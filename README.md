@@ -5,24 +5,82 @@
 > actions, answering their questions, and coaching their behavior over time.
 
 _(Renamed from "Central Command" to "Central Command" on 2026-08-26 — prose and
-product name only. The GitHub repo is named **CentralCommand**, and code
-identifiers — the `central_command/` package, `CC_*` env vars, `cc-*` units,
-namespace, and database names — deliberately retain the historical name.)_
+product name only. Code identifiers — the `central_command/` package, `CC_*` env
+vars, `cc-*` units, namespace, and database names — deliberately retain the
+historical name.)_
 
-## Quickstart
+## Getting started
+
+The path from zero to a running, onboarded system is four steps. The
+authoritative step-by-step reference for the deployment itself is
+[`deploy/single/README.md`](deploy/single/README.md); this section is the map.
+
+### 1. Get the code
 
 ```bash
-git clone https://github.com/codyandrson/CentralCommand.git central_command
-cd central_command
-claude        # launch Claude Code, then type:  /setup
+git clone https://github.com/codyandrson/central-command.git
+cd central-command
 ```
 
-`/setup` conducts the whole install interactively — gated, resumable, ending
-inside a watched dry-run demo. Prerequisites:
-[Claude Code](https://claude.com/claude-code) (it runs the install and the
-onboarding interview — there is no by-hand path), podman ≥ 4.9, and an
-OpenAI-compatible LLM endpoint (base URL + API key). Details and the
-step-by-step reference: [`deploy/single/README.md`](deploy/single/README.md).
+No git, or an air-gapped target? Download the source zip instead —
+**Code → Download ZIP** on the repo page (or
+`https://github.com/codyandrson/central-command/archive/refs/heads/master.zip`)
+— carry it across, and unzip it where the deployment will live. A
+zip-installed deployment updates cleanly later (see **Updating** below); for
+mirror/no-egress installs read [`deploy/AIRGAP.md`](deploy/AIRGAP.md) first.
+
+### 2. Prerequisites
+
+- **[Claude Code](https://claude.com/claude-code)** — it conducts the install
+  and the onboarding interview; there is no by-hand path.
+- **podman ≥ 4.9**, plus `git`, `curl`, `openssl`, `envsubst` (gettext), and
+  `uv`. Node ≥ 22 is optional (without it the cockpit UI is not built; the
+  API still runs). `./setup.sh preflight` checks every one by name.
+- **An OpenAI-compatible LLM endpoint**: base URL, API key, a chat model id,
+  and an embedding model id. ~3 GB RAM for the stack.
+
+### 3. Install
+
+```bash
+claude        # from the repo root, then type:  /setup
+```
+
+`/setup` elicits your answers into `deploy/single/.env` and runs the
+deterministic driver `./setup.sh` — six idempotent phases
+(`validate → preflight → llm → stack → app → verify`), each re-runnable on
+its own, every check one `PASS|WARN|FAIL` line. A failure tells you which
+phase to re-run; `./setup.sh diagnose` writes a support bundle to paste back
+to Claude. Nothing is guessed: the agent reads the results and diagnoses —
+the script does all the mutating.
+
+### 4. Onboarding
+
+`/setup` ends with the **onboarding interview**: Claude asks who you are and
+how you want the team to operate (your name for canonical graph naming, graph
+scope, approval posture), seeds the knowledge graph, and hands you a **watched
+dry-run demo** — the executor starts in `dry_run`, so every write is logged,
+gated, and performed against nothing until you deliberately flip
+`CC_EXECUTOR_MODE=live`.
+
+## Updating a deployment
+
+Updates are built for the same worst case as the install: the only transport
+in is a downloaded source zip. `deploy/single/update.sh` turns the deployment
+into a two-branch git repo (`upstream` = pristine imports, `local` = yours) so
+each update is compare-then-merge, with your local modifications preserved by
+three-way merge and a tagged rollback point:
+
+```bash
+cd deploy/single
+./update.sh init            # one-time, on an existing deployment
+./update.sh import <zip>    # commit the newly downloaded zip
+./update.sh plan            # dry-run: what changes, what will run, conflicts
+./update.sh apply           # merge -> schema -> deps/cockpit -> verify
+./update.sh rollback        # if needed: back to the pre-update tag
+```
+
+Full semantics — conflict handling, what rollback does and does not undo —
+in [`deploy/single/README.md`](deploy/single/README.md#updating-an-existing-deployment).
 
 **Nothing changes the world without passing an approval gate.** Single-operator,
 self-hosted on a Linux homelab (podman). The primary risk model is *error, not

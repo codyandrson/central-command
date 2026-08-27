@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-27 — Zip-based update path for air-gapped deployments
+
+- `deploy/single/update.sh`: `init / import <zip> / plan / apply / rollback`.
+  A zip-installed deployment becomes a two-branch git repo (`upstream` =
+  pristine imports, `local` = the deployment); updates are compare-then-merge
+  with local modifications preserved by three-way merge, schema applied
+  before code goes live (additive-only, idempotent), deps/cockpit reconciled
+  via `setup.sh app`, and a tagged rollback point per update.
+- README rewritten as a getting-started walkthrough (get the code → 
+  prerequisites → `/setup` → onboarding → updating);
+  `deploy/single/README.md` gains the full update reference.
+
 ## 2026-08-27 — Initial public release
 
 First public snapshot, fresh history. The system at this point:

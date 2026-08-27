@@ -160,6 +160,53 @@ different failures with different fixes. `CC_VERIFY_LIVE=1 ./verify.sh` adds a
 real completion and checks that the embedding endpoint actually returns
 `CC_EMBED_DIM` values.
 
+## Updating an existing deployment
+
+`update.sh` is the update driver, built for the air-gapped case where the only
+transport in is a **source zip downloaded from the public repo** (Code →
+Download ZIP, or `…/archive/refs/heads/master.zip`). Same output protocol and
+philosophy as `setup.sh`: every subcommand is idempotent, `PASS|WARN|FAIL`
+lines on stdout, exit 0/1/2, resume is re-run.
+
+It works by making the deployment tree a git repo with two branches:
+`upstream` holds pristine imports (one commit per downloaded zip), `local` is
+what actually runs — upstream plus your local modifications. A three-way merge
+is what carries your changes across updates.
+
+```bash
+cd deploy/single
+./update.sh init            # ONE-TIME: turn the unzipped tree into that repo
+./update.sh import ~/central-command-master.zip   # each update: commit the new zip
+./update.sh plan            # dry-run: diff, flags, predicted conflicts — mutates nothing
+./update.sh apply           # merge, then: schema -> ./setup.sh app -> ./setup.sh verify
+./update.sh rollback        # reset to the pre-update tag and re-deploy that tree
+```
+
+What `apply` does, in load-bearing order: re-run `schema.sql` against the live
+spine **before** the code goes live (the schema is additive-only and fully
+idempotent, so old code tolerates new columns — a failed migration stops the
+update with the old code still running), then `./setup.sh app` (deps from
+`requirements.lock`, honoring `CC_AIRGAP`; cockpit rebuild), then
+`./setup.sh verify`. It always ends with `WARN restart-required` (exit 2): a
+merged change is not live until you restart your uvicorn API (and the sandbox
+runner, if you run one).
+
+Rules that will save you:
+
+- **Commit your local file tweaks to `local` as you make them.** An
+  uncommitted edit is invisible to the merge; `plan` warns about it and
+  `apply` refuses until it is committed. (`.env`, `secrets.yaml`, `.venv` are
+  gitignored and never part of this — they survive untouched.)
+- **Conflicts are a stop, not a failure.** If your local change and the update
+  touch the same lines, `apply` stops with git's normal conflict markers:
+  resolve, `git add`, `git commit`, and **re-run `./update.sh apply`** — every
+  later step is idempotent and picks up where it stopped. To back out instead:
+  `git merge --abort`.
+- **Rollback restores code, not the database.** Schema statements already
+  applied stay applied; the additive-only discipline is what makes the
+  restored code run fine against them. `rollback` refuses over uncommitted
+  changes unless `CC_UPDATE_FORCE=1`.
+
 ## Teardown
 
 Prefix-aware on purpose — with a changed `CC_POD_PREFIX`/`CC_NETWORK` the
