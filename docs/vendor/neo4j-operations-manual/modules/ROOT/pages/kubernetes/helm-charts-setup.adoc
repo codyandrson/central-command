@@ -1,0 +1,50 @@
+:description: How to configure the Neo4j Helm chart repository and check for the available charts.
+[[helm-charts-setup]]
+= Configuring the Neo4j Helm chart repository
+
+To deploy a Neo4j DBMS or cluster on Kubernetes, you have to configure the Neo4j Helm chart repository.
+
+[[helm-prerequisites]]
+== Prerequisites
+
+* Helm v3 (https://helm.sh).
+
+[[helm-chart-config]]
+== Configure the Neo4j Helm chart repository
+
+. Add the Neo4j Helm chart repository.
++
+[source, shell]
+----
+helm repo add neo4j https://helm.neo4j.com/neo4j
+----
++
+. Update the repository:
++
+[source, shell]
+----
+helm repo update
+----
+
+[[helm-charts]]
+== Check for the available Neo4j Helm charts
+
+[source, shell, subs="attributes"]
+----
+helm search repo neo4j/ --versions | grep {neo4j-version-exact}
+----
+
+The output should be similar to the following:
+
+[source, subs="attributes", role=noheader]
+----
+neo4j/neo4j                       {neo4j-version-exact}  {neo4j-version-exact}  Neo4j is the world's leading graph database
+neo4j/neo4j-admin                 {neo4j-version-exact}  {neo4j-version-exact}  Neo4j is the world's leading graph database
+neo4j/neo4j-headless-service      {neo4j-version-exact}  -       Neo4j is the world's leading graph database
+neo4j/neo4j-persistent-volume     {neo4j-version-exact}  -       Sets up persistent disks suitable for a Neo4j H...
+neo4j/neo4j-reverse-proxy         {neo4j-version-exact}  {neo4j-version-exact}  Sets up an http server and a reverse proxy for ...
+----
+
+If you want to see all the versions available, use the option `--versions`.
+
+The utility Helm charts _neo4j/neo4j-docker-desktop-pv_ and _neo4j/neo4j-persistent-volume_ can be used as an alternative way of creating persistent volumes in those environments.

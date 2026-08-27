@@ -1,0 +1,2 @@
+# Air-gapped npm mirror seam. Copy to web/.npmrc when air-gapped.
+registry=https://MIRROR_HOST/npm/

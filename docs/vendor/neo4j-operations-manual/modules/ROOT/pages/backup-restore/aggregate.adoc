@@ -1,0 +1,197 @@
+[role=enterprise-edition]
+[[aggregate-backup]]
+= Aggregate a database backup chain
+:description: This section describes how to aggregate a backup chain into a single backup.
+
+[[aggregate-backup-command]]
+== Command
+
+The aggregate command turns a xref:backup-restore/online-backup.adoc#backup-chain[a chain of backup artifacts] into a single xref:backup-restore/online-backup.adoc#backup-artifact[full backup artifact].
+
+image:backup-chain-aggregation.svg[title="Backup chain aggregation",role="middle"]
+
+The benefits of aggregating a backup chain are notably:
+
+* Reduces the size of backup artifacts in a given backup folder.
+* Keeps the recovery time objective (RTO) low by generating a single backup artifact ready to be restored.
+As part of the aggregation, transactions contained in the differential backups are applied to the store contained in the full backup artifact.
+This operation is called _recovery_ and can be costly.
+* Reduces the risk of losing chain’s links.
+
+
+[[aggregate-backup-syntax]]
+=== Syntax
+
+[source,role=noheader]
+----
+neo4j-admin database aggregate-backup [-h] [--expand-commands]
+                                      [--verbose] [--keep-old-backup[=true|false]]
+                                      [--parallel-recovery[=true|false]]
+                                      [--additional-config=<file>] --from-path=<path>
+                                      [--temp-path=<path>] [<database>]
+----
+
+=== Description
+
+Aggregates a chain of backup artifacts into a single artifact.
+
+[[aggregate-backup-command-parameters]]
+=== Parameters
+
+.`neo4j-admin database aggregate-backup` parameters
+[options="header", cols="1m,3a"]
+|===
+| Parameter
+| Description
+
+|[<database>]
+|Name of the database for which to aggregate the artifacts. Can contain * and ? for globbing.
+|===
+
+
+[[aggregate-backup-command-options]]
+=== Options
+
+.`neo4j-admin database aggregate-backup` options
+[options="header", cols="5m,6a,4m"]
+|===
+| Option
+| Description
+| Default
+
+|--additional-config=<file>footnote:[See xref:tools/neo4j-admin/index.adoc#_configuration[Tools -> Configuration] for details.]
+|Configuration file with additional configuration.
+|
+
+| --expand-commands
+| Allow command expansion in config value evaluation.
+|
+
+|--from-path=<path>
+|Accepts either a path to a single artifact file or a folder containing backup artifacts.
+
+When a file is supplied, the _<database>_ parameter should be omitted.
+It is possible to aggregate backup artifacts from AWS S3 buckets, Google Cloud storage buckets, and Azure buckets using the appropriate URI as the path.
+|
+
+|-h, --help
+|Show this help message and exit.
+|
+
+|--keep-old-backup[=true\|false]
+|If set to true, the old backup chain is not removed.
+|false
+
+|--parallel-recovery[=true\|false]
+|Allow multiple threads to apply pulled transactions to a backup in parallel.
+For some databases and workloads, this may reduce aggregate times significantly.
+Note: this is an EXPERIMENTAL option.
+Consult Neo4j support before use.
+|false
+
+|--temp-path=<path>
+|label:new[Introduced in 5.24] Provide a path to a temporary empty directory for storing backup files until the command is completed. The files will be deleted once the command is finished.
+|
+
+|--verbose
+|Enable verbose output.
+|
+|===
+
+
+
+[NOTE]
+====
+The `--from-path=<path>` option can also load backup artifacts from AWS S3 buckets (from Neo4j 5.19), Google Cloud storage buckets (from Neo4j 5.21), and Azure buckets (from Neo4j 5.24).
+For more information, see <<aggregate-backup-cloud-storage>>.
+====
+
+[NOTE]
+====
+Neo4j 5.24 introduces the `--temp-path` option to address potential issues related to disk space when performing backup-related commands, especially when cloud storage is involved.
+
+If `--temp-path` is not set, a temporary directory is created inside the directory specified by the `--from-path` option.
+
+If you don't provide the `--from-path` option or if your provided path points to a cloud storage bucket, a temporary folder is created inside the current working directory for Neo4j.
+This fallback option can cause issues because the local filesystem (or the partition where Neo4j is installed) may not have enough free disk to accommodate the intermediate computation.
+
+Therefore, it is strongly recommended to provide a `--temp-path` option.
+====
+
+
+[[aggregate-backup-example]]
+== Examples
+
+=== Aggregating a backup chain located in a given folder
+
+The following is an example of how to perform aggregation of a set of backups located in a given folder for the `neo4j` database:
+
+[source,shell]
+----
+bin/neo4j-admin database aggregate-backup --from-path=/mnt/backups/ neo4j
+----
+The command first looks inside the `/mnt/backups/` directory for a backup chain for the database `neo4j`. If found, it is then aggregated into a single backup artifact.
+
+=== Aggregating a backup chain identified using a given backup file
+
+The following is an example of how to perform aggregation of a set of backups identified using a given backup file for the `neo4j` database:
+
+[source,shell]
+----
+bin/neo4j-admin database aggregate-backup --from-path=/mnt/backups/neo4j-2022-10-18T13-00-07.backup
+----
+The command checks the `/mnt/backups/` directory for a backup chain including the file _neo4j-2022-10-18T13-00-07.backup_, for the database `neo4j`.
+If found, it is then aggregated into a single backup artifact.
+This option is only available in Neo4j 5.2 and later.
+
+[[aggregate-backup-cloud-storage]]
+=== Aggregating a backup chain located in a cloud storage
+
+The following examples show how to perform aggregation of a set of backups located in a cloud storage.
+
+[.tabbed-example]
+=====
+[role=include-with-AWS-S3 label--new-5.19]
+======
+
+include::partial$/aws-s3-overrides.adoc[]
+
+include::partial$/aws-s3-credentials.adoc[]
+
+. Then, use the following command to aggregate the backup chain located in a given folder in your AWS S3 bucket.
+The example assumes that you have a backup chain located in the `myBucket/myDirectory` folder  identifiable by the file `myBackup.backup`:
++
+[source,shell]
+----
+bin/neo4j-admin database aggregate-backup --from-path=s3://myBucket/myDirectory/myBackup.backup mydatabase
+----
+======
+
+[role=include-with-Google-cloud-storage label--new-5.21]
+======
+
+include::partial$/gcs-credentials.adoc[]
+
+. Then, use the following command to aggregate the backup chain located in a given folder in your Google storage bucket.
+The example assumes that you have a backup chain located in the `myBucket/myDirectory` folder  identifiable by the file `myBackup.backup`:
++
+[source,shell]
+----
+bin/neo4j-admin database aggregate-backup --from-path=gs://myBucket/myDirectory/myBackup.backup mydatabase
+----
+======
+
+[role=include-with-Azure-cloud-storage label--new-5.24]
+======
+
+include::partial$/azb-credentials.adoc[]
+
+. Then, use the following command to aggregate the backup chain located in a given folder in your Azure blob storage container.
+The example assumes that you have a backup chain located with a `myStorageAccount/myContainer/myDirectory` folder identifiable by the file `myBackup.backup`:
++
+[source,shell]
+----
+bin/neo4j-admin database aggregate-backup --from-path=azb://myStorageAccount/myContainer/myDirectory/myBackup.backup mydatabase
+----
+======
+=====

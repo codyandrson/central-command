@@ -1,0 +1,47 @@
+# Central Command control plane — SYSTEM unit for the Raspberry Pi deployment.
+#
+# Install (one time, as a user with sudo):
+#   sudo cp deploy/pi/cc-uvicorn.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cc-uvicorn
+#
+# Why a SYSTEM unit here, when the desktop used a --user unit + linger: the
+# desktop ran rootless podman, so the containers belonged to the login session
+# and the app had to live there too. On the Pi the containers are Docker's
+# (root daemon, restart: always), so a system unit ordered After=docker.service
+# is strictly simpler — no linger, no session to keep alive, and no
+# ExecStartPre `docker start` dance to re-establish port forwarding.
+#
+# The app reads .env from WorkingDirectory (CC_ANTHROPIC_API_KEY, CC_DISPATCH_*,
+# CC_FEED_*, CC_AUDITOR_*, CC_LLM_PROXY_* all live there); only the run-mode
+# flags are pinned here, matching the documented recipe.
+
+[Unit]
+Description=Central Command control plane (uvicorn on 127.0.0.1:8080)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=codyslab
+Group=codyslab
+WorkingDirectory=/home/codyslab/Central Command
+Environment=CC_DEMO_MODE=false
+Environment=CC_EXECUTOR_MODE=live
+Environment=CC_DISPATCH_APPROVAL_LIMIT=5
+# Idempotent: brings up any stack member that isn't already running. Cheap on
+# a warm boot, and it means the API never starts against a missing spine.
+ExecStartPre=/usr/bin/docker compose -f /home/codyslab/Central Command/deploy/pi/docker-compose.yml up -d
+ExecStart=/home/codyslab/Central Command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080
+# The app exits if Postgres isn't ready yet (seen live on the desktop) — keep
+# retrying until the stack is up. The dispatch advisory lease makes a
+# double-start refuse loudly rather than run two drain loops.
+Restart=always
+RestartSec=5
+# Uvicorn's graceful shutdown waits on open SSE streams that never close on
+# their own — every restart hung the full 90s default before SIGKILL (desktop,
+# 2026-07-21/22). SSE clients reconnect; 15s is ample for real drains.
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

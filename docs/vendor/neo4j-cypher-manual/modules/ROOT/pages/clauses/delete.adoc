@@ -1,0 +1,166 @@
+:description: The `DELETE` clause is used to delete nodes, relationships or paths.
+include::https://raw.githubusercontent.com/neo4j-graphacademy/courses/main/asciidoc/ads/data-analysis.adoc[]
+
+[[query-delete]]
+= DELETE
+
+The `DELETE` clause is used to delete nodes, relationships or paths.
+
+For removing properties and labels, see the xref::clauses/remove.adoc[REMOVE] clause.
+
+It is not possible to delete nodes with relationships connected to them without also deleting the relationships. 
+This can be done by either explicitly deleting specific relationships, or by using the `DETACH DELETE` clause.
+
+[NOTE]
+While the `DELETE` clause renders the deleted objects no longer accessible, the space occupied by the deleted nodes and relationships remain on the disk and is reserved for future transactions creating data.
+For information about how to clear and reuse the space occupied by deleted objects, see link:{neo4j-docs-base-uri}/operations-manual/current/performance/space-reuse/[Operations Manual -> Space reuse].
+
+== Example graph 
+
+The following graph is used for the examples below. 
+It shows four actors, three of whom `ACTED_IN` the `Movie` `The Matrix` (`Keanu Reeves`, `Carrie-Anne Moss`, and `Laurence Fishburne`), and one actor who did not act in it (`Tom Hanks`).
+
+image::graph_delete_clause.svg[width="500",role="middle"]
+
+To recreate the graph, run the following query in an empty Neo4j database: 
+
+[source, cypher, role=test-setup]
+----
+CREATE
+  (keanu:Person {name: 'Keanu Reever'}),
+  (laurence:Person {name: 'Laurence Fishburne'}),
+  (carrie:Person {name: 'Carrie-Anne Moss'}),
+  (tom:Person {name: 'Tom Hanks'}),
+  (theMatrix:Movie {title: 'The Matrix'}),
+  (keanu)-[:ACTED_IN]->(theMatrix),
+  (laurence)-[:ACTED_IN]->(theMatrix),
+  (carrie)-[:ACTED_IN]->(theMatrix)
+----
+
+[[delete-single-node]]
+== Delete single node
+
+To delete a single node, use the `DELETE` clause:
+
+.Query
+[source, cypher, indent=0]
+----
+MATCH (n:Person {name: 'Tom Hanks'})
+DELETE n
+----
+
+This deletes the `Person` node `Tom Hanks`.
+This query is only possible to run on nodes without any relationships connected to them. 
+
+.Result
+[role="queryresult",options="footer",cols="1*<m"]
+----
+Deleted 1 node
+----
+
+[role=label--new-5.14]
+[[delete-nodetach]]
+=== NODETACH keyword
+
+It is also possible to delete the single node using the `NODETACH DELETE` clause.
+Using the `NODETACH` keyword explicitly defines that relationships will not be detached and deleted from a node.
+The `NODETACH` keyword is a mirror of the already existing keyword xref:clauses/delete.adoc#delete-a-node-with-all-its-relationships[DETACH], and it was introduced as part of Cypher's xref:appendix/gql-conformance/index.adoc[].
+Including it is functionally the same as using simple `DELETE`.
+
+.Query
+[source, cypher]
+----
+MATCH (n:Person {name: 'Tom Hanks'})
+NODETACH DELETE n
+----
+
+This also deletes the `Person` node `Tom Hanks`.
+
+[[delete-relationships-only]]
+== Delete relationships only
+
+It is possible to delete a relationship while leaving the node(s) connected to that relationship otherwise unaffected.
+
+.Query
+[source, cypher, indent=0]
+----
+MATCH (n:Person {name: 'Laurence Fishburne'})-[r:ACTED_IN]->()
+DELETE r
+----
+
+This deletes all outgoing `ACTED_IN` relationships from the `Person` node `Laurence Fishburne`, without deleting the node. 
+
+.Result
+[role="queryresult",options="footer",cols="1*<m"]
+----
+Deleted 1 relationship
+----
+
+
+[[delete-a-node-with-all-its-relationships]]
+== Delete a node with all its relationships
+
+To delete nodes and any relationships connected them, use the `DETACH DELETE` clause.
+
+.Query
+[source, cypher, indent=0]
+----
+MATCH (n:Person {name: 'Carrie-Anne Moss'})
+DETACH DELETE n
+----
+
+This deletes the `Person` node `Carrie-Anne Moss` and all relationships connected to it. 
+
+.Result
+[role="queryresult",options="footer",cols="1*<m"]
+----
+Deleted 1 node, deleted 1 relationship
+----
+
+[NOTE]
+====
+The `DETACH DELETE` clause may not be permitted to users with restricted security privileges. 
+For more information, see link:{neo4j-docs-base-uri}/operations-manual/current/tutorial/access-control/#detach-delete-restricted-user[Operations Manual -> Fine-grained access control].
+====
+
+
+[[delete-all-nodes-and-relationships]]
+== Delete all nodes and relationships
+
+It is possible to delete all nodes and relationships in a graph.
+
+.Delete all nodes and relationships
+[source, cypher, indent=0]
+----
+MATCH (n)
+DETACH DELETE n
+----
+
+.Result
+[role="queryresult",options="footer",cols="1*<m"]
+----
+Deleted 3 nodes, deleted 1 relationship
+----
+
+`DETACH DELETE` is useful when experimenting with small example datasets, but it is not suitable for deleting large amounts of data, nor does it delete xref:indexes/search-performance-indexes/index.adoc[indexes] and xref:constraints/index.adoc[constraints].
+
+To delete large amounts of data without deleting indexes and constraints, use xref::subqueries/subqueries-in-transactions.adoc#delete-with-call-in-transactions[CALL subqueries in transactions] instead.
+
+.Delete all nodes and relationships using `CALL` subqueries
+[source, cypher]
+----
+MATCH (n)
+CALL (n) {
+ DETACH DELETE n
+} IN TRANSACTIONS
+----
+
+To remove all data, including indexes and constraints, recreate the database using the following command: `CREATE OR REPLACE DATABASE name`.
+
+.Delete a database and recreate it
+[source, cypher]
+----
+CREATE OR REPLACE DATABASE neo4j
+----
+
+For more information, see the link:{neo4j-docs-base-uri}/operations-manual/current/database-administration/standard-databases/create-databases/#_create_databases_with_if_not_exists_or_or_replace[Operations Manual -> Create databases with `IF NOT EXISTS` or `OR REPLACE`].

@@ -1,0 +1,6 @@
+name: zod
+source_repo: https://github.com/colinhacks/zod
+source_ref: v4.3.6
+fetched_url: https://codeload.github.com/colinhacks/zod/tar.gz/v4.3.6
+fetched_date: 2026-08-25
+subpaths: [packages/docs/content packages/docs/README.md]

@@ -1,0 +1,615 @@
+:description: List functions return lists of things -- nodes in a path, and so on.
+:table-caption!:
+
+[[query-functions-list]]
+= List functions
+
+List functions return lists of different data entities.
+
+For more information about working with `LIST` values, see:
+
+* xref:values-and-types/lists.adoc[Values and types -> Lists]
+* xref:expressions/predicates/list-operators.adoc[Predicates -> List operators]
+* xref:expressions/list-expressions.adoc[List expressions]
+
+[[example-graph]]
+== Example graph
+
+The following graph is used for the examples below:
+
+image::graph_list_functions.svg[role="middle", width="700"]
+
+To recreate the graph, run the following query against an empty Neo4j database: 
+
+[source, cypher, role=test-setup]
+----
+CREATE
+  (alice:Developer {name:'Alice', age: 38, eyes: 'Brown'}),
+  (bob:Administrator {name: 'Bob', age: 25, eyes: 'Blue'}),
+  (charlie:Administrator {name: 'Charlie', age: 53, eyes: 'Green'}),
+  (daniel:Adminstrator {name: 'Daniel', age: 54, eyes: 'Brown'}),
+  (eskil:Designer {name: 'Eskil', age: 41, eyes: 'blue', likedColors: ['Pink', 'Yellow', 'Black']}),
+  (alice)-[:KNOWS]->(bob),
+  (alice)-[:KNOWS]->(charlie),
+  (bob)-[:KNOWS]->(daniel),
+  (charlie)-[:KNOWS]->(daniel),
+  (bob)-[:MARRIED]->(eskil)
+----
+
+[[functions-keys]]
+== keys()
+
+.Details
+|===
+| *Syntax* 3+| `keys(input)`
+| *Description* 3+| Returns a `LIST<STRING>` containing the `STRING` representations for all the property names of a `NODE`, `RELATIONSHIP` or `MAP`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `NODE \| RELATIONSHIP \| MAP` | A node or relationship from which the names of all properties will be returned.
+| *Returns* 3+| `LIST<STRING>`
+|===
+
+.Considerations
+|===
+
+| `keys(null)` returns `null`.
+
+|===
+
+
+.+keys()+
+======
+
+.Query
+// tag::functions_list_keys[]
+[source, cypher]
+----
+MATCH (a) WHERE a.name = 'Alice'
+RETURN keys(a)
+----
+// end::functions_list_keys[]
+
+A `LIST<STRING>` containing the names of all the properties on the node bound to `a` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| keys(a)
+| ["eyes", "name", "age"]
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-labels]]
+== labels()
+
+.Details
+|===
+| *Syntax* 3+| `labels(input)`
+| *Description* 3+| Returns a `LIST<STRING>` containing the `STRING` representations for all the labels of a `NODE`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `NODE` | A node whose labels will be returned.
+| *Returns* 3+| `LIST<STRING>`
+|===
+
+
+.Considerations
+|===
+
+| `labels(null)` returns `null`.
+| The order of the returned labels is not guaranteed when using the `labels()` function.
+
+|===
+
+
+.+labels()+
+======
+
+.Query
+// tag::functions_list_labels[]
+[source, cypher]
+----
+MATCH (a) WHERE a.name = 'Alice'
+RETURN labels(a)
+----
+// end::functions_list_labels[]
+
+A `LIST<STRING>` containing all the labels of the node bound to `a` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| labels(a)
+| ["Developer"]
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-nodes]]
+== nodes()
+
+.Details
+|===
+| *Syntax* 3+| `nodes(input)`
+| *Description* 3+| Returns a `LIST<NODE>` containing all the `NODE` values in a `PATH`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `PATH` | A path whose nodes will be returned.
+| *Returns* 3+| `LIST<NODE>`
+|===
+
+.Considerations
+|===
+
+| The `NODE` values in the returned `LIST` are guaranteed to be in the exact order they appear along the path traversal, from the starting node to the end node.
+| `nodes(null)` returns `null`.
+
+|===
+
+
+.+nodes()+
+======
+
+.Query
+// tag::functions_list_nodes[]
+[source, cypher]
+----
+MATCH p = (a)-->(b)-->(c)
+WHERE a.name = 'Alice' AND c.name = 'Eskil'
+RETURN nodes(p)
+----
+// end::functions_list_nodes[]
+
+A `LIST<NODE>` containing all the nodes in the path `p` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| nodes(p)
+| [(:Developer {name: "Alice", eyes: "Brown", age: 38}), (:Administrator {name: "Bob", eyes: "Blue", age: 25}), (:Designer {name: "Eskil", likedColors: ["Pink", "Yellow", "Black"], eyes: "blue", age: 41})]
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-range]]
+== range()
+
+.Details
+|===
+| *Syntax* 3+| `range(start, end [, step])`
+| *Description* 3+| Returns a `LIST<INTEGER>` comprising all `INTEGER` values within a specified range created with step length, optionally specifying a step length.
+.4+| *Arguments* | *Name* | *Type* | *Description*
+| `start` | `INTEGER` | The start value of the range.
+| `end` | `INTEGER` | The end value of the range.
+| `step` | `INTEGER` | The size of the increment (default value: 1).
+| *Returns* 3+| `LIST<INTEGER>`
+|===
+
+.Considerations
+|===
+| To create ranges with decreasing `INTEGER` values, use a negative value `step`.
+| The range is inclusive for non-empty ranges, and the arithmetic progression will therefore always contain `start` and -- depending on the values of `start`, `step` and `end` -- `end`.
+The only exception where the range does not contain `start` are empty ranges.
+| An empty range will be returned if the value `step` is negative and `start - end` is positive, or vice versa, e.g. `range(0, 5, -1)`.
+|===
+
+
+.+range()+
+======
+
+.Query
+// tag::functions_list_range[]
+[source, cypher]
+----
+RETURN range(0, 10), range(2, 18, 3), range(0, 5, -1)
+----
+// end::functions_list_range[]
+
+Three lists of numbers in the given ranges are returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="3*<m"]
+|===
+
+| range(0, 10) | range(2, 18, 3) | range(0, 5, -1)
+| [0,1,2,3,4,5,6,7,8,9,10] | [2,5,8,11,14,17] | []
+3+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-reduce]]
+== reduce()
+
+.Details
+|===
+| *Syntax* 3+| `reduce(accumulator = initial, variable IN list \| expression)`
+| *Description* 3+| Runs an expression against individual elements of a `LIST<ANY>`, storing the result of the expression in an accumulator.
+.6+| *Arguments* | *Name* | *Type* | *Description*
+| `accumulator` | `ANY` | A variable that holds the result as the `list` is iterated.
+Starts with an `initial` value.
+| `initial` | `ANY` | The starting value of the `accumulator`.
+| `variable` | `ANY` | A variable that represents each element in the `list` during iteration.
+| `list` | `LIST<ANY>` | The `list` that is being iterated over.
+| `expression` | `ANY` | An expression that updates the `accumulator` with each iteration.
+| *Returns* 3+| `ANY`
+|===
+
+.Considerations
+|===
+|`reduce()` differs from most Cypher functions because it iterates over a list, incrementally updating an accumulator with each element based on an expression, rather than returning a result from a single evaluation.
+As such, Cypher's `reduce()` is analogous to the `fold` or `reduce` methods in functional languages such as Lisp and Scala.
+|===
+
+.+reduce()+
+======
+
+.Query
+// tag::functions_list_reduce[]
+[source, cypher]
+----
+MATCH p = (a)-->(b)-->(c)
+WHERE a.name = 'Alice' AND b.name = 'Bob' AND c.name = 'Daniel'
+RETURN reduce(totalAge = 0, n IN nodes(p) | totalAge + n.age) AS reduction
+----
+// end::functions_list_reduce[]
+
+The `age` property of all `NODE` values in the `PATH` are summed and returned as a single value.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| reduction
+| 117
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-relationships]]
+== relationships()
+
+.Details
+|===
+| *Syntax* 3+| `relationships(input)`
+| *Description* 3+| Returns a `LIST<RELATIONSHIP>` containing all the `RELATIONSHIP` values in a `PATH`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `PATH` | The path from which all relationships will be returned.
+| *Returns* 3+| `LIST<RELATIONSHIP>`
+|===
+
+.Considerations
+|===
+
+| `relationships(null)` returns `null`.
+
+|===
+
+
+.+relationships()+
+======
+
+.Query
+// tag::functions_list_relationships[]
+[source, cypher]
+----
+MATCH p = (a)-->(b)-->(c)
+WHERE a.name = 'Alice' AND c.name = 'Eskil'
+RETURN relationships(p)
+----
+// end::functions_list_relationships[]
+
+A `LIST<RELATIONSHIP>` containing all the `RELATIONSHIP` values in the `PATH` `p` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| relationships(p)
+| [[:KNOWS], [:MARRIED]]
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-reverse-list]]
+== reverse()
+
+.Details
+|===
+| *Syntax* 3+| `reverse(input)`
+| *Description* 3+| Returns a `STRING` or `LIST<ANY>` in which the order of all characters or elements in the given `STRING` or `LIST<ANY>` have been reversed.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `STRING \| LIST<ANY>` | The string or list to be reversed.
+| *Returns* 3+| `STRING \| LIST<ANY>`
+|===
+
+.Considerations
+|===
+
+| Any `null` element in `original` is preserved.
+| See also xref:functions/string.adoc#functions-reverse[String functions -> `reverse()`].
+
+|===
+
+
+.+reverse()+
+======
+
+.Query
+// tag::functions_list_reverse[]
+[source, cypher]
+----
+WITH [4923,'abc',521, null, 487] AS ids
+RETURN reverse(ids)
+----
+// end::functions_list_reverse[]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| reverse(ids)
+| [487,<null>,521,"abc",4923]
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-tail]]
+== tail()
+
+.Details
+|===
+| *Syntax* 3+| `tail(input)`
+| *Description* 3+| Returns all but the first element in a `LIST<ANY>`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `LIST<ANY>` | A list from which all but the first element will be returned.
+| *Returns* 3+| `LIST<ANY>`
+|===
+
+.+tail()+
+======
+
+.Query
+// tag::functions_list_tail[]
+[source, cypher]
+----
+MATCH (a) WHERE a.name = 'Eskil'
+RETURN a.likedColors, tail(a.likedColors)
+----
+// end::functions_list_tail[]
+
+The property named `likedColors` and a `LIST<ANY>` comprising all but the first element of the `likedColors` property are returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+
+| a.likedColors | tail(a.likedColors)
+| ["Pink", "Yellow", "Black"] | ["Yellow", "Black"]
+2+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-tobooleanlist]]
+== toBooleanList()
+
+.Details
+|===
+| *Syntax* 3+| `toBooleanList(input)`
+| *Description* 3+| Converts a `LIST<ANY>` of values to a `LIST<BOOLEAN>` values. If any values are not convertible to `BOOLEAN` they will be null in the `LIST<BOOLEAN>` returned.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `LIST<ANY>` | A list of values to be converted into a list of booleans.
+| *Returns* 3+| `LIST<BOOLEAN>`
+|===
+
+.Considerations
+|===
+
+| Any `null` element in `input` is preserved.
+| Any `BOOLEAN` value in `input` is preserved.
+| If the `input` is `null`, `null` will be returned.
+| If the `input` is not a `LIST<ANY>`, an error will be returned.
+| The conversion for each value in `list` is done according to the xref::functions/scalar.adoc#functions-tobooleanornull[`toBooleanOrNull()` function].
+
+|===
+
+
+.+toBooleanList()+
+======
+
+.Query
+// tag::functions_list_to_boolean_list[]
+[source, cypher, indent=0]
+----
+RETURN toBooleanList(null) as noList,
+toBooleanList([null, null]) as nullsInList,
+toBooleanList(['a string', true, 'false', null, ['A','B']]) as mixedList
+----
+// end::functions_list_to_boolean_list[]
+
+.Result
+[role="queryresult",options="header,footer",cols="3*<m"]
+|===
+
+| noList | nullsInList | mixedList
+| <null> | [<null>,<null>] | [<null>,true,false,<null>,<null>]
+3+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-tofloatlist]]
+== toFloatList()
+
+.Details
+|===
+| *Syntax* 3+| `toFloatList(input)`
+| *Description* 3+| Converts a `LIST<ANY>` to a `LIST<FLOAT>` values. If any values are not convertible to `FLOAT` they will be null in the `LIST<FLOAT>` returned.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `LIST<ANY>` | A list of values to be converted into a list of floats.
+| *Returns* 3+| `LIST<FLOAT>`
+|===
+
+.Considerations
+|===
+
+| Any `null` element in `list` is preserved.
+| Any `FLOAT` value in `list` is preserved.
+| If the `input` is `null`, `null` will be returned.
+| If the `input` is not a `LIST<ANY>`, an error will be returned.
+| The conversion for each value in `input` is done according to the xref::functions/scalar.adoc#functions-tofloatornull[`toFloatOrNull()` function].
+
+|===
+
+
+.+toFloatList()+
+======
+
+.Query
+// tag::functions_list_to_float_list[]
+[source, cypher]
+----
+RETURN toFloatList(null) as noList,
+toFloatList([null, null]) as nullsInList,
+toFloatList(['a string', 2.5, '3.14159', null, ['A','B']]) as mixedList
+----
+// end::functions_list_to_float_list[]
+
+.Result
+[role="queryresult",options="header,footer",cols="3*<m"]
+|===
+
+| noList | nullsInList | mixedList
+| <null> | [<null>,<null>] | [<null>,2.5,3.14159,<null>,<null>]
+3+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-tointegerlist]]
+== toIntegerList()
+
+.Details
+|===
+| *Syntax* 3+| `toIntegerList(input)`
+| *Description* 3+| Converts a `LIST<ANY>` to a `LIST<INTEGER>` values. If any values are not convertible to `INTEGER` they will be null in the `LIST<INTEGER>` returned.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `LIST<ANY>` | A list of values to be converted into a list of integers.
+| *Returns* 3+| `LIST<INTEGER>`
+|===
+
+.Considerations
+|===
+
+| Any `null` element in `input` is preserved.
+| Any `INTEGER` value in `input` is preserved.
+| If the `input` is `null`, `null` will be returned.
+| If the `input` is not a `LIST<ANY>`, an error will be returned.
+| The conversion for each value in `list` is done according to the xref::functions/scalar.adoc#functions-tointegerornull[`toIntegerOrNull()` function].
+
+|===
+
+
+.+toIntegerList()+
+======
+
+.Query
+// tag::functions_list_to_integer_list[]
+[source, cypher]
+----
+RETURN toIntegerList(null) as noList,
+toIntegerList([null, null]) as nullsInList,
+toIntegerList(['a string', 2, '5', null, ['A','B']]) as mixedList
+----
+// end::functions_list_to_integer_list[]
+
+.Result
+[role="queryresult",options="header,footer",cols="3*<m"]
+|===
+
+| noList | nullsInList | mixedList
+| <null> | [<null>,<null>] | [<null>,2,5,<null>,<null>]
+3+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-tostringlist]]
+== toStringList()
+
+.Details
+|===
+| *Syntax* 3+| `toStringList(input)`
+| *Description* 3+| Converts a `LIST<ANY>` to a `LIST<STRING>` values. If any values are not convertible to `STRING` they will be null in the `LIST<STRING>` returned.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `LIST<ANY>` | A list of values to be converted into a list of strings.
+| *Returns* 3+| `LIST<STRING>`
+|===
+
+.Considerations
+|===
+
+| Any `null` element in `list` is preserved.
+| Any `STRING` value in `list` is preserved.
+| If the `list` is `null`, `null` will be returned.
+| If the `list` is not a `LIST<ANY>`, an error will be returned.
+| The conversion for each value in `list` is done according to the xref::functions/string.adoc#functions-tostringornull[`toStringOrNull()` function].
+
+|===
+
+
+.+toStringList()+
+======
+
+.Query
+// tag::functions_list_to_string_list[]
+[source, cypher]
+----
+RETURN toStringList(null) as noList,
+toStringList([null, null]) as nullsInList,
+toStringList(['already a string', 2, date({year:1955, month:11, day:5}), null, ['A','B']]) as mixedList
+----
+// end::functions_list_to_string_list[]
+
+.Result
+[role="queryresult",options="header,footer",cols="3*<m"]
+|===
+
+| noList | nullsInList | mixedList
+| <null> | [<null>,<null>] | ["already a string","2","1955-11-05",<null>,<null>]
+3+d|Rows: 1
+
+|===
+
+======
+

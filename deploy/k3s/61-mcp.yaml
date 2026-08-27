@@ -1,0 +1,142 @@
+# ============================================================================
+# D-sandbox slice 3 (2026-08-04) — namespace + network policy + deployer
+# identity for agent-built MCP servers.
+# docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md §5/§8/§10.3.
+#
+#   NOT APPLIED BY THIS CHANGE. Written for the main session to apply
+#   alongside the rest of deploy/k3s/ — this slice's code (executor.py's
+#   mcp.build_image/mcp.server_deploy handlers) only READS
+#   settings.mcp_deploy_kubeconfig; nothing here touches the live cluster.
+#
+#   cc-mcp is its OWN namespace, separate from `central_command` and from
+#   `cc-sandbox` — an agent-built server's running pod has nothing to do
+#   with either the control plane's own workloads or the ephemeral sandbox
+#   mechanism that built it.
+#
+#   Default-deny everything, then ONE narrow ingress allowance: TCP 8000
+#   (the deploy convention every agent-built server must listen on) from
+#   pods labeled app=cc-litellm in namespace `central_command` (the real
+#   namespace/label pair cc-litellm runs under — see deploy/k3s/30-litellm.yaml).
+#   NO egress is allowed by default: a deployed MCP server pod cannot reach
+#   anything outside cc-mcp, including the internet — same "no incentive to
+#   loosen a default the operator hasn't asked to loosen" posture as the
+#   sandbox's own network policy.
+#
+#   cc-mcp-deployer is namespace-scoped (Role, never ClusterRole), mirroring
+#   60-sandbox.yaml's cc-sandbox-runner shape exactly: a long-lived SA token
+#   Secret (k8s 1.24+ no longer auto-creates these), read by
+#   make-mcp-kubeconfig.sh into a standalone kubeconfig for
+#   settings.mcp_deploy_kubeconfig.
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-mcp
+  labels:
+    app.kubernetes.io/part-of: central_command
+---
+# Default-deny ALL ingress AND egress for every pod in cc-mcp. An empty
+# podSelector matches every pod in the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: cc-mcp
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+# The one narrow exception: LiteLLM (namespace `central_command`, pods labeled
+# app=cc-litellm — deploy/k3s/30-litellm.yaml) may reach any cc-mcp pod on
+# TCP 8000. Nothing else, in either namespace, is admitted.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-litellm-ingress-8000
+  namespace: cc-mcp
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: central_command
+          podSelector:
+            matchLabels:
+              app: cc-litellm
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cc-mcp-deployer
+  namespace: cc-mcp
+---
+# Namespace-scoped Role, not ClusterRole — this token can create/inspect/
+# delete Deployments and Services in cc-mcp and read rollout status, nothing
+# more, nowhere else. delete added for mcp.server_remove (operator decision
+# 2026-08-03).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cc-mcp-deployer
+  namespace: cc-mcp
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create, get, list, patch, update, delete]
+  - apiGroups: [apps]
+    resources: [deployments/status]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [create, get, list, patch, update, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cc-mcp-deployer
+  namespace: cc-mcp
+subjects:
+  - kind: ServiceAccount
+    name: cc-mcp-deployer
+    namespace: cc-mcp
+roleRef:
+  kind: Role
+  name: cc-mcp-deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cc-mcp-deployer-token
+  namespace: cc-mcp
+  annotations:
+    kubernetes.io/service-account.name: cc-mcp-deployer
+type: kubernetes.io/service-account-token
+---
+# Belt-and-suspenders alongside the explicit resources every mcp.server_deploy
+# manifest carries (the Executor refuses to apply one without limits) — a
+# hand-applied test pod without them is still capped.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: cc-mcp-defaults
+  namespace: cc-mcp
+spec:
+  limits:
+    - type: Container
+      default:
+        memory: 512Mi
+        cpu: 500m
+      defaultRequest:
+        memory: 128Mi
+        cpu: 100m

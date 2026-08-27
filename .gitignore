@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+.env.local
+
+# Database dumps staged by deploy/pi/migrate-from-desktop.sh. These carry real
+# data AND encrypted credentials (the n8n dump holds the Gmail OAuth record) —
+# never commit them.
+deploy/pi/migration/
+
+# Node / web
+node_modules/
+web/node_modules/
+web/dist/
+web/server-dist/
+web/bin-dist/
+
+# OS
+.DS_Store
+
+# SDD scratch — ledger, briefs, review packages. Never committed.
+.superpowers/
+.playwright-mcp/
+drafts/

@@ -1,0 +1,43 @@
+---
+title: "accessPackageResourceAttributeQuestion resource type"
+description: "Resource that defines the question provided to an end user, for the purpose of obtaining an attribute value to be passed to the end system or the request approver."
+author: "markwahl-msft"
+ms.localizationpriority: medium
+ms.subservice: "entra-id-governance"
+doc_type: resourcePageType
+ms.date: 03/06/2024
+---
+
+# accessPackageResourceAttributeQuestion resource type
+
+Namespace: microsoft.graph
+
+Resource that defines the [question](../resources/accesspackagequestion.md) provided to an end user, for the purpose of obtaining an attribute value to be passed to the end system or the request approver.
+
+This type inherits from [accessPackageResourceAttributeSource](../resources/accesspackageresourceattributesource.md) and is used in the **attributeSource** property of an [accessPackageResourceAttribute](../resources/accesspackageresourceattribute.md).
+
+The only property is **question**, which could be an [accessPackageTextInputQuestion](../resources/accesspackagetextinputquestion.md) or a [accessPackageMultipleChoiceQuestion](../resources/accesspackagemultiplechoicequestion.md) object type.
+
+## Properties
+|Property|Type|Description|
+|:---|:---|:---|
+|question|[accessPackageQuestion](../resources/accesspackagequestion.md)|The question asked in order to get the value of the attribute.|
+
+## Relationships
+None.
+
+## JSON representation
+The following JSON representation shows the resource type.
+<!-- {
+  "blockType": "resource",
+  "@odata.type": "microsoft.graph.accessPackageResourceAttributeQuestion"
+}
+-->
+``` json
+{
+  "@odata.type": "#microsoft.graph.accessPackageResourceAttributeQuestion",
+  "question": {
+    "@odata.type": "microsoft.graph.accessPackageQuestion"
+  }
+}
+```

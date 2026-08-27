@@ -1,0 +1,6 @@
+name: radix-ui-primitives
+source_repo: https://github.com/radix-ui/primitives
+source_ref: main
+fetched_url: https://codeload.github.com/radix-ui/primitives/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [README.md philosophy.md]

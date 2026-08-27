@@ -1,0 +1,32 @@
+name: atlassian-dc-rest
+sources:
+  - product: Jira Server/DC REST API
+    url: https://docs.atlassian.com/software/jira/docs/api/REST/9.17.0/
+    local_dir: jira-9.17.0/
+    live_version: Jira Data Center 10.3.23
+    doc_version: 9.17.0
+  - product: Confluence Server/DC REST API
+    url: https://docs.atlassian.com/ConfluenceServer/rest/8.5.0/
+    local_dir: confluence-8.5.0/
+    live_version: Confluence 9.2.22
+    doc_version: 8.5.0
+fetched_date: 2026-08-25
+mechanism: >
+  Static HTML doc trees, not git repos — mirrored with
+  `wget --mirror --no-parent --convert-links --adjust-extension
+  --page-requisites --quiet`, not scripts/vendor_docs_fetch.sh. Each is a
+  single-page reference: Jira's is a client-side WADL viewer
+  (jira-rest-plugin.wadl, ~1.2 MB of XML, is the actual REST resource
+  reference; index.html/app.js render it) and Confluence's is a
+  server-rendered index.html (~880 KB) containing every resource inline. Low
+  file counts under each directory are expected — the reference content
+  lives in one large file per tree, not per-page HTML files.
+version_approximation: >
+  No 10.x Jira doc tree exists (confirmed 404 at
+  .../REST/10.3.23/) and no 9.2.x Confluence tree exists, so these are
+  pinned to the closest published doc versions: Jira docs 9.17.0 vs live
+  Jira DC 10.3.23, Confluence docs 8.5.0 vs live Confluence 9.2.22. The DC
+  REST surface is stable across those gaps (Atlassian does not routinely
+  break REST compatibility across DC minor/major lines), but treat any
+  field/endpoint absent from a live response as possibly newer than this
+  snapshot.

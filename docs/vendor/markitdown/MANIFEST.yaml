@@ -1,0 +1,6 @@
+name: markitdown
+source_repo: https://github.com/microsoft/markitdown
+source_ref: v0.1.7
+fetched_url: https://codeload.github.com/microsoft/markitdown/tar.gz/v0.1.7
+fetched_date: 2026-08-25
+subpaths: [packages/markitdown/README.md packages/markitdown/pyproject.toml LICENSE*]

@@ -1,0 +1,1397 @@
+:description: This section describes the Neo4j logging, including log files and configuration.
+[[logging]]
+= Logging
+
+Neo4j provides logs for monitoring purposes.
+The logs are stored in the _logs_ directory.
+If you want to use a custom directory, set the path to that directory in the _neo4j.conf_ file by using the parameter xref:configuration/configuration-settings.adoc#config_server.directories.logs[`server.directories.logs`].
+
+
+== Log files
+
+The following table describes the log files that are available in Neo4j and their default configuration.
+Which logs are enabled or disabled is configured in the _neo4j.conf_ file.
+
+.Neo4j log files
+[options="header", cols="1a,3a,3a,1a"]
+|===
+| Filename
+| Description
+| Configuration
+| Default
+
+| _neo4j.log_
+|Logs general information about Neo4j.
+For Debian and RPM packages run `journalctl --unit=neo4j`.
+|
+| `true`
+
+| _debug.log_
+| Log information required by Neo4j Customer Support to investigate problems.
+It is highly recommended to keep it enabled and not to alter the _debug.log_ format.
+If you require the _debug.log_ messages in a different format, create an additional Appender.
+| xref:configuration/configuration-settings.adoc#config_server.logs.debug.enabled[`server.logs.debug.enabled`]
+| `true`
+
+| _http.log_
+| Logs information about the HTTP API.
+| xref:configuration/configuration-settings.adoc#config_dbms.logs.http.enabled[`dbms.logs.http.enabled`]
+| `false`
+
+| _gc.log_
+| Logs information provided by the JVM.
+
+For details, see <<garbage-collection-log-file-configuration>>.
+| xref:configuration/configuration-settings.adoc#config_server.logs.gc.enabled[`server.logs.gc.enabled`]
+| `false`
+
+
+| _query.log_
+| label:Enterprise[]Logs information about executed queries that run longer than a specified threshold.
+Must be one of `INFO`, `VERBOSE`, or `OFF`.
+
+* `INFO` logs queries longer than a given threshold.
+* `VERBOSE` logs the start and end of all queries.
+* `OFF` disables the _query.log_.
+
+For details, see <<query-logging>>.
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.enabled[`db.logs.query.enabled`]
+and xref:configuration/configuration-settings.adoc#config_db.logs.query.threshold[`db.logs.query.threshold`]
+| `VERBOSE`
+
+| _security.log_
+| label:Enterprise[] Logs information about security events.
+| xref:configuration/configuration-settings.adoc#config_dbms.security.auth_enabled[`dbms.security.auth_enabled`]
+| `true`
+
+
+| _service-out.log_
+| label:Windows[]Log of the console output when installing or running the Windows service.
+|
+|
+
+| _service-error.log_
+| label:Windows[]Logs information about errors encountered when installing or running the Windows service.
+|
+|
+|===
+
+== Default logging configuration
+
+As of Neo4j 5.0, Neo4j uses https://logging.apache.org/log4j/2.x/[Log4j 2] for logging.
+The logging configuration is located in the _conf_ directory and consists of two files:
+
+* _user-log.xml_ -- provides configuration for _neo4j.log_.
+* _server-logs.xml_ -- provides configuration for _debug.log_, _http.log_, _query.log_, and _security.log_.
+
+The _gc.log_ is handled by the Java Virtual Machine(JVM) and is configured using the JVM parameters.
+For details, see <<garbage-collection-log-file-configuration>>.
+
+[TIP]
+====
+If you want to use a custom directory for your Log4j configuration files, set the new paths to your XML files in the _neo4j.conf_ file by using the parameters xref:configuration/configuration-settings.adoc#config_server.logs.user.config[`server.logs.user.config`] and xref:configuration/configuration-settings.adoc#config_server.logs.config[`server.logs.config`].
+====
+
+Each configuration file comprises two main elements: _Appenders_ and _Loggers_:
+
+Within the _Appenders_ element, you can define::
+* The output locations, for example, a file, the console, the network socket, etc.
+* How the output is formatted, for example, plain text, JSON, CSV, etc.
+* When the files are rolled and how many files to keep as history before deleting them.
+* If and what log events are to be published and how.
+
+Within the _Loggers_ element, you can define::
+* Which log events are to be captured and sent to which _Appenders_.
+* The log level of the log events to be captured.
+* If the log events are to be forwarded to other _Loggers_.
+
+For more details, see https://logging.apache.org/log4j/2.x/manual/configuration.html[Log4j 2 official documentation on configuration].
+
+[.tabbed-example]
+=====
+[.include-with-user-log.xml]
+======
+
+The following example shows the default configuration of the _user-logs.xml_ file.
+
+.Default _user-log.xml_ configuration
+[source%linenums,xml,options="nowrap", role="nocopy"]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright (c) "Neo4j"
+    Neo4j Sweden AB [http://neo4j.com]
+    This file is a commercial add-on to Neo4j Enterprise Edition.
+
+-->
+<!--
+    This is a log4j 2 configuration file that provides maximum flexibility.
+
+    All configuration values can be queried with the lookup prefix "config:". You can, for example, resolve
+    the path to your neo4j home directory with ${config:dbms.directories.neo4j_home}.
+
+    Please consult https://logging.apache.org/log4j/2.x/manual/configuration.html for instructions and
+    available configuration options.
+-->
+<Configuration status="ERROR" monitorInterval="30" packages="org.neo4j.logging.log4j"> \ #<1>
+
+    <Appenders> \ #<2>
+        <RollingRandomAccessFile name="Neo4jLog" fileName="${config:server.directories.logs}/neo4j.log" #<3>
+                                 filePattern="$${config:server.directories.logs}/neo4j.log.%02i"> #<4>
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/> #<5>
+            <Policies> \ #<6>
+                <SizeBasedTriggeringPolicy size="20 MB"/> \ #<7>
+            </Policies>
+            <DefaultRolloverStrategy fileIndex="min" max="7"/> \ #<8>
+        </RollingRandomAccessFile>
+
+        <!-- Only used by "neo4j console", will be ignored otherwise -->
+        <Console name="ConsoleAppender" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+        </Console>
+    </Appenders>
+
+    <Loggers> \ #<9>
+        <!-- Log level for the neo4j log. One of DEBUG, INFO, WARN, ERROR or OFF -->
+        <Root level="INFO"> \ #<10>
+            <AppenderRef ref="Neo4jLog"/>
+            <AppenderRef ref="ConsoleAppender"/>
+        </Root>
+    </Loggers>
+
+</Configuration>
+
+----
+======
+[.include-with-server-log.xml]
+======
+The following example shows the default configuration of the _server-logs.xml_ file.
+
+.Default _server-logs.xml_ configuration
+[source%linenums,xml,options="nowrap", role="nocopy"]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright (c) "Neo4j"
+    Neo4j Sweden AB [http://neo4j.com]
+    This file is a commercial add-on to Neo4j Enterprise Edition.
+
+-->
+<!--
+    This is a log4j 2 configuration file.
+
+    Please do not alter the original debug.log.
+    Changing the debug.log format can interfere with Neo4j's ability to offer customer support and invalidate your support warranty.
+
+    If you require the debug.log messages in a different format, you can copy the Appender and change the filename.
+    See Neo4j documentation for details.
+
+    All configuration values can be queried with the lookup prefix "config:". You can, for example, resolve
+    the path to your neo4j home directory with ${config:dbms.directories.neo4j_home}.
+
+    Please consult https://logging.apache.org/log4j/2.x/manual/configuration.html for instructions and
+    available configuration options.
+-->
+<Configuration status="ERROR" monitorInterval="30" packages="org.neo4j.logging.log4j"> \ #<1>
+    <Appenders> \ #<2>
+        <!-- Neo4j debug.log,do not change. Required by Neo4j customer support. -->
+        <RollingRandomAccessFile name="DebugLog" fileName="${config:server.directories.logs}/debug.log" \ #<3>
+                                 filePattern="$${config:server.directories.logs}/debug.log.%02i"> \ #<4>
+            <Neo4jDebugLogLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p [%c{1.}] %m%n"/> \ #<5>
+            <Policies> \ #<6>
+                <SizeBasedTriggeringPolicy size="20 MB"/> \ #<7>
+            </Policies>
+            <DefaultRolloverStrategy fileIndex="min" max="7"/> \ #<8>
+        </RollingRandomAccessFile>
+
+        <RollingRandomAccessFile name="HttpLog" fileName="${config:server.directories.logs}/http.log"
+                                 filePattern="$${config:server.directories.logs}/http.log.%02i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy fileIndex="min" max="5"/>
+        </RollingRandomAccessFile>
+
+        <RollingRandomAccessFile name="QueryLog" fileName="${config:server.directories.logs}/query.log"
+                                 filePattern="$${config:server.directories.logs}/query.log.%02i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy fileIndex="min" max="7"/>
+        </RollingRandomAccessFile>
+
+        <RollingRandomAccessFile name="SecurityLog" fileName="${config:server.directories.logs}/security.log"
+                                 filePattern="$${config:server.directories.logs}/security.log.%02i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy fileIndex="min" max="7"/>
+        </RollingRandomAccessFile>
+    </Appenders>
+
+    <Loggers> \ #<9>
+        <!-- Log levels. One of DEBUG, INFO, WARN, ERROR or OFF -->
+
+        <!-- The debug log is used as the root logger to catch everything -->
+        <Root level="INFO"> \ #<10>
+            <AppenderRef ref="DebugLog"/> <!-- Keep this -->
+        </Root>
+
+        <!-- The query log, must be named "QueryLogger" -->
+        <Logger name="QueryLogger" level="INFO" additivity="false"> \ #<11>
+            <AppenderRef ref="QueryLog"/>
+        </Logger>
+
+        <!-- The http request log, must be named "HttpLogger" -->
+        <Logger name="HttpLogger" level="INFO" additivity="false">
+            <AppenderRef ref="HttpLog"/>
+        </Logger>
+
+        <!-- The security log, must be named "SecurityLogger" -->
+        <Logger name="SecurityLogger" level="INFO" additivity="false">
+            <AppenderRef ref="SecurityLog"/>
+        </Logger>
+    </Loggers>
+</Configuration>
+----
+======
+=====
+
+<1> Configuration tag with a `monitorInterval` of 30 seconds and a package namespace of `org.neo4j.logging.log4j`. +
+The monitor interval tells Log4j to periodically check the XML file for changes and reload the file if a change is detected. +
+The package namespace gives access to the Neo4j configuration lookup with `${config:<setting>}`.
+
+<2> Appenders are used to define where the log messages are written.
+The `name` of the appender must be unique as it is used by the logger when referencing the appender.
+The Neo4j default appenders write to _debug.log_, _http.log_, _query.log_, and _security.log_.
+
+<3> By default, Neo4j uses the `<RollingRandomAccessFile>` appender as it is very performant because it always writes to a buffer.
+However, if the server crashes, the last log messages might be lost.
+If that is not acceptable for you, use the `<RollingFile>` appender instead.
+See <<general-logging-appenders>> for more information.
+
+<4> `filePattern` specifies a file pattern to be used when the file is rolled.
+The pattern renames the files to _debug.log.01_ and _http.log.01_ when they reach the defined trigger.
+
+<5> `PatternLayout` defines the layout for the appender, in this case with the `GMT+2` timezone.
+See <<general-logging-log-layout>> for more information.
+
+<6> The `Policies` element defines when the files are rolled and how many files to keep as history before they are deleted.
+
+<7> The `SizeBasedTriggeringPolicy` defines when the files are rolled.
+In this case, when the size of the files reaches 20 MB, the files are renamed according to the `filePattern`, and the log files start over.
+In Neo4j 4.0, this was configured with the parameter `dbms.logs.user.rotation.size`.
+
+<8> The `DefaultRolloverStrategy` defines how many files to keep as history. +
+The `fileIndex=min` implies that the minimum/the lowest number is the most recent one. +
+The `max` attribute defines the number of files to keep as history before they are deleted, in this case, 7 files.
+In Neo4j 4.0, this was configured with the parameter `dbms.logs.user.rotation.keep_number`.
+
+<9> Loggers are used to define the log level and which appender to use for the log messages.
+The loggers are referenced by the `name` attribute.
+See <<general-logging-loggers>> for more information.
+
+<10> The root logger is a "catch-all" logger that catches everything that is not caught by the other loggers and sends it to the appender(s) specified in the `AppenderRef` element(s).
+The root logger is referenced by the `Root` element.
+It can be set to `DEBUG`, `INFO`, `WARN`, `ERROR`, or `OFF`.
+The default log level is `INFO`.
+
+<11> You can also define custom loggers to catch specific log events and send them to the appender(s) specified in the `AppenderRef` element(s).
+For example, the `QueryLogger` logger (configured in _server-logs.xml_) is used to catch log events with a log level of `INFO` or above and send them to the `QueryLog` appender. +
+The `additivity="false"` is set to fully consume the log event and not send it to the root logger. +
+If `additivity="true"` is set, which is the default, the log event is also sent to the root logger.
+
+== Advanced logging configuration
+
+The default logging configuration is a good starting point, but you might want to customize it to your needs.
+The following sections describe some Log4j configuration elements and how to use them to customize the logging configuration.
+For additional information and more advanced customizations, such as filtering and extensions, see the https://logging.apache.org/log4j/2.x/manual/configuration.html[Log4j official documentation on configuration].
+
+[NOTE]
+====
+If Neo4j is embedded in your Java applications, you must provide an implementation of `org.neo4j.logging.LogProvider`.
+Depending on how you set up your log provider, it uses or ignores the _user-logs.xml_ file.
+For details, refer to link:{neo4j-docs-base-uri}/java-reference/{page-version}/java-embedded/logging/[Java Reference -> Using Neo4j embedded in Java applications].
+====
+
+
+[[general-logging-appenders]]
+=== Appenders
+All Log4j standard appenders are available in Neo4j.
+For more details, see the https://logging.apache.org/log4j/2.x/manual/appenders.html[Log4j official documentation on appenders].
+
+A few of the most common appenders are `<RollingRandomAccessFile>`, `<RollingFile>`, and `<Console>`.
+
+==== `<RollingRandomAccessFile>` appender
+The `<RollingRandomAccessFile>` is the default appender in Neo4j.
+It is very performant and has a low impact on the system because it always writes to a buffer.
+However,  the log events might *not* be visible immediately, and if the server crashes, the last log messages might be lost.
+This appender is configured with the `filePattern` attribute, which specifies a file pattern to be used when the file is rolled.
+The pattern renames the files to _debug.log.01_ and _http.log.01_ when they reach the defined trigger.
+
+The possible triggers are `SizeBasedTriggeringPolicy` and `TimeBasedTriggeringPolicy`.
+The `SizeBasedTriggeringPolicy` defines when the files are rolled, in this case, when the size of the files reaches 20 MB.
+The `TimeBasedTriggeringPolicy` defines when the files are rolled based on time, in this case, daily.
+
+The `DefaultRolloverStrategy` defines how many files to keep as history and which file to use as the most recent one.
+The `fileIndex=min` implies that the minimum/the lowest number is the most recent one.
+The `max` attribute defines the number of files to keep as history before they are deleted, in this case, 7 files.
+
+For more information, see https://logging.apache.org/log4j/2.x/manual/appenders.html[Log4j official documentation on RollingRandomAccessFile Appender].
+
+==== `<RollingFile>` appender
+A `<RollingFile>` appender is very similar to `<RollingRandomAccessFile>` but it writes log events to a file.
+It rolls when certain criteria are met.
+A standard scheme is to keep one log file daily or roll a log file once a specific size is reached.
+
+.An example of a rolling file appender with one new log file each day
+[source,xml]
+----
+<RollingFile name="myLog" fileName="${config:server.directories.logs}/my.log"
+                       filePattern="${config:server.directories.logs}/my-%d{yyyy-MM-dd}.log">
+  <!-- Layout -->
+  <Policies>
+      <TimeBasedTriggeringPolicy />
+  </Policies>
+</RollingFile>
+----
+
+The rolling also supports the compression of rolled-out files.
+Adding one of `.gz`, `.zip`, `.bz2`, `.deflate`, or `.pack200` as a suffix to the `filePattern` attribute causes the file to be compressed with the appropriate compression scheme.
+
+.An example of a rolling file appender with zip compression
+[source,xml]
+----
+<RollingFile name="myLog" fileName="${config:server.directories.logs}/my.log"
+                       filePattern="${config:server.directories.logs}/my.%i.log.zip">
+  <!-- Layout -->
+  <Policies>
+      <SizeBasedTriggeringPolicy size="20 MB"/>
+  </Policies>
+</RollingFile>
+----
+
+==== `<Console>` appender
+The console appender outputs log events to _stdout_ or _stderr_.
+It is only used by the "neo4j console".
+
+.An example of a console appender
+[source,xml]
+----
+<Console name="console" target="SYSTEM_OUT"> <!-- or SYSTEM_ERR -->
+  <PatternLayout pattern="%m%n"/>
+</Console>
+----
+
+[[general-logging-log-layout]]
+=== Log layouts
+The log files can be written in a lot of different ways, referred to as layouts.
+Neo4j comes bundled with all the default layouts of Log4j 2, as well as a few Neo4j-specific ones.
+For more details on the default Log4j 2 layouts, see the https://logging.apache.org/log4j/2.x/manual/layouts.html[Log4j official documentation].
+
+[[general-logging-pattern-layout]]
+==== `<PatternLayout>`
+`<PatternLayout>` is the most common layout.
+It is a flexible layout configurable with a pattern string, which is specified in the `pattern` attribute.
+For example:
+
+[source,xml]
+----
+<PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p [%c{1.}] %m%n"/>
+----
+
+The `pattern` consists of different converters that are prefixed with `%`.
+The converters are replaced with the corresponding value from the log event.
+
+.Example pattern layout converters
+[cols="2", options="header"]
+|===
+| Converter
+| Description
+
+a| `%d{_date-pattern_}{_timezone_}`
+| Date of the log event.
+ The time zone is optional.
+ If omitted, the system time is used.
+
+a| `%p`
+a| The log level of the event.
+  Can be `DEBUG`, `INFO`, `WARN`, or `ERROR`.
+  Adding `-5` between the `%` symbol and the `p` pads the level to be exactly 5 characters long.
+
+a| `%c`
+a| The class where the log event originated from.
+  Adding `{1.}` after compacts the package names, e.g. `org.apache.commons.Foo` will become `o.a.c.Foo`.
+
+a| `%m`
+| The log message of the log event.
+
+a| `%n`
+| System-specific new line.
+|===
+
+For all available converters, consult the https://logging.apache.org/log4j/2.x/manual/layouts.html#PatternLayout[Log4j 2 Pattern Layout documentation].
+
+[[general-logging-debug-log-pattern]]
+==== `<Neo4jDebugLogLayout>`
+
+The `<Neo4jDebugLogLayout>` layout is essentially the same as the xref:monitoring/logging.adoc#general-logging-pattern-layout[`PatternLayout`].
+The main difference is that a header is injected at the start of the log file with diagnostic information useful for Neo4j developers.
+This layout should typically only be used for the _debug.log_ file.
+
+.An example usage of the Neo4j debug log layout
+[source,xml]
+----
+<Neo4jDebugLogLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p [%c{1.}] %m%n"/>
+----
+
+[[general-logging-json-template-layout]]
+==== `<JsonTemplateLayout>`
+The `<JsonTemplateLayout>` is equivalent to the pattern layout.
+For more information, see the https://logging.apache.org/log4j/2.x/manual/json-template-layout.html[Log4j official documentation].
+
+There are two ways of configuring the JSON template layout.
+
+* You can specify a JSON event template file and the layout will use that.
+The JSON template file can be on the file system.
++
+[source,xml]
+----
+<JsonTemplateLayout eventTemplateUri="file://path/to/template.json"/>
+----
+
+* The JSON event template file can be embedded in the XML configuration:
++
+[source%linenums,xml,highlight=4..12]
+----
+<JsonTemplateLayout>
+  <eventTemplate>
+    <![CDATA[
+      {
+        "time": { "$resolver": "timestamp",
+          "pattern": { "format": "yyyy-MM-dd HH:mm:ss.SSSZ", "timeZone": "UTC" }
+        },
+        "level": { "$resolver": "level", "field": "name" },
+        "message": { "$resolver": "message" },
+        "includeFullMap": { "$resolver": "map", "flatten": true },
+        "stacktrace": { "$resolver": "exception", "field": "message" }
+      }
+    ]]>
+  </eventTemplate>
+</JsonTemplateLayout>
+----
+
+There are also a couple of built-in templates available from the classpath, for example:
+
+[source,xml]
+----
+<JsonTemplateLayout eventTemplateUri="classpath:org/neo4j/logging/StructuredJsonLayout.json"/>
+----
+
+.Available built-in templates
+[cols="3m,3a", options="header"]
+|===
+| _eventTemplateUri_
+| Description
+
+| classpath:org/neo4j/logging/StructuredJsonLayout.json
+| Layout for structured log messages.
+  Only applicable to the _query.log_ and _security.log_.
+
+| classpath:org/neo4j/logging/StructuredLayoutWithMessage.json
+| Generic layout for logging JSON messages.
+  Can be used for any log file.
+
+| classpath:org/neo4j/logging/QueryLogJsonLayout.json
+| Backward-compatible JSON layout that will match the Neo4j 4.x query log.
+
+| classpath:LogstashJsonEventLayoutV1.json
+| https://github.com/logstash/log4j-jsonevent-layout[Logstash `json_event` pattern for Log4j]
+
+| classpath:GelfLayout.json
+| https://go2docs.graylog.org/5-0/getting_in_log_data/gelf.html?Highlight=Payload#GELFPayloadSpecification[Graylog Extended Log Format (GELF) payload specification] with additional `_thread` and `_logger` fields.
+
+| classpath:GcpLayout.json
+| https://cloud.google.com/logging/docs/structured-logging[Google Cloud Platform structured logging] with additional `_thread`, `_logger`, and `_exception` fields.
+
+| classpath:JsonLayout.json
+| Same layout as the less flexible `<JsonLayout>`.
+|===
+
+=== Filters
+
+You can also configure filters to determine if and what log events are published and how.
+For details, see the https://logging.apache.org/log4j/2.x/manual/configuration.html#appenderrefs-elements-filters[Log4j official documentation].
+// For example, you can filter out logs for queries executed by the `neo4j` user or for the `neo4j` database.
+
+// [source,xml]
+// ----
+// <RollingRandomAccessFile name="QueryLog" fileName="${config:server.directories.logs}/query.log"
+//                                  filePattern="$${config:server.directories.logs}/query.log.%02i">
+//             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+//             <Policies>
+//                 <SizeBasedTriggeringPolicy size="20 MB"/>
+//             </Policies>
+//             <!-- Filter out logs for queries executed by "neo4j" user -->
+//             <Filters>
+//                 <MapFilter onMatch="DENY" onMismatch="ACCEPT">
+//                     <KeyValuePair key="authenticatedUser" value="neo4j"/>
+//                 </MapFilter>
+//             </Filters>
+//             <DefaultRolloverStrategy fileIndex="min" max="7"/>
+//         </RollingRandomAccessFile>
+// ----
+
+// Or, you can filter out logs for queries executed on the `neo4j` database:
+
+// [source,xml]
+// ----
+// <RollingRandomAccessFile name="QueryLog" fileName="${config:server.directories.logs}/query.log"
+//                                  filePattern="$${config:server.directories.logs}/query.log.%02i">
+//             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+//             <Policies>
+//                 <SizeBasedTriggeringPolicy size="20 MB"/>
+//             </Policies>
+//              <!-- Filter out logs for the "neo4j" database -->
+//             <Filters>
+//                 <MapFilter onMatch="DENY" onMismatch="ACCEPT">
+//                     <KeyValuePair key="database" value="neo4j"/>
+//                 </MapFilter>
+//             </Filters>
+//             <DefaultRolloverStrategy fileIndex="min" max="7"/>
+//         </RollingRandomAccessFile>
+// ----
+
+=== Plugins
+
+You can also add plugins to Log4j by dropping them in the _plugin_ directory.
+For details, see the https://logging.apache.org/log4j/2.x/manual/plugins.html[Log4j official documentation on plugins].
+
+[[general-logging-loggers]]
+=== Loggers
+
+Loggers forward log events to appenders.
+There can be an arbitrary number of `<Logger>` elements but only one `<Root>` logger element.
+Loggers have the possibility of being additive.
+An additive logger forwards a log event to its appender(s) and then passes the log event to the next matching logger.
+A non-additive logger forwards a log event to its appender(s) and then drops the event.
+The root logger is a special logger that matches everything, so if another logger does not pick up a log event, the root logger will.
+Therefore, it is best practice always to include a root logger so that no log events are missed.
+
+.Configuration of loggers
+[source%linenums,xml,options="nowrap"]
+----
+<Configuration>
+    <!-- Appenders -->
+    <Loggers>
+        <Root level="WARN">
+            <AppenderRef ref="DebugLog"/>
+        </Root>
+
+        <Logger name="HttpLogger" level="INFO" additivity="false">
+            <AppenderRef ref="HttpLog"/>
+        </Logger>
+    </Loggers>
+</Configuration>
+----
+
+A logger has a `level` that filters log events.
+A level can also include levels of different severity.
+For example, a logger with `level="INFO"` forwards log events with `INFO`, `WARN`, and `ERROR`.
+A logger with `level="WARN"` only logs `WARN` and `ERROR` events.
+
+The following table lists all log levels raised by Neo4j and their severity level:
+
+.Log levels
+[cols="1m,1,3", options="header"]
+|===
+| Message type
+| Severity level
+| Description
+
+a| `DEBUG`
+| Low severity
+| Report details on the raised errors and possible solutions.
+
+a| `INFO`
+| Low severity
+| Report status information and errors that are not severe.
+
+a| `WARN`
+| Low severity
+| Report errors that need attention but are not severe.
+
+a| `ERROR`
+| High severity
+| Reports errors that prevent the Neo4j server from running and must be addressed immediately.
+|===
+
+
+For more details on loggers, see the https://logging.apache.org/log4j/2.x/manual/configuration.html#Loggers[Log4j official documentation -> Configuring Loggers].
+
+[[garbage-collection-log-file-configuration]]
+== Configure the garbage collection log
+
+The garbage collection log, or GC log for short, is special and cannot be configured with Log4j 2.
+The GC log is handled by the Java Virtual Machine(JVM) and must be passed directly to the command line.
+To simplify this process, Neo4j exposes the following settings in _neo4j.conf_:
+
+._Garbage collection log_ configurations
+[cols="3,1,3", options="header"]
+|===
+| The _garbage collection log_ configuration
+| Default value
+| Description
+
+| xref:configuration/configuration-settings.adoc#config_server.logs.gc.enabled[`server.logs.gc.enabled`]
+| `false`
+| Enable garbage collection logging.
+
+| xref:configuration/configuration-settings.adoc#config_server.logs.gc.options[`server.logs.gc.options`]
+a| `-Xlog:gc*,safepoint,age*=trace`
+| Garbage collection logging options.
+For available options, consult the documentation of the JVM distribution used.
+
+| xref:configuration/configuration-settings.adoc#config_server.logs.gc.rotation.keep_number[`server.logs.gc.rotation.keep_number`]
+| `5`
+| The maximum number of history files for the garbage collection log.
+
+| xref:configuration/configuration-settings.adoc#config_server.logs.gc.rotation.size[`server.logs.gc.rotation.size`]
+| `20MB`
+| The threshold size for rotation of the garbage collection log.
+
+|===
+
+[role=enterprise-edition]
+[[security-events-logging]]
+== Configure the security log
+
+Neo4j provides security event logging that records all security events.
+The security log is enabled automatically when the configuration xref:configuration/configuration-settings.adoc#config_dbms.security.auth_enabled[`dbms.security.auth_enabled`] is set to `true` (which is the default).
+It ensures that all requests to Neo4j are authenticated.
+For additional configuration of the security log, see _<NEO4J_HOME>/conf/server-logs.xml_.
+
+For native user management, the following actions are recorded:
+
+* Login attempts -- by default, both successful and unsuccessful logins are recorded.
+* All xref:tutorial/access-control.adoc#auth-access-control-security[administration commands] run against the `system` database.
+* Authorization failures from role-based access control.
+
+If using LDAP as the authentication method, some cases of LDAP misconfiguration will also be logged, as well as the LDAP server communication events and failures.
+
+If many programmatic interactions are expected, it is advised to disable the logging of successful logins by setting the xref:configuration/configuration-settings.adoc#config_dbms.security.log_successful_authentication[`dbms.security.log_successful_authentication`] parameter in the _neo4j.conf_ file:
+
+[source, properties, role="noheader"]
+----
+dbms.security.log_successful_authentication=false
+----
+
+The security log can use a JSON layout.
+To change the format, the layout for the `SecurityLogger` must be changed from using the `PatternLayout`:
+
+[source%linenums,xml,options="nowrap",highlight=4]
+----
+<RollingRandomAccessFile name="SecurityLog" fileName="${config:server.directories.logs}/security.log"
+                                 filePattern="$${config:server.directories.logs}/security.log.%02i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy fileIndex="min" max="7"/>
+</RollingRandomAccessFile>
+----
+
+to using the `JsonTemplateLayout`:
+
+[source%linenums,xml,options="nowrap",highlight=4]
+----
+<RollingRandomAccessFile name="SecurityLog" fileName="${config:server.directories.logs}/security.log"
+                                 filePattern="$${config:server.directories.logs}/security.log.%02i">
+            <JsonTemplateLayout eventTemplateUri="classpath:org/neo4j/logging/StructuredJsonLayout.json"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="20 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy fileIndex="min" max="7"/>
+ </RollingRandomAccessFile>
+----
+
+See also <<general-logging-json-template-layout, `<JsonTemplateLayout>`>> and <<#_default_logging_configuration, Default logging configuration>>.
+
+The following information is available in the JSON format:
+
+.JSON format log entries
+[cols="1m,3a", options="header"]
+|===
+| Name
+| Description
+
+| time
+| The timestamp of the log message.
+
+| level
+| The log level.
+
+| type
+| It is always `security`.
+
+| source
+| Connection details.
+
+| database
+| The database name the command is executed on.
+This field is optional and thus will not be populated for all security events.
+
+| username
+| The user connected to the security event.
+This field is deprecated by `executingUser`.
+
+| executingUser
+| The username of the user triggering the security event.
+Either same as `authenticatedUser` or an impersonated user.
+
+| authenticatedUser
+| The username of the user who authenticated and is connected to the security event.
+
+| message
+| The log message.
+
+| stacktrace
+| Included if there is a stacktrace associated with the log message.
+
+|===
+
+An example of the security log in a plain format:
+
+[source, plain format, role="noheader"]
+----
+2019-12-09 13:45:00.796+0000 INFO  [johnsmith]: logged in
+2019-12-09 13:47:53.443+0000 ERROR [johndoe]: failed to log in: invalid principal or credentials
+2019-12-09 13:48:28.566+0000 INFO  [johnsmith]: CREATE USER janedoe SET PASSWORD '********' CHANGE REQUIRED
+2019-12-09 13:48:32.753+0000 INFO  [johnsmith]: CREATE ROLE custom
+2019-12-09 13:49:11.880+0000 INFO  [johnsmith]: GRANT ROLE custom TO janedoe
+2019-12-09 13:49:34.979+0000 INFO  [johnsmith]: GRANT TRAVERSE ON GRAPH * NODES A, B (*) TO custom
+2019-12-09 13:49:37.053+0000 INFO  [johnsmith]: DROP USER janedoe
+2019-12-09 13:52:24.685+0000 INFO  [johnsmith:alice]: impersonating user alice logged in
+----
+
+[role=enterprise-edition]
+[[query-logging]]
+== Configure the query log
+
+Query logging is enabled by default and is controlled by the setting xref:configuration/configuration-settings.adoc#config_db.logs.query.enabled[`db.logs.query.enabled`].
+It helps you analyze long-running queries and does not impact system performance.
+The default is to log all queries, but it is recommended to log for queries exceeding a certain threshold.
+
+=== Configuration settings
+
+The following values are available for the parameter `db.logs.query.enabled`:
+
+.`db.logs.query.enabled` values
+[cols="1,3a", options="header"]
+|===
+| Option
+| Description
+
+| `OFF`
+| Completely disable logging.
+
+| `INFO`
+a|
+Log at the end of queries that have either succeeded or failed.
+The xref:configuration/configuration-settings.adoc#config_db.logs.query.threshold[`db.logs.query.threshold`] parameter is used to determine the threshold for logging a query.
+If the execution of a query takes longer than this threshold, the query is logged.
+Setting the threshold to `0s` results in all queries being logged.
+
+| `VERBOSE`
+a| label:default[]Log all queries at both start and finish, regardless of xref:configuration/configuration-settings.adoc#config_db.logs.query.threshold[`db.logs.query.threshold`].
+|===
+
+
+The following configuration settings are available for the query logging:
+
+._Query log_ configurations
+[cols="3,2a,3", options="header"]
+|===
+| The _query log_ configuration
+| Default value
+| Description
+
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.early_raw_logging_enabled[`db.logs.query.early_raw_logging_enabled`]
+| `false`
+a|
+Log query text and parameters without obfuscating passwords.
+This allows queries to be logged earlier before parsing starts.
+
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.enabled[`db.logs.query.enabled`]
+| `VERBOSE`
+| Log executed queries.
+
+//New in 4.3
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.max_parameter_length[`db.logs.query.max_parameter_length`]
+| `2147483647`
+a|
+This configuration option allows you to set a maximum parameter length to include in the log.
+Parameters exceeding this length will be truncated and appended with `+...+`.
+This applies to each parameter in the query.
+
+//New in 4.3
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.obfuscate_literals[`db.logs.query.obfuscate_literals`]
+| `false`
+a|
+If `true`, obfuscates all query literals before writing the query to the log.
+This is useful when Cypher queries expose sensitive information.
+
+It is recommended to set this setting to `true` in production.
+
+[NOTE]
+====
+Node labels, relationship types, and map property keys are still shown.
+Changing the setting does not affect cached queries.
+Therefore, if you want the switch to have an immediate effect, you must also clear the query cache; `CALL db.clearQueryCaches()`. +
+Also, keep in mind that if Neo4j receives a malformed query that cannot be parsed, it cannot obfuscate its literals (because it does not know which parts are literals) and, therefore, the query text will not be included in any logging.
+====
+
+[WARNING]
+====
+The setting does not obfuscate literals in parameters. +
+If parameter values are not required in the log, set xref:configuration/configuration-settings.adoc#config_db.logs.query.parameter_logging_enabled[`db.logs.query.parameter_logging_enabled=false`].
+
+The setting does not obfuscate any sensitive information when logging errors. +
+To get that capability, set xref:configuration/configuration-settings.adoc#config_db.logs.query.obfuscate_errors[`db.logs.query.obfuscate_errors=true`].
+====
+
+//New in 5.26.21
+| label:new[Introduced in 5.26.21] xref:configuration/configuration-settings.adoc#config_db.logs.query.obfuscate_errors[`db.logs.query.obfuscate_errors`]
+| `false`
+a|
+If `true`, obfuscates all error information that can contain sensitive data before writing it to the log.
+This applies to error messages when the query log uses pattern layout or xref:#_use_json_format_for_the_query_log[JSON layout] with fields such as `failureReason` and `statusDescription`, where `statusDescription` is an element of `errorInfo`.
+
+It is recommended to set this setting to `true` in production.
+
+[WARNING]
+====
+The setting does not obfuscate literals when logging Cypher queries. +
+To get that capability, set xref:configuration/configuration-settings.adoc#config_db.logs.query.obfuscate_literals[`db.logs.query.obfuscate_literals=true`].
+====
+
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.parameter_logging_enabled[`db.logs.query.parameter_logging_enabled`]
+| `true`
+| Log parameters for the executed queries being logged.
+You can disable this configuration setting if you do not want to display sensitive information.
+
+//New in 4.3
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.plan_description_enabled[`db.logs.query.plan_description_enabled`]
+| `false`
+a|
+This configuration option allows you to log the query plan for each query.
+The query plan shows up as a description table and is useful for debugging purposes.
+Every time a Cypher query is run, it generates and uses a plan for the execution of the code.
+The plan generated can be affected by changes in the database, such as adding a new index.
+As a result, it is not possible to historically see what plan was used for the original query execution.
+[NOTE]
+====
+Enabling this option has a performance impact on the database due to the cost of preparing and including the plan in the _query log_.
+It is not recommended for everyday use.
+====
+
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.threshold[`db.logs.query.threshold`]
+| `0s`
+a|
+If the query execution takes longer than this threshold, the query is logged once completed (provided query logging is set to `INFO`).
+A threshold of `0` seconds logs all queries.
+
+//New in 4.3
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.transaction.enabled[`db.logs.query.transaction.enabled`]
+| `OFF`
+a|
+Track the start and end of a transaction within the query log.
+Log entries are written to the _query log_.
+They include the transaction ID for a specific query and the start and end of a transaction.
+You can also choose a level of logging (`OFF`, `INFO`, or `VERBOSE`).
+If `INFO` is selected, you must exceed the time before the log is written (`db.logs.query.transaction.threshold`).
+
+//New in 4.3
+| xref:configuration/configuration-settings.adoc#config_db.logs.query.transaction.threshold[`db.logs.query.transaction.threshold`]
+| `0s`
+a|
+If the transaction is open for longer than this threshold (duration of time), the transaction is logged once completed, provided transaction logging is set to `INFO`.
+Defaults to `0` seconds, which means all transactions are logged.
+This can be useful when identifying where there is a significant time lapse after query execution and transaction commits, especially in performance analysis around locking.
+|===
+
+=== Configure for simple query logging
+
+In this example, the query logging is set to `INFO`, and all other query log parameters are at their defaults.
+
+[source, properties, role="noheader"]
+----
+db.logs.query.enabled=INFO
+----
+
+The following is an example of the query log with this basic configuration:
+
+[source, plain format, role="noheader"]
+----
+2017-11-22 14:31 ... INFO  9 ms: bolt-session	bolt	johndoe	neo4j-javascript/1.4.1		client/127.0.0.1:59167	...
+2017-11-22 14:31 ... INFO  0 ms: bolt-session	bolt	johndoe	neo4j-javascript/1.4.1		client/127.0.0.1:59167	...
+2017-11-22 14:32 ... INFO  3 ms: server-session	http	127.0.0.1	/db/data/cypher	neo4j - CALL dbms.procedures() - {}
+2017-11-22 14:32 ... INFO  1 ms: server-session	http	127.0.0.1	/db/data/cypher	neo4j - CALL dbms.showCurrentUs...
+2017-11-22 14:32 ... INFO  0 ms: bolt-session	bolt	johndoe	neo4j-javascript/1.4.1		client/127.0.0.1:59167	...
+2017-11-22 14:32 ... INFO  0 ms: bolt-session	bolt	johndoe	neo4j-javascript/1.4.1		client/127.0.0.1:59167	...
+2017-11-22 14:32 ... INFO  2 ms: bolt-session	bolt	johndoe	neo4j-javascript/1.4.1		client/127.0.0.1:59261	...
+----
+
+=== Configure for query logging with more details
+
+In this example, the query log is enabled, as well as some additional logging:
+
+[source, properties, role="noheader"]
+----
+db.logs.query.enabled=INFO
+db.logs.query.parameter_logging_enabled=true
+db.logs.query.threshold=<appropriate value>
+----
+
+The following sample query is run on the Movies database:
+
+[source, cypher]
+----
+MATCH (n:Person {name:'Tom Hanks'})-[:ACTED_IN]->(n1:Movie)<-[:DIRECTED]-(n2:Person {name:"Tom Hanks"}) RETURN n1.title
+----
+
+The corresponding query log in _<.file>query.log_ is:
+
+[source, plain format, role="noheader"]
+----
+2017-11-23 12:44:56.973+0000 INFO  1550 ms: (planning: 20, cpu: 920, waiting: 10) - 13792 B - 15 page hits, 0 page faults - bolt-session	bolt	neo4j	neo4j-javascript/1.4.1		client/127.0.0.1:58189	server/127.0.0.1:7687>	neo4j - match (n:Person {name:'Tom Hanks'})-[:ACTED_IN]->(n1:Movie)<-[:DIRECTED]-(n2:Person {name:"Tom Hanks"}) return n1.title; - {} - {}
+----
+
+An obvious but essential point of note when examining the parameters of a particular query is to ensure you analyze only the entries relevant to that specific query plan, as opposed to, e.g., CPU, time, bytes, and so on for each log entry in sequence.
+
+Following is a breakdown of resource usage parameters with descriptions corresponding to the above query:
+
+`2017-11-23 12:44:56.973+0000`::
+Log timestamp.
+
+`INFO`::
+Log category.
+
+`1550 ms`::
+Total elapsed cumulative wall time spent in query execution.
+It is the total of planning time + CPU + waiting + any other processing time, e.g., taken to acquire execution threads.
+This figure is cumulative for every time a CPU thread works on executing the query.
+
+`Planning`::
+Refers to the time the Cypher engine takes to create a query plan.
+Plans may be cached for repetitive queries, and therefore, planning times for such queries will be shorter than those for previously unplanned ones.
+In the example, this contributed 20ms to the total execution time of 1550ms.
+
+`CPU time`::
+Refers to the time taken by the individual threads executing the query, e.g., a query is submitted at 08:00.
+It uses CPU for 720ms, but then the CPU swaps out to another query, so the first query is no longer using the CPU.
+Then, after 100ms, it gets/uses the CPU again for 200ms (more results to be loaded, requested by the client via the Driver), then the query completes at 08:01:30, so the total duration is 1550ms (includes some round-trip time for 2 round-trips), and CPU is 720+200=920ms.
+
+`Waiting`::
+Time a query spent waiting before execution (in ms), for example, if an existing query has a lock which the new query must wait to release.
+In the example, this contributed 10ms to the total execution time of 1550ms. +
+It is important to note that the client requests data from the server only when its record buffer is empty (one round-trip from the server may end up with several records), and the server stops pushing data into outgoing buffers if the client does not read them in a timely fashion.
+Therefore, it depends on the size of the result set.
+If it is relatively small and fits in a single round-trip, the client receives all the results at once, and the server finishes processing without any client-side effect.
+Meanwhile, if the result set is large, the client-side processing time will affect the overall time, as it is directly connected to when new data is requested from the server.
+
+`13792 B`::
+The logged allocated bytes for the executed queries.
+This is the amount of HEAP memory used during the life of the query.
+The logged number is cumulative over the duration of the query, i.e., for memory-intense or long-running queries, the value may be larger than the current memory allocation.
+
+`15 page hits`::
+Page hit means the result was returned from the page cache as opposed to the disk.
+In this case, the page cache was hit 15 times.
+
+`0 page faults`::
+Page fault means that the query result data was not in the `dbms.memory.pagecache` and, therefore, had to be fetched from the file system.
+In this case, query results were returned entirely from the 8 page cache hits mentioned above, so there were 0 hits on the disk required.
+
+`bolt-session`::
+The session type.
+
+`bolt`::
+The Browser <--> database communication protocol used by the query.
+
+`neo4j`::
+The process ID.
+
+`neo4j-javascript/1.4.1`::
+The Driver version.
+
+`client/127.0.0.1:52935`::
+The query client outbound `IP:port` used.
+
+`server/127.0.0.1:7687>`::
+The server listening `IP:port` used.
+
+`neo4j`::
+username of the query executioner
+
+`match (n:Person {name:'Tom Hanks'})-[:ACTED_IN]→(n1:Movie)←[:DIRECTED]-(n2:Person {name:"Tom Hanks"}) return n1.title`::
+The executed query.
++
+The last two parenthesis `{}` `{}` are for the query parameters and `txMetaData`.
+
+[[attach-metadata-tx]]
+=== Attach metadata to a transaction
+
+You can attach metadata to a transaction and have it printed in the query log using the built-in procedure xref:procedures/built-in-procedures.adoc#procedure_tx_setMetaData[`tx.setMetaData`].
+
+[NOTE]
+====
+Neo4j Drivers also support attaching metadata to a transaction.
+For more information, see the respective Driver's manual.
+====
+
+Every graph app should follow a convention for passing metadata with the queries that it sends to Neo4j:
+
+[source, role=noheader]
+----
+{
+  app: "neo4j-browser_v4.4.0", #<1>
+  type: "system" #<2>
+}
+----
+<1> `app` can be a user-agent styled-name plus version.
+<2> `type` can be one of:
+* `system` -- a query automatically run by the app.
+* `user-direct` -- a query the user directly submitted to/through the app.
+* `user-action` -- a query resulting from an action the user performed.
+* `user-transpiled` -- a query that has been derived from the user input.
+
+This is typically done programmatically but can also be used with the Neo4j dev tools. +
+In general, you start a transaction on a user database and attach a list of metadata to it by calling `tx.setMetaData`.
+You can also use the procedure xref:procedures/built-in-procedures.adoc#procedure_tx_getMetaData[`CALL tx.getMetaData()`] to show the metadata of the current transaction.
+These examples use the Movie Graph dataset from the pre-installed Neo4j Browser guide.
+
+.Using `cypher-shell`, attach metadata to a transaction
+====
+
+[NOTE]
+Cypher Shell always adds metadata that follows the convention by default.
+In this example, the defaults are overridden.
+
+[source, shell, role=noplay,nocopy]
+----
+neo4j@neo4j> :begin
+neo4j@neo4j# CALL tx.setMetaData({app: 'neo4j-cypher-shell_v.4.4.0', type: 'user-direct', user: 'jsmith'});
+0 rows
+ready to start consuming query after 2 ms, results consumed after another 0 ms
+neo4j@neo4j# CALL tx.getMetaData();
++--------------------------------------------------------------------------+
+| metadata                                                                 |
++--------------------------------------------------------------------------+
+| {app: "neo4j-cypher-shell_v.4.4.0", type: "user-direct", user: "jsmith"} |
++--------------------------------------------------------------------------+
+
+1 row
+ready to start consuming query after 37 ms, results consumed after another 2 ms
+neo4j@neo4j# MATCH (n:Person) RETURN n  LIMIT 5;
++----------------------------------------------------+
+| n                                                  |
++----------------------------------------------------+
+| (:Person {name: "Keanu Reeves", born: 1964})       |
+| (:Person {name: "Carrie-Anne Moss", born: 1967})   |
+| (:Person {name: "Laurence Fishburne", born: 1961}) |
+| (:Person {name: "Hugo Weaving", born: 1960})       |
+| (:Person {name: "Lilly Wachowski", born: 1967})    |
++----------------------------------------------------+
+
+5 rows
+ready to start consuming query after 2 ms, results consumed after another 1 ms
+neo4j@neo4j# :commit
+----
+
+.Example result in the _query.log_ file
+[source, query log, role="noheader"]
+----
+2021-07-30 14:43:17.176+0000 INFO  id:225 - 2 ms: 136 B - bolt-session	bolt	neo4j-cypher-shell/v4.4.0		client/127.0.0.1:54026	server/127.0.0.1:7687>	neo4j - neo4j -
+MATCH (n:Person) RETURN n  LIMIT 5; - {} - runtime=pipelined - {app: 'neo4j-cypher-shell_v.4.4.0', type: 'user-direct', user: 'jsmith'}
+----
+====
+
+
+.Using Neo4j Browser, attach metadata to a transaction
+====
+[source, cypher]
+----
+CALL tx.setMetaData({app: 'neo4j-browser_v.4.4.0', type: 'user-direct', user: 'jsmith'})
+MATCH (n:Person) RETURN n LIMIT 5
+----
+
+.Example result in the _query.log_ file
+[source, query log, role="noheader"]
+----
+2021-07-30 14:51:39.457+0000 INFO  Query started: id:328 - 0 ms: 0 B - bolt-session	bolt	neo4j-browser/v4.4.0		client/127.0.0.1:53666	server/127.0.0.1:7687>	neo4j - neo4j - MATCH (n:Person) RETURN n  LIMIT 5 - {} - runtime=null - {type: 'system', app: 'neo4j-browser_v4.4.0'}
+----
+====
+
+.Using Neo4j Bloom, attach metadata to a transaction
+====
+[source, cypher, role="noplay"]
+----
+CALL tx.setMetaData({app: 'neo4j-browser_v.1.7.0', type: 'user-direct', user: 'jsmith'})
+MATCH (n:Person) RETURN n LIMIT 5
+----
+
+.Example result in the _query.log_ file
+[source, query log, role="noheader"]
+----
+2021-07-30 15:09:54.048+0000 INFO  id:95 - 1 ms: 72 B - bolt-session	bolt	neo4j-bloom/v1.7.0		client/127.0.0.1:54693	server/127.0.0.1:11003>	neo4j - neo4j - RETURN TRUE - {} - runtime=pipelined - {app: 'neo4j-bloom_v1.7.0', type: 'system'}
+----
+
+====
+
+[NOTE]
+====
+In Neo4j Browser and Bloom, the user-provided metadata is always replaced by the system metadata.
+====
+
+=== Use JSON format for the query log
+
+The query log can use a JSON layout.
+To change the format, the layout for the `QueryLogger` must be changed from using the `PatternLayout`:
+
+[source%linenums,xml,options="nowrap",highlight=4]
+----
+<RollingRandomAccessFile name="QueryLog" fileName="${config:server.directories.logs}/query.log"
+                     filePattern="${config:server.directories.logs}/query.log.%02i">
+    <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
+    <Policies>
+        <SizeBasedTriggeringPolicy size="20 MB"/>
+    </Policies>
+    <DefaultRolloverStrategy fileIndex="min" max="7"/>
+</RollingRandomAccessFile>
+----
+
+to using the `JsonTemplateLayout`:
+
+[source%linenums,xml,options="nowrap",highlight=4]
+----
+<RollingRandomAccessFile name="QueryLog" fileName="${config:server.directories.logs}/query.log"
+                     filePattern="${config:server.directories.logs}/query.log.%02i">
+    <JsonTemplateLayout eventTemplateUri="classpath:org/neo4j/logging/QueryLogJsonLayout.json"/>
+    <Policies>
+        <SizeBasedTriggeringPolicy size="20 MB"/>
+    </Policies>
+    <DefaultRolloverStrategy fileIndex="min" max="7"/>
+</RollingRandomAccessFile>
+----
+
+See also <<general-logging-json-template-layout, `<JsonTemplateLayout>`>> and <<#_default_logging_configuration, Default logging configuration>>.
+
+
+==== JSON format log entries
+
+The `QueryLogJsonLayout.json` template mimics the 4.x layout and contains the following information:
+
+.JSON format log entries
+[cols="1m,3a", options="header"]
+|===
+| Name
+| Description
+
+| time
+| The timestamp of the log message.
+
+| level
+| The log level.
+
+| type
+| Valid options are `query` and `transaction`.
+
+| stacktrace
+| Included when there is a stacktrace associated with the log message.
+
+|===
+
+If the type of the log entry is `query`, these additional fields are available:
+
+.JSON format log entries for log type `query`
+[cols="2m,3a", options="header"]
+|===
+| Name
+| Description
+
+| event
+| Valid options are `start`, `fail`, and `success`.
+
+| id
+| The query ID.
+The ID is incremental, starting from 1 and resetting upon every Neo4j restart.
+Included when xref:configuration/configuration-settings.adoc#config_db.logs.query.enabled[`db.logs.query.enabled`] is `VERBOSE`.
+
+| elapsedTimeMs
+| The elapsed time in milliseconds.
+
+| planning
+| Milliseconds spent on planning.
+
+| cpu
+| Milliseconds spent actively executing on the CPU.
+
+| waiting
+| Milliseconds spent waiting on locks or other queries, as opposed to actively running this query.
+
+| allocatedBytes
+| Number of bytes allocated by the query.
+
+| pageHits
+| Number of page hits.
+
+| pageFaults
+| Number of page faults.
+
+| source
+| Connection details.
+
+| database
+| The database name on which the query is run. This field will be `<none>` if the query cannot be parsed and routed to a database.
+
+| executingUser
+| The username of the user executing the query.
+Either same as `authenticatedUser` or an impersonated user.
+
+| authenticatedUser footnote:[When SSO is enabled, the username is determined by the xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.claims.username[`dbms.security.oidc.<provider>.claims.username`] setting.
+If LDAP is configured, Neo4j determines the username string using one of two settings: xref:configuration/configuration-settings.adoc#config_dbms.security.ldap.authentication.user_dn_template[`dbms.security.ldap.authentication.user_dn_template`] or xref:configuration/configuration-settings.adoc#config_dbms.security.ldap.authentication.attribute[`dbms.security.ldap.authentication.attribute`].
+Starting with Neo4j 5.24, for both OIDC and LDAP, if local user mapping is required (`dbms.security.require_local_user=true`), the log records the mapped local username instead of the external identity string.
+If authentication is controlled on a user level via Cypher statements, the username is defined directly inside the `system` database using native user creation queries: `CREATE USER 'name'`.]
+| The username used to authenticate the session, whether managed natively by Neo4j or externally via an identity provider like LDAP or OIDC/SSO.
+
+| query
+| The query text.
+
+| queryParameters
+| The query parameters.
+Included when xref:configuration/configuration-settings.adoc#config_db.logs.query.parameter_logging_enabled[`db.logs.query.parameter_logging_enabled`] is `true`.
+
+| runtime
+| The runtime used to run the query.
+
+| annotationData
+| Metadata attached to the transaction.
+
+| failureReason
+| Reason for failure.
+Included when applicable.
+
+| errorInfo
+| label:new[Introduced in 5.25] GQL error information as a JSON object.
+See <<gql-error-information, GQL error information>> for details on the contents of the `errorInfo` JSON object.
+
+| transactionId
+| The transaction ID of the running query.
+
+| queryPlan
+| The query plan.
+Included when xref:configuration/configuration-settings.adoc#config_db.logs.query.plan_description_enabled[`db.logs.query.plan_description_enabled`] is `true`.
+
+| executionPlanCacheKeyHash
+| The 32-bit hash of the cache key used to cache the execution plan.
+It is a fixed-length 8-character string of a hex-encoded integer value.
+Enabled by default only in the JSON format.
+If multiple query executions use the same cached execution plan, their hashes should match.
+For `event=start`, the value is `00000000`.
+
+//####Hiding the `executableQueryCacheHit` because it requires the internal setting `internal.dbms.logs.query.query_cache_usage=true` to be enabled in order to be logged.####
+// | executableQueryCacheHit
+// | Whether the query string matched a cached execution plan.
+
+|===
+
+If the type of the log entry is `transaction`, the following additional fields are available:
+
+.JSON format log entries for log type `transaction`
+[cols="1m,3a", options="header"]
+|===
+| Name
+| Description
+
+| event
+| Valid options are `start`, `rollback`, and `commit`.
+
+| database
+| The database name on which the transaction is run.
+
+| executingUser
+| The name of the user connected to the transaction.
+Either same as `authenticatedUser` or an impersonated user.
+
+| authenticatedUser
+| The name of the user who authenticated and is connected to the transaction.
+
+| transactionId
+| ID of the transaction.
+
+|===
+
+[role=label--new-5.25]
+[[gql-error-information]]
+==== GQL error information
+
+The query log includes the GQL error information under the JSON object `errorInfo`.
+`errorInfo` can contain the following elements:
+
+* `GQLSTATUS` -- A 5-character long alpha-numeric code identifying the error.
+* `statusDescription` -- A message describing the error.
+* `classification` -- The type of error representing a division of client, transient, and database errors.
+* `position` -- The position (a JSON object containing a field for `column`, `offset`, and `line`) in the query where this error occurred.
+* `cause` -- A JSON object containing the `errorInfo` JSON object of the cause of the current `errorInfo` JSON object.
+
+[NOTE]
+====
+The default GQLSTATUS code 50N42 is returned when an exception does not have a GQL-status object.
+Starting from Neo4j 5.25, we started adding GQL objects to exceptions.
+Therefore, you can expect many 50N42 codes during this transition period.
+However, it is important not to rely on this default code, as future Neo4j versions might change it by adding an appropriate GQL object to the exception.
+Additionally, GQL codes for external procedures are not yet stable.
+====
+
+The following are examples of the `errorInfo` JSON object:
+
+.`errorInfo` JSON object of a database error
+[source%linenums,xml,options="nowrap",highlight=4]
+----
+...
+"errorInfo": {
+    "GQLSTATUS": "51N66",
+    "statusDescription": "error: system configuration or operation exception - resource exhaustion. Insufficient resources to complete the request.",
+    "cause": {
+      "GQLSTATUS": "51N55",
+      "statusDescription": "error: system configuration or operation exception - cannot create additional database. Failed to create the database `db10`. The limit of databases is reached. Either increase the limit using the config setting dbms.max_databases or drop a database.",
+      "classification": "DATABASE_ERROR"
+    },
+    "classification": "DATABASE_ERROR"
+  },
+...
+----
+
+.`errorInfo` JSON object of a client error
+[source%linenums,xml,options="nowrap",highlight=4]
+----
+...
+"errorInfo": {
+    "GQLSTATUS": "42N62",
+    "statusDescription": "error: syntax error or access rule violation - variable not defined. Variable `m` not defined.",
+    "position": {
+      "column": 18,
+      "offset": 17,
+      "line": 1
+    },
+    "classification": "CLIENT_ERROR"
+  },
+"query": "MATCH (n) RETURN m",
+...
+----

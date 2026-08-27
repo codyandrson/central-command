@@ -1,0 +1,267 @@
+:description: How to deploy Neo4j using the Neo4j RPM package on Red Hat, CentOS, Fedora, or Amazon Linux distributions.
+[[linux-rpm]]
+= Red Hat, CentOS, Fedora, and Amazon Linux (.rpm)
+
+You can deploy Neo4j on Red Hat, CentOS, Fedora, or Amazon Linux distributions using the Neo4j RPM package.
+
+[[linux-rpm-prerequisites]]
+== Java prerequisites
+
+Neo4j 5.x runs on Java 17, and from Neo4j 5.14, it also supports Java 21.
+
+
+=== OpenJDK Java 17
+Most of our supported Linux distributions have OpenJDK Java 17 available by default.
+Consequently, no extra setup is required if you are using OpenJDK Java, the correct Java dependency will be installed by the package manager when installing Neo4j.
+
+
+[[linux-rpm-prerequisites-oracle]]
+=== Oracle Java 17
+There is some minor setup required for compatibility with Oracle Java 17 because Oracle and OpenJDK provide incompatible RPM packages for Java 17.
+
+You can use an adapter for Oracle Java 17, which must be installed before Neo4j.
+The adapter contains no code but stops the package manager from installing OpenJDK 17 as a dependency despite an existing Oracle Java 17 installation.
+
+. Download and install the Oracle Java 17 JDK from the https://www.oracle.com/java/technologies/downloads/?er=221886[Oracle website].
+. Install the adapter:
++
+[source, shell]
+----
+sudo yum install https://dist.neo4j.org/neo4j-java17-adapter.noarch.rpm
+----
++
+The SHA-256 of the adapter package can be verified against https://dist.neo4j.org/neo4j-java17-adapter.noarch.rpm.sha256.
+
+=== Zulu JDK 17 or Corretto 17
+
+If you want to use a non-default JDK, it must be installed before starting the Neo4j installation.
+Otherwise, your package manager will install the default Java distribution for your operating system, usually OpenJDK.
+
+Installation instructions can be found on the manufacturer's website:
+
+* https://www.azul.com/downloads/?package=jdk[Zulu JDK]
+* https://aws.amazon.com/corretto/[Amazon Corretto JDK]
+
+
+[[linux-rpm-install]]
+== Install on Red Hat, CentOS or Amazon Linux
+
+
+[[linux-rpm-install-standard]]
+=== Set up the repository
+
+. Import the Neo4j GPG public key into the system’s RPM keyring.
+The key is required to verify the authenticity of the Neo4j packages you will install.
++
+[source, bash]
+----
+rpm --import https://debian.neo4j.com/neotechnology.gpg.key
+----
+
+. Create a `neo4j.repo` file in the `/etc/yum.repos.d/` directory.
+This file contains the repository configuration for Neo4j.
++
+[source, bash, subs="attributes"]
+----
+cat <<EOF > /etc/yum.repos.d/neo4j.repo
+[neo4j]
+name=Neo4j RPM Repository
+baseurl=https://yum.neo4j.com/stable/{neo4j-version}
+enabled=1
+gpgcheck=1
+EOF
+----
++
+[NOTE]
+====
+If you are upgrading from Neo4j 4.4 or earlier, you may need to clear the package manager cache before Neo4j packages become available:
+
+`yum clean dbcache`
+====
+
+. Verify that the Neo4j repository is set up correctly by listing the available Neo4j packages versions:
++
+[source, bash]
+----
+yum list neo4j --showduplicates
+----
+
+=== Install Neo4j
+
+Install Neo4j as `root` using the following commands depending on which edition you are using:
+
+* Community Edition
++
+[source, bash, subs="attributes"]
+----
+yum install neo4j-{neo4j-version-exact}
+----
+
+* Enterprise Edition
++
+From Neo4j 5.4 onwards, you are required to accept either the commercial or the evaluation license agreement before running the Neo4j Enterprise Edition.
+The following are examples of using an interactive prompt and a non-interactive installation:
++
+.Interactive installation of Enterprise Edition under the commercial license
+[source, bash, subs="attributes"]
+----
+yum install neo4j-enterprise-{neo4j-version-exact}
+----
+You have to choose either a link:https://legal.neo4j.com/[commercial license] or an link:https://neo4j.com/terms/enterprise_us/[evaluation license] before the interactive installation is allowed to complete.
++
+For a non-interactive installation, you can set the environment variable `NEO4J_ACCEPT_LICENSE_AGREEMENT` to `yes` (for the commercial license) or `eval` (for the evaluation license).
+This should be done in the same line as the package is installed, to ensure bash correctly passes the environment variable to the installer process.
+As in the following example:
++
+.Non-interactive installation of Enterprise Edition under the commercial license
+[source, bash, subs="attributes"]
+----
+NEO4J_ACCEPT_LICENSE_AGREEMENT=yes yum install neo4j-enterprise-{neo4j-version-exact}
+----
+
+[[linux-rpm-suse]]
+== Install on SUSE
+
+For SUSE-based distributions, the steps are as follows:
+
+. Use the following as `root` to add the repository:
++
+[source, bash, subs="attributes"]
+----
+zypper addrepo --refresh https://yum.neo4j.com/stable/{neo4j-version} neo4j-repository
+----
+
+. Install Neo4j as `root` using the following commands depending on which edition you are using:
++
+* Community Edition
++
+[source, bash, subs="attributes"]
+----
+zypper install neo4j-{neo4j-version-exact}
+----
+
+* Enterprise Edition
++
+From Neo4j 5.4 onwards, you are required to accept either the commercial or the evaluation license agreement before running the Neo4j Enterprise Edition.
+The following are examples of using an interactive prompt and a non-interactive installation:
++
+.Interactive installation of Enterprise Edition under the commercial license
+[source, bash, subs="attributes"]
+----
+zypper install neo4j-enterprise-{neo4j-version-exact}
+----
+You have to choose either a link:https://legal.neo4j.com/[commercial license] or an link:https://neo4j.com/terms/enterprise_us/[evaluation license] before the interactive installation is allowed to complete.
++
+For a non-interactive installation, you can set the `NEO4J_ACCEPT_LICENSE_AGREEMENT` to `yes` (for the commercial license) or `eval` (for the evaluation license) as in the following example:
++
+.Non-interactive installation of Enterprise Edition under the commercial license
+[source, bash, subs="attributes"]
+----
+NEO4J_ACCEPT_LICENSE_AGREEMENT=yes zypper install neo4j-enterprise-{neo4j-version-exact}
+----
+
+[[linux-rpm-install-offline-installation]]
+== Offline installation
+
+If you cannot reach `\https://yum.neo4j.com/stable/{neo4j-version}` to install Neo4j using RPM, perhaps due to a firewall, you need to obtain Neo4j via an alternative machine that has the relevant access, and then move the RPM package manually.
+
+[NOTE]
+====
+It is important to note that using this method means that the offline machine cannot receive the dependencies that are normally downloaded and installed automatically when using `yum` for installing Neo4j, xref:tools/cypher-shell.adoc[Neo4j Cypher Shell], and Java.
+====
+
+. Download the Neo4j and Cypher Shell RPM installers from https://neo4j.com/deployment-center/[Deployment Center] or run the following to obtain the required packages:
++
+* Cypher Shell:
++
+[source, curl, subs="attributes"]
+----
+curl -O https://dist.neo4j.org/cypher-shell/cypher-shell-{neo4j-version-exact}-1.noarch.rpm
+----
+* Neo4j Community Edition:
++
+[source, curl, subs="attributes"]
+----
+curl -O https://dist.neo4j.org/rpm/neo4j-{neo4j-version-exact}-1.noarch.rpm
+----
+* Neo4j Enterprise Edition:
++
+[source, curl, subs="attributes"]
+----
+curl -O https://dist.neo4j.org/rpm/neo4j-enterprise-{neo4j-version-exact}-1.noarch.rpm
+----
+
+. Manually move the downloaded RPM packages to the offline machine.
+Before installing Neo4j, you must manually install the required Java 17 packages.
++
+[NOTE]
+====
+If using Oracle Java 17, the same dependency issues apply as with the xref:installation/linux/rpm.adoc#linux-rpm-prerequisites-oracle[Oracle Java prerequisites].
+You will need to additionally download and install the Java adaptor described in that section.
+====
+. Install Neo4j and Cypher Shell as `root` using the following command depending on which edition you are using:
++
+[NOTE]
+====
+If you are upgrading from Neo4j 4.4 or earlier versions of 5.x, due to strict dependencies between Neo4j and Cypher Shell, both packages must be upgraded simultaneously.
+This must be one single command, and Neo4j Cypher Shell must be the first package in the command.
+For later versions, you can install them separately but still need to install Cypher Shell first.
+====
++
+* Community Edition
++
+[source, bash, subs="attributes"]
+----
+rpm --install cypher-shell-{neo4j-version-exact}-1.noarch.rpm neo4j-{neo4j-version-exact}-1.noarch.rpm
+----
++
+* Enterprise Edition
++
+From Neo4j 5.4 onwards, you are required to accept either the commercial or the evaluation license agreement before running the Neo4j Enterprise Edition.
+The following example uses an interactive prompt:
++
+[source, bash, subs="attributes"]
+----
+rpm --install cypher-shell-{neo4j-version-exact}-1.noarch.rpm neo4j-enterprise-{neo4j-version-exact}-1.noarch.rpm
+----
+You have to choose either a link:https://legal.neo4j.com/[commercial license] or an link:https://neo4j.com/terms/enterprise_us/[evaluation license] before the interactive installation is allowed to complete.
+For a non-interactive installation, you can set the `NEO4J_ACCEPT_LICENSE_AGREEMENT` to `yes` (for the commercial license) or `eval` (for the evaluation license) as in the following example:
++
+[source, bash, subs="attributes"]
+----
+NEO4J_ACCEPT_LICENSE_AGREEMENT=yes rpm --install cypher-shell-{neo4j-version-exact}-1.noarch.rpm neo4j-enterprise-{neo4j-version-exact}-1.noarch.rpm
+----
+
+[[rpm-service-start-automatically]]
+== Start the Neo4j service automatically on system start
+
+To enable Neo4j to start automatically on system boot, run the following command:
+
+[source, bash]
+----
+systemctl enable neo4j
+----
+
+[NOTE]
+====
+Before starting up the database for the first time, it is recommended to use the `set-initial-password` command of `neo4j-admin` to define the password for the native user `neo4j`.
+
+If the password is not set explicitly using this method, it will be set to the default password `neo4j`.
+In that case, you will be prompted to change the default password at first login.
+
+For more information, see xref:configuration/set-initial-password.adoc[].
+====
+
+For more information on operating the Neo4j system service, see xref:installation/linux/systemd.adoc[Neo4j system service].
+
+== Uninstall Neo4j
+
+Follow these steps to uninstall Neo4j:
+
+. (Optional) Create a xref:/backup-restore/index.adoc[backup] to avoid losing your data.
+. Uninstall Neo4j:
++
+[source, bash]
+----
+sudo yum remove neo4j
+----

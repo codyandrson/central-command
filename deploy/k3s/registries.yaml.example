@@ -1,0 +1,32 @@
+# ============================================================================
+# containerd mirror config for k3s — air-gapped work site.
+#
+# Copy to /etc/rancher/k3s/registries.yaml on EVERY node (raspberrypi AND
+# chromebox), fill in MIRROR_HOST (+ auth/CA if the mirror needs them), then
+# restart:  sudo systemctl restart k3s        (control plane node)
+#           sudo systemctl restart k3s-agent  (agent node)
+#
+# Registries covered = every registry an image in deploy/k3s/*.yaml pulls
+# from today (docker.io: postgres, redis, neo4j, n8n; ghcr.io: litellm).
+# cc-graphiti is built locally per-node and never pulled, so it needs no
+# mirror entry.
+#
+# Optional: run k3s/k3s-agent with --disable-default-registry-endpoint so a
+# misconfigured mirror fails loud (ImagePullBackOff) instead of silently
+# falling through to the real internet endpoint.
+# ============================================================================
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://MIRROR_HOST/v2/docker.io"
+  ghcr.io:
+    endpoint:
+      - "https://MIRROR_HOST/v2/ghcr.io"
+
+configs:
+  "MIRROR_HOST":
+    # auth:
+    #   username: xxx
+    #   password: xxx
+    # tls:
+    #   ca_file: /etc/rancher/k3s/mirror-ca.crt

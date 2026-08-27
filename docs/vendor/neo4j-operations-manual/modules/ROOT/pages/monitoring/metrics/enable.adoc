@@ -1,0 +1,27 @@
+:description: This chapter describes how to enable the metrics that you want to monitor.
+[role=enterprise-edition]
+[[metrics-enable]]
+= Enable metrics logging
+
+[NOTE]
+====
+A subset of all available metrics is enabled by default.
+See xref:configuration/configuration-settings.adoc#config_server.metrics.filter[`server.metrics.filter`].
+The list was last updated in Neo4j 4.2.
+====
+
+You can enable/disable metrics using the configuration setting xref:configuration/configuration-settings.adoc#config_server.metrics.enabled[`server.metrics.enabled`].
+You can also use the setting `server.metrics.filter` to enable only the metrics you want.
+The metrics must be specified as a comma-separated list of globbing patterns.
+The following example enables all checkpoint metrics and the pagecache eviction metric:
+
+[source, properties]
+----
+# Setting for enabling all supported metrics. (Default is true) Setting this to false disables all metrics.
+server.metrics.enabled=true
+
+# Setting for enabling only the metrics matching the filter.
+server.metrics.filter=*check_point*,neo4j.page_cache.evictions
+----
+
+For more information on the available metrics configuration settings, see xref:configuration/configuration-settings.adoc[Configuration settings].

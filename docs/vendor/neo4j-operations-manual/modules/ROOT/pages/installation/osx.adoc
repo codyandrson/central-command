@@ -1,0 +1,98 @@
+:description: Install Neo4j on macOS.
+[[osx-installation]]
+= macOS installation
+
+Before you install Neo4j on macOS, check xref:installation/requirements.adoc[System Requirements] to see if your setup is suitable.
+
+
+[[osx-console]]
+== Unix console application
+
+. If it is not already installed, get link:https://openjdk.org/[OpenJDK 17] or link:https://www.azul.com/downloads/[ZuluJDK 17].
+From version 5.14 onwards, Neo4j also supports JDK 21.
+. Download the latest release from {neo4j-download-center-uri}[Neo4j Deployment Center].
++
+Select the appropriate tar.gz distribution for your platform.
+. Make sure to download Neo4j from link:{neo4j-download-center-uri}[Neo4j Deployment Center] and always check that the SHA hash of the downloaded file is correct:
+.. To find the correct SHA hash, go to Neo4j Deployment Center and click on `SHA-256` which will be located below your downloaded file.
+.. Using the appropriate commands for your platform, display the `SHA-256` hash for the file that you downloaded.
+.. Ensure that the two are identical.
+. Extract the contents of the archive, using `tar -xf` <filename>.
+For example, `tar -xf neo4j-community-{neo4j-version-exact}-unix.tar.gz`.
+. Place the extracted files in a permanent home on your server and set the environment variable `NEO4J_HOME` to point to the extracted directory, for example, `export NEO4J_HOME=/path/to/_<NEO4J_HOME>` to make it easier to refer to it later.
+. xref:configuration/file-locations.adoc#file-locations-file-locations[Change the default locations] of the _data_, _conf_, _certificates_, _licenses_, and _plugins_ (if you plan to use custom plugins) directories by setting the environment variable `NEO4J_CONF` and the respective xref:configuration/configuration-settings.adoc#_server_directories_settings[`server.directories.*`] settings to point to the desired locations.
++
+[NOTE]
+====
+Storing your Neo4j files outside `NEO4J_HOME` will simplify the upgrade process later because you will be able to replace the DBMS binaries without affecting the configuration and state.
+Otherwise, these Neo4j files will remain in the old installation folder and may be accidentally overwritten during an upgrade or deleted during a subsequent uninstall.
+====
+. Accept either the commercial or the evaluation license agreement before running the Neo4j Enterprise Edition.
+If you are using Community Edition, you can skip this step.
+* Use one of the following options to accept the commercial license agreement.
+See the link:https://legal.neo4j.com/[Neo4j licensing] page for details on the available agreements.
++
+** Set the environment variable `NEO4J_ACCEPT_LICENSE_AGREEMENT=yes`.
+** Run `$NEO4J_HOME/bin/neo4j-admin server license --accept-commercial`
+* Use one of the following options to accept the link:https://neo4j.com/terms/enterprise_us/[Neo4j Evaluation Agreement for Neo4j Software]:
++
+** Set the environment variable `NEO4J_ACCEPT_LICENSE_AGREEMENT=eval`.
+** Run `$NEO4J_HOME/bin/neo4j-admin server license --accept-evaluation`.
+. Before starting up the database for the first time, it is recommended to use the `set-initial-password` command of `neo4j-admin` to define the password for the native user `neo4j`.
++
+If the password is not set explicitly using this method, it will be set to the default password `neo4j`.
+In that case, you will be prompted to change the default password at first login. +
+For more information, see xref:configuration/set-initial-password.adoc[].
+. Start Neo4j:
+* To run Neo4j as a console application, use: `$NEO4J_HOME/bin/neo4j console`.
+* To run Neo4j in a background process, use: `$NEO4J_HOME/bin/neo4j start`.
+. Open  _\http://localhost:7474/_ in your web browser.
+. Connect using the username `neo4j` with your password or the default password `neo4j`.
+You will then be prompted to change the password.
+. Stop the server by typing `Ctrl-C` in the console.
+
+When Neo4j runs in console mode, logs are printed to the terminal.
+
+
+== macOS service
+
+Use the standard macOS system tools to create a service based on the `neo4j` command.
+
+
+== macOS file descriptor limits
+
+The limit of _open file descriptors_ may have to be increased if a database has many indexes or if there are many connections to the database.
+The currently configured open file descriptor limitation on your macOS system can be inspected with the `launchctl limit maxfiles` command.
+The method for changing the limit may differ depending on the version of macOS.
+Consult the documentation for your operating system in order to find out the appropriate command.
+
+If you raise the limit above 10240, then you must also add the following setting to your xref:configuration/file-locations.adoc[_neo4j.conf_] file:
+
+[source, properties]
+----
+server.jvm.additional=-XX:-MaxFDLimit
+----
+
+Without this setting, the file descriptor limit for the JVM will not be increased beyond 10240.
+Note, however, that this only applies to macOS.
+On all other operating systems, you should always leave the `MaxFDLimit` JVM setting enabled.
+
+== Uninstall Neo4j
+
+Here are the steps to uninstall Neo4j on macOS:
+
+. (Optional) Create a xref:/backup-restore/index.adoc[backup] to avoid losing your data.
+. Stop all Neo4j running services:
++
+[source, shell]
+---
+sudo systemctl stop neo4j
+sudo systemctl disable neo4j
+---
+. Delete _NEO4J_HOME_ and the file _/lib/systemd/system/neo4j.service_:
++
+[source, shell]
+---
+rm /lib/systemd/system/neo4j.service
+rm -rf NEO4J_HOME
+---

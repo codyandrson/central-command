@@ -1,0 +1,100 @@
+# ============================================================================
+# cc-crawler — browser-rendering crawl service (rung-2 docs ingestion).
+#
+#   PINNED to the chromebox, REQUIRED nodeAffinity, no fallback. This is a
+#   deliberate exception to "stateless compute floats": the state is not the
+#   reason — Chromium is. A Playwright browser under a 3Gi limit is exactly the
+#   memory profile the placement rule exists to keep off the 15.6 GB Pi that
+#   also runs the k3s control plane and every database. Accepted consequence,
+#   same call as cc-sandbox and cc-neo4j: chromebox down = crawler down. It is
+#   a DEGRADABLE capability (rung 1, plain HTTP fetch, still works), never a
+#   dependency of the spine.
+#
+#   Image is LOCALLY BUILT and single-arch amd64
+#   (deploy/k3s/build-crawler-image.sh) — hence imagePullPolicy: IfNotPresent;
+#   `Always` would try to pull a tag that exists in no registry and CrashLoop.
+#
+#   Service is type LoadBalancer so k3s's ServiceLB (Klipper) binds :8091 on
+#   every node — the Pi host reaches the crawler at 127.0.0.1:8091 even though
+#   the pod runs on the chromebox, which is what keeps CC_CRAWLER_URL a
+#   LOOPBACK address like every other CC_* endpoint.
+#
+#   No PVC: stateless. No Secret: the service holds NO credentials and makes no
+#   provider call — Crawl4AI's optional LLM features are not used.
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: cc-crawler
+  namespace: central-command
+spec:
+  type: LoadBalancer
+  selector:
+    app: cc-crawler
+  ports:
+    - name: http
+      port: 8091
+      targetPort: 8091
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-crawler
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-crawler
+  template:
+    metadata:
+      labels:
+        app: cc-crawler
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [chromebox]
+      # Nothing here reads an injected service-discovery variable, and the
+      # namespace's Services would otherwise dump ~40 legacy env vars into a
+      # Chromium process's environment. Same precaution as cc-graphiti.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: crawler
+          image: docker.io/library/cc-crawler:1
+          imagePullPolicy: IfNotPresent
+          # OPTIONAL — the pod must run without it. The only thing the Secret
+          # buys is the opt-in `filter: "llm"` mode; unset, that request falls
+          # back to heuristic pruning with a warning rather than failing.
+          # The credential is a LiteLLM VIRTUAL key for this cluster's own
+          # proxy — never an external provider key.
+          envFrom:
+            - secretRef:
+                name: cc-crawler-llm
+                optional: true
+          ports:
+            - {name: http, containerPort: 8091}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8091}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            # Generous: a crawl holds the process-wide lock, and the event loop
+            # can be busy enough that a probe is slow without the pod being sick.
+            failureThreshold: 6
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8091}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: {memory: 512Mi, cpu: 250m}
+            limits: {memory: 3Gi, cpu: "2"}

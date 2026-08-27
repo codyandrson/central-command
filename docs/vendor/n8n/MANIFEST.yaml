@@ -1,0 +1,14 @@
+name: n8n
+source_repo: https://github.com/n8n-io/n8n-docs
+source_ref: main
+fetched_url: https://codeload.github.com/n8n-io/n8n-docs/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE.md]
+note: >
+  We pin n8n-io/n8n at 2.29.0 (git tag n8n@2.29.0, confirmed to exist), but
+  its docs/ folder there is thin (just docs/db.md + a generated dir) --
+  the real user-facing documentation lives in the separate n8n-io/n8n-docs
+  repo. That repo carries NO git tags, so there is no ref that corresponds
+  to the app's 2.29.0 release; this vendors its main branch as of the fetch
+  date above, per instructions to fall back to main/master when no matching
+  tag exists.

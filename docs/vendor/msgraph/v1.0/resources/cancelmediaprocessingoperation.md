@@ -1,0 +1,60 @@
+--- 
+title: "cancelMediaProcessingOperation resource type"
+description: "This resource type is used to describe the response format of the cancel media processing operation."
+author: "ananmishr"
+ms.localizationpriority: medium
+ms.subservice: "cloud-communications"
+doc_type: resourcePageType
+ms.date: 07/22/2024
+---
+
+# CancelMediaProcessingOperation resource type
+
+Namespace: microsoft.graph
+
+Describes the response format of the cancel media processing operation.
+
+## Properties
+
+| Property      | Type                        | Description                                                                     |
+| :------------ | :-------------------------- | :------------------------------------------------------------------------------ |
+| all           | Boolean                     | Indicates whether to stop all operations or current.                            |
+| clientContext | String                      | The client context.                                                             |
+| id            | String                      | The server operation ID. Read-only.                                             |
+| resultInfo    | [resultInfo](resultinfo.md) | The result information.  Read-only.                                             |
+| status        | String                      | The possible values are: `notStarted`, `running`, `completed`, `failed`. Read-only. |
+
+## Relationships
+None.
+
+## JSON representation
+
+The following JSON representation shows the resource type.
+
+<!-- {
+  "blockType": "resource",
+  "optionalProperties": [
+
+  ],
+  "@odata.type": "microsoft.graph.cancelMediaProcessingOperation"
+}-->
+```json
+{
+  "all": true,
+  "clientContext": "String",
+  "id": "String (identifier)",
+  "resultInfo": {"@odata.type": "#microsoft.graph.resultInfo"},
+  "status": "notStarted | running | completed | failed"
+}
+```
+
+<!-- uuid: 8fcb5dbc-d5aa-4681-8e31-b001d5168d79
+2015-10-25 14:57:30 UTC -->
+<!-- {
+  "type": "#page.annotation",
+  "description": "cancelMediaProcessingOperation resource",
+  "keywords": "",
+  "section": "documentation",
+  "tocPath": ""
+}-->
+

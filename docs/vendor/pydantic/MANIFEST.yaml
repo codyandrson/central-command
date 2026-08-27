@@ -1,0 +1,6 @@
+name: pydantic
+source_repo: https://github.com/pydantic/pydantic
+source_ref: v2.13.4
+fetched_url: https://codeload.github.com/pydantic/pydantic/tar.gz/v2.13.4
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]

@@ -1,0 +1,234 @@
+:description: Logarithmic functions operate on numeric expressions only, and will return an error if used on any other values.
+:table-caption!:
+
+[[query-functions-logarithmic]]
+= Logarithmic functions
+
+Logarithmic mathematical functions operate on numeric expressions only, and will return an error if used on any other values. See also xref:expressions/mathematical-operators.adoc[Mathematical operators].
+
+
+[[functions-e]]
+== e()
+
+.Details
+|===
+| *Syntax* 3+| `e()`
+| *Description* 3+| Returns the base of the natural logarithm, e.
+| *Returns* 3+| `FLOAT`
+|===
+
+.+e()+
+======
+
+.Query
+// tag::functions_mathematical_logarithmic_e[]
+[source, cypher, indent=0]
+----
+RETURN e()
+----
+// end::functions_mathematical_logarithmic_e[]
+
+The base of the natural logarithm, `e`, is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| +e()+
+| +2.718281828459045+
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-exp]]
+== exp()
+
+.Details
+|===
+| *Syntax* 3+| `exp(input)`
+| *Description* 3+| Returns e^n, where e is the base of the natural logarithm, and n is the value of the argument expression.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `FLOAT` | A value to which the base of the natural logarithm, e, will be raised.
+| *Returns* 3+| `FLOAT`
+|===
+
+.Considerations
+|===
+
+| `exp(null)` returns `null`.
+| `exp()` returns `Infinity` when the return value is greater than the largest `FLOAT` value (Java Double.MAX_VALUE).
+
+|===
+
+
+.+exp()+
+======
+
+.Query
+// tag::functions_mathematical_logarithmic_exp[]
+[source, cypher, indent=0]
+----
+RETURN exp(2)
+----
+// end::functions_mathematical_logarithmic_exp[]
+
+`e` to the power of `2` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| exp(2)
+| 7.38905609893065
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-log]]
+== log()
+
+.Details
+|===
+| *Syntax* 3+| `log(input)`
+| *Description* 3+| Returns the natural logarithm of a `FLOAT`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `FLOAT` | A value for which the natural logarithm will be returned.
+| *Returns* 3+| `FLOAT`
+|===
+
+.Considerations
+|===
+
+| `log(null)` returns `null`.
+| `log(0)` returns `-Infinity`.
+| If (`input` < 0), then (`log(input)`) returns `NaN`.
+
+|===
+
+
+.+log()+
+======
+
+.Query
+// tag::functions_mathematical_logarithmic_log[]
+[source, cypher, indent=0]
+----
+RETURN log(27)
+----
+// end::functions_mathematical_logarithmic_log[]
+
+The natural logarithm of `27` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| log(27)
+| 3.295836866004329
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-log10]]
+== log10()
+
+.Details
+|===
+| *Syntax* 3+| `log10(input)`
+| *Description* 3+| Returns the common logarithm (base 10) of a `FLOAT`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `FLOAT` | A value for which the common logarithm (base 10) will be returned.
+| *Returns* 3+| `FLOAT`
+|===
+
+.Considerations
+|===
+
+| `log10(null)` returns `null`.
+| `log10(0)` returns `-Infinity`.
+| If (`input` < 0), then (`log10(input)`) returns `NaN`.
+
+|===
+
+
+.+log10()+
+======
+
+.Query
+// tag::functions_mathematical_logarithmic_log10[]
+[source, cypher, indent=0]
+----
+RETURN log10(27)
+----
+// end::functions_mathematical_logarithmic_log10[]
+
+The common logarithm of `27` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| log10(27)
+| 1.4313637641589874
+1+d|Rows: 1
+
+|===
+
+======
+
+
+[[functions-sqrt]]
+== sqrt()
+
+.Details
+|===
+| *Syntax* 3+| `sqrt(input)`
+| *Description* 3+| Returns the square root of a `FLOAT`.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `FLOAT` | The value to calculate the square root of.
+| *Returns* 3+| `FLOAT`
+|===
+
+.Considerations
+|===
+
+| `sqrt(null)` returns `null`.
+| If (`input` < 0), then (`sqrt(input)`) returns `NaN`.
+
+|===
+
+
+.+sqrt()+
+======
+
+.Query
+// tag::functions_mathematical_logarithmic_sqrt[]
+[source, cypher, indent=0]
+----
+RETURN sqrt(256)
+----
+// end::functions_mathematical_logarithmic_sqrt[]
+
+The square root of `256` is returned.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| sqrt(256)
+| 16.0
+1+d|Rows: 1
+
+|===
+
+======
+

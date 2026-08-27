@@ -1,0 +1,52 @@
+# ============================================================================
+# Central Command on k3s — namespace (2026-07-31)
+#
+#   Supersedes deploy/pi/docker-compose.yml as THE deployment. The move exists
+#   for one measured reason: LiteLLM's bundled Prisma query engine leaks GBs
+#   per minute ON ARM64 (1.47 -> 4.82 GB in 24s, see the long note in the old
+#   compose file). Uncapped it reached 10.96 GiB of the Pi's 15.6 GiB and took
+#   the whole host down three times, k3s control plane included. The 6 GB
+#   mem_limit was a blast-radius guard, never a fix. Running LiteLLM on the
+#   x86_64 chromebox takes it off the architecture where the leak was measured.
+#
+#   THE PLACEMENT RULE — split by STATE, not by service:
+#     * Stateless compute FLOATS, preferring the chromebox, falling back to
+#       the Pi automatically (preferred nodeAffinity + fast NoExecute
+#       tolerations).  -> cc-litellm, graphiti
+#     * Stateful services are PINNED, because local-path stamps a REQUIRED
+#       kubernetes.io/hostname nodeAffinity onto every PV it provisions: a pod
+#       holding that PVC can never move. Shared storage does not rescue them
+#       either — Neo4j forbids NFS outright (no file locking -> store
+#       corruption) and Postgres on NFS is a bad trade.
+#       -> cc-postgres, cc-litellm-db, cc-litellm-redis, cc-n8n, cc-n8n-db (Pi)
+#       -> cc-neo4j (chromebox, for the JVM headroom)
+#
+#   Why the databases stay on the Pi is the part that makes failover WORK:
+#   LiteLLM the proxy is the memory hog AND it is stateless — its state lives
+#   in cc-litellm-db (182 MB) and redis. Float the hog, keep the small database
+#   on the Pi, and a chromebox outage reschedules LiteLLM onto the Pi where its
+#   database already is.
+#
+#   EXPOSURE — the host still reaches everything at today's addresses, so
+#   deploy/pi/.env needs no edits:
+#     * Pi-pinned services use hostPort bound to 127.0.0.1 (loopback only,
+#       exactly as the compose stack bound them).
+#     * FLOATING services use type: LoadBalancer. k3s's built-in ServiceLB
+#       (Klipper) runs a DaemonSet that binds the REAL port on every node and
+#       forwards to the service wherever its pods are — so localhost:4000
+#       works on the Pi whether LiteLLM is on the Pi or the chromebox. No
+#       NodePort range hacks.
+#     * cc-neo4j is ClusterIP ONLY. Verified 2026-07-31: the app has zero
+#       direct Neo4j references, reaching the graph solely through Graphiti's
+#       MCP endpoint. That is stricter than the compose stack, which bound
+#       7474/7687 on loopback.
+#
+#   Secrets are NOT in this directory. make-secrets.sh reads deploy/pi/.env
+#   (gitignored) and creates them imperatively — see the script.
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: central_command
+  labels:
+    app.kubernetes.io/part-of: central_command

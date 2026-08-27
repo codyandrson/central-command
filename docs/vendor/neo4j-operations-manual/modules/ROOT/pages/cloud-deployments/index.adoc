@@ -1,0 +1,39 @@
+:description: Deploying Neo4j on AWS and Azure.
+[[cloud]]
+= Cloud deployments
+
+Neo4j's cloud marketplace listings represent a quick and easy way of getting started with graph databases on the cloud platform of your choice.
+[cols="<25s,40,40",frame="topbot",options="header"]
+|===
+
+| *Cloud partner*
+| *Documentation link*
+| *Marketplace link*
+
+| Amazon Web Services
+| xref:cloud-deployments/neo4j-aws.adoc[Neo4j Enterprise on AWS]
+| link:https://aws.amazon.com/marketplace/pp/prodview-akmzjikgawgn4?sr=0-2&ref_=beagle&applicationId=AWSMPContessa[Neo4j in the AWS Marketplace]
+
+| Microsoft Azure
+| xref:cloud-deployments/neo4j-azure.adoc[Neo4j on Microsoft Azure]
+| link:https://marketplace.microsoft.com/en-us/product/azure-applications/neo4j.neo4j-ee?tab=Overview[Neo4j in the Azure Marketplace]
+
+|===
+
+[NOTE]
+====
+Deploying Neo4j on the GCP marketplace is supported only for version 2025.x.
+See link:{neo4j-docs-base-uri}/operations-manual/current/cloud-deployments/neo4j-gcp/[Neo4j on GCP] for more information.
+====
+
+.Other cloud deployment options
+[TIP]
+====
+*Neo4j Aura* is a fully managed Neo4j database, hosted in the cloud and requires no installation.
+For more information, see link:https://neo4j.com/aura/[the Aura product], link:https://support.neo4j.com/[support pages], and the link:https://www.neo4j.com/docs/aura[Aura documentation].
+
+//Neo4j can be run in a *Docker* container.
+//For information on running Neo4j on Docker, see xref:docker/index.adoc[Docker].
+====
+
+

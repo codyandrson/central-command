@@ -1,0 +1,6 @@
+name: uvicorn
+source_repo: https://github.com/encode/uvicorn
+source_ref: 0.52.4
+fetched_url: https://codeload.github.com/encode/uvicorn/tar.gz/0.52.4
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]

@@ -1,0 +1,15 @@
+name: litellm
+source_repo: https://github.com/BerriAI/litellm-docs
+source_ref: main
+fetched_url: https://codeload.github.com/BerriAI/litellm-docs/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]
+note: >
+  We deploy ghcr.io/berriai/litellm-database:main-stable, a rolling tag with
+  no fixed release version. Docs for the litellm PACKAGE now live in a
+  separate repo (BerriAI/litellm-docs), not under docs/my-website in
+  BerriAI/litellm (confirmed absent at BerriAI/litellm@v1.98.0). This
+  MANIFEST vendors litellm-docs @ main (also untagged), the closest
+  available approximation of "main-stable" as of the fetch date above.
+  The most recent stable (non -rc/-dev) tagged release of BerriAI/litellm
+  itself at fetch time was v1.98.0 (released 2026-08-22).

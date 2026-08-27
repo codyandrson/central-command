@@ -1,0 +1,6 @@
+name: codemirror/packages/commands
+source_repo: https://github.com/codemirror/commands
+source_ref: 6.10.2
+fetched_url: https://codeload.github.com/codemirror/commands/tar.gz/6.10.2
+fetched_date: 2026-08-25
+subpaths: [src README.md CHANGELOG.md LICENSE]

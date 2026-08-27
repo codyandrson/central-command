@@ -1,0 +1,257 @@
+:description: This section describes how to manage errors that you may encounter while managing databases.
+:page-aliases: manage-databases/errors.adoc
+:page-role: enterprise-edition
+[[manage-database-errors]]
+= Error handling
+
+When running the database management queries, such as `CREATE DATABASE`, it is possible to encounter errors.
+
+[[observe-database-errors]]
+== Observing errors
+
+Because database management operations are performed asynchronously, these errors may not be returned immediately upon query execution.
+Instead, you must monitor the output from the `SHOW DATABASE` command; particularly the `statusMessage` and `currentStatus` columns.
+
+=== Fail to create a database
+
+[source, cypher]
+----
+neo4j@system> CREATE DATABASE foo;
+----
+
+[queryresult]
+----
+0 rows available after 108 ms, consumed after another 0 ms
+----
+
+[source, cypher]
+----
+neo4j@system> SHOW DATABASE foo;
+----
+In standalone mode:
+[queryresult]
+----
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| name   | type       | aliases | access       | address          | role      | writer | requestedStatus | currentStatus | statusMessage             | default | home  | constituents |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "foo"  | "standard" | []      | "read-write" | "localhost:7687" | "primary" | TRUE   | "online"        | "dirty"       | "File system permissions" | FALSE   | FALSE | []           |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+1 rows available after 4 ms, consumed after another 1 ms
+----
+In a cluster:
+[queryresult]
+----
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| name   | type       | aliases | access       | address          | role      | writer | requestedStatus | currentStatus | statusMessage             | default | home  | constituents |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "foo"  | "standard" | []      | "read-write" | "localhost:7687" | "primary" | TRUE   | "online"        | "online"      | ""                        | FALSE   | FALSE | []           |
+| "foo"  | "standard" | []      | "read-write" | "localhost:7688" | "primary" | FALSE  | "online"        | "online"      | ""                        | FALSE   | FALSE | []           |
+| "foo"  | "standard" | []      | "read-write" | "localhost:7689" | "primary" | FALSE  | "online"        | "dirty"       | "File system permissions" | FALSE   | FALSE | []           |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+3 row available after 100 ms, consumed after another 6 ms
+----
+
+
+[[database-management-states]]
+== Database states
+
+A database management operation may fail for a number of reasons.
+For example, if the file system instance has incorrect permissions, or Neo4j itself is misconfigured.
+As a result, the contents of the `statusMessage` column in the `SHOW DATABASE` query results may vary significantly.
+
+However, databases may only be in one of a select number of states:
+
+* `online`
+* `offline`
+* `starting`
+* `stopping`
+* `store copying`
+* `initial`
+* `deallocating`
+* `dirty`
+* `quarantined`
+* `unknown`
+
+For more details about the various states, see xref::database-administration/standard-databases/listing-databases.adoc#database-states[Database states].
+Most often, when a database management operation fails, Neo4j attempts to transition the database in question to the `offline` state.
+If the system is certain that no store files have yet been created, it transitions the database to `initial` instead.
+Similarly, if the system suspects that the store files underlying the database are invalid (incomplete, partially deleted, or corrupt), then it transitions the database to `dirty`.
+
+
+[[database-errors-retry]]
+== Retrying failed operations
+
+Database management operations may be safely retried in the event of failure.
+However, these retries are not guaranteed to succeed, and errors may persist through several attempts.
+
+[NOTE]
+====
+If a database is in the `quarantined` state, retrying the last operation will not work.
+====
+
+=== Retry to start a database
+
+[source, cypher]
+----
+neo4j@system> START DATABASE foo;
+----
+
+[queryresult]
+----
+0 rows available after 108 ms, consumed after another 0 ms
+----
+
+[source, cypher]
+----
+neo4j@system> SHOW DATABASE foo;
+----
+
+[queryresult]
+----
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| name   | type       | aliases | access       | address          | role      | writer | requestedStatus | currentStatus | statusMessage             | default | home  | constituents |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "foo"  | "standard" | []      | "read-write" | "localhost:7687" | "primary" | TRUE   | "online"        | "offline"     | "File system permissions" | FALSE   | FALSE | []           |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+1 rows available after 4 ms, consumed after another 1 ms
+----
+
+After investigating and addressing the underlying issue, you can start the database again and verify that it is running properly:
+
+[source, cypher]
+----
+neo4j@system> START DATABASE foo;
+----
+
+[queryresult]
+----
+0 rows available after 108 ms, consumed after another 0 ms
+----
+
+[source, cypher]
+----
+neo4j@system> SHOW DATABASE foo;
+----
+
+[queryresult]
+----
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| name     | type       | aliases | access       | address          | role      | writer | requestedStatus | currentStatus | statusMessage | default | home  | constituents |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "foo"    | "standard" | []      | "read-write" | "localhost:7687" | "primary" | TRUE   | "online"        | "online"      | ""            | FALSE   | FALSE | []           |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+1 rows available after 4 ms, consumed after another 1 ms
+----
+
+If repeated retries of a command have no effect, or if a database is in a `dirty` state, you may drop and recreate the database, as detailed in xref:database-administration/standard-databases/create-databases.adoc[Create database].
+
+[NOTE]
+====
+When running `DROP DATABASE` as part of an error handling operation, you can also append `DUMP DATA` to the command.
+It produces a database dump that can be further examined and potentially repaired.
+====
+
+
+[[quarantine]]
+== Quarantined databases
+
+There are two ways to get a database into a `quarantined` state:
+
+* By using the xref:procedures/built-in-procedures.adoc#procedure_dbms_quarantineDatabase[`dbms.quarantineDatabase()`] procedure locally to isolate a specific database.
+The procedure must be executed on the instance whose copy of the database you want to quarantine.
+A reason for that can be, for example, when a database is unable to start on a given instance due to a file system permissions issue with the volume where the database is located or when a recently started database begins to log errors.
+The quarantine state renders the database inaccessible on that instance and prevents its state from being changed, for example, with the `START DATABASE` command.
++
+[NOTE]
+====
+If running in a cluster, database management commands such as `START DATABASE foo` will still take effect on the instances which have *not* quarantined `foo`.
+====
+
+* When a database encounters a severe error during its normal run, which prevents it from a further operation, Neo4j stops that database and brings it into a `quarantined` state.
+Meaning, it is not possible to restart it with a simple `START DATABASE` command.
+You have to execute `CALL dbms.quarantineDatabase(databaseName, false)` on the instance with the failing database in order to lift the quarantine.
+
+After lifting the quarantine, the instance will automatically try to bring the database to the desired state.
+
+[NOTE]
+====
+It is recommended to run the quarantine procedure over the `bolt://` protocol rather than `neo4j://`, which may route requests to unexpected instances.
+====
+
+*Syntax:*
+
+`CALL dbms.quarantineDatabase(databaseName,setStatus,reason)`
+
+*Arguments:*
+
+[options="header"]
+|===
+| Name           | Type    | Description
+| `databaseName` | String  | The name of the database that will be put into or removed from quarantine.
+| `setStatus`    | Boolean | `true` for placing the database into quarantine; `false` for lifting the quarantine.
+| `reason`       | String  | (Optional) The reason for placing the database in quarantine.
+|===
+
+*Returns:*
+
+[options="header"]
+|===
+| Name           | Type   | Description
+| `databaseName` | String | The name of the database.
+| `quarantined`  | String | Actual state.
+| `result`       | String | Result of the last operation.
+The result contains the user, the time, and the reason for the quarantine.
+|===
+
+[NOTE]
+====
+The `dbms.quarantineDatabase()` procedure replaces link:{neo4j-docs-base-uri}/operations-manual/4.4/reference/procedures/#procedure_dbms_cluster_quarantinedatabase[`dbms.cluster.quarantineDatabase()`], which has been deprecated in Neo4j 4.3 and will be removed with the next major version.
+====
+
+.Quarantine a database
+[source, cypher]
+----
+neo4j@system> CALL dbms.quarantineDatabase("foo",true);
+----
+[queryresult]
+----
++--------------------------------------------------------------------------------------+
+| databaseName | quarantined | result                                                  |
++--------------------------------------------------------------------------------------+
+| "foo"        | TRUE        | "By neo4j at 2020-10-15T15:10:41.348Z: No reason given" |
++--------------------------------------------------------------------------------------+
+
+3 row available after 100 ms, consumed after another 6 ms
+----
+
+.Check if a database is quarantined
+[source, cypher]
+----
+neo4j@system> SHOW DATABASE foo;
+----
+[queryresult]
+----
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| name  | type       | aliases | access       | address          | role      | writer | requestedStatus | currentStatus | statusMessage                                           | default | home  | constituents |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "foo" | "standard" | []      | "read-write" | "localhost:7688" | "unknown" | FALSE  | "online"        | "quarantined" | "By neo4j at 2020-10-15T15:10:41.348Z: No reason given" | FALSE   | FALSE | []           |
+| "foo" | "standard" | []      | "read-write" | "localhost:7689" | "primary" | FALSE  | "online"        | "online"      | ""                                                      | FALSE   | FALSE | []           |
+| "foo" | "standard" | []      | "read-write" | "localhost:7687" | "primary" | TRUE   | "online"        | "online"      | ""                                                      | FALSE   | FALSE | []           |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+3 row available after 100 ms, consumed after another 6 ms
+----
+
+[NOTE]
+====
+A `quarantined` state is persisted for user databases.
+This means that if a database is quarantined, it will remain so even if the Neo4j process is restarted.
+You can remove it only by running the xref:procedures/built-in-procedures.adoc#procedure_dbms_quarantineDatabase[`dbms.quarantineDatabase()`] procedure on the instance where the quarantined database is located, passing `false` for the `setStatus` parameter.
+
+The one exception to this rule is for the built-in `system` database.
+Any quarantine for that database is removed automatically after instance restart.
+====

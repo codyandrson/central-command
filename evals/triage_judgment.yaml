@@ -1,0 +1,209 @@
+# Inbox-triage JUDGMENT dataset — the answer to "demo mode can't validate judgment".
+#
+# Demo mode's FunctionModel returns a canned proposal, so it proves the plumbing
+# and nothing about reasoning. These cases run the REAL model against the REAL
+# charter and ask whether it DECIDED correctly.
+#
+# Expectations are derived from inbox-triage charter **v6** (the CURRENT
+# guidance_version row), not from intuition. The clauses each case leans on are
+# named in `metadata.charter_clause`. If the charter is coached to a v7 that
+# changes those clauses, THIS FILE IS THE THING THAT MUST CHANGE — a passing
+# eval against a stale expectation is worse than no eval.
+#
+# Run:  python scripts/run_evals.py     (live mode, real inference — never in pytest)
+#
+# Schema
+#   inputs.primary          fixture filename under fixtures/emails/ — the claimed item
+#   inputs.siblings         other UNPROCESSED messages on the same thread, oldest
+#                           first, exactly as dispatcher._bundle_prompt shows them
+#   expected_output.disposition   the ACCEPTABLE dispositions. More than one entry
+#                           means the charter genuinely permits either; it is not
+#                           a hedge, and cases with one entry are held to it.
+#                             propose  = a propose_* call (a gated proposal)
+#                             ask      = ask_operator (a question, not a change)
+#                             dismiss  = plain-text reply, no world change
+#   expected_output.capabilities  capabilities that MUST appear in the proposal
+#   expected_output.issue_keys    issue keys that MUST be targeted
+#   expected_output.due_dates     due dates that MUST be set (YYYY-MM-DD)
+#   expected_output.fold          acceptable record_thread_decision fold values
+#
+# `capabilities` / `issue_keys` / `due_dates` are SUBSET checks: extra correct
+# actions are not penalised. `graph.add_episode` is required wherever the
+# charter says "a due-date change ALWAYS qualifies".
+
+cases:
+  - name: explicit-due-date-change
+    inputs:
+      primary: 001-invoice-due.eml
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date, graph.add_episode]
+      issue_keys: [TASKS-12]
+      due_dates: ['2026-08-15']
+    metadata:
+      charter_clause: >-
+        "When an email implies a change to a Jira issue, call
+        propose_jira_update" + "A due-date change ALWAYS qualifies" for the
+        episode. The email names the issue and the date outright.
+      difficulty: easy
+
+  - name: newsletter-dismiss
+    inputs:
+      primary: 004-no-action.eml
+    expected_output:
+      disposition: [dismiss]
+    metadata:
+      charter_clause: >-
+        "Only dismiss without proposing when, after checking, the email truly
+        implies no tracked or trackable action — e.g. pure FYI, a newsletter".
+        This is the one fixture that is unambiguously a newsletter.
+      difficulty: easy
+      watch_for: >-
+        The charter's DUPLICATE CHECK pushes hard AWAY from dismissal, so the
+        failure mode here is a manufactured proposal, not a missed one.
+
+  - name: thread-root-alone
+    inputs:
+      primary: 002-thread-root.eml
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date, graph.add_episode]
+      issue_keys: [TASKS-12]
+      due_dates: ['2026-08-06']
+    metadata:
+      charter_clause: >-
+        No sibling is listed, so there is nothing to fold and nothing to wait
+        for. "Thursday 6 August 2026" resolves against the email's Date header
+        (2026-07-02) — the date is stated in full, so no inference is needed.
+      difficulty: easy
+
+  - name: correction-alone
+    inputs:
+      primary: 003-thread-reply.eml
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date, graph.add_episode]
+      issue_keys: [TASKS-12]
+      due_dates: ['2026-08-07']
+    metadata:
+      charter_clause: >-
+        The correction seen on its own. Latest instruction stands; the earlier
+        message is not in this run's context and must not be invented.
+      difficulty: easy
+
+  - name: supersession-fold
+    inputs:
+      primary: 002-thread-root.eml
+      siblings: [003-thread-reply.eml]
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date, graph.add_episode]
+      issue_keys: [TASKS-12]
+      due_dates: ['2026-08-07']
+      fold: [true]
+    metadata:
+      charter_clause: >-
+        "Fold them in only when a single change resolves them all — typically a
+        later message that supersedes an earlier one (e.g. 'moved to Thursday'
+        then 'actually Friday' → propose Friday once, folding the earlier
+        message)." This fixture pair IS that example.
+      difficulty: medium
+      watch_for: >-
+        Proposing 2026-08-06 (the superseded date) is the failure this case
+        exists to catch. So is fold=false, which would leave the correction to
+        be re-triaged and re-proposed.
+
+  - name: supersession-fold-reversed-claim
+    inputs:
+      primary: 003-thread-reply.eml
+      siblings: [002-thread-root.eml]
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date, graph.add_episode]
+      issue_keys: [TASKS-12]
+      due_dates: ['2026-08-07']
+      fold: [true]
+    metadata:
+      charter_clause: >-
+        Same supersession, claimed from the OTHER end — the ledger's
+        `for update skip locked` claim order is not guaranteed to be
+        chronological. Folding backwards over an already-superseded sibling is
+        the same judgment and must not depend on arrival order.
+      difficulty: medium
+
+  - name: marginal-conditional-instruction
+    inputs:
+      primary: 005-marginal-thread-root.eml
+    expected_output:
+      disposition: [propose, ask]
+      issue_keys: [TASKS-12]
+    metadata:
+      charter_clause: >-
+        "Unless anyone objects, please set it" is a conditional instruction.
+        The charter contains no wait-for-consensus rule, so proposing
+        2026-08-20 is charter-correct; asking the operator whether the
+        condition is met is also defensible and is what ask_operator is for.
+        BOTH are accepted on purpose — a dataset that forces one reading of a
+        genuinely marginal email measures conformity, not judgment.
+      difficulty: hard
+      watch_for: >-
+        A dismissal is wrong here: the email names an issue and a date and
+        asks for a change.
+
+  - name: marginal-endorsement-plus-new-work
+    inputs:
+      primary: 005-marginal-thread-root.eml
+      siblings: [006-marginal-thread-reply.eml]
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date]
+      issue_keys: [TASKS-12]
+      due_dates: ['2026-08-20']
+      fold: [true, false]
+    metadata:
+      charter_clause: >-
+        The reply ENDORSES Dana's change (resolving the condition) and ADDS a
+        second, different change (TASKS-13 → 2026-08-22). Fold is accepted
+        either way: one proposal carrying both set_due_date actions genuinely
+        covers both messages, and "when unsure, do not fold" makes fold=false
+        equally defensible. What is NOT acceptable is proposing 2026-08-20 while
+        claiming to cover a sibling whose TASKS-13 request goes unaddressed —
+        the fold/coverage check reads `covered_message_ids`.
+      difficulty: hard
+
+  - name: dependent-issue-alone
+    inputs:
+      primary: 006-marginal-thread-reply.eml
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date]
+      issue_keys: [TASKS-13]
+      due_dates: ['2026-08-22']
+    metadata:
+      charter_clause: >-
+        Seen alone, the load-bearing content is the NEW instruction: "set
+        TASKS-13 to 22 August 2026". TASKS-12 may also be proposed (the message
+        endorses Aug 20) and is not penalised, but TASKS-13 is the thing this
+        message uniquely carries and dropping it is the failure.
+      difficulty: medium
+      watch_for: >-
+        Answering only about TASKS-12 — the quoted-subject issue — and silently
+        losing the dependent issue.
+
+  - name: dependent-issue-with-context
+    inputs:
+      primary: 006-marginal-thread-reply.eml
+      siblings: [005-marginal-thread-root.eml]
+    expected_output:
+      disposition: [propose]
+      capabilities: [jira.set_due_date]
+      issue_keys: [TASKS-13]
+      due_dates: ['2026-08-22']
+      fold: [true, false]
+    metadata:
+      charter_clause: >-
+        The same message with its root visible. The dependency ("TASKS-13
+        depends on this work") is stated outright, so a graph episode is
+        defensible but not required — the charter requires the episode for the
+        due-date change it proposes, and both dates are legitimate targets.
+      difficulty: medium

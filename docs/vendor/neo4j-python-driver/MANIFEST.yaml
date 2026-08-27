@@ -1,0 +1,6 @@
+name: neo4j-python-driver
+source_repo: https://github.com/neo4j/neo4j-python-driver
+source_ref: 5.26.0
+fetched_url: https://codeload.github.com/neo4j/neo4j-python-driver/tar.gz/5.26.0
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]

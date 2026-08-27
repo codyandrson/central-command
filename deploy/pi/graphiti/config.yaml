@@ -1,0 +1,163 @@
+# ============================================================================
+# Graphiti MCP server configuration (Story 2.1 / D9 / AR-9)
+#
+#   Mounted read-only into nat-graphiti at /app/mcp/config/config.yaml
+#   (CONFIG_PATH). Based on the config-docker-neo4j.yaml template embedded in
+#   zepai/knowledge-graph-mcp:1.0.2-standalone — the exact schema this image
+#   parses; only the providers we deploy are kept.
+#
+#   Secrets are ${ENV} references ONLY — values come from the container env
+#   (docker-compose.yml <- .env), never from this tracked file (NFR-4).
+#   Precedence: CLI > env > this yaml. `${VAR:default}` expansion supported.
+#
+#   LLM MIGRATED OFF ANTHROPIC 2026-08-01: claude-sonnet-5 -> the workstation's
+#   Qwen3-Coder-Next via LiteLLM's `graphiti-llm` entry. Graphiti now reaches NO
+#   external provider: LLM, embeddings and reranker are all local. See the long
+#   note on the llm block for why the model alias must be the bridged one.
+#
+#   EMBEDDER MIGRATED 2026-07-26: OpenAI text-embedding-3-small (1536d) ->
+#   self-hosted Qwen3-Embedding-0.6B (1024d) via the Pi's LiteLLM. The
+#   provider stays "openai" because that is the WIRE PROTOCOL Graphiti speaks;
+#   only the endpoint behind it changed.
+#
+#   Consequences, stated plainly:
+#   - Embeddings now depend on the operator's WORKSTATION being up. OpenAI cannot act
+#     as a fallback: 1536d vectors are meaningless against a 1024d index. The
+#     only valid fallback is the SAME Qwen model on DeepInfra/OpenRouter, and
+#     that parity is UNPROVEN as of this commit.
+#   - Changing this model again means re-embedding the whole graph.
+# ============================================================================
+
+server:
+  # HTTP streamable transport (SSE is deprecated); n8n's lib-graph connects to
+  # http://graphiti:8000/mcp on nat-net (NO trailing slash on this image —
+  # /mcp/ 307-redirects; see bootstrap §2.1).
+  transport: "http"
+  host: "0.0.0.0"
+  port: 8000
+
+llm:
+  # MIGRATED OFF ANTHROPIC 2026-08-01: claude-sonnet-5 -> the workstation's
+  # Qwen3-Coder-Next, through the Pi's LiteLLM. Same reasoning as the embedder
+  # below — "openai" is the WIRE PROTOCOL, not the vendor.
+  provider: "openai"
+  # NOT `cc-default`, and the difference is load-bearing.
+  #
+  # graphiti_core's OpenAIClient drives extraction through the RESPONSES API
+  # (`client.responses.parse`, openai_client.py:99) whenever a response_model is
+  # present — and extraction ALWAYS passes one, with no chat-completions
+  # fallback (openai_base_client.py:171). llama.cpp does not implement
+  # /v1/responses, and LiteLLM treats `openai/...` as NATIVELY supporting it
+  # (ProviderConfigManager returns OpenAIResponsesAPIConfig), so it passes the
+  # request straight through and the `text.format` json_schema is silently
+  # DROPPED. Measured 2026-08-01: cc-default answered that request with markdown
+  # prose, which would fail every extraction.
+  #
+  # `graphiti-llm` is registered in LiteLLM as
+  #   openai/chat_completions/qwen3.8-27b
+  # The `openai/chat_completions/` prefix forces LiteLLM's Responses ->
+  # chat-completions BRIDGE (responses/main.py:1058), which translates
+  # text.format into a real `response_format: json_schema`
+  # (_transform_text_format_to_response_format). llama.cpp enforces that via
+  # GBNF, so extraction gets schema-conforming JSON. Verified end to end.
+  #
+  # Upstream says the same thing about local models:
+  # help.getzep.com/graphiti/configuration/llm-configuration — an OpenAI-compatible
+  # endpoint "does not support the /v1/responses endpoint that OpenAIClient
+  # uses". The bridge is how we satisfy that WITHOUT patching the image.
+  model: "graphiti-llm"
+  max_tokens: 4096
+  # PINNED TO 0.0 (2026-08-15). It was unset for claude-sonnet-5, which rejected
+  # the param, and the comment here claimed it stayed unset "because extraction
+  # wants determinism". That reasoning was WRONG once the LLM moved to the
+  # OpenAI client path: unset means the param is OMITTED from the request
+  # (openai_client.py — `if temperature_value is not None`), so the SERVER's
+  # default applies, and llama.cpp's default is temperature 1.0 / top_k 40 /
+  # top_p 0.95. Measured 2026-08-15: three identical prompts returned three
+  # different completions, direct to :8081 and through LiteLLM alike. Entity
+  # dedup and the CONTRADICTION pass that invalidates existing facts were both
+  # running on stochastic sampling. The anthropic_client.py patch cited by the
+  # old comment does not touch this path at all.
+  temperature: 0.0
+
+  providers:
+    openai:
+      # A LiteLLM virtual key scoped to models=["graphiti-llm"] ONLY, matching
+      # the embedder/reranker pattern: a leak here cannot spend on anything else.
+      api_key: ${GRAPHITI_LLM_API_KEY}
+      # ⚠️ DECORATIVE — read this before "fixing" it. The MCP factory's `openai`
+      # case builds CoreLLMConfig WITHOUT base_url (factories.py:122-129), so
+      # this value is never used for the LLM. The endpoint actually comes from
+      # the OPENAI_BASE_URL env var via the openai SDK's own fallback — the same
+      # var the reranker needs. Kept here only so the file states the intent;
+      # if you point the LLM somewhere else, change OPENAI_BASE_URL, not this.
+      api_url: ${LLM_API_URL:http://litellm:4000/v1}
+
+embedder:
+  # "openai" = the wire protocol, not the vendor. Points at LiteLLM.
+  provider: "openai"
+  # model and dimensions are LITERALS on purpose, not ${ENV}. They must agree
+  # with each other and with the graph's stored vectors; making them separately
+  # overridable invites a silent mismatch that only shows up as bad retrieval.
+  # Change them together, and re-embed the graph when you do.
+  model: "qwen3-embedding-local"
+  dimensions: 1024
+
+  providers:
+    openai:
+      # Deliberately NOT ${OPENAI_API_KEY} — this is a LiteLLM virtual key
+      # (alias graphiti-embeddings) scoped to the embedding group only, so a
+      # leak here cannot spend on chat models. Reusing the OpenAI var name
+      # would have made the config lie about what the credential is.
+      api_key: ${EMBEDDER_API_KEY}
+      api_url: ${EMBEDDER_API_URL:https://api.openai.com/v1}
+
+database:
+  provider: "neo4j"
+
+  providers:
+    neo4j:
+      uri: ${NEO4J_URI:bolt://neo4j:7687}
+      username: ${NEO4J_USER:neo4j}
+      # No default on purpose — compose fails loud if NEO4J_PASSWORD is unset
+      # (the upstream template's demodemo fallback is exactly what we don't want).
+      password: ${NEO4J_PASSWORD}
+      database: ${NEO4J_DATABASE:neo4j}
+      use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
+
+graphiti:
+  # Single-graph MVP: everything lands in group `main` unless a caller
+  # overrides per-call (lib-graph passes group_id through, default main).
+  group_id: ${GRAPHITI_GROUP_ID:main}
+  episode_id_prefix: ${EPISODE_ID_PREFIX:}
+  user_id: ${USER_ID:operator}
+  # Upstream default ontology PLUS `Person` (added 2026-08-15). The upstream list
+  # has no type for a human being, so every person in the graph landed as a bare
+  # `Entity` — verified against the live graph: "Jonathan Lee Rivers", "Jane
+  # Anne Doe" and "the operator" all carried labels ["Entity"] and nothing
+  # else, while orgs and events were typed correctly. A graph substantially about
+  # the operator's family and colleagues needs the type that names them; without
+  # it the extractor has nowhere to put a human and coreference has one less
+  # signal to work with. Person is declared FIRST so it wins over the "use as
+  # last resort" types below.
+  entity_types:
+    - name: "Person"
+      description: "An individual human being — family, friends, colleagues, contacts. Use the person's canonical full name as the entity name, never a role or pronoun ('the operator'). A NAME IS NOT A PERSON: a bare surname, maiden name, married name, nickname or alias ('Doe', 'Rivers', 'Janie', 'Hawk') must NEVER become an entity of its own, because that invents a second human who does not exist. Do still RECORD what someone is called — attach it to the person it belongs to, as a fact about that one person ('Jonathan Lee Rivers is also known as Hawk'). Drop the name, never the fact."
+    - name: "Preference"
+      description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
+    - name: "Requirement"
+      description: "Specific needs, features, or functionality that must be fulfilled"
+    - name: "Procedure"
+      description: "Standard operating procedures and sequential instructions"
+    - name: "Location"
+      description: "Physical or virtual places where activities occur"
+    - name: "Event"
+      description: "Time-bound activities, occurrences, or experiences"
+    - name: "Organization"
+      description: "Companies, institutions, groups, or formal entities"
+    - name: "Document"
+      description: "Information content in various forms (books, articles, reports, etc.)"
+    - name: "Topic"
+      description: "Subject of conversation, interest, or knowledge domain (use as last resort)"
+    - name: "Object"
+      description: "Physical items, tools, devices, or possessions (use as last resort)"

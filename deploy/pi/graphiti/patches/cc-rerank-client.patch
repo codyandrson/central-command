@@ -1,0 +1,149 @@
+--- a/src/graphiti_mcp_server.py	2026-08-19 21:11:32.106336421 -0600
++++ b/src/graphiti_mcp_server.py	2026-08-19 21:16:14.733374724 -0600
+@@ -33,6 +33,66 @@
+ )
+ from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
+ from services.queue_service import QueueService
++
++# ---------------------------------------------------------------------------
++# Central Command (2026-08-19): a true cross-encoder for hybrid-search reranking.
++#
++# Upstream's default is OpenAIRerankerClient — a boolean-classifier prompt per
++# passage against the CHAT model, which on this deployment meant the 27B chat
++# LLM was doing a purpose-built 0.6B reranker's job, serialized. When
++# GRAPHITI_RERANK_MODEL is set, rerank through LiteLLM's /rerank instead
++# (Jina/Cohere wire shape -> llama.cpp `--rerank` server on the workstation).
++# Unset -> upstream default behaviour, so the escape hatch is deleting one env
++# var. FAILS SOFT at call time: a down reranker returns the passages unranked
++# (input order) rather than killing the search that asked.
++# ---------------------------------------------------------------------------
++from graphiti_core.cross_encoder.client import CrossEncoderClient
++
++
++class GVRerankClient(CrossEncoderClient):
++    def __init__(self, base_url: str, api_key: str, model: str):
++        # base_url is OPENAI_BASE_URL (".../v1" on LiteLLM); /rerank lives at
++        # the proxy ROOT, and llama.cpp itself answers both /rerank and
++        # /v1/rerank — strip the suffix so both directs and LiteLLM work.
++        self._url = base_url.rstrip('/').removesuffix('/v1') + '/rerank'
++        self._api_key = api_key
++        self._model = model
++
++    async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
++        if not passages:
++            return []
++        import httpx
++
++        try:
++            async with httpx.AsyncClient(timeout=30) as client:
++                resp = await client.post(
++                    self._url,
++                    headers={'Authorization': f'Bearer {self._api_key}'},
++                    json={'model': self._model, 'query': query, 'documents': passages},
++                )
++                resp.raise_for_status()
++                results = resp.json()['results']
++            ranked = sorted(results, key=lambda r: r['relevance_score'], reverse=True)
++            return [(passages[r['index']], float(r['relevance_score'])) for r in ranked]
++        except Exception as exc:  # noqa: BLE001 — degrade, never kill the search
++            logging.getLogger(__name__).warning(
++                'GVRerankClient: rerank via %s failed (%s) — returning input order',
++                self._url,
++                exc,
++            )
++            return [(p, 1.0 - i / max(len(passages), 1)) for i, p in enumerate(passages)]
++
++
++def _gv_cross_encoder() -> CrossEncoderClient | None:
++    model = os.environ.get('GRAPHITI_RERANK_MODEL', '').strip()
++    if not model:
++        return None  # -> graphiti_core default (OpenAIRerankerClient)
++    return GVRerankClient(
++        base_url=os.environ.get('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
++        api_key=os.environ.get('OPENAI_API_KEY', ''),
++        model=model,
++    )
++
+ from utils.formatting import format_fact_result
+ 
+ # Load .env file from mcp_server directory
+@@ -226,6 +286,7 @@
+                         graph_driver=falkor_driver,
+                         llm_client=llm_client,
+                         embedder=embedder_client,
++                        cross_encoder=_gv_cross_encoder(),
+                         max_coroutines=self.semaphore_limit,
+                     )
+                 else:
+@@ -236,6 +297,7 @@
+                         password=db_config['password'],
+                         llm_client=llm_client,
+                         embedder=embedder_client,
++                        cross_encoder=_gv_cross_encoder(),
+                         max_coroutines=self.semaphore_limit,
+                     )
+             except Exception as db_error:
+@@ -441,12 +503,23 @@
+             node_labels=entity_types,
+         )
+ 
+-        # Use the search_ method with node search config
+-        from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
++        # Use the search_ method with node search config.
++        # Central Command: with GRAPHITI_RERANK_MODEL set, the true cross-encoder
++        # (GVRerankClient) reranks candidates; unset falls back to RRF, the
++        # upstream default. One env var controls client AND recipe together.
++        from graphiti_core.search.search_config_recipes import (
++            NODE_HYBRID_SEARCH_CROSS_ENCODER,
++            NODE_HYBRID_SEARCH_RRF,
++        )
+ 
++        node_config = (
++            NODE_HYBRID_SEARCH_CROSS_ENCODER
++            if os.environ.get('GRAPHITI_RERANK_MODEL', '').strip()
++            else NODE_HYBRID_SEARCH_RRF
++        )
+         results = await client.search_(
+             query=query,
+-            config=NODE_HYBRID_SEARCH_RRF,
++            config=node_config,
+             group_ids=effective_group_ids,
+             search_filter=search_filters,
+         )
+@@ -520,12 +593,30 @@
+             else []
+         )
+ 
+-        relevant_edges = await client.search(
+-            group_ids=effective_group_ids,
+-            query=query,
+-            num_results=max_facts,
+-            center_node_uuid=center_node_uuid,
+-        )
++        # Central Command: same GRAPHITI_RERANK_MODEL switch as search_nodes. The
++        # centered variant keeps upstream node-distance reranking — distance to
++        # an anchor is not a relevance judgement a cross-encoder can make.
++        if os.environ.get('GRAPHITI_RERANK_MODEL', '').strip() and center_node_uuid is None:
++            from graphiti_core.search.search_config_recipes import (
++                EDGE_HYBRID_SEARCH_CROSS_ENCODER,
++            )
++
++            _cfg = EDGE_HYBRID_SEARCH_CROSS_ENCODER.model_copy(deep=True)
++            _cfg.limit = max_facts
++            relevant_edges = (
++                await client.search_(
++                    query=query,
++                    config=_cfg,
++                    group_ids=effective_group_ids,
++                )
++            ).edges
++        else:
++            relevant_edges = await client.search(
++                group_ids=effective_group_ids,
++                query=query,
++                num_results=max_facts,
++                center_node_uuid=center_node_uuid,
++            )
+ 
+         if not relevant_edges:
+             return FactSearchResponse(message='No relevant facts found', facts=[])

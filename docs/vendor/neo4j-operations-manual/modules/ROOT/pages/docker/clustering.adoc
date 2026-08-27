@@ -1,0 +1,47 @@
+:description: How to deploy a Neo4j cluster in a containerized environment without an orchestration tool.
+[role=enterprise-edition]
+[[docker-cc]]
+= Deploy a Neo4j cluster on multiple Docker hosts
+
+Neo4j supports clustering in a containerized environment without an orchestration tool.
+This section describes how to use Docker to set up a cluster across multiple machines.
+For a tutorial on how to set up a cluster locally for testing purposes, see xref:tutorial/tutorial-clustering-docker.adoc[Tutorials -> Deploying a Neo4j cluster in a Docker container].
+
+[NOTE]
+====
+The examples on this page make use of both command expansion and DNS discovery method.
+For more information, see:
+
+* xref:configuration/command-expansion.adoc[Command expansion]
+* xref:clustering/setup/discovery.adoc#clustering-discovery-dns[Discovery using DNS with multiple records]
+====
+
+
+To create a  highly-available cluster of containers, the Neo4j cluster servers can be deployed on different physical machines.
+
+When each container is running on its own physical machine, and the Docker network is not used, you have to define the advertised addresses to enable communication between the physical machines.
+Each container must also bind to the host machine's network.
+For more information about container networking, see the https://docs.docker.com/engine/network/[Docker official documentation].
+
+Example of a `docker run` command for invoking a cluster member:
+
+[source, shell, subs="attributes"]
+----
+docker run --name=server1 --detach \
+         --network=host \
+         --publish=7474:7474 --publish=7687:7687 \
+         --publish=5000:5000 --publish=6000:6000 --publish=7000:7000 \
+         --hostname=public-address \
+         --env NEO4J_dbms_cluster_discovery_endpoints=server1-public-address:5000,server2-public-address:5000,server3-public-address:5000 \
+         --env NEO4J_server_discovery_advertised__address=public-address:5000 \
+         --env NEO4J_server_cluster_advertised__address=public-address:6000 \
+         --env NEO4J_server_cluster.raft.advertised__address=public-address:7000 \
+         --env NEO4J_server_default__advertised__address=public-address \
+         --env NEO4J_ACCEPT_LICENSE_AGREEMENT=yes \
+         --env NEO4J_server_bolt_advertised__address=public-address:7687 \
+         --env NEO4J_server_http_advertised__address=public-address:7474 \
+         neo4j:{neo4j-version-exact}-enterprise
+----
+
+Where `public-address` is the public hostname or ip-address of the machine.
+

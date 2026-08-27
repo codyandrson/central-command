@@ -1,0 +1,13 @@
+Message-ID: <invoice-2026-07-01@example.com>
+From: billing@vendor.example.com
+To: lee@example.com
+Subject: Invoice INV-4471 — payment date confirmed
+Date: Wed, 1 Jul 2026 09:14:22 +0000
+
+Hi the operator,
+
+Confirming we've agreed payment for invoice INV-4471 on 15 August 2026. Please
+update the tracking ticket TASKS-12 so its due date reflects 2026-08-15.
+
+Thanks,
+Vendor Billing

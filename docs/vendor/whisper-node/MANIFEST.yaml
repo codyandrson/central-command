@@ -1,0 +1,14 @@
+name: whisper-node
+source_repo: https://github.com/mybigday/whisper.node
+source_ref: 1.0.16
+fetched_url: https://codeload.github.com/mybigday/whisper.node/tar.gz/1.0.16
+fetched_date: 2026-08-25
+subpaths: [README.md LICENSE]
+notes: >
+  npm package name is "@fugood/whisper.node" (matches web/package-lock.json);
+  that literal org/repo path does not exist on GitHub. npm registry metadata
+  (bugs url + maintainer jhen0409) traces to this repo, mybigday/whisper.node,
+  which is confirmed by its package.json "name" field reading
+  "@fugood/whisper.node". A near-identical fork, hans00/whisper.node, carries
+  the same tag/commit for 1.0.16 - mybigday is treated as canonical since its
+  package.json matches the published npm name.

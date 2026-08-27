@@ -1,0 +1,70 @@
+:description: Verify the cluster formation.
+[role=enterprise-edition]
+[[cc-verify-cluster]]
+= Verify the Neo4j cluster formation
+
+You check the pods and services to verify that the servers have managed to form a cluster.
+
+. Check that the pods are `READY`.
++
+Typically, it takes a minute or two after the pods are running.
+They become `READY` after they form a cluster.
+You can watch pod status changes by adding the `-w` option to the `kubectl` command (`kubectl get pods -w`).
++
+[source, shell]
+----
+kubectl get pods
+----
++
+[source, role=noheader]
+----
+NAME       READY   STATUS    RESTARTS   AGE
+server-1-0   1/1     Running   0          147m
+server-2-0   1/1     Running   0          147m
+server-3-0   1/1     Running   0          147m
+----
+
+. You can also check the logs of the pods, for example:
++
+[source, shell]
+----
+kubectl exec server-2-0 -- tail /logs/neo4j.log
+----
++
+[source, role=noheader, subs="attributes"]
+----
+2022-10-26 11:37:42.516+0000 INFO  Remote interface available at http://localhost:7474/
+2022-10-26 11:37:42.539+0000 INFO  id: 72419021DEA149919ABFFD4930EDE02131E52E77F7EADF62C6323BC4F2D01EC5
+2022-10-26 11:37:42.539+0000 INFO  name: system
+2022-10-26 11:37:42.539+0000 INFO  creationDate: 2022-10-26T11:37:28.784Z
+2022-10-26 11:37:42.540+0000 INFO  Started.
+2022-10-26 11:37:47.177+0000 INFO  This instance bootstrapped the 'neo4j' database.
+2022-10-26 11:37:58.644+0000 INFO  Connected to server-3-internals.neo4j.svc.cluster.local/10.24.0.131:7000 [RAFT version:1.0]
+2022-10-26 12:01:32.066+0000 INFO  Direct driver instance 577812770 created for server address server-1-internals.neo4j.svc.cluster.local:7688
+2022-10-26 12:02:40.172+0000 INFO  Closing driver instance 577812770
+2022-10-26 12:02:40.174+0000 INFO  Closing connection pool towards server-1-internals.neo4j.svc.cluster.local:7688
+
+----
+. Check that the services look good:
++
+[source, shell]
+----
+kubectl get services
+----
++
+[source, role=noheader]
+----
+NAME            TYPE          CLUSTER-IP      EXTERNAL-IP    PORT(S)                                        AGE
+my-cluster-lb-neo4j   LoadBalancer   10.28.12.119   35.234.152.117   7474:32169/TCP,7473:32145/TCP,7687:32624/TCP                              148m
+server-1              ClusterIP      10.28.13.216   <none>           7687/TCP,7474/TCP,7473/TCP                                                148m
+server-1-admin        ClusterIP      10.28.13.244   <none>           6362/TCP,7687/TCP,7474/TCP,7473/TCP                                       148m
+server-1-internals    ClusterIP      None           <none>           6362/TCP,7687/TCP,7474/TCP,7473/TCP,7688/TCP,5000/TCP,7000/TCP,6000/TCP   148m
+server-2              ClusterIP      10.28.10.237   <none>           7687/TCP,7474/TCP,7473/TCP                                                148m
+server-2-admin        ClusterIP      10.28.7.113    <none>           6362/TCP,7687/TCP,7474/TCP,7473/TCP                                       148m
+server-2-internals    ClusterIP      None           <none>           6362/TCP,7687/TCP,7474/TCP,7473/TCP,7688/TCP,5000/TCP,7000/TCP,6000/TCP   148m
+server-3              ClusterIP      10.28.3.164    <none>           7687/TCP,7474/TCP,7473/TCP                                                148m
+server-3-admin        ClusterIP      10.28.14.77    <none>           6362/TCP,7687/TCP,7474/TCP,7473/TCP                                       148m
+server-3-internals    ClusterIP      None           <none>           6362/TCP,7687/TCP,7474/TCP,7473/TCP,7688/TCP,5000/TCP,7000/TCP,6000/TCP   148m
+----
++
+For more information about the Neo4j services, see xref:kubernetes/accessing-neo4j.adoc[Accessing Neo4j].

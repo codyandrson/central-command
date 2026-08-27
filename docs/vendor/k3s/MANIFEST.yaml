@@ -1,0 +1,11 @@
+name: k3s
+source_repo: https://github.com/k3s-io/docs
+source_ref: main
+fetched_url: https://codeload.github.com/k3s-io/docs/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [docs]
+note: >
+  k3s-io/docs is not version-branched per k3s release — vendored from
+  default branch (main), which tracks the latest docs. Our deployed k3s is
+  v1.34; treat this as the current-docs approximation rather than an exact
+  v1.34 pin.

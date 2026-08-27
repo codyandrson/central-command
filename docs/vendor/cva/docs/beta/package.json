@@ -1,0 +1,27 @@
+{
+  "name": "docs-beta",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "astro": "astro",
+    "build": "astro check && astro build",
+    "check": "tsc",
+    "dev": "astro dev",
+    "preview": "astro preview",
+    "start": "astro dev"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.3",
+    "@astrojs/starlight": "^0.28.2",
+    "@astrojs/starlight-tailwind": "^2.0.3",
+    "@astrojs/tailwind": "^5.1.1",
+    "@astrojs/ts-plugin": "^1.10.2",
+    "@astrojs/vercel": "^7.8.1",
+    "astro": "^4.15.9",
+    "cva": "workspace:*",
+    "date-fns": "3.6.0",
+    "sharp": "^0.33.2",
+    "tailwindcss": "^3.4.3",
+    "typescript": "5.4.5"
+  }
+}

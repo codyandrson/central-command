@@ -1,0 +1,9 @@
+:description: The `CALL` clause can be used to invoke a subquery or to call a procedure.
+= CALL 
+
+The `CALL` clause can be used to invoke a subquery or to call a procedure.
+For more information about either of these uses, refer to:
+
+* xref:subqueries/call-subquery.adoc[]
+* xref:subqueries/subqueries-in-transactions.adoc[]
+* link:{neo4j-docs-base-uri}/operations-manual/current/procedures/call-procedures[Operations Manual -> Call procedures]

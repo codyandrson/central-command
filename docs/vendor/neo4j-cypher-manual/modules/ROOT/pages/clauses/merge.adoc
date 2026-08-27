@@ -1,0 +1,727 @@
+:description: Information about Cypher's `MERGE` clause.
+:table-caption!:
+= MERGE
+
+The `MERGE` clause combines the behavior of xref:clauses/match.adoc[`MATCH`] and xref:clauses/create.adoc[`CREATE`].
+When merging a pattern:
+
+* If the exact pattern is found, nothing is created; `MERGE` acts like `MATCH` and binds the found pattern.
+* If the exact pattern is not found, `MERGE` acts like `CREATE` and creates the pattern.
+
+For more information about the differences between the two clauses, see xref:clauses/create.adoc#comparing-create-and-merge[`CREATE` -> Comparing `CREATE` and `MERGE`].
+
+`MERGE` also allows for specific actions depending on whether the specified pattern was xref:clauses/merge.adoc#on-match-and-on-create[matched (`ON MATCH`) or created (`ON CREATE`)].
+
+It is recommended to create constraints prior to merging data: they provide index-backed performance improvements (in the case of property uniqueness and key constraints) while also preventing the creation of data that differ in unintended ways from pre-existing data.
+For more information, see xref:clauses/merge.adoc#merge-with-constraints[] below.
+
+
+[[example-graph]]
+== Example graph
+
+The following graph is used for the examples below:
+
+image::graph_merge_clause.svg[]
+
+To recreate the graph, run the following query in an empty Neo4j database:
+
+[source, cypher, role=test-setup]
+----
+CREATE (charlie:Person {name: 'Charlie Sheen', bornIn: 'New York', chauffeurName: 'John Brown'}),
+       (martin:Person {name: 'Martin Sheen', bornIn: 'Ohio', chauffeurName: 'Bob Brown'}),
+       (michael:Person {name: 'Michael Douglas', bornIn: 'New Jersey', chauffeurName: 'John Brown'}),
+       (oliver:Person {name: 'Oliver Stone', bornIn: 'New York', chauffeurName: 'Bill White'}),
+       (rob:Person {name: 'Rob Reiner', bornIn: 'New York', chauffeurName: 'Ted Green'}),
+       (wallStreet:Movie {title: 'Wall Street'}),
+       (theAmericanPresident:Movie {title: 'The American President'}),
+       (charlie)-[:ACTED_IN]->(wallStreet),
+       (martin)-[:ACTED_IN]->(wallStreet),
+       (michael)-[:ACTED_IN]->(wallStreet),
+       (martin)-[:ACTED_IN]->(theAmericanPresident),
+       (michael)-[:ACTED_IN]->(theAmericanPresident),
+       (oliver)-[:DIRECTED]->(wallStreet),
+       (rob)-[:DIRECTED]->(theAmericanPresident)
+----
+
+
+[[merge-existing-patterns]]
+== `MERGE` existing patterns
+
+If `MERGE` matches an existing pattern, it will not create anything.
+Instead, it will bind the pattern in the same way that `MATCH` does.
+
+.`MERGE` an existing node
+[source, cypher]
+----
+MERGE (michael:Person {name: 'Michael Douglas'})
+RETURN michael.name AS name, 
+       michael.bornIn AS bornIn
+----
+
+No new node is created, since there already exists an identical node in the database.
+
+.Result
+[role="queryresult",options="header",cols="2*<m"]
+|===
+| name
+| bornIn
+
+| "Michael Douglas"
+| "New Jersey"
+
+2+d|Rows: 1
+|===
+
+.`MERGE` an existing relationship
+// tag::clauses_merge_relationships[]
+[source, cypher]
+----
+MATCH (charlie:Person {name: 'Charlie Sheen'}),
+      (wallStreet:Movie {title: 'Wall Street'})
+MERGE (charlie)-[r:ACTED_IN]->(wallStreet)
+RETURN charlie.name AS name,
+       type(r) AS newRel, 
+       wallStreet.title AS title
+----
+// end::clauses_merge_relationships[]
+
+`Charlie Sheen` had already been marked as acting in `Wall Street`, so the existing relationship is found and returned.
+
+.Result
+[role="queryresult",options="header",cols="3*<m"]
+|===
+| name
+| newRel
+| title
+
+| "Charlie Sheen"
+| "ACTED_IN"
+| "Wall Street"
+
+3+d|Rows: 1
+|===
+
+[[null-properties]]
+== `null` properties
+
+`MERGE` cannot be used on property values that are `null`.
+
+For example, the following query will throw an error:
+
+.`MERGE` on `null` property
+[source, cypher, role=test-fail]
+----
+MERGE (martin:Person {name: 'Martin Sheen'})-[r:FATHER_OF {since: null}]->(charlie:Person {name: 'Charlie Sheen'})
+RETURN type(r)
+----
+
+.GQLSTATUS error chain
+[role="queryresult",stripes="all", cols="1", ]
+|===
+| link:https://neo4j.com/docs/status-codes/current/errors/gql-errors/22N31/[22N31]: error: data exception - invalid properties in merge pattern. The relationship property `since` in '(martin)-[:FATHER_OF {since: null}]->(charlie)' is invalid. 'MERGE' cannot be used with a graph element property value that is null.
+
+link:https://neo4j.com/docs/status-codes/current/errors/gql-errors/22G03/[22G03]: error: data exception - invalid value type
+|===
+
+[[merge-new-patterns]]
+== `MERGE` new patterns
+
+If `MERGE` cannot match the exact pattern given in the query, it will create the pattern instead.
+To prevent the creation of nodes or relationships that differ in unintended ways from existing ones, it is therefore recommended to use constraints when merging data.
+For more information, see xref:clauses/merge.adoc#merge-with-constraints[Using `MERGE` with constraints] below.
+
+.`MERGE` a new node with labels and properties
+// tag::clauses_merge_node_label[]
+[source, cypher]
+----
+MERGE (robert:Critic:Viewer {name: 'Robert Smith', occupation: 'Journalist'})
+RETURN labels(robert) AS labels,
+       properties(robert) AS properties
+----
+// end::clauses_merge_node_label[]
+
+A new node is created because there are no identical nodes in the dataset.
+
+.Result
+[role="queryresult",options="header",cols="2*<m"]
+|===
+| labels
+| properties
+
+| ["Critic", "Viewer"]
+| {name: "Robert Smith", occupation: "Journalist"}
+
+2+d|Rows: 1
+|===
+
+
+[NOTE]
+Multiple labels can also be separated by an ampersand `&`, in the same manner as it is used in xref:patterns/reference/node-and-relationship-patterns.adoc#label-expressions[label expressions].
+Separation by colon `:` and ampersand `&` cannot be mixed in the same clause.
+
+.`MERGE` node with different property values
+[source, cypher]
+----
+MERGE (p:Person {name: 'Charlie Sheen', bornIn: "New York", chauffeurName: 'Michael Black'})
+WITH p
+MATCH (charlies:Person)
+WHERE charlies.name = 'Charlie Sheen'
+RETURN charlies.name AS name,
+       charlies.chauffeurName AS chauffeur
+----
+
+A new node with the name `Charlie Sheen` is created since not all properties matched those set to the pre-existing `Charlie Sheen` node:
+
+.Result
+[role="queryresult",options="header",cols="2*<m"]
+|===
+| name
+| chauffeur
+
+| "Charlie Sheen"
+| "John Brown"
+
+| "Charlie Sheen" 
+| "Michael Black"
+
+2+d|Rows: 2
+|===
+
+.`MERGE` a node derived from an existing node property
+[source, cypher]
+----
+MATCH (person:Person)
+WITH person
+MERGE (location:Location {name: person.bornIn})
+RETURN person.name AS name,
+       person.bornIn AS bornIn,
+       location.name AS locationNode
+ORDER BY name
+----
+
+Three `Location` nodes are created, with `name` values of `New York`, `Ohio`, and `New Jersey`. Although `MATCH` returns multiple `Person` nodes with `bornIn: 'New York'`, only one `New York` location node is created.
+Subsequent matches bind to it rather than creating duplicates.
+
+.Result
+[role="queryresult",options="header",cols="3*<m"]
+|===
+
+| name
+| bornIn
+| locationNode
+
+| "Charlie Sheen"
+| "New York"
+| "New York"
+
+| "Charlie Sheen"
+| "New York"
+| "New York"
+
+| "Martin Sheen"
+| "Ohio"
+| "Ohio"
+
+| "Michael Douglas"
+| "New Jersey"
+| "New Jersey"
+
+| "Oliver Stone"
+| "New York"
+| "New York"
+
+| "Rob Reiner"
+| "New York"
+| "New York"
+
+3+d|Rows: 6
+|===
+
+`MERGE` can be used with preceding `MATCH` and `MERGE` clauses to create a relationship between two bound nodes.
+
+.`MERGE` a relationship between two existing nodes
+[source, cypher]
+----
+MATCH (person:Person)
+WITH person
+MERGE (location:Location {name: person.bornIn})
+MERGE (person)-[r:BORN_IN]->(location)
+RETURN startNode(r).name AS name,
+       type(r) AS newRel,
+       endNode(r).name AS location
+ORDER BY name
+----
+
+The second `MERGE` creates a `BORN_IN` relationship between each person and their corresponding `Location` node.
+
+.Result
+[role="queryresult",options="header",cols="3*<m"]
+|===
+
+| name
+| newRel
+| location
+
+| "Charlie Sheen" 
+| "BORN_IN" 
+| "New York" 
+
+| "Charlie Sheen"
+| "BORN_IN" 
+| "New York" 
+
+| "Martin Sheen"
+| "BORN_IN"
+| "Ohio"
+
+| "Michael Douglas"
+| "BORN_IN"
+| "New Jersey"
+
+| "Oliver Stone"
+| "BORN_IN"
+| "New York"
+
+| "Rob Reiner" 
+| "BORN_IN"
+| "New York"
+
+3+d|Rows: 6
+|===
+
+`MERGE` can also create both a new node and a relationship in a single clause:
+
+.`MERGE` a new node and relationship connected to an existing node
+[source, cypher]
+----
+MATCH (person:Person)
+WITH person
+MERGE (person)-[r:HAS_CHAUFFEUR]->(chauffeur:Chauffeur {name: person.chauffeurName})
+REMOVE person.chauffeurName
+RETURN startNode(r) AS startNode,
+       type(r) AS newRel,
+       endNode(r).name AS newChauffeurNode
+ORDER BY newChauffeurNode
+----
+
+As the graph contains no `Chauffeur` nodes and no `HAS_CHAUFFEUR` relationships, `MERGE` creates six `Chauffeur` nodes, each with a `name` corresponding to the matched `Person` node's `chauffeurName` property, and a `HAS_CHAUFFEUR` relationship between each pair. 
+
+This differs from the `Location` example above, where a preceding `MERGE` bound the `Location` nodes before the relationship was created.
+Here, `MERGE` matches the full pattern including the relationship, which doesn't match the existing `Person` nodes and instead creates new `Chauffeur` nodes, even if `Person` nodes with the same names already exist.
+
+.Result
+[role="queryresult",options="header",cols="3*<m"]
+|===
+| startNode
+| newRel
+| newChauffeurNode
+
+| (:Person {name: "Oliver Stone", bornIn: "New York"})
+| "HAS_CHAUFFEUR"
+| "Bill White"
+
+| (:Person {name: "Martin Sheen", bornIn: "Ohio"})
+| "HAS_CHAUFFEUR"
+| "Bob Brown"
+
+| (:Person {name: "Charlie Sheen", bornIn: "New York"})
+| "HAS_CHAUFFEUR"
+| "John Brown"
+
+| (:Person {name: "Michael Douglas", bornIn: "New Jersey"})
+| "HAS_CHAUFFEUR"
+| "John Brown"
+
+| (:Person {name: "Rob Reiner", bornIn: "New York"})
+| "HAS_CHAUFFEUR"
+| "Ted Green"
+
+| (:Person {name: "Charlie Sheen", bornIn: "New York"})
+| "HAS_CHAUFFEUR"
+| "Michael Black"
+
+3+d|Rows: 6
+|===
+
+[[undirected-relationships]]
+== Undirected relationships
+
+`MERGE` can be used without specifying relationship direction.
+Cypher tries to match the relationship in both directions first; if no match is found, it creates the relationship left to right.
+
+.`MERGE` an undirected relationship
+[source, cypher]
+----
+MATCH (charlie:Person {name: 'Oliver Stone'}),
+      (oliver:Person {name: 'Michael Douglas'})
+WITH charlie, oliver
+MERGE (charlie)-[r:KNOWS]-(oliver)
+RETURN startNode(r).name AS from,
+       type(r) AS relationship,
+       endNode(r).name AS to
+----
+
+As no `KNOWS` relationship exists between `Oliver Stone` and `Michael Douglas`, `MERGE` creates one left to right.
+
+.Result
+[role="queryresult",options="header",cols="3*<m"]
+|===
+| from 
+| relationship
+| to
+
+| "Oliver Stone"
+| "KNOWS"
+| "Michael Douglas"
+
+3+d|Rows: 1
+|===
+
+
+[[on-match-and-on-create]]
+== `ON MATCH` and `ON CREATE`
+
+Use `ON CREATE` and `ON MATCH` to conditionally execute clauses depending on whether a node or relationship is created or matched.
+
+.`MERGE` with `ON CREATE`
+// tag::clauses_merge_on_create[]
+[source, cypher, role=test-result-skip]
+----
+MERGE (keanu:Person {name: 'Keanu Reeves', bornIn: 'Beirut', chauffeurName: 'Eric Brown'})
+ON CREATE
+  SET keanu.created = timestamp()
+RETURN keanu.name AS name, 
+       keanu.created AS creationTimestamp
+----
+// end::clauses_merge_on_create[]
+
+.Result
+[role="queryresult",options="header",cols="2*<m"]
+|===
+| name
+| creationTimestamp
+
+| "Keanu Reeves"
+| 1655200898563
+
+2+d|Rows: 1
+|===
+
+.`MERGE` with `ON MATCH`
+// tag::clauses_merge_on_match[]
+[source, cypher, role=test-result-skip]
+----
+MERGE (person:Person)
+ON MATCH
+  SET person.updatedAt = date()
+RETURN person.name AS name,
+       person.updatedAt AS updatedAt
+ORDER BY name
+----
+// end::clauses_merge_on_match[]
+
+.Result
+[role="queryresult",options="header",cols="2*<m"]
+|===
+| name
+| updatedAt
+
+| "Charlie Sheen" 
+| 2026-06-16
+
+| "Charlie Sheen" 
+| 2026-06-16
+
+| "Martin Sheen"
+| 2026-06-16
+
+| "Michael Douglas"
+| 2026-06-16
+
+| "Oliver Stone"
+| 2026-06-16
+
+| "Rob Reiner"
+| 2026-06-16
+
+2+d|Rows: 6
+|===
+
+.`MERGE` with `ON CREATE` and `ON MATCH`
+// tag::clauses_merge_on_create_and_on_match[]
+[source, cypher, role=test-result-skip]
+----
+MERGE (keanu:Person {name: 'Keanu Reeves'})
+ON CREATE
+  SET keanu.created = timestamp()
+ON MATCH
+  SET keanu.lastSeen = timestamp()
+RETURN keanu.name AS name,
+       keanu.created AS createdAt,
+       keanu.lastSeen AS lastSeen
+----
+// end::clauses_merge_on_create_and_on_match[]
+
+Because the `Person` node named `Keanu Reeves` already exists, this query does not create a new node.
+Instead, it adds a timestamp on the `lastSeen` property.
+
+.Result
+[role="queryresult",options="header",cols="3*<m"]
+|===
+| name | createdAt | lastSeen
+
+| "Keanu Reeves"
+| 1655200902354
+| 1674655352124
+
+3+d|Rows: 1
+|===
+
+[[parameters]]
+== Using map parameters with `MERGE`
+
+Unlike xref:clauses/create.adoc#use-parameters-with-create[`CREATE`], `MERGE` does not accept a map parameter directly as a property map (e.g. `CREATE (n:Person $param)`).
+Each property must be specified explicitly:
+
+.Parameters
+[source, parameters]
+----
+{
+  "param": {
+    "name": "Keanu Reeves",
+    "bornIn": "Beirut",
+    "chauffeurName": "Eric Brown"
+  }
+}
+----
+
+.`MERGE` with parameters
+// tag::clauses_merge_map_parameters[]
+[source, cypher]
+----
+MERGE (person:Person {name: $param.name, bornIn: $param.bornIn, chauffeurName: $param.chauffeurName})
+RETURN person.name AS name,
+       person.bornIn AS bornIn,
+      person.chauffeurName AS chauffeur
+----
+
+.Result
+[role="queryresult",options="header",cols="3*<m"]
+|===
+| name
+| bornIn 
+| chauffeur
+
+| "Keanu Reeves"
+| "Beirut"
+| "Eric Brown"
+
+3+d|Rows: 1
+|===
+
+For more information on parameters, see xref::syntax/parameters.adoc[].
+
+[role=label--new-5.26]
+[[dynamic-merge]]
+== `MERGE` using dynamic node labels and relationship types
+
+Node labels and relationship types can be referenced dynamically in expressions, parameters, and variables when merging nodes and relationships.
+This allows for more flexible queries and mitigates the risk of Cypher injection.
+(For more information about Cypher injection, see link:https://neo4j.com/developer/kb/protecting-against-cypher-injection/[Neo4j Knowledge Base -> Protecting against Cypher injection]).
+
+.Syntax for merging nodes and relationships dynamically
+[source, syntax]
+----
+MERGE (n:$(<expr>))
+MERGE ()-[r:$(<expr>)]->()
+----
+
+The expression must evaluate to a `STRING NOT NULL | LIST<STRING NOT NULL> NOT NULL` value.
+Using a `LIST<STRING>` with more than one item when merging a relationship using dynamic relationship types will fail.
+This is because a relationship can only have exactly one type.
+
+.Parameters
+[source, parameters]
+----
+{
+  "nodeLabels": ["Person", "Director"],
+  "relType": "DIRECTED",
+  "movies": ["Ladybird", "Little Women", "Barbie"]
+}
+----
+
+.`MERGE` nodes and relationships using dynamic node labels and relationship types
+// tag::clauses_merge_dynamic_merge[]
+[source, cypher]
+----
+MERGE (greta:$($nodeLabels) {name: 'Greta Gerwig'})
+WITH greta
+UNWIND $movies AS movieTitle
+MERGE (greta)-[rel:$($relType)]->(m:Movie {title: movieTitle})
+RETURN greta.name AS name, labels(greta) AS labels, type(rel) AS relType, collect(m.title) AS movies
+----
+// end::clauses_merge_dynamic_merge[]
+
+.Result
+[role="queryresult",options="footer",cols="4*<m"]
+|===
+| name | labels | relType | movies
+
+| "Greta Gerwig"
+| ["Person", "Director"]
+| "DIRECTED"
+| ["Ladybird", "Little Women", "Barbie"]
+
+4+d|Rows: 1 +
+|===
+
+[[dynamic-merge-caveats]]
+=== Performance caveats
+
+`MERGE` queries that use dynamic values may not perform as well as those with static values.
+Neo4j is actively working to improve the performance of these queries.
+The table below outlines performance caveats for specific Neo4j versions.
+
+.Neo4j versions and performance caveats
+[%header,cols="a,5a"]
+|===
+| Neo4j versions | Performance caveat
+
+| 5.26 -- 2025.07
+| The xref:planning-and-tuning/execution-plans.adoc[Cypher planner] is not able to leverage xref:indexes/search-performance-indexes/index.adoc[indexes] with xref:planning-and-tuning/operators/operators-detail.adoc#leaf-operators[index scans or seeks] and must instead utilize the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-all-nodes-scan[`AllNodesScan`] operator, which reads all nodes from the node store and is therefore more costly. 
+
+| 2025.08 -- 2025.10
+| The Cypher planner is able to leverage xref:indexes/search-performance-indexes/using-indexes.adoc#token-lookup-indexes[token lookup indexes] when matching node labels and relationship types dynamically.
+This is enabled by the introduction of three new query plan operators: 
+xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-dynamic-label-node-lookup[`DynamicLabelNodeLookup`], xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-dynamic-directed-relationship-type-lookup[`DynamicDirectedRelationshipTypeLookup`], and xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-dynamic-undirected-relationship-type-lookup[`DynamicUndirectedRelationshipTypeLookup`].
+It is not, however, able to use indexes on property values.
+For example, `MERGE (n:$(Label) {foo: bar})` will not use any indexes on `n.foo` but can use a `DynamicLabelNodeLookup` on `$(label)`.
+
+| 2025.11 -- current
+a| The Cypher planner is able to leverage indexes on property values, however:
+
+* It only supports exact seeks on range indexes (no full text or spatial).
+* The index order cannot be leveraged, so the planner must insert separate ordering if required later on in the query.
+* Parallel runtime seeks and scans are single-threaded.
+
+|===
+
+
+[[merge-with-constraints]]
+== Using `MERGE` with constraints
+
+Constraints on identifying properties (such as `id`) when using `MERGE` prevents duplicating data that differ in unintended ways.
+They also protect against duplicate creation under concurrent loads, where `MERGE` alone only guarantees the existence of the pattern, not its uniqueness.
+
+[role=label--enterprise-edition]
+=== Enforce property existence and uniqueness with key constraints
+
+There are two ways to ensure the uniqueness of a property value in a database: xref:constraints/create-constraints.adoc#create-property-uniqueness-constraints[property uniqueness constraints] and xref:constraints/create-constraints.adoc#create-key-constraints[key constraints].
+Both are xref:constraints/create-constraints.adoc#constraints-and-backing-indexes[backed by indexes], which provide significant performance improvements.
+Key constraints are the preferred option, however, since they both guarantee the existence and uniqueness of a property.
+
+.Create key constraint
+[source, cypher]
+----
+CREATE CONSTRAINT FOR (n:Product) REQUIRE n.id IS NODE KEY
+----
+
+.`MERGE` a node that complies with key constraint
+[source, cypher]
+----
+MERGE (n:Product {id: 12, category: 'Electronics', type: 'Laptop'})
+----
+
+A subsequent `MERGE` with the same `id` but different properties will fail rather than create a duplicate:
+
+.`MERGE` a node that violates key constraint
+[source, cypher, role=test-fail]
+----
+MERGE (n:Product {id: 12, category: 'Computing', type: 'Laptop'})
+----
+
+.GQLSTATUS error chain
+[role="queryresult",stripes="all",cols="1"]
+|===
+| link:https://neo4j.com/docs/status-codes/current/errors/gql-errors/22N80/[22N80]: error: data exception - index entry conflict. Index entry conflict: Node(23) already exists with label `Product` and property `id` = 12.
+
+link:https://neo4j.com/docs/status-codes/current/errors/gql-errors/22N79/[22N79]: error: data exception - property uniqueness constraint violated. Property uniqueness constraint violated: Node(23) already exists with label `Product` and property `id` = 12.
+
+|===
+
+Similarly, an attempt to `MERGE` a node with a missing `id` property would fail due to the key constraint:
+
+.`MERGE` a node that violates key constraint
+[source, cypher, role=test-fail]
+----
+MERGE (n:Product {category: 'Computing', type: 'Laptop'})
+----
+
+.GQLSTATUS error chain
+[role="queryresult",stripes="all",cols="1"]
+|===
+| link:https://neo4j.com/docs/status-codes/current/errors/gql-errors/22N77/[22N77]: error: data exception - property presence verification failed. NODE (24) with label 'Product' must have the following properties: `id`.
+|===
+
+[role=label--enterprise-edition]
+=== Enforce property value types with property type constraints
+
+xref:constraints/create-constraints.adoc#create-property-type-constraints[Property type constraints] are useful to enforce type correctness when merging data.
+
+.Create property type constraint
+[source, cypher]
+----
+CREATE CONSTRAINT FOR (n:Product) REQUIRE n.id IS :: INTEGER
+----
+
+.`MERGE` a node that complies with property type constraint
+[source, cypher]
+----
+MERGE (n:Product {id: 13, category: 'Electronics', type: 'Laptop'})
+----
+
+.`MERGE` a new node that violates property type constraint
+[source, cypher, role=test-fail]
+----
+MERGE (n:Product {id: "13", category: 'Electronics', type: 'Laptop'})
+----
+
+.GQLSTATUS error chain
+[role="queryresult",stripes="all",cols="1"]
+|===
+| link:https://neo4j.com/docs/status-codes/current/errors/gql-errors/22N78/[22N78]: error: data exception - property type verification failed. NODE (25) with label 'Product' must have the property `id` with value type INTEGER.
+|===
+
+Cypher offers the following functions to cast data while merging:
+
+* xref:functions/scalar.adoc#functions-toboolean[`toBoolean()`] / xref:functions/scalar.adoc#functions-tobooleanornull[`toBooleanOrNull()`]
+* xref:functions/scalar.adoc#functions-tofloat[`toFloat()`] / xref:functions/scalar.adoc#functions-tofloatornull[`toFloatOrNull()`]
+* xref:functions/scalar.adoc#functions-tointeger[`toInteger()`] / xref:functions/scalar.adoc#functions-tointegerornull[`toIntegerOrNull()`]
+* xref:functions/string.adoc#functions-tostring[`toString()`]/ xref:functions/string.adoc#functions-tostringornull[`toStringOrNull()`]
+* xref:functions/temporal/index.adoc#functions-date[`date()`], xref:functions/temporal/index.adoc#functions-datetime[`datetime()`], xref:functions/temporal/index.adoc#functions-localdatetime[`localdatetime()`], xref:functions/temporal/index.adoc#functions-time[`time()`], xref:functions/temporal/duration.adoc#functions-durations[`duration()`]
+* xref:functions/list.adoc#functions-tobooleanlist[`toBooleanList()`], xref:functions/list.adoc#functions-tofloatlist[`toFloatList()`], xref:functions/list.adoc#functions-tointegerlist[`toIntegerList()`], xref:functions/list.adoc#functions-tostringlist[`toStringList()`]
+
+.`MERGE` a node that casts data type and complies with property type constraint 
+[source, cypher]
+----
+MERGE (n:Product {id: toInteger("14"), category: 'Electronics', type: 'Laptop'})
+----
+
+[[concurrent-relationship-merges]]
+== Concurrent relationship merges
+
+.`MERGE` a relationship between two previously bound nodes
+[source, cypher]
+----
+MATCH (keanu:Person { name: 'Keanu Reeves' })
+MATCH (charlie:Person { name: 'Charlie Sheen' })
+WITH keanu, charlie
+MERGE (keanu)-[:KNOWS]->(charlie)
+----
+
+If the above query is run sequentially, `MERGE` creates the relationship on the first execution and matches it on any subsequent run.
+If the same query is run concurrently, Neo4j preserves this behavior by acquiring exclusive locks on both end nodes when no match is found, preventing two transactions from creating the relationship simultaneously.
+After locking, `MERGE` performs a second `MATCH` to account for any race condition between the initial failed match and lock acquisition.
+
+This serialization guarantee for concurrent updates does not rely on a uniqueness constraint.
+Cypher has no constraint that limits the number of relationships of a given type between two nodes, so the guarantee is provided by the locking behavior used by `MERGE`.

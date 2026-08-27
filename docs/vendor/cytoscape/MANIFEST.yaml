@@ -1,0 +1,6 @@
+name: cytoscape
+source_repo: https://github.com/cytoscape/cytoscape.js
+source_ref: v3.34.0
+fetched_url: https://codeload.github.com/cytoscape/cytoscape.js/tar.gz/v3.34.0
+fetched_date: 2026-08-25
+subpaths: [documentation/md documentation/webgl.md README.md LICENSE]

@@ -1,0 +1,64 @@
+:description: Uninstall the Neo4j cluster and clean up the resources. 
+[role=enterprise-edition]
+[[cc-uninstall-cleanup]]
+= Uninstall Neo4j cluster and clean up resources
+
+
+== Uninstall all Neo4j Helm deployments
+
+. Uninstall each of the cluster servers and the services using their Helm release names:
++
+[source, shell]
+----
+helm uninstall server-1 server-2 server-3 headless
+----
++
+[source, result, role=noheader]
+----
+release "server-1" uninstalled
+release "server-2" uninstalled
+release "server-3" uninstalled
+release "headless" uninstalled
+----
+
+== Fully remove all the data and resources
+
+Uninstalling the Helm releases does not remove the created resources and data.
+Therefore, after uninstalling the helm deployments, you also have to delete all the data and resources.
+
+. Delete all persistent volume claims in the `neo4j` namespace:
++
+[source, shell]
+----
+kubectl delete pvc --all --namespace neo4j
+----
+. Delete the entire Kubernetes cluster in your cloud provider:
++
+[.tabbed-example]
+=====
+[.include-with-gke]
+======
+[source, shell]
+----
+gcloud container clusters delete my-neo4j-gke-cluster
+----
+======
+
+[.include-with-aws]
+======
+
+[source, shell]
+----
+eksctl delete cluster --name=my-neo4j-eks-cluster
+----
+======
+
+[.include-with-azure]
+======
+
+[source, shell]
+----
+az aks delete --name my-neo4j-aks-cluster --resource-group <MyResourceGroup>
+----
+======
+=====

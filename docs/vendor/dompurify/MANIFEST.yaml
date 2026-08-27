@@ -1,0 +1,6 @@
+name: dompurify
+source_repo: https://github.com/cure53/DOMPurify
+source_ref: 3.3.1
+fetched_url: https://codeload.github.com/cure53/DOMPurify/tar.gz/3.3.1
+fetched_date: 2026-08-25
+subpaths: [docs README* LICENSE*]

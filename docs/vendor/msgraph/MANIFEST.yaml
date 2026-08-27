@@ -1,0 +1,16 @@
+name: msgraph
+source_repo: https://github.com/microsoftgraph/microsoft-graph-docs-contrib
+source_ref: main
+fetched_url: https://codeload.github.com/microsoftgraph/microsoft-graph-docs-contrib/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [api-reference/v1.0 concepts]
+note: >
+  Repo is huge (~1.3 GB, mostly api-reference/beta which was skipped
+  entirely). Vendored the full api-reference/v1.0 tree (api/ + resources/ +
+  overview docs, ~31.7 MB per the GitHub tree API) rather than hand-picking
+  mail/calendar/task pages by filename glob, since the whole v1.0 reference
+  fits well inside the acceptable size budget and per-topic filtering would
+  have meant guessing which pages an offline Claude might need. Also vendored
+  the full concepts/ directory (~67 MB) rather than filtering to
+  mail/calendar/outlook/todo topics for the same reason. Result: 221 MB,
+  no beta docs, no changelog/redirects/templates.

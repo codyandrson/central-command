@@ -1,0 +1,303 @@
+:description: How to install Neo4j on Debian, and Debian-based distributions like Ubuntu, using the Neo4j Debian package.
+[[debian]]
+= Debian-based distributions (.deb)
+
+You can install Neo4j on Debian, and Debian-based distributions like Ubuntu, using the Neo4j Debian package.
+
+[[debian-prerequisites]]
+== Java prerequisites
+
+Neo4j {neo4j-version} requires the Java 17 runtime.
+From version 5.14 onwards, Neo4j also supports Java 21.
+
+[[debian-prerequisites-notopenjdk]]
+=== Oracle JDK, Zulu JDK, or Corretto JDK
+
+If you wish to use a non-default JDK, it must be installed before starting the Neo4j installation.
+Otherwise, your package manager will install the default Java distribution for your operating system, usually OpenJDK.
+
+Download and installation instructions can be found on the manufacturer's website:
+
+* https://www.oracle.com/java/technologies/downloads/[Oracle JDK]
+* https://www.azul.com/downloads/?package=jdk[Zulu JDK]
+* https://aws.amazon.com/corretto/[Amazon Corretto JDK]
+
+
+[[multiple-java-versions]]
+=== Dealing with multiple installed Java versions
+
+You must configure your default Java version to point to Java 17 or 21, or Neo4j {neo4j-version-exact} will be unable to start.
+Do so with the `update-java-alternatives` command.
+
+. List all your installed versions of Java with `update-java-alternatives --list`.
++
+Your results may vary, but this is an example of the output:
++
+[queryresult]
+----
+java-1.11.0-openjdk-amd64 1111 /usr/lib/jvm/java-1.11.0-openjdk-amd64
+java-1.17.0-openjdk-amd64 1711 /usr/lib/jvm/java-1.17.0-openjdk-amd64
+java-1.21.0-openjdk-amd64 2111 /usr/lib/jvm/java-1.21.0-openjdk-amd64
+----
+
+. Identify your Java 21 version, in this case, it is `java-1.21.0-openjdk-amd64`.
+
+. Set it as the default by replacing `<java21name>` with its name:
++
+[source, shell]
+----
+sudo update-java-alternatives --jre --set <java21name>
+----
+
+. Confirm which version of Java is the default using `java -version`.
+
+[[debian-installation]]
+== Installation
+
+To install Neo4j using the Debian package manager `apt`, you need to add the Neo4j repository to your system's list of package sources, and then install the desired Neo4j package.
+The Debian package is available from https://debian.neo4j.com.
+
+[[debian-add-repository]]
+=== Add the repository
+
+Run the following commands as a sudo user to add the Neo4j repository to the package manager:
+
+. Create the keyrings directory for the Neo4j GPG key if it does not already exist:
++
+[source,bash]
+----
+sudo mkdir -p /etc/apt/keyrings
+----
+
+. Download and install the Neo4j GPG key:
++
+[source,bash]
+----
+wget -O - https://debian.neo4j.com/neotechnology.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/neotechnology.gpg > /dev/null
+----
+. Ensure the key file is world-readable:
++
+[source,bash]
+----
+sudo chmod a+r /etc/apt/keyrings/neotechnology.gpg
+----
+. Add the Neo4j APT repository:
++
+[source,bash]
+----
+echo 'deb [signed-by=/etc/apt/keyrings/neotechnology.gpg] https://debian.neo4j.com stable 5' | sudo tee -a /etc/apt/sources.list.d/neo4j.list > /dev/null
+----
+. Update package lists:
++
+[source,bash]
+----
+sudo apt-get update
+----
+. Once the repository has been added to `apt`, you can verify which Neo4j versions are available by running:
++
+[source, shell]
+----
+apt list -a neo4j
+----
++
+[NOTE]
+====
+In Ubuntu server installations, you also need to make sure that the `universe` repository is enabled.
+If the `universe` repository is not present, the Neo4j installation will fail with the error `Depends: daemon but it is not installable`.
+
+This can be fixed by running the command:
+[source, shell,subs="attributes"]
+----
+sudo add-apt-repository universe
+----
+====
+
+
+[[debian-install]]
+=== Install Neo4j
+
+To install Neo4j, run one of the following commands depending on which version you want to install:
+
+* Neo4j Community Edition:
++
+[source, shell, subs="attributes"]
+----
+sudo apt-get install neo4j=1:{neo4j-version-exact}
+----
+
+* Neo4j Enterprise Edition:
++
+[source, shell, subs="attributes"]
+----
+sudo apt-get install neo4j-enterprise=1:{neo4j-version-exact}
+----
+
+Note that the version includes an epoch version component (`1:`), following the https://www.debian.org/doc/debian-policy/[Debian policy on versioning].
+
+When installing Neo4j Enterprise Edition, you will be prompted to accept the license agreement.
+Once the license agreement is accepted installation begins.
+Your answer to the license agreement prompt will be remembered for future installations on the same system.
+
+To forget the stored answer, and trigger the license agreement prompt on subsequent installation, use `debconf-communicate` to purge the stored answer:
+
+[source, shell]
+----
+echo purge | sudo debconf-communicate neo4j-enterprise
+----
+
+[role=enterprise-edition]
+==== Non-interactive installation of Neo4j Enterprise Edition
+
+For Neo4j Enterprise Edition, the license agreement is presented in an interactive prompt.
+If you require non-interactive installation of Neo4j Enterprise Edition, you can indicate that you have read and accepted the license agreement using `debconf-set-selections`:
+
+.For Neo4j 5.3 and later
+[source, shell]
+----
+echo "neo4j-enterprise neo4j/accept-license select Accept commercial license" | sudo debconf-set-selections
+----
+
+.For Neo4j 5.2 and earlier
+[source, shell]
+----
+echo "neo4j-enterprise neo4j/question select I ACCEPT" | sudo debconf-set-selections
+echo "neo4j-enterprise neo4j/license note" | sudo debconf-set-selections
+----
+
+[[debian-install-newer-java]]
+=== Verify the Java version
+
+On newer Debian or Ubuntu operating systems, Java 25 is available by default, and `apt` may install OpenJDK 25, *even if you have Java 21 installed*.
+
+If this happens, Neo4j will return the following warning on start:
+[output]
+----
+WARNING! You are using an unsupported Java runtime.
+* Please use Oracle(R) Java(TM) 25, OpenJDK(TM) 25 to run Neo4j.
+* Please see https://neo4j.com/docs/ for Neo4j installation instructions.
+----
+
+To fix this, you can install Java 21 manually and then either uninstall OpenJDK 25 or set Java 21 as the default.
+
+. Run the following command to install OpenJDK 21 manually:
++
+[source, shell, subs="attributes"]
+----
+sudo apt install openjdk-21-jre
+----
++
+For other distributions of Java, see
+xref:installation/linux/debian.adoc#debian-prerequisites-notopenjdk[Java prerequisites].
+
+. Choose one of the following options to set it as the default:
++
+* Uninstall OpenJDK 25:
++
+[source, shell, subs="attributes"]
+----
+sudo apt remove openjdk-25-jre-headless
+----
+
+* If you want to keep OpenJDK 25 installed, set Java 21 as default by following the instructions in
+xref:installation/linux/debian.adoc#multiple-java-versions[Dealing with multiple installed Java versions].
+
+
+[[debian-offline-installation]]
+== Offline installation
+
+If you cannot reach `https://debian.neo4j.com`, perhaps due to a firewall, you need to obtain Neo4j via an alternative machine that has the relevant access, and then move the package manually.
+
+[NOTE]
+====
+It is important to note that using this method will mean that the offline machine will not receive the dependencies that are normally downloaded and installed automatically when using `apt` for installing Neo4j; xref:tools/cypher-shell.adoc[Cypher Shell] and Java (if not installed already):
+
+* The Cypher Shell package can be downloaded from link:{neo4j-download-center-uri}[Neo4j Deployment Center].
+* For information on supported versions of Java, see xref:installation/requirements.adoc[System requirements].
+====
+
+. Run the following to download the required Debian software package:
+** Neo4j Enterprise Edition:
++
+[source, shell, subs="attributes"]
+----
+curl -O https://dist.neo4j.org/deb/neo4j-enterprise_{neo4j-version-exact}_all.deb
+----
++
+[NOTE]
+====
+To list all files that the Debian software package (`.deb` file) installs:
+[source, shell, subs="attributes"]
+----
+dpkg --contents neo4j_{neo4j-version-exact}_all.deb
+----
+====
+** Neo4j Community Edition:
++
+[source, shell, subs="attributes"]
+----
+curl -O https://dist.neo4j.org/deb/neo4j_{neo4j-version-exact}_all.deb
+----
+
+. Manually move the downloaded Debian package to the offline machine.
+. Run the following on the offline machine to install Neo4j:
++
+[source, shell]
+----
+sudo dpkg -i <deb file name>
+----
+
+
+[[debian-file-locations]]
+== File locations
+
+File locations for all Neo4j packages are documented xref:configuration/file-locations.adoc[_here_].
+
+
+[[debian-operation]]
+== Operation
+
+Most Neo4j configuration goes into xref:configuration/file-locations.adoc[_neo4j.conf_].
+
+For operating systems using `systemd`, some package-specific options are set in _neo4j.service_ and can be edited using `systemctl edit neo4j.service`.
+
+For operating systems that are not using `systemd`, some package-specific options are set in _/etc/default/neo4j_.
+
+[options="header"]
+|===
+| Environment variable     | Default value | Details
+| _NEO4J_SHUTDOWN_TIMEOUT_ | _120_           | Timeout in seconds when waiting for Neo4j to stop. If it takes longer than this then the shutdown is considered to have failed. This may need to be increased if the system serves long-running transactions.
+| _NEO4J_ULIMIT_NOFILE_    | _60000_         | Maximum number of file handles that can be opened by the Neo4j process.
+|===
+
+[[debian-service-start-automatically]]
+== Starting the service automatically on system start
+
+On Debian-based distributions, run the following command to ensure that Neo4j starts automatically at boot time:
+[source, shell]
+----
+sudo systemctl enable neo4j
+----
+
+[NOTE]
+====
+Before starting up the database for the first time, it is recommended to use the `set-initial-password` command of `neo4j-admin` to define the password for the native user `neo4j`.
+
+If the password is not set explicitly using this method, it will be set to the default password `neo4j`.
+In that case, you will be prompted to change the default password at first login.
+
+For more information, see xref:configuration/set-initial-password.adoc[].
+====
+
+For more information on operating the Neo4j system service, see xref:installation/linux/systemd.adoc[Neo4j system service].
+
+== Uninstall Neo4j
+
+Follow these steps to uninstall Neo4j:
+
+. (Optional) Create a xref:/backup-restore/index.adoc[backup] to avoid losing your data.
+. Uninstall Neo4j:
++
+[source, shell]
+---
+sudo apt remove neo4j
+---

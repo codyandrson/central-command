@@ -1,0 +1,49 @@
+[[cypher-intro]]
+ifdef::backend-pdf[]
+= Neo4j Cypher {page-version} Manual
+endif::[]
+ifndef::backend-pdf[]
+= Introduction
+:description: This section provides an introduction to the Cypher query language.
+endif::[]
+
+Welcome to the Neo4j Cypher Manual.
+
+Cypher is Neo4j’s declarative query language, allowing users to unlock the full potential of property graph databases.
+
+[NOTE]
+====
+This manual covers Cypher 5 -- the default language for Neo4j databases.
+As of Neo4j 2025.06, Cypher 5 is in a frozen state; no new features will be added to it (though performance improvements and bug fixes may still be made).
+From Neo4j 2025.06 onward, all new Cypher features will be exclusively added to Cypher 25.
+For more details, see:
+
+* xref:queries/select-version.adoc[Select Cypher version]
+* link:https://neo4j.com/docs/cypher-manual/25/introduction/[Cypher 25 Manual]
+* link:https://neo4j.com/docs/cypher-manual/25/deprecations-additions-removals-compatibility/[Additions, deprecations, removals, and compatibility]
+====
+
+The Cypher Manual aims to be as instructive as possible to readers from a variety of backgrounds and professions, such as developers, administrators, and academic researchers.
+
+If you are new to Cypher and Neo4j, you can visit the link:{neo4j-docs-base-uri}/getting-started/cypher/[Getting Started Guide -> Cypher] chapter. 
+Additionally, https://graphacademy.neo4j.com/[Neo4j GraphAcademy] has a variety of free courses tailored for all levels of experience.
+
+For a reference of all available Cypher features, see the link:{neo4j-docs-base-uri}/cypher-cheat-sheet/5/all/[Cypher Cheat Sheet].
+
+For a downloadable PDF version of the Cypher Manual, visit the link:{neo4j-docs-base-uri}/reference/docs-archive/#_cypher_query_language[Neo4j documentation archive].
+
+This introduction will cover the following topics:
+
+* xref:introduction/cypher-overview.adoc[]
+* xref:introduction/cypher-neo4j.adoc[]
+* xref:introduction/cypher-aura.adoc[]
+
+
+ifndef::backend-pdf[]
+License: link:{common-license-page-uri}[Creative Commons 4.0]
+endif::[]
+
+//License page should be added at the end when generating pdf. (neo4j-manual-modeling-antora)
+ifdef::backend-pdf[]
+License: Creative Commons 4.0
+endif::[]

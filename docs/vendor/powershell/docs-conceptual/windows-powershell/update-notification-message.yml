@@ -1,0 +1,76 @@
+### YamlMime:FAQ
+metadata:
+  description: >-
+    This article explains the intent of the update notification message in Windows PowerShell.
+  ms.date: 08/18/2026
+  ms.topic: faq
+  title: Windows PowerShell update message FAQ
+
+title: Windows PowerShell update message FAQ
+summary: |
+  When you start Windows PowerShell you see a message that tells you to install the latest version
+  of PowerShell along with a URL.
+
+  ![Update notification message](./media/update-notification-message/windows-powershell-update-notice.png)
+
+  This article explains the intent of this message and provides answers to frequently asked
+  questions.
+
+sections:
+  - name: Frequently asked questions
+    questions:
+      - question: Why am I seeing this message?
+        answer: |
+          Windows PowerShell 5.1 displays this message at startup to make you aware that there is a
+          newer version of PowerShell available. You will see this message every time you start
+          Windows PowerShell (`powershell.exe`). You won't see this message when you start
+          PowerShell 7 (`pwsh.exe`).
+
+      - question: I opened the URL but it didn't install an update. How do I install PowerShell 7?
+        answer: |
+          The `aka.ms` link shown in the Windows PowerShell console takes you to this page. To
+          install the latest version of PowerShell 7, follow the instructions in the
+          [**Install PowerShell on Windows**](../install/install-powershell-on-windows.md) article.
+
+      - question: But I installed PowerShell 7, why am I still seeing this message?
+        answer: |
+          Because you ran Windows PowerShell 5.1 (`powershell.exe`) instead of PowerShell 7
+          (`pwsh.exe`). PowerShell 7 and Windows PowerShell 5.1 are separate products. PowerShell 7
+          doesn't replace Windows PowerShell 5.1. PowerShell 7 installs side-by-side. You can run
+          either version.
+
+      - question: How do I run PowerShell 7?
+        answer: |
+          For instructions, see the _Start PowerShell 7_ section of the
+          [Install PowerShell on Windows](../install/install-powershell-on-windows.md#start-powershell-7)
+          article.
+
+      - question: Why would I want to install PowerShell 7?
+        answer: |
+          PowerShell 7 is faster, more secure, and is available for Windows, Linux and macOS.
+          PowerShell 7 is actively developed and supported. Windows PowerShell 5.1 is no longer
+          being developed. For more information, see the
+          [Differences between Windows PowerShell 5.1 and PowerShell 7](../whats-new/differences-from-windows-powershell.md)
+          article.
+
+      - question: Do I need to install PowerShell 7?
+        answer: |
+          No, you don't need to install PowerShell 7 unless you have a specific requirement for the
+          features it provides.
+
+      - question: My install of Windows is up-to-date. Why am I still getting this message?
+        answer: |
+          This message appears every time you start Windows PowerShell 5.1. It doesn't mean that
+          Windows PowerShell 5.1 is not up-to-date.
+
+      - question: How does Windows PowerShell 5.1 get updated?
+        answer: |
+          Microsoft only publishes security updates for Windows PowerShell 5.1. It's important to
+          understand that Windows PowerShell 5.1 is no longer being developed. Windows PowerShell
+          5.1 is a built-in component of Windows. All updates are managed through standard Windows
+          update channels.
+
+      - question: Can I disable the message?
+        answer: |
+          No. There is no way to remove the message. However, you can avoid all startup messages
+          by running `powershell.exe -nologo`.

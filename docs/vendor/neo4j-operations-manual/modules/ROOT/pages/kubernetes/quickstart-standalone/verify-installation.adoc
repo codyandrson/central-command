@@ -1,0 +1,173 @@
+:description: Verify the Neo4j standalone installation.
+[[si-verify-installation]]
+= Verify the installation
+
+[.tabbed-example]
+=====
+[.include-with-cloud-environments]
+======
+. Check that the `statefulset` is OK.
++
+[source, shell]
+----
+kubectl get statefulsets
+----
++
+[source, role=noheader]
+----
+NAME               READY   AGE
+my-neo4j-release   1/1     2m11s
+----
++
+. Check that the pod is `Running`:
++
+[source, shell]
+----
+kubectl get pods
+----
++
+[source, role=noheader]
+----
+NAME                 READY   STATUS    RESTARTS   AGE
+my-neo4j-release-0   1/1     Running   0          16m
+----
++
+. Check that the pod logs look OK:
++
+[source, shell]
+----
+kubectl exec my-neo4j-release-0 -- tail -n50 /logs/neo4j.log
+----
++
+[source, role=noheader]
+----
+2022-10-26 14:19:51.728+0000 INFO  Command expansion is explicitly enabled for configuration
+2022-10-26 14:19:51.733+0000 WARN  Unrecognized setting. No declared setting with name: server.panic.shutdown_on_panic.
+2022-10-26 14:19:51.749+0000 INFO  Starting...
+2022-10-26 14:19:53.062+0000 INFO  This instance is ServerId{cb9f2f3c} (cb9f2f3c-cd70-40b1-ac8e-13d9c4d26173)
+2022-10-26 14:19:54.970+0000 INFO  ======== Neo4j 5.1.0 ========
+2022-10-26 14:19:59.528+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2022-10-26 14:20:01.523+0000 INFO  Remote interface available at http://localhost:7474/
+2022-10-26 14:20:01.530+0000 INFO  id: EF772BAFBDCD3C4921D00A5707C88D6EDE514915DBCC7134E8704AFA15DC19C8
+2022-10-26 14:20:01.530+0000 INFO  name: system
+2022-10-26 14:20:01.531+0000 INFO  creationDate: 2022-10-26T14:19:56.631Z
+2022-10-26 14:20:01.531+0000 INFO  Started.
+----
++
+. Check that the services look OK:
++
+[source, shell]
+----
+kubectl get services
+----
++
+[source, role=noheader]
+----
+NAME                                         TYPE           CLUSTER-IP    EXTERNAL-IP      PORT(S)                         AGE
+service/my-neo4j-release-lb-neo4j            LoadBalancer   10.36.5.34    34.105.179.172   7474:30288/TCP,7687:30584/TCP   14m
+service/kubernetes                           ClusterIP      10.36.0.1     <none>           443/TCP                         22h
+service/my-neo4j-release                     ClusterIP      10.36.11.18   <none>           7687/TCP,7474/TCP               14m
+service/my-neo4j-release-admin               ClusterIP      10.36.3.238   <none>           6362/TCP,7687/TCP,7474/TCP      14m
+----
++
+. Use the external IP of the LoadBalancer to access Neo4j from an application outside the Kubernetes cluster.
+For more information, see xref:kubernetes/accessing-neo4j.adoc#_applications_accessing_neo4j_from_outside_kubernetes[Applications accessing Neo4j from outside Kubernetes].
+.. In a web browser, open the Neo4j Browser at _\http://EXTERNAL_IP:7474/browser_.
+.. Use the automatically-generated password (as printed in the output of the `helm install` command) or the one you have configured in the _my-neo4j.values.yaml_ file.
+======
+
+[.include-with-docker-desktop]
+======
+. Check that `statefulset` is OK.
++
+[source, shell]
+----
+kubectl get statefulsets
+----
++
+[source, role=noheader]
+----
+NAME               READY   AGE
+my-neo4j-release   1/1     5m11s
+----
++
+. Check that the PVC is OK (the `STATUS` must be `Bound`):
++
+[source, shell]
+----
+kubectl get pvc
+----
++
+[source, role=noheader]
+----
+NAME                       STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+data-my-neo4j-release-0    Bound    pvc-c35b7abd-1778-4c15-ada5-98912722b7c5   100Gi      RWO            premium-rwo    7m57s
+----
++
+. Check that the pod is `READY`:
++
+[source, shell]
+----
+kubectl get pods
+----
++
+[source, role=noheader]
+----
+NAME                  READY   STATUS       RESTARTS   AGE
+my-neo4j-release-0   1/1     Running      0          5m53s
+----
++
+. Check that the pod logs look OK:
++
+[source, shell]
+----
+kubectl exec my-neo4j-release-0 -- tail -n50 /logs/neo4j.log
+----
++
+[source, subs="attributes", role=noheader]
+----
+Changed password for user 'neo4j'.
+Directories in use:
+  home:         /var/lib/neo4j
+  config:       /config/
+  logs:         /data/logs
+  plugins:      /var/lib/neo4j/plugins
+  import:       /var/lib/neo4j/import
+  data:         /var/lib/neo4j/data
+  certificates: /var/lib/neo4j/certificates
+  run:          /var/lib/neo4j/run
+Starting Neo4j.
+2021-06-02 17:38:27.791+0000 INFO  Command expansion is explicitly enabled for configuration
+2021-06-02 17:38:27.819+0000 INFO  Starting...
+2021-06-02 17:38:31.195+0000 INFO  ======== Neo4j 5.1.0 ========
+2021-06-02 17:38:34.168+0000 INFO  Initializing system graph model for component 'security-users' with version -1 and status UNINITIALIZED
+2021-06-02 17:38:34.188+0000 INFO  Setting up initial user from `auth.ini` file: neo4j
+2021-06-02 17:38:34.190+0000 INFO  Creating new user 'neo4j' (passwordChangeRequired=false, suspended=false)
+2021-06-02 17:38:34.205+0000 INFO  Setting version for 'security-users' to 2
+2021-06-02 17:38:34.214+0000 INFO  After initialization of system graph model component 'security-users' have version 2 and status CURRENT
+2021-06-02 17:38:34.223+0000 INFO  Performing postInitialization step for component 'security-users' with version 2 and status CURRENT
+2021-06-02 17:38:34.561+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2021-06-02 17:38:36.910+0000 INFO  Remote interface available at http://localhost:7474/
+2021-06-02 17:38:36.912+0000 INFO  Started.
+----
++
+. Check that the services look OK:
++
+[source, shell]
+----
+kubectl get services
+----
++
+[source, role=noheader]
+----
+NAME                     TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                                        AGE
+kubernetes               ClusterIP      10.96.0.1        <none>        443/TCP                                        3d1h
+my-neo4j-release         ClusterIP      10.103.103.142   <none>        7687/TCP,7474/TCP,7473/TCP                     2d8h
+my-neo4j-release-admin   ClusterIP      10.99.11.122     <none>        6362/TCP,7687/TCP,7474/TCP,7473/TCP            2d8h
+my-neo4j-release-neo4j   LoadBalancer   10.110.138.165   localhost     7474:31237/TCP,7473:32026/TCP,7687:32169/TCP   2d3h
+----
+. In a web browser, open the Neo4j Browser at _\http://localhost:7474/_.
+. Use the automatically-generated password (as printed in the output of the `helm install` command) or the one you have set up with the `helm install` command.
+
+======
+=====

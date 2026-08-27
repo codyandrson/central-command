@@ -1,0 +1,6 @@
+name: victorialogs
+source_repo: https://github.com/VictoriaMetrics/VictoriaLogs
+source_ref: v1.52.0
+fetched_url: https://codeload.github.com/VictoriaMetrics/VictoriaLogs/tar.gz/v1.52.0
+fetched_date: 2026-08-25
+subpaths: [docs/victorialogs README.md LICENSE]

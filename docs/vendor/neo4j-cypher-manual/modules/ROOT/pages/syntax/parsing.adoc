@@ -1,0 +1,85 @@
+:description: This section describes whitespace in Cypher
+
+[[parsing]]
+= Parsing
+
+This page provides a general overview of how Cypher parses an input `STRING`.
+
+The Cypher parser takes an arbitrary input `STRING`.
+This page details the general rules on which characters are considered valid input.
+
+== Using unicodes in Cypher
+
+Unicodes can generally be escaped as `\uxxx`.
+For example, the below query uses the Unicode `u00B0` to search for any recipe descriptions containing the degree symbol, `º`:
+
+.Using Unicodes in `STRING` matching
+[source, cypher]
+----
+MATCH (r:Recipe)
+WHERE r.description CONTAINS "\u00B0"
+RETURN r
+----
+
+Additional documentation on escaping rules for `STRING` literals, names and regular expressions can be found here:
+
+* xref::values-and-types/boolean-numeric-string.adoc#string-literal-escape-sequences[String literal escape sequences]
+* xref::syntax/naming.adoc#symbolic-names-escaping-rules[Using special characters in names]
+* xref:expressions/predicates/string-operators.adoc#regular-expressions[Regular expressions]
+
+The Unicode version used by Cypher depends on the running JVM version.
+
+[options="header", cols="1,2,3"]
+|===
+| Neo4j version	| JVM compliancy                                   | Unicode version
+| 3.x           | Java SE 8 Platform Specification                 | Unicode 6.2
+| 4.x           | Java SE 11 Platform Specification                | Unicode 10.0
+| 5.x           | Java SE 17 Platform Specification                | Unicode 13.0
+| 5.14          | Java SE 17 and Java SE 21 Platform Specification | Unicode 13.0 and Unicode 15.0
+|===
+
+[[cypher-whitespaces]]
+== Supported whitespace
+
+Whitespace can be used as a separator between keywords and has no semantic meaning.
+The following unicode characters are considered as whitespace:
+
+[options="header", cols="1,2"]
+|===
+| Description                       | List of included Unicode characters
+| Unicode general category Zp       | `\u2029`
+| Unicode general category Zs       | `\u0020` (space), `\u1680`, `\u2000-200A`, `\u202F`, `\u205F`, `\u3000`
+| Unicode general category class Zl | `\u2028`
+| Horizontal tabulation             | `\t`, `\u0009`
+| Line feed                         | `\n`, `\u000A`
+| Vertical tabulation               | `\u000B`
+| Form feed                         | `\f`, `\u000C`
+| Carriage return                   | `\r`, `\u000D`
+| File separator                    | `\u001C`
+| Group separator                   | `\u001D`
+| Record separator                  | `\u001E`
+| Unit separator                    | `\u001F`
+|===
+
+It is possible to have multiple whitespace characters in a row, and will have the same effect as using a single whitespace.
+
+The following example query uses vertical tabulation (`\u000B`) as whitespace between the `RETURN` keyword and the variable `m`:
+
+[source, syntax]
+----
+MATCH (m) RETURN\u000Bm;
+----
+
+[[cypher-newlines]]
+== Supported newline characters
+
+A newline character identifies a new line in the query and is also considered whitespace.
+The supported newline characters in Cypher are:
+
+[options="header", cols="1,2"]
+|===
+| Description                       | List of included Unicode characters
+| Line feed                         | `\n`, `\u000A`
+| Carriage return                   | `\r`, `\u000D`
+| Carriage return + line feed       | `\r\n`, `\u000D\u000A`
+|===

@@ -1,0 +1,6 @@
+name: codemirror/packages/language
+source_repo: https://github.com/codemirror/language
+source_ref: 6.12.1
+fetched_url: https://codeload.github.com/codemirror/language/tar.gz/6.12.1
+fetched_date: 2026-08-25
+subpaths: [src README.md CHANGELOG.md LICENSE]

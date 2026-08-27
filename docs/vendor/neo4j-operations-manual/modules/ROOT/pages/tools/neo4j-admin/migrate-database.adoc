@@ -1,0 +1,217 @@
+:description: This chapter describes the `neo4j-admin database migrate` command.
+:page-role: not-on-aura
+[[neo4j-admin-migrate]]
+= Migrate a database
+
+You can use the `neo4j-admin database migrate` command to migrate a Neo4j database from one store format to another or to a later `MAJOR` version of the same format.
+
+A store format defines how the data of a database is stored on the file system.
+
+As of Neo4j 5, the store format of a database is versioned with the `MAJOR.MINOR` scheme, independent of Neo4j versioning.
+An upgrade to the latest `MINOR` format version is an automatic operation performed on database startup.
+A migration to a higher `MAJOR` format version or another format is a manual action performed with the `migrate` command.
+
+The store format for new databases can be set with the xref:configuration/configuration-settings.adoc#config_db.format[`db.format`] configuration setting.
+
+The table below shows supported migration paths between different Neo4j store formats.
+However, the `standard` and `high_limit` store formats are deprecated starting with Neo4j 5.23, meaning that migration to these formats is not recommended from this version onward.
+
+[[supported-migration-paths]]
+.Migration paths between Neo4j store formats
+[options="noheader"]
+|===
+.2+.>|*Store format*              4+^|*Migration paths*
+                                   ^|To `block`  ^|To `aligned`  ^|To `high_limit`  ^|To `standard`
+
+|`block` footnote:1[The `block` format is the default in Enterprise Edition starting from Neo4j 5.22.]     |  |{check-mark} Not recommended  |{check-mark} Not recommended |
+
+|`aligned` footnote:2[The `aligned` format is the default in Community Edition. In Enterprise Edition, it was default before Neo4j 5.22.]     ^|{check-mark}                |                             |{check-mark} Not recommended |
+
+|`high_limit` footnote:3[label:enterprise[Enterprise Edition] The `high_limit` format is deprecated in 5.23.]  ^|{check-mark} |  |  |
+
+|`standard` footnote:4[label:community[Community Edition] The `standard` format is deprecated in 5.23.]    ^|{check-mark} ^|{check-mark} |{check-mark} Not recommended |
+|===
+
+Before migrating from `block` to the `aligned` format, you have to ensure that your graph fits in the `aligned` since the `block` format has higher limits.
+For details, see xref:database-internals/store-formats.adoc#store-formats-entity-limits[Database internals and transactional behavior -> Store formats].
+
+== Syntax
+
+The `neo4j-admin database  migrate` has the following syntax:
+
+----
+neo4j-admin database migrate [-h] [--expand-commands]
+                             [--force-btree-indexes-to-range]
+                             [--verbose]
+                             [--additional-config=<file>] [--pagecache=<size>]
+                             [--to-format=standard|high_limit|aligned|block] <database>
+----
+
+[NOTE]
+====
+The `neo4j-admin database migrate` command is run only on a stopped database.
+====
+
+=== Parameters
+
+.`neo4j-admin database migrate` parameters
+[options="header", cols="1m,3a"]
+|===
+| Parameter
+| Description
+
+|<database>
+|Name of the database to migrate. Can contain * and ? for globbing. Note that * and ? have special meaning in some shells and might need to be escaped or used with quotes.
+|===
+
+=== Options
+
+The `neo4j-admin database migrate` command has the following options:
+
+.`neo4j-admin database migrate` options
+[options="header", cols="5m,6a"]
+|===
+| Option
+| Description
+
+|--additional-config=<file>footnote:[See xref:tools/neo4j-admin/index.adoc#_configuration[Tools -> Configuration] for details.]
+|Configuration file with additional configuration.
+
+|--expand-commands
+|Allow command expansion in config value evaluation.
+
+|--force-btree-indexes-to-range
+|Special option for automatically turning all BTREE indexes/constraints into RANGE. Be aware that RANGE indexes are not always the optimal replacement of BTREEs and performance may be affected while the new indexes are populated.
+See the Neo4j v5 migration guide online for more information.
+The newly created indexes will be populated in the background on the first database start up following the migration and users should monitor the successful completion of that process.
+[NOTE]
+BTREE indexes are not supported in Neo4j 5 and the `neo4j-admin database migrate` command will remove all BTREE indexes and BTREE index-backed constraints.
+It is recommended to create valid replacements before migrating the database.
+For more information, see link:https://neo4j.com/docs/upgrade-migration-guide/current/version-5/migration/planning/#_prepare_indexes[[Upgrade and Migration Guide -> Prepare indexes].
+
+|-h, --help
+|Show this help message and exit.
+
+|--pagecache=<size>
+|The size of the page cache to use for the migration process. The general rule is that values up to the size of the database proportionally increase performance.
+
+|--to-format=standard\|high_limit\|aligned\|block
+|Name of the format to migrate the store to.
+If the format is specified, the target database is migrated to the latest known combination of `MAJOR` and `MINOR` versions of the specified format.
+If not specified, the tool migrates the target database to the latest known combination of `MAJOR` and `MINOR` versions of the current format.
+
+|--verbose
+|Enable verbose output.
+|===
+
+[NOTE]
+====
+The block format is introduced in Neo4j 5.14 and from Neo4j 5.22, is the default format for all newly-created databases in Enterprise Edition as long as they do not have the xref:configuration/configuration-settings.adoc#config_db.format[`db.format`] setting specified.
+For more information on the block format, see xref:database-internals/store-formats.adoc[Store formats].
+====
+
+== Example
+
+The following example migrates the `movies` database to the latest known combination of `MAJOR` and `MINOR` versions of the `high_limit` format:
+
+[source, shell, subs="attributes+"]
+----
+bin/neo4j-admin database migrate --to-format=high_limit movies
+----
+
+.Example output
+[source, shell, subs="attributes+"]
+----
+2022-11-10 12:55:35.542+0000 INFO  [o.n.c.d.MigrateStoreCommand] Starting migration for database 'movies'
+2022-11-10 12:55:36.061+0000 INFO  [o.n.k.i.s.StoreMigrator] 'record-aligned-1.1' has been identified as the current version of the store
+2022-11-10 12:55:36.061+0000 INFO  [o.n.k.i.s.StoreMigrator] 'record-high_limit-1.1' has been identified as the target version of the store migration
+2022-11-10 12:55:36.065+0000 INFO  [o.n.k.i.s.StoreMigrator] Starting migration of database
+2022-11-10 12:55:36.154+0000 INFO  [o.n.k.i.s.StoreMigrator] Migrating Store files (1/7):
+2022-11-10 12:55:36.828+0000 INFO  [o.n.k.i.s.f.RecordFormatSelector] Selected RecordFormat:HighLimitV5_0[high_limit-1.1] record format from store $NEO4J_HOME/data/databases/movies/migrate
+2022-11-10 12:55:36.828+0000 INFO  [o.n.k.i.s.f.RecordFormatSelector] Selected format from the store files: RecordFormat:HighLimitV5_0[high_limit-1.1]
+2022-11-10 12:55:37.020+0000 INFO  [o.n.i.b.ImportLogic] Import starting
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   10% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   20% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   30% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   40% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   50% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   60% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   70% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   80% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   90% completed
+2022-11-10 12:55:37.924+0000 INFO  [o.n.k.i.s.StoreMigrator]   100% completed
+2022-11-10 12:55:37.925+0000 INFO  [o.n.i.b.ImportLogic] Import completed successfully, took 903ms. Imported:
+  171 nodes
+  253 relationships
+  564 properties
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator] Migrating text-1.0 (2/7):
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   10% completed
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   20% completed
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   30% completed
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   40% completed
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   50% completed
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   60% completed
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   70% completed
+2022-11-10 12:55:38.515+0000 INFO  [o.n.k.i.s.StoreMigrator]   80% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   90% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   100% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator] Migrating range-1.0 indexes (3/7):
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   10% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   20% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   30% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   40% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   50% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   60% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   70% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   80% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   90% completed
+2022-11-10 12:55:38.516+0000 INFO  [o.n.k.i.s.StoreMigrator]   100% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator] Migrating Fulltext indexes (4/7):
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   10% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   20% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   30% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   40% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   50% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   60% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   70% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   80% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   90% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   100% completed
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator] Migrating point-1.0 indexes (5/7):
+2022-11-10 12:55:38.517+0000 INFO  [o.n.k.i.s.StoreMigrator]   10% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   20% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   30% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   40% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   50% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   60% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   70% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   80% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   90% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   100% completed
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator] Migrating Token indexes (6/7):
+2022-11-10 12:55:38.518+0000 INFO  [o.n.k.i.s.StoreMigrator]   10% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   20% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   30% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   40% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   50% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   60% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   70% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   80% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   90% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   100% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator] Migrating text-2.0 (7/7):
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   10% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   20% completed
+2022-11-10 12:55:38.519+0000 INFO  [o.n.k.i.s.StoreMigrator]   30% completed
+2022-11-10 12:55:38.520+0000 INFO  [o.n.k.i.s.StoreMigrator]   40% completed
+2022-11-10 12:55:38.520+0000 INFO  [o.n.k.i.s.StoreMigrator]   50% completed
+2022-11-10 12:55:38.520+0000 INFO  [o.n.k.i.s.StoreMigrator]   60% completed
+2022-11-10 12:55:38.520+0000 INFO  [o.n.k.i.s.StoreMigrator]   70% completed
+2022-11-10 12:55:38.520+0000 INFO  [o.n.k.i.s.StoreMigrator]   80% completed
+2022-11-10 12:55:38.520+0000 INFO  [o.n.k.i.s.StoreMigrator]   90% completed
+2022-11-10 12:55:38.520+0000 INFO  [o.n.k.i.s.StoreMigrator]   100% completed
+2022-11-10 12:55:38.628+0000 INFO  [o.n.k.i.s.StoreMigrator] Starting transaction logs migration.
+2022-11-10 12:55:38.660+0000 INFO  [o.n.k.i.s.StoreMigrator] Transaction logs migration completed.
+2022-11-10 12:55:38.696+0000 INFO  [o.n.k.i.s.StoreMigrator] Successfully finished migration of database, took 2s 631ms
+2022-11-10 12:55:38.698+0000 INFO  [o.n.c.d.MigrateStoreCommand] Database migration completed successfully
+----

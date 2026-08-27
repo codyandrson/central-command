@@ -1,0 +1,12 @@
+name: fluent-bit
+source_repo: https://github.com/fluent/fluent-bit-docs
+source_ref: master
+fetched_url: https://codeload.github.com/fluent/fluent-bit-docs/tar.gz/master
+fetched_date: 2026-08-25
+subpaths: [about administration concepts development installation local-testing monitoring pipeline stream-processing README.md SUMMARY.md]
+note: >
+  fluent-bit-docs is a GitBook source tree with no top-level docs/ dir —
+  content lives directly under topic directories (about/, administration/,
+  concepts/, etc.), listed explicitly as subpaths rather than a plain
+  "docs" default. We run fluent-bit 5.1.1; this repo is untagged/unbranched
+  per release, vendored from master (approximate, current-docs snapshot).

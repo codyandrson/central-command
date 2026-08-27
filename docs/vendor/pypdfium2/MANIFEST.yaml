@@ -1,0 +1,6 @@
+name: pypdfium2
+source_repo: https://github.com/pypdfium2-team/pypdfium2
+source_ref: 5.13.0
+fetched_url: https://codeload.github.com/pypdfium2-team/pypdfium2/tar.gz/5.13.0
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]

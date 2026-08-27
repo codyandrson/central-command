@@ -1,0 +1,286 @@
+[[introduction]]
+= Introduction
+:description: This section provides a brief overview of the Neo4j editions, versioning, Cypher language, interaction, and capabilities.
+:description: Introduction to Neo4j, ACID-compliant, property graph, community edition, enterprise edition, Neo4j Aura.
+:keywords: neo4j, edition, version, acid, cluster, node, relationship, property
+
+:semver-uri: https://semver.org/
+:aura-uri: https://neo4j.com/product/auradb/
+:bloom-uri: https://neo4j.com/bloom/
+:download-center-drivers: https://neo4j.com/deployment-center/#drivers-tab
+:download-center-desktop: https://neo4j.com/deployment-center/?desktop
+:download-center-cyphershell: https://neo4j.com/deployment-center/?cypher-shell
+:download-center-bloom: https://neo4j.com/deployment-center/?bloom
+:wiki-acid-uri: https://en.wikipedia.org/wiki/ACID
+:bolt-protocol-uri: https://neo4j-drivers.github.io/
+:github-neo4j-neo4j-java-driver: https://github.com/neo4j/neo4j-java-driver
+:github-neo4j-neo4j-javascript-driver: https://github.com/neo4j/neo4j-javascript-driver
+:github-neo4j-neo4j-dotnet-driver: https://github.com/neo4j/neo4j-dotnet-driver
+:github-neo4j-neo4j-python-driver: https://github.com/neo4j/neo4j-python-driver
+:github-neo4j-neo4j-go-driver: https://github.com/neo4j/neo4j-go-driver
+:github-spring-projects-spring-data-neo4j: https://github.com/spring-projects/spring-data-neo4j
+
+
+//Check Mark
+:check-mark: icon:check[]
+
+//Cross Mark
+:cross-mark: icon:times[]
+
+
+Neo4j is the world’s leading graph database.
+The architecture is designed for optimal management, storage, and traversal of nodes and relationships.
+The graph database takes a property graph approach, which is beneficial for both traversal performance and operations runtime.
+Neo4j offers dedicated memory management and memory-efficient operations.
+
+Neo4j is scalable and can be deployed as a standalone server or across multiple machines in a fault-tolerant cluster for production environments.
+Other features for production applications include hot backups and extensive monitoring.
+
+== Neo4j editions
+
+There are two editions of self-managed Neo4j to choose from, the Community Edition (CE) and the Enterprise Edition (EE).
+The Enterprise Edition includes all that Community Edition offers, plus extra enterprise requirements such as backups, clustering, and failover capabilities.
+
+Community Edition::
+The Community Edition is a fully functional edition of Neo4j, suitable for single-instance deployments.
+It fully supports key Neo4j features, such as ACID-compliant transactions, Cypher, and programming APIs.
+It is ideal for learning Neo4j, do-it-yourself projects, and applications in small workgroups.
+
+
+Enterprise Edition::
+The Enterprise Edition extends the functionality of Community Edition to include key features for performance and scalability, such as a clustering architecture and online backup functionality.
+Additional security features include role-based access control and LDAP support, for example, Active Directory.
+It is the choice for production systems with requirements for scale and availability, such as commercial and critical internal solutions.
+
+The following table compares the available key features in both editions:
+
+[[edition-details]]
+.Community Edition vs Enterprise Edition key features
+[cols="<60,^20,^20",frame="topbot",options="header"]
+|===
+| Feature
+| Community Edition
+| Enterprise Edition
+
+a| link:https://www.gnu.org/licenses/quick-guide-gplv3.html[Open source under GPLv3]
+|{check-mark}
+|
+
+3+^s| Native Graph
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/queries/basic/[Property graph model]
+| {check-mark}
+| {check-mark}
+
+| Native graph processing & storage
+| {check-mark}
+| {check-mark}
+
+a| xref:database-internals/store-formats.adoc#standard-format[Standard] and xref:database-internals/store-formats.adoc#aligned-format[Aligned] store format (xref:database-internals/store-formats.adoc#aligned-limits[34 Billion Nodes & Relationships]) label:deprecated[Standard is deprecated in 5.23]
+| {check-mark}
+| {check-mark}
+
+a| xref:database-internals/store-formats.adoc#high-limit-format[High_limit] (xref:database-internals/store-formats.adoc#high-format-limits[1 Quadrillion Nodes & Relationships]) label:deprecated[Deprecated in 5.23]
+|
+| {check-mark}
+
+a| xref:database-internals/store-formats.adoc#block-format[Block format] label:ga[GA from 5.16]
+|
+| {check-mark}
+
+a| link:https://neo4j.com/docs/cdc/current/[Change Data Capture (CDC)] label:new[Introduced in 5.13] label:ga[GA from 5.23]
+|
+| {check-mark}
+
+| xref:database-internals/index.adoc[ACID-compliant transactions]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/introduction/cypher-overview/[Cypher graph query language]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/planning-and-tuning/runtimes/concepts/#runtimes-slotted-runtime[Slotted Cypher runtime]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/planning-and-tuning/runtimes/concepts/#runtimes-pipelined-runtime[Pipelined Cypher runtime]
+|
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/planning-and-tuning/runtimes/concepts/#runtimes-parallel-runtime[Parallel Cypher runtime] label:new[Introduced in 5.13]
+|
+| {check-mark}
+
+| xref:monitoring/query-management.adoc[Listing and terminating running queries]
+| {check-mark}
+| {check-mark}
+
+| xref:performance/disks-ram-and-other-tips.adoc#performance-storage[High-performance caching]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/planning-and-tuning/query-tuning/[Cost-based query optimizer]
+| {check-mark}
+| {check-mark}
+
+3+^s| Clients and APIs
+
+| xref:tools/cypher-shell.adoc[Cypher Shell]
+| {check-mark}
+| {check-mark}
+
+| link:https://neo4j.com/docs/browser/visual-tour/#_cypher_editor[Neo4j Browser with syntax highlighting]
+| {check-mark}
+| {check-mark}
+
+| link:https://neo4j.com/docs/bolt/current/bolt/[Bolt Protocol]
+| {check-mark}
+| {check-mark}
+
+| Language drivers for link:https://neo4j.com/docs/dotnet-manual/current/[.NET], link:https://neo4j.com/docs/go-manual/current/[Go], link:https://neo4j.com/docs/java-manual/current/[Java], link:https://neo4j.com/docs/javascript-manual/current/[JavaScript], and link:https://neo4j.com/docs/python-manual/current/[Python] footnote:sepinstall[Must be downloaded and installed separately.]
+| {check-mark}
+| {check-mark}
+
+| High-performance native API
+| {check-mark}
+| {check-mark}
+
+a| APOC 450+ link:https://neo4j.com/docs/apoc/5/[Core Procedures and Functions]
+| {check-mark}
+| {check-mark}
+
+| Support for link:https://neo4j.com/docs/graph-data-science/current/introduction/#introduction-editions[Neo4j Graph Data Science Community Edition] footnote:sepinstall[]
+| {check-mark}
+| {check-mark}
+
+| Support for link:https://neo4j.com/docs/graph-data-science/current/installation/installation-enterprise-edition/[Neo4j Graph Data Science Enterprise Edition] footnote:sepinstall[]
+|
+| {check-mark}
+
+| Support for link:https://neo4j.com/docs/bloom-user-guide/current/[Neo4j Bloom]
+| {check-mark}
+| {check-mark}
+
+3+^s| Indexes and constraints
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/indexes/search-performance-indexes/overview/[Fast writes via native label indexes]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/indexes/search-performance-indexes/using-indexes/#composite-indexes[Composite indexes]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/indexes/semantic-indexes/full-text-indexes/[Full-text node & relationship indexes]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/indexes/semantic-indexes/vector-indexes/[Vector indexes] label:new[Introduced in Neo4j 5.13]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/constraints/managing-constraints/#create-property-uniqueness-constraints[Property uniqueness constraints]
+| {check-mark}
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/constraints/managing-constraints/#create-property-existence-constraints[Property existence constraints]
+|
+| {check-mark}
+
+| link:{neo4j-docs-base-uri}/cypher-manual/5/constraints/managing-constraints/#create-property-type-constraints[Property type constraints]
+|
+| {check-mark}
+
+|link:{neo4j-docs-base-uri}/cypher-manual/5/constraints/managing-constraints/#create-key-constraints[Node and relationship key constraints]
+|
+| {check-mark}
+
+3+^s| Security
+
+| xref:authentication-authorization/manage-privileges.adoc[Role-based access control]
+|
+| {check-mark}
+
+| xref:tutorial/access-control.adoc#auth-access-control-using-privileges[Sub-graph access control]
+|
+| {check-mark}
+
+| xref:authentication-authorization/ldap-integration.adoc[LDAP and Active Directory integration]
+|
+| {check-mark}
+
+| link:https://neo4j.com/docs/kerberos-add-on/current/[Kerberos security option]
+|
+| {check-mark}
+
+3+^s| Data management
+
+| xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-full[Offline import]
+| {check-mark}
+| {check-mark}
+
+| xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-incremental[Offline incremental import]
+|
+| {check-mark}
+
+| xref:performance/space-reuse.adoc[Auto-reuse of space]
+| {check-mark}
+| {check-mark}
+
+| xref:backup-restore/copy-database.adoc[Store copy]
+|
+| {check-mark}
+
+| xref:backup-restore/offline-backup.adoc[Offline backup] (dump)
+| {check-mark}
+| {check-mark}
+
+3+^s| Scale and availability
+
+| Online xref:backup-restore/online-backup.adoc[backup] and xref:/backup-restore/restore-backup.adoc[restore]
+|
+| {check-mark}
+
+| xref:database-administration/index.adoc[Multiple databases] (beyond the `system` and default databases)
+|
+| {check-mark}
+
+| xref:clustering/index.adoc[Autonomous clustering]
+|
+| {check-mark}
+
+| xref:database-administration/composite-databases/concepts.adoc[Composite databases]
+|
+| {check-mark}
+
+3+^s| xref:monitoring/index.adoc[Monitoring and management]
+
+| xref:monitoring/metrics/expose.adoc#_prometheus[Endpoints and metrics for monitoring via Prometheus]
+|
+| {check-mark}
+
+| link:https://neo4j.com/docs/ops-manager/current/[Neo4j Operations Manager]
+|
+| {check-mark}
+
+|===
+
+[NOTE]
+====
+By default, Neo4j Community Edition and Neo4j Enterprise Edition report a small amount of usage data.
+This helps Neo4j understand how its products are used and improve them.
+For more information about what data is collected, see link:https://neo4j.com/docs/reference/usage-data/[Usage data report].
+====
+
+[[versioning]]
+== Versioning
+
+Neo4j uses semantic versioning (link:{semver-uri}[Semantic Versioning Specification 2.0.0]).
+Given a version number `MAJOR.MINOR.PATCH`, the increment is based on:
+
+* `MAJOR` version - incompatible API changes towards the previous `MAJOR` version.
+* `MINOR` version - functionality in a backward-compatible manner.
+* `PATCH` release - backwards-compatible bug fixes.
+
+Neo4j’s fully managed cloud service link:{aura-uri}[Neo4j Aura] uses only `MAJOR` versioning.

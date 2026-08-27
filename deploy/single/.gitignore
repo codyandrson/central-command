@@ -1,0 +1,8 @@
+# Everything generated, and the one file that holds secrets.
+.env
+secrets.yaml
+stack.yaml
+stack-llm.yaml
+optional-n8n.yaml
+optional-crawler.yaml
+setup-diagnostics.txt

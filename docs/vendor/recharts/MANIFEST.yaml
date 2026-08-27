@@ -1,0 +1,6 @@
+name: recharts
+source_repo: https://github.com/recharts/recharts
+source_ref: v3.7.0
+fetched_url: https://codeload.github.com/recharts/recharts/tar.gz/v3.7.0
+fetched_date: 2026-08-25
+subpaths: [storybook/stories README.md LICENSE]

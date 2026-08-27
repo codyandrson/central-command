@@ -1,0 +1,6 @@
+name: codemirror/packages/lang-python
+source_repo: https://github.com/codemirror/lang-python
+source_ref: 6.2.1
+fetched_url: https://codeload.github.com/codemirror/lang-python/tar.gz/6.2.1
+fetched_date: 2026-08-25
+subpaths: [src README.md CHANGELOG.md LICENSE]

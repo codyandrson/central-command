@@ -1,0 +1,474 @@
+:description: Predicates are boolean functions that return `true` or `false` for a given set of non-`null` input.
+:table-caption!:
+
+[[query-functions-predicate]]
+= Predicate functions
+
+== Introduction
+
+Predicates are boolean functions that return `true` or `false` for a given set of non-`null` input.
+They are most commonly used to filter out paths in the `WHERE` part of a query.
+
+== Example graph
+
+The following graph is used for the examples below:
+
+image::graph_predicate_functions.svg[[width="600",role="middle"]
+
+To recreate it, run the following query against an empty Neo4j database:
+
+[source, cypher, role=test-setup]
+----
+CREATE
+  (keanu:Person {name:'Keanu Reeves', age:58, nationality:'Canadian'}),
+  (carrie:Person {name:'Carrie Anne Moss', age:55, nationality:'American'}),
+  (liam:Person {name:'Liam Neeson', age:70, nationality:'Northern Irish'}),
+  (guy:Person {name:'Guy Pearce', age:55, nationality:'Australian'}),
+  (kathryn:Person {name:'Kathryn Bigelow', age:71, nationality:'American'}),
+  (jessica:Person {name:'Jessica Chastain', age:45, address:''}),
+  (theMatrix:Movie {title:'The Matrix'}),
+  (keanu)-[:KNOWS]->(carrie),
+  (keanu)-[:KNOWS]->(liam),
+  (keanu)-[:KNOWS]->(kathryn),
+  (kathryn)-[:KNOWS]->(jessica),
+  (carrie)-[:KNOWS]->(guy),
+  (liam)-[:KNOWS]->(guy),
+  (keanu)-[:ACTED_IN]->(theMatrix),
+  (carrie)-[:ACTED_IN]->(theMatrix)
+----
+
+[[functions-all]]
+== all()
+
+.Details
+|===
+| *Syntax* 3+| `all(variable IN list WHERE predicate)`
+| *Description* 3+| Returns true if the predicate holds for all elements in the given `LIST<ANY>`.
+.4+| *Arguments* | *Name* | *Type* | *Description*
+| `variable` | `ANY` | A variable that can be used within the `WHERE` clause.
+| `list` | `LIST<ANY>` | A predicate must hold for all elements in this list for the function to return `true`.
+| `predicate` | `ANY` | A predicate that is tested against all items in the given list.
+| *Returns* 3+| `BOOLEAN`
+|===
+
+.Considerations
+|===
+| `all()` differs from most Cypher functions because it iterates over a list, evaluating an expression for each element, rather than returning a result from a single evaluation.
+| `null` is returned if the `list` is `null` or if the `predicate` evaluates to `null` for at least one element and does not evaluate to false for any other element.
+| `all()` returns `true` if `list` is empty because there are no elements to falsify the `predicate`.
+|===
+
+.+all()+
+======
+
+.Query
+// tag::functions_predicate_all[]
+[source, cypher, indent=0]
+----
+MATCH p = (a)-[*]->(b)
+WHERE
+  a.name = 'Keanu Reeves'
+  AND b.name = 'Guy Pearce'
+  AND all(x IN nodes(p) WHERE x.age < 60)
+RETURN p
+----
+// end::functions_predicate_all[]
+
+All nodes in the returned paths will have a property `age` with a value lower than `60`:
+
+image::predicate_function_example.svg[width="300",role="middle"]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| +p+
+| +(:Person {nationality: "Canadian",name: "Keanu Reeves",age: 58})-[:KNOWS]->(:Person {nationality: "American",name: "Carrie Anne Moss",age: 55})-[:KNOWS]->(:Person {nationality: "Australian",name: "Guy Pearce",age: 55})+
+1+d|Rows: 1
+
+|===
+
+.`all()` on an empty `LIST`
+[source, cypher]
+----
+WITH [] as emptyList
+RETURN all(i in emptyList WHERE true) as allTrue, all(i in emptyList WHERE false) as allFalse
+----
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+| allTrue | allFalse
+
+| TRUE  | TRUE
+
+2+d|Rows: 1
+|===
+
+======
+
+
+[[functions-any]]
+== any()
+
+.Details
+|===
+| *Syntax* 3+| `any(variable IN list WHERE predicate)`
+| *Description* 3+| Returns true if the predicate holds for at least one element in the given `LIST<ANY>`.
+.4+| *Arguments* | *Name* | *Type* | *Description*
+| `variable` | `ANY` | A variable that can be used within the `WHERE` clause.
+| `list` | `LIST<ANY>` | A predicate must hold for all elements in this list for the function to return `true`.
+| `predicate` | `ANY` | A predicate that is tested against all items in the given list.
+| *Returns* 3+| `BOOLEAN`
+|===
+
+.Considerations
+|===
+| `any()` differs from most Cypher functions because it iterates over a list, evaluating an expression for each element, rather than returning a result from a single evaluation.
+| `null` is returned if the `list` is `null` or if the `predicate` evaluates to `null` for at least one element and does not evaluate to false for any other element.
+| `any()` returns `false` if `list` is empty because there are no elements to satisfy the `predicate`.
+|===
+
+.+any()+
+======
+
+.Query
+// tag::functions_predicate_any[]
+[source, cypher, indent=0]
+----
+MATCH (p:Person)
+WHERE any(nationality IN p.nationality WHERE nationality = 'American')
+RETURN p
+----
+// end::functions_predicate_any[]
+
+The query returns the `Person` nodes with the `nationality` property value `American`:
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| +p+
+| +{"nationality":"American","name":"Carrie Anne Moss","age":55}+
+| +{"nationality":"American","name":"Kathryn Bigelow","age":71}+
+
+1+d|Rows: 2
+
+|===
+
+
+.`any()` on an empty `LIST`
+[source, cypher]
+----
+WITH [] as emptyList
+RETURN any(i IN emptyList WHERE true) as anyTrue, any(i IN emptyList WHERE false) as anyFalse
+----
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+| anyTrue | anyFalse
+
+| false  | false
+
+2+d|Rows: 1
+|===
+
+======
+
+
+[[functions-exists]]
+== exists()
+
+.Details
+|===
+| *Syntax* 3+| `exists(input)`
+| *Description* 3+| Returns true if a match for the pattern exists in the graph.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `ANY` | A pattern to verify the existence of.
+| *Returns* 3+| `BOOLEAN`
+|===
+
+.Considerations
+|===
+| `null` is returned if `input` is `null`.
+|===
+
+[NOTE]
+====
+To check if a property is not `null` use the xref:expressions/predicates/comparison-operators.adoc[`IS NOT NULL` predicate].
+====
+
+.+exists()+
+======
+
+.Query
+// tag::functions_predicate_exists[]
+[source, cypher, indent=0]
+----
+MATCH (p:Person)
+RETURN
+  p.name AS name,
+  exists((p)-[:ACTED_IN]->()) AS has_acted_in_rel
+----
+// end::functions_predicate_exists[]
+
+This query returns the `name` property of every `Person` node, along with a boolean (`true` or `false`) indicating if those nodes have an `ACTED_IN` relationship in the graph.
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+
+| name | has_acted_in_rel
+| "Carrie Anne Moss" | true
+| "Keanu Reeves" | true
+| "Liam Neeson" | false
+| "Guy Pearce" | false
+| "Kathryn Bigelow" | false
+| "Jessica Chastain" | false
+2+d|Rows: 6
+
+|===
+
+======
+
+[NOTE]
+====
+For information about the `EXISTS` subquery, which is more versatile than the `exists()` function, see xref::subqueries/existential.adoc[].
+====
+
+
+[[functions-isempty]]
+== isEmpty()
+
+.Details
+|===
+| *Syntax* 3+| `isEmpty(input)`
+| *Description* 3+| Checks whether a `STRING`, `MAP` or `LIST<ANY>` is empty.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `STRING \| MAP \| LIST<ANY>` | A value to be checked for emptiness.
+| *Returns* 3+| `BOOLEAN`
+|===
+
+.+isEmpty(list)+
+======
+
+.Query
+// tag::functions_predicate_is_empty[]
+[source, cypher]
+----
+MATCH (p:Person)
+WHERE NOT isEmpty(p.nationality)
+RETURN p.name, p.nationality
+----
+// end::functions_predicate_is_empty[]
+
+This query returns every `Person` node in the graph with a set `nationality` property value (i.e., all `Person` nodes except for `Jessica Chastain`):
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+| p.name | p.nationality
+| "Keanu Reeves" | "Canadian"
+| "Carrie Anne Moss" | "American"
+| "Liam Neeson" | "Northern Irish"
+| "Guy Pearce" | "Australian"
+| "Kathryn Bigelow" | "American"
+2+d|Rows: 5
+|===
+
+======
+
+.+isEmpty(map)+
+======
+
+.Query
+[source, cypher, indent=0]
+----
+MATCH (n)
+WHERE isEmpty(properties(n))
+RETURN n
+----
+
+Because the example graph contains no empty nodes, nothing is returned:
+
+.Result
+----
+(no changes, no records)
+----
+
+======
+
+
+.+isEmpty(string)+
+======
+
+.Query
+[source, cypher, indent=0]
+----
+MATCH (p:Person)
+WHERE isEmpty(p.address)
+RETURN p.name AS name
+----
+
+The `name` property of each node that has an empty `STRING` `address` property is returned:
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| name
+| "Jessica Chastain"
+1+d|Rows: 1
+
+|===
+
+======
+
+[NOTE]
+====
+The function `isEmpty()`, like most other Cypher functions, returns `null` if `null` is passed in to the function.
+That means that a predicate `isEmpty(n.address)` will filter out all nodes where the `address` property is not set.
+Thus, `isEmpty()` is not suited to test for `null`-values.
+xref:expressions/predicates/comparison-operators.adoc[`IS NULL` or `IS NOT NULL`] should be used for that purpose.
+====
+
+
+[[functions-none]]
+== none()
+
+.Details
+|===
+| *Syntax* 3+| `none(variable IN list WHERE predicate)`
+| *Description* 3+| Returns true if the predicate holds for no element in the given `LIST<ANY>`.
+.4+| *Arguments* | *Name* | *Type* | *Description*
+| `variable` | `ANY` | A variable that can be used within the `WHERE` clause.
+| `list` | `LIST<ANY>` | A predicate must hold for all elements in this list for the function to return `true`.
+| `predicate` | `ANY` | A predicate that is tested against all items in the given list.
+| *Returns* 3+| `BOOLEAN`
+|===
+
+.Considerations
+|===
+| `none()` differs from most Cypher functions because it iterates over a list, evaluating an expression for each element, rather than returning a result from a single evaluation.
+| `null` is returned if the `list` is `null`, or if the `predicate` evaluates to `null` for at least one element and does not evaluate to `true` for any other element.
+| `none()` returns `true` if `list` is empty because there are no elements to violate the `predicate`.
+|===
+
+.+none()+
+======
+
+.Query
+// tag::functions_predicate_none[]
+[source, cypher, indent=0]
+----
+MATCH p = (n)-[*]->(b)
+WHERE
+  n.name = 'Keanu Reeves'
+  AND none(x IN nodes(p) WHERE x.age > 60)
+RETURN p
+----
+// end::functions_predicate_none[]
+
+No node in the returned path has an `age` property with a greater value than `60`:
+
+image::predicate_function_example.svg[width="300",role="middle"]
+
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| p
+| (:Person {nationality: "Canadian",name: "Keanu Reeves",age: 58})-[:KNOWS]->(:Person {nationality: "American",name: "Carrie Anne Moss",age: 55})
+| (:Person {nationality: "Canadian",name: "Keanu Reeves",age: 58})-[:KNOWS]->(:Person {nationality: "American",name: "Carrie Anne Moss",age: 55})-[:KNOWS]->(:Person {nationality: "Australian",name: "Guy Pearce",age: 55})
+1+d|Rows: 2
+
+|===
+
+.`none()` on an empty `LIST`
+[source, cypher]
+----
+WITH [] as emptyList
+RETURN none(i IN emptyList WHERE true) as noneTrue, none(i IN emptyList WHERE false) as noneFalse
+----
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+| noneTrue | noneFalse
+
+| TRUE  | TRUE
+
+2+d|Rows: 1
+|===
+
+======
+
+
+[[functions-single]]
+== single()
+
+.Details
+|===
+| *Syntax* 3+| `single(variable IN list WHERE predicate)`
+| *Description* 3+| Returns true if the predicate holds for exactly one of the elements in the given `LIST<ANY>`.
+.4+| *Arguments* | *Name* | *Type* | *Description*
+| `variable` | `ANY` | A variable that can be used within the `WHERE` clause.
+| `list` | `LIST<ANY>` | A predicate must hold for all elements in this list for the function to return `true`.
+| `predicate` | `ANY` | A predicate that is tested against all items in the given list.
+| *Returns* 3+| `BOOLEAN`
+|===
+
+.Considerations
+|===
+| `single()` differs from most Cypher functions because it iterates over a list, evaluating an expression for each element, rather than returning a result from a single evaluation.
+| `null` is returned if the `list` is `null`, or if the `predicate` evaluates to `null` for at least one element and does not evaluate to `true` for any other element.
+| `single()` returns `false` if `list` is empty because there is not exactly one element satisfying the `predicate`.
+|===
+
+.+single()+
+======
+
+.Query
+// tag::functions_predicate_single[]
+[source, cypher, indent=0]
+----
+MATCH p = (n)-->(b)
+WHERE
+  n.name = 'Keanu Reeves'
+  AND single(x IN nodes(p) WHERE x.nationality = 'Northern Irish')
+RETURN p
+----
+// end::functions_predicate_single[]
+
+In every returned path there is exactly one node which has the `nationality` property value `Northern Irish`:
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| p
+| (:Person {nationality: "Canadian",name: "Keanu Reeves",age: 58})-[:KNOWS]->(:Person {nationality: "Northern Irish",name: "Liam Neeson",age: 70})
+1+d|Rows: 1
+
+|===
+
+.`single()` on an empty `LIST`
+[source, cypher]
+----
+WITH [] as emptyList
+RETURN single(i IN emptyList WHERE true) as singleTrue, single(i IN emptyList WHERE false) as singleFalse
+----
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+| singleTrue | singleFalse
+
+| false  | false
+
+2+d|Rows: 1
+|===
+
+======

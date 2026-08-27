@@ -1,0 +1,49 @@
+# Central Command control plane — systemd USER unit (reboot resilience).
+#
+# Install (one time, as codys-lab):
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/cc-uvicorn.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now cc-uvicorn
+#   loginctl enable-linger codys-lab     # start at boot without a login session
+#
+# Why ExecStartPre starts postgres here instead of a compose restart policy:
+# the 2026-07-21 reboot showed rootless podman's `restart: always` containers
+# come back at early boot WITHOUT working host port forwarding (every nat-*
+# port was unbound; containers "healthy"). Starting cc-postgres from inside
+# the user session re-establishes the forwarder reliably. `docker start` on an
+# already-running container is a no-op, so this is safe on restarts too.
+#
+# The app reads .env from WorkingDirectory (CC_ANTHROPIC_API_KEY, CC_DISPATCH_
+# ENABLED, CC_FEED_ENABLED, CC_AUDITOR_* etc. all live there); only the run-
+# mode flags are pinned here, matching the documented recipe.
+
+[Unit]
+Description=Central Command control plane (uvicorn on 127.0.0.1:8080)
+After=network-online.target default.target
+
+[Service]
+WorkingDirectory=/home/codys-lab/Central Command
+Environment=CC_DEMO_MODE=false
+Environment=CC_EXECUTOR_MODE=live
+Environment=CC_DISPATCH_APPROVAL_LIMIT=5
+ExecStartPre=-/usr/bin/docker start cc-postgres
+ExecStartPre=/bin/sleep 3
+ExecStart=/home/codys-lab/Central Command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080
+# The app exits if Postgres isn't ready yet (seen live) — keep retrying until
+# the stack is up. The dispatch lease makes double-starts loudly refuse.
+Restart=always
+RestartSec=5
+# Uvicorn's graceful shutdown waits on open SSE streams that never close on
+# their own — every restart hung the full 90s default before SIGKILL (seen on
+# 2026-07-21/22). SSE clients reconnect; 15s is ample for real drains.
+TimeoutStopSec=15
+# The ExecStartPre `docker start` parks cc-postgres's conmon in THIS unit's
+# cgroup (systemd logs "found left-over process (conmon)"). With the default
+# control-group kill, every service restart would kill conmon and wedge
+# cc-postgres in the phantom "stopping" state (2026-07-21, second reboot
+# test). Kill only uvicorn itself; conmon outlives the unit on purpose.
+KillMode=process
+
+[Install]
+WantedBy=default.target

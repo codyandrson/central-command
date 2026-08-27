@@ -1,0 +1,15 @@
+name: dnd-kit
+source_repo: https://github.com/clauderic/dnd-kit
+source_ref: "@dnd-kit/core@6.3.1"
+fetched_url: https://codeload.github.com/clauderic/dnd-kit/tar.gz/@dnd-kit/core@6.3.1
+fetched_date: 2026-08-25
+subpaths: [README.md, LICENSE, packages/core/README.md, packages/sortable/README.md, packages/utilities/README.md]
+notes: >
+  Monorepo, packages versioned independently. Tag pinned to @dnd-kit/core@6.3.1
+  (matches web/package-lock.json). @dnd-kit/sortable is pinned at 10.0.0 and
+  @dnd-kit/utilities at 3.2.2 in package-lock.json; their package source/README
+  at this same monorepo ref may differ slightly from their own exact tags, but
+  no docs/ or website/ folder exists in this repo at any recent ref (checked) -
+  these package READMEs are the real doc source for the JS API. A separate
+  "clauderic/docs" repo exists on GitHub but its purpose is unconfirmed (no
+  description, no homepage) - not vendored; flagged as a gap rather than guessed.

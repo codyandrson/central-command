@@ -1,0 +1,39 @@
+name: graphiti-core
+source_repo: https://github.com/getzep/graphiti
+source_ref: v0.28.2
+fetched_url: https://codeload.github.com/getzep/graphiti/tar.gz/v0.28.2
+fetched_date: 2026-08-25
+subpaths: [README.md LICENSE]
+note: >
+  getzep/graphiti@v0.28.2 has no top-level docs/ folder in-repo (confirmed
+  by listing the tag, and confirmed again on main -- no docs repo exists
+  under the getzep GitHub org either). The project's real documentation is
+  hosted externally on help.getzep.com (Zep, the commercial product built
+  on graphiti-core) and is NOT sourced from any git repo -- it's a Mintlify
+  site, so there is no version-pinned ref to fetch. Vendored the README
+  (setup/usage/config) and LICENSE from the exact pinned tag as above, PLUS
+  a full crawl of help.getzep.com under help.getzep.com/ (see its own
+  manifest note below) since that site holds the real conceptual/API docs
+  (temporal knowledge graphs, graph creation, retrieval, etc.) that this
+  repo's README doesn't cover.
+
+help_site_crawl:
+  source: https://help.getzep.com
+  method: >
+    Enumerated https://help.getzep.com/sitemap.xml (322 URLs), fetched each
+    page's clean-markdown variant by appending .md to its URL (a documented
+    Mintlify convention -- confirmed via the site's own llms.txt, which
+    points AI clients at exactly this mechanism), preserving the site's URL
+    path structure under help.getzep.com/.
+  fetched_date: 2026-08-25
+  pages_fetched: 322
+  size: ~3.0 MB
+  caveat: >
+    No version pin is possible -- this is a live, continuously-published
+    site with no git history to pin against, so it reflects whatever was
+    live on the fetch date. It also covers Zep the hosted product broadly
+    (including SaaS-only features like ABAC/audit logging that don't apply
+    to our self-hosted graphiti-core usage), not exclusively graphiti-core
+    -- kept in full per the "no gaps" policy rather than curated down,
+    since the conceptual/architecture content is what we actually need and
+    it's not worth the risk of mis-judging what to exclude.

@@ -1,0 +1,495 @@
+:description: This section describes how to back up an online database.
+[role=enterprise-edition not-on-aura]
+[[online-backup]]
+= Back up an online database
+
+[CAUTION]
+====
+Remember to xref:backup-restore/planning.adoc[plan your backup] carefully and back up each of your databases, including the `system` database.
+
+Note that it is not allowed to take a backup of a database alias, only physical databases can be backed up.
+====
+
+[[online-backup-command]]
+== Command
+
+A Neo4j database can be backed up in **online mode** using the `neo4j-admin database backup` command.
+The command must be invoked as the `neo4j` user to ensure the appropriate file permissions.
+
+It is best practice, but not mandatory, to perform the backup from a server on the same network as the database, but that is not part of the cluster.
+You should install Neo4j on that machine to make the `neo4j-admin` command available.
+This machine is known as a backup client.
+
+
+[NOTE]
+====
+Neo4j 5 introduces a new version of the backup command which produces immutable backup artifacts (as opposed to mutable folders as in previous versions).
+====
+
+
+[[backup-artifact]]
+=== Backup artifact
+
+The `neo4j-admin database backup` command produces one backup artifact file per database each time it is run.
+A backup artifact file is an immutable file containing the backup data of a given database along with some metadata like the database name and ID, the backup time, the lowest/highest transaction ID, etc.
+
+Backup artifacts can be of two types:
+
+. a __full backup__ containing the whole database store or
+. a __differential backup__ containing a log of transactions to apply to a database store contained in a full backup artifact.
+
+[[backup-chain]]
+=== Backup chain
+
+The first time the backup command is run, a full backup artifact is produced for a given database.
+On the other hand, differential backup artifacts are produced by the subsequent runs.
+
+A _backup chain_ consists of a full backup optionally followed by a sequence of n contiguous differential backups.
+
+image::backup-chain.png[title="Backup chain",role="middle"]
+
+[[backup-command-usage]]
+=== Usage
+
+The `neo4j-admin database backup` command can be used for performing an online full or differential backup from a running Neo4j Enterprise server.
+The produced differential backup artifact contains transaction logs that can be replayed and applied to stores contained in full backup artifacts when restoring a backup chain.
+
+Neo4j's backup service must have been configured on the server beforehand.
+The command can be run both locally and remotely.
+However, it uses a significant amount of resources, such as memory and CPU.
+Therefore, it is recommended to perform the backup on a separate dedicated machine.
+The `neo4j-admin database backup` command also supports SSL/TLS.
+For more information, see xref:backup-restore/online-backup.adoc#online-backup-configurations[Online backup configurations].
+
+[NOTE]
+====
+`neo4j-admin database backup` is not supported in link:https://neo4j.com/product/auradb/[Neo4j Aura].
+====
+
+[[backup-command-syntax]]
+=== Syntax
+
+[source,role=noheader]
+----
+neo4j-admin database backup [-h] [--expand-commands] [--verbose]
+                            [--compress[=true|false]] [--keep-failed[=true|false]]
+                            [--parallel-recovery[=true|false]]
+                            [--additional-config=<file>]
+                            [--include-metadata=none|all|users|roles]
+                            [--inspect-path=<path>] [--pagecache=<size>] [--temp-path=<path>]
+                            [--to-path=<path>] [--type=<type>] [--from=<host:port>[,<host:
+                            port>...]]... [<database>...]
+----
+
+=== Description
+
+Perform an online backup from a running Neo4j enterprise server.
+Neo4j's backup service must have been configured on the server beforehand.
+
+[[backup-backup-command-parameters]]
+=== Parameters
+
+.`neo4j-admin database backup` parameters
+[options="header", cols="1m,3a,1m"]
+|===
+| Parameter
+| Description
+| Default
+
+|[<database>...]
+|Name(s) of the remote database(s) to backup. Supports globbing inside of double quotes, for example, "data*". (<database> is required unless `--inspect-path` is used.)
+|neo4j
+|===
+
+[TIP]
+====
+If <database> is "*", `neo4j-admin` will attempt to back up all databases of the DBMS.
+====
+
+[[backup-command-options]]
+=== Options
+
+.`neo4j-admin database backup` options
+[options="header", cols="5m,6a,4m"]
+|===
+| Option
+| Description
+| Default
+
+|--additional-config=<file>footnote:[See xref:tools/neo4j-admin/index.adoc#_configuration[Tools -> Configuration] for details.]
+|Configuration file with additional configuration.
+|
+
+|--compress[=true\|false]
+|Request backup artifact to be compressed. Compression can yield a backup artefact many times smaller, but the exact reduction depends upon many factors, including the database format and the kind of data stored. If disabled, the size of the produced artifact will be approximately equal to the size of the backed-up database. The speed of the backup operation is affected by compression, but which is faster depends upon the relative performance of CPU and storage. If backup speed is important, consider evaluating both options - with compression enabled and disabled.
+|true
+
+| --expand-commands
+|Allow command expansion in config value evaluation.
+|
+
+|--from=<host:port>[,<host:port>...]
+|Comma-separated list of host and port of Neo4j instances, each of which are tried in order.
+|
+
+|-h, --help
+|Show this help message and exit.
+|
+
+|--include-metadata=none\|all\|users\|roles
+|Include metadata in the file. This cannot be used for backing up the `system` database. Possible values are:
+
+- `roles` - include commands to create the roles and privileges (for both database and graph) that affect the use of the database.
+- `users` - include commands to create the users that can use the database and their role assignments.
+- `all` - include both `roles` and `users`.
+- `none` - does not include any metadata.
+[NOTE]
+Privileges specific to the DBMS and not to the backed-up database are not included in the backup.
+For instance, `GRANT ROLE MANAGEMENT ON DBMS TO $role` will not be backed up.
+
+Accordingly, `roles` and `users` that do not have database-related privileges are not included in the backup (e.g. those with only DBMS or no privileges).
+
+It is recommended to use `SHOW USERS`, `SHOW ROLES`, and `SHOW ROLE $role PRIVILEGES AS COMMANDS` to get the complete list of users, roles and privileges in these situations.
+|all
+
+|--inspect-path=<path>
+|List and show the metadata of the backup artifact(s). Accepts a folder or a file.
+|
+
+|--keep-failed[=true\|false]
+|Request failed backup to be preserved for further post-failure analysis. If enabled, a directory with the failed backup database is preserved.
+|false
+
+|--pagecache=<size>
+|The size of the page cache to use for the backup process.
+|
+
+|--parallel-recovery[=true\|false]
+| Allow multiple threads to apply pulled transactions to a backup in parallel. For some databases and workloads, this may reduce backup times significantly.
+Note: this is an EXPERIMENTAL option. Consult Neo4j support before use.
+|false
+
+|--temp-path=<path>
+|label:new[Introduced in 5.24] Provide a path to a temporary empty directory for storing backup files until the command is completed. The files will be deleted once the command is finished.
+|
+
+|--to-path=<path>
+|Directory to place backup in (required unless `--inspect-path` is used). It is possible to back up databases into AWS S3 buckets, Google Cloud storage buckets, and Azure using the appropriate URI as the path.
+|
+
+|--type=<type>
+|Type of backup to perform. Possible values are: `FULL`, `DIFF`, `AUTO`.
+If none is specified, the type is automatically determined based on the existing backups.
+If you want to force a full backup, use `FULL`.
+|AUTO
+
+|--verbose
+|Enable verbose output.
+|
+|===
+
+[[temp-path-explanation]]
+[NOTE]
+====
+The `--to-path=<path>` option can also back up databases into AWS S3 buckets (from Neo4j 5.19), Google Cloud storage buckets (from Neo4j 5.21), and Azure buckets (from 5.24).
+For more information, see <<online-backup-cloud-storage>>.
+
+Neo4j 5.24 introduces the `--temp-path` option to address potential issues related to disk space when performing backup-related commands, especially when cloud storage is involved.
+
+When `--to-path` points to a cloud storage bucket, the backup process still requires a temporary local directory to store the database store files and transaction logs before creating and streaming the backup artifact to the cloud destination.
+The temporary directory must therefore have enough free space to hold the entire backup.
+
+The temporary path can be specified by the `--temp-path` option.
+If `--temp-path` is unspecified, Neo4j creates the temporary directory in its current working directory. 
+If that location does not have sufficient free disk space, the backup can fail.
+
+To avoid this issue, it is strongly recommended to specify `--temp-path` and point it to a local directory with sufficient free disk space, especially when backing up to cloud storage.
+====
+
+[[backup-command-exit-codes]]
+=== Exit codes
+
+Depending on whether the backup was successful or not, `neo4j-admin database backup` exits with different codes.
+The error codes include details of what error was encountered.
+
+.Neo4j Admin backup exit codes when backing up one database
+[cols="<1,<5", options="header"]
+|===
+| Code | Description
+| `0`  | Success.
+| `1`  | Backup failed, or succeeded but encountered problems such as some servers being uncontactable. See logs for more details.
+|===
+
+.Neo4j Admin backup exit codes when backing multiple databases
+[cols="m,a", options="header"]
+|===
+| Code | Description
+| 0  | All databases are backed up successfully.
+| 1  | One or several backups failed, or succeeded with problems.
+|===
+
+[[online-backup-configurations]]
+== Online backup configurations
+
+[[online-backup-checkpoints]]
+=== Checkpointing
+
+When a full backup is requested, it always triggers a checkpoint.
+The backup cannot proceed until the checkpoint finishes.
+
+While the server is checkpointing, the backup job receives no data, which may lead to the backup timeout.
+To extend the backup timeout, modify the xref:configuration/configuration-settings.adoc#config_dbms.cluster.catchup.client_inactivity_timeout[`dbms.cluster.catchup.client_inactivity_timeout`] setting, which restricts the network inactivity.
+It controls the timeout duration of the catchup protocol, which is the underlying protocol of multiple catchup processes, including backups.
+
+You can also tune up xref:configuration/configuration-settings.adoc#_checkpoint_settings[the Checkpoint settings] or check that your disks are performant enough to handle the load.
+For more information, see xref:performance/disks-ram-and-other-tips.adoc#performance-checkpoint-iops-limit[Checkpoint IOPS limit].
+
+To read more about checkpointing, see xref:database-internals/checkpointing.adoc[Database internals -> Checkpointing and log pruning].
+
+
+[[backup-server-configuration]]
+=== Server configuration
+
+The table below lists the basic server parameters relevant to backups.
+Note that by default, the backup service is enabled but only listens on localhost (127.0.0.1).
+This needs to be changed if backups are to be taken from another machine.
+
+[[table-backup-introduction-options-standalone-parameters]]
+.Server parameters for backups
+[options="header"]
+|===
+| Parameter name | Default value | Description
+| `xref:configuration/configuration-settings.adoc#config_server.backup.enabled[server.backup.enabled]` | `true` | Enable support for running online backups.
+| `xref:configuration/configuration-settings.adoc#config_server.backup.listen_address[server.backup.listen_address]` | `127.0.0.1:6362` | Listening server for online backups.
+|===
+
+[[online-backup-memory]]
+=== Memory configuration
+
+You can configure the memory allocated to the backup client in several ways:
+
+* Configure heap size:
++
+`HEAP_SIZE` configures the maximum heap size allocated for the backup process.
+Define the variable `HEAP_SIZE` before starting the operation.
+If not specified, the Java Virtual Machine chooses a value based on the server resources.
+
+* Configure page cache:
++
+Set the page cache size with the `--pagecache` option of the `neo4j-admin database backup` command.
+
+* Override the memory settings:
++
+Use the `--additional-config` option of the `neo4j-admin database backup` command to override the memory configurations in the _neo4j.conf_ file.
+
+
+[TIP]
+====
+You should give the Neo4J page cache as much memory as possible, as long as it satisfies the following constraint:
+
+Neo4J page cache + OS page cache < available RAM, where 2 to 4GB should be dedicated to the operating system’s page cache.
+
+For example, if your current database has a `Total mapped size` of `128GB` as per the _debug.log_, and you have enough free space (meaning you have left aside 2 to 4 GB for the OS), then you can set `--pagecache` to `128GB`.
+====
+
+[[online-backup-resources]]
+=== Computational resource configurations
+
+Transaction log files::
+The xref:database-internals/transaction-logs.adoc[transaction log files], which keep track of recent changes, are rotated and pruned based on a provided configuration.
+For example, setting `db.tx_log.rotation.retention_policy=3` files keeps 3 transaction log files in the backup.
+Because recovered servers do not need all of the transaction log files that have already been applied, it is possible to further reduce storage size by reducing the size of the files to the bare minimum.
+This can be done by setting `db.tx_log.rotation.size=1M` and `db.tx_log.rotation.retention_policy=3` files.
+You can use the `--additional-config` parameter to override the configurations in the _neo4j.conf_ file.
++
+[WARNING]
+====
+Removing transaction logs manually can result in a broken backup.
+====
+
+[[online-backup-ssl]]
+=== Security configurations
+
+Securing your backup network communication with an SSL policy and a firewall protects your data from unwanted intrusion and leakage.
+When using the `neo4j-admin database backup` command, you can configure the backup server to require SSL/TLS, and the backup client to use a compatible policy.
+For more information on how to configure SSL in Neo4j, see xref:security/ssl-framework.adoc[SSL framework].
+
+Configuration for the backup server should be added to the _neo4j.conf_ file and configuration for backup client to the _neo4j-admin.conf_ file.
+The easiest way to ensure compatibility is to use the same SSL policy configuration for both the server and the client.
+For production environments, it is recommended to use Certificate Authorities (CAs) to sign certificates rather than self-signed certificates.
+
+
+
+The default backup port is 6362, configured with key `server.backup.listen_address`.
+The SSL configuration policy has the key of `dbms.ssl.policy.backup`.
+
+As an example, add the following content to your _neo4j.conf_ and _neo4j-admin.conf_ files:
+
+.Server configuration in _neo4j.conf_
+[source, properties]
+----
+dbms.ssl.policy.backup.enabled=true
+dbms.ssl.policy.backup.client_auth=REQUIRE
+dbms.ssl.policy.backup.tls_versions=TLSv1.2,TLSv1.3
+dbms.ssl.policy.backup.ciphers=TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+----
+
+.Client configuration in _neo4j-admin.conf_
+[source, properties]
+----
+dbms.ssl.policy.backup.enabled=true
+dbms.ssl.policy.backup.client_auth=REQUIRE
+dbms.ssl.policy.backup.tls_versions=TLSv1.2,TLSv1.3
+dbms.ssl.policy.backup.ciphers=TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+----
+
+[TIP]
+====
+Neo4j 5.24 also supports TLSv1.3.
+To use both TLSv1.2 and TLSv1.3 versions, you must specify which ciphers to be enforced for each version.
+Otherwise, Neo4j could use every possible cipher in the JVM for those versions, leading to a less secure configuration.
+
+For a detailed list of recommendations regarding security in Neo4j, see xref:security/checklist.adoc[Security checklist].
+====
+
+[IMPORTANT]
+====
+It is very important to ensure that there is no external access to the port specified by the setting `server.backup.listen_address`.
+Failing to protect this port may leave a security hole open by which an unauthorized user can make a copy of the database onto a different machine.
+In production environments, external access to the backup port should be blocked by a firewall.
+
+The cluster transaction port `6000` inherits its bind address from `server.default_listen_address`.
+If this is set to `0.0.0.0`, the cluster port is network-reachable and provides unauthenticated backup/replication capability.
+Protect this port with SSL (`dbms.ssl.policy.cluster`) and/or a firewall.
+====
+
+[[online-backup-cluster]]
+=== Cluster configurations
+
+In a cluster topology, it is possible to take a backup from any server hosting the database to backup, and each server has two configurable ports capable of serving a backup.
+These ports are configured by `server.backup.listen_address` and `server.cluster.listen_address` respectively.
+Functionally, they are equivalent for backups, but separating them can allow some operational flexibility, while using just a single port can simplify the configuration.
+
+It is generally recommended to select secondary database copies to act as backup resources since they are more numerous than primary copies in typical cluster deployments.
+Furthermore, the possibility of performance issues on a secondary database allocation, caused by a large backup, does not affect the performance or redundancy of the primaries.
+If a secondary is not available, then a primary can be selected based on factors, such as its physical proximity, bandwidth, performance, and liveness.
+
+[NOTE]
+====
+Use the `SHOW DATABASES` command to learn which database is hosted on which server.
+====
+
+[NOTE]
+====
+To avoid taking a backup from a database member that is lagging behind, you can look at the transaction IDs by exposing Neo4j metrics or via Neo4j Browser.
+To view the latest processed transaction IDs (and other metrics) in Neo4j Browser, type `:sysinfo` at the prompt.
+====
+
+==== Targeting multiple servers
+
+It is recommended to provide a list of multiple target servers when taking a backup from a cluster, since that may allow a backup to succeed even if some server is down, or not all databases are hosted on the same servers.
+If the command finds one or more servers that do not respond, it continues trying to backup from other servers and continues backing up other requested databases, but the exit code of the command is non-zero, to alert the user to the fact there is a problem.
+If a name pattern is used for the database together with multiple target servers, all servers contribute to the list of matching databases.
+
+[[online-backup-example]]
+== Examples
+
+The following are examples of how to perform a backup of a single database and multiple databases.
+The target directory _/mnt/backups/neo4j_ must exist before calling the command and the database(s) must be online.
+
+=== Back up a single database
+
+You do not need to use the `--type` option to specify the type of backup.
+By default, the type is automatically determined based on the existing backups.
+
+[source, shell,role=nocopy noplay]
+----
+bin/neo4j-admin database backup --to-path=/path/to/backups/neo4j neo4j
+----
+
+
+=== Perform a forced full backup of a single database
+
+If you want to force a full backup after several differential backups, you can use the `--type=full` option.
+
+[source, shell,role=nocopy noplay]
+----
+bin/neo4j-admin database backup --type=full --to-path=/path/to/backups/neo4j neo4j
+----
+
+
+=== Back up multiple databases
+
+To back up multiple databases that match a name pattern, you can use name globbing.
+For example, to backup all databases that start with *n* in your three-server cluster, run:
+
+[source, shell,role=nocopy noplay]
+----
+bin/neo4j-admin database backup --from=192.168.1.34:6362,192.168.1.35:6362,192.168.1.36:6362 --to-path=/mnt/backups/neo4j --pagecache=4G "n*"
+----
+
+=== Back up a list of databases
+
+To back up several databases by name, you can provide a list of database names.
+
+[source, shell,role=nocopy noplay]
+----
+neo4j-admin database backup --from=192.168.1.34:6362,192.168.1.35:6362,192.168.1.36:6362 --to-path=/mnt/backups/neo4j --pagecache=4G "test*" "neo4j"
+----
+
+[[online-backup-cloud-storage]]
+=== Back up a database to cloud storage
+
+The following examples show how to back up a database to a cloud storage bucket using the `--to-path` option.
+
+[NOTE]
+====
+Backing up directly to cloud storage still requires local disk space on the machine running the backup command.
+The store files and transaction logs are copied to a local temporary directory (configured with `--temp-path`) before being streamed to the cloud destination.
+Therefore, the temporary location must have free space at least equal to the size of the database being backed up.
+See <<backup-command-options>> for details on the `--temp-path` option.
+====
+
+[.tabbed-example]
+=====
+[role=include-with-AWS-S3 label--new-5.19]
+======
+
+include::partial$/aws-s3-overrides.adoc[]
+
+include::partial$/aws-s3-credentials.adoc[]
+
+. Run the `neo4j-admin database backup` command to back up your database to your AWS S3 bucket:
++
+[source, shell, role="nocopy"]
+----
+bin/neo4j-admin database backup --to-path=s3://myBucket/myDirectory/ mydatabase
+----
+
+======
+
+[role=include-with-Google-cloud-storage label--new-5.21]
+======
+
+include::partial$/gcs-credentials.adoc[]
+
+. Run `neo4j-admin database backup` command to back up your database to your Google bucket:
++
+[source,shell]
+----
+bin/neo4j-admin database backup --to-path=gs://myBucket/myDirectory/ mydatabase
+----
+======
+[role=include-with-Azure-cloud-storage label--new-5.24]
+======
+
+include::partial$/azb-credentials.adoc[]
+
+. Run `neo4j-admin database backup` command to back up your database to your Azure container:
++
+[source,shell]
+----
+bin/neo4j-admin database backup --to-path=azb://myStorageAccount/myContainer/myDirectory/ mydatabase
+----
+======
+=====

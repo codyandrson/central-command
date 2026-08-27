@@ -1,0 +1,27 @@
+# Nightly disaster-recovery backup of all four Central Command stores.
+#
+# Install (one time):
+#   sudo cp deploy/pi/cc-backup.service deploy/pi/cc-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cc-backup.timer
+#
+# Runs as codyslab (in the docker group). Output goes to the journal:
+#   journalctl -u cc-backup -n 50
+# A non-zero exit means at least one store did NOT get backed up — the unit
+# goes `failed` and stays visible in `systemctl list-units --failed`.
+
+[Unit]
+Description=Central Command nightly backup (spine, litellm, n8n, neo4j)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=codyslab
+Group=codyslab
+WorkingDirectory=/home/codyslab/Central Command
+ExecStart=/home/codyslab/Central Command/deploy/pi/backup.sh
+# The neo4j stop/dump/start window dominates the runtime; 30min is generous
+# headroom. On timeout systemd sends SIGTERM, which the script traps to bring
+# the graph stack back up rather than leaving neo4j stopped.
+TimeoutStartSec=1800

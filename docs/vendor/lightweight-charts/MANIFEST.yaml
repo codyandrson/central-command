@@ -1,0 +1,6 @@
+name: lightweight-charts
+source_repo: https://github.com/tradingview/lightweight-charts
+source_ref: v5.1.0
+fetched_url: https://codeload.github.com/tradingview/lightweight-charts/tar.gz/v5.1.0
+fetched_date: 2026-08-25
+subpaths: [website/docs README.md LICENSE]

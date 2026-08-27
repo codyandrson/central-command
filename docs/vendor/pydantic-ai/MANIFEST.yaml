@@ -1,0 +1,6 @@
+name: pydantic-ai
+source_repo: https://github.com/pydantic/pydantic-ai
+source_ref: v2.18.0
+fetched_url: https://codeload.github.com/pydantic/pydantic-ai/tar.gz/v2.18.0
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE]

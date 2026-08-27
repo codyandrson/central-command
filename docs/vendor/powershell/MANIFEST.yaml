@@ -1,0 +1,10 @@
+name: powershell
+source_repo: https://github.com/MicrosoftDocs/PowerShell-Docs
+source_ref: main
+fetched_url: https://codeload.github.com/MicrosoftDocs/PowerShell-Docs/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [reference/docs-conceptual reference/7.5]
+note: >
+  7.5 chosen as the current stable cmdlet-reference version (7.4 is the LTS,
+  7.6 is preview) — only one version folder vendored per the task's size
+  guidance; docs-conceptual covers language/scripting concepts version-agnostically.

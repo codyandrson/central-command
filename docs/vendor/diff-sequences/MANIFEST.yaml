@@ -1,0 +1,6 @@
+name: diff-sequences
+source_repo: https://github.com/jestjs/jest
+source_ref: v29.6.3
+fetched_url: https://codeload.github.com/jestjs/jest/tar.gz/v29.6.3
+fetched_date: 2026-08-25
+subpaths: [packages/diff-sequences/README.md LICENSE]

@@ -1,0 +1,359 @@
+:description: Cypher provides functions allowing for the creation and manipulation of temporal `DURATION` values.
+
+[[query-functions-temporal-duration]]
+= Duration functions
+:table-caption!:
+
+Duration functions allow for the creation and manipulation of temporal `DURATION` values.
+
+[NOTE]
+====
+See also xref::values-and-types/temporal.adoc[Temporal values] and xref::expressions/temporal-operators.adoc[Temporal operators].
+====
+
+[[functions-durations]]
+== duration()
+
+.Details
+|===
+| *Syntax* 3+| `duration(input)`
+| *Description* 3+| Creates a `DURATION` value.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `input` | `ANY` | A map optionally containing the following keys: 'years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds', 'milliseconds', 'microseconds', or 'nanoseconds'.
+| *Returns* 3+| `DURATION`
+|===
+
+.Considerations
+|===
+
+| At least one parameter must be provided (`duration()` and `+duration({})+` are invalid).
+| There is no constraint on how many of the parameters are provided.
+| It is possible to have a `DURATION` where the amount of a smaller unit (e.g. `seconds`) exceeds the threshold of a larger unit (e.g. `days`).
+| The values of the parameters may be expressed as decimal fractions.
+| The values of the parameters may be arbitrarily large.
+| The values of the parameters may be negative.
+| The xref:values-and-types/temporal.adoc#cypher-temporal-accessing-components-durations[components of `DURATION` objects] are individually accessible.
+
+|===
+
+.+duration()+ using duration components
+======
+
+.Query
+// tag::functions_duration[]
+[source, cypher, indent=0]
+----
+UNWIND [
+duration({days: 14, hours:16, minutes: 12}),
+duration({months: 5, days: 1.5}),
+duration({months: 0.75}),
+duration({weeks: 2.5}),
+duration({minutes: 1.5, seconds: 1, milliseconds: 123, microseconds: 456, nanoseconds: 789}),
+duration({minutes: 1.5, seconds: 1, nanoseconds: 123456789})
+] AS aDuration
+RETURN aDuration
+----
+// end::functions_duration[]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| aDuration
+| P14DT16H12M
+| P5M1DT12H
+| P22DT19H51M49.5S
+| P17DT12H
+| PT1M31.123456789S
+| PT1M31.123456789S
+1+d|Rows: 6
+
+|===
+
+======
+
+
+.+duration()+ using STRING values
+======
+
+.Query
+// tag::functions_duration_from_string[]
+[source, cypher, indent=0]
+----
+UNWIND [
+duration("P14DT16H12M"),
+duration("P5M1.5D"),
+duration("P0.75M"),
+duration("PT0.75M"),
+duration("P2012-02-02T14:37:21.545")
+] AS aDuration
+RETURN aDuration
+----
+// end::functions_duration_from_string[]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| aDuration
+| P14DT16H12M
+| P5M1DT12H
+| P22DT19H51M49.5S
+| PT45S
+| P2012Y2M2DT14H37M21.545S
+1+d|Rows: 5
+
+|===
+
+======
+
+
+[[functions-duration-between]]
+== duration.between()
+
+.Details
+|===
+| *Syntax* 3+| `duration.between(from, to)`
+| *Description* 3+| Computes the `DURATION` between the `from` instant (inclusive) and the `to` instant (exclusive) in logical units.
+.3+| *Arguments* | *Name* | *Type* | *Description*
+| `from` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the starting instant.
+| `to` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the ending instant.
+| *Returns* 3+| `DURATION`
+|===
+
+.Considerations
+|===
+
+| If `to` occurs earlier than `from`, the resulting `DURATION` will be negative.
+| If `from` has a time component and `to` does not, the time component of `to` is assumed to be midnight, and vice versa.
+| If `from` has a time zone component and `to` does not, the time zone component of `to` is assumed to be the same as that of `from`, and vice versa.
+| If `to` has a date component and `from` does not, the date component of `from` is assumed to be the same as that of `to`, and vice versa.
+
+|===
+
+
+.+duration.between()+
+======
+
+.Query
+// tag::functions_duration_between[]
+[source, cypher, indent=0]
+----
+UNWIND [
+duration.between(date("1984-10-11"), date("1985-11-25")),
+duration.between(date("1985-11-25"), date("1984-10-11")),
+duration.between(date("1984-10-11"), datetime("1984-10-12T21:40:32.142+0100")),
+duration.between(date("2015-06-24"), localtime("14:30")),
+duration.between(localtime("14:30"), time("16:30+0100")),
+duration.between(localdatetime("2015-07-21T21:40:32.142"), localdatetime("2016-07-21T21:45:22.142")),
+duration.between(datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/Stockholm'}), datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/London'}))
+] AS aDuration
+RETURN aDuration
+----
+// end::functions_duration_between[]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| aDuration
+| P1Y1M14D
+| P-1Y-1M-14D
+| P1DT21H40M32.142S
+| PT14H30M
+| PT2H
+| P1YT4M50S
+| PT1H
+1+d|Rows: 7
+
+|===
+
+======
+
+
+[[functions-duration-indays]]
+== duration.inDays()
+
+.Details
+|===
+| *Syntax* 3+| `duration.inDays(from, to)`
+| *Description* 3+| Computes the `DURATION` between the `from` instant (inclusive) and the `to` instant (exclusive) in days.
+.3+| *Arguments* | *Name* | *Type* | *Description*
+| `from` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the starting instant.
+| `to` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the ending instant.
+| *Returns* 3+| `DURATION`
+|===
+
+.Considerations
+|===
+
+| If `to` occurs earlier than `from`, the resulting `DURATION` will be negative.
+| If `from` has a time component and `to` does not, the time component of `to` is assumed to be midnight, and vice versa.
+| If `from` has a time zone component and `to` does not, the time zone component of `to` is assumed to be the same as that of `from`, and vice versa.
+| If `from` has a date component and `to` does not, the date component of `to` is assumed to be the same as that of `from`, and vice versa.
+| Any difference smaller than a whole day is disregarded.
+| Get the total number of days in a `DURATION` by returning the `days` component.
+For more information, see xref:values-and-types/temporal.adoc#cypher-temporal-accessing-components-durations[Components of durations].
+
+|===
+
+
+.+duration.inDays()+
+======
+
+.Query
+// tag::functions_duration_in_months[]
+[source, cypher, indent=0]
+----
+UNWIND [
+duration.inDays(date("1984-10-11"), date("1985-11-25")),
+duration.inDays(date("1985-11-25"), date("1984-10-11")),
+duration.inDays(date("1984-10-11"), datetime("1984-10-12T21:40:32.142+0100")),
+duration.inDays(date("2015-06-24"), localtime("14:30")),
+duration.inDays(localdatetime("2015-07-21T21:40:32.142"), localdatetime("2016-07-21T21:45:22.142")),
+duration.inDays(datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/Stockholm'}), datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/London'}))
+] AS aDuration
+RETURN aDuration
+----
+// end::functions_duration_in_months[]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| aDuration
+| P410D
+| P-410D
+| P1D
+| PT0S
+| P366D
+| PT0S
+1+d|Rows: 6
+
+|===
+
+======
+
+[[functions-duration-inmonths]]
+== duration.inMonths()
+
+.Details
+|===
+| *Syntax* 3+| `duration.inMonths(from, to)`
+| *Description* 3+| Computes the `DURATION` between the `from` instant (inclusive) and the `to` instant (exclusive) in months.
+.3+| *Arguments* | *Name* | *Type* | *Description*
+| `from` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the starting instant.
+| `to` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the ending instant.
+| *Returns* 3+| `DURATION`
+|===
+
+.Considerations
+|===
+
+| If `to` occurs earlier than `from`, the resulting `DURATION` will be negative.
+| If `from` has a time component and `to` does not, the time component of `to` is assumed to be midnight, and vice versa.
+| If `from` has a time zone component and `to` does not, the time zone component of `to` is assumed to be the same as that of `from`, and vice versa.
+| If `from` has a date component and `to` does not, the date component of `to` is assumed to be the same as that of `from`, and vice versa.
+| Any difference smaller than a whole month is disregarded.
+| Get the total number of months in a `DURATION` by returning the `months` component.
+For more information, see xref:values-and-types/temporal.adoc#cypher-temporal-accessing-components-durations[Components of durations].
+
+|===
+
+
+.+duration.inMonths()+
+======
+
+.Query
+// tag::functions_duration_in_days[]
+[source, cypher, indent=0]
+----
+UNWIND [
+duration.inMonths(date("1984-10-11"), date("1985-11-25")),
+duration.inMonths(date("1985-11-25"), date("1984-10-11")),
+duration.inMonths(date("1984-10-11"), datetime("1984-10-12T21:40:32.142+0100")),
+duration.inMonths(date("2015-06-24"), localtime("14:30")),
+duration.inMonths(localdatetime("2015-07-21T21:40:32.142"), localdatetime("2016-07-21T21:45:22.142")),
+duration.inMonths(datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/Stockholm'}), datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/London'}))
+] AS aDuration
+RETURN aDuration
+----
+// end::functions_duration_in_days[]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| aDuration
+| P1Y1M
+| P-1Y-1M
+| PT0S
+| PT0S
+| P1Y
+| PT0S
+1+d|Rows: 6
+
+|===
+
+======
+
+[[functions-duration-inseconds]]
+== duration.inSeconds()
+
+.Details
+|===
+| *Syntax* 3+| `duration.inSeconds(from, to)`
+| *Description* 3+| Computes the `DURATION` between the `from` instant (inclusive) and the `to` instant (exclusive) in seconds.
+.3+| *Arguments* | *Name* | *Type* | *Description*
+| `from` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the starting instant.
+| `to` | `ANY` | A temporal instant type (`DATE`, `LOCAL TIME`, `ZONED TIME`, `LOCAL DATETIME`, `ZONED DATETIME`) representing the ending instant.
+| *Returns* 3+| `DURATION`
+|===
+
+.Considerations
+|===
+
+| If `to` occurs earlier than `from`, the resulting `DURATION` will be negative.
+| If `from` has a time component and `to` does not, the time component of `to` is assumed to be midnight, and vice versa.
+| If `from` has a time zone component and `to` does not, the time zone component of `to` is assumed to be the same as that of `from`, and vice versa.
+| If `from` has a date component and `to` does not, the date component of `to` is assumed to be the same as that of `from`, and vice versa.
+| Get the total seconds of days in a `DURATION` by returning the `seconds` component.
+For more information, see xref:values-and-types/temporal.adoc#cypher-temporal-accessing-components-durations[Components of durations].
+
+|===
+
+
+.+duration.inSeconds()+
+======
+
+.Query
+// tag::functions_duration_in_seconds[]
+[source, cypher, indent=0]
+----
+UNWIND [
+duration.inSeconds(date("1984-10-11"), date("1984-10-12")),
+duration.inSeconds(date("1984-10-12"), date("1984-10-11")),
+duration.inSeconds(date("1984-10-11"), datetime("1984-10-12T01:00:32.142+0100")),
+duration.inSeconds(date("2015-06-24"), localtime("14:30")),
+duration.inSeconds(datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/Stockholm'}), datetime({year: 2017, month: 10, day: 29, hour: 0, timezone: 'Europe/London'}))
+] AS aDuration
+RETURN aDuration
+----
+// end::functions_duration_in_seconds[]
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| aDuration
+| PT24H
+| PT-24H
+| PT25H32.142S
+| PT14H30M
+| PT1H
+1+d|Rows: 5
+
+|===
+
+======
+

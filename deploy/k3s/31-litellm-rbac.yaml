@@ -1,0 +1,149 @@
+# ============================================================================
+# litellm.apply_config_change (2026-08-06) — the scoped identity the Executor
+# re-renders LiteLLM's config with.
+# docs/superpowers/research/2026-08-06-litellm-config-change-design.md §Plumbing.
+#
+#   NOT APPLIED BY THIS CHANGE. Written for the operator to apply alongside
+#   the rest of deploy/k3s/ — the handler only READS
+#   settings.litellm_kubeconfig and refuses (writing nothing) when it is
+#   unset or missing.
+#
+#   Config reaches the proxy as configmap/cc-litellm-config, mounted at
+#   /app/config.yaml (deploy/k3s/30-litellm.yaml) — NOT as a Secret. So the
+#   re-render is "recreate that ConfigMap from the repo file, then rollout
+#   restart", and this Role needs configmaps + deployments, no secrets at all.
+#   model-preferences.yaml is not mounted anywhere: it is pushed into the
+#   proxy's own DB by policy.py --apply, which authenticates with the master
+#   key, not with this token.
+#
+#   Namespace-scoped (Role, never ClusterRole), same shape as
+#   61-mcp.yaml's cc-mcp-deployer: a long-lived SA token Secret (k8s 1.24+ no
+#   longer auto-creates these), read by deploy/k3s/make-litellm-kubeconfig.sh
+#   into a standalone kubeconfig.
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cc-litellm-operator
+  namespace: central-command
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cc-litellm-operator
+  namespace: central-command
+rules:
+  # `kubectl apply` reads before it patches, so get+patch+update are all
+  # needed — but only on the ONE ConfigMap. list/watch cannot carry
+  # resourceNames (the API filters those verbs by field selector, not by
+  # name), so they are granted unscoped and are read-only.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [list, watch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [cc-litellm-config]
+    verbs: [get, update, patch]
+  # `rollout restart` PATCHes the Deployment's pod template annotation;
+  # `rollout status` watches it.
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [cc-litellm]
+    verbs: [get, patch]
+  - apiGroups: [apps]
+    resources: [deployments/status]
+    verbs: [get]
+  # Reading pods is how a failed rollout is diagnosed from the output.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cc-litellm-operator
+  namespace: central-command
+subjects:
+  - kind: ServiceAccount
+    name: cc-litellm-operator
+    namespace: central-command
+roleRef:
+  kind: Role
+  name: cc-litellm-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cc-litellm-operator-token
+  namespace: central-command
+  annotations:
+    kubernetes.io/service-account.name: cc-litellm-operator
+type: kubernetes.io/service-account-token
+---
+# ============================================================================
+# litellm-manager troubleshooting reads (2026-08-06) — the RUNTIME's read-only
+# identity, distinct from cc-litellm-operator above. That SA carries WRITE
+# verbs (configmaps update/patch, deployments patch) and belongs to the
+# Executor ONLY; runtime/tools.py's litellm_read_logs tool must never hold
+# it — runtime/ may hold READ credentials only. This SA can list/get pods
+# and read pod logs, nothing else, anywhere.
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cc-litellm-logreader
+  namespace: central-command
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cc-litellm-logreader
+  namespace: central-command
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  # RECORDED RESIDUAL (security review 2026-08-06): pods/log cannot be
+  # resourceName-pinned in practice (pod names are generated per ReplicaSet),
+  # so this SA can read any pod's logs IN THIS NAMESPACE — including
+  # cc-postgres and cc-n8n. Accepted: read-only, namespace-scoped, and the
+  # runtime tool only ever addresses deploy/cc-litellm; revisit if a
+  # sensitive-logging service ever lands in the namespace.
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  # `kubectl logs deploy/cc-litellm` resolves the Deployment before it ever
+  # touches a pod — found live at provisioning (Forbidden), invisible to the
+  # faked-subprocess unit tests. Read-only `get`, pinned to the one
+  # Deployment this tool may address (review finding: was unscoped).
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [cc-litellm]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cc-litellm-logreader
+  namespace: central-command
+subjects:
+  - kind: ServiceAccount
+    name: cc-litellm-logreader
+    namespace: central-command
+roleRef:
+  kind: Role
+  name: cc-litellm-logreader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cc-litellm-logreader-token
+  namespace: central-command
+  annotations:
+    kubernetes.io/service-account.name: cc-litellm-logreader
+type: kubernetes.io/service-account-token

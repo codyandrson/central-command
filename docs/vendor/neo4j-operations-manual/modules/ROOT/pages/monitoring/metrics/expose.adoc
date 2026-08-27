@@ -1,0 +1,136 @@
+:description: This chapter describes how to expose the metrics using the default and third-party monitoring tools.
+
+[role=enterprise-edition]
+[[metrics-expose]]
+= Expose metrics
+
+Neo4j supports the following ways of exposing data for monitoring purposes:
+
+* Neo4j Ops Manager -- a UI-based tool that enables a DBA (or any administrator) to monitor, administer, and operate all of the Neo4j DBMSs in an Enterprise.
+* CSV files -- retrieve metrics from CSV files. Enabled by default.
+* JMX MBeans -- expose metrics over JMX MBeans. Enabled by default.
+* Graphite -- send metrics to https://graphiteapp.org/[Graphite] or any monitoring tool based on the Graphite protocol. Disabled by default.
+* Prometheus -- publish metrics for polling as https://prometheus.io/[Prometheus] endpoint. Disabled by default.
+
+== Neo4j Ops Manager
+
+The Neo4j metrics data can be viewed via Neo4j Ops Manager (NOM).
+For more information on how to install and set up NOM to be used with your Neo4j DBMS, see https://neo4j.com/docs/ops-manager/current/[Neo4j Ops Manager documentation].
+
+== CSV files
+
+Export metrics to CSV files.
+
+Add the following settings to _neo4j.conf_ in order to enable export of metrics into local .CSV files:
+
+[source, properties]
+----
+# Enable the CSV exporter. Default is true.
+server.metrics.csv.enabled=true
+# Directory path for output files.
+# Default is the /metrics directory under NEO4J_HOME.
+server.directories.metrics=/local/file/system/path
+# How often to store data. Default is 30 seconds.
+server.metrics.csv.interval=30s
+# The maximum number of CSV files that will be saved. Default is 7.
+server.metrics.csv.rotation.keep_number=7
+# The file size at which the CSV files will auto-rotate. Default is 10.00MiB.
+server.metrics.csv.rotation.size=10.00MiB
+# Compresses the metric archive files. Default is NONE. Possible values are NONE, ZIP, and GZ.
+server.metrics.csv.rotation.compression=ZIP
+----
+
+xref:configuration/configuration-settings.adoc#config_server.metrics.csv.rotation.compression[`server.metrics.csv.rotation.compression`] selects the compression scheme to use on the files after rotation.
+Since CSV files are highly compressible, it is recommended to enable compression of the files to save disk space.
+
+== JMX MBeans
+
+From Neo4j 4.2.2 onwards, the JMX metrics are exposed by default over JMX MBeans.
+
+[source, properties]
+----
+# Enable the JMX MBeans integration. Default is true.
+server.metrics.jmx.enabled=true
+----
+
+For more information about accessing and adjusting the metrics, see link:{neo4j-docs-base-uri}/java-reference/{page-version}/jmx-metrics/[The Java Reference Guide -> JMX metrics].
+
+[[metrics-graphite]]
+== Graphite
+
+Send metrics to https://graphiteapp.org/[Graphite] or any monitoring tool based on the Graphite protocol.
+
+Add the following settings to xref:configuration/neo4j-conf.adoc[_neo4j.conf_] to enable integration with Graphite:
+
+[source, properties]
+----
+# Enable the Graphite integration. Default is false.
+server.metrics.graphite.enabled=true
+# The hostname or IP address of the Graphite server.
+# A socket address in the format <hostname>, <hostname>:<port>, or :<port>.
+# If missing, the port or hostname is acquired from server.default_listen_address.
+# The default port number for Graphite is 2003.
+server.metrics.graphite.server=localhost:2003
+# How often to send data. Default is 30 seconds.
+server.metrics.graphite.interval=30s
+# Prefix for Neo4j metrics on Graphite server.
+server.metrics.prefix=neo4j
+----
+
+Start Neo4j and connect to Graphite via a web browser to monitor your Neo4j metrics.
+
+[NOTE]
+--
+If you configure the Graphite server to be a hostname or DNS entry, you should be aware that the JVM resolves hostnames to IP addresses and, by default, caches the result indefinitely for security reasons.
+This is controlled by the value of `networkaddress.cache.ttl` in the JVM Security properties.
+See https://docs.oracle.com/javase/8/docs/technotes/guides/net/properties.html for more information.
+--
+
+
+== Prometheus
+
+Publish metrics for polling as https://prometheus.io/[Prometheus] endpoint.
+
+Add the following settings to _neo4j.conf_ to enable the Prometheus endpoint.
+
+[source, properties]
+----
+# Enable the Prometheus endpoint. Default is false.
+server.metrics.prometheus.enabled=true
+# The hostname and port to use as Prometheus endpoint.
+# A socket address is in the format <hostname>, <hostname>:<port>, or :<port>.
+# If missing, the port or hostname is acquired from server.default_listen_address.
+# The default is localhost:2004.
+server.metrics.prometheus.endpoint=localhost:2004
+----
+
+When Neo4j is fully started, a Prometheus endpoint will be available at the configured address.
+
+[WARNING]
+====
+You should never expose the Prometheus endpoint directly to the Internet.
+If security is of paramount importance, you should set `server.metrics.prometheus.endpoint=localhost:2004` and configure a reverse HTTP proxy on the same machine that handles the authentication, SSL, caching, etc.
+====
+If you can afford to send unencrypted metrics within the internal network, such as `server.metrics.prometheus.endpoint=10.0.0.123:2004`, all servers within the same netmask will be able to access it.
+
+If you specify anything more permissive, such as `server.metrics.prometheus.endpoint=0.0.0.0:2004`, you should have a firewall rule to prevent any unauthorized access.
+Data in transit will still not be encrypted, so it should never go over any insecure networks.
+
+[TIP]
+====
+When Neo4j metrics are exposed via Prometheus, their names are transformed to comply with Prometheus naming conventions.
+
+The following general rules are applied:
+
+* Dots (.) are replaced with underscores (_), since Prometheus does not support dots in metric names.
+
+* Depending on the metric type, a postfix is added.
+
+Original Neo4j metric names can be found in Prometheus output, see lines starting with `# HELP`.
+
+For more information, see link:https://prometheus.io/docs/concepts/data_model/[Prometheus Documentation].
+====
+
+
+
+

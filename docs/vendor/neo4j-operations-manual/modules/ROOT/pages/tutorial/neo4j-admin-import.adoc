@@ -1,0 +1,976 @@
+[[tutorial-neo4j-admin-import]]
+= Full data import
+:description: Examples of importing data from CSV files using the `neo4j-admin database import full` command.
+
+The neo4j-admin import command is used for loading large amounts of data from CSV files and supports full and incremental import into a running or stopped DBMS.
+
+This page provides examples of importing data from CSV files into a nonexistent database using the xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-full[`neo4j-admin database import full`] command.
+
+For examples of importing data into an existing database using the `neo4j-admin database import incremental` command, see xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-incremental[Incremental import].
+
+[IMPORTANT]
+====
+The `neo4j-admin database import full` command does not create a database, the command only imports data and makes it available for the database.
+
+If the database does not exist before running the command, you must create it afterward.
+
+If you want to perform a full import into an existing database, you must stop the database before running the command and specify the `--overwrite-destination` flag to overwrite the existing database.
+Then, you can start the database and the imported data will be available for querying.
+====
+
+== Prerequisites
+
+The following examples show how to import data into a nonexistent database in a standalone Neo4j DBMS.
+They use:
+
+* The Neo4j tarball (xref:installation/linux/tarball.adoc#unix-console[Unix console application]).
+* `$NEO4J_HOME` as the current working directory.
+* A nonexistent database, called `foo`.
+* The _import_ directory of the Neo4j installation to store all the CSV files.
+However, the CSV files can be located in any directory of your file system.
+* UNIX-styled paths.
+* The xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-full[`neo4j-admin database import full`] command.
+
+[TIP]
+.Handy tips:
+====
+Relationships are created by connecting node IDs.
+Therefore, each node must have a unique ID to be able to be referenced when creating relationships between nodes.
+In the following examples, the node IDs are stored as properties on the nodes.
+If you do not want the IDs to persist as properties after the import completes, then do not specify a property name in the `:ID` field.
+
+The details of a CSV file header format can be found at xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-header-format[CSV header format].
+====
+
+== Example 1: Import a small data set
+
+The following example imports a small data set containing nodes and relationships.
+The data set is split into three CSV files, where each file has a header row describing the data.
+
+[discrete]
+=== The data
+
+The data set contains information about movies, actors, and roles.
+Data for movies and actors are stored as nodes and the roles are stored as relationships.
+
+The files you want to import data from are:
+
+* _movies.csv_
+* _actors.csv_
+* _roles.csv_
+
+Each movie in _movies.csv_ has an `ID`, a `title`, and a `year`, stored as **properties** in the node.
+All the nodes in _movies.csv_ also have the **label** `Movie`.
+A node can have several labels, as you can see in _movies.csv_, there are nodes that also have the label `Sequel`.
+The node labels are optional, they are very useful for grouping nodes into sets, where all nodes that have a certain label belong to the same set.
+
+.movies.csv
+[source, csv]
+----
+movieId:ID,title,year:int,:LABEL
+tt0133093,"The Matrix",1999,Movie
+tt0234215,"The Matrix Reloaded",2003,Movie;Sequel
+tt0242653,"The Matrix Revolutions",2003,Movie;Sequel
+----
+
+The actors' data in _actors.csv_ consist of an `ID` and a `name`, stored as **properties** in the node.
+The ID, in this case, is a shorthand for the actor's name.
+All the nodes in _actors.csv_ have the label `Actor`.
+
+.actors.csv
+[source, csv]
+----
+personId:ID,name,:LABEL
+keanu,"Keanu Reeves",Actor
+laurence,"Laurence Fishburne",Actor
+carrieanne,"Carrie-Anne Moss",Actor
+----
+
+The roles data in _roles.csv_ have only one **property**, `role`.
+Roles are represented by relationship data that connects actor nodes with movie nodes.
+
+There are three mandatory fields for relationship data:
+
+* `:START_ID` -- ID referring to a node.
+* `:END_ID` -- ID referring to a node.
+* `:TYPE` -- The relationship type.
+
+To create a relationship between two nodes, the IDs defined in _actors.csv_ and _movies.csv_ are used for the `:START_ID` and `:END_ID` fields.
+You also need to provide a relationship type (in this case `ACTED_IN`) for the `:TYPE` field.
+
+.roles.csv
+[source, csv]
+----
+:START_ID,role,:END_ID,:TYPE
+keanu,"Neo",tt0133093,ACTED_IN
+keanu,"Neo",tt0234215,ACTED_IN
+keanu,"Neo",tt0242653,ACTED_IN
+laurence,"Morpheus",tt0133093,ACTED_IN
+laurence,"Morpheus",tt0234215,ACTED_IN
+laurence,"Morpheus",tt0242653,ACTED_IN
+carrieanne,"Trinity",tt0133093,ACTED_IN
+carrieanne,"Trinity",tt0234215,ACTED_IN
+carrieanne,"Trinity",tt0242653,ACTED_IN
+----
+
+
+[discrete]
+=== Importing the data
+
+You can import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies.csv \
+--nodes=import/actors.csv \
+--relationships=import/roles.csv
+----
+include::partial$/full-import-query-db.adoc[]
+
+== Example 2: CSV file delimiters
+
+You can customize the configuration options that the import tool uses (see xref:tools/neo4j-admin/neo4j-admin-import.adoc#_options[Options]) if your data does not fit the default format.
+
+The details of a CSV file header format can be found at xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-header-format[CSV header format].
+
+
+[discrete]
+=== The data
+
+The following CSV files have:
+
+* `--delimiter=";"`
+* `--array-delimiter="U+007C"` (`U+007C` is the Unicode code point for the character `|`)
+* `--quote="'"`
+
+.movies2.csv
+[source, csv]
+----
+movieId:ID;title;year:int;:LABEL
+tt0133093;'The Matrix';1999;Movie
+tt0234215;'The Matrix Reloaded';2003;Movie|Sequel
+tt0242653;'The Matrix Revolutions';2003;Movie|Sequel
+----
+
+.actors2.csv
+[source, csv]
+----
+personId:ID;name;:LABEL
+keanu;'Keanu Reeves';Actor
+laurence;'Laurence Fishburne';Actor
+carrieanne;'Carrie-Anne Moss';Actor
+----
+
+.roles2.csv
+[source, csv]
+----
+:START_ID;role;:END_ID;:TYPE
+keanu;'Neo';tt0133093;ACTED_IN
+keanu;'Neo';tt0234215;ACTED_IN
+keanu;'Neo';tt0242653;ACTED_IN
+laurence;'Morpheus';tt0133093;ACTED_IN
+laurence;'Morpheus';tt0234215;ACTED_IN
+laurence;'Morpheus';tt0242653;ACTED_IN
+carrieanne;'Trinity';tt0133093;ACTED_IN
+carrieanne;'Trinity';tt0234215;ACTED_IN
+carrieanne;'Trinity';tt0242653;ACTED_IN
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--delimiter=";" \
+--array-delimiter="U+007C" \
+--quote="'" \
+--nodes=import/movies2.csv \
+--nodes=import/actors2.csv \
+--relationships=import/roles2.csv
+----
+
+include::partial$/full-import-query-db.adoc[]
+
+== Example 3: Using separate header files
+
+When dealing with very large CSV files, it is more convenient to have the header in a separate file.
+This makes it easier to edit the header as you avoid having to open a huge data file just to change it.
+The header file must be specified before the rest of the files in each file group.
+
+The import tool can also process single-file compressed archives, for example:
+
+* `--nodes=import/nodes.csv.gz`
+* `--relationships=import/relationships.zip`
+
+
+[discrete]
+=== The data
+
+You will use the same data set as in the previous examples but with the headers in separate files.
+
+.movies3-header.csv
+[source, csv]
+----
+movieId:ID,title,year:int,:LABEL
+----
+
+.movies3.csv
+[source, csv]
+----
+tt0133093,"The Matrix",1999,Movie
+tt0234215,"The Matrix Reloaded",2003,Movie;Sequel
+tt0242653,"The Matrix Revolutions",2003,Movie;Sequel
+----
+
+.actors3-header.csv
+[source, csv]
+----
+personId:ID,name,:LABEL
+----
+
+.actors3.csv
+[source, csv]
+----
+keanu,"Keanu Reeves",Actor
+laurence,"Laurence Fishburne",Actor
+carrieanne,"Carrie-Anne Moss",Actor
+----
+
+.roles3-header.csv
+[source, csv]
+----
+:START_ID,role,:END_ID,:TYPE
+----
+
+.roles3.csv
+[source, csv]
+----
+keanu,"Neo",tt0133093,ACTED_IN
+keanu,"Neo",tt0234215,ACTED_IN
+keanu,"Neo",tt0242653,ACTED_IN
+laurence,"Morpheus",tt0133093,ACTED_IN
+laurence,"Morpheus",tt0234215,ACTED_IN
+laurence,"Morpheus",tt0242653,ACTED_IN
+carrieanne,"Trinity",tt0133093,ACTED_IN
+carrieanne,"Trinity",tt0234215,ACTED_IN
+carrieanne,"Trinity",tt0242653,ACTED_IN
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[NOTE]
+====
+The header line for a file group, whether it is the first line of a file in the group or a dedicated header file, must be the _first_ line in the file group.
+====
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies3-header.csv,import/movies3.csv \
+--nodes=import/actors3-header.csv,import/actors3.csv \
+--relationships=import/roles3-header.csv,import/roles3.csv
+----
+include::partial$/full-import-query-db.adoc[]
+
+[[example-multiple-input-files]]
+== Example 4: Multiple input files
+
+In addition to using a separate header file, you can also provide multiple node or relationship files.
+Files within such an input group can be specified with multiple match strings, delimited by `,`, where each matched string can be either the exact file name or a regular expression matching one or more files.
+Multiple matching files are sorted according to their characters and their natural number sort order for file names containing numbers.
+
+[discrete]
+=== The data
+
+.movies4-header.csv
+[source, csv]
+----
+movieId:ID,title,year:int,:LABEL
+----
+
+.movies4-part1.csv
+[source, csv]
+----
+tt0133093,"The Matrix",1999,Movie
+tt0234215,"The Matrix Reloaded",2003,Movie;Sequel
+----
+
+.movies4-part2.csv
+[source, csv]
+----
+tt0242653,"The Matrix Revolutions",2003,Movie;Sequel
+----
+
+.actors4-header.csv
+[source, csv]
+----
+personId:ID,name,:LABEL
+----
+
+.actors4-part1.csv
+[source, csv]
+----
+keanu,"Keanu Reeves",Actor
+laurence,"Laurence Fishburne",Actor
+----
+
+.actors4-part2.csv
+[source, csv]
+----
+carrieanne,"Carrie-Anne Moss",Actor
+----
+
+.roles4-header.csv
+[source, csv]
+----
+:START_ID,role,:END_ID,:TYPE
+----
+
+.roles4-part1.csv
+[source, csv]
+----
+keanu,"Neo",tt0133093,ACTED_IN
+keanu,"Neo",tt0234215,ACTED_IN
+keanu,"Neo",tt0242653,ACTED_IN
+laurence,"Morpheus",tt0133093,ACTED_IN
+laurence,"Morpheus",tt0234215,ACTED_IN
+----
+
+.roles4-part2.csv
+[source, csv]
+----
+laurence,"Morpheus",tt0242653,ACTED_IN
+carrieanne,"Trinity",tt0133093,ACTED_IN
+carrieanne,"Trinity",tt0234215,ACTED_IN
+carrieanne,"Trinity",tt0242653,ACTED_IN
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[NOTE]
+====
+The header line for a file group, whether it is the first line of a file in the group or a dedicated header file, must be the _first_ line in the file group.
+====
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies4-header.csv,import/movies4-part1.csv,import/movies4-part2.csv \
+--nodes=import/actors4-header.csv,import/actors4-part1.csv,import/actors4-part2.csv \
+--relationships=import/roles4-header.csv,import/roles4-part1.csv,import/roles4-part2.csv
+----
+
+include::partial$/full-import-query-db.adoc[]
+
+== Example 5: Regular expressions
+
+File names can be specified using regular expressions when there are many data source files.
+Each file name that matches the regular expression will be included.
+
+When using regular expressions to specify the input files, the list of files will be sorted according to the names of the files that match the expression.
+The matching is aware of the numbers inside the file names and will sort them accordingly, without the need for padding with zeros.
+
+
+[discrete]
+=== The data
+
+Let's assume that you have the same files as in <<example-multiple-input-files, Example 4: Multiple input files>>.
+
+If you use the regular expression `+movies4.*+`, the sorting will place the header file last and the import will fail.
+A better alternative would be to name the header file explicitly and use a regular expression that only matches the names of the data files.
+For example: `+--nodes "import/movies4-header.csv,movies4-part.*"+` will accomplish this.
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[NOTE]
+====
+The header line for a file group, whether it is the first line of a file in the group or a dedicated header file, must be the _first_ line in the file group.
+====
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes="import/movies4-header.csv,import/movies4-part.*" \
+--nodes="import/actors4-header.csv,import/actors4-part.*" \
+--relationships="import/roles4-header.csv,import/roles4-part.*"
+----
++
+[NOTE]
+====
+The use of regular expressions should not be confused with https://en.wikipedia.org/wiki/Glob_(programming)[file globbing].
+
+The expression `+.*+` means: "zero or more occurrences of any character except line break".
+Therefore, the regular expression `+movies4.*+` will list all files starting with `movies4`.
+Conversely, with file globbing, `+ls movies4.*+` will list all files starting with `movies4.`.
+
+Another important difference to pay attention to is the sorting order.
+The result of a regular expression matching will place the file `movies4-part2.csv` before the file `movies4-partX.csv`.
+If doing `+ls movies4-part*+` in a directory containing the above-listed files, the file `movies4-partX.csv` will be listed before the file `movies4-part2.csv`.
+====
+
+include::partial$/full-import-query-db.adoc[]
+
+== Example 6: Using the same label for every node
+
+If you want to use the same node label(s) for every node in your nodes file, you can specify the appropriate value as an option to `neo4j-admin database import full`.
+There is then no need to specify the `:LABEL` column in the header file, and each row (node) will apply the specified labels from the command line option.
+For example, you can use the following syntax to specify node labels option:
+
+`--nodes=LabelOne:LabelTwo=import/example-header.csv,import/example-data1.csv`
+
+[TIP]
+====
+It is possible to apply both the label provided in the file and the one provided on the command line to the node.
+====
+
+
+[discrete]
+=== The data
+
+In this example, you want to have the label `Movie` on every node specified in `movies5a.csv`, and you put the labels `Movie` and `Sequel` on the nodes specified in `sequels5a.csv`.
+
+.movies5a.csv
+[source, csv]
+----
+movieId:ID,title,year:int
+tt0133093,"The Matrix",1999
+----
+
+.sequels5a.csv
+[source, csv]
+----
+movieId:ID,title,year:int
+tt0234215,"The Matrix Reloaded",2003
+tt0242653,"The Matrix Revolutions",2003
+----
+
+.actors5a.csv
+[source, csv]
+----
+personId:ID,name
+keanu,"Keanu Reeves"
+laurence,"Laurence Fishburne"
+carrieanne,"Carrie-Anne Moss"
+----
+
+.roles5a.csv
+[source, csv]
+----
+:START_ID,role,:END_ID,:TYPE
+keanu,"Neo",tt0133093,ACTED_IN
+keanu,"Neo",tt0234215,ACTED_IN
+keanu,"Neo",tt0242653,ACTED_IN
+laurence,"Morpheus",tt0133093,ACTED_IN
+laurence,"Morpheus",tt0234215,ACTED_IN
+laurence,"Morpheus",tt0242653,ACTED_IN
+carrieanne,"Trinity",tt0133093,ACTED_IN
+carrieanne,"Trinity",tt0234215,ACTED_IN
+carrieanne,"Trinity",tt0242653,ACTED_IN
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=Movie=import/movies5a.csv \
+--nodes=Movie:Sequel=import/sequels5a.csv \
+--nodes=Actor=import/actors5a.csv \
+--relationships=import/roles5a.csv
+----
+
+include::partial$/full-import-query-db.adoc[]
+
+== Example 7: Using the same relationship type for every relationship
+
+If you want to use the same relationship type for every relationship in your relationships file this can be done by specifying the appropriate value as an option to `neo4j-admin database import`.
+For example, you can use the following syntax to specify relationship type option:
+
+`--relationships=TYPE=import/example-header.csv,import/example-data1.csv`
+
+[NOTE]
+====
+If you provide a relationship type both on the command line and in the relationships file, the one in the file will be applied.
+====
+
+[discrete]
+=== The data
+
+In this example, you want the relationship type `ACTED_IN` to be applied on every relationship specified in `roles5b.csv`.
+
+.movies5b.csv
+[source, csv]
+----
+movieId:ID,title,year:int,:LABEL
+tt0133093,"The Matrix",1999,Movie
+tt0234215,"The Matrix Reloaded",2003,Movie;Sequel
+tt0242653,"The Matrix Revolutions",2003,Movie;Sequel
+----
+
+.actors5b.csv
+[source, csv]
+----
+personId:ID,name,:LABEL
+keanu,"Keanu Reeves",Actor
+laurence,"Laurence Fishburne",Actor
+carrieanne,"Carrie-Anne Moss",Actor
+----
+
+.roles5b.csv
+[source, csv]
+----
+:START_ID,role,:END_ID
+keanu,"Neo",tt0133093
+keanu,"Neo",tt0234215
+keanu,"Neo",tt0242653
+laurence,"Morpheus",tt0133093
+laurence,"Morpheus",tt0234215
+laurence,"Morpheus",tt0242653
+carrieanne,"Trinity",tt0133093
+carrieanne,"Trinity",tt0234215
+carrieanne,"Trinity",tt0242653
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies5b.csv \
+--nodes=import/actors5b.csv \
+--relationships=ACTED_IN=import/roles5b.csv
+----
+
+include::partial$/full-import-query-db.adoc[]
+
+== Example 8: Properties
+
+Nodes and relationships can have properties.
+The property type is specified in the CSV header row, see xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-header-format[CSV header format].
+
+
+[discrete]
+=== The data
+
+The following example creates a small graph containing one actor and one movie connected by one relationship.
+
+There is a `roles` property on the relationship which contains an array of the characters played by the actor in a movie:
+
+.movies6.csv
+[source, csv]
+----
+movieId:ID,title,year:int,:LABEL
+tt0099892,"Joe Versus the Volcano",1990,Movie
+----
+
+.actors6.csv
+[source, csv]
+----
+personId:ID,name,:LABEL
+meg,"Meg Ryan",Actor
+----
+
+.roles6.csv
+[source, csv]
+----
+:START_ID,roles:string[],:END_ID,:TYPE
+meg,"DeDe;Angelica Graynamore;Patricia Graynamore",tt0099892,ACTED_IN
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies6.csv \
+--nodes=import/actors6.csv \
+--relationships=import/roles6.csv
+----
+
+. In your Cypher Shell terminal, create the database `foo`:
++
+[source, cypher]
+----
+CREATE DATABASE foo;
+----
+
+. Switch to the `foo` database:
++
+[source, cypher]
+----
+:use foo;
+----
+
+. Run a Cypher query to check that the data has been imported correctly:
++
+[source, cypher]
+----
+MATCH (n)
+RETURN count(n) as nodes;
+----
++
+This query returns `2` as there are 2 nodes in the graph (1 movie and 1 actor).
+
+== Example 9: ID space
+
+The import tool assumes that identifiers are unique across node files.
+This may not be the case for data sets that use sequential, auto-incremented, or otherwise colliding identifiers.
+Those data sets can define ID spaces where identifiers are unique within their respective ID space.
+
+In cases where the node ID is unique only within files, using ID spaces is a way to ensure uniqueness across all node files.
+See xref:tools/neo4j-admin/neo4j-admin-import.adoc#import-tool-id-spaces[Using ID spaces].
+
+Each node processed by `neo4j-admin database import full` must provide an ID if it is to be connected in any relationships.
+The node ID is used to find the start node and end node when creating a relationship.
+
+A node header can also contain multiple `ID` columns, where the relationship data references the composite value of all those columns.
+This also implies using `string` as `id-type`.
+For each `ID` column, you can specify to store its values as different node properties.
+However, the composite value cannot be stored as a node property.
+For example, you can use the following syntax to define the ID space `Movie-ID` for `movieId:ID`:
+
+`movieId:ID(Movie-ID)`.
+
+[discrete]
+=== The data
+
+If both movies and people use sequential identifiers, then you need to define `Movie` and `Actor` ID spaces.
+
+.movies7.csv
+[source, csv]
+----
+movieId:ID(Movie-ID),title,year:int,:LABEL
+1,"The Matrix",1999,Movie
+2,"The Matrix Reloaded",2003,Movie;Sequel
+3,"The Matrix Revolutions",2003,Movie;Sequel
+----
+
+.actors7.csv
+[source, csv]
+----
+personId:ID(Actor-ID),name,:LABEL
+1,"Keanu Reeves",Actor
+2,"Laurence Fishburne",Actor
+3,"Carrie-Anne Moss",Actor
+----
+
+You also need to reference the appropriate ID space in your relationships file so it knows which nodes to connect.
+
+.roles7.csv
+[source, csv]
+----
+:START_ID(Actor-ID),role,:END_ID(Movie-ID)
+1,"Neo",1
+1,"Neo",2
+1,"Neo",3
+2,"Morpheus",1
+2,"Morpheus",2
+2,"Morpheus",3
+3,"Trinity",1
+3,"Trinity",2
+3,"Trinity",3
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies7.csv \
+--nodes=import/actors7.csv \
+--relationships=ACTED_IN=import/roles7.csv
+----
+
+include::partial$/full-import-query-db.adoc[]
+
+== Example 10: Skip relationships referring to missing nodes
+
+The import tool has no tolerance for bad relationships and will fail the import on the first bad relationship.
+You can specify explicitly that you want it to ignore rows that contain bad relationships, and continue the import with the remaining data.
+
+Bad relationships are relationships that refer to missing node IDs, either for `:START_ID` or `:END_ID`.
+Whether or not such relationships are skipped is controlled with the `--skip-bad-relationships` flag, which can have the values `true` or `false`, or no value, which means `true`.
+The default is `false`, which means that any bad relationship is considered an error and will fail the import.
+For more information, see the `--skip-bad-relationships` option in xref:tools/neo4j-admin/neo4j-admin-import.adoc#full-import-options-table[Import -> `neo4j-admin database import full` options] table.
+
+
+[discrete]
+=== The data
+
+In the following example, there is a missing `emil` node referenced in the roles file.
+
+.movies8a.csv
+[source, csv]
+----
+movieId:ID,title,year:int,:LABEL
+tt0133093,"The Matrix",1999,Movie
+tt0234215,"The Matrix Reloaded",2003,Movie;Sequel
+tt0242653,"The Matrix Revolutions",2003,Movie;Sequel
+----
+
+.actors8a.csv
+[source, csv]
+----
+personId:ID,name,:LABEL
+keanu,"Keanu Reeves",Actor
+laurence,"Laurence Fishburne",Actor
+carrieanne,"Carrie-Anne Moss",Actor
+----
+
+.roles8a.csv
+[source, csv]
+----
+:START_ID,role,:END_ID,:TYPE
+keanu,"Neo",tt0133093,ACTED_IN
+keanu,"Neo",tt0234215,ACTED_IN
+keanu,"Neo",tt0242653,ACTED_IN
+laurence,"Morpheus",tt0133093,ACTED_IN
+laurence,"Morpheus",tt0234215,ACTED_IN
+laurence,"Morpheus",tt0242653,ACTED_IN
+carrieanne,"Trinity",tt0133093,ACTED_IN
+carrieanne,"Trinity",tt0234215,ACTED_IN
+carrieanne,"Trinity",tt0242653,ACTED_IN
+emil,"Emil",tt0133093,ACTED_IN
+----
+
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies8a.csv \
+--nodes=import/actors8a.csv \
+--relationships=import/roles8a.csv
+----
++
+Because there is a bad relationship in the input data, the import process will fail.
+
+. Let's see what happens if you append the `--skip-bad-relationships` flag:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--skip-bad-relationships \
+--nodes=import/movies8a.csv \
+--nodes=import/actors8a.csv \
+--relationships=import/roles8a.csv
+--overwrite-destination
+----
+
+include::partial$/full-import-query-db.adoc[]
++
+The data files are successfully imported and the bad relationship is ignored.
+An entry is written to the `import.report` file.
++
+.ignore bad relationships
+[result, subs="attributes+,+macros"]
+----
+InputRelationship:
+   source: roles8a.csv:11
+   properties: [role, Emil]
+   startNode: emil (global id space)
+   endNode: tt0133093 (global id space)
+   type: ACTED_IN
+ referring to missing node emil
+----
+
+
+== Example 11: Skip nodes with the same ID
+
+Nodes that specify `:ID`, which has already been specified within the ID space are considered bad nodes.
+Whether or not such nodes are skipped is controlled with `--skip-duplicate-nodes` flag, which can have the values `true`, `false`, or no value, which means `true`.
+The default is `false`, which means that any duplicate node is considered an error and will fail the import.
+For more information, see the `--skip-duplicate-nodes` option in xref:tools/neo4j-admin/neo4j-admin-import.adoc#full-import-options-table[Import -> `neo4j-admin database import full` options] table.
+
+
+[discrete]
+=== The data
+
+In the following example there is a node ID, `laurence`, that is specified twice within the same ID space.
+
+
+.movies8b.csv
+[source, csv]
+----
+movieId:ID,title,year:int,:LABEL
+tt0133093,"The Matrix",1999,Movie
+tt0234215,"The Matrix Reloaded",2003,Movie;Sequel
+tt0242653,"The Matrix Revolutions",2003,Movie;Sequel
+----
+
+.actors8b.csv
+[source, csv]
+----
+personId:ID,name,:LABEL
+keanu,"Keanu Reeves",Actor
+laurence,"Laurence Fishburne",Actor
+carrieanne,"Carrie-Anne Moss",Actor
+laurence,"Laurence Harvey",Actor
+----
+
+.roles8b.csv
+[source, csv]
+----
+:START_ID,role,:END_ID,:TYPE
+keanu,"Neo",tt0133093,ACTED_IN
+keanu,"Neo",tt0234215,ACTED_IN
+keanu,"Neo",tt0242653,ACTED_IN
+laurence,"Morpheus",tt0133093,ACTED_IN
+laurence,"Morpheus",tt0234215,ACTED_IN
+laurence,"Morpheus",tt0242653,ACTED_IN
+carrieanne,"Trinity",tt0133093,ACTED_IN
+carrieanne,"Trinity",tt0234215,ACTED_IN
+carrieanne,"Trinity",tt0242653,ACTED_IN
+----
+
+[discrete]
+=== Importing the data
+
+You import the data from the CSV files into the database `foo` with a single command.
+The database `foo` should not exist and it must be created afterward.
+Paths to node data are defined with the `--nodes` option.
+Paths to relationship data are defined with the `--relationships` option.
+
+include::partial$/full-import-drop-db.adoc[]
+
+. In a separate terminal, run the `neo4j-admin database import full` command to import the data from the CSV files:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--nodes=import/movies8b.csv \
+--nodes=import/actors8b.csv \
+--relationships=import/roles8b.csv
+----
++
+Because there is a bad node in the input data, the import process will fail.
+
+. Let's see what happens if you append the `--skip-duplicate-nodes` flag:
++
+[source, shell]
+----
+bin/neo4j-admin database import full foo \
+--skip-duplicate-nodes \
+--nodes=import/movies8b.csv \
+--nodes=import/actors8b.csv \
+--relationships=import/roles8b.csv \
+--overwrite-destination
+----
+
+include::partial$/full-import-query-db.adoc[]
++
+The data files are successfully imported and the bad node is ignored.
+An entry is written to the `import.report` file.
++
+.ignore bad nodes
+[result, subs="attributes+,+macros"]
+----
+ID 'laurence' is defined more than once in global ID space, at least at actors8b.csv:3 and actors8b.csv:5
+----

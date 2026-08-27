@@ -1,0 +1,546 @@
+:description: This section describes how to manage databases in a cluster.
+:page-aliases: clustering/seed.adoc
+[role=enterprise-edition]
+[[database-management]]
+= Managing databases in a cluster
+
+When creating a database or altering it after creation, you can select the number of `primary` and `secondary` allocations for it, i.e., define a topology for a database.
+To specify the initial database topology, use the Cypher command `CREATE DATABASE`.
+To change the topology once the database is created, run the `ALTER DATABASE` command.
+Note that the database role must be aligned with the server’s `modeConstraint`, which value can be `PRIMARY`, or `SECONDARY`, or `NONE`.
+
+If a database is no longer needed, the command `DROP DATABASE` deletes the database from the cluster.
+
+[[cluster-system-db]]
+== The `system` database in a cluster
+
+The `system` database contains metadata on the DBMS and security configuration.
+When connected to this database you can only perform a specific set of administrative tasks, such as managing databases, servers, and access control.
+
+In the clustered environment, the `system` database can be in a primary or secondary mode.
+To configure its mode, use the xref:configuration/configuration-settings.adoc#config_server.cluster.system_database_mode[`server.cluster.system_database_mode`] setting in the _neo4j.conf_ file.
+This has to be done before starting the Neo4j process.
+For guidelines on how to choose the mode for the `system` database, see xref:clustering/introduction.adoc#primaries-secondaries-for-system-db[Introduction -> Primaries and secondaries for the `system` database].
+
+Deploying a cluster for the first time, consider configuring the xref:configuration/configuration-settings.adoc#config_dbms.cluster.minimum_initial_system_primaries_count[`dbms.cluster.minimum_initial_system_primaries_count`].
+This setting defaults to `3`.
+See xref:clustering/setup/deploy.adoc[] for details.
+
+For information on how to recover the `system` database, refer to the xref:clustering/multi-region-deployment/disaster-recovery.adoc[Disaster recovery guide].
+
+
+[[create-database]]
+== Create databases
+
+The command to create a standard database in a cluster is not significantly different from the command to create a database in a non-clustered environment.
+See xref:database-administration/standard-databases/create-databases.adoc[] for more information on database management in a non-clustered environments.
+
+The difference in a clustered environment is that the database topology can be specified, i.e. how many primaries and secondaries are desired for the database.
+For more details on how many primaries and  secondaries it is recommended to have, see xref:clustering/introduction.adoc[].
+
+To create a database `foo` with three primaries and two secondaries, run the following Cypher command:
+
+[source, cypher]
+----
+CREATE DATABASE foo TOPOLOGY 3 PRIMARIES 2 SECONDARIES
+----
+Alternatively, starting from 5.26, you can use link:{neo4j-docs-base-uri}/cypher-manual/5/syntax/parameters[parameters] to provide the number of primaries and secondaries:
+
+.Parameters
+[source,javascript, indent=0]
+----
+{
+  "dbname": "foo",
+  "primary": 3,
+  "secondary": 2
+}
+----
+
+.Query
+[source, cypher, indent=0]
+----
+CREATE DATABASE $dbname TOPOLOGY $primary PRIMARIES $secondary SECONDARIES
+----
+
+The command can only be executed successfully if the cluster's servers are able to satisfy the specified topology.
+If they are not, the command results in an error.
+For example, if only four servers exist, the command fails with an error.
+Also, it fails if two servers are set up with a mode constraint of primary, and three servers are set up with a mode constraint of secondary.
+
+If `TOPOLOGY` is not specified, the database is created according to xref:configuration/configuration-settings.adoc#config_initial.dbms.default_primaries_count[`initial.dbms.default_primaries_count`] and xref:configuration/configuration-settings.adoc#config_initial.dbms.default_secondaries_count[`initial.dbms.default_secondaries_count`] specified in _neo4j.conf_.
+After cluster startup, you can overwrite these values using the xref:procedures/built-in-procedures.adoc#procedure_dbms_setDefaultAllocationNumbers[`dbms.setDefaultAllocationNumbers()`] procedure.
+
+A `CREATE DATABASE` command allocates the database, therefore there is no requirement to run `REALLOCATE DATABASES` (described in xref:clustering/servers.adoc#_hosting_databases_on_added_servers[Hosting databases on added servers]).
+
+However, over time, or after several `CREATE DATABASE` commands have been issued, the distribution of databases can become unbalanced.
+At this point you can run `REALLOCATE DATABASES` to make the cluster re-balance databases across all servers that are part of the cluster.
+
+
+[[alter-database]]
+== Modify database topology and read/write access
+
+To alter the topology of or read/write access to a database after its creation, use the command `ALTER DATABASE`.
+
+For information about the command syntax, see xref:database-administration/standard-databases/alter-databases.adoc[].
+
+[[alter-topology]]
+=== Alter database topology
+
+To change the topology of the database `foo` from the previous example, run the following command:
+
+[source, cypher]
+----
+ALTER DATABASE foo SET TOPOLOGY 2 PRIMARIES 1 SECONDARY
+----
+
+Alternatively, starting from 5.26, you can use link:{neo4j-docs-base-uri}/cypher-manual/5/syntax/parameters[parameters] to provide the number of primaries and secondaries:
+
+
+.Parameters
+[source,javascript, indent=0]
+----
+{
+  "dbname": "foo",
+  "primary": 2,
+  "secondary": 1
+}
+----
+
+.Query
+[source, cypher, indent=0]
+----
+ALTER DATABASE $dbname SET TOPOLOGY $primary PRIMARIES $secondary SECONDARIES
+----
+
+Like the `CREATE DATABASE` command, the `ALTER DATABASE` command results in an error if the cluster does not contain sufficient servers to satisfy the requested topology.
+
+Additionally, `ALTER DATABASE` is optionally idempotent and also results in an error if the database does not exist.
+It is possible to append the command with `IF EXISTS` to make sure that no error is returned if the database does not exist.
+
+When there is more than one possible permutation of the specified topology, Neo4j uses an allocator to decide how to spread the database across the cluster.
+Note, like `CREATE DATABASE`, the `ALTER DATABASE` command allocates the database and there is no requirement to execute `REALLOCATE DATABASES` unless there is a desire to re-balance databases across all servers that are part of the cluster.
+
+This normally happens when the cluster is configured with more servers than the sum of the number of primaries and secondaries for any one database.
+
+It is not possible to automatically transition to a topology with a single primary host. Attempting to do so results in an error.
+
+However, it is possible to _manually_ do this transition:
+
+. First, back up the database.
+See xref:backup-restore/index.adoc[Backup and restore] for more information.
+. Once the database is backed up, drop the database.
+See xref:database-administration/standard-databases/delete-databases.adoc[Delete databases] for more information.
+. The last step is to either seed a cluster from the backup with the new topology, or to restore the backup on a single server.
+See xref:clustering/databases.adoc#cluster-seed[Seed a cluster] further on for information on seeding.
+
+Also, it is possible to automatically transition _from_ a topology with a single primary host to multiple primary hosts.
+Keep in mind that during such a transition, the database will be unavailable for a short period of time.
+
+If the `ALTER DATABASE` command decreases the number of allocations of a database, allocations on xref:clustering/servers.adoc#_cordoned_state[cordoned servers] are removed first.
+
+.Query
+[source, cypher]
+----
+ALTER DATABASE nonExisting IF EXISTS SET TOPOLOGY 1 PRIMARY 0 SECONDARY
+----
+
+[role="statsonlyqueryresult"]
+0 rows
+// This part can be added back once it has been implemented.
+// The allocation approach can be specified with the setting `initial.dbms.database_allocator`.
+// The available options are:
+//
+// * `EQUAL_NUMBERS`
+// * `OPTIMAL_DISC_USAGE`
+// * `ALL`
+
+[[alter-access]]
+=== Alter database access
+
+To alter the access to the database `foo`, the syntax looks like this:
+
+[source, cypher]
+----
+ALTER DATABASE foo SET ACCESS {READ ONLY | READ WRITE}
+----
+
+By default, a newly created database has both read and write access.
+
+[role=label--new-5.23]
+[[deallocate-databases]]
+== Deallocate databases
+
+To relieve the load of a specific server(s), you can use one of the following procedures to deallocate databases, causing the databases to be removed from the server(s) under pressure:
+
+* xref:procedures/built-in-procedures.adoc#procedure_dbms_cluster_deallocateDatabaseFromServer[`dbms.cluster.deallocateDatabaseFromServer("server-name", "database-name")`]
+* xref:procedures/built-in-procedures.adoc#procedure_dbms_cluster_deallocateDatabaseFromServers[`dbms.cluster.deallocateDatabaseFromServers(["server-name1", "server-name2"\], "database-name")`]
+* xref:procedures/built-in-procedures.adoc#procedure_dbms_cluster_deallocateNumberOfDatabases[`dbms.cluster.deallocateNumberOfDatabases("server-name", number)`]
+
+You must have the `SERVER MANAGEMENT` privilege to execute these procedures.
+
+[NOTE]
+====
+The aforementioned procedures do not put a server in a xref:clustering/servers.adoc#deallocating-state[_deallocating_] state.
+They only move database allocations away from the server.
+
+If you need to transition a server to the _deallocating_ state, use the Cypher command xref:clustering/servers.adoc#_deallocating_databases_from_a_server[`DEALLOCATE DATABASES FROM SERVERS`].
+====
+
+For example, `server01` hosts two small databases, `foo` and `bar`, and one very large database `baz`, while other servers contain fewer or smaller databases, and `server01` is under pressure.
+
+You can use one of the following approaches to deallocate `baz` from `server01` or to deallocate a number of databases from `server01`:
+
+.Deallocating a database from a server
+[source, cypher]
+----
+// With dry run
+neo4j@system> CALL dbms.cluster.deallocateDatabaseFromServer("server01", "baz", true);
+
+// Without dry run
+neo4j@system> CALL dbms.cluster.deallocateDatabaseFromServer("server01", "baz");
+
+----
+
+.Deallocating a database from multiple servers
+[source, cypher]
+----
+// With dry run
+neo4j@system> CALL dbms.cluster.deallocateDatabaseFromServers(["server01", "server02"], "baz", true);
+
+// Without dry run
+neo4j@system> CALL dbms.cluster.deallocateDatabaseFromServers(["server01", "server02"], "baz");
+
+----
+
+.Deallocating three databases from a server
+[source, cypher]
+----
+// With dry run
+neo4j@system> CALL dbms.cluster.deallocateNumberOfDatabases("server01", 3, true);
+
+// Without dry run
+neo4j@system> CALL dbms.cluster.deallocateNumberOfDatabases("server01", 3);
+----
+
+
+[[reallocate-databases]]
+== Reallocate databases
+
+To rebalance all database allocations across the cluster, for example, because you added new servers, use either procedures or Cypher commands to reallocate databases onto the new servers.
+
+[role=label--new-5.23]
+[[reallocate-databases-procedure]]
+=== Reallocate databases using a procedure
+
+You can use the procedure xref:procedures/built-in-procedures.adoc#procedure_dbms_cluster_reallocateDatabase[`dbms.cluster.reallocateDatabase`] to rebalance a specific database across the cluster, or xref:procedures/built-in-procedures.adoc#procedure_dbms_cluster_reallocateNumberOfDatabases[`dbms.cluster.reallocateNumberOfDatabases`] to rebalance a number of database allocations across the cluster and relieve overloaded servers.
+Note that if the cluster is already balanced, no reallocations will happen when running these procedures.
+These procedures do not require a server name and can be executed with or without a dry run.
+
+[NOTE]
+====
+You must have the `SERVER MANAGEMENT` privilege to execute these procedures.
+====
+
+For example, you add three new servers and want to move a very large database, `baz`, from all the servers containing it to the new servers.
+
+.Reallocate one database to new servers
+[source, cypher]
+----
+// With dry run
+neo4j@system> CALL dbms.cluster.reallocateDatabase("baz", true);
+
+// Without dry run
+neo4j@system> CALL dbms.cluster.reallocateDatabase("baz");
+----
+
+.Reallocating a number of databases to new servers
+[source, cypher]
+----
+// With dry run
+neo4j@system> CALL dbms.cluster.reallocateNumberOfDatabases(3, true);
+
+// Without dry run
+neo4j@system> CALL dbms.cluster.reallocateNumberOfDatabases(3);
+----
+
+[[reallocate-databases-cypher]]
+=== Reallocate databases using a Cypher command
+
+You can use the Cypher command `REALLOCATE DATABASES` to rebalance all database allocations across the cluster and relieve overloaded servers.
+This command can also be used with `DRYRUN` to preview the new allocation of databases.
+
+[CAUTION]
+====
+`REALLOCATE DATABASES` on a large cluster with many databases has the potential to move a lot of allocations at once, which might stress the cluster.
+Consider starting with more limited reallocations, such as xref:procedures/built-in-procedures.adoc#procedure_dbms_cluster_reallocateNumberOfDatabases[`dbms.cluster.reallocateNumberOfDatabases`] with a small number, and let the databases complete their reallocation before calling it again, until no more reallocations are necessary.
+====
+
+[NOTE]
+====
+`DRYRUN` is available from Neo4j 5.2 and later.
+====
+
+[source,cypher]
+----
+neo4j@neo4j> DRYRUN REALLOCATE DATABASES;
++----------------------------------------------------------------------------------------------------------------------------------------+
+| database | fromServerName | fromServerId                           | toServerName | toServerId                             | mode      |
++----------------------------------------------------------------------------------------------------------------------------------------+
+| "bar"    | "server-1"     | "00000000-27e1-402b-be79-d28047a9418a" | "server-5"   | "00000003-b76c-483f-b2ca-935a1a28f3db" | "primary" |
+| "bar"    | "server-3"     | "00000001-7a21-4780-bb83-cee4726cb318" | "server-4"   | "00000002-14b5-4d4c-ae62-56845797661a" | "primary" |
++----------------------------------------------------------------------------------------------------------------------------------------+
+----
+
+
+
+[[cluster-seed]]
+== Restore a clustered database from a `.backup`/`.dump`
+
+To restore a clustered database from a backup, or to seed a cluster with data:
+
+* You can <<restore-database-using-uri-approach, seed the cluster from a URI>>, where all servers to host the database are seeded with an identical seed from an external source specified by that URI.
+* You can use <<cluster-designated-seeder, a _designated seeder_>>, where a designated server is used to create a backed-up database on other servers in the cluster.
+* label:new[Introduced in 5.24] You can use <<restore-database-using-recreate-procedure, the `dbms.recreateDatabase()` procedure>>.
+
+
+[[restore-database-using-uri-approach]]
+=== Restore a database from a URI
+
+Before restoring a database from a backup, ensure you have its backup and drop the database on all servers.
+
+The seed can be a full backup, a differential backup (see xref:database-administration/standard-databases/seed-from-uri.adoc#cloud-seed-provider[Create database from a URI -> `CloudSeedProvider`], starting from Neo4j 5.26), or a dump from an existing database.
+When using `CloudSeedProvider`, the URI can point also to a folder which contains a backup chain.
+The sources of seeds are called _seed providers_. +
+For detailed information about seed providers in Neo4j, see xref:database-administration/standard-databases/seed-from-uri.adoc[].
+
+Remember that the dump file created with the xref:backup-restore/offline-backup.adoc#offline-backup-command[`neo4j-admin database dump`] command contains only the database data.
+The associated users and roles metadata are not included and must be recreated manually after restore.
+
+When restoring a database from a backup seed in a cluster, you have to define the database topology.
+You have the opportunity to create a topology that will differ from the original one.
+The new allocations can be put on any `ENABLED` server in the cluster.
+
+To restore a clustered database from a URI, follow the steps.
+
+. On one of the cluster's servers, run the command:
++
+[source, cypher]
+----
+CREATE DATABASE foo
+TOPOLOGY [desired number of primaries] PRIMARIES [desired number of secondaries] SECONDARIES
+OPTIONS { existingData: 'use', seedURI: 's3://myBucket/myBackup.backup' }
+----
++
+Number of primaries and secondaries must respect the number of `ENABLED` servers and their mode constraints.
+The `CREATE DATABASE` command automatically allocates the database.
+
+. If you restore your database from a backup file created with the xref:backup-restore/online-backup.adoc[`neo4j-admin database backup`] command, users and roles metadata is backed up by default unless you have changed the default value of the `--include-metadata` option.
+As a final step, you can xref:backup-restore/restore-backup.adoc#_restore_users_and_roles_metadata[restore users and roles metadata].
+This step is optional.
+
+. Verify that the restored database is online on the desired number of servers, in the desired roles by running the `SHOW DATABASES` command.
+
+
+[[cluster-designated-seeder]]
+=== Restore a database using a designated seeder
+
+[NOTE]
+====
+Keep in mind that using a designated seeder can be problematic in some situations as it is not known in advance how a database is going to be allocated to the servers in a cluster.
+Also, this method relies on the seed already existing on one of the servers.
+====
+
+In order to designate a server in the cluster as _a seeder_, a database backup is transferred to that server using the xref:backup-restore/restore-backup.adoc[`neo4j-admin database restore`] command.
+Subsequently, that server is used as the source for other cluster members to copy the backed-up database from.
+
+This example creates a user database called `foo`, hosted on three servers in primary mode.
+The `foo` database *should not* previously exist on any of the servers in the cluster.
+
+If a database with the same name as your backup already exists, use the command `DROP DATABASE` to delete it and all users and roles associated with it.
+
+. Restore the `foo` database on one server.
+In this example, the `server01` member is used.
++
+[source, shell]
+----
+bin/neo4j-admin database restore --from-path=/path/to/foo-backup-dir foo
+----
+. Find the server ID of `server01` by logging in to Cypher Shell and running `SHOW SERVERS`.
+Cross-reference the address to find the server ID.
+Use any database to connect.
++
+[source, cypher, role=noplay]
+----
+SHOW SERVERS YIELD serverId, name, address, state, health, hosting;
+----
++
+[queryresult]
+----
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+| serverId                               | name                                   | address          | state     | health      | hosting              |
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+| "25a7efc7-d063-44b8-bdee-f23357f89f01" | "25a7efc7-d063-44b8-bdee-f23357f89f01" | "localhost:7689" | "Enabled" | "Available" | ["system",  "neo4j"] |
+| "782f0ee2-5474-4250-b905-4cd8b8f586ba" | "782f0ee2-5474-4250-b905-4cd8b8f586ba" | "localhost:7688" | "Enabled" | "Available" | ["system",  "neo4j"] |
+| "8512c9b9-d9e8-48e6-b037-b15b0004ca18" | "8512c9b9-d9e8-48e6-b037-b15b0004ca18" | "localhost:7687" | "Enabled" | "Available" | ["system",  "neo4j"] |
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+----
+In this case, the address for `server01` is `localhost:7687` and thus, the server ID is `8512c9b9-d9e8-48e6-b037-b15b0004ca18`.
++
+. On one of the servers, use the `system` database and create the database `foo` using the server ID of `server01`.
+The topology of `foo` is stored in the `system` database and when you create it, it is allocated according to the default topology (which can be shown with `CALL dbms.showTopologyGraphConfig`).
+This may be different from the topology of `foo` when it was backed up.
+If you want to ensure a certain allocation across the cluster, you can specify the desired topology with the `TOPOLOGY` clause in the `CREATE DATABASE` command.
+See <<create-database, `CREATE DATABASE`>> for more information.
++
+[source, cypher, role=noplay]
+----
+CREATE DATABASE foo
+TOPOLOGY [desired number of primaries] PRIMARIES [desired number of secondaries] SECONDARIES
+OPTIONS {existingData: 'use', existingDataSeedInstance: '8512c9b9-d9e8-48e6-b037-b15b0004ca18'};
+----
++
+In Neo4j 5.25, `existingDataSeedInstance` is deprecated.
+`existingDataSeedServer` is introduced to replace it.
+
+. Verify that the `foo` database is online on the desired number of servers, in the desired roles.
+If the `foo` database is of considerable size, the execution of the command can take some time.
++
+[source, cypher, role=noplay]
+----
+SHOW DATABASE foo;
+----
++
+[queryresult]
+----
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| name  | type       | aliases | access       | address          | role      | writer | requestedStatus | currentStatus | statusMessage | default | home  | constituents |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "foo" | "standard" | []      | "read-write" | "localhost:7687" | "primary" | FALSE  | "online"        | "online"      | ""            | FALSE   | FALSE | []           |
+| "foo" | "standard" | []      | "read-write" | "localhost:7688" | "primary" | FALSE  | "online"        | "online"      | ""            | FALSE   | FALSE | []           |
+| "foo" | "standard" | []      | "read-write" | "localhost:7689" | "primary" | TRUE   | "online"        | "online"      | ""            | FALSE   | FALSE | []           |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+9 rows available after 3 ms, consumed after another 1 ms
+----
+
+
+[role=label--new-5.24]
+[[restore-database-using-recreate-procedure]]
+=== Restore a database using the `dbms.recreateDatabase()` procedure
+
+For detailed information on the recreate procedure, its options and limitations, see xref:database-administration/standard-databases/recreate-database.adoc[].
+
+If you provide a URI to a backup or a dump, the stores on all servers will be replaced by the backup or the dump at the given URI.
+The new database can be allocated to any `ENABLED` server in the cluster, subject to its mode constraints.
+
+You need xref:authentication-authorization/dbms-administration/dbms-database-management-privileges.adoc[the `CREATE DATABASE` and `DROP DATABASE` privileges] to run the recreate procedure.
+
+You do not need to `DROP DATABASE` before calling the `dbms.recreateDatabase()` procedure.
+
+To restore a database using backup as a seed and keeping the original database topology, run the command:
+
+[source, shell]
+----
+CALL dbms.recreateDatabase("foo", {seedURI: "s3://myBucket/myBackup.backup",});
+----
+
+If you need to change the original database topology, run the command:
+
+[source, shell]
+----
+CALL dbms.recreateDatabase("foo",  {seedURI: "s3://myBucket/myBackup.backup", primaries: 3, secondaries: 0});
+----
+
+The number of newly defined `primaries` and `secondaries` must respect the number of `ENABLED` servers in a cluster and their mode constraints.
+
+If a database is restored using `dbms.recreateDatabase()`, all previously granted user and role privileges on that database are preserved.
+
+As a final step, verify that the restored database is online on the desired number of servers, in the desired roles by running the `SHOW DATABASES` command.
+
+
+[[cluster-allow-deny-db]]
+== Controlling locations with allowed/denied databases
+
+A database can by default be allocated to run on any server in a cluster.
+However, it is possible to constrain the servers that specific databases are hosted on.
+This is done with `ENABLE SERVER` and `ALTER SERVER`, described in xref:clustering/servers.adoc[Managing servers in a cluster].
+The following options are available:
+
+** `allowedDatabases` - a set of databases that are allowed to be hosted on a server.
+** `deniedDatabases` - a set of databases that are denied to be hosted on a server.
+Allowed and denied are mutually exclusive.
+** `modeConstraint` - controls in what mode (primary, secondary, or none) databases can be hosted on a server.
+If not set, there are no mode constraints on the server.
+
+
+[[cluster-default-database]]
+== Default database in a cluster
+
+The default database, as defined by xref:configuration/configuration-settings.adoc#config_initial.dbms.default_database[`initial.dbms.default_database`], is automatically created when the DBMS starts for the first time.
+This provides a user database to experiment with immediately.
+However, this creation is 'best effort' for reasons explained below, and users are encouraged to create their own default database for production use.
+If you create your own default database, even if you just run `DROP DATABASE neo4j` and `CREATE DATABASE neo4j`, you do not have to be aware of the complexities below.
+
+[[default-database-automatic-creation]]
+=== Automatic default database creation
+
+The initial default database is created when the DBMS starts for the first time.
+It uses the following settings:
+
+* xref:configuration/configuration-settings.adoc#config_initial.dbms.default_database[`initial.dbms.default_database`] -- the name of the database.
+* xref:configuration/configuration-settings.adoc#config_initial.dbms.default_primaries_count[`initial.dbms.default_primaries_count`] -- the number of primaries requested for the default database.
+* xref:configuration/configuration-settings.adoc#config_initial.dbms.default_secondaries_count[`initial.dbms.default_secondaries_count`] -- the number of secondaries requested for the default database.
+
+However, it uses the default primary and secondary counts (topology) as maximums, not as hard requirements.
+This is different to normal database creation, where if the requested topology cannot be satisfied, creation fails.
+For the automatic creation of the default database alone, if the requested topology cannot be satisfied, you get as many of each hosting type as can be satisfied by the current cluster.
+This means you may end up with a default database with as few as one primary and no secondaries, despite the default values being higher.
+It is also possible to configure a cluster where automatic creation of the default database is not possible when the DBMS starts up.
+In this case, creation fails, a warning is logged, and creation *is not be re-attempted*.
+
+Automatic creation of the initial default database works as follows:
+
+* As the cluster starts for the first time, there is a configured threshold for how many servers are required to create the DBMS - `dbms.cluster.minimum_initial_system_primaries_count`.
+* Once *a minimum* of this many servers have discovered each other, the `system` database bootstraps, allowing creation of the DBMS.
+* The initial default database is created with those servers as the possible hosts.
+* If any of the servers block hosting the default database (see xref:configuration/configuration-settings.adoc#config_initial.server.denied_databases[`initial.server.denied_databases`]), they are not used.
+* If any of the servers restrict the mode they can host a database in, that is obeyed (see xref:configuration/configuration-settings.adoc#config_initial.server.mode_constraint[`initial.server.mode_constraint`]).
+* If there are too few servers to allocate the requested number of primaries, whichever ones available are used.
+If there are zero available primaries, automatic creation fails.
+* If there are too few servers remaining after the primary allocation to satisfy the requested number of secondaries, whicever ones available are used.
+
+Some possible behaviours that may be observed as a result of the above approach:
+
+* If `initial.dbms.default_primaries_count` is larger than `dbms.cluster.minimum_initial_system_primaries_count`, you are likely to get an initial default database with fewer primaries than the default.
+This is because DBMS initialisation only waits for the minimum system primaries.
+* If `initial.dbms.default_secondaries_count` plus `initial.dbms.default_primaries_count` is larger than `dbms.cluster.minimum_initial_system_primaries_count`, you are likely to get an initial default database with fewer secondaries than the default.
+This is because DBMS initialisation only waits for the minimum number of system primaries.
+* If you use `initial.server.denied_databases` to prevent the allocation of your default database to any of your initial servers, you may end up with fewer copies of the database than the default request, and possibly even no default database.
+* If you use `initial.server.mode_constraint=SECONDARY` for any of your initial servers, you may end up with fewer primary copies of the database than the default request, and possibly even no default database.
+
+[[default-database-change-topology]]
+=== Changing default database topology
+
+If the default database is initially created for you with a topology different to what you want, you can update it in the same way as any database, see <<alter-topology, Alter topology>>.
+
+
+[[change-default-database]]
+=== Change the default database
+
+You can use the procedure xref:procedures/built-in-procedures.adoc#procedure_dbms_setDefaultDatabase[`dbms.setDefaultDatabase("newDefaultDatabaseName")`] to change the default database for a DBMS.
+
+. Ensure that the database to be set as default exists, otherwise create it using the command `CREATE DATABASE <database-name>`.
+. Show the name and status of the current default database by using the command `SHOW DEFAULT DATABASE`.
+. Stop the current default database using the command `STOP DATABASE <database-name>`.
+. Run `CALL dbms.setDefaultDatabase("newDefaultDatabaseName")` against the `system` database to set the new default database.
+. Optionally, you can start the previous default database as non-default by using `START DATABASE <database-name>`.
+
+
+[[cluster-database-error-handling]]
+== Handling errors
+
+Databases can get into error states.
+Typically you can observe this with the `SHOW DATABASES` command, and use the xref:database-administration/standard-databases/errors.adoc[error handling guidance] to help.
+
+In more serious cases you may be dealing with a disaster situation, where the whole DBMS may not be responding correctly, or some specific databases cannot be restored without downtime.
+Refer to the xref:clustering/multi-region-deployment/disaster-recovery.adoc[disaster recovery guide] for those situations.

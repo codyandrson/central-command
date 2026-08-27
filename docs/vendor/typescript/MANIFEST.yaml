@@ -1,0 +1,11 @@
+name: typescript
+source_repo: https://github.com/microsoft/TypeScript-Website
+source_ref: v2
+fetched_url: https://codeload.github.com/microsoft/TypeScript-Website/tar.gz/v2
+fetched_date: 2026-08-25
+subpaths: [packages/documentation/copy README.md LICENSE]
+note: >
+  TypeScript-Website's own tags/branches (e.g. `v2`) track the site, not the
+  compiler version; there is no tag matching compiler 5.9.3. `v2` is this
+  repo's current default branch and is the closest available match.
+

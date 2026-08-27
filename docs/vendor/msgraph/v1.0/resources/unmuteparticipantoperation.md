@@ -1,0 +1,58 @@
+--- 
+title: "unmuteParticipantOperation resource type"
+description: "Describes the response format of a call participant unmute operation."
+author: "ananmishr"
+ms.localizationpriority: medium
+ms.subservice: "cloud-communications"
+doc_type: resourcePageType
+ms.date: 07/22/2024
+---
+
+# unmuteParticipantOperation resource type
+
+Namespace: microsoft.graph
+
+Describes the response format of a call participant unmute operation.
+
+## Properties
+
+| Property                       | Type                        | Description                                                                                                                                       |
+| :----------------------------- | :---------------------------| :-------------------------------------------------------------------------------------------------------------------------------------------------|
+| clientContext                  | String                      | Unique client context string. Can have a maximum of 256 characters.                                                                               |
+| id                             | String                      | The server operation ID. Read-only.                                                                                            |
+| resultInfo                     | [resultInfo](resultinfo.md) | The result information.  Read-only.                                                                                            |
+| status                         | String                      | The possible values are: `notStarted`, `running`, `completed`, `failed`. Read-only.                                                 |
+
+## Relationships
+None.
+
+## JSON representation
+
+The following JSON representation shows the resource type.
+
+<!-- {
+  "blockType": "resource",
+  "optionalProperties": [
+
+  ],
+  "@odata.type": "microsoft.graph.unmuteParticipantOperation"
+}-->
+```json
+{
+  "clientContext": "String",
+  "id": "String (identifier)",
+  "resultInfo": {"@odata.type": "#microsoft.graph.resultInfo"},
+  "status": "notStarted | running | completed | failed"
+}
+```
+
+<!-- uuid: 8fcb5dbc-d5aa-4681-8e31-b001d5168d79
+2015-10-25 14:57:30 UTC -->
+<!-- {
+  "type": "#page.annotation",
+  "description": "unmuteParticipantOperation resource",
+  "keywords": "",
+  "section": "documentation",
+  "tocPath": ""
+}-->
+

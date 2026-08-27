@@ -1,0 +1,6 @@
+name: neo4j-cypher-manual
+source_repo: https://github.com/neo4j/docs-cypher
+source_ref: cypher-5
+fetched_url: https://codeload.github.com/neo4j/docs-cypher/tar.gz/cypher-5
+fetched_date: 2026-08-25
+subpaths: [modules README.adoc]

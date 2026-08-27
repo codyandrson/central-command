@@ -1,0 +1,322 @@
+:description: Syntax for how to manage constraints used for ensuring data integrity.
+= Syntax
+
+This page contains the syntax for creating, listing, and dropping the constraints available in Neo4j.
+
+[[create-constraint]]
+== Create constraints
+
+Constraints are created with the `CREATE CONSTRAINT` command.
+When creating a constraint, it is recommended to provide a constraint name.
+This name must be unique among both indexes and constraints.
+If a name is not explicitly given, a unique name will be auto-generated.
+
+[NOTE]
+Creating a constraint requires the link:{neo4j-docs-base-uri}/operations-manual/current/authentication-authorization/database-administration/#access-control-database-administration-constraints[`CREATE CONSTRAINT` privilege].
+
+The `CREATE CONSTRAINT` command is optionally idempotent. 
+This means its default behavior is to throw an error if an attempt is made to create the same constraint twice.
+With the `IF NOT EXISTS` flag, no error is thrown and nothing happens should a constraint with the same name or same schema and constraint type already exist.
+It may still throw an error if conflicting data, indexes, or constraints exist.
+Examples of this are nodes with missing properties, indexes with the same name, or constraints with same schema but a different conflicting constraint type.
+As of Neo4j 5.17, an informational notification is returned in case nothing happens showing the existing constraint which blocks the creation.
+
+[[create-property-uniqueness-constraints]]
+=== Create property uniqueness constraints
+
+.Syntax for creating a node property uniqueness constraint on a single property
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR (n:LabelName)
+REQUIRE n.propertyName IS [NODE] UNIQUE
+----
+
+.Syntax for creating a composite node property uniqueness constraint on multiple properties
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR (n:LabelName)
+REQUIRE (n.propertyName_1, ..., n.propertyName_n) IS [NODE] UNIQUE
+----
+
+.Syntax for creating a relationship property uniqueness constraint on a single property label:new[Introduced in 5.7]
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR ()-"["r:RELATIONSHIP_TYPE"]"-()
+REQUIRE r.propertyName IS [REL[ATIONSHIP]] UNIQUE
+----
+
+.Syntax for creating a composite relationship property uniqueness constraint on multiple properties label:new[Introduced in 5.7]
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR ()-"["r:RELATIONSHIP_TYPE"]"-()
+REQUIRE (r.propertyName_1, ..., r.propertyName_n) IS [REL[ATIONSHIP]] UNIQUE
+----
+
+For examples on how to create property uniqueness constraints, see  xref:constraints/create-constraints.adoc#create-property-uniqueness-constraints[Create constraints -> Create property uniqueness constraint].
+Property uniqueness constraints are xref:constraints/create-constraints.adoc#constraints-and-indexes[index-backed].
+
+[role=label--enterprise-edition]
+[[create-property-existence-constraints]]
+=== Create property existence constraints
+
+.Syntax for creating a node property existence constraint
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR (n:LabelName)
+REQUIRE n.propertyName IS NOT NULL
+----
+
+.Syntax for creating a relationship property existence constraint
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR ()-"["r:RELATIONSHIP_TYPE"]"-()
+REQUIRE r.propertyName IS NOT NULL
+----
+
+For examples on how to create property existence constraints, see  xref:constraints/create-constraints.adoc#create-property-existence-constraints[Create constraints -> Create property existence constraints].
+
+[role=label--enterprise-edition label--new-5.9]
+[[create-property-type-constraints]]
+=== Create property type constraints
+
+.Syntax for creating a node property type constraint
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR (n:LabelName)
+REQUIRE n.propertyName {[IS] :: | IS TYPED} <TYPE>
+----
+
+.Syntax for creating a relationship property type constraint
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR ()-"["r:RELATIONSHIP_TYPE"]"-()
+REQUIRE r.propertyName {[IS] :: | IS TYPED} <TYPE>
+----
+
+The three variations of the expression, `IS ::`, `::`, and `IS TYPED` are syntactic synonyms for the same expression.
+The preferred syntax is the `IS ::` variant.
+
+Where `<TYPE>` is one of the following property types:
+
+* `BOOLEAN`
+* `STRING`
+* `INTEGER`
+* `FLOAT`
+* `DATE`
+* `LOCAL TIME`
+* `ZONED TIME`
+* `LOCAL DATETIME`
+* `ZONED DATETIME`
+* `DURATION`
+* `POINT`
+* `LIST<BOOLEAN NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<STRING NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<INTEGER NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<FLOAT NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<DATE NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<LOCAL TIME NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<ZONED TIME NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<LOCAL DATETIME NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<ZONED DATETIME NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<DURATION NOT NULL>` label:new[Introduced in 5.10]
+* `LIST<POINT NOT NULL>` label:new[Introduced in 5.10]
+* Any closed dynamic union of the above types, e.g. `INTEGER | FLOAT | STRING`. label:new[Introduced in 5.11]
+
+Allowed syntax variations of these types are listed in  xref::values-and-types/property-structural-constructed.adoc#types-synonyms[Types and their synonyms].
+
+For examples on how to create property type constraints, see  xref:constraints/create-constraints.adoc#create-property-type-constraints[Create constraints -> Create property type constraints].
+
+
+[role=label--enterprise-edition]
+[[create-key-constraints]]
+=== Create key constraints
+
+.Syntax for creating a node key constraint on a single property
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR (n:LabelName)
+REQUIRE n.propertyName IS [NODE] KEY
+----
+
+.Syntax for creating a composite node key constraint on multiple properties
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR (n:LabelName)
+REQUIRE (n.propertyName_1, ..., n.propertyName_n) IS [NODE] KEY
+----
+
+.Syntax for creating a relationship key constraint on a single property label:new[Introduced in 5.7]
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR ()-"["r:RELATIONSHIP_TYPE"]"-()
+REQUIRE r.propertyName IS [REL[ATIONSHIP]] KEY
+----
+
+.Syntax for creating a composite relationship key constraint on multiple properties label:new[Introduced in 5.7]
+[source, syntax]
+----
+CREATE CONSTRAINT [constraint_name] [IF NOT EXISTS]
+FOR ()-"["r:RELATIONSHIP_TYPE"]"-()
+REQUIRE (r.propertyName_1, ..., r.propertyName_n) IS [REL[ATIONSHIP]] KEY
+----
+
+For examples on how to create key constraints, see  xref:constraints/create-constraints.adoc#create-key-constraints[Create constraints -> Create key constraints].
+Key constraints are xref:constraints/create-constraints.adoc#constraints-and-indexes[index-backed].
+
+[[list-constraints]]
+== Show constraints
+
+To list all constraints with the default output columns, use `SHOW CONSTRAINTS`.
+If all columns are required, use `SHOW CONSTRAINTS YIELD *`.
+If only specific columns are required, use `SHOW CONSTRAINTS YIELD field[, ...]`.
+The `SHOW CONSTRAINTS` clause can also be filtered using the xref:clauses/where.adoc[`WHERE`] clause.
+
+[NOTE]
+Showing constraints requires the link:{neo4j-docs-base-uri}/operations-manual/current/authentication-authorization/database-administration/#access-control-database-administration-constraints[`SHOW CONSTRAINTS` privilege].
+
+.Syntax to list constraints with default return columns
+[source, syntax]
+----
+SHOW [
+      ALL
+     |NODE UNIQUE[NESS]
+     |REL[ATIONSHIP] UNIQUE[NESS]
+     |UNIQUE[NESS]
+     |NODE [PROPERTY] EXIST[ENCE]
+     |REL[ATIONSHIP] [PROPERTY] EXIST[ENCE]
+     |[PROPERTY] EXIST[ENCE]
+     |NODE PROPERTY TYPE
+     |REL[ATIONSHIP] PROPERTY TYPE
+     |PROPERTY TYPE
+     |NODE KEY
+     |REL[ATIONSHIP] KEY
+     |KEY
+] CONSTRAINT[S]
+  [WHERE expression]
+----
+
+.Syntax for listing constraints with full return columns
+[source, syntax]
+----
+SHOW [
+      ALL
+     |NODE UNIQUE[NESS]
+     |REL[ATIONSHIP] UNIQUE[NESS]
+     |UNIQUE[NESS]
+     |NODE [PROPERTY] EXIST[ENCE]
+     |REL[ATIONSHIP] [PROPERTY] EXIST[ENCE]
+     |[PROPERTY] EXIST[ENCE]
+     |NODE PROPERTY TYPE
+     |REL[ATIONSHIP] PROPERTY TYPE
+     |PROPERTY TYPE
+     |NODE KEY
+     |REL[ATIONSHIP] KEY
+     |KEY
+] CONSTRAINT[S]
+YIELD { * | field[, ...] } [ORDER BY field[, ...]] [SKIP n] [LIMIT n]
+  [WHERE expression]
+  [RETURN field[, ...] [ORDER BY field[, ...]] [SKIP n] [LIMIT n]]
+----
+
+The type filtering keywords filters the returned constraints on constraint type:
+
+[[constraints-syntax-list-type-filter]]
+.Type filters
+[options="header", width="100%", cols="4m,6a"]
+|===
+| Filter | Description
+
+| ALL
+| Returns all constraints, no filtering on constraint type.
+This is the default if none is given.
+
+| NODE UNIQUE[NESS]
+| Returns node property uniqueness constraints.
+label:new[Introduced in 5.7]
+
+| REL[ATIONSHIP] UNIQUE[NESS]
+| Returns relationship property uniqueness constraints.
+label:new[Introduced in 5.7]
+
+| UNIQUE[NESS]
+| Returns all property uniqueness constraints, for both nodes and relationships.
+label:new[Allowing `UNIQUENESS` was introduced in 5.3]
+
+| NODE PROPERTY EXIST[ENCE]
+| Returns node property existence constraints.
+
+| REL[ATIONSHIP] PROPERTY EXIST[ENCE]
+| Returns relationship property existence constraints.
+
+| PROPERTY EXIST[ENCE]
+| Returns property existence constraints, for both nodes and relationships.
+
+| NODE EXIST[ENCE]
+| Returns node existence constraints.
+
+| REL[ATIONSHIP] EXIST[ENCE]
+| Returns relationship existence constraints.
+
+| EXIST[ENCE]
+| Returns existence constraints, for both nodes and relationships.
+
+| NODE PROPERTY TYPE
+| Returns node property type constraints.
+label:new[Introduced in 5.9]
+
+| REL[ATIONSHIP] PROPERTY TYPE
+| Returns relationship property type constraints.
+label:new[Introduced in 5.9]
+
+| PROPERTY TYPE
+| Returns property type constraints, for both nodes and relationships.
+label:new[Introduced in 5.9]
+
+| NODE KEY
+| Returns node key constraints.
+
+| REL[ATIONSHIP] KEY
+| Returns relationship key constraints.
+label:new[Introduced in 5.7]
+
+| KEY
+| Returns key constraints, for both nodes and relationships.
+label:new[Introduced in 5.7]
+
+|===
+
+For examples on how to list constraints, see  xref:constraints/list-constraints.adoc[Show constraints].
+For full details of the result columns for the `SHOW CONSTRAINTS` command, see xref:constraints/list-constraints.adoc#list-constraints-result-columns[Show constraints -> Result columns for listing constraints].
+
+[[drop-constraint]]
+== Drop constraints
+
+Constraints are dropped using the `DROP` CONSTRAINT` command.
+Dropping a constraint is done by specifying the name of the constraint.
+
+[NOTE]
+Dropping a constraint requires the link:{neo4j-docs-base-uri}/operations-manual/current/authentication-authorization/database-administration/#access-control-database-administration-constraints[`DROP CONSTRAINT` privilege].
+
+.Syntax for dropping a constraint by name
+[source, syntax]
+----
+DROP CONSTRAINT constraint_name [IF EXISTS]
+----
+
+This command is optionally idempotent.
+This means its default behavior is to throw an error if an attempt is made to drop the same constraint twice.
+With the `IF EXISTS` flag, no error is thrown and nothing happens should the constraint not exist.
+As of Neo4j 5.17, an informational notification is instead returned detailing that the constraint does not exist.
+
+For examples on how to drop constraints, see  xref:constraints/drop-constraints.adoc[Drop constraints].

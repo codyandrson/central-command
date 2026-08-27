@@ -1,0 +1,21 @@
+[[security]]
+= Security
+:description: This section covers important security aspects in Neo4j. 
+
+This section describes how to ensure physical data security according to industry best practices with regards to server and network security:
+
+* xref:security/securing-extensions.adoc[Securing extensions]
+* xref:security/ssl-framework.adoc[SSL framework]
+** xref:security/ssl-fips-compatibility.adoc[]
+* xref:security/browser.adoc[Credentials handling in Neo4j Browser]
+* xref:security/checklist.adoc[Security checklist]
+
+Additionally, logs can be useful for continuous analysis, or for specific investigations.
+Facilities are available for producing xref:monitoring/logging.adoc#security-events-logging[security event logs] as well as xref:monitoring/logging.adoc#query-logging[query logs] as described in xref:monitoring/index.adoc[Monitoring].
+
+[NOTE]
+--
+Refer to xref:authentication-authorization/index.adoc[Authentication and authorization] for information on how to manage users and their authentication and authorization.
+--
+
+

@@ -1,0 +1,6 @@
+name: trafilatura
+source_repo: https://github.com/adbar/trafilatura
+source_ref: v2.2.0
+fetched_url: https://codeload.github.com/adbar/trafilatura/tar.gz/v2.2.0
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]

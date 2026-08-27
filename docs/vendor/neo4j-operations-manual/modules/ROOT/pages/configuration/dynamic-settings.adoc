@@ -1,0 +1,151 @@
+:description: How to change your Neo4j configuration while Neo4j is running, and which settings can be changed.
+[role=enterprise-edition]
+[[dynamic-settings]]
+= Update dynamic settings
+
+Neo4j Enterprise Edition supports changing some configuration settings at runtime, without restarting the service.
+
+[NOTE]
+====
+Changes to the configuration at runtime are not persisted.
+To avoid losing changes when restarting Neo4j, make sure you update xref:configuration/file-locations.adoc[_neo4j.conf_] as well.
+
+In a clustered environment, `CALL dbms.setConfigValue` affects only the cluster member it is run against, and it is not propagated to other members.
+If you want to change the configuration settings on all cluster members, you have to run the procedure against each of them and update their _neo4j.conf_ file.
+====
+
+
+[[dynamic-settings-discover]]
+== Discover dynamic settings
+
+Use `SHOW SETTINGS` to discover which configuration values can be dynamically updated, or consult the xref:configuration/configuration-settings.adoc[Configuration settings reference].
+
+.Discover dynamic settings
+====
+[source, cypher]
+----
+SHOW SETTINGS
+YIELD name, isDynamic
+WHERE isDynamic
+RETURN name
+----
+
+[queryresult]
+----
++----------------------------------------------------------------+
+| name                                                           |
++----------------------------------------------------------------+
+| "db.checkpoint.iops.limit"                                     |
+| "db.format"                                                    |
+| "db.lock.acquisition.timeout"                                  |
+| "db.logs.query.annotation_data_as_json_enabled"                |
+| "db.logs.query.annotation_data_format"                         |
+| "db.logs.query.early_raw_logging_enabled"                      |
+| "db.logs.query.enabled"                                        |
+| "db.logs.query.max_parameter_length"                           |
+| "db.logs.query.obfuscate_errors"
+| "db.logs.query.obfuscate_literals"                             |
+| "db.logs.query.parameter_logging_enabled"                      |
+| "db.logs.query.plan_description_enabled"                       |
+| "db.logs.query.threshold"                                      |
+| "db.logs.query.transaction.enabled"                            |
+| "db.logs.query.transaction.threshold"                          |
+| "db.memory.transaction.max"                                    |
+| "db.memory.transaction.total.max"                              |
+| "db.track_query_cpu_time"                                      |
+| "db.transaction.bookmark_ready_timeout"                        |
+| "db.transaction.concurrent.maximum"                            |
+| "db.transaction.sampling.percentage"                           |
+| "db.transaction.timeout"                                       |
+| "db.transaction.tracing.level"                                 |
+| "db.tx_log.preallocate"                                        |
+| "db.tx_log.rotation.retention_policy"                          |
+| "db.tx_log.rotation.size"                                      |
+| "dbms.cluster.network.connect_timeout"                         |
+| "dbms.cypher.render_plan_description"                          |
+| "dbms.memory.transaction.total.max"                            |
+| "dbms.routing.client_side.enforce_for_domains"                 |
+| "dbms.routing.reads_on_writers_enabled"                        |
+| "dbms.security.key.name"                                       |
+| "dbms.security.keystore.password"                              |
+| "dbms.security.keystore.path"                                  |
+| "dbms.security.ldap.authentication.attribute"                  |
+| "dbms.security.ldap.authentication.user_dn_template"           |
+| "dbms.security.ldap.authorization.access_permitted_group"      |
+| "dbms.security.ldap.authorization.group_membership_attributes" |
+| "dbms.security.ldap.authorization.group_to_role_mapping"       |
+| "dbms.security.ldap.authorization.nested_groups_enabled"       |
+| "dbms.security.ldap.authorization.nested_groups_search_filter" |
+| "dbms.security.ldap.authorization.user_search_base"            |
+| "dbms.security.ldap.authorization.user_search_filter"          |
+| "server.cluster.catchup.connect_randomly_to_server_group"      |
+| "server.cluster.catchup.connect_randomly_to_server_tags"       |
+| "server.databases.default_to_read_only"                        |
+| "server.databases.read_only"                                   |
+| "server.databases.writable"                                    |
+| "server.memory.pagecache.flush.buffer.enabled"                 |
+| "server.memory.pagecache.flush.buffer.size_in_pages"           |
+| "server.memory.query_cache.per_db_cache_num_entries"           |
+| "server.memory.query_cache.shared_cache_num_entries"           |
++----------------------------------------------------------------+
+
+51 rows
+----
+====
+
+
+[[dynamic-settings-procedure]]
+== Update dynamic settings
+
+An xref:authentication-authorization/index.adoc#auth-terminology[administrator] is able to change some configuration settings at runtime, without restarting the service.
+
+*Syntax:*
+
+`CALL dbms.setConfigValue(_setting_, _value_)`
+
+*Returns:*
+
+Nothing on success.
+
+*Exceptions:*
+
+|===
+| Unknown or invalid setting name.
+| The setting is not dynamic and cannot be changed at runtime.
+| Invalid setting value.
+|===
+
+The following example shows how to dynamically enable query logging.
+
+.Set a config value
+====
+[source, cypher]
+----
+CALL dbms.setConfigValue('db.logs.query.enabled', 'info')
+----
+====
+
+If an invalid value is passed, the procedure will show a message to that effect.
+
+.Try to set invalid config value
+====
+[source, cypher, role=test-fail]
+----
+CALL dbms.setConfigValue('db.logs.query.enabled', 'yes')
+----
+
+[queryresult]
+----
+Failed to invoke procedure `dbms.setConfigValue`: Caused by: org.neo4j.graphdb.config.InvalidSettingException: Bad value 'yes' for setting 'db.logs.query.enabled': 'yes' not one of [OFF, INFO, VERBOSE]
+----
+====
+
+To reset a config value to its default, pass an empty string as the _value_ argument.
+
+.Reset a config value to default
+====
+[source, cypher]
+----
+CALL dbms.setConfigValue('db.logs.query.enabled', '')
+----
+====

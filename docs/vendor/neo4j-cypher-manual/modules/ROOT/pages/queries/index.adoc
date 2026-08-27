@@ -1,0 +1,19 @@
+= Queries
+:description: This page is an overview of the queries section in the Cypher Manual.
+
+This section provides a brief overview of the core concepts of a Cypher query (nodes, relationships, and paths), and examples of how to query a Neo4j graph database.
+It also explains how to select the version of Cypher in which queries are run, and how to compose combined queries using `UNION`.
+
+* xref:queries/concepts.adoc[]
+* xref:queries/basic.adoc[]
+* xref:queries/select-version.adoc[]
+* xref:queries/combined-queries.adoc[]
+
+[TIP]
+====
+Cypher 25 introduces conditional and sequential queries.
+For more information, see the following pages in the Cypher 25 Manual:
+
+* link:https://neo4j.com/docs/cypher-manual/25/queries/composed-queries/conditional-queries/[Conditional queries (`WHEN`)]
+* link:https://neo4j.com/docs/cypher-manual/25/queries/composed-queries/sequential-queries/[Sequential queries (`NEXT`)]
+====

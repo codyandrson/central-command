@@ -1,0 +1,411 @@
+:description: An overview of where files are stored in the different Neo4j distributions, and the necessary file permissions for running Neo4j.
+
+= Default file locations
+
+[[neo4j-directories]]
+== Neo4j directories
+
+The page describes the Neo4j directories, specifying their default locations per distribution and minimal file permissions.
+
+If Neo4j was installed using a `tar.gz` or `zip` archive,  _<NEO4J_HOME>_ refers to the location the archive was extracted to.
+
+Instructions provided for Neo4j Desktop are applicable across all operating systems where Neo4j Desktop is supported.
+
+[NOTE]
+====
+If  _tmp_ is set to `noexec`, it is recommended to set `server.jvm.additional=-Djava.io.tmpdir=/home/neo4j` in _conf/neo4j.conf_ and replace _/home/neo4j_ with a path that has `exec` permissions.
+
+For _/bin/cypher-shell_, set this via an environment variable: `export JAVA_OPTS=-Djava.io.tmpdir=/home/neo4j` and replace `/home/neo4j` with a path that has `exec` permissions.
+
+For the Neo4j's uses of the Java Native Access (JNA) library, set `server.jvm.additional=-Djna.tmpdir=/tmp` in _conf/neo4j.conf_ and replace `/tmp` with a path that has `exec` permissions.
+====
+
+[[neo4j-bin]]
+=== Bin
+
+The _bin_ directory contains the Neo4j running script and built-in tools, such as xref:tools/cypher-shell.adoc[Cypher Shell] and xref:tools/neo4j-admin/index.adoc[Neo4j Admin].
+
+File permissions:: Read only and execute.
+
+._bin_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/bin_
+| Windows | _<NEO4J_HOME>\bin_
+| Debian / RPM | _/usr/bin_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_ and run `cd bin`.
+|===
+
+[[neo4j-certificates]]
+=== Certificates
+
+The certificate directory contains the Neo4j TLS certificates.
+
+File permissions:: Read only.
+
+._certificates_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/certificates_
+| Windows | _<NEO4J_HOME>\certificates_
+| Debian / RPM | _/var/lib/neo4j/certificates_
+| Neo4j Desktop| From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_ and run `cd certificates`.
+|===
+
+[[neo4j-config]]
+=== Configuration
+
+The _configuration_ directory contains the Neo4j configuration settings, Log4j configuration settings, and the JMX access credentials.
+For details about _neo4j.conf_, see xref:configuration/neo4j-conf.adoc[The neo4j.conf file].
+
+File permissions:: Read only
+
+._configuration_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/conf/neo4j.conf_ +
+_<NEO4J_HOME>/conf/neo4j-admin.conf_ +
+ _<NEO4J_HOME>/conf/server-logs.xml_ +
+ _<NEO4J_HOME>/conf/user-log.xml_
+| Windows | _<NEO4J_HOME>\conf\neo4j.conf_ +
+_<NEO4J_HOME>\conf\neo4j-admin.conf_ +
+_<NEO4J_HOME>\conf\server-logs.xml_ +
+_<NEO4J_HOME>\conf\user-log.xml_
+| Debian / RPM | _/etc/neo4j/neo4j.conf_ +
+_/etc/neo4j/neo4j-admin.conf_ +
+_/etc/neo4j/server-logs.xml_ +
+_/etc/neo4j/user-log.xml_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_ and run `cd conf`.
+|===
+
+[[data]]
+=== Data
+
+The _data_ directory contains all data-related content, such as databases, transactions, cluster-state (if applicable), dumps, and the _cypher.script_ files (from the `neo4j-admin database restore` command).
+The data directory is internal to Neo4j and its structure is subject to change between versions without notice.
+
+File permissions:: Read and write.
+
+._data_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/data_
+| Windows | _<NEO4J_HOME>\data_
+| Debian / RPM | _/var/lib/neo4j/data_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd data`.
+|===
+
+[[neo4j-import]]
+=== Import
+
+The _import_ directory contains all CSV files that the command `LOAD CSV` uses as sources to import data in Neo4j.
+
+File permissions:: Read only
+
+._import_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/import_
+| Windows | _<NEO4J_HOME>\import_
+| Debian / RPM | _/var/lib/neo4j/import_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd import`.
+|===
+
+[[neo4j-labs]]
+=== Labs
+
+The _labs_ directory contains APOC Core.
+For more information, see https://neo4j.com/docs/apoc/current/installation/[APOC User Guide -> Installation].
+
+File permissions:: Read only.
+
+._labs_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/labs_
+| Windows | _<NEO4J_HOME>\labs_
+| Debian / RPM | _/var/lib/neo4j/labs_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd labs`.
+|===
+
+[[neo4j-lib]]
+=== Lib
+
+The _lib_ directory contains all Neo4j dependencies.
+
+File permissions:: Read only.
+
+._lib_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/lib_
+| Windows | _<NEO4J_HOME>\lib_
+| Debian / RPM | _/usr/share/neo4j/lib_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd lib`.
+|===
+
+[IMPORTANT]
+====
+In Neo4j 5.26.22, the position of Browser is changed from the directory _lib_ to _web_ and from .jar to .zip.
+These changes are reverted in the Enterprise Edition 5.26.23.
+See <<neo4j-web, Web>> for details.
+====
+
+
+[[neo4j-licenses]]
+=== Licenses
+
+The _licenses_ directory contains Neo4j license files.
+
+File permissions:: Read only.
+
+._licenses_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/licenses_
+| Windows | _<NEO4J_HOME>\licenses_
+| Debian / RPM | _/var/lib/neo4j/licenses_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd licences`.
+|===
+
+[[neo4j-logs]]
+=== Logs
+
+The _logs_ directory contains the Neo4j log files.
+
+File permissions:: Read and write.
+
+._logs_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/logs_ footnote:[To view _neo4j.log_ in Docker, use xref:docker/mounting-volumes.adoc#docker-volumes-logs[`docker logs <containerID/name>`].]
+| Windows | _<NEO4J_HOME>\logs_
+| Debian / RPM | _/var/log/neo4j/_ footnote:[To view the neo4j.log for Debian and RPM, use `journalctl --unit=neo4j`.]
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd logs`.
+|===
+
+
+[role=enterprise-edition]
+[[neo4j-metrics]]
+=== Metrics
+
+The _metrics_ directory contains the Neo4j built-in metrics for monitoring the Neo4j DBMS and each individual database.
+
+File permissions:: Read and write.
+
+._metrics_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/metrics_
+| Windows | _<NEO4J_HOME>\metrics_
+| Debian / RPM | _/var/lib/neo4j/metrics_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd metrics`.
+|===
+
+[[neo4j-plugins]]
+=== Plugins
+
+The _plugins_ directory contains custom code that extends Neo4j, for example, user-defined procedures, functions, and security plugins.
+
+File permissions:: Read only.
+
+._plugins_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/plugins_
+| Windows | _<NEO4J_HOME>\plugins_
+| Debian / RPM | _/var/lib/neo4j/plugins_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd plugins`.
+|===
+
+
+[[neo4j-products]]
+=== Products
+
+The _products_ directory contains the JAR files of the Neo4j products.
+
+For Enterprise Edition, these are:
+
+* link:{neo4j-docs-base-uri}/bloom-user-guide/current/[Neo4j Bloom]
+* link:{neo4j-docs-base-uri}/graph-data-science/current/[Graph Data Science Library]
+* link:{neo4j-docs-base-uri}/genai/plugin/5/[GenAI plugin]
+* link:{neo4j-docs-base-uri}/ops-manager/current/[Neo4j Ops Manager Server]
+* _README.txt_ file -- with information on enabling them.
+
+Community Edition contains the link:{neo4j-docs-base-uri}/genai/plugin/5/[GenAI plugin].
+Starting from 5.26.10, the link:{neo4j-docs-base-uri}/aura/fleet-management/setup/[Fleet management] jar file is bundled with the Neo4j CE.
+
+[NOTE]
+====
+Using the Fleet management plugin in Neo4j CE deployments is subject to some limitations due to the limited set of features, such as no metrics being available.
+Also, it is offered on a best-effort basis.
+Neo4j does not offer any technical support for it.
+====
+
+File permissions:: Read only.
+
+._products_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/products_
+| Windows | _<NEO4J_HOME>\products_
+| Debian / RPM | _/var/lib/neo4j/products_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd products`.
+|===
+
+[[neo4j-run]]
+=== Run
+
+The _run_ directory contains the processes IDs.
+
+File permissions:: Read and write.
+
+._run_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/run_
+| Windows | _<NEO4J_HOME>\run_
+| Debian / RPM | _/var/lib/neo4j/run_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd run`.
+|===
+
+
+[role=label--new-5.26.22]
+[[neo4j-web]]
+=== Web
+
+In Neo4j 5.26.22, a new directory _web_ is introduced.
+The _web_ directory contains Neo4j Browser bundled as a .zip file.
+
+Starting from Neo4j 5.26.23, the _web_ directory is included only in the Neo4j Community Edition.
+The Neo4j Enterprise Edition does not include the _web_ directory; and Neo4j Browser continues to be distributed as a .jar file located in the _lib_ directory.
+
+File permissions:: Read only.
+
+._web_ directory default location per distribution
+[cols="1,4", options="header"]
+|===
+| Neo4j distribution
+| Default file location
+
+| Linux / macOS / Docker | _<NEO4J_HOME>/web_
+| Windows | _<NEO4J_HOME>\web_
+| Debian / RPM | _/var/lib/neo4j/web_
+| Neo4j Desktop | From the _Open_ dropdown menu of your active Neo4j DBMS, select _Terminal_, and run `cd web`.
+|===
+
+
+
+[[file-locations-file-locations]]
+== Customize your file locations
+The file locations can also be customized by using environment variables and options.
+
+The locations of _<NEO4J_HOME>_ and _conf_ can be configured using environment variables:
+
+[[table-file-locations-environment-variables]]
+.Configuration of _<NEO4J_HOME>_ and _conf_
+[cols="4", options="header"]
+|===
+| Location
+| Default
+| Environment variable
+| Notes
+
+| _<NEO4J_HOME>_
+| parent of _bin_
+| `NEO4J_HOME`
+| Must be set explicitly if _bin_ is not a subdirectory.
+
+| _conf_
+| _<NEO4J_HOME>/conf_
+| `NEO4J_CONF`
+| Must be set explicitly if it is not a subdirectory of _<NEO4J_HOME>_.
+|===
+
+
+The rest of the locations can be configured by uncommenting the respective setting in the _conf/neo4j.conf_ file and changing the default value.
+
+[source, shell]
+----
+#server.directories.data=data
+#server.directories.plugins=plugins
+#server.directories.logs=logs
+#server.directories.lib=lib
+#server.directories.run=run
+#server.directories.licenses=licenses
+#server.directories.metrics=metrics
+#server.directories.transaction.logs.root=data/transactions
+#server.directories.dumps.root=data/dumps
+#server.directories.import=import
+----
+
+
+
+=== Security considerations
+
+If a directory stores sensitive data, it must never be world-readable or world-executable.
+Even if files inside are restricted, a world-executable directory can leak structure.
+
+* On Linux, follow the recommendations:
++
+[cols="1,1a",options="header"]
+|===
+| Scenario
+| Recommended mode
+
+| Only owner can access
+| `700`
+
+| Owner and specific group may have access
+| `750`
+|===
++
+Ensure the process creating the directory uses a restrictive umask (e.g., `077`) to prevent overly permissive defaults.
+
+* On Windows, allow access only to the owning account (or service account) and `Administrators`.
+Remove access for `Users`, `Authenticated Users`, and `Everyone`. +
+Before removing broad permissions disable inheritance on the directory, otherwise they may be reintroduced from the parent directory.
+
+Consider security recommendations above when creating a directory for backup files.
+
+
+

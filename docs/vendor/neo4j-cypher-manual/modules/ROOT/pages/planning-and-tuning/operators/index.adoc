@@ -1,0 +1,973 @@
+:description: Overview page for the Cypher operators.
+:page-aliases: execution-plans/operator-summary.adoc
+= Operators
+
+This page provides an overview of the available operators in Cypher.
+An operator is a specialized execution module that is responsible for some type of transformation to the data in a query execution plan before passing it on to the next operator, until the desired graph pattern has been matched.
+
+For information about how to understand execution plans (and the role operators play in them), see xref:planning-and-tuning/execution-plans.adoc[].
+
+For more information about each operator, see xref:planning-and-tuning/operators/operators-detail.adoc[].
+
+== Summary of operators 
+
+This table comprises all the execution plan operators ordered lexicographically.
+
+* _Leaf_ operators, in most cases, locate the starting nodes and relationships required in order to execute the query.
+
+* _Updating_ operators are used in queries that update the graph.
+
+* _Eager_ operators xref::planning-and-tuning/execution-plans.adoc#lazy-eager-evaluation[accumulate all their rows] before piping them to the next operator.
+
+[cols="35a,35a,8,12,18", options="header"]
+|===
+| Name | Description | Leaf? | Updating? | Considerations
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-all-nodes-scan[AllNodesScan]
+| Reads all nodes from the node store.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-anti[Anti]
+| Tests for the absence of a pattern.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-anti-semi-apply[AntiSemiApply]
+a|
+Performs a nested loop.
+Tests for the absence of a pattern predicate.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-apply[Apply]
+| Performs a nested loop. Yields rows from both the left-hand and right-hand side operators.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-argument[Argument]
+| Indicates the variable to be used as an argument to the right-hand side of an xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-apply[`Apply`] operator.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-argument-tracker[ArgumentTracker]
+| Used to ensure row-by-row semantics.
+Restricts the xref:planning-and-tuning/runtimes/index.adoc[Cypher runtime] to not batch operations in larger chunks.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-assert-same-node[AssertSameNode]
+| Ensures that no node property uniqueness constraints are violated.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-assert-same-relationship[AssertSameRelationship]
+| Ensures that no relationship property uniqueness constraints are violated.
+|
+|
+| label:new[Introduced in 5.8]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-asserting-multi-node-index-seek[AssertingMultiNodeIndexSeek]
+| Used to ensure that no property uniqueness constraints are violated.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-cache-properties[CacheProperties]
+| Reads node or relationship properties and caches them.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-cartesian-product[CartesianProduct]
+| Produces a cartesian product of the inputs from the left-hand and right-hand operators.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-create[Create]
+| Creates nodes and relationships.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-create-index[CreateIndex]
+| Creates an index for either nodes or relationships.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-create-constraint[CreateConstraint]
+| Creates a constraint for either nodes or relationships.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-delete[Delete]
+| Deletes a node or relationship.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-detach-delete[DetachDelete]
+| Deletes a node and its relationships.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-all-relationships-scan[DirectedAllRelationshipsScan]
+| Fetches all relationships and their start and end nodes in the database.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-by-element-id-seek[DirectedRelationshipByElementIdSeek]
+| Reads one or more relationships by element id (specified via the function xref::functions/scalar.adoc#functions-elementid[elementId()]) from the relationship store and produces the relationship as well as the source and target node of the relationship.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-by-id-seek[DirectedRelationshipByIdSeek]
+| Reads one or more relationships by id (specified via the function xref::functions/scalar.adoc#functions-id[Id()]) from the relationship store, and produces the relationship as well as the source and target node of the relationship.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-index-contains-scan[DirectedRelationshipIndexContainsScan]
+| Examines all values stored in an index, searching for entries containing a specific `STRING`; for example, in queries including `CONTAINS`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-index-ends-with-scan[DirectedRelationshipIndexEndsWithScan]
+| Examines all values stored in an index, searching for entries ending in a specific `STRING`; for example, in queries containing `ENDS WITH`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-index-scan[DirectedRelationshipIndexScan]
+| Examines all values stored in an index, returning all relationships and their start and end nodes with a particular relationship type and a specified property.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-index-seek[DirectedRelationshipIndexSeek]
+| Finds relationships and their start and end nodes using an index seek.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-index-seek-by-range[DirectedRelationshipIndexSeekByRange]
+| Finds relationships and their start and end nodes using an index seek where the value of the property matches a given prefix `STRING`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-relationship-type-scan[DirectedRelationshipTypeScan]
+| Fetches all relationships and their start and end nodes with a specific type from the relationship type index.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-directed-union-relationship-types-scan[DirectedUnionRelationshipTypesScan]
+| Fetches all relationships and their start and end nodes with at least one of the provided types from the relationship type index.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-distinct[Distinct]
+| Drops duplicate rows from the incoming stream of rows.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-do-nothing-if-exists-constraint[DoNothingIfExists(CONSTRAINT)]
+| Checks if a constraint already exists, if it does then it stops the execution, if not it continues.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-do-nothing-if-exists-index[DoNothingIfExists(INDEX)]
+| Checks if an index already exists, if it does then it stops the execution, if not it continues.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-drop-constraint[DropConstraint]
+| Drops a constraint using its name.
+| label:yes[]
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-drop-index[DropIndex]
+| Drops an index using its name.
+| label:yes[]
+| label:yes[]
+|
+
+| xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-dynamic-label-node-lookup[DynamicLabelNodeLookup]
+| Allows Cypher to use token lookup indexes when planning queries using dynamic node labels.
+| label:yes[]
+| 
+| label:new[Introduced in Neo4j 2025.08]
+
+
+| xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-dynamic-directed-relationship-type-lookup[DynamicDirectedRelationshipTypeLookup]
+| Allows Cypher to use token lookup indexes when planning queries using dynamic relationship types in directed relationship patterns.
+| label:yes[]
+| 
+| label:new[Introduced in Neo4j 2025.08]
+
+| xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-dynamic-undirected-relationship-type-lookup[DynamicUndirectedRelationshipTypeLookup]
+| Allows Cypher to use token lookup indexes when planning queries using dynamic relationship types in undirected relationship patterns.
+| label:yes[]
+| 
+| label:new[Introduced in Neo4j 2025.08]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-eager[Eager]
+| For isolation purposes, `Eager` ensures that operations affecting subsequent operations are executed fully for the whole dataset before continuing execution.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-eager-aggregation[EagerAggregation]
+| Evaluates a grouping expression.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-empty-result[EmptyResult]
+| Eagerly loads all incoming data and discards it.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-empty-row[EmptyRow]
+| Returns a single row with no columns.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-exhaustive-limit[ExhaustiveLimit]
+a|
+The `ExhaustiveLimit` operator is similar to the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-limit[`Limit`]operator, but always exhausts the input.
+Used when combining `LIMIT` and updates.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-expand-all[Expand(All)]
+| Traverses incoming or outgoing relationships from a given node.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-expand-into[Expand(Into)]
+| Finds all relationships between two nodes.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-filter[Filter]
+| Filters each row coming from the child operator, only passing through rows that evaluate the predicates to `true`.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-foreach[Foreach]
+a|
+Performs a nested loop.
+Yields rows from the left-hand operator and discards rows from the right-hand operator.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-intersection-node-by-labels-scan[IntersectionNodeByLabelsScan]
+| Fetches all nodes that have all of the provided labels from the node label index.
+| label:yes[]
+|
+| label:new[Introduced in 5.5]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-let-anti-semi-apply[LetAntiSemiApply]
+a|
+Performs a nested loop.
+Tests for the absence of a pattern predicate in queries containing multiple pattern predicates.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-let-select-or-anti-semi-apply[LetSelectOrAntiSemiApply]
+a|
+Performs a nested loop.
+Tests for the absence of a pattern predicate that is combined with other predicates.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-let-select-or-semi-apply[LetSelectOrSemiApply]
+a|
+Performs a nested loop.
+Tests for the presence of a pattern predicate that is combined with other predicates.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-let-semi-apply[LetSemiApply]
+a|
+Performs a nested loop.
+Tests for the presence of a pattern predicate in queries containing multiple pattern predicates.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-limit[Limit]
+| Returns the first `+n+` rows from the incoming input.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-load-csv[LoadCSV]
+| Loads data from a CSV source into the query.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-locking-merge[LockingMerge]
+| Similar to the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-merge[`Merge`] operator but will lock the start and end node when creating a relationship if necessary.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-lock-nodes[LockNodes]
+| Sometimes used in conjunction with the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-locking-merge[`LockingMerge`] operator to lock nodes.
+|
+|
+| label:new[Introduced in Neo4j 2025.09]
+
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-merge[Merge]
+| The `Merge` operator will either read or create nodes and/or relationships.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-merge-into[MergeInto]
+| Similar to the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-merge[`Merge`] operator, but is used when the start and end node of the pattern is matched outside the `MERGE` pattern.
+|
+|
+| label:new[Introduced in Neo4j 2025.11]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-merge-unique-node[MergeUniqueNode]
+| Similar to the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-merge[`Merge`] operator, but is used when there is a property uniqueness constraint on the property used in the `MERGE` statement.
+|
+|
+| label:new[Introduced in Neo4j 2026.02]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-multi-node-index-seek[MultiNodeIndexSeek]
+| Finds nodes using multiple index seeks.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-by-elementid-seek[NodeByElementIdSeek]
+| Reads one or more nodes by id from the node store, specified via the function xref::functions/scalar.adoc#functions-elementid[elementId()].
+| label:yes[]
+|
+| label:new[Introduced in 5.3]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-by-id-seek[NodeByIdSeek]
+| Reads one or more nodes by id from the node store, specified via the function xref::functions/scalar.adoc#functions-id[id()].
+| label:yes[]
+|
+| 
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-by-label-scan[NodeByLabelScan]
+| Fetches all nodes with a specific label from the node label index.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-count-from-count-store[NodeCountFromCountStore]
+| Uses the count store to answer questions about node counts.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-hash-join[NodeHashJoin]
+| Executes a hash join on node ID.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-index-contains-scan[NodeIndexContainsScan]
+| Examines all values stored in an index, searching for entries containing a specific `STRING`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-index-ends-with-scan[NodeIndexEndsWithScan]
+| Examines all values stored in an index, searching for entries ending in a specific `STRING`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-index-scan[NodeIndexScan]
+| Examines all values stored in an index, returning all nodes with a particular label with a specified property.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-index-seek[NodeIndexSeek]
+| Finds nodes using an index seek.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-index-seek-by-range[NodeIndexSeekByRange]
+| Finds nodes using an index seek where the value of the property matches the given prefix `STRING`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-left-right-outer-hash-join[NodeLeftOuterHashJoin]
+| Executes a left outer hash join.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-left-right-outer-hash-join[NodeRightOuterHashJoin]
+| Executes a right outer hash join.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-unique-index-seek[NodeUniqueIndexSeek]
+| Finds nodes using an index seek within a unique index.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-node-unique-index-seek-by-range[NodeUniqueIndexSeekByRange]
+| Finds nodes using an index seek within a unique index where the value of the property matches the given prefix `STRING`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-nullify-metadata[NullifyMetadata]
+| responsible for cleaning up the state produced by xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-repeat[`Repeat(Trail)`].
+It is only planned directly after `Repeat(Trail)`.
+|
+|
+| label:new[Introduced in 5.9]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-optional[Optional]
+| Yields a single row with all columns set to `null` if no data is returned by its source.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-optional-expand-all[OptionalExpand(All)]
+| Traverses relationships from a given node, producing a single row with the relationship and end node set to `null` if the predicates are not fulfilled.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-optional-expand-into[OptionalExpand(Into)]
+| Traverses all relationships between two nodes, producing a single row with the relationship and end node set to `null` if no matching relationships are found (the start node is the node with the smallest degree).
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-ordered-aggregation[OrderedAggregation]
+| Similar to the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-eager-aggregation[`EagerAggregation`] operator but relies on the ordering of incoming rows.
+It is not eager.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-ordered-distinct[OrderedDistinct]
+| Similar to the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-distinct[`DISTINCT`] operator but relies on the ordering of incoming rows.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partial-sort[PartialSort]
+| Sorts a row by multiple columns if there is already an ordering.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partial-top[PartialTop]
+| Returns the first `+n+` rows sorted by multiple columns if there is already an ordering.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-all-nodes-scan[PartitionedAllNodesScan]
+| Used by the parallel runtime to read all nodes from the node store.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-directed-all-relationships-scan[PartitionedDirectedAllRelationshipsScan]
+| Used by the parallel runtime to fetch all relationships and their start and end nodes from the database.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-directed-relationship-index-scan[PartitionedDirectedRelationshipIndexScan]
+| Used by the parallel runtime to examine all values stored in an index. 
+It returns all relationships with a particular type and a specified property, along with their start and end nodes.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-directed-relationship-index-seek[PartitionedDirectedRelationshipIndexSeek]
+| Finds relationships and their start and end nodes using a parallel index seek.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-directed-relationship-index-seek-by-range[PartitionedDirectedRelationshipIndexSeekByRange]
+| Finds relationships using a parallel index seek where the value of the of the specified relationship type property is within a given range.
+It also finds the start and end nodes of those relationships.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-directed-relationship-types-scan[PartitionedDirectedRelationshipTypesScan]
+| Fetches all relationships with a specific type from the relationship type index using a parallel scan.
+It also fetches the start and end nodes of those relationships.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-directed-union-relationship-types-scan[PartitionedDirectedUnionRelationshipTypesScan]
+| Fetches all relationships with at least one of the provided types from the relationship type index using a parallel scan.
+It also fetches the start and end nodes of those relationships.
+|
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-node-by-label-scan[PartitionedNodeByLabelScan]
+| Used by the parallel runtime to fetch all nodes with a specific label from the node label index.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-node-index-scan[PartitionedNodeIndexScan]
+| Used by the parallel runtime to examine all values stored in an index, returning all nodes with a particular label and a specified property.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-node-index-seek[PartitionedNodeIndexSeek]
+| Used by the parallel runtime to find nodes using an index seek.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-node-index-seek-by-range[PartitionedNodeIndexSeekByRange]
+| Finds nodes using a parallel index seek where the value of the specified property is within a given range.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-subtraction-node-by-labels-scan[PartitionedSubtractionNodeByLabelsScan]
+| Used by the parallel runtime to fetch all nodes that have all of the first set of provided labels and none of the second provided set of labels from the node label index.
+| label:yes[]
+|
+| label:new[Introduced in 5.21]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-undirected-all-relationships-scan[PartitionedUndirectedAllRelationshipsScan]
+| Used by the parallel runtime to fetch all relationships and their start and end nodes from the database.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-undirected-relationship-index-scan[PartitionedUndirectedRelationshipIndexScan]
+| Used by the parallel runtime to examine all values stored in an index, returning all relationships with a particular relationship type and a specified property.
+It also returns the start and end nodes of those relationships.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-undirected-relationship-index-seek[PartitionedUndirectedRelationshipIndexSeek]
+| Finds relationships and their start and end nodes using a parallel index seek.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-undirected-relationship-index-seek-by-range[PartitionedUndirectedRelationshipIndexSeekByRange]
+| Finds relationships using a parallel index seek where the value of the specified relationship property type is within a given range.
+It also finds the start and end nodes of those relationships.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-undirected-relationship-type-scan[PartitionedUndirectedRelationshipTypeScan]
+| Used by the parallel runtime to fetch all relationships with a specific type from the relationship type index.
+It also fetches the start and end nodes of those relationships.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-undirected-union-relationship-types-scan[PartitionedUndirectedUnionRelationshipTypesScan]
+| Used by the parallel runtime to fetch all relationships with at least one of the provided types from the relationship type index.
+It also fetches the start and end nodes of those relationships.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-union-node-by-labels-scan[PartitionedUnionNodeByLabelsScan]
+| Used by the parallel runtime to fetch all nodes that have at least one of the provided labels from the node label index.
+| label:yes[]
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-partitioned-unwind[PartitionedUnwind]
+| Used by the parallel runtime to return one row per item in a list.
+|
+|
+| label:new[Introduced in 5.17]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-procedure-call[ProcedureCall]
+| Calls a procedure.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-produce-results[ProduceResults]
+| Prepares the result so that it is consumable by the user.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-project-endpoints[ProjectEndpoints]
+| Projects the start and end node of a relationship.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-projection[Projection]
+| Evaluates a set of expressions, producing a row with the results thereof.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-relationship-count-from-count-store[RelationshipCountFromCountStore]
+| Uses the count store to answer questions about relationship counts.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-repeat[Repeat(Trail)]
+| Solves quantified path patterns.
+|
+|
+| label:new[Introduced in 5.9]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-remove-labels[RemoveLabels]
+| Deletes labels from a node.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-roll-up-apply[RollUpApply]
+| Performs a nested loop.
+Executes a pattern expression or pattern comprehension.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-select-or-anti-semi-apply[SelectOrAntiSemiApply]
+| Performs a nested loop.
+Tests for the absence of a pattern predicate if an expression predicate evaluates to `false`.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-select-or-semi-apply[SelectOrSemiApply]
+| Performs a nested loop. Tests for the presence of a pattern predicate if an expression predicate evaluates to `false`.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-semi-apply[SemiApply]
+| Performs a nested loop. Tests for the presence of a pattern predicate.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-set-labels[SetLabels]
+| Sets labels on a node.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-set-node-properties-from-map[SetNodePropertiesFromMap]
+| Sets properties from a map on a node.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-set-property[SetProperty]
+| Sets a property on a node or relationship.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-set-properties[SetProperties]
+| Used when setting multiple properties on a node or relationship.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-set-relationship-properties-from-map[SetRelationshipPropertiesFromMap]
+| Sets properties from a map on a relationship.
+|
+| label:yes[]
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-shortest-path[ShortestPath]
+| Finds one or all shortest paths between two previously matches node variables.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-show-constraints[ShowConstraints]
+| Shows the available constraints.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-show-functions[ShowFunctions]
+| Shows the available functions.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-show-indexes[ShowIndexes]
+| Shows the available indexes.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-show-procedures[ShowProcedures]
+| Shows the available procedures.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-show-settings[ShowSettings]
+| Shows the available configuration settings.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-show-transactions[ShowTransactions]
+| Shows the available transactions on the current server.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-skip[Skip]
+| Skips `+n+` rows from the incoming rows.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-sort[Sort]
+| Sorts rows by a provided key.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-stateful-shortest-path-all[StatefulShortestPath(All)]
+| Finds shortest paths from a previously matched node variable to an endpoint that was not previously matched.
+|
+|
+| label:new[Introduced in 5.21]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-stateful-shortest-path-into[StatefulShortestPath(Into)]
+| Finds shortest paths between two previously matched node variables.
+It uses a bidirectional breadth-first search (BFS) algorithm, which performs two BFS invocations at the same time, one from the left boundary node and one from the right boundary node.
+|
+|
+| label:new[Introduced in 5.21]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-subquery-foreach[SubqueryForeach]
+| Works like the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-foreach[`Foreach`]operator but it is only used for executing subqueries.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-subtraction-node-by-labels-scan[SubtractionNodeByLabelsScan]
+| Fetches all nodes that have all of the first set of provided labels and none of the second provided set of labels from the node label index.
+| label:yes[]
+|
+| label:new[Introduced in 5.21]
+
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-terminate-transactions[TerminateTransactions]
+| Terminate transactions with the given IDs.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-top[Top]
+| Returns the first 'n' rows sorted by a provided key.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-transaction-apply[TransactionApply]
+| Works like the xref:planning-and-tuning/operators/operators-detail#query-plan-apply[`Apply`] operator but will commit the current transaction after a specified number of rows.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-transaction-foreach[TransactionForeach]
+| Works like the xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-foreach[`Foreach`] operator but will commit the current transaction after a specified number of rows.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-triadic-build[TriadicBuild]
+| Used in conjunction with xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-triadic-filter[`TriadicFilter`] to solve triangular queries.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-triadic-filter[TriadicFilter]
+| Used in conjunction with xref:planning-and-tuning/operators/operators-detail.adoc#query-plan-triadic-build[`TriadicBuild`] to solve triangular queries.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-triadic-selection[TriadicSelection]
+| Solves triangular queries, such as the very common 'find my friends-of-friends that are not already my friends'.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-all-relationships-scan[UndirectedAllRelationshipsScan]
+| Fetches all relationships and their start and end nodes in the database.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-by-element-id-seek[UndirectedRelationshipByElementIdSeek]
+| Reads one or more relationships by element id (specified via the function xref::functions/scalar.adoc#functions-elementid[ElementId()]) from the relationship store.
+As the direction is unspecified, two rows are produced for each relationship as a result of alternating the combination of the start and end node.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-by-id-seek[UndirectedRelationshipByIdSeek]
+| Reads one or more relationships by id (specified via the function xref::functions/scalar.adoc#functions-id[Id()]) from the relationship store.
+As the direction is unspecified, two rows are produced for each relationship as a result of alternating the combination of the start and end node.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-index-contains-scan[UndirectedRelationshipIndexContainsScan]
+| Examines all values stored in an index, searching for entries containing a specific `STRING`; for example, in queries including `CONTAINS`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-index-ends-with-scan[UndirectedRelationshipIndexEndsWithScan]
+| Examines all values stored in an index, searching for entries ending in a specific `STRING`; for example, in queries containing `ENDS WITH`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-index-scan[UndirectedRelationshipIndexScan]
+| Examines all values stored in an index, returning all relationships and their start and end nodes with a particular relationship type and a specified property.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-index-seek[UndirectedRelationshipIndexSeek]
+| Finds relationships and their start and end nodes using an index seek.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-index-seek-by-range[UndirectedRelationshipIndexSeekByRange]
+| Finds relationships and their start and end nodes using an index seek where the value of the property matches a given prefix `STRING`.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-relationship-type-scan[UndirectedRelationshipTypeScan]
+| Fetches all relationships and their start and end nodes with a specific type from the relationship type index.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-undirected-union-relationship-types-scan[UndirectedUnionRelationshipTypesScan]
+| Fetches all relationships and their start and end nodes with at least one of the provided types from the relationship type index.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-union[Union]
+| Concatenates the results from the right-hand operator with the results from the left-hand operator.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-union-node-by-labels-scan[UnionNodeByLabelsScan]
+| Fetches all nodes that have at least one of the provided labels from the node label index.
+| label:yes[]
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-unwind[Unwind]
+| Returns one row per item in a list.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-value-hash-join[ValueHashJoin]
+| Executes a hash join on arbitrary values.
+|
+|
+| label:eager[]
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-varlength-expand-all[VarLengthExpand(All)]
+| Traverses variable-length relationships from a given node.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-varlength-expand-into[VarLengthExpand(Into)]
+| Finds all variable-length relationships between two nodes.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-varlength-expand-pruning[VarLengthExpand(Pruning)]
+| Traverses variable-length relationships from a given node and only returns unique end nodes.
+|
+|
+|
+
+| xref::planning-and-tuning/operators/operators-detail.adoc#query-plan-breadth-first-varlength-expand-pruning-bfs-all[VarLengthExpand(Pruning,BFS)]
+| Traverses variable-length relationships from a given node and only returns unique end nodes.
+|
+|
+|
+
+|===

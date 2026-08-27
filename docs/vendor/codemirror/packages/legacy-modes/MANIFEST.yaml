@@ -1,0 +1,6 @@
+name: codemirror/packages/legacy-modes
+source_repo: https://github.com/codemirror/legacy-modes
+source_ref: 6.5.2
+fetched_url: https://codeload.github.com/codemirror/legacy-modes/tar.gz/6.5.2
+fetched_date: 2026-08-25
+subpaths: [src README.md CHANGELOG.md LICENSE]

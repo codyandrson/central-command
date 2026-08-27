@@ -1,0 +1,66 @@
+---
+title: "openShiftItem resource type"
+description: "Represents a single count of an open shift."
+ms.localizationpriority: medium
+author: "akumar39"
+ms.subservice: "teams"
+doc_type: "resourcePageType"
+ms.date: 07/26/2024
+---
+
+# openShiftItem resource type
+
+Namespace: microsoft.graph
+
+Represents a single count of an [openShift](../resources/openshift.md).
+
+Inherits from [shiftItem](../resources/shiftitem.md).
+
+## Properties
+
+| Property     | Type        | Description |
+|:-------------|:------------|:------------|
+| activities 	| [shiftActivity](shiftactivity.md) collection   | An incremental part of a shift that can cover details of when and where an employee is during their shift. For example, an assignment, a scheduled break, or lunch. Required. Inherited from [shiftItem](../resources/shiftitem.md). |
+| displayName               | String                  | The shift label of the **openShift**. Inherited from [shiftItem](../resources/shiftitem.md). |
+| endDateTime               | DateTimeOffset                 | The end date and time for the **openShift**. Required. The Timestamp type represents date and time information using ISO 8601 format and is always in UTC. For example, midnight UTC on Jan 1, 2014 is `2014-01-01T00:00:00Z`. Inherited from [shiftItem](../resources/shiftitem.md). |
+| notes               | String                  | The shift notes for the **openShift**. Inherited from [shiftItem](../resources/shiftitem.md). |
+|openSlotCount|Int32| Count of the number of slots for the given open shift.|
+| startDateTime               | DateTimeOffset                  | The start date and time for the **openShift**. Required. The Timestamp type represents date and time information using ISO 8601 format and is always in UTC. For example, midnight UTC on Jan 1, 2014 is `2014-01-01T00:00:00Z`. Inherited from [shiftItem](../resources/shiftitem.md). |
+| theme | scheduleEntityTheme   |  The color of the open shift. The possible values are: `white`, `blue`, `green`, `purple`, `pink`, `yellow`, `gray`, `darkBlue`, `darkGreen`, `darkPurple`, `darkPink`, `darkYellow`, `unknownFutureValue`, `darkRed`, `cranberry`, `darkOrange`, `bronze`, `peach`, `gold`, `lime`, `forest`, `lightGreen`, `jade`, `lightTeal`, `darkTeal`, `steel`, `skyBlue`, `blueGray`, `lavender`, `lilac`, `plum`, `magenta`, `darkBrown`, `beige`, `charcoal`, `silver`. Use the `Prefer: include-unknown-enum-members` request header to get the following values from this [evolvable enum](/graph/best-practices-concept#handling-future-members-in-evolvable-enumerations): `darkRed`, `cranberry`, `darkOrange`, `bronze`, `peach`, `gold`, `lime`, `forest`, `lightGreen`, `jade`, `lightTeal`, `darkTeal`, `steel`, `skyBlue`, `blueGray`, `lavender`, `lilac`, `plum`, `magenta`, `darkBrown`, `beige`, `charcoal`, `silver`. Inherited from [shiftItem](../resources/shiftitem.md). |
+
+## JSON representation
+
+The following JSON representation shows the resource type.
+
+<!-- {
+  "blockType": "resource",
+  "optionalProperties": [
+
+  ],
+  "@odata.type": "microsoft.graph.openShiftItem",
+  "baseType": "microsoft.graph.shiftItem"
+}-->
+
+```json
+{
+  "@odata.type": "#microsoft.graph.openShiftItem",
+  "activities": [{"@odata.type": "microsoft.graph.shiftActivity"}],
+  "displayName": "String",
+  "endDateTime": "String (timestamp)",
+  "notes": "String",
+  "openSlotCount": "Int32",
+  "startDateTime": "String (timestamp)",
+  "theme": "String"
+}
+```
+
+<!-- uuid: 16cd6b66-4b1a-43a1-adaf-3a886856ed98
+2019-02-04 14:57:30 UTC -->
+<!-- {
+  "type": "#page.annotation",
+  "description": "openShiftItem resource",
+  "keywords": "",
+  "section": "documentation",
+  "tocPath": ""
+}-->
+

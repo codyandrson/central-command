@@ -1,0 +1,190 @@
+---
+description: PowerShell has several features designed to improve the security of your scripting environment.
+ms.date: 07/17/2026
+title: PowerShell security features
+---
+# PowerShell security features
+
+PowerShell has several features designed to improve the security of your scripting environment.
+
+## Execution policy
+
+PowerShell's execution policy is a safety feature that controls the conditions under which
+PowerShell loads configuration files and runs scripts. This feature helps prevent the execution of
+malicious scripts. You can use a Group Policy setting to set execution policies for computers and
+users. Execution policies only apply to the Windows platform.
+
+For more information, see [about_Execution_Policies][02].
+
+## Use of the SecureString class
+
+PowerShell has several cmdlets that support the use of the `System.Security.SecureString` class.
+And, as with any .NET class, you can use **SecureString** in your own scripts. However, Microsoft
+doesn't recommend using **SecureString** for new development. Microsoft recommends that you avoid
+using passwords and rely on other means to authenticate, such as certificates or Windows
+authentication.
+
+PowerShell continues to support the **SecureString** class for backward compatibility. Using a
+**SecureString** is still more secure than using a plain text string. PowerShell still relies on the
+**SecureString** type to avoid accidentally exposing the contents to the console or in logs. Use
+**SecureString** carefully, because it can be easily converted to a plain text string. For a full
+discussion about using **SecureString**, see the [System.Security.SecureString class][01]
+documentation.
+
+## Module and script block logging
+
+Module Logging allows you to enable logging for selected PowerShell modules. This setting is
+effective in all sessions on the computer. PowerShell records pipeline execution events for the
+specified modules in the Windows PowerShell event log.
+
+Script Block Logging enables logging for the processing of commands, script blocks, functions, and
+scripts - whether invoked interactively, or through automation. PowerShell logs this information to
+the **Microsoft-Windows-PowerShell/Operational** event log.
+
+For more information, see the following articles:
+
+- [about_Group_Policy_Settings][03]
+- [about_Logging_Windows][06]
+- [about_Logging_Non-Windows][05]
+
+## AMSI Support
+
+The Windows Antimalware Scan Interface (AMSI) is an API that allows applications to pass actions to
+an antimalware scanner, such as Windows Defender, to scan for malicious payloads. Beginning with
+PowerShell 5.1, PowerShell running on Windows 10 (and higher) passes all script blocks to AMSI.
+
+PowerShell 7.3 extends the data it sends to AMSI for inspection. It now includes all .NET method
+invocations.
+
+For more information about AMSI, see [How AMSI helps][09].
+
+## Constrained language mode
+
+**ConstrainedLanguage** mode protects your system by limiting the cmdlets and .NET types allowed in
+a PowerShell session. For a full description, see [about_Language_Modes][04].
+
+## Application Control
+
+Windows 10 includes two technologies, [App Control for Business][08] and [AppLocker][07] that you
+can use to control applications. PowerShell detects if a system wide application control policy is
+being enforced. The policy applies certain behaviors when running script blocks, script files, or
+loading module files to prevent arbitrary code execution on the system.
+
+App Control for Business is designed as a security feature under the servicing criteria defined by
+the Microsoft Security Response Center (MSRC). App Control for Business is the preferred application
+control system for Windows. For more information about how PowerShell supports AppLocker and App
+Control for Business, see [Use App Control to secure PowerShell][10].
+
+AppLocker is a legacy application control system that's still supported in and Windows 11. AppLocker
+isn't a security feature under the servicing criteria defined by MSRC. For more information about
+servicing criteria, see [Microsoft Security Servicing Criteria for Windows][12].
+
+### System Lockdown mode
+
+In PowerShell, System Lockdown mode is an abstraction of the system-wide application control policy
+enforced by Windows through App Control for Business or AppLocker. When an application control
+policy is active, PowerShell enters System Lockdown mode. In System Lockdown mode, the application
+control policy determines the language mode for each runspace.
+
+> [!IMPORTANT]
+> Without System Lockdown mode, language mode doesn't propagate between runspaces. Each runspace
+> independently queries the Windows application control policy to determine its language mode.
+> Setting the language mode on one runspace doesn't affect other runspaces. Without an active
+> application control policy, new runspaces default to `FullLanguage` mode.
+
+## Software Bill of Materials (SBOM)
+
+Beginning with PowerShell 7.2, all install packages contain a Software Bill of Materials (SBOM). The
+PowerShell team also produces SBOMs for modules that they own but ship independently from
+PowerShell.
+
+You can find SBOM files in the following locations:
+
+- In PowerShell, find the SBOM at `$PSHOME/_manifest/spdx_2.2/manifest.spdx.json`.
+- For modules, find the SBOM in the module's folder under `_manifest/spdx_2.2/manifest.spdx.json`.
+
+The creation and publishing of the SBOM is the first step to modernize Federal Government
+cybersecurity and enhance software supply chain security. For more information about this
+initiative, see the blog post [Generating SBOMs with SPDX at Microsoft][11].
+
+## Secure data transfer in PowerShell remoting
+
+Prior to PowerShell v7.6-preview5, a `Session_Key` is used to encrypt a **SecureString** before
+sending it a PowerShell remote session. The PowerShell Remoting Protocol (PSRP) performs a
+key exchange between client and server when a `SecureString` object needs to be
+transferred. The exchange involves the following steps:
+
+1. The client side generates a public/private key pair and sends the public key to the server.
+1. The server generates a session key for symmetric encryption.
+1. The server uses the public key to encrypt the session key and sends it to the client.
+1. Both the client and server use the new session key to encrypt a **SecureString** object.
+
+The PowerShell Remoting Protocol (PSRP) uses the `RSAEncryptionPadding.Pkcs1` algorithm during the
+key exchange. The algorithm is **NOT** secure, so the key exchange doesn't provide any extra
+security.
+
+> [!IMPORTANT]
+> You must use a secure transport layer to ensure secure data transfer over PSRP.
+
+Beginning in PowerShell v7.6-preview.5, the key exchange was deprecated. The version of PSRP was
+incremented to v2.4 and includes the following changes:
+
+- The following PSRP messages are deprecated when both client and server are v2.4 or higher:
+
+  - PUBLIC_KEY
+  - PUBLIC_KEY_REQUEST
+  - ENCRYPTED_SESSION_KEY
+
+- The encryption and decryption steps for `SecureString` are skipped when both client and server are
+  v2.4 or higher.
+
+This change is backward compatible.
+
+- For old clients or servers (v2.3 or lower), the key exchange is still used when needed.
+- PSRP can use a named pipe remote sessions when both client and server are on the same machine.
+  Since it's possible for a remote client to connect to named pipe and the data is no longer
+  encrypted with a session key, the named pipe (used for `Enter-PSHostProcess`) rejects the remote
+  client.
+
+## Security Servicing Criteria
+
+A security boundary provides a logical separation between the code and data of security domains with
+different levels of trust. Security features build upon security boundaries to provide robust
+protection against specific threats. For security features in this category, Microsoft intends to
+address reported vulnerabilities through servicing.
+
+Security features of PowerShell
+
+- System Lockdown with App Control for Business
+- Constrained language mode with App Control for Business
+
+For more information, see the [Microsoft Security Servicing Criteria for Windows][12] documentation.
+
+In some cases, a security feature may provide protection against a threat without being able to
+provide a robust defense. These security features are typically referred to as _defense-in-depth_
+features or mitigations because they provide additional security but may have by-design limitations
+that prevent them from fully mitigating a threat. A bypass for a defense-in-depth security feature
+by itself does not pose a direct risk because an attacker must also have found a vulnerability that
+affects a security boundary, or they must rely on additional techniques, such as social engineering
+to achieve the initial stage of a device compromise.
+
+Defense-in-depth features of PowerShell
+
+- Constrained language mode with AppLocker or configured through session configuration or by
+  manually setting `$ExecutionContext.SessionState.LanguageMode`
+- System Lockdown with AppLocker
+- Execution Policy
+
+<!-- link references -->
+[01]: /dotnet/fundamentals/runtime-libraries/system-security-securestring
+[02]: /powershell/module/microsoft.powershell.core/about/about_execution_policies
+[03]: /powershell/module/microsoft.powershell.core/about/about_group_policy_settings#turn-on-module-logging
+[04]: /powershell/module/microsoft.powershell.core/about/about_language_modes
+[05]: /powershell/module/microsoft.powershell.core/about/about_logging_non-windows
+[06]: /powershell/module/microsoft.powershell.core/about/about_logging_windows
+[07]: /windows/security/application-security/application-control/app-control-for-business/applocker/what-is-applocker
+[08]: /windows/security/application-security/application-control/app-control-for-business/appcontrol
+[09]: /windows/win32/amsi/how-amsi-helps
+[10]: app-control/application-control.md
+[11]: https://devblogs.microsoft.com/engineering-at-microsoft/generating-software-bills-of-materials-sboms-with-spdx-at-microsoft/
+[12]: https://www.microsoft.com/msrc/windows-security-servicing-criteria

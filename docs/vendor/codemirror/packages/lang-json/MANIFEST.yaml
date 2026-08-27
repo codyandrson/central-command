@@ -1,0 +1,6 @@
+name: codemirror/packages/lang-json
+source_repo: https://github.com/codemirror/lang-json
+source_ref: 6.0.2
+fetched_url: https://codeload.github.com/codemirror/lang-json/tar.gz/6.0.2
+fetched_date: 2026-08-25
+subpaths: [src README.md CHANGELOG.md LICENSE]

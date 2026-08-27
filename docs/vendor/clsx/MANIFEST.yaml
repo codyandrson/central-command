@@ -1,0 +1,6 @@
+name: clsx
+source_repo: https://github.com/lukeed/clsx
+source_ref: v2.1.1
+fetched_url: https://codeload.github.com/lukeed/clsx/tar.gz/v2.1.1
+fetched_date: 2026-08-25
+subpaths: [readme.md license]

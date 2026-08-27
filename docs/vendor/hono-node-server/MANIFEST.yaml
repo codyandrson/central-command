@@ -1,0 +1,6 @@
+name: hono-node-server
+source_repo: https://github.com/honojs/node-server
+source_ref: v1.19.9
+fetched_url: https://codeload.github.com/honojs/node-server/tar.gz/v1.19.9
+fetched_date: 2026-08-25
+subpaths: [docs README* LICENSE*]

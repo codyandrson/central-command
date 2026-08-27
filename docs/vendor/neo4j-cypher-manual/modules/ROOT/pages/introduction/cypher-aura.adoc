@@ -1,0 +1,46 @@
+[[cypher-aura]]
+= Cypher and Aura
+:description: This section provides an introduction to the Cypher query language.
+
+This page provides a brief overview of Neo4j Aura and its relationship to Cypher.
+
+== What is Aura?
+
+Aura is Neo4j's fully managed cloud service. 
+It consists of AuraDB and AuraDS.
+AuraDB is a graph database service for developers building intelligent applications, and AuraDS is a Graph Data Science (GDS) service for data scientists building predictive models and analytics workflows. 
+
+AuraDB is available on the following tiers:
+
+* AuraDB Free
+* AuraDB Professional
+* AuraDB Business Critical
+* AuraDB Virtual Dedicated Cloud
+
+For more information, see link:{neo4j-docs-base-uri}/aura/classic/auradb/[Aura docs - Neo4j AuraDB overview].
+
+AuraDS is available on the following tiers:
+
+* Graph Data Science Community
+* Graph Data Science Enterprise
+* AuraDS Professional
+* AuraDS Enterprise
+
+For more information, see link:{neo4j-docs-base-uri}/aura/classic/aurads/[Aura docs - Neo4j AuraDS overview].
+
+== Using Cypher on Aura
+
+Most Cypher features are available across all tiers of Aura.
+However, certain features are not supported in Aura instances. 
+For example, it is not possible to create, alter, or drop databases using Aura, nor is it possible to alter or drop servers.
+
+Additionally, some Cypher features are exclusive to AuraDB Business Critical and AuraDB Virtual Dedicated Cloud tiers.
+These primarily fall under database administration and role-based access control capabilities.
+For more information, see the link:{neo4j-docs-base-uri}/operations-manual/current/database-administration/[Operations Manual -> Database administration] and the link:{neo4j-docs-base-uri}/operations-manual/current/authentication-authorization/[Operations Manual -> Authentication and authorization].
+
+== Aura and the Cypher Cheat Sheet
+
+Each different tier of Aura has a customized version of the Cypher Cheat Sheet which only shows the features of Cypher available for the chosen tier. 
+
+The Cypher Cheat Sheet can be accessed link:{neo4j-docs-base-uri}/cypher-cheat-sheet/5/all[here].
+You can select your desired Aura tier and Cypher version by using the dropdown menus provided.

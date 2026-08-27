@@ -1,0 +1,6 @@
+name: node-pty
+source_repo: https://github.com/microsoft/node-pty
+source_ref: v1.1.0
+fetched_url: https://codeload.github.com/microsoft/node-pty/tar.gz/v1.1.0
+fetched_date: 2026-08-25
+subpaths: [README.md LICENSE]

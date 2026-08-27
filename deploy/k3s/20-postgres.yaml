@@ -1,0 +1,120 @@
+# ============================================================================
+# cc-postgres — THE SPINE. Pinned to the Pi, loopback-only, port 5442.
+#
+#   PINNED, and not negotiable: this is the durable state behind every proposal,
+#   the ledger and the append-only event log. cc-uvicorn and the Executor hit it
+#   on essentially every request, so putting a Tailscale hop in front of it would
+#   add latency to every query and a network failure mode to durable
+#   pause/resume. It stays on the same box as the app.
+#
+#   5442, never 5432 — the port convention travels with the project. hostPort
+#   with hostIP 127.0.0.1 reproduces the compose stack's "127.0.0.1:5442:5432"
+#   exactly, so CC_DATABASE_URL is unchanged.
+#
+#   schema.sql is mounted the same way compose mounted it, into
+#   /docker-entrypoint-initdb.d. Remember it runs on a FRESH database only —
+#   nothing applies it at runtime — and its founding-roster UPDATEs are guarded
+#   by `where ... and role = ''`, so a fresh database still reproduces the
+#   roster. The migration restore (migrate-from-docker.sh) drops and recreates
+#   on top of whatever initdb built.
+# ============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cc-pgdata
+  namespace: central-command
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: central-command
+spec:
+  # ClusterIP for in-cluster consumers; the HOST reaches it via hostPort below.
+  selector:
+    app: cc-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-postgres
+  namespace: central-command
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: two pods cannot hold the same hostPort or the
+  # same ReadWriteOnce PVC. A rolling update would deadlock on both.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-postgres
+  template:
+    metadata:
+      labels:
+        app: cc-postgres
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: raspberrypi
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:16
+          env:
+            - name: POSTGRES_USER
+              value: central_command
+            - name: POSTGRES_PASSWORD
+              value: central_command
+            - name: POSTGRES_DB
+              value: central_command
+            # initdb writes the data directory; keep it in a subdirectory so the
+            # local-path volume root (owned by root) does not upset initdb.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+              hostPort: 5442
+              hostIP: 127.0.0.1
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            - name: schema
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U central_command"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U central_command"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              # mirrors the compose blast-radius cap (mem_limit: 2g)
+              memory: 2Gi
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: cc-pgdata
+        - name: schema
+          configMap:
+            name: cc-schema-sql

@@ -1,0 +1,175 @@
+:description: This section provides a summary of server management Cypher syntax.
+[role=enterprise-edition]
+[[server-commands-reference]]
+= Server management command syntax
+
+Servers can be added and managed using a set of Cypher administrative commands executed against the `system` database.
+
+When connected to the DBMS over `bolt`, administrative commands are automatically routed to the `system` database.
+
+
+[[server-management-syntax]]
+== Server management command reference
+
+[NOTE]
+====
+More details about the syntax descriptions can be found on the page xref:database-administration/syntax.adoc#administration-syntax-reading[Database management command syntax -> Reading the administrative commands syntax].
+====
+
+=== Enable a server
+
+The `ENABLE SERVER` command adds a server that has been discovered to the cluster.
+For more information, see xref:clustering/servers.adoc#server-enabled-state[Enabled state].
+
+To run the command, the `SERVER MANAGEMENT` privilege is required.
+For details, see xref:authentication-authorization/dbms-administration/dbms-server-management-privileges.adoc[`SERVER MANAGEMENT` privileges].
+
+[options="header", width="100%", cols="1m,5a"]
+|===
+| Command | Syntax
+
+| `ENABLE SERVER`
+
+|
+[source, syntax, role=noheader]
+----
+ENABLE SERVER 'serverId' [OPTIONS "{" option: value[,...] "}"]
+----
+|===
+
+
+=== List servers
+
+The `SHOW SERVERS` command shows all servers visible to the cluster.
+For more information, see xref:clustering/servers.adoc#_showing_servers[Showing servers].
+
+To run the command, the `SHOW SERVERS` or `SERVER MANAGEMENT` privilege is required. 
+For details, see xref:authentication-authorization/dbms-administration/dbms-server-management-privileges.adoc[`SERVER MANAGEMENT` privileges].
+
+[options="header", width="100%", cols="1m,5a"]
+|===
+| Command | Syntax
+| `SHOW SERVERS`
+
+|
+[source, syntax, role=noheader]
+----
+SHOW SERVER[S]
+  [YIELD { * \| field[, ...] } [ORDER BY field[, ...]] [SKIP n] [LIMIT n]]
+  [WHERE expression]
+  [RETURN field[, ...] [ORDER BY field[, ...]] [SKIP n] [LIMIT n]]
+----
+|===
+
+
+=== Alter server's options
+
+The `ALTER SERVER` command changes the constraints for a server.
+For more information, see xref:clustering/servers.adoc#alter-server-options[Altering server options].
+
+To run the command, the `SERVER MANAGEMENT` privilege is required.
+For details, see xref:authentication-authorization/dbms-administration/dbms-server-management-privileges.adoc[`SERVER MANAGEMENT` privileges].
+
+[options="header", width="100%", cols="1m,5a"]
+|===
+| Command | Syntax
+| `ALTER SERVER`
+
+|
+[source, syntax, role=noheader]
+----
+ALTER SERVER 'name' SET OPTIONS "{" option: value[,...] "}"
+----
+|===
+
+
+=== Rename a server
+
+`RENAME SERVER` changes the name of a server.
+For more information, see xref:clustering/servers.adoc#_renaming_a_server[Renaming a server].
+
+To run the command, the `SERVER MANAGEMENT` privilege is required.
+For details, see xref:authentication-authorization/dbms-administration/dbms-server-management-privileges.adoc[`SERVER MANAGEMENT` privileges].
+
+[options="header", width="100%", cols="1m,5a"]
+|===
+| Command | Syntax
+| `RENAME SERVER`
+
+|
+[source, syntax, role=noheader]
+----
+RENAME SERVER 'name' TO 'newName'
+----
+|===
+
+
+=== Reallocate databases in a cluster
+
+`REALLOCATE DATABASES` re-balances databases among the servers in the cluster.
+For more information, see xref:clustering/servers.adoc#_hosting_databases_on_added_servers[Hosting databases on added servers] and xref:clustering/databases.adoc#reallocate-databases-cypher[Reallocate databases using Cypher command].
+
+[NOTE]
+====
+The `REALLOCATE DATABASES` command is a cluster-level operation rather than a local server command.
+It serves as a database allocation tool under server management operations, responsible for re-balancing database placements across servers in a Neo4j cluster.
+====
+
+To run the `REALLOCATE DATABASES` command, the `SERVER MANAGEMENT` privilege is required.
+For details, see xref:authentication-authorization/dbms-administration/dbms-server-management-privileges.adoc[`SERVER MANAGEMENT` privileges].
+
+[options="header", width="100%", cols="2m,5a"]
+|===
+| Command | Syntax
+| `REALLOCATE DATABASES`
+
+|
+[source, syntax, role=noheader]
+----
+[DRYRUN] REALLOCATE DATABASE[S]
+----
+|===
+
+
+=== Deallocate databases from a server
+
+Before removing a server from a cluster, you have to move away all databases from this server.
+The `DEALLOCATE DATABASES FROM SERVERS` removes all standard databases from the given servers.
+For more information, see xref:clustering/servers.adoc#_deallocating_databases_from_a_server[Deallocating databases from a server].
+
+To run the command, the `SERVER MANAGEMENT` privilege is required.
+For details, see xref:authentication-authorization/dbms-administration/dbms-server-management-privileges.adoc[`SERVER MANAGEMENT` privileges].
+
+[options="header", width="100%", cols="3m,5a"]
+|===
+| Command | Syntax
+| `DEALLOCATE DATABASES FROM SERVERS`
+
+|
+[source, syntax, role=noheader]
+----
+[DRYRUN] DEALLOCATE DATABASE[S] FROM SERVER[S] 'name'[, ...]
+----
+|===
+
+
+=== Remove a server
+
+`DROP SERVER` removes a server from the cluster.
+The server must be in a _deallocated_ state and must not host any databases.
+For more information, see xref:clustering/servers.adoc#_dropping_a_server[Dropping a server].
+
+To run the command, the `SERVER MANAGEMENT` privilege is required.
+For details, see xref:authentication-authorization/dbms-administration/dbms-server-management-privileges.adoc[`SERVER MANAGEMENT` privileges].
+
+[options="header", width="100%", cols="1m,5a"]
+|===
+| Command | Syntax
+| `DROP SERVER`
+
+|
+[source, syntax, role=noheader]
+----
+DROP SERVER 'name'
+----
+|===

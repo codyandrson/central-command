@@ -1,0 +1,6 @@
+name: markdownify
+source_repo: https://github.com/matthewwithanm/python-markdownify
+source_ref: 1.2.3
+fetched_url: https://codeload.github.com/matthewwithanm/python-markdownify/tar.gz/1.2.3
+fetched_date: 2026-08-25
+subpaths: [README.rst LICENSE* pyproject.toml]

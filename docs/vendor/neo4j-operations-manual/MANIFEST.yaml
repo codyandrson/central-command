@@ -1,0 +1,6 @@
+name: neo4j-operations-manual
+source_repo: https://github.com/neo4j/docs-operations
+source_ref: 5.x
+fetched_url: https://codeload.github.com/neo4j/docs-operations/tar.gz/5.x
+fetched_date: 2026-08-25
+subpaths: [modules README.adoc]

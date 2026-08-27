@@ -1,0 +1,6 @@
+name: ews-exchange-dev
+source_repo: https://github.com/MicrosoftDocs/office-developer-exchange-docs
+source_ref: main
+fetched_url: https://codeload.github.com/MicrosoftDocs/office-developer-exchange-docs/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [docs]

@@ -1,0 +1,421 @@
+[role=enterprise-edition]
+[[auth-sso-integration]]
+= Single sign-on integration
+:description: This page describes Neo4j support for integrating with SSO identity providers using OpenID Connect.
+
+Neo4j supports OpenID Connect (OIDC), which allows for integration with many identity providers including Okta, Microsoft Entra ID, and Google.
+This integration permits federated users, managed by the identity provider, to access Neo4j instead of, or in addition to the native users and roles.
+For examples with different providers and troubleshooting, see the xref:tutorial/tutorial-sso-configuration.adoc[SSO configuration tutorial].
+
+[[auth-sso-parameters]]
+== OIDC configuration settings
+
+Neo4j supports multiple OIDC identity providers at the same time, as such each provider configuration must be assigned a prefix to differentiate it from others.
+In the configuration examples below the provider-specific prefix is represented by `<provider>`, which should be replaced with a name representing your provider.
+For example, if you are using Okta as your identity provider you might use `okta` in the place of `<provider>` below.
+
+The following configuration settings are important to consider when configuring single sign-on.
+For a more detailed overview of the single sign-on configuration options, see xref:configuration/configuration-settings.adoc[Configuration settings].
+Some of these settings can also be updated while the database is running, see xref:configuration/dynamic-settings.adoc[Dynamic settings] for more information on how to do this.
+Altering any of these settings causes users to re-authenticate as their permissions may have changed as a result.
+
+[options="header",cols="<3,<1,<1,<3"]
+|===
+| Parameter name
+| Default value
+| Dynamic
+| Description
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.display_name[dbms.security.oidc.<provider>.display_name]
+|
+| false
+| The display name for the provider.
+This is displayed in clients such as Neo4j Browser and Bloom.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.auth_flow[dbms.security.oidc.<provider>.auth_flow]
+| pkce
+| true
+| The OIDC auth_flow for clients such as Neo4j Browser and Bloom to use.
+Supported values are `pkce` and `implicit`.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.well_known_discovery_uri[dbms.security.oidc.<provider>.well_known_discovery_uri]
+|
+| true
+| The OpenID Connect Discovery URL for the provider.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.auth_endpoint[dbms.security.oidc.<provider>.auth_endpoint]
+|
+| true
+| URL of the provider's Authorization Endpoint.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.auth_params[dbms.security.oidc.<provider>.auth_params]
+|
+| true
+| Optional parameters that clients may require with the Authorization Endpoint. The map is a semicolon-separated list of key-value pairs. For example: k1=v1;k2=v2.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.token_endpoint[dbms.security.oidc.<provider>.token_endpoint]
+|
+| true
+| URL of the provider's OAuth 2.0 Token Endpoint.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.token_params[dbms.security.oidc.<provider>.token_params]
+|
+| true
+| Option parameters that clients may require with the Token Endpoint. The map is a semicolon-separated list of key-value pairs. For example: k1=v1;k2=v2.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.jwks_uri[dbms.security.oidc.<provider>.jwks_uri]
+|
+| true
+| URL of the provider's JSON Web Key Set.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.user_info_uri[dbms.security.oidc.<provider>.user_info_uri]
+|
+| true
+| URL of the provider's UserInfo Endpoint.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.issuer[dbms.security.oidc.<provider>.issuer]
+|
+| true
+| URL that the provider asserts as its issuer identifier.
+This will be checked against the `iss` claim in the token.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.audience[dbms.security.oidc.<provider>.audience]
+|
+| true
+| The expected value for the `aud` claim.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.params[dbms.security.oidc.<provider>.params]
+|
+| true
+|  Option parameters that clients may require. The map is a semicolon-separated list of key-value pairs. For example: k1=v1;k2=v2.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.config[dbms.security.oidc.<provider>.config]
+|
+| true
+|  Option additional configuration that clients may require. The map is a semicolon-separated list of key-value pairs. For example: k1=v1;k2=v2.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.get_groups_from_user_info[dbms.security.oidc.<provider>.get_groups_from_user_info]
+| false
+| true
+| Whether to fetch the groups claim from the user info endpoint on the identity provider.
+The default is `false`, to read the claim from the token.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.get_username_from_user_info[dbms.security.oidc.<provider>.get_username_from_user_info]
+| false
+| true
+| Whether to fetch the username claim from the user info endpoint on the identity provider.
+The default is `false`, to read the claim from the token.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.claims.username[dbms.security.oidc.<provider>.claims.username]
+| sub
+| true
+| The claim to use for the database username. Neo4j expects to find a string claim in the JWT or user_info response with this name.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.claims.groups[dbms.security.oidc.<provider>.claims.groups]
+|
+| true
+| The claim to use for the database roles. Neo4j expects to find a claim in the JWT or user_info response with this name. The claim may be a string claim representing a single role or a string array claim representing multiple roles. From Neo4j 5.4, the JWT claim may also contain a single group returned as a string as well as a list of groups as was previously required.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.authorization.group_to_role_mapping[dbms.security.oidc.<provider>.authorization.group_to_role_mapping]
+|
+| true
+| List an authorization mapping from groups to the pre-defined built-in roles `admin`, `architect`, `publisher`, `editor`, and `reader`, or to any custom-defined roles.
+
+| xref:configuration/configuration-settings.adoc#config_dbms.security.logs.oidc.jwt_claims_at_debug_level_enabled[dbms.security.logs.oidc.jwt_claims_at_debug_level_enabled]
+| false
+| false
+| When set to `true`, it logs the claims from the JWT into the security log (provided the security log level is also set to `DEBUG`).
+|===
+
+[[auth-sso-configure-sso]]
+== Configure Neo4j to use OpenID Connect
+
+First, you configure Neo4j to use OpenID Connect as an authentication and authorization provider in the _neo4j.conf_ file.
+
+. Make sure security is turned on.
+The default value for `dbms.security.auth_enabled` is `true`.
+. Uncomment the settings `dbms.security.authentication_providers` and `dbms.security.authorization_providers` and change their value to `oidc-<provider>`, where `<provider>` maps to the provider name used in the configuration settings.
+This way, the OIDC connector is used as a security provider for both authentication and authorization.
+If you want, you can still use the `native` provider for mixed-mode authentication and authorization.
+The values are comma-separated and queried in the declared order.
++
+.Configure Neo4j to use two OpenID Connect and the native authentication and authorization providers.
+======
+[source,configuration,role="noheader"]
+----
+dbms.security.authentication_providers=oidc-newsso,oidc-oldsso,native
+dbms.security.authorization_providers=oidc-newsso,oidc-oldsso,native
+----
+======
+. Check connectivity.
+Neo4j needs to connect to the identity provider to discover settings and fetch public keys to verify tokens.
+Check firewall settings and security controls, and, if necessary, logs to ensure that the Neo4j server is able to connect to the identity provider using HTTPS.
+If a proxy is required, this can be link:https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/net/doc-files/net-properties.html#Proxies[configured] in the Java virtual machine using the configuration setting xref:configuration/configuration-settings.adoc#config_server.jvm.additional[server.jvm.additional].
+Proxies that require credentials are not supported.
+
+[[auth-sso-map-idp-roles]]
+== Map the identity provider groups to the Neo4j roles
+
+Before identity provider managed groups can be used with Neo4j, you have to decide on an approach for mapping identity provider groups to Neo4j roles.
+The simplest approach is to create identity provider groups with the same names as Neo4j roles.
+If you decide to go this way, no mapping configuration is necessary.
+Assuming, however, that identity provider groups do not directly map 1:1 to the desired Neo4j roles, it is necessary to map the identity provider groups to the xref:authentication-authorization/built-in-roles.adoc[Neo4j built-in] and custom-defined roles.
+To do that, you need to know what privileges the Neo4j roles have, and based on these privileges, create the mapping to the groups defined in the identity provider.
+The map must be formatted as a semicolon-separated list of key-value pairs, where the key is the identity provider group name and the value is a comma-separated list of the corresponding role names.
+For example, `group1=role1;group2=role2;group3=role3,role4,role5;group4=role6;group5=role6`.
+
+.Example of identity provider groups to Neo4j roles mapping
+====
+[source, role=noheader]
+----
+dbms.security.oidc.mysso.authorization.group_to_role_mapping=\
+    neo4j_readonly  = reader;    \ #<1>
+    neo4j_rw        = editor,publisher; \ #<2>
+    neo4j_rw        = publisher; \ #<3>
+    neo4j_create    = publisher; \
+    neo4j_dba       = admin; \
+    neo4j_exec      = rolename #<4>
+----
+
+<1> Mapping of an identity provider group to a Neo4j built-in role.
+<2> Mapping of an identity provider group to two Neo4j built-in roles.
+<3> Mapping of two identity provider groups to a Neo4j built-in role.
+<4> Mapping of an identity provider group to a custom-defined role.
+Custom-defined roles, such as `rolename`, must be explicitly created using the `CREATE ROLE rolename` command before they can be used to grant privileges.
+See xref:authentication-authorization/manage-roles.adoc[Manage roles].
+====
+
+[NOTE]
+====
+When specifying explicit group to role mapping the automatic mapping for groups and roles sharing a name is disabled.
+This means that all groups and roles need to be specified to be mapped, even if they share a name.
+====
+
+[[auth-sso-configure-provider]]
+== Configure Neo4j to use an OpenID Connect identity provider
+
+This option allows users to log in through an OIDC compliant identity provider by offering a token from the provider instead of a username and password.
+Typically, these tokens take the form of a signed JSON Web Token (JWT).
+The following configuration examples use `mysso` as the provider's name.
+It is recommended to use a name describing the provider that is being integrated.
+
+[[auth-sso-configure-provider-jwt]]
+=== OpenID Connect using JWT claims
+
+In this configuration, Neo4j receives a JWT from the identity provider containing claims representing the database username (e.g. email), and the Neo4j roles.
+
+. Set a display name.
++
+In the _neo4j.conf_ file, uncomment and configure the following settings:
++
+[source, properties]
+----
+dbms.security.oidc.mysso.display_name=SSO Provider
+----
+This is displayed on a button on the login page of clients, such as Neo4j Browser and Bloom so that you can identify the provider you are using to login.
+
+. Configure discovery.
++
+Uncomment and configure the following settings:
++
+[source, properties]
+----
+dbms.security.oidc.mysso.well_known_discovery_uri=https://my-idp.example.com/.well-known/openid-configuration
+----
+The `well_known_discovery` endpoint of the identity provider supplies the OpenID provider metadata to allow Neo4j to interact with that provider.
+It is also possible to configure the provider settings manually:
++
+[source, properties]
+----
+dbms.security.oidc.mysso.auth_endpoint=https://my-idp.example.com/openid-connect/auth
+dbms.security.oidc.mysso.token_endpoint=https://my-idp.example.com/openid-connect/token
+dbms.security.oidc.mysso.jwks_uri=https://my-idp.example.com/openid-connect/certs
+dbms.security.oidc.mysso.user_info_uri=https://my-idp.example.com/openid-connect/userinfo
+dbms.security.oidc.mysso.issuer=abcd1234
+----
+Manual settings always take priority over those retrieved from the discovery endpoint.
+
+. Configure audience.
++
+Provide the expected value for the audience(`aud`) claim:
++
+[source, properties]
+----
+dbms.security.oidc.mysso.claims.audience=myaudience
+----
+
+. Configure claims.
++
+Provide the name of the claims that map to the database username and roles.
+`username` is expected to be a string claim, and `roles` is expected to be a list of strings representing a set of roles or a single string representing a single role:
++
+[source, properties]
+----
+dbms.security.oidc.mysso.claims.username=sub
+dbms.security.oidc.mysso.claims.groups=roles
+----
+
+. Optionally, map the groups in the OIDC groups claim to the Neo4j built-in and custom roles.
++
+See <<auth-sso-map-idp-roles, Map the identity provider groups to the Neo4j roles>>
+
+
+[[auth-sso-configure-provider-userinfo]]
+=== OpenID Connect fetching claims from a provider
+
+In this configuration, Neo4j receives a token from the identity provider and uses that token to call back to the identity provider using its _UserInfo_ endpoint to retrieve claims for the database username and Neo4j roles.
+
+. Configure Neo4j for xref:authentication-authorization/sso-integration.adoc#auth-sso-configure-provider-jwt[OpenID Connect Using JWT Claims].
+
+. Configure the claims to fetch from the _UserInfo_ endpoint:
++
+[source, properties]
+----
+dbms.security.oidc.mysso.get_username_from_user_info=true
+dbms.security.oidc.mysso.get_groups_from_user_info=true
+----
++
+It is possible to fetch just the username, just the groups, or both from the userinfo endpoint.
+
+[role=label--new-5.24]
+[[auth-sso-auth-providers]]
+=== Configure SSO at the user level using auth providers
+xref:authentication-authorization/auth-providers.adoc[User auth providers] can be used to determine which users can authenticate and authorize using the configured providers.
+
+You must change the xref:configuration/configuration-settings.adoc#config_dbms.security.require_local_user[`dbms.security.require_local_user`] configuration setting to `true` to use auth providers.
+This means that a user with a matching auth provider *must* exist in order to be able to authenticate and authorize.
+This applies to all providers.
+
+Conversely, when xref:configuration/configuration-settings.adoc#config_dbms.security.require_local_user[`dbms.security.require_local_user`] is set to `false`, users' auth providers have no bearing on the way that they are authenticated and authorized, instead authentication and authorization is controlled centrally (for all users) by the database configuration.
+
+The following examples show how to configure users with auth provider using Cypher.
+
+.Create a user with an auth provider who can authenticate and authorize using `mysso`
+======
+[source,cypher,role=noplay]
+----
+CREATE USER jake
+SET AUTH 'oidc-mysso' {SET ID 'jakesUniqueMySsoId'} // the id must match the claim that you configured via dbms.security.oidc.mysso.claims.username
+----
+
+The command creates the user `jake` who can authenticate and authorize using `mysso` provided they present a valid token with a `sub` claim of `jakesUniqueMySsoId`.
+The claim used for authentication is determined by the xref:configuration/configuration-settings.adoc#config_dbms.security.oidc.-provider-.claims.username[`dbms.security.oidc.mysso.claims.username`] config setting (the default is the `sub` claim).
+======
+
+
+.Create a user with two auth providers allowing the user to authenticate and authorize with one of them
+======
+[source,cypher,role=noplay]
+----
+CREATE USER jake
+SET HOME DATABASE anotherDb
+SET AUTH 'oidc-mysso1' {SET ID 'jakesUniqueMySso1Id'} // `jakesUniqueMySso1Id` must match the value of the claim that you configured via dbms.security.oidc.mysso1.claims.username
+SET AUTH 'oidc-mysso2' {SET ID 'jakesUniqueMySso2Id'} // `jakesUniqueMySso2Id` must match the value of the claim that you configured via dbms.security.oidc.mysso2.claims.username
+----
+The command creates the user `jake` who can authenticate and authorize using `mysso1` or `mysso2`.
+The example also illustrates that the user can have their home database set even when using only external auth providers.
+======
+
+
+.Alter a user to remove one of their auth providers
+======
+[source,cypher,role=noplay]
+----
+ALTER USER jake
+REMOVE AUTH 'oidc-mysso2'
+----
+The command prevents the user `jake` from being able to authenticate and authorize with the `mysso2` provider.
+======
+
+.Alter a user to allow them to authenticate and authorize using username and password
+======
+[source,cypher,role=noplay]
+----
+ALTER USER jake
+SET AUTH 'native' {SET PASSWORD 'changeme' SET PASSWORD CHANGE REQUIRED}
+----
+The command allows the user `jake` to authenticate and authorize using the specified username and password (in addition to what they are already configured to use).
+======
+
+
+.Configure the database to allow authentication via `mysso` and authorization via the `native` provider
+======
+
+. Set the following database config:
++
+[source, properties]
+----
+dbms.security.authentication_providers=oidc-mysso
+dbms.security.authorization_providers=native
+----
+
+. Create a user with a `mysso` auth provider:
++
+[source,cypher,role=noplay]
+----
+CREATE USER jake
+SET AUTH 'oidc-mysso' {SET ID 'jakesUniqueMySsoId'} // `jakesUniqueMySsoId` must match the value of the claim that you configured via dbms.security.oidc.mysso.claims.username
+----
+
+. Natively grant the `READER` role to the user:
++
+[source,cypher,role=noplay]
+----
+GRANT ROLE READER TO jake
+----
++
+The command allows the user `jake` to authenticate using `mysso` and receive the `READER` role from the `native` provider.
+
+. You can also give the user the union of roles from `mysso` *and* `native` by setting `mysso` as an authorization provider too:
++
+[source, properties]
+----
+dbms.security.authentication_providers=oidc-mysso
+dbms.security.authorization_providers=native,oidc-mysso
+----
+======
+
+.Suspend a user
+======
+[source,cypher,role=noplay]
+----
+ALTER USER jake
+SET STATUS SUSPENDED
+
+----
+The command completely prevents the user from being able to authenticate/authorize by any means.
+======
+
+[[auth-sso-self-signed-certificate]]
+== Use a self-signed certificate (SSL) in a test environment
+
+Production environments should always use an SSL certificate issued by a Certificate Authority for secure access to the identity provider.
+However, there are scenarios, for example in test environments, where you may want to use a self-signed SSL certificate on the identity provider server.
+
+To configure a self-signed SSL certificate used on an identity provider server, enter the details of a Java keystore containing the relevant  certificates using `server.jvm.additional` in _neo4j.conf_.
+The path to the certificate file `MyCert.jks` is an absolute path to the Neo4j server.
+
+[source, properties]
+----
+server.jvm.additional=-Djavax.net.ssl.keyStore=/path/to/MyCert.jks
+server.jvm.additional=-Djavax.net.ssl.keyStorePassword=mypasword
+server.jvm.additional=-Djavax.net.ssl.trustStore=/path/to/MyCert.jks
+server.jvm.additional=-Djavax.net.ssl.trustStorePassword=mypasword
+----
+
+[[auth-sso-debug-jwt-claims]]
+== Debug logging of JWT claims
+
+While setting up an OIDC integration, it is sometimes necessary to perform troubleshooting.
+In these cases, it can be useful to view the claims contained in the JWT supplied by the identity provider.
+
+To enable the logging of these claims at `DEBUG` level in the security log, set xref:configuration/configuration-settings.adoc#config_dbms.security.logs.oidc.jwt_claims_at_debug_level_enabled[dbms.security.logs.oidc.jwt_claims_at_debug_level_enabled] to be `true` and the security log level to `DEBUG`.
+You can do this in _<NEO4J_HOME>/conf/server-logs.xml_.
+
+If you need more information on how to set up and manage the security log, see xref:monitoring/logging.adoc#security-events-logging[Configure the security log].
+
+[WARNING]
+====
+Make sure to set xref:configuration/configuration-settings.adoc#config_dbms.security.logs.oidc.jwt_claims_at_debug_level_enabled[dbms.security.logs.oidc.jwt_claims_at_debug_level_enabled] back to `false` for production environments to avoid unwanted logging of potentially sensitive information.
+Also, bear in mind that the set of claims provided by an identity provider in the JWT can change over time.
+====

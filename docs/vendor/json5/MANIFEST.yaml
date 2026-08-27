@@ -1,0 +1,6 @@
+name: json5
+source_repo: https://github.com/json5/json5
+source_ref: v2.2.3
+fetched_url: https://codeload.github.com/json5/json5/tar.gz/v2.2.3
+fetched_date: 2026-08-25
+subpaths: [README.md LICENSE.md]

@@ -1,0 +1,6 @@
+name: hono-website
+source_repo: https://github.com/honojs/website
+source_ref: main
+fetched_url: https://codeload.github.com/honojs/website/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [docs]

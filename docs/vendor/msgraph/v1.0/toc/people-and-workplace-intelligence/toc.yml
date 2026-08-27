@@ -1,0 +1,150 @@
+#
+# GENERATED FILE - DO NOT EDIT
+#
+items:
+- name: Overview
+  href: ../../resources/social-overview.md
+- name: Person
+  items:
+  - name: Person
+    href: ../../resources/person.md
+  - name: List people
+    href: ../../api/user-list-people.md
+- name: People admin settings
+  items:
+  - name: People admin settings
+    href: ../../resources/peopleadminsettings.md
+  - name: Get
+    href: ../../api/peopleadminsettings-get.md
+  - name: List item insights
+    href: ../../api/peopleadminsettings-list-iteminsights.md
+  - name: List pronouns settings
+    href: ../../api/peopleadminsettings-list-pronouns.md
+  - name: List profile card properties
+    href: ../../api/peopleadminsettings-list-profilecardproperties.md
+  - name: Create profile card property
+    href: ../../api/peopleadminsettings-post-profilecardproperties.md
+  - name: List profile sources
+    href: ../../api/peopleadminsettings-list-profilesources.md
+  - name: Create profile source
+    href: ../../api/peopleadminsettings-post-profilesources.md
+  - name: List profile property settings
+    href: ../../api/peopleadminsettings-list-profilepropertysettings.md
+  - name: Create profile property setting
+    href: ../../api/peopleadminsettings-post-profilepropertysettings.md
+- name: Insights settings
+  items:
+  - name: Insights settings
+    href: ../../resources/insightssettings.md
+  - name: List itemInsights
+    href: ../../api/peopleadminsettings-list-iteminsights.md
+  - name: Update insightsSettings
+    href: ../../api/insightssettings-update.md
+- name: Profile card property
+  items:
+  - name: Profile card property
+    href: ../../resources/profilecardproperty.md
+  - name: List
+    href: ../../api/peopleadminsettings-list-profilecardproperties.md
+  - name: Create
+    href: ../../api/peopleadminsettings-post-profilecardproperties.md
+  - name: Get
+    href: ../../api/profilecardproperty-get.md
+  - name: Update
+    href: ../../api/profilecardproperty-update.md
+  - name: Delete
+    href: ../../api/profilecardproperty-delete.md
+- name: Profile property setting
+  items:
+  - name: Profile property setting
+    href: ../../resources/profilepropertysetting.md
+  - name: List
+    href: ../../api/peopleadminsettings-list-profilepropertysettings.md
+  - name: Create
+    href: ../../api/peopleadminsettings-post-profilepropertysettings.md
+  - name: Get
+    href: ../../api/profilepropertysetting-get.md
+  - name: Update
+    href: ../../api/profilepropertysetting-update.md
+  - name: Delete
+    href: ../../api/profilepropertysetting-delete.md
+- name: Profile source
+  items:
+  - name: Profile source
+    href: ../../resources/profilesource.md
+  - name: List
+    href: ../../api/peopleadminsettings-list-profilesources.md
+  - name: Create
+    href: ../../api/peopleadminsettings-post-profilesources.md
+  - name: Get
+    href: ../../api/profilesource-get.md
+  - name: Update
+    href: ../../api/profilesource-update.md
+  - name: Delete
+    href: ../../api/profilesource-delete.md
+- name: Pronouns settings
+  items:
+  - name: Pronouns settings
+    href: ../../resources/pronounssettings.md
+  - name: List
+    href: ../../api/peopleadminsettings-list-pronouns.md
+  - name: Update
+    href: ../../api/pronounssettings-update.md
+- name: Insights
+  items:
+  - name: Shared insight
+    items:
+    - name: Shared insight
+      href: ../../resources/insights-shared.md
+    - name: List shared (deprecated)
+      href: ../../api/insights-list-shared.md
+  - name: Trending
+    items:
+    - name: Trending
+      href: ../../resources/insights-trending.md
+    - name: List trending
+      href: ../../api/insights-list-trending.md
+  - name: Used insight
+    items:
+    - name: Used insight
+      href: ../../resources/insights-used.md
+    - name: List used (deprecated)
+      href: ../../api/insights-list-used.md
+  - name: Complex types
+    items:
+    - name: Insight identity
+      href: ../../resources/insights-insightidentity.md
+    - name: Office graph insights
+      href: ../../resources/officegraphinsights.md
+    - name: Resource reference
+      href: ../../resources/insights-resourcereference.md
+    - name: Resource visualization
+      href: ../../resources/insights-resourcevisualization.md
+    - name: Sharing detail
+      href: ../../resources/insights-sharingdetail.md
+    - name: Usage details
+      href: ../../resources/insights-usagedetails.md
+- name: Item insights
+  items:
+  - name: Item insights
+    href: ../../resources/iteminsights.md
+  - name: User insights settings
+    items:
+    - name: User insights settings
+      href: ../../resources/userinsightssettings.md
+    - name: Get
+      href: ../../api/userinsightssettings-get.md
+    - name: Update
+      href: ../../api/userinsightssettings-update.md
+  - name: Insights settings
+    items:
+    - name: Insights settings
+      href: ../../resources/insightssettings.md
+    - name: List itemInsights
+      href: ../../api/peopleadminsettings-list-iteminsights.md
+    - name: Update insightsSettings
+      href: ../../api/insightssettings-update.md
+- name: Complex types
+  items:
+  - name: Profile source localization
+    href: ../../resources/profilesourcelocalization.md

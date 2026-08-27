@@ -1,0 +1,148 @@
+:description: This chapter describes some essential metrics to monitor in Neo4j.
+[role=enterprise-edition]
+[[essential-metrics]]
+= Essential metrics
+
+To ensure your applications are running smoothly, you should monitor:
+
+* The *server load* -- the strain on the machine hosting Neo4j.
+* The *Neo4j load* -- the strain on Neo4j.
+* The *cluster health* -- to ensure the cluster is working as expected.
+* The *workload* of a Neo4j instance.
+
+[TIP]
+====
+Reading the xref:performance/index.adoc[] section is recommended to better understand the metrics.
+====
+
+== Server load metrics
+
+Monitoring the hardware resources shows the strain on the server running Neo4j.
+
+You can use utilities, such as the https://www.collectd.org/[collectd] daemon or `systemd` on Linux, to gather information about the system.
+These metrics can help with capacity planning as your workload grows.
+
+[options="header", cols="1,3a"]
+|===
+| Metric name
+| Description
+
+| CPU usage
+| If this is reaching 100%, you may need additional CPU capacity.
+
+| Used memory
+| This metric tells you if you are close to using all available memory on the server.
+Make sure your peaks are at 95% or below to reduce the risk of running out of memory.
+For more information, see xref:performance/memory-configuration.adoc[].
+
+| Free disk space
+| Observe the rate of your data growth so you can plan for additional storage before you run out.
+This applies to all disks that Neo4j is writing to.
+You might also choose to write the log files to a different disk.
+[NOTE]
+An out of disk event may disrupt system availability and cause the database going offline, thus creating the risk of database or log file corruption. To avoid that, system monitoring tools should be configured to monitor available disk space on all drives used for databases, indexes, and transactions logs.
+For more recommendations, see xref:performance/disks-ram-and-other-tips.adoc#performance-storage[Disks, RAM and other tips], as well as xref:clustering/monitoring/show-servers-monitoring.adoc[Monitoring servers] and xref:clustering/monitoring/show-databases-monitoring.adoc[Monitoring databases] in a Neo4j cluster.
+|===
+
+== Neo4j load metrics
+
+The Neo4j load metrics monitor the strain that Neo4j is being put under.
+They can help with capacity planning.
+
+[options="header", cols="1,3a,3a"]
+|===
+| Metric name
+| Metric
+| Description
+
+| Heap usage
+| `<prefix>.dbms.vm.heap.used`
+| If Neo4j consistently uses 100% of the heap, increase the initial and max heap size.
+For more information, see xref:performance/memory-configuration.adoc[].
+
+| Page cache
+| `<prefix>.dbms.page_cache.hit_ratio`  and `<prefix>.dbms.page_cache.usage_ratio`
+| When a request misses the page cache, the data must be fetched from a much slower disk.
+Ideally, the hit_ratio should be above 98% most of the time.
+This shows how much of the allocated memory to the page cache is used.
+If this is at 100%, consider increasing the page cache size.
+
+| JVM garbage collection
+| `<prefix>.dbms.vm.gc.time.%s`
+| The proportion of time the JVM spends reclaiming the heap instead of doing other work.
+This metric can spike when the database is running low on memory.
+If this happens, it can halt processing and cause query execution errors.
+Consider increasing the size of your database if this appears to be the case.
+
+| Checkpoint time
+| `<prefix>.database.<db>.check_point.duration`
+| You should monitor the checkpoint duration to ensure it does not start to approach the interval between checkpoints.
+If this happens, consider the following steps to improve checkpointing performance:
+
+* Raise the xref:configuration/configuration-settings.adoc#config_db.checkpoint.iops.limit[`db.checkpoint.iops.limit`] to make checkpoints faster, but only if there is enough IOPS budget available to avoid slowing the commit process.
+* xref:configuration/configuration-settings.adoc#config_server.memory.pagecache.flush.buffer.enabled[`server.memory.pagecache.flush.buffer.enabled`] / xref:configuration/configuration-settings.adoc#config_server.memory.pagecache.flush.buffer.size_in_pages[`server.memory.pagecache.flush.buffer.size_in_pages`] make checkpoints faster by writing batches of data in a way that plays well with the underlying disk (with a nice multiple to the block size).
+* Change the checkpointing policy (xref:configuration/configuration-settings.adoc#config_db.checkpoint[`db.checkpoint.*`], xref:configuration/configuration-settings.adoc#config_db.checkpoint.interval.time[`db.checkpoint.interval.time`]) to more frequent/smaller checkpoints, continuous checkpointing, or checkpoint by volume or `tx` count.
+For more information, see xref:performance/disks-ram-and-other-tips.adoc#performance-checkpoint-iops-limit[Checkpoint IOPS limit] and xref:database-internals/checkpointing.adoc[Checkpointing and log pruning].
+|===
+
+== Neo4j cluster health metrics
+
+The cluster health metrics indicate the health of a cluster member at a glance.
+It is essential to know which instance is the leader.
+The leader's load pattern differs from the followers, which should exhibit similar load patterns.
+
+[options="header", cols="1,3a,3a"]
+|===
+| Metric name
+| Metric
+| Description
+
+| Leader
+| `<prefix>.database.<db>.cluster.raft.is_leader`
+| Track this for each database primary.
+It reports `0` if it is not the leader and `1` if it is the leader.
+The sum of all of these should always be `1`.
+However, there are transient periods in which the sum can be more than `1` because more than one member thinks it is the leader.
+
+| Transaction workload
+| `<prefix>.database.<db>.transaction.last_committed_tx_id`
+| The ID of the last committed transaction. Track this for each Neo4j instance.
+It might break into separate charts.
+It should show one line, ever-increasing, and if one of the lines levels off or falls behind, it is clear that this instance is no longer replicating data, and action is needed to rectify the situation.
+|===
+
+See more about how to xref:clustering/monitoring/endpoints.adoc[Monitor cluster endpoints for status information].
+
+== Workload metrics
+
+These metrics help monitor the workload of a Neo4j instance.
+The absolute values of these depend on the sort of workload you expect.
+
+[options="header", cols="1,3a,3a"]
+|===
+| Metric name
+| Metric
+| Description
+
+| Bolt connections
+| `<prefix>.dbms.bolt.connections_running`
+| The number of connections that are currently executing Cypher and returning results.
+
+| Total nodes/relationships
+| `<prefix>.database.<db>.count.node` and `<prefix>.database.<db>.count.relationship`
+| (Not enabled by default)
+Total number of distinct relationship types.
+Total number of distinct property names.
+Total number of relationships.
+Total number of nodes.
+
+| Throughput
+| `<prefix>.database.<db>.db.query.execution.latency.millis`
+| This metric produces a histogram of 99th and 95th percentile transaction latencies.
+Useful for identifying spikes or increases in the data load.
+|===
+
+[NOTE]
+====
+For the complete list of all available metrics in Neo4j, see xref:monitoring/metrics/reference.adoc[].
+====

@@ -1,0 +1,245 @@
+:description: An introduction to how Neo4j runs in a Docker container.
+[[docker-overview]]
+= Getting started with Neo4j in Docker
+
+Docker can be downloaded for macOS, Windows, and Linux operating systems from https://www.docker.com/get-started/.
+DockerHub hosts an link:https://hub.docker.com/_/neo4j[official Neo4j image] that provides a standard, ready-to-run package of Neo4j Community Edition and Enterprise Edition for a variety of versions.
+
+[[getting-docker-image]]
+== Getting the Neo4j image
+
+Variants of the Neo4j image are tagged according to Community/Enterprise Edition and the operating system used as the base image.
+
+
+=== Neo4j editions
+
+Tags are available for both Community Edition and Enterprise Edition.
+Version-specific Enterprise Edition tags have an `-enterprise` suffix after the version number, for example: `neo4j:{neo4j-version-exact}-enterprise`.
+Community Edition tags have no suffix, for example `neo4j:{neo4j-version-exact}`.
+The latest Neo4j Enterprise Edition release is available as `neo4j:enterprise`.
+
+Neo4j Enterprise Edition license::
+To use Neo4j Enterprise Edition, you must accept the license agreement by setting the environment variable `NEO4J_ACCEPT_LICENSE_AGREEMENT=yes`.
++
++
+____
+(C) Network Engine for Objects in Lund AB.  2023.  All Rights Reserved.
+Use of this Software without a proper commercial license with Neo4j,
+Inc. or its affiliates is prohibited.
+
+Email inquiries can be sent using the form https://neo4j.com/contact-us/[Contact Neo4j].
+
+More information is also available at: https://neo4j.com/licensing/
+____
+
+=== Base operating system
+
+The Neo4j image is available with either `debian:trixie-slim` or `redhat/ubi10-minimal:latest` as the base image.
+
+Starting with 5.26.25, `debian:bullseye-slim` and `redhat/ubi9-minimal:latest` are not supported.
+
+Starting with 5.26.20, the default is `debian:trixie-slim` (updated from `debian:bullseye-slim`).
+
+[TIP]
+====
+If you are unsure which base image to use or have no preference, just use the default of `neo4j:{neo4j-version-exact}`.
+====
+
+
+To specify which base image to use, the image tags optionally have a `-trixie` or `-ubi10` suffix.
+
+For example:
+
+[source, subs="attributes"]
+----
+neo4j:{neo4j-version-exact}-trixie              # debian 13 community
+neo4j:{neo4j-version-exact}-enterprise-ubi10   # redhat UBI10 enterprise
+neo4j:{neo4j-version-exact}                    # debian 13 community
+neo4j:{neo4j-version-exact}-enterprise         # debian 13 enterprise
+----
+
+
+.Base images and the corresponding tag suffix.
+[options="header", cols="2"]
+|===
+| tag suffix
+| Base Image
+
+| `-trixie`
+| `debian:trixie-slim`
+
+| `-ubi10`
+| `redhat/ubi10-minimal:latest`
+
+| _unspecified_
+| `debian:trixie-slim`
+|===
+
+
+[NOTE]
+====
+* The Red Hat UBI9 variant images are only available for Neo4j 5.17.0-5.26.24.
+
+* The Red Hat UBI10 variant images are only available from 5.26.20 and onwards.
+
+* The Debian 13 variant images are only available from 5.26.20 and onwards.
+
+* For earlier Neo4j versions, do not specify a base image.
+====
+
+[[docker-image]]
+== Using the Neo4j Docker image
+
+You can start a Neo4j container by using the following command.
+Note that this Neo4j container will not persist data between restarts and will have the default username/password.
+
+[source, shell, subs="attributes"]
+----
+docker run \
+    --restart always \
+    --publish=7474:7474 --publish=7687:7687 \
+    neo4j:{neo4j-version-exact}
+----
+
+You can try out your Neo4j container by opening _\http://localhost:7474/_ (the Neo4j's Browser interface) in a web browser.
+By default, Neo4j requires authentication and prompts you to log in with a username/password of `neo4j/neo4j` at the first connection.
+You are then prompted to set a new password.
+
+
+[role=label--new-5.13]
+[NOTE]
+====
+The default minimum password length is 8 characters.
+
+Use the xref:configuration/configuration-settings.adoc#config_config_dbms.security.auth_minimum_password_length[`dbms.security.auth_minimum_password_length`] configuration setting to change the default minimum value.
+====
+
+The following sections provide more information about how to set an initial password, configure Neo4j to persist data between restarts, and use the Neo4j Docker image.
+
+[[docker-simple-volumes]]
+== Persisting data between restarts
+
+The `--volume` option maps a local folder to the container, where you can persist data between restarts.
+To persist the contents of the database between containers, mount a volume to the `/data` directory on starting the container:
+
+[source, shell, subs="attributes"]
+----
+docker run \
+    --restart always \
+    --publish=7474:7474 --publish=7687:7687 \
+    --env NEO4J_AUTH=neo4j/your_password \
+    --volume=/path/to/your/data:/data \
+    neo4j:{neo4j-version-exact}
+----
+
+[CAUTION]
+====
+The folders that you want to mount must exist before starting Docker, otherwise, Neo4j fails to start due to permissions errors.
+====
+
+For more information about mounting volumes, see xref:docker/mounting-volumes.adoc[].
+
+[[docker-auth]]
+== Using `NEO4J_AUTH` to set an initial password
+
+When using Neo4j in a Docker container, you can set the initial password for the database directly by specifying the `NEO4J_AUTH` in your run directive:
+
+[source, shell, subs="attributes"]
+----
+docker run \
+    --restart always \
+    --publish=7474:7474 --publish=7687:7687 \
+    --env NEO4J_AUTH=neo4j/your_password \
+    neo4j:{neo4j-version-exact}
+----
+
+Alternatively, you can disable authentication by specifying `NEO4J_AUTH` to `none`:
+
+[source, shell]
+----
+--env NEO4J_AUTH=none
+----
+
+Note that there is currently no way to change the initial username from `neo4j`.
+
+[CAUTION]
+====
+*Setting `NEO4J_AUTH` does not override the existing authentication.*
+
+If you have mounted a _/data_ volume containing an existing database, setting `NEO4J_AUTH` will have no effect because that database already has authentication configured.
+The Neo4j Docker service will start, but you will need a username and password already associated with the database to log in.
+====
+
+
+== Useful `docker run` options
+
+This table lists some of the options available:
+
+.Options for `docker run`
+[options="header",cols="1m,3a,3m"]
+|===
+|Option |Description  |Example
+
+|--name
+|Name your container to avoid generic ID.
+|docker run --name myneo4j neo4j
+
+|-p
+|Specify which container port to expose.
+|docker run -p7687:7687 neo4j
+
+|-d
+|Detach container to run in the background.
+|docker run -d neo4j
+
+|-v
+|Bind mount a volume.
+|docker run -v $HOME/neo4j/data:/data neo4j
+
+|--env
+|Set config as environment variables for the Neo4j database.
+|docker run --env NEO4J_AUTH=neo4j/your_password neo4j
+
+|--user
+|Run neo4j as the given user, instead of `neo4j`.
+|docker run --user="$(id -u):$(id -g)" neo4j
+
+|--restart
+|Control whether Neo4j containers start automatically when they exit, or when Docker restarts.
+|docker run --restart always
+
+|--help
+|Output full list of `docker run` options
+|docker run --help
+|===
+
+[NOTE]
+====
+The `--restart always` option sets the Neo4j container (and Neo4j) to restart automatically whenever the Docker daemon is restarted.
+
+If you no longer want to have the container auto-start on machine boot, you can disable this setting using the flag `no`, for example, `docker update --restart=no <containerID>`. +
+For more information on Docker restart policies, see the link:https://docs.docker.com/engine/containers/start-containers-automatically/[official Docker documentation].
+====
+
+[[docker-offline-installation]]
+== Offline installation of Neo4j Docker image
+
+Docker provides the `docker save` command for downloading an image into a `.tar` package so that it can be used offline, or transferred to a machine without internet access.
+
+This is an example command to save the `neo4j:{neo4j-version-exact}` image to a `.tar` file:
+[source, shell, subs="attributes"]
+----
+docker save -o neo4j-{neo4j-version-exact}.tar neo4j:{neo4j-version-exact}
+----
+
+To load a docker image from a `.tar` file created by `docker save`, use the `docker load` command.
+For example:
+[source, shell, subs="attributes"]
+----
+docker load --input neo4j-{neo4j-version-exact}.tar
+----
+
+For complete instructions on using the `docker save` and `docker load` commands, refer to:
+
+* https://docs.docker.com/engine/reference/commandline/save/[The official `docker save` documentation].
+* https://docs.docker.com/engine/reference/commandline/load/[The official `docker load` documentation].

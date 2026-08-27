@@ -1,0 +1,67 @@
+<<head {title: "CodeMirror Reference Manual", type: "docs"}>>
+
+<style>
+  section { margin-bottom: 10em }
+  section h2 { border-bottom: 1px solid black }
+  .at { color: #666; font-size: 80% }
+</style>
+
+<<toc $in.modules.map(mod => ({name: mod.name, link: "#" + mod.name}))>>
+
+<article>
+
+<h1 id=manual>Reference Manual</h1>
+
+<p>CodeMirror is published as a set of NPM packages under
+the <code>@codemirror</code> scope. The core packages are listed in
+this reference guide.</p>
+
+<p>Each package exposes
+<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules">ECMAScript</a>
+and <a href="https://flaviocopes.com/commonjs/">CommonJS</a> modules.
+You'll have to use some kind of
+<a href="https://www.freecodecamp.org/news/javascript-modules-part-2-module-bundling-5020383cf306/">bundler</a>
+or <a href="https://code.haverbeke.berlin/marijn/esmoduleserve">loader</a> to
+run them in the browser.</p>
+
+<p>The most important modules
+are <a href="#state"><code>state</code></a>, which contains the data
+structures that model the editor state,
+and <a href="#view"><code>view</code></a>, which provides the UI
+component for an editor.</p>
+
+<p>A minimal editor might look like this:</p>
+
+<pre><code type=javascript><span class="tok-keyword">import</span> <span class="tok-punctuation">{</span><span class="tok-variableName tok-definition">EditorView</span><span class="tok-punctuation">,</span> <span class="tok-variableName tok-definition">keymap</span><span class="tok-punctuation">}</span> <span class="tok-keyword">from</span> <span class="tok-string">"@codemirror/view"</span>
+<span class="tok-keyword">import</span> <span class="tok-punctuation">{</span><span class="tok-variableName tok-definition">defaultKeymap</span><span class="tok-punctuation">}</span> <span class="tok-keyword">from</span> <span class="tok-string">"@codemirror/commands"</span>
+
+<span class="tok-keyword">let</span> <span class="tok-variableName tok-definition">myView</span> <span class="tok-operator">=</span> <span class="tok-keyword">new</span> <span class="tok-variableName">EditorView</span><span class="tok-punctuation">(</span><span class="tok-punctuation">{</span>
+  <span class="tok-propertyName tok-definition">doc</span><span class="tok-punctuation">:</span> <span class="tok-string">"hello"</span><span class="tok-punctuation">,</span>
+  <span class="tok-propertyName tok-definition">extensions</span><span class="tok-punctuation">:</span> <span class="tok-punctuation">[</span><span class="tok-variableName">keymap</span><span class="tok-operator">.</span><span class="tok-propertyName">of</span><span class="tok-punctuation">(</span><span class="tok-variableName">defaultKeymap</span><span class="tok-punctuation">)</span><span class="tok-punctuation">],</span>
+  <span class="tok-propertyName tok-definition">parent</span><span class="tok-punctuation">:</span> <span class="tok-variableName">document</span><span class="tok-operator">.</span><span class="tok-propertyName">body</span>
+<span class="tok-punctuation">}</span><span class="tok-punctuation">)</span></code></pre>
+
+<p>But such an editor is going to be rather primitive. To get
+functionality
+like <a href="#language.defaultHighlightStyle">highlighting</a>,
+a <a href="#view.lineNumbers">line number gutter</a>, or
+an <a href="#h_undo_history">undo history</a>, you need
+to <a href="#state.EditorStateConfig.extensions">add</a> more
+extensions to your editor.</p>
+
+<p>To quickly get started, the <a href="#codemirror">codemirror</a>
+package provides a bundle of extensions to set up a functioning
+editor.</p>
+
+<<for mod $in.modules>>
+  <section id="<<t mod.name>>">
+    <h2><a href="#<<t mod.name>>"><<if mod.name != "codemirror">><span class=at>@codemirror/</span><</if>><<t mod.name>></a></h2>
+    <<h mod.content>>
+  </section>
+<</for>>
+
+</article>
+
+<script src=ref.js></script>
+
+<<foot>>

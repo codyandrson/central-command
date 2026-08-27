@@ -1,0 +1,36 @@
+# Nightly disaster-recovery backup of all four Central Command stores.
+#
+# Install (one time):
+#   sudo cp deploy/k3s/cc-backup.service deploy/k3s/cc-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cc-backup.timer
+#
+# Runs as ROOT, and that is not a preference. Every store is dumped through
+# `k3s kubectl`, which reads /etc/rancher/k3s/k3s.yaml — mode 0600, owned by
+# root. Under the old `User=codyslab` (carried over from the compose stack,
+# where the docker group was enough) EVERY kubectl call died with "permission
+# denied" and all four dumps failed. It failed SILENTLY in the sense that
+# matters: the timer stayed `active (waiting)`, the last neo4j dump on disk was
+# 2026-07-31, and nobody looked at `systemctl list-units --failed`. Found
+# 2026-08-15 while checking there was a backup to fall back on before a
+# deliberate graph wipe. backup.sh:40 already said "runs as root from the
+# systemd timer" — the unit was what disagreed.
+#
+# Output goes to the journal:
+#   journalctl -u cc-backup -n 50
+# A non-zero exit means at least one store did NOT get backed up — the unit
+# goes `failed` and stays visible in `systemctl list-units --failed`.
+
+[Unit]
+Description=Central Command nightly backup (spine, litellm, n8n, neo4j)
+After=k3s.service
+Requires=k3s.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/codyslab/Central Command
+ExecStart=/home/codyslab/Central Command/deploy/k3s/backup.sh
+# The neo4j stop/dump/start window dominates the runtime; 30min is generous
+# headroom. On timeout systemd sends SIGTERM, which the script traps to bring
+# the graph stack back up rather than leaving neo4j stopped.
+TimeoutStartSec=1800

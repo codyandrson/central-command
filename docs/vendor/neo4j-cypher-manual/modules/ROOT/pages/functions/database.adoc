@@ -1,0 +1,55 @@
+[[query-functions-database]]
+= Database functions
+:description: Database functions provide information about databases
+:test-skip: true
+:page-role: new-5.12
+:table-caption!:
+
+[[functions-database-nameFromElementId]]
+== db.nameFromElementId()
+
+.Details
+|===
+| *Syntax* 3+| `db.nameFromElementId(elementId)`
+| *Description* 3+| Resolves the database name for the given element id.
+.2+| *Arguments* | *Name* | *Type* | *Description*
+| `elementId` | `STRING` | An element id of a node or relationship.
+| *Returns* 3+| `STRING`
+|===
+
+.Considerations
+|===
+| The name of the database can only be returned if the provided element id belongs to a standard database in the DBMS.
+a|The function only returns the name of the database if one or more of the following are true:
+
+* the user has access to the database
+
+* the database is a standard database and the user has `DATABASE MANAGEMENT`, `CREATE DATABASE`, `DROP DATABASE`, `ALTER DATABASE` or `SET DATABASE ACCESS` privileges
+
+* the database is a composite database and the user has `COMPOSITE DATABASE MANAGEMENT`, `CREATE COMPOSITE DATABASE`, `DROP COMPOSITE DATABASE` or `ALTER COMPOSITE DATABASE` privileges
+|===
+
+.+db.nameFromElementId()+
+======
+
+.Query
+// tag::functions_database_name_from_element_id[]
+[source, cypher, indent=0]
+----
+WITH "2:efc7577d-022a-107c-a736-dbcdfc189c03:0" AS eid
+RETURN db.nameFromElementId(eid) AS name
+----
+// end::functions_database_name_from_element_id[]
+
+Returns the name of the database which the element id belongs to.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+
+| name
+| "neo4j"
+1+d|Rows: 1
+
+|===
+======

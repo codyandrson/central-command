@@ -1,0 +1,358 @@
+:description: This section describes how to restore a database backup or an offline database in a live Neo4j deployment.
+[role=enterprise-edition]
+[[restore-backup]]
+= Restore a database backup
+
+Neo4j suggests a few options to restore a database backup artifact (full or differential) created with the xref:backup-restore/online-backup.adoc[`neo4j-admin database backup`] command.
+
+== Restore a database on a standalone server
+
+To restore a database from a backup in a standalone server environment, use one of the following methods:
+
+* Use the <<restore-backup-command, `neo4j-admin database restore`>> command.
+* Restore a database using URI approach.
+See xref:database-administration/standard-databases/seed-from-uri.adoc[] for detailed information.
+* label:new[Introduced in 5.24] Recreate a database using the xref:database-administration/standard-databases/recreate-database.adoc[`dbms.recreateDatabase()` procedure].
+* label:new[Introduced in 5.20] You can also load a **full** database backup artifact using the xref:backup-restore/restore-dump.adoc[`neo4j-admin database load`] command.
+This functionality is available in the Community Edition.
+
+== Restore a clustered database from a backup
+
+To restore a database from a backup in a clustered environment, use one of the following methods:
+
+* Recreate a database from a URI.
+See xref:clustering/databases.adoc#restore-database-using-uri-approach[Restore a database in cluster using URI approach] for more information.
+* Designate one of the servers to be used as a seeder, and restore the database backup on that server.
+For more information, see xref:clustering/databases.adoc#cluster-designated-seeder[Restore a database using a server as a designated seeder].
+* label:new[Introduced in 5.24] Recreate a database using the `dbms.recreateDatabase()` procedure.
+See xref:clustering/databases.adoc#restore-database-using-recreate-procedure[Restore a database using `dbms.recreateDatabase()`] for more details.
+
+
+[[restore-backup-command]]
+== Command
+
+A database backup artifact (full or differential) can be restored within the same or to a later Neo4j version using the `restore` command of `neo4j-admin`.
+
+Starting with Neo4j 5.20, you can load a **full** database backup artifact using the xref:backup-restore/restore-dump.adoc[`neo4j-admin database load`] command.
+This functionality is available in the Community Edition.
+
+[IMPORTANT]
+====
+Restoring a database backup to a previous Neo4j version is not supported.
+====
+
+You must create the database (using `CREATE DATABASE` against the `system` database) after the restore operation finishes, unless you are replacing an existing database.
+`neo4j-admin database restore` must be invoked as the `neo4j` user to ensure the appropriate file permissions.
+For more information, see xref:database-administration/standard-databases/create-databases.adoc[Create databases].
+
+[NOTE]
+====
+If you are using CDC, make sure you create the new database with the same `txLogEnrichment` value and handle the potential loss or corruption of CDC data in your CDC application.
+For more information, see the link:https://neo4j.com/docs/cdc/current/[Change Data Capture (CDC)] documentation.
+====
+
+[NOTE]
+====
+When restoring a backup chain, the transaction log contained in the differential backup artifacts must first be replayed.
+This recovery operation is resource-intensive and can be decoupled from the restore operation by using the xref:backup-restore/aggregate.adoc[aggregate] command.
+====
+
+[[restore-backup-syntax]]
+=== Syntax
+
+[source,role=noheader]
+----
+neo4j-admin database restore [-h] [--expand-commands]
+                             [--verbose] [--overwrite-destination[=true|false]]
+                             [--additional-config=<file>]
+                             --from-path=<path>[,<path>...]
+                             [--restore-until=<recovery-criteria>] [--temp-path=<path>]
+                             [--to-path-data=<path>] [--to-path-txn=<path>]
+                              [<database>]
+----
+
+=== Parameters
+
+.`neo4j-admin database restore` parameters
+[options="header", cols="1m,3a"]
+|===
+| Parameter
+| Description
+
+|[<database>]
+|Name of the database after restore. Usage of this parameter is only allowed if the `--from-path` option points to a path to a single artifact.
+|===
+
+
+[[restore-backup-command-options]]
+=== Options
+
+.`neo4j-admin database restore` options
+[options="header", cols="5m,6a,4m"]
+|===
+| Option
+| Description
+| Default
+
+|--additional-config=<file>footnote:[See xref:tools/neo4j-admin/index.adoc#_configuration[Tools -> Configuration] for details.]
+|Configuration file with additional configuration.
+|
+
+|--expand-commands
+|Allow command expansion in config value evaluation.
+|
+
+|--from-path=<path>[,<path>...]
+|A single path or a comma-separated list of paths pointing to a backup artifact file.
+An artifact file can be 1) a full backup, in which case it is restored directly or, 2) a differential backup, in which case the command tries first to find in the folder a backup chain ending at that specific differential backup and then restores that chain.
+It is possible to restore backups from AWS S3 buckets, Google Cloud storage buckets, and Azure buckets using the appropriate URI as the path.
+|
+
+|-h, --help
+|Show this help message and exit.
+|
+
+|--overwrite-destination[=true\|false]
+|If an existing database should be replaced.
+[NOTE]
+This option is not safe on a cluster since clusters have an additional state that would be inconsistent with the restored database. In a cluster, restore to a new database to avoid this problem.
+|false
+
+|--restore-until=<recovery-criteria>
+| Differential backup artifacts contain transaction logs that can be replayed and applied to stores contained in full backup artifacts when restoring a backup chain.
+The database applies logs until the recovery predicate is satisfied.
+Currently supported predicates are: `<transactionID>` and `<timestamp>`.
+
+- to restore a database up to a transaction ID, the required transaction predicate should look like `--restore-until=123`, where 123 is the provided transaction ID.
+The restore recovers transaction logs up to, but not including, the transaction 123.
+
+- to restore a database up to a specific date, the required date predicate should look like `--restore-until=2021-09-11 10:15:30`, where 2021-09-11 10:15:30 is a UTC date and time.
+The restore recovers transactions that were committed before the provided timestamp.
+|
+
+| --to-path-data=<path>
+|Base directory for databases.
+Usage of this option is only allowed if the `--from-path` parameter points to exactly one directory.
+|
+
+|--to-path-txn=<path>
+|Base directory for transaction logs.
+Usage of this option is only allowed if the `--from-path` parameter points to exactly one directory.
+|
+
+|--temp-path=<path>
+|label:new[Introduced in 5.24] Provide a path to a temporary empty directory for storing backup files until the command is completed. The files will be deleted once the command is finished.
+|
+
+|--verbose
+|Enable verbose output.
+|
+|===
+
+[NOTE]
+====
+The `--from-path=<path>` option can also load backups from AWS S3 buckets (from Neo4j 5.19), Google Cloud storage buckets (from Neo4j 5.21), and Azure buckets (from Neo4j 5.24).
+For more information, see <<restore-cloud-storage>>.
+====
+
+[NOTE]
+====
+Neo4j 5.24 introduces the `--temp-path` option to address potential issues related to disk space when performing backup-related commands, especially when cloud storage is involved.
+
+If `--temp-path` is not set, a temporary directory is created inside the directory specified by the `--from-path` option.
+
+If you don't provide the `--from-path` option or if your provided path points to a cloud storage bucket, a temporary folder is created inside the current working directory for Neo4j.
+This fallback option can cause issues because the local filesystem (or the partition where Neo4j is installed) may not have enough free disk to accommodate the intermediate computation.
+
+Therefore, it is strongly recommended to provide a `--temp-path` option.
+====
+
+[[restore-backup-example]]
+== Examples
+
+The following examples show how to inspect your backup directory and restore a database backup, created in the section xref:backup-restore/online-backup.adoc#online-backup-example[Back up an online database].
+It is assumed that the backup artifacts (full and differential) are located in the _/path/to/mybackups_ directory.
+
+=== Inspect the backup artifacts
+
+Use the following command to inspect the backup directory:
+
+[source, shell,role=nocopy noplay]
+----
+bin/neo4j-admin database backup --inspect-path=/path/to/mybackups
+----
+
+.Example output
+[source, role="noheader"]
+----
+|                                                       FILE | DATABASE |                          DATABASE ID |                TIME |  FULL | COMPRESSED | LOWEST TX | HIGHEST TX |
+| file:///path/to/mybackups/neo4j-2023-06-29T14-46-27.backup |    neo4j | c8368b24-55e2-474d-bb41-75657f5bfcde | 2023-06-29T13:46:27 |  true |       true |         1 |         11 |
+| file:///path/to/mybackups/neo4j-2023-06-29T14-50-45.backup |    neo4j | c8368b24-55e2-474d-bb41-75657f5bfcde | 2023-06-29T13:50:45 | false |       true |        12 |         14 |
+| file:///path/to/mybackups/neo4j-2023-06-29T14-51-33.backup |    neo4j | c8368b24-55e2-474d-bb41-75657f5bfcde | 2023-06-29T13:51:33 | false |       true |        15 |         18 |
+----
+
+The example output shows that the backup artifacts are part of a backup chain.
+The first artifact is a full backup, and the other two are differential backups.
+The `LOWEST TX` and `HIGHEST TX` columns show the transaction IDs of the first and the last transaction in the backup artifacts.
+That means, if you restore `neo4j-2023-06-29T14-50-45.backup`, your database will have `14` as the last transaction ID.
+
+
+=== Restore a backup on a standalone server
+
+The following examples assume that you want to restore your data in a new database, called `mydatabase`.
+If you want to replace an existing database, you need to stop it first, and add the option `--overwrite-destination=true` to the restore command.
+
+. Restore a database backup by running the following command:
++
+[source, shell,role=nocopy noplay]
+----
+bin/neo4j-admin database restore --from-path=/path/to/backups/neo4j-2023-06-29T14-51-33.backup mydatabase
+----
++
+The `--from-path=` argument must contain the path to the last backup of a chain, in this case, `neo4j-2023-06-29T14-51-33.backup`.
++
+[TIP]
+====
+If you want to restore several databases at once, you must stop them first and then you can alter the command by specifying a comma-separated list of paths to backup artifacts, and remove the `<database>` parameter.
+You should also skip the `CREATE DATABASE` step afterward if you are replacing an existing database.
+====
+. Create the new database using `CREATE DATABASE` against the `system` database.
++
+[source, cypher, role=nocopy noplay]
+----
+CREATE DATABASE mydatabase
+----
+
+=== Restore data up to a specific date
+
+To restore data up to a specific date, you need to pass the backup artifact that contains the data up to that date. +
+This example assumes that you want to restore your data in a new database, called `mydatabase`.
+If you want to replace an existing database, you need to stop it first, and add the option `--overwrite-destination=true` to the restore command.
+
+. Restore from the backup that contains the data up to the desired date.
++
+[source, shell,role=nocopy noplay]
+----
+bin/neo4j-admin database restore --from-path=/path/to/mybackups/neo4j-2023-06-29T14-50-45.backup --restore-until="2023-06-29 13:50:45" mydatabase
+----
++
+The `--from-path=` argument must contain the path to either a full or a differential backup artifact.
+The `--restore-until=` argument must contain a UTC date and time.
+The restore recovers all transactions that were committed before the provided date and time.
++
+[TIP]
+====
+If you want to restore several databases at once, you must stop them first and then you can alter the command by specifying a comma-separated list of paths to backup artifacts, and remove the `<database>` parameter.
+You should also skip the `CREATE DATABASE` step afterward if you are replacing an existing database.
+====
++
+[NOTE]
+====
+If you know the transaction ID of the last transaction that was committed before the date you want to restore to, you can use the `--restore-until=` argument with the transaction ID instead of the date.
+For example, `--restore-until=123`.
+====
+. Create the new database using `CREATE DATABASE` against the `system` database:
++
+[source, cypher, role=nocopy noplay]
+----
+CREATE DATABASE mydatabase;
+----
+
+
+[[restore-cloud-storage]]
+=== Restore a backup located in cloud storage
+
+The following examples show how to restore a database located in a cloud storage bucket using the `--from-path` option.
+
+For details on how to restore a database backup located in cloud storage in a Neo4j Kubernetes deployment, see xref:kubernetes/operations/backup-restore.adoc#kubernetes-neo4j-restore[Restore a single database].
+
+[.tabbed-example]
+=====
+[role=include-with-AWS-S3 label--new-5.19]
+======
+
+include::partial$/aws-s3-overrides.adoc[]
+
+include::partial$/aws-s3-credentials.adoc[]
+
+. Run the `neo4j-admin database restore` command to restore the database located in your AWS S3 storage.
+The example assumes that you have backup artifacts located in the `myBucket/myDirectory` folder in your bucket.
++
+[source, shell,role=nocopy noplay]
+----
+bin/neo4j-admin database restore --from-path=s3://myBucket/myDirectory/myBackup.backup mydatabase
+----
+
+. If you have not stopped your database and used the `--overwrite-destination=true` option, you have to create the new `mydatabase` by running the command:
++
+[source,cypher]
+----
+CREATE DATABASE mydatabase;
+----
+
+======
+
+[role=include-with-Google-cloud-storage label--new-5.21]
+======
+
+include::partial$/gcs-credentials.adoc[]
+
+. Run the `neo4j-admin database restore` command to restore the database located in a given folder in your Google storage bucket.
+The example assumes that you have backup artifacts located in the `myBucket/myDirectory` folder in your bucket.
++
+[source,shell]
+----
+bin/neo4j-admin database restore --from-path=gs://myBucket/myDirectory/myBackup.backup mydatabase
+----
+
+. If you have not stopped your database and used the `--overwrite-destination=true` option, you have to create the new `mydatabase` by running the command:
++
+[source,cypher]
+----
+CREATE DATABASE mydatabase;
+----
+
+======
+
+[role=include-with-Azure-cloud-storage label--new-5.24]
+======
+
+include::partial$/azb-credentials.adoc[]
+
+. Run the `neo4j-admin database restore` command to restore the database located in a given folder in your Azure blob storage container.
+The example assumes that you have backup artifacts located in the `myStorageAccount/myContainer/myDirectory` folder.
++
+[source,shell]
+----
+bin/neo4j-admin database restore --from-path=azb://myStorageAccount/myContainer/myDirectory/myBackup.backup mydatabase
+----
+
+. If you have not stopped your database and used the `--overwrite-destination=true` option, you have to create the new `mydatabase` by running the command:
++
+[source,cypher]
+----
+CREATE DATABASE mydatabase;
+----
+
+======
+=====
+
+
+== Restore users and roles metadata
+
+Users, roles, and auth rules metadata are backed up during the backup process by default.
+
+If you need to restore the users and roles metadata, you have to do it manually by running the Cypher script from the _<NEO4J_HOME>_ directory, _/data/scripts/databasename/restore_metadata.cypher_, which the `neo4j-admin database restore` command outputs, using xref:tools/cypher-shell.adoc[]:
+
+*Using `cat` (UNIX)*
+[source, shell, role=nocopy noplay]
+----
+cat ../data/scripts/databasename/restore_metadata.cypher | bin/cypher-shell -u user -p password -a ip_address:port -d system --param "database => 'databasename'"
+----
+
+*Using `type` (Windows)*
+[source, shell, role=nocopy noplay]
+----
+type ..\data\scripts\databasename\restore_metadata.cypher | bin\cypher-shell.bat -u user -p password -a ip_address:port -d system --param "database => 'databasename'"
+----
+

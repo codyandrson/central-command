@@ -1,0 +1,6 @@
+name: highlight.js
+source_repo: https://github.com/highlightjs/highlight.js
+source_ref: 11.11.1
+fetched_url: https://codeload.github.com/highlightjs/highlight.js/tar.gz/11.11.1
+fetched_date: 2026-08-25
+subpaths: [docs README.md CHANGES.md LICENSE SUPPORTED_LANGUAGES.md]

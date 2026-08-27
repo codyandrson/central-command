@@ -1,0 +1,194 @@
+:description: This section describes how to secure the cluster communication between server instances.
+:page-aliases: clustering/intra-cluster-encryption.adoc
+
+[role=enterprise-edition]
+[[clustering-intra-cluster-encryption]]
+= Intra-cluster encryption
+
+
+[CAUTION]
+====
+Securing client-to-server communication is not covered in this chapter (e.g. Bolt, HTTPS, Backup).
+====
+
+
+[[clustering-intra-cluster-encryption-introduction]]
+== Introduction
+
+The security solution for cluster communication is based on standard SSL/TLS technology (referred to jointly as SSL).
+Encryption is one aspect of security, the other cornerstones are authentication and integrity.
+A secure solution is based on a key infrastructure which is deployed together with a requirement of authentication.
+
+The SSL support in the platform is documented in detail in xref:security/ssl-framework.adoc[SSL framework].
+This section covers the specifics as they relate to securing a cluster.
+
+Under SSL, an endpoint can authenticate itself using certificates managed by a xref:security/ssl-framework.adoc#term-ssl-pki[Public Key Infrastructure (_PKI_)].
+
+[IMPORTANT]
+====
+The deployment of a secure key management infrastructure is beyond the scope of this manual, and should be entrusted to experienced security professionals.
+The example deployment illustrated below is for reference purposes only.
+====
+
+[[clustering-intra-cluster-encryption-example-deployment]]
+== Example deployment
+
+[[clustering-intra-cluster-encryption-cryptographic]]
+=== Generate and install cryptographic objects
+
+The generation of xref:security/ssl-framework.adoc#term-ssl-cryptographic-objects[cryptographic objects] is for the most part outside the scope of this manual.
+It generally requires having a PKI with a xref:security/ssl-framework.adoc#term-ssl-certificate-authority[Certificate Authority (CA)] within the organization and they should be able to advise here.
+Note that the information in this manual relating to the PKI is mainly for illustrative purposes.
+
+[TIP]
+====
+If setting up intra-cluster encryption as part of a cluster configuration, ensure that the certificates used on the cluster endpoint support server and client usage.
+This is because when connecting between the Neo4j servers for clustering, each server uses its own certificate to authenticate as a client on the connection to another server.
+
+This could be verified from within the certificate details:
+
+----
+openssl x509 -in public.crt -noout -text
+----
+You should see that the X509v3 Extended Key Usage section shows both the usages listed:
+
+----
+X509v3 Extended Key Usage:
+    TLS Web Server Authentication, TLS Web Client Authentication
+----
+====
+
+
+When the certificates and private keys are obtained they can be installed on each of the servers.
+Each server has a certificate of its own, signed by a CA, and the corresponding private key.
+The certificate of the CA is installed into the `trusted` directory, and any certificate signed by the CA is thus trusted.
+This means that the server now has the capability of establishing trust with other servers.
+
+[CAUTION]
+====
+Be sure to exercise caution when using CA certificates in the `trusted` directory, as any certificates signed by that CA are then trusted to join the cluster.
+Never use a public CA or your internal root CA to sign certificates for your cluster.
+Instead, use an intermediate certificate or a CA certificate which originates from and is controlled by your organization, and is only used for that specific cluster.
+====
+
+In this example a mutual authentication setup is deployed, which means that both ends of a channel have to authenticate.
+To enable mutual authentication the SSL policy must have `client_auth` set to `REQUIRE` (which is the default).
+Servers are by default required to authenticate themselves, so there is no corresponding server setting.
+
+If the certificate for a particular server is compromised, it is possible to revoke it by installing a xref:security/ssl-framework.adoc#term-ssl-certificate-revocation-list[Certificate Revocation List (CRL)] in the `revoked` directory.
+It is also possible to redeploy using a new CA.
+For contingency purposes, it is advised to have a separate intermediate CA specifically for the cluster which can be substituted in its entirety should it ever become necessary.
+This approach would be much easier than having to handle revocations and ensuring their propagation.
+
+.Generate and install cryptographic objects
+====
+In this example, assume that the private key and certificate file are named _private.key_ and _public.crt_, respectively.
+The policy configuration for the key and certificate names/locations can be overridden if different names are desired.
+For this server, use the default configuration, create the appropriate directory structure, and install the certificate:
+
+[source, shell]
+----
+$NEO4J_HOME> mkdir certificates/cluster
+$NEO4J_HOME> mkdir certificates/cluster/trusted
+$NEO4J_HOME> mkdir certificates/cluster/revoked
+
+$NEO4J_HOME> cp $some-dir/private.key certificates/cluster
+$NEO4J_HOME> cp $some-dir/public.crt certificates/cluster
+----
+====
+
+
+[[clustering-intra-cluster-encryption-ssl-config]]
+=== Configure the cluster SSL policy
+
+By default, cluster communication is unencrypted.
+However, even if you change the default and encrypt it, without mutual TLS, any network-reachable client can replicate the database via the cluster port.
+Therefore, configure a cluster to encrypt its intra-cluster communication by setting `dbms.ssl.policy.cluster.enabled=true` and `client_auth=REQUIRE`.
+See xref:security/ssl-framework.adoc#ssl-configuration[SSL framework -> Configuration] for details.
+
+An SSL policy utilizes the installed cryptographic objects and additionally allows parameters to be configured.
+Use the parameters in one of the following configurations:
+
+[.tabbed-example]
+=====
+[.include-with-one-TLS-version]
+======
+
+The following example assumes that an SSL policy is created and configured as per the <<clustering-intra-cluster-encryption-example-deployment, example deployment>> and uses the default TLSv1.2.
+
+Add the following content to the _neo4j.conf_ file:
+
+[source, properties]
+----
+dbms.ssl.policy.cluster.enabled=true
+dbms.ssl.policy.cluster.tls_versions=TLSv1.2 \ # <1>
+dbms.ssl.policy.cluster.ciphers=TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384 \ # <2>
+dbms.ssl.policy.cluster.client_auth=REQUIRE # <3>
+----
+
+<1> With control of the entire cluster, the default TLS standard can be enforced without any concern for backwards compatibility.
+It has no known security vulnerabilities and uses the most modern algorithms for key exchanges, etc.
+<2> A particular single strong cipher can be enforced and thus remove any doubt about which cipher gets negotiated and chosen.
+The selected cipher offers Perfect Forward Secrecy (PFS) and uses the Advanced Encryption Standard (AES) for symmetric encryption.
+AES has great support for hardware acceleration and thus allows performance to be generally negligibly affected.
+<3> Setting the cluster client authentication to `REQUIRE` enables mutual authentication, meaning both ends of a channel must authenticate.
+
+
+======
+[role=include-with-two-TLS-versions label--new-5.24]
+======
+
+The following example assumes that an SSL policy is created and configured as per the <<clustering-intra-cluster-encryption-example-deployment, example deployment>> and uses both TLSv1.2 and TLSv1.3.
+
+Add the following content to the _neo4j.conf_ file:
+
+[source, properties]
+----
+dbms.ssl.policy.cluster.enabled=true
+dbms.ssl.policy.cluster.tls_versions=TLSv1.3,TLSv1.2 \ # <1>
+dbms.ssl.policy.cluster.ciphers=TLS_AES_256_GCM_SHA384,TLS_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA,TLS_DHE_DSS_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_128_CBC_SHA \ # <2>
+dbms.ssl.policy.cluster.client_auth=REQUIRE \# <3>
+----
+
+<1> With control of the entire cluster, the default TLS standard can be enforced without any concern for backwards compatibility.
+It has no known security vulnerabilities and uses the most modern algorithms for key exchanges, etc.
+<2> If you want to specify ciphers for both supported TLS versions, you must specify ciphers for each TLS version not to get more ciphers than expected.
+The selected ciphers offer Perfect Forward Secrecy (PFS) and use the Advanced Encryption Standard (AES) for symmetric encryption.
+AES has great support for hardware acceleration and thus allows performance to be generally negligibly affected.
+<3> Setting the cluster client authentication to `REQUIRE` enables mutual authentication, meaning both ends of a channel must authenticate.
+They have no known security vulnerabilities and use the most modern algorithms for key exchanges, etc.
+
+======
+=====
+
+Any user data communicated between servers is now secured.
+Note that a server that is not correctly setup is not able to communicate with the others.
+
+The policy must be configured on every server with the same settings.
+The actual cryptographic objects installed are mostly different since they do not share the same private keys and corresponding certificates.
+However, the trusted CA certificate is shared.
+
+
+[[clustering-intra-cluster-encryption-validate]]
+=== Validate the secure operation of the cluster
+
+To make sure that everything is secured as intended, it makes sense to validate using external tooling such as, for example, the open source assessment tools `nmap` or `OpenSSL`.
+
+.Validate the secure operation of the cluster
+====
+This example uses the `nmap` tool to validate the secure operation of the cluster.
+A simple test to perform is a cipher enumeration using the following command:
+
+[source, shell]
+----
+nmap --script ssl-enum-ciphers -p <port> <hostname>
+----
+
+The hostname and port have to be adjusted according to the example configuration.
+This can prove that TLS is in fact enabled and that only the intended cipher suites are enabled.
+All servers and all applicable ports should be tested.
+====
+
+For testing purposes, it is also possible to utilize a separate testing instance of Neo4j which, for example, has an untrusted certificate in place.
+The expected result of this is that the test server is not able to participate in replication of user data.
+The debug logs generally indicate an issue by printing an SSL or certificate-related exception.

@@ -1,0 +1,82 @@
+# Central Command control plane — SYSTEM unit for the k3s deployment (2026-07-31).
+#
+# Install (one time, as a user with sudo):
+#   sudo cp deploy/k3s/cc-uvicorn.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart cc-uvicorn
+#
+# Supersedes deploy/pi/cc-uvicorn.service. Two things changed:
+#
+#   1. The dependency is k3s, not Docker. The stack's containers are now pods.
+#   2. The ExecStartPre is a READINESS WAIT, not a "bring the stack up" command.
+#      The old unit ran `docker compose up -d`, which was both idempotent and
+#      synchronous — by the time it returned, the spine existed. Kubernetes is
+#      declarative and ASYNCHRONOUS: the workloads are already declared in the
+#      cluster and the kubelet starts them on its own schedule, so there is
+#      nothing for this unit to "bring up". What it must do instead is refuse to
+#      start the API until Postgres actually answers, which is the property the
+#      old ExecStartPre was really buying.
+#
+# The app reads .env from WorkingDirectory (CC_ANTHROPIC_API_KEY, CC_DISPATCH_*,
+# CC_FEED_*, CC_AUDITOR_*, CC_LLM_PROXY_* all live there); only the run-mode
+# flags are pinned here, matching the documented recipe.
+
+[Unit]
+Description=Central Command control plane (uvicorn on 127.0.0.1:8080)
+After=network-online.target k3s.service
+Wants=network-online.target
+Requires=k3s.service
+
+[Service]
+User=codyslab
+Group=codyslab
+WorkingDirectory=/home/codyslab/Central Command
+Environment=CC_DEMO_MODE=false
+Environment=CC_EXECUTOR_MODE=dry_run
+# NOTE: CC_DISPATCH_APPROVAL_LIMIT=5 used to be pinned here. It is not a
+# run-mode flag, and a systemd Environment= beats pydantic-settings' env_file,
+# so it SILENTLY shadowed .env: raising the valve there changed nothing and the
+# API kept reporting the old limit (2026-08-13). Dispatch valves live in .env
+# only — one source of truth, exactly as the comment above says.
+# Wait for the spine to answer on 5442 rather than assuming it does. cc-postgres
+# is pinned to this node and publishes hostPort 127.0.0.1:5442, so this is a
+# plain TCP check with no kubectl and no cluster credentials involved — which
+# also means it still works if the API server is briefly unavailable.
+# 120s ceiling, then start anyway and let Restart=always handle it.
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do (exec 3<>/dev/tcp/127.0.0.1/5442) 2>/dev/null && exit 0; sleep 2; done; echo "postgres not reachable on 127.0.0.1:5442 after 120s" >&2; exit 0'
+# --timeout-graceful-shutdown is a BACKSTOP, not the mechanism. Uvicorn's default
+# is None, i.e. wait for open connections FOREVER — and the SSE stream and cockpit
+# WebSocket follow the event log forever by construction, so no restart could ever
+# finish that phase. The app now releases those followers from its SIGTERM handler
+# (see api/app.py: the lifespan shutdown runs AFTER this wait, far too late), so
+# this should never be reached. 30s of headroom if one ever is.
+# --ws-max-size 96 MB: must exceed MAX_ATTACHMENT_BYTES (50 MB) after base64
+# inflation (~4/3×), or the socket closes 1009 before the application's clean
+# attachment_too_large refusal can fire (uvicorn's default is 16 MB).
+ExecStart=/home/codyslab/Central Command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080 --timeout-graceful-shutdown 30 --ws-max-size 100663296
+# The app exits if Postgres isn't ready yet — keep retrying until the stack is
+# up. The dispatch advisory lease makes a double-start refuse loudly rather than
+# run two drain loops.
+Restart=always
+RestartSec=5
+# A stop timeout must only fire when a shutdown is genuinely WEDGED. This one
+# fired on every routine deploy instead, and that is the whole reason it was 15s:
+# uvicorn's graceful shutdown waited on SSE streams and cockpit WebSockets that
+# followed the event log FOREVER by construction, so no restart could ever
+# complete and the 90s default was pure dead time (desktop, 2026-07-21/22). The
+# 15s cap traded that away for a guaranteed SIGKILL — which on 2026-08-15 killed
+# twelve in-flight answer resumes mid-batch.
+#
+# `events.log.close()` now releases those followers in the lifespan shutdown
+# (they reconnect and replay from Last-Event-ID, losing nothing), so a healthy
+# stop is bounded by `dispatcher.stop()`'s own 30s wait for its current drain
+# item. 120s is 4x that: never reached by a shutdown that is progressing, and
+# still a real signal when one is not.
+#
+# Sizing rule if either side changes: keep this comfortably ABOVE the slowest
+# component's internal stop timeout. Below it — as 15s was below dispatch's 30s —
+# the unit cannot shut down gracefully at all while that component is busy.
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

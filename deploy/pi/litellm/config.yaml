@@ -1,0 +1,126 @@
+# LiteLLM proxy config
+#
+# No models here. Every model, plus the `cc-default` alias Central Command
+# addresses, lives in Postgres (store_model_in_db: true) so it can be created
+# and re-pointed through the API with no restart.
+#
+# A `cc-smart` adaptive router lived here until 2026-07-27. Deleted because it
+# never routed: the adaptive router is config.yaml-only (DB-created ones return
+# HTTP 400), and its complexity classifier scored real mail INVERSELY to
+# difficulty over a 283-email measurement. Evidence:
+# docs/superpowers/specs/2026-07-26-quality-router-migration-design.md
+
+# ── Claude Code on the Max subscription (2026-07-26) ─────────────────────────
+# the operator's `claude` CLI routes through this proxy so its usage lands in the spend
+# logs next to Central Command's. It needs NO model entries here: it uses the built-in
+# /anthropic/* PASSTHROUGH route, which forwards the request verbatim to
+# api.anthropic.com under the caller's OWN credentials and logs usage from the
+# response (call_type=pass_through_endpoint). Real model names travel untouched,
+# so new Claude models work with no config change.
+#
+#   ANTHROPIC_BASE_URL=http://127.0.0.1:4000/anthropic  +  x-litellm-api-key header
+#
+# An earlier attempt aliased cc-opus/cc-sonnet/cc-haiku as normal model entries.
+# It worked, but every alias hid the real model's limits from the client — Claude
+# Code sent max_tokens=128000 to haiku (cap 64000) and the call failed. Don't
+# reintroduce aliases for the CLI; passthrough is the correct seam.
+#
+# What makes the subscription (not the API key) get used is the ABSENCE of
+# ANTHROPIC_API_KEY from the litellm container env — see the long note in
+# deploy/pi/docker-compose.yml. Read it before adding any Anthropic credential.
+
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  store_prompts_in_spend_logs: true
+  # Health-check-driven routing: a background loop pings every deployment and a
+  # failing one is dropped from the routing pool BEFORE a request lands on it,
+  # rather than after one has already failed. That is what would let the
+  # workstation models carry a timeout generous enough to cover a cold model
+  # load instead of doubling as a liveness probe.
+  #
+  # DELIBERATELY DISABLED (2026-07-26). The keys are correct — verified against
+  # 1.93.0 source at proxy_server.py:4655/4658/4669 — but this was never
+  # exercised on this deployment, and two things about it are UNVERIFIED:
+  #   1. `ahealth_check` issues an acompletion with `messages=[]` (main.py:8214).
+  #      Nobody has checked how Anthropic answers an empty-messages probe, or
+  #      whether a rejection would make enable_health_check_routing drop healthy
+  #      Claude models out of the routing pool.
+  #   2. At a 60s interval it is a real API round-trip per deployment, ~1440/day
+  #      each, every one of which lands in the spend logs.
+  # It was enabled for the adaptive-router plan, which was ABANDONED after the
+  # router proved config.yaml-only and its complexity classifier proved
+  # inversely correlated with real difficulty. Leaving it armed to fire on the
+  # next restart would be an unverified change to live routing that nobody
+  # decided to make. Re-enable deliberately, after testing the probe, when a
+  # routing direction is chosen.
+  background_health_checks: false
+
+litellm_settings:
+  request_timeout: 300
+  drop_params: true
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+
+# Failover policy. The model ENTRIES live in the DB (see the note above); only
+# the policy lives here, because it is a decision worth reviewing in a diff.
+#
+# qwen3.8-27b is a self-hosted model on the operator's WORKSTATION (llama.cpp on
+# the 3090), reached over Tailscale. The workstation is not always on — that is
+# expected and fine. What must NOT happen is the Pi erroring or hanging when it
+# is off: an off-box model is a degradable capability, not a dependency. Hence
+# liveness is now detected by the background health checks (general_settings
+# above), which drop a dead deployment from the routing pool before a request
+# lands on it — freeing the workstation models' per-model timeout (300s, set
+# on the DB entry) to cover a legitimate cold model load instead of doubling
+# as a liveness probe. This does not weaken the standalone guarantee in
+# deploy/pi/verify.sh — the spine never depends on the workstation, it only
+# opportunistically uses it.
+#
+# Fallbacks are NOT declared here. With store_model_in_db: true the DB wins the
+# `fallbacks` key, and a block in this file reads back as [] from
+# /get/config/callbacks — verified 2026-07-26. They live in
+# deploy/pi/litellm/model-preferences.yaml and are pushed to the DB (POST
+# /fallback) by `policy.py --apply`. tests/test_litellm_policy.py fails if a
+# fallbacks block reappears here.
+# NOTE: with store_model_in_db: true the DB wins this whole key, and the live
+# value has been cooldown_time: 0 since 2026-07-31. Mirrored here so the file
+# does not contradict the deployment. Cooldown is OFF on purpose: every alias
+# has a single deployment, so a 60s cooldown converted one failed request into a
+# total outage reported as the misleading "No deployments available for selected
+# model" instead of the real upstream error.
+router_settings:
+  allowed_fails: 1
+  cooldown_time: 0
+
+# Local model groups point at the operator's WORKSTATION (100.73.68.9), one GPU.
+# The :8081 slot is llama-swap (container `cc-swap`, since 2026-08-19): ONE big
+# model at a time, loaded on demand by the request's `model` field, requests
+# QUEUED through the ~10s swap. The embedder and reranker are NOT competitors —
+# they are separate resident containers:
+#   qwen3.8-27b          :8081  Qwen3.8-27B (dense, 81920 ctx, vision, MTP)
+#                               <-- the swap default; cc-default/graphiti-llm/
+#                                   gpt-4.1-nano all resolve to it
+#   gpt-oss-20b          :8081  GPT-OSS-20B (131072 ctx, ttl 600)  <-- judge
+#   gemma-4-31b          :8081  Gemma 4 31B (65536 ctx, ttl 600)   <-- judge
+#   qwen3-rerank-local   :8082  Qwen3-Reranker-0.6B  <-- resident, GPU
+#   qwen3-embedding-local :8083  Qwen3-Embedding-0.6B <-- resident, CPU since
+#                                   2026-08-19 (freed the VRAM that capped ctx)
+#
+# RETIRED, deliberately and for good: `qwen3.6-35b` and `north-mini-code`
+# (2026-08-01 — never routed to, never given a role) and `qwen3-coder-next`
+# (replaced 2026-08-15 by the dense 27B). Deleted from the proxy, from this
+# repo, and from the workstation config. Do not re-register them — a new local
+# LLM gets its role decided first (the two judges above are the pattern).
+#
+# The embedder must stay up no matter what the LLM slot does: Graphiti has NO
+# embedding fallback (deploy/pi/graphiti/config.yaml — OpenAI cannot
+# substitute, the dimensions differ), so an embedder outage is a graph WRITE
+# outage, not a degraded capability. The LLM being down is the degradable case.
+#
+# Setup, benchmark evidence and lessons: ~/QWEN/README.md on the workstation.

@@ -1,0 +1,157 @@
+:description: Create a neo4j deployment YAML file.
+[role=enterprise-edition]
+[[cc-create-value-file]]
+= Create Helm deployment values files
+
+You create a Helm deployment YAML file for each Neo4j cluster member with all the configuration settings.
+
+[[cc-config-parameters]]
+== Important configuration parameters
+
+`neo4j.name`::
+Starting from Neo4j 5.0.0, standalone servers and cluster servers have no distinction.
+This means a standalone server can be upgraded to a cluster by adding more servers.
+All Neo4j cluster servers are linked together by the value of the parameter `neo4j.name`.
+When installed via the Neo4j Helm chart, they will join the cluster identified by `neo4j.name`. +
+`neo4j.name` is different from the Helm _release name_, which is used to reference a cluster server elsewhere in Kubernetes. +
+All other names and labels of K8s objects created by the Helm chart derive from both `neo4j.name` and _release name_.
+The `neo4j.name` parameter is mandatory, and the installation will fail if it is not specified.
+`neo4j.name` must be unique within a namespace.
++
+[NOTE]
+====
+If you want to install 2 clusters in the same namespace, they must have different values for `neo4j.name`.
+====
+
+`neo4j.minimumClusterSize`::
+Starting from Neo4j 5.0.0, standalone servers and cluster servers have no distinction.
+By default, servers in a cluster can host primary and secondary databases.
+See the xref:clustering/introduction.adoc#clustering-introduction-operational[Operational view] for more details. +
+`neo4j.minimumClusterSize` is set to 1 by default, which means the server starts without waiting for the other servers.
+When installing a cluster, you should set `neo4j.minimumClusterSize` to the number of desired members in the cluster.
+If you later decide to add an extra cluster server in excess of `neo4j.minimumClusterSize`, you need to manually enable it using the Cypher command `ENABLE SERVER`.
+From Neo4j 5.20 onwards, you can also use the configuration parameter `neo4j.operations.enableServer` to automatically enable the server when it joins the cluster.
+For more information, see xref:kubernetes/operations/scaling.adoc#horizontal-scaling[Horizontal scaling].
+
+`neo4j.resources`::
+The size of a Neo4j cluster member is defined by the values of the `neo4j.resources.cpu` and `neo4j.resources.memory` parameters.
+The minimum for a Neo4j instance is `0.5` CPU and `2GB` memory.
+If invalid or less than the minimum values are provided, Helm will throw an error, for example:
++
+[source, role=noheader]
+----
+Error: template: neo4j/templates/_helpers.tpl:157:11: executing "neo4j.resources.evaluateCPU" at <fail (printf "Provided cpu value %s is less than minimum. \n %s" (.Values.neo4j.resources.cpu) (include "neo4j.resources.invalidCPUMessage" .))>: error calling fail: Provided cpu value 0.25 is less than minimum.
+ cpu value cannot be less than 0.5 or 500m
+----
++
+For more information, see xref:kubernetes/configuration.adoc#important-config-parameters[Important configuration parameters].
+
+`neo4j.password`::
+The password for the `neo4j` user.
+The same password must be set for all cluster members. +
+If you do not provide a password, the Neo4j Helm chart will automatically generate one for you.
+(Make a note of it.)
++
+[NOTE]
+====
+You cannot use `neo4j` as the initial password as this is the default password.
+====
+
+`neo4j.edition` and `neo4j.acceptLicenseAgreement`::
+By default, the Helm chart installs Neo4j Community Edition. +
+If you want to install Neo4j Enterprise Edition, set the configuration parameters `edition: "enterprise"` and acknowledge license compliance by setting `neo4j.acceptLicenseAgreement` to `"yes"` if you have a valid license or to `"eval"` if you want to accept the link:link:https://neo4j.com/terms/enterprise_us/[Neo4j evaluation license]. +
+For more information on how to obtain a valid license for Neo4j Enterprise Edition, see https://neo4j.com/licensing/ and link:https://neo4j.com/terms/licensing/, or use the form https://neo4j.com/contact-us/[Contact Neo4j].
+
+`volumes.data`::
+The `volumes.data` parameter maps the `data` volume mount of each cluster member to the persistent volume for that member.
+For more information, see xref:kubernetes/persistent-volumes.adoc[Volume mounts and persistent volumes].
+[NOTE]
+====
+For details of all Neo4j Helm chart configuration options, see xref:kubernetes/configuration.adoc[Configure a Neo4j Helm deployment].
+====
+
+[[servers-values-yaml]]
+== Create a values.yaml file for each server
+
+Select the tab as per your Kubernetes environment, and using the provided example, create a YAML file for each of your cluster servers with all the configuration settings.
+
+This guide assumes that the YAML files are named _server-1.values.yaml_, _server-2.values.yaml_ and _server-3.values.yaml_.
+
+The examples use storage classes provided by the vendor.
+If you want to use a different type of storage class, such as regional disks, consult the cloud vendor documentation on creating new storage classes.
+
+[.tabbed-example]
+=====
+[.include-with-gke]
+======
+[source, yaml]
+----
+neo4j:
+  name: "my-cluster"
+  minimumClusterSize: 3
+  resources:
+    cpu: "0.5"
+    memory: "2Gi"
+  password: "my-password"
+  edition: "enterprise"
+  acceptLicenseAgreement: "yes"
+
+volumes:
+  data:
+    mode: "dynamic"
+    dynamic:
+      # * premium-rwo provisions SSD disks (recommended)
+      # * standard-rwo provisions balanced SSD-backed disks
+      # * standard provisions HDD disks
+      storageClassName: premium-rwo
+----
+======
+[.include-with-aws]
+======
+[source, yaml]
+----
+neo4j:
+  name: "my-cluster"
+  minimumClusterSize: 3
+  resources:
+    cpu: "0.5"
+    memory: "2Gi"
+  password: "my-password"
+  edition: "enterprise"
+  acceptLicenseAgreement: "yes"
+
+volumes:
+  data:
+    mode: "dynamic"
+    dynamic:
+     # gp2 is a general-purpose SSD volume
+     storageClassName: gp2
+
+----
+======
+
+[.include-with-azure]
+======
+[source, yaml]
+----
+neo4j:
+  name: "my-cluster"
+  minimumClusterSize: 3
+  resources:
+    cpu: "0.5"
+    memory: "2Gi"
+  password: "my-password"
+  edition: "enterprise"
+  acceptLicenseAgreement: "yes"
+
+volumes:
+  data:
+    mode: "dynamic"
+    dynamic:
+      # * managed-csi-premium provisions premium SSD disks (recommended)
+      # * managed-csi provisions standard SSD backed disks
+      storageClassName: managed-csi-premium
+
+----
+======
+=====

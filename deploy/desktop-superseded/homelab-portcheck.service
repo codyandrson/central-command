@@ -1,0 +1,11 @@
+# Boot-time port-forwarding self-heal (user unit) — see homelab-portcheck.sh.
+# Paired with homelab-portcheck.timer (OnBootSec) so it runs AFTER
+# podman-restart.service has brought the restart-policy containers up.
+
+[Unit]
+Description=Heal rootless podman port forwarding after boot
+After=podman-restart.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/codys-lab/Central Command/deploy/homelab-portcheck.sh

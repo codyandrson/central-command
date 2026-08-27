@@ -1,0 +1,11 @@
+name: react
+source_repo: https://github.com/reactjs/react.dev
+source_ref: main
+fetched_url: https://codeload.github.com/reactjs/react.dev/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [src/content README.md LICENSE]
+note: >
+  react.dev does not version in lockstep with the react npm package (pinned
+  react/react-dom 19.2.4 here). No tag near 19.2.x exists on this repo;
+  `main` is the latest doc content and is the closest available match.
+

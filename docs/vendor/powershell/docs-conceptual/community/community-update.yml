@@ -1,0 +1,75 @@
+### YamlMime:Landing
+
+title: Community Update # < 60 chars
+summary: A list of resources and a summary of new articles and community contributions. # < 160 chars
+
+metadata:
+  title: Community Update # Required; page title displayed in search results. Include the brand. < 60 chars.
+  description: A list of resources and a summary of new articles and community contributions. # < 160 chars
+  ms.topic: landing-page # Required
+  author: sdwheeler #Required; your GitHub user alias, with correct capitalization.
+  ms.author: sewhee #Required; Microsoft alias of author; optional team alias.
+  ms.date: 02/02/2026
+
+# linkListType: architecture | concept | deploy | download | get-started | how-to-guide | learn |
+#               overview | quickstart | reference | tutorial | video | whats-new
+
+landingContent:
+# Cards and links should be based on top customer tasks or top subjects
+# Start card title with a verb
+- title: What's new in Docs?
+  linkLists:
+    - linkListType: whats-new
+      links:
+        - text: 2026 Updates
+          url: ./2026-updates.md
+        - text: 2025 Updates
+          url: ./2025-updates.md
+        - text: 2024 Updates
+          url: ./2024-updates.md
+        - text: 2023 Updates
+          url: ./2023-updates.md
+        - text: 2022 Updates
+          url: ./2022-updates.md
+        - text: 2021 Updates
+          url: ./2021-updates.md
+        - text: 2020 Updates
+          url: ./2020-updates.md
+        - text: Contributor Hall of Fame
+          url: hall-of-fame.md
+- title: Learning resources
+  linkLists:
+    - linkListType: learn
+      links:
+        - text: PowerShell 101
+          url: ../learn/ps101/00-introduction.md
+        - text: Deep Dives
+          url: ../learn/deep-dives/overview.md
+        - text: PowerShell Learn modules
+          url: /training/browse/?terms=PowerShell
+    - linkListType: video
+      links:
+      - text: Microsoft Virtual Academy videos
+        url: /shows/browse?terms=powershell
+      - text: Jason Helmick's - The Show
+        url: https://www.youtube.com/user/JasonHelmick/videos
+      - text: The PSConfEU Channel
+        url: https://www.youtube.com/channel/UCxgrI58XiKnDDByjhRJs5fg
+      - text: The PowerShell.org Channel
+        url: https://www.youtube.com/user/powershellorg
+- title: Community resources
+  linkLists:
+    - linkListType: overview
+      links:
+        - text: Community support
+          url: community-support.md
+    - linkListType: download
+      links:
+        - text: Digital art
+          url: digital-art.md
+    - linkListType: reference
+      links:
+        - text: PowerShell 7 usage stats
+          url: https://msit.powerbi.com/view?r=eyJrIjoiM2E3MDllNDMtNGE4OS00NjdkLWI1ODEtZGI2MGNiYjA1ZmI1IiwidCI6IjcyZjk4OGJmLTg2ZjEtNDFhZi05MWFiLTJkN2NkMDExZGI0NyIsImMiOjV9&pageName=ReportSection
+        - text: Top contributors to PowerShell
+          url: https://msit.powerbi.com/view?r=eyJrIjoiM2E3MDllNDMtNGE4OS00NjdkLWI1ODEtZGI2MGNiYjA1ZmI1IiwidCI6IjcyZjk4OGJmLTg2ZjEtNDFhZi05MWFiLTJkN2NkMDExZGI0NyIsImMiOjV9&pageName=ReportSection4644b8b160132457dabe

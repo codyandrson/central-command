@@ -1,0 +1,8 @@
+name: anthropic-platform
+source_url: https://platform.claude.com/llms-full.txt
+fetched_date: 2026-08-25
+note: >
+  Live-site snapshot, no version pin — platform.claude.com serves
+  llms-full.txt generated from whatever docs are current at fetch time. Not
+  a git repo, so scripts/vendor_docs_fetch.sh does not apply; fetched
+  directly with curl. Re-fetch periodically rather than pinning to a release.

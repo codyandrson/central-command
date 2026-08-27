@@ -1,0 +1,31 @@
+[[installation]]
+= Installation
+:description: Neo4j installation on Linux, macOS, and Windows.
+
+Neo4j can be installed in different deployment contexts, such as Linux, macOS, and Windows.
+
+The following topics are covered:
+
+* xref:installation/requirements.adoc[System requirements] -- The system requirements for a production deployment of Neo4j.
+* xref:installation/linux/index.adoc[Linux] -- Installation instructions for Linux.
+* xref:installation/osx.adoc[macOS] -- Installation instructions for macOS.
+* xref:installation/windows.adoc[Windows] -- Installation instructions for Windows.
+* xref:installation/neo4j-desktop.adoc[Neo4j Desktop] -- About Neo4j Desktop.
+
+.Installation-free options
+[TIP]
+====
+*Neo4j AuraDB* is a fully managed Neo4j database, hosted in the cloud and requires no installation.
+For more information, see the link:https://neo4j.com/aura/[AuraDB product page] and link:https://neo4j.com/docs/aura/current/[AuraDB documentation].
+
+Neo4j can be run in a *Docker* container.
+For information on running Neo4j on Docker, see xref:docker/index.adoc[Docker].
+====
+
+[NOTE]
+====
+By default, Neo4j Community Edition and Neo4j Enterprise Edition report a small amount of usage data.
+This helps Neo4j understand how its products are used and improve them.
+For more information about what data is collected, see link:https://neo4j.com/docs/usage-data/[Usage data report].
+====
+

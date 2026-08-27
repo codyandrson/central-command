@@ -1,0 +1,6 @@
+name: fastapi
+source_repo: https://github.com/fastapi/fastapi
+source_ref: 0.141.1
+fetched_url: https://codeload.github.com/fastapi/fastapi/tar.gz/0.141.1
+fetched_date: 2026-08-25
+subpaths: [docs/en/docs README.md LICENSE*]

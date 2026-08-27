@@ -1,0 +1,169 @@
+:description: The `UNION` clause is used to combine the result of multiple queries.
+:page-aliases: clauses/union.adoc
+[[query-union]]
+= Combined queries (`UNION`)
+
+`UNION` combines the results of two or more queries into a single result set that includes all the rows that belong to any queries in the union.
+
+The number and the names of the columns must be identical in all queries combined by using `UNION`.
+
+To keep all the result rows, use `UNION ALL`.
+Using just `UNION` (or `UNION DISTINCT`) will combine and remove duplicates from the result set.
+
+[NOTE]
+====
+If any of the queries in a `UNION` contain updates, the order of queries in the `UNION` is relevant.
+
+Any clause before the `UNION` cannot observe writes made by a clause after the `UNION`.
+Any clause after `UNION` can observe all writes made by a clause before the `UNION`.
+
+See xref::clauses/clause-composition.adoc#cypher-clause-composition-union-queries[clause composition in queries with `UNION`] for details.
+====
+
+[[example-graph]]
+== Example graph
+
+The following graph is used for the examples below:
+
+image:graph_union_clause.svg[width="500", role="middle"]
+
+To recreate the graph, run the following query against an empty Neo4j database:
+
+[source, cypher, role=test-setup]
+----
+CREATE (johnny:Actor {name: 'Johnny Depp'}),
+       (sarah:Actor {name: 'Sarah Jessica Parker'}),
+       (ed:Actor&Director {name: 'Ed Wood'}),
+       (edWoodMovie:Movie {title: 'Ed Wood'}),
+       (johnny)-[:ACTED_IN]->(edWoodMovie),
+       (sarah)-[:ACTED_IN]->(edWoodMovie)
+----
+
+[[union-combine-queries-retain-duplicates]]
+== Combine two queries and retain duplicates
+
+Combining the results from two queries is done using `UNION ALL`.
+
+.Query
+// tag::combined_queries_union_all[]
+[source, cypher]
+----
+MATCH (n:Actor)
+RETURN n.name AS name
+UNION ALL
+MATCH (n:Movie)
+RETURN n.title AS name
+----
+// end::combined_queries_union_all[]
+
+The combined result is returned, including duplicates.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+| name
+| "Johnny Depp"
+| "Sarah Jessica Parker"
+| "Ed Wood"
+| "Ed Wood"
+|Rows: 4
+|===
+
+
+[[union-combine-queries-remove-duplicates]]
+== Combine two queries and remove duplicates
+
+By not including `ALL` in the `UNION`, duplicates are removed from the combined result set.
+
+.Query
+// tag::combined_queries_union[]
+[source, cypher]
+----
+MATCH (n:Actor)
+RETURN n.name AS name
+UNION
+MATCH (n:Movie)
+RETURN n.title AS name
+----
+// end::combined_queries_union[]
+
+The combined result is returned, without duplicates.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+| name
+| "Johnny Depp"
+| "Sarah Jessica Parker"
+| "Ed Wood"
+|Rows: 3
+|===
+
+[role=label--new-5.19]
+[[union-distinct]]
+=== UNION DISTINCT
+
+Removal of duplicates can also be accomplished by explicitly including `DISTINCT` in the `UNION`.
+The `UNION DISTINCT` keyword was introduced as part of Cypher's xref:appendix/gql-conformance/index.adoc[], and using it is functionally the same as using simple `UNION`.
+
+.Query
+[source, cypher]
+----
+MATCH (n:Actor)
+RETURN n.name AS name
+UNION DISTINCT
+MATCH (n:Movie)
+RETURN n.title AS name
+----
+
+The combined result is returned, without duplicates.
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+| name
+| "Johnny Depp"
+| "Sarah Jessica Parker"
+| "Ed Wood"
+|Rows: 3
+|===
+
+
+[[post-union-processing]]
+== Post-union processing
+
+The `UNION` clause can be used within a xref:subqueries/call-subquery.adoc[`CALL` subquery] to further process the combined results before a final output is returned.
+For example, the below query xref:functions/aggregating.adoc#functions-count[counts] the occurrences of each `name` property returned after the `UNION ALL` within the `CALL` subquery.
+
+[NOTE]
+The below query uses an empty xref:subqueries/call-subquery.adoc#variable-scope-clause[variable scope clause]: `CALL () { ... }` (introduced in Neo4j 5.23).
+If you are using an older version of Neo4j, use `CALL { ... }` instead.
+For more information, see xref:subqueries/call-subquery.adoc#import-variables[CALL subqueries -> Importing variables].
+
+.Query
+// tag::combined_queries_post_union_processing[]
+[source, cypher]
+----
+CALL () { 
+  MATCH (a:Actor)
+  RETURN a.name AS name
+UNION ALL
+  MATCH (m:Movie)
+  RETURN m.title AS name
+}
+RETURN name, count(*) AS count
+ORDER BY count
+----
+// end::combined_queries_post_union_processing[]
+
+.Result
+[role="queryresult",options="header,footer",cols="2*<m"]
+|===
+| name | count
+| "Ed Wood" | 2
+| "Johnny Depp" | 1
+| "Sarah Jessica Parker" | 1
+2+d|Rows: 3
+|===
+
+For more information, see xref:subqueries/call-subquery.adoc#call-post-union[`CALL` subqueries -> Post-union processing].

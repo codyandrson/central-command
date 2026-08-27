@@ -1,0 +1,278 @@
+# ============================================================================
+# Knowledge graph — Neo4j PINNED to the chromebox, Graphiti FLOATS.
+#
+#   Neo4j is the awkward one: memory-heavy (a ~905 MB JVM) AND stateful, so it
+#   cannot float — local-path pins its PV to one node, and Neo4j explicitly
+#   forbids NFS (no file locking -> store corruption), so shared storage is not
+#   a way out. the operator's call (2026-07-31) is to pin it to the CHROMEBOX and take
+#   the JVM off the Pi entirely. Consequence, accepted deliberately: if the
+#   chromebox is down the knowledge graph is down. That is consistent with the
+#   project's own language about off-box things being degradable capabilities
+#   rather than dependencies.
+#
+#   Graphiti is stateless (its state IS Neo4j), so it floats like LiteLLM.
+#
+#   TWO NAMING CONSTRAINTS, both load-bearing:
+#     1. The Service MUST be named `graphiti`. The derived image patches
+#        FastMCP's DNS-rebinding allowlist to exactly {graphiti, localhost,
+#        127.0.0.1} and answers any other Host header with HTTP 421. In-cluster
+#        callers use `graphiti`; the Pi host uses `localhost` via ServiceLB.
+#        Both are on the list. Renaming this Service breaks the graph.
+#     2. The Service in front of Neo4j MUST be named `neo4j`, because
+#        NEO4J_URI=bolt://neo4j:7687 is what Graphiti is configured with.
+#
+#   cc-neo4j is ClusterIP ONLY — verified 2026-07-31 that the app holds zero
+#   direct Neo4j references and reaches the graph solely through Graphiti's MCP
+#   endpoint. Stricter than the compose stack, which bound 7474/7687 on loopback.
+# ============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cc-neo4j-data
+  namespace: central-command
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: central-command
+spec:
+  selector:
+    app: cc-neo4j
+  ports:
+    - name: bolt
+      port: 7687
+      targetPort: 7687
+    - name: http
+      port: 7474
+      targetPort: 7474
+---
+# Name is load-bearing — see constraint 1 in the header.
+apiVersion: v1
+kind: Service
+metadata:
+  name: graphiti
+  namespace: central-command
+spec:
+  type: LoadBalancer
+  selector:
+    app: cc-graphiti
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-neo4j
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-neo4j
+  template:
+    metadata:
+      labels:
+        app: cc-neo4j
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: chromebox
+      # NOT OPTIONAL — without it Neo4j CrashLoops on its own Service name.
+      # Kubernetes injects service-discovery env vars for every Service in the
+      # namespace (NEO4J_PORT_7687_TCP_PORT, NEO4J_PORT_7474_TCP_ADDR, ...), and
+      # the Neo4j entrypoint turns EVERY NEO4J_-prefixed variable into a config
+      # setting by lowercasing and swapping _ for . So the injected var becomes
+      # the setting `PORT.7687.TCP.PORT` and startup dies with:
+      #   Failed to read config: Unrecognized setting. No declared setting with
+      #   name: PORT.7687.TCP.PORT
+      # Hit on the first cutover, 2026-07-31. The pod reaches everything it needs
+      # by DNS, so switching the legacy service links off costs nothing.
+      # Do NOT "fix" this with server.config.strict_validation.enabled=false —
+      # that silences the symptom and leaves junk settings being parsed.
+      enableServiceLinks: false
+      containers:
+        - name: neo4j
+          image: docker.io/library/neo4j:5.26.2
+          env:
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef: {name: cc-neo4j, key: NEO4J_AUTH}
+            # Heap/pagecache kept at the compose values on purpose. The
+            # chromebox has room to raise them, but that is a behaviour change
+            # worth making deliberately and measuring, not a free side effect
+            # of the move.
+            - name: NEO4J_server_memory_heap_initial__size
+              value: 512m
+            - name: NEO4J_server_memory_heap_max__size
+              value: 1G
+            - name: NEO4J_server_memory_pagecache_size
+              value: 512m
+          ports:
+            - {name: bolt, containerPort: 7687}
+            - {name: http, containerPort: 7474}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+          readinessProbe:
+            httpGet: {path: /, port: 7474}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests: {memory: 768Mi, cpu: 250m}
+            limits: {memory: 2Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cc-neo4j-data
+        - name: logs
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-graphiti
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-graphiti
+  template:
+    metadata:
+      labels:
+        app: cc-graphiti
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [chromebox]
+      tolerations:
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+      # Same reasoning as cc-neo4j above, as a precaution rather than a fix for
+      # an observed crash: the injected NEO4J_PORT=tcp://10.43.x.x:7687 would sit
+      # alongside the NEO4J_URI this container actually reads, and a client
+      # library that prefers the wrong one would fail in a thoroughly confusing
+      # way. It resolves neo4j by DNS; it does not need the legacy links.
+      enableServiceLinks: false
+      containers:
+        - name: graphiti
+          # LOCALLY BUILT, and it must exist on BOTH nodes because this pod
+          # floats: arm64 on the Pi, amd64 on the chromebox. There is no
+          # registry in play, so build-graphiti-image.sh imports it straight
+          # into each node's containerd. IfNotPresent (never Always) — Always
+          # would try to pull a tag that exists nowhere and CrashLoop.
+          image: cc-graphiti:1.0.2-anthropic
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CONFIG_PATH
+              value: /app/mcp/config/config.yaml
+            - name: NEO4J_URI
+              value: bolt://neo4j:7687
+            - name: NEO4J_USER
+              value: neo4j
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: cc-neo4j, key: NEO4J_PASSWORD}
+            # The LLM that does entity extraction. Off Anthropic since
+            # 2026-08-01 — this is a LiteLLM virtual key scoped to
+            # models=["graphiti-llm"], the bridged
+            # openai/chat_completions/qwen3.8-27b entry. See the long note
+            # in graphiti/config.yaml for why the bridged alias is required.
+            - name: GRAPHITI_LLM_API_KEY
+              valueFrom:
+                secretKeyRef: {name: cc-graphiti, key: GRAPHITI_LLM_API_KEY}
+            # ANTHROPIC_API_KEY is deliberately NO LONGER PASSED (2026-08-01).
+            # config.yaml's llm block is `provider: openai` now, so nothing
+            # constructs an AnthropicClient and nothing reads this. Graphiti
+            # reaches no external provider at all: LLM, embeddings and reranker
+            # are all the workstation via LiteLLM. Re-add it only alongside a
+            # config.yaml change that actually selects the anthropic provider.
+            # Embeddings go through THIS cluster's LiteLLM to the workstation's
+            # Qwen3-Embedding. Endpoint + credential only: the MODEL and
+            # DIMENSIONS are literals in graphiti/config.yaml because they must
+            # agree with each other AND with the graph's stored vectors.
+            - name: EMBEDDER_API_URL
+              value: http://litellm:4000/v1
+            - name: EMBEDDER_API_KEY
+              valueFrom:
+                secretKeyRef: {name: cc-graphiti, key: EMBEDDER_API_KEY}
+            # The RERANKER's endpoint, not the embedder's. graphiti_core builds
+            # its cross-encoder as OpenAIRerankerClient() with no config, so the
+            # openai SDK falls back to these two vars — the only seam available
+            # without patching the image. The target MUST expose
+            # logprobs/top_logprobs (it scores passages from token
+            # log-probabilities), so an Anthropic model is never a valid target.
+            - name: OPENAI_BASE_URL
+              value: http://litellm:4000/v1
+            # REQUIRED, and NOT for embeddings. Dropping it crash-loops startup:
+            # Graphiti.__init__ unconditionally constructs OpenAIRerankerClient,
+            # which raises without a key (graphiti.py:224 ->
+            # openai/_client.py:514). Holds a LiteLLM virtual key, not an OpenAI
+            # one, because OPENAI_BASE_URL points at LiteLLM. The var name is
+            # dictated by the openai SDK and cannot be renamed.
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: cc-graphiti, key: RERANKER_API_KEY}
+            # TRUE CROSS-ENCODER (2026-08-19, cc-rerank-client.patch): set, this
+            # routes reranking to LiteLLM /rerank -> the workstation's
+            # Qwen3-Reranker-0.6B (llama.cpp --rerank, :8082) instead of the
+            # logprob-classifier prompts above — those comments describe the
+            # FALLBACK path now. Rollback = delete this var (upstream default
+            # returns). The virtual key above must stay scoped to this model.
+            - name: GRAPHITI_RERANK_MODEL
+              value: qwen3-rerank-local
+            - name: GRAPHITI_TELEMETRY_ENABLED
+              value: "false"
+            # Was 3 on the Pi ("4 cores shared with k3s"). Left at 3: raising it
+            # is a chromebox-only win that evaporates on the Pi-fallback path,
+            # and extraction concurrency is worth tuning with measurements.
+            - name: SEMAPHORE_LIMIT
+              value: "3"
+          ports:
+            - {name: http, containerPort: 8000}
+          volumeMounts:
+            - name: config
+              mountPath: /app/mcp/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests: {memory: 192Mi, cpu: 100m}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: config
+          configMap:
+            name: cc-graphiti-config

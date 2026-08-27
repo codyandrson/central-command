@@ -1,0 +1,5 @@
+:description: List of available tutorials in the Cypher Manual.
+= Tutorials and extended examples
+
+* xref:appendix/tutorials/basic-query-tuning.adoc[]
+* xref:appendix/tutorials/advanced-query-tuning.adoc[]

@@ -1,0 +1,50 @@
+---
+title: "customTaskExtensionCallbackConfiguration resource type"
+description: "Defines if and in which time span a callback is expected from the Azure Logic App."
+author: "AlexFilipin"
+ms.localizationpriority: medium
+ms.subservice: "entra-id-governance"
+doc_type: resourcePageType
+ms.date: 07/22/2024
+---
+
+# customTaskExtensionCallbackConfiguration resource type
+
+Namespace: microsoft.graph.identityGovernance
+
+Defines if, and in, which time span a callback is expected from the Azure Logic App. This object is configured in the **callbackConfiguration** property of the [customTaskExtension](../resources/identitygovernance-customtaskextension.md) resource.
+
+Inherits from  [customExtensionCallbackConfiguration](../resources/customextensioncallbackconfiguration.md).
+
+## Properties
+
+|Property|Type|Description|
+|:---|:---|:---|
+|timeoutDuration|Duration| Callback time out in ISO 8601 time duration. Accepted time durations are between 30 minutes to 3 hours. For example, PT30M for 30 minutes and PT3H for three hours. Inherited from [customExtensionCallbackConfiguration](../resources/customextensioncallbackconfiguration.md).|
+|authorizedApps|microsoft.graph.application collection| A collection of unique identifiers or **appIds** of the applications that are allowed to [resume](../api/identitygovernance-taskprocessingresult-resume.md) a task processing result.|
+
+
+## Relationships
+
+None.
+
+## JSON representation
+
+The following JSON representation shows the resource type.
+<!-- {
+  "blockType": "resource",
+  "@odata.type": "microsoft.graph.identityGovernance.customTaskExtensionCallbackConfiguration",
+  "baseType": "microsoft.graph.customExtensionCallbackConfiguration"
+}
+-->
+``` json
+{
+  "@odata.type": "#microsoft.graph.identityGovernance.customTaskExtensionCallbackConfiguration",
+  "timeoutDuration": "String (duration)",
+  "authorizedApps":[
+    {
+      "@odata.type": "microsoft.graph.application"
+    }
+] 
+}
+```

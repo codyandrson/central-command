@@ -1,0 +1,40 @@
+# Sandbox-runner (D-sandbox, slice 1) — SEPARATE from cc-uvicorn on purpose.
+#
+# This unit runs central_command/sandbox/runner.py, a standalone, credential-free
+# FastAPI service that drives ephemeral gVisor Jobs on the chromebox by
+# shelling out to kubectl with a namespace-scoped (cc-sandbox) kubeconfig. It
+# holds no Postgres connection, no LiteLLM key, no Jira token — see the
+# module's own docstring for why that boundary matters.
+#
+# Install (one time, as a user with sudo):
+#   ./deploy/k3s/make-sandbox-kubeconfig.sh   # writes the kubeconfig this unit reads
+#   sudo cp deploy/k3s/cc-sandbox-runner.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cc-sandbox-runner
+#
+# Modeled on deploy/k3s/cc-uvicorn.service: Requires=k3s.service (this talks
+# to the cluster on every request, not just at startup, so it genuinely
+# cannot do anything useful without k3s up).
+
+[Unit]
+Description=Central Command sandbox-runner (uvicorn on 127.0.0.1:8090)
+After=network-online.target k3s.service
+Wants=network-online.target
+Requires=k3s.service
+
+[Service]
+User=codyslab
+Group=codyslab
+WorkingDirectory=/home/codyslab/Central Command
+# .env carries CC_SANDBOX_RUNNER_TOKEN (and any CC_SANDBOX_* overrides) so the
+# runner and the app enforce/send the SAME token from the same file.
+EnvironmentFile=-/home/codyslab/Central Command/.env
+Environment=CC_SANDBOX_KUBECONFIG=/home/codyslab/.cc-sandbox-runner.kubeconfig
+Environment=CC_SANDBOX_COPY_ROOT=/home/codyslab/Central Command
+ExecStart=/home/codyslab/Central Command/.venv/bin/uvicorn central_command.sandbox.runner:app --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

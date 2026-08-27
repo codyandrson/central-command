@@ -1,0 +1,263 @@
+[[cypher-values]]
+= Property, structural, and constructed values
+:description: This section provides an overview of the property, structural, and constructed data types supported by Cypher.
+:page-aliases: values-and-types/property-structural-composite.adoc
+
+
+Cypher provides first class support for a number of data value types.
+These fall into the following three categories: *property*, *structural*, and *constructed*.
+This section will first provide a brief overview of each type, and then go into more detail about the property data type. 
+
+[[property-types]]
+== Property types
+
+A property type value is one that can be stored as a node or relationship property.
+
+Property types are the most primitive types in Cypher and include the following: `BOOLEAN`, `DATE`, `DURATION`, `FLOAT`, `INTEGER`, `LIST`, `LOCAL DATETIME`, `LOCAL TIME`, `POINT`, `STRING`, `ZONED DATETIME`, and `ZONED TIME`.
+
+* Property types can be returned from Cypher queries.
+* Property types can be used as xref::syntax/parameters.adoc[parameters].
+* Property types can be stored as properties.
+* Property types can be constructed with Cypher literals.
+
+Homogeneous lists of simple types can be stored as properties, although lists in general (see xref::values-and-types/property-structural-constructed.adoc#constructed-types[Constructed types]) cannot be stored as properties.
+Lists stored as properties cannot contain `null` values.
+
+Cypher also provides pass-through support for byte arrays, which can be stored as property values.
+Byte arrays are supported for performance reasons, since using Cypher's generic data type, `LIST<INTEGER>` (where each `INTEGER` has a 64-bit representation), would be too costly.
+However, byte arrays are _not_ considered a first class data type by Cypher, so they do not have a literal representation.
+
+
+[[structural-types]]
+== Structural types
+
+The following data types are included in the structural types category: `NODE`, `RELATIONSHIP`, and `PATH`.
+
+* Structural types can be returned from Cypher queries.
+* Structural types cannot be used as xref::syntax/parameters.adoc[parameters].
+* Structural types cannot be stored as properties.
+* Structural types cannot be constructed with Cypher literals.
+
+The `NODE` data type includes: id, label(s), and a map of properties.
+Note that labels are not values, but a form of pattern syntax. 
+
+The `RELATIONSHIP` data type includes: id, relationship type, a map of properties, start node id, and end node id.
+
+The `PATH` data type is an alternating sequence of nodes and relationships.
+
+[NOTE]
+====
+Nodes, relationships, and paths are returned as a result of pattern matching.
+In Neo4j, all relationships have a direction.
+However, you can have the notion of undirected relationships at query time.
+====
+
+[[constructed-types]]
+== Constructed types
+
+The following data types are included in the constructed types category: `LIST` and `MAP`.
+
+* Constructed types can be returned from Cypher queries.
+* Constructed types can be used as xref::syntax/parameters.adoc[parameters].
+* Constructed types cannot be stored as properties (with the exception of homogenous lists).
+* Constructed types can be constructed with Cypher literals.
+
+The `LIST` data type can be either a homogenous collection of simple values, or a heterogeneous, ordered collection of values, each of which can have any property, structural or constructed type.
+
+The `MAP` data type is a heterogeneous, unordered collection of (_Key_, _Value_) pairs, where _Key_ is a literal and  _Value_ can have any property, structural, or constructed type.
+
+Constructed type values can also contain `null`.
+For more details, see xref::values-and-types/working-with-null.adoc[working with null].
+
+[[types-synonyms]]
+== Types and their synonyms
+
+The table below shows the types and their syntactic synonyms.
+
+These types (and their synonyms) can be used in xref::expressions/predicates/type-predicate-expressions.adoc[type predicate expressions] and in xref::constraints/create-constraints.adoc#create-property-type-constraints[property type constraints].
+They are also returned as a `STRING` value when using the xref::functions/scalar.adoc#functions-valueType[valueType()] function.
+
+However, not all types can be used in all places.
+
+[.synonyms, opts="header", cols="2a,2a"]
+|===
+| Type | Synonyms
+| `ANY` | `ANY VALUE`
+| `BOOLEAN` | `BOOL`
+| `DATE` |
+| `DURATION` |
+| `FLOAT` |
+| `INTEGER` | `INT`, `SIGNED INTEGER`
+| `LIST<INNER_TYPE>` | `ARRAY<INNER_TYPE>`, `INNER_TYPE LIST`, `INNER_TYPE ARRAY`
+| `LOCAL DATETIME` | `TIMESTAMP WITHOUT TIME ZONE`, `TIMESTAMP WITHOUT TIMEZONE`
+| `LOCAL TIME` | `TIME WITHOUT TIME ZONE`, `TIME WITHOUT TIMEZONE`
+| `MAP` |
+| `NODE` | `ANY NODE`, `VERTEX`, `ANY VERTEX`
+| `NOTHING` |
+| `null` |
+| `PATH` |
+| `POINT` |
+| `PROPERTY VALUE` | `ANY PROPERTY VALUE`
+| `RELATIONSHIP` | `ANY RELATIONSHIP`, `EDGE`, `ANY EDGE`
+| `STRING` | `VARCHAR`
+| `ZONED DATETIME` | `TIMESTAMP WITH TIME ZONE`, `TIMESTAMP WITH TIMEZONE`
+| `ZONED TIME` | `TIME WITH TIME ZONE`, `TIME WITH TIMEZONE`
+| `INNER_TYPE_1 \| INNER_TYPE_2...` | `ANY<INNER_TYPE_1 \| INNER_TYPE_2...>`
+|===
+
+All Cypher types contain the `null` value. To make them not nullable, `NOT NULL` can be appended to the end of the type (e.g. `BOOLEAN NOT NULL`, `LIST<FLOAT NOT NULL>`).
+A shorthand syntax equivalent, introduced in Neo4j 5.14, for `NOT NULL` is to use an exclamation mark `!` (e.g. `INTEGER!`, `LIST<STRING!>`).
+Note that closed dynamic types (`INNER_TYPE_1 | INNER_TYPE_2...`) cannot be appended with `NOT NULL`: all inner types must be nullable, or all appended with `NOT NULL`.
+
+[[type-normalization]]
+== Type Normalization
+
+Cypher runs a normalization algorithm on all input types, simplifying the given type to a deterministic representation for equivalent types.
+Types are simplified to their default name (e.g. `BOOL` is simplified to `BOOLEAN`).
+Encompassing types are absorbed (e.g. `LIST<BOOLEAN> | LIST<BOOLEAN | INTEGER>` is normalized to `LIST<BOOLEAN | INTEGER>`).
+Types are also xref:values-and-types/property-structural-constructed.adoc#ordering-of-types[ordered].
+
+The type `PROPERTY VALUE` is expanded to a closed dynamic union of all valid property types, and if all types are represented, then the normalization would simplify to `ANY`.
+
+For example, given the closed dynamic type `BOOL | LIST<INT> | BOOLEAN | LIST<FLOAT | INT>`, the normalized type would be: `BOOLEAN | LIST<INTEGER | FLOAT>`.
+
+This normalization is run on types used in xref::expressions/predicates/type-predicate-expressions.adoc[type predicate expressions], and in xref::constraints/create-constraints.adoc#create-property-type-constraints[property type constraints].
+Type normalization is also used to ensure the consistency of the output for the xref::functions/scalar.adoc#functions-valueType[valueType()] function.
+
+[[ordering-of-types]]
+=== Ordering of types
+The ordering of types is as follows:
+
+    *  Predefined types
+    ** `NOTHING`
+    ** `null`
+    ** `BOOLEAN`
+    ** `STRING`
+    ** `INTEGER`
+    ** `FLOAT`
+    ** `DATE`
+    ** `LOCAL TIME`
+    ** `ZONED TIME`
+    ** `LOCAL DATETIME`
+    ** `ZONED DATETIME`
+    ** `DURATION`
+    ** `POINT`
+    ** `NODE`
+    ** `RELATIONSHIP`
+    * Constructed types
+    ** `MAP`
+    ** `LIST<INNER_TYPE>` (ordered by the inner type)
+    ** `PATH`
+    * Dynamic union types
+    ** `INNER_TYPE_1 \| INNER_TYPE_2...` (ordered by specific rules for closed dynamic union type)
+    ** `ANY`
+
+Subtypes are always ordered before any enclosing types (e.g. `LIST<INTEGER>` is ordered before `LIST<INTEGER | FLOAT>`).
+This also means that the `NOT NULL` variants of each type comes before the nullable variant.
+
+The order between two closed dynamic unions `A` and `B` is determined as followed:
+
+    * If `A` has fewer inner types than `B`, `A` is ordered first.
+    * If `A` and `B` have the same number of inner types, they are ordered according to the order of the first inner type that differ (lexicographic order).
+
+The resulting order is deterministic.
+
+== Property type details
+
+The below table provides more detailed information about the various property types that Cypher supports. 
+Note that Cypher types are implemented using Java, and that below table references Java value constants. 
+
+[.types, opts="header", cols="2,2,2,1"]
+|===
+| Type | Min. value | Max. value | Precision
+
+| `BOOLEAN`
+| `False`
+| `True`
+| -
+
+| `DATE`
+| `-999_999_999-01-01`
+| `+999_999_999-12-31`
+| Days
+
+| `DURATION`
+| `P-292471208677Y-6M-15DT-15H-36M-32S`
+| `P292471208677Y6M15DT15H36M32.999999999S`
+| Nanoseconds
+
+| `FLOAT`
+| `Double.MIN_VALUE` footnote:[The minimum value represents the minimum positive value of a `FLOAT`, i.e. the closest value to zero.
+It is also possible to have a negative float.]
+| `Double.MAX_VALUE`
+| 64 bit
+
+| `INTEGER`
+| `Long.MIN_VALUE`
+| `Long.MAX_VALUE`
+| 64 bit
+
+| `LOCAL DATETIME`
+| `-999_999_999-01-01T00:00:00`
+| `+999_999_999-12-31T23:59:59.999999999`
+| Nanoseconds
+
+| `LOCAL TIME`
+| `00:00:00`
+| `23:59:59.999999999`
+| Nanoseconds
+
+| `POINT`
+| *Cartesian*: (`-Double.MAX_VALUE`, `-Double.MAX_VALUE`)
+
+*Cartesian_3D*: (`-Double.MAX_VALUE`, `-Double.MAX_VALUE`, `-Double.MAX_VALUE`)
+
+*WGS_84*: (`-180`, `-90`)
+
+*WGS_84_3D*: (`-180`, `-90`, `-Double.MAX_VALUE`)
+
+| *Cartesian*: (`Double.MAX_VALUE`, `Double.MAX_VALUE`)
+
+*Cartesian_3D*: (`Double.MAX_VALUE`, `Double.MAX_VALUE`, `Double.MAX_VALUE`)
+
+*WGS_84*: (`180`, `90`)
+
+*WGS_84_3D*: (`180`, `90`, `Double.MAX_VALUE`)
+
+| The precision of each coordinate of the `POINT` is 64 bit as they are floats.
+
+| `STRING`
+| -
+| -
+| -
+
+| `ZONED DATETIME`
+| `-999_999_999-01-01T00:00:00+18:00`
+| `+999_999_999-12-31T23:59:59.999999999-18:00`
+| Nanoseconds
+
+| `ZONED TIME`
+| `00:00:00+18:00`
+| `23:59:59.999999999-18:00`
+| Nanoseconds
+|===
+
+=== Java value details
+
+[.values, opts="header", width=75%, cols="1,3"]
+|===
+| Name | Value
+
+| `Double.MAX_VALUE`
+| 1.7976931348623157e+308 
+
+| `Double.MIN_VALUE` 
+| 4.9e-324 
+
+| `Long.MAX_VALUE` 
+| 2^63-1 
+
+| `Long.MIN_VALUE`
+| -2^63 
+|===
+

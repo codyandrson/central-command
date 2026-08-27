@@ -1,0 +1,26 @@
+# Phase-1 infra. Postgres is the framework spine (state, ledger, event log, DBOS).
+# Graphiti/Neo4j and n8n are assumed to already run in the homelab and are reached
+# over MCP (see .env); they are not started here.
+services:
+  postgres:
+    image: postgres:16
+    container_name: cc-postgres
+    environment:
+      POSTGRES_USER: central_command
+      POSTGRES_PASSWORD: central_command
+      POSTGRES_DB: central_command
+    ports:
+      # 5442, not 5432: n8n's `nat-postgres` already owns 5432 on this host and
+      # must never be reused for Central Command. Bound to localhost — single-operator.
+      - "127.0.0.1:5442:5432"
+    volumes:
+      - cc-pgdata:/var/lib/postgresql/data
+      - ./central_command/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U central_command"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cc-pgdata:

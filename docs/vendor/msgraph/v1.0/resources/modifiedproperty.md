@@ -1,0 +1,53 @@
+---
+title: "modifiedProperty resource type"
+description: "Indicates all the properties on a Microsoft Entra resource that have been modified, including the old and new values."
+ms.localizationpriority: medium
+author: "egreenberg14"
+ms.subservice: "entra-directory-management"
+doc_type: resourcePageType
+ms.date: 07/22/2024
+---
+
+# modifiedProperty resource type
+
+Namespace: microsoft.graph
+
+Indicates all the properties on a Microsoft Entra resource that have been modified, including the old and new values. This object is configured in the **modifiedProperties** property of [provisioningObjectSummary](../resources/provisioningobjectsummary.md) and [targetResource](../resources/targetresource.md).
+
+## Properties
+
+| Property	   | Type	|Description|
+|:---------------|:--------|:----------|
+|displayName|String|Indicates the property name of the target attribute that was changed.|
+|newValue|String|Indicates the updated value for the propery.|
+|oldValue|String|Indicates the previous value (before the update) for the property.|
+
+## JSON representation
+
+The following JSON representation shows the resource type.
+
+<!-- {
+  "blockType": "resource",
+  "optionalProperties": [
+
+  ],
+  "@odata.type": "microsoft.graph.modifiedProperty"
+}-->
+
+```json
+{
+  "displayName": "String",
+  "newValue": "String",
+  "oldValue": "String"
+}
+```
+
+<!-- uuid: 8fcb5dbc-d5aa-4681-8e31-b001d5168d79
+2015-10-25 14:57:30 UTC -->
+<!-- {
+  "type": "#page.annotation",
+  "description": "modifiedProperty resource",
+  "keywords": "",
+  "section": "documentation",
+  "tocPath": ""
+}-->

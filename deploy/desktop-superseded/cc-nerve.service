@@ -1,0 +1,29 @@
+# Central Command Nerve cockpit UI — systemd USER unit (reboot resilience).
+#
+# Serves the vendored Nerve web UI (web/) on 127.0.0.1:3080. Config lives in
+# web/.env (PORT, GATEWAY_URL -> the FastAPI gateway on 8080, ALLOWED_ORIGINS
+# + NERVE_AUTH for the Tailscale Serve origin). Tailnet exposure is handled
+# by `tailscale serve --bg http://127.0.0.1:3080` (persisted in tailscaled
+# state, survives reboots on its own) — this unit only needs the local server.
+#
+# Install (one time, as codys-lab):
+#   cp deploy/cc-nerve.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now cc-nerve
+#
+# After `npm run build` in web/, restart this unit to pick up the new bundle.
+
+[Unit]
+Description=Central Command Nerve cockpit (node on 127.0.0.1:3080)
+After=network-online.target default.target
+# Not Requires= — the UI is useful even while the API restarts; it reconnects.
+Wants=cc-uvicorn.service
+
+[Service]
+WorkingDirectory=/home/codys-lab/Central Command/web
+ExecStart=/usr/bin/node server-dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

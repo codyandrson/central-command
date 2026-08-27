@@ -1,0 +1,6 @@
+name: vite
+source_repo: https://github.com/vitejs/vite
+source_ref: v7.3.1
+fetched_url: https://codeload.github.com/vitejs/vite/tar.gz/v7.3.1
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE]

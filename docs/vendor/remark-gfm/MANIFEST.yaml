@@ -1,0 +1,6 @@
+name: remark-gfm
+source_repo: https://github.com/remarkjs/remark-gfm
+source_ref: 4.0.1
+fetched_url: https://codeload.github.com/remarkjs/remark-gfm/tar.gz/4.0.1
+fetched_date: 2026-08-25
+subpaths: [readme.md, license]

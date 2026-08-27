@@ -1,0 +1,15 @@
+:description: How to install Neo4j on Linux using Debian or RPM packages, or from a Tar archive.
+[[linux-installation]]
+= Linux installation
+
+You can install Neo4j on Linux using Debian or RPM packages, or from a TAR archive.
+
+
+This section describes how to:
+
+* xref:installation/linux/debian.adoc[Install Neo4j on Debian and Debian-based distributions (.deb)] using the Neo4j Debian package.
+* xref:installation/linux/rpm.adoc[Install Neo4j on Red Hat, CentOS, Fedora, and Amazon Linux (.rpm)] using the Neo4j RPM package.
+* xref:installation/linux/tarball.adoc[Install Neo4j on Linux from a tarball] and run it as a console application or a service.
+* xref:installation/linux/systemd.adoc[Configure and operate the Neo4j system service].
+
+

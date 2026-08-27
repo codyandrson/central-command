@@ -1,0 +1,336 @@
+:description: The `CREATE` clause is used to create nodes and relationships.
+
+[[query-create]]
+= CREATE
+
+The `CREATE` clause allows you to create nodes and relationships.
+To define these entities, `CREATE` uses a syntax similar to that of xref::clauses/match.adoc[`MATCH`].
+However, while xref::patterns/index.adoc[patterns] only need to evaluate to either true or false, the syntax for `CREATE` needs to specify exactly what nodes and relationships to create.
+
+Unlike xref:clauses/merge.adoc[`MERGE`], which first checks for a match and only creates anything if nothing is found, `CREATE` always creates the given pattern, regardless of whether matching patterns exist.
+For more information, see xref:clauses/create.adoc#comparing-create-and-merge[Comparing `CREATE` and `MERGE`] below.
+
+[[create-nodes]]
+== Create nodes
+
+The `CREATE` clause allows you to create one or more nodes.
+Each node can be assigned labels and properties.
+You can bind each node to a variable that you can refer to later in the query.
+Multiple labels are separated by colons.
+
+.Query
+[source, cypher]
+----
+CREATE (charlie:Person:Actor {name: 'Charlie Sheen'}), (oliver:Person:Director {name: 'Oliver Stone'})
+----
+
+As of Neo4j 5.18, multiple labels can also be separated by an ampersand `&`, in the same manner as it is used in xref:patterns/reference/node-and-relationship-patterns.adoc#label-expressions[label expressions].
+Separation by colon `:` and ampersand `&` cannot be mixed in the same clause.
+
+.Query
+[source, cypher, indent=0]
+----
+CREATE (charlie:Person&Actor {name: 'Charlie Sheen'}), (oliver:Person&Director {name: 'Oliver Stone'})
+----
+
+Both of the above queries create two nodes, bound to the variables `charlie` and `oliver`, each with a `Person` label and a `name` property.
+The node representing Charlie Sheen also has the label `Actor` while the node representing Oliver Stone is assigned the label `Director`.
+
+[[create-relationships]]
+== Create relationships
+
+Relationships can also be created using the `CREATE` clause.
+Unlike nodes, relationships always need exactly one relationship type and a direction.
+Similar to nodes, relationships can be assigned properties and relationship types and be bound to variables.
+
+.Query
+[source, cypher]
+----
+CREATE (charlie:Person:Actor {name: 'Charlie Sheen'})-[:ACTED_IN {role: 'Bud Fox'}]->(wallStreet:Movie {title: 'Wall Street'})<-[:DIRECTED]-(oliver:Person:Director {name: 'Oliver Stone'})
+----
+
+This query creates the `Person` nodes for Charlie Sheen and Oliver Stone and the `Movie` node for Wall Street.
+It also created the relationships of the types `ACTED_IN` and `DIRECTED` between them.
+
+[[comparing-create-and-merge]]
+== Comparing `CREATE` and `MERGE`
+
+`CREATE` and `MERGE` are both used to add nodes and relationships to the graph, but they differ in how they handle existing data.
+
+`CREATE` unconditionally creates a new node or relationship, without checking whether a matching one already exists.
+Running the same `CREATE` statement multiple times will therefore produce duplicate entries.
+
+.Two identical `CREATE` statements will create two separate but identical entities
+[source, cypher]
+----
+CREATE (:Person {name: "Alice"})
+CREATE (:Person {name: "Alice"})
+----
+
+`CREATE` does not check for existing matches, so it will create duplicates unless a xref:constraints/create-constraints.adoc#create-property-uniqueness-constraints[uniqueness constraint] or xref:constraints/create-constraints.adoc#create-key-constraints[key constraint] prevents it.
+With a uniqueness constraint on `:Person(name)`, the second `CREATE` statement above would fail instead.
+
+`MERGE` first attempts to match an existing pattern in the graph.
+If a match is found, it uses the existing node or relationship; if not, it creates a new one.
+This makes `MERGE` idempotent; running it repeatedly with the same pattern will not create duplicates.
+
+.Two identical `MERGE` statements will result in only one entity, as the second matches the first
+[source, cypher]
+----
+MERGE (:Person {name: "John"})
+MERGE (:Person {name: "John"})
+----
+
+.When to use `CREATE` and `MERGE`
+[cols="1,2,2", options="header"]
+|===
+| 
+| `CREATE` 
+| `MERGE`
+
+| *Duplicates*
+| Always creates new data.
+| Creates only if no match exists; safe for incremental imports and re-runs.
+
+| *Performance*
+| Fast — no lookup required.
+| Requires a lookup per row; without an xref:indexes/search-performance-indexes/index.adoc[index], this means a full label scan for every row.
+
+| *Best for*
+a|
+* Loading into a fresh database with data you're certain is clean.
+* IDs guaranteed unique, import won't be re-run.
+a|
+* Incremental imports or re-runnable jobs.
+* Ensuring uniqueness when data may already exist.
+|===
+
+[[reusing-variables]]
+== Reusing variables
+The previous example created a path between the specified nodes.
+Note, that these newly created nodes and relationships are not connected to what was previously in the graph.
+To connect them to already existing data, bind the desired nodes and relationships to variables.
+These variables can then be passed along to subsequent clauses in a query that target pre-existing elements in the graph.
+
+.Query
+[source, cypher]
+----
+MATCH (charlie:Person {name: 'Charlie Sheen'}), (oliver:Person {name: 'Oliver Stone'})
+CREATE (charlie)-[:ACTED_IN {role: 'Bud Fox'}]->(wallStreet:Movie {title: 'Wall Street'})<-[:DIRECTED]-(oliver)
+----
+
+In this example, the `MATCH` clause finds the nodes Charlie Sheen and Oliver Stone and binds them to the `charlie` and `oliver` variables respectively.
+These variables are then passed along to the subsequent `CREATE` clause, which creates new relationships from the bound nodes.
+
+You can also reuse variables from the same `CREATE`, both in the same or a later clause.
+This way, you can, for example, define constructs that are more complex than just a linear path.
+
+.Query
+[source, cypher]
+----
+CREATE p = (charlie:Person:Actor {name: 'Charlie Sheen'})-[:ACTED_IN {role: 'Bud Fox'}]->(wallStreet:Movie {title: 'Wall Street'})<-[:DIRECTED]-(oliver:Person:Director {name: 'Oliver Stone'}), (wallStreet)<-[:ACTED_IN {role: 'Gordon Gekko'}]-(michael:Person:Actor {name: 'Michael Douglas'})
+RETURN length(p)
+----
+
+Creates all three nodes for Charlie Sheen, Oliver Stone and Michael Douglas and connects them all to the node representing the Wall Street movie.
+It then returns the length of the path from Charlie Sheen to Oliver Stone.
+
+Note that when repeating a node's variable, you may not add labels or properties to the repetition.
+
+.Query
+[source, cypher, role=test-fail]
+----
+MATCH (charlie:Person {name: 'Charlie Sheen'})
+CREATE (charlie:Actor)
+----
+
+This query will fail because the variable `charlie` has already been bound to a pre-existing node, and therefore it cannot be reused to create a new node.
+If you intend to add a label, use the xref:clauses/set.adoc#set-set-a-label-on-a-node[`SET` clause] instead.
+
+[[reusing-variables-properties]]
+== Reusing variables in properties
+The value that can be assigned to a node's or a relationship's property can be defined by an xref::expressions/index.adoc[expression].
+
+////
+.Parameters
+[source, json, role=test-setup]
+----
+{
+  "age": 23
+}
+----
+////
+
+.Query
+[source, cypher]
+----
+MATCH (person:Person)
+  WHERE person.name IS NOT NULL
+CREATE (anotherPerson:Person {name: person.name, age: $age})
+----
+
+This example created a `Person` node with the same name as another person and the age from a xref:syntax/parameters.adoc[parameter] called `age`.
+
+Such an expression may not contain a reference to a variable that is defined in the same `CREATE` statement.
+This is to ensure that the value of a property is always clear.
+
+.Query
+[source, cypher, role=test-fail]
+----
+CREATE (charlie {score: oliver.score + 1}), (oliver {score: charlie.score + 1})
+----
+
+This query tries to create nodes such that Charlie's score is higher than Oliver's and vice versa, which is a contradiction.
+The query therefore fails.
+
+[[use-parameters-with-create]]
+== Use parameters with `CREATE`
+
+[[create-create-node-with-a-parameter-for-the-properties]]
+=== Create node with a parameter for the properties
+
+You can also create a graph entity from a map.
+All the key/value pairs in the map will be set as properties on the created relationship or node.
+In this case we add a `Person` label to the node as well.
+
+.Parameters
+[source, parameters]
+----
+{
+  "props": {
+    "name": "Andy",
+    "position": "Developer"
+  }
+}
+----
+
+.Query
+[source, cypher]
+----
+CREATE (n:Person $props)
+RETURN n
+----
+
+.Result
+[role="queryresult",options="header,footer",cols="1*<m"]
+|===
+| +n+
+| +Node[2]{name:"Andy",position:"Developer"}+
+1+d|Rows: 1 +
+Nodes created: 1 +
+Properties set: 2 +
+Labels added: 1
+|===
+
+
+[[create-create-multiple-nodes-with-a-parameter-for-their-properties]]
+=== Create multiple nodes with a parameter for their properties
+
+By providing Cypher an array of maps, it will create a node for each map.
+
+.Parameters
+[source, parameters]
+----
+{
+  "props": [ {
+    "name": "Andy",
+    "position": "Developer"
+  }, {
+    "name": "Michael",
+    "position": "Developer"
+  } ]
+}
+----
+
+.Query
+[source, cypher]
+----
+UNWIND $props AS map
+CREATE (n)
+SET n = map
+----
+
+.Result
+[role="queryresult",options="footer",cols="1*<m"]
+|===
+1+|(empty result)
+1+d|Rows: 0 +
+Nodes created: 2 +
+Properties set: 4
+|===
+
+[role=label--new-5.26]
+[[dynamic-create]]
+== Create using dynamic node labels and relationship types
+
+Node labels and relationship types can be referenced dynamically in expressions, parameters, and variables when creating nodes and relationships.
+This allows for more flexible queries and mitigates the risk of Cypher injection.
+(For more information about Cypher injection, see link:https://neo4j.com/developer/kb/protecting-against-cypher-injection/[Neo4j Knowledge Base -> Protecting against Cypher injection]).
+
+.Syntax for creating nodes and relationships dynamically
+[source, syntax]
+----
+CREATE (n:$(<expr>))
+CREATE ()-[r:$(<expr>)]->()
+----
+
+The expression must evaluate to a `STRING NOT NULL | LIST<STRING NOT NULL> NOT NULL` value.
+Using a `LIST<STRING>` with more than one item when creating a relationship using dynamic relationship types will fail.
+This is because a relationship can only have exactly one type.
+
+.Parameters
+[source, parameters]
+----
+{
+  "nodeLabels": ["Person", "Director"],
+  "relType": "DIRECTED",
+  "movies": ["Ladybird", "Little Women", "Barbie"]
+}
+----
+
+.Create nodes and relationships using dynamic node labels and relationship types
+// tag::clauses_create_dynamic_create[]
+[source, cypher]
+----
+CREATE (greta:$($nodeLabels) {name: 'Greta Gerwig'})
+WITH greta
+UNWIND $movies AS movieTitle
+CREATE (greta)-[rel:$($relType)]->(m:Movie {title: movieTitle})
+RETURN greta.name AS name, labels(greta) AS labels, type(rel) AS relType, collect(m.title) AS movies
+----
+// end::clauses_create_dynamic_create[]
+
+.Result
+[role="queryresult",options="footer",cols="4*<m"]
+|===
+| name | labels | relType | movies
+
+| "Greta Gerwig"
+| ["Person", "Director"]
+| "DIRECTED"
+| ["Ladybird", "Little Women", "Barbie"]
+4+d|Rows: 1 +
+|===
+
+[role=label--new-5.18]
+[[insert-as-synonym-of-create]]
+== `INSERT` as a synonym of `CREATE`
+
+`INSERT` can be used as a synonym to `CREATE` for creating nodes and relationships, and was introduced as part of Cypher's xref:appendix/gql-conformance/index.adoc[].
+However, `INSERT` requires that multiple labels are separated by an ampersand `&` and not by colon `:`. 
+Additionally, `INSERT` does not support using dynamic node labels and relationship types.
+
+.Query
+[source, cypher, indent=0]
+----
+INSERT (tom:Person&Actor&Director {name: 'Tom Hanks'})
+----
+
+Creates a node, bound to the variable `tom`, with the labels `Person`, `Actor`, and `Director` and a `name` property.
+
+[[create-and-concurrent-transactions]]
+== `CREATE` and concurrent transactions
+
+Checking whether a node or relationship already exists before running `CREATE` does not prevent duplicates under link:{neo4j-docs-base-uri}/operations-manual/current/database-internals/concurrent-data-access/[concurrent transactions]: concurrent transactions can each perform the check, find no existing node or relationship, and proceed to create identical entities.
+
+To reliably create an entity only if it does not already exist, use `MERGE` instead, combined with a xref:constraints/create-constraints.adoc#create-property-uniqueness-constraints[uniqueness constraint] on the merged property when merging nodes (this forces an index lock), or with both endpoint nodes bound by a preceding `MATCH` when merging relationships (forces a locking merge with locks taken on both endpoints).

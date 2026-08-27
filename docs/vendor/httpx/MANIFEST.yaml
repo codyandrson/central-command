@@ -1,0 +1,6 @@
+name: httpx
+source_repo: https://github.com/encode/httpx
+source_ref: 0.28.1
+fetched_url: https://codeload.github.com/encode/httpx/tar.gz/0.28.1
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]

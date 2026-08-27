@@ -1,0 +1,181 @@
+# ============================================================================
+# Sandbox slice 1 (2026-08-03) — the mechanism alone, no exit.
+# docs/superpowers/plans/2026-08-03-sandbox-slice1.md,
+# docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md §4/§10.1.
+#
+#   Everything here lives in its OWN namespace (`cc-sandbox`), separate from
+#   `central_command`: an agent's sandbox Job has nothing to do with the control
+#   plane's own workloads, and a compromised sandbox pod must not be able to
+#   even LIST anything in `central_command`.
+#
+#   Isolation is TWO independent layers, neither load-bearing alone:
+#     1. gVisor (`runtimeClassName: gvisor`, handler `runsc`) — installed on
+#        the CHROMEBOX only (no k3s-agent restart on the Pi's control plane).
+#        Sandbox pods carry a REQUIRED nodeAffinity to chromebox for exactly
+#        this reason; there is no fallback node.
+#     2. A default-deny-ALL NetworkPolicy, BOTH directions. `kubectl exec`
+#        rides the kubelet's own control channel, not the pod network, so
+#        exec keeps working even though every packet the sandbox tries to
+#        send or receive over the CNI is dropped — this is what makes
+#        egress=deny-all consistent with the runner still being able to
+#        drive the sandbox at all.
+#
+#   The sandbox-runner (central_command/sandbox/runner.py, deployed OUTSIDE this
+#   cluster as a Pi systemd unit) is the only actor with any access to this
+#   namespace, and its SA is scoped to jobs/pods/exec/log — nothing else, and
+#   nothing cluster-scoped (Role, never ClusterRole).
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-sandbox
+  labels:
+    app.kubernetes.io/part-of: central_command
+---
+# Handler `runsc` — installed by the chromebox infra track
+# (containerd-shim-runsc-v1 + the runsc runtime entry in
+# /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl). This object
+# is cluster-scoped and costs nothing on the Pi; only pods that request it
+# (via the required nodeAffinity above) ever land on a node that has it.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+---
+# THE SANDBOX IS CONTAINMENT, NOT RESTRICTION (the operator, 2026-08-04 — this
+# reverses the deny-all egress this file shipped with on 2026-08-03).
+#
+# The sandbox exists so an agent can work FREELY and unsupervised without any
+# risk of damaging the operator's system — not to limit what the agent can reach. An
+# agent must be able to pip/npm install, fetch docs, clone, and actually TEST
+# what it builds; an agent that cannot verify its code against real
+# dependencies writes from stale training data and ships broken work (proved
+# live 2026-08-04: echo-demo was written against mcp 1.x's FastMCP path, could
+# not be tested in-sandbox, and crashed on the deployed pod). The review gate
+# is on what LEAVES the sandbox (mcp.sync_source), never on what it reads.
+#
+# So: EGRESS IS OPEN — the internet AND the operator's own internal services
+# (the operator, 2026-08-04, clarifying the same day: "the agent should be able to
+# read All of my internal services, since I may of course be asking it to do
+# something that involves modifying or integrating with those services. tools
+# that would allow making changes to those services however need to be gated
+# by default"). Reachability is NOT the gate: an agent asked to integrate with
+# n8n / LiteLLM / the graph has to be able to reach and read them. The gate
+# lives where it always lives in this system — on the CAPABILITY. Every tool
+# that changes a service is a gated propose_* going through the Executor.
+#
+# WHAT ACTUALLY CONSTRAINS A SANDBOX, then, is that it holds NO CREDENTIALS:
+# the runner injects none, `automountServiceAccountToken: false`, and every
+# credentialed store (Postgres, LiteLLM admin, Neo4j, the Jira/Gmail façades)
+# demands auth the sandbox does not have. NOTE THE COROLLARY, because it is
+# the real decision point: handing a sandbox a service credential would make
+# network reach into ungated write access to that service. Credential
+# provisioning into a sandbox is therefore an explicit operator decision, not
+# a default — see the design doc's governance doctrine.
+#
+# INGRESS stays deny-all: nothing has any business reaching INTO a sandbox
+# (the runner drives it over the kubelet's exec channel, not the pod network).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: cc-sandbox
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-all-egress
+  namespace: cc-sandbox
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # Everything — internet and internal services alike — EXCEPT link-local.
+    # 169.254.0.0/16 is excluded not because anything here serves it (this is
+    # bare metal; there is no cloud metadata endpoint on a Pi or a chromebox)
+    # but because it costs nothing, conflicts with no stated need — every
+    # internal service is on 10.43.x or the 100.x tailnet — and the work
+    # deployment may not be bare metal. 169.254.169.254 is the single most
+    # attacked address in the SSRF literature; leaving it reachable from a
+    # sandbox that runs unreviewed agent code has no upside.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cc-sandbox-runner
+  namespace: cc-sandbox
+---
+# Namespace-scoped Role, not ClusterRole — the runner's kubeconfig token can
+# make/exec/delete sandbox pods and nothing else, anywhere.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cc-sandbox-runner
+  namespace: cc-sandbox
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cc-sandbox-runner
+  namespace: cc-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: cc-sandbox-runner
+    namespace: cc-sandbox
+roleRef:
+  kind: Role
+  name: cc-sandbox-runner
+  apiGroup: rbac.authorization.k8s.io
+---
+# A long-lived, non-expiring token Secret for the SA — the kind kubeconfigs
+# are traditionally built from (k8s 1.24+ no longer auto-creates these; this
+# is the explicit replacement). make-sandbox-kubeconfig.sh reads it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cc-sandbox-runner-token
+  namespace: cc-sandbox
+  annotations:
+    kubernetes.io/service-account.name: cc-sandbox-runner
+type: kubernetes.io/service-account-token
+---
+# Every container in cc-sandbox gets these limits if it declares none of its
+# own — belt-and-suspenders alongside the explicit resources on the Job spec
+# the runner builds; a hand-applied test pod without them is still capped.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: cc-sandbox-defaults
+  namespace: cc-sandbox
+spec:
+  limits:
+    - type: Container
+      default:
+        memory: 1Gi
+        cpu: "1"
+      defaultRequest:
+        memory: 512Mi
+        cpu: 250m

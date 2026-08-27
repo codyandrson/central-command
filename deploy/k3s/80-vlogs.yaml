@@ -1,0 +1,231 @@
+# ============================================================================
+# The log console (2026-08-15) — VictoriaLogs PINNED to the chromebox, one
+# Fluent Bit DaemonSet shipping BOTH log sources from BOTH nodes.
+#
+#   Why this exists: before it, errors lived in three places with three tools —
+#   the event log (cockpit), journald (`journalctl` by hand), and pod logs
+#   (`kubectl logs` by hand). This puts the last two behind one UI:
+#   http://127.0.0.1:9428/select/vmui/ (ServiceLB carries it to the Pi's
+#   loopback; tailscale serve exposes it on the tailnet like the cockpit).
+#
+#   Placement follows the standing rule — split by STATE. VictoriaLogs is
+#   stateful (its index/partitions are a local-path PVC) so it is PINNED, and
+#   it goes on the CHROMEBOX to keep another memory-holding store off the Pi —
+#   the same call as cc-neo4j, with the same accepted consequence: chromebox
+#   down means the log console is down. The logs themselves are NOT lost in
+#   that window: Fluent Bit retries with buffering (Retry_Limit False), and
+#   journald/kubelet keep the originals on each node regardless.
+#
+#   Fluent Bit (not vlagent) is the collector because vlagent CANNOT read
+#   journald — verified against its own source doc 2026-08-15, it collects
+#   only CRI pod logs and file globs. Fluent Bit does both in one DaemonSet:
+#     - tail  /var/log/containers/*.log  (containerd CRI format) — every pod
+#     - systemd journal (default search paths) — cc-uvicorn, cc-nerve, k3s
+#       itself, and everything else either host runs
+#   No kubernetes-metadata filter ON PURPOSE: it would need API-server access
+#   (RBAC + a watch per node) to decorate records with labels nobody queries.
+#   `Path_Key path` embeds the container log filename — which k3s names
+#   <pod>_<namespace>_<container>-<id>.log — and that is enough to filter by.
+#
+#   These stores are deliberately NOT in backup.sh: logs are telemetry, not
+#   state — the event log in Postgres is the durable record of what mattered.
+#   Retention is bounded twice: 30d by age AND 8GiB by disk (the PVC is 10Gi),
+#   whichever bites first.
+# ============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cc-vlogs-data
+  namespace: central-command
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vlogs
+  namespace: central-command
+spec:
+  # LoadBalancer so the UI answers on the Pi's loopback (ServiceLB), same
+  # mechanism as litellm/graphiti. In-cluster shippers use the DNS name.
+  type: LoadBalancer
+  selector:
+    app: cc-vlogs
+  ports:
+    - name: http
+      port: 9428
+      targetPort: 9428
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-vlogs
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-vlogs
+  template:
+    metadata:
+      labels:
+        app: cc-vlogs
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: chromebox
+      enableServiceLinks: false
+      containers:
+        - name: victoria-logs
+          # Multi-arch upstream (arm64+amd64) — matters only if the pin ever
+          # changes, but IfNotPresent+multi-arch is the house default.
+          image: docker.io/victoriametrics/victoria-logs:v1.52.0
+          args:
+            - -storageDataPath=/victoria-logs-data
+            - -retentionPeriod=30d
+            - -retention.maxDiskSpaceUsageBytes=8GiB
+          ports:
+            - {name: http, containerPort: 9428}
+          volumeMounts:
+            - name: data
+              mountPath: /victoria-logs-data
+          readinessProbe:
+            httpGet: {path: /health, port: 9428}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cc-vlogs-data
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cc-fluentbit-config
+  namespace: central-command
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Daemon           off
+        Log_Level        info
+
+    # Every pod on this node, in containerd's CRI log format. The DB file keeps
+    # the read cursor across restarts so a redeploy never re-ships the backlog.
+    [INPUT]
+        Name             tail
+        Path             /var/log/containers/*.log
+        Path_Key         path
+        multiline.parser cri
+        Tag              pod.*
+        DB               /var/lib/fluent-bit/tail.db
+        Skip_Long_Lines  On
+        Refresh_Interval 10
+
+    # This node's whole journal (default search paths: /var/log/journal and
+    # /run/log/journal — both exist on both nodes, checked 2026-08-15).
+    # Read_From_Tail only governs the very first start, before the DB exists;
+    # after that the cursor in the DB file is what prevents re-reads.
+    [INPUT]
+        Name             systemd
+        Tag              journal.*
+        Read_From_Tail   On
+        DB               /var/lib/fluent-bit/systemd.db
+
+    # Which node a line came from — journald records carry _HOSTNAME but tailed
+    # pod logs carry nothing, so stamp both.
+    [FILTER]
+        Name             record_modifier
+        Match            *
+        Record           node ${NODE_NAME}
+
+    # VictoriaLogs' documented Fluent Bit ingestion: jsonline with the field
+    # mapping in the URI. _msg_field is a comma list — first non-empty wins —
+    # because the CRI parser yields `log` while some paths yield `message`.
+    [OUTPUT]
+        Name             http
+        Match            pod.*
+        Host             vlogs
+        Port             9428
+        URI              /insert/jsonline?_stream_fields=node,path,stream&_msg_field=log,message&_time_field=date
+        Format           json_lines
+        Json_date_format iso8601
+        compress         gzip
+        Retry_Limit      False
+
+    [OUTPUT]
+        Name             http
+        Match            journal.*
+        Host             vlogs
+        Port             9428
+        URI              /insert/jsonline?_stream_fields=node,_SYSTEMD_UNIT&_msg_field=MESSAGE&_time_field=date
+        Format           json_lines
+        Json_date_format iso8601
+        compress         gzip
+        Retry_Limit      False
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cc-fluentbit
+  namespace: central-command
+spec:
+  selector:
+    matchLabels:
+      app: cc-fluentbit
+  template:
+    metadata:
+      labels:
+        app: cc-fluentbit
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: fluent-bit
+          # Multi-arch upstream — this genuinely runs on both architectures.
+          image: docker.io/fluent/fluent-bit:5.1.1
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          volumeMounts:
+            - name: config
+              mountPath: /fluent-bit/etc/fluent-bit.conf
+              subPath: fluent-bit.conf
+              readOnly: true
+            # /var/log covers containers/, pods/ AND the persistent journal.
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: runjournal
+              mountPath: /run/log/journal
+              readOnly: true
+            - name: machineid
+              mountPath: /etc/machine-id
+              readOnly: true
+            # Read cursors — survive pod restarts, per-node by nature.
+            - name: state
+              mountPath: /var/lib/fluent-bit
+          resources:
+            requests: {memory: 64Mi, cpu: 50m}
+            limits: {memory: 256Mi}
+      volumes:
+        - name: config
+          configMap:
+            name: cc-fluentbit-config
+        - name: varlog
+          hostPath: {path: /var/log}
+        - name: runjournal
+          hostPath: {path: /run/log/journal, type: DirectoryOrCreate}
+        - name: machineid
+          hostPath: {path: /etc/machine-id, type: File}
+        - name: state
+          hostPath: {path: /var/lib/fluent-bit, type: DirectoryOrCreate}

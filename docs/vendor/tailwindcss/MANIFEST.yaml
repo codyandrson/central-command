@@ -1,0 +1,11 @@
+name: tailwindcss
+source_repo: https://github.com/tailwindlabs/tailwindcss.com
+source_ref: main
+fetched_url: https://codeload.github.com/tailwindlabs/tailwindcss.com/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [src/docs README.md LICENSE]
+note: >
+  tailwindcss.com (the docs site) has no version tags matching the
+  tailwindcss npm package (pinned 4.1.18 here); `main` is the current v4
+  docs content and is the closest available match.
+

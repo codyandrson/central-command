@@ -1,0 +1,6 @@
+name: codemirror/packages/lang-javascript
+source_repo: https://github.com/codemirror/lang-javascript
+source_ref: 6.2.4
+fetched_url: https://codeload.github.com/codemirror/lang-javascript/tar.gz/6.2.4
+fetched_date: 2026-08-25
+subpaths: [src README.md CHANGELOG.md LICENSE]

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Central Command backup nightly
+
+[Timer]
+# 03:00 local, matching the habit the desktop's cron established.
+OnCalendar=*-*-* 03:00:00
+# If the Pi was off at 03:00, run on the next boot instead of silently skipping
+# a night — the whole point is that a gap should not pass unnoticed.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,298 @@
+# ============================================================================
+# LiteLLM — the proxy FLOATS (prefers the chromebox), its stores stay on the Pi.
+#
+#   This split is the whole point of the migration. cc-litellm is the memory hog
+#   AND it is stateless: everything it remembers lives in cc-litellm-db and
+#   redis. So the hog floats to the x86_64 chromebox (off the architecture where
+#   the Prisma leak was measured) while its 182 MB database stays pinned to the
+#   Pi. If the chromebox goes away, LiteLLM reschedules onto the Pi and its
+#   database is already there. That is real failover, and it only works because
+#   the volume did NOT move.
+#
+#   Exposure: type: LoadBalancer, served by k3s's built-in ServiceLB (Klipper),
+#   which binds :4000 on EVERY node and forwards to the pod wherever it runs.
+#   So CC_LLM_BASE_URL=http://localhost:4000 keeps working on the Pi unchanged.
+#   The compose stack bound 0.0.0.0:4000, so tailnet reachability is unchanged.
+# ============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cc-litellm-pgdata
+  namespace: central-command
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cc-litellm-redisdata
+  namespace: central-command
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-db
+  namespace: central-command
+spec:
+  selector:
+    app: cc-litellm-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-redis
+  namespace: central-command
+spec:
+  selector:
+    app: cc-litellm-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+# The one service the Pi host must reach at a fixed port while the pod roams.
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: central-command
+spec:
+  type: LoadBalancer
+  selector:
+    app: cc-litellm
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-litellm-db
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-litellm-db
+  template:
+    metadata:
+      labels:
+        app: cc-litellm-db
+    spec:
+      # PINNED to the Pi on purpose — see the header. This is what lets the
+      # proxy fall back here without its data being stranded on a dead node.
+      nodeSelector:
+        kubernetes.io/hostname: raspberrypi
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:16
+          # Loopback-only hostPort, same pattern as cc-postgres:5442 — the
+          # spine's autodiscovery reads LiteLLM's stored credentials from
+          # here (decrypted with the salt key). Safe to hostPort a pinned
+          # pod: the local-path PV means it can never move off the Pi.
+          ports:
+            - containerPort: 5432
+              hostPort: 5443
+              hostIP: 127.0.0.1
+          env:
+            - name: POSTGRES_DB
+              value: litellm
+            - name: POSTGRES_USER
+              value: llmproxy
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: LITELLM_POSTGRES_PASSWORD}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U llmproxy -d litellm"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests: {memory: 128Mi, cpu: 50m}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cc-litellm-pgdata
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-litellm-redis
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-litellm-redis
+  template:
+    metadata:
+      labels:
+        app: cc-litellm-redis
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: raspberrypi
+      containers:
+        - name: redis
+          image: docker.io/library/redis:7-alpine
+          args: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests: {memory: 32Mi, cpu: 25m}
+            limits: {memory: 512Mi}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cc-litellm-redisdata
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-litellm
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-litellm
+  template:
+    metadata:
+      labels:
+        app: cc-litellm
+    spec:
+      # ── THE FLOAT ────────────────────────────────────────────────────────
+      # "preferred", not "required": the chromebox is where this SHOULD run
+      # (x86_64, 8 cores, and off the arm64 Prisma leak), but the Pi is a
+      # perfectly valid fallback and the pod must never go Pending waiting for
+      # a node that is switched off.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: [chromebox]
+      # "IgnoredDuringExecution" is literal — affinity is NOT re-evaluated for a
+      # running pod. Eviction from a dead node is what actually moves it, and
+      # that is driven by these tolerations. The k8s default is 300s; 30s turns
+      # a chromebox outage into a ~1 minute LiteLLM gap instead of ~6.
+      tolerations:
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+      containers:
+        - name: litellm
+          # Pinned to a digest 2026-08-25 — main-stable is a moving tag;
+          # bumping this is now a deliberate act, not an automatic pull.
+          image: ghcr.io/berriai/litellm-database:main-stable@sha256:5ead13edd4efd89f32dab349c1f19447d395affca53f3aeae00f5e6e01b8c08d
+          args: ["--config", "/app/config.yaml", "--port", "4000"]
+          ports:
+            - name: http
+              containerPort: 4000
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: LITELLM_MASTER_KEY}
+            # NEVER change: it encrypts every stored LiteLLM virtual key. A
+            # restore under a different salt leaves the rows present but
+            # undecryptable.
+            - name: LITELLM_SALT_KEY
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: LITELLM_SALT_KEY}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: DATABASE_URL}
+            - name: REDIS_HOST
+              value: litellm-redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: STORE_MODEL_IN_DB
+              value: "True"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: OPENAI_API_KEY, optional: true}
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: GEMINI_API_KEY, optional: true}
+            # !! ANTHROPIC_API_KEY IS DELIBERATELY ABSENT — DO NOT ADD IT !!
+            # Carried over verbatim from deploy/pi/docker-compose.yml, where the
+            # full reasoning lives. Short version: LiteLLM treats it as a
+            # last-resort fallback in two places that silently bill the operator's
+            # pay-per-token key instead of the Max subscription —
+            #   1. /anthropic/* passthrough injects it as x-api-key, and injected
+            #      headers BEAT the client's forwarded Authorization. Verified by
+            #      experiment: a deliberately INVALID OAuth token still returned
+            #      HTTP 200. That is the subscription being bypassed.
+            #   2. A model row with neither api_key nor credential inherits it.
+            # With it absent both cases fail loudly. If a model needs a key,
+            # point it at the `anthropic-main` named credential instead, and
+            # keep use_in_pass_through=false on every Anthropic row.
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet: {path: /health/liveliness, port: 4000}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            httpGet: {path: /health/liveliness, port: 4000}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              # Blast-radius cap, kept from compose. The arm64 Prisma leak is the
+              # reason this exists; the cap still matters on the Pi-fallback path,
+              # and costs nothing on the chromebox.
+              memory: 6Gi
+      volumes:
+        - name: config
+          configMap:
+            name: cc-litellm-config

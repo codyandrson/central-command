@@ -1,0 +1,6 @@
+name: asyncpg
+source_repo: https://github.com/MagicStack/asyncpg
+source_ref: v0.31.0
+fetched_url: https://codeload.github.com/MagicStack/asyncpg/tar.gz/v0.31.0
+fetched_date: 2026-08-25
+subpaths: [docs README.md LICENSE*]

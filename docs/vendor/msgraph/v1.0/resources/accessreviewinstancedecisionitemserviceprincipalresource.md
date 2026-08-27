@@ -1,0 +1,48 @@
+---
+title: "accessReviewInstanceDecisionItemServicePrincipalResource resource type"
+description: "Represents service principals whose access to a resource is represented through an accessReviewInstanceDecisionItem object."
+author: "jyothig123"
+ms.localizationpriority: medium
+ms.subservice: "entra-id-governance"
+doc_type: resourcePageType
+ms.date: 07/22/2024
+---
+
+# accessReviewInstanceDecisionItemServicePrincipalResource resource type
+
+Namespace: microsoft.graph
+
+In an [accessReviewInstanceDecisionItem](../resources/accessreviewinstancedecisionitem.md), the **resource** property can contain an **accessReviewInstanceDecisionItemServicePrincipalResource** object for a service principal resource. This open type allows other properties to be passed in.
+
+Inherits from [accessReviewInstanceDecisionItemResource](accessreviewinstancedecisionItemresource.md).
+
+## Properties
+|Property|Type|Description|
+|:---|:---|:---|
+| appId | String | The globally unique identifier of the application to which access has been granted. |
+| displayName | String | Display name of the resource. Inherited from [accessReviewInstanceDecisionItemResource](accessreviewinstancedecisionItemresource.md).|
+| id | String | Identifier of the decision item resource. Inherited from [accessReviewInstanceDecisionItemResource](accessreviewinstancedecisionItemresource.md). |
+| type | String | Type of resource. Type will always be `ServicePrincipal`.  Inherited from [accessReviewInstanceDecisionItemResource](accessreviewinstancedecisionItemresource.md). |
+
+
+## Relationships
+None.
+
+## JSON representation
+The following JSON representation shows the resource type.
+<!-- {
+  "blockType": "resource",
+  "@odata.type": "microsoft.graph.accessreviewinstancedecisionitemserviceprincipalresource",
+  "baseType": "microsoft.graph.accessReviewInstanceDecisionItemResource",
+  "openType": true
+}
+-->
+``` json
+{
+  "@odata.type": "#microsoft.graph.accessreviewinstancedecisionitemserviceprincipalresource",
+  "appId": "String",
+  "displayName": "String",
+  "id": "String (identifier)",
+  "type": "String"
+}
+```

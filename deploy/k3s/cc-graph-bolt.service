@@ -1,0 +1,24 @@
+# Loopback-only bolt reachability for the cockpit's graph reads (rung 3 of
+# docs/superpowers/specs/2026-08-09-graph-inspection-design.md).
+#
+# cc-neo4j stays ClusterIP-only; this unit forwards svc/neo4j 7687 onto
+# 127.0.0.1 ONLY, keeping the standing rule that every CC_* endpoint resolves
+# to loopback and adding no tailnet/LAN exposure. kubectl port-forward drops
+# when the neo4j pod restarts or moves — Restart=always reconnects, and per
+# outage-equivalence that drop costs the graph panel latency, never work.
+#
+# Install (mirrors cc-uvicorn.service):
+#   sudo cp deploy/k3s/cc-graph-bolt.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cc-graph-bolt
+[Unit]
+Description=Central Command loopback bolt forward to cc-neo4j (read path for the Graph panel)
+Requires=k3s.service
+After=k3s.service
+
+[Service]
+ExecStart=/usr/local/bin/k3s kubectl -n central-command port-forward --address=127.0.0.1 svc/neo4j 7687:7687
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+name: hono-zod-validator
+source_repo: https://github.com/honojs/middleware
+source_ref: @hono/zod-validator@0.7.6
+fetched_url: https://codeload.github.com/honojs/middleware/tar.gz/@hono/zod-validator@0.7.6
+fetched_date: 2026-08-25
+subpaths: [packages/zod-validator/README.md packages/zod-validator/package.json]

@@ -1,0 +1,241 @@
+:description: How to use Cypher to manage read privileges on graphs.
+:page-role: enterprise-edition aura-db-business-critical aura-db-dedicated
+////
+[source, cypher, role=test-setup]
+----
+CREATE ROLE regularUsers;
+----
+////
+
+
+[[access-control-privileges-reads]]
+= Read privileges
+
+There are three separate read privileges:
+
+* xref:authentication-authorization/privileges-reads.adoc#access-control-privileges-reads-traverse[`TRAVERSE`] - enables the specified entities to be found.
+* xref:authentication-authorization/privileges-reads.adoc#access-control-privileges-reads-read[`READ`] - enables the specified properties of the found entities to be read.
+* xref:authentication-authorization/privileges-reads.adoc#access-control-privileges-reads-match[`MATCH`] - combines both `TRAVERSE` and `READ`, enabling an entity to be found and its properties read.
+
+For more details about how to read the administration commands syntax, see xref:database-administration/syntax.adoc#administration-syntax-reading[Reading the administration commands syntax] and xref:authentication-authorization/manage-privileges.adoc#components-of-the-graph-privilege-commands[Components of the graph privilege commands].
+
+[[access-control-privileges-reads-traverse]]
+== The `TRAVERSE` privilege
+
+Users can be granted the right to find nodes and relationships using the `GRANT TRAVERSE` privilege.
+
+[source, syntax, role="noheader"]
+----
+GRANT [IMMUTABLE] TRAVERSE
+  ON { HOME GRAPH | GRAPH[S] { * | name[, ...] } }
+    [
+      ELEMENT[S] { * | label-or-rel-type[, ...] }
+      | NODE[S] { * | label[, ...] }
+      | RELATIONSHIP[S] { * | rel-type[, ...] }
+      | FOR pattern
+    ]
+  TO role[, ...]
+----
+
+[NOTE]
+====
+For more details about the `pattern` syntax used to express attributes based access control rules, see xref:authentication-authorization/property-based-access-control.adoc[Property-based access control].
+====
+
+For example, you can enable users with the role `regularUsers` to find all nodes with the label `Post` in the database `neo4j`:
+
+[source, cypher, role=noplay]
+----
+GRANT TRAVERSE ON GRAPH neo4j NODES Post TO regularUsers
+----
+
+The `TRAVERSE` privilege can also be denied.
+
+[source, syntax, role="noheader"]
+----
+DENY [IMMUTABLE] TRAVERSE
+  ON { HOME GRAPH | GRAPH[S] { * | name[, ...] } }
+    [
+      ELEMENT[S] { * | label-or-rel-type[, ...] }
+      | NODE[S] { * | label[, ...] }
+      | RELATIONSHIP[S] { * | rel-type[, ...] }
+      | FOR pattern
+    ]
+  TO role[, ...]
+----
+
+For example, you can disable users with the role `regularUsers` from finding all nodes with the label `Payments`:
+
+[source, cypher, role=noplay]
+----
+DENY TRAVERSE ON HOME GRAPH NODES Payments TO regularUsers
+----
+
+Although you just granted the role `regularUsers` the right to read all properties on nodes with label `Post`, you may want to make this more fine-grained using xref:authentication-authorization/property-based-access-control.adoc[Property-based access control] to hide the posts with `secret` property set to `true`.
+For example:
+
+[source, cypher, role=noplay]
+----
+DENY TRAVERSE ON HOME GRAPH FOR (:Post {secret: true}) TO regularUsers
+----
+
+[NOTE]
+====
+If a label or a relationship type does not exist in the database, the user cannot use the corresponding privilege until it is created.
+See xref:authentication-authorization/limitations.adoc#access-control-limitations-nonexistent-labels[Privileges for nonexistent labels, relationship types, and property names] for more information.
+====
+
+
+[[access-control-privileges-reads-read]]
+== The `READ` privilege
+
+Users can be granted the right to do property reads on nodes and relationships using the `GRANT READ` privilege.
+It is very important to note that users can only read properties on entities that they are enabled to find in the first place.
+
+[source, syntax, role="noheader"]
+----
+GRANT [IMMUTABLE] READ "{" { * | property[, ...] } "}"
+  ON { HOME GRAPH | GRAPH[S] { * | name[, ...] } }
+    [
+      ELEMENT[S] { * | label-or-rel-type[, ...] }
+      | NODE[S] { * | label[, ...] }
+      | RELATIONSHIP[S] { * | rel-type[, ...] }
+      | FOR pattern
+    ]
+  TO role[, ...]
+----
+[NOTE]
+====
+For more details about the `pattern` syntax used to express attributes based access control rules, see xref:authentication-authorization/property-based-access-control.adoc[Property-based access control].
+====
+
+For example, you can enable users with the role `regularUsers` to read all properties on nodes with the label `Post` in the database `neo4j`.
+The `+*+` implies that the ability to read all properties also extends to properties that might be added in the future.
+
+[source, cypher, role=noplay]
+----
+GRANT READ { * } ON GRAPH neo4j NODES Post TO regularUsers
+----
+
+To further fine-grained the read access, you can enable users with the role `regularUsers` to read all properties on nodes with the label `Post` that have property `secret` not set to `true` in the database `neo4j`.
+For example:
+
+[source, cypher, role=noplay]
+----
+GRANT READ { * } ON GRAPH neo4j FOR (n:Post) WHERE n.secret <> true TO regularUsers
+----
+
+[NOTE]
+====
+Granting property `READ` access does not imply that the entities with that property can be found.
+For example, if there is also a `DENY TRAVERSE` present on the same entity as a `GRANT READ`, the entity will not be found by a Cypher `MATCH` statement.
+====
+
+The `READ` privilege can also be denied.
+
+[source, syntax, role="noheader"]
+----
+DENY [IMMUTABLE] READ "{" { * | property[, ...] } "}"
+  ON { HOME GRAPH | GRAPH[S] { * | name[, ...] } }
+    [
+      ELEMENT[S] { * | label-or-rel-type[, ...] }
+      | NODE[S] { * | label[, ...] }
+      | RELATIONSHIP[S] { * | rel-type[, ...] }
+      | FOR pattern
+    ]
+  TO role[, ...]
+----
+
+Although you just granted the role `regularUsers` the right to read all properties, you may want to hide the `secret` property.
+The following example shows how to do that:
+
+[source, cypher, role=noplay]
+----
+DENY READ { secret } ON GRAPH neo4j NODES Post TO regularUsers
+----
+
+[NOTE]
+====
+If a label, a relationship type, or a property name does not exist in the database, the user cannot use the corresponding privilege until it is created.
+See xref:authentication-authorization/limitations.adoc#access-control-limitations-nonexistent-labels[Privileges for nonexistent labels, relationship types, and property names] for more information.
+====
+
+
+[[access-control-privileges-reads-match]]
+== The `MATCH` privilege
+
+Users can be granted the right to find and do property reads on nodes and relationships using the `GRANT MATCH` privilege.
+This is semantically the same as having both `TRAVERSE` and `READ` privileges.
+
+[source, syntax, role="noheader"]
+----
+GRANT [IMMUTABLE] MATCH "{" { * | property[, ...] } "}"
+  ON { HOME GRAPH | GRAPH[S] { * | name[, ...] } }
+    [
+      ELEMENT[S] { * | label-or-rel-type[, ...] }
+      | NODE[S] { * | label[, ...] }
+      | RELATIONSHIP[S] { * | rel-type[, ...] }
+      | FOR pattern
+    ]
+  TO role[, ...]
+----
+[NOTE]
+====
+For more details about the `pattern` syntax used to express attributes based access control rules, see xref:authentication-authorization/property-based-access-control.adoc[Property-based access control].
+====
+
+For example if you want to grant the ability to read the properties `language` and `length` for nodes with the label `Message`, as well as the ability to find these nodes to the role `regularUsers`, you can use the following `GRANT MATCH` query:
+
+[source, cypher, role=noplay]
+----
+GRANT MATCH { language, length } ON GRAPH neo4j NODES Message TO regularUsers
+----
+
+The following query grants the `regularUsers` role the ability to find `Post` and `Likes` nodes where the `secret` property is set to `false`, as well as reading all their properties.
+
+[source, cypher, role=noplay]
+----
+GRANT MATCH { * } ON GRAPH neo4j FOR (n:Post|Likes) WHERE n.secret = false TO regularUsers
+----
+
+Like all other privileges, the `MATCH` privilege can also be denied.
+
+[source, syntax, role="noheader"]
+----
+DENY [IMMUTABLE] MATCH "{" { * | property[, ...] } "}"
+  ON { HOME GRAPH | GRAPH[S] { * | name[, ...] } }
+    [
+      ELEMENT[S] { * | label-or-rel-type[, ...] }
+      | NODE[S] { * | label[, ...] }
+      | RELATIONSHIP[S] { * | rel-type[, ...] }
+      | FOR pattern
+    ]
+  TO role[, ...]
+----
+
+Please note that the effect of denying a `MATCH` privilege depends on whether concrete property keys are specified or are `+*+`.
+If you specify concrete property keys, then `DENY MATCH` will only deny reading those properties.
+Finding the elements to traverse would still be enabled.
+If you specify `+*+` instead, then both traversal of the element and all property reads will be disabled.
+The following queries will show examples for this.
+
+Denying to read the property `content` on nodes with the label `Message` for the role `regularUsers` would look like the following query.
+Although not being able to read this specific property, nodes with that label can still be traversed (and, depending on other grants, other properties on it could still be read).
+
+[source, cypher, role=noplay]
+----
+DENY MATCH { content } ON GRAPH neo4j NODES Message TO regularUsers
+----
+
+The following query exemplifies how it would look if you wanted to deny both reading all properties and traversing nodes labeled with `Account` in the database `neo4j`:
+
+[source, cypher, role=noplay]
+----
+DENY MATCH { * } ON GRAPH neo4j NODES Account TO regularUsers
+----
+
+[NOTE]
+====
+If a label, a relationship type, or a property name does not exist in the database, the user cannot use the corresponding privilege until it is created.
+See xref:authentication-authorization/limitations.adoc#access-control-limitations-nonexistent-labels[Privileges for nonexistent labels, relationship types, and property names] for more information.
+====

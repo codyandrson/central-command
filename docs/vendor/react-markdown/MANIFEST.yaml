@@ -1,0 +1,6 @@
+name: react-markdown
+source_repo: https://github.com/remarkjs/react-markdown
+source_ref: 10.1.0
+fetched_url: https://codeload.github.com/remarkjs/react-markdown/tar.gz/10.1.0
+fetched_date: 2026-08-25
+subpaths: [readme.md, license]

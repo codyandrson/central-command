@@ -1,0 +1,6 @@
+name: codemirror/website
+source_repo: https://github.com/codemirror/website
+source_ref: main
+fetched_url: https://codeload.github.com/codemirror/website/tar.gz/main
+fetched_date: 2026-08-25
+subpaths: [site/docs README.md LICENSE]

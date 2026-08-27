@@ -1,0 +1,301 @@
+# HTTP
+
+The _HTTP_ output plugin lets you flush your records into an HTTP endpoint. It issues `POST` or `PUT` requests with the data records in [MessagePack](https://msgpack.org) (or JSON) format.
+
+## Configuration parameters
+
+| Key | Description | Default |
+| :--- | :--- | :--- |
+| `allow_duplicated_headers` | Specify if duplicated headers are allowed. If a duplicated header is found, the latest key/value set is preserved. | `true` |
+| `aws_auth` | Enable AWS SigV4 authentication. | `false` |
+| `aws_external_id` | External ID for the AWS IAM Role specified with `aws_role_arn`, used by SigV4 authentication. | _none_ |
+| `aws_profile` | AWS Profile name. AWS Profiles can be configured with AWS CLI and are usually stored in `$HOME/.aws/` directory. | _none_ |
+| `aws_region` | Specify the AWS region of your service, used by SigV4 authentication. | _none_ |
+| `aws_role_arn` | AWS IAM Role to assume, used by SigV4 authentication. | _none_ |
+| `aws_service` | Specify the AWS service code of your service, used by SigV4 authentication (for example, `es`, `xray`). Usually found in the service endpoint's subdomains, `protocol://service-code.region-code.amazonaws.com`. | _none_ |
+| `aws_sts_endpoint` | Specify the custom STS endpoint to be used by STS API. Used with the `aws_role_arn` option and by SigV4 authentication. | _none_ |
+| `body_key` | Specify the key to use as the body of the request (must prefix with `$`). The key must contain either a binary or raw string, and the content type can be specified using `headers_key`, which must be passed whenever `body_key` is present. When this option is present, each `msgpack` record will create a separate request. | _none_ |
+| `compress` | Set payload compression mechanism. Allowed values: `gzip`, `snappy`, `zstd`. | _none_ |
+| `format` | Specify the data format to be used in the HTTP request body. Supported formats: `gelf`, `json`, `json_stream`, `json_lines`, `msgpack`. | `json` |
+| `gelf_full_message_key` | Specify the key to use for the `full` message in `gelf` format. | _none_ |
+| `gelf_host_key` | Specify the key to use for the `host` in `gelf` format. | _none_ |
+| `gelf_level_key` | Specify the key to use for the `level` in `gelf` format. | _none_ |
+| `gelf_short_message_key` | Specify the key to use as the `short` message in `gelf` format. | _none_ |
+| `gelf_timestamp_key` | Specify the key to use for `timestamp` in `gelf` format. | _none_ |
+| `header` | Add a HTTP header key/value pair. Multiple headers can be set. | _none_ |
+| `header_tag` | Specify an optional HTTP header field for the original message tag. | _none_ |
+| `headers_key` | Specify the key to use as the headers of the request (must prefix with `$`). The key must contain a map, which will have the contents merged on the request headers. This can be used for many purposes, such as specifying the content type of the data contained in `body_key`. | _none_ |
+| `host` | IP address or hostname of the target HTTP Server. | `127.0.0.1` |
+| `http.read_idle_timeout` | Set maximum allowed time between two consecutive reads. If set to `0s`, uses the `io_timeout` value from the network setup. | `0s` |
+| `http.response_timeout` | Set maximum time to wait for a server response. | `60s` |
+| `http_method` | Specify `POST` versus `PUT` HTTP method. | `POST` |
+| `http_passwd` | Basic Auth password. Requires `http_user` to be set. | _none_ |
+| `http_user` | Basic Auth username. | _none_ |
+| `json_date_format` | Specify the format of the date. Supported formats: `double`, `epoch`, `epoch_ms`, `iso8601`, `java_sql_timestamp`. | _none_ |
+| `json_date_key` | Specify the name of the time key in the output record. To disable the time key, set the value to `false`. | `date` |
+| `log_response_payload` | Specify if the response payload should be logged or not. | `true` |
+| `oauth2.audience` | Optional `OAuth 2.0` audience parameter. | _none_ |
+| `oauth2.auth_method` | `OAuth 2.0` client authentication method. Supported values: `basic`, `post`, `private_key_jwt`. | `basic` |
+| `oauth2.client_id` | `OAuth 2.0` client ID. | _none_ |
+| `oauth2.client_secret` | `OAuth 2.0` client secret. | _none_ |
+| `oauth2.connect_timeout` | Connect timeout for `OAuth 2.0` token requests. | `0s` |
+| `oauth2.enable` | Enable `OAuth 2.0` client credentials for outgoing requests. | `false` |
+| `oauth2.jwt_aud` | Audience for `private_key_jwt` JSON Web Token (JWT) assertion. Defaults to the value of `oauth2.token_url` when not set. | _none_ |
+| `oauth2.jwt_cert_file` | Path to certificate file used by `private_key_jwt`. | _none_ |
+| `oauth2.jwt_header` | JWT header claim name for `private_key_jwt` thumbprint. Accepted values: `kid`, `x5t`. | `kid` |
+| `oauth2.jwt_key_file` | Path to PEM private key file used by `private_key_jwt`. | _none_ |
+| `oauth2.jwt_ttl_seconds` | Lifetime in seconds for `private_key_jwt` JWT client assertions. | `300` |
+| `oauth2.refresh_skew_seconds` | Seconds before expiry at which to refresh the access token. | `60` |
+| `oauth2.resource` | Optional `OAuth 2.0` resource parameter. | _none_ |
+| `oauth2.scope` | Optional `OAuth 2.0` scope. | _none_ |
+| `oauth2.timeout` | Timeout for `OAuth 2.0` token requests. Defaults to `http.response_timeout` when unset. | `0s` |
+| `oauth2.token_url` | `OAuth 2.0` token endpoint URL. | _none_ |
+| `oauth2.user_agent` | Optional `User-Agent` header value to include in `OAuth 2.0` token requests. If omitted, no `User-Agent` header is sent. | _none_ |
+| `port` | TCP port of the target HTTP Server. | `80` |
+| `proxy` | Specify an HTTP Proxy. The expected format of this value is `http://HOST:PORT`. HTTPS isn't supported. It's recommended to configure the [HTTP proxy environment variables](https://docs.fluentbit.io/manual/administration/http-proxy) instead as they support both HTTP and HTTPS. | _none_ |
+| `uri` | Specify an optional HTTP URI for the target web server. For example, `/somepath`. | _none_ |
+| `workers` | The number of [workers](../../administration/multithreading.md#outputs) to perform flush operations for this output. | `2` |
+
+### TLS / SSL
+
+The HTTP output plugin supports TLS/SSL. For more details about the properties available and general configuration, see [TLS/SSL](../../administration/transport-security.md).
+
+## Get started
+
+To insert records into an HTTP server, you can run the plugin from the command line or through the configuration file.
+
+### Command line
+
+The HTTP plugin can read the parameters from the command line through the `-p` argument (property) or setting them directly through the service URI. The URI format is the following:
+
+```text
+http://host:port/something
+```
+
+Using the format specified, you could start Fluent Bit through:
+
+```shell
+fluent-bit -i cpu -t cpu -o http://192.168.2.3:80/something -m '*'
+```
+
+### Configuration file
+
+In your main configuration file append the following:
+
+{% tabs %}
+{% tab title="fluent-bit.yaml" %}
+
+```yaml
+pipeline:
+  inputs:
+    - name: cpu
+      tag:  cpu
+  outputs:
+    - name: http
+      match: '*'
+      host: 192.168.2.3
+      port: 80
+      uri: /something
+```
+
+{% endtab %}
+{% tab title="fluent-bit.conf" %}
+
+```text
+[INPUT]
+  Name  cpu
+  Tag   cpu
+
+[OUTPUT]
+  Name  http
+  Match *
+  Host  192.168.2.3
+  Port  80
+  Uri   /something
+```
+
+{% endtab %}
+{% endtabs %}
+
+By default, the URI becomes tag of the message, the original tag is ignored. To retain the tag, multiple configuration sections have to be made based and flush to more than one URI.
+
+Another supported approach is the sending the original message tag in a configurable header. It's up to the receiver to do what it wants with that header field. For example, parse it and use it as the tag for example.
+
+To configure this behaviour, add this configuration:
+
+{% tabs %}
+{% tab title="fluent-bit.yaml" %}
+
+```yaml
+pipeline:
+
+  outputs:
+    - name: http
+      match: '*'
+      host: 192.168.2.3
+      port: 80
+      uri: /something
+      format: json
+      header_tag: FLUENT-TAG
+```
+
+{% endtab %}
+{% tab title="fluent-bit.conf" %}
+
+```text
+[OUTPUT]
+  Name  http
+  Match *
+  Host  192.168.2.3
+  Port  80
+  Uri        /something
+  Format     json
+  Header_Tag FLUENT-TAG
+```
+
+{% endtab %}
+{% endtabs %}
+
+
+Provided you are using Fluentd as data receiver, you can combine `in_http` and `out_rewrite_tag_filter` to make use of this HTTP header.
+
+```text
+<source>
+  @type http
+  add_http_headers true
+</source>
+
+<match something>
+  @type rewrite_tag_filter
+  <rule>
+    key HTTP_FLUENT_TAG
+    pattern /^(.*)$/
+    tag $1
+  </rule>
+</match>
+```
+
+Fluent Bit overrides the tag, which is from URI path, with a custom header.
+
+#### Add a header
+
+This example adds a header.
+
+{% tabs %}
+{% tab title="fluent-bit.yaml" %}
+
+```yaml
+pipeline:
+
+  outputs:
+    - name: http
+      match: '*'
+      host: 127.0.0.1
+      port: 9000
+      header:
+        - X-Key-A Value_A
+        - X-Key-B Value_B
+      uri: /something
+```
+
+{% endtab %}
+{% tab title="fluent-bit.conf" %}
+
+```text
+[OUTPUT]
+  Name           http
+  Match          *
+  Host           127.0.0.1
+  Port           9000
+  Header         X-Key-A Value_A
+  Header         X-Key-B Value_B
+  Uri            /something
+```
+
+{% endtab %}
+{% endtabs %}
+
+#### Sumo Logic HTTP collector
+
+The following is a suggested configuration for Sumo Logic using `json_lines` with `iso8601` timestamps. The `PrivateKey` is specific to a configured HTTP collector.
+
+{% tabs %}
+{% tab title="fluent-bit.yaml" %}
+
+```yaml
+pipeline:
+
+  outputs:
+    - name: http
+      match: '*'
+      host: collectors.au.sumologic.com
+      port: 443
+      uri: /receiver/v1/http/[PrivateKey]
+      format: json_lines
+      json_date_key: timestamp
+      json_date_format: iso8601
+```
+
+{% endtab %}
+{% tab title="fluent-bit.conf" %}
+
+```text
+[OUTPUT]
+  Name             http
+  Match            *
+  Host             collectors.au.sumologic.com
+  Port             443
+  Uri              /receiver/v1/http/[PrivateKey]
+  Format           json_lines
+  Json_Date_Key    timestamp
+  Json_Date_Format iso8601
+```
+
+{% endtab %}
+{% endtabs %}
+
+A sample Sumo Logic query for the [CPU](../inputs/cpu-metrics.md) input. \(Requires `json_lines` format with `iso8601` date format for the `timestamp` field\).
+
+```text
+_sourcecategory="my_fluent_bit"
+| json "cpu_p" as cpu
+| timeslice 1m
+| max(cpu) as cpu group by _timeslice
+```
+
+#### Using `PUT` method
+
+The following example shows how to configure the HTTP output plugin to use the `PUT` method instead of the default `POST` method.
+
+{% tabs %}
+{% tab title="fluent-bit.yaml" %}
+
+```yaml
+pipeline:
+
+  outputs:
+    - name: http
+      match: '*'
+      host: 192.168.2.3
+      port: 80
+      uri: /api/endpoint
+      http_method: PUT
+      format: json
+```
+
+{% endtab %}
+{% tab title="fluent-bit.conf" %}
+
+```text
+[OUTPUT]
+  Name       http
+  Match      *
+  Host       192.168.2.3
+  Port       80
+  Uri        /api/endpoint
+  Http_Method PUT
+  Format     json
+```
+
+{% endtab %}
+{% endtabs %}

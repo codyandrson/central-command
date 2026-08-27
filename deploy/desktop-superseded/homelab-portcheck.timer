@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the port-forwarding self-heal shortly after boot
+
+[Timer]
+# Late enough for podman-restart + container startup; the script itself does
+# a second verify round 20s after healing.
+OnBootSec=45s
+# And a periodic re-check so a mid-day forwarder death also self-heals.
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
