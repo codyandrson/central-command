@@ -119,11 +119,46 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh stack       # build local images, render, play postgres/neo4j/graphiti (+crawler, +n8n)
 ./setup.sh app         # venv, editable install, the app's .env, mint the spine's virtual key, cockpit
 ./setup.sh verify      # verify.sh, then live, then the capability manifest
+./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
+./setup.sh boot        # asks your name (once), starts the API detached, checks the roster
+./setup.sh demo        # fixture email -> triage -> YOUR approval -> dry-run provenance
 ./setup.sh status      # postconditions only, mutates nothing
+./setup.sh stop        # stops the API that `boot` started
 ```
 
 The `kube play` calls use `--replace`, so re-applying after a config change
 replaces the pods and updates the podman secrets in place.
+
+### First boot and the demo (the last three phases, 2026-08-28)
+
+A bare `./setup.sh` runs all nine phases — **zero to a working, human-approved
+demo in one command.** The late phases skip by probing reality, never a state
+file: a healthy API skips `test` and `boot`, a decided proposal in the event
+log skips `demo`. Only two moments are yours, and on a terminal the script
+waits in place for both:
+
+1. **Your name** (`boot`) — becomes `CC_OPERATOR_NAME` and the provenance
+   actor on your decisions. Headless runs gate with exit 3 instead of asking.
+2. **The demo approval** (`demo`) — the script feeds
+   `fixtures/emails/001-invoice-due.eml`, steps the dispatcher (a real
+   inference against your endpoint — commonly a few minutes), and then waits
+   while you open the cockpit at http://127.0.0.1:8080, read the proposal in
+   the **Decisions Inbox**, and decide. That gate is the product; the script
+   never decides for you. It then verifies the decision and the `[dry-run]`
+   execution landed on the event log.
+
+The API runs detached afterward (log: `deploy/single/uvicorn.log`; stop it
+with `./setup.sh stop`). **Deliberately still OFF after the demo, each one an
+explicit flip when you decide:** live executor mode (`CC_EXECUTOR_MODE` in
+the root `.env` — until then every EXECUTED proposal is a logged simulation),
+the mail feed and dispatch drain (`CC_FEED_ENABLED` / `CC_DISPATCH_ENABLED` +
+their schedules in the cockpit's Crons tab), every recurring schedule (seeded
+disabled), the onboarding interview (run `/setup` with Claude any time — it
+writes operator episodes into the knowledge graph), and the sandbox runner
+(below). Two demo traps worth knowing: re-POSTing the same email is a silent
+no-op (repeat Message-IDs are terminal by design — recover a stuck item with
+`POST /api/work/<id>/requeue`), and the model pickers need the API restarted
+at least once after an update that adds routes.
 
 ### Starting the sandbox runner
 

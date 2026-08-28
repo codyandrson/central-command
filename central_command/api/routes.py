@@ -2223,6 +2223,40 @@ async def list_model_catalog(session_id: str | None = None) -> dict:
     }
 
 
+@router.get("/gateway/models")
+async def gateway_model_catalog() -> dict:
+    """The cockpit's `/api/gateway/models` — served here for the SINGLE-NODE
+    profile, where uvicorn serves the cockpit and no Node server exists to
+    provide it (2026-08-28: the model pickers showed "Gateway HTTP 404" on a
+    fresh Windows install). On the k3s substrate cc-nerve's own route answers
+    first and this one is never reached; both are thin translations of
+    /api/models above, so the catalog has one source of truth.
+
+    Wire shape is what web/src/hooks/useGatewayModelCatalog.ts declares —
+    guarded by a backend test, since a hand-declared frontend interface cannot
+    catch a field the backend never sends.
+    """
+    data = await list_model_catalog()
+    if data.get("error"):
+        return {"models": [], "error": data["error"], "source": "litellm"}
+    primary = data.get("default") or None
+    models = []
+    for m in data["models"]:
+        mid = m["id"]
+        provider, _, rest = mid.partition("/")
+        models.append({
+            "id": mid,
+            "label": rest or mid,
+            "provider": provider if rest else "litellm",
+            "configured": True,
+            "role": "primary" if mid == primary else "allowed",
+            "thinkingLevels": m.get("thinking_levels") or [],
+        })
+    if not models:
+        return {"models": [], "error": "LiteLLM served no models.", "source": "litellm"}
+    return {"models": models, "error": None, "source": "litellm"}
+
+
 @router.get("/sessions")
 async def list_sessions(
     limit: int = 50,

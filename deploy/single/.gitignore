@@ -7,3 +7,5 @@ optional-n8n.yaml
 optional-crawler.yaml
 setup-diagnostics.txt
 setup-log.txt
+uvicorn.log
+uvicorn.pid

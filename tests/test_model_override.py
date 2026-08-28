@@ -263,3 +263,38 @@ async def test_label_only_patches_stay_a_no_op():
     assert await nerve_gateway._dispatch(
         "sessions.patch", {"key": "agent:inbox-triage:main", "label": "renamed"}, _noop,
     ) == {}
+
+
+# --- the single-profile /api/gateway/models translation ------------------------
+# (2026-08-28: on the single-node profile uvicorn serves the cockpit, so this
+# route must exist in FastAPI — the Node server that provides it on k3s is
+# absent, and its absence rendered as "Gateway HTTP 404" in three UI spots.)
+
+
+async def test_gateway_models_carries_the_shape_the_cockpit_hook_declares():
+    payload = await routes.gateway_model_catalog()
+    assert set(payload) == {"models", "error", "source"}
+    assert payload["source"] == "litellm"
+    assert payload["error"] is None
+    by_id = {m["id"]: m for m in payload["models"]}
+    # Every field web/src/hooks/useGatewayModelCatalog.ts reads, per model.
+    for m in payload["models"]:
+        assert set(m) == {"id", "label", "provider", "configured", "role", "thinkingLevels"}
+        assert m["configured"] is True
+    # The pinned catalog: cc-default is the resolved default -> primary.
+    assert by_id["cc-default"]["role"] == "primary"
+    assert by_id["cc-default"]["thinkingLevels"] == list(models_mod.THINKING_LEVELS)
+    # A namespaced id splits into provider/label; a bare id falls back.
+    assert by_id["openai/gpt-5.2"]["provider"] == "openai"
+    assert by_id["openai/gpt-5.2"]["label"] == "gpt-5.2"
+    assert by_id["cc-default"]["provider"] == "litellm"
+
+
+async def test_gateway_models_reports_proxy_errors_not_an_empty_catalog(monkeypatch):
+    async def boom() -> list[str]:
+        raise litellm_mod.LiteLLMError("model catalog — http://x unreachable: nope")
+
+    monkeypatch.setattr(litellm_mod, "exposed_model_ids", boom)
+    payload = await routes.gateway_model_catalog()
+    assert payload["models"] == []
+    assert "unreachable" in payload["error"]

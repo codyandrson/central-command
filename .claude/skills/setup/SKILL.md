@@ -52,12 +52,18 @@ Rules that hold for the whole run:
 - **Never print secret values.** `.env` and `secrets.yaml` contents stay out
   of your output, and so does `setup-diagnostics.txt`'s content beyond what
   it already redacts (it records key NAMES only) — refer to keys by name.
-- **pytest gates Phase 5, but `setup.sh` does not run it.** After the `app`
-  phase reports clean, run `pytest -q` yourself (sequential — xdist's
-  per-worker DBs are broken in practice; ~11 minutes). All green before the
-  interview; a red suite here is a real defect, not something to wave through.
-- **Do not start uvicorn before the interview.** First boot hires the roster;
-  the interview's answers must land in `.env` first.
+- **`setup.sh` now runs the whole ride (2026-08-28): nine phases, ending in
+  `test` (the pytest gate, via the venv), `boot` (elicits the operator name
+  on a terminal, starts the API detached — `./setup.sh stop` is its
+  counterpart) and `demo` (fixture email → the operator approves in the
+  cockpit → dry-run provenance verified).** Do not hand-conduct those steps
+  on the podman substrate any more — run `./setup.sh` and interpret. The
+  late phases skip by probing reality (healthy API skips test+boot; a
+  decided proposal skips demo), so re-runs converge. A red `test` phase is
+  a real defect — diagnose it, don't wave it through.
+- **The interview's `.env` answer is only `CC_OPERATOR_NAME`, and `boot`
+  elicits it interactively** — the fuller onboarding interview (operator
+  episodes into the graph) remains yours to conduct, any time after boot.
 - **Capability manifest and vlogs disclosure are mandatory.** `./setup.sh
   verify` prints what this profile installed vs. the k3s deployment, naming
   vlogs (the log console) as the one deliberate omission — podman doesn't

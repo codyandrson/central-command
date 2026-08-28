@@ -22,12 +22,21 @@
 #     app         venv, editable install, root .env, mint the spine's virtual
 #                 key, cockpit build
 #     verify      verify.sh (deployed) then live, then the capability manifest
+#     test        the pytest gate, via the venv (no activation stumbles)
+#     boot        elicit the operator's name (once), start the API detached,
+#                 assert the roster hired          (counterpart: ./setup.sh stop)
+#     demo        fixture email -> triage -> YOUR approval in the cockpit ->
+#                 dry-run execution + provenance verified on the event log
 #
+#     stop        stop the API that `boot` started
 #     status      re-run postconditions only, nothing mutating
 #     diagnose    write setup-diagnostics.txt for pasting to Claude
 #
-#   No argument = all six phases in order, stopping at the first hard failure.
-#   There is no state file: every step is idempotent, so RESUME IS RE-RUN.
+#   No argument = ALL NINE phases in order — zero to a working, human-approved
+#   demo in one command (2026-08-28), stopping at the first hard failure or
+#   gate. There is no state file: every step is idempotent and the late phases
+#   probe REALITY to skip (a healthy API skips test+boot; a decided proposal
+#   skips demo), so RESUME IS RE-RUN.
 #
 #   OUTPUT PROTOCOL (cloud-init's exit taxonomy, Replicated's check lines):
 #     stdout   one line per check: `PASS|WARN|FAIL|USERACTION <check>: <message>`
@@ -640,6 +649,195 @@ phase_verify() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PHASES test / boot / demo — install-to-working-demo in ONE command
+# (2026-08-28, operator decision: "me having to run a whole series of commands
+# myself seems relatively pointless"). Deterministic like everything above;
+# the two genuinely-human moments (naming the operator, approving the demo
+# proposal) are IN-PROCESS gates on a terminal, exit-3 gates otherwise.
+# Idempotency probes REALITY, never a state file: a healthy API skips
+# test+boot, a decided proposal in the event log skips demo.
+# ─────────────────────────────────────────────────────────────────────────────
+is_tty() { [[ -t 0 ]]; }
+
+api_url() { # the app's own port, from the root .env when set
+  local p; p="$(get_kv "$APP_ENV" CC_API_PORT)"; printf 'http://127.0.0.1:%s' "${p:-8080}"
+}
+api_up() { curl -fsS -m 5 "$(api_url)/health" >/dev/null 2>&1; }
+
+venv_uvicorn() {
+  [[ -x "$REPO_ROOT/.venv/bin/uvicorn" ]] && { printf '%s' "$REPO_ROOT/.venv/bin/uvicorn"; return 0; }
+  [[ -x "$REPO_ROOT/.venv/Scripts/uvicorn.exe" ]] && { printf '%s' "$REPO_ROOT/.venv/Scripts/uvicorn.exe"; return 0; }
+  return 1
+}
+
+# One JSON field out of a GET, via the venv-independent $PY. Empty on any
+# error — callers treat empty as "not there yet".
+api_json() { # api_json <url> <python-expr over `d`>
+  curl -fsS -m 10 "$1" 2>/dev/null | $PY -c "
+import json,sys
+try: d=json.load(sys.stdin); print($2)
+except Exception: pass" 2>/dev/null
+}
+
+poll_until() { # poll_until <seconds> <interval> <cmd...> — true once cmd succeeds
+  local deadline=$(( SECONDS + $1 )) ivl="$2"; shift 2
+  until "$@"; do (( SECONDS < deadline )) || return 1; sleep "$ivl"; done
+}
+
+phase_test() {
+  load_env || return 1
+  if api_up; then
+    pass "test" "skipped — the API is already up and healthy; to re-gate by hand: .venv python -m pytest -q"
+    return 0
+  fi
+  local py; py="$(venv_python)" || { fail "test" ".venv missing — run: ./setup.sh app"; return 1; }
+  note "the offline suite is SEQUENTIAL and takes ~10 minutes — this is the gate, not a formality"
+  step "test" "the offline suite is green" in_repo "$py" -m pytest -q || return 1
+}
+
+phase_boot() {
+  load_env || return 1
+  if api_up; then
+    pass "boot-api" "API already answering at $(api_url) — not starting a second one"
+  else
+    # CC_OPERATOR_NAME is the one value only a human can supply. On a
+    # terminal, ask it here (elicitation IS allowed to be a prompt — it is
+    # the script asking, deterministically); headless, gate.
+    local opname; opname="$(get_kv "$APP_ENV" CC_OPERATOR_NAME)"
+    if is_placeholder "$opname"; then
+      if is_tty; then
+        note ""
+        note "== one question before first boot =="
+        read -rp "What should the agents call you? " opname
+        [[ -n "$opname" ]] || { fail "operator-name" "no name given — first boot needs one"; return 1; }
+        set_kv "$APP_ENV" CC_OPERATOR_NAME "$opname"
+        pass "operator-name" "CC_OPERATOR_NAME recorded in the root .env"
+      else
+        useraction "operator-name" "set CC_OPERATOR_NAME in the root .env, then re-run: ./setup.sh boot"
+        return 3
+      fi
+    else
+      pass "operator-name" "CC_OPERATOR_NAME already set — left alone"
+    fi
+
+    local uv_bin; uv_bin="$(venv_uvicorn)" || { fail "boot-api" "uvicorn not in .venv — run: ./setup.sh app"; return 1; }
+    note "--> starting uvicorn detached (log: $HERE/uvicorn.log · stop: ./setup.sh stop)"
+    ( cd "$REPO_ROOT" && nohup "$uv_bin" central_command.api.app:app --host 127.0.0.1 \
+        --port "$(api_url | sed 's/.*://')" >>"$HERE/uvicorn.log" 2>&1 &
+      echo $! >"$HERE/uvicorn.pid" )
+    if wait_http "$(api_url)/health" 90; then
+      pass "boot-api" "API answering at $(api_url) (first boot hires the roster)"
+    else
+      fail "boot-api" "API never answered /health — read $HERE/uvicorn.log"
+      return 1
+    fi
+  fi
+
+  local n; n="$(api_json "$(api_url)/api/agents" 'len(d.get("agents", d if isinstance(d, list) else []))')"
+  if [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )); then
+    pass "boot-roster" "$n agents on the roster"
+  else
+    fail "boot-roster" "the roster is empty — read $HERE/uvicorn.log (seed guard? database?)"
+    return 1
+  fi
+  note "cockpit: $(api_url)  (a fresh install runs the executor in dry_run — nothing touches the world until you flip it)"
+}
+
+demo_decided() { # true once the event log shows a decided proposal
+  local c; c="$(api_json "$(api_url)/api/events?kind=proposal.decided&limit=1" 'len(d.get("events",[]))')"
+  [[ "$c" =~ ^[1-9] ]]
+}
+demo_awaiting() {
+  local c; c="$(api_json "$(api_url)/api/dispatch" 'd.get("awaiting_human",0)')"
+  [[ "$c" =~ ^[1-9] ]]
+}
+
+phase_demo() {
+  load_env || return 1
+  api_up || { fail "demo" "the API is not running — ./setup.sh boot"; return 1; }
+
+  if demo_decided; then
+    pass "demo" "skipped — the event log already shows a decided proposal (the loop is proven on this install)"
+    return 0
+  fi
+
+  if ! demo_awaiting; then
+    local eml="$REPO_ROOT/fixtures/emails/001-invoice-due.eml"
+    [[ -f "$eml" ]] || { fail "demo-feed" "$eml missing"; return 1; }
+    step "demo-feed" "fixture email enrolled (a repeat Message-ID is a no-op by design)" \
+      bash -c "$PY -c 'import json,sys,pathlib;print(json.dumps({\"text\":pathlib.Path(sys.argv[1]).read_text()}))' '$eml' \
+        | curl -fsS -X POST -H 'content-type: application/json' -d @- '$(api_url)/api/emails'" || return 1
+
+    # Fire the dispatcher only when nothing is already working the queue.
+    local busy; busy="$(api_json "$(api_url)/api/dispatch" 'd.get("in_flight",0)')"
+    if [[ "$busy" =~ ^[1-9] ]]; then
+      pass "demo-dispatch" "a run is already in flight — riding it"
+    else
+      step "demo-dispatch" "dispatcher claimed the item (a real inference against your endpoint starts now)" \
+        curl -fsS -m 30 -X POST "$(api_url)/api/dispatch/step" || return 1
+    fi
+
+    note "triage is thinking — a real model call; this commonly takes a few minutes"
+    if ! poll_until 600 10 demo_awaiting; then
+      local failed; failed="$(api_json "$(api_url)/api/dispatch" '(d.get("ledger") or {}).get("FAILED",0)')"
+      if [[ "$failed" =~ ^[1-9] ]]; then
+        fail "demo" "the triage run FAILED — read $HERE/uvicorn.log; recover with POST $(api_url)/api/work/<item_id>/requeue (never re-POST the email: a repeat Message-ID is a silent no-op)"
+      else
+        fail "demo" "no proposal parked within 10 minutes — read $HERE/uvicorn.log and $(api_url)/api/dispatch"
+      fi
+      return 1
+    fi
+  fi
+
+  # ── the operator's moment — never scripted away ────────────────────────────
+  useraction "demo-approve" "a proposal is waiting in the Decisions Inbox — open $(api_url), review it, and decide (approve to see the dry-run execution)"
+  if ! is_tty; then
+    return 3
+  fi
+  note ""
+  note "== your move =="
+  note "Open $(api_url) -> Decisions Inbox. Read the proposal and its evidence,"
+  note "then decide. This gate IS the product; nothing here will decide for you."
+  note "(waiting — checks every 10s, Ctrl-C to abandon and re-run later)"
+  if ! poll_until 1800 10 demo_decided; then
+    fail "demo" "no decision within 30 minutes — re-run ./setup.sh demo whenever you are ready; it resumes here"
+    return 1
+  fi
+  pass "demo-decided" "decision recorded on the event log"
+
+  local execd; execd="$(api_json "$(api_url)/api/events?kind=proposal.executed&limit=1" 'len(d.get("events",[]))')"
+  if [[ "$execd" =~ ^[1-9] ]]; then
+    pass "demo-executed" "execution recorded with provenance (dry-run: a logged simulation — flip CC_EXECUTOR_MODE deliberately for live writes)"
+  else
+    # Reject/dismiss is a legitimate decision — the loop is still proven.
+    pass "demo-executed" "no execution event — you rejected or dismissed, which proves the gate just as well"
+  fi
+  note ""
+  note "The install is complete and the spine is proven end to end."
+  note "Deliberately still OFF: live executor mode, the mail feed, the dispatch"
+  note "drain, and every recurring schedule — the cockpit's Crons tab and the"
+  note "root .env flip each one when YOU decide."
+}
+
+cmd_stop() {
+  CURPHASE=stop
+  local pidf="$HERE/uvicorn.pid"
+  if [[ -f "$pidf" ]]; then
+    local pid; pid="$(cat "$pidf")"
+    if kill "$pid" 2>/dev/null; then
+      pass "stop" "sent TERM to uvicorn (pid $pid)"
+    else
+      warn "stop" "pid $pid was not running — removing the stale pid file"
+    fi
+    rm -f "$pidf"
+  elif api_up; then
+    warn "stop" "an API answers at $(api_url) but was not started by this script — stop it where you started it"
+  else
+    pass "stop" "nothing to stop"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # status — postconditions only. Mutates nothing.
 # ─────────────────────────────────────────────────────────────────────────────
 phase_status() {
@@ -759,10 +957,18 @@ pending_update() {
 
 usage() {
   cat >&2 <<USAGE
-usage: ./setup.sh [validate|preflight|llm|stack|app|verify|status|diagnose]
+usage: ./setup.sh [validate|preflight|llm|stack|app|verify|test|boot|demo|
+                   stop|status|diagnose]
 
-  no argument   runs validate -> preflight -> llm -> stack -> app -> verify,
-                stopping at the first phase that hard-fails or needs you
+  no argument   runs validate -> preflight -> llm -> stack -> app -> verify
+                -> test -> boot -> demo: zero to a working, human-approved
+                demo in one command, stopping at the first phase that
+                hard-fails or needs you
+  test          the pytest gate (via the venv — no activation needed)
+  boot          asks your name (once), starts the API detached, checks roster
+  demo          feeds a fixture email, waits for YOUR approval in the
+                cockpit, verifies the dry-run execution + provenance
+  stop          stops the API this script started (boot's counterpart)
   exit codes    0 clean · 1 hard failure · 2 completed with warnings
                 3 stopped for USER ACTION (see the last USERACTION line)
   status log    every check is appended to deploy/single/setup-log.txt
@@ -773,10 +979,16 @@ main() {
   local cmd="${1:-all}"
   logline "run start: ./setup.sh $cmd"
   case "$cmd" in
-    validate|preflight|llm|stack|app|verify|status|diagnose)
+    validate|preflight|llm|stack|app|verify|test|boot|demo|status|diagnose)
       run_phase "$cmd"; local prc=$?
       logline "run end: ./setup.sh $cmd -> exit $prc"
       exit $prc
+      ;;
+    stop)
+      cmd_stop
+      local src=0; (( WARNS )) && src=2; (( FAILS )) && src=1
+      logline "run end: ./setup.sh stop -> exit $src"
+      exit $src
       ;;
     all)
       if pending_update; then
@@ -786,7 +998,7 @@ main() {
         exit 3
       fi
       local worst=0 rc p
-      for p in validate preflight llm stack app verify; do
+      for p in validate preflight llm stack app verify test boot demo; do
         run_phase "$p"; rc=$?
         if (( rc == 1 )); then
           note ""
