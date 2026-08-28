@@ -30,7 +30,7 @@ describe('UpdateBadge', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows a copy-paste update command with the project directory', async () => {
+  it('shows the update.sh pipeline with the project directory', async () => {
     const user = userEvent.setup();
     render(<UpdateBadge />);
 
@@ -41,8 +41,10 @@ describe('UpdateBadge', () => {
     });
 
     expect(screen.getByText('/tmp/nerve repo')).toBeInTheDocument();
-    expect(screen.getByText("cd '/tmp/nerve repo' && npm run update -- --yes")).toBeInTheDocument();
-    expect(screen.getByText(/cd '\/tmp\/nerve repo' && npm run update -- --dry-run/i)).toBeInTheDocument();
+    // The external-updater pipeline (2026-08-27 contract), never an in-app apply.
+    expect(screen.getByText(/update\.sh import ~\/Downloads\/central-command-v1\.5\.3\.zip/)).toBeInTheDocument();
+    expect(screen.getByText(/update\.sh plan/)).toBeInTheDocument();
+    expect(screen.getByText(/update\.sh apply/)).toBeInTheDocument();
   });
 
   it('does not render when the server omits the project directory', async () => {

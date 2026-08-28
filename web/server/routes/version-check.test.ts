@@ -4,7 +4,10 @@ import { Hono } from 'hono';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const TEST_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+// The route resolves the PRODUCT repo root (three levels above the compiled
+// routes dir); from this test file's source location that is also '../..' up
+// from web/ — i.e. the checkout root holding the VERSION file.
+const TEST_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 describe('GET /api/version/check', () => {
   beforeEach(() => {
@@ -47,5 +50,8 @@ describe('GET /api/version/check', () => {
     expect(json.latest).toBe('9.9.9');
     expect(json.updateAvailable).toBe(true);
     expect(json.projectDir).toBe(TEST_REPO_ROOT);
+    // current comes from the repo-root VERSION file, not the cockpit's
+    // package.json — the wire shape the UpdateBadge renders.
+    expect(json.current).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });

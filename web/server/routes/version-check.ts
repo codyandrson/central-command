@@ -1,7 +1,11 @@
 /**
- * GET /api/version/check — Check if a newer version is available.
+ * GET /api/version/check — Check if a newer Central Command is available.
  *
- * Uses latest published GitHub release first, then latest semver tag fallback.
+ * Uses latest published GitHub release first, then latest semver tag fallback
+ * — resolved against the REPO ROOT's git origin (the central-command repo),
+ * not the vendored cockpit. Current version comes from the root VERSION file
+ * (`version=<semver>`, the 2026-08-27 setup-update contract), not the
+ * cockpit's package.json — the vendored Nerve version is not the product's.
  */
 
 import { Hono } from 'hono';
@@ -12,9 +16,19 @@ import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { compareSemver, resolveLatestVersion } from '../lib/release-source.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf-8')) as {
-  version: string;
-};
+// server-dist/routes -> ../.. = web/ -> ../../.. = the repo root.
+const repoRoot = resolve(__dirname, '../../..');
+
+function readProductVersion(): string {
+  try {
+    const raw = readFileSync(resolve(repoRoot, 'VERSION'), 'utf-8');
+    const match = /^version=(.+)$/m.exec(raw);
+    if (match) return match[1].trim();
+  } catch {
+    // fall through
+  }
+  return '0.0.0'; // pre-versioning tree — anything published reads newer
+}
 
 interface VersionCache {
   latest: string;
@@ -24,7 +38,7 @@ interface VersionCache {
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 let cache: VersionCache | null = null;
-const projectDir = resolve(__dirname, '../..');
+const projectDir = repoRoot;
 
 const app = new Hono();
 
@@ -34,10 +48,10 @@ app.get('/api/version/check', rateLimitGeneral, async (c) => {
   // Serve from cache if fresh.
   if (cache && now - cache.checkedAt < CACHE_TTL_MS) {
     return c.json({
-      current: pkg.version,
+      current: readProductVersion(),
       latest: cache.latest,
       source: cache.source,
-      updateAvailable: compareSemver(cache.latest, pkg.version) > 0,
+      updateAvailable: compareSemver(cache.latest, readProductVersion()) > 0,
       projectDir,
     });
   }
@@ -45,7 +59,7 @@ app.get('/api/version/check', rateLimitGeneral, async (c) => {
   const latest = await resolveLatestVersion(projectDir);
   if (!latest) {
     return c.json({
-      current: pkg.version,
+      current: readProductVersion(),
       latest: null,
       source: null,
       updateAvailable: false,
@@ -61,10 +75,10 @@ app.get('/api/version/check', rateLimitGeneral, async (c) => {
   };
 
   return c.json({
-    current: pkg.version,
+    current: readProductVersion(),
     latest: latest.version,
     source: latest.source,
-    updateAvailable: compareSemver(latest.version, pkg.version) > 0,
+    updateAvailable: compareSemver(latest.version, readProductVersion()) > 0,
     projectDir,
   });
 });
