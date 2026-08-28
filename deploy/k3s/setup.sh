@@ -795,7 +795,7 @@ phase_status() {
   done
 
   local u
-  for u in cc-uvicorn cc-nerve cc-sandbox-runner cc-graph-bolt cc-backup.timer; do
+  for u in cc-uvicorn cc-nerve cc-sandbox-runner cc-graph-bolt cc-backup.timer cc-update.path; do
     if systemctl is-active --quiet "$u"; then
       pass "unit-${u}" "active"
     elif systemctl is-enabled --quiet "$u" 2>/dev/null; then
