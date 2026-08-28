@@ -30,9 +30,13 @@
 #   There is no state file: every step is idempotent, so RESUME IS RE-RUN.
 #
 #   OUTPUT PROTOCOL (cloud-init's exit taxonomy, Replicated's check lines):
-#     stdout   one line per check: `PASS|WARN|FAIL <check-name>: <message>`
+#     stdout   one line per check: `PASS|WARN|FAIL|USERACTION <check>: <message>`
 #     stderr   everything else — subprocess output, detail, progress
 #     exit 0   clean · 1 hard failure · 2 completed with warnings
+#              · 3 stopped for USER ACTION (the operator's move, not an error)
+#     log      every check line is also appended, timestamped, to
+#              deploy/single/setup-log.txt — the durable history a re-run
+#              (or a diagnosing agent) reads first
 #
 #   Secret VALUES are never printed. Keys are referred to by NAME.
 # ============================================================================
@@ -57,10 +61,18 @@ done
 # $PY may be multiple words (the uv fallback) — always invoke it unquoted.
 
 # ── output protocol ─────────────────────────────────────────────────────────
-FAILS=0; WARNS=0
-pass() { printf 'PASS %s: %s\n' "$1" "$2"; }
-warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); }
-fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); }
+# Exit taxonomy (2026-08-27 contract): 0 clean · 1 hard failure · 2 warnings ·
+# 3 USER ACTION REQUIRED — the run stopped deliberately for the operator; the
+# last USERACTION line says what for. A conductor (human or agent) re-runs the
+# phase after acting; every phase is idempotent so that always converges.
+FAILS=0; WARNS=0; ACTIONS=0
+CURPHASE=""
+LOGFILE="$HERE/setup-log.txt"
+logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "${CURPHASE:-run}" "$*" >>"$LOGFILE" 2>/dev/null || true; }
+pass() { printf 'PASS %s: %s\n' "$1" "$2"; logline "PASS $1: $2"; }
+warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
+fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); logline "FAIL $1: $2"; }
+useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); logline "USERACTION $1: $2"; }
 note() { printf '%s\n' "$*" >&2; }
 
 # Run a step, sending all of its chatter to stderr. PASS on success, FAIL on
@@ -324,6 +336,35 @@ phase_preflight() {
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE: llm — LiteLLM first, then everything is proven through its aliases.
 # ─────────────────────────────────────────────────────────────────────────────
+# The USER-ACTION gate for a probe failure. The proxy is alive at this point,
+# so the operator can act in its UI; this prints the where and the what.
+# Key VALUES are never printed — names only, per the output protocol.
+llm_gate() { # llm_gate <what-failed>
+  useraction "llm-models" "$1 — operator action needed; see the instructions on stderr, then re-run: ./setup.sh llm"
+  note ""
+  note "== LiteLLM needs your attention =="
+  note "The proxy is UP but a model alias is not answering. Fix it yourself —"
+  note "no agent should register or edit models on your behalf."
+  note ""
+  note "  UI:           http://127.0.0.1:${CC_LITELLM_PORT}/ui"
+  note "  login:        username 'admin', password = LITELLM_MASTER_KEY"
+  note "                (the value is in deploy/single/.env — not printed here)"
+  note ""
+  note "  These aliases must exist and answer (rendered from your .env; check"
+  note "  them in the UI against your upstream server):"
+  note "    cc-default    -> openai/${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}"
+  note "    graphiti-llm  -> openai/chat_completions/${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}   (the bridge prefix is required)"
+  note "    cc-embedding  -> openai/${CC_EMBED_MODEL:-<CC_EMBED_MODEL>}"
+  note ""
+  note "  Is the fault upstream or in the proxy? One command tells you:"
+  note "    ./discover-llm.sh chat ${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}     # DIRECT to your server"
+  note "  Direct works + proxy fails = registration/alias problem (fix in the UI"
+  note "  or fix .env and re-run). Direct fails = CC_LLM_BASE_URL or the key is"
+  note "  wrong in deploy/single/.env."
+  note ""
+  note "When it looks right, re-run:  ./setup.sh llm   (idempotent; it re-probes)"
+}
+
 phase_llm() {
   load_env || return 1
 
@@ -353,20 +394,23 @@ phase_llm() {
     return 1
   fi
 
-  step "probe-chat" "a real completion came back through the cc-default alias" \
-    "$HERE/discover-llm.sh" --proxy chat cc-default || {
-      note "A --proxy failure can be a bad upstream key OR a broken registration."
-      note "Tell them apart with the DIRECT rung: ./discover-llm.sh chat \$CC_CHAT_MODEL"
-      return 1
-    }
+  # The probes. A failure here is a USER-ACTION gate, not a plain FAIL
+  # (2026-08-27 contract): the proxy is UP, so the fix is the operator's —
+  # correct the model in the LiteLLM UI or in .env — never an agent
+  # improvising registrations. The gate prints everything needed to act.
+  if ! step "probe-chat" "a real completion came back through the cc-default alias" \
+    "$HERE/discover-llm.sh" --proxy chat cc-default; then
+    llm_gate "the cc-default alias did not return a completion"
+    return 3
+  fi
 
   # THE measurement. Never a model card: a mis-sized vector corrupts the Neo4j
   # index instead of erroring, and the dimension is permanent once it exists.
   local dim
   dim="$("$HERE/discover-llm.sh" --proxy embed cc-embedding 2>/dev/null | tail -1)"
   if [[ ! "$dim" =~ ^[0-9]+$ ]]; then
-    fail "probe-embed" "the cc-embedding alias did not return a vector — run: ./discover-llm.sh --proxy embed cc-embedding"
-    return 1
+    llm_gate "the cc-embedding alias did not return a vector"
+    return 3
   fi
   pass "probe-embed" "cc-embedding returned a ${dim}-dimension vector"
 
@@ -684,14 +728,28 @@ phase_diagnose() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings
-  FAILS=0; WARNS=0
+run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user action
+  FAILS=0; WARNS=0; ACTIONS=0
+  CURPHASE="$1"
   note ""
   note "======== phase: $1"
   "phase_$1"
+  # A gate outranks a FAIL: the same event often prints both (the probe FAILs,
+  # then the gate says whose move it is), and the exit code must say "stopped
+  # for you", not "broken".
+  (( ACTIONS )) && return 3
   (( FAILS )) && return 1
   (( WARNS )) && return 2
   return 0
+}
+
+# An initialized update.sh repo with unmerged imports means this tree is an
+# EXISTING deployment mid-update, not a fresh install — the full run must not
+# plow through it (same-tool-detects-mode, 2026-08-27 contract).
+pending_update() {
+  command -v git >/dev/null 2>&1 || return 1
+  git -C "$REPO_ROOT" rev-parse --verify -q upstream >/dev/null 2>&1 || return 1
+  ! git -C "$REPO_ROOT" merge-base --is-ancestor upstream local 2>/dev/null
 }
 
 usage() {
@@ -699,18 +757,29 @@ usage() {
 usage: ./setup.sh [validate|preflight|llm|stack|app|verify|status|diagnose]
 
   no argument   runs validate -> preflight -> llm -> stack -> app -> verify,
-                stopping at the first phase that hard-fails
+                stopping at the first phase that hard-fails or needs you
   exit codes    0 clean · 1 hard failure · 2 completed with warnings
+                3 stopped for USER ACTION (see the last USERACTION line)
+  status log    every check is appended to deploy/single/setup-log.txt
 USAGE
 }
 
 main() {
   local cmd="${1:-all}"
+  logline "run start: ./setup.sh $cmd"
   case "$cmd" in
     validate|preflight|llm|stack|app|verify|status|diagnose)
-      run_phase "$cmd"; exit $?
+      run_phase "$cmd"; local prc=$?
+      logline "run end: ./setup.sh $cmd -> exit $prc"
+      exit $prc
       ;;
     all)
+      if pending_update; then
+        CURPHASE="dispatch"
+        useraction "existing-install" "this tree is an existing deployment with an unapplied update — use ./update.sh plan (then apply), not a fresh setup run"
+        logline "run end: ./setup.sh all -> exit 3"
+        exit 3
+      fi
       local worst=0 rc p
       for p in validate preflight llm stack app verify; do
         run_phase "$p"; rc=$?
@@ -719,12 +788,24 @@ main() {
           note "phase '$p' failed. Fix the FAIL line above, then re-run just that phase:"
           note "    ./setup.sh $p"
           note "If the cause is not obvious: ./setup.sh diagnose  (then paste the file to Claude)"
+          logline "run end: ./setup.sh all -> exit 1 (phase $p)"
           exit 1
+        fi
+        if (( rc == 3 )); then
+          note ""
+          note "phase '$p' stopped for YOUR action — see the USERACTION line above."
+          note "When done, re-run:  ./setup.sh   (idempotent — it fast-forwards to here)"
+          logline "run end: ./setup.sh all -> exit 3 (phase $p)"
+          exit 3
         fi
         (( rc > worst )) && worst=$rc
       done
       note ""
       note "all phases complete."
+      if ! git -C "$REPO_ROOT" rev-parse --verify -q upstream >/dev/null 2>&1; then
+        note "make this deployment updatable (one-time): ./update.sh init"
+      fi
+      logline "run end: ./setup.sh all -> exit $worst"
       exit "$worst"
       ;;
     -h|--help|help) usage; exit 0 ;;

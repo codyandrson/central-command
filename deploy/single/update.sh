@@ -19,10 +19,14 @@
 #
 #     init            one-time: turn the unzipped tree into the git repo above
 #     import <zip>    commit a newly downloaded source zip onto `upstream`
-#     plan            what an apply would do: diff summary, migration/deps/
-#                     cockpit flags, predicted merge conflicts. Mutates nothing.
-#     apply           merge upstream into local, then deploy the result:
+#     plan            what an apply would do: version gate, diff summary,
+#                     migration/deps/cockpit flags, predicted merge conflicts.
+#                     Mutates nothing.
+#     apply           gate (API stopped? no downgrade/out-of-order version?)
+#                     -> spine DB backup (default ON; CC_SKIP_DB_BACKUP=1 to
+#                     opt out) -> merge upstream into local -> deploy:
 #                     schema -> ./setup.sh app -> ./setup.sh verify
+#                     -> USERACTION: restart is the operator's
 #     rollback        reset `local` to the last pre-update tag and re-deploy
 #                     the restored tree through the same idempotent steps
 #
@@ -43,11 +47,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="$HERE/.env"
 
-# ── output protocol (setup.sh's) ────────────────────────────────────────────
-FAILS=0; WARNS=0
-pass() { printf 'PASS %s: %s\n' "$1" "$2"; }
-warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); }
-fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); }
+# ── output protocol (setup.sh's, incl. the 2026-08-27 additions) ────────────
+# exit 3 = stopped for USER ACTION (deliberate gate, not an error).
+FAILS=0; WARNS=0; ACTIONS=0
+LOGFILE="$HERE/setup-log.txt"
+CURCMD="update"
+logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "$CURCMD" "$*" >>"$LOGFILE" 2>/dev/null || true; }
+pass() { printf 'PASS %s: %s\n' "$1" "$2"; logline "PASS $1: $2"; }
+warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
+fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); logline "FAIL $1: $2"; }
+useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); logline "USERACTION $1: $2"; }
 note() { printf '%s\n' "$*" >&2; }
 
 step() { # step <check-name> <success-message> <cmd...>
@@ -98,6 +107,78 @@ dirty_tracked() { [[ -n "$(G status --porcelain --untracked-files=no)" ]]; }
 on_local_branch() { [[ "$(G rev-parse --abbrev-ref HEAD 2>/dev/null)" == "local" ]]; }
 
 merged_already() { G merge-base --is-ancestor upstream local 2>/dev/null; }
+
+# ── version gate (2026-08-27 contract) ──────────────────────────────────────
+# VERSION at the repo root: `version=` + `min_upgrade_from=`. The updater
+# refuses downgrades and out-of-order jumps LOUDLY; a missing file (a
+# pre-versioning tree) degrades to a WARN so old installs can still move
+# forward onto the first versioned release.
+branch_kv() { # branch_kv <branch> <key> — read VERSION off a branch, no checkout
+  G show "$1:VERSION" 2>/dev/null | { grep "^$2=" || true; } | head -1 | cut -d= -f2
+}
+semver_lt() { # semver_lt <a> <b> — true when a < b
+  [[ "$1" == "$2" ]] && return 1
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" == "$1" ]]
+}
+version_gate() { # -> 0 ok / 1 refuse (already printed)
+  local cur new minfrom
+  cur="$(branch_kv local version)"; new="$(branch_kv upstream version)"
+  if [[ -z "$new" ]]; then
+    warn "version-gate" "upstream has no VERSION file — cannot gate this update (pre-versioning import)"
+    return 0
+  fi
+  if [[ -z "$cur" ]]; then
+    warn "version-gate" "installed tree has no VERSION file (pre-1.0 install) — allowing the move onto ${new}"
+    return 0
+  fi
+  if semver_lt "$new" "$cur"; then
+    fail "version-gate" "REFUSING a downgrade: installed ${cur}, import is ${new} — import a release >= ${cur}"
+    return 1
+  fi
+  minfrom="$(branch_kv upstream min_upgrade_from)"
+  if [[ -n "$minfrom" ]] && semver_lt "$cur" "$minfrom"; then
+    fail "version-gate" "REFUSING an out-of-order jump: ${new} requires upgrading from >= ${minfrom}, installed is ${cur} — apply the intermediate release(s) first"
+    return 1
+  fi
+  pass "version-gate" "installed ${cur} -> ${new}${minfrom:+ (min_upgrade_from ${minfrom})}"
+}
+
+# ── database backup (default ON; ceremony tracks reversibility) ─────────────
+# The git tag is the cheap code checkpoint; the spine dump is the guard for
+# the one thing rollback cannot undo. CC_SKIP_DB_BACKUP=1 is the explicit
+# GitLab-style opt-out; CC_BACKUP_DIR overrides the destination.
+backup_spine() {
+  if [[ "${CC_SKIP_DB_BACKUP:-0}" == "1" ]]; then
+    warn "db-backup" "skipped by CC_SKIP_DB_BACKUP=1 — schema changes will be irreversible"
+    return 0
+  fi
+  local pfx ctr dest out
+  pfx="$(get_kv "$ENV_FILE" CC_POD_PREFIX)"; pfx="${pfx:-cc-}"
+  ctr="${pfx}postgres-postgres"
+  if ! podman container exists "$ctr" 2>/dev/null; then
+    warn "db-backup" "spine postgres container '$ctr' not running — nothing to dump (the schema step below will fail if the stack is truly down)"
+    return 0
+  fi
+  dest="${CC_BACKUP_DIR:-$HOME/cc-backups}"
+  mkdir -p "$dest" && chmod 700 "$dest" 2>/dev/null
+  out="$dest/central_command_pre-update_$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+  if podman exec "$ctr" pg_dump -U central_command -d central_command | gzip >"$out" \
+     && [[ -s "$out" ]]; then
+    chmod 600 "$out" 2>/dev/null
+    pass "db-backup" "spine dumped to $out"
+  else
+    rm -f "$out"
+    fail "db-backup" "pg_dump failed — refusing to update without a spine backup (set CC_SKIP_DB_BACKUP=1 to override deliberately)"
+    return 1
+  fi
+}
+
+# ── running-service gate ────────────────────────────────────────────────────
+# Mutating the venv and code under a live API is the classic half-updated
+# process; deb/rpm stop the daemon first. This profile does not own the
+# operator's uvicorn process, so the stop is a prompted gate, not a kill.
+api_port() { local p; p="$(get_kv "$REPO_ROOT/.env" CC_API_PORT)"; printf '%s' "${p:-8080}"; }
+api_running() { curl -fsS -m 3 "http://127.0.0.1:$(api_port)/health" >/dev/null 2>&1; }
 
 # ── init ────────────────────────────────────────────────────────────────────
 cmd_init() {
@@ -184,6 +265,8 @@ cmd_plan() {
     return 0
   fi
 
+  version_gate || return 1
+
   local names; names="$(G diff --name-only local...upstream)"
   note ""
   note "== diff summary (what upstream brings):"
@@ -240,7 +323,7 @@ deploy_current_tree() {
   apply_schema || return 1
   step "app" "venv/deps/cockpit reconciled (./setup.sh app)" "$HERE/setup.sh" app || return 1
   step "verify" "deployed + live verification passed (./setup.sh verify)" "$HERE/setup.sh" verify || return 1
-  warn "restart-required" "a merged change is not live until its process restarts — restart your uvicorn API (and the sandbox runner, if you run one), then re-check with: ./setup.sh status"
+  useraction "restart" "update applied — start your uvicorn API (and the sandbox runner, if you run one), then confirm with: ./setup.sh status"
 }
 
 # ── apply ───────────────────────────────────────────────────────────────────
@@ -258,10 +341,18 @@ cmd_apply() {
     return 1
   fi
 
+  # The stop half of the deb/rpm bracket: nothing mutates under a live API.
+  if api_running; then
+    useraction "api-stop" "the API is answering on 127.0.0.1:$(api_port) — stop your uvicorn process (and the sandbox runner, if running), then re-run ./update.sh apply"
+    return 0
+  fi
+
   ensure_identity
   if merged_already; then
     pass "merge" "\`local\` already contains \`upstream\` — continuing with the deploy steps"
   else
+    version_gate || return 1
+    backup_spine || return 1
     local tag; tag="pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
     step "checkpoint" "rollback point tagged: $tag" G tag "$tag" || return 1
     note "--> git merge --no-edit upstream"
@@ -279,6 +370,10 @@ cmd_apply() {
 cmd_rollback() {
   need_git || return 1
   need_initialized || return 1
+  if api_running; then
+    useraction "api-stop" "the API is answering on 127.0.0.1:$(api_port) — stop it before rolling back, then re-run ./update.sh rollback"
+    return 0
+  fi
   local tag; tag="$(G tag -l 'pre-update-*' | sort | tail -1)"
   [[ -n "$tag" ]] || { fail "tag" "no pre-update-* tag found — nothing recorded to roll back to"; return 1; }
 
@@ -301,18 +396,22 @@ usage: ./update.sh <init | import <zip> | plan | apply | rollback>
   init            one-time: turn this unzipped tree into a git repo
                   (branch \`upstream\` for imports, \`local\` for the deployment)
   import <zip>    commit a newly downloaded source zip onto \`upstream\`
-  plan            dry-run report: diff, migration/deps/cockpit flags,
-                  predicted conflicts. Mutates nothing; re-runnable.
-  apply           merge + deploy: schema -> ./setup.sh app -> ./setup.sh verify
+  plan            dry-run report: version gate, diff, migration/deps/cockpit
+                  flags, predicted conflicts. Mutates nothing; re-runnable.
+  apply           gate (API stopped? version ok?) -> spine DB backup -> merge
+                  -> schema -> ./setup.sh app -> ./setup.sh verify
   rollback        reset \`local\` to the last pre-update tag and re-deploy
 
   exit codes      0 clean · 1 hard failure · 2 completed with warnings
-                  (apply always ends 2: the restart is yours to perform)
+                  3 stopped for USER ACTION (stop the API / restart it after —
+                  a successful apply always ends 3: the restart is yours)
 USAGE
 }
 
 main() {
   local cmd="${1:-}"
+  CURCMD="update-${cmd:-help}"
+  logline "run start: ./update.sh ${cmd:-<none>} ${2:-}"
   case "$cmd" in
     init)     cmd_init ;;
     import)   cmd_import "${2:-}" ;;
@@ -322,9 +421,12 @@ main() {
     -h|--help|help|"") usage; [[ -n "$cmd" ]] && exit 0 || exit 1 ;;
     *) usage; exit 1 ;;
   esac
-  (( FAILS )) && exit 1
-  (( WARNS )) && exit 2
-  exit 0
+  local rc=0
+  (( WARNS ))   && rc=2
+  (( ACTIONS )) && rc=3
+  (( FAILS ))   && rc=1
+  logline "run end: ./update.sh $cmd -> exit $rc"
+  exit "$rc"
 }
 
 main "$@"

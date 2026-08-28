@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (validate/preflight/llm/stack/app/verify, PASS/WARN/FAIL output, exit 0/1/2), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. On the multi-node k3s substrate it still conducts deploy/k3s/README.md's clean-install runbook. Either way it ends with the onboarding interview and a working dry-run demo. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (validate/preflight/llm/stack/app/verify, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. On the multi-node k3s substrate it still conducts deploy/k3s/README.md's clean-install runbook. Either way it ends with the onboarding interview and a working dry-run demo. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -19,6 +19,31 @@ never end a turn mid-phase with no text.
 
 Rules that hold for the whole run:
 
+- **The exception-handler contract (2026-08-27,
+  `docs/superpowers/specs/2026-08-27-setup-update-contract.md`): the script
+  is the spine, you are the exception handler.** On ANY non-zero exit from
+  `setup.sh` or `update.sh` — 1 (failure), 2 (warnings), or 3 (user action)
+  — you STOP AND END YOUR TURN after surfacing exactly what happened: quote
+  the FAIL/WARN/USERACTION lines, say what they mean, and (for failures) what
+  you propose. You may run the read-only rungs first (`./setup.sh diagnose`,
+  read `setup-log.txt`, read the bundle) — but the decision about what
+  happens next is the operator's, made in conversation, before anything is
+  re-run or changed. Autonomous continuation is for exit 0 only.
+- **Exit 3 is a gate, not an error.** The last USERACTION line names the
+  operator's move (add/fix models in the LiteLLM UI, stop the API before an
+  update, restart it after). Relay the script's own instructions — for the
+  llm gate that includes the UI URL, where the credential lives (by NAME:
+  LITELLM_MASTER_KEY in deploy/single/.env — never print the value), and the
+  expected alias list. When the operator says they've acted, re-run the same
+  phase; it is idempotent and verifies.
+- **Existing install?** Before Phase 0, check: if the repo has an `upstream`
+  branch (update.sh-initialized) — this is a deployment, not a fresh target.
+  Read the tail of `deploy/single/setup-log.txt` for where it last stopped.
+  A new release zip goes through `./update.sh import <zip>` → `plan` (show
+  the operator the plan output and version gate) → on their explicit
+  approval → `apply` — never through a fresh install, and never by
+  extracting a zip over the tree. `setup.sh` itself refuses (exit 3) to run
+  a full pass over a tree with an unapplied import.
 - **Phased with gates — now enforced by `setup.sh` itself.** The full run
   stops at the first phase that hard-fails; don't skip ahead of it, and don't
   re-derive what a failed phase already told you to fix.
@@ -155,30 +180,34 @@ means the cockpit won't be built).
 If the user is running it themselves instead of you, have them paste the
 output; interpret it the same way.
 
-**On any FAIL:**
+**On any non-zero exit — stop. This is the contract, not advice:**
 
-```bash
-./setup.sh diagnose
-```
+1. Optionally run the read-only rungs: `./setup.sh diagnose` (writes
+   `setup-diagnostics.txt` — pod/container states, last 100 log lines per
+   pod, `verify.sh` output, tool versions, `.env` key NAMES only) and read
+   the tail of `setup-log.txt`.
+2. Surface the outcome to the operator: the exact FAIL/WARN/USERACTION
+   lines, what they mean, and — for a failure — your proposed cause and fix.
+3. **End your turn.** The operator decides what happens next. Only after
+   they respond do you correct `.env` and/or re-run `./setup.sh <phase>`.
 
-This writes `deploy/single/setup-diagnostics.txt` — pod/container states,
-last 100 log lines per pod, `verify.sh`'s output, tool versions, and `.env`
-key NAMES only (never values). Read it, reason about the actual cause, and
-say which phase to re-run and why. Do not compose a replacement command for
-whatever `setup.sh` was doing — if the fix is a real command (e.g. `loginctl
-enable-linger`), it's one `setup.sh preflight` already named in its WARN/FAIL
-line; otherwise the fix is almost always "re-run `./setup.sh <phase>`" after
-correcting `.env`.
+Never compose a replacement command for whatever `setup.sh` was doing — if
+the fix is a real command (e.g. `loginctl enable-linger`), it's one the
+script already named in its WARN/FAIL line; otherwise the fix is almost
+always "re-run `./setup.sh <phase>`" after correcting `.env`.
 
-One exception worth knowing about, not composing: if `probe-chat` or
-`probe-embed` fails inside the `llm` phase, the note on stderr already tells
-you to run `./discover-llm.sh chat <upstream-model-id>` or `./discover-llm.sh
-embed <upstream-model-id>` DIRECT — that's the troubleshooting rung baked
-into the script's own output, not a freehand invention. A direct success with
-a proxied failure means the upstream and key are fine and the fault is
-registration; a direct failure means the upstream URL or key is wrong.
+**Exit 3 in the `llm` phase (the model gate)** means LiteLLM is UP but an
+alias didn't answer. The script's stderr already printed the full hand-off:
+the UI URL (`http://127.0.0.1:4000/ui`), the credential's location by name,
+the expected alias → upstream mapping, and the direct-vs-proxy
+discrimination command (`./discover-llm.sh chat <upstream-model-id>` —
+direct success + proxy failure = registration fault; direct failure = wrong
+URL/key in `.env`). Relay it, let the OPERATOR fix the models in the UI or
+correct `.env`, then re-run `./setup.sh llm`. You never register, edit, or
+delete a model — not via curl, not via the UI, not at all.
 
-Gate: `./setup.sh` exits 0 (or 2 with WARNs you've read and accepted).
+Gate: `./setup.sh` exits 0 (or 2 with WARNs the operator has read and
+accepted — a WARN is a stop-and-discuss point, not a drive-past).
 
 ### Phase 2 — pytest gate
 
