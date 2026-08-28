@@ -35,7 +35,7 @@
 # ============================================================================
 set -euo pipefail
 
-CB="${CC_CHROMEBOX_SSH:-chromebox_admin@100.113.118.28}"
+CB="${CC_COMPUTE_SSH:-${CC_CHROMEBOX_SSH:-chromebox_admin@100.113.118.28}}"
 REL="${GVISOR_RELEASE:-latest}"
 TMPL=/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl
 

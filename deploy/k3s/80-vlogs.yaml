@@ -78,7 +78,7 @@ spec:
         app: cc-vlogs
     spec:
       nodeSelector:
-        kubernetes.io/hostname: chromebox
+        cc-role/compute: "true"
       enableServiceLinks: false
       containers:
         - name: victoria-logs

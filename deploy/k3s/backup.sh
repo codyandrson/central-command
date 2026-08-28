@@ -129,7 +129,7 @@ apiVersion: v1
 kind: Pod
 metadata: {name: neo4j-dumper, namespace: central-command}
 spec:
-  nodeSelector: {kubernetes.io/hostname: chromebox}
+  nodeSelector: {cc-role/compute: "true"}
   restartPolicy: Never
   containers:
     - name: dumper
@@ -217,7 +217,7 @@ say "done → ${OUT}/ (retain ${RETAIN_DAYS}d, $(du -sh "$OUT" | cut -f1) total)
 #        with "Mismatching encryption keys" until it is gone. The PVC needs a
 #        helper pod (cc-n8n is scaled to 0):
 #          k3s kubectl -n central-command run n8n-fixer --image=busybox --restart=Never \
-#            --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"raspberrypi"},
+#            --overrides='{"spec":{"nodeSelector":{"cc-role/anchor":"true"},
 #            "containers":[{"name":"n8n-fixer","image":"busybox","command":["sleep","600"],
 #            "volumeMounts":[{"name":"d","mountPath":"/data"}]}],
 #            "volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"cc-n8n-data"}}]}}'

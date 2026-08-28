@@ -197,10 +197,13 @@ def _job_manifest(name: str, agent_id: str) -> dict:
                                 "nodeSelectorTerms": [
                                     {
                                         "matchExpressions": [
+                                            # Role label, not hostname (2026-08-27):
+                                            # gVisor lives on whichever node
+                                            # carries cc-role/compute.
                                             {
-                                                "key": "kubernetes.io/hostname",
+                                                "key": "cc-role/compute",
                                                 "operator": "In",
-                                                "values": ["chromebox"],
+                                                "values": ["true"],
                                             }
                                         ]
                                     }

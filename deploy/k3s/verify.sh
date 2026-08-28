@@ -43,6 +43,16 @@ set -a
 [[ -f deploy/pi/.env ]] && . deploy/pi/.env
 set +a
 
+# Topology is ROLE LABELS, not hostnames (2026-08-27 contract): manifests pin
+# by cc-role/anchor (small stateful stores, control plane) and cc-role/compute
+# (JVM/gVisor/Chromium muscle). Resolve each role to its node once; every
+# placement assertion below compares against these, so a node swap is a
+# relabel, not a verify.sh edit. SSH target for the compute node comes from
+# deploy/pi/.env (CC_COMPUTE_SSH), defaulting to today's chromebox.
+ANCHOR_NODE="$(sudo k3s kubectl get nodes -l cc-role/anchor=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+COMPUTE_NODE="$(sudo k3s kubectl get nodes -l cc-role/compute=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
+
 PASS=0; FAIL=0; SKIP=0
 ok()   { printf '  \033[32mok\033[0m    %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
@@ -129,17 +139,24 @@ fi
 echo
 echo "== C. placement matches the design =="
 # The float/pin split IS the migration. Assert it explicitly rather than
-# inferring it from a green service check.
+# inferring it from a green service check. Roles first: an unlabeled node
+# makes every pinned pod Pending with no event that names the cause.
+if [[ -n "$ANCHOR_NODE" && -n "$COMPUTE_NODE" ]]; then
+  ok "role labels resolve: anchor=$ANCHOR_NODE compute=$COMPUTE_NODE"
+else
+  bad "role labels missing — label the nodes: kubectl label node <anchor> cc-role/anchor=true ; kubectl label node <compute> cc-role/compute=true"
+fi
 node_of() { "${K[@]}" get pod -l "app=$1" -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null; }
 pinned() {  # pinned <app> <expected-node>
   local got; got="$(node_of "$1")"
   if [[ "$got" == "$2" ]]; then ok "$1 pinned to $2"; else bad "$1 should be on $2 but is on '${got:-<none>}'"; fi
 }
-for a in cc-postgres cc-litellm-db cc-litellm-redis cc-n8n cc-n8n-db; do pinned "$a" raspberrypi; done
-pinned cc-neo4j chromebox
-# Same call as neo4j: stateful, so pinned, and off the Pi. Accepted consequence:
-# chromebox down = log console down (the logs themselves survive on each node).
-pinned cc-vlogs chromebox
+for a in cc-postgres cc-litellm-db cc-litellm-redis cc-n8n cc-n8n-db; do pinned "$a" "$ANCHOR_NODE"; done
+pinned cc-neo4j "$COMPUTE_NODE"
+# Same call as neo4j: stateful, so pinned, and off the anchor. Accepted
+# consequence: compute node down = log console down (the logs themselves
+# survive on each node).
+pinned cc-vlogs "$COMPUTE_NODE"
 # The collector must cover EVERY node or a whole host's logs silently vanish
 # from the console — desired comes from the node count, so compare, don't count.
 fb="$("${K[@]}" get ds cc-fluentbit -o jsonpath='{.status.desiredNumberScheduled} {.status.numberReady}' 2>/dev/null)"
@@ -148,18 +165,18 @@ if [[ -n "$fb" && "${fb% *}" -gt 0 && "${fb% *}" == "${fb#* }" ]]; then
 else
   bad "fluent-bit collector not covering every node (ready/desired: ${fb:-<none>})"
 fi
-# cc-crawler is chromebox-REQUIRED (Chromium never runs on the Pi) — the
+# cc-crawler is compute-REQUIRED (Chromium never runs on the anchor) — the
 # accepted consequence is that browser-rendered import is down when the
-# chromebox is; rungs 0/1 of the import ladder don't need it.
-pinned cc-crawler chromebox
+# compute node is; rungs 0/1 of the import ladder don't need it.
+pinned cc-crawler "$COMPUTE_NODE"
 # The floating pair is NOT asserted to a node — that would defeat the point.
-# What matters is that they PREFER the chromebox and are schedulable on either.
+# What matters is that they PREFER the compute node and can run on either.
 for a in cc-litellm cc-graphiti; do
   got="$(node_of "$a")"
-  if [[ "$got" == "chromebox" ]]; then
-    ok "$a floating, currently on chromebox (preferred)"
-  elif [[ "$got" == "raspberrypi" ]]; then
-    ok "$a floating, currently on raspberrypi (fallback — expected only if the chromebox is down/cordoned)"
+  if [[ "$got" == "$COMPUTE_NODE" ]]; then
+    ok "$a floating, currently on $COMPUTE_NODE (preferred)"
+  elif [[ "$got" == "$ANCHOR_NODE" ]]; then
+    ok "$a floating, currently on $ANCHOR_NODE (fallback — expected only if the compute node is down/cordoned)"
   else
     bad "$a is not scheduled anywhere (got '${got:-<none>}')"
   fi
@@ -173,7 +190,7 @@ if [[ -z "$unbound" ]]; then ok "every PVC is Bound"; else bad "unbound PVCs: $u
 # pipefail (grep exits early, ctr takes SIGPIPE).
 REF=docker.io/library/cc-graphiti:1.0.2-anthropic
 pi_i="$(sudo k3s ctr -n k8s.io images ls -q 2>/dev/null)"
-cb_i="$(ssh -o ConnectTimeout=10 chromebox_admin@100.113.118.28 'sudo k3s ctr -n k8s.io images ls -q' 2>/dev/null)"
+cb_i="$(ssh -o ConnectTimeout=10 "$COMPUTE_SSH" 'sudo k3s ctr -n k8s.io images ls -q' 2>/dev/null)"
 if grep -qx "$REF" <<<"$pi_i" && grep -qx "$REF" <<<"$cb_i"; then
   ok "cc-graphiti image present on BOTH nodes (failover would not ImagePullBackOff)"
 else
@@ -182,14 +199,14 @@ fi
 # The RuntimeClass object applies unconditionally, so a chromebox missing the
 # runsc HOST half stays green everywhere until the first sandbox Job hangs at
 # a "failed to create shim" event, weeks later. Assert the host half here.
-gvisor_ok="$(ssh -o ConnectTimeout=10 chromebox_admin@100.113.118.28 \
+gvisor_ok="$(ssh -o ConnectTimeout=10 "$COMPUTE_SSH" \
   'test -x /usr/local/bin/runsc \
    && sudo grep -q "runtimes\.runsc" /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl \
    && echo yes' 2>/dev/null)"
 if [[ "$gvisor_ok" == "yes" ]]; then
-  ok "gvisor: runsc installed + registered on the chromebox (sandbox Jobs can run)"
+  ok "gvisor: runsc installed + registered on the compute node (sandbox Jobs can run)"
 else
-  bad "gvisor: runsc missing/unregistered on the chromebox — run deploy/k3s/install-gvisor.sh"
+  bad "gvisor: runsc missing/unregistered on the compute node — run deploy/k3s/install-gvisor.sh"
 fi
 
 echo

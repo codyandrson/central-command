@@ -34,7 +34,7 @@ KUBECTL=(sudo k3s kubectl)
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 # OUTSIDE the repo — these dumps carry real mail, credentials and graph content.
 WORK="${CC_MIGRATE_DIR:-/home/codyslab/cc-migrate}/${STAMP}"
-CHROMEBOX=chromebox_admin@100.113.118.28
+CHROMEBOX="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"   # compute-node ssh target; override in deploy/pi/.env
 DUMP_ONLY="${DUMP_ONLY:-0}"
 
 umask 077

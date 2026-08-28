@@ -32,7 +32,7 @@ IMAGE=cc-graphiti:1.0.2-anthropic
 # pull from Docker Hub, giving ImagePullBackOff on the chromebox only. Found
 # 2026-07-31 on the first two-arch build. Always build/tag with the full ref.
 IMAGE_REF="docker.io/library/${IMAGE}"
-CHROMEBOX=chromebox_admin@100.113.118.28
+CHROMEBOX="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"   # compute-node ssh target; override in deploy/pi/.env
 # k3s's containerd keeps Kubernetes images in the k8s.io namespace. An import
 # into the default namespace is invisible to the kubelet.
 CTR_NS=k8s.io

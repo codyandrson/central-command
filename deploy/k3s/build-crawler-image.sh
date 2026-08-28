@@ -25,7 +25,7 @@ DOCKERFILE="$REPO_ROOT/central_command/crawler/Dockerfile"
 SERVICE="$REPO_ROOT/central_command/crawler/service.py"
 IMAGE=cc-crawler:1
 IMAGE_REF="docker.io/library/${IMAGE}"
-CHROMEBOX=chromebox_admin@100.113.118.28
+CHROMEBOX="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"   # compute-node ssh target; override in deploy/pi/.env
 CTR_NS=k8s.io  # k3s's containerd keeps kubernetes images in this namespace
 
 for f in "$DOCKERFILE" "$SERVICE"; do

@@ -86,7 +86,7 @@ spec:
         app: cc-neo4j
     spec:
       nodeSelector:
-        kubernetes.io/hostname: chromebox
+        cc-role/compute: "true"
       # NOT OPTIONAL — without it Neo4j CrashLoops on its own Service name.
       # Kubernetes injects service-discovery env vars for every Service in the
       # namespace (NEO4J_PORT_7687_TCP_PORT, NEO4J_PORT_7474_TCP_ADDR, ...), and
@@ -164,9 +164,9 @@ spec:
             - weight: 100
               preference:
                 matchExpressions:
-                  - key: kubernetes.io/hostname
+                  - key: cc-role/compute
                     operator: In
-                    values: [chromebox]
+                    values: ["true"]
       tolerations:
         - key: node.kubernetes.io/unreachable
           operator: Exists

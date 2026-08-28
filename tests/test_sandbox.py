@@ -79,7 +79,9 @@ def test_job_manifest_shape():
     node_terms = spec["affinity"]["nodeAffinity"][
         "requiredDuringSchedulingIgnoredDuringExecution"
     ]["nodeSelectorTerms"]
-    assert node_terms[0]["matchExpressions"][0]["values"] == ["chromebox"]
+    expr = node_terms[0]["matchExpressions"][0]
+    assert expr["key"] == "cc-role/compute"
+    assert expr["values"] == ["true"]
     container = spec["containers"][0]
     assert container["image"] == "docker.io/library/cc-sandbox:1"
     assert container["imagePullPolicy"] == "IfNotPresent"

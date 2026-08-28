@@ -64,7 +64,7 @@ spec:
         app: cc-postgres
     spec:
       nodeSelector:
-        kubernetes.io/hostname: raspberrypi
+        cc-role/anchor: "true"
       containers:
         - name: postgres
           image: docker.io/library/postgres:16

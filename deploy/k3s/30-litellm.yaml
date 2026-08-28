@@ -97,7 +97,7 @@ spec:
       # PINNED to the Pi on purpose — see the header. This is what lets the
       # proxy fall back here without its data being stranded on a dead node.
       nodeSelector:
-        kubernetes.io/hostname: raspberrypi
+        cc-role/anchor: "true"
       containers:
         - name: postgres
           image: docker.io/library/postgres:16
@@ -154,7 +154,7 @@ spec:
         app: cc-litellm-redis
     spec:
       nodeSelector:
-        kubernetes.io/hostname: raspberrypi
+        cc-role/anchor: "true"
       containers:
         - name: redis
           image: docker.io/library/redis:7-alpine
@@ -203,9 +203,9 @@ spec:
             - weight: 100
               preference:
                 matchExpressions:
-                  - key: kubernetes.io/hostname
+                  - key: cc-role/compute
                     operator: In
-                    values: [chromebox]
+                    values: ["true"]
       # "IgnoredDuringExecution" is literal — affinity is NOT re-evaluated for a
       # running pod. Eviction from a dead node is what actually moves it, and
       # that is driven by these tolerations. The k8s default is 300s; 30s turns

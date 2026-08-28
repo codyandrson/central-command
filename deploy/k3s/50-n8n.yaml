@@ -86,7 +86,7 @@ spec:
         app: cc-n8n-db
     spec:
       nodeSelector:
-        kubernetes.io/hostname: raspberrypi
+        cc-role/anchor: "true"
       containers:
         - name: postgres
           image: docker.io/library/postgres:16
@@ -140,7 +140,7 @@ spec:
         app: cc-n8n
     spec:
       nodeSelector:
-        kubernetes.io/hostname: raspberrypi
+        cc-role/anchor: "true"
       containers:
         - name: n8n
           image: docker.io/n8nio/n8n:2.29.0
