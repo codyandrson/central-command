@@ -208,10 +208,23 @@ It works by making the deployment tree a git repo with two branches:
 what actually runs — upstream plus your local modifications. A three-way merge
 is what carries your changes across updates.
 
+**The human path is one command** (2026-08-28 — terraform's own lesson:
+separate plan/apply is for automation; the human command shows the plan and
+asks): download the release zip, then
+
 ```bash
 cd deploy/single
+./update.sh ~/Downloads/central-command-1.0.2.zip
+```
+
+That inits the repo on first use, imports the zip, shows the version gate +
+plan, pauses for your explicit yes, and applies — offering to stop a
+`./setup.sh boot`-started API first. The named subcommands remain for
+granular or agent-conducted flows:
+
+```bash
 ./update.sh init            # ONE-TIME: turn the unzipped tree into that repo
-./update.sh import ~/central-command-master.zip   # each update: commit the new zip
+./update.sh import <zip>    # each update: commit the new zip
 ./update.sh plan            # dry-run: diff, flags, predicted conflicts — mutates nothing
 ./update.sh apply           # merge, then: schema -> ./setup.sh app -> ./setup.sh verify
 ./update.sh rollback        # reset to the pre-update tag and re-deploy that tree

@@ -113,10 +113,10 @@ export function UpdateBadge() {
   // and ends at a restart gate. These are the exact commands, per install
   // shape.
   const quotedProjectDir = shellQuote(versionInfo.projectDir);
-  const zipName = `central-command-v${versionInfo.latest}.zip`;
-  const importCommand = `cd ${quotedProjectDir}/deploy/single && ./update.sh import ~/Downloads/${zipName}`;
-  const planCommand = `cd ${quotedProjectDir}/deploy/single && ./update.sh plan`;
-  const applyCommand = `cd ${quotedProjectDir}/deploy/single && ./update.sh apply`;
+  const zipName = `central-command-${versionInfo.latest}.zip`;
+  // One command (2026-08-28): update.sh <zip> = init-if-needed + import +
+  // plan + the operator's explicit yes + apply.
+  const updateCommand = `cd ${quotedProjectDir}/deploy/single && ./update.sh ~/Downloads/${zipName}`;
 
   return (
     <>
@@ -195,9 +195,9 @@ export function UpdateBadge() {
                   {versionInfo.projectDir}
                 </pre>
                 <pre className="bg-secondary rounded-md px-3 py-2 font-mono select-all whitespace-pre-wrap break-all">
-{`${importCommand}
-${planCommand}   # dry-run: diff, flags, predicted conflicts
-${applyCommand}  # stops if the API is running; restart is yours`}
+{`${updateCommand}
+# shows the version gate + plan, asks for your yes, applies;
+# gates on a running API and offers the stop`}
                 </pre>
                 <p>Rollback: <span className="font-mono">./update.sh rollback</span> (zip installs) or <span className="font-mono">sudo journalctl -u cc-update</span> for the helper's log.</p>
               </div>

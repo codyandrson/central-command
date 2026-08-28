@@ -41,10 +41,8 @@ describe('UpdateBadge', () => {
     });
 
     expect(screen.getByText('/tmp/nerve repo')).toBeInTheDocument();
-    // The external-updater pipeline (2026-08-27 contract), never an in-app apply.
-    expect(screen.getByText(/update\.sh import ~\/Downloads\/central-command-v1\.5\.3\.zip/)).toBeInTheDocument();
-    expect(screen.getByText(/update\.sh plan/)).toBeInTheDocument();
-    expect(screen.getByText(/update\.sh apply/)).toBeInTheDocument();
+    // The external-updater one-command path (2026-08-28), never an in-app apply.
+    expect(screen.getByText(/update\.sh ~\/Downloads\/central-command-1\.5\.3\.zip/)).toBeInTheDocument();
   });
 
   it('does not render when the server omits the project directory', async () => {

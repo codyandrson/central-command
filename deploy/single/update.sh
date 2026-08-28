@@ -17,6 +17,10 @@
 #
 #   Subcommands (each idempotent — resume is re-run, setup.sh's shape):
 #
+#     <zip>           the ONE-COMMAND human path (2026-08-28): init if needed,
+#                     import, plan, pause for the operator's explicit yes,
+#                     apply. The named subcommands below remain for granular
+#                     and agent-conducted flows.
 #     init            one-time: turn the unzipped tree into the git repo above
 #     import <zip>    commit a newly downloaded source zip onto `upstream`
 #     plan            what an apply would do: version gate, diff summary,
@@ -220,7 +224,11 @@ cmd_import() {
   local tmp; tmp="$(mktemp -d)" || { fail "tmp" "mktemp failed"; return 1; }
   # The worktree lives under $tmp; we never cd into it from this shell, so the
   # remove below cannot hit the remove-while-cwd-inside trap.
-  trap 'git -C "$REPO_ROOT" worktree remove --force "$tmp/wt" >/dev/null 2>&1; git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1; rm -rf "$tmp"' RETURN
+  # Self-clearing (`trap - RETURN` inside the action): a bash RETURN trap
+  # stays armed for EVERY later function return, and under cmd_run other
+  # functions return after this one — the stale trap then fires with $tmp out
+  # of scope (found by the one-command-path test, 2026-08-28).
+  trap 'git -C "$REPO_ROOT" worktree remove --force "${tmp:-/nonexistent}/wt" >/dev/null 2>&1; git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1; rm -rf "${tmp:-/nonexistent}"; trap - RETURN' RETURN
 
   step "unzip" "archive unpacked" unzip -q "$zip" -d "$tmp/x" || return 1
 
@@ -366,6 +374,42 @@ cmd_apply() {
   deploy_current_tree
 }
 
+# ── run <zip>: the one-command human path (2026-08-28) ──────────────────────
+# terraform's own lesson, missed on the first pass: plan/apply as SEPARATE
+# commands is for automation; `terraform apply` shows the plan and asks. Same
+# here — import, plan, PAUSE for the operator's yes, apply. The subcommands
+# remain for granular/agent-conducted flows.
+cmd_run() {
+  local zip="${1:-}"
+  need_git || return 1
+  if ! initialized; then
+    # First-ever update on a zip install: init is mechanical, do it.
+    cmd_init || return 1
+  fi
+  cmd_import "$zip" || return 1
+  (( FAILS )) && return 1
+  cmd_plan
+  (( FAILS )) && return 1
+  if merged_already; then return 0; fi   # plan already said: nothing to apply
+
+  if [[ -t 0 ]]; then
+    note ""
+    local yn
+    read -rp "Apply this update now? [y/N] " yn
+    [[ "$yn" == [yY]* ]] || { useraction "apply" "declined — apply later with: ./update.sh apply"; return 0; }
+    # The one gate apply cannot waive: nothing mutates under a live API. If
+    # WE started it (setup.sh boot's pid file), offer the stop here.
+    if api_running && [[ -f "$HERE/uvicorn.pid" ]]; then
+      read -rp "The API is running (started by ./setup.sh boot). Stop it for the update? [y/N] " yn
+      [[ "$yn" == [yY]* ]] && "$HERE/setup.sh" stop >&2
+    fi
+  else
+    useraction "apply" "plan shown above — apply with: ./update.sh apply"
+    return 0
+  fi
+  cmd_apply
+}
+
 # ── rollback ────────────────────────────────────────────────────────────────
 cmd_rollback() {
   need_git || return 1
@@ -391,8 +435,11 @@ cmd_rollback() {
 # ─────────────────────────────────────────────────────────────────────────────
 usage() {
   cat >&2 <<USAGE
-usage: ./update.sh <init | import <zip> | plan | apply | rollback>
+usage: ./update.sh <downloaded-source-zip>
+       ./update.sh <init | import <zip> | plan | apply | rollback>
 
+  <zip>           THE human path: import + plan + your explicit yes + apply,
+                  one command (init runs automatically on first use)
   init            one-time: turn this unzipped tree into a git repo
                   (branch \`upstream\` for imports, \`local\` for the deployment)
   import <zip>    commit a newly downloaded source zip onto \`upstream\`
@@ -419,7 +466,15 @@ main() {
     apply)    cmd_apply ;;
     rollback) cmd_rollback ;;
     -h|--help|help|"") usage; [[ -n "$cmd" ]] && exit 0 || exit 1 ;;
-    *) usage; exit 1 ;;
+    *)
+      # A path to a zip is the one-command human path; anything else is a typo.
+      if [[ -f "$cmd" ]]; then
+        CURCMD="update-run"
+        cmd_run "$cmd"
+      else
+        usage; exit 1
+      fi
+      ;;
   esac
   local rc=0
   (( WARNS ))   && rc=2
