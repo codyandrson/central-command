@@ -123,6 +123,11 @@ _GRAPH_ACTION = Action(
         "name": "DEMO-1 deadline slip",
         "episode_body": "DEMO-1's deadline moved to 2026-08-03.",
         "source_description": "email gmail:msg_1846d2",
+        # Scope is REQUIRED since the 2026-08-27 no-default guard (the
+        # partition is part of what the operator approved). This action broke
+        # the suite for a day because the guard landed without updating it —
+        # caught by the 2026-08-28 Windows clean-install's pytest gate.
+        "scope": "shared",
     },
     target_ref={"system": "graphiti", "id": "central_command", "read_version": "unknown"},
     reversibility="reversible",

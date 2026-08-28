@@ -717,7 +717,14 @@ async def test_copy_in_refuses_symlinked_source(monkeypatch, tmp_path):
     monkeypatch.setenv("CC_SANDBOX_COPY_ROOT", str(tmp_path))
     (tmp_path / "granted").mkdir()
     (tmp_path / "secret.txt").write_text("shh")
-    (tmp_path / "granted" / "link.txt").symlink_to(tmp_path / "secret.txt")
+    try:
+        (tmp_path / "granted" / "link.txt").symlink_to(tmp_path / "secret.txt")
+    except OSError:
+        # Windows refuses symlink creation without developer mode (WinError
+        # 1314) — the test cannot even build its attack precondition, and the
+        # guard under test is a Linux-runner concern. Skip, don't fail
+        # (found by the 2026-08-28 Windows clean-install's pytest gate).
+        pytest.skip("cannot create symlinks on this platform (Windows without developer mode)")
     fake, calls = _fake_kubectl([])
     monkeypatch.setattr(runner, "_run_kubectl", fake)
     sid = runner._sandbox_id("a", "s")
