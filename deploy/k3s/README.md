@@ -1,8 +1,16 @@
 # deploy/k3s — clean-install runbook
 
-From bare cluster to a running Central Command. Written for a human to follow top to
-bottom, on the Pi, in a terminal. Every command is copy-pasteable and every
-`apply`/`make-*` step is idempotent, so a re-run reconciles rather than breaks.
+> **The install is driven by `./deploy/k3s/setup.sh` (2026-08-27,
+> the setup-update contract):** `validate → preflight → llm → stack → app →
+> verify`, each phase re-runnable alone, `PASS|WARN|FAIL|USERACTION` output,
+> exit 3 = stopped for your action, `diagnose` for a support bundle. It
+> mechanizes §1–§6 and §9 below by CALLING the same scripts they describe.
+> This file remains the reference — the *why* behind each step, the placement
+> table, phase 8's instance-data decisions, and the rollback path.
+
+From bare cluster to a running Central Command. Every command is
+copy-pasteable and every `apply`/`make-*` step is idempotent, so a re-run
+reconciles rather than breaks.
 
 Context for *why* the two-node split looks like this: `CLAUDE.md` → "Where it
 runs". Live state (counts, roster, what's in the queue): the instance repo's

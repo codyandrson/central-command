@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (validate/preflight/llm/stack/app/verify, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. On the multi-node k3s substrate it still conducts deploy/k3s/README.md's clean-install runbook. Either way it ends with the onboarding interview and a working dry-run demo. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (validate/preflight/llm/stack/app/verify, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, under the identical contract. Either way it ends with the onboarding interview and a working dry-run demo. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -70,11 +70,10 @@ Rules that hold for the whole run:
 > the giftable profile), or across the operator's **multi-node k3s cluster**
 > (`deploy/k3s/`)?
 
-Record the answer. Everything below "Podman substrate" is that path. The
-**k3s substrate is untouched by this redesign** — conduct
-`deploy/k3s/README.md`'s clean-install runbook exactly as before (see the
-bottom of this file for the reference, unchanged from the prior version of
-this skill).
+Record the answer. Everything below "Podman substrate" is that path; the
+**k3s substrate** (bottom of this file) has its own driver,
+`./deploy/k3s/setup.sh`, under the identical contract — the conductor rules
+above apply verbatim on both.
 
 ---
 
@@ -418,126 +417,76 @@ without it orphans any kept volumes.
 
 ---
 
-## k3s substrate (unchanged — out of scope for the 2026-08-25 redesign)
+## k3s substrate — same contract, driven by `deploy/k3s/setup.sh` (2026-08-27)
 
-The k3s branch does not restate commands: it **conducts
-`deploy/k3s/README.md`**, which is the clean-install runbook, phase by
-phase. The gate for the whole substrate is `./deploy/k3s/verify.sh
---clean-install` with **zero failures** (in `--clean-install` mode there is
-no expected red).
+The k3s branch now has its own deterministic driver, the sibling of the
+podman one: **`./deploy/k3s/setup.sh`** runs `validate → preflight → llm →
+stack → app → verify` with the same output protocol, exit taxonomy
+(0/1/2/3), `setup-log.txt`, and `diagnose` bundle. All the conductor rules
+at the top of this file apply UNCHANGED: stop and end your turn on any
+non-zero exit; exit 3 gates are the operator's move; never compose a
+mutating command — every mechanical step in `deploy/k3s/README.md` §1–§6
+and §9 is a phase of the driver now. The README remains the reference for
+the *why*, the placement table, §8's instance-data decisions and rollback.
 
 > **Before you wipe or deploy anything:** if the operator's Claude Code CLI
 > routes through this stack's LiteLLM `/anthropic` passthrough, re-point it
 > to direct Anthropic FIRST — otherwise the installer loses its own model
 > mid-run, at the exact moment the proxy goes down.
 
-**Phase 0 deltas.** Confirm the runbook's own prerequisites
-(`deploy/k3s/README.md` §1): k3s v1.34+ with both nodes `Ready`; Tailscale up
-on both; passwordless `ssh` from the Pi to the chromebox (every build script
-shells over it); Docker CE on the Pi (arm64 image builder) and podman on the
-chromebox (amd64 one) — both, not either; `./deploy/k3s/install-gvisor.sh`
-(idempotent) on the chromebox, without which sandbox Jobs never start and the
-failure only shows at first use; uv-managed CPython 3.12 and NodeSource 22 on
-the Pi.
+**Elicitation (before the driver).** Two answer files:
 
-**Phase 1 — LLM endpoint.** Same elicitation, different target: the "LLM
-endpoint" is the operator's own upstream (local llama-swap / OpenAI-compatible
-server). The tracked proxy config under `deploy/pi/litellm/` is repo config
-and re-applies as-is. The direct listing still runs first, against the
-environment rather than a `.env` file (the k3s substrate never reads
-`deploy/single/.env`):
+- `deploy/pi/.env` — run `./deploy/k3s/init-env.sh` (idempotent); it
+  generates every GENERATED value and prints the ELICITED ones to collect.
+  Topology: placement is the role labels `cc-role/anchor` /
+  `cc-role/compute` (preflight names the label commands if missing), and
+  `CC_COMPUTE_SSH` is the compute node's ssh target (defaults to the
+  homelab chromebox). `CC_COCKPIT_ORIGIN` is the cockpit's tailnet URL —
+  without it, tailnet browsers 403 on the WS upgrade (README §6).
+  On a RESTORE, the two never-rotate keys (`LITELLM_SALT_KEY`,
+  `N8N_ENCRYPTION_KEY`) must carry their existing values BEFORE init-env
+  runs — a restore under a different key leaves rows undecryptable.
+- Integration choices (Jira/Confluence/email/network-trust) — identical
+  elicitation to the podman substrate's Phase 0; the values go into the
+  root `.env` (the driver creates it with `CC_EXECUTOR_MODE=dry_run`).
 
-```bash
-CC_LLM_BASE_URL=<upstream>/v1 CC_LLM_API_KEY=<key> \
-  ./deploy/single/discover-llm.sh models
-```
-
-**Phase 2 — LiteLLM first, then the rest, through three tracked scripts —
-run them in this order, don't hand-compose any of it:**
-
-- **`./deploy/k3s/init-env.sh`** bootstraps `deploy/pi/.env`: copies the
-  template, `chmod 600`, generates every GENERATED variable that's empty, and
-  writes `PENDING` into the three Graphiti virtual-key slots. It prints the
-  ELICITED variables you must supply.
-- After that, the runbook's `./deploy/k3s/make-secrets.sh` (accepts
-  `PENDING`, refuses only EMPTY), then apply the trio
-  (`00-namespace`, `30-litellm`, `31-litellm-rbac`), roll it out, register
-  models via `deploy/pi/litellm/register-models.py` (`--dry-run` first),
-  `policy.py --apply`, restart `cc-litellm`, `policy.py --check`.
-- **`./deploy/k3s/mint-keys.sh`** mints the four virtual keys against the
-  now-running proxy, writes them back, re-runs `make-secrets.sh`, restarts
-  `cc-graphiti`. It requires the repo-root `.env` to already exist — run `cp
-  .env.example .env && chmod 600 .env` first if it doesn't.
-- Then build local images (`build-graphiti-image.sh`,
-  `build-sandbox-image.sh`, `build-crawler-image.sh`) and
-  `sudo k3s kubectl apply -f deploy/k3s/` (re-applies the trio as a no-op).
-
-Through-alias probes: `CC_LLM_BASE_URL=http://127.0.0.1:4000/v1
-CC_LLM_API_KEY=<master> ./deploy/single/discover-llm.sh chat cc-default` and
-`... embed qwen3-embedding-local` — the embed alias on THIS substrate is
-`qwen3-embedding-local`, not `cc-embedding`; check `GET /v1/models` on the
-live proxy rather than trusting either literal.
-
-Gate: `./deploy/k3s/verify.sh --clean-install` — cannot reach zero failures
-yet (the control-plane API and cockpit checks probe processes Phase 3/4
-haven't started). Confirm every OTHER check passes.
-
-**Phase 3 — integrations.** Identical to the podman substrate's Phase 0
-integration elicitation above (Jira/Confluence/email/network-trust);
-`CC_*` values land in the root `.env` in Phase 4 there, not written yet here.
-
-**Phase 4 — install the app.**
+**Run the driver.**
 
 ```bash
-uv venv --python 3.12 && source .venv/bin/activate
-uv pip install -e ".[dev,runtime]"
-cp .env.example .env && chmod 600 .env
-(cd web && npm install && npm run build)
+./deploy/k3s/setup.sh                # all six phases, stops at first FAIL/gate
 ```
 
-Air-gapped: `uv pip install -r requirements.lock && uv pip install -e .
---no-deps` instead. Root `.env` needs the same full list as the podman
-substrate's app phase writes automatically — here you write it by hand:
-`CC_LLM_API_KEY` (mint via `POST http://127.0.0.1:4000/key/generate`,
-`Authorization: Bearer <LITELLM_MASTER_KEY from deploy/pi/.env>`, body
-`{"models": ["cc-default"], "metadata": {"cc": "spine"}}`, no `tags` field —
-403s on non-Enterprise), `CC_LLM_PROXY_ADMIN_KEY` (the master key),
-`CC_EXECUTOR_MODE=dry_run` (`.env.example` ships `live`), `CC_EMBED_ALIAS=
-qwen3-embedding-local` (NOT `cc-embedding` — that's the podman profile's own
-name), `CC_EMBED_DIM=<discovered>`, `CC_NEO4J_PASSWORD` (= `NEO4J_PASSWORD`
-from `deploy/pi/.env`), `CC_LITELLM_DB_URL`/`CC_LITELLM_SALT_KEY`, the
-Jira/Confluence/network-trust values from Phase 3. `CC_OPERATOR_NAME` is
-Phase 5's.
+What its phases own (so you can interpret, not so you re-derive): `llm`
+brings up ONLY the LiteLLM trio, registers the model catalog from
+`model-preferences.yaml` (`register-models.py` → `policy.py --apply` →
+restart → `--check`), mints the virtual keys, then probes `cc-default` and
+`qwen3-embedding-local` through the proxy — a probe failure is an exit-3
+gate handing the operator the UI URL, the credential's location by name,
+and the alias list with the two easily-wrong facts (the
+`openai/chat_completions/` bridge prefix; rerank's `/v1/rerank` api_base).
+`stack` builds the per-arch images only if missing and rolls out every
+manifest. `app` installs the venv/cockpit and the systemd units, holding
+`cc-uvicorn` enabled-but-stopped, and ends at the **first-boot exit-3
+gate** — that gate is where the onboarding interview happens.
 
-The app runs as **systemd units**, not a foreground process: runbook §6
-installs `cc-uvicorn`, `cc-nerve`, `cc-sandbox-runner`, `cc-graph-bolt`,
-`cc-backup.timer`. Before starting `cc-nerve`, create `web/.env` with
-`GATEWAY_URL=http://127.0.0.1:8080` (§6 has the exact lines) — its code
-default points at the vendored gateway port, not Central Command's real API. Do
-NOT start `cc-uvicorn` yet — first boot is Phase 6, after the interview.
+**At the first-boot gate:** conduct the onboarding interview (identical to
+the podman substrate's Phase 3 above; `CC_OPERATOR_NAME` and the episodes
+land first), write in the Phase-0 integration values if the root `.env`
+does not carry them yet, then have the operator:
 
-Gate: `pytest -q` all green — same rule as the podman substrate.
-
-**Phase 5 — the onboarding interview.** Identical to the podman substrate's
-Phase 3 above.
-
-**Phase 6 — first boot.** `sudo systemctl start cc-uvicorn` (`ExecStartPre`
-waits on 127.0.0.1:5442). Gate on runbook §9's smoke checks (four `curl`
-health probes, all pods `Running 1/1` on §4's placement,
-`./deploy/k3s/verify.sh --clean-install` at zero failures) plus `GET
-/api/agents`. The cockpit is `cc-nerve`'s tailnet URL, not `GET /` on :8080.
-The demo (fixture email → approval → provenance, Jira/Confluence first-read
-verification, macro harvest offer, team tour) is unchanged from the podman
-substrate's Phase 4 above.
+```bash
+sudo systemctl start cc-uvicorn
+./deploy/k3s/setup.sh verify --clean-install   # zero failures is the gate
+```
 
 Then read `deploy/k3s/README.md` §8 with the operator and decide each
 instance-data item deliberately — on a fully-clean deployment the answer is
-"restore nothing" (§7).
-
-Then the GO-LIVE checklist — identical to the podman substrate's, above:
-executor live, feed, dispatch, schedules, each its own prompted question,
-choices recorded as an operator episode. Do not end setup with the system
-silently in dry_run.
+"restore nothing" (§7). The demo (fixture email → approval → provenance,
+Jira/Confluence first-read verification, macro harvest offer, team tour)
+and the GO-LIVE checklist are identical to the podman substrate's Phase 4
+above — with the k3s-specific executor flip: a systemd drop-in, not the
+`.env` (the tracked unit pins dry_run and systemd `Environment=` beats
+pydantic's env_file; verify via the `status` RPC's `executorMode`).
 
 **Uninstalling (k3s).** Per-manifest: `sudo k3s kubectl delete -f
 deploy/k3s/<file>.yaml` for each of `20-postgres`, `40-graph`, `50-n8n`,
