@@ -535,11 +535,13 @@ phase_app() {
   if is_placeholder "$cur_key"; then
     [[ -n "${LITELLM_MASTER_KEY:-}" ]] || { fail "mint-key" "LITELLM_MASTER_KEY is missing from deploy/single/.env — run the llm phase first"; return 1; }
     local body minted
-    # The master key travels via -H @<(...) — a /dev/fd path — so it is not
-    # visible in `ps` while the request runs. No `tags` field: tags are an
-    # Enterprise feature and their presence 403s a community proxy.
-    body="$(curl -sS --fail-with-body -m 60 \
-      -H @<(printf 'Authorization: Bearer %s\n' "$LITELLM_MASTER_KEY") \
+    # The master key travels via `-H @-` (stdin), so it is not visible in `ps`
+    # while the request runs. NOT `-H @<(...)`: native Windows curl cannot
+    # open MSYS's /proc fd paths (found live 2026-08-28). No `tags` field:
+    # tags are an Enterprise feature and their presence 403s a community proxy.
+    body="$(printf 'Authorization: Bearer %s\n' "$LITELLM_MASTER_KEY" | \
+      curl -sS --fail-with-body -m 60 \
+      -H @- \
       -H 'Content-Type: application/json' \
       -d '{"models": ["cc-default"], "metadata": {"cc": "spine"}}' \
       "http://127.0.0.1:${CC_LITELLM_PORT}/key/generate" 2>&1)"
@@ -694,6 +696,9 @@ phase_diagnose() {
       fi
     done
     printf 'python: '; $PY -V 2>&1 | head -1
+    echo
+    echo "== setup-log.txt (last 40 lines — WHERE the run stopped)"
+    tail -40 "$LOGFILE" 2>/dev/null || echo "  (no log yet)"
     echo
     echo "== deploy/single/.env (names only)"
     env_key_names "$ENV_FILE"

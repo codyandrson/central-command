@@ -84,11 +84,14 @@ fi
 : "${CC_EMBED_BASE_URL:=$CC_LLM_BASE_URL}"
 : "${CC_EMBED_API_KEY:=$CC_LLM_API_KEY}"
 
-# The Authorization header travels via `-H @<(...)` — a /dev/fd path — never
-# as a command-line argument, so the key is not visible in `ps` while a probe
-# runs. (curl >= 7.55 for -H @file; process substitution works in Git Bash.)
-_api()  { curl -sS --fail-with-body --max-time 60 -H @<(printf 'Authorization: Bearer %s\n' "$CC_LLM_API_KEY") "$@"; }
-_eapi() { curl -sS --fail-with-body --max-time 60 -H @<(printf 'Authorization: Bearer %s\n' "$CC_EMBED_API_KEY") "$@"; }
+# The Authorization header travels via `-H @-` — curl reads it from STDIN —
+# never as a command-line argument, so the key is not visible in `ps` while a
+# probe runs. NOT `-H @<(...)`: that hands native Windows curl an MSYS-virtual
+# /proc/<pid>/fd path it cannot open ("Failed to open /proc/752/fd/63", found
+# live 2026-08-28 on Git Bash); a stdin pipe is a real handle everywhere.
+# (curl >= 7.55 for -H @file/@-. No probe uses stdin for anything else.)
+_api()  { printf 'Authorization: Bearer %s\n' "$CC_LLM_API_KEY"   | curl -sS --fail-with-body --max-time 60 -H @- "$@"; }
+_eapi() { printf 'Authorization: Bearer %s\n' "$CC_EMBED_API_KEY" | curl -sS --fail-with-body --max-time 60 -H @- "$@"; }
 
 case "${1:-}" in
   models)
