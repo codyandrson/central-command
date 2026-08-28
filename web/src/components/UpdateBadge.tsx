@@ -15,7 +15,20 @@ interface VersionCheck {
   projectDir?: string | null;
 }
 
+interface UpdateStatus {
+  state: 'running' | 'success' | 'failed' | 'rolled_back';
+  phase: string;
+  error?: string;
+}
+
+interface UpdateProgress {
+  pending: boolean;
+  inFlight: boolean;
+  status: UpdateStatus | null;
+}
+
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const PROGRESS_POLL_MS = 3000;
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -29,6 +42,9 @@ function shellQuote(value: string): string {
 export function UpdateBadge() {
   const [versionInfo, setVersionInfo] = useState<VersionCheck | null>(null);
   const [open, setOpen] = useState(false);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -46,6 +62,48 @@ export function UpdateBadge() {
     const iv = setInterval(check, CHECK_INTERVAL_MS);
     return () => { ac.abort(); clearInterval(iv); };
   }, []);
+
+  // Poll the durable status record while the modal is open and a run is
+  // pending/in flight. Fetch failures are EXPECTED mid-update (the updater
+  // restarts this very server) — keep polling straight through them; the
+  // record outlives every process involved.
+  useEffect(() => {
+    if (!open || (!applying && !progress?.pending && !progress?.inFlight)) return;
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetch('/api/update/status');
+        if (!res.ok) return;
+        const data: UpdateProgress = await res.json();
+        setProgress(data);
+        if (data.status && data.status.state !== 'running' && !data.pending && !data.inFlight) {
+          setApplying(false);
+        }
+      } catch {
+        // server restarting under us — keep polling
+      }
+    }, PROGRESS_POLL_MS);
+    return () => clearInterval(iv);
+  }, [open, applying, progress?.pending, progress?.inFlight]);
+
+  const applyNow = async () => {
+    setApplyError(null);
+    try {
+      const res = await fetch('/api/update/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: versionInfo?.latest ?? '' }),
+      });
+      if (res.status === 202) {
+        setApplying(true);
+        setProgress({ pending: true, inFlight: false, status: null });
+        return;
+      }
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      setApplyError(body.error ?? `HTTP ${res.status}`);
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   if (!versionInfo?.updateAvailable || !versionInfo.latest || !versionInfo.projectDir) return null;
 
@@ -82,29 +140,68 @@ export function UpdateBadge() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Project directory</p>
-              <pre className="bg-secondary rounded-md px-3 py-2 text-xs font-mono text-muted-foreground select-all whitespace-pre-wrap break-all">
-                {versionInfo.projectDir}
-              </pre>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground mb-2">
-                Download the release zip from GitHub, then run the updater —
-                it version-gates, backs up the spine database, and stops for
-                you at each gate:
+            {(applying || progress) && (
+              <div className="rounded-md border border-border px-3 py-2 text-sm space-y-1">
+                {progress?.status?.state === 'success' ? (
+                  <p className="text-green-500">Update complete — the system is healthy on the new version.</p>
+                ) : progress?.status?.state === 'rolled_back' ? (
+                  <p className="text-amber-500">
+                    Update failed its health check and was <b>rolled back</b> — you are on v{versionInfo.current}.
+                    {progress.status.error ? ` (${progress.status.error})` : ''}
+                  </p>
+                ) : progress?.status?.state === 'failed' ? (
+                  <p className="text-red-500">
+                    Update failed at <span className="font-mono">{progress.status.phase}</span>
+                    {progress.status.error ? ` — ${progress.status.error}` : ''}.
+                    {' '}Details: <span className="font-mono">journalctl -u cc-update</span>
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground animate-pulse">
+                    {progress?.status?.state === 'running'
+                      ? `Updating — ${progress.status.phase}…`
+                      : 'Update requested — waiting for the updater to start…'}
+                    {' '}The cockpit restarts during the update; this window keeps polling through it.
+                  </p>
+                )}
+              </div>
+            )}
+            {applyError && (
+              <div className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-500">
+                {applyError}
+              </div>
+            )}
+            {!applying && progress?.status?.state !== 'running' && (
+              <button
+                onClick={applyNow}
+                className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                Apply update now
+              </button>
+            )}
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>
+                The cockpit never updates itself: this hands off to the external
+                cc-update helper (a root one-shot systemd unit), which backs up
+                the spine database, applies v{versionInfo.latest}, rebuilds,
+                restarts the services, health-checks, and <b>rolls back
+                automatically</b> if the new version is unhealthy.
               </p>
-              <pre className="bg-secondary rounded-md px-3 py-2 text-xs font-mono select-all whitespace-pre-wrap break-all">
+            </div>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Manual / zip-install path</summary>
+              <div className="space-y-2 pt-2">
+                <p className="mb-1">Project directory</p>
+                <pre className="bg-secondary rounded-md px-3 py-2 font-mono select-all whitespace-pre-wrap break-all">
+                  {versionInfo.projectDir}
+                </pre>
+                <pre className="bg-secondary rounded-md px-3 py-2 font-mono select-all whitespace-pre-wrap break-all">
 {`${importCommand}
 ${planCommand}   # dry-run: diff, flags, predicted conflicts
 ${applyCommand}  # stops if the API is running; restart is yours`}
-              </pre>
-            </div>
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p>The running app never updates itself — update.sh is the external updater.</p>
-              <p>Rollback: <span className="font-mono">./update.sh rollback</span> restores the pre-update tag.</p>
-              <p>On the k3s deployment this checkout IS the source — update with git, not the zip.</p>
-            </div>
+                </pre>
+                <p>Rollback: <span className="font-mono">./update.sh rollback</span> (zip installs) or <span className="font-mono">sudo journalctl -u cc-update</span> for the helper's log.</p>
+              </div>
+            </details>
           </div>
         </DialogContent>
       </Dialog>

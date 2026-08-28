@@ -67,6 +67,7 @@ import activityRoutes from './routes/cc-activity.js';
 import loeRoutes from './routes/cc-loe.js';
 import skillsRoutes from './routes/cc-skills.js';
 import decisionsRoutes from './routes/cc-decisions.js';
+import updateRoutes from './routes/cc-update.js';
 
 const app = new Hono();
 
@@ -110,6 +111,7 @@ const routes = [
   workspaceRoutes, charterRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,
   voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, channelsRoutes, kanbanRoutes, beadsRoutes,
   graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes,
+  updateRoutes,
 ];
 for (const route of routes) app.route('/', route);
 

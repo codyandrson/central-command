@@ -693,9 +693,14 @@ phase_app() {
   # unit that still legitimately lives in deploy/pi/.
   local u
   for u in cc-uvicorn.service cc-sandbox-runner.service cc-graph-bolt.service \
-           cc-backup.service cc-backup.timer; do
+           cc-backup.service cc-backup.timer cc-update.service cc-update.path; do
     step "unit-${u}" "$u installed" sudo cp "$HERE/$u" /etc/systemd/system/ || return 1
   done
+  # The one-click updater's channel dirs (trigger tmpfs + durable status) —
+  # cc-nerve's "apply update" button writes the trigger; cc-update.path fires
+  # the root one-shot. See cc-update.sh's header for the design.
+  step "update-tmpfiles" "cc-update trigger/status directories declared and created" \
+    sudo bash -c "cp '$HERE/cc-update-tmpfiles.conf' /etc/tmpfiles.d/cc-update.conf && systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf" || return 1
   step "unit-cc-nerve.service" "cc-nerve.service installed (from deploy/pi/)" \
     sudo cp "$REPO_ROOT/deploy/pi/cc-nerve.service" /etc/systemd/system/ || return 1
   step "daemon-reload" "systemd reloaded" sudo systemctl daemon-reload || return 1
@@ -707,8 +712,8 @@ phase_app() {
   # it up on every subsequent boot.
   step "enable-cc-uvicorn" "cc-uvicorn enabled but NOT started (first-boot hold — the interview lands first)" \
     sudo systemctl enable cc-uvicorn || return 1
-  step "enable-rest" "cc-nerve, cc-sandbox-runner, cc-graph-bolt and the nightly backup timer enabled and started" \
-    sudo systemctl enable --now cc-nerve cc-sandbox-runner cc-graph-bolt cc-backup.timer || return 1
+  step "enable-rest" "cc-nerve, cc-sandbox-runner, cc-graph-bolt, the backup timer and the update watcher enabled and started" \
+    sudo systemctl enable --now cc-nerve cc-sandbox-runner cc-graph-bolt cc-backup.timer cc-update.path || return 1
 
   # The gate DISSOLVES once the API runs: a re-run after first boot must
   # converge to clean and continue into verify, not stop here forever.

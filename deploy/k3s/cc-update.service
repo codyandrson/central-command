@@ -1,0 +1,26 @@
+# The one-click updater (2026-08-28) — started by cc-update.path, or by hand:
+#   sudo systemctl start cc-update
+# Full design in cc-update.sh's header. Detail channel: journalctl -u cc-update.
+#
+# DELIBERATELY no PartOf=/BoundTo=/Wants= toward cc-uvicorn, cc-nerve or
+# cc-sandbox-runner: this unit stops and restarts them from inside ExecStart
+# (the established cert-reload/self-deploy pattern), and any dependency
+# linkage would stop-propagate back onto the updater mid-flight and kill it.
+#
+# ExecStartPre CONSUMES the trigger (mv, `-` prefix so a manual start with no
+# trigger file still runs): systemd.path(5) rechecks the watched path the
+# instant this service exits, so a trigger left in place = a tight loop. A
+# write that lands DURING a run causes exactly one clean re-run after — the
+# correct behavior for "asked again while busy".
+[Unit]
+Description=Central Command updater (stop, apply, rebuild, restart, verify, roll back on failure)
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# pip + npm builds on a Pi are slow; give the whole pipeline half an hour.
+TimeoutStartSec=1800
+ExecStartPre=-/usr/bin/mv -f /run/cc-update/trigger /run/cc-update/request.json
+ExecStart=/home/codyslab/Central Command/deploy/k3s/cc-update.sh
+
+# No [Install]: cc-update.path is what gets enabled, per the .path convention.

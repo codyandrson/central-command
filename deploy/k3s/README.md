@@ -242,13 +242,27 @@ sudo cp deploy/k3s/cc-sandbox-runner.service /etc/systemd/system/
 sudo cp deploy/k3s/cc-graph-bolt.service     /etc/systemd/system/
 sudo cp deploy/k3s/cc-backup.service         /etc/systemd/system/
 sudo cp deploy/k3s/cc-backup.timer           /etc/systemd/system/
+sudo cp deploy/k3s/cc-update.service         /etc/systemd/system/
+sudo cp deploy/k3s/cc-update.path            /etc/systemd/system/
 sudo cp deploy/pi/cc-nerve.service           /etc/systemd/system/
+sudo cp deploy/k3s/cc-update-tmpfiles.conf   /etc/tmpfiles.d/cc-update.conf
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
 
 sudo systemctl daemon-reload
 sudo systemctl enable cc-uvicorn                     # enabled, NOT started — see below
 sudo systemctl enable --now cc-nerve cc-sandbox-runner cc-graph-bolt
-sudo systemctl enable --now cc-backup.timer
+sudo systemctl enable --now cc-backup.timer cc-update.path
 ```
+
+- **cc-update** (2026-08-28) — the cockpit's one-click updater. The badge's
+  "Apply update now" writes `/run/cc-update/trigger`; `cc-update.path` starts
+  the root one-shot `cc-update.service` → `deploy/k3s/cc-update.sh`, which
+  version-gates, dumps the spine DB, stops the services, merges the release
+  tag, applies schema, rebuilds AS codyslab, restarts, health-checks, and
+  **rolls back automatically** (reset to the pre-update tag + rebuild) if the
+  new version is unhealthy. Status: `/var/lib/cc-update/status.json` (what
+  the UI polls); full log: `journalctl -u cc-update`. No sudoers/polkit —
+  the web process's only privileged act is writing a file in a tmpfs dir.
 
 **`cc-uvicorn` is enabled here but started in §9**, after the onboarding
 interview has written the instance's env — the API reads it once at start, so a

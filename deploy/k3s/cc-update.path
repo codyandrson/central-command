@@ -1,0 +1,20 @@
+# Watches for the cockpit's update trigger (2026-08-28, cc-update.sh header
+# has the full design). The unprivileged web process's ONLY privileged act is
+# writing /run/cc-update/trigger — no sudoers rule, no polkit policy: the
+# smallest possible trust surface for "unprivileged service asks root to
+# update" (research verdict over sudoers/polkit/socket-activation).
+#
+# TriggerLimit is the backstop against a re-trigger loop; the real guard is
+# cc-update.service's ExecStartPre consuming the trigger file (systemd.path
+# rechecks the path THE INSTANT the service exits).
+[Unit]
+Description=Watch for Central Command update trigger
+
+[Path]
+PathExists=/run/cc-update/trigger
+Unit=cc-update.service
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
