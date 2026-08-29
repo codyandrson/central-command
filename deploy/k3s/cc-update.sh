@@ -14,15 +14,19 @@
 #
 #   Pipeline (no-op exits BEFORE any mutation):
 #     resolve target (highest semver tag on origin, fetched) -> version gate
-#     (no downgrade, min_upgrade_from honored) -> checkpoint tag -> DB dumps
-#     (spine, litellm, n8n + the two decryption keys — see below) -> stop
-#     cc-uvicorn + cc-sandbox-runner (cc-nerve stays up serving progress;
-#     restarted last) -> merge the tag -> schema (additive-only, idempotent)
-#     -> pip + cockpit rebuild AS codyslab (root-owned files in the checkout
-#     break every later build) -> start services -> health poll -> on
-#     failure: git reset --hard to the checkpoint, rebuild, restart, re-poll
-#     — the rolled_back state is honest about what schema kept (additive-only
-#     means old code runs fine against it).
+#     (no downgrade, min_upgrade_from honored) -> checkpoint tag -> PREBUILD
+#     the locally-built images whose inputs changed, WHILE THE SYSTEM IS UP
+#     (operator decision 2026-08-29: a build is the long pole and it does not
+#     need downtime; a failed build then costs nothing) -> DB dumps (spine,
+#     litellm, n8n + the two decryption keys — see below) -> stop cc-uvicorn +
+#     cc-sandbox-runner (cc-nerve stays up serving progress; restarted last)
+#     -> merge the tag -> schema (additive-only, idempotent) -> pip + cockpit
+#     rebuild AS codyslab (root-owned files in the checkout break every later
+#     build) -> apply changed k8s manifests + install changed unit files ->
+#     start services -> health poll -> on failure: git reset --hard to the
+#     checkpoint, rebuild, restore the images/manifests the forward pass
+#     touched, restart, re-poll — the rolled_back state is honest about what
+#     schema kept (additive-only means old code runs fine against it).
 #
 #   DB-dump scope deliberately excludes Neo4j: dumping it means scaling
 #   cc-graphiti/cc-neo4j to 0 on the CHROMEBOX (backup.sh's scale-down/dump/
@@ -48,10 +52,25 @@ BACKUPS=/home/codyslab/cc-backups
 K=(k3s kubectl -n central-command)
 STARTED_AT="$(date -u +%FT%TZ)"
 
+# k3s's containerd keeps Kubernetes images in the k8s.io namespace; anything
+# imported or tagged elsewhere is invisible to the kubelet.
+CTR_NS=k8s.io
+SSHQ=(ssh -o BatchMode=yes -o ConnectTimeout=10)
+
+# What the forward pass actually touched — rollback reverses only these.
+RETAGGED=()          # "<node>|<ref>" per node whose running image we preserved
+IMAGE_DEPLOYS=()     # deployments whose image bytes changed under the same tag
+TOUCHED_DEPLOYS=()   # deployments whose manifest changed
+APPLIED_MANIFESTS=0
+WT=""                # build worktree, "" when none exists
+
 set -a
 # shellcheck disable=SC1091
 [[ -f "$REPO/deploy/pi/.env" ]] && . "$REPO/deploy/pi/.env"
 set +a
+
+# Same resolution as the build scripts and verify.sh: override in deploy/pi/.env.
+COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
 
 note() { printf '%s\n' "$*"; }   # journald captures stdout — that IS the log
 
@@ -92,6 +111,63 @@ rebuild() { # as codyslab, never root
   "${RUNAS[@]}" bash -c "cd '$REPO/web' && npm install && npm run build" || return 1
 }
 
+# ── locally-built images ────────────────────────────────────────────────────
+# The three images no registry serves. Every ref is FULLY QUALIFIED, including
+# on the podman side: podman tags local builds `localhost/<name>`, which the
+# kubelet never matches, and the manifests' bare names normalise to exactly
+# these. Fields: name | ref | build script | deployment | nodes | change inputs.
+#   - graphiti FLOATS, so both nodes must hold it (preferred nodeAffinity).
+#   - sandbox and crawler carry REQUIRED affinity to the compute node.
+#   - cc-sandbox has NO Deployment: the sandbox runner creates pods per run, so
+#     a fresh pod picks the new bytes up on its own and there is nothing to
+#     restart. Hence the empty deployment field.
+# A change to a build script is a changed input like any file in its context.
+IMAGES=(
+  "graphiti|docker.io/library/cc-graphiti:1.0.2-anthropic|build-graphiti-image.sh|cc-graphiti|anchor compute|deploy/pi/graphiti deploy/k3s/build-graphiti-image.sh"
+  "sandbox|docker.io/library/cc-sandbox:1|build-sandbox-image.sh||compute|deploy/k3s/sandbox.Dockerfile deploy/k3s/build-sandbox-image.sh"
+  "crawler|docker.io/library/cc-crawler:1|build-crawler-image.sh|cc-crawler|compute|central_command/crawler deploy/k3s/build-crawler-image.sh"
+)
+
+# `ctr images ls | grep -q` reports FAILURE on success under pipefail (grep
+# exits at the first match and ctr takes SIGPIPE) — capture, then grep.
+ctr_images() { # ctr_images <anchor|compute>
+  if [[ "$1" == anchor ]]; then
+    k3s ctr -n "$CTR_NS" images ls -q 2>/dev/null
+  else
+    "${RUNAS[@]}" "${SSHQ[@]}" "$COMPUTE_SSH" "sudo k3s ctr -n $CTR_NS images ls -q" 2>/dev/null
+  fi
+}
+
+have_image() { # have_image <node> <ref> — exact ref, never a substring
+  local imgs; imgs="$(ctr_images "$1")"
+  grep -qx "$2" <<<"$imgs"
+}
+
+ctr_tag() { # ctr_tag <node> <from-ref> <to-ref>
+  if [[ "$1" == anchor ]]; then
+    k3s ctr -n "$CTR_NS" images tag --force "$2" "$3" >/dev/null
+  else
+    "${RUNAS[@]}" "${SSHQ[@]}" "$COMPUTE_SSH" "sudo k3s ctr -n $CTR_NS images tag --force '$2' '$3'" >/dev/null
+  fi
+}
+
+changed_between() { # changed_between <pathspec...> — output non-empty = release touches it
+  "${RUNAS[@]}" git -C "$REPO" diff --name-only "$CKPT" "v$TARGET_VERSION" -- "$@"
+}
+
+deployments_in() { # deployments_in <manifest> — every Deployment it declares
+  [[ -f "$1" ]] || return 0
+  awk '/^kind: Deployment/{d=1} d&&/^  name:/{print $2; d=0}' "$1"
+}
+
+# Never `cd` into the worktree: a cwd inside a removed worktree is its own trap.
+remove_worktree() {
+  [[ -n "$WT" ]] || return 0
+  "${RUNAS[@]}" git -C "$REPO" worktree remove --force "$WT" 2>/dev/null \
+    || { rm -rf "$WT"; "${RUNAS[@]}" git -C "$REPO" worktree prune; }
+  WT=""
+}
+
 die() { # <phase> <message> — best-effort recovery: services back up, honest status
   note "FAILED at $1: $2"
   write_status failed "$1" "$2"
@@ -101,6 +177,9 @@ die() { # <phase> <message> — best-effort recovery: services back up, honest s
 
 # A SIGTERM (TimeoutStartSec) must not leave a silent corpse.
 trap 'write_status failed "${PHASE_NOW:-unknown}" "terminated (timeout or stop)"; exit 143' TERM
+# The build worktree must not survive ANY exit path, TERM included (the TERM
+# handler exits, so this runs after it).
+trap 'remove_worktree' EXIT
 
 main() {
   mkdir -p "$STATEDIR"
@@ -139,10 +218,70 @@ main() {
   fi
 
   PHASE_NOW=checkpoint; phase "tagging rollback checkpoint"
-  local ckpt="pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
+  # One stamp names both rollback records: the git tag and the containerd tags
+  # that preserve the currently-running image bytes.
+  CKPT="pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
   "${RUNAS[@]}" git -C "$REPO" config user.name  >/dev/null 2>&1 || "${RUNAS[@]}" git -C "$REPO" config user.name "Central Command"
   "${RUNAS[@]}" git -C "$REPO" config user.email >/dev/null 2>&1 || "${RUNAS[@]}" git -C "$REPO" config user.email "update@localhost"
-  "${RUNAS[@]}" git -C "$REPO" tag "$ckpt" || die checkpoint "could not tag"
+  "${RUNAS[@]}" git -C "$REPO" tag "$CKPT" || die checkpoint "could not tag"
+
+  # ── prebuild: the system stays UP through every build ─────────────────────
+  # A failure here costs nothing but a git tag and a spare containerd tag, so
+  # it happens before the stop AND before the DB dumps.
+  PHASE_NOW=prebuild; phase "prebuilding changed images (services stay up)"
+  local row name ref script dep nodes paths node log i rc=0
+  local -a changed_rows=() build_names=() build_pids=() build_logs=()
+  for row in "${IMAGES[@]}"; do
+    IFS='|' read -r name ref script dep nodes paths <<<"$row"
+    # shellcheck disable=SC2086  # paths is a pathspec LIST, word splitting intended
+    [[ -n "$(changed_between $paths)" ]] && changed_rows+=("$row")
+  done
+
+  if [[ ${#changed_rows[@]} -eq 0 ]]; then
+    note "no image inputs changed between $CKPT and v$TARGET_VERSION — nothing to build"
+  else
+    # Build from a detached worktree of the target tag: no merge is needed, so
+    # the running checkout stays exactly as the live services expect it.
+    WT="/home/codyslab/.cc-update-build-$CKPT"
+    "${RUNAS[@]}" git -C "$REPO" worktree add --detach "$WT" "v$TARGET_VERSION" \
+      || die prebuild "could not create the build worktree $WT — nothing was stopped or merged"
+
+    for row in "${changed_rows[@]}"; do
+      IFS='|' read -r name ref script dep nodes paths <<<"$row"
+      # Rollback safety FIRST: the new image lands on the SAME tag, so this is
+      # the only chance to name the bytes that are running right now.
+      for node in $nodes; do
+        if have_image "$node" "$ref"; then
+          ctr_tag "$node" "$ref" "${ref%:*}:$CKPT" \
+            || die prebuild "could not preserve the running $ref on $node — nothing was stopped or merged"
+          RETAGGED+=("$node|$ref")
+        else
+          note "WARNING: $ref is absent from containerd on $node — nothing to preserve for rollback"
+        fi
+      done
+      # The target tag's OWN build script, resolving its REPO_ROOT from
+      # BASH_SOURCE inside the worktree; as codyslab, because git, ssh keys and
+      # the docker group are the operator's, not root's.
+      log="$(mktemp "/tmp/cc-update-build-$name.XXXXXX.log")"
+      "${RUNAS[@]}" env CC_COMPUTE_SSH="$COMPUTE_SSH" bash "$WT/deploy/k3s/$script" >"$log" 2>&1 &
+      build_pids+=("$!"); build_names+=("$name"); build_logs+=("$log")
+    done
+
+    # Concurrent, but each image's output is journalled as one block — an
+    # interleaved build log is unreadable exactly when it matters.
+    for i in "${!build_pids[@]}"; do
+      wait "${build_pids[$i]}" || rc=1
+      note "---- build output: ${build_names[$i]}"
+      cat "${build_logs[$i]}"; rm -f "${build_logs[$i]}"
+    done
+    remove_worktree
+    [[ $rc -eq 0 ]] || die prebuild "an image build failed — NOTHING was stopped, merged or restarted; the system is untouched apart from the $CKPT git tag and the spare containerd tags"
+
+    for row in "${changed_rows[@]}"; do
+      IFS='|' read -r name ref script dep nodes paths <<<"$row"
+      [[ -n "$dep" ]] && IMAGE_DEPLOYS+=("$dep")
+    done
+  fi
 
   PHASE_NOW=db-backup; phase "dumping spine + litellm + n8n databases"
   mkdir -p "$BACKUPS" && chmod 700 "$BACKUPS"
@@ -198,6 +337,48 @@ main() {
   PHASE_NOW=rebuild; phase "rebuilding venv and cockpit"
   rebuild || die rebuild "pip/npm build failed"
 
+  PHASE_NOW=manifests; phase "applying changed manifests and unit files"
+  local changed_yaml changed_units f d
+  changed_yaml="$(changed_between 'deploy/k3s/*.yaml')"
+  if [[ -n "$changed_yaml" ]]; then
+    # `apply -f <dir>` reads yaml/json only — the scripts, units,
+    # sandbox.Dockerfile and registries.yaml.example there are ignored. Apply
+    # rolls anything whose SPEC changed by itself; the rollout restarts below
+    # are for the OTHER case, where only the image bytes moved under a tag.
+    k3s kubectl apply -f "$REPO/deploy/k3s/" || die manifests "kubectl apply -f deploy/k3s/ failed"
+    APPLIED_MANIFESTS=1
+    while read -r f; do
+      [[ -n "$f" ]] || continue
+      while read -r d; do TOUCHED_DEPLOYS+=("$d"); done < <(deployments_in "$REPO/$f")
+    done <<<"$changed_yaml"
+  fi
+
+  # A retag in place plus imagePullPolicy: IfNotPresent means a running pod
+  # keeps the OLD bytes forever — only a restart re-resolves the tag.
+  for d in "${IMAGE_DEPLOYS[@]:-}"; do
+    [[ -n "$d" ]] || continue
+    "${K[@]}" rollout restart "deploy/$d" || die manifests "rollout restart deploy/$d failed"
+  done
+  for d in $(printf '%s\n' "${IMAGE_DEPLOYS[@]:-}" "${TOUCHED_DEPLOYS[@]:-}" | sort -u); do
+    "${K[@]}" rollout status "deploy/$d" --timeout=300s || die manifests "deploy/$d did not become ready"
+  done
+
+  changed_units="$(changed_between 'deploy/k3s/*.service' 'deploy/k3s/*.path' 'deploy/k3s/*.timer' \
+                                   'deploy/k3s/*-tmpfiles.conf' 'deploy/pi/cc-nerve.service')"
+  if [[ -n "$changed_units" ]]; then
+    while read -r f; do
+      [[ -f "$REPO/$f" ]] || continue   # a unit DELETED by the release is not ours to install
+      case "$f" in
+        # Installed paths mirror the runbook (README §6), not the source names.
+        *-tmpfiles.conf) install -m 644 "$REPO/$f" /etc/tmpfiles.d/cc-update.conf ;;
+        *)               install -m 644 "$REPO/$f" /etc/systemd/system/ ;;
+      esac || die manifests "could not install $f"
+    done <<<"$changed_units"
+    systemctl daemon-reload || die manifests "systemctl daemon-reload failed"
+    # A changed cc-update.service takes effect on the NEXT run: restarting the
+    # unit whose ExecStart is this script would kill the update mid-flight.
+  fi
+
   PHASE_NOW=restart; phase "starting services"
   start_services || die restart "systemctl start failed"
 
@@ -209,10 +390,31 @@ main() {
   fi
 
   # ── rollback: the updater owns this (greenboot's shape) ────────────────────
-  PHASE_NOW=rollback; phase "unhealthy after update — rolling back to $ckpt"
+  PHASE_NOW=rollback; phase "unhealthy after update — rolling back to $CKPT"
   systemctl stop cc-uvicorn cc-sandbox-runner || true
-  "${RUNAS[@]}" git -C "$REPO" reset --hard "$ckpt" || die rollback "reset --hard $ckpt failed — MANUAL intervention needed"
+  "${RUNAS[@]}" git -C "$REPO" reset --hard "$CKPT" || die rollback "reset --hard $CKPT failed — MANUAL intervention needed"
   rebuild || die rollback "rebuild of the rolled-back tree failed — MANUAL intervention needed"
+
+  # Reverse only what the forward pass actually did. Best-effort from here on:
+  # a half-restored cluster still beats dying with the API down.
+  local ent
+  for ent in "${RETAGGED[@]:-}"; do
+    [[ -n "$ent" ]] || continue
+    IFS='|' read -r node ref <<<"$ent"
+    ctr_tag "$node" "${ref%:*}:$CKPT" "$ref" || note "WARNING: could not restore $ref on $node"
+  done
+  if [[ $APPLIED_MANIFESTS -eq 1 ]]; then
+    # reset --hard already put the checkpoint's manifests back on disk.
+    k3s kubectl apply -f "$REPO/deploy/k3s/" || note "WARNING: re-applying the checkpoint manifests failed"
+  fi
+  for d in "${IMAGE_DEPLOYS[@]:-}"; do
+    [[ -n "$d" ]] || continue
+    "${K[@]}" rollout restart "deploy/$d" || note "WARNING: could not restart deploy/$d onto the restored image"
+  done
+  for d in $(printf '%s\n' "${IMAGE_DEPLOYS[@]:-}" "${TOUCHED_DEPLOYS[@]:-}" | sort -u); do
+    "${K[@]}" rollout status "deploy/$d" --timeout=300s || note "WARNING: deploy/$d is not ready after rollback"
+  done
+
   start_services || true
   if healthy; then
     write_status rolled_back "rolled back to $CUR_VERSION" "v$TARGET_VERSION failed its post-update health check; schema changes (additive-only) were kept"

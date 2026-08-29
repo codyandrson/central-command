@@ -133,16 +133,23 @@ architecture where the leak was measured.
   placement, PVC binding, and both decryption keys), `cc-update.sh` +
   `cc-update.path`/`cc-update.service`/`cc-update-tmpfiles.conf` (the cockpit's
   one-click updater — see the update-scope note below).
-- **`cc-update.sh` updates code, schema, and the two systemd-managed
-  processes ONLY.** It `git merge`s a release tag, reapplies `schema.sql`, and
-  restarts `cc-uvicorn`/`cc-sandbox-runner`/`cc-nerve` — it never runs
-  `kubectl apply` on `deploy/k3s/*.yaml` and never rebuilds/repushes
-  `cc-graphiti`/`cc-sandbox`/`cc-crawler` images, on either node. A release
-  that changes a manifest or needs a rebuilt image needs a manual
-  `kubectl apply -f deploy/k3s/` + per-node image rebuild pass; the updater
-  gives no warning that this step was skipped. This is the k3s counterpart to
-  `deploy/single/update.sh`, but scoped narrower — it does not implement the
-  two-branch (`local`/`upstream`) git model that script uses.
+- **`cc-update.sh` covers the full release surface since 2026-08-29** —
+  code, schema, k8s manifests, unit files, and the three locally-built
+  images. Images whose inputs changed are PREBUILT before anything stops
+  (operator decision: builds are the long pole and need no downtime), each
+  from a detached worktree of the target tag via the release's own
+  `build-*-image.sh`, with the currently-running bytes preserved first by a
+  containerd retag to `:pre-update-<stamp>` on every holding node — that
+  retag is what makes image rollback possible on a stable tag. After the
+  merge it applies changed `deploy/k3s/*.yaml` + installs changed unit
+  files, and `rollout restart`s image-changed deployments (retag-in-place +
+  `IfNotPresent` never repulls on its own). Rollback reverses exactly what
+  the forward pass recorded: reset, retag back, re-apply checkpoint
+  manifests, restart. Two known limits: `kubectl apply` does not PRUNE — a
+  manifest the release deletes leaves its old resource running; and a
+  changed `cc-update.service` only takes effect on the NEXT run. It remains
+  a different design from `deploy/single/update.sh` (no `local`/`upstream`
+  two-branch model; git-tag merge from origin, online-only on purpose).
 - **Never change `LITELLM_SALT_KEY` or `N8N_ENCRYPTION_KEY`.** They encrypt the
   stored LiteLLM virtual keys and the Gmail OAuth credential respectively; a
   restore under a different key leaves the rows present but undecryptable.
@@ -743,7 +750,7 @@ deploy/k3s/   THE deployment (2026-07-31): README.md is the CLEAN-INSTALL
               verify.sh), registries.yaml.example (containerd mirror seam), and
               the units (cc-uvicorn, cc-sandbox-runner, cc-graph-bolt,
               cc-backup.service/.timer, cc-update.path/.service +
-              cc-update-tmpfiles.conf — code/schema-only, see above).
+              cc-update-tmpfiles.conf — full release surface, see above).
 deploy/AIRGAP.md + airgap.env.example
               the air-gap/mirror seam doc: pip/uv/npm/container-registry
               overrides, what still needs pre-staging. Read it FIRST for any

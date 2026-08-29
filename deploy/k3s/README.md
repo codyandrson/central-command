@@ -257,12 +257,18 @@ sudo systemctl enable --now cc-backup.timer cc-update.path
 - **cc-update** (2026-08-28) — the cockpit's one-click updater. The badge's
   "Apply update now" writes `/run/cc-update/trigger`; `cc-update.path` starts
   the root one-shot `cc-update.service` → `deploy/k3s/cc-update.sh`, which
-  version-gates, dumps the spine/litellm/n8n DBs plus their decryption keys
-  (Neo4j is out of scope — nightly `cc-backup.timer` covers it), stops the
-  services, merges the release
-  tag, applies schema, rebuilds AS codyslab, restarts, health-checks, and
-  **rolls back automatically** (reset to the pre-update tag + rebuild) if the
-  new version is unhealthy. Status: `/var/lib/cc-update/status.json` (what
+  version-gates, **prebuilds any locally-built image whose inputs changed
+  (cc-graphiti / cc-sandbox / cc-crawler) while the system is still UP** — a
+  failed build then costs no downtime at all — dumps the spine/litellm/n8n DBs
+  plus their decryption keys (Neo4j is out of scope — nightly
+  `cc-backup.timer` covers it), stops the services, merges the release
+  tag, applies schema, rebuilds AS codyslab, **applies changed `deploy/k3s/`
+  manifests and installs changed unit files (`daemon-reload`; a changed
+  `cc-update.service` takes effect next run)**, restarts, health-checks, and
+  **rolls back automatically** if the new version is unhealthy — reset to the
+  pre-update tag + rebuild, plus re-applying the checkpoint's manifests and
+  retagging each node's preserved `…:pre-update-<stamp>` image back, for
+  whatever the forward pass actually touched. Status: `/var/lib/cc-update/status.json` (what
   the UI polls); full log: `journalctl -u cc-update`. No sudoers/polkit —
   the web process's only privileged act is writing a file in a tmpfs dir.
 

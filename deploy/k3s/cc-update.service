@@ -18,8 +18,9 @@ Description=Central Command updater (stop, apply, rebuild, restart, verify, roll
 [Service]
 Type=oneshot
 RemainAfterExit=no
-# pip + npm builds on a Pi are slow; give the whole pipeline half an hour.
-TimeoutStartSec=1800
+# pip + npm builds on a Pi are slow, and image prebuilds (Chromium!) are slower
+# — safe to wait for now that they happen BEFORE the stop; downtime is unchanged.
+TimeoutStartSec=5400
 ExecStartPre=-/usr/bin/mv -f /run/cc-update/trigger /run/cc-update/request.json
 ExecStart=/home/codyslab/Central Command/deploy/k3s/cc-update.sh
 

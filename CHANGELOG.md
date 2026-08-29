@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-29 — cc-update covers the full release surface
+
+- `deploy/k3s/cc-update.sh` now handles the parts of a release it used to
+  silently skip: changed k8s manifests are `kubectl apply`ed (with rollout
+  waits), changed systemd unit files are installed + `daemon-reload`ed, and
+  the three locally-built images (`cc-graphiti`, `cc-sandbox`, `cc-crawler`)
+  are rebuilt when their inputs changed — **before any service stops**, from
+  a detached worktree of the target tag, natively per architecture on each
+  node in parallel. The running image bytes are preserved first by a
+  containerd retag (`:pre-update-<stamp>`), so automatic rollback now also
+  restores images and re-applies the checkpoint's manifests. Downtime is
+  unchanged; only total wall-clock grows when a release actually ships an
+  image change (`TimeoutStartSec` raised to 5400 accordingly).
+
 ## 2026-08-29 — cc-update backup scope widened; update-docs audit
 
 - `deploy/k3s/cc-update.sh`'s pre-update backup now dumps the LiteLLM and n8n
