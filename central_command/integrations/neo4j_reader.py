@@ -250,6 +250,16 @@ async def provenance(uuid: str) -> list[dict]:
     return episodes
 
 
+async def count_episodes(group_ids: list[str]) -> int:
+    """Total Episodic nodes across `group_ids` — the memory panel's "N of
+    TOTAL" figure, so a fixed `limit` never reads as the whole truth."""
+    rows = await _read(
+        "MATCH (e:Episodic) WHERE e.group_id IN $group_ids RETURN count(e) AS total",
+        group_ids=group_ids,
+    )
+    return rows[0]["total"] if rows else 0
+
+
 async def episode_by_marker(marker: str, group_id: str) -> dict | None:
     """The Episodic node the verification sweep is looking for — matched by a
     marker token stamped into `source_description` at propose time (Task 2's

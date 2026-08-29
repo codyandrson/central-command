@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-29 — v1.0.7: Systems launchpad; private-only agent memory; LiteLLM UI login fields
+
+- **Systems view** (top bar › Systems, or "Open Systems" in the palette): one
+  launchpad listing every deployed or integrated system — cockpit, control
+  plane API, LiteLLM, both Postgres stores, Graphiti, Neo4j, n8n,
+  VictoriaLogs, sandbox runner, crawler, and Jira/Confluence when configured
+  — with live up/down + latency from a concurrent health fan-out
+  (`GET /api/systems`, `central_command/api/systems.py`), an **Open →** link
+  where a browser URL is configured, and WHERE each credential lives (env
+  var name / file) — never the value. New optional browser-URL settings on
+  the `CC_LLM_PROXY_UI_URL` pattern: `CC_N8N_UI_URL`, `CC_VLOGS_UI_URL`,
+  `CC_NEO4J_BROWSER_URL` (tailnet addresses; `deploy/k3s/verify.sh`
+  exempts them from the loopback rule for the same reason).
+- The per-agent **memory panel** on the chat page now shows only that
+  agent's PRIVATE episodes by default (`/api/graph/episodes?scope=private`;
+  `scope=all` restores the shared+private union). The graph view is the
+  place for shared knowledge. It also never silently truncates: the response
+  carries a real graph count (`total`) and `has_more`, the panel shows
+  "Showing N of TOTAL" and a **Load more** button that doubles the page.
+- **LiteLLM admin-UI login**: `UI_USERNAME` / `UI_PASSWORD` are now
+  declared (commented out) in `deploy/pi/.env.example` and
+  `deploy/single/env.example` and plumbed into the proxy's Secret and pod
+  env, so uncommenting them replaces the master-key login. Unset keeps
+  LiteLLM's default (`admin` + master key). On k3s the keys are only written
+  when set (`optional: true` on the pod); on the podman profile the Secret
+  carries LiteLLM's own defaults, because LiteLLM reads `UI_PASSWORD` with
+  `os.getenv(..., None)` and an EMPTY string would become the real password.
+
 ## 2026-08-29 — v1.0.6: Settings › Updates with a manual "Check for updates"
 
 - The cockpit's update check is now one shared state (`web/src/lib/

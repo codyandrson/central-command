@@ -221,6 +221,11 @@ from central_command.api.nerve_gateway import router as nerve_gateway_router  # 
 
 app.include_router(nerve_gateway_router)
 
+# Systems view (launchpad): its own module/router, kept out of routes.py.
+from central_command.api.systems import router as systems_router  # noqa: E402
+
+app.include_router(systems_router)
+
 
 @app.get("/health")
 async def health() -> dict:

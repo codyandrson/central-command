@@ -114,6 +114,13 @@ export interface MemoryApiResponse {
   result?: unknown;
 }
 
+/** GET /api/memories response (2026-08-29): paged, never silently truncated. */
+export interface MemoriesListResponse {
+  memories: Memory[];
+  total: number;
+  hasMore: boolean;
+}
+
 /** Aggregated token usage and cost data from the gateway. */
 export interface TokenData {
   entries?: TokenEntry[];

@@ -86,10 +86,10 @@ describe('useDashboardData', () => {
       if (url === '/api/tokens') {
         return Promise.resolve(jsonResponse({ totalTokens: 0 }));
       }
-      if (url === '/api/memories?agentId=alpha') {
+      if (url === '/api/memories?agentId=alpha&limit=50') {
         return alphaMemories.promise;
       }
-      if (url === '/api/memories?agentId=bravo') {
+      if (url === '/api/memories?agentId=bravo&limit=50') {
         return bravoMemories.promise;
       }
       if (url.startsWith('/api/workspace')) {
@@ -104,17 +104,17 @@ describe('useDashboardData', () => {
     );
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha', expect.any(Object));
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
     });
 
     rerender({ agentId: 'bravo' });
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=bravo', expect.any(Object));
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=bravo&limit=50', expect.any(Object));
     });
 
     await act(async () => {
-      bravoMemories.resolve(jsonResponse([{ type: 'section', text: 'Bravo memory' }]));
+      bravoMemories.resolve(jsonResponse({ memories: [{ type: 'section', text: 'Bravo memory' }], total: 1, hasMore: false }));
     });
 
     await waitFor(() => {
@@ -123,7 +123,7 @@ describe('useDashboardData', () => {
     });
 
     await act(async () => {
-      alphaMemories.resolve(jsonResponse([{ type: 'section', text: 'Alpha memory' }]));
+      alphaMemories.resolve(jsonResponse({ memories: [{ type: 'section', text: 'Alpha memory' }], total: 1, hasMore: false }));
     });
 
     await waitFor(() => {
@@ -143,10 +143,10 @@ describe('useDashboardData', () => {
       if (url === '/api/tokens') {
         return tokens.promise;
       }
-      if (url === '/api/memories?agentId=alpha') {
+      if (url === '/api/memories?agentId=alpha&limit=50') {
         return alphaMemories.promise;
       }
-      if (url === '/api/memories?agentId=bravo') {
+      if (url === '/api/memories?agentId=bravo&limit=50') {
         return bravoMemories.promise;
       }
       if (url.startsWith('/api/workspace')) {
@@ -161,7 +161,7 @@ describe('useDashboardData', () => {
     }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha', expect.any(Object));
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
     });
 
     alphaOnFileChanged.mockClear();
@@ -189,8 +189,8 @@ describe('useDashboardData', () => {
       if (url === '/api/tokens') {
         return Promise.resolve(jsonResponse({ totalTokens: 0 }));
       }
-      if (url === '/api/memories?agentId=alpha') {
-        return Promise.resolve(jsonResponse([{ type: 'section', text: 'Alpha memory' }]));
+      if (url === '/api/memories?agentId=alpha&limit=50') {
+        return Promise.resolve(jsonResponse({ memories: [{ type: 'section', text: 'Alpha memory' }], total: 1, hasMore: false }));
       }
       if (url.startsWith('/api/workspace')) {
         return Promise.resolve(jsonResponse({ ok: true, files: [], remoteWorkspace: false }));
@@ -201,7 +201,7 @@ describe('useDashboardData', () => {
     renderHook(() => useDashboardData({ agentId: 'alpha', onFileChanged }));
 
     await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha', expect.any(Object));
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
     });
 
     const fetchMock = vi.mocked(globalThis.fetch);
@@ -214,7 +214,7 @@ describe('useDashboardData', () => {
       sseHandler?.({ event: 'file.changed', data: { path: 'memory/2026-03-19.md' }, ts: Date.now() });
     });
 
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/memories?agentId=alpha', expect.any(Object));
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
     expect(onFileChanged).not.toHaveBeenCalled();
 
     act(() => {
@@ -223,7 +223,7 @@ describe('useDashboardData', () => {
     });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/memories?agentId=alpha', expect.any(Object));
+      expect(fetchMock).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
     });
     expect(onFileChanged).toHaveBeenCalledWith('memory/2026-03-19.md', 'alpha');
   });

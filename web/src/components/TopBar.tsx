@@ -23,6 +23,7 @@ import {
   Target,
   ShieldCheck,
   Clock,
+  LayoutGrid,
 } from "lucide-react";
 import type { ViewMode } from "@/features/command-palette/commands";
 import type { AgentLogEntry, EventEntry, TokenData } from "@/types";
@@ -428,6 +429,21 @@ export function TopBar({
             >
               <Clock size={13} aria-hidden="true" />
               <span>Crons</span>
+            </button>
+            {/* Systems — the launchpad: every deployed/integrated system,
+                live status, and where its credential lives. Same terms as
+                Crons: an operator-driven surface, no per-agent scope, no
+                attention badge. */}
+            <button
+              onClick={() => onViewModeChange("systems")}
+              title="Systems"
+              aria-label="Switch to systems view"
+              aria-pressed={viewMode === "systems"}
+              data-active={viewMode === "systems"}
+              className="shell-chip min-h-11 flex-1 justify-center text-[0.733rem] uppercase tracking-[0.14em] max-[371px]:min-h-[38px] max-[371px]:gap-1 max-[371px]:px-2 max-[371px]:text-[0.667rem] max-[371px]:tracking-[0.08em] max-[371px]:[&_svg]:size-3 sm:min-h-10 sm:flex-none"
+            >
+              <LayoutGrid size={13} aria-hidden="true" />
+              <span>Systems</span>
             </button>
           </div>
         )}

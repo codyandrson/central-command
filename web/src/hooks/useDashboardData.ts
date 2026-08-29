@@ -13,12 +13,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
 import { useServerEvents, type ServerEvent } from '@/hooks/useServerEvents';
-import type { Memory, TokenData, GatewayEvent } from '@/types';
+import type { Memory, MemoriesListResponse, TokenData, GatewayEvent } from '@/types';
 
 // Polling intervals - much longer now since SSE/WS provide real-time updates
 // These are just safety nets for edge cases
 const MEMORY_POLL_INTERVAL = 60000; // 60s fallback (was 10s)
 const TOKEN_POLL_INTERVAL = 60000;  // 60s fallback (was 30s)
+const DEFAULT_MEMORY_LIMIT = 50;
 
 export type FileChangedHandler = (path: string, agentId: string) => void;
 
@@ -31,9 +32,12 @@ export interface DashboardDataOptions {
 export interface DashboardDataState {
   memories: Memory[];
   memoriesLoading: boolean;
+  memoriesTotal: number;
+  memoriesHasMore: boolean;
   tokenData: TokenData | null;
   remoteWorkspace: boolean;
   refreshMemories: (signal?: AbortSignal) => Promise<void>;
+  loadMoreMemories: () => void;
   refreshTokens: (signal?: AbortSignal) => Promise<void>;
 }
 
@@ -51,23 +55,30 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
   const activeAgentId = options.agentId ?? 'main';
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(true);
+  const [memoriesTotal, setMemoriesTotal] = useState(0);
+  const [memoriesHasMore, setMemoriesHasMore] = useState(false);
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
   const [remoteWorkspace, setRemoteWorkspace] = useState(false);
-  
+
   // Refs for callbacks (to avoid stale closures in subscriptions)
   const refreshMemoriesRef = useRef<((signal?: AbortSignal) => Promise<void>) | undefined>(undefined);
   const refreshTokensRef = useRef<((signal?: AbortSignal) => Promise<void>) | undefined>(undefined);
   const onFileChangedRef = useRef(options.onFileChanged);
   const agentIdRef = useRef(activeAgentId);
+  // How many rows to ask for — bumped by loadMoreMemories, reset on agent switch.
+  const memoryLimitRef = useRef(DEFAULT_MEMORY_LIMIT);
 
   const refreshMemories = useCallback(async (signal?: AbortSignal) => {
     const requestAgentId = activeAgentId;
-    const params = new URLSearchParams({ agentId: requestAgentId });
+    const params = new URLSearchParams({ agentId: requestAgentId, limit: String(memoryLimitRef.current) });
 
     try {
       const res = await fetch(`/api/memories?${params.toString()}`, { signal });
       if (!signal?.aborted && res.ok && agentIdRef.current === requestAgentId) {
-        setMemories(await res.json());
+        const data: MemoriesListResponse = await res.json();
+        setMemories(data.memories);
+        setMemoriesTotal(data.total);
+        setMemoriesHasMore(data.hasMore);
       }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
@@ -79,6 +90,11 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
       }
     }
   }, [activeAgentId]);
+
+  const loadMoreMemories = useCallback(() => {
+    memoryLimitRef.current *= 2;
+    void refreshMemories();
+  }, [refreshMemories]);
 
   const refreshTokens = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -102,6 +118,7 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
   agentIdRef.current = activeAgentId;
 
   useEffect(() => {
+    memoryLimitRef.current = DEFAULT_MEMORY_LIMIT;
     setMemories([]);
     setMemoriesLoading(true);
   }, [activeAgentId]);
@@ -203,9 +220,12 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
   return {
     memories,
     memoriesLoading,
+    memoriesTotal,
+    memoriesHasMore,
     tokenData,
     remoteWorkspace,
     refreshMemories,
+    loadMoreMemories,
     refreshTokens,
   };
 }

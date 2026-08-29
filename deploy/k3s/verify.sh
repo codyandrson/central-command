@@ -234,11 +234,13 @@ echo "== D. host config still points at loopback =="
 #     carried by ServiceLB and never will be, so flagging them tests nothing.
 #   * EMPTY values — `CC_LLM_PROXY_UI_URL=` is "not configured", not
 #     "misconfigured"; the presence checks below are what catch a required var.
-# CC_LLM_PROXY_UI_URL is exempt: the app never calls it — it is the LiteLLM
-# admin link the cockpit hands to the operator's BROWSER (integrations/
-# litellm.py), so it must be a tailnet address, not loopback.
+# CC_LLM_PROXY_UI_URL, CC_N8N_UI_URL, CC_VLOGS_UI_URL and CC_NEO4J_BROWSER_URL
+# are exempt for the same reason: the app never calls them — they are the
+# Systems view's "Open →" links the cockpit hands to the operator's BROWSER
+# (central_command/api/systems.py), so they must be tailnet addresses, not
+# loopback.
 offhost="$(grep -hoE '^CC_[A-Z_]*(URL|DATABASE_URL)=.+' .env 2>/dev/null \
-  | grep -vE '^CC_(JIRA|CONFLUENCE|FORGE)_|^CC_LLM_PROXY_UI_URL=' \
+  | grep -vE '^CC_(JIRA|CONFLUENCE|FORGE)_|^CC_(LLM_PROXY|N8N|VLOGS)_UI_URL=|^CC_NEO4J_BROWSER_URL=' \
   | grep -vE '=[a-z+]+://([^@/]*@)?(localhost|127\.0\.0\.1)([:/]|$)' || true)"
 if [[ -n "$offhost" ]]; then
   bad "non-loopback endpoint in .env:"; printf '        %s\n' "$offhost"

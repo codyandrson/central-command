@@ -99,6 +99,13 @@ stringData:
   DATABASE_URL: "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD}@${CC_POD_PREFIX}litellm-db:5432/litellm"
   CC_LLM_API_KEY: "${CC_LLM_API_KEY}"
   CC_EMBED_API_KEY: "${CC_EMBED_API_KEY}"
+  # Admin-UI login, optional and never generated. LiteLLM reads these with
+  # os.getenv(..., None), so an EMPTY string would become the real password —
+  # substitute its own defaults (admin / master key) instead, which is exactly
+  # what it does when the vars are absent. The master key is in this Secret
+  # already, so this adds no exposure.
+  UI_USERNAME: "${UI_USERNAME:-admin}"
+  UI_PASSWORD: "${UI_PASSWORD:-$LITELLM_MASTER_KEY}"
 ---
 apiVersion: v1
 kind: Secret

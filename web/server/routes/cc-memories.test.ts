@@ -38,16 +38,17 @@ describe('cc-memories adapter', () => {
     return app;
   }
 
-  it('forwards agentId as agent_id and carries scope as a wire field, not a text prefix', async () => {
+  it('forwards agentId as agent_id, defaults scope=private, and carries total/hasMore', async () => {
     const app = await buildApp();
     let requestedUrl: string | null = null;
     fetchMock.mockImplementation(async (url: string) => {
       requestedUrl = url;
       return respond({
         episodes: [
-          { uuid: '1', name: 'shared fact', content: 'body', created_at: '2026-08-01T00:00:00Z', scope: 'shared' },
           { uuid: '2', name: 'private fact', content: 'body2', created_at: '2026-08-02T00:00:00Z', scope: 'private' },
         ],
+        total: 7,
+        has_more: true,
       });
     });
 
@@ -55,20 +56,20 @@ describe('cc-memories adapter', () => {
     expect(res.status).toBe(200);
     const url = new URL(requestedUrl as unknown as string);
     expect(url.searchParams.get('agent_id')).toBe('jira-expert');
+    expect(url.searchParams.get('scope')).toBe('private');
+    expect(url.searchParams.get('limit')).toBe('50');
 
-    const body = await res.json() as Array<{ text: string; scope: string }>;
-    const shared = body.find((m) => m.text.includes('shared fact'));
-    const priv = body.find((m) => m.text.includes('private fact'));
-    expect(shared?.scope).toBe('shared');
+    const body = await res.json() as { memories: Array<{ text: string; scope: string }>; total: number; hasMore: boolean };
+    expect(body.total).toBe(7);
+    expect(body.hasMore).toBe(true);
+    const priv = body.memories.find((m) => m.text.includes('private fact'));
     expect(priv?.scope).toBe('private');
-    expect(shared?.text).not.toContain('[private]');
     expect(priv?.text).not.toContain('[private]');
     // no markdown-bold artifact either — text is plain, rendered verbatim
-    expect(shared?.text).not.toContain('**');
     expect(priv?.text).not.toContain('**');
   });
 
-  it('passes through with no agentId and defaults scope to shared', async () => {
+  it('forwards a custom limit and passes through with no agentId, defaulting scope to shared', async () => {
     const app = await buildApp();
     let requestedUrl: string | null = null;
     fetchMock.mockImplementation(async (url: string) => {
@@ -77,17 +78,22 @@ describe('cc-memories adapter', () => {
         episodes: [
           { uuid: '1', name: 'shared fact', content: 'body', created_at: '2026-08-01T00:00:00Z' },
         ],
+        total: 1,
+        has_more: false,
       });
     });
 
-    const res = await app.request('/api/memories');
+    const res = await app.request('/api/memories?limit=100');
     expect(res.status).toBe(200);
     const url = new URL(requestedUrl as unknown as string);
     expect(url.searchParams.has('agent_id')).toBe(false);
+    expect(url.searchParams.get('limit')).toBe('100');
 
-    const body = await res.json() as Array<{ text: string; scope: string }>;
-    expect(body[0].text).not.toContain('[private]');
-    expect(body[0].scope).toBe('shared');
+    const body = await res.json() as { memories: Array<{ text: string; scope: string }>; total: number; hasMore: boolean };
+    expect(body.memories[0].text).not.toContain('[private]');
+    expect(body.memories[0].scope).toBe('shared');
+    expect(body.total).toBe(1);
+    expect(body.hasMore).toBe(false);
   });
 
   it('still refuses writes with 501', async () => {

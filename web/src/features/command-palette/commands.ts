@@ -3,7 +3,7 @@ import { themes, type ThemeName } from '@/lib/themes';
 import { fonts, type FontName } from '@/lib/fonts';
 import type { TTSProvider } from '@/features/tts/useTTS';
 
-export type ViewMode = 'chat' | 'kanban' | 'inbox' | 'agents' | 'skills' | 'graph' | 'graph-verify' | 'activity' | 'loe' | 'crons';
+export type ViewMode = 'chat' | 'kanban' | 'inbox' | 'agents' | 'skills' | 'graph' | 'graph-verify' | 'activity' | 'loe' | 'crons' | 'systems';
 
 export interface CommandActions {
   onNewSession: () => void;
@@ -281,6 +281,18 @@ export function createCommands(actions: CommandActions): Command[] {
         action: () => actions.onSetViewMode!('crons'),
         category: 'kanban' as const,
         keywords: ['crons', 'schedule', 'heartbeat', 'automation', 'recurring', 'view'],
+      },
+    ] : []),
+    // Systems — the launchpad: every deployed/integrated system, live
+    // status, and where its credential lives. Same terms as Agents/Skills/
+    // Graph/Goals/Crons: an operator-read surface, no feature flag.
+    ...(actions.onSetViewMode ? [
+      {
+        id: 'open-systems',
+        label: 'Open Systems',
+        action: () => actions.onSetViewMode!('systems'),
+        category: 'kanban' as const,
+        keywords: ['systems', 'launchpad', 'health', 'status', 'services', 'credentials', 'view'],
       },
     ] : []),
     // Kanban commands

@@ -150,7 +150,7 @@ def private_group(agent_id: str) -> str:
     return f"{settings.graph_write_group}_{agent_id}"
 
 
-async def _groups_for(agent_id: str | None) -> list[str]:
+async def groups_for(agent_id: str | None) -> list[str]:
     groups = await _read_groups()
     return groups + [private_group(agent_id)] if agent_id else groups
 
@@ -162,7 +162,7 @@ async def search_facts(query: str, max_facts: int = 8, agent_id: str | None = No
     """Relevant facts (entity relationships, with temporal validity)."""
     out = await _call_tool(
         "search_memory_facts",
-        {"query": query, "max_facts": max_facts, "group_ids": await _groups_for(agent_id)},
+        {"query": query, "max_facts": max_facts, "group_ids": await groups_for(agent_id)},
     )
     return out.get("facts", [])
 
@@ -171,7 +171,7 @@ async def search_nodes(query: str, max_nodes: int = 8, agent_id: str | None = No
     """Relevant entities (nodes with summaries)."""
     out = await _call_tool(
         "search_nodes",
-        {"query": query, "max_nodes": max_nodes, "group_ids": await _groups_for(agent_id)},
+        {"query": query, "max_nodes": max_nodes, "group_ids": await groups_for(agent_id)},
     )
     return out.get("nodes", [])
 
@@ -188,14 +188,19 @@ async def search_private_facts(agent_id: str, query: str, max_facts: int = 8) ->
     return out.get("facts", [])
 
 
-async def get_episodes(last_n: int = 50, agent_id: str | None = None) -> list[dict]:
+async def get_episodes(
+    last_n: int = 50, agent_id: str | None = None, private_only: bool = False
+) -> list[dict]:
     """Most recent episodes in our groups — the shared memory, listed, plus the
     caller's own private partition when `agent_id` is given (D11-r1: agents
     have a private partition; a caller with no agent context sees shared only,
-    e.g. the cockpit's team-wide memory panel)."""
+    e.g. the cockpit's team-wide memory panel). `private_only=True` (with an
+    `agent_id`) narrows the read to exactly that agent's private group — the
+    per-agent chat panel's default view."""
+    group_ids = [private_group(agent_id)] if private_only and agent_id else await groups_for(agent_id)
     out = await _call_tool(
         "get_episodes",
-        {"group_ids": await _groups_for(agent_id), "max_episodes": last_n},
+        {"group_ids": group_ids, "max_episodes": last_n},
     )
     return out.get("episodes", [])
 

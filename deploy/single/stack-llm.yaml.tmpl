@@ -227,6 +227,14 @@ spec:
         - name: CC_EMBED_API_KEY
           valueFrom:
             secretKeyRef: {name: ${CC_POD_PREFIX}litellm, key: CC_EMBED_API_KEY}
+        # Admin-UI login. make-secrets.sh fills LiteLLM's own defaults
+        # (admin / master key) when UI_USERNAME/UI_PASSWORD are unset in .env.
+        - name: UI_USERNAME
+          valueFrom:
+            secretKeyRef: {name: ${CC_POD_PREFIX}litellm, key: UI_USERNAME}
+        - name: UI_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: ${CC_POD_PREFIX}litellm, key: UI_PASSWORD}
         - name: REDIS_HOST
           value: ${CC_POD_PREFIX}litellm-redis
         - name: REDIS_PORT

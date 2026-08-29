@@ -67,6 +67,7 @@ const GraphVerificationsView = lazy(() => import('@/features/graph-verifications
 const ActivityView = lazy(() => import('@/features/activity/ActivityView').then(m => ({ default: m.ActivityView })));
 const LoeView = lazy(() => import('@/features/loe/LoeView').then(m => ({ default: m.LoeView })));
 const CronsTab = lazy(() => import('@/features/workspace/tabs/CronsTab').then(m => ({ default: m.CronsTab })));
+const SystemsView = lazy(() => import('@/features/systems/SystemsView').then(m => ({ default: m.SystemsView })));
 
 interface AppProps {
   onLogout?: () => void;
@@ -308,7 +309,7 @@ export default function App({ onLogout }: AppProps) {
   }, [handleFileChanged]);
 
   // Dashboard data (extracted hook) — single SSE connection handles all events
-  const { memories, memoriesLoading, tokenData, remoteWorkspace, refreshMemories } = useDashboardData({
+  const { memories, memoriesLoading, memoriesTotal, memoriesHasMore, tokenData, remoteWorkspace, refreshMemories, loadMoreMemories } = useDashboardData({
     agentId: workspaceAgentId,
     onFileChanged,
   });
@@ -906,6 +907,9 @@ export default function App({ onLogout }: AppProps) {
               memories={memories}
               onRefreshMemories={refreshMemories}
               memoriesLoading={memoriesLoading}
+              memoriesTotal={memoriesTotal}
+              memoriesHasMore={memoriesHasMore}
+              onLoadMoreMemories={loadMoreMemories}
               remoteWorkspace={remoteWorkspace}
               onOpenBoard={() => setViewMode('kanban')}
               onOpenTask={openTaskInBoard}
@@ -950,6 +954,9 @@ export default function App({ onLogout }: AppProps) {
           memories={memories}
           onRefreshMemories={refreshMemories}
           memoriesLoading={memoriesLoading}
+          memoriesTotal={memoriesTotal}
+          memoriesHasMore={memoriesHasMore}
+          onLoadMoreMemories={loadMoreMemories}
           remoteWorkspace={remoteWorkspace}
           compact
           onOpenBoard={() => setViewMode('kanban')}
@@ -1237,6 +1244,13 @@ export default function App({ onLogout }: AppProps) {
           <div className="shell-panel boot-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden rounded-[28px]">
             <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-xs bg-background">Loading…</div>}>
               <CronsTab />
+            </Suspense>
+          </div>
+        )}
+        {viewMode === 'systems' && (
+          <div className="shell-panel boot-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden rounded-[28px]">
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-xs bg-background">Loading…</div>}>
+              <SystemsView />
             </Suspense>
           </div>
         )}

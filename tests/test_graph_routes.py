@@ -201,17 +201,50 @@ async def test_curation_writes_land_on_the_governance_record(monkeypatch):
     assert ev["payload"]["result"]["episode"] == "ep-1"
 
 
-async def test_graph_episodes_tags_scope_when_agent_id_given(monkeypatch):
-    """D11-r1: an agent_id widens the read to that agent's private partition
-    (graphiti.get_episodes already spans it) and the route must label which
-    of the returned rows are which — the cockpit's memory panel relies on
-    this to show a private/shared split for the selected agent."""
-    from central_command.integrations import graphiti
+async def test_graph_episodes_defaults_to_private_only_for_an_agent(monkeypatch):
+    """D11-r1 + the memory-panel default (2026-08-29): with an agent_id and
+    no explicit scope, the route must ask graphiti for THAT agent's private
+    partition only — not the shared+private union — and report a real
+    total/has_more pair so the panel never silently truncates."""
+    from central_command.integrations import graphiti, neo4j_reader
 
     seen = {}
 
-    async def fake_get_episodes(last_n=50, agent_id=None):
+    async def fake_get_episodes(last_n=50, agent_id=None, private_only=False):
         seen["agent_id"] = agent_id
+        seen["private_only"] = private_only
+        seen["last_n"] = last_n
+        return [
+            {"uuid": "2", "name": "mine", "group_id": graphiti.private_group("jira-expert"),
+             "created_at": "2026-08-02T00:00:00Z"},
+        ]
+
+    async def fake_count_episodes(group_ids):
+        seen["group_ids"] = group_ids
+        return 1
+
+    monkeypatch.setattr(graphiti, "get_episodes", fake_get_episodes)
+    monkeypatch.setattr(neo4j_reader, "count_episodes", fake_count_episodes)
+    result = await routes.graph_episodes(agent_id="jira-expert", limit=50)
+
+    assert seen["agent_id"] == "jira-expert"
+    assert seen["private_only"] is True
+    assert seen["last_n"] == 51  # limit+1, to derive has_more
+    assert seen["group_ids"] == [graphiti.private_group("jira-expert")]
+    assert result["episodes"][0]["scope"] == "private"
+    assert result["total"] == 1
+    assert result["has_more"] is False
+
+
+async def test_graph_episodes_scope_all_widens_back_to_shared_and_private(monkeypatch):
+    """scope=all is the explicit opt-out of the private-only default — same
+    shared+private union and per-row tagging as before."""
+    from central_command.integrations import graphiti, neo4j_reader
+
+    seen = {}
+
+    async def fake_get_episodes(last_n=50, agent_id=None, private_only=False):
+        seen["private_only"] = private_only
         return [
             {"uuid": "1", "name": "shared", "group_id": graphiti.settings.graph_write_group,
              "created_at": "2026-08-01T00:00:00Z"},
@@ -220,9 +253,10 @@ async def test_graph_episodes_tags_scope_when_agent_id_given(monkeypatch):
         ]
 
     monkeypatch.setattr(graphiti, "get_episodes", fake_get_episodes)
-    result = await routes.graph_episodes(agent_id="jira-expert")
+    monkeypatch.setattr(neo4j_reader, "count_episodes", lambda group_ids: _ok(2))
+    result = await routes.graph_episodes(agent_id="jira-expert", scope="all")
 
-    assert seen["agent_id"] == "jira-expert"
+    assert seen["private_only"] is False
     by_uuid = {e["uuid"]: e for e in result["episodes"]}
     assert by_uuid["1"]["scope"] == "shared"
     assert by_uuid["2"]["scope"] == "private"
@@ -231,16 +265,19 @@ async def test_graph_episodes_tags_scope_when_agent_id_given(monkeypatch):
 async def test_graph_episodes_without_agent_id_is_all_shared(monkeypatch):
     """No agent_id means no widened read and every row reads shared — the
     unchanged behavior for a caller with no agent context (e.g. dashboard)."""
-    from central_command.integrations import graphiti
+    from central_command.integrations import graphiti, neo4j_reader
 
-    async def fake_get_episodes(last_n=50, agent_id=None):
+    async def fake_get_episodes(last_n=50, agent_id=None, private_only=False):
         assert agent_id is None
+        assert private_only is False
         return [{"uuid": "1", "name": "shared", "group_id": graphiti.settings.graph_write_group,
                   "created_at": "2026-08-01T00:00:00Z"}]
 
     monkeypatch.setattr(graphiti, "get_episodes", fake_get_episodes)
+    monkeypatch.setattr(neo4j_reader, "count_episodes", lambda group_ids: _ok(1))
     result = await routes.graph_episodes()
     assert result["episodes"][0]["scope"] == "shared"
+    assert result["total"] == 1
 
 
 async def test_a_refused_curation_write_emits_nothing(monkeypatch):

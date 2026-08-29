@@ -357,6 +357,7 @@ llm_gate() { # llm_gate <what-failed>
   note ""
   note "  UI:           http://127.0.0.1:${CC_LITELLM_PORT}/ui"
   note "  login:        username 'admin', password = LITELLM_MASTER_KEY"
+  note "                (or UI_USERNAME/UI_PASSWORD if set in .env)"
   note "                (the value is in deploy/single/.env — not printed here)"
   note ""
   note "  These aliases must exist and answer (rendered from your .env; check"

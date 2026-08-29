@@ -112,6 +112,9 @@ interface WorkspacePanelProps {
   memories: Memory[];
   onRefreshMemories: (signal?: AbortSignal) => void | Promise<void>;
   memoriesLoading?: boolean;
+  memoriesTotal?: number;
+  memoriesHasMore?: boolean;
+  onLoadMoreMemories?: () => void;
   /** True when the workspace lives in a remote sandbox (gateway RPC mode). */
   remoteWorkspace?: boolean;
   /** Render in compact dropdown mode (chat-first topbar panel). */
@@ -127,6 +130,9 @@ export function WorkspacePanel({
   memories,
   onRefreshMemories,
   memoriesLoading,
+  memoriesTotal,
+  memoriesHasMore,
+  onLoadMoreMemories,
   remoteWorkspace = false,
   compact = false,
   onOpenBoard,
@@ -185,6 +191,9 @@ export function WorkspacePanel({
                 memories={memories}
                 onRefresh={onRefreshMemories}
                 isLoading={memoriesLoading}
+                total={memoriesTotal}
+                hasMore={memoriesHasMore}
+                onLoadMore={onLoadMoreMemories}
                 remoteWorkspace={remoteWorkspace}
                 hideHeader
                 compact={compact}

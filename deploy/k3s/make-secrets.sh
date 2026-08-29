@@ -79,13 +79,22 @@ echo "namespace/$NS"
 echo "secrets:"
 # The proxy resolves its own DSN from this one value, so the password never has
 # to be reassembled in the manifest.
-apply_secret cc-litellm \
-  "LITELLM_MASTER_KEY=$LITELLM_MASTER_KEY" \
-  "LITELLM_SALT_KEY=$LITELLM_SALT_KEY" \
-  "LITELLM_POSTGRES_PASSWORD=$LITELLM_POSTGRES_PASSWORD" \
-  "DATABASE_URL=postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD}@litellm-db:5432/litellm" \
-  "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
+litellm_args=(
+  "LITELLM_MASTER_KEY=$LITELLM_MASTER_KEY"
+  "LITELLM_SALT_KEY=$LITELLM_SALT_KEY"
+  "LITELLM_POSTGRES_PASSWORD=$LITELLM_POSTGRES_PASSWORD"
+  "DATABASE_URL=postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD}@litellm-db:5432/litellm"
+  "OPENAI_API_KEY=${OPENAI_API_KEY:-}"
   "GEMINI_API_KEY=${GEMINI_API_KEY:-}"
+)
+# UI_USERNAME/UI_PASSWORD (admin-UI login) are OPTIONAL and only added when
+# set, so the Secret simply lacks the key and 30-litellm.yaml's
+# `optional: true` secretKeyRef leaves the env var unset — never an empty
+# string: LiteLLM reads UI_PASSWORD with os.getenv(..., None), so "" would
+# become the real admin password (login_utils.py, verified 2026-08-29).
+[[ -n "${UI_USERNAME:-}" ]] && litellm_args+=("UI_USERNAME=$UI_USERNAME")
+[[ -n "${UI_PASSWORD:-}" ]] && litellm_args+=("UI_PASSWORD=$UI_PASSWORD")
+apply_secret cc-litellm "${litellm_args[@]}"
 
 # NEO4J_AUTH is the container's expected "user/password" form; NEO4J_PASSWORD is
 # what Graphiti wants on its own. Same secret, two shapes, one source value.

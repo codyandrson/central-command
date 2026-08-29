@@ -33,7 +33,8 @@ Rules that hold for the whole run:
   operator's move (add/fix models in the LiteLLM UI, stop the API before an
   update, restart it after). Relay the script's own instructions — for the
   llm gate that includes the UI URL, where the credential lives (by NAME:
-  LITELLM_MASTER_KEY in deploy/single/.env — never print the value), and the
+  LITELLM_MASTER_KEY in deploy/single/.env — never print the value, or
+  UI_USERNAME/UI_PASSWORD if the operator set them), and the
   expected alias list. When the operator says they've acted, re-run the same
   phase; it is idempotent and verifies.
 - **Existing install?** Before Phase 0, check: if the repo has an `upstream`

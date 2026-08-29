@@ -253,6 +253,14 @@ spec:
             - name: GEMINI_API_KEY
               valueFrom:
                 secretKeyRef: {name: cc-litellm, key: GEMINI_API_KEY, optional: true}
+            # Admin-UI login, optional. Unset (key absent from the Secret) means
+            # the UI falls back to username `admin` + LITELLM_MASTER_KEY.
+            - name: UI_USERNAME
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: UI_USERNAME, optional: true}
+            - name: UI_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: cc-litellm, key: UI_PASSWORD, optional: true}
             # !! ANTHROPIC_API_KEY IS DELIBERATELY ABSENT — DO NOT ADD IT !!
             # Carried over verbatim from deploy/pi/docker-compose.yml, where the
             # full reasoning lives. Short version: LiteLLM treats it as a

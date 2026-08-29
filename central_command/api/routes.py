@@ -2334,20 +2334,31 @@ async def usage() -> dict:
 
 
 @router.get("/graph/episodes")
-async def graph_episodes(limit: int = 50, agent_id: str | None = None) -> dict:
+async def graph_episodes(limit: int = 50, agent_id: str | None = None, scope: str = "private") -> dict:
     """Recent memory episodes (read-only; reads are ungated by design).
     Newest first — group merge order from the MCP server is not guaranteed.
-    With `agent_id`, the response also spans that agent's private partition
-    (D11-r1) and each episode is tagged `scope: "shared"|"private"` so the
-    cockpit can label them; with no `agent_id` every episode is shared."""
-    from central_command.integrations import graphiti
+    With `agent_id`, `scope="private"` (the default — the per-agent chat
+    panel's default view) narrows the read to that agent's own partition;
+    `scope="all"` widens it back to shared + private, each episode tagged
+    `scope: "shared"|"private"`. With no `agent_id`, `scope` is moot and every
+    episode is shared, unchanged from before. Also returns `total` (a real
+    graph count, not just this page) and `has_more`, so the cockpit never
+    silently truncates a fixed-size page."""
+    from central_command.integrations import graphiti, neo4j_reader
 
-    episodes = await graphiti.get_episodes(last_n=max(1, min(limit, 500)), agent_id=agent_id)
+    limit = max(1, min(limit, 2000))  # the panel doubles on "Load more"; keep the ceiling above where it stalls
+    private_only = bool(agent_id) and scope == "private"
+    episodes = await graphiti.get_episodes(last_n=limit + 1, agent_id=agent_id, private_only=private_only)
+    has_more = len(episodes) > limit
+    episodes = episodes[:limit]
     private_group = graphiti.private_group(agent_id) if agent_id else None
     for e in episodes:
         e["scope"] = "private" if private_group and e.get("group_id") == private_group else "shared"
     episodes.sort(key=lambda e: e.get("created_at") or "", reverse=True)
-    return {"episodes": episodes}
+
+    group_ids = [private_group] if private_only else await graphiti.groups_for(agent_id)
+    total = await neo4j_reader.count_episodes(group_ids)
+    return {"episodes": episodes, "total": total, "has_more": has_more}
 
 
 class GraphProblemIn(BaseModel):

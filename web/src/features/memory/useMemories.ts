@@ -9,7 +9,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
-import type { Memory, MemoryCategory, MemoryApiResponse } from '@/types';
+import type { Memory, MemoryCategory, MemoryApiResponse, MemoriesListResponse } from '@/types';
 
 /** Generate a unique temporary ID for optimistic updates */
 function generateTempId(): string {
@@ -130,16 +130,16 @@ export function useMemories(initialMemories: Memory[] = [], agentId = 'main'): U
       if (!res.ok) {
         throw new Error(`Failed to fetch memories: ${res.status}`);
       }
-      const data: Memory[] = await res.json();
+      const { memories: data }: MemoriesListResponse = await res.json();
       if (!isCurrentRequest(requestAgentId, requestGeneration)) return;
-      
+
       // Merge with pending optimistic updates
       setMemories(prev => {
         if (!isCurrentRequest(requestAgentId, requestGeneration)) return prev;
 
         const pendingItems = prev.filter(m => m.pending || m.deleting);
         if (pendingItems.length === 0) return data;
-        
+
         const newData = [...data];
         for (const pending of pendingItems) {
           if (pending.pending && !pending.deleting) {

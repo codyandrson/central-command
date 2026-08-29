@@ -125,7 +125,11 @@ describe('useMemories', () => {
     expect(result.current.error).toBeNull();
 
     await act(async () => {
-      mainRefresh.resolve(createJsonResponse([{ type: 'item', text: 'stale main refresh' }]));
+      mainRefresh.resolve(createJsonResponse({
+        memories: [{ type: 'item', text: 'stale main refresh' }],
+        total: 1,
+        hasMore: false,
+      }));
       await Promise.resolve();
     });
 

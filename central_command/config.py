@@ -510,6 +510,19 @@ class Settings(BaseSettings):
     # agents keep reaching the graph only through Graphiti's MCP.
     neo4j_url: str = "bolt://127.0.0.1:7687"
     neo4j_password: str = ""
+    # Browser-reachable Neo4j Browser URL (tailnet) — display-only, for the
+    # Systems view's "Open →" link. Same pattern as llm_proxy_ui_url: distinct
+    # from neo4j_url (loopback bolt, by the failover invariant). Unset = no
+    # link.
+    neo4j_browser_url: str = ""
+
+    # Browser-reachable n8n UI URL (tailnet) — display-only, for the Systems
+    # view. Same pattern as llm_proxy_ui_url. Unset = no link.
+    n8n_ui_url: str = ""
+
+    # Browser-reachable VictoriaLogs UI URL (tailnet) — display-only, for the
+    # Systems view. Same pattern as llm_proxy_ui_url. Unset = no link.
+    vlogs_ui_url: str = ""
 
     def agent_proxy_key(self, agent_id: str | None) -> str:
         """The per-agent LiteLLM virtual key for `agent_id`, from

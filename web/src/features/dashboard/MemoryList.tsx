@@ -22,6 +22,12 @@ interface MemoryListProps {
   remoteWorkspace?: boolean;
   /** Compact mode for mobile/topbar dropdown; uses kebab actions for rows. */
   compact?: boolean;
+  /** Real total episode count in scope — may exceed `memories.length` (a page). */
+  total?: number;
+  /** True when the graph holds more episodes than the current page shows. */
+  hasMore?: boolean;
+  /** Widens the page (never a silent truncation) and refetches. */
+  onLoadMore?: () => void;
 }
 
 interface EditingMemoryState {
@@ -32,7 +38,7 @@ interface EditingMemoryState {
 const MEMORY_EDITOR_STATE_KIND = 'memory-editor:active';
 
 /** Searchable, editable list of agent memories with add/delete support. */
-export function MemoryList({ agentId, memories: initialMemories, onRefresh, isLoading: initialLoading, hideHeader, remoteWorkspace = false, compact = false }: MemoryListProps) {
+export function MemoryList({ agentId, memories: initialMemories, onRefresh, isLoading: initialLoading, hideHeader, remoteWorkspace = false, compact = false, total, hasMore = false, onLoadMore }: MemoryListProps) {
   // useMemories provides optimistic state that reflects pending operations
   const { memories, addMemory, deleteMemory, error, clearError, isLoading } = useMemories(initialMemories, agentId);
   
@@ -330,6 +336,20 @@ export function MemoryList({ agentId, memories: initialMemories, onRefresh, isLo
               compact={compact}
             />
           ))}
+          {typeof total === 'number' && (
+            <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-[0.667rem] text-muted-foreground border-t border-border/40">
+              <span>Showing {memories.length} of {total}</span>
+              {hasMore && onLoadMore && (
+                <button
+                  onClick={onLoadMore}
+                  disabled={isLoading}
+                  className="text-purple hover:underline bg-transparent border-0 cursor-pointer disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-purple/50 focus-visible:ring-offset-0 rounded-sm"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
+          )}
           </>
         )}
       </div>

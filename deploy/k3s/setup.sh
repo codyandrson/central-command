@@ -407,6 +407,7 @@ llm_gate() { # llm_gate <what-failed>
   note ""
   note "  UI:           http://127.0.0.1:4000/ui"
   note "  login:        username 'admin', password = LITELLM_MASTER_KEY"
+  note "                (or UI_USERNAME/UI_PASSWORD if set in .env)"
   note "                (the value is in deploy/pi/.env — not printed here)"
   note ""
   note "  The catalog is DB-stored (store_model_in_db), and its declaration is"

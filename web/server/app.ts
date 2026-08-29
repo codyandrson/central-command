@@ -68,6 +68,9 @@ import loeRoutes from './routes/cc-loe.js';
 import skillsRoutes from './routes/cc-skills.js';
 import decisionsRoutes from './routes/cc-decisions.js';
 import updateRoutes from './routes/cc-update.js';
+// Systems view (launchpad): every deployed/integrated system, live status,
+// and where its credential lives — never the value.
+import systemsRoutes from './routes/cc-systems.js';
 
 const app = new Hono();
 
@@ -111,7 +114,7 @@ const routes = [
   workspaceRoutes, charterRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,
   voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, channelsRoutes, kanbanRoutes, beadsRoutes,
   graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes,
-  updateRoutes,
+  updateRoutes, systemsRoutes,
 ];
 for (const route of routes) app.route('/', route);
 
