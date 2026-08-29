@@ -380,6 +380,11 @@ answers):
 - The instance env files (`.env`, `web/.env`, `deploy/pi/.env`) — usually
   already backed up and removed by the teardown, but verify rather than
   assume.
+- **The go-live systemd drop-in**: `/etc/systemd/system/cc-uvicorn.service.d/`
+  (`executor-live.conf`). It lives outside the repo AND the cluster, beats the
+  unit's `Environment=CC_EXECUTOR_MODE=dry_run`, and survives every teardown —
+  on 2026-08-29 a fresh install executed its demo approval LIVE because of it.
+  `verify.sh --clean-install` now asserts the running process is in dry_run.
 
 ## 9. Verification
 

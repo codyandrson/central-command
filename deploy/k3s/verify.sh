@@ -94,6 +94,12 @@ if [[ "$CLEAN" == "1" ]]; then
   check "spine: schema loaded (event log queryable; fresh log may be near-empty)" \
     "test \"\$(${K[*]} exec deploy/cc-postgres -- psql -qtAX -U central_command -d central_command -c 'select count(*) from audit_event')\" -ge 0"
   skip "n8n: facade workflow + Gmail credential — instance data, restored in README.md phase 8"
+  # The RUNNING process's mode, not the unit file's: a go-live drop-in in
+  # cc-uvicorn.service.d/ outlives a teardown and beats Environment= in the
+  # unit (2026-08-29: a "clean" install executed its demo approval live).
+  # systemd's value is in the process env; absent that, .env decides.
+  check "executor: the running API is in dry_run (a leftover go-live drop-in would make it live)" \
+    "mode=\$(sudo tr '\\0' '\\n' </proc/\$(systemctl show -p MainPID --value cc-uvicorn)/environ | sed -n 's/^CC_EXECUTOR_MODE=//p'); [[ -z \$mode ]] && mode=\$(sed -n 's/^CC_EXECUTOR_MODE=//p' .env); [[ \$mode == dry_run ]]"
   skip "n8n: (run without --clean-install after the phase-8 restore to assert both)"
 else
   check "spine: event log carried over" \
