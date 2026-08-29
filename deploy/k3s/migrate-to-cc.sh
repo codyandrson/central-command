@@ -198,10 +198,14 @@ SQL
 do \$\$ begin
   if exists (select 1 from pg_database where datname='$OLD_DB') then execute 'alter database $OLD_DB rename to $NEW_DB'; end if;
   if exists (select 1 from pg_database where datname='${OLD_DB}_test') then execute 'alter database ${OLD_DB}_test rename to ${NEW_DB}_test'; end if;
-  if exists (select 1 from pg_roles where rolname='$OLD_DB') then execute 'alter role $OLD_DB rename to $NEW_DB'; end if;
-  execute 'alter role $NEW_DB password ''$NEW_DB''';
 end \$\$;
 SQL
+  # A role cannot rename itself and it is the only superuser: use a throwaway one.
+  if [[ $role == "$OLD_DB" ]]; then
+    psql_old gv-postgres $OLD_DB postgres -c "do \$\$ begin if not exists (select 1 from pg_roles where rolname='cc_migrate') then create role cc_migrate superuser login; end if; end \$\$"
+    psql_old gv-postgres cc_migrate postgres -c "alter role $OLD_DB rename to $NEW_DB" -c "alter role $NEW_DB password '$NEW_DB'"
+    psql_old gv-postgres $NEW_DB postgres -c "drop role cc_migrate"
+  fi
   mark postgres
 }
 
@@ -405,9 +409,13 @@ rollback() {
 do \$\$ begin
   if exists (select 1 from pg_database where datname='$NEW_DB') then execute 'alter database $NEW_DB rename to $OLD_DB'; end if;
   if exists (select 1 from pg_database where datname='${NEW_DB}_test') then execute 'alter database ${NEW_DB}_test rename to ${OLD_DB}_test'; end if;
-  if exists (select 1 from pg_roles where rolname='$NEW_DB') then execute 'alter role $NEW_DB rename to $OLD_DB'; execute 'alter role $OLD_DB password ''$OLD_DB'''; end if;
 end \$\$;
 SQL
+  if [[ $u == "$NEW_DB" ]]; then
+    psql_old gv-postgres $NEW_DB postgres -c "do \$\$ begin if not exists (select 1 from pg_roles where rolname='cc_migrate') then create role cc_migrate superuser login; end if; end \$\$"
+    psql_old gv-postgres cc_migrate postgres -c "alter role $NEW_DB rename to $OLD_DB" -c "alter role $OLD_DB password '$OLD_DB'"
+    psql_old gv-postgres $OLD_DB postgres -c "drop role cc_migrate"
+  fi
   "${K[@]}" -n $OLD_NS exec deploy/gv-postgres -- psql -U $OLD_DB -d postgres -c "drop database $OLD_DB with (force)" -c "create database $OLD_DB owner $OLD_DB"
   gunzip -c "$dir/${OLD_DB}_$stamp.sql.gz" | psql_old gv-postgres $OLD_DB $OLD_DB -q
   cypher_old "MATCH (n) WHERE n.group_id STARTS WITH '$NEW_DB' SET n.group_id = '$OLD_DB' + substring(n.group_id, size('$NEW_DB')) RETURN count(n);"
