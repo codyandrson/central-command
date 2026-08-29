@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-29 — v1.0.6: Settings › Updates with a manual "Check for updates"
+
+- The cockpit's update check is now one shared state (`web/src/lib/
+  version-check.ts`): checked on load, hourly, and whenever the tab regains
+  focus. **Settings › Advanced › Updates** shows the running version, the
+  latest published one, when it was last checked, a **Check for updates**
+  button (`GET /api/version/check?force=1` bypasses the server's hourly
+  cache) and, when one is available, the same apply dialog the status-bar
+  badge opens. Nothing auto-applies; the root updater remains the only path.
+- The status-bar and settings-footer version labels now read the product's
+  `VERSION` (they showed the vendored Nerve cockpit's `package.json` version).
+
 ## 2026-08-29 — v1.0.5: updater uses `npm ci`; verify.sh exempts the proxy-UI link
 
 - `cc-update.sh` (and both `setup.sh`s) build the cockpit with `npm ci`

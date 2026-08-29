@@ -1,6 +1,8 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { X, Settings, LogOut, Mic, Monitor, Shield, Waypoints } from 'lucide-react';
 import { ConnectionSettings } from './ConnectionSettings';
+import { UpdateSettings } from './UpdateSettings';
+import { useVersionCheck } from '@/lib/version-check';
 import { AudioSettings } from './AudioSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import { GraphSettings } from './GraphSettings';
@@ -89,6 +91,7 @@ export function SettingsDrawer({
   agentName,
   onLogout,
 }: SettingsDrawerProps) {
+  const productVersion = useVersionCheck().info?.current;
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const isConnected = connectionState === 'connected' || connectionState === 'reconnecting';
@@ -255,6 +258,7 @@ export function SettingsDrawer({
                 connectionState={connectionState}
               />
             )}
+            {currentCategory === 'advanced' && <UpdateSettings />}
           </div>
         </div>
 
@@ -271,8 +275,8 @@ export function SettingsDrawer({
             </button>
           )}
           <div className="flex items-center justify-between gap-3 px-1 text-[0.733rem] text-muted-foreground/70">
-            <span>OpenClaw Nerve</span>
-            <span className="font-mono text-[0.667rem] tracking-[0.08em]">v{__APP_VERSION__}</span>
+            <span>Central Command</span>
+            <span className="font-mono text-[0.667rem] tracking-[0.08em]">v{productVersion ?? __APP_VERSION__}</span>
           </div>
         </div>
       </div>

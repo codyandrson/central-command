@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ContextMeter } from './ContextMeter';
 import { UpdateBadge } from './UpdateBadge';
+import { useVersionCheck } from '@/lib/version-check';
 import { useGateway } from '@/contexts/GatewayContext';
 
 /** Props for {@link StatusBar}. */
@@ -48,6 +49,8 @@ async function fetchServerInfo(): Promise<{ serverTime?: number; gatewayStartedA
  * an optional context-window meter, a sparkline, and the app version.
  */
 export function StatusBar({ connectionState, sessionCount, sparkline, contextTokens, contextLimit }: StatusBarProps) {
+  // The product's VERSION file, once checked — never the vendored Nerve's package.json.
+  const productVersion = useVersionCheck().info?.current;
   useGateway(); // Keep gateway context connected
 
   // Server time: offset between local clock and server clock
@@ -167,7 +170,7 @@ export function StatusBar({ connectionState, sessionCount, sparkline, contextTok
         <span className="rounded-full border border-border/70 bg-background/75 px-2.5 py-1 font-mono text-[0.667rem] tracking-[-0.08em] text-muted-foreground">
           {sparkline}<span className="ml-1 text-primary animate-alive">_</span>
         </span>
-        <span className="text-[0.6rem] font-medium uppercase tracking-[0.18em] text-muted-foreground/55">v{__APP_VERSION__}</span>
+        <span className="text-[0.6rem] font-medium uppercase tracking-[0.18em] text-muted-foreground/55">v{productVersion ?? __APP_VERSION__}</span>
         <UpdateBadge />
       </div>
     </div>

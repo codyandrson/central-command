@@ -45,14 +45,19 @@ const app = new Hono();
 app.get('/api/version/check', rateLimitGeneral, async (c) => {
   const now = Date.now();
 
-  // Serve from cache if fresh.
-  if (cache && now - cache.checkedAt < CACHE_TTL_MS) {
+  // Serve from cache if fresh — unless the operator asked (`?force=1`, the
+  // settings page's "Check for updates"): the cache exists to spare the
+  // hourly background poll a network round-trip, not to make a deliberate
+  // check wait up to an hour. The route is rate-limited either way.
+  const force = c.req.query('force') === '1';
+  if (!force && cache && now - cache.checkedAt < CACHE_TTL_MS) {
     return c.json({
       current: readProductVersion(),
       latest: cache.latest,
       source: cache.source,
       updateAvailable: compareSemver(cache.latest, readProductVersion()) > 0,
       projectDir,
+      checkedAt: cache.checkedAt,
     });
   }
 
@@ -65,6 +70,7 @@ app.get('/api/version/check', rateLimitGeneral, async (c) => {
       updateAvailable: false,
       error: 'Could not fetch release or semver tags',
       projectDir,
+      checkedAt: now,
     });
   }
 
@@ -80,6 +86,7 @@ app.get('/api/version/check', rateLimitGeneral, async (c) => {
     source: latest.source,
     updateAvailable: compareSemver(latest.version, readProductVersion()) > 0,
     projectDir,
+    checkedAt: now,
   });
 });
 

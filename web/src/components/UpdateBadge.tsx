@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
+import { useVersionCheck, type VersionCheck } from '@/lib/version-check';
 import {
   Dialog,
   DialogContent,
@@ -7,13 +8,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-
-interface VersionCheck {
-  current: string;
-  latest: string | null;
-  updateAvailable: boolean;
-  projectDir?: string | null;
-}
 
 interface UpdateStatus {
   state: 'running' | 'success' | 'failed' | 'rolled_back';
@@ -27,7 +21,6 @@ interface UpdateProgress {
   status: UpdateStatus | null;
 }
 
-const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const PROGRESS_POLL_MS = 3000;
 
 function shellQuote(value: string): string {
@@ -35,33 +28,43 @@ function shellQuote(value: string): string {
 }
 
 /**
- * Shows an update badge next to the version in the status bar
- * when a newer version of Nerve is available. Clicking it opens
- * a modal with update instructions.
+ * Shows an update badge next to the version in the status bar when a newer
+ * Central Command is available (the shared version-check store does the
+ * polling). Clicking it opens the update dialog.
  */
 export function UpdateBadge() {
-  const [versionInfo, setVersionInfo] = useState<VersionCheck | null>(null);
+  const { info: versionInfo } = useVersionCheck();
   const [open, setOpen] = useState(false);
+
+  if (!versionInfo?.updateAvailable || !versionInfo.latest || !versionInfo.projectDir) return null;
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1 text-[0.6rem] text-primary hover:text-primary/80 transition-colors cursor-pointer ml-1.5"
+        title={`Update available: v${versionInfo.latest}`}
+        aria-label={`Update available: version ${versionInfo.latest}. Click for instructions.`}
+      >
+        <ArrowUpCircle className="w-3 h-3" />
+        <span className="uppercase tracking-wide font-bold">update</span>
+      </button>
+      <UpdateDialog versionInfo={versionInfo} open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
+
+interface UpdateDialogProps {
+  versionInfo: VersionCheck;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+/** The apply-or-instructions modal — opened from the badge and from Settings › Updates. */
+export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogProps) {
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
-
-  useEffect(() => {
-    const ac = new AbortController();
-    const check = async () => {
-      try {
-        const res = await fetch('/api/version/check', { signal: ac.signal });
-        if (!res.ok) return;
-        const data: VersionCheck = await res.json();
-        setVersionInfo(data);
-      } catch {
-        // Silently ignore — aborted or network error
-      }
-    };
-    check();
-    const iv = setInterval(check, CHECK_INTERVAL_MS);
-    return () => { ac.abort(); clearInterval(iv); };
-  }, []);
 
   // Poll the durable status record while the modal is open and a run is
   // pending/in flight. Fetch failures are EXPECTED mid-update (the updater
@@ -105,7 +108,7 @@ export function UpdateBadge() {
     }
   };
 
-  if (!versionInfo?.updateAvailable || !versionInfo.latest || !versionInfo.projectDir) return null;
+  if (!versionInfo.latest || !versionInfo.projectDir) return null;
 
   // Central Command's update pipeline (2026-08-27 contract): the running app
   // NEVER applies its own update — update.sh is the external updater. It
@@ -119,18 +122,7 @@ export function UpdateBadge() {
   const updateCommand = `cd ${quotedProjectDir}/deploy/single && ./update.sh ~/Downloads/${zipName}`;
 
   return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1 text-[0.6rem] text-primary hover:text-primary/80 transition-colors cursor-pointer ml-1.5"
-        title={`Update available: v${versionInfo.latest}`}
-        aria-label={`Update available: version ${versionInfo.latest}. Click for instructions.`}
-      >
-        <ArrowUpCircle className="w-3 h-3" />
-        <span className="uppercase tracking-wide font-bold">update</span>
-      </button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Update Available</DialogTitle>
@@ -206,6 +198,5 @@ export function UpdateBadge() {
           </div>
         </DialogContent>
       </Dialog>
-    </>
   );
 }

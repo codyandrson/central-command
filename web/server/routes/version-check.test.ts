@@ -34,6 +34,21 @@ describe('GET /api/version/check', () => {
     return app;
   }
 
+  it('serves the hourly cache unless the operator forces a re-check', async () => {
+    const app = await buildApp();
+    const src = await import('../lib/release-source.js');
+    const resolveLatest = vi.mocked(src.resolveLatestVersion);
+
+    await app.request('/api/version/check');
+    await app.request('/api/version/check');
+    expect(resolveLatest).toHaveBeenCalledTimes(1); // second hit: cache
+
+    const res = await app.request('/api/version/check?force=1');
+    expect(resolveLatest).toHaveBeenCalledTimes(2); // force bypasses it
+    const json = await res.json() as { checkedAt: number };
+    expect(typeof json.checkedAt).toBe('number');
+  });
+
   it('returns the resolved project directory for copy-paste update commands', async () => {
     const app = await buildApp();
     const res = await app.request('/api/version/check');

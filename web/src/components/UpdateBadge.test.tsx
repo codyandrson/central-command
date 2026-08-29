@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UpdateBadge } from './UpdateBadge';
+import { _resetVersionCheck } from '@/lib/version-check';
 
 function createMockResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -17,6 +18,7 @@ describe('UpdateBadge', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    _resetVersionCheck();
     global.fetch = vi.fn<typeof fetch>(async () => createMockResponse({
       current: '1.5.2',
       latest: '1.5.3',
