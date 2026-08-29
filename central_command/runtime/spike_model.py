@@ -922,6 +922,7 @@ _EA_EPISODE_PROPOSAL = {
                 "the queue currently awaiting decision."
             ),
             "source_description": "executive assistant contact with the operator",
+            "scope": "shared",
         },
         "target_ref": {"system": "graphiti", "id": "central_command",
                        "read_version": "unknown"},
@@ -1051,6 +1052,7 @@ _INTRO_EPISODE_PROPOSAL = {
                 "agent to weigh its judgment calls."
             ),
             "source_description": "the onboarding tour introduction",
+            "scope": "shared",
         },
         "target_ref": {"system": "graphiti", "id": "central_command",
                        "read_version": "unknown"},

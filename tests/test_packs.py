@@ -127,16 +127,21 @@ def test_known_capability_names_match_the_registry_exactly():
     assert packs.known_capability_names() == gated_write_names()
 
 
-def test_invented_capability_is_rejected_in_run():
+async def test_invented_capability_is_rejected_in_run():
     """The 2026-08-14 `jira.dismiss` incident: a fabricated capability parked
     as a reviewable proposal because nothing checked the name before the
     Executor's dispatch. The propose tools must hand the error back to the
     model (ModelRetry) so it redrafts — or correctly dismisses in plain text —
     in the same run. Real-but-ungranted names still pass: grants are an
-    advisory review flag, never a ceiling."""
+    advisory review flag, never a ceiling. (The argument-shape half of the
+    same check is tests/test_proposal_args.py.)"""
+    from types import SimpleNamespace
+
     from pydantic_ai import ModelRetry
 
+    from central_command import events
     from central_command.contract import Action, Proposal, Reversibility
+    from central_command.runtime.deps import TriageDeps
 
     def prop(capability):
         return Proposal(
@@ -146,9 +151,18 @@ def test_invented_capability_is_rejected_in_run():
                             reversibility=Reversibility.reversible)],
         )
 
-    with pytest.raises(ModelRetry, match="jira.dismiss"):
-        tools_mod._require_known_capabilities(prop("jira.dismiss"))
-    tools_mod._require_known_capabilities(prop("jira.add_comment@v2"))
+    async def no_db(*a, **k):
+        return {}
+
+    ctx = SimpleNamespace(deps=TriageDeps())
+    real = events.emit
+    events.emit = no_db
+    try:
+        with pytest.raises(ModelRetry, match="jira.dismiss"):
+            await tools_mod._validate_proposal(ctx, prop("jira.dismiss"))
+    finally:
+        events.emit = real
+    await tools_mod._validate_proposal(ctx, prop("jira.add_comment@v2"))
 
 
 def test_granted_capability_names_union():

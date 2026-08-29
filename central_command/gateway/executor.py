@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from central_command.config import settings
-from central_command.contract import Action, Provenance
+from central_command.contract import ARG_SPECS, Action, Provenance, validate_action_args
 from central_command.integrations import calendar_facade, confluence, graphiti, jira
 from central_command.integrations import litellm as litellm_client
 
@@ -270,17 +270,17 @@ async def _reverify_after_curation(args: dict) -> None:
     )
 
 
-def _graph_curation_handler(fn_name: str, required: tuple[str, ...], optional: tuple[str, ...]):
-    """One handler per writer primitive, built from the same recipe: validate
-    the required args, pass through only the DECLARED optionals (an undeclared
-    arg is dropped, never forwarded), apply, then queue the re-check."""
+def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, ...]):
+    """One handler per writer primitive, built from the same recipe: the
+    required args come from `contract.ARG_SPECS` (already enforced by
+    `execute()` before any action runs, and by the runtime at propose time),
+    pass through only the DECLARED optionals (an undeclared arg is dropped,
+    never forwarded), apply, then queue the re-check."""
+    required = ARG_SPECS[capability].required
 
     async def handler(args: dict, approver: str, proposer: str | None) -> str:
         from central_command.integrations import neo4j_writer
 
-        for key in required:
-            if not args.get(key):
-                raise ExecutorError(f"{fn_name}: {key} is required")
         kwargs = {k: args[k] for k in required}
         kwargs |= {k: args[k] for k in optional if args.get(k) is not None}
         try:
@@ -302,23 +302,21 @@ _GRAPH_CURATION_HANDLERS = {
     # words, not a re-ingestion. The writer records its own provenance episode
     # for every created node/edge, so pedigree stays queryable.
     "graph.create_node": _graph_curation_handler(
-        "create_node", required=("name", "group_id", "summary"),
-        optional=("labels",)),
+        "graph.create_node", "create_node", optional=("labels",)),
     "graph.create_edge": _graph_curation_handler(
-        "create_edge", required=("source_uuid", "target_uuid", "name", "fact"),
-        optional=("valid_at", "invalid_at")),
+        "graph.create_edge", "create_edge", optional=("valid_at", "invalid_at")),
     "graph.merge_nodes": _graph_curation_handler(
-        "merge_nodes", required=("keep_uuid", "drop_uuid"), optional=()),
+        "graph.merge_nodes", "merge_nodes", optional=()),
     "graph.update_node": _graph_curation_handler(
-        "update_node", required=("uuid",), optional=("name", "summary", "labels")),
+        "graph.update_node", "update_node", optional=("name", "summary", "labels")),
     "graph.delete_node": _graph_curation_handler(
-        "delete_node", required=("uuid",), optional=()),
+        "graph.delete_node", "delete_node", optional=()),
     "graph.update_edge": _graph_curation_handler(
-        "update_edge", required=("uuid",),
+        "graph.update_edge", "update_edge",
         optional=("name", "fact", "source_uuid", "target_uuid", "valid_at",
                   "invalid_at", "clear_invalid", "clear_valid", "clear_expired")),
     "graph.delete_edge": _graph_curation_handler(
-        "delete_edge", required=("uuid",), optional=()),
+        "graph.delete_edge", "delete_edge", optional=()),
 }
 
 
@@ -1915,6 +1913,15 @@ async def execute(
     a façade can honour one; a client-side dedup guess would be worse, because
     guessing wrong drops a real write.
     """
+    # The propose-time shape check, run again here: the Executor never assumes
+    # the runtime validated anything (an API-submitted proposal skips the tool
+    # path), and checking EVERY action before the FIRST runs means a malformed
+    # third action cannot leave the first two half-applied. Same list
+    # (`contract.ARG_SPECS`), so a draft that passes there executes here.
+    for a in actions:
+        problems = validate_action_args(a.capability, a.arguments)
+        if problems:
+            raise ExecutionFailed(a.capability, "; ".join(problems), [])
     token = _current_proposal_id.set(proposal_id)
     wait_token = _current_task_wait.set(None)
     try:

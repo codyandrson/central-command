@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-29 — v1.0.4: argument-shape validation before the Inbox
+
+- A proposal's action ARGUMENTS are now checked at propose time, not first at
+  execution. `contract.ARG_SPECS` declares each capability's required keys
+  and closed enums (the graph family to start: `graph.add_episode` and the
+  seven curation actions); `contract.validate_action_args` runs in the
+  runtime — a bad draft goes back to the model as a tool error listing EVERY
+  problem, it redrafts in the same run, and only a well-formed proposal
+  reaches the Decisions Inbox — and again in the Executor before any action
+  runs, so an API-submitted proposal gets the same refusal with an empty
+  completed-cursor instead of a half-applied one. Found live 2026-08-29: one
+  `graph.add_episode` intent cost four approvals (`summary` for
+  `episode_body`, then no `name`, then no `scope`), the Executor surfacing
+  one problem per round, two of them as bare KeyErrors (`'name'`).
+- Every in-run rejection is recorded as a `proposal.rejected_in_run` event
+  (agent, capabilities, problems, intent): the operator is spared the
+  re-approval, not the knowledge — a cluster of these is the coaching signal.
+- Every `propose_*` tool now carries `max_retries=10` (was pydantic-ai's
+  default of 1 for all but bulk-dismiss), so a second bad draft no longer
+  fails the whole session; exhausting the budget still does, loudly.
+- Two demo-model (`spike_model.py`) `graph.add_episode` drafts had carried no
+  `scope` since the 2026-08-27 executor guard — never noticed because parked
+  demo proposals never executed. The new propose-time check caught both.
+
 ## 2026-08-29 — cc-update covers the full release surface
 
 - `deploy/k3s/cc-update.sh` now handles the parts of a release it used to

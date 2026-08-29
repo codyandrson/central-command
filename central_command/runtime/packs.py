@@ -1314,11 +1314,13 @@ def toolset_for(pack_names) -> FunctionToolset:
     for pack in _packs(pack_names):
         for tool_name in pack.tool_names:
             fn = getattr(tools_mod, tool_name)
-            if tool_name == "propose_bulk_dismiss":
-                # The agent narrows a query it cannot size (the façade 500s
-                # with no count), so converging on a window under the provider
-                # cap can take several ModelRetry rounds — the default 1 failed
-                # whole sessions live (2026-08-18).
+            if tool_name.startswith("propose_"):
+                # Every propose tool hands a bad draft back to the model
+                # (ModelRetry: invented capability, malformed arguments, an
+                # unsizable bulk-dismiss query) and pydantic-ai's default
+                # budget is ONE — the second bad draft failed whole sessions
+                # live (2026-08-18). Exhausting this budget still fails the
+                # session, loudly and with the last problem as its reason.
                 fn = Tool(fn, max_retries=10)
             seen.setdefault(tool_name, fn)
     return FunctionToolset(list(seen.values()), id="granted-packs")

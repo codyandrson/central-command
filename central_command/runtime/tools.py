@@ -12,7 +12,10 @@ from pathlib import Path, PurePosixPath
 from pydantic_ai import CallDeferred, ModelRetry, RunContext
 
 from central_command.config import settings as _settings
-from central_command.contract import Action, Evidence, Proposal, Reversibility, TRANSIENT, classify_failure
+from central_command.contract import (
+    Action, Evidence, Proposal, Reversibility, TRANSIENT, classify_failure,
+    validate_action_args,
+)
 from central_command.integrations import confluence, forge, graphiti, jira, litellm_credstore
 from central_command.integrations import litellm as litellm_client
 from central_command.runtime.deps import ThreadDecision, TriageDeps
@@ -994,24 +997,35 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
     )
 
 
-def _require_known_capabilities(proposal: Proposal) -> None:
-    """Reject an invented capability name IN-RUN, before the proposal parks.
+async def _validate_proposal(ctx: RunContext, proposal: Proposal) -> None:
+    """Reject an invented capability or a malformed action IN-RUN, before the
+    proposal parks — the model gets every problem at once as a tool error
+    (ModelRetry) and redrafts in the same run; only a well-formed proposal
+    reaches the Decisions Inbox.
 
-    Found live 2026-08-14: the triage agent wrapped "no action needed" into
-    proposals carrying fabricated capabilities (`jira.dismiss`,
-    `jira.dismiss_email`) — nothing validated the name until the Executor's
-    dispatch at execution time, so they reached the Decisions Inbox as
-    reviewable proposals that could only ever fail. ModelRetry hands the error
-    back to the model as a tool error so it redrafts (or correctly finishes in
-    plain text) in the same run. Ungranted-but-REAL capabilities pass — grants
-    stay an advisory amber flag at review, never a ceiling."""
+    Names: found live 2026-08-14, the triage agent wrapped "no action needed"
+    into proposals carrying fabricated capabilities (`jira.dismiss`) that could
+    only ever fail at execution. Arguments: found live 2026-08-29, one
+    `graph.add_episode` intent cost the operator FOUR approvals because the
+    Executor was the first thing to look at the args, one field per round.
+    The shape check is `contract.validate_action_args` — the SAME list the
+    Executor runs before executing, so a redraft that passes here executes.
+
+    Every in-run rejection is written to the event log
+    (`proposal.rejected_in_run`): the operator never sees the bad draft, but
+    the record must — a cluster of them is the coaching signal (charter, pack
+    doc, or model) and hiding it would be the silent third state.
+    Ungranted-but-REAL capabilities pass — grants stay an advisory amber flag
+    at review, never a ceiling."""
+    from central_command import events
     from central_command.runtime.packs import known_capability_names
 
     known = known_capability_names()
+    problems: list[str] = []
     for a in proposal.actions:
         name = a.capability.split("@", 1)[0]
         if name not in known:
-            raise ModelRetry(
+            problems.append(
                 f"{name!r} is not a real capability — no such action exists, "
                 "so this proposal could never execute. Your GRANTED "
                 "CAPABILITIES section lists exactly what you may propose. If "
@@ -1019,6 +1033,27 @@ def _require_known_capabilities(proposal: Proposal) -> None:
                 "anything: finish with a plain-text reply stating why, and the "
                 "control plane records the dismissal for operator review."
             )
+            continue
+        problems.extend(validate_action_args(a.capability, a.arguments))
+    if not problems:
+        return
+    deps = getattr(ctx, "deps", None)
+    await events.emit(
+        "proposal.rejected_in_run",
+        ref_id=getattr(deps, "session_id", None),
+        payload={
+            "agent_id": getattr(deps, "agent_id", None),
+            "capabilities": [a.capability for a in proposal.actions],
+            "problems": problems,
+            "intent": proposal.intent,
+        },
+        actor="system",
+    )
+    raise ModelRetry(
+        "This proposal cannot execute as drafted — fix EVERY problem below and "
+        "propose again, using the exact argument names from your GRANTED "
+        "CAPABILITIES section:\n- " + "\n- ".join(problems)
+    )
 
 
 async def propose_action(ctx: RunContext, proposal: Proposal) -> str:
@@ -1030,7 +1065,7 @@ async def propose_action(ctx: RunContext, proposal: Proposal) -> str:
     # Raising CallDeferred ends the run with a DeferredToolRequests carrying this
     # call. The control plane persists the proposal, routes it for approval, and
     # on approval resumes the run with the Executor's result.
-    _require_known_capabilities(proposal)
+    await _validate_proposal(ctx, proposal)
     raise CallDeferred(metadata={"kind": "proposal"})
 
 
@@ -1416,7 +1451,7 @@ async def propose_litellm_change(ctx: RunContext, proposal: Proposal) -> str:
     new file content). Reviewed and, once approved, applied by the
     control-plane Executor — this tool does not perform the change.
     """
-    _require_known_capabilities(proposal)
+    await _validate_proposal(ctx, proposal)
     raise CallDeferred(metadata={"kind": "litellm_change"})
 
 
@@ -1426,7 +1461,7 @@ async def propose_calendar_change(ctx: RunContext, proposal: Proposal) -> str:
     this tool does not change the calendar, and nothing happens until a human
     approves it.
     """
-    _require_known_capabilities(proposal)
+    await _validate_proposal(ctx, proposal)
     raise CallDeferred(metadata={"kind": "calendar_change"})
 
 
@@ -1437,7 +1472,7 @@ async def propose_loe(ctx: RunContext, proposal: Proposal) -> str:
     and, once approved, written by the control-plane Executor — this tool
     records nothing itself.
     """
-    _require_known_capabilities(proposal)
+    await _validate_proposal(ctx, proposal)
     raise CallDeferred(metadata={"kind": "loe"})
 
 

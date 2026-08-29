@@ -451,6 +451,22 @@ default — changing it now buys nothing and breaks all five.
   outcome. Re-driving is correct here even though the sibling sweep FAILS what a
   restart interrupted — there the operator never re-issued the work; here they
   answered or approved, and the owed turn is theirs to lose.
+- **A proposal's argument SHAPE is checked in BOTH tiers from ONE list —
+  `contract.ARG_SPECS`.** The runtime hands a malformed draft back to the
+  model (`tools._validate_proposal`, ModelRetry with every problem at once)
+  so only a well-formed proposal reaches the Inbox, and `executor.execute()`
+  runs the same `validate_action_args` over every action before the first
+  runs. Found live 2026-08-29: one `graph.add_episode` intent cost the
+  operator FOUR approvals because the Executor was the first thing to look
+  at the args and found one per round. Adding a capability whose handler
+  subscripts `args[...]` means adding its spec — a bare KeyError reaching the
+  log as `'name'` is the smell. Only SHAPE goes in the spec (required keys,
+  closed enums); world-state checks (a uuid exists, a project exists) stay
+  Executor-only because the world can change between propose and approve.
+  Every in-run rejection is a `proposal.rejected_in_run` event — the
+  operator is spared the re-approval, never the knowledge. And every
+  `propose_*` tool carries `max_retries=10`: pydantic-ai's default of 1 means
+  the SECOND bad draft fails the session (bit us 2026-08-18 on bulk-dismiss).
 - **A "never guess X" docstring needs a tool that can READ X.** Agents held read
   tools for fields, filters, dashboards, gadgets and transitions — and none for
   Jira PROJECTS, the one argument every `create_issue` requires, so they invented
