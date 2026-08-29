@@ -32,7 +32,7 @@
 # ============================================================================
 set -uo pipefail
 
-REPO="${REPO:-/home/codyslab/Central Command}"
+REPO="${REPO:-/home/codyslab/central-command}"
 OUT="${CC_BACKUP_DIR:-/home/codyslab/cc-backups}"
 RETAIN_DAYS="${CC_BACKUP_RETAIN_DAYS:-14}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

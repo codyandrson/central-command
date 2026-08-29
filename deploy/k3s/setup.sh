@@ -257,6 +257,27 @@ phase_preflight() {
   fi
   pass "k3s" "$(k3s --version 2>/dev/null | head -1)"
 
+  # The unit files hardcode the checkout path, and the app phase installs
+  # them verbatim — so a driver run from a DIFFERENT checkout builds the venv
+  # and writes the .env here while systemd starts uvicorn THERE (2026-08-29:
+  # a stale sibling checkout's .env had the feed enabled and a PENDING key;
+  # the API polled real Gmail and 401'd for twenty minutes). Every absolute
+  # path in every unit we install must live under REPO_ROOT (Environment= is
+  # exempt: the minted kubeconfigs live in $HOME by design).
+  local unit stray
+  stray=""
+  for unit in "$HERE"/cc-*.service "$HERE"/cc-*.path "$HERE"/cc-*.timer "$REPO_ROOT/deploy/pi/cc-nerve.service"; do
+    if grep -E '^(WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=' "$unit" 2>/dev/null \
+       | grep -oE '/home/[^ :"]+' | grep -vq "^$REPO_ROOT"; then
+      stray="$stray $(basename "$unit")"
+    fi
+  done
+  if [[ -n "$stray" ]]; then
+    fail "unit-paths" "unit files point outside this checkout ($REPO_ROOT):$stray — fix the hardcoded paths before installing them"
+    return 1
+  fi
+  pass "unit-paths" "every unit file's paths live under $REPO_ROOT"
+
   # Both nodes Ready. Capture then inspect — a `get nodes | grep` pipeline
   # inverts under pipefail when kubectl takes SIGPIPE.
   local nodes notready

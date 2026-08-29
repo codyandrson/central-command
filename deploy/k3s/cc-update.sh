@@ -42,7 +42,7 @@
 # ============================================================================
 set -uo pipefail
 
-REPO=/home/codyslab/Central Command
+REPO=/home/codyslab/central-command
 RUNAS=(runuser -u codyslab --)
 RUNDIR=/run/cc-update
 STATEDIR=/var/lib/cc-update

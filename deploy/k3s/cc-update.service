@@ -22,6 +22,6 @@ RemainAfterExit=no
 # — safe to wait for now that they happen BEFORE the stop; downtime is unchanged.
 TimeoutStartSec=5400
 ExecStartPre=-/usr/bin/mv -f /run/cc-update/trigger /run/cc-update/request.json
-ExecStart=/home/codyslab/Central Command/deploy/k3s/cc-update.sh
+ExecStart=/home/codyslab/central-command/deploy/k3s/cc-update.sh
 
 # No [Install]: cc-update.path is what gets enabled, per the .path convention.

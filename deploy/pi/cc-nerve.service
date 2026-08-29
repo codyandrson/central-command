@@ -31,7 +31,7 @@ Wants=network-online.target
 [Service]
 User=codyslab
 Group=codyslab
-WorkingDirectory=/home/codyslab/Central Command/web
+WorkingDirectory=/home/codyslab/central-command/web
 ExecStart=/usr/bin/node server-dist/index.js
 Restart=always
 RestartSec=5

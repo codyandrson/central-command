@@ -25,13 +25,13 @@ Requires=k3s.service
 [Service]
 User=codyslab
 Group=codyslab
-WorkingDirectory=/home/codyslab/Central Command
+WorkingDirectory=/home/codyslab/central-command
 # .env carries CC_SANDBOX_RUNNER_TOKEN (and any CC_SANDBOX_* overrides) so the
 # runner and the app enforce/send the SAME token from the same file.
-EnvironmentFile=-/home/codyslab/Central Command/.env
+EnvironmentFile=-/home/codyslab/central-command/.env
 Environment=CC_SANDBOX_KUBECONFIG=/home/codyslab/.cc-sandbox-runner.kubeconfig
-Environment=CC_SANDBOX_COPY_ROOT=/home/codyslab/Central Command
-ExecStart=/home/codyslab/Central Command/.venv/bin/uvicorn central_command.sandbox.runner:app --host 127.0.0.1 --port 8090
+Environment=CC_SANDBOX_COPY_ROOT=/home/codyslab/central-command
+ExecStart=/home/codyslab/central-command/.venv/bin/uvicorn central_command.sandbox.runner:app --host 127.0.0.1 --port 8090
 Restart=always
 RestartSec=5
 TimeoutStopSec=15

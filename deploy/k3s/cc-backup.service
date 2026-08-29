@@ -28,8 +28,8 @@ Requires=k3s.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/codyslab/Central Command
-ExecStart=/home/codyslab/Central Command/deploy/k3s/backup.sh
+WorkingDirectory=/home/codyslab/central-command
+ExecStart=/home/codyslab/central-command/deploy/k3s/backup.sh
 # The neo4j stop/dump/start window dominates the runtime; 30min is generous
 # headroom. On timeout systemd sends SIGTERM, which the script traps to bring
 # the graph stack back up rather than leaving neo4j stopped.
