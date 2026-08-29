@@ -4,7 +4,7 @@
  * Doctrine decision 4: not everything the team does deserves to interrupt the
  * operator, and not everything deserves to be silent. Three tiers:
  *
- *   interrupt — something is BLOCKED ON CODY, or something broke. Toasts.
+ *   interrupt — something is BLOCKED ON THE OPERATOR, or something broke. Toasts.
  *   badge     — worth noticing, not worth stopping for. Counts and chips.
  *   digest    — the running log. Deferred to the EA slice.
  *

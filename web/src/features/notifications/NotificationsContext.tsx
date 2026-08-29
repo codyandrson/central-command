@@ -8,8 +8,8 @@ import { classifyEvent, isErrorKind } from './tiers';
 import { loadSeen, loadToastMode, saveSeen, type SeenSet } from './seen';
 
 /**
- * The interrupt tier: what is BLOCKED ON CODY right now, and what is new about
- * it since the last time he was told.
+ * The interrupt tier: what is BLOCKED ON THE OPERATOR right now, and what is new about
+ * it since the last time they were told.
  *
  * ARCHITECTURE — a toast is a PROJECTION DIFF, not a rendered push.
  * `_forward_events` fans the durable log out over the WS with no replay, so a

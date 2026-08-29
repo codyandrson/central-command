@@ -2,7 +2,7 @@
 
 _Design record written 2026-08-21 from a design discussion with the operator. The
 problem: processing emails/chats yields a well-populated graph and a pile of
-tasks, and the EA prioritizes CODY's day — but nothing decides who on his
+tasks, and the EA prioritizes the operator's day — but nothing decides who on their
 HUMAN team should work each task. Arbitrary assignment has no value; the
 system must develop an understanding of who is the expert on what, and route
 around capacity ("the SME has no bandwidth, so someone with bandwidth takes
