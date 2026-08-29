@@ -45,7 +45,7 @@ BASE_URL = os.environ.get("CC_LITELLM_URL", "http://127.0.0.1:4000")
 # The litellm_params this script owns. Anything else on a live deployment is
 # LiteLLM's own default noise (use_litellm_proxy, merge_reasoning_content_in_
 # choices, ...) and is not drift.
-OWNED = ("model", "api_base", "timeout", "mode", "chat_template_kwargs")
+OWNED = ("model", "api_base", "api_key", "timeout", "mode", "chat_template_kwargs")
 
 
 def _master_key() -> str:
@@ -113,8 +113,13 @@ def plan(want: dict[str, dict], live_models: list[dict]) -> list[tuple[str, str,
             continue
         live_params = {k: v for k, v in (live.get("litellm_params") or {}).items() if k in OWNED}
         # LiteLLM stores timeouts as floats; 300 and 300.0 are the same timeout.
+        # LiteLLM never echoes api_key back from /model/info, so an absent
+        # live value is "unknown", not "unset" — comparing it would PATCH the
+        # row on every run (2026-08-29).
         differs = any(
-            _norm(live_params.get(k)) != _norm(v) for k, v in params.items()
+            _norm(live_params.get(k)) != _norm(v)
+            for k, v in params.items()
+            if not (k == "api_key" and "api_key" not in live_params)
         )
         actions.append((("update" if differs else "ok"), alias, params, live_params))
     return actions
