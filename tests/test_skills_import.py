@@ -229,7 +229,7 @@ async def test_a_derived_id_that_already_exists_is_refused(clean_skills, tmp_pat
 
     second = tmp_path / "other"
     second.mkdir()
-    (second / "SKILL.md").write_text("---\nname: Central Command Test Thing\n---\n\n# B\nvendor two")
+    (second / "SKILL.md").write_text("---\nname: CC Test Thing\n---\n\n# B\nvendor two")
 
     with pytest.raises(ValueError) as exc:
         await import_skill_folder(second)

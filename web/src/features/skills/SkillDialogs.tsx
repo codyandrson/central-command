@@ -83,7 +83,7 @@ export function ImportDialog({ open, onOpenChange, onImport }: {
             <input
               value={path}
               onChange={(e) => setPath(e.target.value)}
-              placeholder="/path/to/Central Command/skills/pydantic-ai"
+              placeholder="/path/to/central-command/skills/pydantic-ai"
               className="cockpit-input"
             />
           </div>

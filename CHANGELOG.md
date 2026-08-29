@@ -4,6 +4,47 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-29 — v2.0.0: one name everywhere — the historical identifiers are gone
+
+**Breaking. This release is applied BY HAND, not by the cockpit updater**
+(`deploy/k3s/migrate-to-cc.sh`, see its header and `deploy/k3s/README.md`):
+it renames the updater's own units, the Python package, the databases and
+the Kubernetes namespaces, so the running v1.0.x updater cannot carry
+itself across. `min_upgrade_from=1.0.7`.
+
+- The product's historical code name is removed from every identifier, not
+  just prose: Python package `central_command/` (`import central_command`),
+  env prefix `CC_*` (every reader — `config.py`, the sandbox runner, the
+  deploy scripts, `verify.sh`), pods/units/images/scripts `cc-*`, k8s
+  namespaces `central-command` / `cc-mcp` / `cc-sandbox`, node labels
+  `cc-role/*`, databases `central_command` / `central_command_test` and role
+  `central_command`, Graphiti groups `central_command` / `central_command_<agent>`,
+  LiteLLM alias `cc-default`, n8n webhook paths `webhook/cc-*-facade`,
+  cockpit wire events `cc.*` and routes `cc-*.ts`, `CC_POD_PREFIX=cc-` in
+  `deploy/single/`, `~/cc-backups`, `~/.cc-private-identifiers`.
+- Data migration (`migrate-to-cc.sh`): renames the Postgres databases and
+  role in place; rewrites the Graphiti `group_id` on every node and
+  relationship (embeddings untouched); rewrites the synthesized
+  `work_item.message_id` suffix and the stored prose in `audit_event.payload`,
+  `session.run_state`, `proposal.*` and `operator_item.body` — the
+  append-only log is rewritten in place, once, by operator decision; moves
+  every local-path PV's data into the new namespace's claims; retags the
+  three locally-built images on both nodes; installs the renamed units and
+  removes the old ones; rewrites the gitignored `.env` files to the `CC_` prefix
+  with a backup. Rollback reverses the recorded log.
+- Cockpit persisted preferences are re-keyed (`cc-*` / `cc:*`) without a
+  fallback to the old keys, so the "show history" toggles reset and
+  already-seen notifications toast once more after the upgrade.
+- `docs/vendor/{cva,dompurify,hono,hono-node-server}/README.md` were stale
+  copies of this repo's own README, vendored in error on 2026-08-25;
+  refetched for real from their tags (LICENSE files now included).
+- Fixed: `web/src/components/TopBar.tsx` imported `LayoutGrid` twice (TS2300),
+  which broke `npm run build` on v1.0.7 — the cockpit updater's rebuild
+  phase failed on it.
+- Git history is rewritten in the same release (every historical blob and
+  commit message; all `v1.0.x` tags re-pointed), so an existing checkout must
+  be re-pointed: `git fetch origin && git reset --hard origin/master`.
+
 ## 2026-08-29 — v1.0.7: Systems launchpad; private-only agent memory; LiteLLM UI login fields
 
 - **Systems view** (top bar › Systems, or "Open Systems" in the palette): one

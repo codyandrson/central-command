@@ -30,7 +30,7 @@ kind: Namespace
 metadata:
   name: cc-sandbox
   labels:
-    app.kubernetes.io/part-of: central_command
+    app.kubernetes.io/part-of: central-command
 ---
 # Handler `runsc` — installed by the chromebox infra track
 # (containerd-shim-runsc-v1 + the runsc runtime entry in

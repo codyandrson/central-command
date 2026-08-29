@@ -28,7 +28,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NS=central_command
+NS=central-command
 COMPOSE="docker compose -f ${REPO}/deploy/pi/docker-compose.yml"
 KUBECTL=(sudo k3s kubectl)
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

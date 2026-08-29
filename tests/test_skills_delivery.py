@@ -134,7 +134,7 @@ async def test_search_tool_schema_exposes_no_skill_selector(clean_skills):
     await agent.run("hi")
 
     search_tools = [
-        t for t in captured["tools"] if t.name == "search_gv_test_lite_reference"
+        t for t in captured["tools"] if t.name == "search_cc_test_lite_reference"
     ]
     assert len(search_tools) == 1
     schema = search_tools[0].parameters_json_schema
@@ -168,8 +168,8 @@ async def test_two_granted_skills_each_search_their_own_content(clean_skills):
     caps = await skills_mod.capabilities_for("inbox-triage")
     tools_by_skill = {c.id: c._function_toolset.tools for c in caps}
 
-    lite_tool = tools_by_skill["cc-test-lite"]["search_gv_test_lite_reference"]
-    conf_tool = tools_by_skill["cc-test-conf"]["search_gv_test_conf_reference"]
+    lite_tool = tools_by_skill["cc-test-lite"]["search_cc_test_lite_reference"]
+    conf_tool = tools_by_skill["cc-test-conf"]["search_cc_test_conf_reference"]
 
     lite_hit = await lite_tool.function("budgetduration")
     assert "budgetduration" in lite_hit
@@ -517,7 +517,7 @@ async def test_colliding_tool_names_do_not_brick_the_agent(clean_skills, caplog)
 
         UserError: FunctionToolset 'cc_test_lite' defines a tool whose name
         conflicts with existing tool from FunctionToolset 'cc-test-lite':
-        'search_gv_test_lite_reference'
+        'search_cc_test_lite_reference'
 
     at `agent.run()` — NOT at build. Grant both to one agent and every run of
     that agent (triage, conversation, task, resume) dies before the model is
@@ -536,7 +536,7 @@ async def test_colliding_tool_names_do_not_brick_the_agent(clean_skills, caplog)
 
     colliding = [c.id for c in caps if c.id in ("cc-test-lite", "cc_test_lite")]
     assert len(colliding) == 1, f"both survived assembly: {colliding}"
-    assert "search_gv_test_lite_reference" in caplog.text
+    assert "search_cc_test_lite_reference" in caplog.text
 
     # The property that actually matters: the agent still RUNS. Building the
     # Agent is not enough — pydantic-ai only detects the conflict on run.

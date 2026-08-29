@@ -488,7 +488,7 @@ _sleep = asyncio.sleep
 
 # Stamped on the exception the last attempt raised, so the degradation text can
 # say how many times we actually tried without every call site being told.
-_ATTEMPTS_ATTR = "_gv_read_attempts"
+_ATTEMPTS_ATTR = "_cc_read_attempts"
 
 
 async def _read_with_retry(op, *, attempts: int = 2, delay: float = 0.5):

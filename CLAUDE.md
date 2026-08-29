@@ -1,10 +1,5 @@
 # CLAUDE.md — Central Command orientation
 
-> Renamed from "Central Command" to "Central Command" on 2026-08-26 — prose and
-> product name only. Code identifiers deliberately retain the historical
-> name: the `central_command/` package, `CC_*` env vars, `cc-*` units/pods/images,
-> the k8s namespace, and the `central_command`/`central_command_test` database names.
-
 > Read this first. It orients a new session; **`docs/DESIGN.md`** is the full
 > design; **`CHANGELOG.md`** is the public what-changed record. The live
 > operational state (**STATUS.md**) and the development journal (**JOURNAL.md**)
@@ -68,7 +63,7 @@ k3s control plane) and `chromebox` (100.113.118.28, amd64, 8 cores / 15 GB,
 agent), run FROM THIS CHECKOUT — `/home/codyslab/central-command` (the units,
 `.venv`, root `.env`, `web/.env` and `deploy/pi/.env` all live here;
 clean-installed 2026-08-29 by `./deploy/k3s/setup.sh`). The former checkout
-`~/Central Command` is retired (`~/Central Command.retired-20260829`) — never run,
+(retired 2026-08-29 under a `.retired-20260829` suffix) — never run,
 edit or install from it.** The Docker Compose stack in `deploy/pi/` is SUPERSEDED — kept for its
 comments and as the rollback path, not run. `cc-uvicorn`/`cc-nerve` still run as
 systemd units on the Pi, outside the cluster.

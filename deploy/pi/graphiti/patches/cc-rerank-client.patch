@@ -54,7 +54,7 @@
 +            return [(p, 1.0 - i / max(len(passages), 1)) for i, p in enumerate(passages)]
 +
 +
-+def _gv_cross_encoder() -> CrossEncoderClient | None:
++def _cc_cross_encoder() -> CrossEncoderClient | None:
 +    model = os.environ.get('GRAPHITI_RERANK_MODEL', '').strip()
 +    if not model:
 +        return None  # -> graphiti_core default (OpenAIRerankerClient)
@@ -71,7 +71,7 @@
                          graph_driver=falkor_driver,
                          llm_client=llm_client,
                          embedder=embedder_client,
-+                        cross_encoder=_gv_cross_encoder(),
++                        cross_encoder=_cc_cross_encoder(),
                          max_coroutines=self.semaphore_limit,
                      )
                  else:
@@ -79,7 +79,7 @@
                          password=db_config['password'],
                          llm_client=llm_client,
                          embedder=embedder_client,
-+                        cross_encoder=_gv_cross_encoder(),
++                        cross_encoder=_cc_cross_encoder(),
                          max_coroutines=self.semaphore_limit,
                      )
              except Exception as db_error:

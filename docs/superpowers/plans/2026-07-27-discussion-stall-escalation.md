@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Work in `/home/codyslab/Central Command` on the Pi, on `master`. Run tests with `source .venv/bin/activate`.
+- Work in `/home/codyslab/central-command` on the Pi, on `master`. Run tests with `source .venv/bin/activate`.
 - **Assert on rows your test created, never global counts** — the dev DB is shared.
 - **Pin `demo_mode=True`** in any test that reaches code calling `resolve_model()`, or the offline suite calls Claude for real.
 - `runtime/` may never import `gateway/`. (`runtime/questions.py` already reaches `api.orchestration` late — that is allowed and not the banned edge.)

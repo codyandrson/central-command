@@ -41,7 +41,7 @@ declare -A PORT_CONTAINER=()
 compose_file_for() {
   case "$1" in
     nat-*)         echo /home/codys-lab/n8n-agentic-team/docker-compose.yml ;;
-    cc-postgres)   echo /home/codys-lab/Central Command/docker-compose.yml ;;
+    cc-postgres)   echo /home/codys-lab/central-command/docker-compose.yml ;;
     litellm-*)     echo /home/codys-lab/LiteLLM/docker-compose.yml ;;
   esac
 }

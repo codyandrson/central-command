@@ -24,8 +24,8 @@ encode the safety rules and known API shapes.
 - **NEVER approve a proposal that sends email.** Reject/dismiss those as part
   of verdict testing instead.
 - **At most ONE external-write approval per run** (Jira create), and only
-  with summary/description `CENTRAL_COMMAND TESTRUN <date> - delete me` +
-  label `central_command-test`. Record the issue key in CLEANUP.md immediately.
+  with summary/description `CC TESTRUN <date> - delete me` +
+  label `cc-test`. Record the issue key in CLEANUP.md immediately.
   Delete it in cleanup via `jira._call("DELETE", "/rest/api/3/issue/<KEY>")`.
 - **Mutate only artifacts you create, prefixed `testrun-`.** Real roster
   agents may be TASKED (tiny, "TESTRUN"-labeled tasks) but never

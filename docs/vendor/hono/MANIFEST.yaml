@@ -2,5 +2,5 @@ name: hono
 source_repo: https://github.com/honojs/hono
 source_ref: v4.11.7
 fetched_url: https://codeload.github.com/honojs/hono/tar.gz/v4.11.7
-fetched_date: 2026-08-25
+fetched_date: 2026-08-29
 subpaths: [docs README* LICENSE*]

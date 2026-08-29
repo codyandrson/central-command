@@ -23,13 +23,13 @@ Description=Central Command control plane (uvicorn on 127.0.0.1:8080)
 After=network-online.target default.target
 
 [Service]
-WorkingDirectory=/home/codys-lab/Central Command
+WorkingDirectory=/home/codys-lab/central-command
 Environment=CC_DEMO_MODE=false
 Environment=CC_EXECUTOR_MODE=live
 Environment=CC_DISPATCH_APPROVAL_LIMIT=5
 ExecStartPre=-/usr/bin/docker start cc-postgres
 ExecStartPre=/bin/sleep 3
-ExecStart=/home/codys-lab/Central Command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080
+ExecStart=/home/codys-lab/central-command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080
 # The app exits if Postgres isn't ready yet (seen live) — keep retrying until
 # the stack is up. The dispatch lease makes double-starts loudly refuse.
 Restart=always

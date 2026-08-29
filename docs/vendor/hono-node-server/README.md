@@ -1,106 +1,357 @@
-# Central Command
+# Node.js Adapter for Hono
 
-> A human-supervised agentic-team framework — a control plane over a team of
-> Claude agents where the operator is team lead: tasking agents, approving their
-> actions, answering their questions, and coaching their behavior over time.
+This adapter `@hono/node-server` allows you to run your Hono application on Node.js.
+Initially, Hono wasn't designed for Node.js, but with this adapter, you can now use Hono on Node.js.
+It utilizes web standard APIs implemented in Node.js version 18 or higher.
 
-_(The GitHub repo is named **CentralCommand**; the project itself is
-**Central Command** throughout the code and docs.)_
+## Benchmarks
 
-## Quickstart
+Hono is 3.5 times faster than Express.
 
-```bash
-git clone https://github.com/codyandrson/CentralCommand.git central_command
-cd central_command
-claude        # launch Claude Code, then type:  /setup
+Express:
+
+```txt
+$ bombardier -d 10s --fasthttp http://localhost:3000/
+
+Statistics        Avg      Stdev        Max
+  Reqs/sec     16438.94    1603.39   19155.47
+  Latency        7.60ms     7.51ms   559.89ms
+  HTTP codes:
+    1xx - 0, 2xx - 164494, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:     4.55MB/s
 ```
 
-`/setup` conducts the whole install interactively — gated, resumable, ending
-inside a watched dry-run demo. Prerequisites:
-[Claude Code](https://claude.com/claude-code) (it runs the install and the
-onboarding interview — there is no by-hand path), podman ≥ 4.9, and an
-OpenAI-compatible LLM endpoint (base URL + API key). Details and the
-step-by-step reference: [`deploy/single/README.md`](deploy/single/README.md).
+Hono + `@hono/node-server`:
 
-**Nothing changes the world without passing an approval gate.** Single-operator,
-self-hosted on a Linux homelab (podman). The primary risk model is *error, not
-malice* (hallucination / misreads), so the guards are reliability guards that
-also happen to stop misuse.
+```txt
+$ bombardier -d 10s --fasthttp http://localhost:3000/
 
-## The core idea
-
-An agent can only **propose** and **read** — never write. It emits a `Proposal`
-(intent + actions + evidence), the run **durably pauses** (survives a full
-process restart), the proposal lands in a **Decisions Inbox**, and only after the
-operator approves does a credentialed **Executor** perform the real write (Jira,
-the knowledge graph) and stamp provenance. The trust boundary is the import
-graph: `runtime/` may never import the gateway/executor tier — and that rule is
-enforced by a test, not a convention.
-
-**Approval attaches to what work _does_, never to how it was triggered.** A
-schedule, a delegation, or an orchestrated project can move work along, but every
-world-changing action still gates individually — exactly as if the operator had
-started it by hand.
-
-## Architecture
-
-A modular monolith in four tiers:
-
-1. **Control Plane UI** — React cockpit (`web/`, a forked OpenClaw-Nerve frontend)
-2. **Control Plane API & Services** — FastAPI (`central_command/api`, `central_command/gateway`)
-3. **Agent Runtime** — Pydantic AI 2.x + Claude (`central_command/runtime`) — *propose + read only*
-4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph via MCP), n8n
-   (email façade holding the Gmail OAuth)
-
-Durable pause/resume is explicit persistence over Postgres (the paused run's
-message history + pending tool call), so an agent can wait days for a human
-approval and survive a restart.
-
-## Where to read next
-
-| Doc | What it is |
-|-----|------------|
-| [`CLAUDE.md`](CLAUDE.md) | Orientation — read this first: what the system is, how to run it, conventions and hard-won gotchas |
-| [`docs/STATUS.md`](docs/STATUS.md) | The precise live state and what to do next — the running project journal (source of truth for status) |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | The full design compendium and decision record |
-
-## Running it
-
-**Fresh install** (you have an LLM API key and nothing else): run **`/setup`**
-in Claude Code from the repo root — Claude Code is a hard prerequisite of
-setup — and it takes you from zero to a verified, onboarded, dry-run system
-(`.claude/skills/setup/`, deployment profile `deploy/single/`).
-
-Dev checkout:
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,runtime]"
-cp .env.example .env                 # fill CC_LLM_BASE_URL + CC_LLM_API_KEY for live mode
-
-# Demo mode — no API key, no live writes (safe):
-(cd web && npm install && npm run build)
-CC_DEMO_MODE=true CC_EXECUTOR_MODE=dry_run uvicorn central_command.api.app:app --port 8080
-
-pytest                               # offline suite (contract + durable + orchestration)
+Statistics        Avg      Stdev        Max
+  Reqs/sec     58296.56    5512.74   74403.56
+  Latency        2.14ms     1.46ms   190.92ms
+  HTTP codes:
+    1xx - 0, 2xx - 583059, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:    12.56MB/s
 ```
 
-Postgres for the spine: `docker compose up -d postgres` (podman works) — starts
-`cc-postgres` on **127.0.0.1:5442** with the schema auto-loaded. For live UI dev
-with hot-reload, run the API on :8080 and `cd web && npm run dev` (Vite proxies
-`/api`). See `CLAUDE.md` for live-mode flags, ingestion, and audit-trail endpoints.
+## Requirements
 
-## Status at a glance
+It works on Node.js versions greater than 18.x. The specific required Node.js versions are as follows:
 
-Phases 1–3 are built and human-verified; Phase 4 is underway. The full spine runs
-end-to-end on real Claude — email ingestion at scale, a knowledge-graph write
-path, governed charters, a graduated independent auditor, a coaching loop, native
-Jira, capability packs, a governed heartbeat scheduler, and (newest) a **D7
-orchestration runtime**: the orchestrator runs multi-agent projects as a durable
-plan → assign → receive → decide loop, with the human gate exactly where it
-belongs. See [`docs/STATUS.md`](docs/STATUS.md) for the exact current state.
+- 18.x => 18.14.1+
+- 19.x => 19.7.0+
+- 20.x => 20.0.0+
 
-## Secrets
+Essentially, you can simply use the latest version of each major release.
 
-All credentials live only in `.env` / `web/.env` (both git-ignored) — never in
-the repo or its history. The tracked `.env.example` files are empty placeholders.
+## Installation
+
+You can install it from the npm registry with `npm` command:
+
+```sh
+npm install @hono/node-server
+```
+
+Or use `yarn`:
+
+```sh
+yarn add @hono/node-server
+```
+
+## Usage
+
+Just import `@hono/node-server` at the top and write the code as usual.
+The same code that runs on Cloudflare Workers, Deno, and Bun will work.
+
+```ts
+import { serve } from '@hono/node-server'
+import { Hono } from 'hono'
+
+const app = new Hono()
+app.get('/', (c) => c.text('Hono meets Node.js'))
+
+serve(app, (info) => {
+  console.log(`Listening on http://localhost:${info.port}`) // Listening on http://localhost:3000
+})
+```
+
+For example, run it using `ts-node`. Then an HTTP server will be launched. The default port is `3000`.
+
+```sh
+ts-node ./index.ts
+```
+
+Open `http://localhost:3000` with your browser.
+
+## Options
+
+### `port`
+
+```ts
+serve({
+  fetch: app.fetch,
+  port: 8787, // Port number, default is 3000
+})
+```
+
+### `createServer`
+
+```ts
+import { createServer } from 'node:https'
+import fs from 'node:fs'
+
+//...
+
+serve({
+  fetch: app.fetch,
+  createServer: createServer,
+  serverOptions: {
+    key: fs.readFileSync('test/fixtures/keys/agent1-key.pem'),
+    cert: fs.readFileSync('test/fixtures/keys/agent1-cert.pem'),
+  },
+})
+```
+
+### `overrideGlobalObjects`
+
+The default value is `true`. The Node.js Adapter rewrites the global Request/Response and uses a lightweight Request/Response to improve performance. If you don't want to do that, set `false`.
+
+```ts
+serve({
+  fetch: app.fetch,
+  overrideGlobalObjects: false,
+})
+```
+
+### `autoCleanupIncoming`
+
+The default value is `true`. The Node.js Adapter automatically cleans up (explicitly call `destroy()` method) if application is not finished to consume the incoming request. If you don't want to do that, set `false`.
+
+If the application accepts connections from arbitrary clients, this cleanup must be done otherwise incomplete requests from clients may cause the application to stop responding. If your application only accepts connections from trusted clients, such as in a reverse proxy environment and there is no process that returns a response without reading the body of the POST request all the way through, you can improve performance by setting it to `false`.
+
+```ts
+serve({
+  fetch: app.fetch,
+  autoCleanupIncoming: false,
+})
+```
+
+## Middleware
+
+Most built-in middleware also works with Node.js.
+Read [the documentation](https://hono.dev/middleware/builtin/basic-auth) and use the Middleware of your liking.
+
+```ts
+import { serve } from '@hono/node-server'
+import { Hono } from 'hono'
+import { prettyJSON } from 'hono/pretty-json'
+
+const app = new Hono()
+
+app.get('*', prettyJSON())
+app.get('/', (c) => c.json({ 'Hono meets': 'Node.js' }))
+
+serve(app)
+```
+
+## Serve Static Middleware
+
+Use Serve Static Middleware that has been created for Node.js.
+
+```ts
+import { serveStatic } from '@hono/node-server/serve-static'
+
+//...
+
+app.use('/static/*', serveStatic({ root: './' }))
+```
+
+If using a relative path, `root` will be relative to the current working directory from which the app was started.
+
+This can cause confusion when running your application locally.
+
+Imagine your project structure is:
+
+```
+my-hono-project/
+  src/
+    index.ts
+  static/
+    index.html
+```
+
+Typically, you would run your app from the project's root directory (`my-hono-project`),
+so you would need the following code to serve the `static` folder:
+
+```ts
+app.use('/static/*', serveStatic({ root: './static' }))
+```
+
+Notice that `root` here is not relative to `src/index.ts`, rather to `my-hono-project`.
+
+### Options
+
+#### `rewriteRequestPath`
+
+If you want to serve files in `./.foojs` with the request path `/__foo/*`, you can write like the following.
+
+```ts
+app.use(
+  '/__foo/*',
+  serveStatic({
+    root: './.foojs/',
+    rewriteRequestPath: (path: string) => path.replace(/^\/__foo/, ''),
+  })
+)
+```
+
+#### `onFound`
+
+You can specify handling when the requested file is found with `onFound`.
+
+```ts
+app.use(
+  '/static/*',
+  serveStatic({
+    // ...
+    onFound: (_path, c) => {
+      c.header('Cache-Control', `public, immutable, max-age=31536000`)
+    },
+  })
+)
+```
+
+#### `onNotFound`
+
+The `onNotFound` is useful for debugging. You can write a handle for when a file is not found.
+
+```ts
+app.use(
+  '/static/*',
+  serveStatic({
+    root: './non-existent-dir',
+    onNotFound: (path, c) => {
+      console.log(`${path} is not found, request to ${c.req.path}`)
+    },
+  })
+)
+```
+
+#### `precompressed`
+
+The `precompressed` option checks if files with extensions like `.br` or `.gz` are available and serves them based on the `Accept-Encoding` header. It prioritizes Brotli, then Zstd, and Gzip. If none are available, it serves the original file.
+
+```ts
+app.use(
+  '/static/*',
+  serveStatic({
+    precompressed: true,
+  })
+)
+```
+
+## ConnInfo Helper
+
+You can use the [ConnInfo Helper](https://hono.dev/docs/helpers/conninfo) by importing `getConnInfo` from `@hono/node-server/conninfo`.
+
+```ts
+import { getConnInfo } from '@hono/node-server/conninfo'
+
+app.get('/', (c) => {
+  const info = getConnInfo(c) // info is `ConnInfo`
+  return c.text(`Your remote address is ${info.remote.address}`)
+})
+```
+
+## Accessing Node.js API
+
+You can access the Node.js API from `c.env` in Node.js. For example, if you want to specify a type, you can write the following.
+
+```ts
+import { serve } from '@hono/node-server'
+import type { HttpBindings } from '@hono/node-server'
+import { Hono } from 'hono'
+
+const app = new Hono<{ Bindings: HttpBindings }>()
+
+app.get('/', (c) => {
+  return c.json({
+    remoteAddress: c.env.incoming.socket.remoteAddress,
+  })
+})
+
+serve(app)
+```
+
+The APIs that you can get from `c.env` are as follows.
+
+```ts
+type HttpBindings = {
+  incoming: IncomingMessage
+  outgoing: ServerResponse
+}
+
+type Http2Bindings = {
+  incoming: Http2ServerRequest
+  outgoing: Http2ServerResponse
+}
+```
+
+## Direct response from Node.js API
+
+You can directly respond to the client from the Node.js API.
+In that case, the response from Hono should be ignored, so return `RESPONSE_ALREADY_SENT`.
+
+> [!NOTE]
+> This feature can be used when migrating existing Node.js applications to Hono, but we recommend using Hono's API for new applications.
+
+```ts
+import { serve } from '@hono/node-server'
+import type { HttpBindings } from '@hono/node-server'
+import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response'
+import { Hono } from 'hono'
+
+const app = new Hono<{ Bindings: HttpBindings }>()
+
+app.get('/', (c) => {
+  const { outgoing } = c.env
+  outgoing.writeHead(200, { 'Content-Type': 'text/plain' })
+  outgoing.end('Hello World\n')
+
+  return RESPONSE_ALREADY_SENT
+})
+
+serve(app)
+```
+
+## Listen to a UNIX domain socket
+
+You can configure the HTTP server to listen to a UNIX domain socket instead of a TCP port.
+
+```ts
+import { createAdaptorServer } from '@hono/node-server'
+
+// ...
+
+const socketPath ='/tmp/example.sock'
+
+const server = createAdaptorServer(app)
+server.listen(socketPath, () => {
+  console.log(`Listening on ${socketPath}`)
+})
+```
+
+## Related projects
+
+- Hono - <https://hono.dev>
+- Hono GitHub repository - <https://github.com/honojs/hono>
+
+## Author
+
+Yusuke Wada <https://github.com/yusukebe>
+
+## License
+
+MIT

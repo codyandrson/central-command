@@ -25,14 +25,14 @@ Requires=docker.service
 [Service]
 User=codyslab
 Group=codyslab
-WorkingDirectory=/home/codyslab/Central Command
+WorkingDirectory=/home/codyslab/central-command
 Environment=CC_DEMO_MODE=false
 Environment=CC_EXECUTOR_MODE=live
 Environment=CC_DISPATCH_APPROVAL_LIMIT=5
 # Idempotent: brings up any stack member that isn't already running. Cheap on
 # a warm boot, and it means the API never starts against a missing spine.
-ExecStartPre=/usr/bin/docker compose -f /home/codyslab/Central Command/deploy/pi/docker-compose.yml up -d
-ExecStart=/home/codyslab/Central Command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080
+ExecStartPre=/usr/bin/docker compose -f /home/codyslab/central-command/deploy/pi/docker-compose.yml up -d
+ExecStart=/home/codyslab/central-command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080
 # The app exits if Postgres isn't ready yet (seen live on the desktop) — keep
 # retrying until the stack is up. The dispatch advisory lease makes a
 # double-start refuse loudly rather than run two drain loops.

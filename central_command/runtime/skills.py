@@ -35,7 +35,7 @@ def _tool_name(skill_id: str) -> str:
     is collapsed rather than just substituting dashes.
 
     This is NOT collision-free and cannot be: the mapping is lossy, so
-    `cc-test-lite` and `cc_test_lite` both slug to `search_gv_test_lite_reference`.
+    `cc-test-lite` and `cc_test_lite` both slug to `search_cc_test_lite_reference`.
     Collisions are handled where they matter, in `capabilities_for`, which
     skips the loser with a warning instead of letting pydantic-ai raise
     `UserError` at `agent.run()` and kill every run of the holding agent.

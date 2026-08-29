@@ -36,7 +36,7 @@ REPO="${REPO:-/home/codyslab/central-command}"
 OUT="${CC_BACKUP_DIR:-/home/codyslab/cc-backups}"
 RETAIN_DAYS="${CC_BACKUP_RETAIN_DAYS:-14}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-NS=central_command
+NS=central-command
 K=(k3s kubectl -n "$NS")   # runs as root from the systemd timer
 
 # 077 from the very top: EVERY artifact here is sensitive, not just the key

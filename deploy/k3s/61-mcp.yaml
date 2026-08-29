@@ -8,14 +8,14 @@
 #   mcp.build_image/mcp.server_deploy handlers) only READS
 #   settings.mcp_deploy_kubeconfig; nothing here touches the live cluster.
 #
-#   cc-mcp is its OWN namespace, separate from `central_command` and from
+#   cc-mcp is its OWN namespace, separate from `central-command` and from
 #   `cc-sandbox` — an agent-built server's running pod has nothing to do
 #   with either the control plane's own workloads or the ephemeral sandbox
 #   mechanism that built it.
 #
 #   Default-deny everything, then ONE narrow ingress allowance: TCP 8000
 #   (the deploy convention every agent-built server must listen on) from
-#   pods labeled app=cc-litellm in namespace `central_command` (the real
+#   pods labeled app=cc-litellm in namespace `central-command` (the real
 #   namespace/label pair cc-litellm runs under — see deploy/k3s/30-litellm.yaml).
 #   NO egress is allowed by default: a deployed MCP server pod cannot reach
 #   anything outside cc-mcp, including the internet — same "no incentive to
@@ -33,7 +33,7 @@ kind: Namespace
 metadata:
   name: cc-mcp
   labels:
-    app.kubernetes.io/part-of: central_command
+    app.kubernetes.io/part-of: central-command
 ---
 # Default-deny ALL ingress AND egress for every pod in cc-mcp. An empty
 # podSelector matches every pod in the namespace.
@@ -48,7 +48,7 @@ spec:
   ingress: []
   egress: []
 ---
-# The one narrow exception: LiteLLM (namespace `central_command`, pods labeled
+# The one narrow exception: LiteLLM (namespace `central-command`, pods labeled
 # app=cc-litellm — deploy/k3s/30-litellm.yaml) may reach any cc-mcp pod on
 # TCP 8000. Nothing else, in either namespace, is admitted.
 apiVersion: networking.k8s.io/v1
@@ -63,7 +63,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: central_command
+              kubernetes.io/metadata.name: central-command
           podSelector:
             matchLabels:
               app: cc-litellm

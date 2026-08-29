@@ -2,5 +2,5 @@ name: cva
 source_repo: https://github.com/joe-bell/cva
 source_ref: v0.7.1
 fetched_url: https://codeload.github.com/joe-bell/cva/tar.gz/v0.7.1
-fetched_date: 2026-08-25
+fetched_date: 2026-08-29
 subpaths: [docs README* LICENSE*]

@@ -1546,7 +1546,7 @@ _LITELLM_PREFS_FILE = "deploy/pi/litellm/model-preferences.yaml"
 _LITELLM_CONFIG_PATHS = (_LITELLM_CONFIG_FILE, _LITELLM_PREFS_FILE)
 _LITELLM_CHECKS_SCRIPT = "deploy/pi/litellm/checks.sh"
 _LITELLM_POLICY_SCRIPT = "deploy/pi/litellm/policy.py"
-_LITELLM_NAMESPACE = "central_command"
+_LITELLM_NAMESPACE = "central-command"
 _LITELLM_CONFIGMAP = "cc-litellm-config"
 _LITELLM_DEPLOYMENT = "deployment/cc-litellm"
 # The aliases the deployment cannot lose: cc-default is what every agent run

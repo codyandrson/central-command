@@ -8,4 +8,4 @@ After=podman-restart.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/codys-lab/Central Command/deploy/homelab-portcheck.sh
+ExecStart=/home/codys-lab/central-command/deploy/homelab-portcheck.sh

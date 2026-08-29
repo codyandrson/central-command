@@ -35,7 +35,7 @@ CLEAN=0
 [[ "${1:-}" == "--clean-install" ]] && CLEAN=1
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
-NS=central_command
+NS=central-command
 K=(sudo k3s kubectl -n "$NS")
 
 set -a

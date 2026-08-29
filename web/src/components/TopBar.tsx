@@ -23,7 +23,6 @@ import {
   Target,
   ShieldCheck,
   Clock,
-  LayoutGrid,
 } from "lucide-react";
 import type { ViewMode } from "@/features/command-palette/commands";
 import type { AgentLogEntry, EventEntry, TokenData } from "@/types";

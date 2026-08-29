@@ -2496,7 +2496,7 @@ git push origin master
 - [ ] **Step 1: Read the pattern before writing anything**
 
 ```bash
-cd /home/codyslab/Central Command
+cd /home/codyslab/central-command
 sed -n '1,80p' web/src/features/agents/useAgents.ts
 sed -n '1,60p' web/src/features/agents/types.ts
 grep -rn "AgentsView" web/src --include=*.tsx --include=*.ts

@@ -1,106 +1,85 @@
-# Central Command
+<div align="center">
+  <a href="https://hono.dev">
+    <img src="https://raw.githubusercontent.com/honojs/hono/main/docs/images/hono-title.png" width="500" height="auto" alt="Hono"/>
+  </a>
+</div>
 
-> A human-supervised agentic-team framework — a control plane over a team of
-> Claude agents where the operator is team lead: tasking agents, approving their
-> actions, answering their questions, and coaching their behavior over time.
+<hr />
 
-_(The GitHub repo is named **CentralCommand**; the project itself is
-**Central Command** throughout the code and docs.)_
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/honojs/hono/ci.yml?branch=main)](https://github.com/honojs/hono/actions)
+[![GitHub](https://img.shields.io/github/license/honojs/hono)](https://github.com/honojs/hono/blob/main/LICENSE)
+[![npm](https://img.shields.io/npm/v/hono)](https://www.npmjs.com/package/hono)
+[![npm](https://img.shields.io/npm/dm/hono)](https://www.npmjs.com/package/hono)
+[![JSR](https://jsr.io/badges/@hono/hono)](https://jsr.io/@hono/hono)
+[![Bundle Size](https://img.shields.io/bundlephobia/min/hono)](https://bundlephobia.com/result?p=hono)
+[![Bundle Size](https://img.shields.io/bundlephobia/minzip/hono)](https://bundlephobia.com/result?p=hono)
+[![GitHub commit activity](https://img.shields.io/github/commit-activity/m/honojs/hono)](https://github.com/honojs/hono/pulse)
+[![GitHub last commit](https://img.shields.io/github/last-commit/honojs/hono)](https://github.com/honojs/hono/commits/main)
+[![codecov](https://codecov.io/github/honojs/hono/graph/badge.svg)](https://codecov.io/github/honojs/hono)
+[![Discord badge](https://img.shields.io/discord/1011308539819597844?label=Discord&logo=Discord)](https://discord.gg/KMh2eNSdxV)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/honojs/hono)
 
-## Quickstart
+Hono - _**means flame🔥 in Japanese**_ - is a small, simple, and ultrafast web framework built on Web Standards. It works on any JavaScript runtime: Cloudflare Workers, Fastly Compute, Deno, Bun, Vercel, AWS Lambda, Lambda@Edge, and Node.js.
 
-```bash
-git clone https://github.com/codyandrson/CentralCommand.git central_command
-cd central_command
-claude        # launch Claude Code, then type:  /setup
+Fast, but not only fast.
+
+```ts
+import { Hono } from 'hono'
+const app = new Hono()
+
+app.get('/', (c) => c.text('Hono!'))
+
+export default app
 ```
 
-`/setup` conducts the whole install interactively — gated, resumable, ending
-inside a watched dry-run demo. Prerequisites:
-[Claude Code](https://claude.com/claude-code) (it runs the install and the
-onboarding interview — there is no by-hand path), podman ≥ 4.9, and an
-OpenAI-compatible LLM endpoint (base URL + API key). Details and the
-step-by-step reference: [`deploy/single/README.md`](deploy/single/README.md).
-
-**Nothing changes the world without passing an approval gate.** Single-operator,
-self-hosted on a Linux homelab (podman). The primary risk model is *error, not
-malice* (hallucination / misreads), so the guards are reliability guards that
-also happen to stop misuse.
-
-## The core idea
-
-An agent can only **propose** and **read** — never write. It emits a `Proposal`
-(intent + actions + evidence), the run **durably pauses** (survives a full
-process restart), the proposal lands in a **Decisions Inbox**, and only after the
-operator approves does a credentialed **Executor** perform the real write (Jira,
-the knowledge graph) and stamp provenance. The trust boundary is the import
-graph: `runtime/` may never import the gateway/executor tier — and that rule is
-enforced by a test, not a convention.
-
-**Approval attaches to what work _does_, never to how it was triggered.** A
-schedule, a delegation, or an orchestrated project can move work along, but every
-world-changing action still gates individually — exactly as if the operator had
-started it by hand.
-
-## Architecture
-
-A modular monolith in four tiers:
-
-1. **Control Plane UI** — React cockpit (`web/`, a forked OpenClaw-Nerve frontend)
-2. **Control Plane API & Services** — FastAPI (`central_command/api`, `central_command/gateway`)
-3. **Agent Runtime** — Pydantic AI 2.x + Claude (`central_command/runtime`) — *propose + read only*
-4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph via MCP), n8n
-   (email façade holding the Gmail OAuth)
-
-Durable pause/resume is explicit persistence over Postgres (the paused run's
-message history + pending tool call), so an agent can wait days for a human
-approval and survive a restart.
-
-## Where to read next
-
-| Doc | What it is |
-|-----|------------|
-| [`CLAUDE.md`](CLAUDE.md) | Orientation — read this first: what the system is, how to run it, conventions and hard-won gotchas |
-| [`docs/STATUS.md`](docs/STATUS.md) | The precise live state and what to do next — the running project journal (source of truth for status) |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | The full design compendium and decision record |
-
-## Running it
-
-**Fresh install** (you have an LLM API key and nothing else): run **`/setup`**
-in Claude Code from the repo root — Claude Code is a hard prerequisite of
-setup — and it takes you from zero to a verified, onboarded, dry-run system
-(`.claude/skills/setup/`, deployment profile `deploy/single/`).
-
-Dev checkout:
+## Quick Start
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,runtime]"
-cp .env.example .env                 # fill CC_LLM_BASE_URL + CC_LLM_API_KEY for live mode
-
-# Demo mode — no API key, no live writes (safe):
-(cd web && npm install && npm run build)
-CC_DEMO_MODE=true CC_EXECUTOR_MODE=dry_run uvicorn central_command.api.app:app --port 8080
-
-pytest                               # offline suite (contract + durable + orchestration)
+npm create hono@latest
 ```
 
-Postgres for the spine: `docker compose up -d postgres` (podman works) — starts
-`cc-postgres` on **127.0.0.1:5442** with the schema auto-loaded. For live UI dev
-with hot-reload, run the API on :8080 and `cd web && npm run dev` (Vite proxies
-`/api`). See `CLAUDE.md` for live-mode flags, ingestion, and audit-trail endpoints.
+## Features
 
-## Status at a glance
+- **Ultrafast** 🚀 - The router `RegExpRouter` is really fast. Not using linear loops. Fast.
+- **Lightweight** 🪶 - The `hono/tiny` preset is under 12kB. Hono has zero dependencies and uses only the Web Standard API.
+- **Multi-runtime** 🌍 - Works on Cloudflare Workers, Fastly Compute, Deno, Bun, AWS Lambda, Lambda@Edge, or Node.js. The same code runs on all platforms.
+- **Batteries Included** 🔋 - Hono has built-in middleware, custom middleware, and third-party middleware. Batteries included.
+- **Delightful DX** 😃 - Super clean APIs. First-class TypeScript support. Now, we've got "Types".
 
-Phases 1–3 are built and human-verified; Phase 4 is underway. The full spine runs
-end-to-end on real Claude — email ingestion at scale, a knowledge-graph write
-path, governed charters, a graduated independent auditor, a coaching loop, native
-Jira, capability packs, a governed heartbeat scheduler, and (newest) a **D7
-orchestration runtime**: the orchestrator runs multi-agent projects as a durable
-plan → assign → receive → decide loop, with the human gate exactly where it
-belongs. See [`docs/STATUS.md`](docs/STATUS.md) for the exact current state.
+## Documentation
 
-## Secrets
+The documentation is available on [hono.dev](https://hono.dev).
 
-All credentials live only in `.env` / `web/.env` (both git-ignored) — never in
-the repo or its history. The tracked `.env.example` files are empty placeholders.
+## Migration
+
+The migration guide is available on [docs/MIGRATION.md](docs/MIGRATION.md).
+
+## Communication
+
+[X](https://x.com/honojs) and [Discord channel](https://discord.gg/KMh2eNSdxV) are available.
+
+## Contributing
+
+Contributions Welcome! You can contribute in the following ways.
+
+- Create an Issue - Propose a new feature. Report a bug.
+- Pull Request - Fix a bug or typo. Refactor the code.
+- Create third-party middleware - See instructions below.
+- Share - Share your thoughts on the Blog, X, and others.
+- Make your application - Please try to use Hono.
+
+For more details, see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+
+## Contributors
+
+Thanks to [all contributors](https://github.com/honojs/hono/graphs/contributors)!
+
+## Authors
+
+Yusuke Wada <https://github.com/yusukebe>
+
+_RegExpRouter_, _SmartRouter_, _LinearRouter_, and _PatternRouter_ are created by Taku Amano <https://github.com/usualoma>
+
+## License
+
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.

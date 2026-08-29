@@ -9,7 +9,7 @@
 #   Namespace-scoped by construction: the token IS the cc-litellm-operator
 #   SA's token (Role, no ClusterRole) — it can update ONE ConfigMap
 #   (cc-litellm-config), patch ONE Deployment (cc-litellm) and read pods in
-#   `central_command`, and nothing else, anywhere. It holds no secrets access at
+#   `central-command`, and nothing else, anywhere. It holds no secrets access at
 #   all. Sibling of make-mcp-kubeconfig.sh, same idiom including the
 #   go-template `{{index .data "ca.crt"}}` form — the naive `.data."ca.crt"`
 #   form does not resolve the dotted key and is a live-found bug (do not
@@ -35,7 +35,7 @@
 # ============================================================================
 set -euo pipefail
 
-NS=central_command
+NS=central-command
 SERVER="https://127.0.0.1:6443"
 KUBECTL=(sudo k3s kubectl)
 

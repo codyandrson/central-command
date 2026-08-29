@@ -18,6 +18,19 @@ runs". Live state (counts, roster, what's in the queue): the instance repo's
 
 ---
 
+## 0. Upgrading an existing v1.0.x install to v2.0.0
+
+v2.0.0 renamed every identifier (package, `CC_*` prefix, `cc-*` pods/units/
+images, the namespaces, the databases and role, the Graphiti group ids, the
+LiteLLM alias, the n8n webhook paths). Kubernetes cannot rename a namespace
+and the cockpit updater cannot rename its own units mid-run, so **this one
+release is applied by hand**, with downtime, by `deploy/k3s/migrate-to-cc.sh`
+— its header is the runbook (rehearse with `DUMP_ONLY=1`, then run, then
+`verify.sh`, then `cleanup` to delete the old namespace once everything is
+green; `rollback` reverses from the journal). Do NOT press "Check for
+updates" in the cockpit for this release. Fresh installs follow §1 onward as
+before.
+
 ## 1. Prerequisites & assumptions
 
 Assumed already true before phase 2:
@@ -26,7 +39,7 @@ Assumed already true before phase 2:
   (amd64, agent). `sudo k3s kubectl get nodes` shows both `Ready`.
 - **Tailscale** up on both; the Pi can `ssh chromebox_admin@100.113.118.28`
   without a password prompt (every build script shells over that).
-- Repo cloned at **`/home/codyslab/Central Command`**.
+- Repo cloned at **`/home/codyslab/central-command`**.
 - **`deploy/pi/.env`** populated — run **`./deploy/k3s/init-env.sh`**: it copies
   the template, generates every **GENERATED** variable that is empty, writes
   `PENDING` into the three Graphiti virtual-key slots (they cannot exist before
@@ -105,7 +118,7 @@ Assumed already true before phase 2:
 ## 2. Secrets and ConfigMaps
 
 ```bash
-cd /home/codyslab/Central Command
+cd /home/codyslab/central-command
 ./deploy/k3s/init-env.sh        # bootstraps deploy/pi/.env (idempotent)
 ./deploy/k3s/make-secrets.sh
 ```
@@ -200,7 +213,7 @@ by re-running the script, never by editing the file.
 ## 5. Python and web builds
 
 ```bash
-cd /home/codyslab/Central Command
+cd /home/codyslab/central-command
 python3 -m venv .venv && source .venv/bin/activate   # uv-managed CPython 3.12
 pip install -e ".[dev,runtime]"
 (cd web && npm install && npm run build)
@@ -425,7 +438,7 @@ https://raspberrypi.tail2ae84b.ts.net:9428/select/vmui/
 
 - **Data:** the RESTORE section at the bottom of `deploy/k3s/backup.sh`, against
   the **pre-clean-install** dump set in `/home/codyslab/cc-backups` (take one
-  before wiping: `sudo /home/codyslab/Central Command/deploy/k3s/backup.sh`, and
+  before wiping: `sudo /home/codyslab/central-command/deploy/k3s/backup.sh`, and
   confirm the `keys_<stamp>.env` beside it — without those two keys the dumps
   are ciphertext).
 - **Whole stack:** the Docker Compose stack in `deploy/pi/` is the documented

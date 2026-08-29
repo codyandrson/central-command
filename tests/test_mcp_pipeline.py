@@ -170,7 +170,7 @@ def test_deployment_manifest_refuses_without_limits(monkeypatch):
         executor._mcp_deployment_manifest("myserver", "some-ref")
 
 
-def test_service_manifest_targets_8000_in_gv_mcp():
+def test_service_manifest_targets_8000_in_cc_mcp():
     s = executor._mcp_service_manifest("myserver")
     assert s["metadata"]["namespace"] == "cc-mcp"
     assert s["spec"]["ports"] == [{"port": 8000, "targetPort": 8000}]

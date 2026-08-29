@@ -4,11 +4,6 @@
 > Claude agents where the operator is team lead: tasking agents, approving their
 > actions, answering their questions, and coaching their behavior over time.
 
-_(Renamed from "Central Command" to "Central Command" on 2026-08-26 — prose and
-product name only. Code identifiers — the `central_command/` package, `CC_*` env
-vars, `cc-*` units, namespace, and database names — deliberately retain the
-historical name.)_
-
 ## Getting started
 
 The path from zero to a running, onboarded system is four steps. The

@@ -36,7 +36,7 @@ PI_ENV="$REPO_ROOT/deploy/pi/.env"
 ROOT_ENV="$REPO_ROOT/.env"
 BASE_URL="${CC_LITELLM_URL:-http://127.0.0.1:4000}"
 KUBECTL=(sudo k3s kubectl)
-NS=central_command
+NS=central-command
 
 [[ -f "$PI_ENV" ]] || { echo "FATAL: $PI_ENV not found — run ./deploy/k3s/init-env.sh first" >&2; exit 1; }
 [[ -f "$ROOT_ENV" ]] || { echo "FATAL: $ROOT_ENV not found — cp .env.example .env first" >&2; exit 1; }

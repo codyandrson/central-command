@@ -186,13 +186,13 @@ async def test_search_web_never_raises_on_a_transport_failure(monkeypatch):
 @needs_pg
 async def test_skill_create_writes_the_skill_and_stamps_the_drafter(clean_skills):
     out = await executor._skill_create(
-        {"title": "Central Command authoring test", "summary": "s",
+        {"title": "CC authoring test", "summary": "s",
          "guidance_content": "the guidance body"},
         "human:lee", "knowledge-steward",
     )
     assert "cc-authoring-test" in out
     skill = await repo.get_skill("cc-authoring-test")
-    assert skill and skill["title"] == "Central Command authoring test"
+    assert skill and skill["title"] == "CC authoring test"
     docs = await repo.list_skill_docs("cc-authoring-test")
     assert [d["doc_key"] for d in docs] == ["guidance"]
     assert docs[0]["kind"] == "guidance"
@@ -203,17 +203,17 @@ async def test_skill_create_writes_the_skill_and_stamps_the_drafter(clean_skills
 
 @needs_pg
 async def test_skill_create_refuses_an_existing_id(clean_skills):
-    await repo.create_skill("cc-authoring-test", "Central Command authoring test", "s")
+    await repo.create_skill("cc-authoring-test", "CC authoring test", "s")
     with pytest.raises(executor.ExecutorError, match="already exists"):
         await executor._skill_create(
-            {"title": "Central Command authoring test", "summary": "s", "guidance_content": "x"},
+            {"title": "CC authoring test", "summary": "s", "guidance_content": "x"},
             "human:lee", "knowledge-steward",
         )
 
 
 @needs_pg
 async def test_skill_doc_add_versions_and_derives_kind_from_doc_key(clean_skills):
-    await repo.create_skill("cc-authoring-test", "Central Command authoring test", "s")
+    await repo.create_skill("cc-authoring-test", "CC authoring test", "s")
     args = {"skill_id": "cc-authoring-test", "doc_key": "upstream",
             "title": "Upstream docs", "content": "v1 body",
             "source_url": "https://example.com/g",
@@ -240,7 +240,7 @@ async def test_skill_doc_add_refuses_unknown_and_retired_skills(clean_skills):
             {"skill_id": "cc-authoring-test-nope", "doc_key": "k",
              "title": "t", "content": "c"}, "human:lee", "knowledge-steward")
 
-    await repo.create_skill("cc-authoring-test", "Central Command authoring test", "s")
+    await repo.create_skill("cc-authoring-test", "CC authoring test", "s")
     await repo.retire_skill("cc-authoring-test", "superseded")
     with pytest.raises(executor.ExecutorError, match="RETIRED"):
         await executor._skill_doc_add(

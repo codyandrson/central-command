@@ -31,7 +31,7 @@
 set -euo pipefail
 
 PI_HOST="${PI_HOST:-codyslab@100.74.236.97}"
-PI_DIR="${PI_DIR:-/home/codyslab/Central Command}"
+PI_DIR="${PI_DIR:-/home/codyslab/central-command}"
 COMPOSE="docker compose -f ${PI_DIR}/deploy/pi/docker-compose.yml"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 WORK="$(mktemp -d)"

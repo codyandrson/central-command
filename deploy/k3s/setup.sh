@@ -57,7 +57,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/deploy/pi/.env"     # the CONTAINERS' env (make-secrets.sh)
 APP_ENV="$REPO_ROOT/.env"                # the APP's env (CC_*)
-NS=central_command
+NS=central-command
 
 # k3s hides kubectl behind `k3s kubectl` and its kubeconfig is root-owned —
 # same array idiom as verify.sh and mint-keys.sh. Never a bare `kubectl`.

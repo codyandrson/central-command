@@ -20,7 +20,7 @@ After=network-online.target default.target
 Wants=cc-uvicorn.service
 
 [Service]
-WorkingDirectory=/home/codys-lab/Central Command/web
+WorkingDirectory=/home/codys-lab/central-command/web
 ExecStart=/usr/bin/node server-dist/index.js
 Restart=always
 RestartSec=5
