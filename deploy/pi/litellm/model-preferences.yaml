@@ -254,6 +254,11 @@ registration_only:
     registration:
       model: cohere/qwen3-rerank-local
       api_base: http://100.73.68.9:8082/v1/rerank
+      # The cohere client refuses to send without SOME key ("Cohere API key is
+      # required" -> /rerank 500). The local server ignores it; the previous
+      # instance carried a hand-set placeholder that was never declared here
+      # (found 2026-08-29, first clean install driven from this file).
+      api_key: none
       mode: rerank
       timeout: 60
 
