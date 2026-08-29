@@ -146,9 +146,13 @@ step_stop() {
 step_postgres() {
   done_step postgres && return
   say "postgres: rewrite stored names, rename database + role"
+  # Resumable: a previous run may have renamed the role and/or the database already.
+  local role=$OLD_DB db=$OLD_DB
+  psql_old gv-postgres $OLD_DB postgres -c 'select 1' >/dev/null 2>&1 || role=$NEW_DB
+  [[ "$(psql_old gv-postgres "$role" postgres -tA -c "select 1 from pg_database where datname='$OLD_DB'")" == 1 ]] || db=$NEW_DB
   # Every text / varchar / json / jsonb column in public gets the ordered
   # replace list — one transaction, so an FK surprise rolls the whole sweep back.
-  psql_old gv-postgres $OLD_DB $OLD_DB <<SQL
+  psql_old gv-postgres "$role" "$db" <<SQL
 begin;
 do \$\$
 declare r record; n bigint; total bigint := 0;
@@ -174,7 +178,7 @@ begin
 end \$\$;
 commit;
 SQL
-  psql_old gv-postgres $OLD_DB $OLD_DB <<'SQL'
+  psql_old gv-postgres "$role" "$db" <<'SQL'
 do $$ declare r record; n bigint; t bigint := 0; begin
   for r in select c.table_name t, c.column_name c from information_schema.columns c
            join information_schema.tables tb on tb.table_schema=c.table_schema and tb.table_name=c.table_name and tb.table_type='BASE TABLE'
@@ -185,11 +189,18 @@ SQL
   # Rename. postgres db as the maintenance connection; no client is connected
   # (the app units are stopped). RENAME clears an MD5 password, so set it
   # explicitly to the value the new manifest injects (20-postgres.yaml).
-  psql_old gv-postgres $OLD_DB postgres <<SQL
-alter database $OLD_DB rename to $NEW_DB;
-do \$\$ begin if exists (select 1 from pg_database where datname='${OLD_DB}_test') then execute 'alter database ${OLD_DB}_test rename to ${NEW_DB}_test'; end if; end \$\$;
-alter role $OLD_DB rename to $NEW_DB;
-alter role $NEW_DB password '$NEW_DB';
+  # The test database is disposable (tests/conftest.py drops and recreates it):
+  # if a new-named one already exists, the old one is simply dropped.
+  if [[ "$(psql_old gv-postgres "$role" postgres -tA -c "select count(*) from pg_database where datname in ('${OLD_DB}_test','${NEW_DB}_test')")" == 2 ]]; then
+    psql_old gv-postgres "$role" postgres -c "drop database ${OLD_DB}_test with (force)"
+  fi
+  psql_old gv-postgres "$role" postgres <<SQL
+do \$\$ begin
+  if exists (select 1 from pg_database where datname='$OLD_DB') then execute 'alter database $OLD_DB rename to $NEW_DB'; end if;
+  if exists (select 1 from pg_database where datname='${OLD_DB}_test') then execute 'alter database ${OLD_DB}_test rename to ${NEW_DB}_test'; end if;
+  if exists (select 1 from pg_roles where rolname='$OLD_DB') then execute 'alter role $OLD_DB rename to $NEW_DB'; end if;
+  execute 'alter role $NEW_DB password ''$NEW_DB''';
+end \$\$;
 SQL
   mark postgres
 }
