@@ -703,7 +703,7 @@ phase_app() {
   local nv=""
   command -v node >/dev/null 2>&1 && { nv="$(node -v 2>/dev/null)"; nv="${nv#v}"; }
   if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
-    step "cockpit" "cockpit built (web/)" in_web bash -c 'npm install && npm run build' || return 1
+    step "cockpit" "cockpit built (web/)" in_web bash -c 'npm ci && npm run build' || return 1
   else
     warn "cockpit" "node ${nv:-not found} is not >= 22 — cockpit not built; the API runs without it"
   fi

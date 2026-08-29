@@ -592,7 +592,7 @@ phase_app() {
     local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
     if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
       step "cockpit" "cockpit built (web/)" \
-        in_web bash -c 'npm install && npm run build' || return 1
+        in_web bash -c 'npm ci && npm run build' || return 1
     else
       warn "cockpit" "node v$nv is older than 22 — cockpit not built; the API runs without it"
     fi

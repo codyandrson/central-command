@@ -108,7 +108,10 @@ healthy() { # poll the API up to 2 minutes; it is the load-bearing process
 rebuild() { # as codyslab, never root
   "${RUNAS[@]}" env VIRTUAL_ENV="$REPO/.venv" PATH="/home/codyslab/.local/bin:$PATH" \
     bash -c "cd '$REPO' && uv pip install -e '.[dev,runtime]'" || return 1
-  "${RUNAS[@]}" bash -c "cd '$REPO/web' && npm install && npm run build" || return 1
+  # `npm ci`, never `npm install`: install REWRITES package-lock.json when its
+  # resolution differs (2026-08-29: one metadata line), leaving a dirty tracked
+  # file that makes the NEXT run die at resolve's clean-tree check.
+  "${RUNAS[@]}" bash -c "cd '$REPO/web' && npm ci && npm run build" || return 1
 }
 
 # ── locally-built images ────────────────────────────────────────────────────

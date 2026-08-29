@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-29 — v1.0.5: updater uses `npm ci`; verify.sh exempts the proxy-UI link
+
+- `cc-update.sh` (and both `setup.sh`s) build the cockpit with `npm ci`
+  instead of `npm install`: install rewrote `web/package-lock.json` during
+  the v1.0.4 update (one metadata line), leaving a dirty tracked file that
+  would have made the next update refuse at its clean-tree check.
+- `deploy/k3s/verify.sh` no longer flags `CC_LLM_PROXY_UI_URL` as a
+  non-loopback endpoint: the app never calls it — it is the LiteLLM admin
+  link the cockpit hands to the operator's browser, so a tailnet address is
+  the correct value.
+
 ## 2026-08-29 — v1.0.4: argument-shape validation before the Inbox
 
 - A proposal's action ARGUMENTS are now checked at propose time, not first at
