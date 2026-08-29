@@ -32,7 +32,7 @@ def _model():
 
 @needs_pg
 async def test_every_active_agent_is_chattable_and_retired_ones_are_not():
-    """Chattability stopped being a per-agent property (the operator, 2026-07-25): the
+    """Chattability stopped being a per-agent property (The operator, 2026-07-25): the
     chat page is where you talk to the team, and talking changes nothing on its
     own. This test previously asserted the opposite — that only agents flagged
     `conversational` had a lane — so it is rewritten rather than deleted: the

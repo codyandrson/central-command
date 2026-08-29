@@ -223,7 +223,7 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:?set NEO4J_PASSWORD in deploy/pi/.env}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in deploy/pi/.env}
       # EMBEDDINGS (migrated 2026-07-26): self-hosted Qwen3-Embedding-0.6B on
-      # the operator's workstation, reached through THIS Pi's LiteLLM so the endpoint,
+      # The operator's workstation, reached through THIS Pi's LiteLLM so the endpoint,
       # spend and any future failover stay in one place. The key is a LiteLLM
       # virtual key scoped to the embedding group only — not the master key.
       # Endpoint + credential only. The MODEL and DIMENSIONS are literals in

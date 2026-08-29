@@ -1,6 +1,6 @@
 """Native Jira Cloud client (D23) — Central Command's Jira surface without n8n.
 
-The toolbox rule (the operator, 2026-07-20): n8n earns its place where it has already
+The toolbox rule (The operator, 2026-07-20): n8n earns its place where it has already
 solved a hard integration problem (the Gmail OAuth in cc-email-facade); a
 plain token-REST API like Jira is better served by a native client that lives
 in git, is tested by the suite, and grows without editing a live workflow.

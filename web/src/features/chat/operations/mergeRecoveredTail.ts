@@ -75,7 +75,7 @@ function findTailAnchor(existingSigs: string[], recoveredSigs: string[]) {
  * turn landed — the operator's own words blinking out while the agent worked.
  *
  * The operator's input is the one thing the client is authoritative about.
- * Nothing recovered from the server may remove it (the operator, 2026-07-25: "my
+ * Nothing recovered from the server may remove it (The operator, 2026-07-25: "my
  * inputs should never disappear").
  */
 function unconfirmedLocalTail(existing: ChatMsg[], recovered: ChatMsg[]): ChatMsg[] {

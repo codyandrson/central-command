@@ -16,7 +16,7 @@
 ## What Central Command is
 
 A **human-supervised agentic-team framework**: a control plane over a team of
-Claude agents where the operator (the operator) is team lead — tasking agents, approving
+Claude agents where the operator (The operator) is team lead — tasking agents, approving
 their actions, answering their questions, and coaching behavior over time.
 **Nothing changes the world without passing an approval gate.** Single-operator,
 self-hosted on a Raspberry Pi in the operator's homelab (Docker CE); the work deployment
@@ -29,7 +29,7 @@ misuse.
 The full spine works end-to-end: **agent proposes → durable pause (survives a full
 restart) → Decisions Inbox → operator approves → gateway → Executor performs the
 real write → provenance stamped → agent resumes.** It runs on real Claude against
-the operator's actual Gmail and a real Jira, and in **demo mode** (no API key, dry-run
+The operator's actual Gmail and a real Jira, and in **demo mode** (no API key, dry-run
 writes) for safe dev.
 
 Phase 4 is not a plan any more — the auditor is **graduated** (active on
@@ -65,7 +65,11 @@ performs writes *after* approval. Keep it that way.
 
 **The deployment is `deploy/k3s/`, across `raspberrypi` (100.74.236.97, arm64,
 k3s control plane) and `chromebox` (100.113.118.28, amd64, 8 cores / 15 GB,
-agent).** The Docker Compose stack in `deploy/pi/` is SUPERSEDED — kept for its
+agent), run FROM THIS CHECKOUT — `/home/codyslab/central-command` (the units,
+`.venv`, root `.env`, `web/.env` and `deploy/pi/.env` all live here;
+clean-installed 2026-08-29 by `./deploy/k3s/setup.sh`). The former checkout
+`~/Central Command` is retired (`~/Central Command.retired-20260829`) — never run,
+edit or install from it.** The Docker Compose stack in `deploy/pi/` is SUPERSEDED — kept for its
 comments and as the rollback path, not run. `cc-uvicorn`/`cc-nerve` still run as
 systemd units on the Pi, outside the cluster.
 
@@ -265,7 +269,7 @@ default — changing it now buys nothing and breaks all five.
   Apply additive columns to the running `cc-postgres` by hand in the same change
   that adds them to the file (they are `add column if not exists`, so it is
   idempotent). Found 2026-07-27 adding the tier-3 stall columns.
-- **The agent sandbox is CONTAINMENT, not restriction** (the operator, 2026-08-04).
+- **The agent sandbox is CONTAINMENT, not restriction** (The operator, 2026-08-04).
   It exists so an agent can work freely and unsupervised without risking his
   system — NOT to limit what it can reach. Egress is open: the internet AND
   his internal services, because a task may be "integrate with n8n". The gate
@@ -667,13 +671,19 @@ default — changing it now buys nothing and breaks all five.
   including on error), and the panel updates on `cc.conversation.ended` /
   `cc.session.*` events. If you add a new turn/close path, push the frames, or
   the UI lies ("still thinking" / stale rows — 2026-07-23, five rounds of it).
-- **Git: every commit belongs on GitHub — and this repo is PUBLIC.** Remote
-  `origin` is **https://github.com/codyandrson/central-command** (PUBLIC,
-  fresh history since 2026-08-27), default branch **`master`** — product work
-  (code + docs) happens on `master` and is pushed there; there is no `main`.
-  The old private repo **codyandrson/CentralCommand** is the INSTANCE repo:
-  it keeps the full pre-release history and is where STATUS.md / JOURNAL.md
-  live on (checkout `~/CentralCommand-instance`, its own commits and pushes).
+- **Two repos, routed by CONTENT.** Ask: *would another Central Command
+  deployment need this?*
+  - **Yes → PUBLIC, this repo:** `origin git@github.com:codyandrson/central-command`
+    (SSH — the Pi's `id_ed25519` authenticates; there is no GitHub HTTPS
+    credential on this host), branch `master`, no `main`. Core product work:
+    features, fixes, drivers, manifests, unit files, docs that apply to any
+    install. Never instance facts.
+  - **No → PRIVATE, the instance repo:** `codyandrson/CentralCommand`,
+    checkout `~/CentralCommand-instance`, its own commits and pushes. Everything
+    specific to THIS deployment: `docs/STATUS.md` (live state),
+    `docs/JOURNAL.md` (incidents and why), go-live and instance-data
+    decisions, operator notes. A session that changes the deployment updates
+    STATUS/JOURNAL there in the same session.
   **A change is not done until it is pushed**: `git push origin master`
   in the same session you commit it, and leave `git status -sb` reading
   `## master...origin/master` with no "ahead". STATUS.md carried "NOT yet
@@ -686,18 +696,24 @@ default — changing it now buys nothing and breaks all five.
   (2026-08-17: an auditor commit, c8e15b9, silently absorbed most of the
   tool-visibility phase-2 work). Stage only the paths this session changed,
   and check `git status` for unexpected files before committing.
-- **Before any push, confirm no secrets OR personal data are riding along —
-  this repo is PUBLIC.** `.env` is gitignored (`git check-ignore -v .env` to
-  be sure) and secrets live ONLY there; scan the outgoing diff for token
-  shapes (`sk-ant-`, `ATATT`, `gh[pous]_`, private-key headers) before
-  pushing. Personal/instance facts (real names of family or contacts, real
-  mail or Jira content, work-internal identifiers) NEVER go into tracked
-  files here — they belong in the graph/DB or the private instance repo's
-  STATUS/JOURNAL. The 2026-08-27 scrub established placeholder conventions
-  (the Doe/Rivers cast, "Example Bank", "Initech"); reuse them in incident
-  write-ups. Homelab topology (tailnet IPs/hostnames, usernames, paths) is
-  deliberately tracked — the operator accepted that exposure because
-  setup/deploy uses it.
+- **Nothing sensitive or personal EVER reaches the public repo — enforced,
+  not hoped.** Three classes, all forbidden in tracked files: (1) SECRETS —
+  API keys, tokens, passwords, private keys, kubeconfigs, virtual keys;
+  they live only in gitignored `.env` files (`git check-ignore -v .env`).
+  (2) THE OPERATOR — their name, handles, e-mail, Atlassian/Gmail account
+  URLs, family, contacts, health, finances, real mail/Jira/Confluence
+  content, and any interview or graph fact about them. Prose says "the
+  operator"; examples use the placeholder cast (the Doe/Rivers cast,
+  "Example Bank", "Initech", `example.com`). (3) SECURITY-RELEVANT internals
+  beyond topology — anything that lowers the cost of attacking the instance.
+  Homelab TOPOLOGY stays tracked by decision (tailnet-only IPs/hostnames,
+  unix usernames, paths, the cockpit URL): setup/deploy reads it, and it is
+  unreachable from outside the tailnet. `scripts/prepush-scan.sh` runs as
+  the pre-push hook (`.git/hooks/pre-push`) and REFUSES a push whose added
+  lines match secret shapes or the identifier list kept OUTSIDE the repo at
+  `~/.cc-private-identifiers` — never weaken it to get a push through; move
+  the content to the instance repo instead. Backlog scrubbed 2026-08-29
+  (the operator's name and handle were tracked until then).
 - **`master` is the only branch**, locally and on origin (the five historical
   `phase2-*` / feature branches were deleted 2026-07-25 — four fully merged,
   and `close-emails-gap` superseded: master's `feed_email` already routes

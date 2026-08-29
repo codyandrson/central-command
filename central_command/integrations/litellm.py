@@ -1001,7 +1001,7 @@ async def call_mcp_tool(server_name: str, tool_name: str, arguments: dict) -> di
 async def usage_snapshot(days: int = 30) -> dict:
     """Spend + token usage as LiteLLM records it. Display-only: Central Command
     never re-derives or persists usage itself — budgets and limits live in
-    LiteLLM (the operator's call, 2026-07-22), the cockpit just shows its numbers."""
+    LiteLLM (The operator's call, 2026-07-22), the cockpit just shows its numbers."""
     from datetime import date, timedelta
 
     _require_configured("usage_snapshot")

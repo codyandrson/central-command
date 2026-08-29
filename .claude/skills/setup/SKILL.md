@@ -340,7 +340,7 @@ per-use discovery doctrine still covers whatever wasn't harvested.
 
 Only after they have seen the demo loop (and the Jira/Confluence reads, if
 configured) does GO-LIVE happen — and it is a PROMPTED CHECKLIST, never a
-default and never skipped silently (the operator, 2026-08-27: "off until onboarding
+default and never skipped silently (The operator, 2026-08-27: "off until onboarding
 finishes" is right, but off-by-default with no prompted turn-on is a cliff —
 the first instance sat in dry_run for a day of approvals nobody knew were
 simulated). Walk each item as its own question, one line on what it does,

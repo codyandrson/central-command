@@ -1,6 +1,6 @@
 # The setup & update contract (2026-08-27)
 
-Operator decision (the operator, 2026-08-27), after a failed air-gapped work install
+Operator decision (The operator, 2026-08-27), after a failed air-gapped work install
 where the conducting agent responded to a mid-install failure by freehanding
 fixes for an hour. Supersedes the *process* half of
 `2026-08-25-deterministic-setup.md` (its phase design and output protocol are

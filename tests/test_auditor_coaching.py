@@ -1,4 +1,4 @@
-"""The auditor is a team member (the operator, 2026-07-20): on the roster, its charter
+"""The auditor is a team member (The operator, 2026-07-20): on the roster, its charter
 governed by M11 and loaded at audit time, and coachable through the D5 loop —
 where its coaching signals ARE the agreement record's disagreements (every
 over-cautious challenge and every miss is the operator's recorded verdict on

@@ -5,7 +5,7 @@ Coaching screen" framing of stage 5 (see **Decision 3**)._
 
 ## What this is
 
-Stage 5 of the agent-management split. the operator asked for **three coaching
+Stage 5 of the agent-management split. The operator asked for **three coaching
 experiences**, not a page:
 
 1. **Coach on recent work** — from an agent's profile, see what it has recently
@@ -86,7 +86,7 @@ what is on its board.
 
 ### Decision 2 — Full read access; selection is context, not a fence
 
-**Chosen** (the operator, verbatim): the coach has full read access; a selection is
+**Chosen** (The operator, verbatim): the coach has full read access; a selection is
 provided as part of its prompt/context but does **not** prevent it retrieving
 more at its discretion — *"that behavior can be tuned by coaching the coach over
 time."*
@@ -264,7 +264,7 @@ Also:
 
 Stubs where a real run would spend tokens, per the existing coach tests.
 
-### Live validation (the operator)
+### Live validation (The operator)
 
 A coach session against **`litellm-manager`** (4 signals, charter v0 — lowest
 stakes), approve the diff, then confirm the new version row says the **coach**

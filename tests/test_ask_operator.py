@@ -2,7 +2,7 @@
 
 Until 2026-07-25 `ask_operator` lived only in the `orchestrate` pack, so only
 the orchestrator could ask and only inside a project loop; every other agent's
-options on an ambiguous task were to guess or to give up. the operator: "all agents
+options on an ambiguous task were to guess or to give up. The operator: "all agents
 should be able to ask."
 
 That change is also what turned a latent bug live. `extract_deferred` returns

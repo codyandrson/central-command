@@ -115,7 +115,7 @@ struck/dimmed, never hidden.
 
 Graphistry's GPU requirement is **server-side** (RAPIDS on NVIDIA/x86); the
 homelab Pi/chromebox can never host it, the operator's workstation and the work
-deployment can. Decision (the operator, 2026-08-09): ship the **seam** now, defer the
+deployment can. Decision (The operator, 2026-08-09): ship the **seam** now, defer the
 integration until scale or the work deployment demands it.
 
 - **Settings toggle** `graphistry_enabled` (default **off**) plus

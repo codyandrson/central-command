@@ -1,6 +1,6 @@
 """Clear the Decisions Inbox and requeue every email behind it (2026-08-16).
 
-the operator's call after the 2026-08-15 fixes landed (Graphiti invalidation scope,
+The operator's call after the 2026-08-15 fixes landed (Graphiti invalidation scope,
 pinned sampling, reasoning-first dedupe, the qwen3.6-27b swap, the `Person`
 ontology entry, and the cockpit's new graph curation): the 27 items sitting in
 the inbox were triaged by agents reading a graph that was actively destroying

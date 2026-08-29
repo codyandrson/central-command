@@ -6,7 +6,7 @@ to concrete uuids at preview/execute time, and only those rows move. New mail
 matching the same query later is untouched — that's deliberate, not a gap
 (the design defers standing rules to trust-tier graduation).
 
-Ungated: this is the operator path (the operator is the author, graph-curation
+Ungated: this is the operator path (The operator is the author, graph-curation
 precedent), so there is no propose/approve step here — see the agent path
 (slice 2) for the gated version riding the fold machinery.
 """

@@ -7,7 +7,7 @@ What these tests lock in:
 - the gated path (a child's proposal parks in the Decisions Inbox; the loop
   resumes only after the operator's decision);
 - the mechanical guards: star shape / depth-1, plan-before-assign, stall
-  escalation (the operator: pause when stuck, never budgets), batch rejection bounded;
+  escalation (The operator: pause when stuck, never budgets), batch rejection bounded;
 - restart-proofness: resume works purely from persisted state (M2's
   two-process property, orchestration edition);
 - the capability-gap principle: a child's declared gap becomes event-log data.
@@ -82,7 +82,7 @@ async def _events_for(ref_id: str, kinds: list[str] | None = None) -> list[dict]
 
 async def test_full_loop_ungated_answer_flows_without_approval(monkeypatch):
     # The child answers in TEXT — nothing external changes, so its result
-    # returns to the orchestrator with NO approval anywhere (the operator's rule).
+    # returns to the orchestrator with NO approval anywhere (The operator's rule).
     monkeypatch.setattr(
         routes, "resolve_model",
         aresolve(lambda *a, **k: _text_model("Review done: TASKS-12 hygiene is fine.")),

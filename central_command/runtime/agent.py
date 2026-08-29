@@ -117,7 +117,7 @@ LAYER0 = (
 # Nothing injects that syntax at runtime, so an agent that was never told it
 # exists can never use it. Appended for every agent in build_charter — like the
 # date stamp, it is presentation doctrine, not a capability, so it rides no
-# pack and no grant (the operator approved the generated-section mechanism 2026-08-01).
+# pack and no grant (The operator approved the generated-section mechanism 2026-08-01).
 # Keep this in sync with the parser's contract (extractCharts.ts) — the guard
 # test only proves the section is present, not that the frontend still parses it.
 CHART_MARKERS = (

@@ -344,7 +344,7 @@ real hardware (Pi + chromebox) before building anything that depends on it.
    explicit buy-in, per §2.)
 2. **Sandbox egress: CORRECTED 2026-08-04 — OPEN to the internet.** The
    2026-08-03 "empty by default" answer was based on a wrong model of what
-   the sandbox is FOR. the operator's correction: the sandbox contains *effects on
+   the sandbox is FOR. The operator's correction: the sandbox contains *effects on
    his system*; it does not limit what the agent may reach. An agent must be
    able to pip/npm install, fetch docs and TEST what it builds — otherwise it
    writes from stale training data (proved live the next day: echo-demo was
@@ -370,7 +370,7 @@ real hardware (Pi + chromebox) before building anything that depends on it.
    separate deregister-only capability remains for the
    keep-the-pod-running-while-debugging case.
 5. **Scheduled script + agent evaluation: DECIDED 2026-08-03 —
-   heartbeat-native** (the operator approved the recommendation in
+   heartbeat-native** (The operator approved the recommendation in
    `2026-08-03-scheduled-script-verify-patterns.md`, the companion survey of
    k8s CronJob, Argo, CI pipelines, Temporal/DBOS and scheduled-agent
    products). One new `ActionSpec`, `sandbox.run_script`: the heartbeat

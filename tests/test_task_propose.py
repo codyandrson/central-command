@@ -2,7 +2,7 @@
 
 The first gated capability that acts on Central Command's own work queue rather
 than an external system, and the first time an agent can put work on another
-agent's board. the operator's call: the proposal NAMES its assignee, and the operator's
+agent's board. The operator's call: the proposal NAMES its assignee, and the operator's
 approval is the delegation.
 """
 

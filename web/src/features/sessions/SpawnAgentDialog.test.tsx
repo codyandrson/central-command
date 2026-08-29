@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SpawnAgentDialog } from './SpawnAgentDialog';
 
 /**
- * The chat "+" after the management split (the operator, 2026-07-25): it starts a
+ * The chat "+" after the management split (The operator, 2026-07-25): it starts a
  * conversation and does nothing else.
  *
  * This file previously asserted the three-path dialog — hire, assign work,

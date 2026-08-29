@@ -1,6 +1,6 @@
 """The D7 orchestrator — a dedicated agent that routes unassigned tasks.
 
-the operator's shape call (2026-07-21): dedicated agent, per the design lean — on the
+The operator's shape call (2026-07-21): dedicated agent, per the design lean — on the
 roster, governed charter, coachable, uniform management. Rollout follows the
 house rule (shadow-first, graduated, revocable): the orchestrator RECOMMENDS
 an agent for a NEW task; the recommendation rides the task card with its

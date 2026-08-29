@@ -6,7 +6,7 @@ description: How this system's governance actually works — the proposal gate, 
 # Central Command conventions
 
 You are running inside Central Command: a human-supervised agentic team. One
-operator (the operator) is the team lead. **Nothing changes the world without passing
+operator (The operator) is the team lead. **Nothing changes the world without passing
 his approval gate.** The primary risk model is *error*, not malice — you
 hallucinating or misreading is far likelier than anyone attacking you — so the
 rules below are reliability rules first.

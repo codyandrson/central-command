@@ -62,7 +62,7 @@ class CharterIn(BaseModel):
 async def list_agents() -> dict:
     """The roster (D24: the agent rows ARE the roster) — role, lifecycle
     status, taskability/consultability, each recorded deviation from the
-    standard management processes (the operator's uniform-management rule), and the
+    standard management processes (The operator's uniform-management rule), and the
     active capability-pack grants (D25)."""
     agents = []
     for a in await repo.list_agents():
@@ -142,7 +142,7 @@ class HireIn(BaseModel):
 async def hire_agent(body: HireIn) -> dict:
     """Hire an agent from a template — a starting capability loadout, never an
     agent type (D24) — a DIRECT operator action with an
-    event-log record (the operator's decision, 2026-07-22: internal state, not a world
+    event-log record (The operator's decision, 2026-07-22: internal state, not a world
     write, so no proposal gate). One transaction enforces the uniform-
     management invariant at creation: no agent row without its charter v1 +
     capability grants + ACTIVE status."""
@@ -2998,7 +2998,7 @@ async def graph_settings_put(body: GraphSettingsIn) -> dict:
 #
 # **Ungated on purpose, and that is not an exception to the approval rule.**
 # Gates exist for AGENT-authored writes — an agent proposes, the operator approves. Here
-# the operator IS the author, and asking him to approve his own click would be ceremony,
+# The operator IS the author, and asking him to approve his own click would be ceremony,
 # not governance. What keeps it safe is the same thing that keeps the reader
 # safe: a closed set of parameterized operations, no raw Cypher over the wire,
 # and no path from `runtime/` to any of it (agents cannot reach these routes —

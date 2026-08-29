@@ -1,6 +1,6 @@
 # Deterministic setup + single-node parity (2026-08-25)
 
-Operator decision (the operator, 2026-08-25, after the Windows rollout): the /setup
+Operator decision (The operator, 2026-08-25, after the Windows rollout): the /setup
 flow had inverted the intended division of labor — the agent was conducting
 probes, installs, renders and deploys from a 700-line prose runbook, which is
 exactly the volatile part. The rule now, stated by the operator and confirmed
@@ -147,6 +147,6 @@ console.
 The podman path of the skill shrinks to: elicit answers → fill .env → run
 `./setup.sh` → interpret PASS/WARN/FAIL and diagnose bundles → conduct the
 Phase-5 interview → conduct the Phase-6 demo. The k3s substrate section is
-UNTOUCHED this round (the operator's deployment, already script-railed). The
+UNTOUCHED this round (The operator's deployment, already script-railed). The
 conductor-discipline rules collapse to one: **if you are composing a command
 that mutates anything, you are off the rails — the script does that.**

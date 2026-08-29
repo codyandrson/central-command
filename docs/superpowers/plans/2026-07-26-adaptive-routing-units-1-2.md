@@ -828,7 +828,7 @@ git commit -m "verify.sh fails when the live routing policy drifts from the repo
 - Consumes: everything above.
 - Produces: a live proxy whose `/adaptive_router/state` shows real priors and real costs.
 
-> the operator drives anything that changes the running deployment. The steps below are
+> The operator drives anything that changes the running deployment. The steps below are
 > for him to run; the verification commands are the acceptance evidence.
 
 - [ ] **Step 1: Record the "before" state**

@@ -1,7 +1,7 @@
 # Work-transition compatibility — Exchange via the internal automation toolset, and what must be true before on-site
 
 _Design record written 2026-08-21 from the sanitized compatibility profile
-the operator brought out of the work environment
+The operator brought out of the work environment
 (`docs/reference/work-environment-compatibility.md` — the deduplicated
 transcription; read it alongside this). That document is the ground truth
 for the transition and it CORRECTS two assumptions earlier records made._

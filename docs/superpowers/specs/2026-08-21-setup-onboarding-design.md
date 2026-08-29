@@ -30,7 +30,7 @@ doesn't exist.
    must be reproducible (write `.env`, apply schema, render manifests, run
    verification). Claude Code fills script inputs and runs scripts — it never
    freehand-edits config. **Claude Code is a hard prerequisite of setup**
-   (the operator's decision, 2026-08-21, revising this spec's original fallback
+   (The operator's decision, 2026-08-21, revising this spec's original fallback
    line): the target user has it, it works at his work against their
    models, and a no-Claude-Code install path would be maintained for nobody
    — do not build or document one. The scripts stay because they are the
@@ -49,10 +49,10 @@ doesn't exist.
 4. **LiteLLM is mandatory: detect-or-provision.** The Graphiti
    Responses→chat bridge (`openai/chat_completions/` prefix) and the carried
    graphiti patches assume the proxy. The installer either registers an
-   existing LiteLLM (the operator's work case) or stands one up configured against
+   existing LiteLLM (The operator's work case) or stands one up configured against
    the user's key (teammate case). `LITELLM_SALT_KEY` and
    `N8N_ENCRYPTION_KEY` are generated into the install directory's `.env`
-   (the operator's call — no separate key escrow), with the never-rotate warning;
+   (The operator's call — no separate key escrow), with the never-rotate warning;
    the backup path for a portable install is configured at setup and must
    live outside the install tree.
 5. **The portable deploy target is a SINGLE-NODE `podman kube play` profile**
@@ -98,7 +98,7 @@ doesn't exist.
    manufactures the instance (`.env`, graph seed, rendered + coached
    charters) on the user's machine.
 
-   **REVISED same day (the operator's call, and it simplified the design): Claude
+   **REVISED same day (The operator's call, and it simplified the design): Claude
    Code conducts the interview, and on a fresh install the approval burst
    dissolves entirely.** Three facts made the original shape redundant
    there: (a) onboarding answers are OPERATOR INPUT — trusted evidence, not

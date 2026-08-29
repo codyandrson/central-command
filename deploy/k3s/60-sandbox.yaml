@@ -43,7 +43,7 @@ metadata:
   name: gvisor
 handler: runsc
 ---
-# THE SANDBOX IS CONTAINMENT, NOT RESTRICTION (the operator, 2026-08-04 — this
+# THE SANDBOX IS CONTAINMENT, NOT RESTRICTION (The operator, 2026-08-04 — this
 # reverses the deny-all egress this file shipped with on 2026-08-03).
 #
 # The sandbox exists so an agent can work FREELY and unsupervised without any
@@ -56,7 +56,7 @@ handler: runsc
 # is on what LEAVES the sandbox (mcp.sync_source), never on what it reads.
 #
 # So: EGRESS IS OPEN — the internet AND the operator's own internal services
-# (the operator, 2026-08-04, clarifying the same day: "the agent should be able to
+# (The operator, 2026-08-04, clarifying the same day: "the agent should be able to
 # read All of my internal services, since I may of course be asking it to do
 # something that involves modifying or integrating with those services. tools
 # that would allow making changes to those services however need to be gated

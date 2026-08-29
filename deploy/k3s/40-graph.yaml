@@ -4,7 +4,7 @@
 #   Neo4j is the awkward one: memory-heavy (a ~905 MB JVM) AND stateful, so it
 #   cannot float — local-path pins its PV to one node, and Neo4j explicitly
 #   forbids NFS (no file locking -> store corruption), so shared storage is not
-#   a way out. the operator's call (2026-07-31) is to pin it to the CHROMEBOX and take
+#   a way out. The operator's call (2026-07-31) is to pin it to the CHROMEBOX and take
 #   the JVM off the Pi entirely. Consequence, accepted deliberately: if the
 #   chromebox is down the knowledge graph is down. That is consistent with the
 #   project's own language about off-box things being degradable capabilities

@@ -2,7 +2,7 @@
 
 Until 2026-08-13 a consultation whose specialist DRAFTED a gated proposal
 returned "I proposed prop_xxx, carry on without me" and the asker kept running
-— against a world where the change did not exist yet. the operator's objection is the
+— against a world where the change did not exist yet. The operator's objection is the
 whole feature: *"It's not really a collaboration if teammate A asks teammate B
 a question, but A just continues working w/o the response from B."*
 

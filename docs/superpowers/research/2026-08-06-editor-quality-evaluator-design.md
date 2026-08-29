@@ -50,7 +50,7 @@ Everything it needs already exists — this is a hire, not a build.
 
 ## How it enters the flow
 
-Coaching, not wiring. Nothing hard-codes an editor pass. the operator steers WHEN
+Coaching, not wiring. Nothing hard-codes an editor pass. The operator steers WHEN
 drafters consult it the same way consultability itself was widened
 "enable-ahead-of-coaching": start by coaching one or two drafters whose
 content quality has real review cost — candidates, in order of observed

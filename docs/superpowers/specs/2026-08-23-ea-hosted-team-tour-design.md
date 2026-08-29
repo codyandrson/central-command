@@ -6,7 +6,7 @@
 ## The problem
 
 The onboarding interview (setup phase 5) captures the operator's facts, but
-the operator never meets the system. the operator's framing after running the first
+the operator never meets the system. The operator's framing after running the first
 fully-clean setup: a new boss doesn't read the org chart — they sit down with
 each report, hear how things are supposed to work, and adjust what doesn't
 match their leadership style. Three goals in one mechanism: **familiarization**
@@ -118,7 +118,7 @@ a grants change that breaks a promised proposal fails the suite.
 
 ## Decision log
 
-| # | Decision | Choice (the operator, 2026-08-23) |
+| # | Decision | Choice (The operator, 2026-08-23) |
 |---|---|---|
 | 1 | Trigger/placement | Product machinery: `ea.contact` kind `onboarding_tour`; setup's last act creates it |
 | 2 | Who speaks | EA brokers the arc; each agent introduces ITSELF in its own lane |

@@ -417,7 +417,7 @@ export const SessionNode = memo(function SessionNode({
 
       {/* Persistent close ✕ at the row's far right, where the status badge
           sits — sibling of the main <button> (nested buttons are invalid
-          HTML). the operator's ask: exec-failed rows rest open until closed by hand,
+          HTML). The operator's ask: exec-failed rows rest open until closed by hand,
           so the control can't be hover-only or it's undiscoverable. */}
       {!compact && hasDeleteAction && !isClosed && (
         <button

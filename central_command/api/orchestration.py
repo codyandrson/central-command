@@ -17,8 +17,8 @@ Mechanical guards (all tested):
   and is refused orchestration; assign targets must be ACTIVE taskable roster
   agents and never the orchestrator itself.
 - PLAN FIRST: assign_work is refused until a submitted plan is APPROVED
-  (the operator, 2026-07-24: plan review ON).
-- STALL, NOT BUDGETS (the operator, 2026-07-24): consecutive no-progress/looping
+  (The operator, 2026-07-24: plan review ON).
+- STALL, NOT BUDGETS (The operator, 2026-07-24): consecutive no-progress/looping
   rounds force an operator question instead of another round; generous
   config-only caps (rounds/fanout) exist purely as runaway-token backstops
   and escalate the same way.
@@ -255,7 +255,7 @@ async def _park_stalled(
     task: dict, session_id: str, result, state: dict, calls, reason: str,
     ledger: list[dict],
 ) -> dict:
-    """The stall escalation (the operator: pause when stuck, never silently retry):
+    """The stall escalation (The operator: pause when stuck, never silently retry):
     the requested calls are NOT executed; ONE operator item carries the reason
     and the ledger, and every pending call resumes with the operator's answer."""
     from central_command.runtime.durable import dump_run_state

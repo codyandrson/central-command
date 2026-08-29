@@ -14,7 +14,7 @@ create table if not exists agent (
 -- Roster as data (Phase 4, D24). The agent row IS the roster entry: membership,
 -- taskability/consultability/conversational lanes, recorded deviations from
 -- uniform management, and the lifecycle status. Hire/retire is a DIRECT
--- operator action with an event-log record (the operator, 2026-07-22) — internal
+-- operator action with an event-log record (The operator, 2026-07-22) — internal
 -- state, not a world write, so no proposal gate. History (sessions, charters,
 -- events, grants) is keyed by agent_id and never deleted; retire is a status
 -- flip with a recorded reason.

@@ -56,7 +56,7 @@ PROJECT_TOOLS = frozenset({"submit_plan", "assign_work", "record_progress"})
 # a pure-advice consult still returns text inline and never reaches here. The
 # asker then waits for the specialist's whole chain (decision + its closing
 # turn) exactly as `ask_operator` waits for the operator: a consult that
-# returned before the answer existed was not a collaboration (the operator, 2026-08-13).
+# returned before the answer existed was not a collaboration (The operator, 2026-08-13).
 CONSULT_TOOLS = frozenset({"consult_agent"})
 
 

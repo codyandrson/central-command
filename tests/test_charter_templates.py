@@ -54,7 +54,7 @@ def _shipped_charters():
 
 def test_placeholder_fills_and_unknown_raises():
     assert t.render_charter("hi <<operator_name>>", packs=(),
-                            values={"operator_name": "the operator"}) == "hi the operator"
+                            values={"operator_name": "Lee"}) == "hi Lee"
     with pytest.raises(ValueError, match="unknown placeholder"):
         t.render_charter("hi <<no_such_thing>>", packs=())
 

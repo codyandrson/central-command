@@ -267,7 +267,7 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
     transcript = _transcript_text(await repo.get_session_run_state(session_id))
     if not transcript.strip():
         return  # nothing to learn from, so nothing is written
-    # Scope limits (the operator, 2026-08-05, re-enabling after the review-load
+    # Scope limits (The operator, 2026-08-05, re-enabling after the review-load
     # shutdown): a trivial session teaches nothing durable, and an agent that
     # cannot propose episodes anyway no longer buys a distill call — that also
     # skips its nominations, a deliberate narrowing to the graph-propose

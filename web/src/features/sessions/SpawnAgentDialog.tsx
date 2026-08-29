@@ -32,7 +32,7 @@ interface SpawnAgentDialogProps {
 
 /**
  * The chat page's "+" — start a conversation with a teammate. That is all it
- * does (the operator, 2026-07-25, the management split).
+ * does (The operator, 2026-07-25, the management split).
  *
  * It used to do three jobs; the other two moved to where they belong:
  *

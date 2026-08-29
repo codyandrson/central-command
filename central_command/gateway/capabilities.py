@@ -452,7 +452,7 @@ REGISTRY: list[Capability] = [
             "Create a first-class Task assigned to a named agent, proposed by "
             "an agent and approved by the operator. The first capability that "
             "acts on Central Command's own work queue rather than an external "
-            "system. `agent_id` is the assignee (the operator, 2026-07-25): an agent "
+            "system. `agent_id` is the assignee (The operator, 2026-07-25): an agent "
             "may propose work FOR another agent, and the operator's approval "
             "is the delegation — a deliberate widening of D7's star shape, "
             "where agent-to-agent delegation otherwise runs only through the "
@@ -1488,7 +1488,7 @@ POLICIES: list[Policy] = [
             "refused orchestration; the orchestrator is never an assignment "
             "target), assign_work refused before an operator-APPROVED plan "
             "(D7-P), consecutive no-progress rounds park an operator question "
-            "instead of another round (the operator 2026-07-24: stall detection, not "
+            "instead of another round (The operator 2026-07-24: stall detection, not "
             "budgets; caps are runaway backstops only)"
         ),
         guard="tests/test_orchestration.py::test_stall_escalates_to_operator_instead_of_looping",

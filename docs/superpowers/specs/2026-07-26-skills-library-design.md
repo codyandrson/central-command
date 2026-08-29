@@ -1,6 +1,6 @@
 # The Skills Library — design
 
-_Status: approved in brainstorming 2026-07-26 (the operator). Precedes the implementation plan._
+_Status: approved in brainstorming 2026-07-26 (The operator). Precedes the implementation plan._
 
 ## Why
 
@@ -92,7 +92,7 @@ database for storage**:
 ### Skills may carry executable capability
 
 An earlier draft of this design forbade skills from carrying anything executable. That was
-wrong and is explicitly rejected (the operator, 2026-07-26): approval is a per-agent design choice,
+wrong and is explicitly rejected (The operator, 2026-07-26): approval is a per-agent design choice,
 not an architectural law, and over-restricting limits the system's potential for no gain.
 
 What is preserved is narrower and unrelated to approval: **anything an agent can do must be
@@ -369,7 +369,7 @@ clicks.
 3. **Gap declaration** — structured tool, events, substring match deleted with its guard.
 4. **Gate model** — `agent_capability_gate`, `resolve_gate`, auto-approve path for ungated
    capabilities, maximum-gate declaration in the registry.
-5. **Cockpit** — Skills screen, folder import, gap queue. the operator validates by clicking.
+5. **Cockpit** — Skills screen, folder import, gap queue. The operator validates by clicking.
 
 Later slices, out of scope here: folding packs into skills (`skill_tool` table, retiring
 `agent_grant` behind the same resolution seam); agent-proposed skill edits; the Governance

@@ -248,7 +248,7 @@ async def test_signals_are_newest_first_capped_and_dated():
     assert len(signals) <= 50
 
 
-# --- the rework (the operator): operator-curated inputs + diff review -----------------
+# --- the rework (The operator): operator-curated inputs + diff review -----------------
 
 
 async def test_only_selected_signals_feed_the_session():

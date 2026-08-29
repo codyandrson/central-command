@@ -49,7 +49,7 @@ async def test_read_tool_formats_facts_with_validity(monkeypatch):
             {"fact": "TASKS-12 due date moved to Aug 20.", "valid_at": "2026-08-20T00:00:00Z"},
             {"fact": "Old date was Aug 6.", "invalid_at": "2026-07-17T00:00:00Z"},
             {
-                "fact": "the operator worked at Initech.",
+                "fact": "Lee worked at Initech.",
                 "valid_at": "2011-06-06T00:00:00Z",
                 "invalid_at": "2022-09-01T00:00:00Z",
             },
@@ -65,7 +65,7 @@ async def test_read_tool_formats_facts_with_validity(monkeypatch):
     # A fact with both bounds renders its whole window — how an agent tells a
     # FORMER employer from a wrong fact.
     assert (
-        "the operator worked at Initech. [SUPERSEDED as of 2022-09-01T00:00:00Z"
+        "Lee worked at Initech. [SUPERSEDED as of 2022-09-01T00:00:00Z"
         ", was valid from 2011-06-06T00:00:00Z — historical, no longer current]" in out
     )
 
@@ -78,7 +78,7 @@ async def test_read_tool_stamps_steward_attribution_on_facts_from_a_domain_group
     async def fake_search(query, max_facts=8, agent_id=None):
         return [
             {"fact": "TASKS-12 is a Jira issue.", "group_id": "domain_jira"},
-            {"fact": "the operator's birthday is in June.", "group_id": "central_command"},
+            {"fact": "Lee's birthday is in June.", "group_id": "central_command"},
         ]
 
     async def fake_steward_map():
@@ -88,7 +88,7 @@ async def test_read_tool_stamps_steward_attribution_on_facts_from_a_domain_group
     monkeypatch.setattr(graphiti, "steward_map", fake_steward_map)
     out = await tools.search_knowledge_graph(None, "TASKS-12")
     assert "TASKS-12 is a Jira issue. [domain: domain_jira — steward: jira-expert]" in out
-    assert "the operator's birthday is in June." in out
+    assert "Lee's birthday is in June." in out
     assert "[domain: central_command" not in out
 
 

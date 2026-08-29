@@ -1,6 +1,6 @@
 # Bulk dismissal — chewing the 105k archive without 105k decisions
 
-**Date:** 2026-08-17 · **Status:** decided (the operator approved the recommendation
+**Date:** 2026-08-17 · **Status:** decided (The operator approved the recommendation
 in-session) · **Problem:** the full Gmail archive (105,222 UNPROCESSED refs,
 enrolled 2026-08-12) drains one claim at a time; most of it is bulk mail that
 deserves one decision per *pattern*, not per message.

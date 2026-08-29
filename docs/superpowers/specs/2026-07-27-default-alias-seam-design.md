@@ -7,7 +7,7 @@
 > and is still the reference for why neither the adaptive router nor the
 > complexity classifier is usable. Its *proposal* — Central Command routed by a
 > quality router — is withdrawn. **Routing logic is deferred to LiteLLM and is
-> the operator's to manage; this spec builds only the seam that makes that possible.**
+> The operator's to manage; this spec builds only the seam that makes that possible.**
 
 ## The decision
 
@@ -27,7 +27,7 @@ Two constraints from the operator, both binding:
 ## Why this and not a router
 
 The cost case for routing does not survive contact with the spend data. Splitting
-the operator's Claude Code CLI passthrough (Max-subscription, $0 real) from agent traffic,
+The operator's Claude Code CLI passthrough (Max-subscription, $0 real) from agent traffic,
 over the 14 days to 2026-07-27:
 
 | source | calls | spend |
@@ -174,7 +174,7 @@ LiteLLM only, Central Command untouched:
 Central Command, only after step 3:
 
 4. `CC_DEFAULT_MODEL=anthropic:cc-default`; restart `cc-uvicorn`; run one real
-   agent turn (the operator drives the UI — a chat turn to any conversational agent is
+   agent turn (The operator drives the UI — a chat turn to any conversational agent is
    enough); confirm in `LiteLLM_SpendLogs` that the row has
    `model_group = 'cc-default'` and `model = 'openai/qwen3-coder-next'`.
    Rollback is one `.env` line plus a restart.
@@ -209,7 +209,7 @@ Cleanup:
 
 ## AS BUILT — 2026-07-27, and it is smaller than this spec
 
-the operator cut the scope on sight: *"I don't want to redesign anything at all. Just
+The operator cut the scope on sight: *"I don't want to redesign anything at all. Just
 update our models to use cc-default, and ensure new models use that as a
 default. No prohibition on different models in the future, nothing else."*
 
@@ -248,7 +248,7 @@ The reduced version is the one to trust. This spec's *evidence* and its
 ## Out of scope, deliberately
 
 - **Routing logic of any kind.** No quality router, no complexity classifier, no
-  Auto Router. the operator's direction is Auto-Router-shaped and is future work.
+  Auto Router. The operator's direction is Auto-Router-shaped and is future work.
 - **Stripping the inert tiers/strengths** from the five existing model
   declarations. They are applied and harmless; re-deciding them is part of
   choosing a router.

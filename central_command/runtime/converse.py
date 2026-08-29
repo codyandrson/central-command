@@ -9,7 +9,7 @@ Decisions Inbox and gates exactly like any other proposal — and when that
 decision resolves, the gateway returns the session to AWAITING_OPERATOR so the
 conversation CONTINUES (Option C). The operator ends the conversation explicitly.
 
-EVERY active roster agent has this lane (the operator, 2026-07-25): the chat page is
+EVERY active roster agent has this lane (The operator, 2026-07-25): the chat page is
 where you talk to the team, and talking changes nothing on its own. The trust
 boundary holds: this module never imports the gateway; a mid-conversation
 proposal is decided through the same gated route as everything else — including

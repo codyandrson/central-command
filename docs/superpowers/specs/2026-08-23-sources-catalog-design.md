@@ -11,7 +11,7 @@ two layers around it. Implementation is not planned here; the slice order is._
 
 ## Why this record exists
 
-the operator's end goals are three: (1) agents keep up with all email, backlog
+The operator's end goals are three: (1) agents keep up with all email, backlog
 included, with tasks tracked and knowledge in the graph — largely built;
 (2) a **central library/index** of every document across drives, Confluence
 spaces, SharePoint and email — versions, locations, currency, tags — navigable
@@ -81,7 +81,7 @@ descending order of how much work they delete:
 
 The funnel is three tiers: deterministic (free) → agent triage with auditor
 concurrence (cheap) → operator review (disagreements and material proposals
-only). the operator's expected "velocity increases as we work the backlog" is
+only). The operator's expected "velocity increases as we work the backlog" is
 structural, not hopeful: every processed document widens the deterministic
 tier's catch.
 

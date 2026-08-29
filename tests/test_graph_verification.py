@@ -481,7 +481,7 @@ async def test_create_edge_carries_the_validity_window(monkeypatch):
     try:
         await executor.HANDLERS["graph.create_edge"](
             {"source_uuid": "n1", "target_uuid": "n2", "name": "OWNED",
-             "fact": "the operator owned the roadster from 2011 until 2022",
+             "fact": "Lee owned the roadster from 2011 until 2022",
              "valid_at": "2011-06-01T00:00:00Z", "invalid_at": "2022-03-01T00:00:00Z",
              "verification_id": original["id"]},
             approver="human:lee", proposer="graph-curator")

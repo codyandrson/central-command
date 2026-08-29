@@ -31,7 +31,7 @@ from central_command.db import repo
 # The action classes graduated so far. Anything else the auditor ever covers
 # gets its own class name, its own shadow period, and its own revocable flag.
 AUDIT_ACTION_CLASS = "dismissal.confirm"
-# Bulk dismissals, graduated 2026-08-17 by explicit operator decision (the operator):
+# Bulk dismissals, graduated 2026-08-17 by explicit operator decision (The operator):
 # same shape one rung up — triage proposes the pattern, the auditor is the
 # secondary check, agreement executes and only DISAGREEMENT reaches the
 # operator. Same off switch (`CC_AUDITOR_ENABLED` / `CC_AUDITOR_MODE=active`)

@@ -1551,7 +1551,7 @@ async def enroll_work_item(
 # Proposal statuses that still OWE the world a change — undecided, or decided
 # but not yet executed (RETRY_PENDING is an approved execution parked by an
 # outage). The relatedness lock holds until none remain: "the next related item
-# starts after the actions are ACCOMPLISHED, not after the verdict" (the operator,
+# starts after the actions are ACCOMPLISHED, not after the verdict" (The operator,
 # 2026-08-19). Interpolated into the claim queries and the semantic gate's
 # comparison set so the three can never drift.
 _UNEXECUTED_PROPOSALS = "('AWAITING_HUMAN', 'APPROVED', 'EXECUTING', 'RETRY_PENDING')"

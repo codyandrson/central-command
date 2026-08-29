@@ -1,6 +1,6 @@
 """The team roster — the ONE place an agent joins the team.
 
-the operator's rule (2026-07-20): every agent is managed through the same standard
+The operator's rule (2026-07-20): every agent is managed through the same standard
 processes — roster registration, M11-governed charter, D5 coaching — unless a
 recorded reason says otherwise. Since D24 (2026-07-22) the roster is DATA:
 `agent` table rows are the membership truth, hire/retire is a direct operator
@@ -216,7 +216,7 @@ async def team_section(agent_id: str) -> str:
 
 
 async def conversational_agent_ids() -> tuple[str, ...]:
-    """EVERY active roster agent (the operator, 2026-07-25 — the management split).
+    """EVERY active roster agent (The operator, 2026-07-25 — the management split).
 
     Chattability stopped being a per-agent property when the chat page became
     the place you talk to the team: a teammate you cannot talk to is a strange

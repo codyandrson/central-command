@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # tool call arrived unterminated, could not be parsed, and the coach run
     # died after four identical retries (2026-07-28, the first live coach test).
     #
-    # Sized to THE DEPLOYMENT, not to the job (the operator, 2026-07-28): the serving
+    # Sized to THE DEPLOYMENT, not to the job (The operator, 2026-07-28): the serving
     # model is qwen3.6-27b on the workstation, where llama.cpp reports
     # n_ctx = 262144 per slot and sets no output cap of its own (n_predict
     # defaults to unlimited, bounded only by remaining context). So this is the
@@ -170,7 +170,7 @@ class Settings(BaseSettings):
     # No instance-specific default (2026-08-21, sibling of rehearsal finding
     # F11): a gift install must never point at the operator's Jira. Unset + jira packs
     # granted = reads fail loudly with a URL-shaped error, which is the honest
-    # state. the operator's instance sets this in .env.
+    # state. The operator's instance sets this in .env.
     jira_base_url: str = ""
     jira_email: str = ""
     jira_api_token: str = ""
@@ -242,7 +242,7 @@ class Settings(BaseSettings):
     # Native Confluence client, Phase 1 read-only (D-confluence). Same giftable
     # convention as jira_base_url above: no instance-specific default, so a
     # gift install never points at the operator's Confluence — unset + a confluence
-    # pack granted means reads fail loudly with a URL-shaped error. the operator's
+    # pack granted means reads fail loudly with a URL-shaped error. The operator's
     # instance sets these in .env.
     confluence_base_url: str = ""
     confluence_email: str = ""
@@ -432,7 +432,7 @@ class Settings(BaseSettings):
 
     # The ATTENTION BUDGET (teaming doctrine, Decision 4): how many times a day
     # the EA may open a conversation with the operator unprompted. The dial is
-    # the operator's and the default errs LOW — the notification-budget evidence puts
+    # The operator's and the default errs LOW — the notification-budget evidence puts
     # total unsolicited agent contact at ~3-5/day before fatigue, and three
     # scheduled kinds (morning report, check-in, digest) cost one each.
     # 0 = unlimited, and every other agent's budget IS 0 — this is a per-agent

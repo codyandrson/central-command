@@ -7,7 +7,7 @@ pipeline (user story 4). Implementation is not planned here._
 
 ## Why this record exists
 
-the operator's story 5 asked whether the answer is Skills, capability packs, MCP
+The operator's story 5 asked whether the answer is Skills, capability packs, MCP
 servers, RAG, something else, or several. The answer is **several, and they are
 not competitors** — the system already runs all four layers; what was missing
 was the doctrine saying which knowledge goes where. Without it, "standards",

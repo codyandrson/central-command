@@ -1,6 +1,6 @@
 """Hire templates (D24) — how an agent joins the team in seconds.
 
-A template is a STARTING CAPABILITY LOADOUT, never an agent type (the operator,
+A template is a STARTING CAPABILITY LOADOUT, never an agent type (The operator,
 2026-07-23): a charter skeleton (rendered with the agent's name and mission),
 the default capability-pack grants, and the lifecycle flags. Every hire is the
 same kind of thing — a full roster member, coachable from day one — and
@@ -362,7 +362,7 @@ ACCOUNTABILITY_TEMPLATE = HireTemplate(
     # operator decision — but goal->work origination from check-in evidence
     # remains THIS agent's job, with its citation duty.)
     # jira-read + calendar-read added 2026-08-18 (evidence at check-in time,
-    # the operator): the agent reads what the calendar and the board actually show for
+    # The operator): the agent reads what the calendar and the board actually show for
     # a line before asking, and cites it — ungated reads, no new writes.
     default_packs=("loe-propose", "ask-operator", "task-propose", "consult",
                    "jira-read", "calendar-read"),

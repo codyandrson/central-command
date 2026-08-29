@@ -2,7 +2,7 @@
  * cc-tokens — the cockpit usage panel, showing LiteLLM's numbers.
  *
  * LiteLLM is Central Command's system of record for usage tracking and spend
- * limits (the operator, 2026-07-22) — this adapter only relays its figures via
+ * limits (The operator, 2026-07-22) — this adapter only relays its figures via
  * Central Command's /api/usage. It replaces Nerve's transcript-scanning
  * tokens route; nothing is re-derived or persisted here. Coverage note:
  * these are the proxy's numbers, i.e. traffic routed through LiteLLM.

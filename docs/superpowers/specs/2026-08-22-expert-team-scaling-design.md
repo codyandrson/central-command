@@ -10,7 +10,7 @@ of its lines (named below); everything else in that record stands._
 ## Why this record exists
 
 The jira-expert/confluence-expert pattern works: a practice charter, domain
-packs, `consultable`+`taskable`, and dual consultation/direct-task modes. the operator
+packs, `consultable`+`taskable`, and dual consultation/direct-task modes. The operator
 wants that pattern to generalize — experts per work system, each stewarding
 deep domain knowledge that generalist agents tap by consulting rather than
 guessing (the anti-Dunning-Kruger goal). The blockers were discovery (only the
@@ -65,7 +65,7 @@ the written doctrine: a consulted specialist keeps `consult_agent` and may
 open at most one consult of its own, with the consult chain threaded through
 deps and refused mechanically at depth >2, on cycles (anyone already in the
 chain), and on self-consult. The by-construction guarantee is replaced by an
-explicit runtime check plus guard tests. the operator owns the revert to depth-1 if
+explicit runtime check plus guard tests. The operator owns the revert to depth-1 if
 it misbehaves in practice.
 
 ## Decision 4 — Consults stay single-shot; continuity is caller-carried

@@ -1,6 +1,6 @@
 # Local model serving + embedding migration — design
 
-> Status: design approved 2026-07-26 (the operator). Not yet planned or implemented.
+> Status: design approved 2026-07-26 (The operator). Not yet planned or implemented.
 > Companion spec: `2026-07-26-adaptive-routing-that-learns-design.md`.
 > Hold until that spec's Units 1–2 have landed.
 
@@ -138,10 +138,10 @@ Chosen over the 0.6B (1024-dim, weaker retrieval) on the operator's call, and ov
 because it trades retrieval quality for storage that is irrelevant at ~60
 entities; if that ever changes, it is a re-embed like any other dimension change.
 
-> **SUPERSEDED 2026-07-26 (the operator): the deployed model is `Qwen3-Embedding-0.6B`
+> **SUPERSEDED 2026-07-26 (The operator): the deployed model is `Qwen3-Embedding-0.6B`
 > at f16, 1024 dimensions — not the 4B.**
 >
-> What changed is the requirement, not the reasoning above. the operator made
+> What changed is the requirement, not the reasoning above. The operator made
 > third-party failover an explicit goal *after* this spec was approved: the
 > local model must be one a paid provider also serves, so an offline
 > workstation degrades rather than stops. That makes precision a correctness
@@ -226,7 +226,7 @@ powered on. They previously depended on OpenAI, which has better uptime than a
 desktop. This is a real availability regression on the graph write path.
 
 It is correct by the fail-and-retry rule — episodes queue rather than corrupt —
-but it means the Pi's standalone guarantee no longer covers graph writes. the operator
+but it means the Pi's standalone guarantee no longer covers graph writes. The operator
 accepted this explicitly on 2026-07-26, with a second same-weights host (other
 hardware, or a provider serving identical weights such as
 `Qwen/Qwen3-Embedding-4B` on DeepInfra) deferred as a later, non-urgent addition.
@@ -235,7 +235,7 @@ Provenance stamping is what keeps that honest and makes the eventual fallback
 safe to add without rework: any same-weights host must pass the interchangeability
 checklist above, and a mismatch becomes detectable instead of silent.
 
-Explicitly **not** pursued: hosting the embedder on the Pi. the operator ruled it out —
+Explicitly **not** pursued: hosting the embedder on the Pi. The operator ruled it out —
 the Pi has 4 cores shared with k3s and Graphiti already runs at
 `SEMAPHORE_LIMIT: 3`.
 

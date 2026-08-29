@@ -171,7 +171,7 @@ export default function App({ onLogout }: AppProps) {
     return false;
   })();
 
-  // File browser: DEFERRED, hidden until needed (the operator, 2026-07-23) — Nerve's
+  // File browser: DEFERRED, hidden until needed (The operator, 2026-07-23) — Nerve's
   // browser expects per-agent workspace directories, which Central Command does
   // not have; every governed artifact already has a first-class surface
   // (charters, memory panel, transcripts). Flip this flag when agents start

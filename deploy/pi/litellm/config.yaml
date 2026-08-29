@@ -11,7 +11,7 @@
 # docs/superpowers/specs/2026-07-26-quality-router-migration-design.md
 
 # ── Claude Code on the Max subscription (2026-07-26) ─────────────────────────
-# the operator's `claude` CLI routes through this proxy so its usage lands in the spend
+# The operator's `claude` CLI routes through this proxy so its usage lands in the spend
 # logs next to Central Command's. It needs NO model entries here: it uses the built-in
 # /anthropic/* PASSTHROUGH route, which forwards the request verbatim to
 # api.anthropic.com under the caller's OWN credentials and logs usage from the

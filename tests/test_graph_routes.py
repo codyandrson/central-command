@@ -87,7 +87,7 @@ async def _ok(value):
 
 async def test_graph_neighborhood_wire_shape(monkeypatch):
     canned = {
-        "nodes": [{"uuid": "n1", "name": "the operator", "labels": ["Entity"],
+        "nodes": [{"uuid": "n1", "name": "Lee", "labels": ["Entity"],
                    "summary": "s", "group_id": "main"}],
         "edges": [{
             "uuid": "e1", "source": "n1", "target": "n2", "name": "USED_FOR",

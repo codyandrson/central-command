@@ -23,7 +23,7 @@ const AGENT_EVENT_PREFIXES = [
  * no-displacement rule); a refresh may change a row's contents, never its seat.
  * This page is the ROSTER, so it stays scannable by name; "who is working" is
  * the AGENTS sidebar's job, and the `N active` badge answers it here without
- * moving anything (the operator, 2026-08-19).
+ * moving anything (The operator, 2026-08-19).
  *
  * The 60s poll is slower than the inbox's 30s on purpose: a roster changes when
  * the operator changes it, so pushes carry the load and the poll is a backstop.

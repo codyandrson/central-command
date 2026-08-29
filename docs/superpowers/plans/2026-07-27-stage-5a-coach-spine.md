@@ -1570,7 +1570,7 @@ git status -sb   # must read '## master...origin/master' with no 'ahead'
 
 ---
 
-## Live validation (the operator — not an agent step)
+## Live validation (The operator — not an agent step)
 
 Claude sets up state and verifies via API/tests; the operator performs the clicks.
 

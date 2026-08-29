@@ -67,7 +67,7 @@ ANSWER_CEILING = _MODEL_TEXT_CEILING
 log = logging.getLogger(__name__)
 
 # How many model requests one consultation may make. A loop-breaker, not a
-# cost control (the operator, 2026-08-05: inference is entirely self-hosted, so the
+# cost control (The operator, 2026-08-05: inference is entirely self-hosted, so the
 # budget guards runaway loops and nothing else) — raised from 10 after a real
 # convention-review consult exhausted the old bound doing legitimate reads.
 REQUEST_LIMIT = 100

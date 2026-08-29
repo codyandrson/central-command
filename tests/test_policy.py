@@ -199,7 +199,7 @@ def test_a_dateless_episode_is_flagged_for_the_reviewer():
     LEARNED read as newly TRUE. The reviewer decides with that visible."""
     flags = policy.check_actions([{
         "capability": "graph.add_episode@v1",
-        "arguments": {"episode_body": "Bonnie Doe is the cousin of the operator."},
+        "arguments": {"episode_body": "Bonnie Doe is the cousin of Lee."},
     }])
     assert len(flags) == 1
     assert flags[0]["policy"] == "episodes-carry-their-time"
@@ -208,12 +208,12 @@ def test_a_dateless_episode_is_flagged_for_the_reviewer():
 
 def test_an_episode_stating_its_time_is_clean():
     for body in (
-        "the operator worked at Initech from June 2011 until September 2022.",
+        "Lee worked at Initech from June 2011 until September 2022.",
         "Melody Doe has worked for Prairie Home Services since May 2023.",
         "The TASKS-12 due date moved to 2026-08-20.",
         # The pack guidance's honest-uncertainty forms count as stated time.
-        "Jane is the operator's mother (long-standing).",
-        "the operator owns a 1996 Volvo 850; start date unknown.",
+        "Jane is Lee's mother (long-standing).",
+        "Lee owns a 1996 Volvo 850; start date unknown.",
     ):
         assert policy.check_actions([{
             "capability": "graph.add_episode",
