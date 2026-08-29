@@ -257,7 +257,9 @@ sudo systemctl enable --now cc-backup.timer cc-update.path
 - **cc-update** (2026-08-28) — the cockpit's one-click updater. The badge's
   "Apply update now" writes `/run/cc-update/trigger`; `cc-update.path` starts
   the root one-shot `cc-update.service` → `deploy/k3s/cc-update.sh`, which
-  version-gates, dumps the spine DB, stops the services, merges the release
+  version-gates, dumps the spine/litellm/n8n DBs plus their decryption keys
+  (Neo4j is out of scope — nightly `cc-backup.timer` covers it), stops the
+  services, merges the release
   tag, applies schema, rebuilds AS codyslab, restarts, health-checks, and
   **rolls back automatically** (reset to the pre-update tag + rebuild) if the
   new version is unhealthy. Status: `/var/lib/cc-update/status.json` (what

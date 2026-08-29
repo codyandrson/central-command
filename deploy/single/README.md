@@ -201,7 +201,8 @@ real completion and checks that the embedding endpoint actually returns
 transport in is a **source zip downloaded from the public repo** (Code →
 Download ZIP, or `…/archive/refs/heads/master.zip`). Same output protocol and
 philosophy as `setup.sh`: every subcommand is idempotent, `PASS|WARN|FAIL`
-lines on stdout, exit 0/1/2, resume is re-run.
+lines on stdout, exit 0/1/2/3 (3 = paused for your explicit go-ahead), resume
+is re-run.
 
 It works by making the deployment tree a git repo with two branches:
 `upstream` holds pristine imports (one commit per downloaded zip), `local` is
@@ -235,7 +236,7 @@ spine **before** the code goes live (the schema is additive-only and fully
 idempotent, so old code tolerates new columns — a failed migration stops the
 update with the old code still running), then `./setup.sh app` (deps from
 `requirements.lock`, honoring `CC_AIRGAP`; cockpit rebuild), then
-`./setup.sh verify`. It always ends with `WARN restart-required` (exit 2): a
+`./setup.sh verify`. It always ends with a `USERACTION restart` (exit 3): a
 merged change is not live until you restart your uvicorn API (and the sandbox
 runner, if you run one).
 

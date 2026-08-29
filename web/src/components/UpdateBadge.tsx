@@ -182,9 +182,10 @@ export function UpdateBadge() {
               <p>
                 The cockpit never updates itself: this hands off to the external
                 cc-update helper (a root one-shot systemd unit), which backs up
-                the spine database, applies v{versionInfo.latest}, rebuilds,
-                restarts the services, health-checks, and <b>rolls back
-                automatically</b> if the new version is unhealthy.
+                the spine, LiteLLM and n8n databases (plus their decryption
+                keys), applies v{versionInfo.latest}, rebuilds, restarts the
+                services, health-checks, and <b>rolls back automatically</b> if
+                the new version is unhealthy.
               </p>
             </div>
             <details className="text-xs text-muted-foreground">

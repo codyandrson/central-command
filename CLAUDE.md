@@ -130,7 +130,19 @@ architecture where the leak was measured.
   from `deploy/pi/.env` — imperative on purpose, so no base64'd secret ever
   lands in the repo), `build-graphiti-image.sh`, `migrate-from-docker.sh`
   (supports `DUMP_ONLY=1` to rehearse), `verify.sh` (32 assertions incl.
-  placement, PVC binding, and both decryption keys).
+  placement, PVC binding, and both decryption keys), `cc-update.sh` +
+  `cc-update.path`/`cc-update.service`/`cc-update-tmpfiles.conf` (the cockpit's
+  one-click updater — see the update-scope note below).
+- **`cc-update.sh` updates code, schema, and the two systemd-managed
+  processes ONLY.** It `git merge`s a release tag, reapplies `schema.sql`, and
+  restarts `cc-uvicorn`/`cc-sandbox-runner`/`cc-nerve` — it never runs
+  `kubectl apply` on `deploy/k3s/*.yaml` and never rebuilds/repushes
+  `cc-graphiti`/`cc-sandbox`/`cc-crawler` images, on either node. A release
+  that changes a manifest or needs a rebuilt image needs a manual
+  `kubectl apply -f deploy/k3s/` + per-node image rebuild pass; the updater
+  gives no warning that this step was skipped. This is the k3s counterpart to
+  `deploy/single/update.sh`, but scoped narrower — it does not implement the
+  two-branch (`local`/`upstream`) git model that script uses.
 - **Never change `LITELLM_SALT_KEY` or `N8N_ENCRYPTION_KEY`.** They encrypt the
   stored LiteLLM virtual keys and the Gmail OAuth credential respectively; a
   restore under a different key leaves the rows present but undecryptable.
@@ -727,10 +739,11 @@ deploy/k3s/   THE deployment (2026-07-31): README.md is the CLEAN-INSTALL
               scripts (init-env.sh, make-secrets.sh, mint-keys.sh,
               build-graphiti-image.sh, build-sandbox-image.sh, build-crawler-image.sh,
               make-sandbox/mcp/litellm-kubeconfig.sh, install-gvisor.sh,
-              migrate-from-docker.sh, backup.sh, graph-browse.sh, verify.sh),
-              registries.yaml.example (containerd mirror seam), and the units
-              (cc-uvicorn, cc-sandbox-runner, cc-graph-bolt,
-              cc-backup.service/.timer).
+              migrate-from-docker.sh, backup.sh, cc-update.sh, graph-browse.sh,
+              verify.sh), registries.yaml.example (containerd mirror seam), and
+              the units (cc-uvicorn, cc-sandbox-runner, cc-graph-bolt,
+              cc-backup.service/.timer, cc-update.path/.service +
+              cc-update-tmpfiles.conf — code/schema-only, see above).
 deploy/AIRGAP.md + airgap.env.example
               the air-gap/mirror seam doc: pip/uv/npm/container-registry
               overrides, what still needs pre-staging. Read it FIRST for any

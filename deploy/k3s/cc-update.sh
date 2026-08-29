@@ -14,14 +14,22 @@
 #
 #   Pipeline (no-op exits BEFORE any mutation):
 #     resolve target (highest semver tag on origin, fetched) -> version gate
-#     (no downgrade, min_upgrade_from honored) -> checkpoint tag -> spine DB
-#     dump -> stop cc-uvicorn + cc-sandbox-runner (cc-nerve stays up serving
-#     progress; restarted last) -> merge the tag -> schema (additive-only,
-#     idempotent) -> pip + cockpit rebuild AS codyslab (root-owned files in
-#     the checkout break every later build) -> start services -> health poll
-#     -> on failure: git reset --hard to the checkpoint, rebuild, restart,
-#     re-poll — the rolled_back state is honest about what schema kept
-#     (additive-only means old code runs fine against it).
+#     (no downgrade, min_upgrade_from honored) -> checkpoint tag -> DB dumps
+#     (spine, litellm, n8n + the two decryption keys — see below) -> stop
+#     cc-uvicorn + cc-sandbox-runner (cc-nerve stays up serving progress;
+#     restarted last) -> merge the tag -> schema (additive-only, idempotent)
+#     -> pip + cockpit rebuild AS codyslab (root-owned files in the checkout
+#     break every later build) -> start services -> health poll -> on
+#     failure: git reset --hard to the checkpoint, rebuild, restart, re-poll
+#     — the rolled_back state is honest about what schema kept (additive-only
+#     means old code runs fine against it).
+#
+#   DB-dump scope deliberately excludes Neo4j: dumping it means scaling
+#   cc-graphiti/cc-neo4j to 0 on the CHROMEBOX (backup.sh's scale-down/dump/
+#   scale-up cycle), which this update never touches or migrates and which
+#   would add real downtime to an already-live rollout. The nightly
+#   `cc-backup.timer` covers Neo4j DR; this pre-update dump is only for the
+#   three stores an update can actually put in a bad state.
 #
 #   Status: /var/lib/cc-update/status.json, written ATOMICALLY (tmp + mv) at
 #   every phase change — the UI re-reads it after its own restart; the full
@@ -39,6 +47,11 @@ REQUEST="$RUNDIR/request.json"
 BACKUPS=/home/codyslab/cc-backups
 K=(k3s kubectl -n central-command)
 STARTED_AT="$(date -u +%FT%TZ)"
+
+set -a
+# shellcheck disable=SC1091
+[[ -f "$REPO/deploy/pi/.env" ]] && . "$REPO/deploy/pi/.env"
+set +a
 
 note() { printf '%s\n' "$*"; }   # journald captures stdout — that IS the log
 
@@ -131,13 +144,43 @@ main() {
   "${RUNAS[@]}" git -C "$REPO" config user.email >/dev/null 2>&1 || "${RUNAS[@]}" git -C "$REPO" config user.email "update@localhost"
   "${RUNAS[@]}" git -C "$REPO" tag "$ckpt" || die checkpoint "could not tag"
 
-  PHASE_NOW=db-backup; phase "dumping the spine database"
+  PHASE_NOW=db-backup; phase "dumping spine + litellm + n8n databases"
   mkdir -p "$BACKUPS" && chmod 700 "$BACKUPS"
-  local dump="$BACKUPS/central_command_pre-update_$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
-  if ! "${K[@]}" exec deploy/cc-postgres -- pg_dump -U central_command -d central_command | gzip >"$dump" || [[ ! -s "$dump" ]]; then
-    rm -f "$dump"; die db-backup "pg_dump via kubectl failed — refusing to update without a spine backup"
-  fi
-  chown codyslab:codyslab "$dump" 2>/dev/null; chmod 600 "$dump"
+  local stamp; stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+  dump_pg() { # dump_pg <label> <deployment> <user> <db>
+    local label="$1" dep="$2" user="$3" db="$4"
+    local file="$BACKUPS/${label}_pre-update_${stamp}.sql.gz"
+    if ! "${K[@]}" exec "deploy/$dep" -- pg_dump -U "$user" -d "$db" | gzip >"$file" || [[ ! -s "$file" ]]; then
+      rm -f "$file"; return 1
+    fi
+    # A truncated dump that gunzips cleanly is the failure mode that makes
+    # people think they have backups — demand pg_dump's completion marker
+    # (same check as backup.sh; pg_dump 18 appends a \unrestrict trailer,
+    # hence tail -5, not tail -1).
+    if ! gunzip -c "$file" | tail -5 | grep -q 'PostgreSQL database dump complete'; then
+      rm -f "$file"; return 1
+    fi
+    chown codyslab:codyslab "$file" 2>/dev/null; chmod 600 "$file"
+  }
+
+  dump_pg central_command cc-postgres   central_command central_command \
+    || die db-backup "pg_dump of the spine failed — refusing to update without a backup"
+  dump_pg litellm     cc-litellm-db llmproxy    litellm \
+    || die db-backup "pg_dump of litellm failed — refusing to update without a backup"
+  dump_pg n8n         cc-n8n-db     "${N8N_DB_USER:-n8n}" "${N8N_DB_NAME:-n8n}" \
+    || die db-backup "pg_dump of n8n failed — refusing to update without a backup"
+
+  # Without these, the litellm/n8n dumps above are undecryptable ciphertext.
+  local keyfile="$BACKUPS/keys_pre-update_${stamp}.env"
+  {
+    echo "# Captured with the $stamp pre-update dumps."
+    echo "N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}"
+    echo "LITELLM_SALT_KEY=${LITELLM_SALT_KEY:-}"
+  } >"$keyfile"
+  chown codyslab:codyslab "$keyfile" 2>/dev/null; chmod 600 "$keyfile"
+  [[ -n "${N8N_ENCRYPTION_KEY:-}" && -n "${LITELLM_SALT_KEY:-}" ]] \
+    || note "WARNING: a decryption key is missing from deploy/pi/.env — the litellm/n8n dumps above would not be restorable"
 
   PHASE_NOW=stop; phase "stopping cc-uvicorn and cc-sandbox-runner"
   systemctl stop cc-uvicorn cc-sandbox-runner || die stop "systemctl stop failed"

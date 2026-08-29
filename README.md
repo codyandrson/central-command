@@ -65,13 +65,22 @@ gated, and performed against nothing until you deliberately flip
 ## Updating a deployment
 
 Updates are built for the same worst case as the install: the only transport
-in is a downloaded source zip. `deploy/single/update.sh` turns the deployment
-into a two-branch git repo (`upstream` = pristine imports, `local` = yours) so
-each update is compare-then-merge, with your local modifications preserved by
-three-way merge and a tagged rollback point:
+in is a downloaded source zip. **The human path is one command** — download
+the release zip, then:
 
 ```bash
 cd deploy/single
+./update.sh ~/Downloads/central-command-<version>.zip
+```
+
+That imports the zip, shows the version gate + plan, pauses for your explicit
+yes, and applies. Under the hood `update.sh` turns the deployment into a
+two-branch git repo (`upstream` = pristine imports, `local` = yours) so each
+update is compare-then-merge, with your local modifications preserved by
+three-way merge and a tagged rollback point. The named subcommands remain for
+granular or agent-conducted flows:
+
+```bash
 ./update.sh init            # one-time, on an existing deployment
 ./update.sh import <zip>    # commit the newly downloaded zip
 ./update.sh plan            # dry-run: what changes, what will run, conflicts

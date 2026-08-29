@@ -4,6 +4,64 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-29 — cc-update backup scope widened; update-docs audit
+
+- `deploy/k3s/cc-update.sh`'s pre-update backup now dumps the LiteLLM and n8n
+  databases alongside the spine, captures `N8N_ENCRYPTION_KEY` /
+  `LITELLM_SALT_KEY` beside them (without the keys those dumps are
+  undecryptable ciphertext), and validates every dump carries pg_dump's
+  completion marker before proceeding — a truncated dump now blocks the
+  update instead of posing as a backup. Neo4j stays deliberately out of scope
+  (nightly `cc-backup.timer` covers it; dumping it would scale the graph
+  stack down mid-update for no update-safety gain).
+- Update-process documentation audit: exit-code corrections in
+  `deploy/single/README.md` (the one-command path gates with exit 3, and a
+  successful apply ends with a `USERACTION restart`, not a WARN), the root
+  README now teaches the one-command `./update.sh <zip>` path first, the
+  cockpit's update modal describes the widened backup scope, and this
+  changelog was backfilled for v1.0.1–v1.0.3 (entries below).
+
+## 2026-08-28 — v1.0.3: `update.sh <zip>`, the one-command update path
+
+- `deploy/single/update.sh <path-to-zip>` chains
+  init → import → plan → (explicit y/n, or an exit-3 gate if headless) → apply,
+  and offers to stop a `./setup.sh boot`-started API by its own pid file
+  before applying. The named subcommands (`init`/`import`/`plan`/`apply`/
+  `rollback`) remain for granular or agent-conducted flows.
+- Fixed a bug where `cmd_import`'s cleanup trap stayed armed across later
+  function returns and could re-fire under the new one-command path with its
+  temp directory already out of scope.
+
+## 2026-08-27 — v1.0.2: one-command install-to-demo, gateway model catalog
+
+- `deploy/single/setup.sh` gained `test` (pytest gate), `boot` (starts uvicorn
+  detached, elicits `CC_OPERATOR_NAME`), and `demo` (feeds a fixture email,
+  steps the dispatcher, waits for a real operator approval in the cockpit) —
+  probing live state for idempotency rather than a state file.
+- `/api/gateway/models` added to FastAPI, fixing a 404 on the single-node
+  profile (the k3s Node server route it was missing didn't exist there).
+
+## 2026-08-27 — v1.0.1: Windows clean-install fixes
+
+- Windows-safe header piping (`curl -H @-` from stdin, not process
+  substitution) and a doc fix for which URL the container itself dials.
+- Two suite failures caught by the Windows clean-install pytest gate fixed
+  (a stale fixture scope, a symlink-attack test skipped where Windows
+  developer mode isn't available).
+
+## 2026-08-27 — cc-update: one-click apply for the k3s deployment
+
+- `deploy/k3s/cc-update.sh` + `cc-update.path`/`.service`/`-tmpfiles.conf`:
+  the cockpit's "Apply update now" writes a trigger file; a systemd `.path`
+  unit runs the updater as root. It resolves the latest (or requested) origin
+  tag, version-gates it, tags a rollback checkpoint, dumps the spine DB,
+  stops `cc-uvicorn`/`cc-sandbox-runner`, merges the tag, reapplies
+  `schema.sql`, rebuilds, restarts, and automatically rolls back on a failed
+  health check. Status is written to `/var/lib/cc-update/status.json` outside
+  the repo tree so a rollback's `reset --hard` can't clobber it.
+  Scoped to code/schema/systemd-managed processes only — it does not apply
+  Kubernetes manifests or rebuild locally-built images.
+
 ## 2026-08-27 — Zip-based update path for air-gapped deployments
 
 - `deploy/single/update.sh`: `init / import <zip> / plan / apply / rollback`.
