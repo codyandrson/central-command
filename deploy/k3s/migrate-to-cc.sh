@@ -153,8 +153,10 @@ begin;
 do \$\$
 declare r record; n bigint; total bigint := 0;
 begin
-  for r in select table_name t, column_name c, data_type d from information_schema.columns
-           where table_schema='public' and data_type in ('text','character varying','json','jsonb') loop
+  for r in select c.table_name t, c.column_name c, c.data_type d from information_schema.columns c
+           join information_schema.tables tb on tb.table_schema=c.table_schema and tb.table_name=c.table_name and tb.table_type='BASE TABLE'
+           where c.table_schema='public' and c.data_type in ('text','character varying','json','jsonb')
+             and c.is_generated='NEVER' loop
     -- one statement per pair keeps the ordering explicit
     execute format('update %I set %I = replace(%I::text, ''grandvision_'', ''central_command_'')%s where %I::text like ''%%grandvision\\_%%''',
                    r.t, r.c, r.c, case when r.d in ('json','jsonb') then '::'||r.d else '' end, r.c);
@@ -174,8 +176,9 @@ commit;
 SQL
   psql_old gv-postgres $OLD_DB $OLD_DB <<'SQL'
 do $$ declare r record; n bigint; t bigint := 0; begin
-  for r in select table_name t, column_name c from information_schema.columns
-           where table_schema='public' and data_type in ('text','character varying','json','jsonb') loop
+  for r in select c.table_name t, c.column_name c from information_schema.columns c
+           join information_schema.tables tb on tb.table_schema=c.table_schema and tb.table_name=c.table_name and tb.table_type='BASE TABLE'
+           where c.table_schema='public' and c.data_type in ('text','character varying','json','jsonb') loop
     execute format('select count(*) from %I where %I::text ~* ''grandvision|(^|[^a-z0-9_])gv[-_.:]''', r.t, r.c) into n; t := t + n;
   end loop; raise notice 'rows still carrying the old name: %', t; end $$;
 SQL
