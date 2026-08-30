@@ -74,10 +74,12 @@ agent's job is to elicit the answers, read the result, and diagnose a failure
 ```bash
 cd deploy/single
 cp env.example .env    # then fill it in — see below
-./setup.sh             # validate -> preflight -> llm -> stack -> app -> verify
+./setup.sh             # validate -> preflight -> fetch -> llm -> stack -> app -> verify
 ```
 
-What you must supply in `.env`: only the `CC_ENABLE_*` / `CC_AIRGAP` flags.
+What you must supply in `.env`: only the `CC_ENABLE_*` / `CC_AIRGAP` flags —
+and, behind a mirror or with no network, the seams under "Where every
+dependency comes from" (see below).
 Everything else is generated or measured. **The LLM provider is entered in
 the LiteLLM UI, not here:** the `llm` phase stops (exit 3) once the proxy is
 up, with the four aliases created as skeletons and the URL/login printed;
@@ -94,6 +96,33 @@ CC_LLM_BASE_URL=https://host/v1 CC_LLM_API_KEY=... ./discover-llm.sh models
 the `cc-embedding` alias and writes it back, and refuses to overwrite a
 different value that is already there. An embedder on a different server is
 just a different `api_base` on the `cc-embedding` row.
+
+### Mirrors, air gaps, and the bundle
+
+`fetch` is the only phase that needs the network, and it runs BEFORE
+anything is deployed: it pulls every image in `images.txt` by digest, builds
+the three local images (graphiti, sandbox, crawler) with your mirrors passed
+in as build-args, resolves the Python dependencies, and runs the cockpit's
+`npm ci`. Each artifact it cannot get is a `FAIL` naming the `.env` seam that
+governs it (`CC_REGISTRY_*`, `CC_APT_MIRROR`, `CC_PYPI_INDEX_URL`,
+`CC_NPM_REGISTRY`, …), and the phase ends with `USERACTION` / exit 3. Fix the
+mirror and re-run `./setup.sh fetch` — acquired artifacts fast-forward — or
+set that one artifact's `CC_SOURCE_<X>=bundle` and `CC_BUNDLE_DIR`. Nothing
+falls back on its own; the choice lives in `.env` so an update makes the
+same one.
+
+The bundle is produced on a connected machine of the same OS/arch:
+
+```bash
+./setup.sh fetch                 # acquire everything (verifies the digests)
+./bundle.sh export /media/usb/cc-bundle      # images, wheelhouse, built cockpit, MANIFEST
+```
+
+and consumed here by `fetch` through `./bundle.sh import`, which refuses a
+bundle from another release and checksum-verifies before loading. With
+`CC_SOURCE_COCKPIT=bundle` the site needs no npm at all (node ≥ 22 is still
+the cockpit's runtime). The full map of sources and seams is
+`deploy/AIRGAP.md`.
 
 ### Reading the output
 

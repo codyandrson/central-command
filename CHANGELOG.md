@@ -4,7 +4,60 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
-## 2026-08-30 — v2.1.0: setup pauses on a fresh LiteLLM catalog for the operator to enter the providers
+## 2026-08-30 — v2.2.0: the single-node setup acquires every dependency up front, from mirrors or an explicit bundle
+
+- **New `fetch` phase** (`deploy/single/setup.sh`, between `preflight` and
+  `llm`): the only phase that touches the network, and it runs before
+  anything is deployed. Images are pulled **by digest** from the new
+  manifest `deploy/single/images.txt` and tagged locally (the templates'
+  `name:tag` never triggers a pull; a mirror cannot serve a drifted or
+  poisoned tag — the k3s docs' stated reason to prefer digests); the three
+  local images are built with the operator's mirrors passed in as
+  build-args; the Python graph is resolved (`uv pip install --dry-run`); the
+  cockpit's `npm ci` runs. Every artifact that cannot be acquired is a
+  `FAIL` naming the `.env` seam that governs it, and the phase ends in
+  `USERACTION` (exit 3). `stack` now only ASSERTS the images are present.
+  `update.sh apply` runs `fetch` before the schema or the code moves.
+- **One answer file for every seam** (`deploy/single/env.example`, "Where
+  every dependency comes from"): `CC_REGISTRY_{DOCKERIO,GHCR,MCR}`,
+  `CC_APT_MIRROR` + `CC_APT_SECURITY_MIRROR`, `CC_PYPI_INDEX_URL` (fanned
+  out to `PIP_INDEX_URL` AND `UV_DEFAULT_INDEX` — uv reads no `PIP_*`
+  variable and `UV_INDEX_URL` is deprecated), `CC_PYTHON_MIRROR`,
+  `CC_NPM_REGISTRY`, and per-artifact `CC_SOURCE_<X>=mirror|bundle` with
+  `CC_BUNDLE_DIR`. Mirrors are the primary path; the bundle is the
+  operator's explicit per-artifact fallback; **nothing falls back on its
+  own** (the shape Zarf and k3s take: the artifact set is fixed in a
+  manifest, fail-loud is deliberate).
+- **Build containers get the mirrors as build-args.** The graphiti and
+  sandbox Dockerfiles REWRITE `/etc/apt/sources.list.d/debian.sources` from
+  `/etc/os-release` — the slim images ship only the deb822 file and delete
+  `sources.list`, so a sed of the classic file silently does nothing, and
+  the security archive is a separate path on every mirror needing its own
+  stanza. Registry prefix on every `FROM`; `UV_DEFAULT_INDEX` /
+  `PIP_INDEX_URL` / `NPM_CONFIG_REGISTRY` where each tool looks.
+- **The crawler is rebased on Microsoft's Playwright image**
+  (`mcr.microsoft.com/playwright/python:v1.62.0-noble`): browsers and OS
+  libraries are baked in, so the build no longer needs a Debian mirror or
+  the browser CDN (`crawl4ai-setup` runs in `CRAWL4AI_MODE=api`, which
+  skips its `playwright install --with-deps`; the build launches Chromium
+  once as its own check). `playwright==1.62.0` is pinned to the base tag;
+  fastapi/uvicorn/httpx and the sandbox's `@anthropic-ai/sandbox-runtime`
+  are pinned so a mirror rebuild produces the bytes a bundle holds.
+- **`deploy/single/bundle.sh`** export/import: every image in `images.txt`
+  under its public ref, the three local images under `localhost/cc-*`, a
+  `pip download` wheelhouse of `requirements.lock`, the built cockpit
+  (`dist`, `server-dist`, `bin-dist`, `node_modules`), a sha256 `MANIFEST`
+  and a `RELEASE` marker; import refuses another release and verifies
+  checksums before loading anything. With `CC_SOURCE_COCKPIT=bundle` the
+  site needs no npm. `deploy/airgap-image-tarballs.sh` is k3s-only now —
+  its `single` path loaded images under `docker.io/library/cc-*`, a name
+  this profile's templates never referenced.
+- `deploy/airgap.env.example` no longer offers the deprecated `UV_INDEX_URL`.
+  `deploy/AIRGAP.md` rewritten as the map of every external source and its
+  seam. `tests/test_single_airgap_seams.py` walks the five files that must
+  agree (every pulled image pinned in `images.txt`, every seam declared in
+  `env.example`, `fetch` ordered before `llm`, scripts parse).
+
 
 - **Setup no longer knows your LLM provider.** Both drivers' `llm` phase
   bring the proxy up, create every required alias as a **skeleton** in

@@ -310,6 +310,23 @@ default — changing it now buys nothing and breaks all five.
   prose with HTTP 200. The config file is the fallback for what the API
   cannot set (`litellm.apply_config_change`), never the default. Don't
   reintroduce provider values into a tracked declaration or into `.env`.
+- **The single-node install ACQUIRES before it deploys, and never falls back
+  on its own (2026-08-30).** `setup.sh fetch` is the one phase that touches
+  the network: images by digest from `deploy/single/images.txt` (tagged
+  locally, so templates' `name:tag` never pulls), the three local builds
+  with mirrors as build-args, the Python resolve, the cockpit's `npm ci` —
+  each failure names its `.env` seam and the phase exits 3. Mirror is
+  primary; `CC_SOURCE_<X>=bundle` is the operator's explicit per-artifact
+  fallback (`bundle.sh`, checksum-verified). Facts that shaped it, all from
+  current docs: uv reads no `PIP_*` and `UV_INDEX_URL` is deprecated
+  (`UV_DEFAULT_INDEX`); `npm ci --dry-run` proves nothing about
+  fetchability; Debian slim images ship ONLY deb822 `debian.sources` and
+  the security archive is a separate path (so the Dockerfiles REWRITE the
+  file from `/etc/os-release`, never sed); a docker-archive round-trip does
+  not keep the manifest-list digest (so digests live in `images.txt`, not
+  the templates); Ubuntu noble already owns uid 1000 (`userdel ubuntu`
+  before `useradd -u 1000` on the MCR crawler base). Adding an image means
+  adding its digest line — the seam test fails otherwise.
 - **LiteLLM forbids `-` in MCP server names; Kubernetes requires it.** The
   same server cannot use one name on both sides, so `mcp_server.id` stays the
   k8s-valid canonical id and the proxy sees `_litellm_server_name()`'s
@@ -808,17 +825,20 @@ deploy/k3s/   THE deployment (2026-07-31): README.md is the CLEAN-INSTALL
               cc-backup.service/.timer, cc-update.path/.service +
               cc-update-tmpfiles.conf — full release surface, see above).
 deploy/AIRGAP.md + airgap.env.example
-              the air-gap/mirror seam doc: pip/uv/npm/container-registry
-              overrides, what still needs pre-staging. Read it FIRST for any
-              mirrored or no-egress install; /setup Phase 0a points here.
+              the map of every external source and its seam (mirrors
+              primary, bundle explicit), what still needs pre-staging on
+              k3s. Read it FIRST for any mirrored or no-egress install;
+              /setup Phase 0a points here.
 deploy/single/ the GIFTABLE single-node `podman kube play` profile (2026-08-25
               deterministic-setup redesign): core spine as plain Pods (pod name =
               DNS name, no Services), user-supplied LLM endpoint, n8n optional,
               plus the sandbox (podman backend, `CC_SANDBOX_BACKEND`) and
               crawler now at parity with deploy/k3s/. `setup.sh` is the
-              deterministic driver (validate/preflight/llm/stack/app/verify,
-              PASS/WARN/FAIL, `diagnose` support bundle) the /setup skill
-              conducts — the skill's job is elicitation and diagnosis only.
+              deterministic driver (validate/preflight/FETCH/llm/stack/app/
+              verify, PASS/WARN/FAIL, `diagnose` support bundle) the /setup
+              skill conducts — the skill's job is elicitation and diagnosis
+              only. `images.txt` pins every pulled image by digest;
+              `bundle.sh` exports/imports the checksum-verified air-gap bundle.
               Derived from deploy/k3s/, which stays the operator's deployment and is
               NOT this.
 deploy/pi/    SUPERSEDED compose stack — kept for its comments and as the

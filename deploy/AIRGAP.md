@@ -1,51 +1,88 @@
-# Air-gapped mirrors
+# Air-gapped and mirrored installs
 
-The work-site environment already has mirrors for images, PyPI, and npm.
-These are the config seams so Central Command can point at them — not a
-mirroring project.
+The work-site environment has enterprise mirrors for container images, PyPI,
+npm and Debian. This document is the map of every external source Central
+Command touches, the seam that redirects each one, and the bundle that
+replaces a source the mirror cannot serve. It is not a mirroring project.
 
-- **Container images** — `deploy/k3s/registries.yaml.example`. Fill in
-  `MIRROR_HOST`, copy to `/etc/rancher/k3s/registries.yaml` on EVERY node,
-  restart `k3s`/`k3s-agent`. Optionally add `--disable-default-registry-endpoint`
-  so a misconfigured mirror fails loud instead of silently reaching the
-  internet.
-- **pip/uv** — `deploy/airgap.env.example`. `PIP_INDEX_URL`, `UV_INDEX_URL`,
-  `UV_PYTHON_INSTALL_MIRROR`, export before `pip install` / `uv sync`.
-- **npm** — `web/.npmrc.example`. Copy to `web/.npmrc` with the real
-  `MIRROR_HOST`.
+## The model (2026-08-30)
 
-## What these seams don't cover
+**Mirrors are the primary path; the bundle is an explicit, per-artifact
+fallback; nothing falls back on its own.** The single-node driver's `fetch`
+phase (`deploy/single/setup.sh fetch`, right after `preflight`, before
+anything is deployed) acquires every dependency — images by digest, the
+three locally-built images, the Python resolution, the cockpit's npm tree —
+and STOPS (exit 3) on the first artifact it cannot get, naming the `.env`
+seam that governs it. You fix the mirror and re-run (acquired artifacts
+fast-forward), or you write `CC_SOURCE_<X>=bundle` for that one artifact.
+The decision is in `.env`, so a re-run and an update make the same one.
 
-- The k3s **install script** itself (`get.k3s.io`) still needs vendoring or a
-  mirror; the airgap-images tarball (`k3s-airgap-images-<arch>.tar.zst`) is
-  the standard k3s alternative for its own bundled images.
-- The **NodeSource apt repo** for Node 22 (Debian ships 18) — needs an
-  internal apt mirror or a vendored package.
-- `cc-graphiti` should ship as **pre-built tarballs** imported via
-  `ctr images import`, matching the existing two-node build-locally flow
-  (`build-graphiti-image.sh`) — not built on-site.
-- `cc-crawler` likewise ships as a **pre-built tarball** for the chromebox
-  (`build-crawler-image.sh`). Chromium and its Debian dependencies are BAKED
-  INTO the image — nothing downloads a browser at runtime — so mirroring the
-  image is the whole requirement. Building it on-site instead would need
-  PyPI + the Debian apt repo + Playwright's CDN (`playwright install` fetches
-  the browser build), which is three mirrors for one image.
-  `deploy/airgap-image-tarballs.sh export`/`import` does the save/load for
-  both images (docker or podman, whichever built them, on export; `ctr
-  images import` on k3s or `podman load` on single-node, on import).
-- `ghcr.io/berriai/litellm-database:main-stable` was a **moving tag**; pinned
-  to a digest 2026-08-25 in `deploy/k3s/30-litellm.yaml` and
-  `deploy/pi/docker-compose.yml` (bumping is now a deliberate act).
-- **Whisper STT models** phone home to HuggingFace on first voice-input use
-  (`WHISPER_MODELS_BASE_URL` in `web/server/lib/constants.ts`, default
-  `https://huggingface.co/ggerganov/whisper.cpp/resolve/main`). Override it
-  with the `WHISPER_MODELS_BASE_URL` env var to point at an internal mirror,
-  or simply pre-place the `ggml-*.bin` file at `config.whisperModelDir` —
-  `whisper-local.ts` checks for the local file before ever downloading, so a
-  pre-placed model needs no mirror and no env var at all.
-- `deploy/pi/graphiti/Dockerfile` runs `apt-get install -y patch` at build
-  time — needs a reachable Debian mirror (or the package vendored) if the
-  image is ever rebuilt on-site rather than shipped as a tarball (see below).
+This is the shape mature air-gap tooling takes: the artifact set is fixed in
+a manifest, acquired on a connected side, verified by checksum on the
+disconnected side (Zarf's `zarf.yaml` + `package verify`), and every mirror
+layer we sit on — podman's `registries.conf`, containerd's — falls through
+to the public endpoint on a miss by DEFAULT; fail-loud is opt-in
+(`pull-from-mirror`, k3s's `--disable-default-registry-endpoint`). The
+`fetch` phase is where we make it loud.
 
-No `verify.sh` assertion was added: it asserts the live homelab, which has
-no mirrors — a mirror check there would fail at home.
+## Every external source, and its seam
+
+All seams live in `deploy/single/.env` (see `env.example`, "Where every
+dependency comes from"); blank means the public source.
+
+| Source | Used by | Seam | Notes |
+|---|---|---|---|
+| docker.io | postgres, neo4j, redis, n8n, the graphiti and sandbox base images | `CC_REGISTRY_DOCKERIO` | host prefix only; a mirror that re-namespaces paths needs `images.txt` + templates edited |
+| ghcr.io | LiteLLM | `CC_REGISTRY_GHCR` | |
+| mcr.microsoft.com | the crawler base (Microsoft's Playwright image: browsers + OS libs baked in) | `CC_REGISTRY_MCR` | replaces Debian + Microsoft's browser CDN for that build |
+| Debian archive | `apt-get` inside the graphiti and sandbox builds | `CC_APT_MIRROR`, `CC_APT_SECURITY_MIRROR` | build-args; the deb822 sources file is REWRITTEN from `/etc/os-release` (slim images ship no `sources.list`; security is a separate path on every mirror) |
+| PyPI | the app's venv (uv), graphiti's `uv pip`, the crawler's `pip` | `CC_PYPI_INDEX_URL` | fanned out to `PIP_INDEX_URL` AND `UV_DEFAULT_INDEX` — uv reads no `PIP_*` and `UV_INDEX_URL` is deprecated |
+| python-build-standalone | uv, only when the host has no CPython 3.12 | `CC_PYTHON_MIRROR` | `UV_PYTHON_INSTALL_MIRROR`; a `file://` directory works |
+| registry.npmjs.org | the cockpit build (`npm ci`), `sandbox-runtime` inside the sandbox build | `CC_NPM_REGISTRY` | `NPM_CONFIG_REGISTRY`; the lockfile's `resolved` URLs point at npmjs and npm rewrites those to the configured registry (its `replace-registry-host` default) — a lock regenerated AGAINST a mirror would not be rewritten back |
+| huggingface.co | Whisper STT model, first voice-input use | `WHISPER_MODELS_BASE_URL` (web server env) or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file before downloading |
+
+Registries can alternatively be mirrored in podman's own `registries.conf`
+(`[[registry.mirror]]`, tried before the primary, with `pull-from-mirror =
+"digest-only"` to keep tag pulls off it) — on macOS/Windows that file is the
+podman MACHINE's, not the host's; `preflight` prints what `podman info`
+sees so you can tell. Credentials for a build-time mirror go through
+`podman build --secret`, never a build-arg (build-args are visible in
+`podman history`).
+
+## Pins
+
+`deploy/single/images.txt` pins every pulled image by digest; `fetch` pulls
+`ref@digest` and tags it `ref`, so the templates' `name:tag` never triggers
+a pull and the mirror cannot serve a drifted or poisoned tag. The Dockerfiles
+pin their packages (`playwright==` must equal the crawler base's tag).
+`requirements.lock` is the frozen Python resolution; `web/package-lock.json`
+the cockpit's. A mirror that "gets updated regularly" changes nothing until
+a release bumps a pin — that is the point.
+
+## The bundle
+
+`deploy/single/bundle.sh export <dir>` on a connected machine of the SAME
+OS/arch (the wheelhouse is platform-specific) after a successful
+`setup.sh fetch`: saves every image in `images.txt` under its public ref,
+the three local images under `localhost/cc-*`, a `pip download` wheelhouse
+of `requirements.lock`, and the built cockpit (`dist`, `server-dist`,
+`bin-dist`, `node_modules`) — plus `MANIFEST` (sha256 of every file) and
+`RELEASE`. `import` refuses a bundle from another release and verifies the
+checksums of the files it is about to load before loading anything.
+`setup.sh fetch` calls it per artifact for every `CC_SOURCE_<X>=bundle`.
+
+Digests are verified on the connected side (pull-by-digest); the bundle's
+integrity on the disconnected side is the tarball sha256 — a docker-archive
+round-trip does not preserve the manifest-list digest, which is also why the
+digests live in `images.txt` and not in the templates.
+
+## The k3s profile
+
+The two-node deployment keeps its own seams: `deploy/k3s/registries.yaml.example`
+(containerd mirrors; add `--disable-default-registry-endpoint` so a miss
+fails loud), `deploy/airgap.env.example` (pip/uv), `web/.npmrc.example`
+(npm), and `deploy/airgap-image-tarballs.sh` for the locally-built images
+(`ctr images import`). It also still needs the k3s install script vendored
+and the NodeSource apt repo mirrored. The Dockerfiles' build-args apply to
+its builds too (pass them to `podman build` by hand; the k3s build scripts
+pass nothing and get the public defaults).

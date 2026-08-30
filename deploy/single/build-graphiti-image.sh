@@ -28,17 +28,33 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 CTX="$REPO_ROOT/deploy/pi/graphiti"
 
+# Mirror seams (2026-08-30): the build container sees none of the host's
+# mirror configuration, so each seam travels as a build-arg from
+# deploy/single/.env — blank = public. The registry prefix must also be the
+# name setup.sh fetch tagged the base image under, so the FROM resolves from
+# local storage without a pull.
 if [[ -f "$HERE/.env" ]]; then
-  # shellcheck disable=SC1090
-  CC_GRAPHITI_TAG="$(grep -E '^CC_GRAPHITI_TAG=' "$HERE/.env" | tail -1 | cut -d= -f2-)"
+  set -a
+  # shellcheck disable=SC1091
+  . "$HERE/.env"
+  set +a
 fi
+BUILD_ARGS=(
+  --build-arg "CC_REGISTRY_DOCKERIO=${CC_REGISTRY_DOCKERIO:-docker.io}"
+  --build-arg "CC_REGISTRY_MCR=${CC_REGISTRY_MCR:-mcr.microsoft.com}"
+  --build-arg "CC_APT_MIRROR=${CC_APT_MIRROR:-}"
+  --build-arg "CC_APT_SECURITY_MIRROR=${CC_APT_SECURITY_MIRROR:-}"
+  --build-arg "PIP_INDEX_URL=${CC_PYPI_INDEX_URL:-}"
+  --build-arg "UV_DEFAULT_INDEX=${CC_PYPI_INDEX_URL:-}"
+  --build-arg "NPM_CONFIG_REGISTRY=${CC_NPM_REGISTRY:-}"
+)
 : "${CC_GRAPHITI_TAG:=1.0.2-anthropic}"
 IMAGE_REF="localhost/cc-graphiti:${CC_GRAPHITI_TAG}"
 
 [[ -d "$CTX" ]] || { echo "FATAL: build context $CTX not found" >&2; exit 1; }
 
 echo "==> building $IMAGE_REF from $CTX"
-podman build -t "$IMAGE_REF" "$CTX"
+podman build "${BUILD_ARGS[@]}" -t "$IMAGE_REF" "$CTX"
 
 # Exact match, not a substring: the whole point is to catch a near-miss like
 # a bare `cc-graphiti:tag`, which a fuzzy grep would happily pass.

@@ -11,14 +11,21 @@
 #   builds) — saves whichever of these refs docker/podman knows about into
 #   OUTPUT_DIR as one tarball per image.
 #
-#   import: run on the destination node — loads the tarballs. k3s substrate
-#   uses `ctr images import` (containerd, k8s.io namespace, matching how the
-#   build scripts import); single-node substrate uses `podman load`.
-#   Auto-detected from whether `k3s` is on PATH; override with --substrate.
+#   import: run on the destination node — loads the tarballs with
+#   `ctr images import` (containerd, k8s.io namespace, matching how the
+#   build scripts import).
+#
+#   k3s ONLY (2026-08-30). The single-node profile has its own
+#   deploy/single/bundle.sh: it saves under the refs that profile's templates
+#   reference (localhost/cc-*, not docker.io/library/cc-* — a tarball from
+#   here `podman load`s under the wrong name), covers the pulled images, the
+#   wheelhouse and the pre-built cockpit, and verifies a checksum MANIFEST
+#   before loading anything. The `--substrate single` path this script used
+#   to offer did none of that and is gone.
 #
 #   Usage:
 #     ./deploy/airgap-image-tarballs.sh export  /path/to/out-dir
-#     ./deploy/airgap-image-tarballs.sh import  /path/to/tarball-dir [--substrate k3s|single]
+#     ./deploy/airgap-image-tarballs.sh import  /path/to/tarball-dir
 # ============================================================================
 set -euo pipefail
 
@@ -30,7 +37,7 @@ CTR_NS=k8s.io  # k3s's containerd keeps kubernetes images in this namespace
 
 usage() {
   echo "Usage: $0 export <output-dir>" >&2
-  echo "       $0 import <input-dir> [--substrate k3s|single]" >&2
+  echo "       $0 import <input-dir>" >&2
   exit 1
 }
 
@@ -50,13 +57,7 @@ save_tool() {
 MODE=$1
 DIR=$2
 shift 2
-SUBSTRATE=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --substrate) SUBSTRATE=$2; shift 2 ;;
-    *) echo "FATAL: unknown arg $1" >&2; exit 1 ;;
-  esac
-done
+[[ $# -eq 0 ]] || { echo "FATAL: unknown arg $1 (single-node? use deploy/single/bundle.sh)" >&2; exit 1; }
 
 case "$MODE" in
   export)
@@ -78,18 +79,12 @@ case "$MODE" in
     ;;
   import)
     [[ -d "$DIR" ]] || { echo "FATAL: $DIR not found" >&2; exit 1; }
-    if [[ -z "$SUBSTRATE" ]]; then
-      if command -v k3s >/dev/null 2>&1; then SUBSTRATE=k3s; else SUBSTRATE=single; fi
-    fi
+    command -v k3s >/dev/null 2>&1 || { echo "FATAL: k3s not on PATH — this importer is k3s-only; single-node uses deploy/single/bundle.sh" >&2; exit 1; }
     for ref in "${IMAGE_REFS[@]}"; do
       tar="$DIR/$(tarball_name "$ref")"
       [[ -f "$tar" ]] || { echo "  skip $ref (no $tar)"; continue; }
-      echo "==> importing $tar ($SUBSTRATE)"
-      if [[ "$SUBSTRATE" == k3s ]]; then
-        sudo k3s ctr -n "$CTR_NS" images import "$tar"
-      else
-        podman load -i "$tar"
-      fi
+      echo "==> importing $tar (k3s)"
+      sudo k3s ctr -n "$CTR_NS" images import "$tar"
     done
     ;;
   *)

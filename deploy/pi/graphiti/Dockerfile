@@ -21,7 +21,34 @@
 #   anthropic==0.116.0 is what graphiti-core[anthropic]==0.28.2 resolved on
 #   2026-07-09 — pinned explicitly for reproducibility.
 # ============================================================================
-FROM docker.io/zepai/knowledge-graph-mcp:1.0.2-standalone
+# Mirror seams (2026-08-30). A build container sees none of the host's mirror
+# configuration, so every external source this build touches is a build-arg:
+# the registry the base comes from, the Debian mirror apt-get uses, the PyPI
+# index uv uses. Blank = public. Passed by deploy/single/build-graphiti-image.sh
+# from deploy/single/.env; the k3s build script passes nothing and gets the
+# defaults. Digest pinning of the base is done by the caller (setup.sh fetch
+# pulls images.txt's digest and tags it, so this FROM resolves locally).
+ARG CC_REGISTRY_DOCKERIO=docker.io
+FROM ${CC_REGISTRY_DOCKERIO}/zepai/knowledge-graph-mcp:1.0.2-standalone
+ARG CC_APT_MIRROR=
+ARG CC_APT_SECURITY_MIRROR=
+# uv reads UV_DEFAULT_INDEX (UV_INDEX_URL is deprecated; PIP_* is ignored).
+# An empty value is "unset" to uv, so a blank build-arg is the public index.
+ARG UV_DEFAULT_INDEX=
+
+# Debian's slim images ship ONLY the deb822 /etc/apt/sources.list.d/debian.sources
+# (sources.list is deleted by the base build), and the security archive is a
+# separate path from the main one on every mirror — so the file is REWRITTEN
+# from /etc/os-release, not sed'ed: one stanza for the main mirror, one for the
+# security mirror when given. Debian only; anything else fails the build loud.
+RUN if [ -n "$CC_APT_MIRROR" ]; then \
+      . /etc/os-release && [ "$ID" = debian ] || { echo "CC_APT_MIRROR: base is '$ID', only Debian is supported" >&2; exit 1; }; \
+      rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*; \
+      printf 'Types: deb\nURIs: %s\nSuites: %s %s-updates\nComponents: main\n' \
+        "$CC_APT_MIRROR" "$VERSION_CODENAME" "$VERSION_CODENAME" >/etc/apt/sources.list.d/debian.sources; \
+      [ -z "$CC_APT_SECURITY_MIRROR" ] || printf '\nTypes: deb\nURIs: %s\nSuites: %s-security\nComponents: main\n' \
+        "$CC_APT_SECURITY_MIRROR" "$VERSION_CODENAME" >>/etc/apt/sources.list.d/debian.sources; \
+    fi
 
 RUN uv pip install --python /app/mcp/.venv/bin/python \
       "graphiti-core[anthropic]==0.28.2" "anthropic==0.116.0"
