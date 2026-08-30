@@ -56,35 +56,44 @@ models:
   # `reasoning_effort` into Anthropic's native control (output_config.effort /
   # thinking), and accepts "xhigh" verbatim; "none" disables it. Undeclared
   # would mean Central Command sends NO thinking control at all.
-  claude-opus-4-8:
-    registration:
-      model: anthropic/PLACEHOLDER   # no api_base: the provider's own
-    quality_tier: 3
-    strengths: [analytical_reasoning, technical_design]
-    input_cost_per_token: 0.000005
-    timeout: null
-    thinking_mechanism: anthropic
-    thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
-
-  claude-sonnet-5:
-    registration:
-      model: anthropic/PLACEHOLDER
-    quality_tier: 3
-    strengths: [code_generation, writing]
-    input_cost_per_token: 0.000002
-    timeout: null
-    thinking_mechanism: anthropic
-    thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
-
-  claude-haiku-4-5:
-    registration:
-      model: anthropic/PLACEHOLDER
-    quality_tier: 2
-    strengths: [factual_lookup, general]
-    input_cost_per_token: 0.000001
-    timeout: null
-    thinking_mechanism: anthropic
-    thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
+  # ── Anthropic — RETIRED FROM THE PROXY 2026-08-30 (operator action) ──────
+  # The operator deleted claude-opus-4-8 / claude-sonnet-5 / claude-haiku-4-5
+  # in the LiteLLM UI: the clean-installed proxy database has no Anthropic
+  # credential (the old `anthropic-main` died with the pre-install DB), so
+  # the entries were registered-but-401 and probed exactly that way. They
+  # are commented rather than deleted so re-adding is a paste: store an
+  # Anthropic credential in the UI first, uncomment, then run
+  # `policy.py --apply` (registration blocks mean register-models.py would
+  # otherwise recreate credential-less skeletons on a fresh install).
+  # claude-opus-4-8:
+  #   registration:
+  #     model: anthropic/PLACEHOLDER   # no api_base: the provider's own
+  #   quality_tier: 3
+  #   strengths: [analytical_reasoning, technical_design]
+  #   input_cost_per_token: 0.000005
+  #   timeout: null
+  #   thinking_mechanism: anthropic
+  #   thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
+  #
+  # claude-sonnet-5:
+  #   registration:
+  #     model: anthropic/PLACEHOLDER
+  #   quality_tier: 3
+  #   strengths: [code_generation, writing]
+  #   input_cost_per_token: 0.000002
+  #   timeout: null
+  #   thinking_mechanism: anthropic
+  #   thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
+  #
+  # claude-haiku-4-5:
+  #   registration:
+  #     model: anthropic/PLACEHOLDER
+  #   quality_tier: 2
+  #   strengths: [factual_lookup, general]
+  #   input_cost_per_token: 0.000001
+  #   timeout: null
+  #   thinking_mechanism: anthropic
+  #   thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
 
   # ── Workstation, 100.73.68.9 over Tailscale (free; often off) ─────────────
   # timeout is generous ON PURPOSE: liveness is now detected by background
@@ -312,8 +321,10 @@ aliases: []
 # diagnosable, and the operator is at the machine when it happens.
 #
 # This is CURRENT CONFIGURATION, not a rule. Provider models are expected back
-# later to make the system more robust; the `claude-*` entries stay registered
-# and dormant for exactly that. To restore, re-add keys here and run
+# later to make the system more robust. The `claude-*` entries were retired
+# from the proxy 2026-08-30 (operator action, credential-less after the clean
+# install — see the commented block in `models:`). To restore, re-add the
+# models AND the fallback keys here and run
 # `policy.py --apply`. If you do, note the historical bite mark: the ALIAS needs
 # its own key, because when the alias's one deployment is in COOLDOWN the router
 # 429s on `cc-default` before any call happens and the lookup finds nothing

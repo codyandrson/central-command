@@ -387,6 +387,20 @@ main() {
 
   PHASE_NOW=health; phase "health check"
   if healthy; then
+    # The declared LiteLLM policy is part of the release surface (v2.6.0):
+    # a release that changes model-preferences.yaml is not live until
+    # --apply pushes it into the proxy's DB. WARN-only on failure — the
+    # code deploy is healthy, and rolling back the tree would not fix a
+    # proxy-side refusal; the operator re-runs --apply after fixing the
+    # cause (verify.sh's --check keeps it loud until then). Note the
+    # standing limit: like cc-update.service, a change to THIS block takes
+    # effect on the NEXT run.
+    phase "litellm policy apply"
+    if "${RUNAS[@]}" python3 "$REPO/deploy/pi/litellm/policy.py" --apply; then
+      note "litellm policy applied"
+    else
+      note "WARNING: policy.py --apply failed — run it by hand after fixing the cause (verify.sh --check stays red until then)"
+    fi
     note "updated $CUR_VERSION -> $TARGET_VERSION"
     write_status success done
     exit 0

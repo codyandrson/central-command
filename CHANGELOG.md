@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.6.0: the updater applies the declared LiteLLM policy, and the declaration matches the proxy again
+
+- **`cc-update.sh` runs `policy.py --apply` after a healthy update** — a
+  release that changes `model-preferences.yaml` is not live until the
+  declaration reaches the proxy's DB, and that step was the operator's to
+  remember (it was forgotten exactly once, which is once too many — and by
+  design it could not be remembered before the update, because the file it
+  applies arrives WITH the release). WARN-only on failure: the code deploy
+  is healthy and a tree rollback cannot fix a proxy-side refusal;
+  `verify.sh --check` stays red until the operator re-runs it. Standing
+  limit: like a changed `cc-update.service`, this block takes effect on
+  the NEXT update after the one that ships it.
+- **The `claude-*` declarations are retired** (commented, not deleted) —
+  the operator removed the three models from the proxy on 2026-08-30
+  (registered-but-401 since the clean install took the old
+  `anthropic-main` credential). `policy.py --apply` refuses a
+  declared-but-absent model by design, so the declaration now matches the
+  operator's action. Re-adding is a paste: store an Anthropic credential,
+  uncomment the block, `--apply`. Applied live: 4 models patched, `--check`
+  clean, provenance stamps (`updated_by: policy.py`) now populated.
+- Charter and skill text no longer name `anthropic-main` as a present
+  credential — the stored set changes with a clean install, so the rule is
+  "read `litellm_list_credentials`, never a remembered name."
+
 ## 2026-08-30 — v2.5.0: every model is probeable, undeclared capabilities reconcile themselves, and setup stamps its provenance
 
 - **The probe covers the whole fleet now.** Non-chat aliases get a battery

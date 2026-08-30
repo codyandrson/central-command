@@ -45,13 +45,15 @@ A model authenticates by **referencing** a stored credential by name:
 litellm_params.litellm_credential_name = '<credential name>'
 ```
 
-This deployment has a credential named **`anthropic-main`** (provider
-anthropic), verified working for the Claude models. So the key-safe way to
-register or re-point an anthropic model is:
+The stored credential SET changes over time (the 2026-08-29 clean install
+recreated the proxy database, taking the old `anthropic-main` with it), so
+**always read `litellm_list_credentials` for the current names** — never a
+remembered one. The key-safe way to register or re-point a model against a
+stored credential is:
 
-- `add_model` with `'extra': {'litellm_credential_name': 'anthropic-main'}`, or
+- `add_model` with `'extra': {'litellm_credential_name': '<credential name>'}`, or
 - `update_model` with `'litellm_params': {'model': 'anthropic/…',
-  'litellm_credential_name': 'anthropic-main'}`
+  'litellm_credential_name': '<credential name>'}`
 
 and **no `api_key`**. A model referencing a named credential can never be
 dropped into an unauthenticated state by a re-register, because the proposal

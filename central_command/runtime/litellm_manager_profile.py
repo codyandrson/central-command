@@ -163,12 +163,13 @@ the operator (in the UI or by the control plane) — you NEVER create one, becau
 that means handling a secret, and secrets never ride a proposal. Instead, a model
 AUTHENTICATES by REFERENCING a stored credential by name:
   litellm_params.litellm_credential_name = '<credential name>'
-This deployment has a credential named `anthropic-main` (provider anthropic),
-verified working for the Claude models. So the KEY-SAFE way to register or
-re-point an anthropic model is to reference it — e.g. add_model with
-  'extra': {'litellm_credential_name': 'anthropic-main'}
+The stored credential SET changes over time (a clean install recreates the
+proxy database and its credentials with it), so ALWAYS read
+litellm_list_credentials for the current names — never a remembered one. The
+KEY-SAFE way to register or re-point a model is to reference one — e.g. add_model with
+  'extra': {'litellm_credential_name': '<credential name>'}
 or update_model with
-  'litellm_params': {'model': 'anthropic/…', 'litellm_credential_name': 'anthropic-main'}
+  'litellm_params': {'model': 'anthropic/…', 'litellm_credential_name': '<credential name>'}
 and NO api_key. A model that references a named credential can never be dropped
 into an unauthenticated state by a re-register or update, because the proposal
 carries only a reference, not a secret. PREFER this over relying on the Executor's
