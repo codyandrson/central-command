@@ -11,10 +11,13 @@
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import cytoscape, { type Core, type NodeSingular, type EdgeSingular } from 'cytoscape';
+import fcose from 'cytoscape-fcose';
 import { Waypoints, Search, X, AlertTriangle, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useGraph, type GraphNode, type GraphEdge, type GraphEpisode, type GraphGroupScope } from './useGraph';
+
+cytoscape.use(fcose);
 
 /** "Public" / "Private · <agent_id>" — the operator-facing label for a raw
  *  `group_id`, everywhere one is shown. The underlying id stays available
@@ -31,6 +34,7 @@ const CY_STYLE: cytoscape.StylesheetJson = [
       'background-color': '#6366f1',
       label: 'data(label)',
       'font-size': 9,
+      'min-zoomed-font-size': 8,
       color: '#e5e7eb',
       'text-valign': 'bottom',
       'text-margin-y': 4,
@@ -50,6 +54,7 @@ const CY_STYLE: cytoscape.StylesheetJson = [
       'curve-style': 'bezier',
       label: 'data(label)',
       'font-size': 7,
+      'min-zoomed-font-size': 8,
       color: 'rgba(148,163,184,0.9)',
       'text-rotation': 'autorotate',
     },
@@ -446,7 +451,7 @@ function EdgeEditor({ edge, curate, onDone }: {
 
 /** Side drawer: node/edge details + provenance. Overlays the canvas — never
  *  displaces the search panel or shifts layout. */
-function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onChange, groups }: {
+function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onChange, groups, onRemoveFromCanvas }: {
   selection: Selection;
   episodes: GraphEpisode[];
   onClose: () => void;
@@ -454,6 +459,11 @@ function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onCha
   curate: Curation;
   onChange: (change: DrawerChange) => void;
   groups: GraphGroupScope[];
+  /** Display-only: drops a node off the canvas (and its dangling edges with
+   *  it). Never calls a delete API — nothing in the graph changes. Kept far
+   *  from NodeEditor's destructive "Delete" so the two can't be mistaken for
+   *  each other. */
+  onRemoveFromCanvas: (uuid: string) => void;
 }) {
   if (!selection) return null;
   return (
@@ -473,7 +483,16 @@ function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onCha
       {selection.kind === 'node' ? (
         <div className="space-y-3 px-4 py-3">
           <div>
-            <div className="text-[0.85rem] font-semibold text-foreground">{selection.node.name}</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[0.85rem] font-semibold text-foreground">{selection.node.name}</div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0 text-[0.667rem] text-muted-foreground hover:text-foreground"
+                title="Drop this entity off the canvas only — the graph itself is unchanged."
+                onClick={() => onRemoveFromCanvas(selection.node.uuid)}
+              >Remove from view</Button>
+            </div>
             <div className="mt-1 flex flex-wrap gap-1">
               {selection.node.labels.map((l) => (
                 <span key={l} className="cockpit-badge">{l}</span>
@@ -669,13 +688,28 @@ export function GraphView() {
     return () => { ro.disconnect(); cy.destroy(); cyRef.current = null; };
   }, []);
 
-  const runLayout = useCallback(() => {
-    cyRef.current?.layout({ name: 'cose', animate: false, fit: true, padding: 40 } as cytoscape.LayoutOptions).run();
+  // `fresh` is true only for a from-scratch canvas (first layout, or a
+  // rebuild that just wiped everything) — those randomize + fit. An
+  // incremental merge keeps existing nodes' approximate positions
+  // (`randomize: false`) so adding a neighborhood doesn't reshuffle the
+  // whole canvas the operator was just looking at.
+  const runLayout = useCallback((fresh: boolean) => {
+    cyRef.current?.layout({
+      name: 'fcose',
+      quality: 'default',
+      animate: false,
+      fit: fresh,
+      padding: 40,
+      randomize: fresh,
+    } as cytoscape.LayoutOptions).run();
   }, []);
 
-  const mergeIn = useCallback((nodes: GraphNode[], edges: GraphEdge[]) => {
+  const mergeIn = useCallback((nodes: GraphNode[], edges: GraphEdge[], fresh = false) => {
     const cy = cyRef.current;
     if (!cy) return;
+    // An empty canvas (first-ever add, or right after `rebuild` wiped it)
+    // has nothing worth preserving positions for — randomize + fit either way.
+    fresh = fresh || cy.elements().length === 0;
     let changed = false;
     for (const n of nodes) {
       nodeDataRef.current.set(n.uuid, n);
@@ -702,7 +736,7 @@ export function GraphView() {
       }
     }
     setLoadedNodes([...nodeDataRef.current.values()]);
-    if (changed) runLayout();
+    if (changed) runLayout(fresh);
   }, [runLayout]);
 
   // Wipes the canvas and repopulates it from exactly the given data — unlike
@@ -718,7 +752,7 @@ export function GraphView() {
     cy.elements().remove();
     nodeDataRef.current.clear();
     edgeDataRef.current.clear();
-    mergeIn(nodes, edges);
+    mergeIn(nodes, edges, true);
     setSelection((s) => {
       if (!s) return s;
       if (s.kind === 'node') {
@@ -897,6 +931,22 @@ export function GraphView() {
     void fetchStatus();
   }, [expandNode, fetchStatus]);
 
+  // Display-state only: drops a node (and its now-dangling edges — cytoscape
+  // removes connected edges automatically) off the canvas without touching
+  // the graph. Distinct from NodeEditor's "Delete", which calls the real
+  // curation API.
+  const removeFromCanvas = useCallback((uuid: string) => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    for (const [eid, e] of edgeDataRef.current) {
+      if (e.source === uuid || e.target === uuid) edgeDataRef.current.delete(eid);
+    }
+    nodeDataRef.current.delete(uuid);
+    cy.getElementById(uuid).remove();
+    setSelection((s) => (s?.kind === 'node' && s.node.uuid === uuid ? null : s));
+    setLoadedNodes([...nodeDataRef.current.values()]);
+  }, []);
+
   const createNode = useCallback(async (draft: GraphNode) => {
     const { uuid } = await graph.createNode({
       name: draft.name, labels: draft.labels,
@@ -1039,6 +1089,7 @@ export function GraphView() {
             curate={curate}
             onChange={(change) => { void applyChange(change); }}
             groups={groupOptions}
+            onRemoveFromCanvas={removeFromCanvas}
           />
         </Panel>
       </SplitGroup>
