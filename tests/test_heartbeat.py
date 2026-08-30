@@ -80,6 +80,7 @@ def test_action_registry_parity_with_the_lever_allowlist():
         "integrations.litellm.provider_catalog", # a credential's own live catalog
         "integrations.litellm.list_models",  # the proxy's configured deployments
         "integrations.litellm.check_model_health", # per-deployment health
+        "integrations.litellm.probe_model", # measures undeclared capabilities
     }
     seen = set()
     for kind, spec in hb_actions.ACTIONS.items():
@@ -875,7 +876,9 @@ def discovery_stubs(monkeypatch):
         "decisions": {"skip": []},
         "deployments": [], "unhealthy": [], "catalog": [],
         "open_counts": {},  # credential_name -> count, generation-guard input
+        "probes": {},  # alias -> probe_model() return (or an Exception instance)
     }
+    probed: list[str] = []
 
     async def fake_list_provider_credentials():
         return state["credentials"]
@@ -901,6 +904,13 @@ def discovery_stubs(monkeypatch):
     async def fake_provider_catalog(provider, api_key, api_base=None):
         return state["catalog"]
 
+    async def fake_probe_model(alias, **kw):
+        probed.append(alias)
+        result = state["probes"].get(alias, {"suggested_model_info": {}})
+        if isinstance(result, Exception):
+            raise result
+        return result
+
     async def fake_create(instructions, title, agent_id, actor="operator", background=False, **kw):
         assert background is True  # discovery tasks always run detached
         task_id = f"task_discovery_stub_{len(calls['tasks'])}"
@@ -915,8 +925,10 @@ def discovery_stubs(monkeypatch):
     monkeypatch.setattr(litellm_client, "list_models", fake_list_models)
     monkeypatch.setattr(litellm_client, "check_model_health", fake_check_model_health)
     monkeypatch.setattr(litellm_client, "provider_catalog", fake_provider_catalog)
+    monkeypatch.setattr(litellm_client, "probe_model", fake_probe_model)
     monkeypatch.setattr(routes, "create_and_run_task", fake_create)
     calls["state"] = state
+    calls["probed"] = probed
     return calls
 
 
@@ -1133,3 +1145,73 @@ async def test_generation_guard_skips_credential_with_open_batch_task(discovery_
     assert out["queued"] == 0
     assert out["backlog"] == {"anthropic-main": 3}
     assert discovery_stubs["tasks"] == []
+
+
+def _managed_deployment(alias, *, capabilities=None, provider_model="anthropic/claude-x",
+                        provider="anthropic"):
+    """A MANAGED deployment row shaped like `list_models()`'s output, quiet on
+    the catalog diff (its provider_model already matches a configured catalog
+    entry) so tests can isolate the undeclared-capability probe."""
+    return {
+        "model_name": alias, "model_id": f"{alias}-id",
+        "credential_name": "anthropic-main", "provider": provider,
+        "provider_model": provider_model,
+        "capabilities": capabilities if capabilities is not None else {
+            "mode": None, "supports_function_calling": None,
+            "supports_response_schema": None, "supports_vision": True,
+        },
+    }
+
+
+async def test_undeclared_alias_is_probed_and_lands_in_the_maintenance_brief(discovery_stubs):
+    discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
+    discovery_stubs["state"]["deployments"] = [_managed_deployment("cc-x")]
+    discovery_stubs["state"]["probes"]["cc-x"] = {
+        "suggested_model_info": {"supports_vision": True, "mode": "chat"},
+        "notes": ["measured"],
+    }
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["drift"] is True
+    assert discovery_stubs["probed"] == ["cc-x"]
+    task = discovery_stubs["tasks"][0]
+    assert task["title"] == "LiteLLM autodiscovery: maintenance"
+    assert "UNDECLARED" in task["instructions"]
+    assert "cc-x-id" in task["instructions"]
+    assert '"supports_vision": true' in task["instructions"]
+
+
+async def test_probe_batch_caps_how_many_undeclared_aliases_are_probed(discovery_stubs):
+    discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
+    discovery_stubs["state"]["deployments"] = [
+        _managed_deployment(f"cc-{i}") for i in range(5)
+    ]
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"probe_batch": "2"})
+    assert len(discovery_stubs["probed"]) == 2
+    # Nothing suggested by the default stub probe, so this pass is quiet.
+    assert out == {"drift": False}
+
+
+async def test_declared_and_bridge_aliases_are_never_probed(discovery_stubs):
+    declared = _managed_deployment("cc-declared", capabilities={
+        "mode": "chat", "supports_function_calling": True,
+        "supports_response_schema": True, "supports_vision": False,
+    })
+    bridge = _managed_deployment(
+        "cc-bridge", provider_model="openai/chat_completions/graphiti-llm",
+        provider="openai",  # excluded from the anthropic-credential's catalog diff too
+    )
+    discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
+    discovery_stubs["state"]["deployments"] = [declared, bridge]
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert discovery_stubs["probed"] == []
+    assert out == {"drift": False}
+
+
+async def test_a_probe_exception_becomes_an_error_entry_and_the_tick_completes(discovery_stubs):
+    discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
+    discovery_stubs["state"]["deployments"] = [_managed_deployment("cc-x")]
+    discovery_stubs["state"]["probes"]["cc-x"] = RuntimeError("provider flap")
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["drift"] is True
+    task = discovery_stubs["tasks"][0]
+    assert "RuntimeError: provider flap" in task["instructions"]

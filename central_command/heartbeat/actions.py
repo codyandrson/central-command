@@ -754,6 +754,13 @@ def _maintenance_brief(findings: dict[str, dict]) -> str:
         "read-only to you.\n\n"
         "Verification of any fix is the NEXT discovery pass observing health "
         "clean; you don't need to re-check it now.\n\n"
+        "UNDECLARED (managed deployments whose measured capabilities are not "
+        "declared): propose ONE litellm.update_model per alias carrying "
+        "exactly its `suggested_model_info` as `model_info` — measured, "
+        "never guessed. This converges: once declared, an alias never "
+        "re-qualifies. A probe `error` entry here is a mechanism failure "
+        "like any other — surface it via ask_operator, same as the ERRORS "
+        "paragraph below.\n\n"
         "ERRORS: a findings entry carrying `error` instead of a diff means the "
         "DISCOVERY MECHANISM itself failed for that credential — the pass was "
         "blind there, and blind is never 'nothing to do'. Diagnose what you "
@@ -845,6 +852,47 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         except Exception as e:  # noqa: BLE001 — a dead model must read as unhealthy, not kill the tick
             unhealthy.append({"model": alias, "error": f"{type(e).__name__}: {e}"})
 
+    # UNDECLARED-CAPABILITY reconciliation: "declare the undeclared", not
+    # continuous re-measurement. A probe costs ~10 real requests, so this
+    # caps itself at `probe_batch` per tick — a fleet of newly-added models
+    # converges over a few nightly passes rather than one expensive burst,
+    # and once an alias is declared its capabilities are no longer None here
+    # so it never re-qualifies. Re-measuring an already-declared fleet is an
+    # operator-triggered task (`litellm_probe_model`), never a heartbeat one.
+    probe_batch = _parse_positive_int(params, "probe_batch", 3)
+    undeclared: dict[str, dict] = {}
+    probed = 0
+    for d in deployments:
+        if probed >= probe_batch:
+            break
+        if d.get("credential_name") not in cred_names:
+            continue
+        caps = d.get("capabilities") or {}
+        if not any(
+            caps.get(f) is None
+            for f in ("mode", "supports_function_calling",
+                      "supports_response_schema", "supports_vision")
+        ):
+            continue
+        if "/chat_completions/" in str(d.get("provider_model") or ""):
+            continue  # Responses-bridge alias — the chat battery can't probe it
+        alias = d.get("model_name")
+        if not alias:
+            continue
+        probed += 1
+        try:
+            probe = await litellm_client.probe_model(alias)
+        except Exception as e:  # noqa: BLE001 — one bad probe must not kill the tick
+            undeclared[alias] = {"error": f"{type(e).__name__}: {e}"}
+            continue
+        suggested = probe.get("suggested_model_info") or {}
+        if suggested:
+            undeclared[alias] = {
+                "model_id": d.get("model_id"),
+                "suggested_model_info": suggested,
+                "notes": probe.get("notes"),
+            }
+
     findings: dict[str, dict] = {}
     for cred in credentials:
         name = cred["credential_name"]
@@ -860,7 +908,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         if drift["missing"] or drift["stale"] or drift["unhealthy"]:
             findings[name] = drift
 
-    if not findings:
+    if not findings and not undeclared:
         return {"drift": False}
 
     batch_size = _parse_positive_int(params, "batch_size", 5)
@@ -885,6 +933,8 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         for name, d in findings.items()
         if d.get("error") or d.get("stale") or d.get("unhealthy")
     }
+    if undeclared:
+        maintenance["undeclared"] = undeclared
     if maintenance:
         result = await create_and_run_task(
             _maintenance_brief(maintenance), "LiteLLM autodiscovery: maintenance",
@@ -1114,6 +1164,10 @@ ACTIONS: dict[str, ActionSpec] = {
             ),
             params={
                 "batch_size": "models per add-task, default 5",
+                "probe_batch": (
+                    "managed deployments with undeclared capabilities to "
+                    "probe per tick, default 3"
+                ),
             },
             required=(),
             levers=(
@@ -1121,6 +1175,7 @@ ACTIONS: dict[str, ActionSpec] = {
                 "integrations.litellm.provider_catalog",
                 "integrations.litellm.list_models",
                 "integrations.litellm.check_model_health",
+                "integrations.litellm.probe_model",
                 "api.routes.create_and_run_task",
             ),
             run=_litellm_discovery,

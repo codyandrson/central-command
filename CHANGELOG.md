@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.5.0: every model is probeable, undeclared capabilities reconcile themselves, and setup stamps its provenance
+
+- **The probe covers the whole fleet now.** Non-chat aliases get a battery
+  of their own, dispatched on the declared `mode` or the caller's explicit
+  `battery=` ("embedding" → one `/v1/embeddings` call reporting the vector
+  DIMENSIONS — the number that decides index compatibility; "rerank" → one
+  `/v1/rerank` call). The chat battery gains `pdf_input` (a 192-byte blank
+  PDF as an OpenAI `file` part, feeding `supports_pdf_input`) and
+  `thinking_template` (Qwen-style `chat_template_kwargs`, run only when no
+  `thinking_mechanism` is declared) — the latter produces a NOTE
+  recommending `qwen_template`, never an automatic declaration, because a
+  mechanism changes how the runtime CONTROLS the model. Verified live:
+  1024 dims on the embedder, rerank results, and a measured
+  `supports_pdf_input: false` on `cc-default`.
+- **The nightly discovery pass declares the undeclared** (`probe_batch`
+  param, default 3): managed deployments missing any of `mode` /
+  `supports_function_calling` / `supports_response_schema` /
+  `supports_vision` are probed and their `suggested_model_info` lands in
+  the maintenance task as an UNDECLARED finding — one `litellm.update_model`
+  proposal each. Converging by construction (a declared alias never
+  re-qualifies); re-measuring a declared fleet stays an operator-triggered
+  task, not a heartbeat.
+- **Setup stamps its provenance.** `register-models.py` sets
+  `created_by`/`created_at` (+updated) on the skeletons it creates and
+  `policy.py --apply` stamps `updated_by`/`updated_at` on every patch —
+  the live fleet's all-None stamps came from these two writers, not the
+  Executor (which has stamped gated changes all along). Stamps are never
+  compared as drift. All-None stamps on a model simply predate this
+  release; any later gated update or `policy.py --apply` re-run fills them.
+
 ## 2026-08-30 — v2.4.0: test-on-add runs the full capability probe, and the offline library gains three benchmark datasets
 
 - **The Executor's test-on-add is the full probe now** (operator decision):

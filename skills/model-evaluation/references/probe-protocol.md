@@ -71,6 +71,8 @@ not yet scoped to any agent key), one real small request per capability,
 | 5b | `json_object` | looser `response_format={"type":"json_object"}` | reply parses as any JSON object |
 | 6 | `vision` | a 1×1 red PNG data URL + "What color is this image? One word." | non-empty content (any answer counts; a 4xx/5xx is a no) |
 | 7 | `reasoning` | `reasoning_effort="low"`, "Is 17 prime? One word." | `msg.get("reasoning_content") or msg.get("reasoning")` present — **note this is a separate fact from "the request was accepted"** |
+| 7b | `pdf_input` | an OpenAI `file` content part carrying a blank one-page PDF (`_PROBE_PDF`) + "How many pages does this document have?" | non-empty content (a 4xx/5xx is a no) — feeds `suggested_model_info["supports_pdf_input"]` directly, both directions |
+| 7c | `thinking_template` (only when `declared["thinking_mechanism"]` is `None`) | the OK prompt with `chat_template_kwargs={"enable_thinking": true}` | `reasoning_content`/`reasoning` present — see below, this is a **note**, never a `suggested_model_info` write |
 | 8 | `max_output_tokens` | the same OK prompt with `max_tokens=1_000_000` | see below — always inconclusive |
 | 9 | `streaming` | the OK prompt with `stream=True` | 200 and `"data:"` appears in the first 200 chars of the body |
 | 10 | `max_input_tokens` (opt-in, `measure_context=True`) | see the bisect section | reports a `value`, never ok/false |
@@ -111,6 +113,21 @@ matching declaration is `thinking_mechanism: anthropic` with
 bare `off` parses as YAML `false`). Do not declare `supports_reasoning: true`
 in place of this — that flag says "the request format is accepted", not "the
 model tells you it thought."
+
+### `thinking_template` — a note, never a declaration
+
+Check 7c only runs when `declared["thinking_mechanism"]` is `None` — a model
+that already declares a mechanism doesn't need this guess, so `observed` has
+no `thinking_template` key at all in that case. When it does run and comes
+back with `reasoning_content` present, the probe adds a **note** —
+*"template-driven thinking works — consider declaring `thinking_mechanism:
+qwen_template` (plus `thinking_levels`) so the runtime can control it"* — and
+stops there. It never writes `thinking_mechanism` into
+`suggested_model_info`: declaring the mechanism changes how
+`runtime/models.py::_thinking_body` **controls** the model on every future
+call, which is a decision with behavioral consequences the operator makes
+deliberately, not a fact the probe can respond to a diff and be done with
+(unlike a `supports_*` flag, which is purely descriptive).
 
 ### `max_output_tokens` — "accepted 1,000,000 → no ceiling"
 
@@ -153,6 +170,7 @@ flags = {
     "supports_response_schema": observed["response_schema"]["ok"],
     "supports_vision": observed["vision"]["ok"],
     "supports_reasoning": observed["reasoning"]["ok"],
+    "supports_pdf_input": observed["pdf_input"]["ok"],
 }
 ```
 
@@ -200,16 +218,34 @@ fleet**, not just the model you're currently probing — an old model that
 predates this protocol and was never probed reads as capability-less to both
 consumers until someone runs the battery on it too.
 
+## Non-chat aliases — a battery each, not the chat battery
+
+Embedding and rerank aliases are not chat models, so the chat battery above
+never runs against them — `probe_model` dispatches on `battery` (an explicit
+override) or, absent that, the declared `mode`, before sending a single chat
+request:
+
+- **`battery="embedding"`** (or a declared `mode: embedding`): one `POST
+  /v1/embeddings` with `{"input": "probe"}`. `observed["embedding"]` reports
+  `ok` (200 and a non-empty vector) and `value` = the vector's dimension
+  count — the number to declare as the embedding size. No chat request is
+  made and `suggested_model_info` is always `{}` (nothing in
+  `CAPABILITY_FIELDS`'s chat vocabulary applies to an embedder).
+- **`battery="rerank"`** (or a declared `mode: rerank`): one `POST
+  /v1/rerank` with a query and two documents. `observed["rerank"]["ok"]` is
+  true when the proxy answers 200 with a non-empty `results` list.
+  `suggested_model_info` is again always `{}`.
+- Use `battery=` explicitly for a model whose `mode` isn't declared yet —
+  which is exactly the state a fresh registration is in before its first
+  probe. Once `mode` is declared, the plain `litellm_probe_model(model)` call
+  dispatches on its own.
+
 ## Aliases the chat battery cannot probe
 
 - **A Responses-bridge alias** (`openai/chat_completions/<model>`, e.g.
   `graphiti-llm`) serves only `/v1/responses` — the plain chat check 404s
   with "no router for requested model" and the probe's note says so. Probe
   the underlying model's own alias; the bridge alias inherits its answers.
-- **Embedding / rerank aliases** (`mode: embedding` / `mode: rerank`) are not
-  chat models; every chat-shaped check fails by construction. Don't probe
-  them — their health check (`litellm_check_model_health`) already speaks
-  their mode.
 - **A registered-but-unauthenticated model** fails the chat gate with a 401
   naming the missing provider key — a credential problem, not a capability
   one (the dormant `claude-*` entries read exactly this way on a fresh

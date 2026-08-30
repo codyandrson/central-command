@@ -469,6 +469,15 @@ _PROBE_PNG = (  # a 1x1 red PNG — the smallest image an endpoint can be asked 
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE"
     "hQGAhKmMIQAAAABJRU5ErkJggg=="
 )
+# The smallest well-formed one-page PDF (a blank page, ~230 bytes) — enough
+# for an endpoint that reads documents to answer, and for one that does not
+# to error. Built by hand once; never parsed by us.
+_PROBE_PDF = (
+    "JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIg"
+    "MCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2Jq"
+    "PDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgNjEyIDc5Ml0+PmVuZG9i"
+    "agp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9G"
+)
 _PROBE_TOOL = {
     "type": "function",
     "function": {
@@ -557,6 +566,7 @@ def _verdict(st: int, payload, ok_when: bool, detail: str) -> dict:
 async def probe_model(
     model: str, *, measure_context: bool = False,
     context_ceiling: int = PROBE_CONTEXT_CEILING, timeout: float = 300,
+    battery: str | None = None,
 ) -> dict:
     """Measure what `model` can actually do, one small request per capability.
 
@@ -580,6 +590,47 @@ async def probe_model(
             break
     observed: dict[str, dict] = {}
     notes: list[str] = []
+
+    # Non-chat modes get their OWN one-request battery — every chat-shaped
+    # check would fail on an embedder by construction and prove nothing.
+    # Dispatch is on the DECLARED mode, or the caller's explicit `battery`
+    # ("chat" | "embedding" | "rerank") for a model whose mode is not
+    # declared yet — which is exactly when you are probing it.
+    kind = battery or declared.get("mode") or "chat"
+    if kind == "embedding":
+        resp = await _call("POST", "/v1/embeddings",
+                           {"model": alias, "input": "probe"}, timeout=timeout)
+        dims = None
+        if resp.status_code == 200:
+            try:
+                dims = len(resp.json()["data"][0]["embedding"])
+            except (KeyError, IndexError, TypeError, ValueError):
+                dims = None
+        observed["embedding"] = {"ok": resp.status_code == 200 and bool(dims),
+                                 "value": dims,
+                                 "detail": (f"{dims}-dimension vector" if dims else
+                                            f"{resp.status_code}: {resp.text[:200]}")}
+        return {"ok": bool(observed["embedding"]["ok"]), "kind": "litellm",
+                "operation": "probe_model", "model": alias, "declared": declared,
+                "observed": observed, "suggested_model_info": {}, "notes": notes}
+    if kind == "rerank":
+        resp = await _call("POST", "/v1/rerank",
+                           {"model": alias, "query": "probe",
+                            "documents": ["a probe document", "another document"]},
+                           timeout=timeout)
+        ok = False
+        if resp.status_code == 200:
+            try:
+                ok = bool(resp.json().get("results"))
+            except ValueError:
+                ok = False
+        observed["rerank"] = {"ok": ok,
+                              "detail": "results returned" if ok else
+                                        f"{resp.status_code}: {resp.text[:200]}"}
+        return {"ok": ok, "kind": "litellm", "operation": "probe_model",
+                "model": alias, "declared": declared, "observed": observed,
+                "suggested_model_info": {}, "notes": notes}
+
     say_ok = [{"role": "user", "content": "Reply with the single word OK."}]
 
     # 1. chat — the gate for everything else
@@ -678,6 +729,41 @@ async def probe_model(
                                         "driven model (qwen_template) needs its mechanism declared by hand")
                              if st == 200 else f"{st}: {_err(out)}"}
 
+    # 7b. pdf input — an OpenAI `file` content part carrying a blank one-page
+    # PDF; an endpoint that reads documents answers, one that does not errors.
+    st, out = await _chat(alias, {
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "How many pages does this document have? One word."},
+            {"type": "file", "file": {"filename": "probe.pdf",
+                                      "file_data": f"data:application/pdf;base64,{_PROBE_PDF}"}},
+        ]}], "max_tokens": PROBE_MAX_TOKENS,
+    }, timeout)
+    content, _fin, _ = _reply(st, out)
+    observed["pdf_input"] = _verdict(st, out, bool(content), (content or "")[:40])
+
+    # 7c. template-driven thinking — only when the model has NO declared
+    # mechanism: send the Qwen-style chat_template_kwargs and see whether
+    # reasoning_content appears. INFERENCE STOPS AT A NOTE: declaring
+    # thinking_mechanism changes how the runtime CONTROLS the model
+    # (runtime/models._thinking_body), so that call is the operator's.
+    if not declared.get("thinking_mechanism"):
+        st, out = await _chat(alias, {
+            "messages": [{"role": "user", "content": "Is 17 prime? One word."}],
+            "chat_template_kwargs": {"enable_thinking": True},
+            "max_tokens": PROBE_MAX_TOKENS,
+        }, timeout)
+        msg2 = _message(out) if st == 200 else {}
+        seen2 = bool(msg2.get("reasoning_content") or msg2.get("reasoning"))
+        observed["thinking_template"] = {
+            "ok": st == 200 and seen2,
+            "detail": ("chat_template_kwargs produced reasoning_content" if seen2
+                       else "" if st != 200 else "accepted, no reasoning_content"),
+        }
+        if st == 200 and seen2:
+            notes.append("template-driven thinking works — consider declaring "
+                         "thinking_mechanism: qwen_template (plus thinking_levels) "
+                         "so the runtime can control it; see the model-evaluation skill")
+
     # 8. output ceiling — ask for far too much and read what the endpoint says
     st, out = await _chat(alias, {"messages": say_ok, "max_tokens": 1_000_000}, timeout)
     if st == 200:
@@ -724,6 +810,7 @@ async def probe_model(
         "supports_response_schema": observed["response_schema"]["ok"],
         "supports_vision": observed["vision"]["ok"],
         "supports_reasoning": observed["reasoning"]["ok"],
+        "supports_pdf_input": observed["pdf_input"]["ok"],
     }
     suggested = {k: v for k, v in flags.items() if v is not None and declared.get(k) != v}
     if declared.get("mode") is None:

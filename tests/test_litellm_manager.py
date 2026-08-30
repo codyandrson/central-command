@@ -1167,7 +1167,7 @@ def _tool_calls(n):
 def _make_probe_fake_call(
     *, model_name="probe-model", declared_info=None, fail_chat_status=None,
     schema_inconclusive=False, single_tool_call=False, bisect_limit=None,
-    seen_bodies=None,
+    seen_bodies=None, pdf_fail=False, thinking_template_seen=False,
 ):
     """A battery-wide fake `litellm_client._call` covering every check
     `probe_model` makes, dispatched purely on method/path/body shape — never
@@ -1188,6 +1188,12 @@ def _make_probe_fake_call(
 
         if body.get("stream"):
             return _ProbeResp(200, text="data: {\"choices\":[{\"delta\":{}}]}\n\n")
+
+        if "chat_template_kwargs" in body:
+            msg = {"content": "yes"}
+            if thinking_template_seen:
+                msg["reasoning_content"] = "17 has no even divisors"
+            return _ProbeResp(200, {"choices": [{"message": msg, "finish_reason": "stop"}]})
 
         if "tools" in body:
             n = 1 if (single_tool_call or isinstance(body.get("tool_choice"), dict)) else 2
@@ -1210,6 +1216,13 @@ def _make_probe_fake_call(
             ]})
 
         if any(isinstance(m.get("content"), list) for m in messages):
+            parts = next(m["content"] for m in messages if isinstance(m.get("content"), list))
+            if any(isinstance(p, dict) and p.get("type") == "file" for p in parts):
+                if pdf_fail:
+                    return _ProbeResp(500, {"error": {"message": "file input not supported"}})
+                return _ProbeResp(200, {"choices": [
+                    {"message": {"content": "1"}, "finish_reason": "stop"}
+                ]})
             return _ProbeResp(200, {"choices": [
                 {"message": {"content": "red"}, "finish_reason": "stop"}
             ]})
@@ -1295,6 +1308,7 @@ async def test_probe_model_measures_each_capability_and_suggests_the_diff(monkey
         "supports_response_schema": True,
         "supports_vision": True,
         "supports_reasoning": True,
+        "supports_pdf_input": True,
         "mode": "chat",
         "max_output_tokens": 32768,
     }
@@ -1364,6 +1378,99 @@ async def test_probe_model_bisects_the_context_ceiling_when_asked(monkeypatch):
     assert 4990 <= value <= 5000
     assert out["suggested_model_info"]["max_input_tokens"] == value
     assert call_count["n"] <= 10
+
+
+async def test_probe_model_embedding_battery_hits_only_embeddings(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    seen_paths: list = []
+
+    async def fake_call(method, path, json_body=None, auth_key=None, timeout=30):
+        seen_paths.append(path)
+        if method == "GET" and path == "/model/info":
+            return _ProbeResp(200, {"data": [{"model_name": "probe-model", "model_info": {}}]})
+        assert path == "/v1/embeddings"
+        return _ProbeResp(200, {"data": [{"embedding": [0.1] * 1024}]})
+
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model", battery="embedding")
+
+    assert "/v1/chat/completions" not in seen_paths
+    assert out["observed"]["embedding"]["value"] == 1024
+    assert out["observed"]["embedding"]["ok"] is True
+    assert out["suggested_model_info"] == {}
+
+
+async def test_probe_model_declared_rerank_mode_dispatches_without_explicit_battery(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+
+    async def fake_call(method, path, json_body=None, auth_key=None, timeout=30):
+        if method == "GET" and path == "/model/info":
+            return _ProbeResp(200, {"data": [
+                {"model_name": "probe-model", "model_info": {"mode": "rerank"}}
+            ]})
+        assert path == "/v1/rerank"
+        return _ProbeResp(200, {"results": [{"index": 0, "relevance_score": 0.9}]})
+
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["rerank"]["ok"] is True
+
+
+async def test_probe_model_pdf_input_check_ok_and_suggests_capability(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call()
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["pdf_input"]["ok"] is True
+    assert out["suggested_model_info"]["supports_pdf_input"] is True
+
+
+async def test_probe_model_pdf_input_check_fails_suggests_false(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(pdf_fail=True)
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["pdf_input"]["ok"] is False
+    assert out["suggested_model_info"]["supports_pdf_input"] is False
+
+
+async def test_probe_model_thinking_template_notes_but_never_declares(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(
+        declared_info={"thinking_mechanism": None}, thinking_template_seen=True,
+    )
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["thinking_template"]["ok"] is True
+    assert any("qwen_template" in n for n in out["notes"])
+    assert "thinking_mechanism" not in out["suggested_model_info"]
+
+
+async def test_probe_model_thinking_template_skipped_when_mechanism_declared(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(
+        declared_info={"thinking_mechanism": "qwen_template"}, thinking_template_seen=True,
+    )
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert "thinking_template" not in out["observed"]
 
 
 def test_litellm_read_pack_carries_the_probe_tool_and_the_manager_may_propose_skills():

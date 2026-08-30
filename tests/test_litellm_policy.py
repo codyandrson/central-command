@@ -379,6 +379,40 @@ def test_reranker_api_base_ends_in_v1_rerank(policy):
     )
 
 
+def test_build_patch_body_stamps_updated_by_and_iso_timestamp(policy_mod):
+    """policy.py --apply must stamp model_info.updated_by/updated_at (2026-08-30)
+    -- the live fleet's provenance fields were all None because neither writer
+    ever set them. Fixed timestamp in, so the test is deterministic."""
+    from datetime import datetime
+
+    spec = {
+        "quality_tier": 2,
+        "strengths": ["code_generation"],
+        "input_cost_per_token": 0,
+        "timeout": 300,
+    }
+    body = policy_mod.build_patch_body(spec, now_iso="2026-08-30T00:00:00+00:00")
+    assert body["model_info"]["updated_by"] == "policy.py"
+    assert body["model_info"]["updated_at"] == "2026-08-30T00:00:00+00:00"
+    # round-trips as ISO-8601
+    datetime.fromisoformat(body["model_info"]["updated_at"])
+
+
+def test_diff_policy_does_not_flag_stamps_as_drift(policy_mod):
+    """The provenance stamps are OUR bookkeeping, not a declared policy value --
+    diff_policy must never compare them, or every model reads as permanent
+    drift the moment apply stamps a real timestamp."""
+    live = _live_in_sync()
+    live[0]["model_info"]["updated_by"] = "policy.py"
+    live[0]["model_info"]["updated_at"] = "2026-08-30T00:00:00+00:00"
+    live[1]["model_info"]["created_by"] = "register-models.py"
+    live[1]["model_info"]["created_at"] = "2020-01-01T00:00:00+00:00"
+    drift = policy_mod.diff_policy(
+        _declared(), live, {"qwen3.8-27b": ["claude-haiku-4-5"]}
+    )
+    assert drift == []
+
+
 def test_registration_only_models_carry_no_routing_policy(policy):
     """They are not in any routing pool; declaring preferences on them would make
     policy.py --check report permanent drift against a healthy proxy."""

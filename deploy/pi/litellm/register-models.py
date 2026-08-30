@@ -50,6 +50,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -182,8 +183,11 @@ def main() -> int:
         elif status == "create":
             print(f"  CREATE   {alias}  skeleton {json.dumps(want[alias], sort_keys=True)}")
             if not args.dry_run:
+                stamp = datetime.now(timezone.utc).isoformat()
                 _request("POST", "/model/new",
-                         {"model_name": alias, "litellm_params": want[alias], "model_info": {}})
+                         {"model_name": alias, "litellm_params": want[alias],
+                          "model_info": {"created_by": "register-models.py", "created_at": stamp,
+                                         "updated_by": "register-models.py", "updated_at": stamp}})
                 created += 1
             action_needed.append((alias, ["created as a skeleton — fill in model, api_base and the key/credential"]))
         else:

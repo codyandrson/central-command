@@ -62,6 +62,17 @@ non-native custom key a past agent invented: it is stored, has no UI column, and
 does not render. Fix such a model by populating the native `created_at` (and
 `created_by`) with an in-place update.
 
+Three writers stamp these fields, each only for its own action: the **Executor**
+sets `created_by`/`updated_by` to the proposer and `updated_by`/`updated_at` to
+the approver on every gated add/update; `register-models.py` stamps itself
+(`created_by`/`created_at`/`updated_by`/`updated_at` = `"register-models.py"` and
+the creation time) when it creates a skeleton, and never touches an existing
+row; `policy.py --apply` stamps `updated_by`/`updated_at` = `"policy.py"` on
+every model it patches. A model with **all four fields `None`** predates
+2026-08-30's v2.5.0, when neither script set them — it is not evidence of a
+manual edit. Fix it with any later gated update, or a re-run of `policy.py
+--apply`.
+
 `model_info` also accepts **arbitrary custom keys**, and is where custom
 per-deployment **pricing** lives: `input_cost_per_token`,
 `output_cost_per_token`, and for Anthropic `cache_creation_input_token_cost` /

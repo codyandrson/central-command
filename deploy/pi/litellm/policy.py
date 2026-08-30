@@ -19,6 +19,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -174,6 +175,28 @@ def diff_policy(declared: dict, live_models: list[dict], live_fallbacks: dict) -
     return drift
 
 
+def build_patch_body(spec: dict, now_iso: str | None = None) -> dict:
+    """The PATCH /model/{id}/update body for one declared model. Pure, so it is
+    testable without a proxy. `updated_by`/`updated_at` are OUR provenance
+    stamp, not a declared policy key -- see OPTIONAL_MODEL_INFO_KEYS's
+    docstring for why they must never join that list."""
+    params: dict = {"input_cost_per_token": spec["input_cost_per_token"]}
+    if spec.get("timeout") is not None:
+        params["timeout"] = spec["timeout"]
+    return {
+        "model_info": {
+            "adaptive_router_preferences": {
+                "quality_tier": spec["quality_tier"],
+                "strengths": list(spec.get("strengths") or []),
+            },
+            **{k: spec[k] for k in OPTIONAL_MODEL_INFO_KEYS if k in spec},
+            "updated_by": "policy.py",
+            "updated_at": now_iso or datetime.now(timezone.utc).isoformat(),
+        },
+        "litellm_params": params,
+    }
+
+
 def apply_policy(declared: dict) -> None:
     live_models, _ = fetch_live()
     by_alias = {m.get("model_name"): m for m in live_models if m.get("model_name")}
@@ -186,10 +209,6 @@ def apply_policy(declared: dict) -> None:
         if not model_id:
             sys.exit(f"{alias}: proxy returned no model_info.id")
 
-        params: dict = {"input_cost_per_token": spec["input_cost_per_token"]}
-        if spec.get("timeout") is not None:
-            params["timeout"] = spec["timeout"]
-
         # PATCH /model/{id}/update, NOT POST /model/update. Both routes exist on
         # 1.93.0, but the POST one answers every well-formed payload with
         # `{"error":{"message":"Authentication Error, model not found"}}` (HTTP
@@ -199,20 +218,7 @@ def apply_policy(declared: dict) -> None:
         # Its response echoes an internal view with an encrypted `model` value
         # and a different `model_info.id`; that is cosmetic — a follow-up GET
         # shows the original id, one entry, and working completions.
-        _request(
-            "PATCH",
-            f"/model/{model_id}/update",
-            {
-                "model_info": {
-                    "adaptive_router_preferences": {
-                        "quality_tier": spec["quality_tier"],
-                        "strengths": list(spec.get("strengths") or []),
-                    },
-                    **{k: spec[k] for k in OPTIONAL_MODEL_INFO_KEYS if k in spec},
-                },
-                "litellm_params": params,
-            },
-        )
+        _request("PATCH", f"/model/{model_id}/update", build_patch_body(spec))
         print(f"  applied  {alias}")
 
     for alias, targets in (declared.get("fallbacks") or {}).items():
