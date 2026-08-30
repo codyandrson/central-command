@@ -253,6 +253,10 @@ begin;
 update webhook_entity set "webhookPath" = replace("webhookPath", 'gv-', 'cc-') where "webhookPath" like '%gv-%';
 update workflow_entity set name = replace(name, 'gv-', 'cc-'), nodes = replace(nodes::text, 'gv-', 'cc-')::json
   where name like '%gv-%' or nodes::text like '%gv-%';
+-- n8n 2.x publishes the ACTIVE version from workflow_history (activeVersionId), and
+-- re-registers webhook_entity from it on start: leave it unrewritten and both the
+-- old and the new paths come back after the restart (seen live 2026-08-29).
+update workflow_history set nodes = replace(nodes::text, 'gv-', 'cc-')::json where nodes::text like '%gv-%';
 commit;
 select "webhookPath" from webhook_entity order by 1;
 SQL
