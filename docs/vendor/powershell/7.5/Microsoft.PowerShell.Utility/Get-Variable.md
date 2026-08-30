@@ -6,7 +6,7 @@ ms.date: 06/16/2026
 online version: https://learn.microsoft.com/powershell/module/microsoft.powershell.utility/get-variable?view=powershell-7.5&WT.mc_id=ps-gethelp
 schema: 2.0.0
 aliases:
-  - cc
+  - gv
 title: Get-Variable
 ---
 
@@ -59,7 +59,7 @@ Get-Variable -Include M*,P*
 ### Example 4: Get variables by scope
 
 The first command gets only the variables that are defined in the local scope.
-It is equivalent to `Get-Variable -Scope Local` and can be abbreviated as `cc -s 0`.
+It is equivalent to `Get-Variable -Scope Local` and can be abbreviated as `gv -s 0`.
 
 The second command uses the `Compare-Object` cmdlet to find the variables that are defined in the
 parent scope (Scope 1) but are visible only in the local scope (Scope 0).
@@ -197,7 +197,7 @@ enclose the `Get-Variable` command in parentheses.
 PowerShell includes the following aliases for `Get-Variable`:
 
 - All platforms:
-  - `cc`
+  - `gv`
 
 - This cmdlet does not manage environment variables. To manage environment variables, you can use
 the Environment provider.
