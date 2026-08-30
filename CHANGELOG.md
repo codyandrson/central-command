@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.1.0: setup pauses on a fresh LiteLLM catalog for the operator to enter the providers
+
+- **Setup no longer knows your LLM provider.** Both drivers' `llm` phase
+  bring the proxy up, create every required alias as a **skeleton** in
+  LiteLLM's database — the name plus the facts that are not the operator's to
+  choose (`graphiti-llm`'s `openai/chat_completions/` bridge prefix, the
+  reranker's `mode: rerank` and `/v1/rerank` path, per-alias timeouts) with
+  `PLACEHOLDER` where the model id and `api_base` go — and **stop (exit 3)
+  on every fresh catalog** so the operator enters model ids, endpoints and
+  keys/credentials in the LiteLLM UI before anything else is deployed.
+  Re-running `setup.sh llm` checks each row (placeholder gone, invariants
+  kept), then validates with real requests — chat through `cc-default`, a
+  schema-constrained **Responses-API round trip through `graphiti-llm`**
+  (the failure a chat probe cannot see: without the prefix the proxy
+  returns prose with HTTP 200), an embedding with its dimension — and
+  continues. Operator decision: models live in the LiteLLM database and
+  are managed through its API/UI; the config file is the fallback for what
+  the API cannot set.
+- **`register-models.py` is create-only.** An alias that exists is never
+  written to, so nothing entered or later changed in the UI is overwritten
+  by a re-run or an update. Declared values are patterns
+  (`openai/chat_completions/PLACEHOLDER`), `api_key` is never declared, and
+  exit 3 means operator action. `model-preferences.yaml`'s registrations
+  and the new `deploy/single/models.json` are skeletons; the k3s routing
+  policy (`policy.py`) is unchanged.
+- **Single-node `.env` drops `CC_LLM_BASE_URL` / `CC_LLM_API_KEY` /
+  `CC_CHAT_MODEL` / `CC_EMBED_MODEL` and the split-embed pair.** The key is
+  entered in the UI and stored encrypted under `LITELLM_SALT_KEY`; nothing
+  renders or mounts it. `discover-llm.sh` gains `structured <alias>` and its
+  direct mode takes the endpoint from the environment only. This closes the
+  k3s gap where the three Anthropic rows registered with no credential and
+  401'd on first use — the credential is created during the pause.
+
 ## 2026-08-30 — v2.0.3: the single-node profile keeps its models in LiteLLM's database, not the config file
 
 - **`deploy/single` no longer declares models in `config.yaml`.** The profile

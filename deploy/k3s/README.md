@@ -71,12 +71,19 @@ Assumed already true before phase 2:
     empty `cc-litellm-pgdata`. That means two rebuilds, in this order.
 
     **1. An empty model catalog.** `store_model_in_db: true`, so every model
-    lives in that database and NOT in `deploy/pi/litellm/config.yaml`. Rebuild
-    it from the tracked declaration — no hand-composed `POST /model/new`:
+    lives in that database and NOT in `deploy/pi/litellm/config.yaml` — and
+    since 2026-08-30 the catalog is the operator's, managed in the proxy UI.
+    `register-models.py` is create-only: it creates every alias
+    `model-preferences.yaml` declares as a SKELETON (name, invariants, and
+    `PLACEHOLDER` where the model id and `api_base` go; no key) and exits 3
+    for you to fill them in at `http://127.0.0.1:4000/ui` — model ids,
+    endpoints, and the Anthropic credential under Endpoints (the pod carries
+    no `ANTHROPIC_API_KEY` on purpose). Re-run and it checks the rows, then
+    the policy goes on:
 
     ```bash
-    python3 deploy/pi/litellm/register-models.py --dry-run   # read the plan
-    python3 deploy/pi/litellm/register-models.py             # apply it
+    python3 deploy/pi/litellm/register-models.py             # exit 3 = go fill in the UI
+    python3 deploy/pi/litellm/register-models.py             # exit 0 = every row filled and consistent
     python3 deploy/pi/litellm/policy.py --apply              # routing policy
     sudo k3s kubectl -n central-command rollout restart deploy/cc-litellm
     sudo k3s kubectl -n central-command rollout status deploy/cc-litellm --timeout=120s
@@ -88,17 +95,18 @@ Assumed already true before phase 2:
     warning), so skipping it leaves `/adaptive_router/state` stale even though
     `--check` may still pass.
 
-    `model-preferences.yaml` is the authoritative list of all eleven, and it is
-    now actually able to drive registration: each entry carries a
-    `registration:` block with `litellm_params.model` (routing prefix included),
-    `api_base` and, for the four `registration_only:` entries, `timeout`. The
-    two facts most easily got wrong live in that file's comments — `graphiti-llm`
-    needs the `openai/chat_completions/` Responses→chat bridge prefix, and
-    `qwen3-rerank-local`'s **`api_base` must end in `/v1/rerank`** (the `cohere/`
-    client POSTs the base verbatim and appends nothing). Timeouts have exactly
-    one home per model, which is what makes `policy.py --check` a real gate
-    rather than a coin flip. `policy.py --apply` still only *annotates* models
-    that already exist — register first, always.
+    `model-preferences.yaml` declares all eleven aliases and the two
+    invariants most easily got wrong — `graphiti-llm` must keep the
+    `openai/chat_completions/` Responses→chat bridge prefix, and
+    `qwen3-rerank-local`'s **`api_base` must end in `/v1/rerank`** (the
+    `cohere/` client POSTs the base verbatim and appends nothing). Nothing
+    you enter in the UI is ever overwritten by the script. Timeouts have
+    exactly one home per model, which is what makes `policy.py --check` a
+    real gate rather than a coin flip. `policy.py --apply` still only
+    *annotates* models that already exist — register first, always. The
+    setup driver (`./deploy/k3s/setup.sh llm`) runs all of this, gate
+    included, and then probes `cc-default`, `graphiti-llm` (structured) and
+    the embedder through the proxy.
 
     **2. A fresh master key**, so every downstream virtual key must be re-minted
     against it before it will authenticate:

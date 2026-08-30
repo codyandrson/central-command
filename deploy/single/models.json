@@ -1,0 +1,17 @@
+{
+  "notes": [
+    "The single-node profile's REQUIRED LiteLLM aliases. Applied by setup.sh's llm phase through deploy/pi/litellm/register-models.py --policy — CREATE-ONLY: an absent alias is created as a skeleton with PLACEHOLDER where YOUR provider information goes (model id, api_base; the api key / credential you add in the UI), and an alias that exists is never written to. Setup then PAUSES (exit 3) on every fresh catalog so you fill them in at http://127.0.0.1:4000/ui before anything else is deployed; the re-run validates each alias with a real request and continues.",
+    "The catalog lives in LiteLLM's Postgres (store_model_in_db) and is managed through its UI/API — the config file is the fallback for what the API cannot set, never the default (operator decision, 2026-08-30). JSON so the pre-venv system python needs no PyYAML.",
+    "cc-default: what Central Command's agents address. The spine knows exactly one alias. Fill in model (openai/<id your server names>) and api_base (the URL the CONTAINER dials — never 127.0.0.1 for a server on this machine; use host.containers.internal).",
+    "graphiti-llm: NOT a duplicate of cc-default — the openai/chat_completions/ prefix is the whole point and the re-run REFUSES a value without it. graphiti_core drives extraction through the RESPONSES API; a plain openai/ model is passed straight through to an endpoint that does not implement /v1/responses, the json_schema is silently dropped and every extraction fails. The prefix forces LiteLLM's Responses->chat bridge. Typically the same model id and api_base as cc-default.",
+    "cc-embedding: the embedder — commonly a different server than chat. Its DIMENSION is measured by setup and written into the Neo4j vector index — effectively permanent.",
+    "gpt-4.1-nano: graphiti_core's default reranker addresses a model LITERALLY named gpt-4.1-nano; it runs a logprob classifier over chat completions, so any chat model serves — typically the same as cc-default.",
+    "A key the server ignores can be a placeholder like `none`, but the field must be NON-EMPTY — LiteLLM needs a value to send."
+  ],
+  "registration_only": {
+    "cc-default":   {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}},
+    "graphiti-llm": {"registration": {"model": "openai/chat_completions/PLACEHOLDER", "api_base": "PLACEHOLDER"}},
+    "cc-embedding": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}},
+    "gpt-4.1-nano": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}}
+  }
+}

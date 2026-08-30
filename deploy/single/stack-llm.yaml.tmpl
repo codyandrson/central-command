@@ -28,19 +28,18 @@ data:
     # LiteLLM for the single-node profile.
     #
     # NO models here. The catalog lives in LiteLLM's Postgres
-    # (store_model_in_db) exactly as on the k3s profile, so it is editable in
-    # the proxy UI / API and survives every re-render of this file. Setup seeds
-    # it from models.json (rendered by render.sh from models.json.tmpl, applied
-    # by deploy/pi/litellm/register-models.py --policy). Until 2026-08-30 four
-    # models were declared in this model_list AND store_model_in_db was true —
-    # config-declared entries are static (the UI cannot edit them, and a
-    # same-named DB row becomes a second deployment in the group), and they
-    # carried no model_info, so the app's thinking/vision declarations were
-    # silently absent on every gift install.
+    # (store_model_in_db) exactly as on the k3s profile and is managed in the
+    # proxy UI/API: setup creates the four required aliases as SKELETONS
+    # (models.json via deploy/pi/litellm/register-models.py) and PAUSES for
+    # the operator to enter the provider, model ids and key, then validates.
+    # Until 2026-08-30 four models were declared in this model_list AND
+    # store_model_in_db was true — config-declared entries are static (the
+    # UI cannot edit them, and a same-named DB row becomes a second
+    # deployment in the group), and they carried no model_info.
     #
-    # Keys are `os.environ/...` refs, never literals — this ConfigMap is
-    # rendered into a file that may be read by anyone who can read the
-    # install dir, while the secret lives in a podman secret.
+    # No credential is referenced from this file at all any more; the
+    # provider key is entered in the UI and stored encrypted under
+    # LITELLM_SALT_KEY.
     general_settings:
       master_key: os.environ/LITELLM_MASTER_KEY
       database_url: os.environ/DATABASE_URL
@@ -166,16 +165,6 @@ spec:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef: {name: ${CC_POD_PREFIX}litellm, key: DATABASE_URL}
-        # The user's own upstream credential, referenced as os.environ/
-        # from config.yaml so it never lands in the ConfigMap.
-        - name: CC_LLM_API_KEY
-          valueFrom:
-            secretKeyRef: {name: ${CC_POD_PREFIX}litellm, key: CC_LLM_API_KEY}
-        # Same credential unless the user's embeddings live on a different
-        # server (make-secrets.sh copies CC_LLM_API_KEY when unset).
-        - name: CC_EMBED_API_KEY
-          valueFrom:
-            secretKeyRef: {name: ${CC_POD_PREFIX}litellm, key: CC_EMBED_API_KEY}
         # Admin-UI login. make-secrets.sh fills LiteLLM's own defaults
         # (admin / master key) when UI_USERNAME/UI_PASSWORD are unset in .env.
         - name: UI_USERNAME

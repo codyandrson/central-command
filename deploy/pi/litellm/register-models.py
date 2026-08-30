@@ -1,35 +1,46 @@
 #!/usr/bin/env python3
-"""Register (or reconcile) the declared models on the LiteLLM proxy.
+"""Seed the REQUIRED model aliases on the LiteLLM proxy, then get out of the way.
 
-    python3 deploy/pi/litellm/register-models.py --dry-run   # print the diff
-    python3 deploy/pi/litellm/register-models.py             # apply it
-    python3 deploy/pi/litellm/register-models.py --policy deploy/single/models.json
-                                                             # another declaration
-                                                             # (.json needs no PyYAML)
+    python3 deploy/pi/litellm/register-models.py [--policy FILE] [--dry-run]
 
-`store_model_in_db: true`, so the model catalog lives in cc-litellm-db and NOT
-in the tracked config.yaml. A fully-clean deployment therefore boots with an
-EMPTY catalog and nothing in the repo to restore it from — which is exactly what
-happened on 2026-08-23, when all eleven registrations were hand-composed at the
-terminal. `model-preferences.yaml` now carries a `registration:` block per
-entry; this script is the thing that applies them. The single-node profile
-(2026-08-30) seeds its catalog through the same script from a rendered
-`deploy/single/models.json` — `--policy` picks the declaration, and a `.json`
-one is read with the stdlib so the system python needs no PyYAML.
+    exit 0  every required alias exists, is filled in, and keeps its invariants
+    exit 3  OPERATOR ACTION: aliases were just created as skeletons, or still
+            carry PLACEHOLDER values, or break an invariant — fill them in via
+            the LiteLLM UI (printed above the exit), then re-run
+    exit 1  the proxy could not be reached / answered an error
 
-Upsert by `model_name`:
-  * absent  -> POST /model/new
-  * present -> PATCH /model/{id}/update, and only when something differs
+The model catalog lives in LiteLLM's Postgres (`store_model_in_db: true`) and
+is managed through its UI/API — that is the operator's decision (2026-08-30):
+the config file is the fallback for what the API cannot set, never the
+default. So this script is CREATE-ONLY. An alias that does not exist is
+created as a SKELETON — the name plus the facts that are not the operator's
+to choose (`graphiti-llm`'s `openai/chat_completions/` bridge prefix, the
+reranker's `mode: rerank` and `/v1/rerank` path, per-alias timeouts) — with
+the literal token `PLACEHOLDER` where the provider information goes: the
+model id, the api_base, and (never declared here) the api_key or credential.
+An alias that exists is NEVER written to, whatever it says, so everything the
+operator enters or later changes in the UI survives every re-run.
 
-It deliberately does NOT touch `input_cost_per_token` or
-`adaptive_router_preferences` — those are policy.py's, and writing them from two
-places is how a field ends up with two owners. Run, in order:
+Setup pauses on every fresh catalog (exit 3) so the operator fills the
+skeletons in and creates their provider credential BEFORE anything else is
+deployed; the re-run validates (this script's checks, then real probes
+through each alias) and continues.
 
-    register-models.py          # the deployments exist
-    policy.py --apply           # the routing policy is on them
-    policy.py --check           # proves parity, timeouts included
+A declared value is a PATTERN: `openai/chat_completions/PLACEHOLDER` means
+"must start with the bridge prefix and must no longer be the placeholder";
+`PLACEHOLDER/v1/rerank` means "must end in /v1/rerank" (a bare
+`PLACEHOLDER` api_base is entirely the operator's: scheme, host, path); a value with
+no PLACEHOLDER (`mode: rerank`, a timeout) must match exactly. api_key is
+never checked — LiteLLM never echoes it — the probes catch a wrong key.
 
-Reads the master key from deploy/pi/.env. The key is never printed.
+The declaration is `.yaml` (PyYAML) or `.json` (stdlib — the single-node
+profile's, so the pre-venv python needs nothing). `models:` entries take
+their timeout from the top-level `timeout:` (policy.py --apply writes it and
+--check gates it); `registration_only:` entries carry theirs in the block.
+
+Reads the master key from LITELLM_MASTER_KEY, falling back to deploy/pi/.env;
+the proxy URL from CC_LITELLM_URL (default http://127.0.0.1:4000). The key is
+never printed.
 """
 from __future__ import annotations
 
@@ -46,10 +57,12 @@ POLICY_PATH = HERE / "model-preferences.yaml"
 ENV_PATH = HERE.parent / ".env"
 BASE_URL = os.environ.get("CC_LITELLM_URL", "http://127.0.0.1:4000")
 
-# The litellm_params this script owns. Anything else on a live deployment is
-# LiteLLM's own default noise (use_litellm_proxy, merge_reasoning_content_in_
-# choices, ...) and is not drift.
-OWNED = ("model", "api_base", "api_key", "timeout", "mode", "chat_template_kwargs")
+PLACEHOLDER = "PLACEHOLDER"
+# The litellm_params a declaration may fix. api_key is deliberately absent:
+# a credential is the operator's, entered in the UI, never in a tracked file.
+OWNED = ("model", "api_base", "timeout", "mode")
+
+EXIT_ACTION = 3
 
 
 def _master_key() -> str:
@@ -67,13 +80,9 @@ def _master_key() -> str:
 def _request(method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        f"{BASE_URL}{path}",
-        data=data,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {_master_key()}",
-            "Content-Type": "application/json",
-        },
+        f"{BASE_URL}{path}", data=data, method=method,
+        headers={"Authorization": f"Bearer {_master_key()}",
+                 "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -81,6 +90,8 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
         sys.exit(f"{method} {path} failed: HTTP {exc.code} {exc.read().decode()[:300]}")
+    except urllib.error.URLError as exc:
+        sys.exit(f"{method} {path} failed: cannot reach {BASE_URL} ({exc.reason})")
 
 
 def load_declaration(path: Path) -> dict:
@@ -93,13 +104,7 @@ def load_declaration(path: Path) -> dict:
 
 
 def declared(policy: dict) -> dict[str, dict]:
-    """alias -> the litellm_params we intend, from BOTH declaration blocks.
-
-    `models:` entries take their timeout from the top-level `timeout:` (the one
-    policy.py --check gates) so it has exactly one home; `registration_only:`
-    entries carry theirs inside the block, because policy.py declares them not
-    at all. `timeout: null` on the Anthropic models means "send none".
-    """
+    """alias -> the skeleton litellm_params, from BOTH declaration blocks."""
     out: dict[str, dict] = {}
     for alias, spec in (policy.get("models") or {}).items():
         reg = spec.get("registration")
@@ -115,91 +120,91 @@ def declared(policy: dict) -> dict[str, dict]:
     return out
 
 
-def plan(want: dict[str, dict], live_models: list[dict]) -> list[tuple[str, str, dict, dict]]:
-    """[(action, alias, wanted_params, live_params)] — pure, so it is testable."""
-    by_alias = {m.get("model_name"): m for m in live_models if m.get("model_name")}
-    actions = []
-    for alias, params in want.items():
-        live = by_alias.get(alias)
-        if live is None:
-            actions.append(("create", alias, params, {}))
-            continue
-        live_params = {k: v for k, v in (live.get("litellm_params") or {}).items() if k in OWNED}
-        # LiteLLM stores timeouts as floats; 300 and 300.0 are the same timeout.
-        # LiteLLM never echoes api_key back from /model/info, so an absent
-        # live value is "unknown", not "unset" — comparing it would PATCH the
-        # row on every run (2026-08-29).
-        differs = any(
-            _norm(live_params.get(k)) != _norm(v)
-            for k, v in params.items()
-            if not (k == "api_key" and "api_key" not in live_params)
-        )
-        actions.append((("update" if differs else "ok"), alias, params, live_params))
-    return actions
-
-
 def _norm(v):
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
 
 
+def matches(pattern, live) -> bool:
+    """A declared value as a pattern over the live one (see the module doc)."""
+    if not isinstance(pattern, str) or PLACEHOLDER not in pattern:
+        return _norm(live) == _norm(pattern)
+    if not isinstance(live, str) or PLACEHOLDER in live:
+        return False
+    prefix, suffix = pattern.split(PLACEHOLDER, 1)
+    return live.startswith(prefix) and live.endswith(suffix) \
+        and len(live) > len(prefix) + len(suffix)
+
+
+def plan(want: dict[str, dict], live_models: list[dict]) -> list[tuple[str, str, list[str]]]:
+    """[(status, alias, problems)] — pure, so it is testable.
+
+    status: create   absent on the proxy -> a skeleton will be created
+            pending  present, still carries PLACEHOLDER in an owned param
+            drift    present, filled in, but breaks a declared invariant
+            ok
+    """
+    by_alias = {m.get("model_name"): m for m in live_models if m.get("model_name")}
+    out = []
+    for alias, params in want.items():
+        live = by_alias.get(alias)
+        if live is None:
+            out.append(("create", alias, []))
+            continue
+        live_params = live.get("litellm_params") or {}
+        pending = [k for k in OWNED
+                   if isinstance(live_params.get(k), str) and PLACEHOLDER in live_params[k]]
+        if pending:
+            out.append(("pending", alias, [f"{k} is still {live_params[k]!r}" for k in pending]))
+            continue
+        problems = [f"{k}: {live_params.get(k)!r} does not match declared {v!r}"
+                    for k, v in params.items() if not matches(v, live_params.get(k))]
+        out.append((("drift" if problems else "ok"), alias, problems))
+    return out
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true",
-                    help="print what would be created/updated; write nothing")
+                    help="print what would be created; write nothing; exit 0")
     ap.add_argument("--policy", type=Path, default=POLICY_PATH,
-                    help=f"the declaration to apply (.yaml or .json; default {POLICY_PATH})")
+                    help=f"the declaration (.yaml or .json; default {POLICY_PATH})")
     args = ap.parse_args()
 
-    policy = load_declaration(args.policy)
-    want = declared(policy)
+    want = declared(load_declaration(args.policy))
     live = _request("GET", "/model/info").get("data", [])
     actions = plan(want, live)
 
-    unknown = sorted(
-        {m.get("model_name") for m in live if m.get("model_name")} - set(want)
-    )
-
-    changes = 0
-    for action, alias, params, live_params in actions:
-        if action == "ok":
+    created, action_needed = 0, []
+    for status, alias, problems in actions:
+        if status == "ok":
             print(f"  ok       {alias}")
-            continue
-        changes += 1
-        if action == "create":
-            print(f"  CREATE   {alias}  {json.dumps(params, sort_keys=True)}")
+        elif status == "create":
+            print(f"  CREATE   {alias}  skeleton {json.dumps(want[alias], sort_keys=True)}")
+            if not args.dry_run:
+                _request("POST", "/model/new",
+                         {"model_name": alias, "litellm_params": want[alias], "model_info": {}})
+                created += 1
+            action_needed.append((alias, ["created as a skeleton — fill in model, api_base and the key/credential"]))
         else:
-            deltas = {
-                k: f"{live_params.get(k)!r} -> {v!r}"
-                for k, v in params.items()
-                if _norm(live_params.get(k)) != _norm(v)
-            }
-            print(f"  UPDATE   {alias}  {json.dumps(deltas, sort_keys=True)}")
-        if args.dry_run:
-            continue
-        if action == "create":
-            _request("POST", "/model/new",
-                     {"model_name": alias, "litellm_params": params, "model_info": {}})
-        else:
-            model_id = next(
-                (m.get("model_info") or {}).get("id")
-                for m in live if m.get("model_name") == alias
-            )
-            # PATCH, not POST /model/update — see the long note in policy.py.
-            _request("PATCH", f"/model/{model_id}/update", {"litellm_params": params})
+            print(f"  {status.upper():8} {alias}  " + "; ".join(problems))
+            action_needed.append((alias, problems))
 
-    for alias in unknown:
-        print(f"  extra    {alias}  (on the proxy, not declared here — left alone)")
+    extra = sorted({m.get("model_name") for m in live if m.get("model_name")} - set(want))
+    for alias in extra:
+        print(f"  extra    {alias}  (on the proxy, not declared here — yours, left alone)")
 
     print()
     if args.dry_run:
-        print(f"dry run: {changes} change(s) would be made; nothing was written.")
-    elif changes:
-        print(f"{changes} change(s) applied. Now run:")
-        print("  python3 deploy/pi/litellm/policy.py --apply")
-        print("  python3 deploy/pi/litellm/policy.py --check   # proves timeout parity")
-    else:
-        print(f"the proxy already matches {args.policy.name}")
-    return 0
+        print(f"dry run: {sum(1 for s, *_ in actions if s == 'create')} skeleton(s) would be created; nothing was written.")
+        return 0
+    if not action_needed:
+        print(f"the proxy holds every alias {args.policy.name} requires, filled in and consistent")
+        return 0
+    print(f"OPERATOR ACTION — {created} skeleton(s) created; {len(action_needed)} alias(es) need you in the LiteLLM UI:")
+    for alias, problems in action_needed:
+        print(f"  {alias}: " + "; ".join(problems))
+    return EXIT_ACTION
 
 
 if __name__ == "__main__":

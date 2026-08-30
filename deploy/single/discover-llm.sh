@@ -7,33 +7,41 @@
 #   prerequisite of setup) drives this script rather than probing freehand,
 #   so every install answers these questions the same way.
 #
-#   Usage (endpoint from deploy/single/.env, or override via env vars):
-#     ./discover-llm.sh models              # list model ids the endpoint serves
-#     ./discover-llm.sh chat  <model-id>    # prove a real completion works
-#     ./discover-llm.sh embed <model-id>    # embed one string, print DIMENSION
+#   Usage (direct mode: endpoint via CC_LLM_BASE_URL / CC_LLM_API_KEY env vars):
+#     ./discover-llm.sh models                   # list model ids the endpoint serves
+#     ./discover-llm.sh chat       <model-id>    # prove a real completion works
+#     ./discover-llm.sh structured <model-id>    # a Responses-API json_schema round trip
+#     ./discover-llm.sh embed      <model-id>    # embed one string, print DIMENSION
 #
 #   TWO RUNGS, and the difference is the diagnosis (2026-08-25, LiteLLM-first):
 #
 #     --proxy   target THIS STACK's LiteLLM on 127.0.0.1:${CC_LITELLM_PORT}
 #               with the master key from .env, and probe the ALIASES:
-#                 ./discover-llm.sh --proxy chat  cc-default
-#                 ./discover-llm.sh --proxy embed cc-embedding
+#                 ./discover-llm.sh --proxy chat       cc-default
+#                 ./discover-llm.sh --proxy structured graphiti-llm
+#                 ./discover-llm.sh --proxy embed      cc-embedding
+#               `structured` is the graphiti-llm check: graphiti_core drives
+#               extraction through /v1/responses with a json_schema, and a
+#               registration without the openai/chat_completions/ bridge
+#               prefix answers PROSE with HTTP 200 — the one failure a plain
+#               chat probe cannot see.
 #               This is the normal validation path — it proves what production
 #               actually uses (spine -> proxy -> upstream), not a path nothing
 #               takes at runtime.
 #
-#     (direct)  the default. Used for two jobs only: the phase-1 LISTING (you
-#               cannot list an upstream's models through a proxy that has not
-#               registered them yet), and TROUBLESHOOTING — when a --proxy
-#               probe fails, re-run it direct to tell "bad upstream/key" from
-#               "broken deployment/registration". They are different failures
-#               with different fixes.
+#     (direct)  TROUBLESHOOTING only, and LISTING what an upstream serves
+#               before you fill the aliases in. The provider endpoint is not
+#               in .env any more (2026-08-30: it is entered in the LiteLLM UI
+#               during setup's pause), so pass it explicitly:
+#                 CC_LLM_BASE_URL=https://host/v1 CC_LLM_API_KEY=... \
+#                   ./discover-llm.sh chat <upstream model id>
+#               When a --proxy probe fails, the direct run tells "bad
+#               upstream/key" from "broken registration": different failures,
+#               different fixes.
 #
 #   `embed` (and `models`' second listing) uses CC_EMBED_BASE_URL /
-#   CC_EMBED_API_KEY when set — for installs whose embeddings are served by a
-#   different server than chat. Unset falls back to the chat pair. NOTE: .env
-#   is only read when CC_LLM_BASE_URL/CC_LLM_API_KEY are absent from the
-#   environment, so override either all of them or none.
+#   CC_EMBED_API_KEY when set — for an embedder on a different server. Unset
+#   falls back to the chat pair.
 #
 #   The embed probe IS the dimension discovery: never trust a model card for
 #   this — a mis-sized vector corrupts the Neo4j index instead of erroring,
@@ -55,7 +63,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROXY=0
 [[ "${1:-}" == "--proxy" ]] && { PROXY=1; shift; }
 
-if (( PROXY )) || [[ -z "${CC_LLM_BASE_URL:-}" || -z "${CC_LLM_API_KEY:-}" ]]; then
+# .env holds the proxy's master key and port — nothing about the upstream.
+if (( PROXY )); then
   [[ -f "$HERE/.env" ]] && { set -a; . "$HERE/.env"; set +a; }
 fi
 
@@ -74,7 +83,7 @@ if (( PROXY )); then
   CC_EMBED_API_KEY="$CC_LLM_API_KEY"
 fi
 [[ -n "${CC_LLM_BASE_URL:-}" && -n "${CC_LLM_API_KEY:-}" ]] || {
-  echo "FATAL: set CC_LLM_BASE_URL and CC_LLM_API_KEY (env or $HERE/.env)" >&2
+  echo "FATAL: direct mode needs CC_LLM_BASE_URL and CC_LLM_API_KEY in the environment (or use --proxy)" >&2
   exit 1
 }
 
@@ -125,6 +134,25 @@ if not text:
 else:
     print(f"chat ok: {r['\''model'\'']} -> {text!r}")'
     ;;
+  structured)
+    [[ -n "${2:-}" ]] || { echo "usage: $0 structured <model-id>" >&2; exit 1; }
+    # The exact call graphiti_core makes: /v1/responses with text.format
+    # json_schema. Through the proxy this is what proves the bridge prefix.
+    _api -H 'Content-Type: application/json' \
+      -d "{\"model\": \"$2\", \"input\": \"What word follows ping? Answer as JSON.\", \"text\": {\"format\": {\"type\": \"json_schema\", \"name\": \"probe\", \"strict\": true, \"schema\": {\"type\": \"object\", \"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"additionalProperties\": false}}}}" \
+      "${CC_LLM_BASE_URL}/responses" | $PY -c '
+import json, sys
+r = json.load(sys.stdin)
+text = "".join(c.get("text") or "" for o in r.get("output", []) if o.get("type") == "message"
+               for c in o.get("content", []))
+try:
+    answer = json.loads(text)["answer"]
+except Exception:
+    sys.exit(f"FATAL: structured output is not the requested JSON (got {text[:120]!r}) — "
+             "is the model registered as openai/chat_completions/<id>?")
+m = r.get("model")
+print(f"structured ok: {m} -> {answer!r}")'
+    ;;
   embed)
     [[ -n "${2:-}" ]] || { echo "usage: $0 embed <model-id>" >&2; exit 1; }
     _eapi -H 'Content-Type: application/json' \
@@ -137,7 +165,7 @@ if not v:
 print(len(v))'
     ;;
   *)
-    echo "usage: $0 [--proxy] models | chat <model-id> | embed <model-id>" >&2
+    echo "usage: $0 [--proxy] models | chat <model-id> | structured <model-id> | embed <model-id>" >&2
     exit 1
     ;;
 esac

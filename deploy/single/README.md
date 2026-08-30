@@ -13,13 +13,14 @@ the log console — is factored out here.
 `stack-llm.yaml` — litellm + its postgres + redis. Played **first**: setup is
 LiteLLM-first (2026-08-25), so the proxy is up and its aliases registered
 before anything is validated, and every probe then runs THROUGH those aliases.
-The model catalog is **DB-stored** (`store_model_in_db`, as on k3s), not in
-the config file: `models.json.tmpl` renders to `models.json` from your `.env`
-and the `llm` phase seeds the four aliases through
-`deploy/pi/litellm/register-models.py --policy` (upsert by name — anything
-else you add or change in the LiteLLM UI/API is left alone). Until 2026-08-30
-they were declared in the config file's `model_list`, which the UI cannot
-edit and which carried no `model_info`.
+The model catalog is **DB-stored** (`store_model_in_db`, as on k3s) and
+**yours to fill in**: the `llm` phase creates the four required aliases
+(`models.json`, via `deploy/pi/litellm/register-models.py` — create-only)
+as skeletons and **pauses** for you to enter the provider, model ids and key
+in the LiteLLM UI; re-running `./setup.sh llm` validates each alias with a
+real request and continues. Nothing you enter or later change in the UI is
+ever overwritten by setup. Until 2026-08-30 the models were declared in the
+config file's `model_list` from `.env`, which the UI cannot edit.
 
 `stack.yaml` — postgres (the spine, schema auto-loaded) · neo4j · graphiti
 (MCP). Played **second**, and not before the embedding dimension has been
@@ -76,24 +77,23 @@ cp env.example .env    # then fill it in — see below
 ./setup.sh             # validate -> preflight -> llm -> stack -> app -> verify
 ```
 
-What you must supply in `.env`: `CC_LLM_BASE_URL`, `CC_LLM_API_KEY`,
-`CC_CHAT_MODEL`, `CC_EMBED_MODEL`, and the `CC_ENABLE_*` / `CC_AIRGAP` flags.
-Everything else is generated or measured. To pick the two model ids, list what
-your endpoint serves:
+What you must supply in `.env`: only the `CC_ENABLE_*` / `CC_AIRGAP` flags.
+Everything else is generated or measured. **The LLM provider is entered in
+the LiteLLM UI, not here:** the `llm` phase stops (exit 3) once the proxy is
+up, with the four aliases created as skeletons and the URL/login printed;
+fill in model ids, `api_base` (what the container dials —
+`host.containers.internal`, never `127.0.0.1`, for a server on this machine)
+and the key, then re-run `./setup.sh llm`. To see what a server names its
+models before you fill the rows in:
 
 ```bash
-./discover-llm.sh models
+CC_LLM_BASE_URL=https://host/v1 CC_LLM_API_KEY=... ./discover-llm.sh models
 ```
 
-That one read is DIRECT rather than through the proxy, because of a bootstrap
-circularity: you cannot list an upstream's models through a proxy that has not
-registered them yet. **`CC_EMBED_DIM` you do not fill in** — the `llm` phase
-measures it through the `cc-embedding` alias and writes it back, and refuses to
-overwrite a different value that is already there.
-
-Embeddings served by a different server than chat? Also set
-`CC_EMBED_BASE_URL` / `CC_EMBED_API_KEY`; unset means "same server" and only
-the `cc-embedding` alias reads them.
+**`CC_EMBED_DIM` you do not fill in** — the `llm` phase measures it through
+the `cc-embedding` alias and writes it back, and refuses to overwrite a
+different value that is already there. An embedder on a different server is
+just a different `api_base` on the `cc-embedding` row.
 
 ### Reading the output
 

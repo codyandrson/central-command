@@ -36,11 +36,6 @@ set +a
 
 : "${CC_POD_PREFIX:=cc-}"
 
-[[ -n "${CC_LLM_API_KEY:-}" ]] || {
-  echo "FATAL: CC_LLM_API_KEY is empty in $ENV_FILE — nothing can generate it." >&2
-  exit 1
-}
-
 # Set a variable in .env only if it is currently empty, generating a value.
 # Idempotent by construction: a second run sees a non-empty value and leaves
 # it alone, which is the entire safety story for the two never-rotate keys.
@@ -76,11 +71,6 @@ ensure N8N_DB_PASSWORD
 : "${EMBEDDER_API_KEY:=$LITELLM_MASTER_KEY}"
 : "${RERANKER_API_KEY:=$LITELLM_MASTER_KEY}"
 
-# Embeddings may be served by a different endpoint than chat; when they are
-# not, the embed alias uses the same credential. Never generated — it belongs
-# to the user's endpoint.
-: "${CC_EMBED_API_KEY:=$CC_LLM_API_KEY}"
-
 : "${N8N_DB_USER:=n8n}"
 : "${N8N_DB_NAME:=n8n}"
 
@@ -97,8 +87,6 @@ stringData:
   LITELLM_SALT_KEY: "${LITELLM_SALT_KEY}"
   LITELLM_POSTGRES_PASSWORD: "${LITELLM_POSTGRES_PASSWORD}"
   DATABASE_URL: "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD}@${CC_POD_PREFIX}litellm-db:5432/litellm"
-  CC_LLM_API_KEY: "${CC_LLM_API_KEY}"
-  CC_EMBED_API_KEY: "${CC_EMBED_API_KEY}"
   # Admin-UI login, optional and never generated. LiteLLM reads these with
   # os.getenv(..., None), so an EMPTY string would become the real password —
   # substitute its own defaults (admin / master key) instead, which is exactly

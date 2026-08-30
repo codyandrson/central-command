@@ -97,18 +97,19 @@ Elicit each of these and write it into `.env` (never run the install steps
 yourself — `./setup.sh` owns everything mechanical, including generating the
 credentials further down the file):
 
-- **`CC_LLM_BASE_URL`, `CC_LLM_API_KEY`** — any OpenAI-compatible endpoint,
-  URL including `/v1`.
-- **Split embedding endpoint?** Ask separately where embeddings are served —
-  self-hosted setups often run a dedicated embedder on another port. If so,
-  set `CC_EMBED_BASE_URL` / `CC_EMBED_API_KEY` (a key the server ignores can
-  be a placeholder like `none`, but must be non-empty — LiteLLM needs a value
-  to send). Leaving both empty means "same server as chat," and only the
-  `cc-embedding` alias reads them.
-- **`CC_CHAT_MODEL`, `CC_EMBED_MODEL`** — model ids as the endpoint names
-  them. List them with the one DIRECT read that's safe before the proxy
-  exists: `./discover-llm.sh models` (this is the only command in the happy
-  path that talks to the upstream directly rather than through LiteLLM).
+- **The LLM provider is NOT elicited into `.env` (2026-08-30).** Tell the
+  operator up front what is coming: the `llm` phase brings LiteLLM up,
+  creates the four required aliases (`cc-default`, `graphiti-llm`,
+  `cc-embedding`, `gpt-4.1-nano`) as skeletons in the proxy's database, and
+  **pauses (exit 3)** for THEM to enter the provider in the LiteLLM UI —
+  model ids, `api_base`, the key (stored encrypted in the proxy). Re-running
+  `./setup.sh llm` validates every alias with a real request and continues.
+  Have them ready: endpoint URL (the one the CONTAINER dials —
+  `host.containers.internal`, never `127.0.0.1`, for a server on this
+  machine), the key (`none` if the server ignores it), and the model ids
+  (`CC_LLM_BASE_URL=… CC_LLM_API_KEY=… ./discover-llm.sh models` lists them
+  directly). Self-hosted embedders on another server are just a different
+  `api_base` on the `cc-embedding` row.
 - **The embedding-permanence warning** — say it in one sentence: the
   embedding choice is effectively permanent, because `CC_EMBED_DIM` gets
   written into the Neo4j vector index. Changing the embedder later means
@@ -202,15 +203,18 @@ the fix is a real command (e.g. `loginctl enable-linger`), it's one the
 script already named in its WARN/FAIL line; otherwise the fix is almost
 always "re-run `./setup.sh <phase>`" after correcting `.env`.
 
-**Exit 3 in the `llm` phase (the model gate)** means LiteLLM is UP but an
-alias didn't answer. The script's stderr already printed the full hand-off:
-the UI URL (`http://127.0.0.1:4000/ui`), the credential's location by name,
-the expected alias → upstream mapping, and the direct-vs-proxy
-discrimination command (`./discover-llm.sh chat <upstream-model-id>` —
-direct success + proxy failure = registration fault; direct failure = wrong
-URL/key in `.env`). Relay it, let the OPERATOR fix the models in the UI or
-correct `.env`, then re-run `./setup.sh llm`. You never register, edit, or
-delete a model — not via curl, not via the UI, not at all.
+**Exit 3 in the `llm` phase (the model gate) is EXPECTED on every fresh
+install** — it is the pause where the operator enters the provider into
+the LiteLLM UI, and it also fires if a PLACEHOLDER was left in, an
+invariant was broken (the `openai/chat_completions/` prefix on
+`graphiti-llm`), or a probe failed after filling in. The script's stderr
+already printed the full hand-off: the UI URL (`http://127.0.0.1:4000/ui`),
+the credential's location by name, the alias table with what each needs,
+and the direct-vs-proxy discrimination command (direct success + proxy
+failure = the alias row is wrong; direct failure = wrong URL/key). Relay
+it, let the OPERATOR do it, then re-run `./setup.sh llm`. You never
+register, edit, or delete a model — not via curl, not via the UI, not at
+all.
 
 Gate: `./setup.sh` exits 0 (or 2 with WARNs the operator has read and
 accepted — a WARN is a stop-and-discuss point, not a drive-past).
@@ -464,13 +468,16 @@ the *why*, the placement table, §8's instance-data decisions and rollback.
 ```
 
 What its phases own (so you can interpret, not so you re-derive): `llm`
-brings up ONLY the LiteLLM trio, registers the model catalog from
-`model-preferences.yaml` (`register-models.py` → `policy.py --apply` →
-restart → `--check`), mints the virtual keys, then probes `cc-default` and
-`qwen3-embedding-local` through the proxy — a probe failure is an exit-3
-gate handing the operator the UI URL, the credential's location by name,
-and the alias list with the two easily-wrong facts (the
-`openai/chat_completions/` bridge prefix; rerank's `/v1/rerank` api_base).
+brings up ONLY the LiteLLM trio, creates every alias `model-preferences.yaml`
+declares as a SKELETON (`register-models.py`, create-only) and **pauses
+(exit 3) on a fresh catalog** for the operator to enter providers, model
+ids and keys/credentials in the LiteLLM UI; the re-run checks the
+invariants (the `openai/chat_completions/` bridge prefix; rerank's
+`/v1/rerank` api_base), applies the routing policy (`policy.py --apply` →
+restart → `--check`), mints the virtual keys, then probes `cc-default`,
+`graphiti-llm` (a structured Responses round trip) and
+`qwen3-embedding-local` through the proxy — a probe failure is the same
+exit-3 gate.
 `stack` builds the per-arch images only if missing and rolls out every
 manifest. `app` installs the venv/cockpit and the systemd units, holding
 `cc-uvicorn` enabled-but-stopped, and ends at the **first-boot exit-3

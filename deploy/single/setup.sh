@@ -180,31 +180,18 @@ phase_validate() {
   load_env || return 1
   pass "answer-file" "$ENV_FILE present"
 
-  local v
-  for v in CC_LLM_BASE_URL CC_LLM_API_KEY CC_CHAT_MODEL CC_EMBED_MODEL; do
-    if is_placeholder "${!v:-}"; then
-      fail "answer-${v}" "$v is empty or still a placeholder"
-    else
-      pass "answer-${v}" "$v is set"
-    fi
+  # The LLM provider (endpoint, key, model ids) is NOT an answer here any
+  # more (2026-08-30): it is entered in the LiteLLM UI during the llm phase's
+  # pause and stored in the proxy's database. A leftover from an older .env
+  # is harmless but misleading, so say so.
+  local v stale=""
+  for v in CC_LLM_BASE_URL CC_LLM_API_KEY CC_CHAT_MODEL CC_EMBED_MODEL CC_EMBED_BASE_URL CC_EMBED_API_KEY; do
+    [[ -n "${!v:-}" ]] && stale="$stale $v"
   done
-
-  if [[ "${CC_LLM_BASE_URL:-}" == http://* || "${CC_LLM_BASE_URL:-}" == https://* ]]; then
-    if [[ "${CC_LLM_BASE_URL}" == */v1 ]]; then
-      pass "llm-base-url-shape" "ends in /v1"
-    else
-      warn "llm-base-url-shape" "CC_LLM_BASE_URL does not end in /v1 — most OpenAI-compatible servers need it"
-    fi
+  if [[ -n "$stale" ]]; then
+    warn "provider-in-env" "ignored (the provider is configured in the LiteLLM UI now):$stale"
   else
-    fail "llm-base-url-shape" "CC_LLM_BASE_URL is not an http(s) URL"
-  fi
-
-  # A split embedding endpoint needs its own key; make-secrets falls back to
-  # the chat key only when the base URL is also unset.
-  if [[ -n "${CC_EMBED_BASE_URL:-}" && -z "${CC_EMBED_API_KEY:-}" ]]; then
-    warn "embed-endpoint" "CC_EMBED_BASE_URL is set but CC_EMBED_API_KEY is empty — it will fall back to the chat key"
-  else
-    pass "embed-endpoint" "chat/embed endpoint pair is coherent"
+    pass "provider-in-env" "no provider settings in .env — they belong in the LiteLLM UI"
   fi
 
   # Ports: numeric, in range, and distinct — two services on one hostPort is a
@@ -352,29 +339,33 @@ llm_gate() { # llm_gate <what-failed>
   useraction "llm-models" "$1 — operator action needed; see the instructions on stderr, then re-run: ./setup.sh llm"
   note ""
   note "== LiteLLM needs your attention =="
-  note "The proxy is UP but a model alias is not answering. Fix it yourself —"
-  note "no agent should register or edit models on your behalf."
+  note "The proxy is UP. Its model catalog lives in its database and is yours"
+  note "to fill in — setup created the required aliases as skeletons and stops"
+  note "here, on purpose, so the providers are right before anything else is"
+  note "deployed. No agent registers or edits models on your behalf."
   note ""
-  note "  UI:           http://127.0.0.1:${CC_LITELLM_PORT}/ui"
+  note "  UI:           http://127.0.0.1:${CC_LITELLM_PORT}/ui   (Models + Endpoints)"
   note "  login:        username 'admin', password = LITELLM_MASTER_KEY"
   note "                (or UI_USERNAME/UI_PASSWORD if set in .env)"
   note "                (the value is in deploy/single/.env — not printed here)"
   note ""
-  note "  The catalog is DB-stored; setup seeds it from models.json (rendered"
-  note "  from models.json.tmpl by your .env). These aliases must exist and"
-  note "  answer (check them in the UI against your upstream server):"
-  note "    cc-default    -> openai/${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}"
-  note "    graphiti-llm  -> openai/chat_completions/${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}   (the bridge prefix is required)"
-  note "    cc-embedding  -> openai/${CC_EMBED_MODEL:-<CC_EMBED_MODEL>}"
+  note "  For each alias listed above, edit the row: replace every PLACEHOLDER"
+  note "  (the model id after the prefix, the api_base host) and enter the API"
+  note "  key — or create a credential under Endpoints and attach it. Keep:"
+  note "    cc-default     openai/<your chat model>          the spine's alias"
+  note "    graphiti-llm   openai/chat_completions/<model>   the prefix is REQUIRED"
+  note "    cc-embedding   openai/<your embedding model>     dimension is permanent"
+  note "    gpt-4.1-nano   openai/<your chat model>          Graphiti's reranker"
+  note "  api_base is what the CONTAINER dials: a server on this machine is"
+  note "  http://host.containers.internal:<port>/v1, never 127.0.0.1. A key the"
+  note "  server ignores can be 'none', but the field must be non-empty."
   note ""
-  note "  Is the fault upstream or in the proxy? One command tells you:"
-  note "    ./discover-llm.sh chat ${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}     # DIRECT to your server"
-  note "  Direct works + proxy fails = registration/alias problem (fix in the UI,"
-  note "  or fix .env and re-run — re-running re-seeds these four from"
-  note "  models.json). Direct fails = CC_LLM_BASE_URL or the key is"
-  note "  wrong in deploy/single/.env."
+  note "  Not sure what your server names its models? List them directly:"
+  note "    CC_LLM_BASE_URL=<url>/v1 CC_LLM_API_KEY=<key> ./discover-llm.sh models"
+  note "  A probe failed after you filled things in? Direct works + proxy fails ="
+  note "  the alias row is wrong; direct fails = the URL or key is wrong."
   note ""
-  note "When it looks right, re-run:  ./setup.sh llm   (idempotent; it re-probes)"
+  note "When it looks right, re-run:  ./setup.sh llm   (it validates every alias, then continues)"
 }
 
 phase_llm() {
@@ -409,26 +400,38 @@ phase_llm() {
     return 1
   fi
 
-  # The catalog is DB-stored (store_model_in_db), same as the k3s profile, so
-  # a fresh litellm-pgdata boots EMPTY. Seed the four aliases from the rendered
-  # models.json — upsert by model_name, everything else on the proxy left
-  # alone, so later UI/API edits survive. Dry run first, as the plan.
-  # LITELLM_MASTER_KEY is in the environment from load_env; CC_LITELLM_URL
-  # points the script at THIS profile's port instead of its k3s default.
-  step "register-plan" "registration plan printed (dry run)" \
-    env CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
-      $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" --dry-run || return 1
-  step "register-models" "cc-default, graphiti-llm, cc-embedding and gpt-4.1-nano registered/reconciled" \
-    env CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
-      $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" || return 1
+  # The catalog is DB-stored (store_model_in_db) and managed in the proxy's
+  # UI — operator decision, 2026-08-30. register-models.py is CREATE-ONLY: an
+  # absent alias becomes a skeleton (name + invariants + PLACEHOLDER where the
+  # provider goes) and an existing one is never touched. It exits 3 on a
+  # fresh catalog, on a placeholder left in, or on a broken invariant — each
+  # is the operator's, so it is the USER-ACTION gate, before anything else
+  # deploys. LITELLM_MASTER_KEY is in the environment from load_env.
+  local rrc=0
+  CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
+    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" >&2 || rrc=$?
+  case "$rrc" in
+    0) pass "catalog" "every required alias is registered, filled in and consistent" ;;
+    3) llm_gate "the model catalog needs your provider details (see the alias list above)"; return 3 ;;
+    *) fail "catalog" "register-models.py failed (exit $rrc) — run: ./setup.sh diagnose"; return 1 ;;
+  esac
 
-  # The probes. A failure here is a USER-ACTION gate, not a plain FAIL
-  # (2026-08-27 contract): the proxy is UP, so the fix is the operator's —
-  # correct the model in the LiteLLM UI or in .env — never an agent
-  # improvising registrations. The gate prints everything needed to act.
+  # The probes — one real request per alias, through the proxy, exactly the
+  # call production makes. A failure is the same gate: the row is the
+  # operator's to fix.
   if ! step "probe-chat" "a real completion came back through the cc-default alias" \
     "$HERE/discover-llm.sh" --proxy chat cc-default; then
     llm_gate "the cc-default alias did not return a completion"
+    return 3
+  fi
+  if ! step "probe-structured" "graphiti-llm returned schema-constrained JSON through the Responses bridge" \
+    "$HERE/discover-llm.sh" --proxy structured graphiti-llm; then
+    llm_gate "the graphiti-llm alias did not return structured output (is the openai/chat_completions/ prefix intact?)"
+    return 3
+  fi
+  if ! step "probe-rerank-model" "a completion came back through gpt-4.1-nano (Graphiti's reranker alias)" \
+    "$HERE/discover-llm.sh" --proxy chat gpt-4.1-nano; then
+    llm_gate "the gpt-4.1-nano alias did not return a completion"
     return 3
   fi
 

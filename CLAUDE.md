@@ -296,6 +296,20 @@ default — changing it now buys nothing and breaks all five.
   `runtime/tools.py` and `gateway/executor.py` (it did not, 2026-08-04: the
   operator reviewed a diff against a directory the write never touched;
   `test_servers_root_is_the_same_path_on_both_sides` pins it).
+- **Models live in LiteLLM's DATABASE and are the operator's; setup PAUSES
+  for them (2026-08-30).** `store_model_in_db: true` on both profiles, the
+  config file holds no `model_list`, and `register-models.py` is
+  CREATE-ONLY: an absent alias becomes a skeleton (name + invariants +
+  `PLACEHOLDER` where the provider goes, never a key) and an existing row is
+  never written to — so nothing entered in the proxy UI is overwritten by a
+  re-run or an update. Both `setup.sh` drivers exit 3 on a fresh catalog on
+  purpose (the operator fills in providers, model ids and credentials in the
+  UI before anything else deploys), and the re-run validates each alias with
+  a real request — including a Responses-API `structured` probe through
+  `graphiti-llm`, because a registration without the bridge prefix answers
+  prose with HTTP 200. The config file is the fallback for what the API
+  cannot set (`litellm.apply_config_change`), never the default. Don't
+  reintroduce provider values into a tracked declaration or into `.env`.
 - **LiteLLM forbids `-` in MCP server names; Kubernetes requires it.** The
   same server cannot use one name on both sides, so `mcp_server.id` stays the
   k8s-valid canonical id and the proxy sees `_litellm_server_name()`'s

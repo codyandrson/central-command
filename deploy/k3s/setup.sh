@@ -402,33 +402,32 @@ llm_gate() { # llm_gate <what-failed>
   useraction "llm-models" "$1 — operator action needed; see the instructions on stderr, then re-run: ./deploy/k3s/setup.sh llm"
   note ""
   note "== LiteLLM needs your attention =="
-  note "The proxy is UP but a model alias is not answering. Fix it yourself —"
-  note "no agent should register or edit models on your behalf."
+  note "The proxy is UP. Its model catalog lives in its database and is yours"
+  note "to fill in — setup created the declared aliases as skeletons and stops"
+  note "here, on purpose, so the providers are right before anything else is"
+  note "deployed. No agent registers or edits models on your behalf."
   note ""
-  note "  UI:           http://127.0.0.1:4000/ui"
+  note "  UI:           http://127.0.0.1:4000/ui   (Models + Endpoints)"
   note "  login:        username 'admin', password = LITELLM_MASTER_KEY"
   note "                (or UI_USERNAME/UI_PASSWORD if set in .env)"
   note "                (the value is in deploy/pi/.env — not printed here)"
   note ""
-  note "  The catalog is DB-stored (store_model_in_db), and its declaration is"
-  note "  deploy/pi/litellm/model-preferences.yaml. The aliases that must exist"
-  note "  and answer, with the two facts most easily got wrong:"
-  note "    cc-default             the spine's chat alias"
-  note "    graphiti-llm           MUST be openai/chat_completions/<model> —"
+  note "  For each alias listed above, edit the row: replace every PLACEHOLDER"
+  note "  (model id after the prefix, api_base host) and enter the key — for"
+  note "  the Anthropic rows create the credential under Endpoints and attach"
+  note "  it (ANTHROPIC_API_KEY is deliberately NOT in the pod). The invariants"
+  note "  the re-run checks are in deploy/pi/litellm/model-preferences.yaml:"
+  note "    graphiti-llm           MUST keep openai/chat_completions/<model> —"
   note "                           the Responses->chat bridge prefix"
-  note "    qwen3-embedding-local  embeddings (this profile's embed alias)"
-  note "    qwen3-rerank-local     api_base MUST end in /v1/rerank"
+  note "    qwen3-rerank-local     api_base MUST end in /v1/rerank, mode rerank"
+  note "  A key a local server ignores can be 'none', but must be non-empty."
   note ""
-  note "  Is the fault upstream or in the proxy? One command tells you — point"
-  note "  discover-llm.sh DIRECTLY at the upstream server in that alias's"
-  note "  api_base, with that server's own key:"
-  note "    CC_LLM_BASE_URL=<upstream>/v1 CC_LLM_API_KEY=<upstream key> \\"
-  note "      deploy/single/discover-llm.sh chat <upstream model id>"
-  note "  Direct works + proxy fails = registration/alias problem (re-run"
-  note "  register-models.py, or fix it in the UI). Direct fails = the upstream"
-  note "  server or its key is wrong."
+  note "  Not sure what a server names its models? List them directly:"
+  note "    CC_LLM_BASE_URL=<url>/v1 CC_LLM_API_KEY=<key> deploy/single/discover-llm.sh models"
+  note "  A probe failed after you filled things in? Direct works + proxy fails ="
+  note "  the alias row is wrong; direct fails = the server or its key is wrong."
   note ""
-  note "When it looks right, re-run:  ./deploy/k3s/setup.sh llm   (idempotent)"
+  note "When it looks right, re-run:  ./deploy/k3s/setup.sh llm   (it validates every alias, then continues)"
 }
 
 # Probe an alias THROUGH this cluster's proxy. discover-llm.sh only sources
@@ -476,14 +475,19 @@ phase_llm() {
     return 1
   fi
 
-  # The catalog is DB-stored, so a fresh cc-litellm-pgdata boots EMPTY and
-  # there is nothing in config.yaml to restore it from. Rebuild it from the
-  # tracked declaration — never a hand-composed POST /model/new. The dry-run
-  # goes to stderr as the plan, then the same script applies it.
-  step "register-plan" "registration plan printed (dry run)" \
-    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --dry-run || return 1
-  step "register-models" "every declared model registered/reconciled" \
-    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" || return 1
+  # The catalog is DB-stored and managed in the proxy's UI (operator
+  # decision, 2026-08-30). register-models.py is CREATE-ONLY: an absent alias
+  # becomes a skeleton (name + invariants + PLACEHOLDER where the provider
+  # goes); an existing one is never touched. Exit 3 — a fresh catalog, a
+  # placeholder left in, a broken invariant — is the USER-ACTION gate, and it
+  # fires BEFORE the policy, the keys and every later phase.
+  local rrc=0
+  $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" >&2 || rrc=$?
+  case "$rrc" in
+    0) pass "catalog" "every declared alias is registered, filled in and consistent" ;;
+    3) llm_gate "the model catalog needs your provider details (see the alias list above)"; return 3 ;;
+    *) fail "catalog" "register-models.py failed (exit $rrc) — run: ./deploy/k3s/setup.sh diagnose"; return 1 ;;
+  esac
   step "policy-apply" "routing policy + costs applied onto the registered models" \
     $PY "$REPO_ROOT/deploy/pi/litellm/policy.py" --apply || return 1
 
@@ -518,6 +522,11 @@ phase_llm() {
   if ! step "probe-chat" "a real completion came back through the cc-default alias" \
     probe_alias chat cc-default; then
     llm_gate "the cc-default alias did not return a completion"
+    return 3
+  fi
+  if ! step "probe-structured" "graphiti-llm returned schema-constrained JSON through the Responses bridge" \
+    probe_alias structured graphiti-llm; then
+    llm_gate "the graphiti-llm alias did not return structured output (is the openai/chat_completions/ prefix intact?)"
     return 3
   fi
   # qwen3-embedding-local is THIS profile's embed alias (mint-keys.sh scopes

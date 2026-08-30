@@ -26,15 +26,18 @@
 #   strengths values come from the fixed v0 taxonomy in
 #   litellm/types/router.py::RequestType. Seven, no more.
 #
-#   ── `registration:` (added 2026-08-23) ───────────────────────────────────
-#   Each entry now also carries the litellm_params needed to CREATE it, so
-#   this file is what the runbook has always called it: the authoritative list
-#   of what must exist on the proxy. Applied by
-#   `python3 deploy/pi/litellm/register-models.py` (upsert by model_name,
-#   `--dry-run` first). Before this, a fully-clean deployment had nothing to
-#   register FROM — store_model_in_db: true means an empty LiteLLM database is
-#   an empty model catalog, and the 2026-08-23 clean install hand-composed all
-#   eleven registrations from memory and the pod's logs.
+#   ── `registration:` (added 2026-08-23; SKELETONS since 2026-08-30) ───────
+#   Each entry carries the litellm_params register-models.py CREATES it with
+#   when it is ABSENT from the proxy — and nothing else, ever: the catalog is
+#   managed through LiteLLM's UI/API (operator decision, 2026-08-30), so an
+#   alias that exists is never written to by this file. `PLACEHOLDER` marks
+#   what the operator fills in during setup's pause on a fresh catalog (model
+#   id, api_base host; the key/credential is never declared here at all).
+#   Everything else in the block is an INVARIANT the re-run checks: the
+#   bridge prefix on graphiti-llm, the reranker's mode and /v1/rerank path,
+#   the per-alias timeouts. A fully-clean deployment used to have nothing to
+#   register FROM (2026-08-23: eleven hand-composed registrations); now it
+#   has the names and the rules, and the operator supplies the providers.
 #
 #   TIMEOUT HAS EXACTLY ONE HOME. For a model in `models:` it is the top-level
 #   `timeout:` (which `policy.py --check` gates), and `registration:` must NOT
@@ -55,7 +58,7 @@ models:
   # would mean Central Command sends NO thinking control at all.
   claude-opus-4-8:
     registration:
-      model: anthropic/claude-opus-4-8   # no api_base: the provider's own
+      model: anthropic/PLACEHOLDER   # no api_base: the provider's own
     quality_tier: 3
     strengths: [analytical_reasoning, technical_design]
     input_cost_per_token: 0.000005
@@ -65,7 +68,7 @@ models:
 
   claude-sonnet-5:
     registration:
-      model: anthropic/claude-sonnet-5
+      model: anthropic/PLACEHOLDER
     quality_tier: 3
     strengths: [code_generation, writing]
     input_cost_per_token: 0.000002
@@ -75,7 +78,7 @@ models:
 
   claude-haiku-4-5:
     registration:
-      model: anthropic/claude-haiku-4-5
+      model: anthropic/PLACEHOLDER
     quality_tier: 2
     strengths: [factual_lookup, general]
     input_cost_per_token: 0.000001
@@ -120,8 +123,8 @@ models:
   # workstation): one big model at a time, requests QUEUE through a swap.
   qwen3.8-27b:
     registration:
-      model: openai/qwen3.8-27b
-      api_base: http://100.73.68.9:8081/v1   # the llama-swap slot (cc-swap)
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER   # the llama-swap slot (cc-swap)
     quality_tier: 2
     strengths: [factual_lookup, general, code_understanding]
     input_cost_per_token: 0
@@ -148,8 +151,8 @@ models:
     # A real DB deployment onto the SAME upstream model as qwen3.8-27b, not an
     # alias — that is why both entries exist and both must be registered.
     registration:
-      model: openai/qwen3.8-27b
-      api_base: http://100.73.68.9:8081/v1
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
     quality_tier: 2
     strengths: [factual_lookup, general, code_understanding]
     input_cost_per_token: 0
@@ -167,8 +170,8 @@ models:
   # supports_vision: it has no vision encoder.
   gpt-oss-20b:
     registration:
-      model: openai/gpt-oss-20b
-      api_base: http://100.73.68.9:8081/v1
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
     quality_tier: 2
     strengths: [analytical_reasoning, factual_lookup]
     input_cost_per_token: 0
@@ -190,8 +193,8 @@ models:
   # decide-the-role-first rule.
   gemma-4-31b:
     registration:
-      model: openai/gemma-4-31b
-      api_base: http://100.73.68.9:8081/v1
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
     quality_tier: 3
     strengths: [analytical_reasoning]
     input_cost_per_token: 0
@@ -222,8 +225,8 @@ registration_only:
   # every extraction fails. The prefix is the whole fix. Do not "normalise" it.
   graphiti-llm:
     registration:
-      model: openai/chat_completions/qwen3.8-27b
-      api_base: http://100.73.68.9:8081/v1
+      model: openai/chat_completions/PLACEHOLDER
+      api_base: PLACEHOLDER
       timeout: 300
 
   # Named for graphiti's cross-encoder config, pointed at the local Qwen. It is
@@ -231,8 +234,8 @@ registration_only:
   # graphiti-side expectation, not a claim that any OpenAI model is in use.
   gpt-4.1-nano:
     registration:
-      model: openai/qwen3.8-27b
-      api_base: http://100.73.68.9:8081/v1
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
       timeout: 300
 
   # Its own llama.cpp server (:8083), CPU-resident since 2026-08-19. Exactly
@@ -240,8 +243,8 @@ registration_only:
   # erroring, so never repoint this without re-embedding the graph.
   qwen3-embedding-local:
     registration:
-      model: openai/qwen3-embedding-local
-      api_base: http://100.73.68.9:8083/v1
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
       timeout: 60
 
   # !! THE api_base MUST END IN /v1/rerank !!  Discovered in-pod during the
@@ -252,13 +255,12 @@ registration_only:
   # beside whatever llama-swap currently holds.
   qwen3-rerank-local:
     registration:
-      model: cohere/qwen3-rerank-local
-      api_base: http://100.73.68.9:8082/v1/rerank
+      model: cohere/PLACEHOLDER
+      api_base: PLACEHOLDER/v1/rerank
       # The cohere client refuses to send without SOME key ("Cohere API key is
       # required" -> /rerank 500). The local server ignores it; the previous
       # instance carried a hand-set placeholder that was never declared here
       # (found 2026-08-29, first clean install driven from this file).
-      api_key: none
       mode: rerank
       timeout: 60
 
