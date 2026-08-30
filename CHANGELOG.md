@@ -4,6 +4,35 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.8.1: curation writes stamp their embeddings, and the migration runbook is written down
+
+- **`neo4j_writer` stamps every embedding it stores** with
+  `embedding_model` + `embedding_dimensions` — the same properties
+  `scripts/oneoff/reembed_graph.py` keys its resumability and `--verify`
+  on. Before this, only the migration script stamped, so all curation-
+  written vectors read `<unstamped>` and `--verify` was meaningful only
+  immediately after a full `--apply`. A degraded write (embedder
+  unreachable → no vector) nulls the stamp too: stamp-iff-vector is the
+  invariant, guarded by a live-graph test. Rows written before this
+  release stay unstamped until the first migration touches them.
+- **The embedding-migration runbook is canonical now**
+  (`skills/graphiti/references/operations.md`, "Changing the embedding
+  model"): same-dimension swaps still require a full re-embed (different
+  models' vectors are not comparable at any width); different-dimension
+  swaps additionally change the three hand-synced declarations together.
+- **Corrected a false claim in four comments**: there is NO Neo4j vector
+  index (verified live 2026-08-30 — graphiti scores similarity per-row
+  with `vector.similarity.cosine()`), so "corrupts the index" is really
+  "silently breaks similarity search", and no index-rebuild step exists
+  in a migration.
+- v2.8.0's operator sequencing was performed live in the same session:
+  `cc-embedding`/`cc-rerank` rows completed (the UI-created `cc-rerank`
+  was missing its api_base and fell through to Cohere's cloud — 401),
+  both graphiti keys re-scoped with TRANSITION scopes (old + new names,
+  so the running pod keeps working until this release deploys), and the
+  app's `CC_EMBED_ALIAS` moved to `cc-embedding`. Tighten the key scopes
+  to the new names only once v2.8.x is live, if desired.
+
 ## 2026-08-30 — v2.8.0: every consumer addresses a cc-* role alias, and the real models keep their own rows
 
 - **`cc-embedding` and `cc-rerank` are the new ROLE aliases** (operator

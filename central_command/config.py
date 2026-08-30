@@ -117,10 +117,13 @@ class Settings(BaseSettings):
     # LiteLLM ALIAS, not the upstream model name, and the vector dimension the
     # Neo4j indexes were created with. Must equal the graphiti config's
     # embedder block: they index the same vectors, and a mismatched dimension
-    # is a corrupt index, not an error. The dimension is discovered at setup
-    # and is effectively permanent — changing the embedder later means
-    # dropping the vector index and re-embedding the whole graph (2026-08-21
-    # setup & onboarding design, decision 3). Defaults = the homelab instance.
+    # is silently-broken similarity, not an error (verified 2026-08-30: there
+    # is NO Neo4j vector index — graphiti scores per-row with
+    # vector.similarity.cosine(), so nothing schema-side enforces the width).
+    # The dimension is discovered at setup and is effectively permanent —
+    # changing the embedder later is a re-embed-the-whole-graph migration
+    # (skills/graphiti/references/operations.md, "Changing the embedding
+    # model"). Defaults = the homelab instance.
     embed_alias: str = "cc-embedding"
     embed_dim: int = 1024
 

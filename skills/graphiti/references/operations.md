@@ -86,6 +86,53 @@ dimensions differ. So an outage of the local embedder
 capability. The LLM being down is the degradable case; the embedder being down
 is not. Report them differently.
 
+## Changing the embedding model (a migration, never a swap)
+
+`cc-embedding` being re-pointable in the LiteLLM UI does NOT make an embedder
+change a config change. Vectors from two models are not comparable — even at
+the same width — so a re-point without a re-embed leaves hybrid search
+returning plausible-looking nonsense with no error anywhere. Investigated
+2026-08-30 against the live graph and graphiti_core source:
+
+- Embeddings live as plain float-array properties: `Entity.name_embedding`
+  and `RELATES_TO.fact_embedding` (community nodes carry `name_embedding`
+  too, when any exist).
+- **There is no Neo4j vector index.** graphiti_core builds only
+  RANGE/FULLTEXT/LOOKUP indexes and scores similarity per-row with the
+  scalar `vector.similarity.cosine()` in Cypher. So there is no
+  index-drop/rebuild step, and nothing at the database level enforces the
+  dimension — the enforcement is three hand-synced declarations that MUST
+  change together: `deploy/pi/graphiti/config.yaml` (`embedder.model` +
+  `dimensions`), the app's `CC_EMBED_ALIAS`/`CC_EMBED_DIM` (config.py), and
+  `EMBEDDER_MODEL`/`EMBEDDER_DIMENSIONS` for the migration script.
+
+**Same-dimension swap (new model, still 1024d):**
+1. Re-point `cc-embedding` in the LiteLLM UI (or register the new model and
+   re-point the role at it).
+2. Restart/redeploy `cc-graphiti` so extraction picks it up. No name or
+   dimension declarations change.
+3. Re-embed everything — NOT optional:
+   `python3 scripts/oneoff/reembed_graph.py` (dry run) → `--apply` →
+   `--verify`. On the Pi; needs `NEO4J_PASSWORD` and `EMBEDDER_API_KEY` set
+   (Neo4j HTTP is loopback-only there).
+
+**Different-dimension swap — all of the above, plus:**
+- Change `dimensions:` in `graphiti/config.yaml`, `CC_EMBED_DIM` in the
+  app's `.env` (setup.sh REFUSES a drifted value until you clear it
+  deliberately — that refusal is the guard, respect it), and
+  `EMBEDDER_DIMENSIONS` for the script, all in the same change.
+- Mixed-width vectors coexist on the same property mid-migration and
+  `vector.similarity.cosine()` behavior on a width mismatch is unverified —
+  prefer a stop-writes-then-migrate window (dispatch off, no curation)
+  rather than migrating under load.
+
+**Stamps:** every embedding write — the reembed script AND the curation
+writer (`neo4j_writer`) since v2.8.1 — records `embedding_model` +
+`embedding_dimensions` beside the vector; the script keys its resumability
+and `--verify` on them. Rows written before v2.8.1 are unstamped, so the
+first `--apply` after this release re-embeds them once and stamps them;
+from then on `--verify` is meaningful as a standing consistency check.
+
 ## Where knowledge comes from
 
 Sources → the **work ledger** → dispatch → a steward agent proposes → the gate

@@ -374,7 +374,8 @@ default — changing it now buys nothing and breaks all five.
   operator's correction reads fine in the UI and no agent ever recalls it —
   every write re-embeds through `cc-embedding` (the role alias over
   `qwen3-embedding-local`) at exactly 1024
-  dimensions (a mis-sized vector corrupts the index instead of erroring, so the
+  dimensions (nothing schema-side enforces the width — there is no Neo4j
+  vector index; a mis-sized vector silently breaks similarity search, so the
   writer drops one rather than store it). Neo4j 5.26 has no parameterized
   labels, hence the closed `ENTITY_TYPES` allowlist mirroring
   `graphiti/config.yaml`.

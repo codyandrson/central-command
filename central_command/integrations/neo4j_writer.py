@@ -123,6 +123,20 @@ async def embed(text: str) -> list[float] | None:
     return vector
 
 
+def _stamp_params(vector: list[float] | None) -> dict:
+    """The provenance stamp written beside every embedding — the same
+    `embedding_model`/`embedding_dimensions` properties
+    scripts/oneoff/reembed_graph.py keys its resumability and --verify on,
+    so a migration can tell re-embedded rows from pending ones. A degraded
+    write (vector None) nulls the stamp too: a stamp beside a missing
+    vector would claim an embedding that is not there."""
+    present = vector is not None
+    return {
+        "embed_model": _EMBED_MODEL if present else None,
+        "embed_dims": _EMBED_DIMENSIONS if present else None,
+    }
+
+
 def _validated_labels(labels: list[str] | None) -> list[str]:
     chosen = [l for l in (labels or []) if l != "Entity"]
     unknown = [l for l in chosen if l not in ENTITY_TYPES]
@@ -185,10 +199,12 @@ async def create_node(
         CREATE (n:Entity{label_clause})
         SET n.uuid = $uuid, n.name = $name, n.summary = $summary,
             n.group_id = $group_id, n.created_at = $created_at,
-            n.labels = $labels, n.name_embedding = $embedding
+            n.labels = $labels, n.name_embedding = $embedding,
+            n.embedding_model = $embed_model, n.embedding_dimensions = $embed_dims
         """,
         uuid=node_uuid, name=name, summary=summary, group_id=group_id,
         created_at=_now(), labels=extra + ["Entity"], embedding=vector,
+        **_stamp_params(vector),
     )
     episode = await _record_operator_episode(
         f"{name}: {summary}" if summary else name, group_id,
@@ -222,7 +238,10 @@ async def update_node(
     params: dict = {"uuid": uuid, "name": new_name, "summary": new_summary}
     if text_changed:
         sets.append("n.name_embedding = $embedding")
+        sets.append("n.embedding_model = $embed_model")
+        sets.append("n.embedding_dimensions = $embed_dims")
         params["embedding"] = vector
+        params.update(_stamp_params(vector))
     if labels is not None:
         extra = _validated_labels(labels)
         # Strip every ontology label, then re-apply the chosen ones. `:Entity`
@@ -294,11 +313,13 @@ async def create_edge(
             e.invalid_at = CASE WHEN $invalid_at IS NULL THEN null
                                 ELSE datetime($invalid_at) END,
             e.source_node_uuid = $source, e.target_node_uuid = $target,
-            e.episodes = [$episode], e.fact_embedding = $embedding
+            e.episodes = [$episode], e.fact_embedding = $embedding,
+            e.embedding_model = $embed_model, e.embedding_dimensions = $embed_dims
         """,
         source=source_uuid, target=target_uuid, uuid=edge_uuid, name=name,
         fact=fact, group_id=ends[0]["group_id"], created_at=_now(),
         valid_at=valid_at, invalid_at=invalid_at, embedding=vector, episode=episode,
+        **_stamp_params(vector),
     )
     return {"uuid": edge_uuid, "embedded": vector is not None, "episode": episode}
 
@@ -333,7 +354,10 @@ async def update_edge(
     params: dict = {"uuid": uuid, "name": new_name, "fact": new_fact}
     if new_fact != row["fact"]:
         sets.append("e.fact_embedding = $embedding")
+        sets.append("e.embedding_model = $embed_model")
+        sets.append("e.embedding_dimensions = $embed_dims")
         params["embedding"] = vector
+        params.update(_stamp_params(vector))
     if clear_valid:
         # An OPEN start: "true since before anyone recorded when". Distinct
         # from leaving the field alone, which is what None means.

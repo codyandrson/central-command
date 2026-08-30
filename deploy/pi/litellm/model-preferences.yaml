@@ -282,8 +282,9 @@ registration_only:
       timeout: 300
 
   # Its own llama.cpp server (:8083), CPU-resident since 2026-08-19. Exactly
-  # 1024 dimensions — a mis-sized vector corrupts the Neo4j index instead of
-  # erroring, so never repoint this without re-embedding the graph.
+  # 1024 dimensions — nothing schema-side enforces the width, so a mis-sized
+  # vector silently breaks similarity search instead of erroring; never
+  # repoint this without re-embedding the graph.
   qwen3-embedding-local:
     registration:
       model: openai/PLACEHOLDER
@@ -297,9 +298,11 @@ registration_only:
   # MIGRATION, NEVER A SWAP: vectors from a different model live in a
   # different semantic space even at the SAME 1024 dimensions, so hybrid
   # search silently degrades until the whole graph is re-embedded
-  # (scripts/oneoff/reembed_graph.py). A different dimension is worse — the
-  # Neo4j vector index is built at 1024 and a mis-sized vector corrupts it
-  # instead of erroring (setup.sh's CC_EMBED_DIM check refuses the change).
+  # (scripts/oneoff/reembed_graph.py). A different dimension is worse — no
+  # Neo4j vector index exists to enforce the width, so mismatched vectors
+  # silently break similarity instead of erroring (setup.sh's CC_EMBED_DIM
+  # check refuses the change). Runbook: skills/graphiti/references/
+  # operations.md, "Changing the embedding model".
   cc-embedding:
     registration:
       model: openai/PLACEHOLDER

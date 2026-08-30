@@ -673,9 +673,10 @@ phase_app() {
   set_kv_if_unset "$APP_ENV" CC_LITELLM_KUBECONFIG     "/home/codyslab/.cc-litellm-operator.kubeconfig"   "app-litellm-kubeconfig"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_LOG_KUBECONFIG "/home/codyslab/.cc-litellm-logreader.kubeconfig"  "app-litellm-log-kubeconfig"
 
-  # THE measurement. Never a model card: a mis-sized vector corrupts the Neo4j
-  # index instead of erroring, and the dimension is permanent once the index
-  # exists.
+  # THE measurement. Never a model card: nothing schema-side enforces the
+  # width (no Neo4j vector index exists — similarity is per-row cosine), so a
+  # mis-sized vector silently breaks search instead of erroring, and the
+  # dimension is effectively permanent once vectors are stored.
   local dim cur
   dim="$(probe_alias embed cc-embedding 2>/dev/null | tail -1)"
   if [[ ! "$dim" =~ ^[0-9]+$ ]]; then
@@ -684,7 +685,7 @@ phase_app() {
   fi
   cur="$(get_kv "$APP_ENV" CC_EMBED_DIM)"
   if [[ -n "$cur" && "$cur" != "$dim" ]]; then
-    fail "app-embed-dim" "CC_EMBED_DIM is already ${cur} but the endpoint returns ${dim} — REFUSING to change it. It is written into the Neo4j vector index; changing it means dropping the index and re-embedding the graph. Fix the model, or clear CC_EMBED_DIM deliberately on a graph you are willing to lose."
+    fail "app-embed-dim" "CC_EMBED_DIM is already ${cur} but the endpoint returns ${dim} — REFUSING to change it. Every stored vector in the graph is ${cur}-wide and nothing schema-side enforces that; changing the embedder is a re-embed-the-whole-graph migration (skills/graphiti/references/operations.md). Fix the model, or clear CC_EMBED_DIM deliberately on a graph you are willing to lose."
     return 1
   fi
   set_kv "$APP_ENV" CC_EMBED_DIM "$dim"

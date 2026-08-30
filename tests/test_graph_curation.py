@@ -99,6 +99,34 @@ async def test_entity_types_are_written_to_both_places(live_graph):
     assert set(rows[0]["prop"]) == {"Entity", "Organization"}
 
 
+async def test_curation_writes_stamp_their_embeddings(live_graph):
+    """Every embedding a curation write stores carries the same
+    embedding_model/embedding_dimensions stamp reembed_graph.py keys its
+    resumability and --verify on — and a degraded write (no vector) carries
+    no stamp, so the invariant is stamp-iff-vector, not stamp-always."""
+    a = await _node(live_graph, f"ZZ A {_uuid.uuid4()}", ["Person"])
+    b = await _node(live_graph, f"ZZ B {_uuid.uuid4()}", ["Person"])
+    edge = await neo4j_writer.create_edge(a, b, "KNOWS", "ZZ A knows ZZ B")
+
+    rows = await neo4j_reader._read(
+        """
+        MATCH (n:Entity {uuid: $a})-[e:RELATES_TO {uuid: $e}]->()
+        RETURN n.name_embedding IS NOT NULL AS n_vec, n.embedding_model AS n_model,
+               n.embedding_dimensions AS n_dims,
+               e.fact_embedding IS NOT NULL AS e_vec, e.embedding_model AS e_model,
+               e.embedding_dimensions AS e_dims
+        """,
+        a=a, e=edge["uuid"],
+    )
+    row = rows[0]
+    for kind in ("n", "e"):
+        if row[f"{kind}_vec"]:
+            assert row[f"{kind}_model"] == neo4j_writer._EMBED_MODEL
+            assert row[f"{kind}_dims"] == neo4j_writer._EMBED_DIMENSIONS
+        else:  # degraded write (embedder unreachable) — no stamp either
+            assert row[f"{kind}_model"] is None and row[f"{kind}_dims"] is None
+
+
 async def test_repointing_an_edge_moves_the_relationship_and_its_properties(live_graph):
     a = await _node(live_graph, f"ZZ A {_uuid.uuid4()}", ["Person"])
     b = await _node(live_graph, f"ZZ B {_uuid.uuid4()}", ["Person"])
