@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic_ai import DeferredToolResults, ToolDenied
+from pydantic_ai import ToolDenied
 
 from central_command import events
 from central_command.db import repo
@@ -500,11 +500,16 @@ async def _settle(
                 "output": summary or "(the clarification discussion is concluded.)",
             }
         if may_drive:
-            results = DeferredToolResults()
-            results.calls[call.tool_call_id] = ToolDenied(
-                "`conclude_discussion` did nothing: you have no open discussion "
-                "lane in this run, so there is nothing to conclude. The "
-                "operator's answer is already in your hands — close out in text."
+            from central_command.runtime.durable import deferred_results
+
+            results = await deferred_results(
+                final.all_messages(), call.tool_call_id, ToolDenied(
+                    "`conclude_discussion` did nothing: you have no open "
+                    "discussion lane in this run, so there is nothing to "
+                    "conclude. The operator's answer is already in your hands "
+                    "— close out in text."
+                ),
+                session_id=session_id, agent_id=agent_id,
             )
             final = await agent.run(
                 message_history=final.all_messages(),

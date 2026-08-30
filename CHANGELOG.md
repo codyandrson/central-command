@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.0.2: a resume answers every deferred call in the parking response
+
+- **A turn that defers two calls no longer loses the second.** A park records
+  one `tool_call_id`, but a model may defer several calls in one response
+  (two `propose_action`s; a propose and an ask). Every resume site answered
+  the one id, and pydantic-ai refuses a resume that does not cover every
+  deferred call in the parking response — so the run failed
+  (`session.resume_failed`, non-transient) and the decision paths completed
+  the session anyway, with the sibling draft never shown to the operator
+  (live 2026-08-30: the onboarding tour's closing turn drafted two episodes).
+  `durable.deferred_results` is now the one seam all six resume paths use:
+  the decided call gets its result and each sibling a `ToolFailed` telling
+  the model it was never seen and to raise it again; on the approved leg the
+  existing follow-on branch parks the re-draft as its own proposal. Each
+  bounce is recorded as `session.deferred_siblings_bounced`.
+- Why `ToolFailed`: `ModelRetry` spends the tool's retry budget (one for
+  `ask_operator`/consult), and `ToolDenied` is an approval-kind result that
+  reaches the model as a serialised dict when placed in `.calls` (the reject
+  path has carried that shape since it landed — unchanged here, noted for a
+  deliberate follow-up). Measured, not assumed: `parallel_tool_calls=false`
+  IS honoured by the LiteLLM → llama.cpp path (1 call vs 2), but forcing one
+  call per turn fleet-wide is a behavioural change left out on purpose.
+
 ## 2026-08-30 — v2.0.1: a discussion lane runs under its charter, and cannot be closed out from under its question
 
 - **A tier-3 discussion lane now carries the agent's charter.** `_open_discussion`

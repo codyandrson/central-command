@@ -12,7 +12,15 @@ from __future__ import annotations
 import json
 
 from pydantic_ai import DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import ModelMessagesTypeAdapter, ToolCallPart
+from pydantic_ai.exceptions import ToolFailed
+from pydantic_ai.messages import (
+    ModelMessagesTypeAdapter,
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 
 from central_command.contract import Proposal
 
@@ -141,6 +149,91 @@ def load_messages(run_state: dict):
     return ModelMessagesTypeAdapter.validate_python(run_state["messages"])
 
 
+SIBLING_NOT_PARKED = (
+    "`{tool}` was NOT processed: a turn parks ONE deferred call for the "
+    "operator, and this one was never shown to them — the decision you just "
+    "received is about the other call. If this one is still needed, make the "
+    "call again now."
+)
+
+
+def unanswered_calls(messages) -> list[ToolCallPart]:
+    """Every tool call in the LAST model response that nothing has answered —
+    the set pydantic-ai requires a result for on resume.
+
+    `_tool_execution.py` refuses a resume unless results cover every deferred
+    call in the parking response ("Tool call results need to be provided for
+    all deferred tool calls"), and refuses one that covers a call the request
+    after it already returned ("already executed"). So: the last response's
+    calls, minus the ids that have a `ToolReturnPart`/`RetryPromptPart` in the
+    messages after it.
+    """
+    last = None
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], ModelResponse):
+            last = i
+            break
+    if last is None:
+        return []
+    answered = {
+        part.tool_call_id
+        for m in messages[last + 1:] if isinstance(m, ModelRequest)
+        for part in m.parts if isinstance(part, ToolReturnPart | RetryPromptPart)
+    }
+    return [
+        part for part in messages[last].parts
+        if isinstance(part, ToolCallPart) and part.tool_call_id not in answered
+    ]
+
+
+async def deferred_results(
+    messages, tool_call_id: str, result, *, session_id: str | None = None,
+    agent_id: str | None = None,
+) -> DeferredToolResults:
+    """THE way a paused run gets its results: `result` for the decided call,
+    and a `ToolFailed` for every SIBLING deferred in the same response.
+
+    A park records one `tool_call_id` (`park_proposal`, `park_question`, the
+    consult wait), but a model may defer several calls in one response — two
+    `propose_action`s, a propose and an ask. Every resume site used to answer
+    the one id and pydantic-ai refused the whole resume (live 2026-08-30: the
+    onboarding tour's closing turn drafted two episodes; the second was never
+    shown to the operator, the resume failed, and the session completed
+    anyway). Resolving every pending id is the framework's contract — its own
+    examples mix outcomes per call — and this seam is where all six resume
+    paths meet, so no path can miss it again.
+
+    `ToolFailed`, not `ModelRetry` (spends the tool's retry budget, which is
+    ONE for `ask_operator`/consult) and not `ToolDenied` (an approval-kind
+    result; in `.calls` it reaches the model as a serialised dict). The
+    sibling was not decided against — it was never seen — and the message
+    says so, so the model re-raises it on the turn it now gets. A bounce is
+    recorded (`session.deferred_siblings_bounced`): the operator is spared the
+    re-approval, never the knowledge.
+    """
+    results = DeferredToolResults()
+    results.calls[tool_call_id] = result
+    bounced = []
+    for call in unanswered_calls(messages):
+        if call.tool_call_id == tool_call_id:
+            continue
+        results.calls[call.tool_call_id] = ToolFailed(
+            SIBLING_NOT_PARKED.format(tool=call.tool_name)
+        )
+        bounced.append(call.tool_name)
+    if bounced and session_id:
+        from central_command import events
+
+        await events.emit(
+            "session.deferred_siblings_bounced",
+            ref_id=session_id,
+            payload={"agent_id": agent_id, "decided_tool_call_id": tool_call_id,
+                     "bounced": bounced},
+            actor="system",
+        )
+    return results
+
+
 async def resume(
     agent, messages, tool_call_id: str, executor_result: str, model=None,
     agent_id: str | None = None, session_id: str | None = None,
@@ -175,8 +268,10 @@ async def resume(
     from central_command.config import settings
     from central_command.runtime.deps import TriageDeps
 
-    results = DeferredToolResults()
-    results.calls[tool_call_id] = executor_result
+    results = await deferred_results(
+        messages, tool_call_id, executor_result,
+        session_id=session_id, agent_id=agent_id,
+    )
     return await agent.run(
         message_history=messages,
         deferred_tool_results=results,

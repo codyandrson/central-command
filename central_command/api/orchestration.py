@@ -826,12 +826,12 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
     paths use (`gateway.finish_decision_resume`, or `questions._settle` after
     an answered question) — never a second copy of that sequence.
     """
-    from pydantic_ai import DeferredToolResults, ToolDenied, UsageLimits
+    from pydantic_ai import ToolDenied, UsageLimits
 
     from central_command.contract import classify_failure
     from central_command.runtime import resume_park
     from central_command.runtime.agent import build_agent_for
-    from central_command.runtime.durable import load_messages
+    from central_command.runtime.durable import deferred_results, load_messages
 
     session = await repo.get_session(session_id)
     if session is None or session["status"] != "AWAITING_RESUME":
@@ -860,13 +860,15 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         actor="system",
     )
 
-    results = DeferredToolResults()
-    results.calls[pending["tool_call_id"]] = (
+    messages = load_messages(claimed)
+    results = await deferred_results(
+        messages, pending["tool_call_id"],
         # Same framing the live reject path uses — `pending["text"]` is the
         # verbatim feedback and stays that way in the record.
         ToolDenied(resume_park.framed_denial(pending["text"]))
         if pending["kind"] == "denial"
-        else pending["text"]
+        else pending["text"],
+        session_id=session_id, agent_id=agent_id,
     )
     final = None
     agent = None
@@ -875,7 +877,7 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
     try:
         agent = await build_agent_for(agent_id, model=model)
         final = await agent.run(
-            message_history=load_messages(claimed),
+            message_history=messages,
             deferred_tool_results=results,
             model=model,
             # The chain rides through the transient park too: it is in the same
@@ -1069,7 +1071,7 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
 
     from central_command.runtime import resume_park
     from central_command.runtime.agent import build_agent_for
-    from central_command.runtime.durable import load_messages
+    from central_command.runtime.durable import deferred_results, load_messages
     from central_command.runtime.models import resolve_model
 
     session = await repo.get_session(session_id)
@@ -1121,9 +1123,13 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
     )
     try:
         agent = await build_agent_for(agent_id, model=model)
+        messages = load_messages(claimed)
         final = await agent.run(
-            message_history=load_messages(claimed),
-            deferred_tool_results=_one_result(wait["tool_call_id"], outcome_text),
+            message_history=messages,
+            deferred_tool_results=await deferred_results(
+                messages, wait["tool_call_id"], outcome_text,
+                session_id=session_id, agent_id=agent_id,
+            ),
             model=model,
             deps=TriageDeps(
                 agent_id=agent_id, session_id=session_id,
@@ -1182,7 +1188,7 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
 
     from central_command.runtime import resume_park
     from central_command.runtime.agent import build_agent_for
-    from central_command.runtime.durable import load_messages
+    from central_command.runtime.durable import deferred_results, load_messages
     from central_command.runtime.models import resolve_model
 
     session = await repo.get_session(session_id)
@@ -1219,9 +1225,13 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
     )
     try:
         agent = await build_agent_for(agent_id, model=model)
+        messages = load_messages(claimed)
         final = await agent.run(
-            message_history=load_messages(claimed),
-            deferred_tool_results=_one_result(wait["tool_call_id"], outcome_text),
+            message_history=messages,
+            deferred_tool_results=await deferred_results(
+                messages, wait["tool_call_id"], outcome_text,
+                session_id=session_id, agent_id=agent_id,
+            ),
             model=model,
             deps=TriageDeps(agent_id=agent_id, session_id=session_id),
             usage_limits=UsageLimits(request_limit=settings.run_request_limit),
@@ -1248,14 +1258,6 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
         agent=agent, model=model, outcome_text=outcome_text, pending=pending,
     )
     return {"resumed": True, "session_id": session_id, "task_id": task["id"], **out}
-
-
-def _one_result(tool_call_id: str, text: str):
-    from pydantic_ai import DeferredToolResults
-
-    results = DeferredToolResults()
-    results.calls[tool_call_id] = text
-    return results
 
 
 def _parked_chain(run_state: dict | None) -> tuple[str, ...]:

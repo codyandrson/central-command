@@ -30,6 +30,7 @@ from central_command.runtime.deps import TriageDeps
 from central_command.runtime.durable import (
     call_args,
     classify_deferred,
+    deferred_results,
     dump_run_state,
     extract_deferred,
     load_messages,
@@ -37,7 +38,7 @@ from central_command.runtime.durable import (
     resume,
 )
 from central_command.runtime.proposals import park_proposal
-from pydantic_ai import DeferredToolResults, ToolDenied
+from pydantic_ai import ToolDenied
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 
@@ -87,7 +88,6 @@ async def _drive_past_non_proposals(
         if call is None or classify_deferred(call) == "proposal":
             return final, call, None
         tool = getattr(call, "tool_name", "?")
-        results = DeferredToolResults()
         # ponytail: a consult raised ON a decision-resume leg is DENIED rather
         # than waited on. Parking a consult wait here would mean re-parking a
         # session mid-decision-resume, which this tail is not built to hand
@@ -113,7 +113,10 @@ async def _drive_past_non_proposals(
                 "would have asked and who you would have asked. Do NOT invent "
                 "the answer you would have got."
             )
-        results.calls[call.tool_call_id] = ToolDenied(denial)
+        results = await deferred_results(
+            final.all_messages(), call.tool_call_id, ToolDenied(denial),
+            session_id=session_id, agent_id=agent_id,
+        )
         final = await agent.run(
             message_history=final.all_messages(),
             deferred_tool_results=results,
@@ -999,9 +1002,10 @@ async def reject_with_feedback(
     )
 
     messages = load_messages(run_state)
-    results = DeferredToolResults()
-    results.calls[run_state["tool_call_id"]] = ToolDenied(
-        resume_park.framed_denial(feedback)
+    results = await deferred_results(
+        messages, run_state["tool_call_id"],
+        ToolDenied(resume_park.framed_denial(feedback)),
+        session_id=session_id, agent_id=prop_row["agent_id"],
     )
     pending = resume_park.pending_resume(
         # RAW here: the quote re-check and the decided event key off the
