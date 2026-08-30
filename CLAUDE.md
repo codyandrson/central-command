@@ -118,11 +118,24 @@ architecture where the leak was measured.
   ImagePullBackOff you only find at failover.
 - **Cockpit:** https://raspberrypi.tail2ae84b.ts.net (tailscale serve → 3080);
   n8n UI at :8443 on the same host (tailnet-only, added 2026-08-01).
-- **A merged change is not LIVE until its process restarts.** Backend (anything
-  under `central_command/`): `sudo systemctl restart cc-uvicorn`. Cockpit (`web/`):
-  `(cd web && npm run build)` then `sudo systemctl restart cc-nerve`. Bit us
-  2026-08-01: a backend fix was "deployed" by rebuilding only the cockpit, and
-  the operator saw stale behaviour until cc-uvicorn restarted.
+- **A session ends at a PUSHED TAG. The operator deploys — never the session.**
+  Releases go live through the cockpit updater (`deploy/k3s/cc-update.sh`):
+  it fetches the tag, takes the rollback checkpoint and the DB dumps, merges,
+  rebuilds, applies manifests/units, restarts, health-polls, rolls back on
+  failure. A bare unit restart skips every one of those. Two corollaries,
+  both broken on 2026-08-30 by sessions that "helpfully" deployed two patch
+  releases: (1) **never restart a live `cc-*` unit from a session**;
+  (2) **never move the live checkout's branch** — this directory is what
+  `cc-uvicorn` runs from (editable install), so a `git merge`/`pull`/`reset`
+  here IS a deployment, silently armed for the next restart-for-any-reason.
+  Work in a worktree (`git worktree add --detach … origin/master`), commit
+  there, `git push origin HEAD:master` plus the tag, and leave the live
+  checkout's `master` where the updater left it (it reads "behind
+  origin/master" between releases — expected, not a forgotten push). The
+  operator's Claude hook (`~/.claude/hooks/guard-live-deploy.sh`) refuses
+  both moves mechanically. The rule that stood here ("a merged change is not
+  LIVE until its process restarts — restart cc-uvicorn") predated the updater
+  (2026-08-01) and is what those sessions followed; it is retired.
 - **Toolchain:** uv-managed CPython **3.12** (Debian 12 ships 3.11) and
   NodeSource **22** (Debian ships 18).
 - **Scripts, all tracked:** `deploy/k3s/make-secrets.sh` (Secrets/ConfigMaps
@@ -695,9 +708,11 @@ default — changing it now buys nothing and breaks all five.
     `docs/JOURNAL.md` (incidents and why), go-live and instance-data
     decisions, operator notes. A session that changes the deployment updates
     STATUS/JOURNAL there in the same session.
-  **A change is not done until it is pushed**: `git push origin master`
-  in the same session you commit it, and leave `git status -sb` reading
-  `## master...origin/master` with no "ahead". STATUS.md carried "NOT yet
+  **A change is not done until it is pushed**: `git push origin HEAD:master`
+  (and the tag) from your worktree in the same session you commit it, and
+  leave your worktree with no "ahead". The LIVE checkout's `master` is the
+  updater's to move (see the deploy rule above) and reads "behind" between
+  releases by design. STATUS.md carried "NOT yet
   committed to git" across three separate sessions — that is the failure mode
   this rule exists to stop, and a stale claim in the doc is worth checking
   against `git log` rather than trusting.
