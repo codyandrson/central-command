@@ -4512,3 +4512,288 @@ async def list_graph_verifications(status: str | None = None, limit: int = 100) 
         return [_graph_verification_row(r) for r in rows]
     finally:
         await conn.close()
+
+
+# --- Sources catalog (slice 1, 2026-08-30) ------------------------------------
+# Three tables per docs/superpowers/specs/2026-08-23-sources-catalog-design.md:
+# `source` (governed data), `catalog_document`/`catalog_version`/`catalog_location`
+# (the lineage inventory a watcher writes), `wiki_claim` untouched here (slice 7).
+
+
+def _jsonb(v):
+    return json.loads(v) if isinstance(v, str) else v
+
+
+def _source_row(row) -> dict:
+    d = dict(row)
+    d["config"] = _jsonb(d["config"])
+    d["cursor"] = _jsonb(d["cursor"])
+    return d
+
+
+async def upsert_source(
+    id: str, kind: str, name: str, config: dict, enabled: bool = False
+) -> dict:
+    """Insert or update the operator-owned fields — never `cursor`, which is
+    the watcher's own progress record, not a lever the operator's edit form
+    should be able to clobber."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            insert into source (id, kind, name, config, enabled)
+            values ($1, $2, $3, $4::jsonb, $5)
+            on conflict (id) do update
+              set kind = $2, name = $3, config = $4::jsonb, enabled = $5,
+                  updated_at = now()
+            returning *
+            """,
+            id, kind, name, json.dumps(config), enabled,
+        )
+        return _source_row(row)
+    finally:
+        await conn.close()
+
+
+async def list_sources() -> list[dict]:
+    conn = await _conn()
+    try:
+        rows = await conn.fetch("select * from source order by id")
+        return [_source_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_source(id: str) -> dict | None:
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow("select * from source where id = $1", id)
+        return _source_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def set_source_enabled(id: str, enabled: bool) -> bool:
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            "update source set enabled = $2, updated_at = now() where id = $1",
+            id, enabled,
+        )
+        return r.endswith("1")
+    finally:
+        await conn.close()
+
+
+async def save_source_cursor(id: str, cursor: dict) -> None:
+    conn = await _conn()
+    try:
+        await conn.execute(
+            "update source set cursor = $2::jsonb, updated_at = now() where id = $1",
+            id, json.dumps(cursor),
+        )
+    finally:
+        await conn.close()
+
+
+async def record_observation(
+    source_id: str,
+    lineage_key: str,
+    uri: str,
+    title: str | None,
+    content_hash: str,
+    extracted_text: str,
+    extractor: str,
+    meta: dict,
+) -> dict:
+    """The walk write path (Decision 4/5), one transaction: find-or-create the
+    lineage, version it only when the content hash changed, and upsert the
+    location. Returns what changed so the caller (the watcher) can decide
+    whether the walk did anything worth an event.
+    """
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            doc = await conn.fetchrow(
+                "select id from catalog_document where source_id = $1 and lineage_key = $2",
+                source_id, lineage_key,
+            )
+            new_lineage = doc is None
+            if doc is None:
+                document_id = "doc_" + uuid.uuid4().hex[:12]
+                await conn.execute(
+                    """
+                    insert into catalog_document (id, source_id, lineage_key, title)
+                    values ($1, $2, $3, $4)
+                    """,
+                    document_id, source_id, lineage_key, title,
+                )
+            else:
+                document_id = doc["id"]
+                if title:
+                    await conn.execute(
+                        "update catalog_document set title = $2, updated_at = now() where id = $1",
+                        document_id, title,
+                    )
+
+            latest = await conn.fetchrow(
+                """
+                select version_no, content_hash from catalog_version
+                 where document_id = $1 order by version_no desc limit 1
+                """,
+                document_id,
+            )
+            new_version = latest is None or latest["content_hash"] != content_hash
+            version_id = None
+            if new_version:
+                version_no = (latest["version_no"] + 1) if latest else 1
+                version_id = "ver_" + uuid.uuid4().hex[:12]
+                await conn.execute(
+                    """
+                    insert into catalog_version
+                        (id, document_id, version_no, content_hash, extracted_text,
+                         extractor, meta)
+                    values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                    """,
+                    version_id, document_id, version_no, content_hash,
+                    extracted_text, extractor, json.dumps(meta),
+                )
+
+            await conn.execute(
+                """
+                insert into catalog_location (id, source_id, document_id, uri)
+                values ($1, $2, $3, $4)
+                on conflict (source_id, uri) do update
+                  set document_id = $3, last_seen = now(), missing_at = null
+                """,
+                "loc_" + uuid.uuid4().hex[:12], source_id, document_id, uri,
+            )
+
+        return {
+            "document_id": document_id,
+            "version_id": version_id,
+            "new_lineage": new_lineage,
+            "new_version": new_version,
+        }
+    finally:
+        await conn.close()
+
+
+async def mark_locations_missing(source_id: str, seen_uris: list[str]) -> list[str]:
+    """Set `missing_at` on this source's locations NOT among `seen_uris` and
+    not already missing. Returns the uris it marked."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            update catalog_location
+               set missing_at = now()
+             where source_id = $1 and missing_at is null and not (uri = any($2::text[]))
+            returning uri
+            """,
+            source_id, seen_uris,
+        )
+        return [r["uri"] for r in rows]
+    finally:
+        await conn.close()
+
+
+async def rescind_document(document_id: str, reason: str, by: str) -> bool:
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update catalog_document
+               set status = 'RESCINDED', rescinded_reason = $2, rescinded_by = $3,
+                   rescinded_at = now(), updated_at = now()
+             where id = $1
+            """,
+            document_id, reason, by,
+        )
+        return r.endswith("1")
+    finally:
+        await conn.close()
+
+
+async def reinstate_document(document_id: str) -> bool:
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update catalog_document
+               set status = 'ACTIVE', rescinded_reason = null, rescinded_by = null,
+                   rescinded_at = null, updated_at = now()
+             where id = $1
+            """,
+            document_id,
+        )
+        return r.endswith("1")
+    finally:
+        await conn.close()
+
+
+async def get_catalog_document(document_id: str) -> dict | None:
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow("select * from catalog_document where id = $1", document_id)
+        if row is None:
+            return None
+        d = dict(row)
+        d["tags"] = _jsonb(d["tags"])
+        return d
+    finally:
+        await conn.close()
+
+
+async def list_catalog_documents(source_id: str | None = None) -> list[dict]:
+    """One row per lineage, with its latest version number and location counts
+    — the shape `GET /api/catalog/documents` renders."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select d.id, d.source_id, d.lineage_key, d.title, d.status,
+                   d.rescinded_reason, d.rescinded_at,
+                   (select max(v.version_no) from catalog_version v
+                     where v.document_id = d.id) as latest_version,
+                   (select count(*) from catalog_location l
+                     where l.document_id = d.id) as location_count,
+                   (select count(*) from catalog_location l
+                     where l.document_id = d.id and l.missing_at is not null) as missing_count
+              from catalog_document d
+             where $1::text is null or d.source_id = $1
+             order by d.updated_at desc
+            """,
+            source_id,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def catalog_overview(source_id: str | None = None) -> dict:
+    """Counts for the walk summary and the future Sources panel."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            select
+                (select count(*) from catalog_document d
+                  where $1::text is null or d.source_id = $1) as documents,
+                (select count(*) from catalog_document d
+                  where d.status = 'RESCINDED'
+                    and ($1::text is null or d.source_id = $1)) as rescinded,
+                (select count(*) from catalog_version v
+                  join catalog_document d on d.id = v.document_id
+                 where $1::text is null or d.source_id = $1) as versions,
+                (select count(*) from catalog_location l
+                 where $1::text is null or l.source_id = $1) as locations,
+                (select count(*) from catalog_location l
+                 where l.missing_at is not null
+                   and ($1::text is null or l.source_id = $1)) as missing
+            """,
+            source_id,
+        )
+        return dict(row)
+    finally:
+        await conn.close()

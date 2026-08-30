@@ -1122,3 +1122,102 @@ insert into agent_grant (agent_id, pack, granted_by) values
     ('wiki-agent',        'ask-operator',             'seed:2026-08-21'),
     ('wiki-agent',        'consult',                  'seed:2026-08-21')
 on conflict (agent_id, pack) do nothing;
+
+-- Sources catalog slice 1 (2026-08-30), spec 2026-08-23 + Decision 9. Three
+-- layers per Decision 1/3: a source is governed data (kind, config, cursor,
+-- enable switch — never-starts-by-surprise, like `heartbeat_schedule`); a
+-- catalog_document is stable LINEAGE identity across locations and versions;
+-- wiki_claim is Decision 9's evidence ledger, created now so slice 7 needs no
+-- migration (nothing populates it in slice 1).
+
+create table if not exists source (
+    id         text primary key,               -- operator slug
+    kind       text not null,                  -- 'filesystem' today; a new kind is
+                                                -- code awareness (the watcher
+                                                -- registry), never a migration —
+                                                -- no CHECK here on purpose
+    name       text not null,
+    config     jsonb not null default '{}',    -- filesystem: {"root": <abs path>,
+                                                -- "include": [globs], "exclude": [globs]}
+    enabled    boolean not null default false, -- never-starts-by-surprise
+    cursor     jsonb,                          -- walk progress; correctness never
+                                                -- depends on it, like feed_state
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+-- Stable identity across versions and locations (Decision 3). `lineage_key` is
+-- the source's own notion of "the same document" — for filesystem, the path
+-- relative to root.
+create table if not exists catalog_document (
+    id               text primary key,                -- 'doc_' + hex
+    source_id        text not null references source (id),
+    lineage_key      text not null,
+    title            text,
+    status           text not null default 'ACTIVE',  -- ACTIVE | RESCINDED — a tag,
+                                                        -- never a delete (Decision 9):
+                                                        -- the library records what
+                                                        -- WAS trusted
+    rescinded_reason text,
+    rescinded_by     text,
+    rescinded_at     timestamptz,
+    tags             jsonb not null default '[]',
+    created_at       timestamptz not null default now(),
+    updated_at       timestamptz not null default now(),
+    unique (source_id, lineage_key)
+);
+
+-- One row per observed version of a lineage (Decision 4/5). Content-hash
+-- dedupe lives here: a re-walk that hashes the same extracted text writes no
+-- new row.
+create table if not exists catalog_version (
+    id             text primary key,           -- 'ver_' + hex
+    document_id    text not null references catalog_document (id),
+    version_no     int not null,                -- monotonic per lineage, starts 1
+    content_hash   text not null,               -- sha256 hex of extracted text, or
+                                                 -- of the RAW bytes when extraction
+                                                 -- is empty/failed
+    extracted_text text not null,               -- may be ''
+    extractor      text not null,               -- e.g. 'markitdown'
+    meta           jsonb not null default '{}', -- size_bytes, mtime, raw_sha256,
+                                                 -- extraction: ok|empty|failed, error
+    seen_at        timestamptz not null default now(),
+    unique (document_id, version_no)
+);
+
+create index if not exists catalog_version_document_idx
+    on catalog_version (document_id, version_no desc);
+
+-- Every place a lineage is FOUND — many locations per document (Decision 3).
+-- `missing_at` is set when a walk no longer finds the uri and cleared if it
+-- reappears; never deleted, same "record what was" posture as rescission.
+create table if not exists catalog_location (
+    id          text primary key,   -- 'loc_' + hex
+    source_id   text not null references source (id),
+    document_id text not null references catalog_document (id),
+    uri         text not null,      -- filesystem: 'file://' + abs path
+    first_seen  timestamptz not null default now(),
+    last_seen   timestamptz not null default now(),
+    missing_at  timestamptz,
+    unique (source_id, uri)
+);
+
+-- Decision 9 (amended 2026-08-30): every proposal citation mechanically
+-- becomes a claim row carrying the evidence VERSION recorded at write time.
+-- Created now, empty, so slice 7 (publication) needs no migration — nothing
+-- populates it in slice 1. Deliberately NO stored stale/unsupported flag:
+-- those are computed by joining the recorded evidence version against
+-- catalog_version / catalog_document.status at read time — the recorded
+-- version IS the check.
+create table if not exists wiki_claim (
+    id          text primary key,       -- 'clm_' + hex
+    page_ref    text,                   -- Confluence page id; null before the
+                                         -- page exists (a create proposal has
+                                         -- none yet)
+    proposal_id text references proposal (id),
+    statement   text not null,
+    evidence    jsonb not null,         -- [{kind, source_ref, version}, ...]
+    created_at  timestamptz not null default now(),
+    retired_at  timestamptz             -- set when a later page edit
+                                         -- replaces/removes this claim
+);

@@ -4,6 +4,38 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.9.0: the library exists — sources catalog slice 1, and the wiki learns how it will forget
+
+- **The document catalog is real** (sources-catalog spec slice 1): four new
+  tables — `source` (governed data: kind, config, cursor, enabled=false by
+  default), `catalog_document` (stable lineage identity per source+key, with
+  RESCINDED as a status flip that never deletes), `catalog_version`
+  (monotonic per lineage, content-hash of extracted text), `catalog_location`
+  (every uri a lineage appears at, `missing_at` when a walk stops finding
+  one). Inventory only — nothing enrolls into the work ledger yet; that is
+  slices 3/4 by the ratified order.
+- **A filesystem watcher walks it** (`ingest/watcher.py`): deterministic, no
+  LLM — extract, hash, record; new version only on content change; idempotent
+  re-walks write nothing and emit nothing (the material-events rule). Per-file
+  read/extract failures land in that version's meta and never abort the walk.
+  Closed watcher registry: an unknown source kind fails loudly.
+- **The extraction seam is shared now** (`ingest/extract.py`): the markitdown
+  machinery hoisted from the chat-attachment gate, which delegates to it
+  unchanged — the gate keeps its refuse-on-empty contract; the watcher records
+  `extraction: empty|failed` instead (a scan is an inventory fact, not an
+  error). OCR-at-watcher-time is the noted upgrade path.
+- **Operator levers**: `GET/POST /api/sources`, `POST /api/sources/{id}/walk`
+  (409 while disabled), `GET /api/catalog/documents`, and
+  rescind/reinstate with a mandatory recorded reason — direct internal-state
+  actions, same posture as hire/retire. The Sources panel is slice 2.
+- **Decision 9 amended into the sources-catalog spec** (out of the OpenWiki
+  discussion): every wiki citation becomes a durable claim row with its
+  evidence version recorded at write time; staleness is a deterministic
+  version comparison (no stored flag — supported/stale/unsupported are
+  computed); repair is scheduled, paced ledger work, never event-triggered
+  churn; operator statements go stale only by explicit supersession. The
+  `wiki_claim` table ships now, empty, so slice 7 needs no migration.
+
 ## 2026-08-30 — v2.8.1: curation writes stamp their embeddings, and the migration runbook is written down
 
 - **`neo4j_writer` stamps every embedding it stores** with

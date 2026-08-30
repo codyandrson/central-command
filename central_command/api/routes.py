@@ -3159,3 +3159,87 @@ async def graph_edge_delete(uuid: str) -> dict:
 async def graph_merge(body: GraphMergeIn) -> dict:
     return await _curate(neo4j_writer.merge_nodes(body.keep_uuid, body.drop_uuid),
         "merge", body.model_dump())
+
+
+# --- Sources catalog (slice 1, 2026-08-30) ------------------------------------
+# Internal-state operations — inventory, no world writes — so these are DIRECT
+# operator actions (D24's "no proposal gate for our own state" posture, same as
+# hire/retire), not proposals. Walking reads the world; it only writes our own
+# tables.
+
+
+class SourceIn(BaseModel):
+    id: str
+    kind: str
+    name: str
+    config: dict = Field(default_factory=dict)
+    enabled: bool = False
+
+
+@router.get("/sources")
+async def list_sources() -> dict:
+    sources = await repo.list_sources()
+    overview = {s["id"]: await repo.catalog_overview(s["id"]) for s in sources}
+    return {"sources": [{**s, "overview": overview[s["id"]]} for s in sources]}
+
+
+@router.post("/sources")
+async def upsert_source(body: SourceIn) -> dict:
+    if body.kind != "filesystem":
+        raise HTTPException(422, f"unknown source kind {body.kind!r} (have: filesystem)")
+    root = (body.config or {}).get("root")
+    if not root or not Path(root).is_absolute():
+        raise HTTPException(422, "config.root must be an absolute path")
+    row = await repo.upsert_source(body.id, body.kind, body.name, body.config, body.enabled)
+    return {"ok": True, "source": row}
+
+
+@router.post("/sources/{source_id}/walk")
+async def walk_source_route(source_id: str) -> dict:
+    """Synchronous for slice 1 — fine at the sizes this proves the pattern
+    against. # ponytail: background walks (a task id + poll) are the upgrade
+    when a source's tree is big enough that a request would time out."""
+    from central_command.ingest.watcher import walk_source
+
+    source = await repo.get_source(source_id)
+    if source is None:
+        raise HTTPException(404, f"source {source_id!r} does not exist")
+    if not source["enabled"]:
+        raise HTTPException(409, f"source {source_id!r} is disabled — enable it before walking")
+    try:
+        summary = await walk_source(source)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return {"ok": True, "summary": summary}
+
+
+@router.get("/catalog/documents")
+async def list_catalog_documents(source_id: str | None = None) -> dict:
+    return {"documents": await repo.list_catalog_documents(source_id)}
+
+
+class RescindIn(BaseModel):
+    reason: str
+
+
+@router.post("/catalog/documents/{document_id}/rescind")
+async def rescind_catalog_document(document_id: str, body: RescindIn) -> dict:
+    if not body.reason.strip():
+        raise HTTPException(422, "rescinding requires a recorded reason")
+    if not await repo.rescind_document(document_id, body.reason.strip(), "operator"):
+        raise HTTPException(404, f"catalog document {document_id!r} does not exist")
+    await events.emit(
+        "catalog.document.rescinded", ref_id=document_id,
+        payload={"reason": body.reason.strip()}, actor="operator",
+    )
+    return {"ok": True}
+
+
+@router.post("/catalog/documents/{document_id}/reinstate")
+async def reinstate_catalog_document(document_id: str) -> dict:
+    if not await repo.reinstate_document(document_id):
+        raise HTTPException(404, f"catalog document {document_id!r} does not exist")
+    await events.emit(
+        "catalog.document.reinstated", ref_id=document_id, payload={}, actor="operator",
+    )
+    return {"ok": True}

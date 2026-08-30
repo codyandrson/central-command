@@ -47,7 +47,6 @@ from __future__ import annotations
 import base64
 import binascii
 import io
-from pathlib import Path
 
 from central_command.config import settings
 from central_command.integrations import http as http_client
@@ -106,18 +105,6 @@ class AttachmentRefused(Exception):
         self.filename = filename
 
 
-def _markitdown():
-    """Built once and cached — construction loads magika's ONNX model."""
-    global _MD
-    try:
-        return _MD
-    except NameError:
-        from markitdown import MarkItDown
-
-        _MD = MarkItDown()
-        return _MD
-
-
 def _decode(att: dict) -> tuple[str, str, bytes]:
     """(filename, media_type, bytes) from one wire attachment, or refuse."""
     name = str(att.get("name") or att.get("filename") or "attachment").strip() or "attachment"
@@ -155,28 +142,22 @@ def _extract(name: str, data: bytes) -> tuple[str, bool]:
     An empty result is a FAILURE here, not an empty document: markitdown
     returns '' for a scanned (image-only) PDF without raising, and passing that
     on would hand the agent a document that says nothing while the operator
-    believes it was delivered.
+    believes it was delivered. Extraction itself lives in `ingest/extract.py`
+    (shared with the catalog watcher); this function keeps the gate's own
+    refuse-on-empty contract.
     """
-    from markitdown._exceptions import MarkItDownException
+    from central_command.ingest.extract import extract_text_or_raise
 
-    suffix = Path(name).suffix or None
     try:
-        result = _markitdown().convert_stream(io.BytesIO(data), file_extension=suffix)
-    except MarkItDownException as exc:
+        text = extract_text_or_raise(name, data)
+    except Exception as exc:  # a malformed file must not 500 the whole send
         raise AttachmentRefused(
             "attachment_unreadable",
             f"could not read {name!r}: {exc}. Convert it to PDF, DOCX, XLSX, "
             "PPTX, CSV, HTML or plain text and try again.",
             name,
         ) from exc
-    except Exception as exc:  # a malformed file must not 500 the whole send
-        raise AttachmentRefused(
-            "attachment_unreadable",
-            f"could not read {name!r} ({type(exc).__name__}: {exc}).",
-            name,
-        ) from exc
 
-    text = (result.text_content or "").strip()
     if not text:
         # ponytail: catches the 0-char scan exactly, which is the measured case.
         # A scan whose only text layer is a stray page number would still slip

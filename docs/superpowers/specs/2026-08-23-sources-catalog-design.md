@@ -158,10 +158,66 @@ Nothing in the core layers (catalog, deterministic tier, ledger integration,
 action classes) may be homelab-shaped; the watcher registry is where
 per-environment variance lives.
 
+## Decision 9 — Claims: the wiki forgets deterministically (amended 2026-08-30)
+
+_Ratified 2026-08-30 out of the OpenWiki discussion (LangChain,
+"Building Self-Correcting Memory in OpenWiki", 2026-08-25). The insight
+adopted: persist each page's factual claims WITH versioned evidence pointers,
+so staleness detection is a deterministic comparison — no model calls — and
+correction is scheduled work, not churn. The wiki already cites evidence at
+propose time; this makes that evidence durable past the approval._
+
+- **Every proposal citation mechanically becomes a claim row.** No agent
+  judgment about what is "material": citation is already mandatory, so the
+  claims ledger falls out of the existing evidence discipline for free. A
+  claim row: page id, statement, evidence refs, and the evidence VERSION
+  recorded at write time (catalog lineage+version, graph edge uuid, Jira
+  key+snapshot, event-log row id for operator statements).
+- **Three claim states, by trigger.** *Supported*: recorded evidence version
+  matches current. *Stale*: the evidence has a newer version — re-verification
+  is possible (refresh the version, or correct claim and page together).
+  *Unsupported*: the evidence was WITHDRAWN — its lineage tagged
+  rescinded/no-longer-trusted — so there is nothing to re-verify against; the
+  claim can only be rewritten on other evidence or removed. No stored status
+  flag for stale: the recorded version IS the check (unsupported is a real
+  state, driven by the rescission tag). Page annotations distinguish the two
+  ("cites an updated source" = check back later; "cites a rescinded source" =
+  do not rely on this).
+- **Operator evidence is citable and verifiable, staleness by supersession
+  only.** Operator statements live in append-only records (transcripts, the
+  event log, curated signals) — quote-checked at write time exactly like
+  document quotes, but an append-only record never version-drifts. It goes
+  stale only when a later operator statement supersedes it, which arrives as
+  a steward supersession per Decision 6. Explicit beats inferred, as usual.
+- **Deterministic annotation is a new action class.** Marking a page stale is
+  a fixed-template block (a status macro the renderer owns idempotently, never
+  an edit inside authored prose) generated from claim rows with no model in
+  the loop, each flip emitting its event. It enters the Decision 7 taxonomy as
+  its own class and climbs the usual ladder: batched-for-approval → operator
+  flips it autonomous. The end state is "the page shows stale immediately".
+- **Repair is scheduled, paced, queued — never event-triggered churn.** A
+  `wiki.freshness` heartbeat action on an operator-set cadence sweeps the
+  claims table, batches stale/unsupported claims per page, and enrolls repair
+  work items through the ordinary ledger; the wiki agent repairs under the
+  gate like any other work, per-source pacing applies. Repair items ride the
+  SAME lineage thread key as the version's steward item, so the relatedness
+  lock guarantees the graph is current before the page is repaired.
+- **Rescission is a catalog tag, not a deletion.** Operator-set from the
+  Sources/catalog panel (agent-proposed and gated is allowed too); the
+  document stays in the catalog forever with its tag — the library records
+  what WAS trusted and when. Graph side: the steward proposes explicit
+  supersession episodes for facts that stood solely on the rescinded source.
+- **Skipped, deliberately: OKF.** A portability format with no second
+  consumer here; our provenance already lives in proposals and the event log.
+  Revisit only if the work deployment must export wiki bundles to another
+  tool.
+
 ## Slice order
 
 1. **Catalog table + extraction seam + filesystem watcher** — the simplest
-   adapter (local/SMB walk) exercises the whole inventory layer.
+   adapter (local/SMB walk) exercises the whole inventory layer. The claims
+   table (Decision 9) is designed into this schema from day one so slice 7
+   needs no migration.
 2. **Sources panel** — sources as data + the operator surface; the email feed
    becomes its first row (visibility retrofit).
 3. **Deterministic tier** — content-hash dedupe, lineage linking, enrollment
