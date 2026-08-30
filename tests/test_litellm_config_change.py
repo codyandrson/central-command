@@ -117,7 +117,7 @@ def test_the_capability_is_a_gated_write_with_a_handler():
         ({}, "non-empty"),
         (
             {CONFIG: "model_list:\n  - model_name: cc-default\n  - model_name: graphiti-llm\n"},
-            "qwen3-embedding-local",
+            "cc-embedding",
         ),
     ],
 )

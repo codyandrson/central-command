@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     # and is effectively permanent — changing the embedder later means
     # dropping the vector index and re-embedding the whole graph (2026-08-21
     # setup & onboarding design, decision 3). Defaults = the homelab instance.
-    embed_alias: str = "qwen3-embedding-local"
+    embed_alias: str = "cc-embedding"
     embed_dim: int = 1024
 
     # How charters address the human team lead — the first charter-template

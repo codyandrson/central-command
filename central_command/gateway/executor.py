@@ -1559,10 +1559,10 @@ _LITELLM_NAMESPACE = "central-command"
 _LITELLM_CONFIGMAP = "cc-litellm-config"
 _LITELLM_DEPLOYMENT = "deployment/cc-litellm"
 # The aliases the deployment cannot lose: cc-default is what every agent run
-# addresses, graphiti-llm is the graph's extraction model, qwen3-embedding-local
-# is the embedder Graphiti has NO fallback for. Verified against the live
-# /model/info, 2026-08-06.
-_LITELLM_REQUIRED_ALIASES = ("cc-default", "graphiti-llm", "qwen3-embedding-local")
+# addresses, graphiti-llm is the graph's extraction model, cc-embedding is the
+# embedding ROLE alias (2026-08-30; over qwen3-embedding-local) Graphiti has
+# NO fallback for.
+_LITELLM_REQUIRED_ALIASES = ("cc-default", "graphiti-llm", "cc-embedding")
 # These files reference secrets as `os.environ/VAR` and never carry one. A
 # literal key shape in proposed content is a refusal, not a warning.
 _SECRET_SHAPES = re.compile(r"sk-ant-|ATATT|gh[pous]_|BEGIN [A-Z ]*PRIVATE KEY")

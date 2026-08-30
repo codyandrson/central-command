@@ -100,7 +100,9 @@ embedder:
   # with each other and with the graph's stored vectors; making them separately
   # overridable invites a silent mismatch that only shows up as bad retrieval.
   # Change them together, and re-embed the graph when you do.
-  model: "qwen3-embedding-local"
+  # cc-embedding is the ROLE alias (2026-08-30) — re-pointing it in LiteLLM is
+  # a re-embed-the-graph migration, never a casual swap.
+  model: "cc-embedding"
   dimensions: 1024
 
   providers:

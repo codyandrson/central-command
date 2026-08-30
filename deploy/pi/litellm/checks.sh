@@ -16,7 +16,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE="${CC_LITELLM_URL:-http://127.0.0.1:4000}"
-REQUIRED_ALIASES=(cc-default graphiti-llm qwen3-embedding-local)
+REQUIRED_ALIASES=(cc-default graphiti-llm cc-embedding)
 
 fail() { echo "CHECK FAILED: $*" >&2; exit 1; }
 
@@ -33,8 +33,8 @@ code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/health/livel
 echo "ok  liveliness"
 
 # 2. the aliases nothing may drop: cc-default (every agent run), graphiti-llm
-#    (graph extraction), qwen3-embedding-local (Graphiti has NO embedding
-#    fallback — an embedder outage is a graph WRITE outage).
+#    (graph extraction), cc-embedding (the embedding ROLE — Graphiti has NO
+#    embedding fallback, so an embedder outage is a graph WRITE outage).
 info="$(curl -s --max-time 20 -H "Authorization: Bearer $KEY" "$BASE/model/info")" \
   || fail "model/info: could not reach $BASE"
 printf '%s' "$info" | python3 -c '

@@ -5,8 +5,8 @@
 #
 #   Three go into deploy/pi/.env (replacing init-env.sh's PENDING placeholders):
 #     GRAPHITI_LLM_API_KEY  -> ["graphiti-llm"]                    extraction
-#     EMBEDDER_API_KEY      -> ["qwen3-embedding-local"]           embeddings
-#     RERANKER_API_KEY      -> ["cc-default","qwen3-rerank-local"] cross-encoder
+#     EMBEDDER_API_KEY      -> ["cc-embedding"]            embeddings (role alias)
+#     RERANKER_API_KEY      -> ["cc-default","cc-rerank"]  cross-encoder (role alias)
 #   One goes into the REPO-ROOT .env, which is the app's own env:
 #     CC_LLM_API_KEY        -> ["cc-default"]        alias cc-spine
 #
@@ -84,11 +84,11 @@ ensure_key() {  # ensure_key <file> <var> <alias> <models-json>
 
 echo "minting virtual keys against $BASE_URL:"
 ensure_key "$PI_ENV"   GRAPHITI_LLM_API_KEY graphiti-llm        '["graphiti-llm"]'
-ensure_key "$PI_ENV"   EMBEDDER_API_KEY     graphiti-embeddings '["qwen3-embedding-local"]'
+ensure_key "$PI_ENV"   EMBEDDER_API_KEY     graphiti-embeddings '["cc-embedding"]'
 # cc-default is in scope alongside the reranker because Graphiti falls back to
 # the logprob-classifier prompts on cc-default when GRAPHITI_RERANK_MODEL is
 # unset or the rerank route fails (40-graph.yaml).
-ensure_key "$PI_ENV"   RERANKER_API_KEY     graphiti-reranker   '["cc-default","qwen3-rerank-local"]'
+ensure_key "$PI_ENV"   RERANKER_API_KEY     graphiti-reranker   '["cc-default","cc-rerank"]'
 # The spine's key is a VIRTUAL key, never the master key (config.py's contract).
 ensure_key "$ROOT_ENV" CC_LLM_API_KEY       cc-spine            '["cc-default"]'
 

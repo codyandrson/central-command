@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.8.0: every consumer addresses a cc-* role alias, and the real models keep their own rows
+
+- **`cc-embedding` and `cc-rerank` are the new ROLE aliases** (operator
+  decision, 2026-08-30): every Central Command consumer now addresses a
+  `cc-*` role — `cc-default` (agents), `cc-embedding` (graphiti embedder,
+  `config.py embed_alias`, the curation writer), `cc-rerank`
+  (`GRAPHITI_RERANK_MODEL`) — so a role can be re-pointed in the LiteLLM UI
+  without touching the app. The real local models (`qwen3-embedding-local`,
+  `qwen3-rerank-local`, `qwen3.8-27b`, …) keep their own rows; two rows onto
+  one upstream is the pattern, not duplication. This is parity with the
+  single-node profile, which already shipped `cc-embedding`.
+  `gpt-4.1-nano` deliberately stays: graphiti_core's fallback reranker
+  addresses that literal name and renaming it would grow our patch surface
+  for a dormant path.
+- **Re-pointing `cc-embedding` is a migration, never a swap** — vectors from
+  a different model live in a different semantic space even at the same
+  1024 dimensions, so hybrid search silently degrades until the graph is
+  re-embedded (`scripts/oneoff/reembed_graph.py`). The declaration, the
+  graphiti config and `setup.sh`'s CC_EMBED_DIM refusal all say so now.
+- **OPERATOR SEQUENCING before installing this release**: the live proxy
+  must serve the two new aliases first, or graphiti's embedder/reranker
+  calls fail on restart. In the LiteLLM UI, add `cc-embedding` and
+  `cc-rerank` as copies of the `qwen3-*-local` rows (cc-rerank keeps
+  `cohere/`, api_base ending `/v1/rerank`, mode rerank), then re-scope (or
+  FORCE=1 re-mint) `EMBEDDER_API_KEY` → `["cc-embedding"]` and
+  `RERANKER_API_KEY` → `["cc-default","cc-rerank"]`. Existing minted keys
+  are scoped to the old names and will 401 the new ones. `CC_EMBED_ALIAS`
+  in the app's `.env` may stay on `qwen3-embedding-local` (still served) or
+  move to `cc-embedding` — setup only writes the default when unset.
+
 ## 2026-08-30 — v2.7.0: the graph panel says "scope", not "group_id"
 
 - **Graph groups render as scope in the cockpit.** The graph panel's node

@@ -95,10 +95,12 @@ Assumed already true before phase 2:
     warning), so skipping it leaves `/adaptive_router/state` stale even though
     `--check` may still pass.
 
-    `model-preferences.yaml` declares all eleven aliases and the two
-    invariants most easily got wrong — `graphiti-llm` must keep the
-    `openai/chat_completions/` Responses→chat bridge prefix, and
-    `qwen3-rerank-local`'s **`api_base` must end in `/v1/rerank`** (the
+    `model-preferences.yaml` declares every alias — the `cc-*` ROLE aliases
+    the app addresses (cc-default, cc-embedding, cc-rerank) AND the
+    real-model rows they point at — plus the two invariants most easily got
+    wrong: `graphiti-llm` must keep the `openai/chat_completions/`
+    Responses→chat bridge prefix, and the rerank rows' (`cc-rerank`,
+    `qwen3-rerank-local`) **`api_base` must end in `/v1/rerank`** (the
     `cohere/` client POSTs the base verbatim and appends nothing). Nothing
     you enter in the UI is ever overwritten by the script. Timeouts have
     exactly one home per model, which is what makes `policy.py --check` a

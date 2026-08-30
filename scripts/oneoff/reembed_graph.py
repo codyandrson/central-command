@@ -46,7 +46,7 @@ EMBED_KEY = os.environ.get("EMBEDDER_API_KEY") or sys.exit("EMBEDDER_API_KEY not
 
 # These three must agree with deploy/pi/graphiti/config.yaml. A mismatch is the
 # silent-failure mode the spec exists to prevent, so assert it rather than trust.
-MODEL = os.environ.get("EMBEDDER_MODEL", "qwen3-embedding-local")
+MODEL = os.environ.get("EMBEDDER_MODEL", "cc-embedding")
 DIMS = int(os.environ.get("EMBEDDER_DIMENSIONS", "1024"))
 BATCH = int(os.environ.get("REEMBED_BATCH", "32"))
 

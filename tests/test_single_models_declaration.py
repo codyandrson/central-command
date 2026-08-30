@@ -48,11 +48,15 @@ def test_single_declaration_is_skeletons_with_the_invariants(rm):
 def test_k3s_declaration_is_skeletons_too(rm):
     want = rm.declared(rm.load_declaration(K3S_POLICY))
     assert "cc-default" in want and "graphiti-llm" in want and "qwen3-rerank-local" in want
+    # The role aliases (2026-08-30): what CC consumers address, over the same
+    # upstreams as the real-model rows — both must be declared.
+    assert "cc-embedding" in want and "cc-rerank" in want
     for alias, params in want.items():
         assert rm.PLACEHOLDER in params["model"], alias
         assert "api_key" not in params, alias
-    assert want["qwen3-rerank-local"]["mode"] == "rerank"
-    assert want["qwen3-rerank-local"]["api_base"].endswith("/v1/rerank")
+    for rerank in ("qwen3-rerank-local", "cc-rerank"):
+        assert want[rerank]["mode"] == "rerank"
+        assert want[rerank]["api_base"].endswith("/v1/rerank")
     assert want["graphiti-llm"]["timeout"] == 300  # registration_only carries its own
 
 

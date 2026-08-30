@@ -106,8 +106,8 @@ apply_secret cc-neo4j \
 # Graphiti reaches no external provider since 2026-08-01. Each is scoped to its
 # own model group so a leak in one cannot spend through another:
 #   GRAPHITI_LLM_API_KEY -> ["graphiti-llm"]          entity extraction
-#   EMBEDDER_API_KEY     -> ["qwen3-embedding-local"] embeddings
-#   RERANKER_API_KEY     -> ["cc-default","qwen3-rerank-local"] cross-encoder
+#   EMBEDDER_API_KEY     -> ["cc-embedding"]           embeddings (role alias)
+#   RERANKER_API_KEY     -> ["cc-default","cc-rerank"] cross-encoder (role alias)
 # ANTHROPIC_API_KEY is intentionally absent — nothing in the graphiti config
 # selects the anthropic provider any more.
 apply_secret cc-graphiti \

@@ -476,7 +476,7 @@ invariants (the `openai/chat_completions/` bridge prefix; rerank's
 `/v1/rerank` api_base), applies the routing policy (`policy.py --apply` →
 restart → `--check`), mints the virtual keys, then probes `cc-default`,
 `graphiti-llm` (a structured Responses round trip) and
-`qwen3-embedding-local` through the proxy — a probe failure is the same
+`cc-embedding` through the proxy — a probe failure is the same
 exit-3 gate.
 `stack` builds the per-arch images only if missing and rolls out every
 manifest. `app` installs the venv/cockpit and the systemd units, holding

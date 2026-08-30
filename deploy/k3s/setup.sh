@@ -419,7 +419,9 @@ llm_gate() { # llm_gate <what-failed>
   note "  the re-run checks are in deploy/pi/litellm/model-preferences.yaml:"
   note "    graphiti-llm           MUST keep openai/chat_completions/<model> —"
   note "                           the Responses->chat bridge prefix"
-  note "    qwen3-rerank-local     api_base MUST end in /v1/rerank, mode rerank"
+  note "    cc-rerank + qwen3-rerank-local  api_base MUST end in /v1/rerank, mode rerank"
+  note "    cc-embedding           the embedding ROLE — same upstream as"
+  note "                           qwen3-embedding-local; both rows must exist"
   note "  A key a local server ignores can be 'none', but must be non-empty."
   note ""
   note "  Not sure what a server names its models? List them directly:"
@@ -529,16 +531,16 @@ phase_llm() {
     llm_gate "the graphiti-llm alias did not return structured output (is the openai/chat_completions/ prefix intact?)"
     return 3
   fi
-  # qwen3-embedding-local is THIS profile's embed alias (mint-keys.sh scopes
-  # EMBEDDER_API_KEY to exactly that name) — the single-node profile's
-  # `cc-embedding` does not exist here.
+  # cc-embedding is the embedding ROLE alias (2026-08-30, parity with the
+  # single-node profile) — mint-keys.sh scopes EMBEDDER_API_KEY to exactly
+  # that name; qwen3-rerank-local/qwen3-embedding-local stay as real-model rows.
   local dim
-  dim="$(probe_alias embed qwen3-embedding-local 2>/dev/null | tail -1)"
+  dim="$(probe_alias embed cc-embedding 2>/dev/null | tail -1)"
   if [[ ! "$dim" =~ ^[0-9]+$ ]]; then
-    llm_gate "the qwen3-embedding-local alias did not return a vector"
+    llm_gate "the cc-embedding alias did not return a vector"
     return 3
   fi
-  pass "probe-embed" "qwen3-embedding-local returned a ${dim}-dimension vector"
+  pass "probe-embed" "cc-embedding returned a ${dim}-dimension vector"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -660,7 +662,7 @@ phase_app() {
   # Cross-file values: the same fact lives in two files, so copy it rather than
   # ask the operator to keep them in sync by hand.
   set_kv_if_unset "$APP_ENV" CC_LLM_PROXY_ADMIN_KEY "${LITELLM_MASTER_KEY:-}"     "app-admin-key"
-  set_kv_if_unset "$APP_ENV" CC_EMBED_ALIAS         "qwen3-embedding-local"       "app-embed-alias"
+  set_kv_if_unset "$APP_ENV" CC_EMBED_ALIAS         "cc-embedding"                "app-embed-alias"
   set_kv_if_unset "$APP_ENV" CC_NEO4J_PASSWORD      "${NEO4J_PASSWORD:-}"         "app-neo4j-password"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_SALT_KEY    "${LITELLM_SALT_KEY:-}"       "app-litellm-salt"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_DB_URL \
@@ -675,7 +677,7 @@ phase_app() {
   # index instead of erroring, and the dimension is permanent once the index
   # exists.
   local dim cur
-  dim="$(probe_alias embed qwen3-embedding-local 2>/dev/null | tail -1)"
+  dim="$(probe_alias embed cc-embedding 2>/dev/null | tail -1)"
   if [[ ! "$dim" =~ ^[0-9]+$ ]]; then
     fail "app-embed-dim" "the embed alias did not return a vector — run: ./deploy/k3s/setup.sh llm"
     return 1

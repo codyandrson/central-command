@@ -211,7 +211,7 @@ ROUTING & RESILIENCE:
     propose — the Executor writes exactly those bytes, never re-reads anything,
     so the diff the operator reviews is the diff that lands. On approval it
     pre-checks the RUNNING proxy (deploy/pi/litellm/checks.sh: liveliness, the
-    required aliases cc-default / graphiti-llm / qwen3-embedding-local, a
+    required aliases cc-default / graphiti-llm / cc-embedding, a
     1-token completion, policy.py --check). A failing pre-check ABORTS and
     writes nothing — an already-broken proxy is its own diagnosis, not
     something to change blind. Then: write + git commit, re-render the

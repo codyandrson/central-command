@@ -81,7 +81,8 @@ breaks.
 
 Graphiti has **no embedding fallback** — OpenAI cannot substitute because the
 dimensions differ. So an outage of the local embedder
-(`qwen3-embedding-local`) is a graph **write outage**, not a degraded
+(role alias `cc-embedding`, over `qwen3-embedding-local`) is a graph
+**write outage**, not a degraded
 capability. The LLM being down is the degradable case; the embedder being down
 is not. Report them differently.
 

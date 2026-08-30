@@ -247,8 +247,9 @@ spec:
             # logprob-classifier prompts above — those comments describe the
             # FALLBACK path now. Rollback = delete this var (upstream default
             # returns). The virtual key above must stay scoped to this model.
+            # cc-rerank is the ROLE alias (2026-08-30) over qwen3-rerank-local.
             - name: GRAPHITI_RERANK_MODEL
-              value: qwen3-rerank-local
+              value: cc-rerank
             - name: GRAPHITI_TELEMETRY_ENABLED
               value: "false"
             # Was 3 on the Pi ("4 cores shared with k3s"). Left at 3: raising it

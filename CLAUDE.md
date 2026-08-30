@@ -372,7 +372,8 @@ default — changing it now buys nothing and breaks all five.
   in the same family: **a node with no `name_embedding` is invisible to the
   semantic half of hybrid search** while still turning up in keyword hits, so an
   operator's correction reads fine in the UI and no agent ever recalls it —
-  every write re-embeds through `qwen3-embedding-local` at exactly 1024
+  every write re-embeds through `cc-embedding` (the role alias over
+  `qwen3-embedding-local`) at exactly 1024
   dimensions (a mis-sized vector corrupts the index instead of erroring, so the
   writer drops one rather than store it). Neo4j 5.26 has no parameterized
   labels, hence the closed `ENTITY_TYPES` allowlist mirroring

@@ -145,7 +145,10 @@ itself, not only on the underlying deployment alias.
   processes, killing in-flight requests — push any config change to it in a
   traffic gap, never blind.
 - **`qwen3-embedding-local`** (`:8083`) and **`qwen3-rerank-local`** (`:8082`)
-  are co-resident and **always on**, not competing for the swap slot.
+  are co-resident and **always on**, not competing for the swap slot. Since
+  2026-08-30 CC's consumers address them through the ROLE aliases
+  `cc-embedding` and `cc-rerank` (separate proxy rows onto the same
+  upstreams, mirroring cc-default / qwen3.8-27b).
   Graphiti has **no embedding fallback** (dimensions differ from OpenAI's), so
   an embedder outage is a graph **write outage**, not a degraded capability.
   The LLM being down is the degradable case; the embedder being down is not.

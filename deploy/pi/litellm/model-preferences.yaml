@@ -246,9 +246,17 @@ models:
 # demand `model_info.adaptive_router_preferences` on an embedder and a rerank
 # endpoint, and report permanent DRIFT against a perfectly healthy proxy.
 # `models:` is "what the router chooses between"; this block is "what else has
-# to be registered". Together they are the authoritative list of eleven.
+# to be registered". Together they are the authoritative list of ten (the
+# three Anthropic entries above are commented out — retired 2026-08-30).
 #
-# Timeouts live HERE for these four (policy.py declares none of them), unlike
+# ROLE vs REAL MODEL (2026-08-30, operator decision): every Central Command
+# consumer addresses a `cc-*` ROLE alias (cc-default, cc-embedding, cc-rerank)
+# so the operator can re-point a role in the LiteLLM UI without touching the
+# app; every real local model ALSO keeps its own row (qwen3-embedding-local,
+# qwen3-rerank-local, …). Two rows onto one upstream is the pattern, not
+# duplication — same as cc-default / qwen3.8-27b in `models:` above.
+#
+# Timeouts live HERE for these entries (policy.py declares none of them), unlike
 # the `models:` entries where the top-level `timeout:` is the single home.
 # ============================================================================
 registration_only:
@@ -280,6 +288,34 @@ registration_only:
     registration:
       model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
+      timeout: 60
+
+  # THE EMBEDDING ROLE — what Central Command actually addresses (config.py
+  # `embed_alias`, graphiti config.yaml `embedder.model`, neo4j_writer).
+  # Points at the same upstream as qwen3-embedding-local; both rows exist on
+  # purpose (see the role-vs-real note above). RE-POINTING THIS ROLE IS A
+  # MIGRATION, NEVER A SWAP: vectors from a different model live in a
+  # different semantic space even at the SAME 1024 dimensions, so hybrid
+  # search silently degrades until the whole graph is re-embedded
+  # (scripts/oneoff/reembed_graph.py). A different dimension is worse — the
+  # Neo4j vector index is built at 1024 and a mis-sized vector corrupts it
+  # instead of erroring (setup.sh's CC_EMBED_DIM check refuses the change).
+  cc-embedding:
+    registration:
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
+      timeout: 60
+
+  # THE RERANK ROLE — GRAPHITI_RERANK_MODEL (deploy/k3s/40-graph.yaml)
+  # addresses this name. Same cohere-client constraints as qwen3-rerank-local
+  # below: api_base is POSTed verbatim and MUST end in /v1/rerank, and a swap
+  # target must itself be a rerank-shaped endpoint (llama.cpp --rerank), never
+  # a chat model.
+  cc-rerank:
+    registration:
+      model: cohere/PLACEHOLDER
+      api_base: PLACEHOLDER/v1/rerank
+      mode: rerank
       timeout: 60
 
   # !! THE api_base MUST END IN /v1/rerank !!  Discovered in-pod during the
