@@ -54,7 +54,7 @@ RUNAS=(runuser -u "$OWNER" --)
 OLD_NS=grandvision; NEW_NS=central-command
 OLD_DB=grandvision; NEW_DB=central_command
 COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
-SSHQ=("${RUNAS[@]}" ssh -o BatchMode=yes -o ConnectTimeout=10)   # as the operator: root has no key/known_hosts for the compute node
+SSHQ=("${RUNAS[@]}" ssh -n -o BatchMode=yes -o ConnectTimeout=10)   # as the operator: root has no key/known_hosts for the compute node
 K=(k3s kubectl)
 STATE=/var/lib/cc-migrate
 JOURNAL=$STATE/journal
@@ -371,7 +371,7 @@ verify() {
 cleanup() {
   # Only after verify.sh passes and the operator says so — this DELETES.
   say "cleanup: deleting the old namespaces, PV data, and unit files"
-  read -r -p "   Type DELETE to remove namespace $OLD_NS, gv-mcp, gv-sandbox, their PV data and the gv-* unit files: " ans
+  ans="${CC_CONFIRM:-}"; [[ $ans == DELETE ]] || read -r -p "   Type DELETE to remove namespace $OLD_NS, gv-mcp, gv-sandbox, their PV data and the gv-* unit files: " ans
   [[ $ans == DELETE ]] || die "aborted"
   for old in "${PVCS[@]}"; do
     local node p; node="$(pvc_node $OLD_NS "$old" 2>/dev/null || true)"; p="$(pv_path $OLD_NS "$old" 2>/dev/null || true)"
