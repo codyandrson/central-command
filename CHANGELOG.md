@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.3.1: the version stamp v2.3.0 forgot
+
+- **`VERSION` now says 2.3.1.** v2.3.0 shipped its CHANGELOG entry and tag
+  without bumping `VERSION`, which is what `cc-update.sh` reads as the
+  installed version — so a successful update still reported 2.2.0 and the
+  cockpit re-offered 2.3.0 every time (each "retry" re-ran the full
+  stop/merge/restart against an already-updated tree; the code was v2.3.0
+  throughout). No functional change beyond the stamp.
+- **`tests/test_version_file.py`** pins `VERSION` to the newest CHANGELOG
+  release heading, so an entry without a bump fails the suite.
+
 ## 2026-08-30 — v2.3.0: the LiteLLM manager measures a model's capabilities instead of guessing them
 
 - **New read tool `litellm_probe_model`** (`integrations/litellm.probe_model`,

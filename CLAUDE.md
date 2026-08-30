@@ -118,6 +118,11 @@ architecture where the leak was measured.
   ImagePullBackOff you only find at failover.
 - **Cockpit:** https://raspberrypi.tail2ae84b.ts.net (tailscale serve → 3080);
   n8n UI at :8443 on the same host (tailnet-only, added 2026-08-01).
+- **A release is THREE things: a CHANGELOG entry, a `VERSION` bump, a tag.**
+  `cc-update.sh` reads `VERSION` (`version=`) as the installed version — not
+  git, not the tag. v2.3.0 skipped the bump; the update succeeded and the
+  cockpit still said 2.2.0 and re-offered 2.3.0 forever (2026-08-30).
+  `tests/test_version_file.py` pins VERSION to the newest CHANGELOG heading.
 - **A session ends at a PUSHED TAG. The operator deploys — never the session.**
   Releases go live through the cockpit updater (`deploy/k3s/cc-update.sh`):
   it fetches the tag, takes the rollback checkpoint and the DB dumps, merges,
