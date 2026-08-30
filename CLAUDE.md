@@ -327,6 +327,20 @@ default — changing it now buys nothing and breaks all five.
   the templates); Ubuntu noble already owns uid 1000 (`userdel ubuntu`
   before `useradd -u 1000` on the MCR crawler base). Adding an image means
   adding its digest line — the seam test fails otherwise.
+- **A model's capabilities are MEASURED, never guessed — and an undeclared
+  flag is not neutral (2026-08-30).** Central Command reads an absent
+  `supports_*` as "nobody said" (fails closed); LiteLLM's own aggregate view
+  (`/model_group/info`) coerces the same absence to **false** — `cc-default`
+  advertised `supports_function_calling: false` while every agent called
+  tools through it. `litellm_probe_model` sends one real request per
+  capability and returns the declared→observed diff; `list_models` no longer
+  strips the `supports_*`/`max_*` keys. Two probe traps: a thinking model
+  spends a small `max_tokens` on reasoning and answers HTTP 200 with EMPTY
+  content — that is "inconclusive", never "no" (the first cut scored every
+  JSON/vision check on `cc-default` as unsupported); and one tool call for a
+  two-city prompt is a choice, not proof parallel calls are unsupported.
+  Declared fleet facts live in `model-preferences.yaml`; after a release
+  that changes them, `policy.py --apply` — the updater does not.
 - **LiteLLM forbids `-` in MCP server names; Kubernetes requires it.** The
   same server cannot use one name on both sides, so `mcp_server.id` stays the
   k8s-valid canonical id and the proxy sees `_litellm_server_name()`'s

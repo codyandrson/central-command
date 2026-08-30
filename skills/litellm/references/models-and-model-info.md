@@ -67,6 +67,30 @@ per-deployment **pricing** lives: `input_cost_per_token`,
 `output_cost_per_token`, and for Anthropic `cache_creation_input_token_cost` /
 `cache_read_input_token_cost`.
 
+## `capabilities` — what `litellm_list_models` also returns (2026-08-30)
+
+Alongside `model_info`, each model in `litellm_list_models`'s output now
+carries a `capabilities` object — LiteLLM's own `supports_*`/`max_*`/`mode`
+vocabulary (the cost-map schema) plus Central Command's two thinking
+declarations, read straight from `CAPABILITY_FIELDS` in
+`central_command/integrations/litellm.py`:
+
+`mode`, `max_input_tokens`, `max_output_tokens`, `supports_function_calling`,
+`supports_parallel_function_calling`, `supports_tool_choice`,
+`supports_response_schema`, `supports_vision`, `supports_pdf_input`,
+`supports_reasoning`, `supports_system_messages`, `supports_prompt_caching`,
+`thinking_mechanism`, `thinking_levels`.
+
+**A key present with value `None` means undeclared — "nobody said" — never**
+**"checked and false."** This is deliberately None-preserving: an absent flag
+IS the finding (an undeclared model), so it must read as such rather than
+being silently dropped or coerced. Contrast this with LiteLLM's own aggregate
+`/model_group/info` view, which coerces that same absence to `False` outright
+— two different readers, two different defaults for the same silence. See
+`skills/model-evaluation/references/probe-protocol.md` for how these fields
+get populated with real evidence rather than left undeclared, and
+`references/operations.md` for `litellm_probe_model` itself.
+
 ### `max_input_tokens`
 
 `model_info.max_input_tokens` enforces a **stricter** limit than the provider's

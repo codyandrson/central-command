@@ -16,6 +16,16 @@ Two different reads, do not conflate them:
   forces two live GPU model swaps (~10s each) and can time the sweep out
   entirely. Probe **one model alias at a time**, and prefer probing only the
   one you actually suspect is unhealthy.
+- **`litellm_probe_model`** — a different kind of expensive: not a liveness
+  check but a **capability measurement**, ~10 short real requests (chat,
+  system message, tool_choice, tool calling, structured output, vision,
+  reasoning, output ceiling, streaming) against ONE model. Cheap in tokens
+  per request, but on a queued local model (llama-swap FIFO) it's minutes,
+  not milliseconds, because each of the ~10 requests waits its turn. Passing
+  `measure_context=True` adds up to 10 MORE requests (a context-length
+  bisect) and is far more expensive — opt-in for exactly that reason. See
+  `skills/model-evaluation/references/probe-protocol.md` for the full
+  register → probe → declare → record procedure this feeds.
 
 ## Caching
 

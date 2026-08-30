@@ -4,6 +4,61 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.3.0: the LiteLLM manager measures a model's capabilities instead of guessing them
+
+- **New read tool `litellm_probe_model`** (`integrations/litellm.probe_model`,
+  in the `litellm-read` pack): one small real request per capability through
+  the proxy — chat, system message, forced `tool_choice`, tool calling and
+  parallel calls, `json_schema` and `json_object` output, vision (a 1×1 PNG),
+  reasoning (`reasoning_effort` accepted AND `reasoning_content` returned),
+  the output-token ceiling, streaming; `measure_context=True` bisects the
+  input ceiling (≤10 long prompts, opt-in). Returns `declared`, `observed`
+  and `suggested_model_info` — the declared→observed diff a
+  `litellm.update_model` proposal carries. "HTTP 200, empty content,
+  `finish_reason: length`" is reported as INCONCLUSIVE, never as a
+  capability finding: a thinking model spends a small budget on reasoning
+  before it answers (the first cut scored every JSON/vision check on
+  `cc-default` as "no" for exactly that reason). Nothing in LiteLLM does
+  this — its `supports_*()` helpers are static cost-map lookups and
+  `/health` only proves a model answers. Measured live against the whole
+  local fleet; matches known truth (the judges' vision 500 is the mmproj
+  incident the attachment gate was built around).
+- **`litellm_list_models` no longer hides the capability fields.** Each
+  entry carries a `capabilities` object (`mode`, `max_input_tokens`,
+  `max_output_tokens`, the `supports_*` flags, `thinking_mechanism`,
+  `thinking_levels`), None-preserving — the manager was told to declare
+  `supports_vision` and could never see whether it had. Note the asymmetry
+  this exposed: Central Command reads an undeclared flag as "nobody said";
+  LiteLLM's own `/model_group/info` coerces it to **false** — `cc-default`
+  advertised `supports_function_calling: false` while every agent called
+  tools through it.
+- **The local fleet is declared from measurement**
+  (`deploy/pi/litellm/model-preferences.yaml`; `policy.py`'s
+  `OPTIONAL_MODEL_INFO_KEYS` gains `supports_function_calling`,
+  `supports_response_schema`, `mode`, `max_output_tokens`). **After
+  updating, run `python3 deploy/pi/litellm/policy.py --apply`** — the
+  updater does not apply policy, and `verify.sh` reports the new
+  declarations as drift until it is run.
+- **New skill `skills/model-evaluation/`** — the probe protocol, the
+  registration recipes for private gateways (OpenAI vs Anthropic format
+  detection, `base_model` for cost-map defaults, `additional_drop_params`,
+  per-model health knobs), and the pre-staged public model library in
+  `docs/vendor/model-library/` (LiteLLM's cost map, models.dev, LLMStats,
+  the Aider polyglot leaderboard — all MIT/Apache-2.0/CC-BY, refetched by
+  `scripts/model_library_fetch.sh`). Import it and grant it to
+  `litellm-manager` from the Skills screen; the manager now also holds
+  `skill-propose` (schema seed + `DEFAULT_PACKS`) so a probed model's
+  measured profile becomes a versioned library document, not a session
+  memory. The public card is a HYPOTHESIS for a private variant; the probe
+  is the evidence.
+- **Charter + autodiscovery brief:** a "testing a model" section (register
+  with what is certain → probe → declare → record) and the add brief no
+  longer says "plus a web read" — useless where the models live.
+- **`scripts/run_evals.py --model A --model B [--out results.json]`** runs
+  the same charter and cases against several aliases and prints a per-model
+  table — a MODEL comparison on our own workload, the shape a comparison
+  record in the library takes.
+
 ## 2026-08-30 — v2.2.0: the single-node setup acquires every dependency up front, from mirrors or an explicit bundle
 
 - **New `fetch` phase** (`deploy/single/setup.sh`, between `preflight` and

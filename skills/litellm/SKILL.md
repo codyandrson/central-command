@@ -59,3 +59,6 @@ approves, the Executor applies.
   teams, and how spend attribution actually works here.
 - `operations` — health endpoints, caching, timeouts, and the failure modes
   this deployment has actually produced.
+
+Registering or probing a **new or private model**? Load `model-evaluation`
+instead — the register → probe → declare → record procedure lives there.

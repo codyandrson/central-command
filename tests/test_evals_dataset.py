@@ -116,3 +116,52 @@ def test_evaluators_score_a_known_right_and_a_known_wrong_answer(dataset):
     dismissed = ctx({**wrong_out, "disposition": "dismiss"})
     assert disposition.evaluate(dismissed) is False
     assert evidence.evaluate(dismissed) is True    # a dismissal cites nothing, by design
+
+
+def test_model_comparison_json_shape():
+    """The --model/--out JSON shaping is pure — no model call, no report object,
+    just a fake stand-in for what `pydantic_evals` hands back."""
+    from dataclasses import dataclass
+    from pathlib import Path
+
+    run_evals = _run_evals()
+
+    @dataclass
+    class FakeResult:
+        value: object
+
+    @dataclass
+    class FakeCase:
+        name: str
+        assertions: dict
+
+    @dataclass
+    class FakeAverages:
+        assertions: float
+
+    @dataclass
+    class FakeReport:
+        cases: list
+
+        def averages(self):
+            return FakeAverages(assertions=0.75)
+
+    good = FakeCase("case-a", {"DispositionMatch": FakeResult(True), "EvidenceCited": FakeResult(True)})
+    bad = FakeCase("case-b", {"DispositionMatch": FakeResult(False), "EvidenceCited": FakeResult(True)})
+    report = FakeReport(cases=[good, bad])
+
+    doc = run_evals.build_results_json(Path("evals/triage_judgment.yaml"), {"cc-default": (report, 12.5)})
+
+    assert doc["dataset"] == "evals/triage_judgment.yaml"
+    assert "run_at" in doc and "T" in doc["run_at"]  # ISO-8601
+    model = doc["models"]["cc-default"]
+    assert model["cases"] == 2
+    assert model["passed"] == 1
+    assert model["score"] == 0.75
+    assert model["seconds"] == 12.5
+    assert model["cases_detail"] == [
+        {"name": "case-a", "passed": True,
+         "assertions": {"DispositionMatch": True, "EvidenceCited": True}},
+        {"name": "case-b", "passed": False,
+         "assertions": {"DispositionMatch": False, "EvidenceCited": True}},
+    ]

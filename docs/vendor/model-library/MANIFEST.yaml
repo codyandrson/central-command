@@ -1,0 +1,20 @@
+# Regenerate with scripts/model_library_fetch.sh. Every entry below is
+# upstream data, not Central Command's own writing.
+fetched_at: 2026-08-30T09:03:29Z
+sources:
+  - name: litellm_model_prices.json
+    url: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+    license: MIT
+    sha256: a980fa0e207d0976a3fa78c6a7c3165ec3c1cfd82b0dcfffc2a55795b9f6f451
+  - name: models_dev_api.json
+    url: https://models.dev/api.json
+    license: MIT
+    sha256: 539d9b9cb1698395d46b5140a25614bbf991414d9bab2625957be8a036320d8b
+  - name: aider_polyglot_leaderboard.yml
+    url: https://raw.githubusercontent.com/Aider-AI/aider/main/aider/website/_data/polyglot_leaderboard.yml
+    license: Apache-2.0
+    sha256: 85a50b25953512d18ba4bb0c23c0b8e626fcf9a5b52d287644b8a0b44b9535de
+  - name: llmstats/
+    url: https://github.com/AchilleasDrakou/LLMStats
+    license: CC-BY-4.0
+    subpaths: [models, providers, schemas, LICENSE.md]

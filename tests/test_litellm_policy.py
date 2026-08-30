@@ -248,6 +248,29 @@ def test_diff_reports_undeclared_capability(policy_mod):
     )
 
 
+def test_diff_reports_undeclared_tool_capability(policy_mod):
+    """Same class of bug as supports_vision, for the flags added 2026-08-30:
+    LiteLLM's aggregate view coerces an undeclared supports_function_calling
+    to False, so once the YAML declares a value, an undeclared or wrong live
+    value must read as drift — same for `mode`."""
+    declared = _declared()
+    declared["models"]["qwen3.8-27b"]["supports_function_calling"] = True
+    declared["models"]["qwen3.8-27b"]["mode"] = "chat"
+    drift = policy_mod.diff_policy(
+        declared, _live_in_sync(), {"qwen3.8-27b": ["claude-haiku-4-5"]}
+    )
+    assert any("qwen3.8-27b" in line and "supports_function_calling" in line for line in drift)
+    assert any("qwen3.8-27b" in line and "mode" in line for line in drift)
+
+    live = _live_in_sync()
+    live[1]["model_info"]["supports_function_calling"] = True
+    live[1]["model_info"]["mode"] = "chat"
+    assert (
+        policy_mod.diff_policy(declared, live, {"qwen3.8-27b": ["claude-haiku-4-5"]})
+        == []
+    )
+
+
 def test_diff_reports_missing_fallback(policy_mod):
     drift = policy_mod.diff_policy(_declared(), _live_in_sync(), {})
     assert any("fallback" in line.lower() and "qwen3.8-27b" in line for line in drift)

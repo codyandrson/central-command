@@ -4,11 +4,21 @@
     python scripts/run_evals.py --help
     python scripts/run_evals.py                     # all cases
     python scripts/run_evals.py -k supersession     # cases whose name contains this
+    python scripts/run_evals.py --model cc-default --model gpt-oss-20b --out results.json
 
 **THIS COSTS REAL INFERENCE AND MUST NEVER RUN IN PYTEST.** It is a script, not
 a test, for the same reason `scripts/m5_acceptance.py` is: the offline suite has
 to stay free and deterministic. `tests/test_evals_dataset.py` checks the dataset
 PARSES and points at real fixtures — nothing more.
+
+`--model ALIAS` (repeatable) runs the dataset once per LiteLLM model-group
+alias (e.g. `cc-default`, `gpt-oss-20b`, `gemma-4-31b`), building the agent
+against that model instead of the configured default, then prints a per-model
+summary table. This is a MODEL comparison on our workload — same charter, same
+cases, different model — never an agent eval; charter, packs and skills stay
+fixed throughout. `--out PATH` writes the comparison as JSON (see
+`build_results_json` for the exact, documented shape) — the record an
+operator or `litellm-manager` skill document is later built from.
 
 It also refuses to run in demo mode, on purpose. Demo mode's FunctionModel
 returns a canned proposal, so it would score ~100% and prove nothing: that
@@ -26,9 +36,13 @@ judgment, not the spine's persistence (which the offline suite already covers).
 from __future__ import annotations
 
 import argparse
+import asyncio
+import functools
 import json
 import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic_evals.evaluators import Evaluator
@@ -50,12 +64,16 @@ def _bare(capability: str) -> str:
     return capability.split("@", 1)[0].strip()
 
 
-async def run_case(inputs: dict) -> dict:
+async def run_case(inputs: dict, model=None) -> dict:
     """Run one triage case and return what the agent DECIDED.
 
     Mirrors `run.ingest_and_propose`'s agent construction exactly (charter +
     granted packs + granted skills), and `dispatcher._bundle_prompt`'s prompt,
     so a case measures the agent that actually runs in production.
+
+    `model` (a resolved pydantic-ai Model, from `resolve_model`) overrides the
+    charter's configured model for a `--model` comparison run; `None` keeps
+    the normal precedence (`build_agent`'s own `resolve_model(None, ...)`).
     """
     from pydantic_ai import UsageLimits
 
@@ -93,6 +111,7 @@ async def run_case(inputs: dict) -> dict:
     deps = TriageDeps(thread=thread, agent_id=AGENT_ID, session_id="eval")
     caps, catalog = await skills_mod.loadout(AGENT_ID)
     agent = await build_agent(
+        model=model,
         charter=await load_charter(AGENT_ID),
         packs=await granted_packs(AGENT_ID),
         capabilities=caps,
@@ -227,6 +246,64 @@ def load_dataset(path: Path = DATASET):
     return dataset
 
 
+def _score_report(report) -> dict:
+    """Pure: one model's `pydantic_evals` report -> our summary shape.
+
+    `score` is `report.averages().assertions` — pydantic_evals' OWN mean of
+    every boolean-evaluator result across every case (DispositionMatch,
+    EvidenceCited), reused rather than reinvented. `passed` per case means
+    every assertion on that case was true; `ExpectedActions` is a graded
+    score, not a pass/fail gate, and stays visible only in `cases_detail`.
+    """
+    cases_detail = [
+        {
+            "name": c.name,
+            "passed": all(v.value for v in c.assertions.values()) if c.assertions else True,
+            "assertions": {k: v.value for k, v in c.assertions.items()},
+        }
+        for c in report.cases
+    ]
+    avg = report.averages()
+    return {
+        "cases": len(report.cases),
+        "passed": sum(1 for c in cases_detail if c["passed"]),
+        "score": avg.assertions if avg is not None and avg.assertions is not None else 0.0,
+        "cases_detail": cases_detail,
+    }
+
+
+def build_results_json(dataset_path: Path, model_timings: dict) -> dict:
+    """The `--out` document: `{alias: (report, seconds)} -> {"dataset", "run_at",
+    "models": {alias: {"cases", "passed", "score", "seconds", "cases_detail"}}}`.
+
+    This shape is what a later `litellm-manager` skill document turns into a
+    comparison record — keep it stable, this docstring is its spec.
+    """
+    return {
+        "dataset": str(dataset_path),
+        "run_at": datetime.now(timezone.utc).isoformat(),
+        "models": {
+            alias: {**_score_report(report), "seconds": seconds}
+            for alias, (report, seconds) in model_timings.items()
+        },
+    }
+
+
+def _print_cases(report) -> None:
+    for case in report.cases:
+        scores = {k: v.value for k, v in {**case.assertions, **case.scores}.items()}
+        print(f"\n=== {case.name}")
+        print(f"    decided : {case.output['disposition']}", end="")
+        if case.output.get("fold") is not None:
+            print(f" (fold={case.output['fold']})", end="")
+        print()
+        if case.output.get("capabilities"):
+            print(f"    actions : {case.output['capabilities']}")
+            print(f"    targets : {case.output['issue_keys']} {case.output['due_dates']}")
+        print(f"    says    : {case.output['text'][:160]}")
+        print(f"    scores  : {scores}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -238,6 +315,12 @@ def main() -> int:
         help="cases in flight at once (default 1 — the local model serves one at a time)",
     )
     ap.add_argument("--list", action="store_true", help="print the case names and exit")
+    ap.add_argument(
+        "--model", action="append", metavar="ALIAS",
+        help="a LiteLLM model-group alias (e.g. cc-default); repeatable to run the "
+             "dataset once per model and compare. Omit for the configured default.",
+    )
+    ap.add_argument("--out", type=Path, help="write the comparison as JSON to PATH")
     args = ap.parse_args()
 
     dataset = load_dataset(args.dataset)
@@ -265,23 +348,40 @@ def main() -> int:
         )
         return 2
 
-    report = dataset.evaluate_sync(run_case, max_concurrency=args.concurrency)
+    aliases = args.model or [None]
+    model_timings: dict[str, tuple] = {}
+    for alias in aliases:
+        label = alias or "default"
+        model_obj = None
+        if alias:
+            from central_command.runtime.models import resolve_model
+            from central_command.runtime.run import AGENT_ID
 
-    for case in report.cases:
-        scores = {k: v.value for k, v in {**case.assertions, **case.scores}.items()}
-        print(f"\n=== {case.name}")
-        print(f"    decided : {case.output['disposition']}", end="")
-        if case.output.get("fold") is not None:
-            print(f" (fold={case.output['fold']})", end="")
+            model_obj = asyncio.run(resolve_model(model_name=alias, agent_id=AGENT_ID))
+        if len(aliases) > 1:
+            print(f"\n########## model: {label} ##########")
+        t0 = time.monotonic()
+        report = dataset.evaluate_sync(
+            functools.partial(run_case, model=model_obj), max_concurrency=args.concurrency
+        )
+        elapsed = time.monotonic() - t0
+        model_timings[label] = (report, elapsed)
+
+        _print_cases(report)
         print()
-        if case.output.get("capabilities"):
-            print(f"    actions : {case.output['capabilities']}")
-            print(f"    targets : {case.output['issue_keys']} {case.output['due_dates']}")
-        print(f"    says    : {case.output['text'][:160]}")
-        print(f"    scores  : {scores}")
+        report.print(include_input=False, include_output=False)
 
-    print()
-    report.print(include_input=False, include_output=False)
+    if len(model_timings) > 1:
+        print("\n=== model comparison ===")
+        print(f"{'model':<20}{'cases':>7}{'passed':>8}{'score':>8}{'seconds':>10}")
+        for label, (report, elapsed) in model_timings.items():
+            s = _score_report(report)
+            print(f"{label:<20}{s['cases']:>7}{s['passed']:>8}{s['score']:>8.2f}{elapsed:>10.1f}")
+
+    if args.out:
+        args.out.write_text(json.dumps(build_results_json(args.dataset, model_timings), indent=2))
+        print(f"\nwrote {args.out}")
+
     return 0
 
 

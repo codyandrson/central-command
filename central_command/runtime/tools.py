@@ -1444,6 +1444,33 @@ async def litellm_check_model_health(ctx: RunContext, model: str | None = None) 
     return _clip(json.dumps(data, default=str))
 
 
+async def litellm_probe_model(
+    ctx: RunContext, model: str, measure_context: bool = False,
+) -> str:
+    """MEASURE what a registered model can actually do — one small real request
+    per capability through the proxy: plain chat, system message, forced
+    tool_choice, tool calling (and parallel calls), json_schema and json_object
+    output, vision (a 1x1 image), reasoning (`reasoning_effort` accepted AND
+    reasoning_content returned), the output-token ceiling, streaming. Returns
+    `declared` (the model_info as registered), `observed` (per check), and
+    `suggested_model_info` — the declared→observed diff, which is exactly the
+    `model_info` a `litellm.update_model` proposal should carry. Run it after
+    an add, before declaring capabilities, or when a declared capability is in
+    doubt; never guess a `supports_*` flag you could have measured. Costs ~10
+    short requests (real tokens; a queued local model can take minutes).
+    `measure_context=True` additionally bisects the input ceiling with ≤10
+    long prompts — expensive, opt-in, and the only way to learn a private
+    model's real context limit. Read-only: it writes nothing.
+    """
+    # No retry wrapper: like the health fan-out, a transient failure mid-battery
+    # would re-buy every request before it, not a half-second of patience.
+    try:
+        data = await litellm_client.probe_model(model, measure_context=measure_context)
+    except Exception as e:  # noqa: BLE001
+        return f"litellm model probe unavailable ({type(e).__name__}: {e})"
+    return _clip(json.dumps(data, default=str))
+
+
 async def propose_litellm_change(ctx: RunContext, proposal: Proposal) -> str:
     """Propose a change to the LiteLLM proxy — a model, key, team or fallback
     change, or a CONFIG-FILE change (litellm.apply_config_change: routing

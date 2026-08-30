@@ -136,6 +136,15 @@ models:
     timeout: 6000
     supports_vision: true
     max_input_tokens: 81920
+    # MEASURED 2026-08-30 by litellm_probe_model (deploy: forced tool_choice
+    # 1 call, auto 2 parallel calls, json_schema and json_object both
+    # parsed, reasoning_content present). Declared because LiteLLM's own
+    # aggregate view (/model_group/info) reads an UNDECLARED flag as false —
+    # cc-default advertised `supports_function_calling: false` while every
+    # agent called tools through it. Re-probe before changing.
+    mode: chat
+    supports_function_calling: true
+    supports_response_schema: true
     # Qwen3.8's chat template takes enable_thinking / reasoning_effort through
     # chat_template_kwargs. There is NO reasoning_effort "none" — the template
     # raises and every request 500s — so `off` is enable_thinking: false.
@@ -159,6 +168,9 @@ models:
     timeout: 6000  # same reasoning as qwen3.8-27b above
     supports_vision: true
     max_input_tokens: 81920
+    mode: chat                        # measured 2026-08-30, see qwen3.8-27b
+    supports_function_calling: true
+    supports_response_schema: true
     thinking_mechanism: qwen_template
     thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
 
@@ -181,6 +193,14 @@ models:
     # correct, timing out is not.
     timeout: 18000
     max_input_tokens: 131072
+    # MEASURED 2026-08-30 (litellm_probe_model): tools yes (one call per
+    # turn observed — parallel inconclusive, so not declared), json_schema
+    # and json_object yes, reasoning_content yes, vision NO (no mmproj: the
+    # 500 the attachment gate was built around) — left undeclared on purpose,
+    # the gate treats absent as text-only.
+    mode: chat
+    supports_function_calling: true
+    supports_response_schema: true
 
   # JUDGE CANDIDATE #2 (2026-08-19): Gemma 4 31B dense on the same llama-swap
   # slot. Chosen from dated primary sources (Google model card / arXiv
@@ -202,6 +222,12 @@ models:
     # 65536 measured 2026-08-20: gemma KV ≈ 50 KB/token (pricier than the Qwen
     # hybrid), 654 MiB free at 64K beside the reranker — its practical ceiling.
     max_input_tokens: 65536
+    # MEASURED 2026-08-30 (litellm_probe_model): forced tool_choice 1 call,
+    # auto 2 parallel calls, json_schema + json_object parsed,
+    # reasoning_content present, vision NO (no mmproj) — undeclared on purpose.
+    mode: chat
+    supports_function_calling: true
+    supports_response_schema: true
 
 # ============================================================================
 # REGISTRATION-ONLY models — they must EXIST on the proxy, but the adaptive

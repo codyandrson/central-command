@@ -114,6 +114,46 @@ litellm_check_model_health — live health of the MODELS (which answer, which fa
   ONLY to diagnose a suspected outage, and pass a single model alias when you can.
 litellm_get_spend — recent spend aggregated per (model, key) from the request log
   (a rolling window, not a ledger). Use it for cost/usage questions.
+litellm_probe_model — MEASURE a registered model's capabilities with one small
+  real request each (chat, system message, tool_choice, tool calling, parallel
+  calls, json_schema, json_object, vision, reasoning, output ceiling,
+  streaming; `measure_context=True` also bisects the input ceiling). Returns
+  declared vs observed and `suggested_model_info` — the model_info diff your
+  litellm.update_model proposal should carry.
+
+════════════════════════════════════════════════════════════════════════
+TESTING A MODEL (2026-08-30): capability is MEASURED, never guessed
+════════════════════════════════════════════════════════════════════════
+The models you register are frequently PRIVATE variants behind a gateway —
+their real context, output cap, tool calling, vision, reasoning and structured
+output differ from the public model card, and the gateway may speak either the
+OpenAI or the Anthropic format. So the public card is a HYPOTHESIS and the
+probe is the evidence. The procedure for a new model:
+  1. REGISTER it (litellm.add_model) with what you know for certain: the
+     provider prefix for the gateway's format (`openai/<model>` + api_base for
+     /v1/chat/completions; `anthropic/<model>` + api_base for /v1/messages;
+     `openai/chat_completions/<model>` when a caller needs the Responses
+     bridge), the credential by name, and `mode: chat`. If the gateway serves
+     a public counterpart, `model_info.base_model` = that public name gives
+     LiteLLM's built-in cost-map defaults for pricing.
+  2. PROBE it (litellm_probe_model). A 404 on chat means the api_base path or
+     the format prefix is wrong — fix that before anything else. `reasoning`
+     "accepted, no reasoning_content" means the control is silently ignored:
+     a template-driven model (Qwen-style) needs `thinking_mechanism:
+     qwen_template` declared by hand, not `supports_reasoning: true`.
+  3. DECLARE what you measured (litellm.update_model with
+     `suggested_model_info`, plus `max_input_tokens`/`max_output_tokens` from
+     the probe or, failing that, the operator). An undeclared flag reads as
+     None to Central Command ("nobody said") but as FALSE to LiteLLM's own
+     aggregate view — so declare the fleet, do not leave it blank.
+  4. RECORD it: a probed private model's measured profile is standing
+     knowledge. Propose a document on the `model-evaluation` skill
+     (propose_skill_doc) so the next session, and the next install, has it.
+The `model-evaluation` skill carries the full protocol, the registration
+recipes (drop_params, supports_system_message, health_check_* knobs), the
+Anthropic-vs-OpenAI detection rules, and the pre-staged public model library
+(LiteLLM's cost map, models.dev, LLMStats, the Aider leaderboard) to compare a
+private model against its public counterpart. Load it before any of this.
 
 ────────────────────────────────────────────────────────────────────────
 CREDENTIALS: the preferred way to attach auth (never a key in a proposal)

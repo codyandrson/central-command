@@ -15,6 +15,7 @@ the last stop before the proxy. Admin ops carry the LiteLLM MASTER key
 
 from __future__ import annotations
 
+import json
 import re
 
 import httpx
@@ -75,12 +76,14 @@ def _provider_model(value: str) -> str:
 
 async def _call(
     method: str, path: str, json_body: dict | None = None,
-    auth_key: str | None = None,
+    auth_key: str | None = None, timeout: float = 30,
 ) -> httpx.Response:
     """`auth_key` overrides the admin key for calls made AS another key (e.g.
     /key/info self-lookup) — a secret belongs in the Authorization header,
-    never in the URL, where proxy access logs and httpx error strings see it."""
-    async with httpx.AsyncClient(timeout=30, **http_client.client_kwargs()) as client:
+    never in the URL, where proxy access logs and httpx error strings see it.
+    `timeout` is per-call: admin reads answer in milliseconds, a probe of a
+    model queued behind the llama-swap slot does not."""
+    async with httpx.AsyncClient(timeout=timeout, **http_client.client_kwargs()) as client:
         return await client.request(
             method,
             settings.llm_proxy_base_url.rstrip("/") + path,
@@ -251,6 +254,23 @@ NATIVE_MODEL_INFO_FIELDS = (
     "base_model", "tier", "team_id", "db_model",
 )
 
+# The CAPABILITY declarations — LiteLLM's own `supports_*` / `max_*` / `mode`
+# vocabulary (the cost-map schema, 38 flags on this build) plus Central
+# Command's two thinking declarations. `list_models` surfaces exactly these,
+# and `probe_model` measures the ones a request can measure. Until 2026-08-30
+# `list_models` STRIPPED every `supports_*`/`max_*` key as "cost-map noise", so
+# the manager was told to declare `supports_vision` and could never see
+# whether it had — nor audit a fleet for undeclared models. Undeclared reads
+# as None here ("nobody said"); note LiteLLM's own aggregate view
+# (`/model_group/info`) coerces the same absence to FALSE.
+CAPABILITY_FIELDS = (
+    "mode", "max_input_tokens", "max_output_tokens",
+    "supports_function_calling", "supports_parallel_function_calling",
+    "supports_tool_choice", "supports_response_schema", "supports_vision",
+    "supports_pdf_input", "supports_reasoning", "supports_system_messages",
+    "supports_prompt_caching", "thinking_mechanism", "thinking_levels",
+)
+
 
 async def list_models() -> dict:
     """Every model the proxy serves, with its provider mapping and NATIVE
@@ -267,13 +287,17 @@ async def list_models() -> dict:
         info = m.get("model_info") or {}
         # Only the native audit/classification fields — never the merged cost map.
         native = {k: info.get(k) for k in NATIVE_MODEL_INFO_FIELDS if info.get(k) is not None}
+        # The capability declarations, None-preserving on purpose: an absent
+        # flag IS the finding (an undeclared model), so it must read as such.
+        capabilities = {k: info.get(k) for k in CAPABILITY_FIELDS}
         # Any CUSTOM keys the operator stored (excluding the cost-map noise the
         # proxy merges in) so the agent can see — and correct — non-native fields
         # like a stray `created_date`.
         custom = {
             k: v for k, v in info.items()
             if k not in NATIVE_MODEL_INFO_FIELDS
-            and k not in ("id", "key", "mode", "litellm_provider")
+            and k not in CAPABILITY_FIELDS
+            and k not in ("id", "key", "litellm_provider")
             and not k.startswith(("input_cost", "output_cost", "cache_", "max_",
                                   "supports_", "search_context"))
             and not isinstance(v, (dict, list))
@@ -292,6 +316,7 @@ async def list_models() -> dict:
             # to manage.
             "credential_name": params.get("litellm_credential_name"),
             "model_info": native,
+            "capabilities": capabilities,
             "custom_model_info": custom or None,
         })
     return {"ok": True, "kind": "litellm", "operation": "list_models",
@@ -427,6 +452,280 @@ async def check_model_health(model: str | None = None) -> dict:
     return {"ok": True, "kind": "litellm", "operation": "check_model_health",
             "healthy": healthy, "unhealthy": unhealthy,
             "healthy_count": len(healthy), "unhealthy_count": len(unhealthy)}
+
+
+# --- capability probe (2026-08-30) --------------------------------------------
+#
+# `/health` proves a model ANSWERS. Nothing in LiteLLM measures what it can
+# do: its `supports_*()` helpers are static lookups into the public cost map,
+# which knows nothing about a private model behind a gateway. The probe sends
+# one small real request per capability THROUGH the proxy (so the answer
+# describes the registered deployment, translation layer included) and reports
+# declared-vs-observed plus the `model_info` diff a proposal would carry.
+# Observed is evidence, not authority: the manager reads it, then PROPOSES
+# `litellm.update_model`; the probe itself writes nothing.
+
+_PROBE_PNG = (  # a 1x1 red PNG — the smallest image an endpoint can be asked about
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE"
+    "hQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+_PROBE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    },
+}
+_PROBE_SCHEMA = {
+    "name": "probe_answer",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {"answer": {"type": "integer"}},
+        "required": ["answer"],
+        "additionalProperties": False,
+    },
+}
+PROBE_CONTEXT_CEILING = 262144   # bisect no higher than this unless asked
+PROBE_CONTEXT_STEPS = 10         # ≤10 requests to land within ~0.1% of the ceiling
+
+
+async def _chat(model: str, body: dict, timeout: float) -> tuple[int, dict | str]:
+    """One chat completion under the ADMIN key (a freshly added model is not
+    yet in any agent key's scope). Returns (status, parsed-or-text)."""
+    resp = await _call("POST", "/v1/chat/completions", {"model": model, **body},
+                       timeout=timeout)
+    try:
+        return resp.status_code, resp.json()
+    except ValueError:
+        return resp.status_code, resp.text[:400]
+
+
+def _err(payload) -> str:
+    if isinstance(payload, dict):
+        e = payload.get("error")
+        if isinstance(e, dict):
+            return str(e.get("message") or e)[:300]
+        return str(e or payload)[:300]
+    return str(payload)[:300]
+
+
+def _message(payload) -> dict:
+    try:
+        return payload["choices"][0]["message"] or {}
+    except (KeyError, IndexError, TypeError):
+        return {}
+
+
+# A thinking model spends its output budget on reasoning BEFORE the answer:
+# with max_tokens=16 cc-default answered every JSON/vision check with HTTP 200
+# and empty content (measured 2026-08-30), which the first cut scored as "no".
+# So every check gets a real budget, and "200, empty, finish_reason=length" is
+# reported as INCONCLUSIVE (ok=None) — never as a capability finding.
+PROBE_MAX_TOKENS = 1024
+
+
+def _reply(st: int, payload) -> tuple[str | None, str, dict]:
+    """(content, finish_reason, message) for a 200; ("", "", {}) otherwise."""
+    if st != 200:
+        return None, "", {}
+    msg = _message(payload)
+    fin = ""
+    try:
+        fin = str(payload["choices"][0].get("finish_reason") or "")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+    content = msg.get("content")
+    return (content if isinstance(content, str) else ""), fin, msg
+
+
+def _verdict(st: int, payload, ok_when: bool, detail: str) -> dict:
+    """ok True/False/None + detail; None when the budget ran out before an answer."""
+    if st != 200:
+        return {"ok": False, "detail": f"{st}: {_err(payload)}"}
+    content, fin, _ = _reply(st, payload)
+    if not content and fin == "length":
+        return {"ok": None, "detail": "output budget exhausted before an answer (thinking?) — inconclusive"}
+    return {"ok": ok_when, "detail": detail}
+
+
+async def probe_model(
+    model: str, *, measure_context: bool = False,
+    context_ceiling: int = PROBE_CONTEXT_CEILING, timeout: float = 300,
+) -> dict:
+    """Measure what `model` can actually do, one small request per capability.
+
+    Returns `declared` (the model_info as registered), `observed` (one entry
+    per check: ok / detail), `suggested_model_info` (the declared→observed
+    diff, ready for a `litellm.update_model` proposal) and `notes`. A failing
+    plain completion ends the battery — every other check would only repeat
+    that failure. `measure_context` bisects the input ceiling with ≤10 extra
+    requests up to `context_ceiling` tokens; it is opt-in because a 200K-token
+    prompt against a queued local model is minutes, not milliseconds.
+    """
+    _require_configured("probe_model")
+    alias = _alias(model)
+    declared: dict = {}
+    for entry in (await _call("GET", "/model/info")).json().get("data") or []:
+        if isinstance(entry, dict) and entry.get("model_name") == alias:
+            declared = {k: (entry.get("model_info") or {}).get(k) for k in CAPABILITY_FIELDS}
+            break
+    observed: dict[str, dict] = {}
+    notes: list[str] = []
+    say_ok = [{"role": "user", "content": "Reply with the single word OK."}]
+
+    # 1. chat — the gate for everything else
+    st, out = await _chat(alias, {"messages": say_ok, "max_tokens": PROBE_MAX_TOKENS}, timeout)
+    content, _fin, _ = _reply(st, out)
+    observed["chat"] = _verdict(st, out, bool(content), (content or "")[:80])
+    if st != 200:
+        if st == 404:
+            notes.append("404 on chat: check api_base ends in /v1 and the provider "
+                         "prefix matches the gateway's format (openai/ vs anthropic/)")
+        return {"ok": False, "kind": "litellm", "operation": "probe_model", "model": alias,
+                "declared": declared, "observed": observed,
+                "suggested_model_info": {}, "notes": notes}
+
+    # 2. system message
+    st, out = await _chat(alias, {"messages": [{"role": "system", "content": "You are terse."},
+                                              *say_ok], "max_tokens": PROBE_MAX_TOKENS}, timeout)
+    observed["system_messages"] = {"ok": st == 200, "detail": "" if st == 200 else f"{st}: {_err(out)}"}
+
+    # 3. forced tool call (tool_choice) — the presence of a tool_calls entry is the proof
+    st, out = await _chat(alias, {
+        "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
+        "tools": [_PROBE_TOOL],
+        "tool_choice": {"type": "function", "function": {"name": "get_weather"}},
+        "max_tokens": PROBE_MAX_TOKENS,
+    }, timeout)
+    calls = _message(out).get("tool_calls") or [] if st == 200 else []
+    observed["tool_choice"] = _verdict(st, out, bool(calls), f"{len(calls)} call(s)") \
+        if not calls else {"ok": True, "detail": f"{len(calls)} call(s)"}
+    # 4. tools, auto — and parallel: two cities in one turn
+    st, out = await _chat(alias, {
+        "messages": [{"role": "user", "content":
+                      "Use the tool to get the weather in Paris and in Tokyo, both, now."}],
+        "tools": [_PROBE_TOOL], "tool_choice": "auto", "max_tokens": PROBE_MAX_TOKENS,
+    }, timeout)
+    calls = _message(out).get("tool_calls") or [] if st == 200 else []
+    observed["function_calling"] = _verdict(st, out, bool(calls), f"{len(calls)} call(s)") \
+        if not calls else {"ok": True, "detail": f"{len(calls)} call(s)"}
+    # Two calls prove parallel calling; ONE call is a model's choice, not
+    # proof of absence (gpt-oss-20b answered one city first, 2026-08-30), so
+    # anything short of two is inconclusive rather than false.
+    observed["parallel_function_calling"] = {"ok": True if len(calls) >= 2 else None,
+                                             "detail": f"{len(calls)} call(s) for two cities"}
+
+    # 5. structured output — json_schema, then the looser json_object
+    st, out = await _chat(alias, {
+        "messages": [{"role": "user", "content": "What is 2+2? Answer as JSON."}],
+        "response_format": {"type": "json_schema", "json_schema": _PROBE_SCHEMA},
+        "max_tokens": PROBE_MAX_TOKENS,
+    }, timeout)
+    content, _fin, _ = _reply(st, out)
+    parsed = None
+    try:
+        parsed = json.loads(content or "")
+    except ValueError:
+        parsed = None
+    observed["response_schema"] = _verdict(st, out, isinstance(parsed, dict) and "answer" in parsed,
+                                           (content or "")[:80])
+    st, out = await _chat(alias, {
+        "messages": [{"role": "user", "content": 'Answer as a JSON object {"answer": <int>}: what is 2+2?'}],
+        "response_format": {"type": "json_object"}, "max_tokens": PROBE_MAX_TOKENS,
+    }, timeout)
+    content, _fin, _ = _reply(st, out)
+    try:
+        ok = isinstance(json.loads(content or ""), dict)
+    except ValueError:
+        ok = False
+    observed["json_object"] = _verdict(st, out, ok, (content or "")[:80])
+
+    # 6. vision — a 1x1 PNG; any answer is a yes, a 4xx/5xx is a no
+    st, out = await _chat(alias, {
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "What color is this image? One word."},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_PROBE_PNG}"}},
+        ]}], "max_tokens": PROBE_MAX_TOKENS,
+    }, timeout)
+    content, _fin, _ = _reply(st, out)
+    observed["vision"] = _verdict(st, out, bool(content), (content or "")[:40])
+
+    # 7. reasoning — the OpenAI-style control; accepted AND visible are separate facts
+    st, out = await _chat(alias, {"messages": [{"role": "user", "content": "Is 17 prime? One word."}],
+                                  "reasoning_effort": "low", "max_tokens": PROBE_MAX_TOKENS}, timeout)
+    msg = _message(out) if st == 200 else {}
+    seen = bool(msg.get("reasoning_content") or msg.get("reasoning"))
+    observed["reasoning"] = {"ok": st == 200 and seen,
+                             "detail": ("reasoning_content present" if seen else
+                                        "accepted, no reasoning_content in the reply — a template-"
+                                        "driven model (qwen_template) needs its mechanism declared by hand")
+                             if st == 200 else f"{st}: {_err(out)}"}
+
+    # 8. output ceiling — ask for far too much and read what the endpoint says
+    st, out = await _chat(alias, {"messages": say_ok, "max_tokens": 1_000_000}, timeout)
+    if st == 200:
+        observed["max_output_tokens"] = {"ok": None, "detail": "max_tokens=1000000 accepted — no "
+                                         "request-time ceiling; declare from the model card"}
+    else:
+        nums = [int(n) for n in re.findall(r"\d{3,}", _err(out)) if int(n) != 1_000_000]
+        observed["max_output_tokens"] = {"ok": None, "detail": f"{st}: {_err(out)}",
+                                         "value": max(nums) if nums else None}
+
+    # 9. streaming
+    resp = await _call("POST", "/v1/chat/completions",
+                       {"model": alias, "messages": say_ok, "max_tokens": 64, "stream": True},
+                       timeout=timeout)
+    observed["streaming"] = {"ok": resp.status_code == 200 and "data:" in resp.text[:200],
+                             "detail": "" if resp.status_code == 200 else f"{resp.status_code}"}
+
+    # 10. input ceiling — opt-in bisect, max_tokens=1, filler of single-token words
+    if measure_context:
+        lo, hi = 1024, max(2048, int(context_ceiling))
+        best = None
+        for _ in range(PROBE_CONTEXT_STEPS):
+            mid = (lo + hi) // 2
+            st, out = await _chat(alias, {
+                "messages": [{"role": "user", "content": ("0 " * mid) + "\nReply OK."}],
+                "max_tokens": 1,
+            }, timeout)
+            if st == 200:
+                best, lo = mid, mid + 1
+            else:
+                hi = mid - 1
+            if lo > hi:
+                break
+        observed["max_input_tokens"] = {"ok": None, "value": best,
+                                        "detail": f"largest accepted ≈{best} filler tokens "
+                                                  f"(ceiling searched: {context_ceiling})"}
+
+    # declared → observed diff, only where the probe can speak
+    flags = {
+        "supports_system_messages": observed["system_messages"]["ok"],
+        "supports_tool_choice": observed["tool_choice"]["ok"],
+        "supports_function_calling": observed["function_calling"]["ok"],
+        "supports_parallel_function_calling": observed["parallel_function_calling"]["ok"],
+        "supports_response_schema": observed["response_schema"]["ok"],
+        "supports_vision": observed["vision"]["ok"],
+        "supports_reasoning": observed["reasoning"]["ok"],
+    }
+    suggested = {k: v for k, v in flags.items() if v is not None and declared.get(k) != v}
+    if declared.get("mode") is None:
+        suggested["mode"] = "chat"
+    for key in ("max_output_tokens", "max_input_tokens"):
+        val = (observed.get(key) or {}).get("value")
+        if val and declared.get(key) != val:
+            suggested[key] = val
+    if flags["supports_function_calling"] is False and declared.get("supports_function_calling"):
+        notes.append("declared tool-capable but produced no tool_calls — re-run before trusting either")
+    return {"ok": True, "kind": "litellm", "operation": "probe_model", "model": alias,
+            "declared": declared, "observed": observed,
+            "suggested_model_info": suggested, "notes": notes}
 
 
 async def get_spend() -> dict:

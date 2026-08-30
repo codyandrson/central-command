@@ -1,0 +1,103 @@
+{
+  "name": "OpenAI",
+  "website": "https://openai.com",
+  "providermodels": [
+    {
+      "model_id": "gpt-4-0613",
+      "price_per_input_token": 0.00003,
+      "price_per_output_token": 0.00006,
+      "throughput": 100,
+      "latency": 0.5,
+      "updated_at": "2024-09-09"
+    },
+    {
+      "model_id": "gpt-4-turbo-2024-04-09",
+      "price_per_input_token": 0.00001,
+      "price_per_output_token": 0.00003,
+      "throughput": 100,
+      "latency": 0.5,
+      "updated_at": "2024-09-09"
+    },
+    {
+      "model_id": "gpt-3.5-turbo-0125",
+      "price_per_input_token": 0.0000005,
+      "price_per_output_token": 0.0000015,
+      "throughput": 100,
+      "latency": 0.5,
+      "updated_at": "2024-09-09"
+    },
+    {
+      "model_id": "gpt-4o-mini-2024-07-18",
+      "price_per_input_token": 0.00000015,
+      "price_per_output_token": 0.0000006,
+      "throughput": 100,
+      "latency": 0.5,
+      "updated_at": "2024-09-09"
+    },
+    {
+      "model_id": "gpt-4o-2024-08-06",
+      "price_per_input_token": 0.0000025,
+      "price_per_output_token": 0.00001,
+      "throughput": 132,
+      "latency": 0.5,
+      "updated_at": "2024-09-09"
+    },
+    {
+      "model_id": "gpt-4o-2024-05-13",
+      "price_per_input_token": 0.0000025,
+      "price_per_output_token": 0.00001,
+      "throughput": 100,
+      "latency": 0.5,
+      "updated_at": "2024-09-09"
+    },
+
+    {
+      "model_id": "gpt-4o-mini-2024-07-18",
+      "price_per_input_token": 0.00000015,
+      "price_per_output_token": 0.0000006,
+      "throughput": 100,
+      "latency": 0.5,
+      "updated_at": "2024-11-24"
+    },
+    {
+      "model_id": "gpt-4o-mini-2024-07-18",
+      "price_per_input_token": 0.00000015,
+      "price_per_output_token": 0.0000006,
+      "throughput": 100,
+      "latency": 0.5,
+      "updated_at": "2024-11-24"
+    },
+    {
+      "model_id": "o1-preview",
+      "price_per_input_token": 0.000015,
+      "price_per_output_token": 0.00006,
+      "throughput": 66,
+      "latency": 16.2,
+      "updated_at": "2024-11-24"
+    },
+    {
+      "model_id": "o1-2024-12-17",
+      "price_per_input_token": 0.000015,
+      "price_per_output_token": 0.00006,
+      "throughput": 66,
+      "latency": 16.2,
+      "updated_at": "2024-11-24"
+    },
+    {
+      "model_id": "o1-mini",
+      "price_per_input_token": 0.000003,
+      "price_per_output_token": 0.000012,
+      "throughput": 115,
+      "latency": 5.2,
+      "updated_at": "2024-11-24"
+    },
+    {
+      "model_id": "o3-mini",
+      "price_per_input_token": 0.0000011,
+      "price_per_output_token": 0.0000044,
+      "throughput": 115,
+      "latency": 5.2,
+      "updated_at": "2024-11-24"
+    }
+  ]
+}

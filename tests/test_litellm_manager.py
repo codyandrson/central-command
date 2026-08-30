@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -1126,3 +1127,246 @@ async def test_provider_catalog_matches_provider_case_insensitively(monkeypatch)
     monkeypatch.setitem(litellm_client.PROVIDER_CATALOGS, "openai", fake_openai)
     out = await litellm_client.provider_catalog("OpenAI", "sk-test")
     assert seen.get("called") and out == [{"id": "gpt-x"}]
+
+
+# --- capability probe (2026-08-30) --------------------------------------------
+
+
+class _ProbeResp:
+    """Minimal stand-in for httpx.Response: json()/`.text`, both derived from a
+    payload unless `text` is given explicitly (the streaming check reads only
+    `.text`, never `.json()`)."""
+
+    def __init__(self, status_code, payload=None, text=None):
+        self.status_code = status_code
+        self._payload = payload
+        self._text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no payload")
+        return self._payload
+
+    @property
+    def text(self):
+        if self._text is not None:
+            return self._text
+        return json.dumps(self._payload) if self._payload is not None else ""
+
+
+def _tool_calls(n):
+    return [{"id": f"call_{i}", "type": "function",
+             "function": {"name": "get_weather", "arguments": "{}"}} for i in range(n)]
+
+
+def _make_probe_fake_call(
+    *, model_name="probe-model", declared_info=None, fail_chat_status=None,
+    schema_inconclusive=False, single_tool_call=False, bisect_limit=None,
+    seen_bodies=None,
+):
+    """A battery-wide fake `litellm_client._call` covering every check
+    `probe_model` makes, dispatched purely on method/path/body shape — never
+    on call order — so each test only needs to say what's DIFFERENT from the
+    all-pass default."""
+    declared_info = declared_info or {}
+
+    async def fake_call(method, path, json_body=None, auth_key=None, timeout=30):
+        if seen_bodies is not None and json_body is not None:
+            seen_bodies.append(json_body)
+        if method == "GET" and path == "/model/info":
+            return _ProbeResp(200, {"data": [
+                {"model_name": model_name, "model_info": declared_info}
+            ]})
+        assert path == "/v1/chat/completions"
+        body = json_body or {}
+        messages = body.get("messages") or []
+
+        if body.get("stream"):
+            return _ProbeResp(200, text="data: {\"choices\":[{\"delta\":{}}]}\n\n")
+
+        if "tools" in body:
+            n = 1 if (single_tool_call or isinstance(body.get("tool_choice"), dict)) else 2
+            return _ProbeResp(200, {"choices": [
+                {"message": {"tool_calls": _tool_calls(n)}, "finish_reason": "tool_calls"}
+            ]})
+
+        rf = body.get("response_format") or {}
+        if rf.get("type") == "json_schema":
+            if schema_inconclusive:
+                return _ProbeResp(200, {"choices": [
+                    {"message": {"content": ""}, "finish_reason": "length"}
+                ]})
+            return _ProbeResp(200, {"choices": [
+                {"message": {"content": '{"answer": 4}'}, "finish_reason": "stop"}
+            ]})
+        if rf.get("type") == "json_object":
+            return _ProbeResp(200, {"choices": [
+                {"message": {"content": '{"answer": 4}'}, "finish_reason": "stop"}
+            ]})
+
+        if any(isinstance(m.get("content"), list) for m in messages):
+            return _ProbeResp(200, {"choices": [
+                {"message": {"content": "red"}, "finish_reason": "stop"}
+            ]})
+
+        if "reasoning_effort" in body:
+            return _ProbeResp(200, {"choices": [
+                {"message": {"content": "yes", "reasoning_content": "17 has no even divisors"},
+                 "finish_reason": "stop"}
+            ]})
+
+        if body.get("max_tokens") == 1_000_000:
+            return _ProbeResp(400, {"error": {"message": "max_tokens must be <= 32768"}})
+
+        if bisect_limit is not None and messages and \
+                "Reply OK." in (messages[0].get("content") or ""):
+            filler = messages[0]["content"].count("0 ")
+            if filler <= bisect_limit:
+                return _ProbeResp(200, {"choices": [
+                    {"message": {"content": "OK"}, "finish_reason": "stop"}
+                ]})
+            return _ProbeResp(400, {"error": {"message": "context length exceeded"}})
+
+        if fail_chat_status is not None:
+            return _ProbeResp(fail_chat_status, {"error": {"message": "not found"}})
+
+        # plain chat gate + system-message check: both land here
+        return _ProbeResp(200, {"choices": [
+            {"message": {"content": "OK"}, "finish_reason": "stop"}
+        ]})
+
+    return fake_call
+
+
+async def test_list_models_surfaces_capability_declarations_none_preserving(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+
+    async def fake_call(method, path, json_body=None, auth_key=None, timeout=30):
+        assert path == "/model/info"
+        return _ProbeResp(200, {"data": [{
+            "model_name": "cc-default",
+            "litellm_params": {"custom_llm_provider": "openai"},
+            "model_info": {
+                "id": "id-1",
+                "supports_vision": True,
+                "max_input_tokens": 81920,
+                "created_date": "2026-01-01",  # stray, non-native custom key
+            },
+        }]})
+
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.list_models()
+    model = out["models"][0]
+    caps = model["capabilities"]
+    assert caps["supports_vision"] is True
+    assert caps["supports_function_calling"] is None  # undeclared, never guessed
+    assert caps["max_input_tokens"] == 81920
+    assert model["custom_model_info"] == {"created_date": "2026-01-01"}
+
+
+async def test_probe_model_measures_each_capability_and_suggests_the_diff(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    seen_bodies: list = []
+    fake_call = _make_probe_fake_call(
+        declared_info={"supports_vision": None, "supports_function_calling": True, "mode": None},
+        seen_bodies=seen_bodies,
+    )
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    for key in ("chat", "system_messages", "tool_choice", "function_calling",
+                "parallel_function_calling", "response_schema", "json_object",
+                "vision", "reasoning", "streaming"):
+        assert out["observed"][key]["ok"] is True, key
+    assert out["observed"]["max_output_tokens"]["value"] == 32768
+    assert out["suggested_model_info"] == {
+        "supports_system_messages": True,
+        "supports_tool_choice": True,
+        "supports_parallel_function_calling": True,
+        "supports_response_schema": True,
+        "supports_vision": True,
+        "supports_reasoning": True,
+        "mode": "chat",
+        "max_output_tokens": 32768,
+    }
+    # a secret belongs in the Authorization header, never in a chat body
+    assert all("api_key" not in b for b in seen_bodies)
+
+
+async def test_probe_model_reports_budget_exhaustion_as_inconclusive_not_false(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(schema_inconclusive=True)
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["response_schema"]["ok"] is None
+    assert "supports_response_schema" not in out["suggested_model_info"]
+
+
+async def test_probe_model_single_tool_call_is_inconclusive_for_parallel(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(single_tool_call=True)
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["parallel_function_calling"]["ok"] is None
+    assert out["observed"]["function_calling"]["ok"] is True
+
+
+async def test_probe_model_stops_at_a_failed_chat_and_names_the_404_cause(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(fail_chat_status=404)
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["ok"] is False
+    assert len(out["observed"]) == 1
+    assert list(out["observed"]) == ["chat"]
+    assert out["observed"]["chat"]["ok"] is False
+    assert any("api_base" in n for n in out["notes"])
+
+
+async def test_probe_model_bisects_the_context_ceiling_when_asked(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    call_count = {"n": 0}
+    base_fake = _make_probe_fake_call(bisect_limit=5000)
+
+    async def counting_fake(method, path, json_body=None, auth_key=None, timeout=30):
+        body = json_body or {}
+        messages = body.get("messages") or []
+        if messages and "Reply OK." in (messages[0].get("content") or ""):
+            call_count["n"] += 1
+        return await base_fake(method, path, json_body, auth_key, timeout)
+
+    monkeypatch.setattr(litellm_client, "_call", counting_fake)
+
+    out = await litellm_client.probe_model(
+        "probe-model", measure_context=True, context_ceiling=8192,
+    )
+
+    value = out["observed"]["max_input_tokens"]["value"]
+    assert 4990 <= value <= 5000
+    assert out["suggested_model_info"]["max_input_tokens"] == value
+    assert call_count["n"] <= 10
+
+
+def test_litellm_read_pack_carries_the_probe_tool_and_the_manager_may_propose_skills():
+    from central_command.runtime import packs, tools as runtime_tools
+
+    assert "litellm_probe_model" in packs.PACKS["litellm-read"].tool_names
+    assert hasattr(runtime_tools, "litellm_probe_model")
+    assert "skill-propose" in packs.DEFAULT_PACKS["litellm-manager"]
+
+    schema_text = Path("central_command/db/schema.sql").read_text(encoding="utf-8")
+    assert "('litellm-manager',   'skill-propose'" in schema_text

@@ -906,6 +906,16 @@ insert into agent_grant (agent_id, pack, granted_by) values
     ('litellm-manager',   'web-read', 'seed:2026-08-06')
 on conflict (agent_id, pack) do nothing;
 
+-- skill-propose for litellm-manager (2026-08-30): a probed model's measured
+-- capabilities and a workload comparison are standing knowledge — the
+-- "library of model performance" the operator asked for lives in the skills
+-- library (versioned, searchable, air-gap-shippable), and the manager is the
+-- agent that produces those facts. It proposes; the operator approves the
+-- document; nothing is written to the library by an agent alone.
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('litellm-manager',   'skill-propose', 'seed:2026-08-30')
+on conflict (agent_id, pack) do nothing;
+
 -- jira.create_project (2026-08-13, operator decision): the operator's Jira
 -- has one real project (TASKS); agents were inventing keys (SUPPORT, CS,
 -- PERSONAL) that failed at execution because jira-expert — the agent OTHERS

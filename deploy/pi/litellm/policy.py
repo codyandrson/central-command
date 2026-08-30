@@ -40,6 +40,12 @@ BASE_URL = os.environ.get("CC_LITELLM_URL", "http://127.0.0.1:4000")
 # says so — an undeclared key is not drift.
 OPTIONAL_MODEL_INFO_KEYS = (
     "supports_vision", "max_input_tokens", "thinking_mechanism", "thinking_levels",
+    # 2026-08-30: LiteLLM's aggregate view (/model_group/info) coerces an
+    # UNDECLARED flag to false — cc-default read `supports_function_calling:
+    # false` while every agent called tools through it. Declare what the
+    # fleet is measured to do (`litellm_probe_model`), never a guess.
+    "supports_function_calling", "supports_response_schema", "mode",
+    "max_output_tokens",
 )
 
 

@@ -979,8 +979,17 @@ PACKS: dict[str, Pack] = {
                     "litellm_get_health", "litellm_check_model_health",
                     "litellm_get_spend", "litellm_list_mcp_servers",
                     "litellm_read_config", "litellm_read_logs",
-                    "litellm_provider_catalog"),
+                    "litellm_provider_catalog", "litellm_probe_model"),
         guidance=(
+            "CAPABILITY IS MEASURED, NEVER GUESSED (2026-08-30): "
+            "litellm_list_models shows each model's declared capabilities "
+            "(supports_*, max_*, mode — None means nobody said) and "
+            "litellm_probe_model measures them with one small real request "
+            "each and returns the declared→observed diff as "
+            "`suggested_model_info`. Before declaring or trusting any "
+            "supports_* flag on a model, probe it; then propose "
+            "litellm.update_model with that model_info. Private models behind "
+            "a gateway do not match their public counterparts' cards. "
             "MCP OWNERSHIP (decided 2026-08-06): you can SEE the MCP servers "
             "registered on the proxy (litellm_list_mcp_servers) for diagnosis "
             "and reporting, but registration, removal, and every other MCP "
@@ -1260,7 +1269,7 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
                     "loe-read"),
     "litellm-manager": ("litellm-read", "litellm-admin-propose", "consult",
                         "graph-read", "graph-propose", "task-propose",
-                        "ask-operator", "web-read"),
+                        "ask-operator", "web-read", "skill-propose"),
     # confluence-space-propose is the expert's ALONE (the jira-project-propose
     # precedent): wiki-agent also holds confluence-propose but must not gain
     # space creation.
