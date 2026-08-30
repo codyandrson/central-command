@@ -1,0 +1,41 @@
+{
+  "notes": [
+    "The single-node profile's LiteLLM model catalog. Rendered by render.sh into models.json (gitignored), applied by `deploy/pi/litellm/register-models.py --policy models.json` in setup.sh's llm phase. Same declaration shape as deploy/pi/litellm/model-preferences.yaml's registration_only block; JSON so the system python needs no PyYAML.",
+    "SEED, not master: register-models.py upserts these four by model_name and leaves everything else on the proxy alone, so edits made in the LiteLLM UI/API to OTHER models (and to model_info on these) survive. Re-running `./setup.sh llm` re-asserts these four's litellm_params from .env.",
+    "cc-default: what Central Command's agents address. The spine knows exactly one alias.",
+    "graphiti-llm is NOT a duplicate of cc-default — the openai/chat_completions/ prefix is the whole point. graphiti_core's OpenAIClient drives extraction through the RESPONSES API whenever a response_model is present (always, for extraction, no chat-completions fallback). A plain openai/ model is passed straight through to an endpoint that does not implement /v1/responses, the text.format json_schema is silently dropped and every extraction fails. The prefix forces LiteLLM's Responses->chat bridge, which turns text.format into a real response_format: json_schema.",
+    "cc-embedding: the ONE alias that may point somewhere else (CC_EMBED_BASE_URL / CC_EMBED_API_KEY default to the main pair). Its DIMENSION is measured by setup and written into the Neo4j vector index — effectively permanent.",
+    "gpt-4.1-nano: graphiti_core's default reranker (OpenAIRerankerClient) addresses a model LITERALLY named gpt-4.1-nano; it runs a logprob classifier over chat completions, so any chat model serves. The k3s profile registers the same alias for the same reason.",
+    "Keys are os.environ/ refs resolved inside the LiteLLM container (podman secrets) — never literals in this file."
+  ],
+  "registration_only": {
+    "cc-default": {
+      "registration": {
+        "model": "openai/${CC_CHAT_MODEL}",
+        "api_base": "${CC_LLM_BASE_URL}",
+        "api_key": "os.environ/CC_LLM_API_KEY"
+      }
+    },
+    "graphiti-llm": {
+      "registration": {
+        "model": "openai/chat_completions/${CC_CHAT_MODEL}",
+        "api_base": "${CC_LLM_BASE_URL}",
+        "api_key": "os.environ/CC_LLM_API_KEY"
+      }
+    },
+    "cc-embedding": {
+      "registration": {
+        "model": "openai/${CC_EMBED_MODEL}",
+        "api_base": "${CC_EMBED_BASE_URL}",
+        "api_key": "os.environ/CC_EMBED_API_KEY"
+      }
+    },
+    "gpt-4.1-nano": {
+      "registration": {
+        "model": "openai/${CC_CHAT_MODEL}",
+        "api_base": "${CC_LLM_BASE_URL}",
+        "api_key": "os.environ/CC_LLM_API_KEY"
+      }
+    }
+  }
+}

@@ -3,6 +3,7 @@
 secrets.yaml
 stack.yaml
 stack-llm.yaml
+models.json
 optional-n8n.yaml
 optional-crawler.yaml
 setup-diagnostics.txt

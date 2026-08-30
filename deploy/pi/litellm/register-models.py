@@ -3,13 +3,19 @@
 
     python3 deploy/pi/litellm/register-models.py --dry-run   # print the diff
     python3 deploy/pi/litellm/register-models.py             # apply it
+    python3 deploy/pi/litellm/register-models.py --policy deploy/single/models.json
+                                                             # another declaration
+                                                             # (.json needs no PyYAML)
 
 `store_model_in_db: true`, so the model catalog lives in cc-litellm-db and NOT
 in the tracked config.yaml. A fully-clean deployment therefore boots with an
 EMPTY catalog and nothing in the repo to restore it from — which is exactly what
 happened on 2026-08-23, when all eleven registrations were hand-composed at the
 terminal. `model-preferences.yaml` now carries a `registration:` block per
-entry; this script is the thing that applies them.
+entry; this script is the thing that applies them. The single-node profile
+(2026-08-30) seeds its catalog through the same script from a rendered
+`deploy/single/models.json` — `--policy` picks the declaration, and a `.json`
+one is read with the stdlib so the system python needs no PyYAML.
 
 Upsert by `model_name`:
   * absent  -> POST /model/new
@@ -34,8 +40,6 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-
-import yaml
 
 HERE = Path(__file__).resolve().parent
 POLICY_PATH = HERE / "model-preferences.yaml"
@@ -77,6 +81,15 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
         sys.exit(f"{method} {path} failed: HTTP {exc.code} {exc.read().decode()[:300]}")
+
+
+def load_declaration(path: Path) -> dict:
+    """`.json` via the stdlib; anything else is YAML (PyYAML imported only then)."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".json":
+        return json.loads(text)
+    import yaml
+    return yaml.safe_load(text)
 
 
 def declared(policy: dict) -> dict[str, dict]:
@@ -133,9 +146,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true",
                     help="print what would be created/updated; write nothing")
+    ap.add_argument("--policy", type=Path, default=POLICY_PATH,
+                    help=f"the declaration to apply (.yaml or .json; default {POLICY_PATH})")
     args = ap.parse_args()
 
-    policy = yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8"))
+    policy = load_declaration(args.policy)
     want = declared(policy)
     live = _request("GET", "/model/info").get("data", [])
     actions = plan(want, live)
@@ -183,7 +198,7 @@ def main() -> int:
         print("  python3 deploy/pi/litellm/policy.py --apply")
         print("  python3 deploy/pi/litellm/policy.py --check   # proves timeout parity")
     else:
-        print("the proxy already matches model-preferences.yaml")
+        print(f"the proxy already matches {args.policy.name}")
     return 0
 
 

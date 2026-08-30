@@ -13,6 +13,13 @@ the log console — is factored out here.
 `stack-llm.yaml` — litellm + its postgres + redis. Played **first**: setup is
 LiteLLM-first (2026-08-25), so the proxy is up and its aliases registered
 before anything is validated, and every probe then runs THROUGH those aliases.
+The model catalog is **DB-stored** (`store_model_in_db`, as on k3s), not in
+the config file: `models.json.tmpl` renders to `models.json` from your `.env`
+and the `llm` phase seeds the four aliases through
+`deploy/pi/litellm/register-models.py --policy` (upsert by name — anything
+else you add or change in the LiteLLM UI/API is left alone). Until 2026-08-30
+they were declared in the config file's `model_list`, which the UI cannot
+edit and which carried no `model_info`.
 
 `stack.yaml` — postgres (the spine, schema auto-loaded) · neo4j · graphiti
 (MCP). Played **second**, and not before the embedding dimension has been

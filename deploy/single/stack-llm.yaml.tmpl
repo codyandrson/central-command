@@ -27,71 +27,20 @@ data:
   config.yaml: |
     # LiteLLM for the single-node profile.
     #
-    # FOUR model entries and nothing else. The homelab config keeps its
-    # models in Postgres (store_model_in_db) and points them at the operator's
-    # workstation; a giftable install has neither, so the models live here
-    # and point at the endpoint the user supplied at setup.
+    # NO models here. The catalog lives in LiteLLM's Postgres
+    # (store_model_in_db) exactly as on the k3s profile, so it is editable in
+    # the proxy UI / API and survives every re-render of this file. Setup seeds
+    # it from models.json (rendered by render.sh from models.json.tmpl, applied
+    # by deploy/pi/litellm/register-models.py --policy). Until 2026-08-30 four
+    # models were declared in this model_list AND store_model_in_db was true —
+    # config-declared entries are static (the UI cannot edit them, and a
+    # same-named DB row becomes a second deployment in the group), and they
+    # carried no model_info, so the app's thinking/vision declarations were
+    # silently absent on every gift install.
     #
     # Keys are `os.environ/...` refs, never literals — this ConfigMap is
     # rendered into a file that may be read by anyone who can read the
     # install dir, while the secret lives in a podman secret.
-    model_list:
-      # What Central Command's agents address. The spine knows exactly one alias.
-      - model_name: cc-default
-        litellm_params:
-          model: openai/${CC_CHAT_MODEL}
-          api_base: ${CC_LLM_BASE_URL}
-          api_key: os.environ/CC_LLM_API_KEY
-
-      # NOT a duplicate of cc-default, and the prefix is the whole point.
-      #
-      # graphiti_core's OpenAIClient drives extraction through the RESPONSES
-      # API (`client.responses.parse`) whenever a response_model is present —
-      # always, for extraction, with no chat-completions fallback. LiteLLM
-      # treats a plain `openai/...` model as NATIVELY supporting /v1/responses
-      # and passes the request straight through, so an OpenAI-COMPATIBLE
-      # endpoint that does not implement it silently DROPS the
-      # `text.format` json_schema and the model answers prose. Every
-      # extraction then fails.
-      #
-      # `openai/chat_completions/` forces LiteLLM's Responses -> chat bridge,
-      # which turns text.format into a real `response_format: json_schema`.
-      # Upstream says the same thing about local/compatible endpoints. Keep
-      # this prefix even when it looks redundant against cc-default.
-      - model_name: graphiti-llm
-        litellm_params:
-          model: openai/chat_completions/${CC_CHAT_MODEL}
-          api_base: ${CC_LLM_BASE_URL}
-          api_key: os.environ/CC_LLM_API_KEY
-
-      # The embedder. Its DIMENSION is configuration (CC_EMBED_DIM),
-      # discovered at setup and written into the graphiti config below —
-      # never the hardcoded 1024 the homelab carries. Changing the embedder
-      # later means dropping the vector index and re-embedding the whole
-      # graph, so treat it as permanent, not a tunable.
-      #
-      # This is the ONE alias that may point somewhere else: a self-hosted
-      # install commonly serves chat and embeddings from different servers.
-      # CC_EMBED_BASE_URL / CC_EMBED_API_KEY default to the main pair when
-      # unset, so a single-endpoint install renders exactly as before.
-      - model_name: cc-embedding
-        litellm_params:
-          model: openai/${CC_EMBED_MODEL}
-          api_base: ${CC_EMBED_BASE_URL}
-          api_key: os.environ/CC_EMBED_API_KEY
-
-      # graphiti_core's default reranker (OpenAIRerankerClient, built
-      # unconditionally with no config) addresses a model LITERALLY named
-      # gpt-4.1-nano — the live k3s deployment registers this same alias for
-      # the same reason. It runs a logprob-classifier over chat completions,
-      # so any chat model serves; endpoints that don't return logprobs
-      # degrade rerank quality, they don't break search.
-      - model_name: gpt-4.1-nano
-        litellm_params:
-          model: openai/${CC_CHAT_MODEL}
-          api_base: ${CC_LLM_BASE_URL}
-          api_key: os.environ/CC_LLM_API_KEY
-
     general_settings:
       master_key: os.environ/LITELLM_MASTER_KEY
       database_url: os.environ/DATABASE_URL

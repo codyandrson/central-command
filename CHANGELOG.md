@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.0.3: the single-node profile keeps its models in LiteLLM's database, not the config file
+
+- **`deploy/single` no longer declares models in `config.yaml`.** The profile
+  had four entries in the ConfigMap's `model_list` *and* `store_model_in_db:
+  true` — config-declared entries are static (the proxy UI cannot edit them,
+  and a same-named DB row becomes a second deployment in the group) and they
+  carried no `model_info`, so the app's thinking and vision declarations were
+  silently absent on every gift install. The catalog is now seeded the way
+  the k3s profile has always done it: `models.json.tmpl` renders to
+  `models.json` from `.env`, and the `llm` phase applies it through
+  `deploy/pi/litellm/register-models.py` — upsert by `model_name`, everything
+  else on the proxy left alone, so operator edits made in the UI/API survive
+  a re-run. The rule this lands: **models live in the LiteLLM database and
+  are managed through its API/UI; the config file is the fallback for what
+  the API cannot set, never the default.**
+- `register-models.py` takes `--policy <file>`; a `.json` declaration is read
+  with the stdlib so the pre-venv system python needs no PyYAML. The k3s
+  default (`model-preferences.yaml`) is unchanged.
+- `render.sh` renders and leak-checks `models.json` in both modes.
+
 ## 2026-08-30 — v2.0.2: a resume answers every deferred call in the parking response
 
 - **A turn that defers two calls no longer loses the second.** A park records

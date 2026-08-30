@@ -360,16 +360,18 @@ llm_gate() { # llm_gate <what-failed>
   note "                (or UI_USERNAME/UI_PASSWORD if set in .env)"
   note "                (the value is in deploy/single/.env — not printed here)"
   note ""
-  note "  These aliases must exist and answer (rendered from your .env; check"
-  note "  them in the UI against your upstream server):"
+  note "  The catalog is DB-stored; setup seeds it from models.json (rendered"
+  note "  from models.json.tmpl by your .env). These aliases must exist and"
+  note "  answer (check them in the UI against your upstream server):"
   note "    cc-default    -> openai/${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}"
   note "    graphiti-llm  -> openai/chat_completions/${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}   (the bridge prefix is required)"
   note "    cc-embedding  -> openai/${CC_EMBED_MODEL:-<CC_EMBED_MODEL>}"
   note ""
   note "  Is the fault upstream or in the proxy? One command tells you:"
   note "    ./discover-llm.sh chat ${CC_CHAT_MODEL:-<CC_CHAT_MODEL>}     # DIRECT to your server"
-  note "  Direct works + proxy fails = registration/alias problem (fix in the UI"
-  note "  or fix .env and re-run). Direct fails = CC_LLM_BASE_URL or the key is"
+  note "  Direct works + proxy fails = registration/alias problem (fix in the UI,"
+  note "  or fix .env and re-run — re-running re-seeds these four from"
+  note "  models.json). Direct fails = CC_LLM_BASE_URL or the key is"
   note "  wrong in deploy/single/.env."
   note ""
   note "When it looks right, re-run:  ./setup.sh llm   (idempotent; it re-probes)"
@@ -379,6 +381,9 @@ phase_llm() {
   load_env || return 1
 
   step "secrets" "credentials generated and secrets.yaml written" "$HERE/make-secrets.sh" || return 1
+  # make-secrets.sh may have generated LITELLM_MASTER_KEY into the .env we
+  # sourced before it; the register step below needs it in the environment.
+  load_env || return 1
   step "render-llm" "stack-llm.yaml rendered" "$HERE/render.sh" llm || return 1
 
   # `network create` is not idempotent; existing is success for us.
@@ -403,6 +408,19 @@ phase_llm() {
     fail "litellm-live" "proxy never answered /health/liveliness — run: ./setup.sh diagnose"
     return 1
   fi
+
+  # The catalog is DB-stored (store_model_in_db), same as the k3s profile, so
+  # a fresh litellm-pgdata boots EMPTY. Seed the four aliases from the rendered
+  # models.json — upsert by model_name, everything else on the proxy left
+  # alone, so later UI/API edits survive. Dry run first, as the plan.
+  # LITELLM_MASTER_KEY is in the environment from load_env; CC_LITELLM_URL
+  # points the script at THIS profile's port instead of its k3s default.
+  step "register-plan" "registration plan printed (dry run)" \
+    env CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
+      $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" --dry-run || return 1
+  step "register-models" "cc-default, graphiti-llm, cc-embedding and gpt-4.1-nano registered/reconciled" \
+    env CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
+      $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" || return 1
 
   # The probes. A failure here is a USER-ACTION gate, not a plain FAIL
   # (2026-08-27 contract): the proxy is UP, so the fix is the operator's —
