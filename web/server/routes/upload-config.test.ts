@@ -46,7 +46,9 @@ describe('GET /api/upload-config', () => {
       inlineEnabled: true,
       fileReferenceEnabled: false,
       modeChooserEnabled: false,
-      inlineAttachmentMaxMb: 4,
+      // 50 since the 2026-08-20 attachment-cap change (MAX_ATTACHMENT_BYTES);
+      // this test pins the DEFAULT, which moved with it.
+      inlineAttachmentMaxMb: 50,
       inlineImageContextMaxBytes: 32768,
       inlineImageAutoDowngradeToFileReference: true,
       inlineImageShrinkMinDimension: 512,

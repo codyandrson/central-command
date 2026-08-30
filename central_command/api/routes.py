@@ -3176,15 +3176,85 @@ class SourceIn(BaseModel):
     enabled: bool = False
 
 
+class SourceEnableIn(BaseModel):
+    enabled: bool
+
+
+# Terminal states of `work_item` vs the ones still owed work (schema.sql:
+# UNPROCESSED | CLAIMED | FOLD_PENDING | DISMISS_PENDING | PROCESSED | FOLDED
+# | FAILED).
+_FEED_PROCESSED = ("PROCESSED", "FOLDED")
+_FEED_PENDING = ("UNPROCESSED", "CLAIMED", "FOLD_PENDING", "DISMISS_PENDING")
+
+EMAIL_FEED_ID = "email-feed"
+
+
+async def _email_feed_source() -> dict:
+    """The email feed as a source row, built at READ time from live truth —
+    settings, the ledger, the mail-poll schedule. Never a stored row: a copy
+    of env config in the database is drift waiting to happen, and the ratified
+    default (Decision 2) is visibility first, configurability later. Same
+    top-level key set as a filesystem row so the panel has one type."""
+    from central_command.config import settings
+
+    states = await repo.count_work_items_by_state("email")
+    schedules = await repo.list_heartbeat_schedules()
+    poll = next((s for s in schedules if s["action_kind"] == "feed.poll"), None)
+    return {
+        "id": EMAIL_FEED_ID,
+        "kind": "email",
+        "name": "Email feed (Gmail via n8n façade)",
+        "read_only": True,
+        "enabled": settings.feed_enabled,
+        "config": {
+            "query": settings.feed_query,
+            "poll_seconds": settings.feed_poll_seconds,
+            "backlog_query": settings.backlog_query,
+            "backlog_window_days": settings.backlog_window_days,
+        },
+        "cursor": await repo.get_feed_state("backlog_sweep"),
+        "last_polled_at": poll["last_fired_at"] if poll else None,
+        "overview": None,
+        "feed_overview": {
+            "enrolled": sum(states.values()),
+            "processed": sum(states.get(s, 0) for s in _FEED_PROCESSED),
+            "pending": sum(states.get(s, 0) for s in _FEED_PENDING),
+            "failed": states.get("FAILED", 0),
+        },
+    }
+
+
 @router.get("/sources")
 async def list_sources() -> dict:
-    sources = await repo.list_sources()
-    overview = {s["id"]: await repo.catalog_overview(s["id"]) for s in sources}
-    return {"sources": [{**s, "overview": overview[s["id"]]} for s in sources]}
+    sources = []
+    for s in await repo.list_sources():
+        cursor = s.get("cursor") or {}
+        sources.append({
+            **s,
+            "read_only": False,
+            "last_polled_at": cursor.get("last_walk_at"),
+            "overview": await repo.catalog_overview(s["id"]),
+            "feed_overview": None,
+        })
+    return {"sources": [await _email_feed_source(), *sources]}
 
 
+@router.post("/sources/{source_id}/enable")
+async def set_source_enabled(source_id: str, body: SourceEnableIn) -> dict:
+    if source_id == EMAIL_FEED_ID:
+        raise HTTPException(409, "the email feed is configured via CC_FEED_ENABLED for now")
+    if not await repo.set_source_enabled(source_id, body.enabled):
+        raise HTTPException(404, f"source {source_id!r} does not exist")
+    return {"ok": True}
+
+
+# No DELETE, deliberately: the catalog's history outlives a source's
+# registration, so "remove" is enable=false.
 @router.post("/sources")
 async def upsert_source(body: SourceIn) -> dict:
+    # The email feed is synthesized at read time, never stored.
+    if body.id == EMAIL_FEED_ID:
+        raise HTTPException(422, f"{EMAIL_FEED_ID!r} is the synthesized email row — pick another id")
     if body.kind != "filesystem":
         raise HTTPException(422, f"unknown source kind {body.kind!r} (have: filesystem)")
     root = (body.config or {}).get("root")

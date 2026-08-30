@@ -3,7 +3,7 @@ import { themes, type ThemeName } from '@/lib/themes';
 import { fonts, type FontName } from '@/lib/fonts';
 import type { TTSProvider } from '@/features/tts/useTTS';
 
-export type ViewMode = 'chat' | 'kanban' | 'inbox' | 'agents' | 'skills' | 'graph' | 'graph-verify' | 'activity' | 'loe' | 'crons' | 'systems';
+export type ViewMode = 'chat' | 'kanban' | 'inbox' | 'agents' | 'skills' | 'graph' | 'graph-verify' | 'activity' | 'loe' | 'crons' | 'systems' | 'sources';
 
 export interface CommandActions {
   onNewSession: () => void;
@@ -293,6 +293,17 @@ export function createCommands(actions: CommandActions): Command[] {
         action: () => actions.onSetViewMode!('systems'),
         category: 'kanban' as const,
         keywords: ['systems', 'launchpad', 'health', 'status', 'services', 'credentials', 'view'],
+      },
+    ] : []),
+    // Sources — the document catalog and the email feed's visibility row.
+    // Same terms as Skills/Systems: an operator-driven surface, no flag.
+    ...(actions.onSetViewMode ? [
+      {
+        id: 'open-sources',
+        label: 'Open Sources',
+        action: () => actions.onSetViewMode!('sources'),
+        category: 'kanban' as const,
+        keywords: ['sources', 'catalog', 'documents', 'feed', 'email', 'watcher', 'walk', 'view'],
       },
     ] : []),
     // Kanban commands

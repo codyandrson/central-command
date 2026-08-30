@@ -62,6 +62,7 @@ const KanbanPanel = lazy(() => import('@/features/kanban/KanbanPanel').then(m =>
 const DecisionsView = lazy(() => import('@/features/decisions/DecisionsView').then(m => ({ default: m.DecisionsView })));
 const AgentsView = lazy(() => import('@/features/agents/AgentsView').then(m => ({ default: m.AgentsView })));
 const SkillsView = lazy(() => import('@/features/skills/SkillsView').then(m => ({ default: m.SkillsView })));
+const SourcesView = lazy(() => import('@/features/sources/SourcesView').then(m => ({ default: m.SourcesView })));
 const GraphView = lazy(() => import('@/features/graph/GraphView').then(m => ({ default: m.GraphView })));
 const GraphVerificationsView = lazy(() => import('@/features/graph-verifications/GraphVerificationsView').then(m => ({ default: m.GraphVerificationsView })));
 const ActivityView = lazy(() => import('@/features/activity/ActivityView').then(m => ({ default: m.ActivityView })));
@@ -1202,6 +1203,13 @@ export default function App({ onLogout }: AppProps) {
           <div className="shell-panel boot-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden rounded-[28px]">
             <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-xs bg-background">Loading…</div>}>
               <SkillsView />
+            </Suspense>
+          </div>
+        )}
+        {viewMode === 'sources' && (
+          <div className="shell-panel boot-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden rounded-[28px]">
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-xs bg-background">Loading…</div>}>
+              <SourcesView />
             </Suspense>
           </div>
         )}

@@ -67,6 +67,8 @@ import activityRoutes from './routes/cc-activity.js';
 import loeRoutes from './routes/cc-loe.js';
 import skillsRoutes from './routes/cc-skills.js';
 import decisionsRoutes from './routes/cc-decisions.js';
+// Sources panel — document catalog sources plus the email feed's visibility row.
+import sourcesRoutes from './routes/cc-sources.js';
 import updateRoutes from './routes/cc-update.js';
 // Systems view (launchpad): every deployed/integrated system, live status,
 // and where its credential lives — never the value.
@@ -113,7 +115,7 @@ const routes = [
   gatewayRoutes, connectDefaultsRoutes,
   workspaceRoutes, charterRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,
   voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, channelsRoutes, kanbanRoutes, beadsRoutes,
-  graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes,
+  graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes, sourcesRoutes,
   updateRoutes, systemsRoutes,
 ];
 for (const route of routes) app.route('/', route);

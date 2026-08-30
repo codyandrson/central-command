@@ -102,7 +102,8 @@ describe('authMiddleware', () => {
         '/api/auth/login',
         '/api/auth/logout',
         '/api/auth/status',
-        '/api/health',
+        // '/api/health' is not a route — the server health check is '/health'
+        // (server/routes/health.ts) and PUBLIC_ROUTES matches exactly.
         '/health',
       ];
 

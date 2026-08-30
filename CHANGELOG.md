@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.10.0: the Sources panel — and the email feed is its first row
+
+- **Sources panel in the cockpit** (sources-catalog slice 2): a new top-level
+  view listing every source — filesystem sources with their catalog counts
+  (documents/versions/locations/missing/rescinded), add/edit (id, name, root,
+  globs), enable/disable, "Walk now" with the summary shown inline, and the
+  per-source document table with rescind (reason required) / reinstate. Plain
+  responsive grid, so the `@container` scoping trap has nothing to bite.
+- **The email feed appears as its first row** — the visibility retrofit
+  Decision 2 promised. Synthesized at READ time from live truth (never a
+  stored row — a DB copy of env config is drift waiting to happen):
+  `CC_FEED_*` settings, the backlog-sweep cursor, the `feed.poll` schedule's
+  `last_fired_at`, and a ledger census by state (enrolled/pending/processed/
+  failed). Read-only by the ratified default; configurability is the
+  operator's later call. `POST /sources/{id}/enable` 409s for it, naming
+  `CC_FEED_ENABLED`.
+- **Wire discipline**: `tests/test_sources_wire.py` pins every key the panel
+  reads, for both row kinds — the hand-declared-interface drift class the
+  cockpit is documented to suffer. New `cc-sources.ts` Hono forward.
+- **Two stale frontend tests fixed** (pre-existing failures, unrelated to
+  this change): the upload-config default test still expected the pre-cap
+  4 MB (50 since 2026-08-20), and the auth test asserted a `/api/health`
+  route that has never existed (the health check is `/health`). The frontend
+  suite is fully green again.
+
 ## 2026-08-30 — v2.9.0: the library exists — sources catalog slice 1, and the wiki learns how it will forget
 
 - **The document catalog is real** (sources-catalog spec slice 1): four new

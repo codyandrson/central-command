@@ -4797,3 +4797,18 @@ async def catalog_overview(source_id: str | None = None) -> dict:
         return dict(row)
     finally:
         await conn.close()
+
+
+async def count_work_items_by_state(kind: str) -> dict:
+    """Ledger census for one work-item kind — the Sources panel's counts for
+    the email feed, which is a synthesized source row with no catalog of its
+    own. States absent from the ledger are absent from the dict."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select state, count(*) as n from work_item where kind = $1 group by state",
+            kind,
+        )
+        return {r["state"]: r["n"] for r in rows}
+    finally:
+        await conn.close()
