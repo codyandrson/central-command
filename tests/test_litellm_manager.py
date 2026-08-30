@@ -249,14 +249,15 @@ async def test_add_and_delete_handlers_call_the_client(monkeypatch):
         calls.append(("delete", model_id))
         return {"ok": True}
 
-    async def fake_health(model=None):
-        calls.append(("health", model))
-        return {"unhealthy": []}
+    async def fake_probe(model, measure_context=False):
+        calls.append(("probe", model))
+        return {"observed": {"chat": {"ok": True, "detail": "OK"}},
+                "suggested_model_info": {"supports_function_calling": True}}
 
     monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
     monkeypatch.setattr(executor.litellm_client, "delete_model", fake_delete)
-    monkeypatch.setattr(executor.litellm_client, "check_model_health", fake_health)
+    monkeypatch.setattr(executor.litellm_client, "probe_model", fake_probe)
 
     out = await executor.execute(
         [
@@ -281,12 +282,15 @@ async def test_add_and_delete_handlers_call_the_client(monkeypatch):
         # agent-supplied claim in the action args.
         ("add", "cc-triage", "anthropic/claude-haiku-4-5-20251001",
          "sk-ant-test", {"created_by": "human:lee", "updated_by": "human:lee"}),
-        # Test-on-add: one scoped health probe of the just-added alias.
-        ("health", "cc-triage"),
+        # Test-on-add: the FULL capability probe of the just-added alias
+        # (v2.4.0, operator decision) — the result carries the declared→
+        # observed diff the follow-up update_model proposal uses.
+        ("probe", "cc-triage"),
         ("delete", "old-999"),
     ]
     assert "cc-triage" in out.result_text and "old-999" in out.result_text
-    assert "tested on add: healthy" in out.result_text
+    assert "tested on add: probed OK" in out.result_text
+    assert "supports_function_calling" in out.result_text  # the diff is in the record
 
 
 async def test_executor_stamps_model_provenance_over_agent_claims(monkeypatch):
@@ -309,13 +313,14 @@ async def test_executor_stamps_model_provenance_over_agent_claims(monkeypatch):
         infos.append(model_info)
         return {"ok": True, "model": {"model_id": model_id, "updated": ["model_info"]}}
 
-    async def fake_health(model=None):
-        return {"unhealthy": [{"model": model, "error": "boom"}]}
+    async def fake_probe(model, measure_context=False):
+        return {"observed": {"chat": {"ok": False, "detail": "boom"}},
+                "suggested_model_info": {}}
 
     monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
-    monkeypatch.setattr(executor.litellm_client, "check_model_health", fake_health)
+    monkeypatch.setattr(executor.litellm_client, "probe_model", fake_probe)
 
     out = await executor.execute(
         [

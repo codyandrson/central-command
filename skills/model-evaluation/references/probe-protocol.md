@@ -199,3 +199,19 @@ real capability you simply forgot to write down. So: **declare the whole
 fleet**, not just the model you're currently probing — an old model that
 predates this protocol and was never probed reads as capability-less to both
 consumers until someone runs the battery on it too.
+
+## Aliases the chat battery cannot probe
+
+- **A Responses-bridge alias** (`openai/chat_completions/<model>`, e.g.
+  `graphiti-llm`) serves only `/v1/responses` — the plain chat check 404s
+  with "no router for requested model" and the probe's note says so. Probe
+  the underlying model's own alias; the bridge alias inherits its answers.
+- **Embedding / rerank aliases** (`mode: embedding` / `mode: rerank`) are not
+  chat models; every chat-shaped check fails by construction. Don't probe
+  them — their health check (`litellm_check_model_health`) already speaks
+  their mode.
+- **A registered-but-unauthenticated model** fails the chat gate with a 401
+  naming the missing provider key — a credential problem, not a capability
+  one (the dormant `claude-*` entries read exactly this way on a fresh
+  install until an Anthropic credential is stored).
+

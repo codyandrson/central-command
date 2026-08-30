@@ -1,6 +1,6 @@
 # Regenerate with scripts/model_library_fetch.sh. Every entry below is
 # upstream data, not Central Command's own writing.
-fetched_at: 2026-08-30T09:03:29Z
+fetched_at: 2026-08-30T19:59:44Z
 sources:
   - name: litellm_model_prices.json
     url: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
@@ -9,7 +9,7 @@ sources:
   - name: models_dev_api.json
     url: https://models.dev/api.json
     license: MIT
-    sha256: 539d9b9cb1698395d46b5140a25614bbf991414d9bab2625957be8a036320d8b
+    sha256: ce80562797535b0a542884b2d4a04b5889fb08cc782a1367eee6b4e784058b8d
   - name: aider_polyglot_leaderboard.yml
     url: https://raw.githubusercontent.com/Aider-AI/aider/main/aider/website/_data/polyglot_leaderboard.yml
     license: Apache-2.0
@@ -18,3 +18,15 @@ sources:
     url: https://github.com/AchilleasDrakou/LLMStats
     license: CC-BY-4.0
     subpaths: [models, providers, schemas, LICENSE.md]
+  - name: epoch/
+    url: https://epoch.ai/data/benchmark_data.zip
+    license: CC-BY-4.0
+    note: unzipped; epoch_LICENSE.md is the zip's own README.md
+  - name: lmarena_leaderboard_latest.parquet
+    url: https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/text/latest-00000-of-00001.parquet
+    license: CC-BY-4.0
+    sha256: 3b92ec87a0c888d45e710d6abbefa20d1cbd9798c1d5d24d026eee9fb26f1462
+  - name: bfcl_data_overall.csv
+    url: https://raw.githubusercontent.com/ShishirPatil/gorilla/gh-pages/data_overall.csv
+    license: Apache-2.0
+    sha256: ede5081a24bc5ac7f9b3b09a52af6bcfcd35aa0f1709239fed979db77a8159a6

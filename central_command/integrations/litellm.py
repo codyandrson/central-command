@@ -571,9 +571,12 @@ async def probe_model(
     _require_configured("probe_model")
     alias = _alias(model)
     declared: dict = {}
+    provider_model = ""
     for entry in (await _call("GET", "/model/info")).json().get("data") or []:
         if isinstance(entry, dict) and entry.get("model_name") == alias:
             declared = {k: (entry.get("model_info") or {}).get(k) for k in CAPABILITY_FIELDS}
+            pm = (entry.get("litellm_params") or {}).get("model")
+            provider_model = pm if isinstance(pm, str) else ""
             break
     observed: dict[str, dict] = {}
     notes: list[str] = []
@@ -585,8 +588,16 @@ async def probe_model(
     observed["chat"] = _verdict(st, out, bool(content), (content or "")[:80])
     if st != 200:
         if st == 404:
-            notes.append("404 on chat: check api_base ends in /v1 and the provider "
-                         "prefix matches the gateway's format (openai/ vs anthropic/)")
+            if "/chat_completions/" in provider_model:
+                # A Responses→chat bridge alias serves ONLY the Responses API —
+                # a plain chat call sends "chat_completions/<model>" upstream,
+                # which no server routes (graphiti-llm, measured 2026-08-30).
+                notes.append("this is a Responses-bridge alias (openai/chat_completions/ "
+                             "prefix) — it answers /v1/responses only; probe the "
+                             "underlying model's own alias instead")
+            else:
+                notes.append("404 on chat: check api_base ends in /v1 and the provider "
+                             "prefix matches the gateway's format (openai/ vs anthropic/)")
         return {"ok": False, "kind": "litellm", "operation": "probe_model", "model": alias,
                 "declared": declared, "observed": observed,
                 "suggested_model_info": {}, "notes": notes}

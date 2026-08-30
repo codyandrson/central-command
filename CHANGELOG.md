@@ -4,6 +4,32 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.4.0: test-on-add runs the full capability probe, and the offline library gains three benchmark datasets
+
+- **The Executor's test-on-add is the full probe now** (operator decision):
+  approving a `litellm.add_model` runs the whole capability battery (~10
+  small real requests) and the execution result carries the
+  declared→observed diff — the exact `model_info` the follow-up
+  `litellm.update_model` proposal should declare. A failing probe still
+  reports rather than fails the action. The autodiscovery add-brief now
+  points the agent at that result instead of asking it to re-probe.
+- **The probe names two 404/401 causes it met on the live fleet:** a
+  Responses-bridge alias (`openai/chat_completions/` prefix, e.g.
+  `graphiti-llm`) answers only `/v1/responses` — probe the underlying
+  alias instead; and a registered-but-credential-less model 401s (the
+  dormant `claude-*` entries on a fresh install, whose `anthropic-main`
+  credential lives in the LiteLLM database the clean install recreated).
+  `skills/model-evaluation/references/probe-protocol.md` documents both,
+  plus the embedding/rerank aliases the chat battery cannot probe.
+- **Three benchmark datasets join `docs/vendor/model-library/`** (now
+  9.8 MB, every license verified): Epoch AI's benchmarking-hub CSVs
+  (CC-BY, `epoch.ai/data/benchmark_data.zip` — GPQA Diamond, SWE-bench
+  Verified, FrontierMath and ~40 more), the LMArena text-leaderboard
+  latest snapshot (CC-BY-4.0, 580 KB parquet — human-preference Elo), and
+  BFCL's `data_overall.csv` (Apache-2.0 — tool-calling accuracy per
+  model). Epoch's Airtable-only "runs" tables were considered and not
+  bundled (need an API key); the README records the rejection.
+
 ## 2026-08-30 — v2.3.1: the version stamp v2.3.0 forgot
 
 - **`VERSION` now says 2.3.1.** v2.3.0 shipped its CHANGELOG entry and tag

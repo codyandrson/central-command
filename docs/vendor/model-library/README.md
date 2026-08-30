@@ -12,6 +12,15 @@ rest of `docs/vendor/`.
 | `models_dev_api.json` | open_weights, knowledge cutoff, release date, context/output limits, per-provider pricing | MIT |
 | `llmstats/` (`models/`, `providers/`, `schemas/`) | benchmark scores, dated and sourced | CC-BY 4.0 |
 | `aider_polyglot_leaderboard.yml` | Aider's polyglot coding benchmark | Apache-2.0 |
+| `epoch/*.csv` | Epoch AI's Benchmarking Hub — broad multi-benchmark scores over time (GPQA Diamond, MATH level 5, SWE-bench Verified, FrontierMath, and more, one CSV per benchmark) | CC-BY 4.0 |
+| `lmarena_leaderboard_latest.parquet` | LMArena's current text-category leaderboard — human-preference Elo + confidence interval per model (latest snapshot only, not the battle history) | CC-BY 4.0 |
+| `bfcl_data_overall.csv` | BFCL (Berkeley Function Calling Leaderboard) overall results — tool-calling accuracy per model, broken out by category | Apache-2.0 |
+
+### Considered and not bundled
+
+- **Epoch AI's Airtable-backed "internal runs"/"external runs" views** —
+  only reachable through the Airtable API (needs a key); skipped in favor of
+  the CSV export above, which needs none.
 
 See `MANIFEST.yaml` for exact source URLs, fetch timestamp, and a sha256 per
 file. `*_LICENSE.md`/`.txt` alongside each source are the upstream license

@@ -15,13 +15,19 @@ name, without a live internet call from inside a proposal-writing session.
 | `models_dev_api.json` | open_weights, knowledge cutoff, release date, context/output limits, per-provider pricing | keyed by provider (`d[provider]["models"][model_id]`): `open_weights`, `knowledge` (cutoff), `release_date`, `reasoning`/`reasoning_options`, `tool_call`, `structured_output`, `attachment` (vision), `limit.context`/`limit.output`, `cost` |
 | `llmstats/models/<provider>/<model_id>/` | Benchmark scores, each **dated and sourced** | validated against `llmstats/schemas/models-schema.json` — includes `release_date`, `input_context_size`, `output_context_size`, `license`, `multimodal`, plus per-benchmark result entries |
 | `aider_polyglot_leaderboard.yml` | Coding-specific benchmark (Aider's polyglot suite) | one YAML record per run: `model`, `edit_format`, `pass_rate_1`/`pass_rate_2`, `percent_cases_well_formed`, `total_cost`, `date`, `versions` |
+| `epoch/*.csv` | Broad multi-benchmark scores over time (Epoch AI's Benchmarking Hub) — one CSV per benchmark | e.g. `gpqa_diamond.csv`, `math_level_5.csv`, `swe_bench_verified.csv`, `frontiermath.csv`: model, score, date, source, and (for `*_external.csv`) the upstream leaderboard it was pulled from |
+| `lmarena_leaderboard_latest.parquet` | Human-preference Elo (LMArena) — the current text-category leaderboard only, not the battle history | per model: Elo rating, confidence interval, rank, vote count |
+| `bfcl_data_overall.csv` | Tool-calling scores (Berkeley Function Calling Leaderboard) | per model: `Rank`, `Overall Acc`, category breakdowns (`Non-Live`/`Live`/`Multi Turn`/`Web Search`/`Memory` AST accuracy), cost, latency, `Organization`, `License` |
 
 Use `litellm_model_prices.json` when you need the exact vocabulary a
 `litellm.update_model` proposal should use (it IS that vocabulary — the same
 `model_info` schema, populated for thousands of public deployments).
 Use `models_dev_api.json` for the human-facing facts a model card would
-state (cutoff, release date, license status). Use `llmstats/` and the Aider
-leaderboard when the question is "how good is it", not "what can it do."
+state (cutoff, release date, license status). Use `llmstats/`, the Aider
+leaderboard, `epoch/`, `lmarena_leaderboard_latest.parquet`, and
+`bfcl_data_overall.csv` when the question is "how good is it", not "what can
+it do" — Epoch for broad benchmark coverage, LMArena for human preference,
+BFCL for tool-calling specifically.
 
 ## The public number is a HYPOTHESIS, not a fact about your deployment
 

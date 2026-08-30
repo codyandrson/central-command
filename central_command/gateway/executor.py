@@ -805,17 +805,26 @@ async def _litellm_add_model(args: dict, approver: str, proposer: str | None) ->
         model_info=model_info, extra=args.get("extra"),
     )
     m = out.get("model") or {}
-    # Test-on-add (the autodiscovery contract): one scoped real-provider
-    # health call, recorded in the execution result. The ADD already
-    # succeeded, so a failing probe reports rather than fails the action —
-    # an unhealthy-but-registered model is the next discovery pass's (or the
-    # operator's) to act on, with this record as the evidence.
+    # Test-on-add (the autodiscovery contract, FULL PROBE since v2.4.0 by
+    # operator decision): the capability battery, not just a health ping —
+    # ~10 small real requests, recorded in the execution result together
+    # with the declared→observed diff the follow-up litellm.update_model
+    # proposal should carry. The ADD already succeeded, so a failing probe
+    # reports rather than fails the action — an unhealthy-but-registered
+    # model is the next discovery pass's (or the operator's) to act on, with
+    # this record as the evidence.
     try:
-        probe = await litellm_client.check_model_health(args["model_name"])
-        bad = probe.get("unhealthy") or []
-        health = (f"UNHEALTHY: {str(bad[0].get('error'))[:200]}" if bad else "healthy")
+        probe = await litellm_client.probe_model(args["model_name"])
+        chat = (probe.get("observed") or {}).get("chat") or {}
+        if chat.get("ok"):
+            diff = probe.get("suggested_model_info") or {}
+            health = ("probed OK — suggested model_info diff: "
+                      f"{json.dumps(diff, default=str)[:400]}" if diff
+                      else "probed OK — declarations match what was measured")
+        else:
+            health = f"UNHEALTHY: {str(chat.get('detail'))[:200]}"
     except Exception as e:  # noqa: BLE001
-        health = f"health check errored: {type(e).__name__}: {str(e)[:200]}"
+        health = f"probe errored: {type(e).__name__}: {str(e)[:200]}"
     return (f"litellm model '{m.get('model_name')}' → {m.get('provider_model')} "
             f"added (id {m.get('model_id')}) — tested on add: {health}")
 
