@@ -350,6 +350,15 @@ step_host() {
     install -m 644 "$f" /etc/systemd/system/
   done
   install -m 644 "$REPO/deploy/k3s/cc-update-tmpfiles.conf" /etc/tmpfiles.d/cc-update.conf
+  # Operator drop-ins (e.g. gv-uvicorn.service.d/executor-live.conf, the go-live
+  # override) are not in the repo: carry them over, rewritten, or the new unit
+  # silently runs on the tracked default (bit us live 2026-08-29: dry_run).
+  local d; for d in /etc/systemd/system/gv-*.d; do
+    [[ -d $d ]] || continue
+    local nd="/etc/systemd/system/$(basename "$d" | sed 's/^gv-/cc-/')"
+    install -d -m 755 "$nd"; for f in "$d"/*.conf; do [[ -f $f ]] && perl -pe "$PERL_RULES" "$f" >"$nd/$(basename "$f")"; done
+    note "carried drop-ins: $d -> $nd"
+  done
   systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
   [[ -f /var/lib/gv-update/status.json ]] && cp -p /var/lib/gv-update/status.json /var/lib/cc-update/status.json || true
   systemctl disable gv-uvicorn gv-nerve gv-sandbox-runner gv-graph-bolt gv-backup.timer gv-update.path 2>/dev/null || true
@@ -382,7 +391,7 @@ cleanup() {
   for n in "$(hostname)" chromebox; do
     on_node "$n" "for i in \$(k3s ctr -n k8s.io images ls -q | grep -E '/gv-(graphiti|sandbox|crawler|mcp-echo-demo):'); do k3s ctr -n k8s.io images rm \"\$i\" >/dev/null && echo \"   $n: removed \$i\"; done" || true
   done
-  rm -f /etc/systemd/system/gv-*.service /etc/systemd/system/gv-*.timer /etc/systemd/system/gv-*.path /etc/tmpfiles.d/gv-update.conf
+  rm -rf /etc/systemd/system/gv-*.service /etc/systemd/system/gv-*.timer /etc/systemd/system/gv-*.path /etc/systemd/system/gv-*.d /etc/tmpfiles.d/gv-update.conf
   rm -rf /run/gv-update /var/lib/gv-update
   rm -f "$HOME_DIR"/.gv-*.kubeconfig
   systemctl daemon-reload
