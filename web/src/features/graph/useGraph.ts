@@ -39,11 +39,18 @@ export interface GraphEpisode {
   content_preview: string;
 }
 
+export interface GraphGroupScope {
+  id: string;
+  scope: 'public' | 'private';
+  agent_id: string | null;
+}
+
 export interface GraphStatus {
   available: boolean;
   node_count: number;
   edge_count: number;
   group_ids: string[];
+  groups: GraphGroupScope[];
   graphistry: 'disabled' | 'unreachable' | 'live';
   graphistry_enabled: boolean;
   graphistry_url: string;

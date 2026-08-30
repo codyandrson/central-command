@@ -54,7 +54,9 @@ async def test_graph_status_carries_graphistry_state_to_the_cockpit(monkeypatch)
     status = await routes.graph_status()
     assert status == {
         "available": True, "node_count": 102, "edge_count": 112,
-        "group_ids": ["main"], "graphistry": "disabled",
+        "group_ids": ["main"],
+        "groups": [{"id": "main", "scope": "public", "agent_id": None}],
+        "graphistry": "disabled",
         "graphistry_enabled": False, "graphistry_url": "",
     }
 
@@ -278,6 +280,47 @@ async def test_graph_episodes_without_agent_id_is_all_shared(monkeypatch):
     result = await routes.graph_episodes()
     assert result["episodes"][0]["scope"] == "shared"
     assert result["total"] == 1
+
+
+async def test_graph_status_classifies_group_ids_into_public_and_private_scope(monkeypatch):
+    """The cockpit renders scope, not raw `group_id`: the shared write group,
+    a steward's domain, and any unrecognised group all read "public"; only a
+    roster agent's own `private_group(agent_id)` partition reads "private"."""
+    from central_command.integrations import graphiti
+
+    async def fake_list_agents(include_retired=True, roster_only=True):
+        return [{"id": "jira-expert", "steward_group": "domain_jira"}]
+
+    monkeypatch.setattr(repo, "list_agents", fake_list_agents)
+    monkeypatch.setattr(neo4j_reader, "ping", lambda: _ok(True))
+    monkeypatch.setattr(
+        neo4j_reader, "counts",
+        lambda: _ok({
+            "node_count": 3, "edge_count": 1,
+            "group_ids": [
+                graphiti.settings.graph_write_group,
+                graphiti.private_group("jira-expert"),
+                "some_unknown_group",
+            ],
+        }),
+    )
+    monkeypatch.setattr(
+        repo, "get_app_setting",
+        lambda key, default: _ok({"graphistry_enabled": False, "graphistry_url": ""}),
+    )
+
+    status = await routes.graph_status()
+    by_id = {g["id"]: g for g in status["groups"]}
+
+    assert by_id[graphiti.settings.graph_write_group] == {
+        "id": graphiti.settings.graph_write_group, "scope": "public", "agent_id": None,
+    }
+    assert by_id[graphiti.private_group("jira-expert")] == {
+        "id": graphiti.private_group("jira-expert"), "scope": "private", "agent_id": "jira-expert",
+    }
+    assert by_id["some_unknown_group"] == {
+        "id": "some_unknown_group", "scope": "public", "agent_id": None,
+    }
 
 
 async def test_a_refused_curation_write_emits_nothing(monkeypatch):

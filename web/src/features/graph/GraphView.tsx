@@ -14,7 +14,14 @@ import cytoscape, { type Core, type NodeSingular, type EdgeSingular } from 'cyto
 import { Waypoints, Search, X, AlertTriangle, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { useGraph, type GraphNode, type GraphEdge, type GraphEpisode } from './useGraph';
+import { useGraph, type GraphNode, type GraphEdge, type GraphEpisode, type GraphGroupScope } from './useGraph';
+
+/** "Public" / "Private · <agent_id>" — the operator-facing label for a raw
+ *  `group_id`, everywhere one is shown. The underlying id stays available
+ *  via `title` so it's never fully hidden, just not the primary label. */
+function scopeLabel(g: GraphGroupScope): string {
+  return g.scope === 'private' ? `Private · ${g.agent_id}` : `Public (${g.id})`;
+}
 import { SplitGroup, SplitSeparator, Panel } from '@/components/Splitter';
 
 const CY_STYLE: cytoscape.StylesheetJson = [
@@ -439,13 +446,14 @@ function EdgeEditor({ edge, curate, onDone }: {
 
 /** Side drawer: node/edge details + provenance. Overlays the canvas — never
  *  displaces the search panel or shifts layout. */
-function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onChange }: {
+function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onChange, groups }: {
   selection: Selection;
   episodes: GraphEpisode[];
   onClose: () => void;
   entityTypes: string[];
   curate: Curation;
   onChange: (change: DrawerChange) => void;
+  groups: GraphGroupScope[];
 }) {
   if (!selection) return null;
   return (
@@ -470,7 +478,12 @@ function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onCha
               {selection.node.labels.map((l) => (
                 <span key={l} className="cockpit-badge">{l}</span>
               ))}
-              <span className="cockpit-badge">{selection.node.group_id}</span>
+              <span className="cockpit-badge" title={selection.node.group_id}>
+                {(() => {
+                  const g = groups.find((x) => x.id === selection.node.group_id);
+                  return g ? scopeLabel(g) : selection.node.group_id;
+                })()}
+              </span>
             </div>
           </div>
           {selection.node.summary && (
@@ -526,16 +539,16 @@ function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onCha
 
 /** Add an entity that extraction never produced. Collapsed by default and
  *  opened from the toolbar, so the panel a reader sees is unchanged. */
-function AddEntity({ entityTypes, groupIds, onCreate, onClose }: {
+function AddEntity({ entityTypes, groups, onCreate, onClose }: {
   entityTypes: string[];
-  groupIds: string[];
+  groups: GraphGroupScope[];
   onCreate: (node: GraphNode) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState('');
   const [summary, setSummary] = useState('');
   const [labels, setLabels] = useState<string[]>([]);
-  const [groupId, setGroupId] = useState(groupIds[0] || 'central_command');
+  const [groupId, setGroupId] = useState(groups[0]?.id || 'central_command');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -558,7 +571,9 @@ function AddEntity({ entityTypes, groupIds, onCreate, onClose }: {
           aria-label="New entity name"
         />
         <select className={`${FIELD} max-w-[220px]`} value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label="Group">
-          {(groupIds.length ? groupIds : ['central_command']).map((g) => <option key={g} value={g}>{g}</option>)}
+          {groups.length
+            ? groups.map((g) => <option key={g.id} value={g.id} title={g.id}>{scopeLabel(g)}</option>)
+            : <option value="central_command">Public (central_command)</option>}
         </select>
       </div>
       <textarea
@@ -803,7 +818,7 @@ export function GraphView() {
     void expandNode(node.uuid);
   }, [mergeIn, expandNode]);
 
-  const groupOptions = useMemo(() => status?.group_ids ?? [], [status]);
+  const groupOptions = useMemo(() => status?.groups ?? [], [status]);
 
   /** Load the WHOLE graph (or the selected group). The panel's default is
    *  explore-from-a-search, which assumes you know what you are looking for —
@@ -940,7 +955,7 @@ export function GraphView() {
               className="h-9 min-h-9 rounded-xl border border-input/80 bg-background/72 px-2.5 text-[0.75rem] text-foreground"
             >
               <option value="">all groups</option>
-              {groupOptions.map((g) => <option key={g} value={g}>{g}</option>)}
+              {groupOptions.map((g) => <option key={g.id} value={g.id} title={g.id}>{scopeLabel(g)}</option>)}
             </select>
           )}
         </div>
@@ -949,7 +964,7 @@ export function GraphView() {
       {adding && (
         <AddEntity
           entityTypes={types}
-          groupIds={groupOptions}
+          groups={groupOptions}
           onCreate={createNode}
           onClose={() => setAdding(false)}
         />
@@ -1023,6 +1038,7 @@ export function GraphView() {
             entityTypes={types}
             curate={curate}
             onChange={(change) => { void applyChange(change); }}
+            groups={groupOptions}
           />
         </Panel>
       </SplitGroup>

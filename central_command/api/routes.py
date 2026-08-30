@@ -2970,6 +2970,30 @@ async def graph_provenance(uuid: str) -> dict:
     return {"episodes": episodes}
 
 
+async def _classify_group_scopes(group_ids: list[str]) -> list[dict]:
+    """Turn raw Graphiti `group_id`s into cockpit-facing scope: the shared
+    write group, the configured read groups and any roster agent's steward
+    domain are "public"; an agent's own `private_group(agent_id)` partition
+    is "private" (matched by iterating known agent ids — never by splitting
+    on "_", agent ids may contain underscores); anything unrecognised
+    renders public rather than private to nobody."""
+    from central_command.config import settings
+    from central_command.integrations import graphiti
+
+    public_ids = {settings.graph_write_group, *await graphiti._read_groups()}
+    private_by_group = {
+        graphiti.private_group(a["id"]): a["id"] for a in await repo.list_agents()
+    }
+
+    out = []
+    for gid in group_ids:
+        if gid in private_by_group and gid not in public_ids:
+            out.append({"id": gid, "scope": "private", "agent_id": private_by_group[gid]})
+        else:
+            out.append({"id": gid, "scope": "public", "agent_id": None})
+    return out
+
+
 @router.get("/graph/status")
 async def graph_status() -> dict:
     settings_row = await repo.get_app_setting(_GRAPH_SETTINGS_KEY, _GRAPH_SETTINGS_DEFAULT)
@@ -2977,7 +3001,7 @@ async def graph_status() -> dict:
     available = await neo4j_reader.ping()
     if not available:
         return {
-            "available": False, "node_count": 0, "edge_count": 0, "group_ids": [],
+            "available": False, "node_count": 0, "edge_count": 0, "group_ids": [], "groups": [],
             "graphistry": graphistry,
             "graphistry_enabled": settings_row["graphistry_enabled"],
             "graphistry_url": settings_row["graphistry_url"],
@@ -2985,6 +3009,7 @@ async def graph_status() -> dict:
     counts = await neo4j_reader.counts()
     return {
         "available": True, **counts,
+        "groups": await _classify_group_scopes(counts["group_ids"]),
         "graphistry": graphistry,
         "graphistry_enabled": settings_row["graphistry_enabled"],
         "graphistry_url": settings_row["graphistry_url"],

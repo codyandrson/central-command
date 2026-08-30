@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.7.0: the graph panel says "scope", not "group_id"
+
+- **Graph groups render as scope in the cockpit.** The graph panel's node
+  badge, group filter and create-entity dropdown now label each Graphiti
+  `group_id` as **Public** (the shared write group, the configured read
+  groups, any steward's domain — everything in every agent's read set) or
+  **Private · \<agent\>** (that agent's own `private_group` partition,
+  matched against the roster, never by splitting the id). Unrecognised
+  groups render public rather than "private to nobody", and the raw
+  `group_id` stays one hover away in the tooltip. Classification is
+  server-side: `/graph/status` carries a new `groups` list (`id`, `scope`,
+  `agent_id`) beside the unchanged `group_ids`, with a wire-shape test
+  pinning it — the cockpit renders what the gateway says, it doesn't
+  re-derive tenancy rules. Display only: scope is still chosen at propose
+  time (`graph.add_episode`'s `shared`/`private` enum) and re-scoping an
+  existing node remains deliberately out of scope.
+
 ## 2026-08-30 — v2.6.0: the updater applies the declared LiteLLM policy, and the declaration matches the proxy again
 
 - **`cc-update.sh` runs `policy.py --apply` after a healthy update** — a
