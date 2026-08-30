@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.0.1: a discussion lane runs under its charter, and cannot be closed out from under its question
+
+- **A tier-3 discussion lane now carries the agent's charter.** `_open_discussion`
+  seeded the lane with the agent's question as a `ModelResponse` and nothing
+  else, and pydantic-ai adds system-prompt parts only when the history is
+  EMPTY — so every turn of every seeded lane ran with the agent's tools and
+  none of its charter: no pack guidance, no "conclude before you propose", no
+  team section. Live 2026-08-29 the EA hosted the whole onboarding tour that
+  way and, asked how to end it, said "there is nothing for me to conclude".
+  The seed now leads with a `ModelRequest` of the same system-prompt parts a
+  fresh chat would have persisted (`converse.lane_system_prompt`, built by the
+  same builder the lane's turns use; a test pins the equality).
+- **Closing a lane by hand is refused while its question is OPEN.**
+  `end_conversation` was a third door with no resolution semantics: the lane
+  went terminal, the item stayed OPEN, the task stayed blocked forever. It now
+  refuses (409 in the cockpit) and points at the Decisions Inbox — answering
+  the item closes the lane with the answer, as the agent's own
+  `conclude_discussion` always did. Lanes opened before this release that were
+  already closed this way still resolve by answering their item.
+- `min_upgrade_from=2.0.0`: the v2.0.0 rename is applied by hand
+  (`migrate-to-cc.sh`), so the cockpit updater carries only 2.x → 2.x.
+
 ## 2026-08-29 — v2.0.0: one name everywhere — the historical identifiers are gone
 
 **Breaking. This release is applied BY HAND, not by the cockpit updater**

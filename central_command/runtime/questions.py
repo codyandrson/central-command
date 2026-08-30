@@ -142,10 +142,16 @@ async def _open_discussion(
     A parallel lane with the same agent — multi-session per agent is the target
     architecture, and the task's own session stays paused and untouched.
     """
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.messages import ModelMessagesTypeAdapter
+    from pydantic_ai.messages import (
+        ModelMessagesTypeAdapter,
+        ModelRequest,
+        ModelResponse,
+        SystemPromptPart,
+        TextPart,
+    )
 
     from central_command.runtime import attention
+    from central_command.runtime.converse import lane_system_prompt
 
     allowed, used, budget = await attention.may_open_lane(agent_id)
     if not allowed:
@@ -167,10 +173,18 @@ async def _open_discussion(
     session_id = "sess_" + uuid.uuid4().hex[:12]
     await repo.create_conversation_session(session_id, agent_id)
     opening = question if not why else f"{question}\n\n(Why I'm asking: {why})"
+    # The charter goes in FIRST, as the request pydantic-ai would have written
+    # for an empty history — it adds system-prompt parts only then, so a lane
+    # seeded with the question alone ran every turn charter-less (2026-08-29,
+    # see `converse.lane_system_prompt`). Persisted, never `instructions=`:
+    # the lane resumes under the charter it was opened under.
+    charter = ModelRequest(
+        parts=[SystemPromptPart(content=p) for p in await lane_system_prompt(agent_id)]
+    )
     await repo.update_session_run_state(
         session_id,
         {"messages": ModelMessagesTypeAdapter.dump_python(
-            [ModelResponse(parts=[TextPart(content=opening)])], mode="json"
+            [charter, ModelResponse(parts=[TextPart(content=opening)])], mode="json"
         )},
     )
     await repo.mark_session_awaiting_operator(session_id)

@@ -99,6 +99,31 @@ async def _build(agent_id: str, model, charter: str | None):
     )
 
 
+async def lane_system_prompt(agent_id: str) -> list[str]:
+    """The system prompt a conversation with `agent_id` runs under, as the
+    strings pydantic-ai would persist into a FRESH chat's first request.
+
+    Needed by `questions._open_discussion`: a tier-3 lane is seeded with the
+    agent's question as a `ModelResponse`, and pydantic-ai adds system-prompt
+    parts ONLY when the history is empty (`_agent_graph._prepare_messages`).
+    Every turn of a seeded lane therefore ran with the agent's tools but NONE
+    of its charter — no pack guidance, no "conclude before you propose", no
+    team section. Live 2026-08-29: the EA hosted a four-hour onboarding tour
+    without knowing it was in a discussion it could conclude, and told the
+    operator "there is nothing for me to conclude".
+
+    Built through `_build`, the same builder the lane's turns use, so the
+    seeded prompt is exactly the one a first turn would have persisted —
+    `tests/test_discussion_lane_charter.py` pins that equality.
+    """
+    from central_command.runtime.agent import load_charter
+
+    agent = await _build(agent_id, None, await load_charter(agent_id))
+    # pydantic-ai keeps the static prompts on the agent; `_sys_parts` renders
+    # one SystemPromptPart per entry, which is what the seed mirrors.
+    return list(agent._system_prompts)  # private: pydantic-ai has no public getter
+
+
 # Deferred tools the CONVERSATION path can drive, and what it does with them.
 # Anything the orchestration driver owns (`submit_plan`, `assign_work`,
 # `record_progress`) has no meaning here: a chat has no plan to approve and no
@@ -577,6 +602,23 @@ async def end_conversation(session_id: str) -> dict:
     status = session["status"]
     if status in ("DONE", "FAILED"):
         return {"session_id": session_id, "status": status}
+    # A tier-3 lane exists to unblock a paused task. Closing it by hand is a
+    # third door with no resolution semantics: the lane goes terminal, the
+    # question stays OPEN, the task stays blocked — forever, unless someone
+    # finds the Inbox item (live 2026-08-29: the onboarding tour). The two
+    # doors that DO resolve it — the agent's `conclude_discussion`, the
+    # operator answering the item (`_close_answered_discussion`) — both close
+    # the lane themselves through `close_session`, so refusing here costs
+    # nothing they need.
+    item = await repo.get_operator_item_by_discussion(session_id)
+    if item is not None and item["status"] == "OPEN":
+        raise ValueError(
+            f"conversation {session_id} is the discussion lane of an open "
+            f"question ({item['id']}) blocking a task — answer it in the "
+            "Decisions Inbox (or let the agent conclude it) and the lane "
+            "closes with it; closing the chat alone would leave the task "
+            "blocked"
+        )
     if status == "AWAITING_HUMAN":
         raise ValueError(
             f"conversation {session_id} has a pending proposal — decide it "
