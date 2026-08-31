@@ -14,9 +14,39 @@ notable landing, newest first. The development journal behind these entries
   check and message in the form. The one malformed live row was removed by
   hand (it had no catalog rows attached).
 
+## 2026-08-30 — v2.15.0: the graph learns to arrange itself, and to answer for its own quality
+
+- **Layout that stays put** (`web/src/features/graph/GraphView.tsx`): the
+  panel's force layout is fCoSE now (spectral init + force refinement,
+  `cytoscape-fcose`), and an incremental merge keeps existing node positions
+  — expanding a neighborhood no longer reshuffles the canvas the operator
+  was reading. Labels drop out below a zoom threshold instead of smearing
+  into noise, and the DetailDrawer gains a display-only "Remove from view"
+  distinct from the destructive curation Delete.
+- **The graph audits itself — read-only** (`GET /graph/audit`,
+  `neo4j_reader.audit()`): duplicate-entity candidates by name-embedding
+  cosine (core `vector.similarity.cosine`, no GDS plugin) unioned with
+  exact-name matches where an embedding is missing (a node without one is
+  invisible to semantic search — the known half-write class), duplicate live
+  edges between the same node pair, and structural health per scope:
+  isolated, untyped and unembedded entities, plus dangling edges whose
+  dual-stored endpoint uuids disagree. Surfaces problems as data; every fix
+  still goes through the existing curation routes. Wire shape pinned by a
+  backend test.
+- **An Audit panel in the cockpit** drives it: run per scope with an
+  editable similarity threshold, click a finding to load the nodes onto the
+  canvas, curate with the existing merge tooling.
+- **A Cluster toggle** collapses Louvain communities (3+ members) into
+  expandable supernodes (`graphology` + `cytoscape-expand-collapse`), so
+  "Show all" reads as a map of clusters rather than a hairball. Clustering
+  is a snapshot — merged-in nodes stay loose until re-toggled — and every
+  curation path unclusters first, because the extension genuinely removes
+  collapsed children from the graph.
+
 ## 2026-08-30 — v2.14.0: publication — the wiki remembers what it believes, and why
 
-_(v2.13.0 is reserved by a concurrent session's in-flight release; the gap is
+_(v2.13.0 was reserved for a concurrent session's in-flight release; that
+release ultimately shipped as v2.15.0, so the gap is permanent and
 deliberate.)_
 
 - **Claims capture** (Decision 9, slice 7): when a wiki-agent Confluence page
