@@ -34,3 +34,4 @@ drafts/
 # Setup driver litter (the k3s driver; deploy/single/ has its own .gitignore)
 deploy/k3s/setup-log.txt
 deploy/k3s/setup-diagnostics.txt
+CLAUDE.local.md

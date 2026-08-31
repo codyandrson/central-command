@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.17.2: the public orientation sheds the instance
+
+`CLAUDE.md` is public-facing and now reads like it: it orients any
+deployment, not this one. Everything specific to the reference instance —
+node names and addresses, checkout paths, backup locations, the operator's
+release/deploy workflow, the model fleet, incident dates and war stories —
+moved to the operator's private instance repo, loadable per-session via a
+gitignored `CLAUDE.local.md` (now in `.gitignore`). The product-level bite
+marks stay, compressed to the rule and its mechanism; generalizable k3s
+placement/exposure facts stay under "Deployment profiles". No code changes.
+
 ## 2026-08-31 — v2.17.1: a replayed consult reuses the draft that survived
 
 Fixes the duplicate-side-effect window found in the 2026-08-31 operational
