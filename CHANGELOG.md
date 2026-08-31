@@ -4,6 +4,15 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.17.3: the partial-availability playbook
+
+`deploy/AIRGAP.md` gains a per-source table: when exactly ONE external
+source is unavailable and everything else is mirrored, the smallest move
+that covers it — apt-less installs via the three prebuilt-image bundles,
+the cockpit's Node runtime from the official tarball instead of NodeSource,
+per-artifact `CC_SOURCE_<X>=bundle` for the rest. Everything in the table
+is existing machinery; the release is the map, not new code.
+
 ## 2026-08-31 — v2.17.2: the public orientation sheds the instance
 
 `CLAUDE.md` is public-facing and now reads like it: it orients any

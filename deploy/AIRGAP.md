@@ -49,6 +49,25 @@ sees so you can tell. Credentials for a build-time mirror go through
 `podman build --secret`, never a build-arg (build-args are visible in
 `podman history`).
 
+## Partial availability — the minimal move per missing source
+
+The sources are independent: bundle ONLY what your mirrors cannot serve and
+leave every other seam on its mirror. For each source, the smallest move
+when it alone is unavailable (single-node profile):
+
+| Missing source | Minimal move |
+|---|---|
+| Debian apt | Don't build: apt is consumed ONLY inside the three local image builds. Connected side: `bundle.sh export <dir> graphiti sandbox crawler`; air-gapped side: `CC_SOURCE_GRAPHITI=bundle`, `CC_SOURCE_SANDBOX=bundle`, `CC_SOURCE_CRAWLER=bundle`. Nothing else in the profile touches apt. |
+| NodeSource (apt-based Node) | Node ≥ 22 is a HOST prerequisite (it *runs* the cockpit; `CC_SOURCE_COCKPIT=bundle` removes npm, not the runtime). Pre-stage the official self-contained tarball — `node-v22.x-linux-<arch>.tar.xz` from nodejs.org, untarred onto PATH — no apt involved. |
+| registry.npmjs.org | `CC_SOURCE_COCKPIT=bundle` (pre-built cockpit, no `npm ci`); the sandbox build's `sandbox-runtime` install rides `CC_SOURCE_SANDBOX=bundle`. |
+| PyPI | `CC_SOURCE_PYTHON=bundle` (wheelhouse, installed `--no-index --find-links`); the pip installs inside the graphiti/crawler builds ride those images' bundles. |
+| A container registry | `CC_SOURCE_IMAGES=bundle` for the pulled set (`bundle.sh export <dir> images` saves every `images.txt` ref under its public name). |
+| python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. |
+| huggingface.co | Pre-place `ggml-*.bin` in `config.whisperModelDir` (checked before any download), or set `WHISPER_MODELS_BASE_URL`. |
+
+Remember the wheelhouse and the saved images are OS/arch-specific: export on
+a connected machine matching the air-gapped target.
+
 ## Pins
 
 `deploy/single/images.txt` pins every pulled image by digest; `fetch` pulls
