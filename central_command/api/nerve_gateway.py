@@ -562,7 +562,7 @@ async def _run_session_context(session: dict) -> dict:
 
     return {
         "kind": kind,
-        "message": f"This is a {kind}, {waiting}.",
+        "message": f"This is a{'n' if kind[0] in 'aeiou' else ''} {kind}, {waiting}.",
         "task": {"id": task["id"], "title": task["title"], "status": task["status"]}
         if task else None,
         "blocking": blocking,
@@ -943,11 +943,17 @@ async def _decisions_history(limit: int, offset: int) -> dict:
     """Paginated history for the Decisions Inbox: every proposal no longer
     awaiting the operator. Same proposal shape `_decisions_list` sends
     (repo.list_proposals' dict, carrying status/decided_at already) — this
-    just paginates a wider status set instead of forking a second mapping."""
+    just paginates a wider status set instead of forking a second mapping.
+
+    Also carries confirmed dismissals (PROCESSED work items) — they vanish
+    from the UI on confirm with no other history surface. Unpaginated (its
+    own fixed recent slice): the operator asked for "findable again", not a
+    second load-more control."""
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     proposals, has_more = await repo.list_decided_proposals(limit, offset)
-    return {"proposals": proposals, "hasMore": has_more}
+    processed_items = await repo.list_processed_work_items(50)
+    return {"proposals": proposals, "hasMore": has_more, "processedItems": processed_items}
 
 
 async def _agents_roster() -> dict:

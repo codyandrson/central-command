@@ -219,6 +219,23 @@ function HistoryRowItem({ p, active, onSelect }: {
   );
 }
 
+/** A confirmed dismissal (PROCESSED work item) — read-only, subject/source/when. */
+function ProcessedRowItem({ item }: { item: WorkItem }) {
+  return (
+    <div
+      data-testid="processed-row"
+      className="flex w-full items-start gap-2.5 border-b border-border/40 px-4 py-2.5 text-left last:border-b-0"
+    >
+      <Mail size={13} className="mt-0.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-foreground">{item.subject || '(no subject)'}</p>
+        <span className="truncate text-[0.667rem] text-muted-foreground">{item.source}</span>
+      </div>
+      <RelativeTime iso={item.terminal_at} />
+    </div>
+  );
+}
+
 function DismissalRowItem({ d, active, onSelect }: {
   d: WorkItem; active: boolean; onSelect: () => void;
 }) {
@@ -1163,7 +1180,7 @@ export function DecisionsView({
     proposals, dismissals, operatorItems, loading, error, refresh,
     confirmAllDismissals, getProposal, approve, reject, dismiss,
     confirmDismissal, reopenDismissal, answerOperatorItem,
-    history, historyHasMore, historyLoading, showHistory,
+    history, historyHasMore, historyLoading, showHistory, processedItems = [],
     toggleHistory, loadMoreHistory,
   } = useDecisions();
   const [selected, setSelected] = useState<DecisionSelection>(null);
@@ -1357,8 +1374,8 @@ export function DecisionsView({
 
           {showHistory && (
             <>
-              <SectionLabel count={history.length}>History</SectionLabel>
-              {history.length === 0 && !historyLoading && (
+              <SectionLabel count={history.length + processedItems.length}>History</SectionLabel>
+              {history.length === 0 && processedItems.length === 0 && !historyLoading && (
                 <p className="px-4 py-2 text-[0.733rem] text-muted-foreground">No decided proposals yet.</p>
               )}
               {history.map((p) => (
@@ -1368,6 +1385,9 @@ export function DecisionsView({
                   active={selected?.kind === 'proposal' && selected.id === p.id}
                   onSelect={() => setSelected({ kind: 'proposal', id: p.id })}
                 />
+              ))}
+              {processedItems.map((item) => (
+                <ProcessedRowItem key={item.id} item={item} />
               ))}
               {historyHasMore && (
                 <div className="px-4 py-2">

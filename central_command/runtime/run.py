@@ -157,6 +157,20 @@ async def _run_live(
             run_ref = agent_run
             async for _node in agent_run:
                 history = agent_run.ctx.state.message_history
+                # Persist the OUTGOING request too, before the model answers.
+                # `state.message_history` only ever ends in a `ModelResponse`
+                # (the unsent request is appended inside `_prepare_request`),
+                # so without this nothing landed until the FIRST response —
+                # and the first turn dominates a oneshot run's wall-clock on
+                # the local models, leaving the cockpit pane empty with no
+                # hint of which document/task the run was on (2026-08-31).
+                # A trailing `ModelRequest` is exactly the shape a
+                # continuation park persists (see the stop boundary below),
+                # so every downstream reader already tolerates it, and the
+                # next boundary's snapshot overwrites it with the response.
+                outgoing = getattr(_node, "request", None)
+                if isinstance(outgoing, ModelRequest):
+                    await snapshot([*history, outgoing])
                 await snapshot(history)
                 if not stop_requested:
                     continue

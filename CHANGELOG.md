@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.16.0: a running agent shows its hand, and dismissals stay findable
+
+- **The transcript pane shows a run's prompt while the model is still
+  thinking** (`runtime/run.py`): the live snapshot now persists the OUTGOING
+  `ModelRequest` at every request boundary, not just the history after each
+  response. Before this, nothing landed until the first model response — and
+  on the local models the first turn dominates a oneshot run's wall-clock,
+  so the operator watched an empty pane with no hint of which document or
+  task the run was on. A trailing request is exactly the shape a
+  continuation park already persists, so every downstream reader tolerated
+  it from day one; the next boundary's snapshot overwrites it with the
+  response. Tool returns now also surface before the model's next answer.
+- **Confirmed dismissals are findable again**: the Decisions history view
+  (`decisions.history`) now carries `processedItems` — the recent PROCESSED
+  work items — rendered as read-only rows after the proposal history. Until
+  now confirming a dismissal made the item vanish with no history surface at
+  all (140 rows were invisible on the live deployment). Wire shape pinned by
+  a backend test.
+- **Settings drawer sheds three vestigial controls**: the Gateway URL and
+  Auth Token inputs (display-only in this deployment — the server resolves
+  the real gateway and injects the token itself) and the Sign Out button
+  (auth is not used single-operator). Reconnect, the status indicator and
+  the disabled restart button stay.
+- The run notice reads "This is an agent run" now, not "a agent run".
+
 ## 2026-08-31 — v2.15.1: a source id must be a slug
 
 - Found live on the first real Sources-panel use: the Add-source form let a

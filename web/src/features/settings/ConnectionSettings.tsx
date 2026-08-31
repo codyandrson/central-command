@@ -1,6 +1,4 @@
-import { useState } from 'react';
-import { RefreshCw, Eye, EyeOff, RotateCw } from 'lucide-react';
-import { DEFAULT_GATEWAY_WS } from '@/lib/constants';
+import { RefreshCw, RotateCw } from 'lucide-react';
 
 interface ConnectionSettingsProps {
   url: string;
@@ -27,15 +25,9 @@ const STATUS_LABELS: Record<string, string> = {
 
 /** Settings section for gateway URL, auth token, reconnection, and gateway restart. */
 export function ConnectionSettings({
-  url,
-  token,
-  onUrlChange,
-  onTokenChange,
   onReconnect,
   connectionState,
 }: ConnectionSettingsProps) {
-  const [showToken, setShowToken] = useState(false);
-
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -65,43 +57,6 @@ export function ConnectionSettings({
         </button>
       </div>
 
-      {/* Gateway URL */}
-      <label className="cockpit-field">
-        <span className="cockpit-field-label">Gateway URL</span>
-        <input
-          type="text"
-          value={url}
-          onChange={e => onUrlChange(e.target.value)}
-          spellCheck={false}
-          className="cockpit-input cockpit-input-mono"
-          placeholder={DEFAULT_GATEWAY_WS}
-        />
-        <span className="cockpit-field-hint">Use the local gateway or paste a remote relay endpoint.</span>
-      </label>
-
-      {/* Auth Token */}
-      <label className="cockpit-field">
-        <span className="cockpit-field-label">Auth Token</span>
-        <div className="relative">
-          <input
-            type={showToken ? 'text' : 'password'}
-            value={token}
-            onChange={e => onTokenChange(e.target.value)}
-            spellCheck={false}
-            className="cockpit-input cockpit-input-mono pr-12"
-            placeholder="••••••••"
-          />
-          <button
-            type="button"
-            onClick={() => setShowToken(!showToken)}
-            className="cockpit-toolbar-button absolute right-2 top-1/2 min-h-8 -translate-y-1/2 px-2.5"
-            title={showToken ? 'Hide token' : 'Show token'}
-          >
-            {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
-        </div>
-        <span className="cockpit-field-hint">Leave blank for unsecured local development.</span>
-      </label>
       {/* Gateway Service — under construction: the vendored Nerve route shells
           out to an `openclaw` binary that does not exist in this deployment
           (the gateway is cc-uvicorn/FastAPI). Disabled (not hidden) until a

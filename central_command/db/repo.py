@@ -2901,6 +2901,25 @@ async def unaudited_bulk_proposal_ids() -> list[dict]:
         await conn.close()
 
 
+async def list_processed_work_items(limit: int) -> list[dict]:
+    """Confirmed dismissals (and any other PROCESSED work item) for the
+    Decisions history view — newest-terminal-first, no offset: the history
+    toggle wants a recent slice, not full pagination (`list_decided_proposals`
+    already carries that for proposals)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """select id, subject, source, terminal_at
+                 from work_item where state = 'PROCESSED'
+                order by terminal_at desc nulls last, enrolled_at desc
+                limit $1""",
+            limit,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
 async def confirm_dismissal(item_id: str) -> bool:
     conn = await _conn()
     try:

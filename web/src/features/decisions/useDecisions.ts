@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
-import type { DecisionsData, ProposalDetail, ProposalSummary } from './types';
+import type { DecisionsData, ProposalDetail, ProposalSummary, WorkItem } from './types';
 
 const POLL_MS = 30_000;
 const HISTORY_PAGE = 50;
@@ -133,6 +133,10 @@ export function useDecisions() {
   const [history, setHistory] = useState<ProposalSummary[]>([]);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Confirmed dismissals (PROCESSED work items) — sent alongside the first
+  // history page, its own fixed recent slice server-side, so it needs no
+  // load-more of its own.
+  const [processedItems, setProcessedItems] = useState<WorkItem[]>([]);
 
   const toggleHistory = useCallback(() => {
     setShowHistory((prev) => {
@@ -141,9 +145,10 @@ export function useDecisions() {
         setHistoryLoading(true);
         rpcRef.current('decisions.history', { limit: HISTORY_PAGE, offset: 0 })
           .then((res) => {
-            const r = res as { proposals: ProposalSummary[]; hasMore: boolean };
+            const r = res as { proposals: ProposalSummary[]; hasMore: boolean; processedItems?: WorkItem[] };
             setHistory(r.proposals ?? []);
             setHistoryHasMore(!!r.hasMore);
+            setProcessedItems(r.processedItems ?? []);
           })
           .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
           .finally(() => setHistoryLoading(false));
@@ -172,7 +177,7 @@ export function useDecisions() {
     getProposal, approve, reject, dismiss,
     confirmDismissal, confirmAllDismissals, reopenDismissal,
     answerOperatorItem,
-    history, historyHasMore, historyLoading, showHistory,
+    history, historyHasMore, historyLoading, showHistory, processedItems,
     toggleHistory, loadMoreHistory,
   };
 }

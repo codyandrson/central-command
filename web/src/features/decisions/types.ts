@@ -130,6 +130,9 @@ export interface WorkItem {
   attempts?: number;
   last_error?: string | null;
   enrolled_at?: string;
+  /** When it went terminal (PROCESSED/FOLDED/FAILED) — the history view's
+   *  sort/display key for confirmed dismissals. */
+  terminal_at?: string | null;
   payload?: {
     from?: string;
     text?: string;

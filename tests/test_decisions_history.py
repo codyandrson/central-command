@@ -12,6 +12,10 @@ async def _async(value):
     return value
 
 
+async def _no_processed_items(limit):
+    return []
+
+
 async def test_decisions_history_carries_status_and_decided_at(monkeypatch):
     """The history pane is meaningless without knowing WHAT happened and
     WHEN — a row missing status/decided_at renders as an unlabeled ghost."""
@@ -25,6 +29,7 @@ async def test_decisions_history_carries_status_and_decided_at(monkeypatch):
         return [row], False
 
     monkeypatch.setattr(nerve_gateway.repo, "list_decided_proposals", fake_history)
+    monkeypatch.setattr(nerve_gateway.repo, "list_processed_work_items", _no_processed_items)
 
     out = await nerve_gateway._decisions_history(50, 0)
 
@@ -44,6 +49,7 @@ async def test_decisions_history_caps_limit(monkeypatch):
         return [], False
 
     monkeypatch.setattr(nerve_gateway.repo, "list_decided_proposals", fake_history)
+    monkeypatch.setattr(nerve_gateway.repo, "list_processed_work_items", _no_processed_items)
 
     await nerve_gateway._decisions_history(10_000, 0)
 
@@ -55,6 +61,7 @@ async def test_decisions_history_reports_has_more(monkeypatch):
         return [{"id": f"p{i}"} for i in range(limit)], True
 
     monkeypatch.setattr(nerve_gateway.repo, "list_decided_proposals", fake_history)
+    monkeypatch.setattr(nerve_gateway.repo, "list_processed_work_items", _no_processed_items)
 
     out = await nerve_gateway._decisions_history(5, 0)
 
@@ -70,9 +77,31 @@ async def test_decisions_history_dispatches_via_rpc(monkeypatch):
         return [], False
 
     monkeypatch.setattr(nerve_gateway.repo, "list_decided_proposals", fake_history)
+    monkeypatch.setattr(nerve_gateway.repo, "list_processed_work_items", _no_processed_items)
 
     out = await nerve_gateway._dispatch(
         "decisions.history", {"limit": 5, "offset": 10}, notify=None
     )
 
-    assert out == {"proposals": [], "hasMore": False}
+    assert out == {"proposals": [], "hasMore": False, "processedItems": []}
+
+
+async def test_decisions_history_carries_processed_work_items(monkeypatch):
+    """Confirmed dismissals (PROCESSED work items) vanish from every other
+    view on confirm — this is their only remaining history surface."""
+
+    async def fake_history(limit, offset):
+        return [], False
+
+    item = {"id": "wi_1", "subject": "Renew warranty?", "source": "fixture",
+            "terminal_at": None}
+
+    async def fake_processed(limit):
+        return [item]
+
+    monkeypatch.setattr(nerve_gateway.repo, "list_decided_proposals", fake_history)
+    monkeypatch.setattr(nerve_gateway.repo, "list_processed_work_items", fake_processed)
+
+    out = await nerve_gateway._decisions_history(50, 0)
+
+    assert out["processedItems"] == [item]

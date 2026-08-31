@@ -178,3 +178,27 @@ async def test_stale_running_sessions_are_swept_but_fresh_ones_are_not():
             "delete from session where id in ($1, $2)", stale, fresh
         )
         await conn.close()
+
+
+async def test_outgoing_request_is_persisted_before_the_first_response(monkeypatch):
+    """The FIRST snapshot is the outgoing request itself, taken while the
+    model is still thinking. Until 2026-08-31 nothing landed before the first
+    response — and the first turn dominates a oneshot's wall-clock on the
+    local models, so the cockpit pane sat empty with no hint of which
+    document/task the run was on."""
+    real_update = repo.update_session_run_state
+    first: list[dict] = []
+
+    async def recording_update(session_id: str, run_state: dict):
+        if not first:
+            first.append(run_state)
+        return await real_update(session_id, run_state)
+
+    monkeypatch.setattr(repo, "update_session_run_state", recording_update)
+    await ingest_and_propose(
+        "Dana: DEMO-1 slipped, due Aug 3.", model=make_no_action_model()
+    )
+    messages = first[0]["messages"]
+    # Nothing but the request: no model response has happened yet.
+    assert messages and all(m["kind"] == "request" for m in messages)
+    assert "DEMO-1 slipped" in str(messages)

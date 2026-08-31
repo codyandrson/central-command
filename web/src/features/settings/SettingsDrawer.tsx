@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { X, Settings, LogOut, Mic, Monitor, Shield, Waypoints } from 'lucide-react';
+import { X, Settings, Mic, Monitor, Shield, Waypoints } from 'lucide-react';
 import { ConnectionSettings } from './ConnectionSettings';
 import { UpdateSettings } from './UpdateSettings';
 import { useVersionCheck } from '@/lib/version-check';
@@ -89,7 +89,6 @@ export function SettingsDrawer({
   liveTranscriptionPreview,
   onToggleLiveTranscriptionPreview,
   agentName,
-  onLogout,
 }: SettingsDrawerProps) {
   const productVersion = useVersionCheck().info?.current;
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -264,16 +263,6 @@ export function SettingsDrawer({
 
         {/* Footer */}
         <div className="shrink-0 space-y-3 border-t border-border/70 bg-secondary/35 px-4 py-4">
-          {onLogout && (
-            <button
-              onClick={onLogout}
-              className="cockpit-toolbar-button w-full justify-center"
-              data-tone="danger"
-            >
-              <LogOut size={14} aria-hidden="true" />
-              Sign Out
-            </button>
-          )}
           <div className="flex items-center justify-between gap-3 px-1 text-[0.733rem] text-muted-foreground/70">
             <span>Central Command</span>
             <span className="font-mono text-[0.667rem] tracking-[0.08em]">v{productVersion ?? __APP_VERSION__}</span>
