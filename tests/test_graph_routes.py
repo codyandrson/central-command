@@ -323,6 +323,72 @@ async def test_graph_status_classifies_group_ids_into_public_and_private_scope(m
     }
 
 
+async def test_graph_audit_wire_shape(monkeypatch):
+    """The cockpit's audit panel reads these exact keys — pin them here per
+    the repo rule (backend test pins wire shape, not a frontend one)."""
+    canned = {
+        "duplicate_entities": [{
+            "a": {"uuid": "n1", "name": "Lee", "labels": ["Entity", "Person"], "group_id": "main"},
+            "b": {"uuid": "n2", "name": "Lee", "labels": ["Entity", "Person"], "group_id": "main"},
+            "similarity": 0.95, "basis": "embedding",
+        }],
+        "duplicate_edges": [{
+            "source": {"uuid": "n1", "name": "Lee"},
+            "target": {"uuid": "n3", "name": "Acme"},
+            "edges": [
+                {"uuid": "e1", "name": "WORKS_AT", "fact": "f1",
+                 "created_at": "2026-08-01T00:00:00+00:00", "valid_at": None},
+                {"uuid": "e2", "name": "WORKS_AT", "fact": "f2",
+                 "created_at": "2026-08-02T00:00:00+00:00", "valid_at": None},
+            ],
+        }],
+        "health": {
+            "isolated_nodes": [{"uuid": "n4", "name": "Orphan", "group_id": "main"}],
+            "untyped_nodes": [{"uuid": "n5", "name": "Vague", "group_id": "main"}],
+            "missing_embedding_nodes": [{"uuid": "n6", "name": "NoVec", "group_id": "main"}],
+            "dangling_edges": [{
+                "uuid": "e3", "claimed_source": "n1", "actual_source": "n7",
+                "claimed_target": "n3", "actual_target": "n3",
+            }],
+            "counts": {
+                "isolated_nodes": 1, "untyped_nodes": 1,
+                "missing_embedding_nodes": 1, "dangling_edges": 1,
+            },
+        },
+    }
+
+    seen = {}
+
+    async def fake_audit(group_id, threshold):
+        seen.update(group_id=group_id, threshold=threshold)
+        return canned
+
+    monkeypatch.setattr(neo4j_reader, "audit", fake_audit)
+    result = await routes.graph_audit(group_id="main", threshold=0.87)
+
+    assert result == canned
+    assert set(result) == {"duplicate_entities", "duplicate_edges", "health"}
+    assert set(result["health"]) == {
+        "isolated_nodes", "untyped_nodes", "missing_embedding_nodes",
+        "dangling_edges", "counts",
+    }
+    assert seen == {"group_id": "main", "threshold": 0.87}
+
+
+async def test_graph_audit_clamps_threshold(monkeypatch):
+    seen = {}
+
+    async def fake_audit(group_id, threshold):
+        seen["threshold"] = threshold
+        return {"duplicate_entities": [], "duplicate_edges": [], "health": {}}
+
+    monkeypatch.setattr(neo4j_reader, "audit", fake_audit)
+    await routes.graph_audit(threshold=5.0)
+    assert seen["threshold"] == 1.0
+    await routes.graph_audit(threshold=0.0)
+    assert seen["threshold"] == 0.5
+
+
 async def test_a_refused_curation_write_emits_nothing(monkeypatch):
     from central_command import events
     from central_command.integrations import neo4j_writer

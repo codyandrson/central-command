@@ -2971,6 +2971,18 @@ async def graph_provenance(uuid: str) -> dict:
     return {"episodes": episodes}
 
 
+@router.get("/graph/audit")
+async def graph_audit(group_id: str | None = None, threshold: float = 0.87) -> dict:
+    """Read-only graph quality report: duplicate candidates, duplicate edges,
+    and structural health (isolated/untyped/unembedded nodes, dangling
+    edges). No writes, no proposals — the operator curates by hand via the
+    existing graph-curation routes."""
+    try:
+        return await neo4j_reader.audit(group_id, min(max(threshold, 0.5), 1.0))
+    except Exception as e:
+        raise HTTPException(503, f"graph unavailable: {e}") from e
+
+
 async def _classify_group_scopes(group_ids: list[str]) -> list[dict]:
     """Turn raw Graphiti `group_id`s into cockpit-facing scope: the shared
     write group, the configured read groups and any roster agent's steward

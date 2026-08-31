@@ -398,6 +398,203 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
     return {"entities": entities, "edges": edges, "invalidated": list(invalidated.values())}
 
 
+async def audit(group_id: str | None, threshold: float) -> dict:
+    """Graph quality report — READ ONLY, surfaces problems as data for an
+    operator to curate by hand (see the graph-curation routes); this module
+    never writes.
+
+    `duplicate_entities` catches near-duplicate identities two ways: cosine
+    similarity of `name_embedding` (the semantic signal Graphiti's own dedupe
+    uses) and, unioned in, exact case-insensitive name matches where either
+    side is MISSING an embedding — a node with no embedding is invisible to
+    every semantic search (see the CLAUDE.md half-write rule) and would
+    otherwise be invisible here too. `basis` tags which check found the pair.
+
+    # ponytail: pairwise O(n^2) over embedded nodes — fine at this graph's
+    # size (tens to low thousands of entities); blocking by community/group
+    # before the pairwise pass is the upgrade path if it ever isn't.
+    """
+    embedding_pairs = await _read(
+        """
+        MATCH (a:Entity), (b:Entity)
+        WHERE a.uuid < b.uuid
+          AND a.group_id = b.group_id
+          AND ($group_id IS NULL OR a.group_id = $group_id)
+          AND a.name_embedding IS NOT NULL AND b.name_embedding IS NOT NULL
+        WITH a, b, vector.similarity.cosine(a.name_embedding, b.name_embedding) AS similarity
+        WHERE similarity >= $threshold
+        RETURN a.uuid AS a_uuid, a.name AS a_name, labels(a) AS a_labels, a.group_id AS a_group_id,
+               b.uuid AS b_uuid, b.name AS b_name, labels(b) AS b_labels, b.group_id AS b_group_id,
+               similarity
+        ORDER BY similarity DESC
+        LIMIT 100
+        """,
+        group_id=group_id, threshold=threshold,
+    )
+    name_pairs = await _read(
+        """
+        MATCH (a:Entity), (b:Entity)
+        WHERE a.uuid < b.uuid
+          AND a.group_id = b.group_id
+          AND ($group_id IS NULL OR a.group_id = $group_id)
+          AND (a.name_embedding IS NULL OR b.name_embedding IS NULL)
+          AND toLower(a.name) = toLower(b.name)
+        RETURN a.uuid AS a_uuid, a.name AS a_name, labels(a) AS a_labels, a.group_id AS a_group_id,
+               b.uuid AS b_uuid, b.name AS b_name, labels(b) AS b_labels, b.group_id AS b_group_id
+        LIMIT 100
+        """,
+        group_id=group_id,
+    )
+
+    def _pair(row, basis):
+        return {
+            "a": {"uuid": row["a_uuid"], "name": row["a_name"],
+                  "labels": row["a_labels"], "group_id": row["a_group_id"]},
+            "b": {"uuid": row["b_uuid"], "name": row["b_name"],
+                  "labels": row["b_labels"], "group_id": row["b_group_id"]},
+            "similarity": row.get("similarity", 1.0),
+            "basis": basis,
+        }
+
+    duplicate_entities = (
+        [_pair(r, "embedding") for r in embedding_pairs]
+        + [_pair(r, "name") for r in name_pairs]
+    )
+    duplicate_entities.sort(key=lambda p: p["similarity"], reverse=True)
+    duplicate_entities = duplicate_entities[:100]
+
+    edge_groups = await _read(
+        """
+        MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity)
+        WHERE e.expired_at IS NULL AND e.invalid_at IS NULL
+          AND ($group_id IS NULL OR (a.group_id = $group_id AND b.group_id = $group_id))
+        WITH CASE WHEN a.uuid < b.uuid THEN a ELSE b END AS lo,
+             CASE WHEN a.uuid < b.uuid THEN b ELSE a END AS hi,
+             e
+        WITH lo, hi, collect({uuid: e.uuid, name: e.name, fact: e.fact,
+                               created_at: e.created_at, valid_at: e.valid_at}) AS edges
+        WHERE size(edges) > 1
+        RETURN lo.uuid AS source_uuid, lo.name AS source_name,
+               hi.uuid AS target_uuid, hi.name AS target_name, edges
+        LIMIT 50
+        """,
+        group_id=group_id,
+    )
+    duplicate_edges = [
+        {
+            "source": {"uuid": row["source_uuid"], "name": row["source_name"]},
+            "target": {"uuid": row["target_uuid"], "name": row["target_name"]},
+            "edges": [
+                {
+                    "uuid": e["uuid"], "name": e["name"], "fact": e["fact"],
+                    "created_at": _iso(e["created_at"]), "valid_at": _iso(e["valid_at"]),
+                }
+                for e in row["edges"]
+            ],
+        }
+        for row in edge_groups
+    ]
+
+    isolated_nodes = await _read(
+        """
+        MATCH (n:Entity)
+        WHERE NOT (n)-[:RELATES_TO]-()
+          AND ($group_id IS NULL OR n.group_id = $group_id)
+        RETURN n.uuid AS uuid, n.name AS name, n.group_id AS group_id
+        LIMIT 100
+        """,
+        group_id=group_id,
+    )
+    isolated_count = await _read(
+        """
+        MATCH (n:Entity)
+        WHERE NOT (n)-[:RELATES_TO]-()
+          AND ($group_id IS NULL OR n.group_id = $group_id)
+        RETURN count(n) AS c
+        """,
+        group_id=group_id,
+    )
+
+    untyped_nodes = await _read(
+        """
+        MATCH (n:Entity)
+        WHERE size(labels(n)) = 1
+          AND ($group_id IS NULL OR n.group_id = $group_id)
+        RETURN n.uuid AS uuid, n.name AS name, n.group_id AS group_id
+        LIMIT 100
+        """,
+        group_id=group_id,
+    )
+    untyped_count = await _read(
+        """
+        MATCH (n:Entity)
+        WHERE size(labels(n)) = 1
+          AND ($group_id IS NULL OR n.group_id = $group_id)
+        RETURN count(n) AS c
+        """,
+        group_id=group_id,
+    )
+
+    missing_embedding_nodes = await _read(
+        """
+        MATCH (n:Entity)
+        WHERE n.name_embedding IS NULL
+          AND ($group_id IS NULL OR n.group_id = $group_id)
+        RETURN n.uuid AS uuid, n.name AS name, n.group_id AS group_id
+        LIMIT 100
+        """,
+        group_id=group_id,
+    )
+    missing_embedding_count = await _read(
+        """
+        MATCH (n:Entity)
+        WHERE n.name_embedding IS NULL
+          AND ($group_id IS NULL OR n.group_id = $group_id)
+        RETURN count(n) AS c
+        """,
+        group_id=group_id,
+    )
+
+    dangling_edges = await _read(
+        """
+        MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity)
+        WHERE (e.source_node_uuid <> a.uuid OR e.target_node_uuid <> b.uuid)
+          AND ($group_id IS NULL OR (a.group_id = $group_id AND b.group_id = $group_id))
+        RETURN e.uuid AS uuid,
+               e.source_node_uuid AS claimed_source, a.uuid AS actual_source,
+               e.target_node_uuid AS claimed_target, b.uuid AS actual_target
+        LIMIT 50
+        """,
+        group_id=group_id,
+    )
+    dangling_count = await _read(
+        """
+        MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity)
+        WHERE (e.source_node_uuid <> a.uuid OR e.target_node_uuid <> b.uuid)
+          AND ($group_id IS NULL OR (a.group_id = $group_id AND b.group_id = $group_id))
+        RETURN count(e) AS c
+        """,
+        group_id=group_id,
+    )
+
+    return {
+        "duplicate_entities": duplicate_entities,
+        "duplicate_edges": duplicate_edges,
+        "health": {
+            "isolated_nodes": isolated_nodes,
+            "untyped_nodes": untyped_nodes,
+            "missing_embedding_nodes": missing_embedding_nodes,
+            "dangling_edges": dangling_edges,
+            "counts": {
+                "isolated_nodes": isolated_count[0]["c"] if isolated_count else 0,
+                "untyped_nodes": untyped_count[0]["c"] if untyped_count else 0,
+                "missing_embedding_nodes": missing_embedding_count[0]["c"] if missing_embedding_count else 0,
+                "dangling_edges": dangling_count[0]["c"] if dangling_count else 0,
+            },
+        },
+    }
+
+
 async def counts() -> dict:
     rows = await _read(
         """
