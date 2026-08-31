@@ -81,6 +81,11 @@ def test_action_registry_parity_with_the_lever_allowlist():
         "integrations.litellm.list_models",  # the proxy's configured deployments
         "integrations.litellm.check_model_health", # per-deployment health
         "integrations.litellm.probe_model", # measures undeclared capabilities
+        "ingest.watcher.walk_source",       # deterministic inventory: stat +
+                                            # extract, no LLM, no ledger writes
+        "ingest.catalog_enroll.enroll_pending", # the catalog backlog onto the
+                                            # ordinary ledger, at the source's
+                                            # own pace
     }
     seen = set()
     for kind, spec in hb_actions.ACTIONS.items():
@@ -299,6 +304,14 @@ def test_quiet_eligibility_is_an_explicit_allowlist():
                             # SELF-RECORDING: task creation emits task.created
                             # itself. The common tick — nothing enrolled, or
                             # nothing drifted — costs no history.
+        "source.walk",      # NON-AUTHORISING: it writes inventory rows and
+                            # enrolls ledger items — nothing is WORKED until
+                            # the dispatcher's valves say so, and every
+                            # proposal that follows still gates.
+                            # SELF-RECORDING: the walk emits
+                            # catalog.walk.completed, the sweep
+                            # catalog.enrolled / catalog.version.autofolded.
+                            # A tree nobody touched must cost no history.
     }
     quiet = {k for k, s in hb_actions.ACTIONS.items() if s.material is not None}
     assert quiet == quiet_allowlist, (

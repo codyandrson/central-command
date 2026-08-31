@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.11.0: documents ride the ledger — the deterministic tier and enrollment land
+
+- **Cross-lineage exact dedupe** (slice 3): a newly-observed file whose
+  extracted-text hash matches the latest version of any ACTIVE document —
+  across every source — becomes a location link to that document, never a new
+  lineage. Only when extraction was clean: raw-bytes hashes of scans never
+  merge lineages.
+- **The enrollment sweep** (`ingest/catalog_enroll.py`, slice 4): each clean
+  catalog version becomes one `kind='document'` work item on the existing
+  ledger — `thread_id = the lineage id` (the relatedness lock serializes a
+  lineage), `received_at = seen_at` (the claim query's newest-first order does
+  the rest), `feed='backlog'` so live email always outranks catalog work.
+  Head versions are full reads; older versions are labelled unified diffs
+  against their already-processed newer neighbour, with the ratified
+  rewrite fallback (>~half the document changed → full text). Two mechanical
+  outcomes cost no agent time: whitespace-only revisions AUTOFOLD
+  (`catalog.version.autofolded`), unreadable extractions are stamped and
+  skipped. Per-source pacing via `config.pace_per_walk` (default 25/sweep);
+  enrollment is idempotent so the remainder enrolls next sweep.
+- **`source.walk` heartbeat action**: walks every enabled source then enrolls
+  at its pace — deterministic end to end, quiet-eligible (a tree nobody
+  touched costs no history), seeded every-30-min and DISABLED. One dead
+  source records its error and the sweep continues.
+- The walk route now returns the enrollment summary; `catalog_overview` and
+  the Sources panel gained the `unenrolled` backlog count. The dispatcher and
+  steward needed zero changes — the diff shape is built at enroll time and
+  `_handle_document` reads `payload.text` as ever.
+
 ## 2026-08-30 — v2.10.0: the Sources panel — and the email feed is its first row
 
 - **Sources panel in the cockpit** (sources-catalog slice 2): a new top-level

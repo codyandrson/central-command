@@ -4610,6 +4610,16 @@ async def record_observation(
     lineage, version it only when the content hash changed, and upsert the
     location. Returns what changed so the caller (the watcher) can decide
     whether the walk did anything worth an event.
+
+    CROSS-LINEAGE EXACT DEDUPE (Decision 4, slice 3): a would-be NEW lineage
+    whose content hash equals the latest version of any existing ACTIVE
+    document — across every source — is not a new document at all, it is
+    another LOCATION of that one ("the same document circulating as a .docx and
+    an exported PDF"). Only when this observation extracted cleanly: an
+    empty/failed extraction hashes RAW BYTES, and two different scans that
+    happen to share a byte hash are the same FILE, while two that don't are
+    invisible to it — neither is evidence about the document, so merging
+    lineages on it would be a guess.
     """
     conn = await _conn()
     try:
@@ -4618,6 +4628,35 @@ async def record_observation(
                 "select id from catalog_document where source_id = $1 and lineage_key = $2",
                 source_id, lineage_key,
             )
+            if doc is None and (meta or {}).get("extraction") == "ok":
+                twin = await conn.fetchval(
+                    """
+                    select d.id from catalog_document d
+                      join catalog_version v on v.document_id = d.id
+                     where d.status = 'ACTIVE'
+                       and v.content_hash = $1
+                       and v.version_no = (select max(v2.version_no)
+                                             from catalog_version v2
+                                            where v2.document_id = d.id)
+                     limit 1
+                    """,
+                    content_hash,
+                )
+                if twin is not None:
+                    await conn.execute(
+                        """
+                        insert into catalog_location (id, source_id, document_id, uri)
+                        values ($1, $2, $3, $4)
+                        on conflict (source_id, uri) do update
+                          set document_id = $3, last_seen = now(), missing_at = null
+                        """,
+                        "loc_" + uuid.uuid4().hex[:12], source_id, twin, uri,
+                    )
+                    return {
+                        "document_id": twin, "version_id": None,
+                        "new_lineage": False, "new_version": False, "deduped": True,
+                    }
+
             new_lineage = doc is None
             if doc is None:
                 document_id = "doc_" + uuid.uuid4().hex[:12]
@@ -4674,6 +4713,7 @@ async def record_observation(
             "version_id": version_id,
             "new_lineage": new_lineage,
             "new_version": new_version,
+            "deduped": False,
         }
     finally:
         await conn.close()
@@ -4771,12 +4811,118 @@ async def list_catalog_documents(source_id: str | None = None) -> list[dict]:
         await conn.close()
 
 
+# --- enrollment (slice 3/4) ---------------------------------------------------
+# A catalog version's work item is keyed on the VERSION id, so enrollment is
+# idempotent per version and the anti-join below is the whole backlog query.
+# Mechanically disposed versions (autofolded, or skipped for unreadable text)
+# are stamped in `meta` and drop out of it — otherwise every sweep would
+# re-examine them forever and `remaining` would never reach zero.
+CATALOG_ITEM_PREFIX = "<cc-cat-"
+
+
+def catalog_message_id(version_id: str) -> str:
+    return f"{CATALOG_ITEM_PREFIX}{version_id}@central_command.local>"
+
+
+_UNENROLLED_VERSION = """
+               d.status = 'ACTIVE'
+           and not (v.meta ? 'autofolded' or v.meta ? 'skipped_enrollment')
+           and not exists (
+                   select 1 from work_item w
+                    where w.message_id = '<cc-cat-' || v.id || '@central_command.local>')
+"""
+
+
+def _version_row(row) -> dict:
+    d = dict(row)
+    d["meta"] = _jsonb(d["meta"])
+    return d
+
+
+async def unenrolled_catalog_versions(
+    source_id: str, limit: int | None = None
+) -> list[dict]:
+    """This source's catalog versions still owed a work item, NEWEST FIRST.
+
+    Newest-first is the governor (Decision 5): an older revision only enrolls
+    once everything newer has, so the diff item's newer neighbour is already
+    processed by the time the lineage lock lets it run.
+    """
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select v.id, v.document_id, v.version_no, v.seen_at, v.extracted_text,
+                   v.meta, d.title, d.lineage_key, d.source_id,
+                   (select max(v2.version_no) from catalog_version v2
+                     where v2.document_id = v.document_id) as head_version_no
+              from catalog_version v
+              join catalog_document d on d.id = v.document_id
+             where d.source_id = $1 and {_UNENROLLED_VERSION}
+             order by v.seen_at desc, v.version_no desc
+             limit $2
+            """,
+            source_id, limit,
+        )
+        return [_version_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def catalog_sibling_version(
+    document_id: str, version_no: int, *, newer: bool
+) -> dict | None:
+    """The IMMEDIATELY newer (or older) version of the same lineage, or None."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            select id, version_no, seen_at, extracted_text from catalog_version
+             where document_id = $1 and version_no {'>' if newer else '<'} $2
+             order by version_no {'asc' if newer else 'desc'}
+             limit 1
+            """,
+            document_id, version_no,
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def update_version_meta(version_id: str, patch: dict) -> None:
+    """Merge keys into a version's `meta` — never a replace: the watcher's own
+    extraction record (size, mtime, raw hash) must survive an enrollment stamp."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            "update catalog_version set meta = meta || $2::jsonb where id = $1",
+            version_id, json.dumps(patch),
+        )
+    finally:
+        await conn.close()
+
+
+async def catalog_backlog_remaining(source_id: str) -> int:
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            f"""
+            select count(*) from catalog_version v
+              join catalog_document d on d.id = v.document_id
+             where d.source_id = $1 and {_UNENROLLED_VERSION}
+            """,
+            source_id,
+        )
+    finally:
+        await conn.close()
+
+
 async def catalog_overview(source_id: str | None = None) -> dict:
     """Counts for the walk summary and the future Sources panel."""
     conn = await _conn()
     try:
         row = await conn.fetchrow(
-            """
+            f"""
             select
                 (select count(*) from catalog_document d
                   where $1::text is null or d.source_id = $1) as documents,
@@ -4790,7 +4936,11 @@ async def catalog_overview(source_id: str | None = None) -> dict:
                  where $1::text is null or l.source_id = $1) as locations,
                 (select count(*) from catalog_location l
                  where l.missing_at is not null
-                   and ($1::text is null or l.source_id = $1)) as missing
+                   and ($1::text is null or l.source_id = $1)) as missing,
+                (select count(*) from catalog_version v
+                  join catalog_document d on d.id = v.document_id
+                 where ($1::text is null or d.source_id = $1)
+                   and {_UNENROLLED_VERSION}) as unenrolled
             """,
             source_id,
         )

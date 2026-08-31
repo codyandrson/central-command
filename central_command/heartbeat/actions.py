@@ -188,6 +188,33 @@ async def _sandbox_run_script(schedule_id: str, params: dict) -> dict:
     return out
 
 
+async def _source_walk(schedule_id: str, params: dict) -> dict:
+    """Walk every ENABLED source, then enroll its catalog backlog at that
+    source's own pace (sources-catalog slices 3+4).
+
+    Deterministic throughout: the walk is `stat()` plus text extraction and the
+    enrollment is hash/diff comparison — no LLM either side. A source whose
+    kind has no watcher (or whose root has gone) records its error against that
+    source and the sweep continues: one dead SMB mount must not stop the
+    others. The email feed is not a `source` row, so it never appears here.
+    """
+    from central_command.db import repo
+    from central_command.ingest.catalog_enroll import enroll_pending
+    from central_command.ingest.watcher import walk_source
+
+    out: dict[str, dict] = {}
+    for source in await repo.list_sources():
+        if not source["enabled"]:
+            continue
+        try:
+            summary = await walk_source(source)
+            summary["enrollment"] = await enroll_pending(source)
+        except Exception as e:  # noqa: BLE001 — one bad source must not kill the tick
+            summary = {"error": f"{type(e).__name__}: {e}"}
+        out[source["id"]] = summary
+    return {"sources": out}
+
+
 async def _report_audit_agreement(schedule_id: str, params: dict) -> dict:
     """Snapshot the auditor's shadow-vs-operator agreement record onto the
     event log, so the D8 evidence accrues visibly without anyone remembering
@@ -1003,6 +1030,32 @@ ACTIONS: dict[str, ActionSpec] = {
             # the lease refused) touched nothing. An opened window is material
             # and logged — as is the heartbeat.window_closed that ends it.
             material=lambda r: bool(r.get("opened")),
+        ),
+        ActionSpec(
+            kind="source.walk",
+            description=(
+                "Walk every enabled document source and enroll its catalog "
+                "backlog at that source's pace (deterministic; no LLM)."
+            ),
+            params={},
+            required=(),
+            levers=(
+                "ingest.watcher.walk_source",
+                "ingest.catalog_enroll.enroll_pending",
+            ),
+            run=_source_walk,
+            # QUIET-ELIGIBLE. NON-AUTHORISING: it writes inventory rows and
+            # enrolls ledger items; nothing is worked until the dispatcher's
+            # valves say so, and every proposal that follows still gates.
+            # SELF-RECORDING: the walk emits catalog.walk.completed, the sweep
+            # catalog.enrolled / catalog.version.autofolded. The common tick —
+            # a tree nobody touched since the last walk — must cost no history.
+            material=lambda r: bool(any(
+                s.get("error") or s.get("new_lineages") or s.get("new_versions")
+                or s.get("marked_missing")
+                or (s.get("enrollment") or {}).get("enrolled")
+                for s in (r.get("sources") or {}).values()
+            )),
         ),
         ActionSpec(
             kind="task.create",

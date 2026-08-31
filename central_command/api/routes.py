@@ -3266,9 +3266,11 @@ async def upsert_source(body: SourceIn) -> dict:
 
 @router.post("/sources/{source_id}/walk")
 async def walk_source_route(source_id: str) -> dict:
-    """Synchronous for slice 1 — fine at the sizes this proves the pattern
-    against. # ponytail: background walks (a task id + poll) are the upgrade
-    when a source's tree is big enough that a request would time out."""
+    """Walk, then enroll what the walk found (slices 3+4). Synchronous for
+    slice 1 — fine at the sizes this proves the pattern against. # ponytail:
+    background walks (a task id + poll) are the upgrade when a source's tree is
+    big enough that a request would time out."""
+    from central_command.ingest.catalog_enroll import enroll_pending
     from central_command.ingest.watcher import walk_source
 
     source = await repo.get_source(source_id)
@@ -3280,7 +3282,7 @@ async def walk_source_route(source_id: str) -> dict:
         summary = await walk_source(source)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    return {"ok": True, "summary": summary}
+    return {"ok": True, "summary": summary, "enrollment": await enroll_pending(source)}
 
 
 @router.get("/catalog/documents")

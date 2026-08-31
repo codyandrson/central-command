@@ -1221,3 +1221,14 @@ create table if not exists wiki_claim (
     retired_at  timestamptz             -- set when a later page edit
                                          -- replaces/removes this claim
 );
+
+-- Sources-catalog slices 3+4 (2026-08-30): walk every enabled source and
+-- enroll its catalog backlog. Born disabled like every seed — a walk that
+-- discovers a 5,000-file drive must be the operator's decision, not a surprise
+-- the first time the heartbeat ticks. Per-source pacing (config.pace_per_walk)
+-- governs how much of it enrolls per sweep.
+insert into heartbeat_schedule
+    (id, name, schedule_kind, schedule, action_kind, action_params, created_by) values
+    ('source-walk', 'Source walk & catalog enrollment', 'every',
+     '{"every_seconds": 1800}', 'source.walk', '{}', 'seed:heartbeat')
+on conflict (id) do nothing;

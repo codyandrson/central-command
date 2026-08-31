@@ -15,6 +15,8 @@ export interface CatalogOverview {
   versions: number;
   locations: number;
   missing: number;
+  /** Versions still owed a work item — the catalog's enrollment backlog. */
+  unenrolled: number;
 }
 
 /** Ledger census — the email feed only; null on filesystem rows. */

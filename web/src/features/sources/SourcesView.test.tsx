@@ -22,7 +22,7 @@ const SOURCES = {
       read_only: false, enabled: true, config: { root: '/srv/docs' },
       cursor: { last_walk_at: '2026-08-30T08:00:00+00:00' },
       last_polled_at: '2026-08-30T08:00:00+00:00',
-      overview: { documents: 3, rescinded: 1, versions: 5, locations: 4, missing: 2 },
+      overview: { documents: 3, rescinded: 1, versions: 5, locations: 4, missing: 2, unenrolled: 2 },
       feed_overview: null,
     },
   ],
@@ -46,6 +46,6 @@ describe('SourcesView', () => {
   it('shows a filesystem source with its catalog counts', async () => {
     render(<SourcesView />);
     await waitFor(() => expect(screen.getByText('Docs drive')).toBeInTheDocument());
-    expect(screen.getByText(/3 docs · 5 versions · 2 missing · 1 rescinded/)).toBeInTheDocument();
+    expect(screen.getByText(/3 docs · 5 versions · 2 unenrolled · 2 missing · 1 rescinded/)).toBeInTheDocument();
   });
 });

@@ -24,7 +24,7 @@ function counts(s: Source): string {
   }
   const o = s.overview;
   if (!o) return '—';
-  return `${o.documents} docs · ${o.versions} versions · ${o.missing} missing · ${o.rescinded} rescinded`;
+  return `${o.documents} docs · ${o.versions} versions · ${o.unenrolled} unenrolled · ${o.missing} missing · ${o.rescinded} rescinded`;
 }
 
 function ConfigTable({ config }: { config: Record<string, unknown> }) {

@@ -57,6 +57,7 @@ def stub(monkeypatch):
     }]))
     monkeypatch.setattr(repo, "catalog_overview", lambda sid: _async({
         "documents": 3, "rescinded": 1, "versions": 5, "locations": 4, "missing": 2,
+        "unenrolled": 2,
     }))
     monkeypatch.setattr(repo, "count_work_items_by_state", lambda kind: _async({
         "UNPROCESSED": 2, "CLAIMED": 1, "FOLD_PENDING": 1, "DISMISS_PENDING": 1,
@@ -99,7 +100,9 @@ async def test_sources_list_carries_every_key_the_panel_reads(stub):
     assert fs["kind"] == "filesystem" and fs["read_only"] is False
     assert fs["last_polled_at"] == "2026-08-30T08:00:00+00:00"
     assert fs["feed_overview"] is None
-    assert set(fs["overview"]) == {"documents", "rescinded", "versions", "locations", "missing"}
+    assert set(fs["overview"]) == {
+        "documents", "rescinded", "versions", "locations", "missing", "unenrolled",
+    }
 
 
 async def test_source_with_no_cursor_still_reports_last_polled_at(monkeypatch, stub):
