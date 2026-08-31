@@ -190,6 +190,25 @@ REGISTRY: list[Capability] = [
         description="Remove an invented relationship (a self-loop, a fact never stated).",
     ),
     Capability(
+        name="catalog.tag",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "internal, reversible — a tag is curation metadata on a catalog "
+            "lineage; a wrong one is re-tagged, and nothing is ever deleted"
+        ),
+        holder="Executor (proposed by the knowledge-steward from its document work)",
+        route="db/repo.set_document_tags → catalog_document.tags",
+        arguments=["document_id", "tags", "mode? (replace|add|remove)"],
+        description=(
+            "Curate a catalog document's tags — currency and standing, in the "
+            "library's own words: 'current as of <date>', 'superseded', "
+            "'draft', 'rescinded'. Decision 7's catalog-metadata class: gated "
+            "today, and the auditor-agreement autonomy it names graduates "
+            "LATER, on the same evidence ladder the dismissal classes climb."
+        ),
+    ),
+    Capability(
         name="jira.link_issues",
         kind="write",
         gate="human approval",
@@ -1781,8 +1800,12 @@ POLICIES: list[Policy] = [
         status="enforced",
         enforced_at=(
             "gateway/auditor.py — CC_AUDITOR_ENABLED default false; shadow mode "
-            "records verdicts without touching any gate; active mode covers only "
-            "dismissal.confirm, never items the operator reopened"
+            "records verdicts without touching any gate; each class carries its "
+            "own name, its own agreement report and its own mode knob "
+            "(dismissal.confirm / CC_AUDITOR_MODE for email, "
+            "dismissal.confirm.document / CC_AUDITOR_DOCUMENT_MODE for "
+            "documents, work.bulk_dismiss for bulk), and no class ever "
+            "auto-confirms an item the operator reopened"
         ),
         guard="tests/test_auditor.py::test_shadow_mode_records_but_never_confirms",
         description=(

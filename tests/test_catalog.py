@@ -214,3 +214,110 @@ async def test_wiki_claim_table_accepts_a_row(cleanup):
     finally:
         await conn.execute("delete from wiki_claim where id = $1", claim_id)
         await conn.close()
+
+
+# --- catalog.tag, the gated curation capability (slice 6, 2026-08-30) ---------
+# Decision 7's "catalog metadata" class. Gated today; the auditor-agreement
+# autonomy it names graduates later, so what matters here is that the tag edit
+# is correct, refuses a document that isn't there, and leaves an event.
+
+
+async def _tagged_document(tmp_path, cleanup) -> str:
+    (tmp_path / "policy.txt").write_text("the standing policy")
+    source = await _make_source(cleanup, tmp_path)
+    await walk_source(source)
+    return (await repo.list_catalog_documents(source["id"]))[0]["id"]
+
+
+async def _tag(doc_id: str, tags: list[str], mode: str | None = None) -> str:
+    from central_command.gateway import executor
+
+    args = {"document_id": doc_id, "tags": tags}
+    if mode is not None:
+        args["mode"] = mode
+    return await executor.HANDLERS["catalog.tag"](args, "human:lee", "knowledge-steward")
+
+
+async def test_catalog_tag_replaces_adds_and_removes(tmp_path, cleanup):
+    doc_id = await _tagged_document(tmp_path, cleanup)
+
+    await _tag(doc_id, ["current as of 2026-08-01", "draft"])
+    assert (await repo.get_catalog_document(doc_id))["tags"] == [
+        "current as of 2026-08-01", "draft"
+    ]
+
+    await _tag(doc_id, ["superseded", "draft"], "add")   # 'draft' must not double
+    assert (await repo.get_catalog_document(doc_id))["tags"] == [
+        "current as of 2026-08-01", "draft", "superseded"
+    ]
+
+    await _tag(doc_id, ["draft"], "remove")
+    assert (await repo.get_catalog_document(doc_id))["tags"] == [
+        "current as of 2026-08-01", "superseded"
+    ]
+
+    # The default is replace — the whole list is rewritten.
+    await _tag(doc_id, ["rescinded"])
+    assert (await repo.get_catalog_document(doc_id))["tags"] == ["rescinded"]
+
+
+async def test_catalog_tag_emits_the_tagged_event(tmp_path, cleanup):
+    doc_id = await _tagged_document(tmp_path, cleanup)
+    since = await repo.latest_event_id()
+
+    await _tag(doc_id, ["superseded"], "add")
+
+    rows = await repo.list_events(since_id=since, kind="catalog.document.tagged")
+    mine = [e for e in rows if e["ref_id"] == doc_id]
+    assert len(mine) == 1
+    assert mine[0]["payload"] == {
+        "tags": ["superseded"], "mode": "add", "proposer": "agent:knowledge-steward"
+    }
+    assert mine[0]["actor"] == "human:lee"
+
+
+async def test_catalog_tag_refuses_an_unknown_document_and_bad_tag_shapes(
+    tmp_path, cleanup
+):
+    """World-state and value checks are the Executor's — the argument SPEC can
+    only see that `tags` is present, never what is inside it."""
+    from central_command.gateway import executor
+
+    doc_id = await _tagged_document(tmp_path, cleanup)
+
+    with pytest.raises(executor.ExecutorError):
+        await _tag("doc_nope", ["superseded"])
+    for bad in ("superseded", [""], ["ok", 7]):
+        with pytest.raises(executor.ExecutorError):
+            await _tag(doc_id, bad)
+    assert (await repo.get_catalog_document(doc_id))["tags"] == []
+
+
+def test_catalog_tag_arg_spec_reports_every_shape_problem_at_once():
+    """Both tiers run this one list, so a missing key never reaches an
+    approval and a bad mode never reaches the handler."""
+    from central_command.contract import validate_action_args
+
+    problems = validate_action_args("catalog.tag", {"mode": "append"})
+    assert len(problems) == 2
+    assert "missing required argument(s) document_id, tags" in problems[0]
+    assert "mode='append' is not one of replace, add, remove" in problems[1]
+    # `mode` is optional: a well-formed tag edit without it passes.
+    assert validate_action_args(
+        "catalog.tag", {"document_id": "doc_1", "tags": ["draft"]}
+    ) == []
+
+
+async def test_the_executor_refuses_a_malformed_catalog_tag_before_it_runs(monkeypatch):
+    from central_command.config import settings
+    from central_command.contract import Action, Reversibility
+    from central_command.gateway import executor
+
+    monkeypatch.setattr(settings, "executor_mode", "live")
+    bad = Action(capability="catalog.tag", arguments={"document_id": "doc_1"},
+                 target_ref={"system": "catalog", "id": "doc_1"},
+                 reversibility=Reversibility.reversible)
+    with pytest.raises(executor.ExecutionFailed) as e:
+        await executor.execute([bad], approver="human:lee", source_refs=[])
+    assert e.value.completed == []
+    assert "missing required argument(s) tags" in e.value.error

@@ -2861,7 +2861,7 @@ async def unaudited_dismiss_pending() -> list[dict]:
     try:
         rows = await conn.fetch(
             """
-            select id, subject, payload from work_item
+            select id, kind, subject, payload from work_item
              where state = 'DISMISS_PENDING' and not payload ? 'audit'
              order by claimed_at
             """
@@ -4768,6 +4768,41 @@ async def reinstate_document(document_id: str) -> bool:
             document_id,
         )
         return r.endswith("1")
+    finally:
+        await conn.close()
+
+
+async def set_document_tags(
+    document_id: str, tags: list[str], mode: str = "replace"
+) -> list[str] | None:
+    """Apply a tag edit and return the resulting list (None: no such document).
+
+    `add`/`remove` are read-modify-write, so they hold the row `for update`
+    inside one transaction — two concurrent adds must not lose one another's
+    tag. Order is preserved and duplicates collapse; a tag is never a delete
+    of anything but itself (Decision 9's posture).
+    """
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select tags from catalog_document where id = $1 for update", document_id
+            )
+            if row is None:
+                return None
+            current = _jsonb(row["tags"]) or []
+            if mode == "add":
+                new = list(dict.fromkeys([*current, *tags]))
+            elif mode == "remove":
+                new = [t for t in current if t not in tags]
+            else:
+                new = list(dict.fromkeys(tags))
+            await conn.execute(
+                "update catalog_document set tags = $2::jsonb, updated_at = now()"
+                " where id = $1",
+                document_id, json.dumps(new),
+            )
+        return new
     finally:
         await conn.close()
 

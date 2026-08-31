@@ -228,12 +228,17 @@ class _KindHandler:
 
 HANDLERS: dict[str, _KindHandler] = {
     "email": _KindHandler(_handle_email, "agent:inbox-triage", True, True),
-    # No auditor on document dismissals. The auditor is graduated on the EMAIL
-    # `dismissal.confirm` action class specifically (it re-derives from a raw
-    # email and its charter says so); extending it here by omission would be an
-    # ungraduated graduation. Document dismissals still require the operator's
-    # confirmation — they are simply never auto-confirmed.
-    "document": _KindHandler(_handle_document, "agent:knowledge-steward", False),
+    # Document dismissals audit from 2026-08-30 (sources-catalog slice 6) — and
+    # this flag is only half of it. The graduation machinery is what makes the
+    # flip legitimate: documents book their verdicts under their OWN action
+    # class (`dismissal.confirm.document`), so their agreement record never
+    # blends with email's, and they answer to their OWN mode knob
+    # (`CC_AUDITOR_DOCUMENT_MODE`, default SHADOW) — email may already be
+    # active while documents are still accruing evidence. Flipping this to
+    # True alone, sharing email's class and knob, is the ungraduated
+    # graduation the old comment here refused; per-class is how it stops being
+    # one. Auto-confirmation begins only when the operator flips that knob.
+    "document": _KindHandler(_handle_document, "agent:knowledge-steward", True),
 }
 
 
@@ -520,7 +525,9 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         # mode may confirm a concur. Off (default) or erroring, the item just
         # waits for the operator like it always did. The auditor resolves its
         # OWN model — the triage model passed here has the wrong output shape.
-        # Per-KIND: only the graduated action class runs it (see HANDLERS).
+        # Per-KIND: only the graduated action classes run it (see HANDLERS),
+        # and each runs under its OWN class and mode — `audit_kwargs_for_kind`
+        # is that seam, so the email path is unchanged by anything added there.
         if handler.audits_dismissals and settings.auditor_enabled:
             from central_command.gateway import auditor
 
@@ -532,6 +539,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
                 # A reopened item carries the operator's note — they asked for
                 # eyes on it, so the auditor may opine but never close it.
                 allow_auto_confirm=not note,
+                **auditor.audit_kwargs_for_kind(kind),
             )
         return {"item_id": item["id"], "ok": True, "dismiss_pending": True, **result}
 

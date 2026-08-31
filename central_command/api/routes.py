@@ -1463,6 +1463,7 @@ async def audit_parked_dismissals() -> dict:
             payload.get("text") or "",
             payload.get("dismissal_rationale") or "no rationale given",
             allow_auto_confirm=not payload.get("operator_note"),
+            **auditor.audit_kwargs_for_kind(it.get("kind")),
         )
         if record:
             audited += 1
@@ -3255,11 +3256,18 @@ async def upsert_source(body: SourceIn) -> dict:
     # The email feed is synthesized at read time, never stored.
     if body.id == EMAIL_FEED_ID:
         raise HTTPException(422, f"{EMAIL_FEED_ID!r} is the synthesized email row — pick another id")
-    if body.kind != "filesystem":
-        raise HTTPException(422, f"unknown source kind {body.kind!r} (have: filesystem)")
-    root = (body.config or {}).get("root")
-    if not root or not Path(root).is_absolute():
-        raise HTTPException(422, "config.root must be an absolute path")
+    if body.kind not in ("filesystem", "confluence"):
+        raise HTTPException(422, f"unknown source kind {body.kind!r} (have: filesystem, confluence)")
+    if body.kind == "filesystem":
+        root = (body.config or {}).get("root")
+        if not root or not Path(root).is_absolute():
+            raise HTTPException(422, "config.root must be an absolute path")
+    else:
+        config = body.config or {}
+        if not config.get("cql") and not config.get("space_keys"):
+            raise HTTPException(
+                422, "config.cql or a non-empty config.space_keys is required for a confluence source"
+            )
     row = await repo.upsert_source(body.id, body.kind, body.name, body.config, body.enabled)
     return {"ok": True, "source": row}
 

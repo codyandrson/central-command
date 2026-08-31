@@ -395,6 +395,43 @@ async def _work_bulk_dismiss(args: dict, approver: str, proposer: str | None) ->
     )
 
 
+async def _catalog_tag(args: dict, approver: str, proposer: str | None) -> str:
+    """Curate a catalog lineage's tags (sources-catalog slice 6, Decision 7).
+
+    Shape is already checked from `contract.ARG_SPECS` before this runs; what
+    belongs here is what only the world can answer — that the document still
+    exists, and that the tags are actually strings (a list is a shape the spec
+    cannot see inside).
+    """
+    from central_command import events
+    from central_command.db import repo
+
+    document_id = args["document_id"]
+    tags = args["tags"]
+    if not isinstance(tags, list) or not all(
+        isinstance(t, str) and t.strip() for t in tags
+    ):
+        raise ExecutorError("tags must be a list of non-empty strings")
+    mode = args.get("mode") or "replace"
+
+    applied = await repo.set_document_tags(
+        document_id, [t.strip() for t in tags], mode
+    )
+    if applied is None:
+        raise ExecutorError(f"unknown catalog document: {document_id}")
+
+    await events.emit(
+        "catalog.document.tagged", ref_id=document_id,
+        payload={"tags": applied, "mode": mode,
+                 "proposer": f"agent:{proposer}" if proposer else None},
+        actor=approver,
+    )
+    return (
+        f"catalog document {document_id} tags ({mode}): "
+        f"{', '.join(applied) or '(none)'}"
+    )
+
+
 async def _loe_create(args: dict, approver: str, proposer: str | None) -> str:
     """Create a line of effort the agent interviewed the operator about.
 
@@ -1862,6 +1899,7 @@ HANDLERS = {
     "loe.record_checkin": _loe_record_checkin,
     "loe.update": _loe_update,
     "work.bulk_dismiss": _work_bulk_dismiss,
+    "catalog.tag": _catalog_tag,
     "skill.create": _skill_create,
     "skill.doc_add": _skill_doc_add,
     "task.create": _task_create,

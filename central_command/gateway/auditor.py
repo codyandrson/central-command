@@ -8,10 +8,12 @@ The design rules honoured here:
 - **Shadow-first, graduated per action-class, revocable.** `CC_AUDITOR_ENABLED`
   (default false) turns it on in `shadow` mode: verdicts are recorded on the
   log and shown to the operator, but every gate stays exactly as it was.
-  `CC_AUDITOR_MODE=active` graduates ONE action class — dismissal
+  `CC_AUDITOR_MODE=active` graduates ONE action class — EMAIL dismissal
   confirmations, the lowest-risk class there is (a wrong concur costs a missed
   email review, never a world change). Flip the config back and the human gate
-  returns; graduation is configuration, never code.
+  returns; graduation is configuration, never code. Every other class has its
+  own name and its own knob: `CC_AUDITOR_DOCUMENT_MODE` for document
+  dismissals, so one class going active never carries another with it.
 - **The auditor is itself fallible.** Active mode auto-confirms only CONCUR
   verdicts; every CHALLENGE parks for the operator with the auditor's reason
   shown. An auditor error degrades to the human gate — it can never wedge the
@@ -37,6 +39,27 @@ AUDIT_ACTION_CLASS = "dismissal.confirm"
 # operator. Same off switch (`CC_AUDITOR_ENABLED` / `CC_AUDITOR_MODE=active`)
 # and the same per-kind flag on the dispatcher's HANDLERS.
 BULK_AUDIT_ACTION_CLASS = "work.bulk_dismiss"
+# Document dismissals (sources-catalog slice 6, 2026-08-30). Same shape as the
+# email class one source-kind over, and deliberately NOT the same class: a
+# document is not an email, its agreement bookkeeping is its own, and its mode
+# is its own knob (`CC_AUDITOR_DOCUMENT_MODE`, default shadow). Inheriting the
+# email class here — by sharing the name or by sharing the flag — would be a
+# graduation nobody decided.
+DOCUMENT_AUDIT_ACTION_CLASS = "dismissal.confirm.document"
+
+
+def audit_kwargs_for_kind(kind: str | None) -> dict:
+    """The per-CLASS audit parameters for one work-item kind — the one seam
+    every caller of `audit_dismissal` routes through (the dispatcher, the
+    startup sweep, the operator's backlog button), so a new class is decided
+    once rather than in three places that can drift apart."""
+    if kind == "document":
+        return {
+            "kind_label": "DOCUMENT",
+            "action_class": DOCUMENT_AUDIT_ACTION_CLASS,
+            "mode": settings.auditor_document_mode,
+        }
+    return {}
 
 
 class AuditVerdict(BaseModel):
@@ -86,20 +109,30 @@ async def audit_dismissal(
     agent_rationale: str,
     allow_auto_confirm: bool = True,
     model=None,
+    *,
+    kind_label: str = "EMAIL",
+    action_class: str = AUDIT_ACTION_CLASS,
+    mode: str | None = None,
 ) -> dict | None:
     """Audit one parked dismissal and apply the outcome for the current mode.
 
     Returns the audit record, or None when the auditor is disabled or errored —
     in both cases the item simply stays DISMISS_PENDING behind the human gate.
+
+    The three keyword-only parameters are the per-CLASS seam: what the source
+    is called in the prompt, which action class the verdict is booked under,
+    and which mode knob governs it (`None` → the email class's
+    `settings.auditor_mode`). Callers get them from `audit_kwargs_for_kind`.
     """
     if not settings.auditor_enabled:
         return None
 
     prompt = (
-        f"EMAIL (subject: {subject or '(none)'}):\n"
+        f"{kind_label} (subject: {subject or '(none)'}):\n"
         f"---\n{email_text}\n---\n\n"
         f'The triage agent dismissed it, saying: "{agent_rationale}"\n\n'
-        "Does 'no action needed' hold? Re-derive from the email itself."
+        "Does 'no action needed' hold? Re-derive from the "
+        f"{kind_label.lower()} itself."
     )
     try:
         await ensure_registered()
@@ -111,14 +144,16 @@ async def audit_dismissal(
     except Exception as e:  # noqa: BLE001 — a down auditor degrades to the human gate
         await events.emit(
             "audit.error", ref_id=item_id,
-            payload={"error": str(e), "transient": is_transient(e)},
+            payload={"error": str(e), "transient": is_transient(e),
+                     "action_class": action_class},
             actor="auditor",
         )
         return None
 
-    mode = settings.auditor_mode if settings.auditor_mode == "active" else "shadow"
+    mode = mode if mode is not None else settings.auditor_mode
+    mode = mode if mode == "active" else "shadow"
     record = {
-        "action_class": AUDIT_ACTION_CLASS,
+        "action_class": action_class,
         "verdict": "concur" if verdict.concur else "challenge",
         "rationale": verdict.rationale,
         "mode": mode,
@@ -147,7 +182,7 @@ async def audit_dismissal(
             await events.emit(
                 "work.dismissal_confirmed",
                 ref_id=item_id,
-                payload={"by": "auditor", "action_class": AUDIT_ACTION_CLASS,
+                payload={"by": "auditor", "action_class": action_class,
                          "rationale": verdict.rationale},
                 actor="auditor",
             )
@@ -323,6 +358,7 @@ async def audit_sweep(model=None) -> dict:
             payload.get("dismissal_rationale") or "no rationale given",
             allow_auto_confirm=not payload.get("operator_note"),
             model=model,
+            **audit_kwargs_for_kind(row.get("kind")),
         )
         items += record is not None
 
@@ -348,8 +384,13 @@ async def audit_sweep(model=None) -> dict:
 #                          this email would have been buried)
 
 
-def pair_verdicts(rows: list[dict]) -> dict:
+def pair_verdicts(rows: list[dict], action_class: str = AUDIT_ACTION_CLASS) -> dict:
     """Pure pairing over event rows (any kinds; ordered by id ascending).
+
+    ONE action class per report — pass `DOCUMENT_AUDIT_ACTION_CLASS` for the
+    document bucket. The classes must never blend: each graduates on its own
+    agreement record, so a report mixing them would justify a flip nobody's
+    evidence supports.
 
     A verdict pairs with the NEXT operator outcome for its item, so an item
     that cycles (dismiss → reopen → dismiss again) contributes one pair per
@@ -372,7 +413,7 @@ def pair_verdicts(rows: list[dict]) -> dict:
             # One class per record: a bulk verdict is keyed on a PROPOSAL and
             # pairs with an approval, not with a confirm/reopen — counting it
             # here would sit in `awaiting_outcome` forever and skew the rate.
-            if (payload.get("action_class") or AUDIT_ACTION_CLASS) != AUDIT_ACTION_CLASS:
+            if (payload.get("action_class") or AUDIT_ACTION_CLASS) != action_class:
                 continue
             pending[ref] = {
                 "verdict": payload.get("verdict"),
@@ -382,6 +423,10 @@ def pair_verdicts(rows: list[dict]) -> dict:
             }
         elif kind == "work.dismissal_confirmed":
             if e.get("actor") == "auditor":
+                # Same class filter as the verdict: an auditor confirm in the
+                # other class must not inflate this one's tally.
+                if (payload.get("action_class") or AUDIT_ACTION_CLASS) != action_class:
+                    continue
                 auto_confirmed += 1
                 pending.pop(ref, None)
             else:  # operator: single confirm carries ref_id, Confirm-all a list
@@ -447,13 +492,14 @@ async def auditor_signals() -> list[dict]:
     return signals_from_report(await agreement_report())
 
 
-async def agreement_report() -> dict:
-    """The shadow-vs-operator record, computed fresh from the event log every
-    time — the log is the truth; nothing here is cached or re-stated."""
+async def agreement_report(action_class: str = AUDIT_ACTION_CLASS) -> dict:
+    """The shadow-vs-operator record for ONE action class, computed fresh from
+    the event log every time — the log is the truth; nothing here is cached or
+    re-stated."""
     rows = await repo.list_events_of_kinds(
         ["audit.verdict", "work.dismissal_confirmed", "work.reopened"]
     )
-    report = pair_verdicts(rows)
+    report = pair_verdicts(rows, action_class)
     # Subjects for the disagreement lists — that's what the operator reviews
     # when deciding graduation.
     ids = {p["item_id"] for p in report["auditor_misses"] + report["over_cautious"]}

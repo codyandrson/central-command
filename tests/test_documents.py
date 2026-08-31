@@ -217,14 +217,17 @@ async def test_an_unknown_kind_fails_the_item_loudly(clean_docs):
     assert failures[0]["payload"]["kind"] == "confluence-page"
 
 
-@pytestmark_db
-async def test_a_document_dismissal_has_the_steward_actor_and_no_audit(
-    clean_docs, monkeypatch
-):
-    """A document that yields nothing durable parks DISMISS_PENDING like any
-    other no-action claim — but the auditor is graduated on the EMAIL
-    dismissal.confirm class, so it must not run here. Enabled on purpose: the
-    proof is that it stays silent while it is switched ON."""
+# --- document dismissals audit in their OWN class (slice 6, 2026-08-30) -------
+# The auditor used to be silent here on purpose: it was graduated on the EMAIL
+# `dismissal.confirm` class, and running it on documents by flipping one flag
+# would have been a graduation nobody decided. What landed is the machinery
+# that makes the flip legitimate — documents book verdicts under
+# `dismissal.confirm.document` and answer to `CC_AUDITOR_DOCUMENT_MODE`, which
+# defaults to SHADOW. These tests pin exactly that separation.
+
+
+@pytest.fixture()
+async def auditing_steward(clean_docs, monkeypatch):
     from central_command.runtime import steward
 
     monkeypatch.setattr(settings, "auditor_enabled", True)
@@ -232,19 +235,144 @@ async def test_a_document_dismissal_has_the_steward_actor_and_no_audit(
         steward, "_resolve_model",
         aresolve(lambda model=None: model or make_steward_no_extraction_model()),
     )
+    return monkeypatch
 
-    enrolled = await ledger.enroll_document(_title(4), DOC_TEXT)
+
+async def _dismissed_document(n: int) -> dict:
+    enrolled = await ledger.enroll_document(_title(n), DOC_TEXT)
     result = await dispatcher.dispatch_item(enrolled["item_id"])
     assert result["dismiss_pending"] is True
+    return enrolled
 
+
+@pytestmark_db
+async def test_a_document_dismissal_has_the_steward_actor_and_a_shadow_audit(
+    auditing_steward
+):
+    """Default mode: the verdict is recorded beside the item and the human gate
+    is untouched — the document parks DISMISS_PENDING exactly as before."""
+    auditing_steward.setattr(settings, "auditor_document_mode", "shadow")
+
+    enrolled = await _dismissed_document(4)
     item = await repo.get_work_item(enrolled["item_id"])
     assert item["state"] == "DISMISS_PENDING"
-    assert (item["payload"] or {}).get("audit") is None, "no auditor on documents"
+    audit = (item["payload"] or {})["audit"]
+    assert audit["action_class"] == "dismissal.confirm.document"
+    assert audit["mode"] == "shadow"
+    assert audit["auto_confirmed"] is False
 
     rows = await repo.list_events(ref_id=enrolled["item_id"])
     parked = [e for e in rows if e["kind"] == "work.dismiss_pending"]
     assert parked and parked[0]["actor"] == "agent:knowledge-steward"
-    assert [e for e in rows if e["kind"] == "audit.verdict"] == []
+    verdicts = [e for e in rows if e["kind"] == "audit.verdict"]
+    assert len(verdicts) == 1
+    assert verdicts[0]["payload"]["action_class"] == "dismissal.confirm.document"
+    assert [e for e in rows if e["kind"] == "work.dismissal_confirmed"] == []
+
+
+@pytestmark_db
+async def test_the_email_class_going_active_never_carries_documents_with_it(
+    auditing_steward
+):
+    """THE point of a per-class knob: `CC_AUDITOR_MODE=active` graduates email
+    and email alone. A document under document-shadow still waits for the
+    operator, however concurring the auditor was."""
+    auditing_steward.setattr(settings, "auditor_mode", "active")
+    auditing_steward.setattr(settings, "auditor_document_mode", "shadow")
+
+    enrolled = await _dismissed_document(41)
+    item = await repo.get_work_item(enrolled["item_id"])
+    assert item["state"] == "DISMISS_PENDING"
+    audit = (item["payload"] or {})["audit"]
+    assert audit["verdict"] == "concur"
+    assert audit["mode"] == "shadow", "documents follow their OWN knob"
+    assert audit["auto_confirmed"] is False
+
+
+@pytestmark_db
+async def test_active_document_mode_confirms_a_concur_with_the_verdict_first(
+    auditing_steward
+):
+    auditing_steward.setattr(settings, "auditor_document_mode", "active")
+    since = await repo.latest_event_id()
+
+    enrolled = await _dismissed_document(42)
+    item = await repo.get_work_item(enrolled["item_id"])
+    assert item["state"] == "PROCESSED"
+    assert (item["payload"] or {})["audit"]["auto_confirmed"] is True
+
+    kinds = [
+        e["kind"] for e in await repo.list_events(
+            since_id=since, ref_id=enrolled["item_id"]
+        )
+    ]
+    assert kinds.index("audit.verdict") < kinds.index("work.dismissal_confirmed")
+
+
+@pytestmark_db
+async def test_a_reopened_document_is_never_auto_confirmed(auditing_steward):
+    """A reopen note means 'I want eyes on this' — the same rule as email, and
+    it must hold in the class that just went active."""
+    auditing_steward.setattr(settings, "auditor_document_mode", "active")
+    enrolled = await _dismissed_document(43)
+
+    conn = await repo._conn()
+    try:  # the parked state a mid-cycle reopen produces
+        await conn.execute(
+            "update work_item set state = 'UNPROCESSED', terminal_at = null,"
+            " payload = (payload - 'audit')"
+            " || '{\"operator_note\": \"look again please\"}'"
+            " where id = $1",
+            enrolled["item_id"],
+        )
+    finally:
+        await conn.close()
+
+    await dispatcher.dispatch_item(enrolled["item_id"])
+    item = await repo.get_work_item(enrolled["item_id"])
+    assert item["state"] == "DISMISS_PENDING"
+    audit = (item["payload"] or {})["audit"]
+    assert audit["verdict"] == "concur"
+    assert audit["operator_hold"] is True
+    assert audit["auto_confirmed"] is False
+
+
+@pytestmark_db
+async def test_a_failed_document_audit_degrades_to_the_human_gate(auditing_steward):
+    from central_command.gateway import auditor
+
+    auditing_steward.setattr(settings, "auditor_document_mode", "active")
+
+    def broken(model, charter=None):
+        raise RuntimeError("auditor model unavailable")
+
+    auditing_steward.setattr(auditor, "build_auditor", broken)
+    since = await repo.latest_event_id()
+    enrolled = await _dismissed_document(44)
+
+    item = await repo.get_work_item(enrolled["item_id"])
+    assert item["state"] == "DISMISS_PENDING"
+    assert "audit" not in (item["payload"] or {})
+    errors = await repo.list_events(since_id=since, kind="audit.error")
+    mine = [e for e in errors if e["ref_id"] == enrolled["item_id"]]
+    assert mine and mine[0]["payload"]["action_class"] == "dismissal.confirm.document"
+
+
+@pytestmark_db
+async def test_document_verdicts_never_land_in_the_email_agreement_report(
+    auditing_steward
+):
+    """Each class graduates on its OWN evidence — a document verdict counted in
+    the email report would justify a flip nobody's record supports."""
+    from central_command.gateway import auditor
+
+    auditing_steward.setattr(settings, "auditor_document_mode", "active")
+    enrolled = await _dismissed_document(45)
+
+    email = await auditor.agreement_report()
+    docs = await auditor.agreement_report(auditor.DOCUMENT_AUDIT_ACTION_CLASS)
+    assert enrolled["item_id"] not in {p["item_id"] for p in email["pairs"]}
+    assert docs["auto_confirmed"] >= 1
 
 
 # --- the hand-feed API --------------------------------------------------------

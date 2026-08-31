@@ -249,8 +249,14 @@ STEWARD_TEMPLATE = HireTemplate(
     # library's own skills, and it needs to FIND a source before it can capture
     # one. web-search is its own pack precisely so this grant is a decision
     # about the steward and not a silent widening of every web-read holder.
+    # catalog-propose added 2026-08-30 (sources-catalog slice 6): the steward
+    # already reads every catalog version off the ledger, so it is the agent
+    # that KNOWS which lineage a new version supersedes — the tag is that
+    # finding written where the catalog can act on it. Gated like everything
+    # else; Decision 7's auditor-agreement autonomy for this class graduates
+    # later, on evidence.
     default_packs=("graph-read", "graph-propose", "consult", "ask-operator",
-                   "web-read", "web-search", "skill-propose"),
+                   "web-read", "web-search", "skill-propose", "catalog-propose"),
     taskable=False,
     conversational=True,
 )

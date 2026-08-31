@@ -4,6 +4,48 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.12.0: the Confluence watcher, document auditing in shadow, and gated catalog tags
+
+- **Document dismissals now audit — shadow-first, in their OWN class**
+  (slice 6): the auditor re-derives "no action needed" from the document
+  itself, booking verdicts under `dismissal.confirm.document` with its own
+  mode knob (`CC_AUDITOR_DOCUMENT_MODE`, default `shadow`) — email may be
+  active while documents accrue their own agreement evidence; one class
+  going active never carries another with it. `audit_kwargs_for_kind` is
+  the one seam all three audit call sites route through. Agreement
+  reporting is class-scoped, so the records never blend. Auto-confirmation
+  begins only when the operator flips the knob.
+- **`catalog.tag` — the steward can propose catalog curation** (Decision 7's
+  metadata class, gated for now; auditor-agreement autonomy graduates later
+  on evidence): replace/add/remove a document's tags ("current as of",
+  "superseded", "draft", …) through the full five-site capability plumbing
+  (ARG_SPECS, registry, executor handler, `catalog-propose` pack, steward
+  template). Every parity guard extended. NOTE for the operator: the LIVE
+  steward was hired before this release — grant it `catalog-propose` by
+  hand (`insert into agent_grant … on conflict do nothing`); a fresh
+  install gets it from the hire template. Ungranted, it simply never
+  proposes a tag.
+
+- **`kind: 'confluence'` sources** (slice 5): scope by `config.cql` or
+  `config.space_keys`, always `type = page`, incremental walks via a
+  `lastmodified >=` cursor ordered ascending (the 2026-07-29 record's
+  Decision 3 — CQL crawls are ground truth; the air-gapped work target has
+  no webhooks anyway, so this is the target shape, not a stopgap). Page
+  bodies extract through the same seam; `lineage_key` is the page id;
+  version meta carries the Confluence version number, timestamp and space.
+- **Cursor overlap is configurable** (`cursor_overlap_minutes`, default 2 —
+  CQL is minute-granular) with a documented caution: Confluence evaluates
+  bare CQL date literals in the API user's PROFILE TIMEZONE — set that
+  account to UTC or raise the overlap past the offset, or increments can
+  silently skip pages. Re-reads are free (content-hash idempotency).
+- **No missing-detection on increments, deliberately** — a CQL window only
+  sees changed pages, so marking the rest missing would be the false-missing
+  trap; deletion detection waits for the occasional full-crawl reconcile.
+  Per-page fetch failures are counted and skipped, never abort the walk.
+- `search()` now surfaces the CQL result's top-level `lastModified` as
+  `last_modified` (additive) — the only API carrier of a page's "when".
+  Enrollment needed zero changes: the sweep is kind-agnostic.
+
 ## 2026-08-30 — v2.11.0: documents ride the ledger — the deterministic tier and enrollment land
 
 - **Cross-lineage exact dedupe** (slice 3): a newly-observed file whose

@@ -125,9 +125,12 @@ async def test_ensure_registered_is_idempotent_and_hires_a_full_roster_member():
     # database's steward row predated it and idempotent ensure_hired never
     # re-grants; the fresh-per-run test database (conftest, 2026-08-09)
     # exposed the stale expectation on its first run.
-    assert sorted(grants) == ["ask-operator", "consult", "graph-propose",
-                              "graph-read", "skill-propose", "web-read",
-                              "web-search"]
+    # catalog-propose added 2026-08-30 (sources-catalog slice 6): the steward
+    # reads every catalog version off the ledger, so it is the agent that KNOWS
+    # which lineage a new one supersedes — gated like everything else.
+    assert sorted(grants) == ["ask-operator", "catalog-propose", "consult",
+                              "graph-propose", "graph-read", "skill-propose",
+                              "web-read", "web-search"]
     # Slice 1 grants no task-propose and no jira packs.
     assert "task-propose" not in grants
 

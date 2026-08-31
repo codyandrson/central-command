@@ -407,6 +407,9 @@ async def search(cql: str, limit: int | None = None) -> dict:
         content = r.get("content") if isinstance(r.get("content"), dict) else {}
         row = _page_row(content) if content else {}
         row["excerpt"] = r.get("excerpt")
+        # Top-level on each v1 search result (not nested under content.version)
+        # — the field the catalog watcher's incremental cursor advances on.
+        row["last_modified"] = r.get("lastModified")
         results.append(row)
     return {"ok": True, "kind": "confluence", "operation": "search",
             "cql": q, "results": results, "count": len(results), "truncated": truncated}

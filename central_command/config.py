@@ -360,8 +360,16 @@ class Settings(BaseSettings):
     #                      "active" graduates exactly one low-risk action class:
     #                      auto-confirming CONCURRED dismissals. Revocable by
     #                      flipping back — graduation is config, never code.
+    #   auditor_document_mode -> the DOCUMENT dismissal class's own knob
+    #                      (sources-catalog slice 6). `auditor_mode` stays the
+    #                      EMAIL class's knob and nothing else: a per-class
+    #                      mode is exactly what makes turning documents on NOT
+    #                      an ungraduated graduation — email can be active
+    #                      while documents accrue their own shadow evidence,
+    #                      and each class is revoked on its own.
     auditor_enabled: bool = False
     auditor_mode: str = "shadow"
+    auditor_document_mode: str = "shadow"
 
     # Graph verification auditor (2026-08-19 spec) — closes the loop after
     # graph.add_episode: the approval gated the EPISODE, extraction ran after

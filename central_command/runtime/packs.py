@@ -395,6 +395,41 @@ PACKS: dict[str, Pack] = {
             ),
         ),
     ),
+    "catalog-propose": Pack(
+        name="catalog-propose",
+        description=(
+            "Propose curation tags on the source catalog's documents — what the "
+            "library currently trusts, and what it no longer does."
+        ),
+        tool_names=("propose_action",),
+        capabilities=(
+            GatedCapability(
+                name="catalog.tag",
+                arguments=("{'document_id': '<the catalog document id>', "
+                           "'tags': ['<tag>', …], "
+                           "'mode': 'replace' | 'add' | 'remove'}"),
+                notes=("target_ref = {'system': 'catalog', 'id': '<document_id>', "
+                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
+                       "`mode` is OPTIONAL and defaults to 'replace' (the whole "
+                       "tag list is rewritten) — use 'add' or 'remove' when you "
+                       "mean one tag and want the rest left alone. Tag from the "
+                       "document work you have actually done, never "
+                       "speculatively: when a version you read supersedes an "
+                       "earlier lineage, tag the OLD one 'superseded' and cite "
+                       "the newer document; when a document states its own "
+                       "currency, tag 'current as of <date>' in the source's "
+                       "own words; tag 'draft' when the document says it is "
+                       "one. 'rescinded' is the library saying it no longer "
+                       "trusts a source at all — propose it only on an explicit "
+                       "statement (the operator's, or the document's own "
+                       "withdrawal notice), never on a hunch that something "
+                       "looks old. Nothing is ever deleted: a tag is how the "
+                       "catalog records what WAS trusted and when. Cite the "
+                       "evidence for every tag exactly as you do for an "
+                       "episode."),
+            ),
+        ),
+    ),
     "graph-curate": Pack(
         name="graph-curate",
         description=(
