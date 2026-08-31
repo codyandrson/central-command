@@ -1039,6 +1039,31 @@ async def save_proposal(
         await conn.close()
 
 
+async def live_consult_draft(caller_session_id: str, agent_id: str) -> dict | None:
+    """The surviving side effect of a consult that already DRAFTED for this
+    caller session: the specialist's still-undecided proposal, or None.
+
+    Keyed on `origin->>'caller_session_id'` (stamped by `runtime/consult.py`'s
+    drafted branch) plus the specialist's id. A RUNNING caller session can only
+    coexist with such a row through the crash window between the specialist's
+    proposal committing and the asker's own consult-wait park committing — see
+    the replay guard in `runtime/consult.py` (TASKS-61/62, 2026-08-31)."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            select id, session_id, intent, expected_effect from proposal
+            where status = 'AWAITING_HUMAN' and agent_id = $2
+              and origin->>'caller_session_id' = $1
+            order by created_at desc limit 1
+            """,
+            caller_session_id, agent_id,
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
 async def set_proposal_status(proposal_id: str, status: str) -> None:
     conn = await _conn()
     try:

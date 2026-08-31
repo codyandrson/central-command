@@ -736,3 +736,79 @@ async def test_the_tool_forwards_the_chain_into_the_consult(monkeypatch):
     answer = await consult_agent(ctx, "jira-expert", "how do links work?")
     assert answer == "advice"
     assert seen.get("chain") == ("inbox-triage",)
+
+
+# --- a crash-replayed consult reuses the surviving draft ----------------------
+
+
+@needs_pg
+async def test_a_replayed_consult_reuses_the_surviving_draft():
+    """The specialist's proposal commits inside `consult()`; the asker's own
+    consult-wait park commits later, in the caller — so a process death in
+    between leaves a live draft with nobody parked on it, and the retry sweep
+    re-drives the asker's whole turn. Found live 2026-08-31: two replays 11
+    minutes apart each drafted for real, and TASKS-61 AND TASKS-62 were both
+    approved and created. The replay must reuse the surviving AWAITING_HUMAN
+    draft, never re-run the specialist — and a DECIDED draft must not
+    short-circuit a genuinely new consult."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    caller_session = "sess_" + uuid.uuid4().hex[:12]
+    specialist_session = "sess_" + uuid.uuid4().hex[:12]
+    prop_id = "prop_" + uuid.uuid4().hex[:12]
+    try:
+        await repo.create_running_session(specialist_session, "jira-expert")
+        await repo.save_proposal(
+            proposal_id=prop_id,
+            session_id=specialist_session,
+            agent_id="jira-expert",
+            intent="create the tracking issue",
+            actions=[], evidence=[],
+            expected_effect="one issue exists in TASKS",
+            idempotency_key=f"{prop_id}:0",
+            origin={"consulted_by": "inbox-triage",
+                    "caller_session_id": caller_session},
+        )
+        since = await repo.latest_event_id()
+
+        def _explode(messages, info: AgentInfo) -> ModelResponse:
+            raise AssertionError("a replayed consult must not re-run the specialist")
+
+        outcome: dict = {}
+        answer = await consult_mod.consult(
+            "jira-expert", "ensure the task is tracked in Jira",
+            model=FunctionModel(_explode), caller_id="inbox-triage",
+            session_id=caller_session, outcome=outcome,
+        )
+        assert prop_id in answer and "AWAITING THE OPERATOR'S REVIEW" in answer
+        assert outcome == {"proposal_id": prop_id, "session_id": specialist_session}
+        reused = [
+            r for r in await repo.list_events(
+                since_id=since, kind="agent.consult_draft_reused")
+            if r["ref_id"] == caller_session
+        ]
+        assert len(reused) == 1
+        assert reused[0]["payload"]["proposal_id"] == prop_id
+
+        # Once the draft is DECIDED the wait is genuinely over: the same
+        # session consulting again is a new question, not a replay.
+        await repo.set_proposal_status(prop_id, "EXECUTED")
+
+        def _advise(messages, info: AgentInfo) -> ModelResponse:
+            return ModelResponse(parts=[TextPart(content="fresh advice")])
+
+        answer = await consult_mod.consult(
+            "jira-expert", "and how do I link it?",
+            model=FunctionModel(_advise), caller_id="inbox-triage",
+            session_id=caller_session,
+        )
+        assert answer == "fresh advice"
+    finally:
+        conn = await repo._conn()
+        try:
+            await conn.execute("delete from proposal where id = $1", prop_id)
+            await conn.execute(
+                "delete from session where id = $1", specialist_session)
+        finally:
+            await conn.close()

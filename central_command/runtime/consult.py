@@ -538,6 +538,51 @@ async def consult(
     if refusal:
         raise ValueError(refusal)
 
+    # THE REPLAY GUARD (found live 2026-08-31: TASKS-61 and TASKS-62, one
+    # request). The drafted branch below commits the SPECIALIST's proposal
+    # inside this call, but the ASKER's own consult-wait park is committed
+    # later, by our caller — so a process death in between leaves a live
+    # proposal with nobody parked on it, and the retry sweep re-drives the
+    # asker's whole turn. Re-running the specialist would draft a SECOND real
+    # proposal: its duplicate check sees only committed world state, never a
+    # sibling still AWAITING_HUMAN. A running asker session can only coexist
+    # with a live draft of its own making through that crash window (the wait
+    # otherwise holds it parked until the draft is decided), so the replay
+    # REUSES the surviving draft — same discipline as `resume_park.arm()`,
+    # one level deeper. Keyed on the same specialist on purpose: a replay
+    # re-runs the same history, and a different target means a different
+    # question, not this window.
+    if session_id:
+        from central_command import events
+        from central_command.db import repo
+
+        survived = await repo.live_consult_draft(session_id, agent_id)
+        if survived is not None:
+            await events.emit(
+                "agent.consult_draft_reused",
+                ref_id=session_id,
+                payload={
+                    "target": agent_id,
+                    "caller": caller_id,
+                    "proposal_id": survived["id"],
+                    "specialist_session_id": survived["session_id"],
+                },
+                actor=f"agent:{caller_id}" if caller_id else "agent",
+            )
+            if outcome is not None:
+                outcome["proposal_id"] = survived["id"]
+                outcome["session_id"] = survived["session_id"]
+            effect = (survived["expected_effect"] or "").strip()
+            return _clip(
+                _DRAFTED_TEMPLATE.format(
+                    agent_id=agent_id,
+                    proposal_id=survived["id"],
+                    intent=survived["intent"],
+                    effect=f" (expected effect: {effect})." if effect else ".",
+                ),
+                ANSWER_CEILING,
+            )
+
     charter = await _charter_for(agent_id)
     if charter is None:
         raise ValueError(

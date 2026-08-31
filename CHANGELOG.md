@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.17.1: a replayed consult reuses the draft that survived
+
+Fixes the duplicate-side-effect window found in the 2026-08-31 operational
+audit (two real Jira issues, TASKS-61 and TASKS-62, created 14 seconds apart
+from one request). A consulted specialist's drafted proposal commits inside
+`consult()`, but the asker's own consult-wait park commits later, in the
+caller — so a process death in between left a live proposal with nobody
+parked on it, and the retry sweep re-drove the asker's whole turn. The
+re-run specialist's duplicate check sees only committed world state, never a
+sibling still AWAITING_HUMAN, so it drafted a second real proposal.
+
+- `consult()` now opens with a replay guard: a running asker session can
+  only coexist with a live draft of its own making through that crash
+  window, so the replay reuses the surviving AWAITING_HUMAN proposal (same
+  specialist, keyed on `origin.caller_session_id`) instead of re-running the
+  specialist — the same arm-before-run discipline `resume_park` enforces,
+  one level deeper. A decided draft never short-circuits a new consult.
+- The reuse is loud: `agent.consult_draft_reused` lands on the audit trail,
+  and the asker parks on the existing specialist session exactly as if the
+  draft were fresh.
+- New `repo.live_consult_draft()`; regression-tested in
+  `tests/test_consult.py` (replay reuses, decided draft does not).
+
 ## 2026-08-31 — v2.17.0: the great scrub — every file read, every loose end pulled
 
 An exhaustive file-by-file review of the whole tree (~30 read-only audit
