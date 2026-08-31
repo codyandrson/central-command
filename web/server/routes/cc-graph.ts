@@ -54,6 +54,7 @@ app.get('/api/graph/all', rateLimitGeneral, (c) => proxyGet(c, '/graph/all'));
 app.get('/api/graph/neighborhood', rateLimitGeneral, (c) => proxyGet(c, '/graph/neighborhood'));
 app.get('/api/graph/provenance', rateLimitGeneral, (c) => proxyGet(c, '/graph/provenance'));
 app.get('/api/graph/status', rateLimitGeneral, (c) => proxyGet(c, '/graph/status'));
+app.get('/api/graph/audit', rateLimitGeneral, (c) => proxyGet(c, '/graph/audit'));
 
 /** Proxy a body-carrying write, forwarding the JSON verbatim. */
 async function proxyBody(c: Context, method: 'POST' | 'PATCH', backendPath: string) {

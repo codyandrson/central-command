@@ -45,6 +45,65 @@ export interface GraphGroupScope {
   agent_id: string | null;
 }
 
+export interface AuditNodeRef {
+  uuid: string;
+  name: string;
+  labels: string[];
+  group_id: string;
+}
+
+export interface AuditDuplicatePair {
+  a: AuditNodeRef;
+  b: AuditNodeRef;
+  similarity: number;
+  basis: 'embedding' | 'name';
+}
+
+export interface AuditEdgeFact {
+  uuid: string;
+  name: string;
+  fact: string;
+  created_at: string | null;
+  valid_at: string | null;
+}
+
+export interface AuditDuplicateEdgeGroup {
+  source: { uuid: string; name: string };
+  target: { uuid: string; name: string };
+  edges: AuditEdgeFact[];
+}
+
+export interface AuditHealthNode {
+  uuid: string;
+  name: string;
+  group_id: string;
+}
+
+export interface AuditDanglingEdge {
+  uuid: string;
+  claimed_source: string;
+  actual_source: string;
+  claimed_target: string;
+  actual_target: string;
+}
+
+export interface GraphAudit {
+  duplicate_entities: AuditDuplicatePair[];
+  duplicate_edges: AuditDuplicateEdgeGroup[];
+  health: {
+    isolated_nodes: AuditHealthNode[];
+    untyped_nodes: AuditHealthNode[];
+    missing_embedding_nodes: AuditHealthNode[];
+    dangling_edges: AuditDanglingEdge[];
+    counts: {
+      isolated_nodes: number;
+      untyped_nodes: number;
+      missing_embedding_nodes: number;
+      dangling_edges: number;
+    };
+  };
+}
+
 export interface GraphStatus {
   available: boolean;
   node_count: number;
@@ -134,6 +193,19 @@ export function useGraph() {
     }
   }, []);
 
+  const audit = useCallback(async (groupId?: string, threshold = 0.87): Promise<GraphAudit | null> => {
+    try {
+      const params = new URLSearchParams({ threshold: String(threshold) });
+      if (groupId) params.set('group_id', groupId);
+      const result = await fetchResult<GraphAudit>(`/api/graph/audit?${params.toString()}`);
+      setError(null);
+      return result;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }, []);
+
   const saveSettings = useCallback(async (
     patch: { graphistry_enabled?: boolean; graphistry_url?: string },
   ): Promise<GraphStatus | null> => {
@@ -204,7 +276,7 @@ export function useGraph() {
   }>('/api/graph/merge', 'POST', { keep_uuid, drop_uuid }), [write]);
 
   return {
-    status, error, fetchStatus, search, neighborhood, provenance, saveSettings, loadAll,
+    status, error, fetchStatus, search, neighborhood, provenance, saveSettings, loadAll, audit,
     entityTypes, createNode, updateNode, deleteNode,
     createEdge, updateEdge, deleteEdge, mergeNodes,
   };

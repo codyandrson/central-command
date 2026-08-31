@@ -12,12 +12,27 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import cytoscape, { type Core, type NodeSingular, type EdgeSingular } from 'cytoscape';
 import fcose from 'cytoscape-fcose';
-import { Waypoints, Search, X, AlertTriangle, Plus } from 'lucide-react';
+import expandCollapse from 'cytoscape-expand-collapse';
+import { Waypoints, Search, X, AlertTriangle, Plus, ShieldAlert, Boxes } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useGraph, type GraphNode, type GraphEdge, type GraphEpisode, type GraphGroupScope } from './useGraph';
+import { AuditPanel } from './AuditPanel';
+import { communitiesFrom } from './clustering';
 
 cytoscape.use(fcose);
+cytoscape.use(expandCollapse);
+
+/** The slice of the expand-collapse api this panel uses (the extension is
+ *  untyped — see cytoscape-expand-collapse.d.ts). */
+type ExpandCollapseApi = { collapseAll(): void; expandAll(): void };
+type WithExpandCollapse = Core & { expandCollapse(options: unknown): ExpandCollapseApi };
+
+/** Layout used both for incremental re-layouts and by the extension after an
+ *  expand/collapse — same options, so the canvas settles the same way. */
+const INCREMENTAL_FCOSE = {
+  name: 'fcose', quality: 'default', animate: false, fit: false, padding: 40, randomize: false,
+};
 
 /** "Public" / "Private · <agent_id>" — the operator-facing label for a raw
  *  `group_id`, everywhere one is shown. The underlying id stays available
@@ -67,6 +82,39 @@ const CY_STYLE: cytoscape.StylesheetJson = [
       'target-arrow-color': 'rgba(148,163,184,0.28)',
       opacity: 0.6,
     },
+  },
+  {
+    // A community supernode: muted, so it reads as scaffolding rather than as
+    // an entity the operator can curate.
+    selector: 'node[?cluster]',
+    style: {
+      'background-color': 'rgba(99,102,241,0.10)',
+      'background-opacity': 1,
+      'border-color': 'rgba(148,163,184,0.45)',
+      'border-width': 1,
+      shape: 'round-rectangle',
+      'text-valign': 'top',
+      'text-margin-y': -4,
+      color: 'rgba(148,163,184,0.95)',
+      'font-size': 10,
+      padding: '12px',
+    },
+  },
+  {
+    // Collapsed: it now stands in for its members, so give it real presence.
+    selector: 'node[?cluster].cy-expand-collapse-collapsed-node',
+    style: {
+      'background-color': 'rgba(99,102,241,0.35)',
+      'text-valign': 'bottom',
+      'text-margin-y': 4,
+      width: 34,
+      height: 34,
+      shape: 'round-rectangle',
+    },
+  },
+  {
+    selector: 'edge.cy-expand-collapse-meta-edge',
+    style: { 'line-style': 'dotted', width: 2, label: '' },
   },
   {
     selector: 'node:selected',
@@ -646,6 +694,7 @@ export function GraphView() {
   } = graph;
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  const ecRef = useRef<ExpandCollapseApi | null>(null);
   const nodeDataRef = useRef<Map<string, GraphNode>>(new Map());
   const edgeDataRef = useRef<Map<string, GraphEdge>>(new Map());
 
@@ -657,8 +706,10 @@ export function GraphView() {
   const [episodes, setEpisodes] = useState<GraphEpisode[]>([]);
   const [types, setTypes] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
+  const [auditing, setAuditing] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
   const [truncated, setTruncated] = useState(false);
+  const [clustered, setClustered] = useState(false);
   // Mirrors nodeDataRef as STATE, because the merge/relate pickers have to
   // re-render when the canvas gains a node; a ref alone never triggers that.
   const [loadedNodes, setLoadedNodes] = useState<GraphNode[]>([]);
@@ -675,6 +726,14 @@ export function GraphView() {
       wheelSensitivity: 0.25,
     });
     cyRef.current = cy;
+    ecRef.current = (cy as WithExpandCollapse).expandCollapse({
+      layoutBy: INCREMENTAL_FCOSE,
+      fisheye: false,
+      animate: false,
+      // The undo-redo extension isn't installed; leaving this true is harmless
+      // (undoRedoUtilities no-ops without cy.undoRedo) but says the wrong thing.
+      undoable: false,
+    });
     // cytoscape hard-sizes its canvases to the container at init and never
     // re-measures. Without this, the first search (results list appearing =
     // container narrowing) leaves stale 100%-width canvases that, combined
@@ -685,7 +744,7 @@ export function GraphView() {
       if (cy.elements().length > 0) cy.fit(undefined, 40);
     });
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); cy.destroy(); cyRef.current = null; };
+    return () => { ro.disconnect(); cy.destroy(); cyRef.current = null; ecRef.current = null; };
   }, []);
 
   // `fresh` is true only for a from-scratch canvas (first layout, or a
@@ -695,13 +754,24 @@ export function GraphView() {
   // whole canvas the operator was just looking at.
   const runLayout = useCallback((fresh: boolean) => {
     cyRef.current?.layout({
-      name: 'fcose',
-      quality: 'default',
-      animate: false,
-      fit: fresh,
-      padding: 40,
-      randomize: fresh,
+      ...INCREMENTAL_FCOSE, fit: fresh, randomize: fresh,
     } as cytoscape.LayoutOptions).run();
+  }, []);
+
+  /** Undo clustering: expand every supernode (which RESTORES the children the
+   *  extension removed on collapse), orphan them, drop the supernodes. Returns
+   *  whether anything was clustered, so callers can drop the toggle. A no-op
+   *  when there are none, which is what lets the curation paths call it
+   *  unconditionally. */
+  const uncluster = useCallback(() => {
+    const cy = cyRef.current;
+    if (!cy || cy.nodes('[?cluster]').empty()) return false;
+    ecRef.current?.expandAll();
+    // Re-query after expandAll: `move()` and `restore()` both hand back new
+    // element refs, so a collection captured before this is stale.
+    cy.nodes('[?cluster]').children().move({ parent: null });
+    cy.nodes('[?cluster]').remove();
+    return true;
   }, []);
 
   const mergeIn = useCallback((nodes: GraphNode[], edges: GraphEdge[], fresh = false) => {
@@ -712,8 +782,13 @@ export function GraphView() {
     fresh = fresh || cy.elements().length === 0;
     let changed = false;
     for (const n of nodes) {
+      // `nodeDataRef` is what "on the canvas" means, NOT the cytoscape lookup:
+      // expand-collapse `.remove()`s a collapsed cluster's children and stashes
+      // them for restore, so `getElementById` reads empty for a node that is
+      // very much still loaded — adding it again would duplicate it on expand.
+      const known = nodeDataRef.current.has(n.uuid);
       nodeDataRef.current.set(n.uuid, n);
-      if (cy.getElementById(n.uuid).empty()) {
+      if (!known && cy.getElementById(n.uuid).empty()) {
         cy.add({ data: { id: n.uuid, label: n.name } });
         changed = true;
       }
@@ -749,7 +824,9 @@ export function GraphView() {
   const rebuild = useCallback((nodes: GraphNode[], edges: GraphEdge[]) => {
     const cy = cyRef.current;
     if (!cy) return;
+    // Everything goes, supernodes included — so clustering is off afterwards.
     cy.elements().remove();
+    setClustered(false);
     nodeDataRef.current.clear();
     edgeDataRef.current.clear();
     mergeIn(nodes, edges, true);
@@ -810,6 +887,9 @@ export function GraphView() {
 
     const onNodeTap = (evt: cytoscape.EventObject) => {
       const target = evt.target as NodeSingular;
+      // A `cluster:*` supernode has no entry here, so this is also the guard
+      // that stops a tap on one opening the DetailDrawer as if it were an
+      // entity. Expanding it is the extension's cue's job, not ours.
       const node = nodeDataRef.current.get(target.id());
       if (!node) return;
       setSelection({ kind: 'node', node });
@@ -852,6 +932,16 @@ export function GraphView() {
     void expandNode(node.uuid);
   }, [mergeIn, expandNode]);
 
+  // Audit panel results reuse the exact same expand-on-canvas path as a
+  // search result click — the operator then curates via the DetailDrawer's
+  // existing merge/edit tooling, same as any other node on the canvas.
+  const loadNodesOnCanvas = useCallback((nodes: GraphNode[]) => {
+    viewModeRef.current = 'neighborhood';
+    mergeIn(nodes, []);
+    if (nodes[0]) setSelection({ kind: 'node', node: nodes[0] });
+    for (const n of nodes) void expandNode(n.uuid);
+  }, [mergeIn, expandNode]);
+
   const groupOptions = useMemo(() => status?.groups ?? [], [status]);
 
   /** Load the WHOLE graph (or the selected group). The panel's default is
@@ -872,6 +962,34 @@ export function GraphView() {
     }
   }, [loadAll, groupId, asOf, mergeIn, rebuild]);
 
+  /** Cluster / uncluster. Clustering is a snapshot of the canvas at the moment
+   *  it is switched on: nodes merged in afterwards (a neighborhood expansion)
+   *  arrive loose and stay loose, because re-running Louvain mid-exploration
+   *  would reshuffle everything the operator was reading. Toggle off and on to
+   *  re-cluster. */
+  const toggleCluster = useCallback(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    if (clustered) {
+      uncluster();
+      setClustered(false);
+      runLayout(false);
+      return;
+    }
+    const clusters = communitiesFrom(
+      cy.nodes().map((n) => ({ id: n.id(), label: String(n.data('label') ?? n.id()) })),
+      cy.edges().map((e) => ({ source: e.source().id(), target: e.target().id() })),
+    );
+    if (clusters.length === 0) return;
+    for (const c of clusters) {
+      cy.add({ data: { id: c.id, label: c.label, cluster: true } });
+      // Parent must exist before a child can move into it.
+      for (const m of c.members) cy.getElementById(m).move({ parent: c.id });
+    }
+    setClustered(true);
+    ecRef.current?.collapseAll();  // runs `layoutBy` itself
+  }, [clustered, uncluster, runLayout]);
+
   const curate = useMemo(() => ({
     updateNode: graph.updateNode,
     deleteNode: graph.deleteNode,
@@ -889,6 +1007,10 @@ export function GraphView() {
    *  rather than guessing at it. */
   const applyChange = useCallback(async (change: DrawerChange) => {
     const cy = cyRef.current;
+    // Curation edits topology, and every `getElementById` below would miss a
+    // node hidden inside a collapsed cluster. Flatten first rather than teach
+    // each case to look through the extension's stash.
+    if (uncluster()) setClustered(false);
     switch (change.kind) {
       case 'node-updated':
         nodeDataRef.current.set(change.node.uuid, change.node);
@@ -929,7 +1051,7 @@ export function GraphView() {
         break;
     }
     void fetchStatus();
-  }, [expandNode, fetchStatus]);
+  }, [expandNode, fetchStatus, uncluster]);
 
   // Display-state only: drops a node (and its now-dangling edges — cytoscape
   // removes connected edges automatically) off the canvas without touching
@@ -938,6 +1060,10 @@ export function GraphView() {
   const removeFromCanvas = useCallback((uuid: string) => {
     const cy = cyRef.current;
     if (!cy) return;
+    // Same reason as applyChange: a collapsed-away node isn't in the graph to
+    // be removed, and a removed cluster member would leave a stale entry in
+    // the extension's restore stash.
+    if (uncluster()) setClustered(false);
     for (const [eid, e] of edgeDataRef.current) {
       if (e.source === uuid || e.target === uuid) edgeDataRef.current.delete(eid);
     }
@@ -945,7 +1071,7 @@ export function GraphView() {
     cy.getElementById(uuid).remove();
     setSelection((s) => (s?.kind === 'node' && s.node.uuid === uuid ? null : s));
     setLoadedNodes([...nodeDataRef.current.values()]);
-  }, []);
+  }, [uncluster]);
 
   const createNode = useCallback(async (draft: GraphNode) => {
     const { uuid } = await graph.createNode({
@@ -1039,6 +1165,26 @@ export function GraphView() {
         >
           {loadingAll ? 'Loading…' : 'Show all'}
         </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={clustered ? 'default' : 'outline'}
+          onClick={toggleCluster}
+          title={clustered
+            ? 'Expand every community back to its members'
+            : 'Group the loaded graph into communities and collapse each into one node'}
+        >
+          <Boxes size={12} aria-hidden="true" /> {clustered ? 'Uncluster' : 'Cluster'}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setAuditing((v) => !v)}
+          title="Duplicate candidates and structural health, read-only"
+        >
+          <ShieldAlert size={12} aria-hidden="true" /> Audit
+        </Button>
       </form>
 
       {truncated && (
@@ -1081,6 +1227,14 @@ export function GraphView() {
               `absolute` utility, and a relative inset-0 box collapses to
               0-height — an invisible canvas (found live 2026-08-10). */}
           <div ref={containerRef} className="h-full w-full" />
+          {auditing && (
+            <AuditPanel
+              groupId={groupId}
+              audit={graph.audit}
+              onLoadNodes={loadNodesOnCanvas}
+              onClose={() => setAuditing(false)}
+            />
+          )}
           <DetailDrawer
             selection={selection}
             episodes={episodes}
