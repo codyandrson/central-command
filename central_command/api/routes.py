@@ -3298,6 +3298,18 @@ async def list_catalog_documents(source_id: str | None = None) -> dict:
     return {"documents": await repo.list_catalog_documents(source_id)}
 
 
+@router.get("/wiki/claims")
+async def list_wiki_claims(page_ref: str | None = None) -> dict:
+    """The claims ledger with each claim's COMPUTED state (Decision 9) —
+    operator visibility over what the wiki asserts and whether its evidence
+    still stands. `page_ref` narrows it to one page."""
+    states = await repo.wiki_claim_states(page_ref)
+    counts: dict[str, int] = {}
+    for entry in states:
+        counts[entry["state"]] = counts.get(entry["state"], 0) + 1
+    return {"claims": states, "counts": counts}
+
+
 class RescindIn(BaseModel):
     reason: str
 

@@ -28,7 +28,10 @@ HELPER_CALL = "mcp_toolsets_for("
 
 # Assemblers: compute mcp_toolsets/mcp_section from grants and thread them
 # into a builder. Source must reference the helper.
-WIRED = {"agent.py", "run.py", "converse.py", "steward.py"}
+# wiki_agent.py joined 2026-08-30: `run_repair` (sources-catalog slice 7) is a
+# fresh-run assembler like steward.run_document — the file still exposes a leaf
+# BUILDER too, but a file with an assembler in it must reference the helper.
+WIRED = {"agent.py", "run.py", "converse.py", "steward.py", "wiki_agent.py"}
 
 # Deliberately NOT wired, with the reason pinned so an accidental
 # half-wiring (or an accidental full-wiring that then silently regresses)
@@ -58,11 +61,6 @@ EXEMPT = {
         "the helper itself"
     ),
     "confluence_expert.py": (
-        "leaf builder — accepts extra_toolsets/mcp_section as parameters "
-        "computed by its caller (run.py/agent.py), never calls the helper "
-        "itself"
-    ),
-    "wiki_agent.py": (
         "leaf builder — accepts extra_toolsets/mcp_section as parameters "
         "computed by its caller (run.py/agent.py), never calls the helper "
         "itself"

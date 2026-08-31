@@ -86,6 +86,11 @@ def test_action_registry_parity_with_the_lever_allowlist():
         "ingest.catalog_enroll.enroll_pending", # the catalog backlog onto the
                                             # ordinary ledger, at the source's
                                             # own pace
+        "ingest.wiki_freshness.sweep",      # compares recorded evidence
+                                            # versions against the catalog and
+                                            # enrolls one repair item per
+                                            # stale page — deterministic, no
+                                            # LLM, no gate opened
     }
     seen = set()
     for kind, spec in hb_actions.ACTIONS.items():
@@ -312,6 +317,16 @@ def test_quiet_eligibility_is_an_explicit_allowlist():
                             # catalog.walk.completed, the sweep
                             # catalog.enrolled / catalog.version.autofolded.
                             # A tree nobody touched must cost no history.
+        "wiki.freshness",   # NON-AUTHORISING: it enrolls repair items —
+                            # nothing is WORKED until the dispatcher's valves
+                            # say so, and the repair proposal still gates. The
+                            # 'auto' annotation it may write is the operator's
+                            # own graduated action class (CC_WIKI_ANNOTATION_
+                            # MODE), off by default. SELF-RECORDING: a changed
+                            # stale set emits wiki.claims.stale, an enrollment
+                            # work.enrolled, a panel wiki.page.annotated. A
+                            # wiki whose sources have not moved must cost no
+                            # history.
     }
     quiet = {k for k, s in hb_actions.ACTIONS.items() if s.material is not None}
     assert quiet == quiet_allowlist, (

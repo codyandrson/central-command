@@ -870,6 +870,63 @@ async def confluence_page_versions(ctx: RunContext, page_id: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+# --- catalog-read (sources-catalog slice 7) -----------------------------------
+# The library the wiki agent renders index pages FROM (Decision 3: the catalog
+# is the system of record; Confluence is a rendered view of it). Read-only, and
+# it reads `db.repo` directly — the runtime tier owns its own reads; only the
+# gate is forbidden here.
+
+# One version's worth of text is plenty to compose an index entry from, and a
+# lineage can hold twenty versions. The cap is per-DOCUMENT, applied before
+# _clip, so a long document cannot eat the whole tool result on its own.
+_CATALOG_TEXT_CAP = 4000
+
+
+async def catalog_list_documents(ctx: RunContext, source_id: str | None = None) -> str:
+    """List the catalog's document lineages — id, title, source, status
+    (ACTIVE or RESCINDED), tags, latest version number, and how many locations
+    each was found at. `source_id` narrows it to one source.
+
+    This is the LIBRARY: what the team actually holds, versioned. Compose index
+    and overview pages from it rather than from memory, and cite what you use
+    with kind='catalog', source_ref=<document id> — a catalog citation is the
+    one the control plane re-checks for staleness after the page ships.
+    A RESCINDED lineage is one the library no longer trusts: never state its
+    content as current. Read-only.
+    """
+    from central_command.db import repo
+
+    try:
+        rows = await repo.list_catalog_documents(source_id)
+    except Exception as e:  # noqa: BLE001
+        return _read_failed("catalog documents read", e)
+    return _clip(json.dumps(rows, default=str))
+
+
+async def catalog_get_document(ctx: RunContext, document_id: str) -> str:
+    """Read one catalog lineage in full: the document row (status, tags,
+    rescission reason), its version list (version number, content hash,
+    seen-at), every location it was found at, and the LATEST version's
+    extracted text (clipped — older versions' text is not returned; ask for
+    what you need one lineage at a time).
+
+    `document_id` comes from catalog_list_documents. Read-only.
+    """
+    from central_command.db import repo
+
+    try:
+        row = await repo.catalog_document_detail(document_id)
+    except Exception as e:  # noqa: BLE001
+        return _read_failed("catalog document read", e)
+    if row is None:
+        return f"no catalog document {document_id!r}"
+    text = row["latest_extracted_text"]
+    if len(text) > _CATALOG_TEXT_CAP:
+        row["latest_extracted_text"] = text[:_CATALOG_TEXT_CAP]
+        row["latest_extracted_text_truncated"] = True
+    return _clip(json.dumps(row, default=str))
+
+
 async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
     """Ask a consultable teammate a specific question and get their distilled
     answer — the way to use expertise you do not hold (Jira structure and

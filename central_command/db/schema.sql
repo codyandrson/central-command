@@ -1232,3 +1232,20 @@ insert into heartbeat_schedule
     ('source-walk', 'Source walk & catalog enrollment', 'every',
      '{"every_seconds": 1800}', 'source.walk', '{}', 'seed:heartbeat')
 on conflict (id) do nothing;
+
+-- Sources-catalog slice 7 (2026-08-30), Decision 9: the wiki agent renders
+-- index pages FROM the catalog, so it must be able to READ the catalog. The
+-- pack is read-only — curation tags stay the steward's (catalog-propose).
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('wiki-agent',        'catalog-read',             'seed:2026-08-30')
+on conflict (agent_id, pack) do nothing;
+
+-- Sources-catalog slice 7 (2026-08-30), Decision 9: sweep the claims ledger,
+-- flag pages whose evidence moved on, and enroll ONE repair item per page.
+-- Born disabled like every seed, and daily rather than hourly on purpose:
+-- repair is SCHEDULED and paced, never event-triggered churn.
+insert into heartbeat_schedule
+    (id, name, schedule_kind, schedule, action_kind, action_params, created_by) values
+    ('wiki-freshness', 'Wiki claim freshness sweep', 'every',
+     '{"every_seconds": 86400}', 'wiki.freshness', '{}', 'seed:heartbeat')
+on conflict (id) do nothing;

@@ -371,6 +371,21 @@ class Settings(BaseSettings):
     auditor_mode: str = "shadow"
     auditor_document_mode: str = "shadow"
 
+    # Deterministic stale-page annotation (sources-catalog slice 7,
+    # Decision 9's own action class) — the same graduation ladder, its own
+    # knob:
+    #   'off'  (default) -> staleness reaches pages ONLY through gated repair
+    #                       proposals. The claims ledger and the freshness
+    #                       sweep still run; nothing touches Confluence.
+    #   'auto'           -> the operator's graduation flip: the freshness
+    #                       sweep writes the bounded stale panel DIRECTLY
+    #                       through the credentialed Confluence client,
+    #                       stamped actor 'system:wiki-freshness' and emitting
+    #                       wiki.page.annotated. Deterministic template over
+    #                       claim rows — no model anywhere in that path, which
+    #                       is what makes it graduatable at all.
+    wiki_annotation_mode: str = "off"
+
     # Graph verification auditor (2026-08-19 spec) — closes the loop after
     # graph.add_episode: the approval gated the EPISODE, extraction ran after
     # it, unreviewed. Same ladder, its own flags:

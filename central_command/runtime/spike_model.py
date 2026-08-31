@@ -776,6 +776,51 @@ def make_steward_no_extraction_model() -> FunctionModel:
     return FunctionModel(_respond_steward_no_extraction)
 
 
+# --- Wiki repair stand-in (sources-catalog slice 7) ----------------------------
+# One confluence.update_page proposal against the page named in the brief, so
+# the freshness → ledger → run_repair → park loop runs offline.
+
+def _respond_wiki_repair(messages, info: AgentInfo) -> ModelResponse:
+    text = " ".join(
+        str(getattr(p, "content", ""))
+        for m in messages
+        for p in getattr(m, "parts", [])
+    )
+    m = re.search(r"^Page: (\S+)", text, re.MULTILINE)
+    page_id = m.group(1) if m else "0"
+    proposal = {
+        "intent": "Restate the page's claims against the current sources.",
+        "actions": [{
+            "capability": "confluence.update_page",
+            "arguments": {
+                "page_id": page_id,
+                "title": "Repaired page",
+                "body_storage": "<p>Restated from the current catalog versions.</p>",
+                "expected_version": 1,
+            },
+            "target_ref": {"system": "confluence", "id": page_id,
+                           "read_version": "1"},
+            "reversibility": "reversible",
+        }],
+        "evidence": [{
+            "kind": "confluence",
+            "source_ref": page_id,
+            "locator": f"confluence page {page_id}",
+            "claim": "The page cites a source that has moved on.",
+        }],
+        "expected_effect": "the page states what its sources say now",
+        "confidence": {"level": "medium",
+                       "rationale": "The claims ledger names exactly what moved."},
+    }
+    return ModelResponse(
+        parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
+    )
+
+
+def make_wiki_repair_model() -> FunctionModel:
+    return FunctionModel(_respond_wiki_repair)
+
+
 # --- Orchestrator stand-in (D7) ------------------------------------------------
 # Deterministic routing so the recommendation loop runs offline: Jira-ish tasks
 # go to jira-expert; anything else honestly reports that no candidate fits.

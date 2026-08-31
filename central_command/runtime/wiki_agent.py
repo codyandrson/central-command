@@ -113,6 +113,113 @@ async def build_wiki_agent(
     )
 
 
+async def _resolve_model(model=None):
+    """The wiki agent resolves its OWN model on the repair path — the
+    local-`_resolve_model` convention (`runtime/steward.py`): the caller's
+    model is whatever the dispatcher was driving with."""
+    if model is not None:
+        return model
+    from central_command.config import settings
+
+    if settings.demo_mode:
+        from central_command.runtime.spike_model import make_wiki_repair_model
+
+        return make_wiki_repair_model()
+    return await resolve_model(agent_id=AGENT_ID)
+
+
+async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dict:
+    """Run the wiki agent over ONE freshness repair brief and park whatever it
+    produces (sources-catalog slice 7, Decision 9).
+
+    Modelled on `steward.run_document` and inheriting its three rules: load the
+    governed charter (this is a FRESH run, never `build_agent_for`), classify
+    the deferred call before parking it, and park through `park_proposal` —
+    the only save path. No folding: a repair item covers one page and nothing
+    else.
+    """
+    import uuid
+
+    from central_command.runtime import packs as packs_mod
+    from central_command.runtime import skills as skills_mod
+    from central_command.runtime.agent import load_charter
+    from central_command.runtime.durable import (
+        classify_deferred,
+        extract_deferred,
+        proposal_from_call,
+    )
+    from central_command.runtime.packs import granted_packs
+    from central_command.runtime.proposals import park_proposal
+    from central_command.runtime.roster import team_section
+    from central_command.runtime.run import _run_live, _total_tokens
+
+    await ensure_registered()
+
+    session_id = "sess_" + uuid.uuid4().hex[:12]
+    deps = TriageDeps(agent_id=AGENT_ID, session_id=session_id)
+
+    resolved = await _resolve_model(model)
+    packs = await granted_packs(AGENT_ID)
+    caps, catalog = await skills_mod.loadout(AGENT_ID)
+    agent = await build_wiki_agent(
+        model=resolved,
+        charter=await load_charter(AGENT_ID) or render_v0(CHARTER),
+        packs=packs,
+        capabilities=caps,
+        skills_catalog=catalog,
+        extra_toolsets=await packs_mod.mcp_toolsets_for(AGENT_ID, packs),
+        mcp_section=await packs_mod.mcp_charter_section(AGENT_ID, packs),
+        team_section=await team_section(AGENT_ID),
+    )
+
+    result = await _run_live(
+        agent, prompt, model=resolved, deps=deps,
+        agent_id=AGENT_ID, session_id=session_id,
+    )
+    tokens = _total_tokens(result)
+
+    call = extract_deferred(result)
+    if call is None:
+        from central_command.runtime.converse import land_session
+
+        await land_session(session_id, agent_id=AGENT_ID)
+        return {"deferred": False, "output": str(result.output), "tokens": tokens,
+                "session_id": session_id}
+
+    kind = classify_deferred(call)
+    if kind == "ask":
+        from central_command.runtime.questions import park_question
+
+        asked = await park_question(
+            session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+        )
+        return {**asked, "tokens": tokens}
+    if kind != "proposal":
+        from central_command.runtime.converse import land_session
+
+        await land_session(session_id, agent_id=AGENT_ID)
+        return {
+            "deferred": False, "tokens": tokens, "session_id": session_id,
+            "output": (
+                f"(reached for `{getattr(call, 'tool_name', '?')}`, which the "
+                "wiki agent cannot drive)"
+            ),
+        }
+
+    parked = await park_proposal(
+        session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+        evidence=[e.model_dump() for e in proposal_from_call(call).evidence],
+        context={"kind": "wiki_repair", **({"item_id": item_id} if item_id else {})},
+    )
+    return {
+        "deferred": True,
+        "session_id": session_id,
+        "proposal_id": parked["proposal_id"],
+        "intent": parked["proposal"].intent,
+        "tokens": tokens,
+    }
+
+
 async def ensure_registered() -> None:
     from central_command.db import repo
 

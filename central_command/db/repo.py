@@ -4846,6 +4846,48 @@ async def list_catalog_documents(source_id: str | None = None) -> list[dict]:
         await conn.close()
 
 
+async def catalog_document_detail(document_id: str) -> dict | None:
+    """One lineage with its version list and locations — what the wiki agent's
+    `catalog_get_document` renders. Version rows carry no extracted text: the
+    LATEST version's text rides separately (and clipped by the caller), because
+    a lineage with twenty versions would otherwise be a token bomb."""
+    doc = await get_catalog_document(document_id)
+    if doc is None:
+        return None
+    conn = await _conn()
+    try:
+        versions = await conn.fetch(
+            """
+            select id, version_no, content_hash, extractor, seen_at
+              from catalog_version where document_id = $1
+             order by version_no desc
+            """,
+            document_id,
+        )
+        latest_text = await conn.fetchval(
+            """
+            select extracted_text from catalog_version where document_id = $1
+             order by version_no desc limit 1
+            """,
+            document_id,
+        )
+        locations = await conn.fetch(
+            """
+            select uri, first_seen, last_seen, missing_at
+              from catalog_location where document_id = $1 order by uri
+            """,
+            document_id,
+        )
+    finally:
+        await conn.close()
+    return {
+        **doc,
+        "versions": [dict(v) for v in versions],
+        "locations": [dict(location) for location in locations],
+        "latest_extracted_text": latest_text or "",
+    }
+
+
 # --- enrollment (slice 3/4) ---------------------------------------------------
 # A catalog version's work item is keyed on the VERSION id, so enrollment is
 # idempotent per version and the anti-join below is the whole backlog query.
@@ -4997,3 +5039,144 @@ async def count_work_items_by_state(kind: str) -> dict:
         return {r["state"]: r["n"] for r in rows}
     finally:
         await conn.close()
+
+
+# --- Wiki claims (slice 7, Decision 9) ----------------------------------------
+# Every citation on an executed wiki proposal becomes a claim row carrying the
+# evidence version recorded at write time. There is NO stored stale flag: the
+# recorded version IS the check, compared against the catalog at read time by
+# `wiki_claim_states`.
+
+
+async def catalog_document_heads(document_ids: list[str]) -> dict[str, dict]:
+    """{document_id: {'status', 'head_version'}} — the stamp source at capture
+    time and the comparison source at staleness time, so both halves of
+    Decision 9 read the same query."""
+    if not document_ids:
+        return {}
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select d.id, d.status,
+                   (select max(v.version_no) from catalog_version v
+                     where v.document_id = d.id) as head_version
+              from catalog_document d
+             where d.id = any($1::text[])
+            """,
+            list(document_ids),
+        )
+        return {r["id"]: {"status": r["status"], "head_version": r["head_version"]}
+                for r in rows}
+    finally:
+        await conn.close()
+
+
+async def insert_wiki_claims(rows: list[dict]) -> int:
+    """Insert one claim row per citation. `rows` carry page_ref, proposal_id,
+    statement and the stamped evidence entry list."""
+    if not rows:
+        return 0
+    conn = await _conn()
+    try:
+        await conn.executemany(
+            """
+            insert into wiki_claim (id, page_ref, proposal_id, statement, evidence)
+            values ($1, $2, $3, $4, $5::jsonb)
+            """,
+            [(
+                "clm_" + uuid.uuid4().hex[:12],
+                r.get("page_ref"), r.get("proposal_id"), r["statement"],
+                json.dumps(r.get("evidence") or []),
+            ) for r in rows],
+        )
+        return len(rows)
+    finally:
+        await conn.close()
+
+
+async def retire_wiki_claims(page_ref: str) -> int:
+    """Retire — never delete — every live claim on a page. A regeneration
+    writes the new set afterwards, so the ledger keeps what the page USED to
+    claim and on what evidence."""
+    conn = await _conn()
+    try:
+        result = await conn.execute(
+            "update wiki_claim set retired_at = now() "
+            " where page_ref = $1 and retired_at is null",
+            page_ref,
+        )
+        return int(result.rsplit(" ", 1)[-1] or 0)
+    finally:
+        await conn.close()
+
+
+async def list_wiki_claims(
+    page_ref: str | None = None, live_only: bool = True
+) -> list[dict]:
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select id, page_ref, proposal_id, statement, evidence,
+                   created_at, retired_at
+              from wiki_claim
+             where ($1::text is null or page_ref = $1)
+               and ($2::bool is false or retired_at is null)
+             order by created_at
+            """,
+            page_ref, live_only,
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["evidence"] = _jsonb(d["evidence"])
+            out.append(d)
+        return out
+    finally:
+        await conn.close()
+
+
+async def wiki_claim_states(page_ref: str | None = None) -> list[dict]:
+    """Decision 9's three states, COMPUTED — [{claim, state, reasons}].
+
+    'unsupported' beats 'stale': a rescinded lineage has nothing left to
+    re-verify against, so it is not a "check back later". Anything else is
+    'supported'.
+
+    v1 machine-checks CATALOG evidence ONLY. Graph, Jira, Confluence and
+    operator citations carry their stamp but never move a claim's state here:
+    Decision 9 puts those on "staleness by supersession only", and the
+    supersession EVENTS are not wired to claims yet. Their hooks are the
+    stamps already on the row — future work, not a silent gap.
+    """
+    claims = await list_wiki_claims(page_ref, live_only=True)
+    doc_ids = {
+        e.get("source_ref")
+        for c in claims for e in (c["evidence"] or [])
+        if e.get("kind") == "catalog" and e.get("source_ref")
+    }
+    heads = await catalog_document_heads(sorted(doc_ids))
+
+    out = []
+    for c in claims:
+        stale: list[str] = []
+        unsupported: list[str] = []
+        for e in c["evidence"] or []:
+            if e.get("kind") != "catalog":
+                continue
+            head = heads.get(e.get("source_ref"))
+            if head is None:
+                continue
+            if head["status"] == "RESCINDED":
+                unsupported.append(
+                    f"{e['source_ref']}: the catalog lineage is RESCINDED"
+                )
+            elif (head["head_version"] or 0) > (e.get("version") or 0):
+                stale.append(
+                    f"{e['source_ref']}: head version {head['head_version']} "
+                    f"vs recorded {e.get('version')}"
+                )
+        state = "unsupported" if unsupported else ("stale" if stale else "supported")
+        out.append({"claim": c, "state": state, "reasons": unsupported + stale})
+    return out

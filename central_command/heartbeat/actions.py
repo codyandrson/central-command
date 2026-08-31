@@ -215,6 +215,20 @@ async def _source_walk(schedule_id: str, params: dict) -> dict:
     return {"sources": out}
 
 
+async def _wiki_freshness(schedule_id: str, params: dict) -> dict:
+    """Sweep the claims ledger and enroll page repairs (sources-catalog slice
+    7, Decision 9).
+
+    Deterministic: a recorded evidence version compared against the catalog —
+    no LLM decides what is stale. Repair is SCHEDULED work on the ordinary
+    ledger, not event-triggered churn, which is why it hangs off a cadence the
+    operator sets rather than off the catalog's own writes.
+    """
+    from central_command.ingest.wiki_freshness import DEFAULT_PAGE_CAP, sweep
+
+    return await sweep(int(params.get("pages") or DEFAULT_PAGE_CAP))
+
+
 async def _report_audit_agreement(schedule_id: str, params: dict) -> dict:
     """Snapshot the auditor's shadow-vs-operator agreement record onto the
     event log, so the D8 evidence accrues visibly without anyone remembering
@@ -1056,6 +1070,28 @@ ACTIONS: dict[str, ActionSpec] = {
                 or (s.get("enrollment") or {}).get("enrolled")
                 for s in (r.get("sources") or {}).values()
             )),
+        ),
+        ActionSpec(
+            kind="wiki.freshness",
+            description=(
+                "Sweep the wiki claims ledger, flag pages whose evidence moved "
+                "on, and enroll one repair item per page (deterministic; no LLM)."
+            ),
+            params={"pages": "how many stale pages to act on per tick (default 5)"},
+            required=(),
+            levers=("ingest.wiki_freshness.sweep",),
+            run=_wiki_freshness,
+            # QUIET-ELIGIBLE. NON-AUTHORISING: it enrolls ledger items — the
+            # dispatcher's valves decide when any of it is worked, and the
+            # repair proposal that follows still gates. (Annotation in 'auto'
+            # mode is the operator's own graduated action class, and records
+            # itself.) SELF-RECORDING: every changed stale set emits
+            # wiki.claims.stale, every enrollment work.enrolled, every panel
+            # write wiki.page.annotated. A wiki whose sources have not moved —
+            # the common tick — must cost no history.
+            material=lambda r: bool(
+                r.get("emitted") or r.get("enrolled") or r.get("annotated")
+            ),
         ),
         ActionSpec(
             kind="task.create",

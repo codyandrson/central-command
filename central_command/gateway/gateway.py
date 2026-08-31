@@ -586,6 +586,16 @@ async def _record_execution_success(
         actor=approver,
     )
 
+    # Decision 9: the wiki's citations become durable claim rows the moment the
+    # page write lands. Non-fatal by construction (see wiki_claims.capture) —
+    # the world already changed and is already recorded above.
+    from central_command.runtime import wiki_agent
+
+    if agent_id == wiki_agent.AGENT_ID:
+        from central_command.gateway import wiki_claims
+
+        await wiki_claims.capture(proposal_id, result_text)
+
     # The covering proposal actually happened, so any folded siblings are now
     # genuinely resolved — this is the only place a fold becomes terminal, and it
     # holds regardless of whether the agent can resume.

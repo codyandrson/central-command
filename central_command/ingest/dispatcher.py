@@ -209,6 +209,21 @@ async def _handle_document(item, siblings, siblings_capped, note, model) -> dict
     )
 
 
+async def _handle_wiki_repair(item, siblings, siblings_capped, note, model) -> dict:
+    """A freshness repair brief (Decision 9). Like documents, it sets its own
+    thread key — the stale claim's catalog lineage — so the repair queues
+    behind that lineage's steward item and no bundling applies."""
+    from central_command.runtime import wiki_agent
+
+    return await wiki_agent.run_repair(
+        _with_operator_note((item.get("payload") or {}).get("text") or "", note),
+        item_id=item["id"],
+        # Deliberately NOT the caller's model: the wiki agent resolves its own
+        # (the steward precedent).
+        model=model,
+    )
+
+
 class _KindHandler:
     """What to run for one work-item kind, and who the record says did it."""
 
@@ -239,6 +254,12 @@ HANDLERS: dict[str, _KindHandler] = {
     # graduation the old comment here refused; per-class is how it stops being
     # one. Auto-confirmation begins only when the operator flips that knob.
     "document": _KindHandler(_handle_document, "agent:knowledge-steward", True),
+    # Wiki freshness repairs (sources-catalog slice 7, 2026-08-30). Dismissal
+    # auditing stays OFF: this is an UNGRADUATED action class — it has no
+    # agreement record of its own yet, and inheriting the document class's
+    # flag by omission is exactly the ungraduated graduation the comment above
+    # refuses.
+    "wiki_repair": _KindHandler(_handle_wiki_repair, "agent:wiki-agent", False),
 }
 
 

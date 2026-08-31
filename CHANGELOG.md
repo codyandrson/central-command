@@ -4,6 +4,44 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-30 — v2.14.0: publication — the wiki remembers what it believes, and why
+
+_(v2.13.0 is reserved by a concurrent session's in-flight release; the gap is
+deliberate.)_
+
+- **Claims capture** (Decision 9, slice 7): when a wiki-agent Confluence page
+  proposal executes, every evidence citation becomes a durable `wiki_claim`
+  row stamped with its evidence version at write time (catalog head
+  version_no; graph/operator pointers as-is — append-only records don't
+  drift; jira/confluence stamped with the time). Page updates retire the old
+  claim set and insert the new one — regeneration is idempotent, the ledger
+  keeps history. Non-fatal by construction: a capture failure emits
+  `wiki.claims.capture_failed`, never fails an executed proposal.
+- **Staleness is computed, never stored**: `wiki_claim_states` derives
+  supported / stale (evidence has a newer catalog version) / unsupported
+  (evidence rescinded — beats stale: there is nothing to re-verify) at read
+  time. v1 machine-checks catalog evidence; graph/jira/operator supersession
+  hooks are future wiring. `GET /api/wiki/claims` is the operator surface.
+- **`wiki.freshness` heartbeat action** (seeded disabled): sweeps claim
+  states, emits `wiki.claims.stale` only when a page's stale-set CHANGED
+  (sha256 of the sorted claim ids — the same digest keys the repair item's
+  message_id, so emit-suppression and enrollment idempotency can never
+  disagree), and enrolls one `kind='wiki_repair'` item per page, capped per
+  tick, `thread_id = the stale catalog lineage` so the relatedness lock lands
+  the steward's graph update before the page repairs.
+- **The repair path**: `wiki_repair` dispatches to `wiki_agent.run_repair` —
+  a labelled brief of each stale/unsupported claim, its evidence, and what
+  changed; the agent re-verifies or corrects and proposes the gated page
+  update, which re-captures a fresh claim set.
+- **Stale-page annotation, ladder-shaped**: `CC_WIKI_ANNOTATION_MODE=off`
+  (default) — staleness reaches pages only through gated repair proposals.
+  `auto` is the operator's graduation flip: a deterministic template panel
+  between owned markers, spliced idempotently, never touching authored
+  prose, stamped `system:wiki-freshness` with a `wiki.page.annotated` event.
+- **`catalog-read` pack**: the wiki agent can finally see the library —
+  `catalog_list_documents` / `catalog_get_document` read tools (latest
+  version's text only, capped), seeded grant + template parity.
+
 ## 2026-08-30 — v2.12.0: the Confluence watcher, document auditing in shadow, and gated catalog tags
 
 - **Document dismissals now audit — shadow-first, in their OWN class**

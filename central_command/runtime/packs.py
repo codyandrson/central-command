@@ -395,6 +395,14 @@ PACKS: dict[str, Pack] = {
             ),
         ),
     ),
+    "catalog-read": Pack(
+        name="catalog-read",
+        description=(
+            "Read the source catalog — the team's library of documents, their "
+            "versions, locations and curation tags (ungated read)."
+        ),
+        tool_names=("catalog_list_documents", "catalog_get_document"),
+    ),
     "catalog-propose": Pack(
         name="catalog-propose",
         description=(
@@ -1312,9 +1320,12 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
                           "confluence-space-propose", "graph-read",
                           "graph-propose", "task-propose", "ask-operator",
                           "consult", "web-read"),
+    # catalog-read added 2026-08-30 (sources-catalog slice 7): the catalog is
+    # the system of record and a Confluence index page is a rendered VIEW of
+    # it (Decision 3) — the producer could not see the library it renders.
     "wiki-agent": ("confluence-read", "confluence-propose", "jira-read",
                    "graph-read", "graph-propose", "task-propose",
-                   "ask-operator", "consult"),
+                   "ask-operator", "consult", "catalog-read"),
     # No task-propose for the orchestrator: it creates work through assign_work
     # after an approved plan, and a second differently-governed path to the
     # same act is a governance trap. The auditor holds no packs at all
