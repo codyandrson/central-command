@@ -112,6 +112,16 @@ function AddSourceForm({ onAdd }: {
   const globs = (v: string) => v.split(',').map((s) => s.trim()).filter(Boolean);
 
   const submit = async () => {
+    // Mirrors the backend's slug rule — the id rides in URL paths, and an
+    // empty one creates a source no route can address (live, 2026-08-31).
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) {
+      setError('id must be a short lowercase slug (letters, digits, . _ -)');
+      return;
+    }
+    if (!root.trim()) {
+      setError('root path is required');
+      return;
+    }
     try {
       const config: Record<string, unknown> = { root };
       if (globs(include).length) config.include = globs(include);

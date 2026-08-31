@@ -3253,6 +3253,15 @@ async def set_source_enabled(source_id: str, body: SourceEnableIn) -> dict:
 # registration, so "remove" is enable=false.
 @router.post("/sources")
 async def upsert_source(body: SourceIn) -> dict:
+    # The id rides in URL paths (/api/sources/{id}/walk), so it must be a
+    # slug: an empty or slashed id creates a row no route can ever address
+    # again (found live 2026-08-31 — a blank form field made an unwalkable
+    # source).
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", body.id):
+        raise HTTPException(
+            422,
+            "id must be a short lowercase slug (letters/digits, then [a-z0-9._-], max 64)",
+        )
     # The email feed is synthesized at read time, never stored.
     if body.id == EMAIL_FEED_ID:
         raise HTTPException(422, f"{EMAIL_FEED_ID!r} is the synthesized email row — pick another id")

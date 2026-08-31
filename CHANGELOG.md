@@ -4,6 +4,16 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.15.1: a source id must be a slug
+
+- Found live on the first real Sources-panel use: the Add-source form let a
+  BLANK id through and `POST /api/sources` accepted it, creating a row that
+  no route could ever address again ("Walk now" posts to
+  `/api/sources/{id}/walk`). The id is now validated as a URL-safe slug at
+  the backend (the guard every caller gets) with a matching client-side
+  check and message in the form. The one malformed live row was removed by
+  hand (it had no catalog rows attached).
+
 ## 2026-08-30 — v2.14.0: publication — the wiki remembers what it believes, and why
 
 _(v2.13.0 is reserved by a concurrent session's in-flight release; the gap is

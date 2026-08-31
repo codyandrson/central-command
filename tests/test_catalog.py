@@ -183,6 +183,21 @@ async def test_unknown_source_kind_raises(cleanup):
         await walk_source(source)
 
 
+async def test_source_id_must_be_a_url_safe_slug(tmp_path):
+    """The id rides in URL paths — an empty or slashed id creates a row no
+    route can ever address again (live, 2026-08-31: a blank Add-source form
+    field made an unwalkable source)."""
+    from central_command.api import routes
+
+    for bad in ("", "  ", "Cayenne Docs", "a/b", "-leading", "UPPER"):
+        with pytest.raises(HTTPException) as e:
+            await routes.upsert_source(routes.SourceIn(
+                id=bad, kind="filesystem", name="x",
+                config={"root": str(tmp_path)},
+            ))
+        assert e.value.status_code == 422, bad
+
+
 async def test_walk_of_disabled_source_via_api_returns_409(tmp_path, cleanup):
     from central_command.api import routes
 
