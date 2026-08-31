@@ -10,10 +10,20 @@ Moved down here 2026-07-29 so `scripts/` stops mixing living tools with
 finished errands. Paths inside them are relative to the repo root and were
 correct when they ran; re-running one would need that checked first.
 
+**`extend_lib_jira.py` was DELETED** (2026-08-31): it made an unguarded live
+write at import time against the n8n `lib-jira` workflow, and its target was
+superseded by **D23**'s move of Jira to a native client
+(`central_command/integrations/jira.py`) — n8n keeps only the email façade,
+where it already solved a hard OAuth problem.
+
+**`reembed_graph.py` is NOT spent** — it is the standing procedure for an
+embedding-model swap, cited by `skills/graphiti/references/operations.md` and
+`central_command/integrations/neo4j_writer.py`. Re-run it (dry run → `--apply` →
+`--verify`) any time the embedding model changes; it stays here because it is
+still a manual, deliberate-invocation operation, not because it is finished.
+
 | script | what it did | why it is spent |
 |---|---|---|
-| `extend_lib_jira.py` | Extended the n8n `lib-jira` provider workflow with additional operations. | **D23** moved Jira to a native client (`central_command/integrations/jira.py`). n8n keeps only the email façade, where it already solved a hard OAuth problem. |
-| `reembed_graph.py` | Re-embedded the Neo4j graph onto a single embedding model after the Graphiti move. | One-time convergence. It ran, `--verify` passed, and the graph now carries exactly one model. |
 | `replay_cancelled_reject_resume.py` | Replayed the resume half of one reject (prop_075d96b53965) whose RPC the 2026-08-13 WS drop cancelled mid-flight, un-sticking sess_10e406047961. | The decision half had committed; only that one session was owed its resume. The general fix is `resume_park.arm()` before every decision resume. |
 | `arm_orphaned_resumes_2026_08_15.py` | Armed park records for the 12 resumes SIGKILLed mid-batch on 2026-08-15, so `resume_sweep` could drive them. | Those twelve predate the arm-before-run fix and carried no marker; every later resume writes its own. |
 | `recommit_lost_private_episodes.py` | Re-delivered the private-scope graph episodes silently dropped 2026-08-01→08-15 (colon group ids rejected AFTER ack), from their EXECUTED proposal rows. | `private_group()` builds valid ids now; the surviving episode bodies were re-committed once. |

@@ -1,5 +1,11 @@
 # Gated LiteLLM config change with verified restart + auto-rollback (2026-08-06)
 
+> **Superseded 2026-08-30 by the DB-based model-management reversal**: models
+> now live in LiteLLM's own database (`store_model_in_db: true`), and
+> `register-models.py` is create-only — the config file is the fallback for
+> what the API cannot set, never the default. See `CLAUDE.md`'s "Models live
+> in LiteLLM's DATABASE" entry.
+
 Operator direction (2026-08-06, decided): the litellm-manager must be able to
 change ROUTING SETTINGS even though they are config-file-only — "I want to be
 able to work with my LiteLLM agent to create/modify routing strategies." That

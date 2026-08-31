@@ -15,7 +15,7 @@ import {
   lazy,
   Suspense,
 } from 'react';
-import { AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { useGateway } from '@/contexts/GatewayContext';
 import { useSessionContext, type SpawnSessionOpts } from '@/contexts/SessionContext';
 import { useChat } from '@/contexts/ChatContext';
@@ -23,7 +23,6 @@ import { useSettings, type STTInputMode } from '@/contexts/SettingsContext';
 import { getSessionKey } from '@/types';
 import { useConnectionManager } from '@/hooks/useConnectionManager';
 import { useDashboardData } from '@/hooks/useDashboardData';
-import { useGatewayRestart } from '@/hooks/useGatewayRestart';
 import { ConnectDialog } from '@/features/connect/ConnectDialog';
 import { TopBar } from '@/components/TopBar';
 import { StatusBar } from '@/components/StatusBar';
@@ -113,7 +112,7 @@ export default function App({ onLogout }: AppProps) {
   // Session state
   const {
     sessions, sessionsLoading, currentSession, setCurrentSession, setViewingChat,
-    busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, openNewSession, abortSession, spawnSession, renameSession,
+    busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, openNewSession, abortSession, spawnSession,
     agentLogEntries, eventEntries,
     agentName,
   } = useSessionContext();
@@ -322,16 +321,6 @@ export default function App({ onLogout }: AppProps) {
   const [isMobileTopBarHidden, setIsMobileTopBarHidden] = useState(false);
   const prevLogCount = useRef(0);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
-
-  // Gateway restart
-  const {
-    showGatewayRestartConfirm,
-    gatewayRestarting,
-    gatewayRestartNotice,
-    cancelGatewayRestart,
-    confirmGatewayRestart,
-    dismissNotice,
-  } = useGatewayRestart();
 
   // Command palette state
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -892,7 +881,6 @@ export default function App({ onLogout }: AppProps) {
               onDelete={deleteSession}
               onNewSession={openNewSession}
               onSpawn={handleSpawnSession}
-              onRename={renameSession}
               onAbort={abortSession}
               isLoading={sessionsLoading}
               agentName={agentName}
@@ -936,7 +924,6 @@ export default function App({ onLogout }: AppProps) {
           onDelete={deleteSession}
           onNewSession={openNewSession}
           onSpawn={handleSpawnSession}
-          onRename={renameSession}
           onAbort={abortSession}
           isLoading={sessionsLoading}
           agentName={agentName}
@@ -993,7 +980,7 @@ export default function App({ onLogout }: AppProps) {
        * Gateway state banners.
        * Kept compact and centered so they read as transient shell notices instead of old alarm strips.
        */}
-      {connectionState === 'reconnecting' && !gatewayRestarting && (
+      {connectionState === 'reconnecting' && (
         <div className="fixed left-1/2 top-12 z-50 flex max-w-[calc(100vw-1.067rem)] -translate-x-1/2 items-start gap-2 rounded-2xl border border-destructive/25 bg-card/94 px-4 py-2 text-xs font-medium text-foreground shadow-[0_20px_48px_rgba(0,0,0,0.28)]">
           <span className="inline-flex size-7 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
             <AlertTriangle size={14} aria-hidden="true" />
@@ -1005,34 +992,6 @@ export default function App({ onLogout }: AppProps) {
         </div>
       )}
 
-      {gatewayRestarting && (
-        <div className="fixed left-1/2 top-12 z-50 flex max-w-[calc(100vw-1.067rem)] -translate-x-1/2 items-start gap-2 rounded-2xl border border-orange/25 bg-card/94 px-4 py-2 text-xs font-medium text-foreground shadow-[0_20px_48px_rgba(0,0,0,0.28)]">
-          <span className="inline-flex size-7 items-center justify-center rounded-xl bg-orange/10 text-orange">
-            <RotateCw size={14} className="animate-spin" aria-hidden="true" />
-          </span>
-          <span className="min-w-0 text-left leading-5">Gateway restarting…</span>
-        </div>
-      )}
-
-      {!gatewayRestarting && gatewayRestartNotice && (
-        <button
-          type="button"
-          onClick={dismissNotice}
-          className={`fixed left-1/2 top-12 z-50 flex max-w-[calc(100vw-1.067rem)] -translate-x-1/2 cursor-pointer items-start gap-2 rounded-2xl border px-4 py-2 text-xs font-medium shadow-[0_20px_48px_rgba(0,0,0,0.28)] transition-transform hover:-translate-x-1/2 hover:-translate-y-px ${
-            gatewayRestartNotice.ok
-              ? 'border-green/25 bg-card/94 text-foreground'
-              : 'border-destructive/25 bg-card/94 text-foreground'
-          }`}
-        >
-          <span className={`inline-flex size-7 items-center justify-center rounded-xl ${
-            gatewayRestartNotice.ok ? 'bg-green/10 text-green' : 'bg-destructive/10 text-destructive'
-          }`}>
-            {gatewayRestartNotice.ok ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
-          </span>
-          <span className="min-w-0 text-left leading-5">{gatewayRestartNotice.message}</span>
-        </button>
-      )}
-      
       {/* Dry run is INVISIBLE otherwise: the operator approved six proposals
           believing they had executed, and every one was simulated
           (2026-08-26). Not dismissible — it is true for as long as the mode is. */}
@@ -1333,18 +1292,6 @@ export default function App({ onLogout }: AppProps) {
         onConfirm={confirmReset}
         onCancel={cancelReset}
         variant="danger"
-      />
-
-      {/* Gateway Restart Confirmation */}
-      <ConfirmDialog
-        open={showGatewayRestartConfirm}
-        title="Restart OpenClaw Gateway"
-        message="This will briefly interrupt gateway connectivity. Continue?"
-        confirmLabel="Restart"
-        cancelLabel="Cancel"
-        onConfirm={confirmGatewayRestart}
-        onCancel={cancelGatewayRestart}
-        variant="warning"
       />
 
       <WorkspaceSwitchDialog

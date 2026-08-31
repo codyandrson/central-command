@@ -8,7 +8,6 @@ import {
   closestCorners,
 } from '@dnd-kit/core';
 import type { DragStartEvent, DragOverEvent, DragEndEvent } from '@dnd-kit/core';
-import { arrayMove } from '@dnd-kit/sortable';
 import type { KanbanTask, TaskStatus } from '../types';
 import { COLUMNS } from '../types';
 
@@ -165,47 +164,32 @@ export function useKanbanDragDrop({
       // Determine target column
       const targetColumn = findColumnForId(overId) ?? originalTask.status;
 
+      // Same-column reordering is a lie: cc-kanban.ts hardcodes columnOrder 0
+      // and never persists a same-column move (display-only 200), so any
+      // optimistic reorder here would silently self-revert on the next poll.
+      // Roll back to the pre-drag snapshot instead of pretending it worked.
+      if (targetColumn === originalTask.status) {
+        if (snapshotRef.current) setTasksOptimistic(() => snapshotRef.current!);
+        snapshotRef.current = null;
+        return;
+      }
+
       // Compute final order: get current tasks in the target column after optimistic updates
       // Use the live tasks state (already optimistically updated in onDragOver)
       const columnTasks = tasks
         .filter((t) => t.status === targetColumn)
         .sort((a, b) => a.columnOrder - b.columnOrder);
 
+      // targetColumn !== originalTask.status here (same-column case already
+      // returned above), so this is always a cross-column move.
       let targetIndex: number;
-
-      if (activeId === overId) {
-        // Dropped on itself — find its current index in column
-        targetIndex = columnTasks.findIndex((t) => t.id === activeId);
-        if (targetIndex < 0) targetIndex = 0;
-      } else if (activeColumns.includes(overId)) {
+      if (activeColumns.includes(overId)) {
         // Dropped on empty column — append
         targetIndex = columnTasks.filter((t) => t.id !== activeId).length;
       } else {
-        // Dropped on another card — use that card's position
+        // Dropped on another card — insert at that card's position
         const overIndex = columnTasks.findIndex((t) => t.id === overId);
-        const activeIndex = columnTasks.findIndex((t) => t.id === activeId);
-
-        if (originalTask.status === targetColumn && activeIndex >= 0 && overIndex >= 0) {
-          // Same column reorder: use arrayMove index logic
-          const reordered = arrayMove(
-            columnTasks.map((t) => t.id),
-            activeIndex,
-            overIndex,
-          );
-          targetIndex = reordered.indexOf(activeId);
-        } else {
-          // Cross-column: insert at over position
-          targetIndex = overIndex >= 0 ? overIndex : columnTasks.length;
-        }
-      }
-
-      // If nothing actually changed, skip API call
-      if (
-        originalTask.status === targetColumn &&
-        targetIndex === columnTasks.findIndex((t) => t.id === activeId)
-      ) {
-        snapshotRef.current = null;
-        return;
+        targetIndex = overIndex >= 0 ? overIndex : columnTasks.length;
       }
 
       // Optimistic state is already applied from onDragOver / implicit ordering.

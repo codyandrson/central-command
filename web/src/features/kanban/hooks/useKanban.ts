@@ -57,16 +57,6 @@ export interface CreateTaskPayload {
   attachments?: TaskAttachment[];
 }
 
-export interface UpdateTaskPayload {
-  title?: string;
-  description?: string | null;
-  status?: TaskStatus;
-  priority?: TaskPriority;
-  labels?: string[];
-  assignee?: string | null;
-  version: number;
-}
-
 /* ── Build query string from filters ── */
 function buildQuery(filters: KanbanFilters): string {
   const p = new URLSearchParams();
@@ -182,26 +172,6 @@ export function useKanban(assignee?: string) {
     // Refetch to get accurate ordering
     await fetchTasks();
     return created;
-  }, [fetchTasks]);
-
-  const updateTask = useCallback(async (id: string, payload: UpdateTaskPayload): Promise<KanbanTask> => {
-    const res = await fetch(`/api/kanban/tasks/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        const err = new Error('version_conflict');
-        (err as VersionConflictError).latest = body.latest;
-        throw err;
-      }
-      throw new Error(body.details || body.error || `HTTP ${res.status}`);
-    }
-    const updated: KanbanTask = await res.json();
-    await fetchTasks();
-    return updated;
   }, [fetchTasks]);
 
   /** Reorder / move a task via the dedicated reorder endpoint. */
@@ -388,7 +358,6 @@ export function useKanban(assignee?: string) {
     setFilters,
     fetchTasks,
     createTask,
-    updateTask,
     deleteTask,
     reorderTask,
     setTasksOptimistic,

@@ -45,10 +45,10 @@ page renders broken with no write-time error.
 
 ### `confluence_list_labels(page_id)`
 
-Current labels on a page. Read before `confluence.set_labels` — like Jira's
-`labels`, a labels write is very likely a full replacement, not a merge (see
-`tool-surface`'s write table below); read the existing list first if you mean
-to add rather than replace.
+Current labels on a page. Read before `confluence.set_labels` — the write is
+**additive** (existing labels stay; there is no gated remove yet), so read the
+existing list first to avoid proposing a no-op or a near-duplicate spelling
+(see `tool-surface`'s write table below).
 
 ### `confluence_page_versions(page_id)`
 

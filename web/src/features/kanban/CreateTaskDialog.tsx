@@ -11,7 +11,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useSessionContext } from '@/contexts/SessionContext';
-import type { TaskStatus, TaskPriority } from './types';
 import type { CreateTaskPayload, TaskAttachment } from './hooks/useKanban';
 import { AssigneeCombobox } from './components/AssigneeCombobox';
 import { buildAssigneeOptions } from './lib/assigneeOptions';
@@ -43,20 +42,6 @@ function readAsBase64(file: File): Promise<string> {
   });
 }
 
-const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
-  { value: 'backlog', label: 'Backlog' },
-  { value: 'todo', label: 'To Do' },
-  { value: 'in-progress', label: 'In Progress' },
-  { value: 'review', label: 'Review' },
-];
-
-const PRIORITY_OPTIONS: { value: TaskPriority; label: string }[] = [
-  { value: 'critical', label: 'Critical' },
-  { value: 'high', label: 'High' },
-  { value: 'normal', label: 'Normal' },
-  { value: 'low', label: 'Low' },
-];
-
 interface CreateTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -67,8 +52,6 @@ export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDia
   const { sessions, agentName } = useSessionContext();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [status, setStatus] = useState<TaskStatus>('todo');
-  const [priority, setPriority] = useState<TaskPriority>('normal');
   const [labelsRaw, setLabelsRaw] = useState('');
   const [assignee, setAssignee] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -92,8 +75,6 @@ export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDia
     if (!open) {
       setTitle('');
       setDescription('');
-      setStatus('todo');
-      setPriority('normal');
       setLabelsRaw('');
       setAssignee('');
       setError(null);
@@ -174,8 +155,6 @@ export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDia
       const payload: CreateTaskPayload = {
         title: trimmedTitle,
         description: description.trim() || undefined,
-        status,
-        priority,
         ...(labels.length > 0 ? { labels } : {}),
         ...(assignee ? { assignee } : {}),
         ...(attachments.length > 0 ? { attachments } : {}),
@@ -187,7 +166,7 @@ export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDia
     } finally {
       setSubmitting(false);
     }
-  }, [isValid, submitting, trimmedTitle, description, status, priority, labelsRaw, assignee, stagedFiles, onCreate, onOpenChange]);
+  }, [isValid, submitting, trimmedTitle, description, labelsRaw, assignee, stagedFiles, onCreate, onOpenChange]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -195,8 +174,6 @@ export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDia
       handleSubmit();
     }
   }, [handleSubmit]);
-
-  const selectClass = 'cockpit-select h-11 text-sm';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -253,40 +230,6 @@ export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDia
 
         {/* 2-col grid for secondary fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {/* Status */}
-          <div>
-            <label htmlFor="kb-new-status" className="cockpit-field-label mb-2 block">
-              Status
-            </label>
-            <select
-              id="kb-new-status"
-              value={status}
-              onChange={e => setStatus(e.target.value as TaskStatus)}
-              className={selectClass}
-            >
-              {STATUS_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Priority */}
-          <div>
-            <label htmlFor="kb-new-priority" className="cockpit-field-label mb-2 block">
-              Priority
-            </label>
-            <select
-              id="kb-new-priority"
-              value={priority}
-              onChange={e => setPriority(e.target.value as TaskPriority)}
-              className={selectClass}
-            >
-              {PRIORITY_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
           {/* Labels */}
           <div>
             <label htmlFor="kb-new-labels" className="cockpit-field-label mb-2 block">

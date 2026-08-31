@@ -9,7 +9,7 @@ All are `JiraError`. The message tells you which half of the system failed.
 - `bad issue_key '<x>' — must match [A-Z][A-Z0-9_]*-<number>`
 - `createIssue — bad project_key '<x>' — must match [A-Z][A-Z0-9_]*`
 - `createIssue — summary must be a non-empty string under 255 chars`
-- `createIssue — bad issue_type '<x>' (must be one of Task, Bug, Story)`
+- `createIssue — bad issue_type '<x>' (must be one of Task, Bug, Story, Epic, Subtask, Sub-task)`
 - `<op> for <KEY> — due_date '<x>' must be strict YYYY-MM-DD`
 - `<op> for <KEY> — due_date '<x>' is not a real calendar date`
 - `linkIssues — bad link_type '<x>' (must be one of Blocks, Relates, Duplicate)`

@@ -76,6 +76,14 @@ the issue reads already carry these fields by name.
 The list is cached for 5 minutes, so a field the operator creates in the UI
 appears within that window with nothing restarted.
 
+### `jira_list_projects()` → `GET /rest/api/3/project`
+
+Every Jira project — key, name, type. Read this **before** proposing any
+`jira.create_issue`: the project key is the one argument you cannot infer
+from an email, and a key that does not exist here fails the write. Never
+invent a plausible-sounding key — the real list is short and this tool is the
+only thing that knows it.
+
 ### `jira_list_filters(query="")` → `GET /rest/api/3/filter/search`
 
 Saved filters: `{id, name, jql, description, owner}`. First page only. Call
@@ -107,6 +115,7 @@ an identifier that appears in this list. Never guess one.
 | `jira.transition_issue` | `POST /rest/api/3/issue/{key}/transitions` | takes a transition **NAME**, case-insensitive; the client resolves it against `get_transitions` first and fails with the available set if it does not match — it never guesses an id |
 | `jira.create_filter` | `POST /rest/api/3/filter` | `name` non-empty < 255 chars; `jql` non-empty under 2000 chars; optional `description`. Native-only — no façade counterpart |
 | `jira.create_dashboard` | `POST /rest/api/3/dashboard` + `POST .../gadget` per gadget | creates a **private** dashboard (empty share/edit permissions), then adds up to **10** gadgets. Each gadget spec: exactly one of `uri`/`module_key` (from `jira_list_gadgets`), optional `title`, `color`, `position {row, column}`, and `config`. A gadget's failure does not undo the dashboard or earlier gadgets — per-gadget outcomes come back in the result. To bind a saved filter to a gadget, set `config: {"filterId": "filter-<id>"}` — **string values, `filter-` prefix** — or `config: {"filterName": "<exact name>"}` when the filter is created in the same proposal (the name is resolved to the real id at execution time; exactly-one match required, and the whole write fails before anything is created if it cannot resolve). Give exactly ONE filter key. **You do not need to know which pref the gadget binds under** — the client reads the gadget's own XML and rewrites your binding to `filterId` or `projectOrFilterId`, whichever that gadget declares, and sets `isConfigured` for you. Every OTHER key in `config` must be a pref that gadget declares, or the whole write is refused with the accepted list (a gadget silently ignores prefs it does not declare, which is how four gadgets came back reading "hasn't been configured yet"). A placeholder filterId is refused outright. Native-only |
+| `jira.create_project` | `POST /rest/api/3/project` | `key` must be 2–10 chars, uppercase letters/digits only, starting with a letter; `name` non-empty under 255 chars; optional `project_type_key` (defaults `software`). The lead is always the credential's own account (fetched fresh via `/myself`, never hardcoded). Native-only — no façade counterpart |
 
 ## Validation that happens before the provider ever sees your arguments
 

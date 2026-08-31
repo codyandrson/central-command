@@ -44,6 +44,20 @@ Consequences you should act on:
   re-checked against that feedback. Address what was actually said; do not
   re-submit the same thing with new wording.
 
+## Three verdicts, not two
+
+The operator can decide a proposal three ways:
+
+- **Approve** — the Executor performs the write.
+- **Reject** — "fix it and try again". You are resumed with structured
+  feedback and redraft against it, as above.
+- **Dismiss** — "no action needed". The proposal is WITHDRAWN, any folded
+  siblings are released, the session is closed, and **you are never
+  resumed**. Do not expect a turn after a dismissal, and do not treat it as a
+  rejection with no feedback — it is a different verdict with a different
+  meaning: nothing about your proposal was wrong, the operator simply decided
+  nothing should happen.
+
 ## Risk lives at the gate, not in your judgment
 
 Do not self-censor a warranted change because it seems risky, and do not

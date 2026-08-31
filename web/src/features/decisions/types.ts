@@ -89,8 +89,6 @@ export interface ProposalDetail extends ProposalSummary {
   confidence?: Confidence | null;
   source_emails?: WorkItem[];
   folds?: WorkItem[];
-  provenance?: Record<string, unknown> | null;
-  result_text?: string | null;
   /** The auditor's verdict on this proposal (bulk dismissals). Present means
    *  it was audited; a challenge is why the proposal is still awaiting you. */
   audit?: AuditRecord | null;

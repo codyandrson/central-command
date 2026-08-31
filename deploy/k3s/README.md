@@ -171,6 +171,19 @@ Three images are built here, not pulled. Everything else is multi-arch upstream.
 - The `-anthropic` in the tag is a misnomer (Graphiti's LLM is the local Qwen).
   Keep it: renaming means rebuilding and re-importing on both nodes for nothing.
 
+## 3a. Label the nodes
+
+Placement resolves entirely through `cc-role/anchor` / `cc-role/compute` node
+labels, never hostnames (the 2026-08-27 contract) — `setup.sh` preflight
+requires exactly one node carrying each label, and a manifest applied against
+an unlabeled cluster leaves its pinned/preferred pods `Pending` with no event
+naming why.
+
+```bash
+sudo k3s kubectl label node <raspberrypi-node-name> cc-role/anchor=true
+sudo k3s kubectl label node <chromebox-node-name> cc-role/compute=true
+```
+
 ## 4. Apply the manifests
 
 ```bash

@@ -19,7 +19,6 @@ from .enums import (
     ConfidenceLevel,
     ProposalStatus,
     Reversibility,
-    RiskTier,
     SessionStatus,
 )
 from .models import (
@@ -40,7 +39,6 @@ __all__ = [
     "Reversibility",
     "ConfidenceLevel",
     "Confidence",
-    "RiskTier",
     "ProposalStatus",
     "SessionStatus",
     "Evidence",

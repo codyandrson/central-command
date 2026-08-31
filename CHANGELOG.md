@@ -4,6 +4,79 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.17.0: the great scrub — every file read, every loose end pulled
+
+An exhaustive file-by-file review of the whole tree (~30 read-only audit
+agents over every non-vendored file, plus a live-deployment sync audit that
+came back clean: cluster, schema, config and running bytes all match the
+release). What it found is fixed here; the diff is deletion-heavy on purpose.
+
+- **The kanban board stops promising writes the backend refuses.** The task
+  board is deliberately read-mostly (a task is the operator's ask, verbatim)
+  — but the vendored UI still carried a full edit-and-save drawer whose
+  PATCH always 400'd, Create-dialog Status/Priority pickers the backend
+  never read, a same-column drag-reorder that silently self-reverted on the
+  next poll, and a proposal inbox polling a hardcoded-empty endpoint every
+  5s. All excised; the drawer is a read-only detail view with the levers
+  that actually work (execute/abort/resume/cancel). The `nerve-kanban`
+  cockpit skill — which documented the upstream API wholesale, wrong
+  statuses and four nonexistent endpoints included — is deleted.
+- **Dead cockpit levers removed**: the unreachable "Restart OpenClaw
+  Gateway" dialog/spinner/banner (its trigger was removed long ago; the
+  backend route 500s here and is now documented inert in `web/VENDORED.md`),
+  and session rename (the gateway no-ops `sessions.patch` labels, so a
+  rename showed then silently reverted). The dashboard hook's listeners for
+  event kinds nothing emits (`memory.stored`, `tokens.update`, …) are gone,
+  and the cc-nerve startup banner logs the real product version instead of
+  the vendored fork's 1.5.3.
+- **Skill docs corrected where an agent would faithfully do the wrong
+  thing**: the Jira tool surface now documents `jira_list_projects` (the
+  read built 2026-08-15 to end project-key guessing — it was invisible to
+  the skill) and `jira.create_project`; the createIssue error example lists
+  all six issue types; the Confluence `set_labels` self-contradiction is
+  resolved (it is additive); the conventions skill teaches the **Dismiss**
+  verdict (withdrawn, folds released, drafter never resumed) alongside
+  approve/reject; deployment-facts refreshed to the three locally-built
+  images and current manifest set.
+- **The k3s runbook can produce a working install again**: a "label the
+  nodes" step (`cc-role/anchor` / `cc-role/compute`) — every manifest
+  schedules by those labels and an unlabeled cluster leaves every pinned pod
+  Pending with no event saying why. `install-gvisor.sh`'s proof pod uses the
+  label now, not a hostname. `deploy/pi/.env.example` documents
+  `CC_COCKPIT_ORIGIN`. CLAUDE.md's intro no longer claims a Docker CE
+  single-node deployment.
+- **Docs synced to shipped reality**: DESIGN.md's status table caught up on
+  six stale rows (the EA tour, activity coverage, self-directed learning —
+  built and enabled by default, previously undocumented anywhere public —
+  Confluence capture, setup-onboarding, the graph-curation capability
+  count) and gained rows for bulk-dismissal and the MCP sandbox; stale spec
+  headers marked shipped; the skills-library spec records that
+  `agent_capability_gate`/`resolve_gate` was never built; `VENDORED.md`'s
+  JOURNAL pointer follows the instance-repo move; `docs/vendor/README.md`
+  lists `model-library/`; `scripts/oneoff/README.md` stops calling
+  `reembed_graph.py` spent (it is the standing embedding-swap procedure) and
+  `extend_lib_jira.py` — an unguarded live write at import time against a
+  retired n8n workflow — is deleted.
+- **Code hygiene with teeth**: `ProposalStatus` gains the `WITHDRAWN` member
+  the gateway was writing as a raw string; `build_agent_for` no longer lists
+  `"auditor"` (a falsy-packs fallthrough would have handed the gate-auditor
+  the inbox-triage toolset if the path were ever reached); the catalog
+  message-id format is built from shared constants in both the Python
+  builder and the enrollment SQL, pinned by a test; 23 `endswith("1")`
+  command-tag checks normalized to the safe `" 1"` form; the systems-panel
+  TCP fallbacks stop defaulting to the retired port 5432; dead `RiskTier`
+  enum removed; stale module docstrings/comments (graphiti compose-era
+  topology, the abandoned generic-MCP-wrapper plan, repo.py's imaginary
+  future pool) now tell the truth. New tests drive `litellm.discovery` and
+  `sandbox.run_script` through the real `engine.fire()` path so a handler
+  return-shape change can no longer silently kill `heartbeat.completed`.
+- The operator's first name, found in one tracked spec, is scrubbed
+  (forward-only; the pre-push identifier list now catches the pattern).
+
+Deliberately deferred, on the record: a `repo.py` connection pool (real
+engineering change, its own release) and the GV identifier rename (already
+earmarked). Suites: 1711 Python + 1720 frontend tests green.
+
 ## 2026-08-31 — v2.16.0: a running agent shows its hand, and dismissals stay findable
 
 - **The transcript pane shows a run's prompt while the model is still

@@ -418,3 +418,14 @@ async def test_an_enrolled_catalog_item_flows_to_the_steward(
     assert landed["state"] in ("PROCESSED", "DISMISS_PENDING")
     session = await repo.get_session(result["session_id"])
     assert session["agent_id"] == "knowledge-steward"
+
+
+def test_catalog_message_id_matches_the_sql_the_enrollment_query_builds():
+    """The anti-join in `repo._UNENROLLED_VERSION` interpolates the same
+    CATALOG_ITEM_PREFIX/CATALOG_ITEM_SUFFIX constants `catalog_message_id`
+    builds from — pins them together so they can't silently desync."""
+    version_id = "some-version-uuid"
+    expected = f"{repo.CATALOG_ITEM_PREFIX}{version_id}{repo.CATALOG_ITEM_SUFFIX}"
+    assert repo.catalog_message_id(version_id) == expected
+    assert repo.CATALOG_ITEM_PREFIX in repo._UNENROLLED_VERSION
+    assert repo.CATALOG_ITEM_SUFFIX in repo._UNENROLLED_VERSION

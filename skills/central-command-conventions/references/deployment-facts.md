@@ -1,4 +1,4 @@
-# Where this runs (as of 2026-08-01)
+# Where this runs (as of 2026-08-31)
 
 Facts about the deployment, so you do not reason about it from general
 knowledge. If what you observe contradicts this document, declare a
@@ -42,9 +42,12 @@ preceded this was a blast-radius guard, never a fix.
   cluster's own load balancer carries the floating services to whichever node
   they are on. A hard-coded node address would work today and silently break
   failover.
-- Two locally-built images exist, one per architecture. A floating pod needs its
-  image present on **both** nodes, or the failure appears only on the day it
-  actually moves.
+- Three locally-built images exist: the graph-extraction service (one per
+  architecture — a floating pod needs it present on **both** nodes, or the
+  failure appears only on the day it actually moves), and the sandbox runner
+  and crawl service (chromebox-only, single-arch by design). The manifest set
+  includes the sandbox, its MCP servers, the crawler, and the log console
+  alongside the original spine.
 - Two encryption keys must never change: they encrypt stored proxy virtual keys
   and a stored OAuth credential respectively. A restore under a different key
   leaves the rows present and undecryptable.

@@ -795,6 +795,53 @@ async def test_a_raising_exec_call_is_material_through_fire(monkeypatch, sandbox
     )
 
 
+async def test_a_material_run_is_recorded_through_fire(monkeypatch, sandbox_stubs):
+    """The happy-path counterpart to the raising-exec test above: a run that
+    creates the evaluation task is material through the REAL `fire()` path,
+    not just via `.run()` directly — pins that `material=lambda r:
+    bool(r.get('task_id'))` actually sees the handler's real return shape."""
+    sandbox_stubs["state"]["exit_code"] = 1
+
+    rec = _Recorder(monkeypatch)
+    from central_command.db import repo
+
+    async def _touch(schedule_id):
+        rec.kinds.append("touch:last_fired")
+
+    monkeypatch.setattr(repo, "touch_heartbeat_fired", _touch)
+
+    out = await fire({
+        "id": "s1", "action_kind": "sandbox.run_script",
+        "action_params": _run_script_params(),
+    })
+    assert out["ok"]
+    assert rec.kinds == ["touch:last_fired", "heartbeat.completed"], (
+        "a run that created a task is material and must land on the log"
+    )
+
+
+async def test_a_material_drift_is_recorded_through_fire(monkeypatch, discovery_stubs):
+    """Same shape, for litellm.discovery: real drift through the REAL
+    `fire()` path must be material, not just quiet-eligible on paper."""
+    discovery_stubs["state"]["catalog"] = [{"id": "claude-new"}]
+
+    rec = _Recorder(monkeypatch)
+    from central_command.db import repo
+
+    async def _touch(schedule_id):
+        rec.kinds.append("touch:last_fired")
+
+    monkeypatch.setattr(repo, "touch_heartbeat_fired", _touch)
+
+    out = await fire({
+        "id": "s1", "action_kind": "litellm.discovery", "action_params": {},
+    })
+    assert out["ok"]
+    assert rec.kinds == ["touch:last_fired", "heartbeat.completed"], (
+        "real drift is material and must land on the log"
+    )
+
+
 @needs_pg
 async def test_an_unrenderable_kind_fails_loudly(monkeypatch, ea_stubs):
     """The belt behind `validate_action`'s braces: a row edited straight in SQL

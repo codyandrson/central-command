@@ -1,8 +1,8 @@
 """Client for the Graphiti knowledge graph, via its MCP server (streamable HTTP).
 
-The Pi's own `cc-graphiti` (127.0.0.1:8000/mcp) fronts the Neo4j graph — one
-service of `deploy/pi/docker-compose.yml`, not the desktop's retired
-`nat-graphiti`.
+`cc-graphiti` fronts the Neo4j graph — a floating k3s pod (chromebox-preferred,
+fails over to the Pi), reached at loopback 127.0.0.1:8000/mcp via ServiceLB
+same as on the retired compose stack. Not the desktop's retired `nat-graphiti`.
 Per DESIGN §3, **reading is layered, writing is gated**: read operations are
 ungated and safe for the runtime tier (agents pull context freely); write
 operations are called by the Executor *after* approval — never handed to a

@@ -127,7 +127,7 @@ def _entries() -> list[dict]:
             "name": "LiteLLM DB",
             "kind": "store",
             "url": None,
-            "health": _tcp_check(settings.litellm_db_url or None, 5432),
+            "health": _tcp_check(settings.litellm_db_url or None, 5443),
             "credential": {
                 "label": "salt key + DB password",
                 "location": "CC_LITELLM_SALT_KEY + LITELLM_POSTGRES_PASSWORD in deploy/pi/.env",
@@ -138,7 +138,7 @@ def _entries() -> list[dict]:
             "name": "Postgres",
             "kind": "store",
             "url": None,
-            "health": _tcp_check(settings.database_url, 5432),
+            "health": _tcp_check(settings.database_url, 5442),
             "credential": {"label": "DB URL", "location": "CC_DATABASE_URL"},
         },
         {

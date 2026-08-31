@@ -1,18 +1,14 @@
-import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
-  X, Play, CheckCircle2, XCircle, Trash2, Save, Loader2,
-  Clock, User, Tag, AlertTriangle, MessageSquare, StopCircle, Pencil,
+  X, Play, CheckCircle2, XCircle, Trash2, Loader2,
+  Clock, User, Tag, AlertTriangle, MessageSquare, StopCircle,
   Compass, CornerDownRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useSessionContext } from '@/contexts/SessionContext';
-import { COLUMN_LABELS, type KanbanTask, type TaskStatus, type TaskPriority } from './types';
-import type { UpdateTaskPayload, VersionConflictError } from './hooks/useKanban';
-import { AssigneeCombobox } from './components/AssigneeCombobox';
-import { buildAssigneeOptionsForEdit } from './lib/assigneeOptions';
+import { COLUMN_LABELS, type KanbanTask } from './types';
 import { SourceEmailBlock } from './SourceEmailBlock';
-import { getTaskPriorityLabel, getTaskPriorityTone, getTaskRunTone, getTaskStatusTone, getTaskPriority, getTaskStatus } from './tone';
+import { getTaskPriorityLabel, getTaskPriorityTone, getTaskRunTone, getTaskStatusTone } from './tone';
 
 const MarkdownRenderer = lazy(() =>
   import('@/features/markdown/MarkdownRenderer').then(m => ({ default: m.MarkdownRenderer })),
@@ -46,7 +42,6 @@ function RunElapsed({ startedAt }: { startedAt: number }) {
 interface TaskDetailDrawerProps {
   task: KanbanTask | null;
   onClose: () => void;
-  onUpdate: (id: string, payload: UpdateTaskPayload) => Promise<KanbanTask>;
   onDelete: (id: string) => Promise<void>;
   onExecute?: (id: string, options?: { model?: string; thinking?: string }) => Promise<KanbanTask>;
   onApprove?: (id: string, note?: string) => Promise<KanbanTask>;
@@ -60,98 +55,34 @@ interface TaskDetailDrawerProps {
   onOpenSession?: (sessionKey: string) => void;
 }
 
-export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute, onApprove, onReject, onAbort, onResume, onOpenSession }: TaskDetailDrawerProps) {
-  const { sessions, agentName } = useSessionContext();
-  const [editTitle, setEditTitle] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editStatus, setEditStatus] = useState<TaskStatus>('todo');
-  const [editPriority, setEditPriority] = useState<TaskPriority>('normal');
-  const [editLabels, setEditLabels] = useState('');
-  const [editAssignee, setEditAssignee] = useState('');
-  const [editVersion, setEditVersion] = useState(0);
-  const [saving, setSaving] = useState(false);
+/**
+ * Read-only task detail view. Central Command task records are the
+ * operator's ask, verbatim — cc-kanban.ts's PATCH endpoint 400s everything
+ * except a status:"CANCELLED" transition, so there is no edit-and-save
+ * affordance here, only the workflow levers that actually do something
+ * (execute / stop / resume / approve / reject / cancel).
+ */
+export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove, onReject, onAbort, onResume, onOpenSession }: TaskDetailDrawerProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [descriptionEditing, setDescriptionEditing] = useState(true);
-  const drawerRef = useRef<HTMLDivElement>(null);
 
-  /* Populate fields when task changes */
+  /* Reset transient state when task changes */
   useEffect(() => {
     if (task) {
-      setEditTitle(task.title);
-      setEditDescription(task.description || '');
-      setEditStatus(getTaskStatus(task.status));
-      setEditPriority(getTaskPriority(task.priority));
-      setEditLabels(task.labels.join(', '));
-      setEditAssignee(task.assignee || '');
-      setEditVersion(task.version);
       setError(null);
-      setDirty(false);
-      setDescriptionEditing(true);
       setConfirmDelete(false);
     }
   }, [task]);
-
-  /* Safe close — warn on unsaved changes */
-  const safeClose = useCallback(() => {
-    if (dirty && !window.confirm('You have unsaved changes. Discard?')) return;
-    onClose();
-  }, [dirty, onClose]);
 
   /* Close on Escape */
   useEffect(() => {
     if (!task) return;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') safeClose();
+      if (e.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [task, safeClose]);
-
-  const markDirty = useCallback(() => setDirty(true), []);
-
-  const handleSave = useCallback(async () => {
-    if (!task || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const labels = editLabels
-        .split(',')
-        .map(l => l.trim())
-        .filter(Boolean);
-      await onUpdate(task.id, {
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
-        status: editStatus,
-        priority: editPriority,
-        labels,
-        assignee: editAssignee.trim() || null,
-        version: editVersion,
-      });
-      setDirty(false);
-    } catch (err) {
-      if (err instanceof Error && err.message === 'version_conflict') {
-        const latest = (err as VersionConflictError).latest;
-        if (latest) {
-          // Refresh drawer fields with latest server state so user can retry
-          setEditTitle(latest.title);
-          setEditDescription(latest.description || '');
-          setEditStatus(getTaskStatus(latest.status));
-          setEditPriority(getTaskPriority(latest.priority));
-          setEditLabels(latest.labels.join(', '));
-          setEditAssignee(latest.assignee || '');
-          setEditVersion(latest.version);
-        }
-        setError('Task was modified elsewhere. Fields refreshed to latest version -- review and save again.');
-        setDirty(false);
-      } else {
-        setError(err instanceof Error ? err.message : 'Save failed');
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [task, saving, editTitle, editDescription, editStatus, editPriority, editLabels, editAssignee, editVersion, onUpdate]);
+  }, [task, onClose]);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -162,7 +93,7 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
       await onDelete(task.id);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed');
+      setError(err instanceof Error ? err.message : 'Cancel failed');
     } finally {
       setDeleting(false);
       setConfirmDelete(false);
@@ -254,13 +185,7 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
   }, [task?.id]);
 
   const isOpen = task !== null;
-  const assigneeOptions = useMemo(
-    () => buildAssigneeOptionsForEdit(sessions, task?.assignee ?? null, agentName),
-    [agentName, sessions, task?.assignee],
-  );
-
-  const selectClass = 'cockpit-select h-11 text-sm';
-  const priorityTone = task ? getTaskPriorityTone(editPriority) : null;
+  const priorityTone = task ? getTaskPriorityTone(task.priority) : null;
 
   return (
     <>
@@ -268,13 +193,12 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
       {isOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/40 transition-opacity duration-200"
-          onClick={safeClose}
+          onClick={onClose}
         />
       )}
 
       {/* Drawer */}
       <div
-        ref={drawerRef}
         role="dialog"
         aria-modal="true"
         aria-label="Task details"
@@ -290,7 +214,7 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
                   {COLUMN_LABELS[task.status as keyof typeof COLUMN_LABELS] ?? 'Task'}
                 </span>
                 <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[0.667rem] font-semibold ${priorityTone?.badgeClass ?? ''}`}>
-                  {getTaskPriorityLabel(editPriority)}
+                  {getTaskPriorityLabel(task.priority)}
                 </span>
                 {task.stopped && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-orange/30 bg-orange/10 px-2.5 py-1 text-[0.667rem] font-semibold text-orange">
@@ -300,7 +224,7 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
                 )}
               </div>
               <button
-                onClick={safeClose}
+                onClick={onClose}
                 className="shell-icon-button size-9 px-0"
                 aria-label="Close drawer"
               >
@@ -318,118 +242,51 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
 
               <div className="cockpit-surface p-4 space-y-4">
                 <div>
-                  <label htmlFor="kb-title" className="cockpit-field-label mb-2 block">
-                    Title
-                  </label>
-                  <Input
-                    id="kb-title"
-                    value={editTitle}
-                    onChange={e => { setEditTitle(e.target.value); markDirty(); }}
-                    maxLength={500}
-                    className="cockpit-input h-11 text-sm font-semibold"
-                  />
+                  <span className="cockpit-field-label mb-2 block">Title</span>
+                  <p className="text-sm font-semibold text-foreground">{task.title}</p>
                 </div>
 
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <label htmlFor="kb-description" className="cockpit-field-label">
-                      Description
-                    </label>
-                    <button
-                      type="button"
-                      aria-label="Toggle description edit mode"
-                      aria-pressed={descriptionEditing}
-                      onClick={() => setDescriptionEditing(v => !v)}
-                      className={
-                        descriptionEditing
-                          ? 'rounded-md border border-border/60 bg-accent p-1 text-accent-foreground'
-                          : 'rounded-md border border-transparent p-1 text-muted-foreground hover:text-foreground'
-                      }
-                    >
-                      <Pencil size={12} />
-                    </button>
-                  </div>
-                  {descriptionEditing ? (
-                    <textarea
-                      id="kb-description"
-                      value={editDescription}
-                      onChange={e => { setEditDescription(e.target.value); markDirty(); }}
-                      placeholder="Markdown description…"
-                      rows={8}
-                      className="cockpit-textarea min-h-[180px]"
-                    />
-                  ) : (
-                    <div className="min-h-[180px] rounded-2xl border border-border/60 bg-background/45 p-3 text-sm text-foreground">
-                      <Suspense fallback={<div className="whitespace-pre-wrap cockpit-wrap">{editDescription}</div>}>
-                        <MarkdownRenderer content={editDescription} suppressImages />
+                {task.description && (
+                  <div>
+                    <span className="cockpit-field-label mb-2 block">Description</span>
+                    <div className="min-h-[60px] rounded-2xl border border-border/60 bg-background/45 p-3 text-sm text-foreground">
+                      <Suspense fallback={<div className="whitespace-pre-wrap cockpit-wrap">{task.description}</div>}>
+                        <MarkdownRenderer content={task.description} suppressImages />
                       </Suspense>
                     </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {task.labels.length > 0 && (
+                    <div>
+                      <span className="cockpit-field-label mb-2 block">
+                        <Tag size={10} className="mr-1 inline" />
+                        Labels
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {task.labels.map((label) => (
+                          <span
+                            key={label}
+                            className="rounded-full border border-border/55 bg-background/50 px-2 py-0.5 text-[0.667rem] font-medium text-muted-foreground"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="kb-status" className="cockpit-field-label mb-2 block">
-                      Status
-                    </label>
-                    <select
-                      id="kb-status"
-                      value={editStatus}
-                      onChange={e => { setEditStatus(e.target.value as TaskStatus); markDirty(); }}
-                      className={selectClass}
-                    >
-                      {Object.entries(COLUMN_LABELS).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="kb-priority" className="cockpit-field-label mb-2 block">
-                      Priority
-                    </label>
-                    <select
-                      id="kb-priority"
-                      value={editPriority}
-                      onChange={e => { setEditPriority(getTaskPriority(e.target.value)); markDirty(); }}
-                      className={selectClass}
-                    >
-                      {(['critical', 'high', 'normal', 'low'] as TaskPriority[]).map(p => (
-                        <option key={p} value={p}>{getTaskPriorityLabel(p)}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="kb-labels" className="cockpit-field-label mb-2 block">
-                      <Tag size={10} className="mr-1 inline" />
-                      Labels
-                    </label>
-                    <Input
-                      id="kb-labels"
-                      value={editLabels}
-                      onChange={e => { setEditLabels(e.target.value); markDirty(); }}
-                      placeholder="bug, urgent"
-                      className="cockpit-input h-11"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="kb-assignee" className="cockpit-field-label mb-2 block">
-                      <User size={10} className="mr-1 inline" />
-                      Assignee
-                    </label>
-                    <AssigneeCombobox
-                      id="kb-assignee"
-                      value={editAssignee}
-                      onChange={(nextValue) => { setEditAssignee(nextValue); markDirty(); }}
-                      options={assigneeOptions}
-                      ariaLabel="Assignee"
-                      placeholder="Select assignee"
-                      noResultsText="No matching assignees"
-                      inline
-                    />
-                  </div>
+                  {task.assignee && (
+                    <div>
+                      <span className="cockpit-field-label mb-2 block">
+                        <User size={10} className="mr-1 inline" />
+                        Assignee
+                      </span>
+                      <p className="text-sm text-foreground">
+                        {task.assignee === 'operator' ? 'Operator' : task.assignee.replace('agent:', '@')}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -501,12 +358,6 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
                     </div>
                     {task.run.startedAt && (
                       <div>Started: {new Date(task.run.startedAt).toLocaleString()}</div>
-                    )}
-                    {task.run.endedAt && (
-                      <div>Ended: {new Date(task.run.endedAt).toLocaleString()}</div>
-                    )}
-                    {task.run.error && (
-                      <div className="break-words text-destructive">Error: {task.run.error}</div>
                     )}
                   </div>
                 </div>
@@ -691,15 +542,6 @@ export function TaskDetailDrawer({ task, onClose, onUpdate, onDelete, onExecute,
                   </Button>
                 )
               )}
-
-              <Button
-                size="xs"
-                onClick={handleSave}
-                disabled={!dirty || saving}
-              >
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                Save
-              </Button>
               </div>
             </div>
           </>

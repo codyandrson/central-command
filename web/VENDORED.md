@@ -45,6 +45,21 @@ Why they had to leave `server/`: their tests **passed**, and ran on every
 no test — it reads as coverage. They are now excluded from `vitest.config.ts`
 and from `config/tsconfig.server.json`.
 
+**The live `cc-kanban.ts` twin is itself read-mostly**, and `src/features/kanban/`
+was cut 2026-08-31 to match: `TaskDetailDrawer.tsx` lost its whole
+edit-and-save UI (title/description/priority/labels/assignee editors, dirty
+tracking, a Save button whose PATCH always 400s except `status:"CANCELLED"`)
+down to a read-only view plus the workflow levers that actually work
+(execute/approve/reject/abort/resume/cancel); `CreateTaskDialog.tsx` dropped
+its Status/Priority selects (the server hardcodes both on creation);
+same-column drag reorder was cut (`columnOrder` is always 0 server-side, so a
+reorder silently self-reverted on the next poll) while cross-column
+drag-to-Cancelled — the one drag that is real — stays; and the whole
+agent-proposal-inbox tree (`ProposalInbox.tsx`, `useProposals.ts`, the header
+wiring) is gone — `GET /api/kanban/proposals` always returned `[]` and
+`POST` was a permanent 501, because Central Command proposals flow through the
+Decisions Inbox / approval gateway, not the board.
+
 **To restore one:** `git mv` it back to its original path under `server/`, then
 register it in `server/app.ts`. The directory layout inside `vendor-unused/`
 mirrors `server/` so relative imports *within* the quarantine still resolve;
@@ -66,6 +81,12 @@ kept as-is rather than quarantined:
   panels for Codex / Claude Code CLI. Report "unavailable" since neither CLI
   runs here (Central Command talks to Claude via the LiteLLM proxy, not a local
   CLI).
+- **`server/routes/gateway.ts`'s `/api/gateway/restart` handler** — shells out
+  to an `openclaw` CLI that has never existed on the Pi. The cockpit's own
+  trigger for it (a confirm dialog + spinner + banner in `App.tsx`, driven by
+  `useGatewayRestart`) was removed 2026-08-31 since it could never open and
+  the route just 500s; the route itself is left mounted (same "degrade
+  honestly, don't quarantine a live route" call as the two above).
 
 ## The file browser — live-mounted upstream code, UI off by decision
 
@@ -105,16 +126,23 @@ Treat every one as third-party documentation:
   contract is `central_command/api/nerve_gateway.py` plus `docs/DESIGN.md`.
 - **`.github/workflows/ci.yml` + issue templates** — inert. GitHub only reads
   `.github/` at the repository root, and there isn't one; this CI has never run.
-- **`CHANGELOG.md`** — upstream's release history. Central Command's history is
-  `docs/JOURNAL.md`.
+- **`CHANGELOG.md`** — upstream's release history. Central Command's own
+  public what-changed record is the repo-root `CHANGELOG.md` (not this one —
+  the operator's live-state/incident journal moved to the private instance
+  repo 2026-08-27 and is not in this tree at all).
 - **`bin/nerve-update.ts`** (+ its gitignored `bin-dist/` build output, wired
   as the `npm run update` script and `server/lib/release-source.ts`) —
   upstream's SELF-UPDATE tooling, fetching releases from upstream's GitHub.
   Never run it here: Central Command's cockpit updates by `git pull` + `npm run
   build`, and a self-update would overwrite the fork with upstream.
-- **`skills/nerve-kanban/`** — an upstream skill bundle, not referenced by
-  `server/app.ts` or any cc-* route; inert upstream leftover, same class as
-  `vendor-unused/`.
+- **`skills/nerve-kanban/`** — DELETED 2026-08-31. It documented upstream
+  Nerve's kanban API (arbitrary status/priority, freeform column moves,
+  agent-proposed edits) which `cc-kanban.ts` contradicts wholesale — Central
+  Command's board is read-mostly (tasks are the operator's ask verbatim; only
+  cancel/execute/approve/reject/abort/resume exist server-side). Kept no
+  longer than the other quarantined-but-not-deleted upstream code because a
+  skill an agent could actually read and act on is worse than dead code: it
+  actively taught the wrong API.
 
 When you need to know how something in the cockpit behaves *here*, read
 `server/app.ts`, the `cc-*` routes, and `nerve_gateway.py`. Not these.

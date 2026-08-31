@@ -69,6 +69,11 @@ powershell, exchange-powershell, ews-exchange-dev, msgraph.
 **Infra & platform:** k3s, victorialogs, fluent-bit, claude-code,
 anthropic-platform, atlassian-dc-rest.
 
+**Model evaluation data:** `model-library/` — fetched by
+`scripts/model_library_fetch.sh` rather than `vendor_docs_fetch.sh` (pricing
+and benchmark datasets, not doc trees); it self-documents via its own
+`README.md`/`MANIFEST.yaml`.
+
 **Known approximations (see each MANIFEST.yaml for detail) — the doc-source
 repo doesn't tag releases in lockstep with the library's own version, so
 these were vendored from that repo's default/main branch rather than an

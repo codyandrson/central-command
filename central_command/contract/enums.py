@@ -11,15 +11,6 @@ class Reversibility(str, Enum):
     irreversible = "irreversible"
 
 
-class RiskTier(str, Enum):
-    """What a class of action requires. The gateway derives this from policy —
-    never from the agent's own say-so."""
-
-    auto = "auto"
-    ask = "ask"
-    never = "never"
-
-
 class ConfidenceLevel(str, Enum):
     """How sure the AGENT is of its own proposal — its self-assessment, never a
     gate. Uncertainty triage (the knowledge-layer routing record) records it on
@@ -48,6 +39,9 @@ class ProposalStatus(str, Enum):
     # and queued for replay because a dependency was DOWN. Not terminal and not
     # decidable — the operator decided once; what is pending is the world-change.
     retry_pending = "RETRY_PENDING"
+    # Dismiss verdict: no action needed. Withdrawn, never deleted — folds
+    # released, session closed, drafter never resumed (see gateway.dismiss_proposal).
+    withdrawn = "WITHDRAWN"
 
 
 class SessionStatus(str, Enum):

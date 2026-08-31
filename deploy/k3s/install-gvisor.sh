@@ -110,7 +110,7 @@ metadata: {name: gvisor-proof, namespace: cc-sandbox}
 spec:
   runtimeClassName: gvisor
   restartPolicy: Never
-  nodeSelector: {kubernetes.io/hostname: chromebox}
+  nodeSelector: {cc-role/compute: "true"}
   containers:
     - name: proof
       image: docker.io/library/busybox:1.36

@@ -2,7 +2,9 @@
 
 > **⛔ MODELS RETIRED 2026-08-01.** `qwen3.6-35b` and `north-mini-code` are gone for good — deleted from LiteLLM, from `model-preferences.yaml` and from the workstation. They were never routed to and never given a role. Anything below that scores, declares, or proposes adopting them is HISTORY, not a to-do. Do not re-register them.
 
-> Status: design approved 2026-07-26 (The operator). Not yet planned or implemented.
+> Status: design approved 2026-07-26 (The operator). Units 1–2 are live (see
+> `2026-07-26-adaptive-routing-units-1-2.md`); Unit 3 (the feedback loop) was
+> withdrawn by the quality-router-migration spec — see `docs/DESIGN.md`.
 > Companion spec: `2026-07-26-local-serving-and-embedding-migration-design.md`.
 
 ## Goal

@@ -1973,13 +1973,13 @@ async def sandbox_reset(ctx: RunContext) -> str:
 # --- mcp.sync_source (D-sandbox slice 2) --------------------------------------
 # The ONE gated exit from a sandbox: everything above is ungated because
 # nothing it produces is durable; this tool is the seam where that stops being
-# true. §7 of the design's long-term shape is ONE generic `propose_mcp_tool_call`
-# wrapper dispatching on the Action's capability (mirrors how jira-propose's
-# single `propose_action` carries six Jira capabilities) — but sync_source
-# is the only MCP capability that exists yet, so this tool is named for what it
-# does. When build_image/server_deploy/register_mcp_server land (later slices),
-# fold this into the generic wrapper rather than adding propose_mcp_build_image
-# etc. one at a time.
+# true. Later slices landed one per-capability tool each — propose_mcp_build,
+# propose_mcp_deploy, propose_mcp_register, propose_mcp_remove, below — rather
+# than folding into a single generic wrapper dispatching on the Action's
+# capability (the §7 plan, mirroring jira-propose's one `propose_action`
+# carrying six Jira capabilities). Consolidating into a generic wrapper
+# remains an option if the per-capability set keeps growing, not the shape
+# that shipped.
 #
 # LOAD-BEARING: file content is captured HERE, at propose time, by CODE reading
 # the sandbox — never authored by the model into the tool call. The model

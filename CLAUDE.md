@@ -11,11 +11,11 @@
 ## What Central Command is
 
 A **human-supervised agentic-team framework**: a control plane over a team of
-Claude agents where the operator (The operator) is team lead — tasking agents, approving
+Claude agents where the operator is team lead — tasking agents, approving
 their actions, answering their questions, and coaching behavior over time.
 **Nothing changes the world without passing an approval gate.** Single-operator,
-self-hosted on a Raspberry Pi in the operator's homelab (Docker CE); the work deployment
-target is air-gapped. Primary risk model is **error, not malice** (hallucination
+self-hosted on a two-node k3s cluster (Raspberry Pi + chromebox) in the operator's
+homelab; the work deployment target is air-gapped. Primary risk model is **error, not malice** (hallucination
 / misreads), so the guards are reliability guards that also happen to stop
 misuse.
 
@@ -83,7 +83,11 @@ architecture where the leak was measured.
   shared storage is no way out ([Neo4j forbids NFS
   outright](https://neo4j.com/developer/kb/can-i-use-nfs-as-my-filesystem-or-datastore-storage/):
   no file locking → store corruption). Pi: `cc-postgres`, `cc-litellm-db`,
-  `cc-litellm-redis`, `cc-n8n`, `cc-n8n-db`. Chromebox: `cc-neo4j`.
+  `cc-litellm-redis`, `cc-n8n`, `cc-n8n-db`. Chromebox: `cc-neo4j`. Every pinned
+  or preferred placement resolves via the `cc-role/anchor` / `cc-role/compute`
+  node labels (the 2026-08-27 contract), never hostnames — `setup.sh` preflight
+  requires exactly one node carrying each label, and an unlabeled cluster
+  leaves those pods Pending.
 - **Databases on the Pi is what MAKES failover work.** LiteLLM is the memory hog
   *and* it is stateless — its state is in `cc-litellm-db` (182 MB) and redis.
   Float the hog, keep the small database on the Pi, and a chromebox outage

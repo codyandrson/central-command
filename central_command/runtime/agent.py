@@ -369,7 +369,11 @@ async def build_agent_for(agent_id: str, model=None) -> Agent:
             model=model, packs=packs, capabilities=caps, skills_catalog=catalog,
             extra_toolsets=mcp_toolsets, mcp_section=mcp_section,
         )
-    if agent_id in ("inbox-triage", "auditor", "orchestrator"):
+    # "auditor" deliberately excluded: the real audit agent is built in
+    # gateway/auditor.py (build_auditor), which is never resumed through this
+    # path. Including it here would fall through to build_agent's default
+    # packs since the auditor's own grants are empty (falsy `packs or None`).
+    if agent_id in ("inbox-triage", "orchestrator"):
         return await build_agent(
             model=model, packs=packs or None, capabilities=caps, skills_catalog=catalog,
             extra_toolsets=mcp_toolsets, mcp_section=mcp_section,

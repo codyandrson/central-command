@@ -18,6 +18,7 @@ from central_command.config import settings
 from central_command.contract import (
     Action,
     Proposal,
+    ProposalStatus,
     claim_supported,
     classify_failure,
     classify_failure_text,
@@ -1104,7 +1105,7 @@ async def dismiss_proposal(
         actor="operator",
     )
 
-    await repo.set_proposal_status(proposal_id, "WITHDRAWN")
+    await repo.set_proposal_status(proposal_id, ProposalStatus.withdrawn)
     await release_folds_for(proposal_id, "covering proposal dismissed")
     await close_session(
         session_id, agent_id=prop_row["agent_id"], reason="dismissed", actor="operator",

@@ -59,7 +59,6 @@ interface SessionContextValue {
   deleteSession: (sessionKey: string) => Promise<void>;
   openNewSession: (rootOrAgentKey: string) => Promise<void>;
   spawnSession: (opts: SpawnSessionOpts) => Promise<void>;
-  renameSession: (sessionKey: string, label: string) => Promise<void>;
   updateSession: (sessionKey: string, updates: Partial<Session>) => void;
   agentLogEntries: AgentLogEntry[];
   eventEntries: EventEntry[];
@@ -1001,11 +1000,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setCurrentSession(data.sessionKey);
   }, [defaultAgentWorkspaceRoot, listAuthoritativeSessions, rpc, refreshSessions, setCurrentSession]);
 
-  const renameSession = useCallback(async (sessionKey: string, label: string) => {
-    await rpc('sessions.patch', { key: sessionKey, label });
-    updateSessionFromEvent(sessionKey, { label });
-  }, [rpc, updateSessionFromEvent]);
-
   const abortSession = useCallback(async (sessionKey: string) => {
     try {
       await rpc('chat.abort', { sessionKey });
@@ -1030,7 +1024,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     deleteSession,
     openNewSession,
     spawnSession,
-    renameSession,
     updateSession: updateSessionFromEvent,
     agentLogEntries,
     eventEntries,
@@ -1038,7 +1031,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }), [
     displaySessions, sessionsLoading, currentSession, setCurrentSession, isViewingChat, setViewingChat, busyState, agentStatus,
     unreadSessions, markSessionRead,
-    abortSession, refreshSessions, deleteSession, openNewSession, spawnSession, renameSession,
+    abortSession, refreshSessions, deleteSession, openNewSession, spawnSession,
     updateSessionFromEvent, agentLogEntries, eventEntries, agentName,
   ]);
 

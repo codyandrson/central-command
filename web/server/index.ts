@@ -21,10 +21,23 @@ import { startFileWatcher, stopFileWatcher } from './lib/file-watcher.js';
 // ── Startup banner + validation ──────────────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pkgPath = path.resolve(__dirname, '..', 'package.json');
-const pkgVersion: string = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version || '0.0.0';
 
-printStartupBanner(pkgVersion);
+// The product version, from the repo-root VERSION file (`version=<semver>`,
+// the 2026-08-27 setup-update contract) — see server/routes/version.ts and
+// version-check.ts, which read the same file for the same reason: the
+// vendored cockpit's package.json version (1.5.3) is Nerve's, not ours.
+function readProductVersion(): string {
+  try {
+    const raw = fs.readFileSync(path.resolve(__dirname, '..', '..', 'VERSION'), 'utf-8');
+    const match = /^version=(.+)$/m.exec(raw);
+    if (match) return match[1].trim();
+  } catch {
+    // fall through
+  }
+  return '0.0.0';
+}
+
+printStartupBanner(readProductVersion());
 validateConfig();
 
 // ── Start file watchers ──────────────────────────────────────────────

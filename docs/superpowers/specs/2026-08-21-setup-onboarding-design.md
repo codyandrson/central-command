@@ -168,7 +168,7 @@ charters simply don't carry markers yet)._
 
 ## Addendum 2026-08-25 — the flow is LiteLLM-first
 
-_Cody's decision. Decision 2 above ("the LLM endpoint comes first") stands; what
+_The operator's decision. Decision 2 above ("the LLM endpoint comes first") stands; what
 changes is what "first" is proven AGAINST._
 
 Everything Central Command runs at runtime addresses this stack's own LiteLLM by

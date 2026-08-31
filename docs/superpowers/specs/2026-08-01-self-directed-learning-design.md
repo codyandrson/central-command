@@ -35,7 +35,7 @@ of our posture.
 learning goes to the shared graph via the gate.
 
 **Revised stance [D11-r1]:** no *ungoverned* private agent memory. Agents get
-a private graph partition (`central_command:<agent_id>`) alongside the shared
+a private graph partition (`central_command_<agent_id>`) alongside the shared
 group, but every write to either scope remains a gated `graph.add_episode`
 proposal through the same Proposal→audit→commit pipeline. What D11 always
 protected — the poisoning boundary, distilled-claims-only, nothing writes
@@ -44,7 +44,7 @@ role-specific knowledge that isn't team-wide noise — is opened, under the
 same gate.
 
 Reads: an agent's retrieval scope becomes `main, central_command,
-central_command:<self>`. It never reads another agent's private partition; a fact
+central_command_<self>`. It never reads another agent's private partition; a fact
 worth a teammate's attention belongs in the shared group (see routing, below).
 
 ## Decided shape
@@ -134,7 +134,7 @@ overconfident; the gate is the mitigation the literature lacks.
 ## Where it attaches (for the implementation plan)
 
 - `integrations/graphiti.py` — `group_id`/`group_ids` already per-call; add
-  the per-agent scope convention (`central_command:<agent_id>`) and widen
+  the per-agent scope convention (`central_command_<agent_id>`) and widen
   per-agent read scopes. Config: `graph_write_group` stays the shared
   default; scope arrives per proposal.
 - `gateway/executor.py:_graph_add_episode` — honor the scope argument; the

@@ -1,10 +1,8 @@
 import { memo, useState, useCallback, useRef, useEffect } from 'react';
-import { Filter, Plus, X, Inbox, History } from 'lucide-react';
+import { Filter, Plus, X, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { TaskStatus } from './types';
 import type { KanbanFilters } from './hooks/useKanban';
-import { ProposalInbox } from './ProposalInbox';
-import type { KanbanProposal } from './hooks/useProposals';
 import { TASK_STATUS_TONE } from './tone';
 import type { AssigneeOption } from './lib/assigneeOptions';
 
@@ -26,10 +24,6 @@ interface KanbanHeaderProps {
   onFiltersChange: (filters: KanbanFilters) => void;
   statusCounts: Record<TaskStatus, number>;
   onCreateTask: () => void;
-  proposals?: KanbanProposal[];
-  pendingProposalCount?: number;
-  onApproveProposal?: (id: string) => void;
-  onRejectProposal?: (id: string) => void;
   /** Active agents, same source CreateTaskDialog/TaskDetailDrawer use
    *  (buildAssigneeOptions over the session roster). */
   agentOptions?: AssigneeOption[];
@@ -43,36 +37,18 @@ export const KanbanHeader = memo(function KanbanHeader({
   onFiltersChange,
   statusCounts,
   onCreateTask,
-  proposals = [],
-  pendingProposalCount = 0,
-  onApproveProposal,
-  onRejectProposal,
   agentOptions = [],
   showOldTerminal = false,
   onToggleOldTerminal,
   oldTerminalHiddenCount = 0,
 }: KanbanHeaderProps) {
   const [showFilters, setShowFilters] = useState(false);
-  const [showInbox, setShowInbox] = useState(false);
   const [searchValue, setSearchValue] = useState(filters.q);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const filtersRef = useRef(filters);
-  const inboxRef = useRef<HTMLDivElement>(null);
 
   /* Keep filtersRef in sync (avoids stale closures in debounced search) */
   useEffect(() => { filtersRef.current = filters; });
-
-  /* Close inbox popover when clicking outside */
-  useEffect(() => {
-    if (!showInbox) return;
-    const handler = (e: MouseEvent) => {
-      if (inboxRef.current && !inboxRef.current.contains(e.target as Node)) {
-        setShowInbox(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showInbox]);
 
   /* Debounced search — reads filtersRef to avoid overwriting concurrent filter changes */
   const handleSearchChange = useCallback((value: string) => {
@@ -170,44 +146,6 @@ export const KanbanHeader = memo(function KanbanHeader({
               <History size={14} />
             </Button>
           )}
-
-          {/* Proposal inbox */}
-          <div className="relative" ref={inboxRef}>
-            <Button
-              variant={showInbox ? 'secondary' : 'outline'}
-              size="icon-sm"
-              onClick={() => setShowInbox(!showInbox)}
-              title="Agent proposals"
-              className={showInbox ? 'border-primary/30 bg-primary/12 text-primary' : ''}
-            >
-              <Inbox size={14} />
-              {pendingProposalCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 text-[0.667rem] font-bold bg-primary text-primary-foreground rounded-full flex items-center justify-center">
-                  {pendingProposalCount}
-                </span>
-              )}
-            </Button>
-
-            {/* Inbox popover */}
-            {showInbox && (
-              <div className="shell-panel absolute right-0 top-full z-50 mt-2 w-[min(360px,calc(100vw-1.067rem))] max-w-[calc(100vw-1.067rem)] overflow-hidden rounded-3xl">
-                <div className="border-b border-border/50 bg-secondary/38 px-4 py-3">
-                  <span className="cockpit-kicker text-[0.6rem]">
-                    <span className="text-primary">◆</span>
-                    Agent proposals
-                  </span>
-                  {pendingProposalCount > 0 && (
-                    <span className="ml-2 text-[0.733rem] text-muted-foreground">{pendingProposalCount} pending</span>
-                  )}
-                </div>
-                <ProposalInbox
-                  proposals={proposals}
-                  onApprove={(id) => onApproveProposal?.(id)}
-                  onReject={(id) => onRejectProposal?.(id)}
-                />
-              </div>
-            )}
-          </div>
 
           {/* Create */}
           <Button size="sm" onClick={onCreateTask}>

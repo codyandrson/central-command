@@ -58,7 +58,6 @@ const {
     deleteSession: vi.fn(),
     abortSession: vi.fn(),
     spawnSession: vi.fn(),
-    renameSession: vi.fn(),
     agentLogEntries: [],
     eventEntries: [],
     agentName: 'Nerve',
@@ -212,18 +211,6 @@ vi.mock('@/hooks/useDashboardData', () => ({
     memoriesLoading: false,
     tokenData: null,
     refreshMemories: vi.fn(),
-  }),
-}));
-
-vi.mock('@/hooks/useGatewayRestart', () => ({
-  useGatewayRestart: () => ({
-    showGatewayRestartConfirm: false,
-    gatewayRestarting: false,
-    gatewayRestartNotice: null,
-    handleGatewayRestart: vi.fn(),
-    cancelGatewayRestart: vi.fn(),
-    confirmGatewayRestart: vi.fn(),
-    dismissNotice: vi.fn(),
   }),
 }));
 

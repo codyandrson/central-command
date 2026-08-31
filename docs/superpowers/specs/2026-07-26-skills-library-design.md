@@ -1,6 +1,10 @@
 # The Skills Library — design
 
-_Status: approved in brainstorming 2026-07-26 (The operator). Precedes the implementation plan._
+_Status: shipped — all 12 tasks of the implementation plan are done, skills are
+DB rows delivered on demand (see `docs/DESIGN.md`). AS BUILT: stage 4's Gate
+model (`agent_capability_gate` table, `resolve_gate` seam) below was never
+built — every capability still gates through the existing proposal/executor
+path._
 
 ## Why
 

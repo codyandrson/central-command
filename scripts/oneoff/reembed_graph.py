@@ -23,9 +23,9 @@ but Graphiti does not add one at search time — so adding one here would embed
 documents into a different region than the queries that must find them. Being
 consistent beats the documented 1-5% gain.
 
-    python3 scripts/reembed_graph.py            # dry run, shows what it would do
-    python3 scripts/reembed_graph.py --apply
-    python3 scripts/reembed_graph.py --verify   # assert exactly one model present
+    python3 scripts/oneoff/reembed_graph.py            # dry run, shows what it would do
+    python3 scripts/oneoff/reembed_graph.py --apply
+    python3 scripts/oneoff/reembed_graph.py --verify   # assert exactly one model present
 """
 import argparse
 import base64

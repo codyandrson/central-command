@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { KanbanTask } from './types';
 import { useKanban } from './hooks/useKanban';
-import { useProposals } from './hooks/useProposals';
 import { KanbanHeader } from './KanbanHeader';
 import { KanbanBoard } from './KanbanBoard';
 import { CreateTaskDialog } from './CreateTaskDialog';
@@ -31,7 +30,6 @@ export function KanbanPanel({ initialTaskId, onInitialTaskConsumed, onOpenSessio
     setFilters,
     fetchTasks,
     createTask,
-    updateTask,
     deleteTask,
     reorderTask,
     tasksByStatus,
@@ -46,13 +44,6 @@ export function KanbanPanel({ initialTaskId, onInitialTaskConsumed, onOpenSessio
     setShowOldTerminal,
     oldTerminalHiddenCount,
   } = useKanban();
-
-  const {
-    proposals,
-    pendingCount: pendingProposalCount,
-    approveProposal,
-    rejectProposal,
-  } = useProposals();
 
   // Same agent source CreateTaskDialog/TaskDetailDrawer use — real active
   // agents from the session roster, not just ones with a task on the board.
@@ -95,13 +86,6 @@ export function KanbanPanel({ initialTaskId, onInitialTaskConsumed, onOpenSessio
     await createTask(payload);
   }, [createTask]);
 
-  /* ── Update handler (refreshes selected task) ── */
-  const handleUpdate = useCallback(async (...args: Parameters<typeof updateTask>) => {
-    const updated = await updateTask(...args);
-    setSelectedTask(updated);
-    return updated;
-  }, [updateTask]);
-
   /* ── Delete handler ── */
   const handleDelete = useCallback(async (id: string) => {
     await deleteTask(id);
@@ -120,10 +104,6 @@ export function KanbanPanel({ initialTaskId, onInitialTaskConsumed, onOpenSessio
         onFiltersChange={setFilters}
         statusCounts={statusCounts}
         onCreateTask={openCreateDialog}
-        proposals={proposals}
-        pendingProposalCount={pendingProposalCount}
-        onApproveProposal={async (id) => { await approveProposal(id); await fetchTasks(); }}
-        onRejectProposal={async (id) => { await rejectProposal(id); }}
         agentOptions={agentOptions}
         showOldTerminal={showOldTerminal}
         onToggleOldTerminal={() => setShowOldTerminal(!showOldTerminal)}
@@ -156,7 +136,6 @@ export function KanbanPanel({ initialTaskId, onInitialTaskConsumed, onOpenSessio
       <TaskDetailDrawer
         task={selectedTask}
         onClose={handleCloseDrawer}
-        onUpdate={handleUpdate}
         onDelete={handleDelete}
         onExecute={executeTask}
         onApprove={approveTask}

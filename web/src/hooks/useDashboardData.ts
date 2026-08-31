@@ -158,19 +158,7 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
     
     return subscribe((msg: GatewayEvent) => {
       const evt = msg.event;
-      
-      // Memory events - refresh immediately when memories change
-      // Gateway may emit: memory.stored, memory.deleted, memory.changed
-      if (evt === 'memory.stored' || evt === 'memory.deleted' || evt === 'memory.changed') {
-        refreshMemoriesRef.current?.();
-      }
-      
-      // Token/cost events - refresh when token usage changes
-      // Gateway may emit: tokens.update, cost.update
-      if (evt === 'tokens.update' || evt === 'cost.update') {
-        refreshTokensRef.current?.();
-      }
-      
+
       // Also trigger token refresh on chat.final events (response completed = tokens used)
       // This ensures token counts update after each agent response
       const payload = msg.payload as Record<string, unknown> | undefined;

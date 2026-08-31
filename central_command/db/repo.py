@@ -1,5 +1,7 @@
-"""Minimal async persistence for the spine (asyncpg). Enough for the M2 spike;
-grows into a proper repository with a connection pool later.
+"""Minimal async persistence for the spine (asyncpg).
+
+# ponytail: connect-per-call by design, not a stopgap — a pool is the known
+# upgrade if connection overhead ever measures as a problem.
 """
 
 from __future__ import annotations
@@ -415,7 +417,7 @@ async def request_session_stop(session_id: str) -> bool:
             "where id = $1 and status = 'RUNNING'",
             session_id,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -648,7 +650,7 @@ async def answer_operator_item(
             """,
             item_id, answer, verdict,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -2263,7 +2265,7 @@ async def retire_agent(agent_id: str, reason: str, retired_by: str = "operator")
             """,
             agent_id, reason,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -2279,7 +2281,7 @@ async def reactivate_agent(agent_id: str) -> bool:
             """,
             agent_id,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -2348,7 +2350,7 @@ async def revoke_pack(agent_id: str, pack: str, reason: str | None = None) -> bo
             """,
             agent_id, pack, reason,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -2603,7 +2605,7 @@ async def retire_loe(loe_id: str, reason: str) -> bool:
             "where id = $2 and status = 'ACTIVE'",
             reason, loe_id,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -2749,7 +2751,7 @@ async def update_heartbeat_schedule(schedule_id: str, fields: dict) -> bool:
             f"where id = ${len(args)}",
             *args,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -2761,7 +2763,7 @@ async def set_heartbeat_enabled(schedule_id: str, enabled: bool) -> bool:
             "update heartbeat_schedule set enabled = $1, updated_at = now() where id = $2",
             enabled, schedule_id,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -2930,7 +2932,7 @@ async def confirm_dismissal(item_id: str) -> bool:
             """,
             item_id,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -3008,7 +3010,7 @@ async def reopen_work_item(item_id: str, note: str | None = None) -> bool:
             """,
             item_id, note,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -3098,7 +3100,7 @@ async def requeue_failed_work_item(item_id: str, payload: dict | None = None) ->
             """,
             item_id, json.dumps(payload) if payload is not None else None,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -3156,7 +3158,7 @@ async def acknowledge_failed_work_item(item_id: str) -> bool:
             """,
             item_id,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -3196,7 +3198,7 @@ async def assign_task(task_id: str, agent_id: str) -> bool:
             "where id = $1 and status = 'NEW'",
             task_id, agent_id,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -3248,7 +3250,7 @@ async def resolve_task(
             """,
             task_id, status, outcome, list(TASK_TERMINAL), only_from,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -3285,7 +3287,7 @@ async def park_task_retry(
             """,
             task_id, json.dumps(retry_state), hint, list(TASK_TERMINAL),
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4083,7 +4085,7 @@ async def revoke_sandbox_source(agent_id: str, source_path: str) -> bool:
             """,
             agent_id, source_path,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4256,7 +4258,7 @@ async def set_mcp_tool_default_gate(server_id: str, tool_name: str, gate: str) -
             "update mcp_tool set default_gate = $3 where server_id = $1 and tool_name = $2",
             server_id, tool_name, gate,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4296,7 +4298,7 @@ async def revoke_agent_mcp_gate_override(agent_id: str, server_id: str, tool_nam
             """,
             agent_id, server_id, tool_name,
         )
-        return result.endswith("1")
+        return result.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4478,7 +4480,7 @@ async def finish_graph_verification(
             json.dumps(delta) if delta is not None else None,
             verdict, verdict_rationale, has_invalidations, closed_by,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4498,7 +4500,7 @@ async def close_graph_verification(
             """,
             verification_id, status, closed_by, problem_note,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4599,7 +4601,7 @@ async def set_source_enabled(id: str, enabled: bool) -> bool:
             "update source set enabled = $2, updated_at = now() where id = $1",
             id, enabled,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4769,7 +4771,7 @@ async def rescind_document(document_id: str, reason: str, by: str) -> bool:
             """,
             document_id, reason, by,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4786,7 +4788,7 @@ async def reinstate_document(document_id: str) -> bool:
             """,
             document_id,
         )
-        return r.endswith("1")
+        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4914,18 +4916,21 @@ async def catalog_document_detail(document_id: str) -> dict | None:
 # are stamped in `meta` and drop out of it — otherwise every sweep would
 # re-examine them forever and `remaining` would never reach zero.
 CATALOG_ITEM_PREFIX = "<cc-cat-"
+CATALOG_ITEM_SUFFIX = "@central_command.local>"
 
 
 def catalog_message_id(version_id: str) -> str:
-    return f"{CATALOG_ITEM_PREFIX}{version_id}@central_command.local>"
+    return f"{CATALOG_ITEM_PREFIX}{version_id}{CATALOG_ITEM_SUFFIX}"
 
 
-_UNENROLLED_VERSION = """
+# Interpolates the same two constants `catalog_message_id` uses, so the SQL
+# and the Python builder can't desync (they were hand-duplicated before this).
+_UNENROLLED_VERSION = f"""
                d.status = 'ACTIVE'
            and not (v.meta ? 'autofolded' or v.meta ? 'skipped_enrollment')
            and not exists (
                    select 1 from work_item w
-                    where w.message_id = '<cc-cat-' || v.id || '@central_command.local>')
+                    where w.message_id = '{CATALOG_ITEM_PREFIX}' || v.id || '{CATALOG_ITEM_SUFFIX}')
 """
 
 
