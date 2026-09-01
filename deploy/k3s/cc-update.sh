@@ -360,6 +360,17 @@ main() {
     done <<<"$changed_yaml"
   fi
 
+  # `apply -f <dir>` never DELETES: a resource whose manifest left the tree
+  # runs forever (v2.18.3's Adminer outlived its manifest and held hostPort
+  # 8092 against pgweb). removed.txt is the explicit tombstone list —
+  # idempotent deletes, so re-runs and fresh installs are quiet no-ops.
+  local ns kind name
+  while read -r ns kind name; do
+    [[ -z "$ns" || "$ns" == \#* ]] && continue
+    k3s kubectl -n "$ns" delete "$kind" "$name" --ignore-not-found \
+      || die manifests "delete $kind/$name from removed.txt failed"
+  done <"$REPO/deploy/k3s/removed.txt"
+
   # A retag in place plus imagePullPolicy: IfNotPresent means a running pod
   # keeps the OLD bytes forever — only a restart re-resolves the tag.
   for d in "${IMAGE_DEPLOYS[@]:-}"; do

@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-01 — v2.19.2: a deleted manifest takes its resource with it
+
+`kubectl apply -f deploy/k3s/` creates and updates but never deletes, so a
+resource whose manifest left the tree ran forever: v2.18.4 replaced Adminer
+with pgweb on the same anchor `hostPort 8092`, the orphaned `cc-adminer`
+deployment kept the port, and `cc-pgweb` sat `Pending` with
+`FailedScheduling` from the moment it shipped. New
+`deploy/k3s/removed.txt` is the explicit tombstone list — one
+`<namespace> <kind> <name>` line per resource whose manifest was removed —
+and `cc-update.sh`'s manifests phase deletes each line with
+`--ignore-not-found`, so re-runs and fresh installs are quiet no-ops.
+Seeded with `cc-adminer`; applying this release performs that delete and
+pgweb schedules. Removing a manifest now means adding its tombstone, and
+`tests/test_k3s_removed.py` guards both failure shapes: a malformed line,
+and a tombstone naming a resource some manifest still declares (which the
+very next apply would resurrect).
+
 ## 2026-09-01 — v2.19.1: an embedding is never served from memory
 
 LiteLLM's redis response cache no longer covers `/v1/embeddings` — in both
