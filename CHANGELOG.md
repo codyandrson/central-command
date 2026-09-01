@@ -4,6 +4,43 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-01 — v2.19.3: discovery feeds the deployment
+
+The discovery prober and the deployment now meet in the middle — as
+evidence, never as authority; `.env` remains the single decision of record.
+
+`deploy/discover.sh`'s report gains a "Suggested Central Command deploy
+seams" section: every verified finding translated into a ready-to-paste
+`deploy/single/.env` line, commented out on purpose — uncommenting one is
+the operator's approval, because a probe cannot see path-layout or policy
+nuances. Registry suggestions are host-prefix-only with the images.txt
+caveat inline.
+
+Two seams that had no home get one: `CC_CA_BUNDLE` (a private/corporate CA
+— TLS interception, self-signed mirror) and `CC_PROXY` (mandatory egress
+proxy) in `deploy/single/.env`, fanned out by `setup.sh` to every name the
+acquisition tools actually read (`CURL_CA_BUNDLE`, `SSL_CERT_FILE`,
+`REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `NPM_CONFIG_CAFILE`;
+`http(s)_proxy` with `no_proxy` pinned to loopback). AIRGAP.md's seam table
+records both, plus an honest map of what `CC_CA_BUNDLE` does NOT cover
+(podman pulls read the host trust store; the in-build package fetches trust
+only the base image's roots).
+
+`setup.sh preflight` cross-checks `.env` against `discovery.env`'s observed
+classes when a discovery run exists — a resource discovery saw fail with no
+seam set is a WARN naming the seam; the operator's conf file is deliberately
+never read. `setup.sh diagnose` includes `discovery.env` (classes only) in
+the support bundle and points at the report rather than inlining it (the
+report names internal hosts).
+
+The /setup skill now reads `deploy/discovery.out/` as its environment
+briefing: pre-filling air-gap elicitation from discovery-verified answers,
+consulting the report and raw/ evidence on network-shaped failures before
+proposing a cause, and recommending /discover instead of iterating blind —
+with the standing guardrail that a `DISCO_INSECURE` diagnostic never
+becomes disabled verification in deploy config. /discover's closing step
+tells the operator to leave `discovery.out/` in place for exactly this.
+
 ## 2026-09-01 — v2.19.2: a deleted manifest takes its resource with it
 
 `kubectl apply -f deploy/k3s/` creates and updates but never deletes, so a
