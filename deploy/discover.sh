@@ -891,6 +891,7 @@ write_report_md() {
     write_nuances_section
     write_group_tables
     write_howto_section
+    write_seams_section
     write_tools_section
 
     printf -- '---\n\n'
@@ -1038,6 +1039,54 @@ write_howto_section() {
   [[ -n "$body" ]] || return 0
   printf '## How to consume each resource here\n\n'
   printf '%s\n' "$body"
+}
+
+# The Central Command deploy seam (deploy/single/.env) a probe key maps
+# onto, empty when there is none. Same honest-lookup-table reasoning as
+# reg_host below; the authoritative map is deploy/AIRGAP.md's seam table.
+seam_for() {
+  case "$1" in
+    pypi|pythonhosted|pip-configured) printf 'CC_PYPI_INDEX_URL' ;;
+    npm|npm-configured)               printf 'CC_NPM_REGISTRY' ;;
+    dockerio)                         printf 'CC_REGISTRY_DOCKERIO' ;;
+    ghcr)                             printf 'CC_REGISTRY_GHCR' ;;
+    mcr)                              printf 'CC_REGISTRY_MCR' ;;
+    deb-debian)                       printf 'CC_APT_MIRROR' ;;
+    deb-security)                     printf 'CC_APT_SECURITY_MIRROR' ;;
+    *)                                printf '' ;;
+  esac
+}
+
+# Verified facts translated into ready-to-paste deploy/single/.env lines —
+# COMMENTED on purpose: copying one in and uncommenting it is the operator's
+# approval, and a probe cannot see path-layout or policy nuances. Only
+# renders lines a finding actually earned (same rule as the howto section).
+write_seams_section() {
+  local body="" f key mir mcls seam host
+  for f in $(result_files_in_order); do
+    key="$(rfield "$f" key)"; mir="$(rfield "$f" mirror)"; mcls="$(rfield "$f" mirror_class)"
+    [[ "$mcls" == ok ]] || continue
+    seam="$(seam_for "$key")"; [[ -n "$seam" ]] || continue
+    case "$seam" in
+      CC_REGISTRY_*)
+        # Registry seams are a HOST PREFIX, never a URL.
+        host="${mir#*://}"; host="${host%%/*}"
+        body+="#${seam}=${host}   # host prefix only; a path-re-namespacing mirror also needs images.txt edited"$'\n' ;;
+      *)
+        body+="#${seam}=${mir}"$'\n' ;;
+    esac
+  done
+  [[ -n "${DISCO_CA_BUNDLE:-}" ]] && \
+    body+="#CC_CA_BUNDLE=${DISCO_CA_BUNDLE}   # also the root .env's CC_CA_BUNDLE for integration trust"$'\n'
+  [[ -n "${DISCO_PROXY:-}" ]] && \
+    body+="#CC_PROXY=$(redact "$DISCO_PROXY")   # credentials go in ~/.netrc, never in .env"$'\n'
+  [[ -n "$body" ]] || return 0
+  printf '## Suggested Central Command deploy seams\n\n'
+  printf 'The verified findings above, translated to `deploy/single/.env` lines. They are\n'
+  printf 'commented out on purpose: pasting one in and uncommenting it is the operator'"'"'s\n'
+  printf 'approval, and a probe cannot see path-layout or policy nuances — check each\n'
+  printf 'against `deploy/AIRGAP.md`'"'"'s seam table before uncommenting.\n\n'
+  printf '```bash\n%s```\n\n' "$body"
 }
 
 # The registry host a probe key stands for — only used to render the

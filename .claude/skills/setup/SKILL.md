@@ -38,6 +38,19 @@ Rules that hold for the whole run:
   UI_USERNAME/UI_PASSWORD if the operator set them), and the
   expected alias list. When the operator says they've acted, re-run the same
   phase; it is idempotent and verifies.
+- **Discovery evidence, if it exists, is part of your briefing.** Before
+  Phase 0, check for `deploy/discovery.out/discovery-report.md` — /discover's
+  converged environment map (gitignored; it names internal hosts, so its
+  contents stay in this conversation, never in tracked files). If present,
+  read it (and `discovery.out/discovery.env`, the machine-readable
+  classifications) BEFORE eliciting: a discovery-verified mirror pre-fills
+  the matching seam question (the operator confirms instead of recalling),
+  and `DISCO_TLS_INTERCEPT=1` tells you the CA story must be settled before
+  `fetch` hits it. Discovery output is EVIDENCE informing what you propose
+  into `.env` — never source it or copy it wholesale, and a
+  `DISCO_INSECURE=1` diagnostic never translates into disabling TLS
+  verification in any deploy config: the fix it indicates is trusting the
+  corporate root CA.
 - **Existing install?** Before Phase 0, check: if the repo has an `upstream`
   branch (update.sh-initialized) — this is a deployment, not a fresh target.
   Read the tail of `deploy/single/setup-log.txt` for where it last stopped.
@@ -129,7 +142,11 @@ credentials further down the file):
   installs from `requirements.lock` instead of resolving).
 - **Air-gap mirrors, if `CC_AIRGAP=1`.** This is still elicitation — mirrors,
   CA bundles, and internal URLs are facts only the user knows, and `setup.sh`
-  can't discover them. Record `CC_REGISTRY_DOCKERIO` / `CC_REGISTRY_GHCR` (the
+  can't discover them. If `deploy/discovery.out/` exists (see the briefing
+  rule above), its report already verified these answers — offer each as a
+  pre-fill for the operator to confirm; if it doesn't and the network is
+  restricted, propose running /discover first rather than eliciting blind.
+  Record `CC_REGISTRY_DOCKERIO` / `CC_REGISTRY_GHCR` (the
   container registry mirror) and anything `deploy/AIRGAP.md` calls for (read
   it now if air-gapped). Reachability itself is `setup.sh preflight`'s job —
   its `package-indexes` check reports PASS/WARN/FAIL; you don't probe by hand.
@@ -206,7 +223,13 @@ output; interpret it the same way.
 1. Optionally run the read-only rungs: `./setup.sh diagnose` (writes
    `setup-diagnostics.txt` — pod/container states, last 100 log lines per
    pod, `verify.sh` output, tool versions, `.env` key NAMES only) and read
-   the tail of `setup-log.txt`.
+   the tail of `setup-log.txt`. For a network-shaped failure (fetch
+   timeouts, TLS/cert errors, 407s, registry pull failures), also read
+   `deploy/discovery.out/` if it exists — the report for the prescription,
+   `raw/<key>.*` for the evidence — before proposing a cause; discovery
+   already classified the failure mode you are looking at. If it does not
+   exist and the failure smells like a restricted network, the proposal to
+   surface is "run /discover", not another iteration against `setup.sh`.
 2. Surface the outcome to the operator: the exact FAIL/WARN/USERACTION
    lines, what they mean, and — for a failure — your proposed cause and fix.
 3. **End your turn.** The operator decides what happens next. Only after

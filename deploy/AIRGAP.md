@@ -70,6 +70,19 @@ dependency comes from"); blank means the public source.
 | python-build-standalone | uv, only when the host has no CPython 3.12 | `CC_PYTHON_MIRROR` | `UV_PYTHON_INSTALL_MIRROR`; a `file://` directory works |
 | registry.npmjs.org | the cockpit build (`npm ci`), `sandbox-runtime` inside the sandbox build | `CC_NPM_REGISTRY` | `NPM_CONFIG_REGISTRY`; the lockfile's `resolved` URLs point at npmjs and npm rewrites those to the configured registry (its `replace-registry-host` default) — a lock regenerated AGAINST a mirror would not be rewritten back |
 | huggingface.co | Whisper STT model, first voice-input use | `WHISPER_MODELS_BASE_URL` (web server env) or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file before downloading |
+| a private/corporate CA (TLS interception, self-signed mirror) | every host-side acquisition: curl, uv/pip, npm, node | `CC_CA_BUNDLE` | fanned out to `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `NPM_CONFIG_CAFILE`; NOT podman pulls or the in-build package fetches — see below |
+| a mandatory egress proxy | every host-side acquisition | `CC_PROXY` | fanned out to `http(s)_proxy` both cases, `no_proxy` pinned to loopback; podman forwards proxy vars into builds on its own |
+
+**What `CC_CA_BUNDLE` does not cover.** podman PULLS verify against the host
+trust store (`update-ca-certificates` / `/etc/containers/certs.d/<registry>/ca.crt`),
+not the exported variables. And the apt/pip/npm fetches INSIDE the three
+local image builds run in containers that trust only the base image's CA set
+— on a TLS-intercepted network, point their seams (`CC_APT_MIRROR`,
+`CC_PYPI_INDEX_URL`, `CC_NPM_REGISTRY`) at internal mirrors whose certificates
+chain to a publicly-trusted (or base-image-trusted) root. Plumbing the
+corporate CA into the builds themselves is a deliberate follow-up, not a
+variable that exists today. Never disable verification anywhere in this
+table — that converts one broken fetch into an unverifiable supply chain.
 
 Registries can alternatively be mirrored in podman's own `registries.conf`
 (`[[registry.mirror]]`, tried before the primary, with `pull-from-mirror =
