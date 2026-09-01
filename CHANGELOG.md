@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-01 — v2.19.1: an embedding is never served from memory
+
+LiteLLM's redis response cache no longer covers `/v1/embeddings` — in both
+proxy config sources (`deploy/pi/litellm/config.yaml` and the single-node
+profile's inline copy in `deploy/single/stack-llm.yaml.tmpl`),
+`cache_params.supported_call_types` now lists only chat-completion call
+types. With embeddings cached, a batch mixing cache hits and misses came
+back **misaligned**: miss rows received a neighboring cached input's vector
+(reproduced live against the proxy). Graphiti embeds each episode's entity
+names as one batch, so any batch containing an already-seen name silently
+corrupted graph `name_embedding`s — 16 clusters of *different* entities
+carried byte-identical vectors, flooding the graph audit's
+duplicate-entities report with false 100% pairs and cross-wiring semantic
+recall. A new guard test (`tests/test_litellm_cache_call_types.py`) walks
+both config sources so neither a hand edit nor the gated
+`litellm.apply_config_change` capability can quietly re-add embedding
+caching. Cached embeddings bought nothing on a local embedder; correctness
+was the only thing at stake. (Existing deployments: after updating, re-run
+`scripts/oneoff/reembed_graph.py --apply` — clear `embedding_model` stamps
+first to force a full pass — to repair any vectors written while the cache
+was live.)
+
 ## 2026-08-31 — v2.19.0: the update is ready before you ask
 
 Two changes: staged updates, and the end of the air-gap bundle mechanism.
