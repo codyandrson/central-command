@@ -11,6 +11,7 @@ interface SystemRow {
   name: string;
   kind: 'ui' | 'api' | 'store' | 'external';
   url: string | null;
+  linkLabel: string | null;
   status: 'up' | 'down' | 'unknown';
   latencyMs: number | null;
   credential: SystemCredential;
@@ -85,7 +86,7 @@ function SystemCard({ system }: { system: SystemRow }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-[0.733rem] text-primary hover:underline"
         >
-          Open <ExternalLink size={11} />
+          {system.linkLabel ?? 'Open'} <ExternalLink size={11} />
         </a>
       )}
       <p className="text-[0.667rem] text-muted-foreground/70">

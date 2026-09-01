@@ -550,6 +550,18 @@ class Settings(BaseSettings):
     # Systems view. Same pattern as llm_proxy_ui_url. Unset = no link.
     vlogs_ui_url: str = ""
 
+    # Browser-reachable Swagger (/docs) URLs for the sandbox runner and the
+    # crawler — display-only, for the Systems view, labelled "Swagger" there.
+    # Both services are loopback/cluster-internal; a value here implies the
+    # operator has put a tailnet listener in front (e.g. tailscale serve).
+    # Unset = no link.
+    sandbox_docs_url: str = ""
+    crawler_docs_url: str = ""
+
+    # Browser-reachable database UI (e.g. Adminer, deploy/k3s/85-adminer.yaml)
+    # — display-only, for the Systems view. Unset = no link.
+    db_ui_url: str = ""
+
     def agent_proxy_key(self, agent_id: str | None) -> str:
         """The per-agent LiteLLM virtual key for `agent_id`, from
         CC_LLM_PROXY_KEY_<AGENT_ID> (upper-cased, '-'→'_'), or "" if unset.

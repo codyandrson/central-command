@@ -103,7 +103,11 @@ def _entries() -> list[dict]:
             "id": "control-plane-api",
             "name": "Control Plane API",
             "kind": "api",
-            "url": None,
+            # Same-origin relative link: FastAPI's Swagger UI lives under the
+            # /api prefix (app.py) and the cockpit server proxies it, so this
+            # works from wherever the cockpit is being viewed — no setting.
+            "url": "/api/docs",
+            "link_label": "Swagger",
             "health": _http_check(_api_health_url()),
             "credential": {"label": "none (internal)", "location": "n/a"},
         },
@@ -190,10 +194,27 @@ def _entries() -> list[dict]:
             "credential": {"label": "none (internal)", "location": "n/a"},
         },
         {
+            "id": "db-ui",
+            "name": "Adminer (DB UI)",
+            "kind": "ui",
+            "url": settings.db_ui_url or None,
+            # Same pattern as VictoriaLogs: no internal CC_* URL exists, only
+            # the browser one — the loopback hostPort is fixed by the manifest
+            # (deploy/k3s/85-adminer.yaml).
+            "health": _http_check(
+                "http://127.0.0.1:8092/" if settings.db_ui_url else None
+            ),
+            "credential": {
+                "label": "Postgres login (entered at the Adminer form)",
+                "location": "CC_DATABASE_URL user/password",
+            },
+        },
+        {
             "id": "sandbox-runner",
             "name": "Sandbox Runner",
             "kind": "api",
-            "url": None,
+            "url": settings.sandbox_docs_url or None,
+            "link_label": "Swagger",
             # No /health route on the runner (it's /sessions and friends) —
             # a bare GET still proves the process is listening, same
             # reachability contract as everywhere else.
@@ -207,7 +228,8 @@ def _entries() -> list[dict]:
             "id": "crawler",
             "name": "Crawler",
             "kind": "api",
-            "url": None,
+            "url": settings.crawler_docs_url or None,
+            "link_label": "Swagger",
             "health": _http_check(
                 f"{settings.crawler_url}/healthz" if settings.crawler_url else None
             ),

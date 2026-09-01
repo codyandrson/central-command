@@ -204,7 +204,13 @@ async def lifespan(app: FastAPI):
     await dispatcher.stop()
 
 
-app = FastAPI(title="Central Command", version=__version__, lifespan=lifespan)
+# Docs live under the /api prefix with everything else, so the cockpit server
+# can proxy them same-origin (Systems page "Swagger" link) without exposing
+# the API port itself.
+app = FastAPI(
+    title="Central Command", version=__version__, lifespan=lifespan,
+    docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None,
+)
 
 # Dev: the Vite dev server (5173) calls the API on 8080.
 app.add_middleware(

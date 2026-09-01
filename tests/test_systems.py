@@ -23,6 +23,9 @@ async def test_systems_wire_shape_and_no_credential_leak(monkeypatch):
     monkeypatch.setattr(settings, "n8n_ui_url", "https://n8n.tail.example/")
     monkeypatch.setattr(settings, "vlogs_ui_url", "https://vlogs.tail.example/")
     monkeypatch.setattr(settings, "neo4j_browser_url", "https://neo4j.tail.example/")
+    monkeypatch.setattr(settings, "sandbox_docs_url", "https://sandbox.tail.example/docs")
+    monkeypatch.setattr(settings, "crawler_docs_url", "https://crawler.tail.example/docs")
+    monkeypatch.setattr(settings, "db_ui_url", "https://adminer.tail.example/")
     monkeypatch.setattr(settings, "jira_base_url", "")
     monkeypatch.setattr(settings, "confluence_base_url", "")
 
@@ -59,6 +62,15 @@ async def test_systems_wire_shape_and_no_credential_leak(monkeypatch):
     assert by_id["victorialogs"]["url"] == "https://vlogs.tail.example/"
     assert by_id["neo4j"]["url"] == "https://neo4j.tail.example/"
     assert by_id["cockpit"]["status"] == "up"
+    # Swagger links: the control plane's is same-origin relative (proxied by
+    # the cockpit server), the others flow from their display settings — and
+    # each carries the label the cockpit renders instead of "Open".
+    assert by_id["control-plane-api"]["url"] == "/api/docs"
+    assert by_id["sandbox-runner"]["url"] == "https://sandbox.tail.example/docs"
+    assert by_id["crawler"]["url"] == "https://crawler.tail.example/docs"
+    for sid in ("control-plane-api", "sandbox-runner", "crawler"):
+        assert by_id[sid]["link_label"] == "Swagger"
+    assert by_id["db-ui"]["url"] == "https://adminer.tail.example/"
 
     # External SaaS entries are omitted entirely when their base URL is empty.
     assert "jira" not in by_id

@@ -72,6 +72,10 @@ check "n8n                127.0.0.1:5678" "curl -fsS http://127.0.0.1:5678/healt
 check "crawler            127.0.0.1:8091" "curl -fsS http://127.0.0.1:8091/healthz"
 check "control plane API  127.0.0.1:8080" "curl -fsS http://127.0.0.1:8080/health"
 check "victorialogs       127.0.0.1:9428" "curl -fsS http://127.0.0.1:9428/health"
+check "adminer (db ui)    127.0.0.1:8092" "curl -fsS -o /dev/null http://127.0.0.1:8092/"
+# 7474 is the cc-graph-bolt unit's loopback forward (Neo4j Browser), not a k8s
+# host binding — a FAIL here means the unit is stale/down, not the pod.
+check "neo4j browser fwd  127.0.0.1:7474" "curl -fsS -o /dev/null http://127.0.0.1:7474/"
 check "nerve cockpit      127.0.0.1:3080" "curl -fsS -o /dev/null http://127.0.0.1:3080"
 # neo4j is ClusterIP-only by design now (the app reaches the graph solely
 # through Graphiti's MCP endpoint), so it is probed from INSIDE the cluster.

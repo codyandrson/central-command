@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.18.3: every system earns its link
+
+The Systems page stops being a launchpad with half its doors painted on.
+Neo4j Browser becomes reachable the same loopback-only way bolt already
+was: `cc-graph-bolt.service` forwards 7474 alongside 7687 (Neo4j itself
+stays ClusterIP-only; tailnet reach is an explicit tailscale-serve entry on
+top, TLS page + TLS-terminated bolt websocket). New `deploy/k3s/85-adminer.yaml`
+adds Adminer — a stateless, credential-free Postgres UI pinned to the anchor
+on loopback hostPort 8092, login typed per-session — so the operator can
+view/inspect/fix the spine without psql. The control-plane API's Swagger
+moves under its /api prefix (`/api/docs`) and the cockpit server proxies
+those two GETs same-origin, so the link works wherever the cockpit is
+viewed with no new port exposure; the sandbox runner's and crawler's
+Swagger pages link through display-only `CC_SANDBOX_DOCS_URL` /
+`CC_CRAWLER_DOCS_URL` (unset = no link, like every `*_UI_URL`), and Adminer
+through `CC_DB_UI_URL`. System entries can now carry a `link_label`
+("Swagger" instead of "Open"), asserted end-to-end by the wire-shape test.
+`verify.sh` gains the Adminer and 7474-forward probes.
+
 ## 2026-08-31 — v2.18.2: the cockpit stops fighting the pointer
 
 Graph panel interaction fixes, found live. Scroll-zoom moves at cytoscape's

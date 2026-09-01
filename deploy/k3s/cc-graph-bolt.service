@@ -1,9 +1,12 @@
 # Loopback-only bolt reachability for the cockpit's graph reads (rung 3 of
 # docs/superpowers/specs/2026-08-09-graph-inspection-design.md).
 #
-# cc-neo4j stays ClusterIP-only; this unit forwards svc/neo4j 7687 onto
-# 127.0.0.1 ONLY, keeping the standing rule that every CC_* endpoint resolves
-# to loopback and adding no tailnet/LAN exposure. kubectl port-forward drops
+# cc-neo4j stays ClusterIP-only; this unit forwards svc/neo4j 7687 (bolt) and
+# 7474 (Neo4j Browser UI) onto 127.0.0.1 ONLY, keeping the standing rule that
+# every CC_* endpoint resolves to loopback and adding no tailnet/LAN exposure
+# by itself — reaching Browser from the tailnet is an explicit tailscale-serve
+# decision on top (https:7474 for the page, tls-terminated-tcp:7687 for the
+# bolt websocket Browser opens from the client). kubectl port-forward drops
 # when the neo4j pod restarts or moves — Restart=always reconnects, and per
 # outage-equivalence that drop costs the graph panel latency, never work.
 #
@@ -16,7 +19,7 @@ Requires=k3s.service
 After=k3s.service
 
 [Service]
-ExecStart=/usr/local/bin/k3s kubectl -n central-command port-forward --address=127.0.0.1 svc/neo4j 7687:7687
+ExecStart=/usr/local/bin/k3s kubectl -n central-command port-forward --address=127.0.0.1 svc/neo4j 7687:7687 7474:7474
 Restart=always
 RestartSec=5
 
