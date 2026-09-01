@@ -26,6 +26,14 @@ describe('GET /api/version/check', () => {
     vi.doMock('../lib/release-source.js', () => ({
       compareSemver: vi.fn(() => 1),
       resolveLatestVersion: vi.fn(async () => ({ version: '9.9.9', source: 'release' })),
+      readProductVersion: vi.fn(() => '1.0.0'),
+      repoRoot: TEST_REPO_ROOT,
+    }));
+
+    // Never let a test write a real stage trigger — on the live host that
+    // file starts the root stager.
+    vi.doMock('./cc-update.js', () => ({
+      requestStage: vi.fn(() => 'requested' as const),
     }));
 
     const mod = await import('./version-check.js');
@@ -47,6 +55,11 @@ describe('GET /api/version/check', () => {
     expect(resolveLatest).toHaveBeenCalledTimes(2); // force bypasses it
     const json = await res.json() as { checkedAt: number };
     expect(typeof json.checkedAt).toBe('number');
+
+    // Seeing an update IS the request to prepare it: every check that finds
+    // one asks the stager (cache hits included).
+    const cc = await import('./cc-update.js');
+    expect(vi.mocked(cc.requestStage)).toHaveBeenCalledWith('9.9.9');
   });
 
   it('returns the resolved project directory for copy-paste update commands', async () => {

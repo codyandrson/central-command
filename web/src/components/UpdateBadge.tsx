@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
-import { useVersionCheck, type VersionCheck } from '@/lib/version-check';
+import { checkVersion, useVersionCheck, type VersionCheck } from '@/lib/version-check';
 import {
   Dialog,
   DialogContent,
@@ -12,13 +12,22 @@ import {
 interface UpdateStatus {
   state: 'running' | 'success' | 'failed' | 'rolled_back';
   phase: string;
+  target?: string;
   error?: string;
+}
+
+interface StageProgress {
+  pending: boolean;
+  inFlight: boolean;
+  status: UpdateStatus | null;
 }
 
 interface UpdateProgress {
   pending: boolean;
   inFlight: boolean;
   status: UpdateStatus | null;
+  /** Absent on servers older than v2.19.0 — treated as "staging unknown". */
+  stage?: StageProgress;
 }
 
 const PROGRESS_POLL_MS = 3000;
@@ -66,27 +75,36 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
 
-  // Poll the durable status record while the modal is open and a run is
-  // pending/in flight. Fetch failures are EXPECTED mid-update (the updater
-  // restarts this very server) — keep polling straight through them; the
-  // record outlives every process involved.
+  // Poll the durable status records the whole time the modal is open — the
+  // stage record decides whether "Apply update now" is offered at all. Fetch
+  // failures are EXPECTED mid-update (the updater restarts this very server)
+  // — keep polling straight through them; the records outlive every process
+  // involved.
   useEffect(() => {
-    if (!open || (!applying && !progress?.pending && !progress?.inFlight)) return;
-    const iv = setInterval(async () => {
+    if (!open) return;
+    const tick = async () => {
       try {
         const res = await fetch('/api/update/status');
         if (!res.ok) return;
         const data: UpdateProgress = await res.json();
         setProgress(data);
         if (data.status && data.status.state !== 'running' && !data.pending && !data.inFlight) {
-          setApplying(false);
+          setApplying((was) => {
+            // The run this dialog started just finished — re-read VERSION so
+            // the badge, Settings and this dialog stop offering the update
+            // that is now installed (or, after a rollback, stay honest).
+            if (was) void checkVersion(true);
+            return false;
+          });
         }
       } catch {
         // server restarting under us — keep polling
       }
-    }, PROGRESS_POLL_MS);
+    };
+    void tick();
+    const iv = setInterval(tick, PROGRESS_POLL_MS);
     return () => clearInterval(iv);
-  }, [open, applying, progress?.pending, progress?.inFlight]);
+  }, [open]);
 
   const applyNow = async () => {
     setApplyError(null);
@@ -108,7 +126,33 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
     }
   };
 
+  const retryStage = async () => {
+    setApplyError(null);
+    try {
+      await fetch('/api/update/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: versionInfo?.latest ?? '' }),
+      });
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   if (!versionInfo.latest || !versionInfo.projectDir) return null;
+
+  // Staging gate (v2.19.0): the stager prebuilds the image caches the moment
+  // an update is seen; "Apply update now" waits for its verdict. A server
+  // without the stage record (older release, stage units not installed)
+  // reports nothing — fall back to the ungated button rather than hiding
+  // apply forever.
+  const stage = progress?.stage;
+  const staged = stage?.status?.state === 'success'
+    && (stage.status.target === versionInfo.latest || stage.status.phase === 'up-to-date');
+  const staging = !!(stage && (stage.pending || stage.inFlight || stage.status?.state === 'running'));
+  const stageFailed = !staging && stage?.status?.state === 'failed'
+    && stage.status.target === versionInfo.latest;
+  const stageUnknown = !staged && !staging && !stageFailed;
 
   // Central Command's update pipeline (2026-08-27 contract): the running app
   // NEVER applies its own update — update.sh is the external updater. It
@@ -163,12 +207,49 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
               </div>
             )}
             {!applying && progress?.status?.state !== 'running' && (
-              <button
-                onClick={applyNow}
-                className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
-              >
-                Apply update now
-              </button>
+              progress === null ? (
+                <p className="text-sm text-muted-foreground animate-pulse">Checking update preparation…</p>
+              ) : staging ? (
+                <p className="text-sm text-muted-foreground animate-pulse">
+                  Preparing the update — building images in the background. The system stays
+                  up; the apply button appears when everything is ready.
+                </p>
+              ) : stageFailed ? (
+                <>
+                  <div className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-500">
+                    Preparation failed at <span className="font-mono">{stage?.status?.phase}</span>
+                    {stage?.status?.error ? ` — ${stage.status.error}` : ''}.
+                    {' '}Details: <span className="font-mono">journalctl -u cc-update-stage</span>
+                  </div>
+                  <button
+                    onClick={retryStage}
+                    className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
+                  >
+                    Retry preparation
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={applyNow}
+                    className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
+                  >
+                    Apply update now
+                  </button>
+                  {staged && (
+                    <p className="text-xs text-muted-foreground">
+                      v{versionInfo.latest} is prepared — the image builds are already cached, so
+                      applying is mostly backup, restart and health-check time.
+                    </p>
+                  )}
+                  {stageUnknown && (
+                    <p className="text-xs text-muted-foreground">
+                      No preparation record — the update stager isn't installed or hasn't run;
+                      applying will do the full build first.
+                    </p>
+                  )}
+                </>
+              )
             )}
             <div className="text-xs text-muted-foreground space-y-1">
               <p>

@@ -37,11 +37,9 @@ DOCKERFILES = [
 SCRIPTS = [
     SINGLE / "setup.sh",
     SINGLE / "update.sh",
-    SINGLE / "bundle.sh",
     SINGLE / "build-graphiti-image.sh",
     SINGLE / "build-sandbox-image.sh",
     SINGLE / "build-crawler-image.sh",
-    ROOT / "deploy" / "airgap-image-tarballs.sh",
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
 COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base"}
@@ -110,7 +108,7 @@ def test_images_txt_has_no_orphans():
         assert ref in used, f"images.txt pins {ref[1]} but nothing references it"
 
 
-SEAM_RE = re.compile(r"\bCC_(?:SOURCE_[A-Z]+|REGISTRY_[A-Z]+|APT_(?:SECURITY_)?MIRROR|PYPI_INDEX_URL|PYTHON_MIRROR|NPM_REGISTRY|BUNDLE_DIR)\b")
+SEAM_RE = re.compile(r"\bCC_(?:REGISTRY_[A-Z]+|APT_(?:SECURITY_)?MIRROR|PYPI_INDEX_URL|PYTHON_MIRROR|NPM_REGISTRY)\b")
 
 
 def test_every_seam_the_scripts_read_is_declared_in_env_example():

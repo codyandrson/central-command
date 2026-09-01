@@ -4,6 +4,55 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.19.0: the update is ready before you ask
+
+Two changes: staged updates, and the end of the air-gap bundle mechanism.
+
+**Updates now prepare themselves.** The moment a version check sees a newer
+release — the hourly poll, a tab regaining focus, or the Settings "Check for
+updates" button — the cockpit server writes `/run/cc-update/stage-trigger`
+and the new root one-shot `cc-update-stage.service` runs `cc-update.sh
+stage`: it resolves and version-gates the same target the apply would, then
+runs every changed image build with the new `CC_BUILD_ONLY=1` mode of the
+three build scripts — layer caches warm on both nodes, nothing imported, no
+ref touched, no service stopped. Importing at stage time would replace the
+running bytes under the tag the updater's rollback preserves, which is why
+staging is a cache and a proof, never a source of truth the apply must
+trust: the apply pipeline is unchanged and simply fast-forwards through the
+warm caches, so the long pole (the Chromium build) is paid before anyone
+commits to downtime, and a build that would fail fails in the background
+with a retry button instead of mid-update.
+
+The dialog's "Apply update now" button now appears only when
+`/var/lib/cc-update/stage.json` says the offered version is staged (with an
+honest fallback when the stage units aren't installed), shows "Preparing the
+update…" while builds run, and surfaces a stage failure with `journalctl -u
+cc-update-stage` and a retry. Two companions fix the stale-button trap the
+old flow had: the dialog re-reads VERSION the moment its own run reaches a
+terminal state (previously the badge and both apply buttons kept offering an
+update that was already installed until the next hourly poll), and
+`POST /api/update/apply` now refuses a target equal to the installed version
+server-side, so a stale click can no longer re-run the whole pipeline
+against itself.
+
+Operator action on the anchor node after applying this release:
+`sudo cp deploy/k3s/cc-update-stage.{service,path} /etc/systemd/system/ &&
+sudo systemctl daemon-reload && sudo systemctl enable --now
+cc-update-stage.path` (the updater installs future changes to these units
+itself, but cannot enable a unit that predates it).
+
+**The air-gap bundle mechanism is gone.** The discovery approach won:
+`deploy/discover.sh` maps what a restricted network can actually reach and
+its report names the mirror to write into each `.env` seam, so the
+export/import bundle (`deploy/single/bundle.sh`, its k3s sibling
+`deploy/airgap-image-tarballs.sh`, the `CC_SOURCE_<X>=bundle` /
+`CC_BUNDLE_DIR` seams and every branch that read them in the single-node
+`setup.sh`/`update.sh`) is removed rather than left as a second,
+never-exercised path. `deploy/AIRGAP.md` and the single-node README are
+rewritten around discovery-first; `images.txt` keeps its digest-pinned
+manifest role unchanged. Existing `.env` files need nothing: the removed
+variables were opt-in and default-off.
+
 ## 2026-08-31 — v2.18.5: the graph fits in a pocket
 
 Phone-reported fixes to the cockpit Graph panel (`web/src/features/graph/

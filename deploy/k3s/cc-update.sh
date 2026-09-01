@@ -48,6 +48,8 @@ RUNDIR=/run/cc-update
 STATEDIR=/var/lib/cc-update
 STATUS="$STATEDIR/status.json"
 REQUEST="$RUNDIR/request.json"
+STAGE_REQUEST="$RUNDIR/stage-request.json"
+STAGE_MODE=0   # 1 = `cc-update.sh stage`: prebuild caches only, never mutate
 BACKUPS=/home/codyslab/cc-backups
 K=(k3s kubectl -n central-command)
 STARTED_AT="$(date -u +%FT%TZ)"
@@ -174,7 +176,9 @@ remove_worktree() {
 die() { # <phase> <message> — best-effort recovery: services back up, honest status
   note "FAILED at $1: $2"
   write_status failed "$1" "$2"
-  start_services || true
+  # Stage mode never stopped anything — restarting cc-nerve here would blip
+  # the cockpit for no reason.
+  [[ $STAGE_MODE -eq 1 ]] || start_services || true
   exit 1
 }
 
@@ -440,4 +444,109 @@ main() {
   die rollback "still unhealthy after rollback — check journalctl -u cc-uvicorn"
 }
 
-main "$@"
+# ── stage: prebuild the image caches while the system stays up ──────────────
+# Triggered by cc-update-stage.path the moment the cockpit sees a newer
+# release. It resolves the same target the apply would, runs the same version
+# gates (so a blocked upgrade surfaces BEFORE anyone clicks apply), and runs
+# every changed image build with CC_BUILD_ONLY=1: layer caches warm on both
+# nodes, nothing imported, no ref touched, no service stopped. Apply then
+# re-runs the same builds and fast-forwards through the warm cache — staging
+# is a cache and a proof, never a source of truth apply must trust.
+# ponytail: apply still pays save/import time for big images; a staged-tag
+# import protocol could remove that if it ever matters.
+apply_in_flight() { # a fresh `running` status.json means the updater owns the tree
+  python3 - "$STATEDIR/status.json" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+try:
+    s = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+if s.get("state") != "running":
+    sys.exit(1)
+ts = s.get("updated_at") or s.get("started_at") or ""
+try:
+    t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+except ValueError:
+    sys.exit(1)
+age = (datetime.now(timezone.utc) - t).total_seconds()
+sys.exit(0 if age < 5700 else 1)   # TimeoutStartSec 5400 + slack
+PY
+}
+
+stage_main() {
+  mkdir -p "$STATEDIR"
+  if apply_in_flight; then
+    note "an update is in flight — the stage yields (apply's prebuild covers it)"
+    exit 0
+  fi
+
+  PHASE_NOW=resolve; phase "resolving stage target"
+  local requested=""
+  [[ -f "$STAGE_REQUEST" ]] && requested="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("target",""))' "$STAGE_REQUEST" 2>/dev/null)"
+
+  CUR_VERSION="$(sed -n 's/^version=//p' "$REPO/VERSION" | head -1)"
+  [[ -n "$CUR_VERSION" ]] || die resolve "no version= in $REPO/VERSION"
+  "${RUNAS[@]}" git -C "$REPO" fetch origin --tags --quiet || die resolve "git fetch origin failed"
+  TARGET_VERSION="${requested:-$("${RUNAS[@]}" git -C "$REPO" tag -l 'v[0-9]*' | sed 's/^v//' | sort -V | tail -1)}"
+  TARGET_VERSION="${TARGET_VERSION#v}"
+  [[ -n "$TARGET_VERSION" ]] || die resolve "no semver tags found on origin"
+
+  if [[ "$TARGET_VERSION" == "$CUR_VERSION" ]]; then
+    note "already at $CUR_VERSION — nothing to stage"
+    write_status success up-to-date
+    exit 0
+  fi
+  # Same gates as apply, so a blocked upgrade is visible before the click.
+  if [[ "$(printf '%s\n%s\n' "$TARGET_VERSION" "$CUR_VERSION" | sort -V | head -1)" == "$TARGET_VERSION" ]]; then
+    die resolve "refusing to stage a downgrade: installed $CUR_VERSION, target $TARGET_VERSION"
+  fi
+  local minfrom
+  minfrom="$("${RUNAS[@]}" git -C "$REPO" show "v$TARGET_VERSION:VERSION" 2>/dev/null | sed -n 's/^min_upgrade_from=//p' | head -1)"
+  if [[ -n "$minfrom" && "$(printf '%s\n%s\n' "$CUR_VERSION" "$minfrom" | sort -V | head -1)" == "$CUR_VERSION" && "$CUR_VERSION" != "$minfrom" ]]; then
+    die resolve "v$TARGET_VERSION requires upgrading from >= $minfrom (installed $CUR_VERSION) — apply the intermediate release first"
+  fi
+
+  PHASE_NOW=stage-build; phase "prebuilding changed image caches (nothing imported, services stay up)"
+  CKPT=HEAD   # changed_between diffs $CKPT..target; at stage time HEAD is the installed state
+  local row name ref script dep nodes paths log i rc=0
+  local -a changed_rows=() build_names=() build_pids=() build_logs=()
+  for row in "${IMAGES[@]}"; do
+    IFS='|' read -r name ref script dep nodes paths <<<"$row"
+    # shellcheck disable=SC2086  # paths is a pathspec LIST, word splitting intended
+    [[ -n "$(changed_between $paths)" ]] && changed_rows+=("$row")
+  done
+
+  if [[ ${#changed_rows[@]} -eq 0 ]]; then
+    note "no image inputs change in v$TARGET_VERSION — nothing to build"
+  else
+    WT="/home/codyslab/.cc-stage-build-$(date -u +%Y%m%dT%H%M%SZ)"
+    "${RUNAS[@]}" git -C "$REPO" worktree add --detach "$WT" "v$TARGET_VERSION" \
+      || die stage-build "could not create the build worktree $WT"
+    for row in "${changed_rows[@]}"; do
+      IFS='|' read -r name ref script dep nodes paths <<<"$row"
+      log="$(mktemp "/tmp/cc-stage-build-$name.XXXXXX.log")"
+      "${RUNAS[@]}" env CC_COMPUTE_SSH="$COMPUTE_SSH" CC_BUILD_ONLY=1 bash "$WT/deploy/k3s/$script" >"$log" 2>&1 &
+      build_pids+=("$!"); build_names+=("$name"); build_logs+=("$log")
+    done
+    for i in "${!build_pids[@]}"; do
+      wait "${build_pids[$i]}" || rc=1
+      note "---- stage build output: ${build_names[$i]}"
+      cat "${build_logs[$i]}"; rm -f "${build_logs[$i]}"
+    done
+    remove_worktree
+    [[ $rc -eq 0 ]] || die stage-build "an image build failed — v$TARGET_VERSION would fail its prebuild; nothing on the system changed"
+  fi
+
+  note "v$TARGET_VERSION staged — apply will fast-forward through the warm caches"
+  write_status success staged
+  exit 0
+}
+
+if [[ "${1:-}" == stage ]]; then
+  STAGE_MODE=1
+  STATUS="$STATEDIR/stage.json"   # write_status + the TERM trap follow this
+  stage_main
+else
+  main "$@"
+fi

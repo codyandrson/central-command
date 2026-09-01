@@ -3,11 +3,8 @@
 #   Every image this profile pulls, pinned by DIGEST. `setup.sh fetch` pulls
 #   each one as <ref>@<digest> (so the mirror cannot serve a poisoned or
 #   drifted tag) and then tags it <ref> locally; the templates reference
-#   <ref> by tag and never trigger a pull. `bundle.sh export` saves the same
-#   list. The digest lives HERE and not in the templates because a
-#   docker-archive round-trip (bundle export/import) does not preserve the
-#   manifest-list digest — a `tag@digest` reference in a template would
-#   resolve on the mirror path and fail on the bundle path.
+#   <ref> by tag and never trigger a pull. The digest lives HERE and not in
+#   the templates so the pin has one home the fetch phase owns.
 #
 #   Columns:  <registry-key> <path:tag> <digest> <component>
 #     registry-key  dockerio | ghcr | mcr  → CC_REGISTRY_DOCKERIO / _GHCR / _MCR

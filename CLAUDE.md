@@ -55,8 +55,9 @@ Executor performs writes *after* approval. Keep it that way.
   stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
   exit 0/1/2/3, `diagnose` support bundle); the
   /setup skill's job is elicitation and diagnosis only. `images.txt` pins
-  every pulled image by digest; `bundle.sh` exports/imports the
-  checksum-verified air-gap bundle.
+  every pulled image by digest. Restricted networks start with
+  `deploy/discover.sh` (the /discover skill), which maps reachable mirrors
+  into the `.env` seams.
 - **`deploy/AIRGAP.md`** — the map of every external source and its seam
   (mirrors primary, bundle explicit). Read it FIRST for any mirrored or
   no-egress install.
@@ -186,10 +187,10 @@ where the story is gone.
   declaration or into `.env`.
 - **The single-node install ACQUIRES before it deploys, and never falls back
   on its own.** `setup.sh fetch` is the one phase that touches the network;
-  each failure names its `.env` seam and the phase exits 3. Mirror is
-  primary; `CC_SOURCE_<X>=bundle` is the operator's explicit per-artifact
-  fallback (`bundle.sh`, checksum-verified). Adding an image means adding its
-  digest line to `images.txt` — the seam test fails otherwise.
+  each failure names its `.env` seam and the phase exits 3; `deploy/discover.sh`
+  is how a restricted network learns which mirror to write into each seam.
+  Adding an image means adding its digest line to `images.txt` — the seam
+  test fails otherwise.
 - **A model's capabilities are MEASURED, never guessed — and an undeclared
   flag is not neutral.** Central Command reads an absent `supports_*` as
   "nobody said" (fails closed); LiteLLM's aggregate `/model_group/info`
@@ -470,7 +471,7 @@ deploy/AIRGAP.md + airgap.env.example
               the map of every external source and its seam — read FIRST for
               any mirrored or no-egress install
 deploy/single/ the single-node `podman kube play` profile: deterministic
-              setup.sh driver, digest-pinned images.txt, bundle.sh (air-gap)
+              setup.sh driver, digest-pinned images.txt
 deploy/pi/    legacy compose stack — kept for its comments and as a rollback
               reference; home of graphiti/ + litellm/ configs and
               graphiti/patches/ (upstream #1729, #1666 — drop when merged)

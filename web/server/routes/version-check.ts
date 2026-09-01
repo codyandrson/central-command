@@ -9,25 +9,16 @@
  */
 
 import { Hono } from 'hono';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
-import { compareSemver, resolveLatestVersion } from '../lib/release-source.js';
+import { compareSemver, resolveLatestVersion, readProductVersion, repoRoot } from '../lib/release-source.js';
+import { requestStage } from './cc-update.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-// server-dist/routes -> ../.. = web/ -> ../../.. = the repo root.
-const repoRoot = resolve(__dirname, '../../..');
-
-function readProductVersion(): string {
-  try {
-    const raw = readFileSync(resolve(repoRoot, 'VERSION'), 'utf-8');
-    const match = /^version=(.+)$/m.exec(raw);
-    if (match) return match[1].trim();
-  } catch {
-    // fall through
-  }
-  return '0.0.0'; // pre-versioning tree — anything published reads newer
+// Seeing an update IS the request to prepare it (v2.19.0): every check that
+// finds a newer release asks the root stager to prebuild the image caches
+// while the system stays up. requestStage is idempotent and quiet, so the
+// hourly poll costs one stat when nothing changed.
+function autoStage(latest: string, updateAvailable: boolean): void {
+  if (updateAvailable) requestStage(latest);
 }
 
 interface VersionCache {
@@ -51,11 +42,13 @@ app.get('/api/version/check', rateLimitGeneral, async (c) => {
   // check wait up to an hour. The route is rate-limited either way.
   const force = c.req.query('force') === '1';
   if (!force && cache && now - cache.checkedAt < CACHE_TTL_MS) {
+    const updateAvailable = compareSemver(cache.latest, readProductVersion()) > 0;
+    autoStage(cache.latest, updateAvailable);
     return c.json({
       current: readProductVersion(),
       latest: cache.latest,
       source: cache.source,
-      updateAvailable: compareSemver(cache.latest, readProductVersion()) > 0,
+      updateAvailable,
       projectDir,
       checkedAt: cache.checkedAt,
     });
@@ -80,11 +73,13 @@ app.get('/api/version/check', rateLimitGeneral, async (c) => {
     checkedAt: now,
   };
 
+  const updateAvailable = compareSemver(latest.version, readProductVersion()) > 0;
+  autoStage(latest.version, updateAvailable);
   return c.json({
     current: readProductVersion(),
     latest: latest.version,
     source: latest.source,
-    updateAvailable: compareSemver(latest.version, readProductVersion()) > 0,
+    updateAvailable,
     projectDir,
     checkedAt: now,
   });

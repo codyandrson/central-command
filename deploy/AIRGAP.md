@@ -2,28 +2,25 @@
 
 The work-site environment has enterprise mirrors for container images, PyPI,
 npm and Debian. This document is the map of every external source Central
-Command touches, the seam that redirects each one, and the bundle that
-replaces a source the mirror cannot serve. It is not a mirroring project.
+Command touches and the seam that redirects each one. It is not a mirroring
+project.
 
-## The model (2026-08-30)
+## The model (2026-08-31)
 
-**Mirrors are the primary path; the bundle is an explicit, per-artifact
-fallback; nothing falls back on its own.** The single-node driver's `fetch`
-phase (`deploy/single/setup.sh fetch`, right after `preflight`, before
-anything is deployed) acquires every dependency — images by digest, the
-three locally-built images, the Python resolution, the cockpit's npm tree —
-and STOPS (exit 3) on the first artifact it cannot get, naming the `.env`
-seam that governs it. You fix the mirror and re-run (acquired artifacts
-fast-forward), or you write `CC_SOURCE_<X>=bundle` for that one artifact.
-The decision is in `.env`, so a re-run and an update make the same one.
+**Discovery first, then mirrors; nothing falls back on its own.**
+`deploy/discover.sh` maps what the environment can actually reach; the
+single-node driver's `fetch` phase (`deploy/single/setup.sh fetch`, right
+after `preflight`, before anything is deployed) acquires every dependency —
+images by digest, the three locally-built images, the Python resolution, the
+cockpit's npm tree — and STOPS (exit 3) on the first artifact it cannot get,
+naming the `.env` seam that governs it. You fix the mirror seam and re-run
+(acquired artifacts fast-forward). The decision is in `.env`, so a re-run and
+an update make the same one.
 
-This is the shape mature air-gap tooling takes: the artifact set is fixed in
-a manifest, acquired on a connected side, verified by checksum on the
-disconnected side (Zarf's `zarf.yaml` + `package verify`), and every mirror
-layer we sit on — podman's `registries.conf`, containerd's — falls through
-to the public endpoint on a miss by DEFAULT; fail-loud is opt-in
-(`pull-from-mirror`, k3s's `--disable-default-registry-endpoint`). The
-`fetch` phase is where we make it loud.
+Every mirror layer we sit on — podman's `registries.conf`, containerd's —
+falls through to the public endpoint on a miss by DEFAULT; fail-loud is
+opt-in (`pull-from-mirror`, k3s's `--disable-default-registry-endpoint`).
+The `fetch` phase is where we make it loud.
 
 ## Step 0 — discover the environment
 
@@ -81,22 +78,20 @@ sees so you can tell. Credentials for a build-time mirror go through
 
 ## Partial availability — the minimal move per missing source
 
-The sources are independent: bundle ONLY what your mirrors cannot serve and
-leave every other seam on its mirror. For each source, the smallest move
-when it alone is unavailable (single-node profile):
+The sources are independent: fix ONLY the seam your environment cannot serve
+and leave every other seam alone. `deploy/discover.sh`'s report says which
+sources are reachable and which mirrors can stand in. For each source, the
+smallest move when it alone is unavailable (single-node profile):
 
 | Missing source | Minimal move |
 |---|---|
-| Debian apt | Don't build: apt is consumed ONLY inside the three local image builds. Connected side: `bundle.sh export <dir> graphiti sandbox crawler`; air-gapped side: `CC_SOURCE_GRAPHITI=bundle`, `CC_SOURCE_SANDBOX=bundle`, `CC_SOURCE_CRAWLER=bundle`. Nothing else in the profile touches apt. |
-| NodeSource (apt-based Node) | Node ≥ 22 is a HOST prerequisite (it *runs* the cockpit; `CC_SOURCE_COCKPIT=bundle` removes npm, not the runtime). Pre-stage the official self-contained tarball — `node-v22.x-linux-<arch>.tar.xz` from nodejs.org, untarred onto PATH — no apt involved. |
-| registry.npmjs.org | `CC_SOURCE_COCKPIT=bundle` (pre-built cockpit, no `npm ci`); the sandbox build's `sandbox-runtime` install rides `CC_SOURCE_SANDBOX=bundle`. |
-| PyPI | `CC_SOURCE_PYTHON=bundle` (wheelhouse, installed `--no-index --find-links`); the pip installs inside the graphiti/crawler builds ride those images' bundles. |
-| A container registry | `CC_SOURCE_IMAGES=bundle` for the pulled set (`bundle.sh export <dir> images` saves every `images.txt` ref under its public name). |
+| Debian apt | apt is consumed ONLY inside the three local image builds — point `CC_APT_MIRROR`/`CC_APT_SECURITY_MIRROR` at the mirror discovery found. Nothing else in the profile touches apt. |
+| NodeSource (apt-based Node) | Node ≥ 22 is a HOST prerequisite (it *runs* the cockpit). Pre-stage the official self-contained tarball — `node-v22.x-linux-<arch>.tar.xz` from nodejs.org (or its mirror), untarred onto PATH — no apt involved. |
+| registry.npmjs.org | `CC_NPM_REGISTRY` at the npm mirror (the lockfile's `resolved` URLs are rewritten automatically). |
+| PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror; the pip installs inside the graphiti/crawler builds ride the same seam as build-args. |
+| A container registry | `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` at the registry mirror, or a `registries.conf` mirror podman sees. |
 | python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. |
 | huggingface.co | Pre-place `ggml-*.bin` in `config.whisperModelDir` (checked before any download), or set `WHISPER_MODELS_BASE_URL`. |
-
-Remember the wheelhouse and the saved images are OS/arch-specific: export on
-a connected machine matching the air-gapped target.
 
 ## Pins
 
@@ -108,30 +103,12 @@ pin their packages (`playwright==` must equal the crawler base's tag).
 the cockpit's. A mirror that "gets updated regularly" changes nothing until
 a release bumps a pin — that is the point.
 
-## The bundle
-
-`deploy/single/bundle.sh export <dir>` on a connected machine of the SAME
-OS/arch (the wheelhouse is platform-specific) after a successful
-`setup.sh fetch`: saves every image in `images.txt` under its public ref,
-the three local images under `localhost/cc-*`, a `pip download` wheelhouse
-of `requirements.lock`, and the built cockpit (`dist`, `server-dist`,
-`bin-dist`, `node_modules`) — plus `MANIFEST` (sha256 of every file) and
-`RELEASE`. `import` refuses a bundle from another release and verifies the
-checksums of the files it is about to load before loading anything.
-`setup.sh fetch` calls it per artifact for every `CC_SOURCE_<X>=bundle`.
-
-Digests are verified on the connected side (pull-by-digest); the bundle's
-integrity on the disconnected side is the tarball sha256 — a docker-archive
-round-trip does not preserve the manifest-list digest, which is also why the
-digests live in `images.txt` and not in the templates.
-
 ## The k3s profile
 
 The two-node deployment keeps its own seams: `deploy/k3s/registries.yaml.example`
 (containerd mirrors; add `--disable-default-registry-endpoint` so a miss
-fails loud), `deploy/airgap.env.example` (pip/uv), `web/.npmrc.example`
-(npm), and `deploy/airgap-image-tarballs.sh` for the locally-built images
-(`ctr images import`). It also still needs the k3s install script vendored
-and the NodeSource apt repo mirrored. The Dockerfiles' build-args apply to
-its builds too (pass them to `podman build` by hand; the k3s build scripts
+fails loud), `deploy/airgap.env.example` (pip/uv), and `web/.npmrc.example`
+(npm). It also still needs the k3s install script vendored and the
+NodeSource apt repo mirrored. The Dockerfiles' build-args apply to its
+builds too (pass them to `podman build` by hand; the k3s build scripts
 pass nothing and get the public defaults).

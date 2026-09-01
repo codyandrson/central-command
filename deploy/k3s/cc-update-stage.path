@@ -1,0 +1,19 @@
+# Watches for the cockpit's STAGE trigger (v2.19.0; cc-update.sh's stage
+# section has the design). Written automatically by the cockpit server the
+# moment a version check sees a newer release — same trust surface as
+# cc-update.path: the unprivileged web process only writes a file in
+# /run/cc-update, and this root path unit does the rest.
+#
+# TriggerLimit is the backstop against a re-trigger loop; the real guard is
+# cc-update-stage.service's ExecStartPre consuming the trigger file.
+[Unit]
+Description=Watch for Central Command update stage trigger
+
+[Path]
+PathExists=/run/cc-update/stage-trigger
+Unit=cc-update-stage.service
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
