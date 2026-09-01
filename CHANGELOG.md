@@ -4,6 +4,24 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.18.0: the environment speaks first
+
+`deploy/discover.sh`: an exhaustive environment-discovery prober for
+restricted and air-gapped networks — ~70 commonly needed external resources
+(package indexes, container registries and their separate token/blob hosts,
+forges, OS archives, developer tooling, AI hosts, CDNs), each classified by
+failure MODE (DNS / refused / timeout / TLS interception / proxy-auth /
+auth / denied / throttled), because the mode is the diagnosis. Detects TLS
+inspection even when every probe passes, captive portals, clock skew, and
+object-store 403s that actually prove reachability. Writes a gitignored
+`discovery-report.md` (the environment guide) plus sourceable
+`discovery.env` facts; elicitation is config-and-rerun via gitignored
+`discovery.conf`. The new `/discover` skill conducts the loop under the
+/setup contract (script is the spine, agent is the exception handler), and
+`deploy/AIRGAP.md` gains the Step 0 section mapping report findings onto
+the existing seams. Prior-art research found no tool that classifies egress
+failure modes; the classifier ships with an offline selftest.
+
 ## 2026-08-31 — v2.17.3: the partial-availability playbook
 
 `deploy/AIRGAP.md` gains a per-source table: when exactly ONE external
