@@ -61,18 +61,34 @@ failed=()
 say() { printf '[backup] %s\n' "$*"; }
 
 # --- Postgres stores ---------------------------------------------------------
-# pg_dump runs INSIDE the pod, so the host needs no postgres client.
+# pg_dump runs INSIDE the pod, so the host needs no postgres client — and it
+# dumps to a FILE in the pod, never through exec's stdout: kubectl exec
+# silently drops the tail of a large fast stream and still exits 0 (bitten
+# 2026-09-01, the litellm pre-update dump). In-pod, pg_dump's exit code
+# guards completeness; the transfer out is checksum-verified and retried.
 # A dump is only accepted when it is gzip-valid AND carries pg_dump's own
 # completion marker — a truncated dump that gunzips cleanly is the failure mode
 # that makes people think they have backups.
 dump_pg() {
   local label="$1" dep="$2" user="$3" db="$4"
-  local file="${OUT}/${label}_${STAMP}.sql.gz"
+  local file="${OUT}/${label}_${STAMP}.sql.gz" tmp=/tmp/cc-dump.sql.gz
   say "dumping ${label}…"
   if ! "${K[@]}" exec deploy/"$dep" -- pg_dump -U "$user" -d "$db" \
-        --clean --if-exists --no-owner --no-privileges 2>/dev/null | gzip > "$file"; then
-    say "ERROR: ${label} pg_dump failed"; rm -f "$file"; failed+=("$label"); return 1
+        --clean --if-exists --no-owner --no-privileges -Z6 -f "$tmp" 2>/dev/null; then
+    say "ERROR: ${label} pg_dump failed"; failed+=("$label"); return 1
   fi
+  local want got try
+  want="$("${K[@]}" exec deploy/"$dep" -- sha256sum "$tmp")"; want="${want%% *}"
+  [[ -n "$want" ]] || { say "ERROR: ${label} could not checksum the in-pod dump"; failed+=("$label"); return 1; }
+  for try in 1 2 3; do
+    "${K[@]}" exec deploy/"$dep" -- cat "$tmp" > "$file"
+    got="$(sha256sum "$file")"; got="${got%% *}"
+    [[ "$got" == "$want" ]] && break
+    if [[ "$try" == 3 ]]; then
+      say "ERROR: ${label} transfer truncated 3 times (checksum mismatch)"; rm -f "$file"; failed+=("$label"); return 1
+    fi
+  done
+  "${K[@]}" exec deploy/"$dep" -- rm -f "$tmp"
   if ! gzip -t "$file" 2>/dev/null; then
     say "ERROR: ${label} dump is not valid gzip"; rm -f "$file"; failed+=("$label"); return 1
   fi

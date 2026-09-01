@@ -296,14 +296,25 @@ main() {
 
   dump_pg() { # dump_pg <label> <deployment> <user> <db>
     local label="$1" dep="$2" user="$3" db="$4"
-    local file="$BACKUPS/${label}_pre-update_${stamp}.sql.gz"
-    if ! "${K[@]}" exec "deploy/$dep" -- pg_dump -U "$user" -d "$db" | gzip >"$file" || [[ ! -s "$file" ]]; then
-      rm -f "$file"; return 1
-    fi
-    # A truncated dump that gunzips cleanly is the failure mode that makes
-    # people think they have backups — demand pg_dump's completion marker
-    # (same check as backup.sh; pg_dump 18 appends a \unrestrict trailer,
-    # hence tail -5, not tail -1).
+    local file="$BACKUPS/${label}_pre-update_${stamp}.sql.gz" tmp=/tmp/cc-dump.sql.gz
+    # Dump to a FILE INSIDE THE POD, never through exec's stdout: kubectl
+    # exec silently drops the tail of a large fast stream and still exits 0
+    # (bitten 2026-09-01 — litellm's 125 MB dump lost its last ~300 KB on
+    # most attempts). In-pod, pg_dump's own exit code guards completeness;
+    # the transfer out is checksum-verified and retried.
+    "${K[@]}" exec "deploy/$dep" -- pg_dump -U "$user" -d "$db" -Z6 -f "$tmp" || return 1
+    local want got try
+    want="$("${K[@]}" exec "deploy/$dep" -- sha256sum "$tmp")"; want="${want%% *}"
+    [[ -n "$want" ]] || return 1
+    for try in 1 2 3; do
+      "${K[@]}" exec "deploy/$dep" -- cat "$tmp" >"$file"
+      got="$(sha256sum "$file")"; got="${got%% *}"
+      [[ "$got" == "$want" ]] && break
+      [[ "$try" == 3 ]] && { rm -f "$file"; return 1; }
+    done
+    "${K[@]}" exec "deploy/$dep" -- rm -f "$tmp"
+    # Belt and braces: the completion marker stays the final authority
+    # (pg_dump 18 appends a \unrestrict trailer, hence tail -5, not tail -1).
     if ! gunzip -c "$file" | tail -5 | grep -q 'PostgreSQL database dump complete'; then
       rm -f "$file"; return 1
     fi
