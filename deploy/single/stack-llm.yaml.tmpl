@@ -55,6 +55,12 @@ data:
         type: redis
         host: os.environ/REDIS_HOST
         port: os.environ/REDIS_PORT
+        # NEVER add embedding/aembedding here (mirrors deploy/pi/litellm/
+        # config.yaml, pinned by tests/test_litellm_cache_call_types.py):
+        # a /v1/embeddings batch mixing cache hits and misses comes back
+        # MISALIGNED — miss rows receive a neighboring cached input's vector
+        # (reproduced live 2026-09-01; corrupted graph name_embeddings).
+        supported_call_types: ["completion", "acompletion"]
 
     router_settings:
       allowed_fails: 1
