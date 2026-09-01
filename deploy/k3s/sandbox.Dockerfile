@@ -32,7 +32,7 @@ RUN if [ -n "$CC_APT_MIRROR" ]; then \
 
 # The apt packages ride Debian stable's own versioning (bookworm only moves
 # them for security fixes); the npm package is PINNED because npm's `latest`
-# is a moving tag and a mirror rebuild must produce the bytes the bundle holds.
+# is a moving tag and a mirror rebuild must reproduce the same bytes.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nodejs npm bubblewrap git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \

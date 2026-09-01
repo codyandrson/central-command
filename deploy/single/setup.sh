@@ -16,7 +16,7 @@
 #
 #     validate    offline check of .env. No side effects.
 #     preflight   named environment checks. No side effects.
-#     fetch       acquire every dependency (mirror or bundle) — the only phase
+#     fetch       acquire every dependency (public or mirror) — the only phase
 #                 that needs the network; stops for the operator per artifact.
 #     llm         secrets + LiteLLM up + probe its aliases + MEASURE the
 #                 embedding dimension into .env
@@ -124,13 +124,6 @@ load_env() {
   : "${CC_ENABLE_CRAWLER:=1}"
   : "${CC_ENABLE_SANDBOX:=1}"
   : "${CC_AIRGAP:=0}"
-  # Where each artifact comes from (env.example "Where every dependency comes
-  # from"): mirror = pull/build/resolve through CC_REGISTRY_*/CC_*_MIRROR/
-  # CC_PYPI_INDEX_URL (blank = public), bundle = import from CC_BUNDLE_DIR.
-  local v
-  for v in IMAGES GRAPHITI SANDBOX CRAWLER COCKPIT PYTHON; do
-    [[ -n "$(eval "printf '%s' \"\${CC_SOURCE_$v:-}\"")" ]] || eval "CC_SOURCE_$v=mirror"
-  done
   # Tool-facing exports. uv reads no PIP_* variable (and UV_INDEX_URL is
   # deprecated), npm reads npm_config_* case-insensitively — so one seam each,
   # fanned out here to every name the tools actually look at.
@@ -256,25 +249,6 @@ phase_validate() {
     [[ -n "${!v:-}" ]] && pass "name-${v}" "${!v}" || fail "name-${v}" "$v is empty"
   done
 
-  # Artifact sources: each is mirror or bundle, and any bundle needs the dir.
-  local any_bundle=0 sv
-  for sv in CC_SOURCE_IMAGES CC_SOURCE_GRAPHITI CC_SOURCE_SANDBOX CC_SOURCE_CRAWLER CC_SOURCE_COCKPIT CC_SOURCE_PYTHON; do
-    case "${!sv}" in
-      mirror) ;;
-      bundle) any_bundle=1 ;;
-      *) fail "source-${sv}" "$sv must be mirror or bundle, got '${!sv}'" ;;
-    esac
-  done
-  if (( any_bundle )); then
-    if [[ -n "${CC_BUNDLE_DIR:-}" && -f "$CC_BUNDLE_DIR/MANIFEST" ]]; then
-      pass "bundle-dir" "$CC_BUNDLE_DIR (MANIFEST present)"
-    else
-      fail "bundle-dir" "a CC_SOURCE_*=bundle needs CC_BUNDLE_DIR pointing at a ./bundle.sh export (MANIFEST not found at '${CC_BUNDLE_DIR:-}')"
-    fi
-  else
-    pass "bundle-dir" "not needed — every source is mirror"
-  fi
-
   # The single-node profile's other never-rotate invariant: the manifests are
   # rendered against these names, so a change after first play orphans pods.
   [[ -f "$REPO_ROOT/central_command/db/schema.sql" ]] \
@@ -369,21 +343,19 @@ phase_preflight() {
   # Index probe: INFORMATIONAL, against the CONFIGURED indexes (a mirror in
   # .env, else the public ones) — the real acquisition is the fetch phase.
   # Unreachable indexes are a fact about the network; CC_AIRGAP is how the
-  # operator says it is deliberate, and bundle sources need no index at all.
-  local u reach=1 probes=""
-  [[ "$CC_SOURCE_PYTHON" == mirror ]] && probes="${CC_PYPI_INDEX_URL:-https://pypi.org/simple/}"
-  [[ "$CC_SOURCE_COCKPIT" == mirror ]] && probes="$probes ${CC_NPM_REGISTRY:-https://registry.npmjs.org/}"
+  # operator says it is deliberate. `deploy/discover.sh` is the tool that maps
+  # what this network can actually reach and which mirrors to write into .env.
+  local u reach=1 probes
+  probes="${CC_PYPI_INDEX_URL:-https://pypi.org/simple/} ${CC_NPM_REGISTRY:-https://registry.npmjs.org/}"
   for u in $probes; do
     curl -fsS -m 10 -o /dev/null "$u" 2>/dev/null || reach=0
   done
-  if [[ -z "$probes" ]]; then
-    pass "package-indexes" "not needed — python and cockpit come from the bundle"
-  elif (( reach )); then
+  if (( reach )); then
     pass "package-indexes" "reachable:$(printf ' %s' $probes)"
   elif [[ "$CC_AIRGAP" == "1" ]]; then
     pass "package-indexes" "unreachable, as expected with CC_AIRGAP=1 — fetch will say per artifact"
   else
-    warn "package-indexes" "unreachable:$(printf ' %s' $probes) — set the mirror seams in .env (see env.example) or CC_SOURCE_*=bundle; deploy/AIRGAP.md"
+    warn "package-indexes" "unreachable:$(printf ' %s' $probes) — run deploy/discover.sh to map this network, then set the mirror seams in .env (see env.example); deploy/AIRGAP.md"
   fi
 
   # Discovery cross-check (read-only). If /discover ran, its discovery.env
@@ -428,11 +400,11 @@ phase_preflight() {
 # The check IS the acquisition: an image is proven by pulling it (by digest,
 # from images.txt), a build by building it (podman caches layers, so a retry
 # costs the failing layer), the Python graph by resolving it, the cockpit by
-# `npm ci`. Each failure names the seam that governs it and the bundle
-# alternative, and the phase ends in USERACTION (exit 3): the operator fixes
-# the mirror and re-runs (acquired artifacts fast-forward), or writes
-# CC_SOURCE_<X>=bundle in .env. Nothing falls back on its own — a fallback
-# chosen at 11pm by a script is a decision nobody can find later.
+# `npm ci`. Each failure names the seam that governs it, and the phase ends in
+# USERACTION (exit 3): the operator fixes the mirror seam (deploy/discover.sh
+# maps what the network can reach) and re-runs — acquired artifacts
+# fast-forward. Nothing falls back on its own — a fallback chosen at 11pm by a
+# script is a decision nobody can find later.
 registry_host() { # registry_host <key> [public]
   case "$1" in
     dockerio) [[ "${2:-}" == public ]] && echo docker.io || echo "${CC_REGISTRY_DOCKERIO:-docker.io}" ;;
@@ -445,9 +417,9 @@ component_wanted() { # images.txt's last column vs the flags and sources
   case "$1" in
     core)          return 0 ;;
     n8n)           [[ "$CC_ENABLE_N8N" == 1 ]] ;;
-    graphiti-base) [[ "$CC_SOURCE_GRAPHITI" == mirror ]] ;;
-    sandbox-base)  [[ "$CC_ENABLE_SANDBOX" == 1 && "$CC_SOURCE_SANDBOX" == mirror ]] ;;
-    crawler-base)  [[ "$CC_ENABLE_CRAWLER" == 1 && "$CC_SOURCE_CRAWLER" == mirror ]] ;;
+    graphiti-base) return 0 ;;
+    sandbox-base)  [[ "$CC_ENABLE_SANDBOX" == 1 ]] ;;
+    crawler-base)  [[ "$CC_ENABLE_CRAWLER" == 1 ]] ;;
     *) return 1 ;;
   esac
 }
@@ -455,26 +427,13 @@ component_wanted() { # images.txt's last column vs the flags and sources
 have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)"; grep -qx "$1" <<<"$imgs"; }
 
 fetch_images() {
-  if [[ "$CC_SOURCE_IMAGES" == bundle ]]; then
-    step "bundle-images" "images loaded from $CC_BUNDLE_DIR (checksums verified)" \
-      "$HERE/bundle.sh" import "$CC_BUNDLE_DIR" images || return 0
-  fi
-  local key path digest comp host ref pub id check
+  local key path digest comp host ref id check
   while read -r key path digest comp; do
     [[ -z "$key" || "$key" == \#* ]] && continue
     component_wanted "$comp" || continue
     host="$(registry_host "$key")" || { fail "images-txt" "unknown registry key '$key' in images.txt"; continue; }
     ref="$host/$path"; check="image-${path%%:*}"; check="${check//\//-}"; check="${check#image-library-}"
     if have_image "$ref"; then pass "$check" "$ref present"; continue; fi
-    if [[ "$CC_SOURCE_IMAGES" == bundle ]]; then
-      pub="$(registry_host "$key" public)/$path"
-      if have_image "$pub" && podman tag "$pub" "$ref" >/dev/null 2>&1; then
-        pass "$check" "$ref (from the bundle)"
-      else
-        fail "$check" "$pub is not in the bundle — re-export it on a connected machine (./bundle.sh export <dir> images)"
-      fi
-      continue
-    fi
     # By DIGEST, then tagged: the mirror cannot hand us a drifted or poisoned
     # tag, and the templates' name:tag resolves locally from here on.
     if podman pull -q "$ref@$digest" >/dev/null 2>&1 \
@@ -482,26 +441,18 @@ fetch_images() {
        && podman tag "$id" "$ref" >/dev/null 2>&1; then
       pass "$check" "$ref pulled by digest"
     else
-      fail "$check" "$ref@$digest could not be pulled — seam: CC_REGISTRY_${key^^} in .env (or a registries.conf mirror podman sees), or CC_SOURCE_IMAGES=bundle"
+      fail "$check" "$ref@$digest could not be pulled — seam: CC_REGISTRY_${key^^} in .env (or a registries.conf mirror podman sees)"
     fi
   done <"$HERE/images.txt"
 }
 
-fetch_local() { # fetch_local <check> <ref> <artifact> <source> <build-script> <seams>
-  local check="$1" ref="$2" artifact="$3" source="$4" script="$5" seams="$6"
+fetch_local() { # fetch_local <check> <ref> <build-script> <seams>
+  local check="$1" ref="$2" script="$3" seams="$4"
   if have_image "$ref"; then pass "$check" "$ref present"; return 0; fi
-  if [[ "$source" == bundle ]]; then
-    if "$HERE/bundle.sh" import "$CC_BUNDLE_DIR" "$artifact" >&2 && have_image "$ref"; then
-      pass "$check" "$ref loaded from the bundle"
-    else
-      fail "$check" "$ref not loadable from $CC_BUNDLE_DIR — re-export on a connected machine (./bundle.sh export <dir> $artifact)"
-    fi
-    return 0
-  fi
   if "$script" >&2; then
     pass "$check" "$ref built"
   else
-    fail "$check" "$ref failed to build against your sources — seams: $seams (see env.example); or CC_SOURCE_${artifact^^}=bundle with CC_BUNDLE_DIR"
+    fail "$check" "$ref failed to build against your sources — seams: $seams (see env.example)"
   fi
 }
 
@@ -512,16 +463,16 @@ phase_fetch() {
 
   fetch_images
 
-  fetch_local "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" graphiti "$CC_SOURCE_GRAPHITI" \
+  fetch_local "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" \
     "$HERE/build-graphiti-image.sh" "CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_PYPI_INDEX_URL"
   if [[ "$CC_ENABLE_SANDBOX" == 1 ]]; then
-    fetch_local "image-sandbox" "localhost/cc-sandbox:1" sandbox "$CC_SOURCE_SANDBOX" \
+    fetch_local "image-sandbox" "localhost/cc-sandbox:1" \
       "$HERE/build-sandbox-image.sh" "CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_NPM_REGISTRY"
   else
     pass "image-sandbox" "skipped (CC_ENABLE_SANDBOX=0)"
   fi
   if [[ "$CC_ENABLE_CRAWLER" == 1 ]]; then
-    fetch_local "image-crawler" "localhost/cc-crawler:1" crawler "$CC_SOURCE_CRAWLER" \
+    fetch_local "image-crawler" "localhost/cc-crawler:1" \
       "$HERE/build-crawler-image.sh" "CC_REGISTRY_MCR, CC_PYPI_INDEX_URL"
   else
     pass "image-crawler" "skipped (CC_ENABLE_CRAWLER=0)"
@@ -529,46 +480,40 @@ phase_fetch() {
 
   # Python: the venv now (its interpreter may itself be a download — seam
   # CC_PYTHON_MIRROR), then a resolve of exactly what the app phase installs.
-  if [[ "$CC_SOURCE_PYTHON" == bundle ]]; then
-    step "python" "wheelhouse verified in $CC_BUNDLE_DIR" "$HERE/bundle.sh" import "$CC_BUNDLE_DIR" python
-  else
-    if ! venv_python >/dev/null; then
-      if ! uv venv --python 3.12 "$REPO_ROOT/.venv" >&2; then
-        fail "venv" "uv could not create a Python 3.12 venv — no 3.12 on PATH and the download failed; seam: CC_PYTHON_MIRROR"
-      fi
+  if ! venv_python >/dev/null; then
+    if ! uv venv --python 3.12 "$REPO_ROOT/.venv" >&2; then
+      fail "venv" "uv could not create a Python 3.12 venv — no 3.12 on PATH and the download failed; seam: CC_PYTHON_MIRROR"
     fi
-    if venv_python >/dev/null; then
-      export VIRTUAL_ENV="$REPO_ROOT/.venv"
-      if [[ "$CC_AIRGAP" == "1" ]]; then
-        in_repo uv pip install --dry-run -r "$REPO_ROOT/requirements.lock" >&2 \
-          && pass "python" "requirements.lock resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
-          || fail "python" "requirements.lock does not resolve — seam: CC_PYPI_INDEX_URL; or CC_SOURCE_PYTHON=bundle"
-      else
-        in_repo uv pip install --dry-run -e ".[dev,runtime]" >&2 \
-          && pass "python" "[dev,runtime] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
-          || fail "python" "the Python dependencies do not resolve — seam: CC_PYPI_INDEX_URL; or CC_AIRGAP=1 (lock only) / CC_SOURCE_PYTHON=bundle"
-      fi
+  fi
+  if venv_python >/dev/null; then
+    export VIRTUAL_ENV="$REPO_ROOT/.venv"
+    if [[ "$CC_AIRGAP" == "1" ]]; then
+      in_repo uv pip install --dry-run -r "$REPO_ROOT/requirements.lock" >&2 \
+        && pass "python" "requirements.lock resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
+        || fail "python" "requirements.lock does not resolve — seam: CC_PYPI_INDEX_URL"
+    else
+      in_repo uv pip install --dry-run -e ".[dev,runtime]" >&2 \
+        && pass "python" "[dev,runtime] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
+        || fail "python" "the Python dependencies do not resolve — seam: CC_PYPI_INDEX_URL; or CC_AIRGAP=1 (lock only)"
     fi
   fi
 
   # Cockpit: `npm ci` is the acquisition; the build itself is the app phase's.
-  if [[ "$CC_SOURCE_COCKPIT" == bundle ]]; then
-    step "cockpit" "pre-built cockpit unpacked from $CC_BUNDLE_DIR" "$HERE/bundle.sh" import "$CC_BUNDLE_DIR" cockpit
-  elif command -v node >/dev/null 2>&1; then
+  if command -v node >/dev/null 2>&1; then
     local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
     if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
       in_web npm ci >&2 \
         && pass "cockpit" "npm tree installed from ${CC_NPM_REGISTRY:-registry.npmjs.org}" \
-        || fail "cockpit" "npm ci failed — seam: CC_NPM_REGISTRY; or CC_SOURCE_COCKPIT=bundle (ships the built cockpit, no npm needed here)"
+        || fail "cockpit" "npm ci failed — seam: CC_NPM_REGISTRY"
     else
-      warn "cockpit" "node v$nv is older than 22 — cockpit not fetched; the API runs without it (or CC_SOURCE_COCKPIT=bundle)"
+      warn "cockpit" "node v$nv is older than 22 — cockpit not fetched; the API runs without it"
     fi
   else
-    warn "cockpit" "node not found — cockpit not fetched; the API runs without it (or CC_SOURCE_COCKPIT=bundle)"
+    warn "cockpit" "node not found — cockpit not fetched; the API runs without it"
   fi
 
   if (( FAILS )); then
-    useraction "fetch" "$FAILS artifact(s) could not be acquired — fix the seam(s) named above in deploy/single/.env and re-run ./setup.sh fetch (acquired ones fast-forward), or set that artifact's CC_SOURCE_*=bundle with CC_BUNDLE_DIR (./bundle.sh export on a connected machine); deploy/AIRGAP.md"
+    useraction "fetch" "$FAILS artifact(s) could not be acquired — fix the seam(s) named above in deploy/single/.env and re-run ./setup.sh fetch (acquired ones fast-forward); deploy/discover.sh maps what this network can reach, deploy/AIRGAP.md maps the seams"
   fi
 }
 
@@ -775,12 +720,7 @@ phase_app() {
   # Air-gapped installs resolve nothing: requirements.lock is the frozen,
   # suite-tested resolution, and `-e . --no-deps` adds the package itself
   # without letting pip re-resolve against a mirror.
-  if [[ "$CC_SOURCE_PYTHON" == bundle ]]; then
-    step "install" "installed from the bundle's wheelhouse (no index)" \
-      in_repo uv pip install --no-index --find-links "$CC_BUNDLE_DIR/wheelhouse" -r "$REPO_ROOT/requirements.lock" || return 1
-    step "install-editable" "central_command installed editable, no dependency resolution" \
-      in_repo uv pip install --no-index --no-deps -e . || return 1
-  elif [[ "$CC_AIRGAP" == "1" ]]; then
+  if [[ "$CC_AIRGAP" == "1" ]]; then
     step "install" "installed from requirements.lock (air-gapped)" \
       in_repo uv pip install -r "$REPO_ROOT/requirements.lock" || return 1
     step "install-editable" "central_command installed editable, no dependency resolution" \
@@ -857,11 +797,7 @@ phase_app() {
   # CC_OPERATOR_NAME is deliberately NOT set here: it is the interview's, and
   # the default ("the operator") is correct until someone is asked.
 
-  if [[ "$CC_SOURCE_COCKPIT" == bundle ]]; then
-    [[ -d "$REPO_ROOT/web/server-dist" && -d "$REPO_ROOT/web/dist" ]] \
-      && pass "cockpit" "pre-built cockpit from the bundle (web/dist, web/server-dist)" \
-      || { fail "cockpit" "CC_SOURCE_COCKPIT=bundle but web/dist or web/server-dist is missing — run: ./setup.sh fetch"; return 1; }
-  elif command -v node >/dev/null 2>&1; then
+  if command -v node >/dev/null 2>&1; then
     local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
     if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
       # fetch already ran `npm ci`; only a tree it did not leave gets one here.

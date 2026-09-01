@@ -281,6 +281,8 @@ sudo cp deploy/k3s/cc-backup.service         /etc/systemd/system/
 sudo cp deploy/k3s/cc-backup.timer           /etc/systemd/system/
 sudo cp deploy/k3s/cc-update.service         /etc/systemd/system/
 sudo cp deploy/k3s/cc-update.path            /etc/systemd/system/
+sudo cp deploy/k3s/cc-update-stage.service   /etc/systemd/system/
+sudo cp deploy/k3s/cc-update-stage.path      /etc/systemd/system/
 sudo cp deploy/pi/cc-nerve.service           /etc/systemd/system/
 sudo cp deploy/k3s/cc-update-tmpfiles.conf   /etc/tmpfiles.d/cc-update.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
@@ -288,7 +290,7 @@ sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
 sudo systemctl daemon-reload
 sudo systemctl enable cc-uvicorn                     # enabled, NOT started — see below
 sudo systemctl enable --now cc-nerve cc-sandbox-runner cc-graph-bolt
-sudo systemctl enable --now cc-backup.timer cc-update.path
+sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
 ```
 
 - **cc-update** (2026-08-28) — the cockpit's one-click updater. The badge's
@@ -308,6 +310,17 @@ sudo systemctl enable --now cc-backup.timer cc-update.path
   whatever the forward pass actually touched. Status: `/var/lib/cc-update/status.json` (what
   the UI polls); full log: `journalctl -u cc-update`. No sudoers/polkit —
   the web process's only privileged act is writing a file in a tmpfs dir.
+- **cc-update-stage** (v2.19.0) — the automatic PREPARE step. The moment a
+  version check sees a newer release, the cockpit server writes
+  `/run/cc-update/stage-trigger`; `cc-update-stage.path` starts the root
+  one-shot stager → `cc-update.sh stage`, which resolves and version-gates
+  the same target the apply would and runs every changed image build with
+  `CC_BUILD_ONLY=1` — layer caches warm on both nodes, **nothing imported,
+  no ref touched, no service stopped**. The cockpit keeps "Apply update now"
+  hidden until `/var/lib/cc-update/stage.json` says the target is staged
+  (a build failure surfaces there, with a retry button, before anyone
+  commits to downtime); the apply then fast-forwards through the warm
+  caches. Log: `journalctl -u cc-update-stage`.
 
 **`cc-uvicorn` is enabled here but started in §9**, after the onboarding
 interview has written the instance's env — the API reads it once at start, so a

@@ -1,0 +1,28 @@
+# The update STAGER (v2.19.0) — started by cc-update-stage.path, or by hand:
+#   sudo systemctl start cc-update-stage
+# Runs `cc-update.sh stage`: resolve + version-gate the target, then prebuild
+# every changed image with CC_BUILD_ONLY=1 — layer caches warm on both nodes,
+# nothing imported, no ref touched, NO service stopped. The apply that follows
+# fast-forwards through the warm caches. Status: /var/lib/cc-update/stage.json;
+# log: journalctl -u cc-update-stage.
+#
+# After=cc-update.service: oneshot units stay "activating" for their whole
+# run, so a stage that fires mid-apply WAITS instead of racing the updater's
+# own prebuild. (The reverse — an apply started mid-stage — is not ordered:
+# an ordering cycle would make systemd drop a job. Worst case is a duplicate
+# podman build; apply's import wins and nothing is corrupted. The UI keeps
+# the apply button hidden while a stage runs, so it takes a manual
+# `systemctl start cc-update` to get there.)
+[Unit]
+Description=Central Command update stager (prebuild image caches, system stays up)
+After=cc-update.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# Same budget as the updater: the Chromium image build is the long pole.
+TimeoutStartSec=5400
+ExecStartPre=-/usr/bin/mv -f /run/cc-update/stage-trigger /run/cc-update/stage-request.json
+ExecStart=/home/codyslab/central-command/deploy/k3s/cc-update.sh stage
+
+# No [Install]: cc-update-stage.path is what gets enabled, per the .path convention.

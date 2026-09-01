@@ -19,6 +19,12 @@
 #   and a source of subtle wheel-selection bugs, and are unnecessary here.
 #
 #   Usage:  ./deploy/k3s/build-graphiti-image.sh
+#
+#   CC_BUILD_ONLY=1 stops after the builds: no save, no containerd import, no
+#   verify. The stager (cc-update.sh stage) uses it to warm every layer cache
+#   and prove buildability WITHOUT touching the refs the kubelet resolves —
+#   an import here would replace the running bytes under the same tag and
+#   break the updater's rollback preservation.
 # ============================================================================
 set -euo pipefail
 
@@ -39,28 +45,40 @@ CTR_NS=k8s.io
 
 [[ -d "$CTX" ]] || { echo "FATAL: build context $CTX not found" >&2; exit 1; }
 
+BUILD_ONLY="${CC_BUILD_ONLY:-0}"
+
 echo "==> [1/2] arm64 on the Pi (docker)"
 docker build --platform linux/arm64 -t "$IMAGE_REF" -t "$IMAGE" "$CTX"
-TMP_ARM=$(mktemp /tmp/cc-graphiti-arm64.XXXXXX.tar)
-trap 'rm -f "$TMP_ARM"' EXIT
-docker save "$IMAGE_REF" -o "$TMP_ARM"
-sudo k3s ctr -n "$CTR_NS" images import "$TMP_ARM"
-echo "    imported into the Pi's containerd"
+if [[ "$BUILD_ONLY" != 1 ]]; then
+  TMP_ARM=$(mktemp /tmp/cc-graphiti-arm64.XXXXXX.tar)
+  trap 'rm -f "$TMP_ARM"' EXIT
+  docker save "$IMAGE_REF" -o "$TMP_ARM"
+  sudo k3s ctr -n "$CTR_NS" images import "$TMP_ARM"
+  echo "    imported into the Pi's containerd"
+fi
 
 echo "==> [2/2] amd64 on the chromebox (podman, native)"
 # Ship the context rather than the image: a native build there beats emulating
 # x86 here, and the context is a Dockerfile plus a config file.
 ssh "$CHROMEBOX" 'rm -rf ~/cc-graphiti-build && mkdir -p ~/cc-graphiti-build'
 tar -C "$CTX" -cf - . | ssh "$CHROMEBOX" 'tar -C ~/cc-graphiti-build -xf -'
+# The heredoc is UNQUOTED on purpose: $BUILD_ONLY and $IMAGE_REF expand HERE,
+# so the remote side runs with this invocation's values baked in.
 ssh "$CHROMEBOX" bash -se <<REMOTE
 set -euo pipefail
 cd ~/cc-graphiti-build
 # Fully-qualified tag, or podman writes localhost/<name> — see the note above.
 podman build --platform linux/amd64 -t "$IMAGE_REF" .
-podman save --format docker-archive "$IMAGE_REF" -o /tmp/cc-graphiti-amd64.tar
-sudo k3s ctr -n "$CTR_NS" images import /tmp/cc-graphiti-amd64.tar
-rm -f /tmp/cc-graphiti-amd64.tar
+if [[ "$BUILD_ONLY" != 1 ]]; then
+  podman save --format docker-archive "$IMAGE_REF" -o /tmp/cc-graphiti-amd64.tar
+  sudo k3s ctr -n "$CTR_NS" images import /tmp/cc-graphiti-amd64.tar
+  rm -f /tmp/cc-graphiti-amd64.tar
+fi
 REMOTE
+if [[ "$BUILD_ONLY" == 1 ]]; then
+  echo "==> CC_BUILD_ONLY=1 — builds cached on both nodes, nothing imported"
+  exit 0
+fi
 echo "    imported into the chromebox's containerd"
 
 echo

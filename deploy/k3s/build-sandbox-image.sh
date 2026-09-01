@@ -18,6 +18,9 @@
 #   pipeline reports failure even though the image is present).
 #
 #   Usage:  ./deploy/k3s/build-sandbox-image.sh
+#
+#   CC_BUILD_ONLY=1 stops after the build (no import/verify) — the stager's
+#   cache-warming mode; see build-graphiti-image.sh for why.
 # ============================================================================
 set -euo pipefail
 
@@ -33,15 +36,23 @@ CTR_NS=k8s.io  # k3s's containerd keeps kubernetes images in this namespace
 echo "==> building amd64 on the chromebox (podman, native)"
 ssh "$CHROMEBOX" 'rm -rf ~/cc-sandbox-build && mkdir -p ~/cc-sandbox-build'
 scp -q "$DOCKERFILE" "$CHROMEBOX:~/cc-sandbox-build/Dockerfile"
+# Unquoted heredoc on purpose: the flag and refs expand locally, so the
+# remote side runs with this invocation's values baked in.
 ssh "$CHROMEBOX" bash -se <<REMOTE
 set -euo pipefail
 cd ~/cc-sandbox-build
 # Fully-qualified tag, or podman writes localhost/<name> — see the note above.
 podman build --platform linux/amd64 -t "$IMAGE_REF" -f Dockerfile .
-podman save --format docker-archive "$IMAGE_REF" -o /tmp/cc-sandbox.tar
-sudo k3s ctr -n "$CTR_NS" images import /tmp/cc-sandbox.tar
-rm -f /tmp/cc-sandbox.tar
+if [[ "${CC_BUILD_ONLY:-0}" != 1 ]]; then
+  podman save --format docker-archive "$IMAGE_REF" -o /tmp/cc-sandbox.tar
+  sudo k3s ctr -n "$CTR_NS" images import /tmp/cc-sandbox.tar
+  rm -f /tmp/cc-sandbox.tar
+fi
 REMOTE
+if [[ "${CC_BUILD_ONLY:-0}" == 1 ]]; then
+  echo "==> CC_BUILD_ONLY=1 — build cached on the chromebox, nothing imported"
+  exit 0
+fi
 echo "    imported into the chromebox's containerd"
 
 echo

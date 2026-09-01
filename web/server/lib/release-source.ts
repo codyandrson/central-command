@@ -8,8 +8,28 @@
 
 import { execSync } from 'node:child_process';
 import https from 'node:https';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type LatestVersionSource = 'release' | 'tag';
+
+// server-dist/lib -> ../.. = web/ -> ../../.. = the repo root.
+export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+
+/** The installed version, from the root VERSION file (the setup-update
+ * contract) — not any package.json; the vendored Nerve version is not the
+ * product's. */
+export function readProductVersion(): string {
+  try {
+    const raw = readFileSync(resolve(repoRoot, 'VERSION'), 'utf-8');
+    const match = /^version=(.+)$/m.exec(raw);
+    if (match) return match[1].trim();
+  } catch {
+    // fall through
+  }
+  return '0.0.0'; // pre-versioning tree — anything published reads newer
+}
 
 interface GitHubRepo {
   owner: string;

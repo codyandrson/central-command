@@ -1,0 +1,7 @@
+# Tombstones: resources whose manifest was removed from deploy/k3s/.
+# Plain `kubectl apply -f <dir>` never deletes anything, so a resource
+# outlives its manifest unless it is named here — cc-update.sh deletes each
+# line (idempotent: --ignore-not-found) in the manifests phase.
+# Removing a manifest from this directory means adding its line here.
+# Format: <namespace> <kind> <name>
+central-command deployment cc-adminer

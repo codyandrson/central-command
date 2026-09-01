@@ -66,6 +66,13 @@ litellm_settings:
     type: redis
     host: os.environ/REDIS_HOST
     port: os.environ/REDIS_PORT
+    # NEVER add embedding/aembedding back to this list. With them cached, a
+    # /v1/embeddings batch that mixes cache hits and misses comes back
+    # MISALIGNED — miss rows receive a neighboring cached input's vector
+    # (reproduced live 2026-09-01; it corrupted 16 entity clusters' graph
+    # name_embeddings with byte-identical vectors across different names).
+    # Cached embeddings save ~nothing on a local embedder anyway.
+    supported_call_types: ["completion", "acompletion"]
 
 # Failover policy. The model ENTRIES live in the DB (see the note above); only
 # the policy lives here, because it is a decision worth reviewing in a diff.

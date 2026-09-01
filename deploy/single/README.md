@@ -97,7 +97,7 @@ the `cc-embedding` alias and writes it back, and refuses to overwrite a
 different value that is already there. An embedder on a different server is
 just a different `api_base` on the `cc-embedding` row.
 
-### Mirrors, air gaps, and the bundle
+### Mirrors and air gaps
 
 `fetch` is the only phase that needs the network, and it runs BEFORE
 anything is deployed: it pulls every image in `images.txt` by digest, builds
@@ -106,23 +106,14 @@ in as build-args, resolves the Python dependencies, and runs the cockpit's
 `npm ci`. Each artifact it cannot get is a `FAIL` naming the `.env` seam that
 governs it (`CC_REGISTRY_*`, `CC_APT_MIRROR`, `CC_PYPI_INDEX_URL`,
 `CC_NPM_REGISTRY`, …), and the phase ends with `USERACTION` / exit 3. Fix the
-mirror and re-run `./setup.sh fetch` — acquired artifacts fast-forward — or
-set that one artifact's `CC_SOURCE_<X>=bundle` and `CC_BUNDLE_DIR`. Nothing
-falls back on its own; the choice lives in `.env` so an update makes the
-same one.
+mirror and re-run `./setup.sh fetch` — acquired artifacts fast-forward.
+Nothing falls back on its own; the choice lives in `.env` so an update makes
+the same one.
 
-The bundle is produced on a connected machine of the same OS/arch:
-
-```bash
-./setup.sh fetch                 # acquire everything (verifies the digests)
-./bundle.sh export /media/usb/cc-bundle      # images, wheelhouse, built cockpit, MANIFEST
-```
-
-and consumed here by `fetch` through `./bundle.sh import`, which refuses a
-bundle from another release and checksum-verifies before loading. With
-`CC_SOURCE_COCKPIT=bundle` the site needs no npm at all (node ≥ 22 is still
-the cockpit's runtime). The full map of sources and seams is
-`deploy/AIRGAP.md`.
+On a restricted network, run `deploy/discover.sh` first: it probes every
+external source this profile touches, diagnoses each failure mode, and its
+report names the mirror value to write into each `.env` seam. The full map
+of sources and seams is `deploy/AIRGAP.md`.
 
 ### Reading the output
 

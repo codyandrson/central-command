@@ -292,9 +292,9 @@ cmd_plan() {
     || pass "flag-cockpit" "no cockpit change"
   # Anything the fetch phase acquires: apply runs `setup.sh fetch` first, so
   # a mirror that cannot serve the new pins stops the update BEFORE the merge
-  # touches the live tree (or the bundle for this release is asked for).
+  # touches the live tree.
   grep -qE '^(deploy/single/images\.txt|deploy/pi/graphiti/|deploy/k3s/sandbox\.Dockerfile|central_command/crawler/Dockerfile|requirements\.lock|web/package(-lock)?\.json)' <<<"$names" \
-    && pass "flag-fetch" "dependency inputs changed — apply will re-run ./setup.sh fetch (images by digest, local builds, python, cockpit) before deploying; a CC_SOURCE_*=bundle needs this release's bundle" \
+    && pass "flag-fetch" "dependency inputs changed — apply will re-run ./setup.sh fetch (images by digest, local builds, python, cockpit) before deploying" \
     || pass "flag-fetch" "no dependency input change — apply still runs ./setup.sh fetch (fast-forwards over what is present)"
 
   # Predict conflicts without touching the working tree (git >= 2.38).
@@ -332,12 +332,12 @@ apply_schema() {
 
 deploy_current_tree() {
   # Acquire BEFORE mutating: every image/build/wheel/npm tree the new release
-  # needs is fetched (or imported from the bundle) before the schema or the
-  # code moves, so "the mirror lacks X" stops the update with nothing changed.
+  # needs is fetched before the schema or the code moves, so "the mirror
+  # lacks X" stops the update with nothing changed.
   # Exit 3 from fetch is the operator's move, not a failure.
   "$HERE/setup.sh" fetch; local frc=$?
   if (( frc == 3 )); then
-    useraction "fetch" "dependencies could not all be acquired — fix the seam(s) named above (deploy/single/.env) or point the artifact at this release's bundle, then re-run ./update.sh apply"
+    useraction "fetch" "dependencies could not all be acquired — fix the seam(s) named above (deploy/single/.env), then re-run ./update.sh apply"
     return 0
   fi
   (( frc == 1 )) && { fail "fetch" "./setup.sh fetch failed — see above"; return 1; }

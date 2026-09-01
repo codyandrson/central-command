@@ -17,6 +17,9 @@
 #
 #   Usage:  ./deploy/k3s/build-crawler-image.sh
 #   Takes a while: the layer installs Chromium + its Debian dependencies.
+#
+#   CC_BUILD_ONLY=1 stops after the build (no import/verify) — the stager's
+#   cache-warming mode; see build-graphiti-image.sh for why.
 # ============================================================================
 set -euo pipefail
 
@@ -36,15 +39,23 @@ echo "==> building amd64 on the chromebox (podman, native)"
 ssh "$CHROMEBOX" 'rm -rf ~/cc-crawler-build && mkdir -p ~/cc-crawler-build'
 scp -q "$DOCKERFILE" "$CHROMEBOX:~/cc-crawler-build/Dockerfile"
 scp -q "$SERVICE" "$CHROMEBOX:~/cc-crawler-build/service.py"
+# Unquoted heredoc on purpose: the flag and refs expand locally, so the
+# remote side runs with this invocation's values baked in.
 ssh "$CHROMEBOX" bash -se <<REMOTE
 set -euo pipefail
 cd ~/cc-crawler-build
 # Fully-qualified tag, or podman writes localhost/<name> — see the note above.
 podman build --platform linux/amd64 -t "$IMAGE_REF" -f Dockerfile .
-podman save --format docker-archive "$IMAGE_REF" -o /tmp/cc-crawler.tar
-sudo k3s ctr -n "$CTR_NS" images import /tmp/cc-crawler.tar
-rm -f /tmp/cc-crawler.tar
+if [[ "${CC_BUILD_ONLY:-0}" != 1 ]]; then
+  podman save --format docker-archive "$IMAGE_REF" -o /tmp/cc-crawler.tar
+  sudo k3s ctr -n "$CTR_NS" images import /tmp/cc-crawler.tar
+  rm -f /tmp/cc-crawler.tar
+fi
 REMOTE
+if [[ "${CC_BUILD_ONLY:-0}" == 1 ]]; then
+  echo "==> CC_BUILD_ONLY=1 — build cached on the chromebox, nothing imported"
+  exit 0
+fi
 echo "    imported into the chromebox's containerd"
 
 echo
