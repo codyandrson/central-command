@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.18.5: the graph fits in a pocket
+
+Phone-reported fixes to the cockpit Graph panel (`web/src/features/graph/
+GraphView.tsx`). The search row now wraps and the input takes the remaining
+width with a 160px floor, so a narrow screen no longer crushes it to an
+untappable sliver. Expanding a collapsed cluster works by touch: the
+expand-collapse extension's "+" cue and cytoscape's `dbltap` are both
+mouse-hit-tested and never fired on a phone, so the panel now detects the
+double tap itself from plain `tap` events (two taps on the same supernode
+within 500 ms) — identical behavior for mouse double-click and touch
+double-tap.
+
 ## 2026-08-31 — v2.18.4: the doors unlock where the perimeter already holds
 
 Single-operator convenience pass over the new links, on the standing posture

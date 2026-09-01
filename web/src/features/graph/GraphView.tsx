@@ -906,18 +906,30 @@ export function GraphView() {
       setSelection({ kind: 'edge', edge });
     };
 
-    // Double-click expands a collapsed cluster — same effect as its "+" cue.
-    const onClusterDblTap = (evt: cytoscape.EventObject) => {
-      ecRef.current?.expand(evt.target as NodeSingular);
+    // Double-click OR double-tap expands a collapsed cluster — same effect as
+    // its "+" cue. Detected by hand from plain taps: cytoscape's `dbltap` and
+    // the extension's cue hit-test are both unreliable on touch, so the cue
+    // and dbltap never fired on a phone (reported live 2026-08-31).
+    const lastClusterTap = { id: '', at: 0 };
+    const onClusterTap = (evt: cytoscape.EventObject) => {
+      const target = evt.target as NodeSingular;
+      const now = Date.now();
+      if (lastClusterTap.id === target.id() && now - lastClusterTap.at < 500) {
+        lastClusterTap.id = '';
+        ecRef.current?.expand(target);
+        return;
+      }
+      lastClusterTap.id = target.id();
+      lastClusterTap.at = now;
     };
 
     cy.on('tap', 'node', onNodeTap);
     cy.on('tap', 'edge', onEdgeTap);
-    cy.on('dbltap', 'node.cy-expand-collapse-collapsed-node', onClusterDblTap);
+    cy.on('tap', 'node.cy-expand-collapse-collapsed-node', onClusterTap);
     return () => {
       cy.off('tap', 'node', onNodeTap);
       cy.off('tap', 'edge', onEdgeTap);
-      cy.off('dbltap', 'node.cy-expand-collapse-collapsed-node', onClusterDblTap);
+      cy.off('tap', 'node.cy-expand-collapse-collapsed-node', onClusterTap);
     };
   }, [expandNode]);
 
@@ -1157,13 +1169,13 @@ export function GraphView() {
         />
       )}
 
-      <form onSubmit={handleSearch} className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5">
+      <form onSubmit={handleSearch} className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-2.5">
         <Search size={14} className="shrink-0 text-muted-foreground" aria-hidden="true" />
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search entities…"
-          className="h-9"
+          className="h-9 min-w-[160px] flex-1"
         />
         <Button type="submit" size="sm" variant="outline">Search</Button>
         <Button
