@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.18.1: the docs catch up to the ten-phase ride
+
+Documentation-only truth-up after a cross-check of every deployment/setup
+doc against the scripts. The 2026-08-28 rework that made
+`deploy/single/setup.sh` run the whole ride (`fetch`, then
+`test`/`boot`/`demo` — ten phases) had drifted out of the prose: the /setup
+skill still carried the pre-rework hand-conducted walkthrough (manual
+pytest, manual uvicorn boot, manual demo POST) alongside the rule saying
+not to; the skill frontmatter, `deploy/single/README.md`, the root
+`README.md` and `CLAUDE.md` listed six-, seven- or nine-phase variants; two
+exit-code summaries omitted the load-bearing exit 3. All now state the ten
+phases and 0/1/2/3; the skill's podman path is renumbered to Phase 0
+(elicit) / 1 (run `./setup.sh`) / 2 (interview) / 3 (integration proof +
+go-live), with the k3s substrate keeping the hand-conducted demo and its
+interview-before-first-boot ordering. Also: the k3s README no longer
+hardcodes a `verify.sh` assertion count (it drifts by design), and the
+orphaned `deploy/k3s/migrate-from-docker.sh` (superseded by the completed
+one-time v1→v2 cutover; never referenced by any runbook) is deleted. New
+guard `tests/test_setup_phase_docs.py` pins the four prose phase lists and
+their exit-3 mentions to `setup.sh`'s own phase loop, so the next phase
+change fails the suite instead of shipping stale docs.
+
 ## 2026-08-31 — v2.18.0: the environment speaks first
 
 `deploy/discover.sh`: an exhaustive environment-discovery prober for

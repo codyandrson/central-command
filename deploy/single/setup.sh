@@ -34,7 +34,7 @@
 #     status      re-run postconditions only, nothing mutating
 #     diagnose    write setup-diagnostics.txt for pasting to Claude
 #
-#   No argument = ALL NINE phases in order — zero to a working, human-approved
+#   No argument = ALL TEN phases in order — zero to a working, human-approved
 #   demo in one command (2026-08-28), stopping at the first hard failure or
 #   gate. There is no state file: every step is idempotent and the late phases
 #   probe REALITY to skip (a healthy API skips test+boot; a decided proposal

@@ -74,7 +74,7 @@ agent's job is to elicit the answers, read the result, and diagnose a failure
 ```bash
 cd deploy/single
 cp env.example .env    # then fill it in — see below
-./setup.sh             # validate -> preflight -> fetch -> llm -> stack -> app -> verify
+./setup.sh             # validate -> preflight -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
 ```
 
 What you must supply in `.env`: only the `CC_ENABLE_*` / `CC_AIRGAP` flags —
@@ -126,11 +126,13 @@ the cockpit's runtime). The full map of sources and seams is
 
 ### Reading the output
 
-Every check is one line on stdout: `PASS|WARN|FAIL <check-name>: <message>`.
-Everything else — subprocess output, progress, detail — is stderr. Exit codes
-follow cloud-init: **0** clean, **1** hard failure, **2** finished with
-warnings. The full run stops at the first phase that hard-fails and tells you
-which phase to re-run.
+Every check is one line on stdout:
+`PASS|WARN|FAIL|USERACTION <check-name>: <message>`. Everything else —
+subprocess output, progress, detail — is stderr. Exit codes follow
+cloud-init, plus a gate code: **0** clean, **1** hard failure, **2** finished
+with warnings, **3** stopped for the operator's move (the last USERACTION
+line names it). The full run stops at the first phase that hard-fails and
+tells you which phase to re-run.
 
 ### When something fails
 
@@ -151,6 +153,7 @@ step inside it is idempotent, so **resume is just re-run**:
 ```bash
 ./setup.sh validate    # offline check of .env; no side effects
 ./setup.sh preflight   # podman/tooling/RAM/disk/linger checks; no side effects
+./setup.sh fetch       # acquire every external artifact up front (the one network phase)
 ./setup.sh llm         # secrets + LiteLLM up + probe its aliases + measure CC_EMBED_DIM
 ./setup.sh stack       # build local images, render, play postgres/neo4j/graphiti (+crawler, +n8n)
 ./setup.sh app         # venv, editable install, the app's .env, mint the spine's virtual key, cockpit
@@ -167,7 +170,7 @@ replaces the pods and updates the podman secrets in place.
 
 ### First boot and the demo (the last three phases, 2026-08-28)
 
-A bare `./setup.sh` runs all nine phases — **zero to a working, human-approved
+A bare `./setup.sh` runs all ten phases — **zero to a working, human-approved
 demo in one command.** The late phases skip by probing reality, never a state
 file: a healthy API skips `test` and `boot`, a decided proposal in the event
 log skips `demo`. Only two moments are yours, and on a terminal the script

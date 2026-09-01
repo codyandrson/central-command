@@ -52,7 +52,8 @@ Executor performs writes *after* approval. Keep it that way.
   manifests, unit files, locally-built images, with rollback).
 - **`deploy/single/`** — the single-node `podman kube play` profile.
   `setup.sh` is a deterministic driver (validate / preflight / fetch / llm /
-  stack / app / verify, PASS/WARN/FAIL, `diagnose` support bundle); the
+  stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
+  exit 0/1/2/3, `diagnose` support bundle); the
   /setup skill's job is elicitation and diagnosis only. `images.txt` pins
   every pulled image by digest; `bundle.sh` exports/imports the
   checksum-verified air-gap bundle.

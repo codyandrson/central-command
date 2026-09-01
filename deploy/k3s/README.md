@@ -441,8 +441,8 @@ authenticated and schema-loaded (roster seeded, event log queryable, neo4j
 answering cypher) instead of asserting *migrated instance data* (`audit_event >
 100`, the n8n façade active, the Gmail credential decrypting, graph non-empty).
 The two n8n instance checks are printed as `skip`. After the phase-8 restore
-choices, run it again **without** the flag — that is the full 32-assertion
-form and the steady-state nightly truth.
+choices, run it again **without** the flag — that is the full assertion
+suite and the steady-state nightly truth.
 
 Quick smoke checks:
 

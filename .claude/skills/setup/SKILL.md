@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (validate/preflight/llm/stack/app/verify, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, under the identical contract. Either way it ends with the onboarding interview and a working dry-run demo. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (ten phases: validate/preflight/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with the onboarding interview and a working dry-run demo. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -13,7 +13,8 @@ the whole install. Your job is: (a) elicit answers and write them into
 its PASS/WARN/FAIL lines and exit code, (c) on failure, run `./setup.sh
 diagnose` and reason over `setup-diagnostics.txt`, then name the fix — never
 freehand a replacement command, (d) conduct the onboarding interview
-(Phase 5), (e) conduct the demo (Phase 6). Delegate read-only investigation
+(Phase 2), (e) verify integrations and walk the go-live checklist
+(Phase 3). Delegate read-only investigation
 ("where is X defined", multi-file config reads) to an Explore sub-agent;
 never end a turn mid-phase with no text.
 
@@ -53,7 +54,7 @@ Rules that hold for the whole run:
 - **Never print secret values.** `.env` and `secrets.yaml` contents stay out
   of your output, and so does `setup-diagnostics.txt`'s content beyond what
   it already redacts (it records key NAMES only) — refer to keys by name.
-- **`setup.sh` now runs the whole ride (2026-08-28): nine phases, ending in
+- **`setup.sh` now runs the whole ride (2026-08-28): ten phases, ending in
   `test` (the pytest gate, via the venv), `boot` (elicits the operator name
   on a terminal, starts the API detached — `./setup.sh stop` is its
   counterpart) and `demo` (fixture email → the operator approves in the
@@ -79,8 +80,9 @@ Rules that hold for the whole run:
 
 Record the answer. Everything below "Podman substrate" is that path; the
 **k3s substrate** (bottom of this file) has its own driver,
-`./deploy/k3s/setup.sh`, under the identical contract — the conductor rules
-above apply verbatim on both.
+`./deploy/k3s/setup.sh`, under the same output/exit contract (six phases —
+no `test`/`boot`/`demo` there) — the conductor rules above apply verbatim
+on both.
 
 ---
 
@@ -144,7 +146,7 @@ credentials further down the file):
     either way, then `CC_JIRA_EMAIL`+`CC_JIRA_API_TOKEN` (Cloud) or a PAT
     into `CC_JIRA_API_TOKEN` with `CC_JIRA_AUTH_MODE=bearer` (DC). Say
     plainly that DC endpoint shapes are coded to docs, not yet proven live —
-    Phase 6's real read is the verification. No Jira: record that; jira-pack
+    Phase 3's real read is the verification. No Jira: record that; jira-pack
     agents fail loudly on reads until it's configured.
   - **Confluence** — same Cloud/DC shape into `CC_CONFLUENCE_BASE_URL` /
     `CC_CONFLUENCE_EMAIL` / `CC_CONFLUENCE_API_TOKEN` /
@@ -162,7 +164,8 @@ credentials further down the file):
     their existing PowerShell tools per
     `docs/reference/work-environment-compatibility.md` §2.3/§7 as design
     input, don't invent config), or manual-feed/none (`POST /api/emails`
-    with a raw message; `fixtures/emails/` has samples for Phase 6).
+    with a raw message; `fixtures/emails/` has samples the `demo` phase
+    uses).
   - Further integrations ship as capability packs — list what
     `central_command/runtime/packs.py` actually defines rather than promising
     from memory.
@@ -177,12 +180,23 @@ phase.
 ./setup.sh
 ```
 
-This runs `validate → preflight → llm → stack → app → verify` in order,
-stopping at the first hard failure. Each line on stdout is
-`PASS|WARN|FAIL <check-name>: <message>`; subprocess detail goes to stderr.
-Exit code **0** = clean, **1** = hard failure, **2** = completed with
-warnings. Read every line — a WARN is not nothing (e.g. `node-version` WARN
-means the cockpit won't be built).
+This runs all ten phases — `validate → preflight → fetch → llm → stack →
+app → verify → test → boot → demo` — in order, stopping at the first hard
+failure. Each line on stdout is
+`PASS|WARN|FAIL|USERACTION <check-name>: <message>`; subprocess detail goes
+to stderr. Exit code **0** = clean, **1** = hard failure, **2** = completed
+with warnings, **3** = stopped for the operator's move. Read every line — a
+WARN is not nothing (e.g. `node-version` WARN means the cockpit won't be
+built).
+
+The late phases are interactive where they must be: `test` is the pytest
+gate (sequential, ~11 minutes — a red suite is a real defect in the install
+or the repo; diagnose it, don't wave it through), `boot` elicits the
+operator's name on the terminal and starts the API detached (`./setup.sh
+stop` is its counterpart), and `demo` feeds a fixture email, waits for the
+operator's approval in the cockpit, then verifies the dry-run provenance.
+If the demo wedges, Phase 3's recovery shapes apply — never re-POST the
+same fixture.
 
 If the user is running it themselves instead of you, have them paste the
 output; interpret it the same way.
@@ -219,24 +233,15 @@ all.
 Gate: `./setup.sh` exits 0 (or 2 with WARNs the operator has read and
 accepted — a WARN is a stop-and-discuss point, not a drive-past).
 
-### Phase 2 — pytest gate
+### Phase 2 — the onboarding interview
 
-```bash
-pytest -q
-```
-
-Sequential, ~11 minutes. All green before Phase 3. A red suite here is a real
-defect in the install or the repo — diagnose it, don't proceed past it.
-
-### Phase 3 — CC_OPERATOR_NAME and the interview (unchanged)
-
-`CC_OPERATOR_NAME` is the one root-`.env` value `setup.sh`'s `app` phase
-deliberately leaves unset (everything else — the virtual key,
-`CC_NEO4J_PASSWORD`, `CC_EMBED_DIM`/`CC_EMBED_ALIAS`, the LiteLLM db url and
-salt, `CC_EXECUTOR_MODE=dry_run` — it already wrote). It's the interview's
-first answer, below. Also write in the Jira/Confluence/network-trust values
-you elicited in Phase 0 if `setup.sh`'s `app` phase didn't already carry them
-forward — check the root `.env` before re-typing anything.
+`boot` already elicited `CC_OPERATOR_NAME` into the root `.env` (everything
+else — the virtual key, `CC_NEO4J_PASSWORD`, `CC_EMBED_DIM`/`CC_EMBED_ALIAS`,
+the LiteLLM db url and salt, `CC_EXECUTOR_MODE=dry_run` — the `app` phase
+already wrote). The fuller interview below is yours to conduct, any time
+after boot. Also write in the Jira/Confluence/network-trust values you
+elicited in Phase 0 if the root `.env` doesn't already carry them — check
+before re-typing anything.
 
 You are the interviewer. The answers here are OPERATOR INPUT — trusted
 evidence, not agent claims — so nothing in this phase rides the approval
@@ -251,9 +256,9 @@ per section, then follow-ups until it has real substance** — a team member
 needs role, expertise and reporting line, not just a name — never bundle
 sections into one question.
 
-1. **Identity.** What should the agents call them? →
-   `CC_OPERATOR_NAME=<name>` in the root `.env`. This also becomes the
-   provenance actor on their decisions (`human:<name-slug>`).
+1. **Identity.** Confirm the name `boot` recorded (`CC_OPERATOR_NAME` in
+   the root `.env`) is what the agents should call them. It also becomes
+   the provenance actor on their decisions (`human:<name-slug>`).
 2. **Work environment.** What they do, where they work, the systems that
    matter (their Jira, their repos, their wiki), what a normal week looks
    like. One episode per topic, each 1–5 sentences of DISTILLED claims
@@ -279,16 +284,12 @@ sections into one question.
 Gate: the user confirms the summary; every episode command returned an
 acknowledgement.
 
-### Phase 4 — first boot + the demo
+### Phase 3 — integration proof + go-live
 
-**Do not start uvicorn before Phase 3 lands `CC_OPERATOR_NAME` and the
-episodes** — first boot hires the roster from what's already in `.env`/graph.
-
-```bash
-uvicorn central_command.api.app:app --port 8080
-```
-
-First boot self-hires the roster. Be honest about what renders where: the
+`./setup.sh boot` and `demo` already did the mechanical part on this
+substrate: first boot self-hired the roster, and the operator watched the
+demo loop (fixture email → their approval in the cockpit → dry-run
+provenance). Be honest about what renders where: the
 founding agents are seeded by `schema.sql` at database init and don't carry
 template markers yet, so THOSE charters read "the operator" — a recorded
 future rebuild. What does use the interview's values today: any agent hired
@@ -302,10 +303,12 @@ in this profile; if `/` 404s, the web build was skipped (check the
 `cockpit`/`node-version` line from `./setup.sh app`).
 
 The install ends inside a working demo the user watches, not a success
-message: feed one fixture email from `fixtures/emails/` via
+message — `./setup.sh demo` runs that loop here; on the k3s substrate you
+conduct it by hand: feed one fixture email from `fixtures/emails/` via
 `POST /api/emails`, watch the proposal land in the Decisions Inbox, have the
 user approve it, and confirm the dry-run execution + provenance in the event
-log. Two shapes, so you don't guess them:
+log. Either way, these are the shapes for conducting or recovering it, so
+you don't guess them:
 
 - `POST /api/emails` takes exactly one field —
   `{"text": "<the raw RFC-822 message>"}` (`EmailIn` in
@@ -484,8 +487,10 @@ manifest. `app` installs the venv/cockpit and the systemd units, holding
 gate** — that gate is where the onboarding interview happens.
 
 **At the first-boot gate:** conduct the onboarding interview (identical to
-the podman substrate's Phase 3 above; `CC_OPERATOR_NAME` and the episodes
-land first), write in the Phase-0 integration values if the root `.env`
+the podman substrate's Phase 2 above, except `CC_OPERATOR_NAME` is yours to
+elicit here — land it and the episodes first, BEFORE starting uvicorn:
+first boot hires the roster from what's already in `.env`/graph), write in
+the Phase-0 integration values if the root `.env`
 does not carry them yet, then have the operator:
 
 ```bash
@@ -497,8 +502,9 @@ Then read `deploy/k3s/README.md` §8 with the operator and decide each
 instance-data item deliberately — on a fully-clean deployment the answer is
 "restore nothing" (§7). The demo (fixture email → approval → provenance,
 Jira/Confluence first-read verification, macro harvest offer, team tour)
-and the GO-LIVE checklist are identical to the podman substrate's Phase 4
-above — with the k3s-specific executor flip: a systemd drop-in, not the
+and the GO-LIVE checklist are identical to the podman substrate's Phase 3
+above (there the demo is hand-conducted, per its shapes) — with the
+k3s-specific executor flip: a systemd drop-in, not the
 `.env` (the tracked unit pins dry_run and systemd `Environment=` beats
 pydantic's env_file; verify via the `status` RPC's `executorMode`).
 
