@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-01 — v2.19.4: a backup is fetched, never streamed
+
+`cc-update.sh` and `backup.sh` no longer trust `kubectl exec`'s stdout for
+bulk data: exec silently drops the tail of a large, fast stream and still
+exits 0 — the litellm pre-update dump (125 MB of spend logs) lost its last
+~300 KB on most attempts, and the updater's completion-marker guard
+correctly refused to proceed. Both scripts now dump to a file INSIDE the
+pod (`pg_dump -Z6 -f`, completeness guarded by pg_dump's own exit code),
+then transfer it out checksum-verified with up to three retries; the
+completion-marker check remains the final authority. Unblocking an
+installed tree whose updater predates this fix: `git fetch origin --tags &&
+git checkout v2.19.4 -- deploy/k3s/cc-update.sh deploy/k3s/backup.sh`,
+commit, re-run the update.
+
 ## 2026-09-01 — v2.19.3: discovery feeds the deployment
 
 The discovery prober and the deployment now meet in the middle — as
