@@ -132,6 +132,21 @@ load_env() {
   fi
   if [[ -n "${CC_PYTHON_MIRROR:-}" ]]; then export UV_PYTHON_INSTALL_MIRROR="$CC_PYTHON_MIRROR"; fi
   if [[ -n "${CC_NPM_REGISTRY:-}" ]]; then export NPM_CONFIG_REGISTRY="$CC_NPM_REGISTRY"; fi
+  # Trust + proxy seams, same fan-out pattern: one .env fact, exported under
+  # every name the acquisition tools actually read. podman pulls consult the
+  # HOST trust store instead (deploy/AIRGAP.md).
+  if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
+    export CURL_CA_BUNDLE="$CC_CA_BUNDLE" SSL_CERT_FILE="$CC_CA_BUNDLE" \
+           REQUESTS_CA_BUNDLE="$CC_CA_BUNDLE" NODE_EXTRA_CA_CERTS="$CC_CA_BUNDLE" \
+           NPM_CONFIG_CAFILE="$CC_CA_BUNDLE"
+  fi
+  if [[ -n "${CC_PROXY:-}" ]]; then
+    export http_proxy="$CC_PROXY" https_proxy="$CC_PROXY" \
+           HTTP_PROXY="$CC_PROXY" HTTPS_PROXY="$CC_PROXY"
+    # Loopback must bypass the proxy — every phase curls 127.0.0.1.
+    export no_proxy="127.0.0.1,localhost,host.containers.internal${no_proxy:+,$no_proxy}"
+    export NO_PROXY="$no_proxy"
+  fi
   return 0
 }
 
@@ -341,6 +356,32 @@ phase_preflight() {
     pass "package-indexes" "unreachable, as expected with CC_AIRGAP=1 — fetch will say per artifact"
   else
     warn "package-indexes" "unreachable:$(printf ' %s' $probes) — run deploy/discover.sh to map this network, then set the mirror seams in .env (see env.example); deploy/AIRGAP.md"
+  fi
+
+  # Discovery cross-check (read-only). If /discover ran, its discovery.env
+  # records the observed failure CLASS per resource (classes only — no
+  # hostnames). It is EVIDENCE, never authority: a mismatch WARNs and names
+  # the seam; the decision stays in .env. The conf file (operator's probe
+  # answers, including diagnostic flags) is deliberately never read here.
+  local denv="$REPO_ROOT/deploy/discovery.out/discovery.env"
+  if [[ -f "$denv" ]]; then
+    dcls() { sed -n "s/^DISCO_$1=\"\(.*\)\"\$/\1/p" "$denv" | tail -1; }
+    local pair dk seam cls dmiss=""
+    for pair in DOCKERIO:CC_REGISTRY_DOCKERIO GHCR:CC_REGISTRY_GHCR \
+                PYPI:CC_PYPI_INDEX_URL NPM:CC_NPM_REGISTRY; do
+      dk="${pair%%:*}"; seam="${pair#*:}"; cls="$(dcls "$dk")"
+      case "$cls" in
+        dns|refused|timeout|unreachable|error)
+          [[ -z "$(eval "printf '%s' \"\${$seam:-}\"")" ]] && dmiss="$dmiss $dk($cls)->$seam" ;;
+      esac
+    done
+    [[ "$(dcls TLS_INTERCEPT)" == "1" && -z "${CC_CA_BUNDLE:-}" ]] \
+      && dmiss="$dmiss tls-intercept->CC_CA_BUNDLE"
+    if [[ -n "$dmiss" ]]; then
+      warn "discovery-crosscheck" "discovery observed failures with no seam set:$dmiss — the prescription is in deploy/discovery.out/discovery-report.md"
+    else
+      pass "discovery-crosscheck" "discovery's observations and the .env seams agree"
+    fi
   fi
 
   # What podman will actually consult for pulls. On macOS/Windows this is the
@@ -1072,6 +1113,15 @@ phase_diagnose() {
     echo
     echo "== the app's .env (names only)"
     env_key_names "$APP_ENV"
+    echo
+    echo "== discovery (classes only — the REPORT names internal hosts, so it is"
+    echo "   pointed to, never inlined here)"
+    if [[ -f "$REPO_ROOT/deploy/discovery.out/discovery.env" ]]; then
+      cat "$REPO_ROOT/deploy/discovery.out/discovery.env"
+      echo "  (full report: deploy/discovery.out/discovery-report.md)"
+    else
+      echo "  (no discovery run on this machine — deploy/discover.sh)"
+    fi
     echo
     echo "== podman pods"
     podman pod ps --format '{{.Name}}\t{{.Status}}' 2>&1

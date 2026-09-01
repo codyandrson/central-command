@@ -63,7 +63,9 @@ Boundaries that hold for the whole run:
    variable in `deploy/AIRGAP.md`'s seam table (PyPI mirror →
    `CC_PYPI_INDEX_URL`, registry mirror → `CC_REGISTRY_<KEY>`, …). The
    report's "How to consume each resource here" section has the per-tool
-   config lines — relay them, don't re-derive them.
+   config lines — relay them, don't re-derive them. If the operator's next
+   move is installing, tell them /setup reads this report as its
+   environment briefing — leave `discovery.out/` in place.
 
 ## Eliciting per class
 
