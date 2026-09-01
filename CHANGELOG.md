@@ -4,6 +4,24 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.18.4: the doors unlock where the perimeter already holds
+
+Single-operator convenience pass over the new links, on the standing posture
+that the tailnet is the perimeter. The DB UI ships as **pgweb** instead of
+Adminer: `PGWEB_DATABASE_URL` auto-connects to the spine at boot, so the
+Systems link opens straight into the schema with no login form — the
+connection string in the manifest is the same in-tree default credential
+`20-postgres.yaml` already declares, so nothing new is disclosed
+(`deploy/k3s/85-pgweb.yaml`, image pinned 0.16.2, amd64+arm64). Neo4j auth
+is disabled (`NEO4J_AUTH=none`, replacing the secret ref) so Neo4j Browser
+connects without a password; the manifest comment records exactly what that
+buys, what it costs (any tailnet device can write to the graph over bolt),
+and the one-line revert. LiteLLM's admin UI and n8n keep their logins on
+purpose — the LiteLLM UI fronts stored provider keys and n8n has no
+supported no-auth mode; the browser password manager is the right tool for
+both — and the cockpit's own session auth is load-bearing (it fronts the
+approval gate) and is not in scope for removal.
+
 ## 2026-08-31 — v2.18.3: every system earns its link
 
 The Systems page stops being a launchpad with half its doors painted on.

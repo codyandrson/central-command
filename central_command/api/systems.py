@@ -195,18 +195,18 @@ def _entries() -> list[dict]:
         },
         {
             "id": "db-ui",
-            "name": "Adminer (DB UI)",
+            "name": "pgweb (DB UI)",
             "kind": "ui",
             "url": settings.db_ui_url or None,
             # Same pattern as VictoriaLogs: no internal CC_* URL exists, only
             # the browser one — the loopback hostPort is fixed by the manifest
-            # (deploy/k3s/85-adminer.yaml).
+            # (deploy/k3s/85-pgweb.yaml).
             "health": _http_check(
                 "http://127.0.0.1:8092/" if settings.db_ui_url else None
             ),
             "credential": {
-                "label": "Postgres login (entered at the Adminer form)",
-                "location": "CC_DATABASE_URL user/password",
+                "label": "none — auto-connected to the spine",
+                "location": "tailnet-gated (tailscale serve)",
             },
         },
         {

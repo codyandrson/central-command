@@ -104,9 +104,17 @@ spec:
         - name: neo4j
           image: docker.io/library/neo4j:5.26.2
           env:
+            # Auth DISABLED, deliberately (2026-08-31): Neo4j is reachable only
+            # in-cluster and via the operator's loopback forward / tailnet
+            # tailscale-serve entries, and this is a single-operator deployment
+            # where the tailnet IS the perimeter (sshd is the gate, not the
+            # network). What this buys: Neo4j Browser connects without a login.
+            # What it costs: any tailnet device can write to the graph over
+            # bolt. Revert = restore the secretKeyRef to the cc-neo4j secret;
+            # clients (Graphiti, the reader) pass credentials either way and
+            # the server simply stops ignoring them.
             - name: NEO4J_AUTH
-              valueFrom:
-                secretKeyRef: {name: cc-neo4j, key: NEO4J_AUTH}
+              value: "none"
             # Heap/pagecache kept at the compose values on purpose. The
             # chromebox has room to raise them, but that is a behaviour change
             # worth making deliberately and measuring, not a free side effect

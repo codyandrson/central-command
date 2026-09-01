@@ -204,7 +204,7 @@ Expected placement once settled:
 | `cc-n8n`, `cc-n8n-db` | raspberrypi (pinned) | stateful | `hostPort` 127.0.0.1:5678 (n8n) |
 | `cc-neo4j` | chromebox (pinned) | stateful (`cc-neo4j-data`) | **ClusterIP only** |
 | `cc-vlogs` | chromebox (pinned) | stateful (`cc-vlogs-data`) | ServiceLB :9428 |
-| `cc-adminer` | raspberrypi (pinned) | stateless DB UI for the spine | `hostPort` 127.0.0.1:8092 |
+| `cc-pgweb` | raspberrypi (pinned) | stateless zero-login DB UI for the spine | `hostPort` 127.0.0.1:8092 |
 | `cc-crawler` | chromebox (**required**) | Chromium stays off the Pi | ServiceLB :8091 |
 | `cc-litellm` | **floats** (prefers chromebox) | stateless, the arm64 memory hog | ServiceLB :4000 |
 | `cc-graphiti` | **floats** (prefers chromebox) | stateless | ServiceLB :8000 |

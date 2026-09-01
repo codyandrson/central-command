@@ -1,0 +1,55 @@
+# cc-pgweb — zero-login browser UI for inspecting/fixing the Postgres spine.
+#
+#   pgweb over Adminer, deliberately: PGWEB_DATABASE_URL auto-connects at
+#   boot, so there is NO login form — the operator clicks the Systems link
+#   and is in. The connection string below is the same in-tree default
+#   credential 20-postgres.yaml already declares; nothing new is disclosed.
+#   The gate is reachability: loopback hostPort only, plus whatever
+#   tailscale-serve entry the operator adds (https:8092 -> 127.0.0.1:8092,
+#   tailnet-only). Single-operator posture — the tailnet is the perimeter.
+#
+#   Stateless, but PINNED to the anchor via the same loopback-hostPort
+#   pattern as cc-postgres. The LiteLLM DB has no UI on purpose (rarely
+#   inspected; psql to 127.0.0.1:5443 covers it).
+#
+#   Multi-arch upstream image (amd64+arm64).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-pgweb
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # two pods cannot hold the same hostPort
+  selector:
+    matchLabels:
+      app: cc-pgweb
+  template:
+    metadata:
+      labels:
+        app: cc-pgweb
+    spec:
+      nodeSelector:
+        cc-role/anchor: "true"
+      enableServiceLinks: false
+      containers:
+        - name: pgweb
+          image: docker.io/sosedoff/pgweb:0.16.2
+          env:
+            - name: PGWEB_DATABASE_URL
+              value: postgres://central_command:central_command@postgres:5432/central_command?sslmode=disable
+          ports:
+            - name: http
+              containerPort: 8081
+              hostPort: 8092
+              hostIP: 127.0.0.1
+          readinessProbe:
+            httpGet: {path: /, port: 8081}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: {memory: 32Mi, cpu: 25m}
+            limits: {memory: 256Mi}
