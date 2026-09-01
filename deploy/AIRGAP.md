@@ -25,6 +25,36 @@ to the public endpoint on a miss by DEFAULT; fail-loud is opt-in
 (`pull-from-mirror`, k3s's `--disable-default-registry-endpoint`). The
 `fetch` phase is where we make it loud.
 
+## Step 0 — discover the environment
+
+Before touching any seam, run `deploy/discover.sh`. It probes every commonly
+needed external resource — package indexes, container registries, forges,
+OS archives, AI hosts, CDNs — and classifies each one by failure MODE (DNS
+vs refused vs timeout vs TLS interception vs auth), because the mode is the
+diagnosis: a timeout is a default-deny firewall, a certificate failure that
+clears with `-k` is a TLS-intercepting proxy, a 407 is proxy credentials.
+
+It writes `deploy/discovery.out/discovery-report.md` — an exhaustive guide
+to the environment for anyone (or anything) developing, deploying, or
+operating in it: what is reachable, what each nuance is, and the concrete
+config lines to consume each resource here — plus `discovery.env`,
+machine-readable facts for tooling. Both are gitignored: they name internal
+hosts.
+
+The elicitation loop is config-and-rerun, same shape as `setup.sh`: each
+finding's USERACTION names a key in `deploy/discovery.conf` (also
+gitignored) — `DISCO_CA_BUNDLE` for the corporate root CA, `DISCO_PROXY`,
+`DISCO_NETRC=1` for credentials, `DISCO_MIRROR_<KEY>` per-resource mirrors.
+Fill in what your environment has and re-run; configured mirrors are probed
+too, and the report's "how to consume" section then points at them. Never
+standardize on disabled TLS verification — `discover.sh` uses `-k` only as
+a diagnostic to identify interception; the fix it prescribes is trusting
+the corporate CA.
+
+The report's findings map directly onto the seam table below: a resource
+the report marks mirror-only is the value you put in that seam's `.env`
+variable.
+
 ## Every external source, and its seam
 
 All seams live in `deploy/single/.env` (see `env.example`, "Where every

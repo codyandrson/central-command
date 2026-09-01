@@ -34,4 +34,9 @@ drafts/
 # Setup driver litter (the k3s driver; deploy/single/ has its own .gitignore)
 deploy/k3s/setup-log.txt
 deploy/k3s/setup-diagnostics.txt
+
+# Environment discovery output and operator-local config (deploy/discover.sh).
+# Both name internal mirror hosts and network posture — never commit them.
+deploy/discovery.out/
+deploy/discovery.conf
 CLAUDE.local.md
