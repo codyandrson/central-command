@@ -441,11 +441,11 @@ export function ActivityView({ onOpenSession }: {
         {/* Quick links to sibling systems on the same host. Deriving from
             the current location (rather than hard-coding the Pi's tailnet
             name) works from any host without configuration. n8n (8443) is
-            tailscale-serve TLS; LiteLLM (4000) and VictoriaLogs (9428) use
-            explicit http on purpose — 4000 has no tailscale serve entry at
-            all, and both ports are ServiceLB raw-TCP on cluster nodes, so
-            plain http is the one scheme that answers from every tailnet
-            vantage point (traffic is WireGuard-encrypted regardless). */}
+            tailscale-serve TLS, and so is VictoriaLogs (9428) — both inherit
+            the page's own scheme, which matches whichever listener (serve TLS
+            via tailnet name, ServiceLB raw via LAN) the operator came in
+            through. LiteLLM (4000) stays explicit http: no serve entry exists
+            for it, so ServiceLB raw-TCP is the only listener on that port. */}
         <div className="ml-auto flex items-center gap-3">
           <a
             href={`${window.location.protocol}//${window.location.hostname}:8443`}
@@ -466,7 +466,7 @@ export function ActivityView({ onOpenSession }: {
             LiteLLM <ExternalLink size={11} />
           </a>
           <a
-            href={`http://${window.location.hostname}:9428/select/vmui/`}
+            href={`${window.location.protocol}//${window.location.hostname}:9428/select/vmui/`}
             target="_blank"
             rel="noreferrer"
             title="journald + pod logs for both nodes (VictoriaLogs)"

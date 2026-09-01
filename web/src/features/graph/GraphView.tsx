@@ -25,7 +25,7 @@ cytoscape.use(expandCollapse);
 
 /** The slice of the expand-collapse api this panel uses (the extension is
  *  untyped — see cytoscape-expand-collapse.d.ts). */
-type ExpandCollapseApi = { collapseAll(): void; expandAll(): void };
+type ExpandCollapseApi = { collapseAll(): void; expandAll(): void; expand(nodes: cytoscape.CollectionArgument): void };
 type WithExpandCollapse = Core & { expandCollapse(options: unknown): ExpandCollapseApi };
 
 /** Layout used both for incremental re-layouts and by the extension after an
@@ -723,7 +723,7 @@ export function GraphView() {
     const cy = cytoscape({
       container: containerRef.current,
       style: CY_STYLE,
-      wheelSensitivity: 0.25,
+      wheelSensitivity: 1,
     });
     cyRef.current = cy;
     ecRef.current = (cy as WithExpandCollapse).expandCollapse({
@@ -733,6 +733,10 @@ export function GraphView() {
       // The undo-redo extension isn't installed; leaving this true is harmless
       // (undoRedoUtilities no-ops without cy.undoRedo) but says the wrong thing.
       undoable: false,
+      // The extension's cue canvas defaults to z-index 999 — above the z-10
+      // DetailDrawer, so drawer clicks fell through to the graph and panned it.
+      // Cue clicks are hit-tested via cytoscape taps, not this canvas.
+      zIndex: 5,
     });
     // cytoscape hard-sizes its canvases to the container at init and never
     // re-measures. Without this, the first search (results list appearing =
@@ -902,11 +906,18 @@ export function GraphView() {
       setSelection({ kind: 'edge', edge });
     };
 
+    // Double-click expands a collapsed cluster — same effect as its "+" cue.
+    const onClusterDblTap = (evt: cytoscape.EventObject) => {
+      ecRef.current?.expand(evt.target as NodeSingular);
+    };
+
     cy.on('tap', 'node', onNodeTap);
     cy.on('tap', 'edge', onEdgeTap);
+    cy.on('dbltap', 'node.cy-expand-collapse-collapsed-node', onClusterDblTap);
     return () => {
       cy.off('tap', 'node', onNodeTap);
       cy.off('tap', 'edge', onEdgeTap);
+      cy.off('dbltap', 'node.cy-expand-collapse-collapsed-node', onClusterDblTap);
     };
   }, [expandNode]);
 

@@ -15,7 +15,6 @@
   html {
     background: var(--color-background);
     color-scheme: dark light;
-    scrollbar-gutter: stable both-edges;
     font-size: var(--font-size-base);
   }
   * {

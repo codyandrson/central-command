@@ -629,6 +629,44 @@ function EpisodeBlock({ args }: { args: Record<string, unknown> }) {
   );
 }
 
+/** graph.create_edge / graph.update_edge: the fact as a quoted claim and the
+ *  validity window as labelled rows. The window is part of what the operator
+ *  approves — on create, an omitted valid_at is stamped by the Executor as
+ *  becoming true TODAY — so it must be readable, not buried in the JSON. */
+function EdgeArgsBlock({ args, isCreate }: { args: Record<string, unknown>; isCreate: boolean }) {
+  const { fact, name, valid_at, invalid_at, clear_valid, clear_invalid, ...rest } = args;
+  const bound = (v: unknown, cleared: unknown, absent: string) =>
+    cleared ? 'cleared' : v != null ? String(v) : absent;
+  return (
+    <div className="space-y-1.5">
+      {typeof fact === 'string' && (
+        <blockquote className="whitespace-pre-wrap cockpit-wrap rounded-lg border-l-2 border-primary/40 bg-muted/40 p-2.5 text-[0.7rem] leading-relaxed text-foreground/90">
+          {fact}
+        </blockquote>
+      )}
+      <dl className="space-y-0.5 text-[0.7rem] text-foreground/80">
+        {name != null && (
+          <div><dt className="inline font-semibold text-muted-foreground">relationship: </dt><dd className="inline">{String(name)}</dd></div>
+        )}
+        <div>
+          <dt className="inline font-semibold text-muted-foreground">valid from: </dt>
+          <dd className="inline">{bound(valid_at, clear_valid, isCreate ? 'not given — stamped as becoming true today' : 'unchanged')}</dd>
+        </div>
+        <div>
+          <dt className="inline font-semibold text-muted-foreground">invalid at: </dt>
+          <dd className="inline">{bound(invalid_at, clear_invalid, isCreate ? 'none — still valid' : 'unchanged')}</dd>
+        </div>
+      </dl>
+      {Object.keys(rest).length > 0 && (
+        <details className="text-[0.7rem] text-muted-foreground">
+          <summary className="cursor-pointer">other arguments</summary>
+          <JsonBlock value={rest} />
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** skill.create / an undiffable skill.doc_add: readable content, no version
  *  to compare against. */
 function SkillDocBlock({ args }: { args: Record<string, unknown> }) {
@@ -894,6 +932,8 @@ function ProposalPane({
             </div>
             {a.charter_diff ? <DiffBlock diff={a.charter_diff} />
               : cap === 'graph.add_episode' ? <EpisodeBlock args={a.arguments ?? {}} />
+              : cap === 'graph.create_edge' || cap === 'graph.update_edge'
+                ? <EdgeArgsBlock args={a.arguments ?? {}} isCreate={cap === 'graph.create_edge'} />
               : cap === 'skill.doc_add' || cap === 'skill.create'
                 ? (a.skill_diff ? <DiffBlock diff={a.skill_diff} /> : <SkillDocBlock args={a.arguments ?? {}} />)
               : cap === 'mcp.sync_source' ? <McpSyncBlock diffs={a.mcp_diffs ?? []} args={a.arguments ?? {}} />
