@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-08-31 — v2.18.2: the cockpit stops fighting the pointer
+
+Graph panel interaction fixes, found live. Scroll-zoom moves at cytoscape's
+full rate (`wheelSensitivity` 0.25 → 1). The expand-collapse extension's cue
+canvas defaulted to z-index 999 — above the detail drawer — so drags and
+scrollbar grabs inside the drawer fell through and panned the canvas; it now
+sits below the drawer (cue clicks are hit-tested via cytoscape taps, not the
+canvas, so nothing is lost). A collapsed community expands on double-click
+as well as its "+" cue. The app shell drops `scrollbar-gutter: stable
+both-edges` on `html`, which reserved a permanent scrollbar-width strip on
+BOTH viewport edges. The Activity page's infra-logs link inherits the page's
+own scheme instead of hard-coding http (a tailscale-serve TLS listener on
+9428 answered the hard-coded form with a raw protocol error).
+
+Decisions inbox: `graph.create_edge` / `graph.update_edge` proposals now
+render the fact as a quoted claim with labelled `valid from` / `invalid at`
+rows — the validity window is part of what the operator approves, and an
+absent bound states its real executor semantics (create: stamped as becoming
+true today; update: unchanged) instead of hiding in the args JSON.
+
 ## 2026-08-31 — v2.18.1: the docs catch up to the ten-phase ride
 
 Documentation-only truth-up after a cross-check of every deployment/setup
