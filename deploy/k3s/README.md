@@ -206,6 +206,7 @@ Expected placement once settled:
 | `cc-vlogs` | chromebox (pinned) | stateful (`cc-vlogs-data`) | ServiceLB :9428 |
 | `cc-pgweb` | raspberrypi (pinned) | stateless zero-login DB UI for the spine | `hostPort` 127.0.0.1:8092 |
 | `cc-crawler` | chromebox (**required**) | Chromium stays off the Pi | ServiceLB :8091 |
+| `cc-speech` | chromebox (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models` | ServiceLB :8093 |
 | `cc-litellm` | **floats** (prefers chromebox) | stateless, the arm64 memory hog | ServiceLB :4000 |
 | `cc-graphiti` | **floats** (prefers chromebox) | stateless | ServiceLB :8000 |
 | `cc-fluentbit` | DaemonSet, both nodes | log collection | none |

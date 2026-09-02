@@ -42,7 +42,7 @@ SCRIPTS = [
     SINGLE / "build-crawler-image.sh",
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
-COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base"}
+COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base", "speech"}
 REGISTRY_VAR = {"CC_REGISTRY_DOCKERIO": "dockerio", "CC_REGISTRY_GHCR": "ghcr", "CC_REGISTRY_MCR": "mcr"}
 
 

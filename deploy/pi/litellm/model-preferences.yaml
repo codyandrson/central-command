@@ -321,6 +321,25 @@ registration_only:
       mode: rerank
       timeout: 60
 
+  # THE SPEECH ROLES — what the cockpit's read-aloud and voice input address
+  # (web/.env OPENAI_TTS_MODEL / OPENAI_STT_MODEL, api/speech.py). cc-speech
+  # (deploy/k3s/90-speech.yaml) answers both: model openai/<the id in its
+  # PRELOAD_MODELS>, api_base http://cc-speech:8000/v1, key `none`. Either
+  # may point elsewhere — hosted Whisper-convention models for cc-stt is the
+  # expected case. The mode is LiteLLM's audio mode, an invariant.
+  cc-tts:
+    registration:
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
+      mode: audio_speech
+      timeout: 120
+  cc-stt:
+    registration:
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
+      mode: audio_transcription
+      timeout: 180
+
   # !! THE api_base MUST END IN /v1/rerank !!  Discovered in-pod during the
   # 2026-08-23 clean install and recorded nowhere until now. The `cohere/`
   # prefix selects LiteLLM's cohere client, and that client appends nothing —

@@ -29,7 +29,7 @@
 #     apply           gate (API stopped? no downgrade/out-of-order version?)
 #                     -> spine DB backup (default ON; CC_SKIP_DB_BACKUP=1 to
 #                     opt out) -> merge upstream into local -> deploy:
-#                     schema -> ./setup.sh app -> ./setup.sh verify
+#                     schema -> ./setup.sh llm -> ./setup.sh app -> ./setup.sh verify
 #                     -> USERACTION: restart is the operator's
 #     rollback        reset `local` to the last pre-update tag and re-deploy
 #                     the restored tree through the same idempotent steps
@@ -345,6 +345,16 @@ deploy_current_tree() {
   # schema means old code tolerates the new columns, so a failed migration
   # leaves the old code running unharmed and the update simply stops here.
   apply_schema || return 1
+  # The LLM half is part of the release surface too (a new alias, a new pod
+  # played in that phase — v2.21.0's speech engine). Idempotent: --replace
+  # converges the pods and the catalog step is create-only. Exit 3 is the
+  # catalog pause — the operator's move, same as fetch.
+  "$HERE/setup.sh" llm; local lrc=$?
+  if (( lrc == 3 )); then
+    useraction "llm" "the model catalog needs your attention (see above) — fill in the LiteLLM UI, then re-run ./update.sh apply"
+    return 0
+  fi
+  (( lrc == 1 )) && { fail "llm" "./setup.sh llm failed — see above"; return 1; }
   step "app" "venv/deps/cockpit reconciled (./setup.sh app)" "$HERE/setup.sh" app || return 1
   step "verify" "deployed + live verification passed (./setup.sh verify)" "$HERE/setup.sh" verify || return 1
   useraction "restart" "update applied — start your uvicorn API (and the sandbox runner, if you run one), then confirm with: ./setup.sh status"
@@ -462,7 +472,7 @@ usage: ./update.sh <downloaded-source-zip>
   plan            dry-run report: version gate, diff, migration/deps/cockpit
                   flags, predicted conflicts. Mutates nothing; re-runnable.
   apply           gate (API stopped? version ok?) -> spine DB backup -> merge
-                  -> schema -> ./setup.sh app -> ./setup.sh verify
+                  -> schema -> ./setup.sh llm -> ./setup.sh app -> ./setup.sh verify
   rollback        reset \`local\` to the last pre-update tag and re-deploy
 
   exit codes      0 clean · 1 hard failure · 2 completed with warnings

@@ -6,12 +6,15 @@
     "graphiti-llm: NOT a duplicate of cc-default — the openai/chat_completions/ prefix is the whole point and the re-run REFUSES a value without it. graphiti_core drives extraction through the RESPONSES API; a plain openai/ model is passed straight through to an endpoint that does not implement /v1/responses, the json_schema is silently dropped and every extraction fails. The prefix forces LiteLLM's Responses->chat bridge. Typically the same model id and api_base as cc-default.",
     "cc-embedding: the embedder — commonly a different server than chat. Its DIMENSION is measured by setup and written into the Neo4j vector index — effectively permanent.",
     "gpt-4.1-nano: graphiti_core's default reranker addresses a model LITERALLY named gpt-4.1-nano; it runs a logprob classifier over chat completions, so any chat model serves — typically the same as cc-default.",
+    "cc-tts / cc-stt: the cockpit's read-aloud and voice input (audio_speech / audio_transcription). With the bundled engine (CC_ENABLE_SPEECH=1) fill in openai/<CC_SPEECH_TTS_MODEL> and openai/<CC_SPEECH_STT_MODEL> with api_base http://<prefix>speech:8000/v1 and key `none` — setup prints the exact values. Either alias may point at an engine of your own instead (hosted Whisper-convention models for cc-stt is the expected case).",
     "A key the server ignores can be a placeholder like `none`, but the field must be NON-EMPTY — LiteLLM needs a value to send."
   ],
   "registration_only": {
     "cc-default":   {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}},
     "graphiti-llm": {"registration": {"model": "openai/chat_completions/PLACEHOLDER", "api_base": "PLACEHOLDER"}},
     "cc-embedding": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}},
-    "gpt-4.1-nano": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}}
+    "gpt-4.1-nano": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}},
+    "cc-tts":       {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "mode": "audio_speech"}},
+    "cc-stt":       {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "mode": "audio_transcription"}}
   }
 }

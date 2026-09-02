@@ -70,6 +70,7 @@ check "litellm: live routing policy == model-preferences.yaml" "python3 deploy/p
 check "graphiti MCP       127.0.0.1:8000" "curl -fsS http://127.0.0.1:8000/health"
 check "n8n                127.0.0.1:5678" "curl -fsS http://127.0.0.1:5678/healthz"
 check "crawler            127.0.0.1:8091" "curl -fsS http://127.0.0.1:8091/healthz"
+check "speech             127.0.0.1:8093" "curl -fsS http://127.0.0.1:8093/health"
 check "control plane API  127.0.0.1:8080" "curl -fsS http://127.0.0.1:8080/health"
 check "victorialogs       127.0.0.1:9428" "curl -fsS http://127.0.0.1:9428/health"
 check "pgweb (db ui)      127.0.0.1:8092" "curl -fsS -o /dev/null http://127.0.0.1:8092/"

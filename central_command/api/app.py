@@ -232,6 +232,13 @@ from central_command.api.systems import router as systems_router  # noqa: E402
 
 app.include_router(systems_router)
 
+# Speech (single-server mode): /api/tts + /api/transcribe forwarded to the
+# cc-tts / cc-stt LiteLLM aliases — the Node cockpit server owns these routes
+# where it runs (k3s); here the API serves web/dist itself, so it must too.
+from central_command.api.speech import router as speech_router  # noqa: E402
+
+app.include_router(speech_router)
+
 
 @app.get("/health")
 async def health() -> dict:

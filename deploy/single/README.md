@@ -38,6 +38,16 @@ install is two containers lighter.
 default. Its image is built locally and is large (Chromium); rung 1, a plain
 HTTP fetch, keeps working without it.
 
+`optional-speech.yaml` — cc-speech, the self-hosted speech engine (Speaches:
+faster-whisper STT + Kokoro TTS) behind the `cc-tts` / `cc-stt` aliases the
+cockpit's voice input and read-aloud use. Played when `CC_ENABLE_SPEECH=1`
+(the default) — in the **llm** phase, not `stack`, so the catalog re-run can
+probe both aliases with a real synthesis-then-transcription round trip. Its
+models are HF-hub snapshots the pod pulls on first boot (`CC_HF_ENDPOINT` for a
+mirror; no egress at all means pre-placing them — `deploy/AIRGAP.md`). `0`
+means you point BOTH aliases at engines of your own (hosted Whisper-convention
+models for `cc-stt` is the expected case); the aliases are required either way.
+
 The **sandbox** has no pod: sandbox containers are created on demand by the
 runner, and on this profile the runner's backend is rootless podman rather
 than the k3s profile's gVisor.
@@ -145,7 +155,7 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh validate    # offline check of .env; no side effects
 ./setup.sh preflight   # podman/tooling/RAM/disk/linger checks; no side effects
 ./setup.sh fetch       # acquire every external artifact up front (the one network phase)
-./setup.sh llm         # secrets + LiteLLM up + probe its aliases + measure CC_EMBED_DIM
+./setup.sh llm         # secrets + LiteLLM (+speech) up + probe its aliases + measure CC_EMBED_DIM
 ./setup.sh stack       # build local images, render, play postgres/neo4j/graphiti (+crawler, +n8n)
 ./setup.sh app         # venv, editable install, the app's .env, mint the spine's virtual key, cockpit
 ./setup.sh verify      # verify.sh, then live, then the capability manifest
@@ -295,6 +305,7 @@ hardcoded names would silently leave secrets and the network behind:
 PFX="$(grep ^CC_POD_PREFIX= .env | cut -d= -f2)"
 NET="$(grep ^CC_NETWORK= .env | cut -d= -f2)"
 podman kube down --force optional-crawler.yaml
+podman kube down --force optional-speech.yaml   # --force also drops the model cache
 podman kube down --force optional-n8n.yaml   # --force also removes the volumes
 podman kube down --force stack.yaml
 podman kube down --force stack-llm.yaml      # the LLM half LAST — it is what

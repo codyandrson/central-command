@@ -1,0 +1,126 @@
+# ============================================================================
+# cc-speech — self-hosted speech engine (Speaches: faster-whisper STT + Kokoro
+# TTS) behind the two speech aliases the cockpit's voice features address
+# through LiteLLM: cc-tts (/v1/audio/speech) and cc-stt
+# (/v1/audio/transcriptions). LiteLLM dials it in-cluster
+# (http://cc-speech:8000/v1); either alias may point elsewhere instead — an
+# operator with hosted Whisper-convention models registers cc-stt at those.
+#
+#   PINNED to the compute node, REQUIRED nodeAffinity — the same call as
+#   cc-crawler: CPU inference under a 4Gi limit is the memory profile the
+#   placement rule keeps off the anchor, and the model cache is a local-path
+#   PVC anyway. Compute down = speech down; a DEGRADABLE capability (the
+#   cockpit still works, silently), never a dependency of the spine.
+#
+#   Applied in setup's LLM phase alongside LiteLLM, before the model-catalog
+#   pause, so the re-run can probe both aliases with a real synthesis +
+#   transcription round trip.
+#
+#   Models are HF-hub snapshots in the PVC (the container's HF cache, uid
+#   1000). PRELOAD_MODELS pulls them on first boot from huggingface.co — a
+#   mirrored site adds an HF_ENDPOINT env below by hand (this profile's air-gap
+#   seams are hand edits, deploy/AIRGAP.md); with no egress at all, pre-place
+#   the snapshots in the volume. Nothing here holds a
+#   credential: the engine's API key is unset and nothing outside the cluster
+#   reaches it except this loopback.
+#
+#   Service is type LoadBalancer so ServiceLB binds :8093 on every node — the
+#   probes and verify.sh reach it at 127.0.0.1:8093 like every CC_* endpoint.
+#
+#   Image is the upstream multi-arch CPU build, pinned by digest (the same
+#   digest deploy/single/images.txt carries — bump both together).
+# ============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cc-speech-models
+  namespace: central-command
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cc-speech
+  namespace: central-command
+spec:
+  type: LoadBalancer
+  selector:
+    app: cc-speech
+  ports:
+    - name: http
+      port: 8093
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cc-speech
+  namespace: central-command
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cc-speech
+  template:
+    metadata:
+      labels:
+        app: cc-speech
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cc-role/compute
+                    operator: In
+                    values: ["true"]
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: speech
+          image: ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
+          env:
+            - name: PRELOAD_MODELS
+              value: '["speaches-ai/Kokoro-82M-v1.0-ONNX", "Systran/faster-whisper-small"]'
+            - name: HF_HUB_CACHE
+              value: /home/ubuntu/.cache/huggingface/hub
+            # - name: HF_ENDPOINT          # a mirrored site: the HF hub mirror
+            #   value: https://MIRROR_HOST/huggingface
+          ports:
+            - {name: http, containerPort: 8000}
+          volumeMounts:
+            - name: models
+              mountPath: /home/ubuntu/.cache/huggingface/hub
+          # /health answers only once the preloaded models are in memory; a
+          # first boot downloads ~1GB before that. The startup probe carries
+          # that wait (30 min on a slow mirror) so liveness never kills a pod
+          # that is merely still downloading.
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: {memory: 1Gi, cpu: 250m}
+            limits: {memory: 4Gi, cpu: "2"}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: cc-speech-models
