@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-02 — v2.20.2: one model per autodiscovery task
+
+`litellm.discovery`'s default `batch_size` drops from 5 to 1. On the first
+large real drift (25 OpenAI models, 2026-09-02), two of the five-model batch
+tasks blew the running model's context window mid-task — a batch multiplies
+the per-model registration work (catalog reads, library lookups, the
+probe-on-add result) inside one session. One model per task gives each
+registration the full window; the per-agent task queue already drains any
+number of tasks one at a time, so more tasks costs nothing. A schedule that
+sets `batch_size` explicitly is unaffected.
+
 ## 2026-09-02 — v2.20.1: the resumed turn reaches the pane
 
 The first live run of v2.20.0 moved all eight episodes and the curator

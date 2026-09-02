@@ -952,7 +952,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
     if not findings and not undeclared:
         return {"drift": False}
 
-    batch_size = _parse_positive_int(params, "batch_size", 5)
+    batch_size = _parse_positive_int(params, "batch_size", 1)
 
     # Same posture as ea.contact: check the attention budget before spending
     # any tokens. litellm-manager carries no budget today (unlimited, like
@@ -1252,7 +1252,7 @@ ACTIONS: dict[str, ActionSpec] = {
                 "drifted."
             ),
             params={
-                "batch_size": "models per add-task, default 5",
+                "batch_size": "models per add-task, default 1",
                 "probe_batch": (
                     "managed deployments with undeclared capabilities to "
                     "probe per tick, default 3"
