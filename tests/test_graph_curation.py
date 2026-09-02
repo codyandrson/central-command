@@ -245,3 +245,61 @@ async def test_a_validity_bound_can_be_cleared_to_open_ended(live_graph):
     assert not any(e["uuid"] == edge["uuid"] for e in hood_after["edges"]), (
         "edge shown past its invalid_at"
     )
+
+
+async def test_rescoping_an_episode_moves_exclusive_content_and_splits_shared(live_graph):
+    """The episode is the unit of scope (2026-09-01): what only it produced
+    MOVES; an entity another episode in the group still mentions is SPLIT
+    into a copy, and every edge ends up inside one group with its uuid
+    properties pointing at the copy."""
+    target = f"{GROUP}-target"
+    shared = await _node(live_graph, f"ZZ shared {_uuid.uuid4()}", ["Organization"])
+    only = await _node(live_graph, f"ZZ only {_uuid.uuid4()}", ["Person"])
+    edge = await neo4j_writer.create_edge(only, shared, "WORKS_AT", "ZZ only works at ZZ shared")
+    # create_edge recorded ONE episode mentioning both; make `shared` also
+    # mentioned by a second, staying episode.
+    staying = await neo4j_writer._record_operator_episode("stay", GROUP, mentions=[shared], entity_edges=[])
+    try:
+        result = await neo4j_writer.rescope_episode(edge["episode"], target)
+        assert (result["nodes_moved"], result["nodes_split"]) == (1, 1)
+        assert result["edges_moved"] == 1 and result["edges_split"] == 0
+
+        rows = await neo4j_reader._read(
+            """
+            MATCH (ep:Episodic {uuid: $ep})-[m:MENTIONS]->(n:Entity)
+            RETURN ep.group_id AS ep_group, n.uuid AS uuid, n.group_id AS group,
+                   n.name AS name, labels(n) AS labels
+            """,
+            ep=edge["episode"],
+        )
+        assert {r["ep_group"] for r in rows} == {target}
+        assert {r["group"] for r in rows} == {target}
+        assert only in {r["uuid"] for r in rows}            # moved in place
+        assert shared not in {r["uuid"] for r in rows}      # replaced by a copy
+        copy = next(r for r in rows if r["uuid"] != only)
+        assert "Organization" in copy["labels"]
+        live_graph.append(copy["uuid"])
+
+        edges = await neo4j_reader._read(
+            """
+            MATCH (a:Entity)-[e:RELATES_TO {uuid: $e}]->(b:Entity)
+            RETURN e.group_id AS group, a.uuid AS a, b.uuid AS b,
+                   e.source_node_uuid AS sa, e.target_node_uuid AS tb, e.episodes AS eps
+            """,
+            e=edge["uuid"],
+        )
+        (er,) = edges
+        assert er["group"] == target
+        assert (er["a"], er["b"]) == (er["sa"], er["tb"]) == (only, copy["uuid"])
+        assert er["eps"] == [edge["episode"]]
+
+        # The staying episode still holds the ORIGINAL shared node, untouched.
+        orig = await neo4j_reader._read(
+            "MATCH (n:Entity {uuid: $u}) RETURN n.group_id AS group", u=shared)
+        assert orig[0]["group"] == GROUP
+    finally:
+        await neo4j_writer._write(
+            "MATCH (ep:Episodic) WHERE ep.group_id IN [$g, $t] DETACH DELETE ep", g=GROUP, t=target)
+        await neo4j_writer._write(
+            "MATCH (n:Entity {group_id: $t}) DETACH DELETE n", t=target)
+        _ = staying

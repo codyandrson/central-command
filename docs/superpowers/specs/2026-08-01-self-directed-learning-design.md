@@ -47,6 +47,17 @@ Reads: an agent's retrieval scope becomes `main, central_command,
 central_command_<self>`. It never reads another agent's private partition; a fact
 worth a teammate's attention belongs in the shared group (see routing, below).
 
+*Revision 2026-09-01 (v2.20.0).* Two exceptions, both explicit: (1) a `private`
+episode may name `for_agent` — a rule about how a TEAMMATE works lands in that
+teammate's partition, visible on the proposal and validated against the active
+roster (before this, "private" could only mean the proposer's own group, which
+is how eight onboarding doctrines ended up in the EA's partition); (2) the
+`graph-curate` pack's `list_graph_groups` / `list_graph_group_episodes` /
+`search_graph_group` reads see EVERY partition — a curator that cannot see the
+patient cannot operate. The exception is granted by holding the pack, never by
+agent id, and `graph.rescope_episode` (episode = unit of scope; shared nodes
+split, nothing deleted) is the gated fix.
+
 ## Decided shape
 
 ### 1. Scope is part of the proposal, never a silent decision

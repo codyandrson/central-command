@@ -41,6 +41,7 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "graph.delete_node": ArgSpec(required=("uuid",)),
     "graph.update_edge": ArgSpec(required=("uuid",)),
     "graph.delete_edge": ArgSpec(required=("uuid",)),
+    "graph.rescope_episode": ArgSpec(required=("episode_uuid", "group_id")),
     # `mode` is optional and defaults to 'replace'; only the CLOSED set of
     # values belongs here. That the document exists is the Executor's check.
     "catalog.tag": ArgSpec(

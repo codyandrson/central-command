@@ -48,6 +48,7 @@ graph quietly misbehaves:
 from __future__ import annotations
 
 import logging
+import re
 import uuid as _uuid
 from datetime import datetime, timezone
 
@@ -453,3 +454,166 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         "edges_moved": moved,
         "edges_discarded": dropped["edges_removed"] - moved,
     }
+
+
+_GROUP_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
+    """Move one episode — and what extraction produced from it — to another
+    graph group (2026-09-01: eight onboarding doctrines committed under
+    `private` landed in the EA's partition because `private` could only mean
+    the PROPOSER's own group).
+
+    The episode is the unit of scope: Graphiti dedupes entities within a
+    group, so a node like "operator" is shared by every episode in the
+    partition and cannot follow one of them. The rule per object:
+
+    - an entity MENTIONED only by this episode (among its group's episodes)
+      MOVES; one still mentioned by a staying episode is SPLIT — a copy in
+      the target group, this episode's MENTIONS repointed to the copy;
+    - a RELATES_TO edge whose `episodes` is only this episode MOVES (re-created
+      when an endpoint was split, since Neo4j cannot repoint in place); an
+      edge that also cites a staying episode is SPLIT the same way and this
+      episode is removed from the original's `episodes`.
+
+    Which is exactly the graph that ingesting the episode into the target
+    group in the first place would have produced. Embeddings are copied, never
+    recomputed — no text changes. Nothing is deleted."""
+    if not _GROUP_ID_RE.match(group_id or ""):
+        raise WriteError(f"group_id {group_id!r} must match [A-Za-z0-9_-]+")
+    rows = await _write(
+        "MATCH (ep:Episodic {uuid: $uuid}) RETURN ep.group_id AS group_id",
+        uuid=episode_uuid,
+    )
+    if not rows:
+        raise WriteError(f"no episode with uuid {episode_uuid}")
+    old_group = rows[0]["group_id"]
+    if old_group == group_id:
+        raise WriteError(f"episode already in group {group_id}")
+
+    # Entities: exclusive → move; shared with a staying episode → split.
+    mentioned = await _write(
+        """
+        MATCH (ep:Episodic {uuid: $uuid})-[:MENTIONS]->(n:Entity)
+        OPTIONAL MATCH (other:Episodic)-[:MENTIONS]->(n)
+          WHERE other.uuid <> $uuid AND other.group_id = n.group_id
+        RETURN n.uuid AS uuid, labels(n) AS labels, count(other) AS others
+        """,
+        uuid=episode_uuid,
+    )
+    remap: dict[str, str] = {}  # old entity uuid -> uuid now in the target group
+    moved_nodes = split_nodes = 0
+    for n in mentioned:
+        if n["others"] == 0:
+            await _write(
+                "MATCH (n:Entity {uuid: $uuid}) SET n.group_id = $group_id",
+                uuid=n["uuid"], group_id=group_id,
+            )
+            remap[n["uuid"]] = n["uuid"]
+            moved_nodes += 1
+        else:
+            remap[n["uuid"]] = await _copy_entity(n["uuid"], n["labels"], group_id)
+            split_nodes += 1
+
+    # Edges this episode produced. An endpoint outside the MENTIONS set is
+    # split too — the copy is what keeps every edge inside one group.
+    edges = await _write(
+        """
+        MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity) WHERE $uuid IN e.episodes
+        RETURN e.uuid AS uuid, a.uuid AS source, b.uuid AS target,
+               labels(a) AS a_labels, labels(b) AS b_labels, e.episodes AS episodes
+        """,
+        uuid=episode_uuid,
+    )
+    moved_edges = split_edges = 0
+    new_edge_uuids: list[str] = []
+    for e in edges:
+        for end, lbls in ((e["source"], e["a_labels"]), (e["target"], e["b_labels"])):
+            if end not in remap:
+                remap[end] = await _copy_entity(end, lbls, group_id)
+                split_nodes += 1
+        exclusive = [x for x in e["episodes"] if x != episode_uuid] == []
+        src, dst = remap[e["source"]], remap[e["target"]]
+        if exclusive and (src, dst) == (e["source"], e["target"]):
+            await _write(
+                "MATCH ()-[e:RELATES_TO {uuid: $uuid}]->() SET e.group_id = $group_id",
+                uuid=e["uuid"], group_id=group_id,
+            )
+            new_edge_uuids.append(e["uuid"])
+            moved_edges += 1
+            continue
+        new_uuid = e["uuid"] if exclusive else str(_uuid.uuid4())
+        await _write(
+            """
+            MATCH ()-[e:RELATES_TO {uuid: $uuid}]->()
+            MATCH (a:Entity {uuid: $src}), (b:Entity {uuid: $dst})
+            CREATE (a)-[e2:RELATES_TO]->(b)
+            SET e2 = properties(e), e2.uuid = $new_uuid, e2.group_id = $group_id,
+                e2.source_node_uuid = $src, e2.target_node_uuid = $dst,
+                e2.episodes = [$episode]
+            """,
+            uuid=e["uuid"], src=src, dst=dst, new_uuid=new_uuid,
+            group_id=group_id, episode=episode_uuid,
+        )
+        if exclusive:
+            await _write("MATCH ()-[e:RELATES_TO {uuid: $uuid}]->() DELETE e", uuid=e["uuid"])
+            moved_edges += 1
+        else:
+            await _write(
+                """
+                MATCH ()-[e:RELATES_TO {uuid: $uuid}]->()
+                SET e.episodes = [x IN e.episodes WHERE x <> $episode]
+                """,
+                uuid=e["uuid"], episode=episode_uuid,
+            )
+            split_edges += 1
+        new_edge_uuids.append(new_uuid)
+
+    # The episode itself: group, its edge list, and MENTIONS repointed to copies.
+    await _write(
+        """
+        MATCH (ep:Episodic {uuid: $uuid})
+        SET ep.group_id = $group_id, ep.entity_edges = $entity_edges
+        WITH ep
+        MATCH (ep)-[m:MENTIONS]->(n:Entity)
+        SET m.group_id = $group_id
+        """,
+        uuid=episode_uuid, group_id=group_id, entity_edges=new_edge_uuids,
+    )
+    for old, new in remap.items():
+        if old != new:
+            await _write(
+                """
+                MATCH (ep:Episodic {uuid: $uuid})-[m:MENTIONS]->(old:Entity {uuid: $old})
+                MATCH (new:Entity {uuid: $new})
+                CREATE (ep)-[m2:MENTIONS]->(new)
+                SET m2 = properties(m), m2.uuid = randomUUID(), m2.group_id = $group_id
+                DELETE m
+                """,
+                uuid=episode_uuid, old=old, new=new, group_id=group_id,
+            )
+    return {
+        "uuid": episode_uuid, "from": old_group, "to": group_id,
+        "nodes_moved": moved_nodes, "nodes_split": split_nodes,
+        "edges_moved": moved_edges, "edges_split": split_edges,
+    }
+
+
+async def _copy_entity(uuid: str, labels: list[str], group_id: str) -> str:
+    """A same-named twin of an entity in another group: every property
+    (embedding included) except uuid and group. Labels come from the node
+    itself, filtered through the ontology allowlist because Cypher cannot
+    parameterize them."""
+    label_clause = "".join(f":{l}" for l in labels if l in ENTITY_TYPES)
+    new_uuid = str(_uuid.uuid4())
+    await _write(
+        f"""
+        MATCH (n:Entity {{uuid: $uuid}})
+        CREATE (n2:Entity{label_clause})
+        SET n2 = properties(n), n2.uuid = $new_uuid, n2.group_id = $group_id,
+            n2.created_at = $now
+        """,
+        uuid=uuid, new_uuid=new_uuid, group_id=group_id, now=_now(),
+    )
+    return new_uuid

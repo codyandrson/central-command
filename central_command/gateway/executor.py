@@ -200,9 +200,22 @@ async def _graph_add_episode(args: dict, approver: str, proposer: str | None) ->
             proposer_row = await db_repo.get_agent(proposer)
             group_id = (proposer_row or {}).get("steward_group") or None
     elif scope == "private":
-        if not proposer:
+        # `for_agent` (2026-09-01): a private episode ABOUT another agent's
+        # operating rules lands in THAT agent's partition. Onboarding recorded
+        # eight teammates' doctrines through the EA, and "private" could only
+        # mean the EA's own group — the operator sees the target on the
+        # proposal, and the target must be a live roster member; the proposer
+        # remains the default and the only fallback.
+        owner = args.get("for_agent") or proposer
+        if not owner:
             raise ExecutorError("graph.add_episode: private scope requires a known proposer")
-        group_id = graphiti.private_group(proposer)
+        if owner != proposer:
+            row = await db_repo.get_agent(owner)
+            if not row or not (row.get("role") or "").strip() or row.get("status") == "RETIRED":
+                raise ExecutorError(
+                    f"graph.add_episode: for_agent {owner!r} is not an active roster agent"
+                )
+        group_id = graphiti.private_group(owner)
     else:
         raise ExecutorError(
             f"graph.add_episode: unknown scope {scope!r} (expected 'shared' or 'private')"
@@ -317,6 +330,10 @@ _GRAPH_CURATION_HANDLERS = {
                   "invalid_at", "clear_invalid", "clear_valid", "clear_expired")),
     "graph.delete_edge": _graph_curation_handler(
         "graph.delete_edge", "delete_edge", optional=()),
+    # rescope (2026-09-01): the episode is the unit of scope — see
+    # neo4j_writer.rescope_episode for why a node cannot follow one episode.
+    "graph.rescope_episode": _graph_curation_handler(
+        "graph.rescope_episode", "rescope_episode", optional=()),
 }
 
 

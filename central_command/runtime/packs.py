@@ -341,7 +341,8 @@ PACKS: dict[str, Pack] = {
                 arguments=("{'name': '<short title>', 'episode_body': '<the "
                            "distilled claim>', 'source_description': '<where it "
                            "came from, e.g. email <id> or the operator>', "
-                           "'scope': 'shared' | 'private'}"),
+                           "'scope': 'shared' | 'private', 'for_agent'?: "
+                           "'<roster agent id, private scope only>'}"),
                 notes=("target_ref = {'system': 'graphiti', 'id': 'central_command', "
                        "'read_version': 'unknown'}, reversibility = 'reversible'. "
                        "The episode_body is a distilled claim of 1-3 sentences: "
@@ -389,9 +390,13 @@ PACKS: dict[str, Pack] = {
                        "only an operating rule about how YOU specifically should "
                        "work (e.g. 'always dismiss email from sender X'), useless "
                        "or wrong for a teammate to act on. If a teammate could "
-                       "ever benefit from knowing it, it is shared. The scope is "
-                       "an operator-visible routing decision on the proposal, "
-                       "not something you can change after approval."),
+                       "ever benefit from knowing it, it is shared. A private "
+                       "rule about how a TEAMMATE should work (the operator "
+                       "telling you inbox-triage's triage policy) names that "
+                       "teammate in 'for_agent' so it lands in THEIR partition, "
+                       "not yours — omit it and 'private' means your own. The "
+                       "scope is an operator-visible routing decision on the "
+                       "proposal, not something you can change after approval."),
             ),
         ),
     ),
@@ -448,8 +453,40 @@ PACKS: dict[str, Pack] = {
         ),
         # The deprecated alias rides wherever propose_action rides (guard in
         # test_packs) — drop both together when the alias retires.
-        tool_names=("propose_action",),
+        # The three graph_group_* reads see EVERY partition, other agents'
+        # private ones included — the one deliberate exception to D11-r1's
+        # "never reads another agent's partition", granted by holding THIS
+        # pack: a curator that cannot see the patient cannot operate.
+        tool_names=("propose_action", "list_graph_groups",
+                    "list_graph_group_episodes", "search_graph_group"),
+        guidance=(
+            "SCOPE: every episode, entity and relationship carries a "
+            "group_id. 'central_command' is the shared team graph, a "
+            "'domain_*' group is a steward's domain (also shared), and "
+            "'central_command_<agent_id>' is that agent's PRIVATE partition. "
+            "The EPISODE is the unit of scope: entities are deduplicated "
+            "within a group, so one node (say 'operator') is shared by every "
+            "episode in a partition and cannot follow a single one of them. "
+            "A mis-scoped doctrine is fixed by graph.rescope_episode on the "
+            "episode, never by re-creating its nodes in another group. Use "
+            "list_graph_groups → list_graph_group_episodes to inventory a "
+            "partition, and search_graph_group to read inside one."
+        ),
         capabilities=(
+            GatedCapability(
+                name="graph.rescope_episode",
+                arguments="{'episode_uuid': '<episode>', 'group_id': "
+                          "'<target group, e.g. central_command_inbox-triage>', "
+                          "'verification_id'?: '<…>'}",
+                notes=("target_ref = {'system': 'graphiti', 'id': "
+                       "'<episode_uuid>', 'read_version': 'unknown'}, "
+                       "reversibility = 'reversible'. Moves the episode and "
+                       "what extraction produced from it to another group: "
+                       "entities and facts only this episode produced move; "
+                       "ones shared with a staying episode are split into a "
+                       "copy in the target group. Nothing is deleted. Name the "
+                       "episode and both groups in your intent."),
+            ),
             GatedCapability(
                 name="graph.create_node",
                 arguments="{'name': '<entity name>', 'group_id': '<the "

@@ -254,3 +254,117 @@ async def test_executor_unknown_scope_raises(monkeypatch):
     args = {"name": "n", "episode_body": "b", "scope": "team"}
     with pytest.raises(ExecutorError):
         await _graph_add_episode(args, approver="lee", proposer="jira-expert")
+
+
+# --- for_agent (2026-09-01): a private rule ABOUT a teammate lands in THEIR partition
+
+
+async def test_executor_private_for_agent_targets_that_agents_partition(
+    monkeypatch, verification_rows
+):
+    seen = {}
+
+    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+        seen["group_id"] = group_id
+        return "ack"
+
+    async def fake_get_agent(agent_id):
+        return {"id": agent_id, "role": "triage email", "status": "ACTIVE"}
+
+    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
+    monkeypatch.setattr(repo, "get_agent", fake_get_agent)
+    args = {"name": "n", "episode_body": "b", "scope": "private", "for_agent": "inbox-triage"}
+    await _graph_add_episode(args, approver="lee", proposer="ea")
+    assert seen["group_id"] == "central_command_inbox-triage"
+    assert verification_rows[0]["group_id"] == "central_command_inbox-triage"
+
+
+@pytest.mark.parametrize("row", [
+    None,
+    {"id": "ghost", "role": "", "status": "ACTIVE"},        # registered, never hired
+    {"id": "ghost", "role": "old hand", "status": "RETIRED"},
+])
+async def test_executor_private_for_agent_must_be_an_active_roster_member(
+    monkeypatch, verification_rows, row
+):
+    async def fake_add_episode(*a, **k):
+        raise AssertionError("must not write")
+
+    async def fake_get_agent(agent_id):
+        return row
+
+    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
+    monkeypatch.setattr(repo, "get_agent", fake_get_agent)
+    args = {"name": "n", "episode_body": "b", "scope": "private", "for_agent": "ghost"}
+    with pytest.raises(ExecutorError, match="for_agent"):
+        await _graph_add_episode(args, approver="lee", proposer="ea")
+
+
+async def test_executor_private_for_agent_self_needs_no_roster_lookup(
+    monkeypatch, verification_rows
+):
+    """for_agent == proposer is the plain private path — no lookup, so a
+    proposer that is not (yet) a roster member keeps working as before."""
+    seen = {}
+
+    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+        seen["group_id"] = group_id
+        return "ack"
+
+    async def fake_get_agent(agent_id):
+        raise AssertionError("no lookup expected")
+
+    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
+    monkeypatch.setattr(repo, "get_agent", fake_get_agent)
+    args = {"name": "n", "episode_body": "b", "scope": "private", "for_agent": "ea"}
+    await _graph_add_episode(args, approver="lee", proposer="ea")
+    assert seen["group_id"] == "central_command_ea"
+
+
+# --- the curator's any-partition reads (graph-curate pack) ---------------------
+
+
+async def test_group_ids_override_bypasses_caller_scope(captured, no_stewards):
+    await graphiti.search_facts("q", agent_id="graph-curator", group_ids=["central_command_ea"])
+    await graphiti.search_nodes("q", agent_id="graph-curator", group_ids=["central_command_ea"])
+    await graphiti.get_group_episodes(["central_command_ea"])
+    for _, args in captured:
+        assert args["group_ids"] == ["central_command_ea"]
+
+
+async def test_known_groups_covers_shared_domains_and_every_roster_partition(monkeypatch):
+    async def fake_list_agents(include_retired=True, roster_only=True):
+        assert include_retired is False
+        return [{"id": "ea", "steward_group": ""}, {"id": "jira-expert", "steward_group": "domain_jira"}]
+
+    monkeypatch.setattr(repo, "list_agents", fake_list_agents)
+    groups = await graphiti.known_groups()
+    assert "domain_jira" in groups
+    assert "central_command_ea" in groups and "central_command_jira-expert" in groups
+    assert groups.index("central_command") < groups.index("central_command_ea")
+
+
+def test_any_partition_reads_are_granted_only_with_graph_curate():
+    """The one exception to 'an agent never reads another's partition' is
+    held by the curate pack alone — no read-only pack may carry it."""
+    from central_command.runtime import packs
+
+    wide = {"list_graph_groups", "list_graph_group_episodes", "search_graph_group"}
+    for pack in packs.PACKS.values():
+        if pack.name == "graph-curate":
+            assert wide <= set(pack.tool_names)
+        else:
+            assert not (wide & set(pack.tool_names)), pack.name
+
+
+def test_rescope_episode_is_wired_end_to_end():
+    from central_command.contract.args import ARG_SPECS
+    from central_command.gateway import capabilities, executor
+    from central_command.integrations import neo4j_writer
+    from central_command.runtime import packs
+
+    assert ARG_SPECS["graph.rescope_episode"].required == ("episode_uuid", "group_id")
+    assert "graph.rescope_episode" in executor.HANDLERS
+    assert callable(neo4j_writer.rescope_episode)
+    assert any(c.name == "graph.rescope_episode" for c in packs.PACKS["graph-curate"].capabilities)
+    assert any(c.name == "graph.rescope_episode" for c in capabilities.REGISTRY)
