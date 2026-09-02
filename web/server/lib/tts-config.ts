@@ -66,8 +66,9 @@ const DEFAULTS: TTSVoiceConfig = {
     styleInstruction: '',
   },
   openai: {
-    model: 'gpt-4o-mini-tts',
-    voice: 'nova',
+    // Env seeds the FIRST-RUN defaults only; tts-config.json wins once written.
+    model: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts',
+    voice: process.env.OPENAI_TTS_VOICE || 'nova',
     instructions:
       'Speak naturally and conversationally, like a real person. Warm, friendly tone with a slight British accent. Keep it casual and relaxed, not robotic or overly formal.',
   },

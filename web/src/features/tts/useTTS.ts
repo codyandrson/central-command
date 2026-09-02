@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { ensureAudioContext } from '@/features/voice/audio-feedback';
 
 // ─── Audio autoplay unlock ─────────────────────────────────────────────────────
@@ -52,6 +52,8 @@ async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: 
 export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model?: string) {
   const currentAudio = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
   const generationRef = useRef(0);
+  /** Text of the utterance currently fetching or playing — null when idle. */
+  const [speaking, setSpeaking] = useState<string | null>(null);
 
   const cleanupAudio = useCallback(() => {
     const current = currentAudio.current;
@@ -62,16 +64,26 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
     currentAudio.current = null;
   }, []);
 
+  /** Cancel whatever is fetching or playing. */
+  const stop = useCallback(() => {
+    generationRef.current++;
+    cleanupAudio();
+    setSpeaking(null);
+  }, [cleanupAudio]);
+
   useEffect(() => {
     return () => {
       cleanupAudio();
     };
   }, [cleanupAudio]);
 
-  const speak = useCallback(async (text: string) => {
-    if (!enabled || !text) return;
+  /** Speak regardless of the sound toggle — for an explicit operator press. */
+  const speakNow = useCallback(async (text: string) => {
+    if (!text) return;
     cleanupAudio();
     const gen = ++generationRef.current;
+    setSpeaking(text);
+    const done = () => { if (gen === generationRef.current) setSpeaking(null); };
     try {
       const blob = await fetchTTS(text, provider, model);
       // Superseded by a newer speak() call during fetch
@@ -87,6 +99,7 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
         if (currentAudio.current?.audio === audio) {
           currentAudio.current = null;
         }
+        done();
       };
       audio.addEventListener('ended', revoke, { once: true });
       audio.addEventListener('error', () => revoke(), { once: true });
@@ -97,11 +110,18 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
         throw err;
       }
     } catch (err: unknown) {
+      done();
       console.error('[TTS] play failed:', err instanceof Error ? err.message : String(err));
     }
-  }, [enabled, provider, model, cleanupAudio]);
+  }, [provider, model, cleanupAudio]);
 
-  return { speak };
+  /** Auto-speak path: honours the sound toggle. */
+  const speak = useCallback(async (text: string) => {
+    if (!enabled) return;
+    await speakNow(text);
+  }, [enabled, speakNow]);
+
+  return { speak, speakNow, stop, speaking };
 }
 
 /** Strip [tts:...] markers from text, returning cleaned text and the first TTS text found */

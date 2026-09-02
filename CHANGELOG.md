@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-02 — v2.20.4: read it to me
+
+The cockpit gains a speaker button: press it on any assistant message
+(hover, next to COPY) or at the top of a proposal in Decisions and the
+content is read aloud through the configured TTS provider; press again to
+stop. It ignores the auto-speak toggle — a press is explicit intent — so
+the voice-brief flow (ask by voice, hear the reply) and the point-and-listen
+flow coexist. A proposal is read as a brief: the drafter and intent, the
+auditor's verdict, each action's prose arguments (subject, body, comment,
+summary…), and the expected effect — ids, JSON and diffs are skipped.
+
+Groundwork for routing speech through the deployment's own LiteLLM instead
+of external providers: the transcription model name is now the
+`OPENAI_STT_MODEL` env seam (was a hard-coded `whisper-1`), the first-run
+OpenAI TTS model/voice defaults come from `OPENAI_TTS_MODEL` /
+`OPENAI_TTS_VOICE`, and `/api/tts/config` now reports a `defaultProvider`
+that a browser with no saved preference adopts — `openai` whenever a key is
+configured, Edge (Microsoft's endpoint) only without one. A browser with no
+saved STT preference likewise adopts the server's `STT_PROVIDER`. The
+speech service itself (self-hosted TTS behind `cc-tts`, `cc-stt` for the
+operator's Whisper-convention models) is the next release; nothing in a
+deployment's manifests changes here.
 ## 2026-09-02 — v2.20.3: the Inbox names the partition
 
 A private episode recorded on a teammate's behalf (`for_agent`, v2.20.0)

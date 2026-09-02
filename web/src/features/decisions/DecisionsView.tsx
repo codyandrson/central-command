@@ -6,6 +6,7 @@ import {
   History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SpeakButton } from '@/features/tts/SpeakButton';
 import { GoalPreviewCard } from '@/features/loe/GoalPreviewCard';
 import type { GoalPreviewData } from '@/features/loe/extractGoalPreviews';
 import { useDecisions } from './useDecisions';
@@ -768,6 +769,24 @@ function EmailCard({ item }: { item: WorkItem }) {
 }
 
 /* ── Proposal detail pane ── */
+/** Argument keys worth reading aloud — the prose an operator reviews, not ids and flags. */
+const SPOKEN_ARG_KEYS = ['subject', 'body', 'comment', 'text', 'summary', 'description', 'episode_body', 'fact', 'title'];
+
+/** The proposal as a spoken brief: what, why the auditor thinks so, each action's prose, expected effect. */
+function proposalSpeech(d: ProposalDetail): string {
+  const parts = [`${d.agent_id} proposes: ${d.intent}`];
+  if (d.audit?.rationale) parts.push(`Auditor ${d.audit.verdict}s: ${d.audit.rationale}`);
+  for (const a of d.actions) {
+    parts.push(`Action: ${a.capability.split('@')[0].replace(/[._]/g, ' ')}.`);
+    for (const k of SPOKEN_ARG_KEYS) {
+      const v = a.arguments?.[k];
+      if (typeof v === 'string' && v.trim()) parts.push(`${k}: ${v}`);
+    }
+  }
+  if (d.expected_effect) parts.push(`Expected effect: ${d.expected_effect}`);
+  return parts.join('\n\n');
+}
+
 function ProposalPane({
   id, pendingGone, onDone, onOpenSession, getProposal, approve, reject, dismiss,
 }: {
@@ -857,6 +876,7 @@ function ProposalPane({
               transcript
             </button>
           )}
+          <SpeakButton text={proposalSpeech(detail)} className="ml-auto" />
         </div>
         <p className="text-sm font-medium leading-snug text-foreground">{detail.intent}</p>
 

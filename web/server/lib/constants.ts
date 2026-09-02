@@ -14,6 +14,8 @@ export const REPLICATE_BASE_URL = process.env.REPLICATE_BASE_URL || 'https://api
 
 export const OPENAI_TTS_URL = `${OPENAI_BASE_URL}/audio/speech`;
 export const OPENAI_WHISPER_URL = `${OPENAI_BASE_URL}/audio/transcriptions`;
+/** Model name sent to the transcription endpoint — an alias when OPENAI_BASE_URL is a proxy (e.g. LiteLLM `cc-stt`). */
+export const OPENAI_STT_MODEL = process.env.OPENAI_STT_MODEL || 'whisper-1';
 export const REPLICATE_QWEN_TTS_URL = `${REPLICATE_BASE_URL}/models/qwen/qwen3-tts/predictions`;
 
 // ─── Default connection ──────────────────────────────────────────────────────

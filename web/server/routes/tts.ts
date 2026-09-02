@@ -135,7 +135,10 @@ app.post(
 
 /** GET /api/tts/config — return current TTS voice config */
 app.get('/api/tts/config', rateLimitGeneral, (c) => {
-  return c.json(getTTSConfig());
+  // defaultProvider: what a browser with no saved preference should use. With a
+  // key configured, prefer the OpenAI-shaped endpoint (a proxy or self-hosted
+  // TTS in a Central Command deployment) over Edge, which phones Microsoft.
+  return c.json({ ...getTTSConfig(), defaultProvider: config.openaiApiKey ? 'openai' : 'edge' });
 });
 
 /** Allowed top-level keys and their allowed child keys (all must be strings) */

@@ -6,6 +6,7 @@ import { decodeHtmlEntities } from '@/lib/formatting';
 import { isStructuredMarkdown } from '@/lib/text/isStructuredMarkdown';
 import type { ChatMsg } from './types';
 import type { BeadLinkTarget } from '@/features/beads';
+import { SpeakButton } from '@/features/tts/SpeakButton';
 
 // Lazy-load markdown renderer (includes highlight.js)
 const MarkdownRenderer = lazy(() => import('@/features/markdown/MarkdownRenderer').then(m => ({ default: m.MarkdownRenderer })));
@@ -352,6 +353,7 @@ function MessageBubbleInner({ msg, index, isCollapsed, isMemoryCollapsed, memory
           {/* Action buttons — visible on hover */}
           {!msg.streaming && (
             <div className="absolute top-0 right-3 hidden gap-1 opacity-0 transition-opacity group-hover:opacity-100 sm:right-4 sm:flex">
+              {isAssistant && <SpeakButton text={displayContent} />}
               {/* Copy button */}
               <button
                 className="cockpit-toolbar-button min-h-7 px-2 text-[0.667rem]"

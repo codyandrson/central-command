@@ -34,6 +34,11 @@ interface SettingsContextValue {
   liveTranscriptionPreview: boolean;
   toggleLiveTranscriptionPreview: () => void;
   speak: (text: string) => Promise<void>;
+  /** Explicit operator press — ignores the sound toggle. */
+  speakNow: (text: string) => Promise<void>;
+  stopSpeaking: () => void;
+  /** Text currently being spoken, or null. */
+  speaking: string | null;
   telemetryVisible: boolean;
   toggleTelemetry: () => void;
   eventsVisible: boolean;
@@ -172,7 +177,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem(TOAST_MODE_STORAGE_KEY);
     return saved === 'errors' || saved === 'off' ? saved : 'all';
   });
-  const { speak } = useTTS(soundEnabled, ttsProvider, ttsModel || undefined);
+  const { speak, speakNow, stop: stopSpeaking, speaking } = useTTS(soundEnabled, ttsProvider, ttsModel || undefined);
   const wakeWordToggleRef = useRef<(() => void) | null>(null);
 
   // Apply theme on mount and when it changes
@@ -241,7 +246,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           localStorage.setItem('oc-stt-model', serverModel);
         }
 
-        // Provider: preserve prior behavior (push local preference to server).
+        // Provider: a browser with NO saved preference adopts the server's
+        // (STT_PROVIDER env — a deployment's choice); a saved one is pushed.
+        if (serverProvider && localStorage.getItem('oc-stt-provider') === null) {
+          setSttProviderState(serverProvider);
+          return;
+        }
         if (serverProvider !== sttProvider) {
           return fetch('/api/transcribe/config', {
             method: 'PUT',
@@ -252,6 +262,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same for TTS: no saved preference → the server's defaultProvider, which
+  // is 'openai' whenever a key is configured (a proxy/self-hosted endpoint in
+  // a Central Command deployment) and only falls back to Edge without one.
+  useEffect(() => {
+    if (localStorage.getItem('oc-tts-provider') !== null) return;
+    fetch('/api/tts/config')
+      .then(resp => resp.ok ? resp.json() : null)
+      .then(data => {
+        if (typeof data?.defaultProvider === 'string') setTtsProvider(migrateTTSProvider(data.defaultProvider));
+      })
+      .catch(() => {});
+  }, []);
 
   const changeSttProvider = useCallback((provider: STTProvider) => {
     setSttProviderState(provider);
@@ -394,6 +417,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     liveTranscriptionPreview,
     toggleLiveTranscriptionPreview,
     speak,
+    speakNow,
+    stopSpeaking,
+    speaking,
     telemetryVisible,
     toggleTelemetry,
     eventsVisible,
@@ -421,7 +447,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     sttProvider, changeSttProvider, sttInputMode, changeSttInputMode, sttModel, changeSttModel,
     wakeWordEnabled, handleToggleWakeWord, handleWakeWordState,
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,
-    speak, telemetryVisible, toggleTelemetry,
+    speak, speakNow, stopSpeaking, speaking, telemetryVisible, toggleTelemetry,
     eventsVisible, toggleEvents, logVisible, toggleLog, showHiddenWorkspaceEntries, toggleShowHiddenWorkspaceEntries,
     commandPaletteButtonVisible, toggleCommandPaletteButtonVisible,
     theme, setTheme, font, setFont,
@@ -436,4 +462,9 @@ export function useSettings() {
   const ctx = useContext(SettingsContext);
   if (!ctx) throw new Error('useSettings must be used within SettingsProvider');
   return ctx;
+}
+
+/** For leaf affordances that should simply vanish when rendered without a provider. */
+export function useOptionalSettings() {
+  return useContext(SettingsContext);
 }

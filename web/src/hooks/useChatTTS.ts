@@ -15,7 +15,7 @@ export const FALLBACK_MAX_CHARS = 300;
 // ─── Pure helpers ───────────────────────────────────────────────────────────────
 
 /** Strip code blocks, markdown noise, and validate text is speakable for TTS fallback. */
-export function buildVoiceFallbackText(raw: string): string | null {
+export function buildVoiceFallbackText(raw: string, maxChars = FALLBACK_MAX_CHARS): string | null {
   // Strip fenced code blocks
   let text = raw.replace(/```[\s\S]*?```/g, '');
   // Strip inline code
@@ -32,8 +32,8 @@ export function buildVoiceFallbackText(raw: string): string | null {
   // Must have at least 3 letter characters (unicode-aware for non-Latin scripts)
   if (!/\p{L}{3,}/u.test(text)) return null;
   // Cap length
-  if (text.length > FALLBACK_MAX_CHARS) {
-    text = text.slice(0, FALLBACK_MAX_CHARS).replace(/\s\S*$/, '') + '…';
+  if (text.length > maxChars) {
+    text = text.slice(0, maxChars).replace(/\s\S*$/, '') + '…';
   }
   return text;
 }

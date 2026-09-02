@@ -7,7 +7,7 @@
  */
 
 import { config } from '../lib/config.js';
-import { OPENAI_WHISPER_URL } from '../lib/constants.js';
+import { OPENAI_WHISPER_URL, OPENAI_STT_MODEL } from '../lib/constants.js';
 
 export interface WhisperResult {
   ok: true;
@@ -44,7 +44,7 @@ export async function transcribe(
   );
 
   // Model field
-  let footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n`;
+  let footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${OPENAI_STT_MODEL}\r\n`;
 
   // Optional language hint (ISO 639-1) — improves accuracy when known
   const effectiveLang = language || config.language;
