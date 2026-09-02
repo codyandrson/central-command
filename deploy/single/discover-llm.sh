@@ -12,6 +12,8 @@
 #     ./discover-llm.sh chat       <model-id>    # prove a real completion works
 #     ./discover-llm.sh structured <model-id>    # a Responses-API json_schema round trip
 #     ./discover-llm.sh embed      <model-id>    # embed one string, print DIMENSION
+#     ./discover-llm.sh speech     <model-id> <out.mp3>   # synthesise one sentence
+#     ./discover-llm.sh transcribe <model-id> <audio>     # transcribe it back
 #
 #   TWO RUNGS, and the difference is the diagnosis (2026-08-25, LiteLLM-first):
 #
@@ -20,6 +22,10 @@
 #                 ./discover-llm.sh --proxy chat       cc-default
 #                 ./discover-llm.sh --proxy structured graphiti-llm
 #                 ./discover-llm.sh --proxy embed      cc-embedding
+#                 ./discover-llm.sh --proxy speech     cc-tts /tmp/p.mp3
+#                 ./discover-llm.sh --proxy transcribe cc-stt /tmp/p.mp3
+#               speech then transcribe is the round trip setup runs: the
+#               transcription must contain what was synthesised.
 #               `structured` is the graphiti-llm check: graphiti_core drives
 #               extraction through /v1/responses with a json_schema, and a
 #               registration without the openai/chat_completions/ bridge
@@ -164,8 +170,30 @@ if not v:
     sys.exit("FATAL: embedding returned an empty vector")
 print(len(v))'
     ;;
+  speech)
+    [[ -n "${2:-}" && -n "${3:-}" ]] || { echo "usage: $0 speech <model-id> <out.mp3>" >&2; exit 1; }
+    # No voice: the engine's default stands — a voice name is per-engine and
+    # belongs in the alias row, not here.
+    _api -H 'Content-Type: application/json' \
+      -d "{\"model\": \"$2\", \"input\": \"Central Command is listening.\", \"response_format\": \"mp3\"}" \
+      -o "$3" "${CC_LLM_BASE_URL}/audio/speech"
+    sz="$(wc -c <"$3" | tr -d ' ')"
+    (( sz > 1000 )) || { echo "FATAL: speech returned ${sz} bytes — not audio" >&2; exit 1; }
+    echo "speech ok: $2 -> ${sz} bytes of audio in $3"
+    ;;
+  transcribe)
+    [[ -n "${2:-}" && -f "${3:-}" ]] || { echo "usage: $0 transcribe <model-id> <audio-file>" >&2; exit 1; }
+    _api -F "model=$2" -F "file=@$3" "${CC_LLM_BASE_URL}/audio/transcriptions" | $PY -c '
+import json, sys
+text = (json.load(sys.stdin).get("text") or "").strip()
+if not text:
+    sys.exit("FATAL: transcription returned empty text")
+if "command" not in text.lower():
+    sys.exit(f"FATAL: transcription {text!r} does not contain what was synthesised (\"Central Command is listening.\")")
+print(f"transcribe ok: {sys.argv[1]} -> {text!r}")' "$2"
+    ;;
   *)
-    echo "usage: $0 [--proxy] models | chat <model-id> | structured <model-id> | embed <model-id>" >&2
+    echo "usage: $0 [--proxy] models | chat <model-id> | structured <model-id> | embed <model-id> | speech <model-id> <out.mp3> | transcribe <model-id> <audio>" >&2
     exit 1
     ;;
 esac

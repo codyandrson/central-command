@@ -38,8 +38,10 @@ def test_single_config_template_declares_no_models_and_no_provider_env():
 
 def test_single_declaration_is_skeletons_with_the_invariants(rm):
     want = rm.declared(rm.load_declaration(SINGLE / "models.json"))
-    assert set(want) == {"cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano"}
+    assert set(want) == {"cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano", "cc-tts", "cc-stt"}
     assert want["graphiti-llm"]["model"] == "openai/chat_completions/PLACEHOLDER"
+    # The speech aliases carry LiteLLM's audio modes — an invariant, like the bridge prefix.
+    assert want["cc-tts"]["mode"] == "audio_speech" and want["cc-stt"]["mode"] == "audio_transcription"
     for params in want.values():
         assert "api_key" not in params
         assert rm.PLACEHOLDER in params["model"] and rm.PLACEHOLDER in params["api_base"]
@@ -76,8 +78,8 @@ def test_matches_treats_a_declared_value_as_a_pattern(rm):
 
 def test_plan_creates_absent_reports_pending_never_updates(rm):
     want = rm.declared(rm.load_declaration(SINGLE / "models.json"))
-    # Fresh catalog: four skeletons to create.
-    assert [s for s, *_ in rm.plan(want, [])] == ["create"] * 4
+    # Fresh catalog: six skeletons to create.
+    assert [s for s, *_ in rm.plan(want, [])] == ["create"] * 6
     # Skeletons created, nothing filled in yet: pending, not drift.
     skel = [_live(a, **p) for a, p in want.items()]
     assert {s for s, *_ in rm.plan(want, skel)} == {"pending"}
@@ -87,8 +89,10 @@ def test_plan_creates_absent_reports_pending_never_updates(rm):
         _live("graphiti-llm", model="openai/chat_completions/gpt-4.1", api_base="https://api.example.com/v1"),
         _live("cc-embedding", model="openai/text-embedding-3-small", api_base="https://embed.example.com/v1"),
         _live("gpt-4.1-nano", model="openai/gpt-4.1-mini", api_base="https://api.example.com/v1"),
+        _live("cc-tts", model="openai/speaches-ai/Kokoro-82M-v1.0-ONNX", api_base="http://cc-speech:8000/v1", mode="audio_speech"),
+        _live("cc-stt", model="openai/whisper-1", api_base="https://stt.example.com/v1", mode="audio_transcription"),
     ]
-    assert [s for s, *_ in rm.plan(want, filled)] == ["ok"] * 4
+    assert [s for s, *_ in rm.plan(want, filled)] == ["ok"] * 6
     # The one thing the operator may not do: drop the bridge prefix.
     filled[1]["litellm_params"]["model"] = "openai/gpt-4.1"
     statuses = {a: s for s, a, _ in rm.plan(want, filled)}

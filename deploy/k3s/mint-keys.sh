@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Mint the four LiteLLM virtual keys against the RUNNING proxy and write them
+# Mint the LiteLLM virtual keys against the RUNNING proxy and write them
 # back where each one is read from.
 #
 #   Three go into deploy/pi/.env (replacing init-env.sh's PENDING placeholders):
@@ -8,7 +8,9 @@
 #     EMBEDDER_API_KEY      -> ["cc-embedding"]            embeddings (role alias)
 #     RERANKER_API_KEY      -> ["cc-default","cc-rerank"]  cross-encoder (role alias)
 #   One goes into the REPO-ROOT .env, which is the app's own env:
-#     CC_LLM_API_KEY        -> ["cc-default"]        alias cc-spine
+#     CC_LLM_API_KEY        -> ["cc-default","cc-tts","cc-stt"]  alias cc-spine
+#   One goes into web/.env (when it exists), the cockpit's Node server:
+#     OPENAI_API_KEY        -> ["cc-tts","cc-stt"]   alias cc-cockpit
 #
 #   Each is scoped to its own model group so a leak in one cannot spend through
 #   another. `tags` is deliberately absent from every body — a tags field 403s
@@ -34,6 +36,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PI_ENV="$REPO_ROOT/deploy/pi/.env"
 ROOT_ENV="$REPO_ROOT/.env"
+WEB_ENV="$REPO_ROOT/web/.env"
 BASE_URL="${CC_LITELLM_URL:-http://127.0.0.1:4000}"
 KUBECTL=(sudo k3s kubectl)
 NS=central-command
@@ -90,7 +93,16 @@ ensure_key "$PI_ENV"   EMBEDDER_API_KEY     graphiti-embeddings '["cc-embedding"
 # unset or the rerank route fails (40-graph.yaml).
 ensure_key "$PI_ENV"   RERANKER_API_KEY     graphiti-reranker   '["cc-default","cc-rerank"]'
 # The spine's key is a VIRTUAL key, never the master key (config.py's contract).
-ensure_key "$ROOT_ENV" CC_LLM_API_KEY       cc-spine            '["cc-default"]'
+# cc-tts/cc-stt are in the spine's scope because api/speech.py forwards the
+# cockpit's voice traffic with THIS key when the API serves the cockpit itself.
+ensure_key "$ROOT_ENV" CC_LLM_API_KEY       cc-spine            '["cc-default","cc-tts","cc-stt"]'
+# The cockpit's Node server (cc-nerve) speaks to the proxy on its own key,
+# scoped to the two speech aliases only. web/.env may not exist yet at this
+# script's clean-install position (setup's app phase writes it) — then the
+# app phase mints it.
+if [[ -f "$WEB_ENV" ]]; then
+  ensure_key "$WEB_ENV"  OPENAI_API_KEY       cc-cockpit          '["cc-tts","cc-stt"]'
+fi
 
 echo
 echo "re-applying secrets (the keys reach the pods through a Secret):"

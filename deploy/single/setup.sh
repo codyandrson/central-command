@@ -120,9 +120,13 @@ load_env() {
   : "${CC_LITELLM_PORT:=4000}"
   : "${CC_LITELLM_DB_PORT:=5443}"
   : "${CC_CRAWLER_PORT:=8091}"
+  : "${CC_SPEECH_PORT:=8093}"
+  : "${CC_SPEECH_TTS_MODEL:=speaches-ai/Kokoro-82M-v1.0-ONNX}"
+  : "${CC_SPEECH_STT_MODEL:=Systran/faster-whisper-small}"
   : "${CC_ENABLE_N8N:=0}"
   : "${CC_ENABLE_CRAWLER:=1}"
   : "${CC_ENABLE_SANDBOX:=1}"
+  : "${CC_ENABLE_SPEECH:=1}"
   : "${CC_AIRGAP:=0}"
   # Tool-facing exports. uv reads no PIP_* variable (and UV_INDEX_URL is
   # deprecated), npm reads npm_config_* case-insensitively — so one seam each,
@@ -224,7 +228,7 @@ phase_validate() {
   # kube play that half-starts.
   local seen="" p val dup=0 bad_port=0
   for p in CC_PG_PORT CC_LITELLM_PORT CC_LITELLM_DB_PORT CC_GRAPHITI_PORT \
-           CC_NEO4J_BOLT_PORT CC_NEO4J_HTTP_PORT CC_N8N_PORT CC_CRAWLER_PORT; do
+           CC_NEO4J_BOLT_PORT CC_NEO4J_HTTP_PORT CC_N8N_PORT CC_CRAWLER_PORT CC_SPEECH_PORT; do
     val="${!p:-}"
     [[ -z "$val" ]] && continue
     if [[ ! "$val" =~ ^[0-9]+$ ]] || (( val < 1 || val > 65535 )); then
@@ -237,7 +241,7 @@ phase_validate() {
 
   # Mode flags must be exactly 0 or 1 — "true" would read as false everywhere.
   local f
-  for f in CC_ENABLE_N8N CC_ENABLE_CRAWLER CC_ENABLE_SANDBOX CC_AIRGAP; do
+  for f in CC_ENABLE_N8N CC_ENABLE_CRAWLER CC_ENABLE_SANDBOX CC_ENABLE_SPEECH CC_AIRGAP; do
     if [[ "${!f}" == "0" || "${!f}" == "1" ]]; then
       pass "flag-${f}" "${!f}"
     else
@@ -420,6 +424,7 @@ component_wanted() { # images.txt's last column vs the flags and sources
     graphiti-base) return 0 ;;
     sandbox-base)  [[ "$CC_ENABLE_SANDBOX" == 1 ]] ;;
     crawler-base)  [[ "$CC_ENABLE_CRAWLER" == 1 ]] ;;
+    speech)        [[ "$CC_ENABLE_SPEECH" == 1 ]] ;;
     *) return 1 ;;
   esac
 }
@@ -544,6 +549,14 @@ llm_gate() { # llm_gate <what-failed>
   note "    graphiti-llm   openai/chat_completions/<model>   the prefix is REQUIRED"
   note "    cc-embedding   openai/<your embedding model>     dimension is permanent"
   note "    gpt-4.1-nano   openai/<your chat model>          Graphiti's reranker"
+  note "    cc-tts         openai/<your TTS model>           cockpit read-aloud"
+  note "    cc-stt         openai/<your Whisper model>       cockpit voice input"
+  if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
+  note "  The bundled speech engine (cc-speech) answers both — enter, verbatim:"
+  note "    cc-tts   model openai/${CC_SPEECH_TTS_MODEL}   api_base http://${CC_POD_PREFIX}speech:8000/v1   key none"
+  note "    cc-stt   model openai/${CC_SPEECH_STT_MODEL}   api_base http://${CC_POD_PREFIX}speech:8000/v1   key none"
+  note "  (or point cc-stt at hosted Whisper-convention models of your own)"
+  fi
   note "  api_base is what the CONTAINER dials: a server on this machine is"
   note "  http://host.containers.internal:<port>/v1, never 127.0.0.1. A key the"
   note "  server ignores can be 'none', but the field must be non-empty."
@@ -588,6 +601,16 @@ phase_llm() {
     return 1
   fi
 
+  # The speech engine plays HERE, not in the stack phase: its aliases are
+  # probed below, and a probe against a pod that is not up yet is a false gate.
+  if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
+    need_image "image-speech" "${CC_REGISTRY_GHCR:-ghcr.io}/speaches-ai/speaches:0.8.3-cpu" || return 1
+    step "play-speech" "speech engine played on 127.0.0.1:${CC_SPEECH_PORT}" \
+      podman kube play --replace --network "$CC_NETWORK" "$HERE/optional-speech.yaml" || return 1
+  else
+    pass "play-speech" "skipped (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt point at engines of your own)"
+  fi
+
   # The catalog is DB-stored (store_model_in_db) and managed in the proxy's
   # UI — operator decision, 2026-08-30. register-models.py is CREATE-ONLY: an
   # absent alias becomes a skeleton (name + invariants + PLACEHOLDER where the
@@ -622,6 +645,31 @@ phase_llm() {
     llm_gate "the gpt-4.1-nano alias did not return a completion"
     return 3
   fi
+
+  # Speech: one synthesis, then transcribe what it said — the round trip proves
+  # both aliases with real audio. First boot downloads the models, so the
+  # engine gets the same wait LiteLLM did.
+  if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
+    if wait_http "http://127.0.0.1:${CC_SPEECH_PORT}/health" 600; then
+      pass "speech-live" "cc-speech answers /health on 127.0.0.1:${CC_SPEECH_PORT}"
+    else
+      fail "speech-live" "cc-speech never answered /health (first boot downloads ~1GB of models — CC_HF_ENDPOINT reachable?) — run: ./setup.sh diagnose"
+      return 1
+    fi
+  fi
+  # A .mp3 suffix so the file's name agrees with its bytes on the far side.
+  local mp3; mp3="$(mktemp --suffix=.mp3)"
+  if ! step "probe-tts" "cc-tts synthesised speech" \
+    "$HERE/discover-llm.sh" --proxy speech cc-tts "$mp3"; then
+    rm -f "$mp3"; llm_gate "the cc-tts alias did not return audio"
+    return 3
+  fi
+  if ! step "probe-stt" "cc-stt transcribed what cc-tts said" \
+    "$HERE/discover-llm.sh" --proxy transcribe cc-stt "$mp3"; then
+    rm -f "$mp3"; llm_gate "the cc-stt alias did not return a transcription"
+    return 3
+  fi
+  rm -f "$mp3"
 
   # THE measurement. Never a model card: a mis-sized vector corrupts the Neo4j
   # index instead of erroring, and the dimension is permanent once it exists.
@@ -761,7 +809,7 @@ phase_app() {
       curl -sS --fail-with-body -m 60 \
       -H @- \
       -H 'Content-Type: application/json' \
-      -d '{"models": ["cc-default"], "metadata": {"cc": "spine"}}' \
+      -d '{"models": ["cc-default", "cc-tts", "cc-stt"], "metadata": {"cc": "spine"}}' \
       "http://127.0.0.1:${CC_LITELLM_PORT}/key/generate" 2>&1)"
     minted="$($PY -c 'import json,sys; print(json.load(sys.stdin).get("key",""))' <<<"$body" 2>/dev/null)"
     if [[ -z "$minted" ]]; then
@@ -769,9 +817,9 @@ phase_app() {
       return 1
     fi
     set_kv "$APP_ENV" CC_LLM_API_KEY "$minted"
-    pass "mint-key" "minted a LiteLLM virtual key scoped to cc-default and stored it as CC_LLM_API_KEY"
+    pass "mint-key" "minted a LiteLLM virtual key scoped to cc-default + cc-tts + cc-stt and stored it as CC_LLM_API_KEY"
   else
-    pass "mint-key" "CC_LLM_API_KEY already set — not minting a second key"
+    pass "mint-key" "CC_LLM_API_KEY already set — not minting a second key (a key minted before v2.21.0 lacks cc-tts/cc-stt: add them to it in the proxy UI, or clear CC_LLM_API_KEY to re-mint)"
   fi
 
   # Cross-file values: the same fact lives in two files, so copy it rather than
@@ -833,6 +881,8 @@ capability_manifest() {
   fi
   [[ "$CC_ENABLE_CRAWLER" == "1" ]] && \
     echo "     crawler     browser-rendering crawl service on 127.0.0.1:${CC_CRAWLER_PORT}"
+  [[ "$CC_ENABLE_SPEECH" == "1" ]] && \
+    echo "     speech      Whisper STT + Kokoro TTS engine on 127.0.0.1:${CC_SPEECH_PORT} (cc-tts / cc-stt)"
   [[ "$CC_ENABLE_N8N" == "1" ]] && \
     echo "     n8n         the integration facade (Gmail OAuth lives here)"
   echo
@@ -845,6 +895,7 @@ capability_manifest() {
   echo "                   ./setup.sh diagnose"
   [[ "$CC_ENABLE_SANDBOX" == "1" ]] || echo "     sandbox     disabled by CC_ENABLE_SANDBOX=0"
   [[ "$CC_ENABLE_CRAWLER" == "1" ]] || echo "     crawler     disabled by CC_ENABLE_CRAWLER=0 (rung-1 HTTP fetch still works)"
+  [[ "$CC_ENABLE_SPEECH" == "1" ]] || echo "     speech      disabled by CC_ENABLE_SPEECH=0 (cc-tts / cc-stt point at your own engines)"
   [[ "$CC_ENABLE_N8N" == "1" ]] || echo "     n8n         disabled by CC_ENABLE_N8N=0 (no n8n-backed integration selected)"
   return 0
 }

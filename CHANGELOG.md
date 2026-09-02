@@ -4,6 +4,42 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-02 — v2.21.0: speech lives in the deployment
+
+Both deployment profiles now ship a self-hosted speech engine — `cc-speech`,
+the Speaches container (Kokoro TTS + faster-whisper STT, CPU, multi-arch,
+digest-pinned) — and the cockpit's voice features address it through two
+new LiteLLM aliases: `cc-tts` (`/v1/audio/speech`) and `cc-stt`
+(`/v1/audio/transcriptions`). Nothing about speech leaves the deployment.
+The aliases are catalog rows like every other: setup registers them as
+PLACEHOLDER skeletons, PAUSES, and on the re-run proves them with a real
+round trip (synthesise "Central Command is listening.", transcribe it back,
+require "command" in the text). An operator with hosted Whisper-convention
+models points `cc-stt` at those instead; `CC_ENABLE_SPEECH=0` (single) means
+both aliases are yours to point elsewhere.
+
+- Single-node: `optional-speech.yaml` (played in the `llm` phase, model
+  cache in a `speech-models` volume, `CC_SPEECH_PORT` default 8093,
+  `CC_HF_ENDPOINT` seam for a Hugging Face mirror), and the API now serves
+  `/api/tts`, `/api/tts/config`, `/api/transcribe`, `/api/transcribe/config`
+  itself (`central_command/api/speech.py`) — the profile runs no Node
+  server, so read-aloud and voice input silently 404'd there.
+- k3s: `90-speech.yaml` (compute-required, ServiceLB :8093, startup probe
+  budgets the first-boot model download); `web/.env` gains
+  `OPENAI_BASE_URL`/`OPENAI_TTS_MODEL`/`OPENAI_STT_MODEL`/`STT_PROVIDER`
+  and its own `cc-cockpit` virtual key scoped to the two aliases.
+- The spine's virtual key is now scoped to `cc-default` + the two aliases.
+- `deploy/AIRGAP.md`: huggingface.co and the ghcr speech image rows.
+
+**Existing installs.** The image, the two alias rows and the wider key scope
+are all new. Single: `./update.sh apply` (it now re-runs `./setup.sh llm`,
+which plays the pod and pauses on the fresh aliases); then either add the
+two aliases to the existing key in the proxy UI or clear `CC_LLM_API_KEY`
+in `.env` so `setup.sh app` re-mints. k3s: `cc-update.sh` applies the
+manifest; then `./setup.sh llm` (registers + probes the aliases) and
+`FORCE=1 ./mint-keys.sh` (re-scopes the spine key, mints the cockpit key)
+and restart cc-uvicorn + the cockpit.
+
 ## 2026-09-02 — v2.20.4: read it to me
 
 The cockpit gains a speaker button: press it on any assistant message

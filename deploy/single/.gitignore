@@ -5,6 +5,7 @@ stack.yaml
 stack-llm.yaml
 optional-n8n.yaml
 optional-crawler.yaml
+optional-speech.yaml
 setup-diagnostics.txt
 setup-log.txt
 uvicorn.log

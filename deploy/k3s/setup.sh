@@ -71,7 +71,7 @@ SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
 # "the stack is up" assertion — `get pods` reports a CrashLooping pod as
 # Running until the probe flips it.
 DEPLOYMENTS=(cc-postgres cc-litellm-db cc-litellm-redis cc-litellm
-             cc-neo4j cc-graphiti cc-n8n-db cc-n8n cc-crawler cc-vlogs)
+             cc-neo4j cc-graphiti cc-n8n-db cc-n8n cc-crawler cc-vlogs cc-speech)
 
 PY=python3
 
@@ -422,6 +422,11 @@ llm_gate() { # llm_gate <what-failed>
   note "    cc-rerank + qwen3-rerank-local  api_base MUST end in /v1/rerank, mode rerank"
   note "    cc-embedding           the embedding ROLE — same upstream as"
   note "                           qwen3-embedding-local; both rows must exist"
+  note "    cc-tts / cc-stt        the speech ROLES; the bundled cc-speech pod"
+  note "                           answers both — enter, verbatim:"
+  note "      cc-tts  model openai/speaches-ai/Kokoro-82M-v1.0-ONNX  api_base http://cc-speech:8000/v1  key none"
+  note "      cc-stt  model openai/Systran/faster-whisper-small     api_base http://cc-speech:8000/v1  key none"
+  note "                           (or point cc-stt at hosted Whisper-convention models)"
   note "  A key a local server ignores can be 'none', but must be non-empty."
   note ""
   note "  Not sure what a server names its models? List them directly:"
@@ -437,12 +442,12 @@ llm_gate() { # llm_gate <what-failed>
 # environment (its --proxy mode reads the OTHER profile's .env, so it is not
 # usable here) — passing both as env vars is what keeps it on our proxy, and
 # keeps the key out of argv.
-probe_alias() { # probe_alias <chat|embed> <alias>
+probe_alias() { # probe_alias <chat|structured|embed|speech|transcribe> <alias> [file]
   CC_LLM_BASE_URL="http://127.0.0.1:4000/v1" \
   CC_LLM_API_KEY="${LITELLM_MASTER_KEY:-}" \
   CC_EMBED_BASE_URL="http://127.0.0.1:4000/v1" \
   CC_EMBED_API_KEY="${LITELLM_MASTER_KEY:-}" \
-    "$REPO_ROOT/deploy/single/discover-llm.sh" "$1" "$2"
+    "$REPO_ROOT/deploy/single/discover-llm.sh" "$@"
 }
 
 phase_llm() {
@@ -462,6 +467,12 @@ phase_llm() {
   step "apply-litellm" "namespace + LiteLLM manifests applied" \
     "${KROOT[@]}" apply -f "$HERE/00-namespace.yaml" -f "$HERE/30-litellm.yaml" -f "$HERE/31-litellm-rbac.yaml" \
     || return 1
+  # The speech engine goes in HERE, not with the stack: its aliases are probed
+  # below, and a probe against a pod that is not up yet is a false gate. Its
+  # first boot downloads the models, so it gets the whole catalog pause to
+  # come up; the rollout wait is at the probe.
+  step "apply-speech" "speech engine manifest applied" \
+    "${KROOT[@]}" apply -f "$HERE/90-speech.yaml" || return 1
 
   local d
   for d in cc-litellm-db cc-litellm-redis cc-litellm; do
@@ -541,6 +552,21 @@ phase_llm() {
     return 3
   fi
   pass "probe-embed" "cc-embedding returned a ${dim}-dimension vector"
+
+  # Speech: one synthesis, then transcribe what it said — both aliases proven
+  # with real audio. A .mp3 suffix so the file's name agrees with its bytes.
+  step "rollout-cc-speech" "cc-speech rolled out (first boot downloads ~1GB of models)" \
+    "${K[@]}" rollout status deploy/cc-speech --timeout=1800s || return 1
+  local mp3; mp3="$(mktemp --suffix=.mp3)"
+  if ! step "probe-tts" "cc-tts synthesised speech" probe_alias speech cc-tts "$mp3"; then
+    rm -f "$mp3"; llm_gate "the cc-tts alias did not return audio"
+    return 3
+  fi
+  if ! step "probe-stt" "cc-stt transcribed what cc-tts said" probe_alias transcribe cc-stt "$mp3"; then
+    rm -f "$mp3"; llm_gate "the cc-stt alias did not return a transcription"
+    return 3
+  fi
+  rm -f "$mp3"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -711,6 +737,22 @@ phase_app() {
       # loads and the WebSocket then 403s, visible only in the server log.
       warn "web-env" "web/.env written without ALLOWED_ORIGINS — set CC_COCKPIT_ORIGIN in deploy/pi/.env to your cockpit URL and add the line (README §6); tailnet browsers 403 on the WS upgrade without it"
     fi
+  fi
+
+  # The cockpit's voice features (read-aloud, voice input) go through THIS
+  # cluster's LiteLLM by alias — never an external provider. The Node server
+  # reads these as its "OpenAI" endpoint; the key is a virtual key scoped to
+  # the two speech aliases (mint-keys.sh, which keeps every key already set).
+  local wenv="$REPO_ROOT/web/.env"
+  set_kv_if_unset "$wenv" OPENAI_BASE_URL  "http://127.0.0.1:4000/v1" "web-speech-url"
+  set_kv_if_unset "$wenv" OPENAI_TTS_MODEL "cc-tts"                   "web-speech-tts"
+  set_kv_if_unset "$wenv" OPENAI_STT_MODEL "cc-stt"                   "web-speech-stt"
+  set_kv_if_unset "$wenv" STT_PROVIDER     "openai"                   "web-speech-provider"
+  if [[ -z "$(get_kv "$wenv" OPENAI_API_KEY)" ]]; then
+    step "web-speech-key" "cockpit virtual key minted into web/.env (OPENAI_API_KEY, scope cc-tts + cc-stt)" \
+      "$HERE/mint-keys.sh" || return 1
+  else
+    pass "web-speech-key" "web/.env OPENAI_API_KEY already set"
   fi
 
   local nv=""

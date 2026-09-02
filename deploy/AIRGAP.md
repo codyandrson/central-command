@@ -60,13 +60,14 @@ dependency comes from"); blank means the public source.
 | Source | Used by | Seam | Notes |
 |---|---|---|---|
 | docker.io | postgres, neo4j, redis, n8n, the graphiti and sandbox base images | `CC_REGISTRY_DOCKERIO` | host prefix only; a mirror that re-namespaces paths needs `images.txt` + templates edited |
-| ghcr.io | LiteLLM | `CC_REGISTRY_GHCR` | |
+| ghcr.io | LiteLLM, the speech engine (`speaches`) | `CC_REGISTRY_GHCR` | |
 | mcr.microsoft.com | the crawler base (Microsoft's Playwright image: browsers + OS libs baked in) | `CC_REGISTRY_MCR` | replaces Debian + Microsoft's browser CDN for that build |
 | Debian archive | `apt-get` inside the graphiti and sandbox builds | `CC_APT_MIRROR`, `CC_APT_SECURITY_MIRROR` | build-args; the deb822 sources file is REWRITTEN from `/etc/os-release` (slim images ship no `sources.list`; security is a separate path on every mirror) |
 | PyPI | the app's venv (uv), graphiti's `uv pip`, the crawler's `pip` | `CC_PYPI_INDEX_URL` | fanned out to `PIP_INDEX_URL` AND `UV_DEFAULT_INDEX` — uv reads no `PIP_*` and `UV_INDEX_URL` is deprecated |
 | python-build-standalone | uv, only when the host has no CPython 3.12 | `CC_PYTHON_MIRROR` | `UV_PYTHON_INSTALL_MIRROR`; a `file://` directory works |
 | registry.npmjs.org | the cockpit build (`npm ci`), `sandbox-runtime` inside the sandbox build | `CC_NPM_REGISTRY` | `NPM_CONFIG_REGISTRY`; the lockfile's `resolved` URLs point at npmjs and npm rewrites those to the configured registry (its `replace-registry-host` default) — a lock regenerated AGAINST a mirror would not be rewritten back |
-| huggingface.co | Whisper STT model, first voice-input use | `WHISPER_MODELS_BASE_URL` (web server env) or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file before downloading |
+| huggingface.co | the speech engine's models (`PRELOAD_MODELS`: Kokoro TTS + faster-whisper STT), first boot of `cc-speech` | `CC_HF_ENDPOINT` (single) / hand-edit `HF_ENDPOINT` in `deploy/k3s/90-speech.yaml`; or pre-place the hub snapshots in the `speech-models` volume | `HF_HUB_CACHE` is the volume; a present snapshot is not re-fetched. `CC_ENABLE_SPEECH=0` removes the source entirely (point `cc-tts`/`cc-stt` at your own engines) |
+| huggingface.co | Whisper STT model for the cockpit's *local* engine (k3s Node server only) | `WHISPER_MODELS_BASE_URL` (web server env) or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file before downloading; unused once `cc-stt` is registered |
 | a private/corporate CA (TLS interception, self-signed mirror) | every host-side acquisition: curl, uv/pip, npm, node | `CC_CA_BUNDLE` | fanned out to `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `NPM_CONFIG_CAFILE`; NOT podman pulls or the in-build package fetches — see below |
 | a mandatory egress proxy | every host-side acquisition | `CC_PROXY` | fanned out to `http(s)_proxy` both cases, `no_proxy` pinned to loopback; podman forwards proxy vars into builds on its own |
 
@@ -104,7 +105,7 @@ smallest move when it alone is unavailable (single-node profile):
 | PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror; the pip installs inside the graphiti/crawler builds ride the same seam as build-args. |
 | A container registry | `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` at the registry mirror, or a `registries.conf` mirror podman sees. |
 | python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. |
-| huggingface.co | Pre-place `ggml-*.bin` in `config.whisperModelDir` (checked before any download), or set `WHISPER_MODELS_BASE_URL`. |
+| huggingface.co | Speech: `CC_HF_ENDPOINT` at an HF mirror, or pre-place the two hub snapshots in the `speech-models` volume, or `CC_ENABLE_SPEECH=0` and register `cc-tts`/`cc-stt` at engines you already have. Cockpit-local Whisper (k3s only): pre-place `ggml-*.bin` in `config.whisperModelDir`, or set `WHISPER_MODELS_BASE_URL`. |
 
 ## Pins
 

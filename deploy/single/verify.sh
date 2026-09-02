@@ -44,6 +44,8 @@ set +a
 : "${CC_CRAWLER_PORT:=8091}"
 : "${CC_ENABLE_CRAWLER:=1}"
 : "${CC_ENABLE_SANDBOX:=1}"
+: "${CC_SPEECH_PORT:=8093}"
+: "${CC_ENABLE_SPEECH:=1}"
 : "${CC_SANDBOX_RUNNER_PORT:=8090}"
 : "${CC_VERIFY_MAX_WAIT:=600}"
 
@@ -219,6 +221,25 @@ if [[ "$CC_ENABLE_CRAWLER" == "1" ]]; then
   fi
 else
   skip "crawler not played (CC_ENABLE_CRAWLER=0)"
+fi
+
+echo
+echo "== speech (optional, CC_ENABLE_SPEECH=${CC_ENABLE_SPEECH})"
+if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
+  if grep -qE "^${CC_POD_PREFIX}speech " <<<"$pods"; then
+    ok "pod ${CC_POD_PREFIX}speech exists"
+    # /health only answers once the preloaded models are in memory; a first
+    # boot is downloading them, hence the budget.
+    if wait_for 600 curl -fsS "http://127.0.0.1:${CC_SPEECH_PORT}/health"; then
+      ok "speech answers /health"
+    else
+      bad "speech answers /health"
+    fi
+  else
+    bad "pod ${CC_POD_PREFIX}speech exists (played by ./setup.sh llm)"
+  fi
+else
+  skip "speech not played (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt are yours)"
 fi
 
 # The sandbox has no pod: sandbox CONTAINERS are created on demand by the
