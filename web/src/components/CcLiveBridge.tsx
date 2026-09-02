@@ -31,10 +31,15 @@ export function CcLiveBridge() {
       // another view) must clear/reload the watched pane — a closed lane's
       // alias resolves to empty history, so the pane can't read as
       // "still continuing" after a close.
+      // conversation.continued: the post-decision resume drives `agent.run()`
+      // directly and emits NO session.step, so this is the only push that says
+      // the transcript grew — without it the pane shows the proposal turn and
+      // nothing after, reading as stuck (2026-09-02).
       if (
         msg.event !== 'cc.session.step'
         && msg.event !== 'cc.session.completed'
         && msg.event !== 'cc.conversation.ended'
+        && msg.event !== 'cc.conversation.continued'
       ) return;
       const evt = msg.payload as { ref_id?: string; payload?: { agent_id?: string } } | undefined;
       const refId = evt?.ref_id;

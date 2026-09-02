@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-02 — v2.20.1: the resumed turn reaches the pane
+
+The first live run of v2.20.0 moved all eight episodes and the curator
+verified the end state — and the cockpit showed none of it. A decision
+resume drives `agent.run()` directly and announces only
+`conversation.continued`, which the live-transcript bridge did not treat as
+"reload": the pane stopped at the proposal turn and read as stuck.
+
+- `CcLiveBridge` reloads the watched pane on `cc.conversation.continued`;
+  a source guard pins the trigger list.
+
+Known gap: the resume turn still streams no per-tool frames (it emits no
+`session.step`); the transcript arrives whole when the turn ends.
+
 ## 2026-09-01 — v2.20.0: the curator can see the patient
 
 Onboarding recorded eight teammates' operating doctrines through the EA, and
