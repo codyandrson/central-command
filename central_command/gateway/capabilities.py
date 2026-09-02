@@ -103,7 +103,7 @@ REGISTRY: list[Capability] = [
         risk="internal, append-only — a wrong fact is supersedable, never silently edited",
         holder="Executor",
         route="Graphiti MCP add_episode → group central_command (tenanted; never `main`)",
-        arguments=["name", "episode_body", "source_description"],
+        arguments=["name", "episode_body", "source_description", "scope", "for_agent"],
         description=(
             "Commit a distilled, human-approved claim to the team knowledge "
             "graph. The Executor stamps trust=human-approved and the approver "
@@ -188,6 +188,16 @@ REGISTRY: list[Capability] = [
         route="neo4j_writer.delete_edge (bolt)",
         arguments=["uuid", "verification_id"],
         description="Remove an invented relationship (a self-loop, a fact never stated).",
+    ),
+    Capability(
+        name="graph.rescope_episode",
+        kind="write",
+        gate="human approval",
+        risk="reversible — an episode and what it produced move to another group; shared entities/edges are split (copied), nothing deleted",
+        holder="Executor",
+        route="neo4j_writer.rescope_episode (bolt; the episode is the unit of scope)",
+        arguments=["episode_uuid", "group_id", "verification_id"],
+        description="Move an episode to the group it should have been committed to (2026-09-01).",
     ),
     Capability(
         name="catalog.tag",

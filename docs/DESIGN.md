@@ -152,7 +152,7 @@ understanding); (5) Shared docs (Confluence — human-readable record).
 **Stance [D11]:** no free-form private long-term agent memory — durable learning goes
 to the shared graph via the gate. **Revised 2026-08-01 [D11-r1]** (see the
 self-directed-learning record): agents gain a *gated* private partition
-(`central_command:<agent_id>`) — "no ungoverned private memory" is what the stance
+(`central_command_<agent_id>`) — "no ungoverned private memory" is what the stance
 always protected; the single-shared-group posture is what it drops.
 
 **Context assembly** on wake: ALWAYS core (charter, applicable policies, task/trigger

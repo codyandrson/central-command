@@ -158,22 +158,46 @@ async def groups_for(agent_id: str | None) -> list[str]:
 # --- reads (ungated; safe for the runtime tier) --------------------------------
 
 
-async def search_facts(query: str, max_facts: int = 8, agent_id: str | None = None) -> list[dict]:
-    """Relevant facts (entity relationships, with temporal validity)."""
+async def search_facts(
+    query: str, max_facts: int = 8, agent_id: str | None = None,
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Relevant facts (entity relationships, with temporal validity).
+    `group_ids` overrides the caller's read scope — the curator's
+    any-partition read (graph-curate pack); every other caller leaves it None."""
     out = await _call_tool(
         "search_memory_facts",
-        {"query": query, "max_facts": max_facts, "group_ids": await groups_for(agent_id)},
+        {"query": query, "max_facts": max_facts,
+         "group_ids": group_ids or await groups_for(agent_id)},
     )
     return out.get("facts", [])
 
 
-async def search_nodes(query: str, max_nodes: int = 8, agent_id: str | None = None) -> list[dict]:
-    """Relevant entities (nodes with summaries)."""
+async def search_nodes(
+    query: str, max_nodes: int = 8, agent_id: str | None = None,
+    group_ids: list[str] | None = None,
+) -> list[dict]:
+    """Relevant entities (nodes with summaries). `group_ids` as in search_facts."""
     out = await _call_tool(
         "search_nodes",
-        {"query": query, "max_nodes": max_nodes, "group_ids": await groups_for(agent_id)},
+        {"query": query, "max_nodes": max_nodes,
+         "group_ids": group_ids or await groups_for(agent_id)},
     )
     return out.get("nodes", [])
+
+
+async def known_groups() -> list[str]:
+    """Every group Central Command would ever have written to: the shared read
+    set (steward domains included) plus one private partition per active
+    roster agent. Derived from the roster, not from Neo4j — the runtime tier
+    has no bolt, and a group nobody on the roster owns is the cockpit's
+    business, not an agent's."""
+    from central_command.db import repo as db_repo
+
+    groups = await _read_groups()
+    for a in await db_repo.list_agents(include_retired=False):
+        groups.append(private_group(a["id"]))
+    return groups
 
 
 async def search_private_facts(agent_id: str, query: str, max_facts: int = 8) -> list[dict]:
@@ -198,6 +222,11 @@ async def get_episodes(
     `agent_id`) narrows the read to exactly that agent's private group — the
     per-agent chat panel's default view."""
     group_ids = [private_group(agent_id)] if private_only and agent_id else await groups_for(agent_id)
+    return await get_group_episodes(group_ids, last_n)
+
+
+async def get_group_episodes(group_ids: list[str], last_n: int = 50) -> list[dict]:
+    """Episodes in exactly these groups — no caller-scope widening."""
     out = await _call_tool(
         "get_episodes",
         {"group_ids": group_ids, "max_episodes": last_n},

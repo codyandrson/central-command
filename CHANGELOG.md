@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-01 — v2.20.0: the curator can see the patient
+
+Onboarding recorded eight teammates' operating doctrines through the EA, and
+`graph.add_episode`'s `private` scope could only mean *the proposer's own*
+partition — so every one of them landed in `central_command_ea`. Asked to fix
+it, the graph curator could neither read that partition nor propose a move.
+
+- **`graph.add_episode` takes `for_agent`** (private scope only): a rule
+  about how a teammate works lands in THAT teammate's partition. The target
+  is visible on the proposal and must be an active roster member; omitted,
+  `private` still means the proposer's own. This is the root cause.
+- **`graph.rescope_episode`** — a new gated curation capability. The EPISODE
+  is the unit of scope: Graphiti dedupes entities within a group, so a node
+  like "operator" is shared by every episode in a partition and cannot
+  follow one of them. The writer moves the episode and what only it
+  produced; entities and facts shared with a staying episode are split into
+  a copy in the target group. Reversible; nothing deleted. (Verified by the
+  offline suite; the live-Neo4j round-trip in `tests/test_graph_curation.py`
+  is opt-in, `CC_LIVE_GRAPH_TESTS=1`.)
+- **Any-partition reads for the `graph-curate` pack:** `list_graph_groups`,
+  `list_graph_group_episodes`, `search_graph_group` see every agent's
+  private partition — the one deliberate exception to "an agent never reads
+  another's partition", granted by holding the pack, never by agent id.
+  Every graph read now also stamps `[group: …]` on each hit.
+- The curator's charter gains the second entry point (operator-tasked
+  curation, no verification_id) and the scope doctrine; the pack carries the
+  same doctrine as generated guidance, so an already-hired curator gets it
+  at its next run. **The charter prose itself does not auto-update a hired
+  agent** — the operator adopts the new v0 text as a new charter version
+  from the cockpit (or leaves v1; the pack guidance covers the mechanics).
+- `docs/DESIGN.md` wrote the private group with a colon; it has been
+  `central_command_<agent_id>` since the 2026-08-15 charset fix.
+
 ## 2026-09-01 — v2.19.4: a backup is fetched, never streamed
 
 `cc-update.sh` and `backup.sh` no longer trust `kubectl exec`'s stdout for
