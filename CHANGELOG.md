@@ -4,6 +4,42 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-02 — v2.20.3: the Inbox names the partition
+
+A private episode recorded on a teammate's behalf (`for_agent`, v2.20.0)
+rendered in the Decisions Inbox as a bare `scope: private` badge whose
+tooltip said "this agent's own partition" — the one field that says where
+the rule actually lands was folded into "other arguments". The operator
+reviewing an onboarding write could not see the routing they were approving.
+
+- The badge reads `scope: private → <agent>` when `for_agent` is set, with a
+  matching tooltip; `for_agent` no longer appears under "other arguments".
+
+## 2026-09-02 — v2.20.2: one model per autodiscovery task
+
+`litellm.discovery`'s default `batch_size` drops from 5 to 1. On the first
+large real drift (25 OpenAI models, 2026-09-02), two of the five-model batch
+tasks blew the running model's context window mid-task — a batch multiplies
+the per-model registration work (catalog reads, library lookups, the
+probe-on-add result) inside one session. One model per task gives each
+registration the full window; the per-agent task queue already drains any
+number of tasks one at a time, so more tasks costs nothing. A schedule that
+sets `batch_size` explicitly is unaffected.
+
+## 2026-09-02 — v2.20.1: the resumed turn reaches the pane
+
+The first live run of v2.20.0 moved all eight episodes and the curator
+verified the end state — and the cockpit showed none of it. A decision
+resume drives `agent.run()` directly and announces only
+`conversation.continued`, which the live-transcript bridge did not treat as
+"reload": the pane stopped at the proposal turn and read as stuck.
+
+- `CcLiveBridge` reloads the watched pane on `cc.conversation.continued`;
+  a source guard pins the trigger list.
+
+Known gap: the resume turn still streams no per-tool frames (it emits no
+`session.step`); the transcript arrives whole when the turn ends.
+
 ## 2026-09-01 — v2.20.0: the curator can see the patient
 
 Onboarding recorded eight teammates' operating doctrines through the EA, and

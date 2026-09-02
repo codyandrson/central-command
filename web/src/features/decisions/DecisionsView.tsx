@@ -602,6 +602,7 @@ function DiffBlock({ diff }: { diff: string }) {
 function EpisodeBlock({ args }: { args: Record<string, unknown> }) {
   const { episode_body, source_description, name, ...rest } = args;
   delete rest.scope; // rendered as a badge above, not repeated here
+  delete rest.for_agent; // part of the same badge
   return (
     <div className="space-y-1.5">
       {typeof episode_body === 'string' && (
@@ -915,11 +916,18 @@ function ProposalPane({
               {cap === 'graph.add_episode' && (typeof a.arguments?.scope === 'string' ? (
                 <span
                   className="cockpit-badge"
-                  title={a.arguments.scope === 'private'
-                    ? "Written to this agent's own graph partition — read by it alone."
-                    : 'Written to the shared team graph — read by every agent.'}
+                  title={a.arguments.scope !== 'private'
+                    ? 'Written to the shared team graph — read by every agent.'
+                    : typeof a.arguments.for_agent === 'string'
+                      ? `Written to ${a.arguments.for_agent}'s private graph partition — read by that agent alone.`
+                      : "Written to this agent's own graph partition — read by it alone."}
                 >
                   scope: {String(a.arguments.scope)}
+                  {/* for_agent is WHO the private rule is about; a private
+                      episode about a teammate that omits it lands in the
+                      drafter's own partition (the 2026-09-01 mis-scoping). */}
+                  {a.arguments.scope === 'private' && typeof a.arguments.for_agent === 'string'
+                    && ` → ${a.arguments.for_agent}`}
                 </span>
               ) : (
                 <span

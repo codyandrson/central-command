@@ -188,6 +188,22 @@ describe('DecisionsView proposal pane', () => {
     expect(screen.getByText('the relationship is inferred')).toBeInTheDocument();
   });
 
+  it('names the partition a private episode is FOR when it is not the drafter', async () => {
+    // The EA recording a teammate's doctrine: the badge must show where it
+    // lands, or the operator approves "private" believing it means the EA's own.
+    state.detail = {
+      id: 'p1', agent_id: 'ea', intent: 'Record it', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(1), evidence: [],
+      actions: [{ capability: 'graph.add_episode', arguments: {
+        name: 'Editor policy', episode_body: 'Standard pass on all drafts.',
+        scope: 'private', for_agent: 'editor',
+      } }],
+    };
+    await openProposal();
+    await waitFor(() => expect(screen.getByText('scope: private → editor')).toBeInTheDocument());
+    expect(screen.queryByText('other arguments')).not.toBeInTheDocument();
+  });
+
   it('shows no badge when the agent stated none — absent is not low', async () => {
     state.detail = {
       id: 'p1', agent_id: 'inbox-triage', intent: 'Record it', status: 'AWAITING_HUMAN',
