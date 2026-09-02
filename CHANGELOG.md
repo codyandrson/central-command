@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-02 — v2.20.3: the Inbox names the partition
+
+A private episode recorded on a teammate's behalf (`for_agent`, v2.20.0)
+rendered in the Decisions Inbox as a bare `scope: private` badge whose
+tooltip said "this agent's own partition" — the one field that says where
+the rule actually lands was folded into "other arguments". The operator
+reviewing an onboarding write could not see the routing they were approving.
+
+- The badge reads `scope: private → <agent>` when `for_agent` is set, with a
+  matching tooltip; `for_agent` no longer appears under "other arguments".
+
 ## 2026-09-02 — v2.20.2: one model per autodiscovery task
 
 `litellm.discovery`'s default `batch_size` drops from 5 to 1. On the first
