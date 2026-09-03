@@ -646,7 +646,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   const effectiveSttInputMode = sttProvider === 'openai' ? 'local' : sttInputMode;
 
-  const { voiceState, interimTranscript, wakeWordEnabled, toggleWakeWord, error: voiceError, clearError: clearVoiceError } = useVoiceInput((text) => {
+  const { voiceState, interimTranscript, startRecording, stopAndTranscribe, wakeWordEnabled, toggleWakeWord, error: voiceError, clearError: clearVoiceError } = useVoiceInput((text) => {
     const input = inputRef.current;
     if (input) {
       input.value = '';
@@ -1560,6 +1560,19 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           aria-label="Attach a document"
         >
           <Paperclip size={16} />
+        </button>
+        {/* Mic: the touch-screen equivalent of double Left Shift. Press to
+            record, press again to send; the hotkey path is unchanged. */}
+        <button
+          type="button"
+          onClick={() => { if (voiceState === 'recording') void stopAndTranscribe(); else if (voiceState === 'idle' || voiceState === 'listening') void startRecording(); }}
+          disabled={voiceState === 'transcribing'}
+          className={`bg-transparent border-none cursor-pointer px-2 self-stretch h-full flex items-center disabled:opacity-50 disabled:cursor-not-allowed ${voiceState === 'recording' ? 'text-red-500' : 'text-muted-foreground hover:text-primary'}`}
+          title={voiceState === 'recording' ? 'Stop and send' : 'Voice input'}
+          aria-label={voiceState === 'recording' ? 'Stop recording and send' : 'Start voice input'}
+          aria-pressed={voiceState === 'recording'}
+        >
+          <Mic size={16} />
         </button>
         <button
           onClick={() => { void handleSend(); }}

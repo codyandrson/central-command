@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-03 — v2.21.2: speech on a phone
+
+The two speech affordances now exist on a touch screen. The message action
+row (read-aloud, COPY) was hidden below the `sm` breakpoint and
+hover-revealed above it — on a phone it did not render at all. It is now a
+static row under each message on narrow screens and fades in on hover only
+where a pointer can hover (`@media (hover: hover)`), so tablets keep it
+visible too. The composer gains a mic button beside Send — press to record,
+press again to send — the touch equivalent of double Left Shift, which is
+unchanged. Also: `deploy/discover.sh` maps its huggingface.co probe onto the
+`CC_HF_ENDPOINT` seam, so a mirror named in `discovery.conf` is probed and
+the report emits the `.env` line for the speech engine's model downloads.
+Cockpit rebuild only; no manifest change.
+
 ## 2026-09-02 — v2.21.1: the triager can read the mail it dismisses
 
 Seven capability gaps were declared on 2026-09-02. Four were the graph

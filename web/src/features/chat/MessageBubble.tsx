@@ -350,9 +350,12 @@ function MessageBubbleInner({ msg, index, isCollapsed, isMemoryCollapsed, memory
               ))}
             </div>
           )}
-          {/* Action buttons — visible on hover */}
+          {/* Action buttons — a static row under the message on phones,
+              hover-revealed in the corner where a pointer can hover. Gating
+              the fade on `hover:hover` (not viewport width) keeps them
+              reachable on tablets and touch laptops. */}
           {!msg.streaming && (
-            <div className="absolute top-0 right-3 hidden gap-1 opacity-0 transition-opacity group-hover:opacity-100 sm:right-4 sm:flex">
+            <div className="mt-1 flex justify-end gap-1 transition-opacity sm:absolute sm:top-0 sm:right-4 sm:mt-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
               {isAssistant && <SpeakButton text={displayContent} />}
               {/* Copy button */}
               <button
