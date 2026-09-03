@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-02 — v2.21.1: the triager can read the mail it dismisses
+
+Seven capability gaps were declared on 2026-09-02. Four were the graph
+curator's and the steward's partition asks, already answered by v2.20.0 (the
+`graphiti` skill grant is an operator click). The other three were one wall
+hit from two sides: inbox-triage proposed a 177-item bulk dismissal of mail
+it had never seen — the tool pins a set from a Gmail query and the drafter
+gets only the one message in hand — and, after the operator rejected it,
+neither triage nor the EA could re-derive what had already been dismissed
+from that sender, or why, for a review digest. No read capability over the
+mailbox existed.
+
+- **`mail-read`** — a new read-only pack, two tools. `mail_search(query)`
+  runs the same Gmail search `propose_bulk_dismiss` pins and cross-reads
+  every match against the ledger: work-item id, state, sender, subject,
+  date, the session that handled it and the recorded dismissal reason, plus
+  how many matches were never enrolled. `mail_read(ref)` opens one record —
+  the message exactly as it was fed to the agent, its decision locators
+  (session, covering proposal), the full dismissal rationale, the auditor's
+  verdict and any operator note; a message not in the queue is read from the
+  mailbox and says so. Nothing is marked, moved or deleted; the OAuth stays
+  in the n8n façade as it does for the feed.
+- Granted to **inbox-triage** (schema seed — the updater applies it) and the
+  **EA** (template default for fresh installs; the live row is added by hand
+  after this release is running, the `calendar-propose` precedent — a grant
+  naming a pack the running process has never heard of fails the agent's
+  next run).
+- Known limit, stated in the tool: attachment metadata does not cross the
+  façade. An agent that needs it says it could not see the attachment.
+
 ## 2026-09-02 — v2.21.0: speech lives in the deployment
 
 Both deployment profiles now ship a self-hosted speech engine — `cc-speech`,

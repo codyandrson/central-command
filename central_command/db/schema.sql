@@ -1249,3 +1249,12 @@ insert into heartbeat_schedule
     ('wiki-freshness', 'Wiki claim freshness sweep', 'every',
      '{"every_seconds": 86400}', 'wiki.freshness', '{}', 'seed:heartbeat')
 on conflict (id) do nothing;
+
+-- mail-read (2026-09-02, declared gap): inbox-triage reviews a set BEFORE it
+-- proposes a bulk dismissal of it. Read-only over the ledger and the façade's
+-- Gmail search. The EA's grant is NOT seeded here (the calendar-propose
+-- precedent: the EA is hired from EA_TEMPLATE, whose default_packs carry it;
+-- the live row is added by hand AFTER the release is running).
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('inbox-triage', 'mail-read', 'seed:2026-09-02')
+on conflict (agent_id, pack) do nothing;

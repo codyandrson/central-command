@@ -271,7 +271,7 @@ async def test_hire_rejects_a_role_too_long_to_be_a_routing_line():
 
 
 @pytest.mark.parametrize("pack_name", ["record-read", "activity-read",
-                                       "calendar-read", "web-read"])
+                                       "calendar-read", "web-read", "mail-read"])
 def test_the_record_packs_are_read_only(pack_name):
     """The reads over Central Command's own record — ungated, and holding no gated
     capability at all. A read pack that could propose would put a write behind

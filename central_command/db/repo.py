@@ -2980,6 +2980,56 @@ async def unprocessed_items_for_message_ids(message_ids: list[str]) -> list[dict
         await conn.close()
 
 
+_MAIL_ITEM_COLUMNS = """
+    id, message_id, state, subject, received_at, session_id, folded_into,
+    terminal_at, payload->>'from' as sender,
+    payload->>'provider_uuid' as provider_uuid,
+    payload->>'dismissal_rationale' as dismissal_rationale,
+    payload->>'operator_note' as operator_note
+"""
+
+
+async def mail_items_for_message_ids(message_ids: list[str]) -> list[dict]:
+    """The ledger rows behind a set of provider messages, ANY state — the
+    mail-read cross-read (2026-09-02): what the queue knows about each match,
+    headers and locators only (no bodies), oldest first."""
+    if not message_ids:
+        return []
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""select {_MAIL_ITEM_COLUMNS} from work_item
+                 where message_id = any($1::text[])
+                 order by received_at nulls last, enrolled_at""",
+            message_ids,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def mail_item(ref: str) -> dict | None:
+    """One ledger row by work-item id, ledger message_id or provider uuid —
+    with the email as it was fed to the agent (`text`) and the audit block."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            f"""select {_MAIL_ITEM_COLUMNS}, payload->>'text' as text,
+                       payload->'audit' as audit
+                  from work_item
+                 where id = $1 or message_id = $1 or payload->>'provider_uuid' = $1
+                 limit 1""",
+            ref,
+        )
+        if row is None:
+            return None
+        out = dict(row)
+        out["audit"] = _payload(out["audit"])
+        return out
+    finally:
+        await conn.close()
+
+
 async def bulk_dismiss_unprocessed(message_ids: list[str], rationale: str) -> int:
     """One UPDATE, scoped to UNPROCESSED exactly like `mark_fold_pending` — a
     race can never touch a row another session already claimed. Returns the

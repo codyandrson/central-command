@@ -289,9 +289,11 @@ EA_TEMPLATE = HireTemplate(
     # loe-read added 2026-08-18 (goals drive work): the EA is goal-AWARE, not
     # goal-driving — its digest and calendar judgment read the operator's
     # lines of effort; originating goal work stays with accountability.
+    # mail-read added 2026-09-02 (declared gap): a review digest of dismissed
+    # mail must be re-derived from the record, not from memory of the brief.
     default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
                    "ask-operator", "consult", "calendar-read", "calendar-propose",
-                   "loe-read", "task-propose"),
+                   "loe-read", "task-propose", "mail-read"),
     taskable=True,
     conversational=True,
 )

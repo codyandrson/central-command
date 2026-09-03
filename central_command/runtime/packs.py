@@ -911,6 +911,32 @@ PACKS: dict[str, Pack] = {
             ),
         ),
     ),
+    # mail-read (2026-09-02): declared as a gap by inbox-triage and the EA the
+    # morning a 177-item bulk dismissal was rejected — the drafter had never
+    # seen the set it pinned, and the digest could not say what was dismissed
+    # or why. Reads the ledger (the rows a dismissal moves) plus the façade's
+    # Gmail search; the OAuth stays in n8n, exactly as for the feed.
+    "mail-read": Pack(
+        name="mail-read",
+        description=(
+            "Search the mailbox with a Gmail query and read any mail record in "
+            "the queue: the message as fed, its state, who decided it and why."
+        ),
+        tool_names=("mail_search", "mail_read"),
+        guidance=(
+            "READING MAIL: `mail_search(query)` runs a Gmail search and shows "
+            "what the QUEUE knows about each match — work-item id, state, "
+            "sender, subject, the session that handled it and the recorded "
+            "dismissal reason; `mail_read(ref)` opens one record with the full "
+            "message as it was fed. Review a set here BEFORE you "
+            "`propose_bulk_dismiss` it — the same query pins the same set, so "
+            "what you read is what the operator will be asked to approve. "
+            "When you report on mail, cite the work-item ids and sessions you "
+            "actually read; attachment metadata does not cross the façade, so "
+            "say when you could not see one rather than describing it. These "
+            "tools change nothing: no mail is read-marked, moved or deleted."
+        ),
+    ),
     "skill-propose": Pack(
         name="skill-propose",
         description=(
@@ -1342,7 +1368,7 @@ PACKS: dict[str, Pack] = {
 DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     "inbox-triage": ("jira-read", "jira-propose", "graph-read", "graph-propose",
                      "consult", "task-propose", "ask-operator",
-                     "bulk-dismiss-propose"),
+                     "bulk-dismiss-propose", "mail-read"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "graph-read", "graph-propose",
                     "consult", "task-propose", "ask-operator", "web-read",

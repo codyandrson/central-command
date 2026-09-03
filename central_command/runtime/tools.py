@@ -1645,6 +1645,115 @@ async def propose_loe(ctx: RunContext, proposal: Proposal) -> str:
     raise CallDeferred(metadata={"kind": "loe"})
 
 
+# --- mail-read (2026-09-02) ----------------------------------------------------
+# Answers the gap inbox-triage and the EA declared: a bulk dismissal pins a
+# set the agent could not read, and a review digest could not re-derive what
+# was dismissed or why. Both tools read the LEDGER — the same rows a bulk
+# dismissal would move — and the façade only for the Gmail search itself
+# (same query semantics `propose_bulk_dismiss` pins). No credential reaches
+# the agent; the façade holds the OAuth exactly as it does for the feed.
+
+def _mail_line(row: dict) -> str:
+    locator = f" session={row['session_id']}" if row.get("session_id") else ""
+    if row.get("folded_into"):
+        locator += f" folded_into={row['folded_into']}"
+    why = ""
+    if row.get("dismissal_rationale"):
+        # Rationales are paragraphs; the list shows the opening line and
+        # `mail_read` carries the whole thing.
+        first = row["dismissal_rationale"].strip().splitlines()[0]
+        why = f" — dismissed: “{first[:200]}{'…' if len(first) > 200 else ''}”"
+    return (f"- {row['id']} [{row['state']}] {row.get('received_at') or '?'} "
+            f"from {row.get('sender') or '?'}: {row.get('subject') or '(no subject)'}"
+            f"{locator}{why}")
+
+
+async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
+    """Search the mailbox with a Gmail query and see what the QUEUE knows about
+    each match: its work-item id, state (UNPROCESSED / PROCESSED / FOLDED …),
+    date, sender, subject, the session that handled it and — when it was
+    dismissed — the recorded reason. Headers and locators only; open one with
+    `mail_read`.
+
+    Use it BEFORE `propose_bulk_dismiss`: the same `query` pins the same set,
+    so what you review here is what the operator will be asked to approve.
+    Name the sender (`from:someone@example.com`) or an exact phrase, and
+    anchor date windows on the mail's own dates (`after:2021/11/01
+    before:2021/12/01`), never `older_than:` — that is relative to today.
+    Read-only: nothing here changes any message or any queue row.
+    """
+    from central_command.db import repo
+    from central_command.ingest.ledger import provider_message_id
+    from central_command.integrations import email_facade
+
+    query = (query or "").strip()
+    if not query:
+        return "give a Gmail query, e.g. from:someone@example.com"
+    try:
+        refs = await email_facade.list_refs(query)
+    except email_facade.EmailFacadeError as e:
+        return (f"mail search failed ({e}). If the query matched too many "
+                "messages, narrow it with an explicit after:/before: window.")
+    ids = [provider_message_id(r["uuid"]) for r in refs]
+    rows = await repo.mail_items_for_message_ids(ids)
+    by_state: dict[str, int] = {}
+    for r in rows:
+        by_state[r["state"]] = by_state.get(r["state"], 0) + 1
+    head = (f"{len(refs)} message(s) match {query!r} in the mailbox; "
+            f"{len(rows)} of them are in the queue"
+            + (f" ({', '.join(f'{k}: {v}' for k, v in sorted(by_state.items()))})" if rows else "")
+            + f"; {len(refs) - len(rows)} never enrolled.")
+    shown = rows[: max(1, limit)]
+    lines = [_mail_line(r) for r in shown]
+    if len(rows) > len(shown):
+        lines.append(f"... {len(shown)} of {len(rows)} shown (raise `limit` to see more)")
+    return _clip("\n".join([head, *lines]))
+
+
+async def mail_read(ctx: RunContext, ref: str) -> str:
+    """Read one mail record from the queue: the email exactly as it was fed to
+    the agent that handled it (headers and body), its current state, the
+    session and covering proposal that decided it, the recorded dismissal
+    reason, the auditor's verdict and any operator note. `ref` is a work-item
+    id (`wi_…`) from `mail_search`, a ledger message id, or a Gmail message
+    uuid. A message not enrolled in the queue is read from the mailbox instead
+    and says so.
+
+    Attachment metadata does not cross the email façade — if an attachment
+    matters, say that you could not see it rather than describing it. Read-only.
+    """
+    from central_command.db import repo
+    from central_command.integrations import email_facade
+
+    ref = (ref or "").strip()
+    row = await repo.mail_item(ref) if ref else None
+    if row is None:
+        try:
+            msg = await email_facade.get_message(ref)
+        except email_facade.EmailFacadeError as e:
+            return f"{ref!r} is not in the queue and the mailbox could not return it ({e})"
+        return _clip(
+            f"NOT ENROLLED in the queue (read from the mailbox)\n"
+            f"From: {msg.get('from')}\nSubject: {msg.get('subject')}\n"
+            f"Date: {msg.get('date')}\n\n{msg.get('body_text') or msg.get('snippet') or ''}"
+        )
+    audit = row.get("audit") or {}
+    parts = [
+        _mail_line(row),
+        f"message_id={row['message_id']} provider_uuid={row.get('provider_uuid')} "
+        f"terminal_at={row.get('terminal_at')}",
+    ]
+    if row.get("dismissal_rationale"):
+        parts.append(f"dismissal rationale: {row['dismissal_rationale']}")
+    if audit:
+        parts.append(f"audit: {audit.get('verdict')} — {audit.get('rationale')}")
+    if row.get("operator_note"):
+        parts.append(f"operator note: {row['operator_note']}")
+    parts.append("")
+    parts.append(row.get("text") or "(no message text recorded)")
+    return _clip("\n".join(parts))
+
+
 # --- bulk dismissal, agent path (2026-08-17 design, slice 2) ------------------
 # A query is SPECIFIC when it names a sender or an exact phrase. A bare
 # `category:promotions` is Gmail's own classifier over the whole mailbox, and
