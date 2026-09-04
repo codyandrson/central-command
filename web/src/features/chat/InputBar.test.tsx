@@ -20,10 +20,13 @@ vi.mock('./image-compress', () => ({
   })),
 }));
 
+const voiceMock = { startRecording: vi.fn(), stopAndTranscribe: vi.fn() };
 vi.mock('@/features/voice/useVoiceInput', () => ({
   useVoiceInput: () => ({
     voiceState: 'idle',
     interimTranscript: '',
+    startRecording: voiceMock.startRecording,
+    stopAndTranscribe: voiceMock.stopAndTranscribe,
     wakeWordEnabled: false,
     toggleWakeWord: vi.fn(),
     error: null,
@@ -273,6 +276,13 @@ describe('InputBar', () => {
     fireEvent.input(input, { target: { value: '/' } });
 
     expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+  });
+
+  it('offers a mic button that starts recording — the touch path to voice input', () => {
+    render(<InputBar onSend={vi.fn()} isGenerating={false} />);
+    fireEvent.click(screen.getByLabelText('Start voice input'));
+    expect(voiceMock.startRecording).toHaveBeenCalled();
+    expect(voiceMock.stopAndTranscribe).not.toHaveBeenCalled();
   });
 
   it('offers the paperclip without the vendored attachment menu', async () => {

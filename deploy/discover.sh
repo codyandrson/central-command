@@ -1053,6 +1053,7 @@ seam_for() {
     mcr)                              printf 'CC_REGISTRY_MCR' ;;
     deb-debian)                       printf 'CC_APT_MIRROR' ;;
     deb-security)                     printf 'CC_APT_SECURITY_MIRROR' ;;
+    huggingface)                      printf 'CC_HF_ENDPOINT' ;;
     *)                                printf '' ;;
   esac
 }
