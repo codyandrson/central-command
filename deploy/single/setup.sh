@@ -8,8 +8,14 @@
 #   this script. If a conductor is composing a command, it is off the rails.
 #
 #   This file ORCHESTRATES; it does not reimplement. Every real operation
-#   already lives in a script next to it (make-secrets.sh, render.sh,
-#   discover-llm.sh, build-*-image.sh, verify.sh) and is called, not copied.
+#   already lives in a script next to it (make-secrets.sh, resolve-images.sh,
+#   discover-llm.sh, build-*-image.sh, verify.sh) or in compose.yaml, and is
+#   called, not copied.
+#
+#   SUBSTRATE: Compose (2026-09-03 deploy refactor, D1). compose.yaml replaced
+#   render.sh + five envsubst templates + `podman kube play` choreography.
+#   Readiness lives in that file as healthchecks and depends_on, so the deploy
+#   phases are a `compose up -d --wait` rather than a play-then-poll sequence.
 #
 #   PHASES — each a subcommand, each individually re-runnable via the SAME
 #   code path as the full run (kubeadm's shape):
@@ -20,7 +26,7 @@
 #                 that needs the network; stops for the operator per artifact.
 #     llm         secrets + LiteLLM up + probe its aliases + MEASURE the
 #                 embedding dimension into .env
-#     stack       build local images + render + play the core stack
+#     stack       assert the local images + bring the core stack up (compose)
 #     app         venv, editable install, root .env, mint the spine's virtual
 #                 key, cockpit build
 #     verify      verify.sh (deployed) then live, then the capability manifest
@@ -97,15 +103,52 @@ step() { # step <check-name> <success-message> <cmd...>
   return 1
 }
 
-# Poll until an HTTP endpoint answers. Never a bare sleep: the thing being
-# waited on has no readiness gate under kube play, so a fixed sleep is either
-# a race or wasted minutes.
+# Poll until an HTTP endpoint answers. Never a bare sleep: a fixed sleep is
+# either a race or wasted minutes. Most readiness now lives in compose.yaml's
+# healthchecks; this stays for the two waits that are honestly host-side —
+# LiteLLM's first-boot Prisma migration and the speech engine's ~1GB model
+# download (long enough that "unhealthy" is the normal state for half an hour,
+# which is why that service carries no healthcheck at all).
 wait_http() { # wait_http <url> <seconds>
   local deadline=$(( SECONDS + $2 ))
   until curl -fsS -m 5 "$1" >/dev/null 2>&1; do
     (( SECONDS < deadline )) || return 1
     sleep 3
   done
+}
+
+# ── the compose provider ────────────────────────────────────────────────────
+# `podman compose` on the targets; `docker compose` is the dev-box fallback.
+# Detected once, by RUNNING it (the same reason $PY is probed by running):
+# `podman compose` exists as a subcommand even when no provider is installed
+# behind it, and answers with an error only when actually invoked.
+COMPOSE_BIN=()
+compose_detect() {
+  (( ${#COMPOSE_BIN[@]} )) && return 0
+  local c
+  for c in podman docker; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    if "$c" compose version >/dev/null 2>&1; then COMPOSE_BIN=("$c" compose); return 0; fi
+  done
+  return 1
+}
+# Every compose call goes through here: one file, one profile set, one place
+# to get the flags right.
+compose() { # compose <args...>
+  compose_detect || { fail "compose" "no compose provider — install podman-compose (or the docker compose plugin)"; return 1; }
+  "${COMPOSE_BIN[@]}" -f "$HERE/compose.yaml" "$@"
+}
+# CC_ENABLE_* -> --profile flags, into the global PROFILE_FLAGS. The sandbox is
+# deliberately absent: it has no container here (its containers are created on
+# demand by the runner, a host process), so its only deployable artifact is
+# the image.
+PROFILE_FLAGS=()
+compose_profile_flags() {
+  PROFILE_FLAGS=()
+  [[ "${CC_ENABLE_N8N:-0}" == 1 ]] && PROFILE_FLAGS+=(--profile n8n)
+  [[ "${CC_ENABLE_CRAWLER:-1}" == 1 ]] && PROFILE_FLAGS+=(--profile crawler)
+  [[ "${CC_ENABLE_SPEECH:-1}" == 1 ]] && PROFILE_FLAGS+=(--profile speech)
+  return 0
 }
 
 # ── .env helpers ────────────────────────────────────────────────────────────
@@ -115,8 +158,10 @@ load_env() {
   # shellcheck disable=SC1090
   . "$ENV_FILE"
   set +a
+  # Still the container-name prefix (compose's container_name), which is how
+  # verify.sh, diagnose and update.sh address containers. It is no longer a
+  # DNS name: compose gives every service its own.
   : "${CC_POD_PREFIX:=cc-}"
-  : "${CC_NETWORK:=cc-single}"
   : "${CC_LITELLM_PORT:=4000}"
   : "${CC_LITELLM_DB_PORT:=5443}"
   : "${CC_CRAWLER_PORT:=8091}"
@@ -225,7 +270,7 @@ phase_validate() {
   fi
 
   # Ports: numeric, in range, and distinct — two services on one hostPort is a
-  # kube play that half-starts.
+  # published port that half-starts the stack.
   local seen="" p val dup=0 bad_port=0
   for p in CC_PG_PORT CC_LITELLM_PORT CC_LITELLM_DB_PORT CC_GRAPHITI_PORT \
            CC_NEO4J_BOLT_PORT CC_NEO4J_HTTP_PORT CC_N8N_PORT CC_CRAWLER_PORT CC_SPEECH_PORT; do
@@ -249,15 +294,28 @@ phase_validate() {
     fi
   done
 
-  for v in CC_POD_PREFIX CC_NETWORK; do
-    [[ -n "${!v:-}" ]] && pass "name-${v}" "${!v}" || fail "name-${v}" "$v is empty"
-  done
+  [[ -n "${CC_POD_PREFIX:-}" ]] \
+    && pass "name-CC_POD_PREFIX" "${CC_POD_PREFIX}" \
+    || fail "name-CC_POD_PREFIX" "CC_POD_PREFIX is empty"
 
-  # The single-node profile's other never-rotate invariant: the manifests are
-  # rendered against these names, so a change after first play orphans pods.
+  # schema.sql is bind-mounted into the spine's initdb directory straight from
+  # the repo, so its absence is a broken deployment, not just a broken test.
   [[ -f "$REPO_ROOT/central_command/db/schema.sql" ]] \
     && pass "repo-layout" "schema.sql found — running inside the repo" \
     || fail "repo-layout" "central_command/db/schema.sql not found — is this the Central Command repo?"
+
+  # The arithmetic validate used to do by hand — service references, port
+  # collisions, profile membership, interpolation — is compose's now. This is
+  # the whole check: does the deployment file parse with THIS .env?
+  if compose_detect; then
+    if compose --profile n8n --profile crawler --profile speech config >/dev/null 2>&1; then
+      pass "compose-config" "compose.yaml is valid with this .env (all profiles)"
+    else
+      fail "compose-config" "compose.yaml does not validate — see: $(printf '%s ' "${COMPOSE_BIN[@]}")-f deploy/single/compose.yaml config"
+    fi
+  else
+    warn "compose-config" "no compose provider here to validate compose.yaml with (preflight checks for one)"
+  fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -285,8 +343,17 @@ phase_preflight() {
     fail "podman-running" "podman not found on PATH"
   fi
 
+  # The deployment substrate. `podman compose` is the target; `docker compose`
+  # is the dev-box fallback. Neither answering is a hard stop — nothing after
+  # fetch can run without one.
+  if compose_detect; then
+    pass "compose-provider" "$(printf '%s ' "${COMPOSE_BIN[@]}")($("${COMPOSE_BIN[@]}" version 2>/dev/null | head -1))"
+  else
+    fail "compose-provider" "neither 'podman compose' nor 'docker compose' answers — install podman-compose (or Podman Desktop's compose support)"
+  fi
+
   local t
-  for t in curl openssl envsubst git uv; do
+  for t in curl openssl git uv; do
     command -v "$t" >/dev/null 2>&1 \
       && pass "tool-${t}" "present" \
       || fail "tool-${t}" "$t not found on PATH"
@@ -401,54 +468,45 @@ phase_preflight() {
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE: fetch — acquire EVERY dependency before anything is deployed.
 # ─────────────────────────────────────────────────────────────────────────────
-# The check IS the acquisition: an image is proven by pulling it (by digest,
-# from images.txt), a build by building it (podman caches layers, so a retry
-# costs the failing layer), the Python graph by resolving it, the cockpit by
-# `npm ci`. Each failure names the seam that governs it, and the phase ends in
-# USERACTION (exit 3): the operator fixes the mirror seam (deploy/discover.sh
-# maps what the network can reach) and re-runs — acquired artifacts
-# fast-forward. Nothing falls back on its own — a fallback chosen at 11pm by a
-# script is a decision nobody can find later.
-registry_host() { # registry_host <key> [public]
-  case "$1" in
-    dockerio) [[ "${2:-}" == public ]] && echo docker.io || echo "${CC_REGISTRY_DOCKERIO:-docker.io}" ;;
-    ghcr)     [[ "${2:-}" == public ]] && echo ghcr.io   || echo "${CC_REGISTRY_GHCR:-ghcr.io}" ;;
-    mcr)      [[ "${2:-}" == public ]] && echo mcr.microsoft.com || echo "${CC_REGISTRY_MCR:-mcr.microsoft.com}" ;;
-    *) return 1 ;;
-  esac
-}
-component_wanted() { # images.txt's last column vs the flags and sources
-  case "$1" in
-    core)          return 0 ;;
-    n8n)           [[ "$CC_ENABLE_N8N" == 1 ]] ;;
-    graphiti-base) return 0 ;;
-    sandbox-base)  [[ "$CC_ENABLE_SANDBOX" == 1 ]] ;;
-    crawler-base)  [[ "$CC_ENABLE_CRAWLER" == 1 ]] ;;
-    speech)        [[ "$CC_ENABLE_SPEECH" == 1 ]] ;;
-    *) return 1 ;;
-  esac
-}
-# CAPTURE BEFORE GREPPING: `podman images | grep -q` inverts under pipefail.
+# The check IS the acquisition: an image is proven by RESOLVING it against the
+# registry (resolve-images.sh: constraint/lock/resolve, design record D2) and
+# then pulling the resolved ref, a build by building it (podman caches layers,
+# so a retry costs the failing layer), the Python graph by resolving it, the
+# cockpit by `npm ci`. Each failure names the seam that governs it, and the
+# phase ends in USERACTION (exit 3): the operator fixes the mirror seam
+# (deploy/discover.sh maps what the network can reach) and re-runs — acquired
+# artifacts fast-forward. Nothing falls back on its own — a fallback chosen at
+# 11pm by a script is a decision nobody can find later.
+# CAPTURE BEFORE GREPPING: `podman images | grep -q` inverts under pipefail
+# (grep exits at the first match, podman takes SIGPIPE, the pipeline reports
+# failure on success).
 have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)"; grep -qx "$1" <<<"$imgs"; }
 
+# Pull every ref resolve-images.sh wrote into .env. The refs are TAGGED, not
+# digest-pinned: the lock's digest is verified at resolution time against the
+# registry, and a substituted tag is deliberately trusted from the mirror.
 fetch_images() {
-  local key path digest comp host ref id check
-  while read -r key path digest comp; do
-    [[ -z "$key" || "$key" == \#* ]] && continue
-    component_wanted "$comp" || continue
-    host="$(registry_host "$key")" || { fail "images-txt" "unknown registry key '$key' in images.txt"; continue; }
-    ref="$host/$path"; check="image-${path%%:*}"; check="${check//\//-}"; check="${check#image-library-}"
+  local rc=0
+  "$HERE/resolve-images.sh" || rc=$?
+  case "$rc" in
+    0) pass "resolve-images" "every image resolved to its locked tag" ;;
+    2) pass "resolve-images" "resolved, with substitutions — see the WARN lines above and installed.manifest" ;;
+    *) fail "resolve-images" "image resolution failed (exit $rc) — the FAIL/USERACTION lines above name the seam"; return 1 ;;
+  esac
+  # resolve-images.sh writes CC_IMG_* into .env; re-read so this shell has them.
+  load_env || return 1
+
+  local var ref check
+  while IFS= read -r var; do
+    ref="${!var:-}"; [[ -z "$ref" ]] && continue
+    check="image-${var#CC_IMG_}"; check="${check,,}"
     if have_image "$ref"; then pass "$check" "$ref present"; continue; fi
-    # By DIGEST, then tagged: the mirror cannot hand us a drifted or poisoned
-    # tag, and the templates' name:tag resolves locally from here on.
-    if podman pull -q "$ref@$digest" >/dev/null 2>&1 \
-       && id="$(podman image inspect --format '{{.Id}}' "$ref@$digest" 2>/dev/null)" \
-       && podman tag "$id" "$ref" >/dev/null 2>&1; then
-      pass "$check" "$ref pulled by digest"
+    if podman pull -q "$ref" >/dev/null 2>&1 </dev/null; then
+      pass "$check" "$ref pulled"
     else
-      fail "$check" "$ref@$digest could not be pulled — seam: CC_REGISTRY_${key^^} in .env (or a registries.conf mirror podman sees)"
+      fail "$check" "$ref could not be pulled — seam: the CC_REGISTRY_* entry for its registry in .env (or a registries.conf mirror podman sees)"
     fi
-  done <"$HERE/images.txt"
+  done < <(compgen -A variable CC_IMG_ | sort)
 }
 
 fetch_local() { # fetch_local <check> <ref> <build-script> <seams>
@@ -553,8 +611,8 @@ llm_gate() { # llm_gate <what-failed>
   note "    cc-stt         openai/<your Whisper model>       cockpit voice input"
   if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
   note "  The bundled speech engine (cc-speech) answers both — enter, verbatim:"
-  note "    cc-tts   model openai/${CC_SPEECH_TTS_MODEL}   api_base http://${CC_POD_PREFIX}speech:8000/v1   key none"
-  note "    cc-stt   model openai/${CC_SPEECH_STT_MODEL}   api_base http://${CC_POD_PREFIX}speech:8000/v1   key none"
+  note "    cc-tts   model openai/${CC_SPEECH_TTS_MODEL}   api_base http://speech:8000/v1   key none"
+  note "    cc-stt   model openai/${CC_SPEECH_STT_MODEL}   api_base http://speech:8000/v1   key none"
   note "  (or point cc-stt at hosted Whisper-convention models of your own)"
   fi
   note "  api_base is what the CONTAINER dials: a server on this machine is"
@@ -572,26 +630,18 @@ llm_gate() { # llm_gate <what-failed>
 phase_llm() {
   load_env || return 1
 
-  step "secrets" "credentials generated and secrets.yaml written" "$HERE/make-secrets.sh" || return 1
+  step "secrets" "credentials generated into deploy/single/.env" "$HERE/make-secrets.sh" || return 1
   # make-secrets.sh may have generated LITELLM_MASTER_KEY into the .env we
-  # sourced before it; the register step below needs it in the environment.
+  # sourced before it; compose reads that file itself, and the register step
+  # below needs the key in this environment.
   load_env || return 1
-  step "render-llm" "stack-llm.yaml rendered" "$HERE/render.sh" llm || return 1
 
-  # `network create` is not idempotent; existing is success for us.
-  local nets; nets="$(podman network ls --format '{{.Name}}' 2>/dev/null)"
-  if grep -qx "$CC_NETWORK" <<<"$nets"; then
-    pass "network" "$CC_NETWORK already exists"
-  else
-    step "network" "$CC_NETWORK created" podman network create "$CC_NETWORK" || return 1
-  fi
-
-  # --replace makes the play converge rather than collide on a re-run
-  # (verified: it replaces the pods and updates the secrets in place).
-  step "play-secrets" "podman secrets applied" \
-    podman kube play --replace "$HERE/secrets.yaml" || return 1
-  step "play-litellm" "litellm + its database and redis played" \
-    podman kube play --replace --network "$CC_NETWORK" "$HERE/stack-llm.yaml" || return 1
+  # `up -d` converges rather than collides on a re-run — a container whose
+  # definition is unchanged is left alone. Named services only: the graph must
+  # not be created before the embedding dimension has been MEASURED, and
+  # compose brings each service's healthy dependencies up with it.
+  step "up-litellm" "litellm + its database and redis are up and healthy" \
+    compose up -d --wait litellm || return 1
 
   # LiteLLM runs its Prisma migrations at boot; 5 minutes is the honest budget.
   if wait_http "http://127.0.0.1:${CC_LITELLM_PORT}/health/liveliness" 300; then
@@ -601,14 +651,15 @@ phase_llm() {
     return 1
   fi
 
-  # The speech engine plays HERE, not in the stack phase: its aliases are
-  # probed below, and a probe against a pod that is not up yet is a false gate.
+  # The speech engine starts HERE, not in the stack phase: its aliases are
+  # probed below, and a probe against a service that is not up yet is a false
+  # gate. No --wait: it has no healthcheck, because its first boot spends up
+  # to half an hour downloading models (polled for real further down).
   if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
-    need_image "image-speech" "${CC_REGISTRY_GHCR:-ghcr.io}/speaches-ai/speaches:0.8.3-cpu" || return 1
-    step "play-speech" "speech engine played on 127.0.0.1:${CC_SPEECH_PORT}" \
-      podman kube play --replace --network "$CC_NETWORK" "$HERE/optional-speech.yaml" || return 1
+    step "up-speech" "speech engine started on 127.0.0.1:${CC_SPEECH_PORT}" \
+      compose --profile speech up -d speech || return 1
   else
-    pass "play-speech" "skipped (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt point at engines of your own)"
+    pass "up-speech" "skipped (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt point at engines of your own)"
   fi
 
   # The catalog is DB-stored (store_model_in_db) and managed in the proxy's
@@ -691,10 +742,8 @@ phase_llm() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PHASE: stack — local images, render, play.
+# PHASE: stack — assert the local images, then bring the whole stack up.
 # ─────────────────────────────────────────────────────────────────────────────
-# Build only what is missing. Capture, THEN grep: `podman images | grep -q`
-# inverts under pipefail (grep exits first, podman takes SIGPIPE).
 # Images are the fetch phase's job; here they are only ASSERTED, so a missing
 # one is a clear "run fetch" and never a surprise build (or pull) mid-deploy.
 need_image() { # need_image <check-name> <image-ref>
@@ -719,24 +768,21 @@ phase_stack() {
     pass "image-crawler" "skipped (CC_ENABLE_CRAWLER=0)"
   fi
 
-  step "render" "all manifests rendered" "$HERE/render.sh" || return 1
+  # The dimension is written into the Neo4j vector index and is effectively
+  # permanent, so the graph may not be created before it has been MEASURED.
+  [[ -n "${CC_EMBED_DIM:-}" ]] || {
+    fail "embed-dimension" "CC_EMBED_DIM is empty in deploy/single/.env — run: ./setup.sh llm (it measures it through the cc-embedding alias)"
+    return 1
+  }
 
-  step "play-core" "postgres, neo4j and graphiti played" \
-    podman kube play --replace --network "$CC_NETWORK" "$HERE/stack.yaml" || return 1
-
-  if [[ "$CC_ENABLE_CRAWLER" == "1" ]]; then
-    step "play-crawler" "crawler played on 127.0.0.1:${CC_CRAWLER_PORT}" \
-      podman kube play --replace --network "$CC_NETWORK" "$HERE/optional-crawler.yaml" || return 1
-  else
-    pass "play-crawler" "skipped (CC_ENABLE_CRAWLER=0)"
-  fi
-
-  if [[ "$CC_ENABLE_N8N" == "1" ]]; then
-    step "play-n8n" "n8n played" \
-      podman kube play --replace --network "$CC_NETWORK" "$HERE/optional-n8n.yaml" || return 1
-  else
-    pass "play-n8n" "skipped (CC_ENABLE_N8N=0 — no n8n-backed integration selected)"
-  fi
+  # ONE call brings the whole stack up: compose.yaml's depends_on/healthchecks
+  # carry the order that used to be a sequence of plays, and --wait blocks
+  # until every service with a healthcheck is healthy. The optional components
+  # are profiles, so the CC_ENABLE_* flags select them by name and nothing has
+  # to be skipped by hand.
+  compose_profile_flags
+  step "up-stack" "the stack is up and healthy (${PROFILE_FLAGS[*]:-no optional profiles})" \
+    compose "${PROFILE_FLAGS[@]}" up -d --wait || return 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -891,7 +937,7 @@ capability_manifest() {
   echo "                 CRI-format /var/log/containers/*.log, which podman does"
   echo "                 not produce, so the collector needs a redesign rather"
   echo "                 than a port. Deferred deliberately. Use instead:"
-  echo "                   podman logs <pod>-<container>"
+  echo "                   podman compose -f deploy/single/compose.yaml logs <service>"
   echo "                   ./setup.sh diagnose"
   [[ "$CC_ENABLE_SANDBOX" == "1" ]] || echo "     sandbox     disabled by CC_ENABLE_SANDBOX=0"
   [[ "$CC_ENABLE_CRAWLER" == "1" ]] || echo "     crawler     disabled by CC_ENABLE_CRAWLER=0 (rung-1 HTTP fetch still works)"
@@ -1174,8 +1220,8 @@ phase_diagnose() {
       echo "  (no discovery run on this machine — deploy/discover.sh)"
     fi
     echo
-    echo "== podman pods"
-    podman pod ps --format '{{.Name}}\t{{.Status}}' 2>&1
+    echo "== compose services"
+    compose_detect && "${COMPOSE_BIN[@]}" -f "$HERE/compose.yaml" ps -a 2>&1 || echo "  (no compose provider)"
     echo
     echo "== podman containers"
     podman ps -a --format '{{.Names}}\t{{.Status}}\t{{.Image}}' 2>&1
@@ -1183,8 +1229,9 @@ phase_diagnose() {
     echo "== images"
     podman images --format '{{.Repository}}:{{.Tag}}' 2>&1
     echo
-    echo "== last 100 log lines per cc pod"
-    # Names, THEN loop — a `podman ... | grep` pipeline inverts under pipefail.
+    echo "== last 100 log lines per cc container"
+    # Names, THEN loop — a `podman ... | grep` pipeline inverts under pipefail
+    # (grep exits at the first match and podman takes SIGPIPE).
     ctrs="$(podman ps -a --format '{{.Names}}' 2>/dev/null)"
     while IFS= read -r c; do
       [[ -z "$c" || "$c" != "${CC_POD_PREFIX}"* ]] && continue

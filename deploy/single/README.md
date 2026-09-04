@@ -1,7 +1,8 @@
 # deploy/single — the single-node, giftable profile
 
-Central Command's core spine on **one machine**, via `podman kube play`. This is
-the profile you hand to someone who has an LLM API key and nothing else.
+Central Command's core spine on **one machine**, via **Compose** (`podman
+compose`; `docker compose` on a dev box). This is the profile you hand to
+someone who has an LLM API key and nothing else.
 
 It is **derived from `deploy/k3s/`, not a replacement for it.** the operator's two-node
 k3s cluster stays what it is; everything homelab-specific — two-node
@@ -10,65 +11,76 @@ the log console — is factored out here.
 
 ## What runs
 
-`stack-llm.yaml` — litellm + its postgres + redis. Played **first**: setup is
-LiteLLM-first (2026-08-25), so the proxy is up and its aliases registered
-before anything is validated, and every probe then runs THROUGH those aliases.
-The model catalog is **DB-stored** (`store_model_in_db`, as on k3s) and
-**yours to fill in**: the `llm` phase creates the four required aliases
-(`models.json`, via `deploy/pi/litellm/register-models.py` — create-only)
-as skeletons and **pauses** for you to enter the provider, model ids and key
-in the LiteLLM UI; re-running `./setup.sh llm` validates each alias with a
-real request and continues. Nothing you enter or later change in the UI is
-ever overwritten by setup. Until 2026-08-30 the models were declared in the
-config file's `model_list` from `.env`, which the UI cannot edit.
+One file: **`compose.yaml`**. It replaced `render.sh` + five envsubst
+templates + `podman kube play` on 2026-09-03 (design record
+`docs/superpowers/specs/2026-09-03-deploy-refactor-design.md`).
 
-`stack.yaml` — postgres (the spine, schema auto-loaded) · neo4j · graphiti
-(MCP). Played **second**, and not before the embedding dimension has been
-measured through `cc-embedding`: `CC_EMBED_DIM` is written into the Neo4j
-vector index and is effectively permanent. It is the only variable of the two
-files that the LLM half does not need, which is why `./render.sh llm` can run
-before it exists.
+**Always up:** `postgres` (the spine, schema auto-loaded from the repo's
+`schema.sql` on a FRESH database) · `litellm` + its own `litellm-db` and
+`litellm-redis` · `neo4j` · `graphiti` (MCP).
 
-`optional-n8n.yaml` — n8n + its postgres. Played **only** when an n8n-backed
-integration (today: Gmail) is selected (`CC_ENABLE_N8N=1`). Skip it and the
-install is two containers lighter.
+**Profiles**, selected from the `CC_ENABLE_*` flags by `setup.sh`:
 
-`optional-crawler.yaml` — cc-crawler, the browser-rendering crawl service
-(rung 2 of docs ingestion). Played when `CC_ENABLE_CRAWLER=1`, which is the
-default. Its image is built locally and is large (Chromium); rung 1, a plain
-HTTP fetch, keeps working without it.
+- `n8n` — n8n + its postgres. Only needed by an n8n-backed integration
+  (today: Gmail). Off by default; skip it and the install is two containers
+  lighter.
+- `crawler` — cc-crawler, the browser-rendering crawl service (rung 2 of docs
+  ingestion). On by default. Its image is built locally and is large
+  (Chromium); rung 1, a plain HTTP fetch, keeps working without it.
+- `speech` — cc-speech, the self-hosted speech engine (Speaches: faster-whisper
+  STT + Kokoro TTS) behind the `cc-tts` / `cc-stt` aliases the cockpit's voice
+  input and read-aloud use. On by default, and started in the **llm** phase
+  rather than `stack`, so the catalog re-run can probe both aliases with a real
+  synthesis-then-transcription round trip. Its models are HF-hub snapshots the
+  container pulls on first boot (`CC_HF_ENDPOINT` for a mirror; no egress at
+  all means pre-placing them — `deploy/AIRGAP.md`). `CC_ENABLE_SPEECH=0` means
+  you point BOTH aliases at engines of your own (hosted Whisper-convention
+  models for `cc-stt` is the expected case); the aliases are required either
+  way.
 
-`optional-speech.yaml` — cc-speech, the self-hosted speech engine (Speaches:
-faster-whisper STT + Kokoro TTS) behind the `cc-tts` / `cc-stt` aliases the
-cockpit's voice input and read-aloud use. Played when `CC_ENABLE_SPEECH=1`
-(the default) — in the **llm** phase, not `stack`, so the catalog re-run can
-probe both aliases with a real synthesis-then-transcription round trip. Its
-models are HF-hub snapshots the pod pulls on first boot (`CC_HF_ENDPOINT` for a
-mirror; no egress at all means pre-placing them — `deploy/AIRGAP.md`). `0`
-means you point BOTH aliases at engines of your own (hosted Whisper-convention
-models for `cc-stt` is the expected case); the aliases are required either way.
+The **sandbox** has no service: sandbox containers are created on demand by the
+runner, and on this profile the runner's backend is rootless podman rather than
+the k3s profile's gVisor.
 
-The **sandbox** has no pod: sandbox containers are created on demand by the
-runner, and on this profile the runner's backend is rootless podman rather
-than the k3s profile's gVisor.
+**Order lives in the file, not in the driver.** `healthcheck` +
+`depends_on: condition: service_healthy` express what used to be a sequence of
+plays and polls: litellm waits for its database and redis, graphiti waits for
+neo4j and litellm. `setup.sh` brings services up with `--wait`. Two host-side
+polls survive on purpose — LiteLLM's first-boot Prisma migration (5 minutes),
+and the speech engine, which carries **no** healthcheck because its first boot
+spends up to half an hour downloading ~1GB of models.
 
-Everything is a plain `Pod`. `podman kube play` implements no Services, so the
-**pod name is the DNS name** on the shared podman network — which is why
-`CC_POD_PREFIX` travels into every cross-pod reference. Host access is
-hostPort on `127.0.0.1`, at the same ports the app's `.env` already assumes
-(postgres 5442, litellm 4000, graphiti 8000, bolt 7687).
+Services find each other by **compose service name** (`neo4j`, `litellm`,
+`speech`) on the project's own network — the old pod-name/`CC_POD_PREFIX` DNS
+convention is gone. `CC_POD_PREFIX` still prefixes `container_name`, which is
+how `verify.sh`, `./setup.sh diagnose` and `update.sh` address containers. Host
+access is loopback-published ports at the same numbers the app's `.env` already
+assumes (postgres 5442, litellm 4000, graphiti 8000, bolt 7687).
+
+The proxy's model catalog is **DB-stored** (`store_model_in_db`, as on k3s) and
+**yours to fill in**: the `llm` phase creates the required aliases
+(`models.json`, via `deploy/pi/litellm/register-models.py` — create-only) as
+skeletons and **pauses** for you to enter the provider, model ids and key in
+the LiteLLM UI; re-running `./setup.sh llm` validates each alias with a real
+request and continues. Nothing you enter or later change in the UI is ever
+overwritten by setup.
+
+`CC_EMBED_DIM` is measured, not declared, and the `stack` phase refuses to run
+without it: it is written into the Neo4j vector index and is effectively
+permanent.
 
 ## Prerequisites
 
 - **Claude Code CLI** — a hard prerequisite: it conducts the install and the
   onboarding interview. There is no no-Claude-Code install path.
-- podman ≥ 4.9 (validated on 4.9.3), with `envsubst` (gettext), `curl`,
-  `openssl`, `git`, and `uv` (which supplies CPython 3.12). Node ≥ 22 is
-  optional — without it the cockpit is not built and the API still runs.
+- podman ≥ 4.9 (validated on 4.9.3) **with compose support** (`podman compose`
+  must answer; `docker compose` is accepted as a dev-box fallback), plus
+  `curl`, `openssl`, `git`, and `uv` (which supplies CPython 3.12). Node ≥ 22
+  is optional — without it the cockpit is not built and the API still runs.
   `./setup.sh preflight` checks all of these by name.
 - Windows: **podman CLI** (a podman machine on WSL2; Podman Desktop is
   optional — a GUI over the same machine) plus **Git Bash** for the `.sh`
-  scripts (ships `envsubst`, `openssl`, `curl`). Windows has no real
+  scripts (ships `openssl`, `curl`). Windows has no real
   `python3`; the scripts fall back to uv's (already required).
 - An OpenAI-compatible endpoint: base URL, API key, a chat model id, an
   embedding model id, and the embedding model's **dimension**.
@@ -110,7 +122,8 @@ just a different `api_base` on the `cc-embedding` row.
 ### Mirrors and air gaps
 
 `fetch` is the only phase that needs the network, and it runs BEFORE
-anything is deployed: it pulls every image in `images.txt` by digest, builds
+anything is deployed: it RESOLVES every image against your registry (see
+below), pulls the resolved refs, builds
 the three local images (graphiti, sandbox, crawler) with your mirrors passed
 in as build-args, resolves the Python dependencies, and runs the cockpit's
 `npm ci`. Each artifact it cannot get is a `FAIL` naming the `.env` seam that
@@ -119,6 +132,33 @@ governs it (`CC_REGISTRY_*`, `CC_APT_MIRROR`, `CC_PYPI_INDEX_URL`,
 mirror and re-run `./setup.sh fetch` — acquired artifacts fast-forward.
 Nothing falls back on its own; the choice lives in `.env` so an update makes
 the same one.
+
+**Image versions are a constraint, a lock, and a resolution** (2026-09-03),
+because rigid `@sha256` pinning broke real installs when an enterprise mirror
+lacked the exact artifact. `images.txt` carries, per image, the tag SERIES this
+release supports (`16`, `5.26`, `7`) alongside the tested tag and digest; a
+substitute must keep the locked tag's FLAVOUR (`7-alpine` admits `7.4-alpine`,
+never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `resolve-images.sh` asks the registry what it has:
+
+- the locked tag → `PASS`, and its digest is verified against `images.txt`
+  (a mismatch is a `FAIL` — that tag has drifted or been poisoned). A tag that
+  is a series or a channel (`16`, `7-alpine`, `main-stable`) is declared
+  ROLLING with a `-` in the digest column: it moves on every upstream rebuild,
+  so the tag is the pin and the observed digest is recorded as provenance;
+- otherwise the newest tag satisfying the constraint → `WARN` naming the
+  substitution, no digest check (a substituted tag is trusted from the
+  enterprise mirror deliberately: the digest pin defended against
+  public-registry tag poisoning, a threat the mirrored air gap does not carry);
+- nothing satisfying it → `FAIL` naming the constraint and what the mirror has.
+
+The resolved refs are written to `.env` as `CC_IMG_*` (compose.yaml reads
+them) and recorded in `installed.manifest`. **A `WARN`-level substitution plus
+a green `./setup.sh verify` is a supported install** — capability is proven by
+probes, not by version strings. One limit worth knowing: the three locally
+built images pin their base tag in the Dockerfile, so a substituted *base*
+image is not what the build uses — if resolution substitutes a `*-base`
+component, the build will fail loudly on the missing tag and the fix is to
+mirror the tested tag or bump the lock.
 
 On a restricted network, run `deploy/discover.sh` first: it probes every
 external source this profile touches, diagnoses each failure mode, and its
@@ -142,7 +182,7 @@ tells you which phase to re-run.
 ```
 
 Paste that file to Claude. It carries pod/container states, the last 100 log
-lines per pod, `verify.sh`'s output, tool versions — and **key NAMES only,
+lines per container, `verify.sh`'s output, tool versions — and **key NAMES only,
 never values**. Claude interprets it and tells you which phase to re-run; it
 does not freehand replacement commands.
 
@@ -156,7 +196,7 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh preflight   # podman/tooling/RAM/disk/linger checks; no side effects
 ./setup.sh fetch       # acquire every external artifact up front (the one network phase)
 ./setup.sh llm         # secrets + LiteLLM (+speech) up + probe its aliases + measure CC_EMBED_DIM
-./setup.sh stack       # build local images, render, play postgres/neo4j/graphiti (+crawler, +n8n)
+./setup.sh stack       # assert the local images, then `compose up -d --wait` (+crawler, +n8n)
 ./setup.sh app         # venv, editable install, the app's .env, mint the spine's virtual key, cockpit
 ./setup.sh verify      # verify.sh, then live, then the capability manifest
 ./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
@@ -166,8 +206,9 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh stop        # stops the API that `boot` started
 ```
 
-The `kube play` calls use `--replace`, so re-applying after a config change
-replaces the pods and updates the podman secrets in place.
+`compose up -d` converges: a service whose definition is unchanged is left
+alone, a changed one is recreated. Re-running a phase after a config change is
+the supported way to apply it.
 
 ### First boot and the demo (the last three phases, 2026-08-28)
 
@@ -220,8 +261,8 @@ exit is a reviewed `mcp.sync_source`), but the kernel boundary is the host's.
 `./setup.sh verify` ends by printing the capability manifest; the one
 deliberate omission is the **vlogs log console**. Fluent Bit's container input
 tails CRI-format `/var/log/containers/*.log`, which podman does not produce, so
-the collector would need a redesign rather than a port. Use `podman logs
-<pod>-<container>` and `./setup.sh diagnose` instead.
+the collector would need a redesign rather than a port. Use `podman compose -f
+deploy/single/compose.yaml logs <service>` and `./setup.sh diagnose` instead.
 
 **When a `--proxy` probe fails, re-run it direct** (`./discover-llm.sh chat
 <upstream-model-id>`): a bad upstream URL/key and a broken
@@ -284,8 +325,8 @@ Rules that will save you:
 
 - **Commit your local file tweaks to `local` as you make them.** An
   uncommitted edit is invisible to the merge; `plan` warns about it and
-  `apply` refuses until it is committed. (`.env`, `secrets.yaml`, `.venv` are
-  gitignored and never part of this — they survive untouched.)
+  `apply` refuses until it is committed. (`.env`, `installed.manifest`,
+  `.venv` are gitignored and never part of this — they survive untouched.)
 - **Conflicts are a stop, not a failure.** If your local change and the update
   touch the same lines, `apply` stops with git's normal conflict markers:
   resolve, `git add`, `git commit`, and **re-run `./update.sh apply`** — every
@@ -298,24 +339,17 @@ Rules that will save you:
 
 ## Teardown
 
-Prefix-aware on purpose — with a changed `CC_POD_PREFIX`/`CC_NETWORK` the
-hardcoded names would silently leave secrets and the network behind:
+One command, and the profiles must be named or their containers are left
+behind:
 
 ```bash
-PFX="$(grep ^CC_POD_PREFIX= .env | cut -d= -f2)"
-NET="$(grep ^CC_NETWORK= .env | cut -d= -f2)"
-podman kube down --force optional-crawler.yaml
-podman kube down --force optional-speech.yaml   # --force also drops the model cache
-podman kube down --force optional-n8n.yaml   # --force also removes the volumes
-podman kube down --force stack.yaml
-podman kube down --force stack-llm.yaml      # the LLM half LAST — it is what
-                                             # everything else talks to
-podman secret rm "${PFX}litellm" "${PFX}neo4j" "${PFX}graphiti" "${PFX}n8n"
-podman network rm "$NET"
+podman compose -f compose.yaml --profile n8n --profile crawler --profile speech down
 ```
 
-Without `--force` the named volumes survive, which is what you want for a
-restart and not what you want for a wipe.
+Add `-v` to remove the named volumes too (the databases, the graph, the speech
+model cache). Without it the volumes survive, which is what you want for a
+restart and not what you want for a wipe. Nothing else is left over: there are
+no podman secrets and no hand-created network any more.
 
 ## Things that will bite you
 
@@ -342,13 +376,11 @@ bridge. It looks like a redundant duplicate of `cc-default`. It is not.
 the pause process dies when your last login session ends and takes every
 container with it. Hit during validation over SSH.
 
-**Secrets live in `secrets.yaml` and nowhere else.** `podman kube play` takes
-only YAML, so unlike the k3s profile (which pipes secrets in imperatively) a
-file is unavoidable. It is chmod'd 0600 (honored on Linux/macOS; on
-Windows/NTFS chmod is a silent no-op and the file relies on the user
-account's ACLs instead — `make-secrets.sh` reports which case applied) and
-gitignored, along with `.env` and all three rendered manifests. base64 is not
-encryption — never commit it.
+**Secrets live in `.env` and nowhere else.** Compose reads that file natively,
+so the old rendered `secrets.yaml` is gone. It is chmod'd 0600 (honored on
+Linux/macOS; on Windows/NTFS chmod is a silent no-op and the file relies on the
+user account's ACLs instead — `make-secrets.sh` reports which case applied) and
+gitignored. Never commit it, and never print its values.
 
 ## Reranking
 
@@ -366,8 +398,9 @@ exists.
 
 Designed for a single node, no hostPath, no GPU, loopback ports only.
 **Validated on Windows 11 + podman 5.8.6 (WSL2) + Git Bash, 2026-08-21,
-end-to-end with live inference.** The `.sh` scripts need a bash (Git Bash or
-WSL); the manifests themselves are shell-independent.
+end-to-end with live inference** — on the kube-play substrate; the Compose
+refactor (2026-09-03) is pending its own Windows validation. The `.sh` scripts
+need a bash (Git Bash or WSL); `compose.yaml` itself is shell-independent.
 
 Two things measured on that run, both already reflected in the scripts/docs
 above:

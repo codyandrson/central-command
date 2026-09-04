@@ -1,0 +1,44 @@
+# LiteLLM for the single-node profile. Bind-mounted read-only at
+# /app/config.yaml by compose.yaml (it used to be an inline ConfigMap in
+# stack-llm.yaml.tmpl).
+#
+# NO models here. The catalog lives in LiteLLM's Postgres (store_model_in_db)
+# exactly as on the k3s profile and is managed in the proxy UI/API: setup
+# creates the required aliases as SKELETONS (models.json via
+# deploy/pi/litellm/register-models.py) and PAUSES for the operator to enter
+# the provider, model ids and key, then validates. Until 2026-08-30 four
+# models were declared in a model_list AND store_model_in_db was true —
+# config-declared entries are static (the UI cannot edit them, and a
+# same-named DB row becomes a second deployment in the group), and they
+# carried no model_info.
+#
+# No credential is referenced from this file at all: the provider key is
+# entered in the UI and stored encrypted under LITELLM_SALT_KEY.
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  background_health_checks: false
+
+litellm_settings:
+  request_timeout: 300
+  # The user's endpoint may not accept every param LiteLLM would send.
+  drop_params: true
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    # NEVER add embedding/aembedding here (mirrors deploy/pi/litellm/
+    # config.yaml, pinned by tests/test_litellm_cache_call_types.py):
+    # a /v1/embeddings batch mixing cache hits and misses comes back
+    # MISALIGNED — miss rows receive a neighboring cached input's vector
+    # (reproduced live 2026-09-01; corrupted graph name_embeddings).
+    supported_call_types: ["completion", "acompletion"]
+
+router_settings:
+  allowed_fails: 1
+  # Every alias has exactly one deployment here, so a cooldown converts a
+  # single failed request into a total outage reported as the misleading
+  # "No deployments available for selected model".
+  cooldown_time: 0

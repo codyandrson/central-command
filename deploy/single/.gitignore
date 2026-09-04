@@ -1,11 +1,6 @@
-# Everything generated, and the one file that holds secrets.
+# The one file that holds secrets, and everything generated per install.
 .env
-secrets.yaml
-stack.yaml
-stack-llm.yaml
-optional-n8n.yaml
-optional-crawler.yaml
-optional-speech.yaml
+installed.manifest
 setup-diagnostics.txt
 setup-log.txt
 uvicorn.log

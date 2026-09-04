@@ -4,7 +4,7 @@
 #
 #   Not a smoke test that prints "OK" if podman is running. Each check hits
 #   the thing it names on the port the app will use, and the exit code is the
-#   result. Run it after every `podman kube play`.
+#   result. Run it after every `compose up`.
 #
 #   THE LIVE-COMPLETION CHECK IS SEPARATE. A stack can be perfectly deployed
 #   and still have a wrong/expired upstream key, and those are different
@@ -34,7 +34,6 @@ set -a
 set +a
 
 : "${CC_POD_PREFIX:=cc-}"
-: "${CC_NETWORK:=cc-single}"
 : "${CC_PG_PORT:=5442}"
 : "${CC_LITELLM_PORT:=4000}"
 : "${CC_GRAPHITI_PORT:=8000}"
@@ -59,9 +58,9 @@ check() { # check <description> <command...>
   if "$@" >/dev/null 2>&1; then ok "$desc"; else bad "$desc"; fi
 }
 
-# Poll until a command succeeds. Startup order is not deterministic under
-# kube play (there are no readiness gates), so a one-shot check would be a
-# race, not an assertion.
+# Poll until a command succeeds. compose.yaml's healthchecks make the STARTUP
+# order deterministic, but a first boot (Prisma migrations, a model download)
+# still outlasts a one-shot check, so this stays an assertion with a budget.
 wait_for() { # wait_for <seconds> <command...>
   # CC_VERIFY_MAX_WAIT caps every poll. Default is above the largest budget
   # here, so a normal run is unchanged; `setup.sh diagnose` sets it low,
@@ -76,23 +75,23 @@ wait_for() { # wait_for <seconds> <command...>
   return 1
 }
 
-echo "== network and pods (prefix=${CC_POD_PREFIX}, network=${CC_NETWORK})"
+echo "== containers (prefix=${CC_POD_PREFIX})"
 
 # Capture, THEN grep. `podman ... | grep -q` exits at the first match, podman
 # takes SIGPIPE, and under pipefail the pipeline reports failure on success.
-nets="$(podman network ls --format '{{.Name}}' 2>/dev/null)"
-check "network ${CC_NETWORK} exists" grep -qx "$CC_NETWORK" <<<"$nets"
-
-pods="$(podman pod ps --format '{{.Name}} {{.Status}}' 2>/dev/null)"
-for p in postgres litellm-db litellm-redis litellm neo4j graphiti; do
+#
+# Containers, not pods: compose has no pods. The names are compose.yaml's
+# container_name values, which keep the cc- prefix for exactly this reason.
+ctrs="$(podman ps -a --format '{{.Names}} {{.Status}}' 2>/dev/null)"
+for p in postgres-postgres litellm-db litellm-redis litellm neo4j graphiti; do
   name="${CC_POD_PREFIX}${p}"
-  line="$(grep -E "^${name} " <<<"$pods")"
+  line="$(grep -E "^${name} " <<<"$ctrs")"
   if [[ -z "$line" ]]; then
-    bad "pod ${name} exists"
-  elif [[ "$line" == *Running* ]]; then
-    ok "pod ${name} Running"
+    bad "container ${name} exists"
+  elif [[ "$line" == *Up* ]]; then
+    ok "container ${name} Up"
   else
-    bad "pod ${name} Running (is: ${line#* })"
+    bad "container ${name} Up (is: ${line#* })"
   fi
 done
 
@@ -182,7 +181,7 @@ else
 fi
 # Graphiti holds a bolt session open to Neo4j; a config or credential error
 # shows up in its log, not in /health.
-glog="$(podman logs "${CC_POD_PREFIX}graphiti-graphiti" 2>&1 | tail -200)"
+glog="$(podman logs "${CC_POD_PREFIX}graphiti" 2>&1 | tail -200)"
 if grep -qiE 'authentication failure|unable to retrieve routing|could not connect|traceback' <<<"$glog"; then
   bad "graphiti log is clean of connection/auth errors"
 else
@@ -192,14 +191,14 @@ fi
 # n8n is optional — absent is not a failure, only broken-while-present is.
 echo
 echo "== n8n (optional)"
-if grep -qE "^${CC_POD_PREFIX}n8n " <<<"$pods"; then
+if grep -qE "^${CC_POD_PREFIX}n8n " <<<"$ctrs"; then
   if wait_for 180 curl -fsS "http://127.0.0.1:${CC_N8N_PORT}/healthz"; then
     ok "n8n answers /healthz"
   else
     bad "n8n answers /healthz"
   fi
 else
-  skip "n8n not played (no n8n-backed integration selected)"
+  skip "n8n not started (no n8n-backed integration selected)"
 fi
 
 # The crawler follows the n8n pattern: absent-because-disabled is a skip,
@@ -209,25 +208,25 @@ fi
 echo
 echo "== crawler (optional, CC_ENABLE_CRAWLER=${CC_ENABLE_CRAWLER})"
 if [[ "$CC_ENABLE_CRAWLER" == "1" ]]; then
-  if grep -qE "^${CC_POD_PREFIX}crawler " <<<"$pods"; then
-    ok "pod ${CC_POD_PREFIX}crawler exists"
+  if grep -qE "^${CC_POD_PREFIX}crawler " <<<"$ctrs"; then
+    ok "container ${CC_POD_PREFIX}crawler exists"
     if wait_for 300 curl -fsS "http://127.0.0.1:${CC_CRAWLER_PORT}/healthz"; then
       ok "crawler answers /healthz"
     else
       bad "crawler answers /healthz"
     fi
   else
-    bad "pod ${CC_POD_PREFIX}crawler exists"
+    bad "container ${CC_POD_PREFIX}crawler exists"
   fi
 else
-  skip "crawler not played (CC_ENABLE_CRAWLER=0)"
+  skip "crawler not started (CC_ENABLE_CRAWLER=0)"
 fi
 
 echo
 echo "== speech (optional, CC_ENABLE_SPEECH=${CC_ENABLE_SPEECH})"
 if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
-  if grep -qE "^${CC_POD_PREFIX}speech " <<<"$pods"; then
-    ok "pod ${CC_POD_PREFIX}speech exists"
+  if grep -qE "^${CC_POD_PREFIX}speech " <<<"$ctrs"; then
+    ok "container ${CC_POD_PREFIX}speech exists"
     # /health only answers once the preloaded models are in memory; a first
     # boot is downloading them, hence the budget.
     if wait_for 600 curl -fsS "http://127.0.0.1:${CC_SPEECH_PORT}/health"; then
@@ -236,13 +235,13 @@ if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
       bad "speech answers /health"
     fi
   else
-    bad "pod ${CC_POD_PREFIX}speech exists (played by ./setup.sh llm)"
+    bad "container ${CC_POD_PREFIX}speech exists (started by ./setup.sh llm)"
   fi
 else
-  skip "speech not played (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt are yours)"
+  skip "speech not started (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt are yours)"
 fi
 
-# The sandbox has no pod: sandbox CONTAINERS are created on demand by the
+# The sandbox has no service: sandbox CONTAINERS are created on demand by the
 # runner, which is a HOST process the operator starts alongside the API. So
 # the deployable artifact to assert is the IMAGE; a runner that is not
 # answering yet is a skip, not a failure.

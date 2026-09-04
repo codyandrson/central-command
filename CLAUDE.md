@@ -50,12 +50,16 @@ Executor performs writes *after* approval. Keep it that way.
   `setup.sh` is the driver, `verify.sh` the assertion suite, `cc-update.sh`
   the one-click updater covering the full release surface (code, schema,
   manifests, unit files, locally-built images, with rollback).
-- **`deploy/single/`** — the single-node `podman kube play` profile.
+- **`deploy/single/`** — the single-node **Compose** profile (`compose.yaml`,
+  run under `podman compose`).
   `setup.sh` is a deterministic driver (validate / preflight / fetch / llm /
   stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
   exit 0/1/2/3, `diagnose` support bundle); the
-  /setup skill's job is elicitation and diagnosis only. `images.txt` pins
-  every pulled image by digest. Restricted networks start with
+  /setup skill's job is elicitation and diagnosis only. `compose.yaml` is the
+  whole deployment (readiness is healthchecks + depends_on, optionals are
+  profiles); `images.txt` holds a constraint, a locked tag and a locked digest
+  per image, which `resolve-images.sh` turns into the refs this registry can
+  actually serve. Restricted networks start with
   `deploy/discover.sh` (the /discover skill), which maps reachable mirrors
   into the `.env` seams.
 - **`deploy/AIRGAP.md`** — the map of every external source and its seam
@@ -189,8 +193,12 @@ where the story is gone.
   on its own.** `setup.sh fetch` is the one phase that touches the network;
   each failure names its `.env` seam and the phase exits 3; `deploy/discover.sh`
   is how a restricted network learns which mirror to write into each seam.
-  Adding an image means adding its digest line to `images.txt` — the seam
-  test fails otherwise.
+  Adding an image means adding its constraint/lock line to `images.txt` — the
+  seam test fails otherwise. **Version flexibility is for third-party
+  dependencies only:** the locked digest is verified when the mirror serves
+  the locked tag, a same-series substitution is a WARN the operator lives
+  with, and our own (locally built) images stay exact — the release is one
+  tested unit.
 - **A model's capabilities are MEASURED, never guessed — and an undeclared
   flag is not neutral.** Central Command reads an absent `supports_*` as
   "nobody said" (fails closed); LiteLLM's aggregate `/model_group/info`
@@ -470,8 +478,8 @@ deploy/k3s/   the multi-node reference deployment: README.md runbook, manifests,
 deploy/AIRGAP.md + airgap.env.example
               the map of every external source and its seam — read FIRST for
               any mirrored or no-egress install
-deploy/single/ the single-node `podman kube play` profile: deterministic
-              setup.sh driver, digest-pinned images.txt
+deploy/single/ the single-node Compose profile: compose.yaml, deterministic
+              setup.sh driver, resolve-images.sh + constraint/lock images.txt
 deploy/pi/    legacy compose stack — kept for its comments and as a rollback
               reference; home of graphiti/ + litellm/ configs and
               graphiti/patches/ (upstream #1729, #1666 — drop when merged)

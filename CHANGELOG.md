@@ -4,6 +4,66 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-03 — v2.22.0: the single-node install runs on Compose
+
+The operator's verdict on installation was "miserable every single time —
+error prone, fragile", and the air-gapped Windows target had never deployed
+successfully. `deploy/` was ~8,300 lines of bash doing what standard
+orchestrators do. Phase 1 of the deploy refactor (design record
+`docs/superpowers/specs/2026-09-03-deploy-refactor-design.md`, D1 + D2)
+replaces the single-node profile's bespoke choreography. **The k3s profile is
+untouched** — its Helm rework is phase 3 — and nothing in the app, the schema,
+the gateway or the trust boundary changed: this is deployment-only.
+
+- **One `compose.yaml` replaces `render.sh` and five envsubst templates.**
+  `podman kube play` choreography, the manual network create, the rendered
+  `secrets.yaml` and the `${CC_POD_PREFIX}`-as-DNS convention are all gone.
+  Services find each other by compose service name; readiness is
+  `healthcheck` + `depends_on: service_healthy`, so the startup order lives
+  in the file instead of in phase ordering. The optional components (n8n,
+  crawler, speech) are **profiles** the `CC_ENABLE_*` flags select. Two
+  host-side polls survive on purpose: LiteLLM's first-boot Prisma migration,
+  and the speech engine's ~1GB model download (which is why that one service
+  carries no healthcheck at all). Deleted, not kept as a second maintained
+  path — the removed air-gap bundle mechanism is the cautionary tale.
+- **Bite marks Compose structurally removed, and the comments went with
+  them:** `enableServiceLinks: false` (compose injects no service-discovery
+  env vars, so Neo4j cannot CrashLoop on its own service name), envsubst's
+  explicit variable list and its rendered-secret leak check (nothing is
+  rendered), and the "no readiness gates under kube play" caveats. The traps
+  that survive are carried verbatim: the pipefail/grep-capture inversion, the
+  NTFS chmod stat-verify, 127.0.0.1-never-localhost, `curl -H @-`, and the
+  Windows python-stub probe.
+- **Image versions became a constraint, a lock and a resolution** — rigid
+  `@sha256` pinning broke real installs when an enterprise mirror lacked the
+  exact artifact. `images.txt` gains constraint and locked-tag columns;
+  `resolve-images.sh` asks the registry's `/v2/<path>/tags/list` what it
+  actually has and PASSes on the locked tag (verifying its digest — a
+  mismatch FAILS, that tag has drifted or been poisoned; a tag that is a
+  series or a channel is declared rolling instead, since those move on every
+  upstream rebuild), WARNs when it
+  substitutes the newest tag in the same series AND flavour (`16` never
+  becomes `16.10-alpine`, `5.26.2` never `5.26.4-enterprise`), and FAILs naming the
+  constraint and the mirror's contents when nothing fits. A mirror with no
+  tags-list API still installs, blind, with a WARN. Resolved refs land in
+  `.env` as `CC_IMG_*` and in a new `installed.manifest` (the provenance
+  record, and phase 2's rollback record). Flexibility is for third-party
+  dependencies only: our own locally built images stay exact.
+- **A WARN-level substitution plus a green `verify` is a supported install.**
+  Capability is proven by probes, not version strings — the same principle as
+  the model-capability probes.
+- `setup.sh` keeps every gate that matters unchanged: the same ten phases and
+  subcommand names, the same output protocol and exit taxonomy, the LLM
+  catalog pause with its live per-alias probes, the embed-dimension
+  measure-and-refuse guard, and the app/verify/test/boot/demo phases verbatim.
+  What changed: `fetch` resolves before it pulls, `llm`/`stack` are
+  `compose up -d --wait`, `validate` hands its port/reference arithmetic to
+  `compose config`, and preflight now requires a compose provider (`podman
+  compose`, or `docker compose` on a dev box).
+
+Windows/Podman-Desktop live validation gates this release for the air-gapped
+target; `update.sh`'s own rework is phase 2.
+
 ## 2026-09-02 — v2.21.1: the triager can read the mail it dismisses
 
 Seven capability gaps were declared on 2026-09-02. Four were the graph

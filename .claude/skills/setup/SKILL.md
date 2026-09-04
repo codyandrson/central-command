@@ -64,7 +64,7 @@ Rules that hold for the whole run:
   re-derive what a failed phase already told you to fix.
 - **Resumable = re-run.** Every phase is idempotent (`./setup.sh <phase>`
   re-runs just that one); there is no state file and none is needed.
-- **Never print secret values.** `.env` and `secrets.yaml` contents stay out
+- **Never print secret values.** `.env` contents stay out
   of your output, and so does `setup-diagnostics.txt`'s content beyond what
   it already redacts (it records key NAMES only) — refer to keys by name.
 - **`setup.sh` now runs the whole ride (2026-08-28): ten phases, ending in
@@ -431,23 +431,16 @@ the EA's conversation, not yours.
 
 ### Uninstalling (podman)
 
-`setup.sh` has no teardown subcommand — this remains a deterministic but
-manual sequence, prefix-aware (never hardcode names — a changed
-`CC_POD_PREFIX`/`CC_NETWORK` would otherwise leak secrets and the network):
+`setup.sh` has no teardown subcommand — but on the Compose substrate it is one
+command. Name every profile, or their containers are left behind:
 
 ```bash
 cd deploy/single
-PFX="$(grep ^CC_POD_PREFIX= .env | cut -d= -f2)"
-NET="$(grep ^CC_NETWORK= .env | cut -d= -f2)"
-podman kube down --force optional-crawler.yaml 2>/dev/null || true
-podman kube down --force optional-n8n.yaml 2>/dev/null || true
-podman kube down --force stack.yaml
-podman kube down --force stack-llm.yaml   # LLM half LAST — everything else talks to it
-podman secret rm "${PFX}litellm" "${PFX}neo4j" "${PFX}graphiti" "${PFX}n8n" 2>/dev/null
-podman network rm "$NET"
+podman compose -f compose.yaml --profile n8n --profile crawler --profile speech down
 ```
 
-`--force` removes the volumes (a wipe); omit it to keep data for a restart.
+`-v` also removes the named volumes (a wipe); omit it to keep data for a
+restart. There are no podman secrets and no hand-created network to clean up.
 Remind the user their `.env` backup is the only copy of the never-rotate keys
 (`LITELLM_SALT_KEY`, `N8N_ENCRYPTION_KEY`) — deleting the install tree
 without it orphans any kept volumes.

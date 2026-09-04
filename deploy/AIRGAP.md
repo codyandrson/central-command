@@ -59,7 +59,7 @@ dependency comes from"); blank means the public source.
 
 | Source | Used by | Seam | Notes |
 |---|---|---|---|
-| docker.io | postgres, neo4j, redis, n8n, the graphiti and sandbox base images | `CC_REGISTRY_DOCKERIO` | host prefix only; a mirror that re-namespaces paths needs `images.txt` + templates edited |
+| docker.io | postgres, neo4j, redis, n8n, the graphiti and sandbox base images | `CC_REGISTRY_DOCKERIO` | host prefix only; a mirror that re-namespaces paths needs the path edited in `images.txt` |
 | ghcr.io | LiteLLM, the speech engine (`speaches`) | `CC_REGISTRY_GHCR` | |
 | mcr.microsoft.com | the crawler base (Microsoft's Playwright image: browsers + OS libs baked in) | `CC_REGISTRY_MCR` | replaces Debian + Microsoft's browser CDN for that build |
 | Debian archive | `apt-get` inside the graphiti and sandbox builds | `CC_APT_MIRROR`, `CC_APT_SECURITY_MIRROR` | build-args; the deb822 sources file is REWRITTEN from `/etc/os-release` (slim images ship no `sources.list`; security is a separate path on every mirror) |
@@ -109,10 +109,23 @@ smallest move when it alone is unavailable (single-node profile):
 
 ## Pins
 
-`deploy/single/images.txt` pins every pulled image by digest; `fetch` pulls
-`ref@digest` and tags it `ref`, so the templates' `name:tag` never triggers
-a pull and the mirror cannot serve a drifted or poisoned tag. The Dockerfiles
-pin their packages (`playwright==` must equal the crawler base's tag).
+`deploy/single/images.txt` carries THREE tiers per image (2026-09-03):
+a **constraint** (the supported tag series), the tested **locked tag** and its
+**digest**. `fetch` runs `resolve-images.sh`, which asks the mirror's
+`/v2/<path>/tags/list` what it actually has: the locked tag is used and its
+digest verified (a mismatch FAILS — drifted or poisoned; a rolling series or
+channel tag carries `-` instead of a digest and is pinned by the tag alone);
+otherwise the newest
+tag satisfying the constraint is substituted with a WARN and no digest check
+(deliberate — the digest pin defended against public-registry tag poisoning, a
+threat a mirrored air gap does not carry); otherwise it FAILS naming the
+constraint and what the mirror has. Resolved refs are written to `.env` as
+`CC_IMG_*` (which `compose.yaml` reads) and recorded in `installed.manifest`.
+A mirror serving no tags-list API still works: resolution falls back to a
+blind pull of the locked tag, with a WARN. The three locally built images pin
+their base tag in the Dockerfile, so a SUBSTITUTED base tag is not what the
+build uses — mirror the tested tag for those. The Dockerfiles pin their
+packages (`playwright==` must equal the crawler base's tag).
 `requirements.lock` is the frozen Python resolution; `web/package-lock.json`
 the cockpit's. A mirror that "gets updated regularly" changes nothing until
 a release bumps a pin — that is the point.

@@ -9,9 +9,9 @@ before the repair). The fix is `cache_params.supported_call_types` listing
 only chat-completion call types.
 
 The proxy config exists in TWO tracked places (the k3s configmap source and
-the single-node inline template), and `litellm.apply_config_change` lets the
-litellm-manager agent rewrite the former — so this walks both files rather
-than trusting anyone to remember.
+the single-node file compose.yaml bind-mounts), and `litellm.apply_config_change`
+lets the litellm-manager agent rewrite the former — so this walks both files
+rather than trusting anyone to remember.
 """
 
 from __future__ import annotations
@@ -24,24 +24,14 @@ REPO = Path(__file__).resolve().parents[1]
 
 CONFIG_SOURCES = [
     REPO / "deploy" / "pi" / "litellm" / "config.yaml",
-    REPO / "deploy" / "single" / "stack-llm.yaml.tmpl",
+    REPO / "deploy" / "single" / "litellm-config.yaml",
 ]
 
 FORBIDDEN = {"embedding", "aembedding"}
 
 
 def _litellm_settings(path: Path) -> dict:
-    text = path.read_text(encoding="utf-8")
-    if path.suffix == ".tmpl":
-        # The template is a multi-doc k8s manifest whose ConfigMap embeds the
-        # proxy config as a string; envsubst vars live outside that block.
-        for doc in yaml.safe_load_all(text):
-            if isinstance(doc, dict) and doc.get("kind") == "ConfigMap":
-                inner = (doc.get("data") or {}).get("config.yaml")
-                if inner:
-                    return yaml.safe_load(inner).get("litellm_settings") or {}
-        raise AssertionError(f"no ConfigMap with config.yaml found in {path}")
-    return yaml.safe_load(text).get("litellm_settings") or {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")).get("litellm_settings") or {}
 
 
 def test_no_config_source_caches_embeddings():

@@ -1,0 +1,85 @@
+# Graphiti MCP config for the single-node profile. Bind-mounted read-only at
+# /app/mcp/config/config.yaml by compose.yaml (it used to be an inline
+# ConfigMap in stack.yaml.tmpl).
+#
+# Schema is the one zepai/knowledge-graph-mcp:1.0.2-standalone parses. EVERY
+# ${VAR} below is expanded by GRAPHITI ITSELF, at startup, from its container
+# environment — nothing renders this file, so the refs must survive verbatim.
+# ${VAR:default} is Graphiti's own default syntax (one colon), not shell's.
+server:
+  transport: "http"
+  host: "0.0.0.0"
+  port: 8000
+
+llm:
+  # "openai" is the WIRE PROTOCOL, not the vendor.
+  provider: "openai"
+  # The BRIDGED alias: graphiti_core drives extraction through the Responses
+  # API with no chat-completions fallback, and registering the model as
+  # openai/chat_completions/<model> forces LiteLLM's Responses→chat bridge.
+  model: "graphiti-llm"
+  max_tokens: 4096
+  # PINNED. Unset does not mean deterministic: the param is OMITTED from the
+  # request and the SERVER's default applies (commonly temp 1.0), so entity
+  # dedup and the CONTRADICTION pass that RETIRES existing facts would run on
+  # stochastic sampling.
+  temperature: 0.0
+  providers:
+    openai:
+      api_key: ${GRAPHITI_LLM_API_KEY}
+      # Decorative: the MCP factory's `openai` case builds its LLM config
+      # without base_url, so the endpoint actually comes from OPENAI_BASE_URL
+      # in the container env. Stated here for intent only.
+      api_url: ${LLM_API_URL}
+
+embedder:
+  provider: "openai"
+  model: "cc-embedding"
+  # MEASURED by setup.sh's llm phase into CC_EMBED_DIM and passed in as
+  # container env. Never a model card's number.
+  dimensions: ${CC_EMBED_DIM}
+  providers:
+    openai:
+      api_key: ${EMBEDDER_API_KEY}
+      api_url: ${EMBEDDER_API_URL}
+
+database:
+  provider: "neo4j"
+  providers:
+    neo4j:
+      uri: ${NEO4J_URI}
+      username: ${NEO4J_USER:neo4j}
+      # No default on purpose — fail loud rather than fall back to the
+      # upstream template's `demodemo`.
+      password: ${NEO4J_PASSWORD}
+      database: ${NEO4J_DATABASE:neo4j}
+      use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
+
+graphiti:
+  group_id: ${GRAPHITI_GROUP_ID:main}
+  episode_id_prefix: ${EPISODE_ID_PREFIX:}
+  user_id: ${USER_ID:operator}
+  # Upstream's default ontology has no type for a HUMAN BEING, so every person
+  # lands as a bare `Entity` while orgs type correctly. Person is declared
+  # FIRST so it beats the "use as last resort" types below.
+  entity_types:
+    - name: "Person"
+      description: "An individual human being — family, friends, colleagues, contacts. Use the person's canonical full name as the entity name, never a role or pronoun ('the operator'). A NAME IS NOT A PERSON: a bare surname, maiden name, married name, nickname or alias must NEVER become an entity of its own, because that invents a second human who does not exist. Do still RECORD what someone is called — attach it to the person it belongs to, as a fact about that one person. Drop the name, never the fact."
+    - name: "Preference"
+      description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
+    - name: "Requirement"
+      description: "Specific needs, features, or functionality that must be fulfilled"
+    - name: "Procedure"
+      description: "Standard operating procedures and sequential instructions"
+    - name: "Location"
+      description: "Physical or virtual places where activities occur"
+    - name: "Event"
+      description: "Time-bound activities, occurrences, or experiences"
+    - name: "Organization"
+      description: "Companies, institutions, groups, or formal entities"
+    - name: "Document"
+      description: "Information content in various forms (books, articles, reports, etc.)"
+    - name: "Topic"
+      description: "Subject of conversation, interest, or knowledge domain (use as last resort)"
+    - name: "Object"
+      description: "Physical items, tools, devices, or possessions (use as last resort)"

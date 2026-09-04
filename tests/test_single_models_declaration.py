@@ -29,11 +29,11 @@ def _live(alias, **params):
     return {"model_name": alias, "litellm_params": params, "model_info": {"id": alias}}
 
 
-def test_single_config_template_declares_no_models_and_no_provider_env():
-    tmpl = (SINGLE / "stack-llm.yaml.tmpl").read_text(encoding="utf-8")
-    assert "model_list:" not in tmpl
-    assert "store_model_in_db: true" in tmpl
-    assert "CC_LLM_API_KEY" not in tmpl  # the key is entered in the UI, not mounted
+def test_single_config_declares_no_models_and_no_provider_env():
+    cfg = (SINGLE / "litellm-config.yaml").read_text(encoding="utf-8")
+    assert "model_list:" not in cfg
+    assert "store_model_in_db: true" in cfg
+    assert "CC_LLM_API_KEY" not in cfg  # the key is entered in the UI, not mounted
 
 
 def test_single_declaration_is_skeletons_with_the_invariants(rm):

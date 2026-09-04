@@ -66,6 +66,6 @@ have="$(podman images --format '{{.Repository}}:{{.Tag}}')"
 if grep -qx "$IMAGE_REF" <<<"$have"; then
   echo "    OK  $IMAGE_REF"
 else
-  echo "FATAL: $IMAGE_REF is not in local storage — kube play would fail to resolve it." >&2
+  echo "FATAL: $IMAGE_REF is not in local storage — compose would fail to resolve it." >&2
   exit 1
 fi

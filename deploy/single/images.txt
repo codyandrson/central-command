@@ -1,28 +1,58 @@
 # deploy/single/images.txt — THE image manifest for the single-node profile.
 #
-#   Every image this profile pulls, pinned by DIGEST. `setup.sh fetch` pulls
-#   each one as <ref>@<digest> (so the mirror cannot serve a poisoned or
-#   drifted tag) and then tags it <ref> locally; the templates reference
-#   <ref> by tag and never trigger a pull. The digest lives HERE and not in
-#   the templates so the pin has one home the fetch phase owns.
+#   Three tiers, not one pin (design record
+#   docs/superpowers/specs/2026-09-03-deploy-refactor-design.md, D2). Rigid
+#   @sha256 pinning broke real installs when an enterprise mirror lacked the
+#   exact artifact, so each image now carries the loosest TRUE requirement
+#   (the constraint) alongside the tested tag+digest (the lock):
 #
-#   Columns:  <registry-key> <path:tag> <digest> <component>
+#     constraint   the tag SERIES this release supports — a floor AND a
+#                  ceiling, never a bare floor (a new major is a breaking
+#                  change until proven otherwise)
+#     lock         the tag and digest this release was tested against
+#
+#   `resolve-images.sh` asks the (mirror) registry what it actually has:
+#   the locked tag → PASS (and the pulled digest must match this one); else
+#   the newest tag satisfying the constraint → WARN naming the substitution
+#   (no digest check — a substituted tag is trusted from the enterprise
+#   mirror; the digest pin defended against public-registry tag poisoning, a
+#   threat the mirrored air gap does not carry); else FAIL. The resolved refs
+#   are written to .env as CC_IMG_* and compose.yaml reads them.
+#
+#   Columns:  <registry-key> <path> <constraint> <locked-tag> <locked-digest> <component>
 #     registry-key  dockerio | ghcr | mcr  → CC_REGISTRY_DOCKERIO / _GHCR / _MCR
+#     path          the repository path, WITHOUT a tag
+#     constraint    the VERSION SERIES only (16, 5.26, 7, main-stable): a tag
+#                   fits when it equals it or continues it at a non-digit
+#                   (16 admits 16.10, not 160). The FLAVOUR comes from the
+#                   locked tag and a substitute must keep it: 7-alpine admits
+#                   7.4-alpine and rejects 7.4 and 7.4-alpine3.22; 16 rejects
+#                   16.10-alpine3.22; 5.26.2 rejects 5.26.4-enterprise.
+#     locked-digest what the locked tag must hash to, or `-` when the tag is
+#                   ROLLING (a series or a channel: 16, 7-alpine, main-stable).
+#                   Those move on every upstream rebuild, so the TAG is the pin
+#                   and a digest there would fail weekly on a healthy registry.
+#                   An exact-version tag gets a real digest, and a mismatch on
+#                   one is a hard FAIL.
 #     component     core | n8n | graphiti-base | sandbox-base | crawler-base | speech
-#                   (fetch skips components whose CC_ENABLE_* flag is 0)
+#                   (resolution skips components whose CC_ENABLE_* flag is 0)
 #
-#   Bumping a line is a deliberate act — a release — never a side effect of
+#   The CC_IMG_* variable name is derived from the path: uppercase, `/` and
+#   `-` become `_`, a leading `LIBRARY_` is dropped. library/postgres →
+#   CC_IMG_POSTGRES, playwright/python → CC_IMG_PLAYWRIGHT_PYTHON.
+#
+#   Bumping a lock is a deliberate act — a release — never a side effect of
 #   what the mirror happens to hold today. Resolve a new digest with:
 #     curl -sI -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
 #       https://<registry>/v2/<path>/manifests/<tag> | grep -i docker-content-digest
-#   (docker.io needs a bearer token from auth.docker.io first.) Pinned 2026-08-30.
+#   (docker.io needs a bearer token from auth.docker.io first.) Locked 2026-08-30.
 
-dockerio  library/postgres:16                              sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94  core
-dockerio  library/neo4j:5.26.2                             sha256:099b9f74968c123209972835417985ed2a1cc19c0422c0753a313e26a736c365  core
-dockerio  library/redis:7-alpine                           sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf  core
-ghcr      berriai/litellm-database:main-stable             sha256:5ead13edd4efd89f32dab349c1f19447d395affca53f3aeae00f5e6e01b8c08d  core
-dockerio  n8nio/n8n:2.29.0                                 sha256:846f0248604d82d989e30457277da9004cdf8a69ad7b6a27ae2ad811841cf25d  n8n
-dockerio  zepai/knowledge-graph-mcp:1.0.2-standalone       sha256:460bafb39439d99ff001ea6ef03efbe0bd5d9e6afe2655edf926da4fd9df97c5  graphiti-base
-dockerio  library/python:3.12-slim-bookworm                sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579  sandbox-base
-mcr       playwright/python:v1.62.0-noble                  sha256:aa81288e738725378becba5b3e06cb0f3a7f012a610e87e8d767a090ea3f740d  crawler-base
-ghcr      speaches-ai/speaches:0.8.3-cpu                   sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8  speech
+dockerio  library/postgres            16                    16                 -                                                                        core
+dockerio  library/neo4j               5.26                  5.26.2             sha256:099b9f74968c123209972835417985ed2a1cc19c0422c0753a313e26a736c365  core
+dockerio  library/redis               7                     7-alpine           -                                                                        core
+ghcr      berriai/litellm-database    main-stable           main-stable        -                                                                        core
+dockerio  n8nio/n8n                   2                     2.29.0             sha256:846f0248604d82d989e30457277da9004cdf8a69ad7b6a27ae2ad811841cf25d  n8n
+dockerio  zepai/knowledge-graph-mcp   1.0                   1.0.2-standalone   sha256:460bafb39439d99ff001ea6ef03efbe0bd5d9e6afe2655edf926da4fd9df97c5  graphiti-base
+dockerio  library/python              3.12                  3.12-slim-bookworm -                                                                        sandbox-base
+mcr       playwright/python           v1.62                 v1.62.0-noble      sha256:aa81288e738725378becba5b3e06cb0f3a7f012a610e87e8d767a090ea3f740d  crawler-base
+ghcr      speaches-ai/speaches        0.8                   0.8.3-cpu          sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8  speech
