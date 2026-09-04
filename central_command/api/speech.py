@@ -66,9 +66,7 @@ async def tts(req: TTSRequest) -> Response:
         return err
     if not req.text.strip():
         return JSONResponse({"error": "Text cannot be empty or whitespace"}, status_code=400)
-    body: dict = {"model": TTS_ALIAS, "input": req.text, "response_format": "mp3"}
-    if req.voice:
-        body["voice"] = req.voice
+    body: dict = {"model": TTS_ALIAS, "voice": req.voice or settings.tts_voice, "input": req.text, "response_format": "mp3"}
     async with httpx.AsyncClient(timeout=120, **http_client.client_kwargs()) as client:
         resp = await client.post(f"{_base()}/v1/audio/speech", headers=_headers(), json=body)
     if resp.status_code != 200:
@@ -79,10 +77,9 @@ async def tts(req: TTSRequest) -> Response:
 @router.get("/tts/config")
 async def tts_config() -> dict:
     # The cockpit's Settings > Audio reads this shape (web/server/lib/tts-config.ts).
-    # Voice is the engine's business; `voice: ""` lets the alias's default stand.
     return {
         "defaultProvider": "openai",
-        "openai": {"model": TTS_ALIAS, "voice": "", "instructions": ""},
+        "openai": {"model": TTS_ALIAS, "voice": settings.tts_voice, "instructions": ""},
         "qwen": {"mode": "", "language": "", "speaker": "", "voiceDescription": "", "styleInstruction": ""},
         "edge": {"voice": ""},
         "xiaomi": {"model": "", "voice": "", "style": ""},

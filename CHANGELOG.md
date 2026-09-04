@@ -4,6 +4,37 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-03 — v2.22.1: the speech engine boots empty
+
+The first Windows run of v2.22.0 failed at `probe-tts`, and the thread led
+somewhere older than the refactor: **no deployment had ever installed a
+speech model.** `PRELOAD_MODELS` is not a setting in speaches 0.8.3 — upstream
+master's `preload_models` is unreleased — so the pinned engine ignored it and
+booted with an empty catalog on the single-node profile AND on k3s, where
+`/health` answered 200 for a month over zero models. And a `voice` is
+REQUIRED on the wire: the engine has no default (422 without one) and the
+LiteLLM `main-stable` built 2026-09-02 stopped injecting one
+(`Router.aspeech() missing … 'voice'`), while both the setup probe and the
+API left it out on the theory that the engine's default would stand.
+
+- Single-node: `setup.sh llm` installs both models through the engine's own
+  API (`POST /v1/models/<id>`, `speech-model` step) after `/health` answers;
+  `verify.sh` asserts each model is installed, not merely that the engine is
+  up. `PRELOAD_MODELS` is gone from `compose.yaml`.
+- k3s: `90-speech.yaml` installs the models from a `postStart` hook (the
+  image ships curl); `verify.sh` gains the same two model checks. Apply via
+  the updater — the running pod gets its models on the next rollout.
+- `CC_TTS_VOICE` (default `af_heart`, the bundled Kokoro's first voice) is
+  what `cc-tts` speaks in when the cockpit names none; `api/speech.py` always
+  sends it, `discover-llm.sh`'s probe reads the same seam, and
+  `/api/tts/config` reports it to Settings > Audio.
+- `setup.sh` exports `PYTHONUTF8=1`: Python on Windows encodes a piped stdout
+  in the ANSI code page, so `register-models.py`'s banner reached the log as
+  cp1252 bytes.
+- Noted, not fixed: the first install pulled a `main-stable` LiteLLM one day
+  newer than the cluster's and got a behaviour change — the rolling-tag
+  trade the D2 design record accepts, seen live on day one.
+
 ## 2026-09-03 — v2.22.0: the single-node install runs on Compose
 
 The operator's verdict on installation was "miserable every single time —

@@ -67,6 +67,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="$HERE/.env"
 APP_ENV="$REPO_ROOT/.env"
+# Python on Windows encodes a PIPED stdout in the ANSI code page, so the em
+# dashes in register-models.py's operator banner reached the log as cp1252
+# bytes inside otherwise-UTF-8 output (2026-09-03 Windows run: `�`).
+export PYTHONUTF8=1
 
 # Windows has no real python3: the WindowsApps stub answers `command -v` but
 # exits 49 (2026-08-21 Windows validation, W2) — so probe by RUNNING it.
@@ -106,9 +110,8 @@ step() { # step <check-name> <success-message> <cmd...>
 # Poll until an HTTP endpoint answers. Never a bare sleep: a fixed sleep is
 # either a race or wasted minutes. Most readiness now lives in compose.yaml's
 # healthchecks; this stays for the two waits that are honestly host-side —
-# LiteLLM's first-boot Prisma migration and the speech engine's ~1GB model
-# download (long enough that "unhealthy" is the normal state for half an hour,
-# which is why that service carries no healthcheck at all).
+# LiteLLM's first-boot Prisma migration and the speech engine, whose image's
+# tool surface is not ours to assume in a healthcheck.
 wait_http() { # wait_http <url> <seconds>
   local deadline=$(( SECONDS + $2 ))
   until curl -fsS -m 5 "$1" >/dev/null 2>&1; do
@@ -698,15 +701,24 @@ phase_llm() {
   fi
 
   # Speech: one synthesis, then transcribe what it said — the round trip proves
-  # both aliases with real audio. First boot downloads the models, so the
-  # engine gets the same wait LiteLLM did.
+  # both aliases with real audio.
   if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
-    if wait_http "http://127.0.0.1:${CC_SPEECH_PORT}/health" 600; then
+    if wait_http "http://127.0.0.1:${CC_SPEECH_PORT}/health" 120; then
       pass "speech-live" "cc-speech answers /health on 127.0.0.1:${CC_SPEECH_PORT}"
     else
-      fail "speech-live" "cc-speech never answered /health (first boot downloads ~1GB of models — CC_HF_ENDPOINT reachable?) — run: ./setup.sh diagnose"
+      fail "speech-live" "cc-speech never answered /health — run: ./setup.sh diagnose"
       return 1
     fi
+    # The engine boots EMPTY: speaches 0.8.3 has no preload setting (upstream
+    # master's `preload_models` is unreleased, checked 2026-09-03), so models
+    # are installed through its API. The first call downloads from
+    # CC_HF_ENDPOINT into the speech-models volume; a re-run answers 201 at once.
+    local m
+    for m in "$CC_SPEECH_TTS_MODEL" "$CC_SPEECH_STT_MODEL"; do
+      step "speech-model" "speech model ${m} installed" \
+        curl -fsS --max-time 1800 -o /dev/null -X POST "http://127.0.0.1:${CC_SPEECH_PORT}/v1/models/${m}" \
+        || { fail "speech-model" "could not install ${m} — CC_HF_ENDPOINT reachable? run: ./setup.sh diagnose"; return 1; }
+    done
   fi
   # A .mp3 suffix so the file's name agrees with its bytes on the far side.
   local mp3; mp3="$(mktemp --suffix=.mp3)"

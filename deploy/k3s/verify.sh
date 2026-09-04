@@ -71,6 +71,9 @@ check "graphiti MCP       127.0.0.1:8000" "curl -fsS http://127.0.0.1:8000/healt
 check "n8n                127.0.0.1:5678" "curl -fsS http://127.0.0.1:5678/healthz"
 check "crawler            127.0.0.1:8091" "curl -fsS http://127.0.0.1:8091/healthz"
 check "speech             127.0.0.1:8093" "curl -fsS http://127.0.0.1:8093/health"
+# /health says nothing about models; the engine boots empty and postStart installs them.
+check "speech TTS model installed        " "curl -fsS http://127.0.0.1:8093/v1/models/speaches-ai/Kokoro-82M-v1.0-ONNX"
+check "speech STT model installed        " "curl -fsS http://127.0.0.1:8093/v1/models/Systran/faster-whisper-small"
 check "control plane API  127.0.0.1:8080" "curl -fsS http://127.0.0.1:8080/health"
 check "victorialogs       127.0.0.1:9428" "curl -fsS http://127.0.0.1:9428/health"
 check "pgweb (db ui)      127.0.0.1:8092" "curl -fsS -o /dev/null http://127.0.0.1:8092/"

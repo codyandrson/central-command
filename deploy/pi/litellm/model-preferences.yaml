@@ -323,8 +323,8 @@ registration_only:
 
   # THE SPEECH ROLES — what the cockpit's read-aloud and voice input address
   # (web/.env OPENAI_TTS_MODEL / OPENAI_STT_MODEL, api/speech.py). cc-speech
-  # (deploy/k3s/90-speech.yaml) answers both: model openai/<the id in its
-  # PRELOAD_MODELS>, api_base http://cc-speech:8000/v1, key `none`. Either
+  # (deploy/k3s/90-speech.yaml) answers both: model openai/<the id setup
+  # installs into it>, api_base http://cc-speech:8000/v1, key `none`. Either
   # may point elsewhere — hosted Whisper-convention models for cc-stt is the
   # expected case. The mode is LiteLLM's audio mode, an invariant.
   cc-tts:

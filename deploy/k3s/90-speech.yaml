@@ -17,12 +17,15 @@
 #   transcription round trip.
 #
 #   Models are HF-hub snapshots in the PVC (the container's HF cache, uid
-#   1000). PRELOAD_MODELS pulls them on first boot from huggingface.co — a
-#   mirrored site adds an HF_ENDPOINT env below by hand (this profile's air-gap
-#   seams are hand edits, deploy/AIRGAP.md); with no egress at all, pre-place
-#   the snapshots in the volume. Nothing here holds a
-#   credential: the engine's API key is unset and nothing outside the cluster
-#   reaches it except this loopback.
+#   1000). The engine boots EMPTY — speaches 0.8.3 has no preload setting
+#   (upstream master's `preload_models` is unreleased, checked 2026-09-03;
+#   PRELOAD_MODELS was silently ignored and no model was ever installed) — so a
+#   postStart hook installs them through its own API, fetching from
+#   huggingface.co. A mirrored site adds an HF_ENDPOINT env below by hand (this
+#   profile's air-gap seams are hand edits, deploy/AIRGAP.md); with no egress
+#   at all, pre-place the snapshots in the volume (the hook then answers 201
+#   at once). Nothing here holds a credential: the engine's API key is unset
+#   and nothing outside the cluster reaches it except this loopback.
 #
 #   Service is type LoadBalancer so ServiceLB binds :8093 on every node — the
 #   probes and verify.sh reach it at 127.0.0.1:8093 like every CC_* endpoint.
@@ -87,8 +90,6 @@ spec:
         - name: speech
           image: ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
           env:
-            - name: PRELOAD_MODELS
-              value: '["speaches-ai/Kokoro-82M-v1.0-ONNX", "Systran/faster-whisper-small"]'
             - name: HF_HUB_CACHE
               value: /home/ubuntu/.cache/huggingface/hub
             # - name: HF_ENDPOINT          # a mirrored site: the HF hub mirror
@@ -98,10 +99,21 @@ spec:
           volumeMounts:
             - name: models
               mountPath: /home/ubuntu/.cache/huggingface/hub
-          # /health answers only once the preloaded models are in memory; a
-          # first boot downloads ~1GB before that. The startup probe carries
-          # that wait (30 min on a slow mirror) so liveness never kills a pod
-          # that is merely still downloading.
+          # The container is not Running until postStart returns, and the
+          # first boot downloads ~1GB inside it. The image ships /usr/bin/curl.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    until curl -fsS http://127.0.0.1:8000/health >/dev/null; do sleep 5; done
+                    for m in speaches-ai/Kokoro-82M-v1.0-ONNX Systran/faster-whisper-small; do
+                      curl -fsS --max-time 1800 -o /dev/null -X POST "http://127.0.0.1:8000/v1/models/$m"
+                    done
+          # The startup probe budgets that download (30 min on a slow mirror)
+          # so liveness never kills a pod that is merely still installing.
           startupProbe:
             httpGet: {path: /health, port: 8000}
             periodSeconds: 30

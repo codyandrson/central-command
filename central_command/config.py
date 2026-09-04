@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     # model"). Defaults = the homelab instance.
     embed_alias: str = "cc-embedding"
     embed_dim: int = 1024
+    # The voice cc-tts speaks in when the cockpit names none. REQUIRED on the
+    # wire: LiteLLM's Router.aspeech() and the speaches engine both reject a
+    # request without one (2026-09-03 Windows run). Default = the bundled
+    # Kokoro's first voice; discover-llm.sh's probe reads the same CC_TTS_VOICE.
+    tts_voice: str = "af_heart"
 
     # How charters address the human team lead — the first charter-template
     # placeholder (<<operator_name>>, rendered ONCE at hire). The default

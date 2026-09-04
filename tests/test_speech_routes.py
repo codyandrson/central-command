@@ -46,6 +46,10 @@ async def test_tts_forwards_to_the_alias_and_returns_audio(client, monkeypatch):
     assert seen["url"] == "http://litellm.test:4000/v1/audio/speech"
     assert seen["auth"] == "Bearer sk-virtual"
     assert b'"model":"cc-tts"' in seen["body"].replace(b" ", b"")  # the alias, never the client's model
+    # A voice is REQUIRED on the wire (LiteLLM's Router.aspeech() and the speaches
+    # engine both reject its absence — 2026-09-03 Windows run), so the default
+    # goes out whenever the cockpit names none.
+    assert b'"voice":"af_heart"' in seen["body"].replace(b" ", b"")
 
 
 async def test_transcribe_forwards_the_file_and_returns_text(client, monkeypatch):

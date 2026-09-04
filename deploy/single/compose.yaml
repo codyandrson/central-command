@@ -24,10 +24,10 @@
 #   polled from the host by setup.sh instead:
 #     * litellm ALSO gets a host-side wait — its first boot runs Prisma
 #       migrations and the honest budget is five minutes;
-#     * speech has NO healthcheck: its first boot downloads ~1GB of models
-#       (up to 30 minutes), during which "unhealthy" is the normal state, and
-#       the image's tool surface (curl/wget/python on PATH) is not ours to
-#       assume. setup.sh polls /health for the real answer.
+#     * speech has NO healthcheck: the image's tool surface (curl/wget/python
+#       on PATH) is not ours to assume. setup.sh polls /health, then installs
+#       the models through the engine's API (speaches 0.8.3 has no preload
+#       setting — it boots empty).
 #
 #   ── SECRETS ─────────────────────────────────────────────────────────────
 #   Every credential comes from deploy/single/.env (0600, gitignored),
@@ -361,10 +361,12 @@ services:
   # may point somewhere else instead; CC_ENABLE_SPEECH=0 means BOTH are yours.
   #
   # Models are HF-hub snapshots in a named volume (the container's HF cache).
-  # PRELOAD_MODELS pulls them on first boot — from huggingface.co or the
-  # CC_HF_ENDPOINT mirror; with no egress at all, pre-place the snapshots in
-  # the volume (deploy/AIRGAP.md). Nothing here holds a credential: the
-  # engine's API key is unset and only this host's loopback can reach it.
+  # setup.sh's llm phase installs them with POST /v1/models/<id> — the engine
+  # fetches from huggingface.co or the CC_HF_ENDPOINT mirror; with no egress
+  # at all, pre-place the snapshots in the volume (deploy/AIRGAP.md). (No
+  # PRELOAD_MODELS: that setting is unreleased upstream and 0.8.3 ignores it.)
+  # Nothing here holds a credential: the engine's API key is unset and only
+  # this host's loopback can reach it.
   #
   # No healthcheck on purpose — see the header.
   speech:
@@ -373,7 +375,6 @@ services:
     image: ${CC_IMG_SPEACHES_AI_SPEACHES:-ghcr.io/speaches-ai/speaches:0.8.3-cpu}
     restart: always
     environment:
-      PRELOAD_MODELS: '["${CC_SPEECH_TTS_MODEL:-speaches-ai/Kokoro-82M-v1.0-ONNX}", "${CC_SPEECH_STT_MODEL:-Systran/faster-whisper-small}"]'
       HF_ENDPOINT: ${CC_HF_ENDPOINT:-https://huggingface.co}
       HF_HUB_CACHE: /home/ubuntu/.cache/huggingface/hub
     ports:

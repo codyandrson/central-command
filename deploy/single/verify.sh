@@ -227,13 +227,20 @@ echo "== speech (optional, CC_ENABLE_SPEECH=${CC_ENABLE_SPEECH})"
 if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
   if grep -qE "^${CC_POD_PREFIX}speech " <<<"$ctrs"; then
     ok "container ${CC_POD_PREFIX}speech exists"
-    # /health only answers once the preloaded models are in memory; a first
-    # boot is downloading them, hence the budget.
-    if wait_for 600 curl -fsS "http://127.0.0.1:${CC_SPEECH_PORT}/health"; then
+    if wait_for 120 curl -fsS "http://127.0.0.1:${CC_SPEECH_PORT}/health"; then
       ok "speech answers /health"
     else
       bad "speech answers /health"
     fi
+    # The engine boots empty; setup.sh llm installs the models. /health says
+    # nothing about them, so ask the catalog.
+    for m in "${CC_SPEECH_TTS_MODEL:-speaches-ai/Kokoro-82M-v1.0-ONNX}" "${CC_SPEECH_STT_MODEL:-Systran/faster-whisper-small}"; do
+      if curl -fsS "http://127.0.0.1:${CC_SPEECH_PORT}/v1/models/${m}" >/dev/null 2>&1; then
+        ok "speech model ${m} installed"
+      else
+        bad "speech model ${m} installed (./setup.sh llm installs it)"
+      fi
+    done
   else
     bad "container ${CC_POD_PREFIX}speech exists (started by ./setup.sh llm)"
   fi
