@@ -4,7 +4,24 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
-## 2026-09-03 — v2.22.1: the speech engine boots empty
+## 2026-09-05 — v2.22.2: one vacation marker took out the calendar
+
+The EA's 2026-09-04 morning brief reported the calendar unavailable —
+`can't compare offset-naive and offset-aware datetimes` — and a direct
+`read_calendar` retry failed the same way, so the EA declared a gap
+(twice: the Thursday look-ahead hit it first). Root cause in
+`reports/ea_calendar.py`: `first_event_at` took `min()` over every event's
+parsed start, but a REAL all-day event's start is a bare date, which parses
+offset-naive, while timed starts parse aware — Python refuses the
+comparison. One all-day vacation marker beside one timed flight crashed the
+whole read; a day with only the marker sailed through, which is why it
+looked intermittent. The suite never caught it because its all-day fixture
+used a full RFC3339 stamp.
+
+- All-day events are excluded from `first_event_at` — it now means the first
+  timed commitment, which is what a brief should lead with anyway.
+- Regression test mirrors the real failing shape: bare-date all-day event
+  beside an aware timed one.
 
 The first Windows run of v2.22.0 failed at `probe-tts`, and the thread led
 somewhere older than the refactor: **no deployment had ever installed a

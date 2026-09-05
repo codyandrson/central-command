@@ -75,7 +75,12 @@ async def day(offset_days: int = 0) -> dict:
 
     out = await calendar_facade.list_events(start.isoformat(), end.isoformat())
     events = out["events"]
-    starts = [s for s in (_dt(e.get("start")) for e in events) if s]
+    # All-day events are excluded here, not just below: a real all-day start is
+    # a bare DATE, which parses NAIVE, and min() over naive + aware raises —
+    # one vacation marker beside one flight took out the whole read. "First
+    # event" means the first timed commitment anyway.
+    starts = [s for s in (_dt(e.get("start")) for e in events
+                          if not e.get("all_day")) if s]
     return {
         "available": True,
         "timezone": settings.ea_timezone,

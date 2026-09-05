@@ -117,6 +117,25 @@ async def test_all_day_markers_and_declined_invitations_are_not_commitments(
     assert out["event_count"] == 3
 
 
+async def test_a_bare_date_all_day_event_beside_a_timed_one_does_not_crash(
+    monkeypatch
+):
+    """Regression for the 2026-09-04 morning brief. A REAL all-day event's
+    start is a bare date ("2026-09-04") — it parses offset-NAIVE, and min()
+    over that plus a timed event's aware start raises TypeError, taking the
+    whole calendar read (brief block AND read_calendar) down. first_event_at
+    is the first TIMED commitment; the marker never enters the comparison."""
+    monkeypatch.setattr(calendar_facade, "list_events", _Facade([
+        _ev("2026-09-04", "2026-09-13", all_day=True, summary="Vacation"),
+        _ev("2026-09-04T14:00:00-06:00", "2026-09-04T17:34:00-06:00",
+            summary="Flight"),
+    ]))
+    out = await ea_calendar.day(0)
+    assert out["available"] and out["event_count"] == 2
+    assert out["first_event_at"].startswith("2026-09-04T14:00")
+    assert out["conflicts"] == []
+
+
 async def test_truncation_is_carried_through_honestly(monkeypatch):
     monkeypatch.setattr(calendar_facade, "list_events", _Facade([], truncated=True))
     out = await ea_calendar.day(0)
