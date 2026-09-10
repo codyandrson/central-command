@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.23.0: a Jira proposal shows the issue, not just its key
+
+A Jira-targeted proposal read as `jira.add_comment  jira:TASKS-48` — twelve
+actions across eight keys, none of them naming the issue. The reviewer had
+the agent's `jira_state` claims and nothing to check them against, where an
+email proposal has always shown the mail itself.
+
+- `proposals.get` now attaches `jira_issues`: a live snapshot (summary,
+  status, type, priority, assignee, due date, labels, last updated, link,
+  description) of every issue the actions touch — the action's target and
+  the argument-side counterparts such as a link's other end. One failed
+  read becomes an `error` for that key; the detail never fails on Jira.
+- The Decisions pane renders an issue card under each action: key, summary,
+  status, due date, a link out to Jira, and the description on expand —
+  the email card's shape.
+- An issue Jira shows as updated AFTER the proposal was drafted gets a
+  "changed since proposed" badge: the world moved between propose and
+  approve, and the agent's claims about it may be stale.
+
 ## 2026-09-10 — v2.22.6: mail_read opens the backlog it was built to review
 
 `mail-read` shipped in v2.21.1 so a drafter could read the set it was about

@@ -3,7 +3,7 @@ import {
   Check, X, Inbox, RefreshCw, ShieldAlert, RotateCcw,
   FileText, Mail, ChevronDown, CircleCheck, CircleAlert,
   Compass, MessageCircleQuestion, OctagonPause, ArrowRight, Hourglass, Ban,
-  History,
+  History, ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SpeakButton } from '@/features/tts/SpeakButton';
@@ -14,7 +14,7 @@ import { BulkDismissDialog } from './BulkDismissDialog';
 import { agingLevel, ageOf, oldestAge, STALE_HOURS, type OldestAge } from './aging';
 import { ListDetailSplit } from '@/components/Splitter';
 import type {
-  DecisionSelection, OperatorItem, ProposalDetail, ProposalSummary, WorkItem,
+  DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, WorkItem,
 } from './types';
 
 /* The panes used to call `useDecisions()` themselves, which meant three live
@@ -768,6 +768,81 @@ function EmailCard({ item }: { item: WorkItem }) {
   );
 }
 
+/** Jira issue keys an action names: its target plus the argument-side
+ *  counterparts (the other end of a link) — the same list the server reads. */
+const JIRA_KEY_ARGS = ['issue_key', 'from_key', 'to_key'];
+function jiraKeysOf(a: ProposalAction): string[] {
+  const keys: string[] = [];
+  const ref = a.target_ref;
+  if (ref && typeof ref === 'object' && ref.system === 'jira' && ref.id) keys.push(ref.id);
+  for (const k of JIRA_KEY_ARGS) {
+    const v = a.arguments?.[k];
+    if (typeof v === 'string' && !keys.includes(v)) keys.push(v);
+  }
+  return keys;
+}
+
+/** The issue behind a `jira:KEY` reference — key, summary, status, due date,
+ *  a link out, and the description on expand. Mirrors EmailCard: the source,
+ *  read live, next to the agent's claim about it. */
+function IssueCard({ issueKey, issue, proposedAt }: {
+  issueKey: string; issue?: JiraIssueSnapshot; proposedAt?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const changed = !!(issue?.updated && proposedAt && new Date(issue.updated) > new Date(proposedAt));
+  return (
+    <div className="mb-1.5 rounded-lg border border-border/40" data-testid="jira-issue-card">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left hover:bg-primary/[0.04]"
+          disabled={!issue?.description}
+        >
+          <ChevronDown size={12} className={`shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'} ${issue?.description ? '' : 'invisible'}`} />
+          <span className="shrink-0 font-mono text-[0.667rem] text-muted-foreground">{issueKey}</span>
+          {issue?.error ? (
+            <span className="min-w-0 truncate text-xs text-yellow-600 dark:text-yellow-400" title={issue.error}>
+              live issue unavailable: {issue.error}
+            </span>
+          ) : issue ? (
+            <span className="min-w-0 truncate text-xs text-foreground">{issue.summary || '(no summary)'}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">(not read)</span>
+          )}
+        </button>
+        {issue && !issue.error && (
+          <>
+            {issue.status && <span className="cockpit-badge shrink-0">{issue.status}</span>}
+            {issue.due_date && <span className="shrink-0 text-[0.667rem] text-muted-foreground">due {issue.due_date}</span>}
+            {changed && (
+              <span
+                className="cockpit-badge shrink-0 text-yellow-600 dark:text-yellow-400"
+                title={`Jira shows this issue updated at ${issue.updated}, after the proposal was drafted — the agent's claims may be stale.`}
+              >
+                changed since proposed
+              </span>
+            )}
+            {issue.url && (
+              <a href={issue.url} target="_blank" rel="noreferrer" title="Open in Jira"
+                 className="shrink-0 text-muted-foreground hover:text-foreground">
+                <ExternalLink size={12} />
+              </a>
+            )}
+          </>
+        )}
+      </div>
+      {open && issue?.description && (
+        <div className="whitespace-pre-wrap cockpit-wrap border-t border-border/40 px-3 py-2 text-[0.733rem] leading-relaxed text-foreground/85">
+          {[issue.issue_type, issue.priority, issue.assignee ? `assignee ${issue.assignee}` : 'unassigned',
+            issue.labels?.length ? `labels ${issue.labels.join(', ')}` : null].filter(Boolean).join(' · ')}
+          {'\n\n'}{issue.description}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Proposal detail pane ── */
 /** Argument keys worth reading aloud — the prose an operator reviews, not ids and flags. */
 const SPOKEN_ARG_KEYS = ['subject', 'body', 'comment', 'text', 'summary', 'description', 'episode_body', 'fact', 'title'];
@@ -958,6 +1033,9 @@ function ProposalPane({
                 </span>
               ))}
             </div>
+            {jiraKeysOf(a).map((k) => (
+              <IssueCard key={k} issueKey={k} issue={detail.jira_issues?.[k]} proposedAt={detail.created_at} />
+            ))}
             {a.charter_diff ? <DiffBlock diff={a.charter_diff} />
               : cap === 'graph.add_episode' ? <EpisodeBlock args={a.arguments ?? {}} />
               : cap === 'graph.create_edge' || cap === 'graph.update_edge'

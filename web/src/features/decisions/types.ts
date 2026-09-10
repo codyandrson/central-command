@@ -78,6 +78,20 @@ export interface ProposalSummary {
   simulated?: boolean;
 }
 
+export interface JiraIssueSnapshot {
+  summary?: string | null;
+  status?: string | null;
+  issue_type?: string | null;
+  priority?: string | null;
+  assignee?: string | null;
+  due_date?: string | null;
+  labels?: string[] | null;
+  updated?: string | null;
+  url?: string | null;
+  description?: string | null;
+  error?: string;
+}
+
 /** Full row from proposals.get — list fields plus reviewer enrichment. */
 export interface ProposalDetail extends ProposalSummary {
   actions: ProposalAction[];
@@ -89,6 +103,10 @@ export interface ProposalDetail extends ProposalSummary {
   confidence?: Confidence | null;
   source_emails?: WorkItem[];
   folds?: WorkItem[];
+  /** Live snapshot of every Jira issue the actions touch, keyed by issue key
+   *  — read at review time, so it is the SOURCE beside the agent's
+   *  jira_state claims. `error` means the read failed; the key still shows. */
+  jira_issues?: Record<string, JiraIssueSnapshot>;
   /** The auditor's verdict on this proposal (bulk dismissals). Present means
    *  it was audited; a challenge is why the proposal is still awaiting you. */
   audit?: AuditRecord | null;

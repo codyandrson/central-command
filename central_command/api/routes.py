@@ -1990,6 +1990,50 @@ async def heartbeat_schedule_runs(schedule_id: str, limit: int = 50) -> dict:
     }
 
 
+# Argument keys that name a Jira issue besides the action's own target — the
+# other end of a link, the issue a comment lands on.
+_JIRA_KEY_ARGS = ("issue_key", "to_key", "from_key")
+_JIRA_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]+-\d+$")
+
+
+def _jira_keys_in(actions: list[dict]) -> list[str]:
+    keys: dict[str, None] = {}
+    for a in actions:
+        ref = a.get("target_ref")
+        if isinstance(ref, dict) and ref.get("system") == "jira":
+            keys[str(ref.get("id") or "")] = None
+        args = a.get("arguments") or {}
+        for k in _JIRA_KEY_ARGS:
+            if isinstance(args.get(k), str):
+                keys[args[k]] = None
+    return [k for k in keys if _JIRA_KEY_RE.match(k)]
+
+
+async def _jira_issues_for(actions: list[dict]) -> dict[str, dict]:
+    """Live snapshot of every Jira issue a proposal touches, keyed by issue
+    key — the reviewer's counterpart to `source_emails`: the SOURCE, read
+    fresh, next to the agent's `jira_state` claims about it. A failed read
+    becomes `{"error": ...}` for that key and never fails the detail — the
+    claims are still reviewable, just unverified."""
+    keys = _jira_keys_in(actions)
+    if not keys:
+        return {}
+    import asyncio
+
+    from central_command.integrations import jira
+
+    async def one(key: str) -> dict:
+        try:
+            issue = (await asyncio.wait_for(jira.get_issue(key), 15))["issue"]
+        except Exception as e:  # noqa: BLE001 — every failure is display-only
+            return {"error": str(e) or type(e).__name__}
+        return {k: issue.get(k) for k in (
+            "summary", "status", "issue_type", "priority", "assignee",
+            "due_date", "labels", "updated", "url", "description")}
+
+    return dict(zip(keys, await asyncio.gather(*(one(k) for k in keys))))
+
+
 @router.get("/proposals/{proposal_id}")
 async def get_proposal(proposal_id: str) -> dict:
     row = await repo.load_proposal(proposal_id)
@@ -2001,6 +2045,7 @@ async def get_proposal(proposal_id: str) -> dict:
     # summary) and any sibling emails approval would also mark resolved.
     row["source_emails"] = await repo.work_items_for_session(row["session_id"])
     row["folds"] = await repo.work_items_folded_into(proposal_id)
+    row["jira_issues"] = await _jira_issues_for(row["actions"])
 
     # Deterministic policy flags, computed at review time only — a due date
     # that was fine when approved naturally falls into the past afterwards,

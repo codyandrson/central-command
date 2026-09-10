@@ -418,3 +418,50 @@ describe('DecisionsView history', () => {
     expect(screen.queryByRole('button', { name: /^Dismiss$/ })).not.toBeInTheDocument();
   });
 });
+
+describe('DecisionsView Jira issue cards', () => {
+  const openProposal = async () => {
+    state.proposals = [{ id: 'p1', agent_id: 'jira-expert', intent: 'Sweep', created_at: hoursAgo(1) }];
+    render(<DecisionsView />);
+    await userEvent.click(screen.getByText('Sweep'));
+  };
+  const link = {
+    capability: 'jira.link_issues@v1',
+    target_ref: { system: 'jira', id: 'TASKS-48' },
+    arguments: { from_key: 'TASKS-48', to_key: 'TASKS-50', link_type: 'Duplicate' },
+  };
+
+  it('names both issues of a link by summary, with status and a live-failure note', async () => {
+    state.detail = {
+      id: 'p1', agent_id: 'jira-expert', intent: 'Sweep', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(1), actions: [link], evidence: [],
+      jira_issues: {
+        'TASKS-48': { summary: 'MyIDCare alert (dup)', status: 'To Do', url: 'https://example.atlassian.net/browse/TASKS-48', description: 'the body' },
+        'TASKS-50': { error: '401 Unauthorized' },
+      },
+    };
+    await openProposal();
+    await waitFor(() => expect(screen.getAllByTestId('jira-issue-card')).toHaveLength(2));
+    expect(screen.getByText('MyIDCare alert (dup)')).toBeInTheDocument();
+    expect(screen.getByText('To Do')).toBeInTheDocument();
+    expect(screen.getByText(/live issue unavailable: 401/)).toBeInTheDocument();
+    expect(screen.getByTitle('Open in Jira')).toHaveAttribute('href', 'https://example.atlassian.net/browse/TASKS-48');
+
+    expect(screen.queryByText(/the body/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('MyIDCare alert (dup)'));
+    expect(screen.getByText(/the body/)).toBeInTheDocument();
+  });
+
+  it('flags an issue Jira updated after the proposal was drafted', async () => {
+    state.detail = {
+      id: 'p1', agent_id: 'jira-expert', intent: 'Sweep', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(2), actions: [link], evidence: [],
+      jira_issues: {
+        'TASKS-48': { summary: 'a', status: 'Done', updated: hoursAgo(1) },
+        'TASKS-50': { summary: 'b', status: 'To Do', updated: hoursAgo(3) },
+      },
+    };
+    await openProposal();
+    await waitFor(() => expect(screen.getAllByText('changed since proposed')).toHaveLength(1));
+  });
+});
