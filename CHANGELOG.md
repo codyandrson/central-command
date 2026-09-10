@@ -4,6 +4,16 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.23.3: the embedding probe keeps its stderr
+
+Rescued from a worktree left behind by the 2026-09-04 Windows run. The
+single-node `setup.sh` measured the `cc-embedding` dimension with the
+probe's stderr silenced, so a 404 ("no router for requested model") read
+exactly like a timeout and the operator had nothing to act on.
+
+- The probe command is echoed, its stderr stays visible, and a non-numeric
+  answer FAILs `probe-embed` by name before the gate message.
+
 ## 2026-09-10 — v2.23.2: an operator who decides mid-audit is not an error
 
 Two bulk dismissals were approved by the operator seconds after they parked;

@@ -736,9 +736,14 @@ phase_llm() {
 
   # THE measurement. Never a model card: a mis-sized vector corrupts the Neo4j
   # index instead of erroring, and the dimension is permanent once it exists.
+  # stderr stays visible: this is the one probe whose command is captured
+  # rather than run through step(), and a silenced 404 ("no router for
+  # requested model") reads exactly like a timeout (2026-09-04 Windows run).
   local dim
-  dim="$("$HERE/discover-llm.sh" --proxy embed cc-embedding 2>/dev/null | tail -1)"
+  note "--> $HERE/discover-llm.sh --proxy embed cc-embedding"
+  dim="$("$HERE/discover-llm.sh" --proxy embed cc-embedding | tail -1)"
   if [[ ! "$dim" =~ ^[0-9]+$ ]]; then
+    fail "probe-embed" "failed — see stderr for the command's own output"
     llm_gate "the cc-embedding alias did not return a vector"
     return 3
   fi
