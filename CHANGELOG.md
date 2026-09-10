@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.23.2: an operator who decides mid-audit is not an error
+
+Two bulk dismissals were approved by the operator seconds after they parked;
+the auditor's verdicts landed four minutes later (a slow local model), each
+concur tried to approve an already-EXECUTED proposal, and the refusal surfaced
+as an `audit error` toast — for a race the design expects.
+
+- `audit_bulk_dismissal` re-reads the proposal status right before its
+  auto-approve. An operator decision in the meantime stands: the verdict
+  stays on the log for the agreement record, the record notes
+  `operator_decided_first`, and no `audit.error` is emitted.
+
 ## 2026-09-10 — v2.23.1: the orchestrator can ask a teammate
 
 Talked to in chat, the orchestrator holds no `assign_work` (a conversation

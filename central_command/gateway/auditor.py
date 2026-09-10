@@ -308,6 +308,14 @@ async def audit_bulk_dismissal(
     )
 
     if mode == "active" and verdict.concur and allow_auto_confirm:
+        # The operator may have decided while the auditor was thinking (live
+        # 2026-09-10: two approvals landed ~4 min before the local model's
+        # verdicts). Their decision stands; the concur is recorded above for
+        # the agreement record, and the miss is nobody's error.
+        fresh = await repo.load_proposal(proposal_id)
+        if fresh is None or fresh["status"] not in ("AWAITING_HUMAN", "PROPOSED"):
+            record["operator_decided_first"] = True
+            return record
         # THE one approval seam — everything downstream (proposal.decided
         # before execute, commit_folds, the drafter's resume) is the normal
         # path, unchanged. `approver` names the mechanism honestly, exactly as

@@ -153,6 +153,31 @@ async def test_an_auditor_error_degrades_to_the_human_gate(monkeypatch):
     assert errors, "an auditor failure must be loud on the log"
 
 
+async def test_an_operator_who_decides_mid_audit_wins_without_an_error(monkeypatch):
+    """Live 2026-09-10: the operator approved two bulk dismissals minutes before
+    the auditor's verdicts landed, and each concur then tried to approve an
+    EXECUTED proposal — an 'audit error' toast for a race the system expects."""
+    approved: list[str] = []
+    real_register = auditor.ensure_registered
+
+    async def approve_during_the_audit():
+        await real_register()
+        pid = (await repo.list_proposals(status="AWAITING_HUMAN"))[0]["id"]
+        await routes.approve(pid)
+        approved.append(pid)
+
+    monkeypatch.setattr(auditor, "ensure_registered", approve_during_the_audit)
+    result, _ = await _propose(monkeypatch)
+
+    assert approved == [result["proposal_id"]]
+    prop = await repo.load_proposal(result["proposal_id"])
+    assert prop["status"] == "EXECUTED"
+    assert prop["provenance"]["approver"] != "auditor"
+    assert set(await _states(result["folded_message_ids"])) == {"FOLDED"}
+    assert not await repo.list_events(kind="audit.error", ref_id=result["proposal_id"])
+    assert await repo.list_events(kind="audit.verdict", ref_id=result["proposal_id"])
+
+
 async def test_shadow_mode_records_the_verdict_but_approves_nothing(monkeypatch):
     monkeypatch.setattr(settings, "auditor_mode", "shadow")
     result, _ = await _propose(monkeypatch)
