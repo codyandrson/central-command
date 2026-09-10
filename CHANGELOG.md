@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.22.5: the brand badge stops eating the name
+
+The v2.22.4 total badge sat in the brand row beside "NERVE", in the flow —
+and the brand block is allowed to shrink, so on the desktop the badge took
+its width out of the name and rendered "NER…". The phone layout happened
+to have room.
+
+- The badge is now overlaid on the logo tile, app-icon style, at its
+  top-right corner. It takes no width from anything; the name is never
+  truncated by it in either layout.
+
 ## 2026-09-10 — v2.22.4: a badge on a scrolled-away tab is no badge
 
 The v2.22.3 diagnosis was wrong about WHERE the notification went missing.

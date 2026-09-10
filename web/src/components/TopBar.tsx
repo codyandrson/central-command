@@ -293,30 +293,32 @@ export function TopBar({
     <div className="relative z-40 px-2 pt-2 sm:px-4 sm:pt-3">
       <header className="topbar-mobile-compact shell-panel flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl px-3 py-2 shrink-0 max-[371px]:gap-x-1.5 max-[371px]:px-2 sm:flex-nowrap sm:px-4">
         <div className="flex min-w-0 items-center gap-3 max-[371px]:gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-background/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] max-[371px]:h-9 max-[371px]:w-9">
+          <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-background/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] max-[371px]:h-9 max-[371px]:w-9">
             <NerveLogo size={24} />
+            {/* The tab strip scrolls sideways in both layouts, so a badge on
+                a tab is invisible whenever that tab is (2026-09-10). The
+                brand block never scrolls: one total here, landing on the
+                first tab that has something waiting. Overlaid on the logo
+                tile, app-icon style — in the flow it took width from the
+                name and truncated "NERVE" on the desktop. */}
+            {attentionTotal > 0 && onViewModeChange && (
+              <button
+                type="button"
+                data-testid="attention-total"
+                title="Something is awaiting you"
+                aria-label={`${attentionTotal} awaiting across tabs`}
+                onClick={() => onViewModeChange(firstAttentionMode!)}
+                className="absolute -right-2 -top-2 flex items-center"
+              >
+                <TabBadge count={attentionTotal} tone="action" />
+              </button>
+            )}
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="truncate text-sm font-semibold uppercase tracking-[0.34em] text-primary max-[371px]:text-xs max-[371px]:tracking-[0.22em] sm:text-base">
                 Nerve
               </span>
-              {/* The tab strip scrolls sideways in both layouts, so a badge on
-                  a tab is invisible whenever that tab is (2026-09-10). The
-                  brand block never scrolls: one total here, landing on the
-                  first tab that has something waiting. */}
-              {attentionTotal > 0 && onViewModeChange && (
-                <button
-                  type="button"
-                  data-testid="attention-total"
-                  title="Something is awaiting you"
-                  aria-label={`${attentionTotal} awaiting across tabs`}
-                  onClick={() => onViewModeChange(firstAttentionMode!)}
-                  className="-ml-1 flex items-center"
-                >
-                  <TabBadge count={attentionTotal} tone="action" />
-                </button>
-              )}
             </div>
             <div className="hidden xl:block text-[0.733rem] text-muted-foreground/80">
               Agentic Command Center{" "}
