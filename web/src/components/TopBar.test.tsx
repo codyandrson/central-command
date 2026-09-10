@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TopBar } from './TopBar';
 
@@ -66,5 +66,19 @@ describe('TopBar', () => {
   it('caps very large counts at 99+', () => {
     renderTopBar({ attention: { chat: 0, decisions: 150, tasks: 0 } });
     expect(screen.getByRole('button', { name: /switch to decisions inbox/i })).toHaveTextContent('99+');
+  });
+
+  it('shows one total on the brand block and lands on the first waiting tab', () => {
+    const onViewModeChange = vi.fn();
+    renderTopBar({ attention: { chat: 0, decisions: 4, tasks: 2, verify: 1 }, onViewModeChange });
+    const total = screen.getByTestId('attention-total');
+    expect(total).toHaveTextContent('7');
+    fireEvent.click(total);
+    expect(onViewModeChange).toHaveBeenCalledWith('inbox');
+  });
+
+  it('shows no brand total when nothing is waiting', () => {
+    renderTopBar({ attention: { chat: 0, decisions: 0, tasks: 0, verify: 0 } });
+    expect(screen.queryByTestId('attention-total')).not.toBeInTheDocument();
   });
 });

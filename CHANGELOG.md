@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.22.4: a badge on a scrolled-away tab is no badge
+
+The v2.22.3 diagnosis was wrong about WHERE the notification went missing.
+The operator's screenshots show it: the tab strip scrolls sideways on the
+phone and on the desktop alike, and every attention badge sits on its own
+tab — so with Decisions scrolled off to the left, six waiting proposals have
+no indication anywhere on screen. The toast fix stands (it is real under
+pinch-zoom) but it never touched this.
+
+- One TOTAL badge on the brand block, the one element that never scrolls in
+  either layout: the sum of the chat, decisions, tasks and verify counts.
+  Clicking it switches to the leftmost tab that has something waiting.
+- The active tab is scrolled into view whenever the view changes, so a
+  switch made from the badge (or the command palette) never lands on a tab
+  that is itself off-screen.
+
 ## 2026-09-10 — v2.22.3: the toast follows the visible viewport
 
 A notification toast is `position: fixed` in the bottom-right corner, which

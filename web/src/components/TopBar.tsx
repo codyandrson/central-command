@@ -169,6 +169,28 @@ export function TopBar({
   const [activePanel, setActivePanel] = useState<PanelId>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonsRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Whichever tab is active should be on screen — a switch made from the
+  // brand badge (or anywhere else) must not land on a tab scrolled out of
+  // view. jsdom has no scrollIntoView, hence the optional call.
+  useEffect(() => {
+    stripRef.current
+      ?.querySelector<HTMLElement>('[data-active="true"]')
+      ?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+  }, [viewMode]);
+
+  // Tab order, so the badge lands on the leftmost tab that is waiting.
+  const attentionOrder: Array<[number, ViewMode]> = attention
+    ? [
+        [attention.chat ?? 0, 'chat'],
+        [attention.decisions ?? 0, 'inbox'],
+        [attention.tasks ?? 0, 'kanban'],
+        [attention.verify ?? 0, 'graph-verify'],
+      ]
+    : [];
+  const attentionTotal = attentionOrder.reduce((n, [c]) => n + c, 0);
+  const firstAttentionMode = attentionOrder.find(([c]) => c > 0)?.[1];
 
   const togglePanel = useCallback((panel: PanelId) => {
     setActivePanel((prev) => (prev === panel ? null : panel));
@@ -279,6 +301,22 @@ export function TopBar({
               <span className="truncate text-sm font-semibold uppercase tracking-[0.34em] text-primary max-[371px]:text-xs max-[371px]:tracking-[0.22em] sm:text-base">
                 Nerve
               </span>
+              {/* The tab strip scrolls sideways in both layouts, so a badge on
+                  a tab is invisible whenever that tab is (2026-09-10). The
+                  brand block never scrolls: one total here, landing on the
+                  first tab that has something waiting. */}
+              {attentionTotal > 0 && onViewModeChange && (
+                <button
+                  type="button"
+                  data-testid="attention-total"
+                  title="Something is awaiting you"
+                  aria-label={`${attentionTotal} awaiting across tabs`}
+                  onClick={() => onViewModeChange(firstAttentionMode!)}
+                  className="-ml-1 flex items-center"
+                >
+                  <TabBadge count={attentionTotal} tone="action" />
+                </button>
+              )}
             </div>
             <div className="hidden xl:block text-[0.733rem] text-muted-foreground/80">
               Agentic Command Center{" "}
@@ -287,7 +325,7 @@ export function TopBar({
         </div>
         {/* View mode toggle */}
         {onViewModeChange && (
-          <div className="order-3 flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto pb-1 max-[371px]:gap-1 sm:order-none sm:ml-2 sm:w-auto sm:pb-0">
+          <div ref={stripRef} className="order-3 flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto pb-1 max-[371px]:gap-1 sm:order-none sm:ml-2 sm:w-auto sm:pb-0">
             <button
               onClick={() => onViewModeChange("chat")}
               title="Chat View"
