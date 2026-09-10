@@ -3086,6 +3086,40 @@ async def graph_settings_put(body: GraphSettingsIn) -> dict:
     return await graph_status()
 
 
+# --- Context window (Settings › Context, 2026-09-10) -------------------------
+# The operator's toggles for what `runtime/context.prepare_window` does to the
+# WORKING window. Same shape as the graph settings above: one `app_setting`
+# row, partial PUT, defaults live in code (`context.DEFAULTS`).
+
+
+class ContextSettingsIn(BaseModel):
+    drop_thinking: bool | None = None
+    clear_tool_results: bool | None = None
+    tool_results_keep_turns: int | None = Field(default=None, ge=0, le=50)
+    pressure_warning: bool | None = None
+    output_headroom: bool | None = None
+    output_headroom_tokens: int | None = Field(default=None, ge=0, le=200_000)
+    summarize: bool | None = None
+    summarize_threshold: float | None = Field(default=None, ge=0.5, le=1.0)
+
+
+@router.get("/context/settings")
+async def context_settings_get() -> dict:
+    from central_command.runtime import context
+
+    return await context.load_settings()
+
+
+@router.put("/context/settings")
+async def context_settings_put(body: ContextSettingsIn) -> dict:
+    from central_command.runtime import context
+
+    current = await context.load_settings()
+    updated = {**current, **body.model_dump(exclude_none=True)}
+    await repo.set_app_setting(context.SETTINGS_KEY, updated)
+    return await context.load_settings()
+
+
 # --- Graph curation (OPERATOR writes, 2026-08-15) ---------------------------
 # The operator's own hand on the graph: delete a hallucinated node, repoint a
 # wrong edge, add a fact the extractor missed, fold a duplicate identity.

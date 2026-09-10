@@ -16,6 +16,8 @@ Either way it never writes: the Executor performs approved changes.
 
 from __future__ import annotations
 
+from central_command.runtime import context as _context
+
 from pydantic_ai import Agent, DeferredToolRequests
 
 from central_command.runtime.deps import TriageDeps
@@ -110,7 +112,7 @@ async def build_jira_expert(
         # rides every shape of run.
         tools=[declare_gap, current_time],
         toolsets=[packs_mod.toolset_for(packs), *extra_toolsets],
-        capabilities=list(capabilities or []),
+        capabilities=[*list(capabilities or []), *_context.capabilities()],
     )
 
 

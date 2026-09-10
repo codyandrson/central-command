@@ -30,6 +30,13 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", False)
     context._last_fraction.clear()
     context._windows.clear()
+    context._sent.clear()
+
+    # Slice 2 counts output headroom against the window; these tests size their
+    # fractions against a bare 10k window, so pin the headroom off here.
+    async def bare_settings():
+        return {**context.DEFAULTS, "output_headroom": False}
+    monkeypatch.setattr(context, "load_settings", bare_settings)
     yield
     context._last_fraction.clear()
     context._windows.clear()

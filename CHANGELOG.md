@@ -4,6 +4,49 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.24.0: an agent's window is managed, not just measured
+
+Found live the same day: a graph-curator conversation failed with
+`UnexpectedModelBehavior: Model token limit (262144) exceeded before any
+response was generated`. The number was a red herring — it is the pinned
+output cap. The real ceiling was the serving model's 81,920-token context:
+the last request carried 81,911 input tokens, llama.cpp accepted it, had nine
+tokens left for the answer, and returned HTTP 200 with `finish_reason:
+length`. No proxy fallback fires on a 200. About 40% of that transcript was
+reasoning from earlier turns, sent back on every request.
+
+Central Command measured pressure since slice 1 (`session.context_pressure`,
+five events on that session from 0.61 to 0.87) and changed nothing. Slice 2
+manages the **working window** — what the model is SENT — while the record
+stays complete and raw. A pydantic-ai `ProcessHistory` capability
+(`runtime/context.prepare_window`), attached to every long-lived agent
+builder, rewrites the outgoing request only, in the order the field converged
+on (Anthropic context editing, Claude Code microcompact, OpenCode, MemGPT):
+
+- **Drop old reasoning** — thinking parts from every response but the last.
+- **Clear old tool output** — tool results older than the kept turns become a
+  one-line placeholder naming the tool and the size; the call stays.
+- **Warn the agent** — past the pressure threshold the outgoing request
+  carries a context notice, so the agent can record what lives only in the
+  conversation before it is compacted (MemGPT's memory-pressure warning).
+- **Reserve output headroom** — pressure now counts a reply-sized reserve
+  against the window, catching exactly the 81,911-of-81,920 case.
+- **Summarize when still over budget** — the oldest half is compressed by
+  the session's own model, once per growth step, cached in
+  `run_state.context_summary`, announced as `session.context_compacted`. The
+  retained tail always starts with a response, so no tool return ever loses
+  the call it answers.
+
+**Every step is an operator toggle: Settings › Context** (a new tab), backed
+by one `app_setting` row (`GET/PUT /api/context/settings`). A toggle applies
+at the agent's next model request, and because nothing edits the transcript,
+switching one off sends the full history again. Defaults: all five on, three
+turns of tool output kept, 8,192 tokens of headroom, summarize at 0.85.
+
+A trim that fails sends the raw history — yesterday's behaviour, logged.
+Demo mode is untouched. `session.context_pressure` now reports the working
+window when one has been measured, plus the `headroom` it counted.
+
 ## 2026-09-10 — v2.23.5: the single-node cockpit can update itself from a zip
 
 Rescued from a worktree last touched 2026-09-03, written as "v2.22.0" and

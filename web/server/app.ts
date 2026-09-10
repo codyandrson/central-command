@@ -59,6 +59,7 @@ import kanbanRoutes from './routes/cc-kanban.js';
 import beadsRoutes from './routes/beads.js';
 // D2026-08-09: the Graph panel's read-only proxy to the API tier's bolt reader.
 import graphRoutes from './routes/cc-graph.js';
+import contextRoutes from './routes/cc-context.js';
 // D2026-08-11: the Activity screen (Overview · Runs · Events) — the surface
 // that makes every run and every event visible somewhere. Supersedes the old
 // workspace activity tab, which was dropped.
@@ -116,7 +117,7 @@ const routes = [
   workspaceRoutes, charterRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,
   voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, channelsRoutes, kanbanRoutes, beadsRoutes,
   graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes, sourcesRoutes,
-  updateRoutes, systemsRoutes,
+  updateRoutes, systemsRoutes, contextRoutes,
 ];
 for (const route of routes) app.route('/', route);
 

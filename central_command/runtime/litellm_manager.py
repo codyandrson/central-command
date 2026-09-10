@@ -18,6 +18,8 @@ Two build modes:
 
 from __future__ import annotations
 
+from central_command.runtime import context as _context
+
 from pydantic_ai import Agent, DeferredToolRequests
 
 from central_command.runtime.deps import TriageDeps
@@ -63,7 +65,7 @@ async def build_litellm_manager(
         # both the advisory (str-only) and direct-task output shapes.
         tools=[declare_gap, current_time],
         toolsets=[packs_mod.toolset_for(packs), *extra_toolsets],
-        capabilities=list(capabilities or []),
+        capabilities=[*list(capabilities or []), *_context.capabilities()],
     )
 
 

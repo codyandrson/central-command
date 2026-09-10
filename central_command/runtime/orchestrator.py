@@ -15,6 +15,8 @@ NEW for the operator, `task.route_error` on the log.
 
 from __future__ import annotations
 
+from central_command.runtime import context as _context
+
 import uuid
 
 from pydantic import BaseModel
@@ -82,7 +84,7 @@ async def build_project_orchestrator(
         # reasoning as build_agent/build_hired_agent in runtime/agent.py.
         tools=[declare_gap, current_time],
         toolsets=[packs_mod.toolset_for(packs)],
-        capabilities=list(capabilities or []),
+        capabilities=[*list(capabilities or []), *_context.capabilities()],
     )
 
 

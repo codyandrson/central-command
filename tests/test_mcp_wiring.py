@@ -65,6 +65,12 @@ EXEMPT = {
         "computed by its caller (run.py/agent.py), never calls the helper "
         "itself"
     ),
+    "context.py": (
+        "the context summarizer is a bare tool-free Agent over rendered "
+        "transcript text (slice 2, 2026-09-10) — no toolsets, no MCP, and "
+        "it must never gain any: a summary that could act would be a write "
+        "path outside the approval gate"
+    ),
     "coach_profile.py": (
         "docstring-only mention of a historical `Agent(...)` shape (coaching "
         "no longer builds an ephemeral agent this way) — no agent "

@@ -20,6 +20,7 @@ from central_command.runtime import packs as packs_mod
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.models import resolve_model
 from central_command.runtime.tools import current_time, declare_gap, record_thread_decision
+from central_command.runtime import context as _context
 
 CHARTER = (
     "You are an inbox-triage agent. When an email implies a change to a Jira issue, "
@@ -295,7 +296,7 @@ async def build_agent(
         # everything else rides the granted packs.
         tools=[record_thread_decision, declare_gap, current_time],
         toolsets=[packs_mod.toolset_for(packs), *extra_toolsets],
-        capabilities=list(capabilities or []),
+        capabilities=[*list(capabilities or []), *_context.capabilities()],
     )
 
 
@@ -320,7 +321,7 @@ async def build_hired_agent(
         # agent holds them.
         tools=[declare_gap, current_time],
         toolsets=[packs_mod.toolset_for(packs), *extra_toolsets],
-        capabilities=list(capabilities or []),
+        capabilities=[*list(capabilities or []), *_context.capabilities()],
     )
 
 
