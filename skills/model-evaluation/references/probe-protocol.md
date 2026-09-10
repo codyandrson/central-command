@@ -235,6 +235,24 @@ request:
   /v1/rerank` with a query and two documents. `observed["rerank"]["ok"]` is
   true when the proxy answers 200 with a non-empty `results` list.
   `suggested_model_info` is again always `{}`.
+- **One-request batteries for the other non-chat modes** — each sends a
+  single mode-shaped request to the model's own endpoint; `ok` is "the
+  endpoint answered 200", and a success on an undeclared-mode model puts
+  `{"mode": <kind>}` in `suggested_model_info`:
+  - `audio_transcription`: multipart `POST /v1/audio/transcriptions` with a
+    quarter second of silent WAV.
+  - `audio_speech`: `POST /v1/audio/speech` (`input: "OK"`, `voice: alloy`).
+  - `image_generation`: `POST /v1/images/generations` (one image, default
+    size — this one costs a real image generation).
+  - `moderation`: `POST /v1/moderations`.
+  - `completion`: `POST /v1/completions` (legacy text completion).
+
+  Finer facts (voices, sizes, languages) come from the model card — the
+  probe only proves the deployment answers its own endpoint.
+- **A mode with no battery** (`realtime`, `responses`, anything new) returns
+  `ok: None` with a "no probe battery" note — inconclusive, never a failure,
+  and never the chat battery's guaranteed 404. Register it and declare its
+  capabilities from the model card.
 - Use `battery=` explicitly for a model whose `mode` isn't declared yet —
   which is exactly the state a fresh registration is in before its first
   probe. Once `mode` is declared, the plain `litellm_probe_model(model)` call

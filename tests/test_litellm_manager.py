@@ -251,7 +251,7 @@ async def test_add_and_delete_handlers_call_the_client(monkeypatch):
 
     async def fake_probe(model, measure_context=False):
         calls.append(("probe", model))
-        return {"observed": {"chat": {"ok": True, "detail": "OK"}},
+        return {"ok": True, "observed": {"chat": {"ok": True, "detail": "OK"}},
                 "suggested_model_info": {"supports_function_calling": True}}
 
     monkeypatch.setattr(settings, "executor_mode", "live")
@@ -314,7 +314,7 @@ async def test_executor_stamps_model_provenance_over_agent_claims(monkeypatch):
         return {"ok": True, "model": {"model_id": model_id, "updated": ["model_info"]}}
 
     async def fake_probe(model, measure_context=False):
-        return {"observed": {"chat": {"ok": False, "detail": "boom"}},
+        return {"ok": False, "observed": {"chat": {"ok": False, "detail": "boom"}},
                 "suggested_model_info": {}}
 
     monkeypatch.setattr(settings, "executor_mode", "live")
@@ -1482,3 +1482,73 @@ def test_litellm_read_pack_carries_the_probe_tool_and_the_manager_may_propose_sk
 
     schema_text = Path("central_command/db/schema.sql").read_text(encoding="utf-8")
     assert "('litellm-manager',   'skill-propose'" in schema_text
+
+
+async def test_probe_model_runs_a_mode_matched_battery_for_audio_transcription(monkeypatch):
+    """A declared non-chat mode never enters the chat battery — transcription
+    gets ONE multipart request on its own endpoint, and a bare-mode success
+    suggests declaring the mode."""
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    seen: list = []
+
+    async def fake_call(method, path, json_body=None, auth_key=None, timeout=30, files=None):
+        seen.append((method, path, files))
+        if path == "/model/info":
+            return _ProbeResp(200, {"data": [
+                {"model_name": "stt-model", "model_info": {"mode": "audio_transcription"}}
+            ]})
+        assert path == "/v1/audio/transcriptions"
+        assert files and "file" in files
+        return _ProbeResp(200, {"text": ""})
+
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("stt-model")
+
+    assert out["ok"] is True
+    assert out["observed"]["audio_transcription"]["ok"] is True
+    assert not any(p == "/v1/chat/completions" for _, p, _ in seen)
+    # mode already declared -> nothing to suggest
+    assert out["suggested_model_info"] == {}
+
+
+async def test_probe_model_battery_override_and_mode_suggestion(monkeypatch):
+    """An undeclared-mode model probed with an explicit battery gets that
+    battery, and success suggests declaring the mode."""
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+
+    async def fake_call(method, path, json_body=None, auth_key=None, timeout=30, files=None):
+        if path == "/model/info":
+            return _ProbeResp(200, {"data": [{"model_name": "tts-model", "model_info": {}}]})
+        assert path == "/v1/audio/speech"
+        return _ProbeResp(200, text="RIFF")
+
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("tts-model", battery="audio_speech")
+
+    assert out["ok"] is True
+    assert out["suggested_model_info"] == {"mode": "audio_speech"}
+
+
+async def test_probe_model_unknown_mode_is_inconclusive_not_a_chat_404(monkeypatch):
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    seen: list = []
+
+    async def fake_call(method, path, json_body=None, auth_key=None, timeout=30, files=None):
+        seen.append(path)
+        assert path == "/model/info"
+        return _ProbeResp(200, {"data": [
+            {"model_name": "rt-model", "model_info": {"mode": "realtime"}}
+        ]})
+
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("rt-model")
+
+    assert out["ok"] is None
+    assert seen == ["/model/info"]
+    assert any("no probe battery" in n for n in out["notes"])

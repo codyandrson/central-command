@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 
 import httpx
 
@@ -77,6 +78,7 @@ def _provider_model(value: str) -> str:
 async def _call(
     method: str, path: str, json_body: dict | None = None,
     auth_key: str | None = None, timeout: float = 30,
+    files: dict | None = None,
 ) -> httpx.Response:
     """`auth_key` overrides the admin key for calls made AS another key (e.g.
     /key/info self-lookup) — a secret belongs in the Authorization header,
@@ -88,6 +90,7 @@ async def _call(
             method,
             settings.llm_proxy_base_url.rstrip("/") + path,
             json=json_body,
+            files=files,
             headers={"Authorization": f"Bearer {auth_key or settings.llm_proxy_admin_key}"},
         )
 
@@ -500,6 +503,15 @@ _PROBE_SCHEMA = {
         "additionalProperties": False,
     },
 }
+def _probe_wav() -> bytes:
+    """A quarter second of 8 kHz mono 16-bit silence — the smallest audio a
+    transcription endpoint accepts without a too-short error."""
+    data = b"\x00\x00" * 2000
+    return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt "
+            + struct.pack("<IHHIIHH", 16, 1, 1, 8000, 16000, 2, 16)
+            + b"data" + struct.pack("<I", len(data)) + data)
+
+
 PROBE_CONTEXT_CEILING = 262144   # bisect no higher than this unless asked
 PROBE_CONTEXT_STEPS = 10         # ≤10 requests to land within ~0.1% of the ceiling
 
@@ -594,8 +606,10 @@ async def probe_model(
     # Non-chat modes get their OWN one-request battery — every chat-shaped
     # check would fail on an embedder by construction and prove nothing.
     # Dispatch is on the DECLARED mode, or the caller's explicit `battery`
-    # ("chat" | "embedding" | "rerank") for a model whose mode is not
-    # declared yet — which is exactly when you are probing it.
+    # ("chat" | "embedding" | "rerank" | "audio_transcription" |
+    # "audio_speech" | "image_generation" | "moderation" | "completion")
+    # for a model whose mode is not declared yet — which is exactly when you
+    # are probing it.
     kind = battery or declared.get("mode") or "chat"
     if kind == "embedding":
         resp = await _call("POST", "/v1/embeddings",
@@ -628,6 +642,44 @@ async def probe_model(
                               "detail": "results returned" if ok else
                                         f"{resp.status_code}: {resp.text[:200]}"}
         return {"ok": ok, "kind": "litellm", "operation": "probe_model",
+                "model": alias, "declared": declared, "observed": observed,
+                "suggested_model_info": {}, "notes": notes}
+
+    # The remaining non-chat modes: ONE mode-shaped request each — proof the
+    # deployment answers its own endpoint. Finer facts (voices, sizes,
+    # languages) come from the model card, never a probe.
+    one_shot: dict[str, tuple[str, dict | None]] = {
+        "audio_transcription": ("/v1/audio/transcriptions", None),  # multipart
+        "audio_speech": ("/v1/audio/speech",
+                         {"model": alias, "input": "OK", "voice": "alloy"}),
+        "image_generation": ("/v1/images/generations",
+                             {"model": alias, "prompt": "a plain red square", "n": 1}),
+        "moderation": ("/v1/moderations", {"model": alias, "input": "probe"}),
+        "completion": ("/v1/completions",
+                       {"model": alias, "prompt": "Say OK.", "max_tokens": 8}),
+    }
+    if kind in one_shot:
+        path, body = one_shot[kind]
+        if kind == "audio_transcription":
+            resp = await _call("POST", path, timeout=timeout,
+                               files={"file": ("probe.wav", _probe_wav(), "audio/wav"),
+                                      "model": (None, alias)})
+        else:
+            resp = await _call("POST", path, body, timeout=timeout)
+        ok = resp.status_code == 200
+        observed[kind] = {"ok": ok, "detail": "endpoint answered" if ok else
+                          f"{resp.status_code}: {resp.text[:200]}"}
+        suggested = {"mode": kind} if ok and declared.get("mode") != kind else {}
+        return {"ok": ok, "kind": "litellm", "operation": "probe_model",
+                "model": alias, "declared": declared, "observed": observed,
+                "suggested_model_info": suggested, "notes": notes}
+    if kind != "chat":
+        # An unknown declared mode (realtime, responses, …) must not fall
+        # through into the chat battery — that 404s by construction and
+        # reads as "broken model". No battery -> inconclusive, not false.
+        notes.append(f"no probe battery for mode {kind!r} — declare "
+                     "capabilities from the model card")
+        return {"ok": None, "kind": "litellm", "operation": "probe_model",
                 "model": alias, "declared": declared, "observed": observed,
                 "suggested_model_info": {}, "notes": notes}
 

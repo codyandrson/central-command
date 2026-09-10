@@ -869,14 +869,21 @@ async def _litellm_add_model(args: dict, approver: str, proposer: str | None) ->
     # this record as the evidence.
     try:
         probe = await litellm_client.probe_model(args["model_name"])
-        chat = (probe.get("observed") or {}).get("chat") or {}
-        if chat.get("ok"):
+        # Top-level `ok` is the battery's verdict whatever the model's mode
+        # (chat, embedding, audio, …); None means no battery exists for the
+        # declared mode — reported as such, never as unhealthy.
+        if probe.get("ok"):
             diff = probe.get("suggested_model_info") or {}
             health = ("probed OK — suggested model_info diff: "
                       f"{json.dumps(diff, default=str)[:400]}" if diff
                       else "probed OK — declarations match what was measured")
+        elif probe.get("ok") is None:
+            health = ("not probed: "
+                      + ("; ".join(probe.get("notes") or []) or "no battery for this mode")[:300])
         else:
-            health = f"UNHEALTHY: {str(chat.get('detail'))[:200]}"
+            bad = next((v for v in (probe.get("observed") or {}).values()
+                        if isinstance(v, dict) and v.get("ok") is False), {})
+            health = f"UNHEALTHY: {str(bad.get('detail'))[:200]}"
     except Exception as e:  # noqa: BLE001
         health = f"probe errored: {type(e).__name__}: {str(e)[:200]}"
     return (f"litellm model '{m.get('model_name')}' → {m.get('provider_model')} "

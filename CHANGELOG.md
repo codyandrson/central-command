@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.23.4: a probe for every mode, not just chat
+
+Rescued from a worktree last touched 2026-09-02 and never merged. The
+LiteLLM probe ran the chat battery against every model, so a transcription,
+speech, image, rerank or moderation deployment answered a chat request
+with a 404 and was recorded UNHEALTHY — a measurement of the wrong thing.
+
+- `probe_model` dispatches on the declared catalog `mode` (or an explicit
+  `battery=` for a model whose mode is not declared yet) and sends ONE
+  mode-shaped request to the model's own endpoint: an embedding, a rerank,
+  a quarter-second synthetic WAV for transcription, a short TTS line, a
+  small image, a moderation call, a legacy completion. Finer facts (voices,
+  sizes, languages) come from the model card, never a probe.
+- A mode with no battery (e.g. realtime) is INCONCLUSIVE, never a failure;
+  the `litellm.add_model` approval record reports "not probed" rather than
+  UNHEALTHY, and the autodiscovery brief tells the agent to register
+  non-chat models the same way instead of skipping them.
+- Three tests: the transcription battery, the `battery=` override with a
+  mode suggestion, and unknown-mode-is-inconclusive.
+
 ## 2026-09-10 — v2.23.3: the embedding probe keeps its stderr
 
 Rescued from a worktree left behind by the 2026-09-04 Windows run. The

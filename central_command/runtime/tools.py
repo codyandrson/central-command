@@ -1588,6 +1588,7 @@ async def litellm_check_model_health(ctx: RunContext, model: str | None = None) 
 
 async def litellm_probe_model(
     ctx: RunContext, model: str, measure_context: bool = False,
+    battery: str | None = None,
 ) -> str:
     """MEASURE what a registered model can actually do — one small real request
     per capability through the proxy: plain chat, system message, forced
@@ -1603,11 +1604,18 @@ async def litellm_probe_model(
     `measure_context=True` additionally bisects the input ceiling with ≤10
     long prompts — expensive, opt-in, and the only way to learn a private
     model's real context limit. Read-only: it writes nothing.
+    NON-CHAT MODELS get a one-request battery on their own endpoint instead
+    of the chat checks — dispatched on the declared `mode`, or on `battery`
+    for a model whose mode is not declared yet ("embedding" | "rerank" |
+    "audio_transcription" | "audio_speech" | "image_generation" |
+    "moderation" | "completion"). A mode with no battery returns
+    inconclusive, never a failure.
     """
     # No retry wrapper: like the health fan-out, a transient failure mid-battery
     # would re-buy every request before it, not a half-second of patience.
     try:
-        data = await litellm_client.probe_model(model, measure_context=measure_context)
+        data = await litellm_client.probe_model(
+            model, measure_context=measure_context, battery=battery)
     except Exception as e:  # noqa: BLE001
         return f"litellm model probe unavailable ({type(e).__name__}: {e})"
     return _clip(json.dumps(data, default=str))
