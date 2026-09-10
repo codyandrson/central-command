@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.22.3: the toast follows the visible viewport
+
+A notification toast is `position: fixed` in the bottom-right corner, which
+anchors it to the LAYOUT viewport. Under pinch-zoom on a phone or tablet the
+operator pans a smaller visual viewport across the page, and the corner —
+toast included — sits outside whatever slice is on screen. An interrupt-tier
+notification nobody can see is worse than none: it auto-dismisses after ten
+seconds believing it was read.
+
+- `useVisualViewportPin` translates the toast host by the offset between
+  the visual and layout viewports on every `visualViewport` resize/scroll,
+  so the stack follows the visible slice. Unzoomed desktop is a no-op.
+- The host is always mounted (empty when there is nothing to show) so the
+  pin attaches before the first toast arrives.
+
+Under evaluation: the operator reports losing toasts on a laptop as well,
+where the page cannot scroll sideways by construction — this release covers
+the zoomed case only; the laptop case is still being characterised.
+
 ## 2026-09-05 — v2.22.2: one vacation marker took out the calendar
 
 The EA's 2026-09-04 morning brief reported the calendar unavailable —

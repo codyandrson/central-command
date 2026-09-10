@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bell, X } from 'lucide-react';
 import { useNotifications, type Toast } from './NotificationsContext';
+import { useVisualViewportPin } from './useVisualViewportPin';
 
 /**
  * Where interrupt-tier notifications appear.
@@ -94,10 +95,14 @@ function ToastCard({ toast, onOpen, onDismiss }: {
 
 export function ToastHost({ onOpenDecision, onOpenSession }: ToastHostProps) {
   const { toasts, dismiss } = useNotifications();
-  if (toasts.length === 0) return null;
+  const hostRef = useRef<HTMLDivElement>(null);
+  // Always mounted, even empty: the pin hook needs the element on its first
+  // run, and an empty pointer-events-none flex box costs nothing.
+  useVisualViewportPin(hostRef);
 
   return (
     <div
+      ref={hostRef}
       data-testid="cc-toast-host"
       className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2"
       role="status"
