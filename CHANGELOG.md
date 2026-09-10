@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.22.6: mail_read opens the backlog it was built to review
+
+`mail-read` shipped in v2.21.1 so a drafter could read the set it was about
+to bulk-dismiss. It did — for mail already decided. The backlog is enrolled
+as references only (body fetched at claim time, an M13 decision that keeps a
+10,000-email sweep from meaning 10,000 fetches), and `mail_read` rendered
+those rows as "? from ?: (no subject) … (no message text recorded)". On
+2026-09-09 inbox-triage read three unprocessed items, saw nothing, and
+proposed a 51-item dismissal it honestly described as unverified.
+
+- `mail_read` on an enrolled-but-unfetched row now reads the message from
+  the mailbox through the façade, shaped exactly as the agent would be fed
+  it, and says so. The ledger row is left alone — a read tool does not
+  hydrate.
+- `mail_search` labels such rows "not yet fetched from the mailbox" instead
+  of a blank sender and subject.
+
 ## 2026-09-10 — v2.22.5: the brand badge stops eating the name
 
 The v2.22.4 total badge sat in the brand row beside "NERVE", in the flow —

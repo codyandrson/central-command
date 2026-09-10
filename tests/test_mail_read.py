@@ -74,3 +74,34 @@ async def test_mail_read_falls_back_to_the_mailbox_and_says_so(monkeypatch):
     monkeypatch.setattr(email_facade, "get_message", get_message)
     out = await tools.mail_read(None, "u9")
     assert out.startswith("NOT ENROLLED")
+
+
+@pytest.mark.asyncio
+async def test_mail_read_fetches_an_unhydrated_backlog_row_from_the_mailbox(monkeypatch):
+    """The backlog is enrolled as refs only (deferred_fetch); the body arrives
+    at claim time. A read of such a row must open the mailbox, not hand back
+    "(no message text recorded)" — that is what made a 2026-09-09 bulk
+    dismissal an unread set."""
+    from central_command.db import repo
+    from central_command.integrations import email_facade
+
+    async def item(ref):
+        return {"id": "wi_7", "message_id": "<m7>", "state": "UNPROCESSED",
+                "received_at": None, "sender": None, "subject": None,
+                "session_id": None, "folded_into": None, "terminal_at": None,
+                "provider_uuid": "u7", "dismissal_rationale": None,
+                "operator_note": None, "audit": None, "text": None}
+
+    async def get_message(uuid):
+        assert uuid == "u7"
+        return {"uuid": "u7", "conversation_id": "c7", "from": "Jane Doe <jane@example.com>",
+                "subject": "Session", "date": "2026-09-08T22:31:35Z",
+                "body_text": "Here's the link"}
+
+    monkeypatch.setattr(repo, "mail_item", item)
+    monkeypatch.setattr(email_facade, "get_message", get_message)
+    out = await tools.mail_read(None, "wi_7")
+    assert "wi_7 [UNPROCESSED] not yet fetched" in out
+    assert "ENROLLED, not yet fetched by the queue" in out
+    assert "Subject: Session" in out and out.endswith("Here's the link")
+    assert "(no message text recorded)" not in out

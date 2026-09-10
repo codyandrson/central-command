@@ -1663,6 +1663,12 @@ def _mail_line(row: dict) -> str:
         # `mail_read` carries the whole thing.
         first = row["dismissal_rationale"].strip().splitlines()[0]
         why = f" — dismissed: “{first[:200]}{'…' if len(first) > 200 else ''}”"
+    if not row.get("sender") and not row.get("subject") and row.get("provider_uuid"):
+        # A refs-only backlog row (`enroll_provider_ref`): the ledger knows the
+        # uuid and nothing else until claim time. Say so — "? from ?" read to
+        # the agent as a blank message it had no way to open (live 2026-09-09).
+        return (f"- {row['id']} [{row['state']}] not yet fetched from the "
+                f"mailbox (open it with mail_read){locator}{why}")
     return (f"- {row['id']} [{row['state']}] {row.get('received_at') or '?'} "
             f"from {row.get('sender') or '?'}: {row.get('subject') or '(no subject)'}"
             f"{locator}{why}")
@@ -1750,7 +1756,19 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
     if row.get("operator_note"):
         parts.append(f"operator note: {row['operator_note']}")
     parts.append("")
-    parts.append(row.get("text") or "(no message text recorded)")
+    text = row.get("text")
+    if not text and row.get("provider_uuid"):
+        # Enrolled as a reference only; the body is fetched at claim time. Read
+        # it from the mailbox now, shaped exactly as the agent would be fed it,
+        # and leave the ledger row alone — this is a read tool.
+        from central_command.ingest import ledger
+        try:
+            msg = await email_facade.get_message(row["provider_uuid"])
+            text = ("ENROLLED, not yet fetched by the queue (read from the mailbox)\n"
+                    + ledger.agent_input(ledger._provider_parsed(msg)))
+        except email_facade.EmailFacadeError as e:
+            text = f"(not yet fetched by the queue, and the mailbox could not return it: {e})"
+    parts.append(text or "(no message text recorded)")
     return _clip("\n".join(parts))
 
 
