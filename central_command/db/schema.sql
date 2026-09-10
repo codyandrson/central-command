@@ -1040,6 +1040,14 @@ insert into agent_grant (agent_id, pack, granted_by) values
     ('orchestrator', 'record-read', 'seed:orch-roster')
 on conflict (agent_id, pack) do nothing;
 
+-- 2026-09-10 (v2.23.1): the orchestrator may CONSULT. In a conversation it
+-- holds no assign_work, so a read-only question for a specialist had only a
+-- gated task.create as its vehicle — the operator rightly asked why a read
+-- needs a task. consult is advice, never work; gated changes still park.
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('orchestrator', 'consult', 'seed:orch-consult')
+on conflict (agent_id, pack) do nothing;
+
 -- Graph verification worklist (2026-08-19 spec). The approval gate reviews
 -- the EPISODE; Graphiti's queued extraction runs after it, unreviewed — the
 -- ack is not graph state (25 approved episodes once dropped silently AFTER

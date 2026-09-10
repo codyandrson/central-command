@@ -1394,7 +1394,16 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     # same act is a governance trap. The auditor holds no packs at all
     # (output_type=AuditVerdict, no toolsets). Both reasons are recorded as
     # `deviations` on the agent row — see schema.sql.
-    "orchestrator": ("orchestrate", "graph-read", "loe-read", "record-read"),
+    #
+    # `consult` added 2026-09-10: in CHAT the orchestrator has no assign_work
+    # (converse._conversational_packs), so a read-only question for a
+    # specialist had exactly one vehicle — a gated task.create the operator
+    # rejected as "why a task for a read?". Its own charter already says
+    # "consult a teammate" when it lacks a capability; the grant makes that
+    # guidance a mechanism. Consult is advice, assign_work is work — the pack
+    # guidance keeps them distinct in project runs.
+    "orchestrator": ("orchestrate", "graph-read", "loe-read", "record-read",
+                     "consult"),
 }
 
 

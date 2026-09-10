@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.23.1: the orchestrator can ask a teammate
+
+Talked to in chat, the orchestrator holds no `assign_work` (a conversation
+has no plan to approve), so when it needed the live Jira board for a
+read-only review its only vehicle was a gated `task.create` for jira-expert
+— which the operator rejected with "why a task if this is read-only?". Its
+charter already told it to consult a teammate when it lacks a capability;
+nothing granted the tool.
+
+- `orchestrator` now holds the `consult` pack (DEFAULT_PACKS + an idempotent
+  schema seed). Consult is advice the specialist spends its own context on;
+  any gated change the specialist drafts still parks for the operator.
+- Existing deployments pick the grant up from the updater's idempotent
+  schema apply; it takes effect on the orchestrator's next run.
+
 ## 2026-09-10 — v2.23.0: a Jira proposal shows the issue, not just its key
 
 A Jira-targeted proposal read as `jira.add_comment  jira:TASKS-48` — twelve
