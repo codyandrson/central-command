@@ -357,7 +357,14 @@ deploy_current_tree() {
   (( lrc == 1 )) && { fail "llm" "./setup.sh llm failed — see above"; return 1; }
   step "app" "venv/deps/cockpit reconciled (./setup.sh app)" "$HERE/setup.sh" app || return 1
   step "verify" "deployed + live verification passed (./setup.sh verify)" "$HERE/setup.sh" verify || return 1
-  useraction "restart" "update applied — start your uvicorn API (and the sandbox runner, if you run one), then confirm with: ./setup.sh status"
+  # CC_UPDATE_DRIVEN=1 is update-run.sh (the cockpit's detached runner): it
+  # owns the restart, so the operator gate would turn its clean exit into an
+  # ambiguous 3 — the same code the fetch/llm pauses use.
+  if [[ "${CC_UPDATE_DRIVEN:-0}" == "1" ]]; then
+    pass "restart" "update applied — the driving runner restarts the API"
+  else
+    useraction "restart" "update applied — start your uvicorn API (and the sandbox runner, if you run one), then confirm with: ./setup.sh status"
+  fi
 }
 
 # ── apply ───────────────────────────────────────────────────────────────────
@@ -398,6 +405,19 @@ cmd_apply() {
   fi
 
   deploy_current_tree
+}
+
+# ── stage <zip>: the promptless half of cmd_run (2026-09-03) ────────────────
+# The cockpit's upload route drives this: init if needed, import, plan —
+# everything that is safe under a live API (only the `upstream` branch
+# moves). No TTY, no questions; apply stays its own explicit step.
+cmd_stage() {
+  local zip="${1:-}"
+  need_git || return 1
+  initialized || { cmd_init || return 1; }
+  cmd_import "$zip" || return 1
+  (( FAILS )) && return 1
+  cmd_plan
 }
 
 # ── run <zip>: the one-command human path (2026-08-28) ──────────────────────
@@ -469,6 +489,8 @@ usage: ./update.sh <downloaded-source-zip>
   init            one-time: turn this unzipped tree into a git repo
                   (branch \`upstream\` for imports, \`local\` for the deployment)
   import <zip>    commit a newly downloaded source zip onto \`upstream\`
+  stage <zip>     init if needed + import + plan, no prompts — the cockpit's
+                  upload route drives this; apply stays its own step
   plan            dry-run report: version gate, diff, migration/deps/cockpit
                   flags, predicted conflicts. Mutates nothing; re-runnable.
   apply           gate (API stopped? version ok?) -> spine DB backup -> merge
@@ -488,6 +510,7 @@ main() {
   case "$cmd" in
     init)     cmd_init ;;
     import)   cmd_import "${2:-}" ;;
+    stage)    cmd_stage "${2:-}" ;;
     plan)     cmd_plan ;;
     apply)    cmd_apply ;;
     rollback) cmd_rollback ;;

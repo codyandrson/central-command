@@ -4,6 +4,42 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.23.5: the single-node cockpit can update itself from a zip
+
+Rescued from a worktree last touched 2026-09-03, written as "v2.22.0" and
+overtaken by the Compose refactor that shipped under that number. Rebased
+onto v2.23.4; its tests, the seam test and the cockpit checks pass.
+
+Found on an air-gapped single-node install: Settings › Updates could neither
+check nor apply — the whole update surface lived only in the Node cockpit
+server the k3s profile runs, and the single-node profile (where the API
+serves `web/dist` itself) had no `/api/version/check` or `/api/update/*` at
+all. The air-gapped operator's only path was the `./update.sh <zip>` CLI.
+
+- **`/api/version/check` + `/api/update/*` now exist on the single-node
+  profile** (`central_command/api/update.py`): VERSION vs the GitHub
+  release/tag when the box has a route out, and the from-file path when it
+  doesn't.
+- **Settings › Updates grows "Update from file"** — always visible, right
+  next to "Check for updates". Pick the downloaded source zip; the API
+  stages it via the new promptless `./update.sh stage` (init/import/plan —
+  safe under the live API, only the `upstream` branch moves), reports the
+  staged version, and the familiar apply dialog takes it from there. A zip
+  that is not newer is refused with the version gate's own verdict, before
+  anything stops.
+- **Apply is a detached runner, not the API updating itself**
+  (`deploy/single/update-run.sh`): `./setup.sh stop` → `./update.sh apply`
+  (version gate, spine DB backup, three-way merge, redeploy — every existing
+  guard) → `./setup.sh boot` → health check, with automatic rollback to the
+  pre-update tag if the apply fails. `CC_UPDATE_DRIVEN=1` tells `update.sh`
+  the runner owns the restart, so its clean exit is not the operator gate's
+  exit 3.
+- `.gitattributes` pins `*.sh`, `*.tmpl` and `*.sql` to LF: a Windows
+  checkout with `core.autocrlf=true` corrupted shebangs and heredocs for the
+  Git Bash-driven single-node pipeline (2026-09-03 Windows review).
+- Not yet validated on a live Windows single-node install — that run was
+  the gate the original worktree never reached.
+
 ## 2026-09-10 — v2.23.4: a probe for every mode, not just chat
 
 Rescued from a worktree last touched 2026-09-02 and never merged. The

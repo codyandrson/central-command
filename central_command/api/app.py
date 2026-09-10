@@ -239,6 +239,13 @@ from central_command.api.speech import router as speech_router  # noqa: E402
 
 app.include_router(speech_router)
 
+# Updates (single-server mode): /api/version/check + /api/update/* — the Node
+# cockpit server owns these where it runs (k3s, via the root systemd helper);
+# here they drive deploy/single/update.sh through a detached runner.
+from central_command.api.update import router as update_router  # noqa: E402
+
+app.include_router(update_router)
+
 
 @app.get("/health")
 async def health() -> dict:

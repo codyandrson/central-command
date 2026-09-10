@@ -112,6 +112,7 @@ app.get('/api/update/status', rateLimitGeneral, (c) => {
   const status = readStatusFile(STATUS);
   const stage = readStatusFile(STAGE_STATUS);
   return c.json({
+    mode: 'systemd',
     pending: existsSync(TRIGGER),
     inFlight: inFlight(status),
     status,
@@ -134,6 +135,17 @@ app.post('/api/update/stage', rateLimitGeneral, async (c) => {
   }
   return c.json({ staging: true, alreadyStaged: result === 'already' }, result === 'requested' ? 202 : 200);
 });
+
+// Update-from-file is the single-node profile's path (the FastAPI app owns
+// it there — central_command/api/update.py); this server's updater is
+// git-based, pulling the release from the repo's origin. A real route so the
+// cockpit gets a truthful error instead of a silent 404 (and so the
+// api-route-parity guard sees the seam).
+app.post('/api/update/upload', rateLimitGeneral, (c) =>
+  c.json({
+    error: 'this install updates from its git origin — use Check for updates; '
+      + 'Update from file exists for the single-node (podman) profile',
+  }, 501));
 
 app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   const status = readStatusFile(STATUS);

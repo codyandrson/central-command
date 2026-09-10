@@ -301,7 +301,21 @@ cd deploy/single
 
 That inits the repo on first use, imports the zip, shows the version gate +
 plan, pauses for your explicit yes, and applies — offering to stop a
-`./setup.sh boot`-started API first. The named subcommands remain for
+`./setup.sh boot`-started API first.
+
+**The cockpit path (2026-09-03)** drives the same machinery without a
+terminal: Settings › Updates has **Update from file** — pick the downloaded
+zip and the API stages it (`./update.sh stage` = init/import/plan; safe under
+the live API), shows what it brings, and applies on your explicit click.
+**Check for updates / Apply** works there too when the box can reach the
+release source. The apply is performed by `update-run.sh`, a detached runner
+the API spawns: it runs `./setup.sh stop`, `./update.sh apply` (all the same
+gates: version, DB backup, merge), `./setup.sh boot`, health-checks, and
+rolls back automatically on failure. Its log is
+`deploy/single/.update/apply.log`; the dialog polls
+`deploy/single/.update/status.json` straight through the restart. A pause
+that needs you (a fetch seam, the LiteLLM catalog) restarts the cockpit and
+tells you the exact command to finish with. The named subcommands remain for
 granular or agent-conducted flows:
 
 ```bash
@@ -319,7 +333,8 @@ update with the old code still running), then `./setup.sh app` (deps from
 `requirements.lock`, honoring `CC_AIRGAP`; cockpit rebuild), then
 `./setup.sh verify`. It always ends with a `USERACTION restart` (exit 3): a
 merged change is not live until you restart your uvicorn API (and the sandbox
-runner, if you run one).
+runner, if you run one). The one exception is the cockpit's detached runner
+(`CC_UPDATE_DRIVEN=1`), which owns the restart itself.
 
 Rules that will save you:
 

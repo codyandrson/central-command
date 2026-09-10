@@ -5,3 +5,5 @@ setup-diagnostics.txt
 setup-log.txt
 uvicorn.log
 uvicorn.pid
+# The cockpit-driven updater's working dir (staged zip, runner copy, status)
+.update/

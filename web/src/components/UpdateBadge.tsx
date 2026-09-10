@@ -28,6 +28,13 @@ interface UpdateProgress {
   status: UpdateStatus | null;
   /** Absent on servers older than v2.19.0 — treated as "staging unknown". */
   stage?: StageProgress;
+  /**
+   * Which updater performs the apply: "systemd" = the k3s root helper
+   * (journalctl is the log), "local" = the single-node detached runner
+   * (deploy/single/.update/apply.log is the log). Absent on older servers —
+   * those are all k3s, so systemd is the default.
+   */
+  mode?: 'local' | 'systemd';
 }
 
 const PROGRESS_POLL_MS = 3000;
@@ -146,6 +153,8 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
   // without the stage record (older release, stage units not installed)
   // reports nothing — fall back to the ungated button rather than hiding
   // apply forever.
+  const local = progress?.mode === 'local';
+  const logRef = local ? 'deploy/single/.update/apply.log' : 'journalctl -u cc-update';
   const stage = progress?.stage;
   const staged = stage?.status?.state === 'success'
     && (stage.status.target === versionInfo.latest || stage.status.phase === 'up-to-date');
@@ -189,7 +198,7 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                   <p className="text-red-500">
                     Update failed at <span className="font-mono">{progress.status.phase}</span>
                     {progress.status.error ? ` — ${progress.status.error}` : ''}.
-                    {' '}Details: <span className="font-mono">journalctl -u cc-update</span>
+                    {' '}Details: <span className="font-mono">{logRef}</span>
                   </p>
                 ) : (
                   <p className="text-muted-foreground animate-pulse">
@@ -219,14 +228,21 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                   <div className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-500">
                     Preparation failed at <span className="font-mono">{stage?.status?.phase}</span>
                     {stage?.status?.error ? ` — ${stage.status.error}` : ''}.
-                    {' '}Details: <span className="font-mono">journalctl -u cc-update-stage</span>
+                    {' '}Details: <span className="font-mono">{local ? 'deploy/single/setup-log.txt' : 'journalctl -u cc-update-stage'}</span>
                   </div>
-                  <button
-                    onClick={retryStage}
-                    className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
-                  >
-                    Retry preparation
-                  </button>
+                  {local ? (
+                    <p className="text-xs text-muted-foreground">
+                      Staging happens when the zip is uploaded — fix the cause above and
+                      upload the file again from Settings › Updates.
+                    </p>
+                  ) : (
+                    <button
+                      onClick={retryStage}
+                      className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
+                    >
+                      Retry preparation
+                    </button>
+                  )}
                 </>
               ) : (
                 <>
@@ -238,8 +254,12 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                   </button>
                   {staged && (
                     <p className="text-xs text-muted-foreground">
-                      v{versionInfo.latest} is prepared — the image builds are already cached, so
-                      applying is mostly backup, restart and health-check time.
+                      {local
+                        ? <>v{versionInfo.latest} is imported and planned — applying stops the API,
+                          backs up the spine DB, merges, redeploys and restarts. The cockpit is
+                          briefly unreachable while that runs.</>
+                        : <>v{versionInfo.latest} is prepared — the image builds are already cached, so
+                          applying is mostly backup, restart and health-check time.</>}
                     </p>
                   )}
                   {stageUnknown && (
@@ -253,12 +273,20 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
             )}
             <div className="text-xs text-muted-foreground space-y-1">
               <p>
-                The cockpit never updates itself: this hands off to the external
-                cc-update helper (a root one-shot systemd unit), which backs up
-                the spine, LiteLLM and n8n databases (plus their decryption
-                keys), applies v{versionInfo.latest}, rebuilds, restarts the
-                services, health-checks, and <b>rolls back automatically</b> if
-                the new version is unhealthy.
+                {local ? (
+                  <>The cockpit never updates itself: this hands off to a detached
+                  updater (deploy/single/update-run.sh), which stops the API, backs
+                  up the spine database, applies v{versionInfo.latest} via
+                  ./update.sh, restarts, health-checks, and <b>rolls back
+                  automatically</b> if the apply fails.</>
+                ) : (
+                  <>The cockpit never updates itself: this hands off to the external
+                  cc-update helper (a root one-shot systemd unit), which backs up
+                  the spine, LiteLLM and n8n databases (plus their decryption
+                  keys), applies v{versionInfo.latest}, rebuilds, restarts the
+                  services, health-checks, and <b>rolls back automatically</b> if
+                  the new version is unhealthy.</>
+                )}
               </p>
             </div>
             <details className="text-xs text-muted-foreground">
