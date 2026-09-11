@@ -146,7 +146,20 @@ def full_messages(run_state: dict) -> list[dict]:
 
 def load_messages(run_state: dict):
     """Rebuild the message history from persisted state."""
-    return ModelMessagesTypeAdapter.validate_python(run_state["messages"])
+    return ModelMessagesTypeAdapter.validate_python(repair_messages(run_state["messages"]))
+
+
+def repair_messages(messages: list[dict]) -> list[dict]:
+    """A typed tool return (`tool_kind` set) whose content is a STRING was
+    damaged by the v2.24.0–v2.24.2 working-window leak — the placeholder went
+    into the record, and pydantic-ai's typed subclass rejects it on load.
+    Dropping `tool_kind` lets it deserialize as a plain `ToolReturnPart`, which
+    is what the part now is. In place, idempotent; the cleared payload is gone."""
+    for m in messages:
+        for p in m.get("parts", []):
+            if p.get("tool_kind") and isinstance(p.get("content"), str):
+                del p["tool_kind"]
+    return messages
 
 
 SIBLING_NOT_PARKED = (

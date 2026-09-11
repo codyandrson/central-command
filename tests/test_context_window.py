@@ -168,14 +168,23 @@ async def test_demo_mode_and_all_off_send_the_raw_history(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", False)
     _pin(monkeypatch, {"drop_thinking": False, "clear_tool_results": False,
                        "pressure_warning": False, "output_headroom": False, "summarize": False})
-    assert await context.prepare_window(_ctx(), msgs) == msgs
+    assert await context.prepare_window(_ctx(), msgs) is msgs
+    assert context.working_window(msgs) is msgs
+
+
+async def _window(ctx, msgs):
+    """What the wire sees: the processor returns the record untouched (that
+    is the point — pydantic-ai persists whatever it returns) and the window
+    rides to the model wrapper."""
+    assert await context.prepare_window(ctx, msgs) is msgs
+    return context.working_window(msgs)
 
 
 async def test_defaults_trim_and_warn_without_touching_the_input(monkeypatch):
     msgs = _transcript(turns=8, payload=4000)
     raw = context.estimate_messages(msgs)
     _pin(monkeypatch, {"summarize": False}, window=20_000)  # well over a 20k window
-    out = await context.prepare_window(_ctx(session_id="sess_x"), msgs)
+    out = await _window(_ctx(session_id="sess_x"), msgs)
 
     # 5 of 8 tool payloads cleared (3 kept) and 8 of 9 thinking parts dropped.
     assert context.estimate_messages(out) < raw * 0.6
@@ -184,8 +193,66 @@ async def test_defaults_trim_and_warn_without_touching_the_input(monkeypatch):
     assert "sess_x" in context._sent
     # The note is on the outgoing request when the history ends on one.
     ending_on_request = msgs[:-1]
-    out2 = await context.prepare_window(_ctx(session_id="sess_x"), ending_on_request)
+    out2 = await _window(_ctx(session_id="sess_x"), ending_on_request)
     assert "[context notice]" in out2[-1].parts[-1].content
+    assert "[context notice]" not in str(ending_on_request[-1].parts), "the record never carries it"
+
+
+async def test_the_window_is_applied_on_the_wire_and_the_record_stays_raw(monkeypatch):
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.function import FunctionModel
+
+    seen = []
+
+    def echo(messages, info):
+        seen.append(messages)
+        return ModelResponse(parts=[TextPart("ok")])
+    msgs = _transcript(turns=8, payload=4000)
+    _pin(monkeypatch, {"summarize": False}, window=20_000)
+    model = context.WindowedModel(FunctionModel(echo))
+    await context.prepare_window(_ctx(session_id="sess_w"), msgs)
+    await model.request(msgs, None, ModelRequestParameters())
+    assert seen and seen[0] is not msgs and context.estimate_messages(seen[0]) < context.estimate_messages(msgs)
+    # A different request (a stale measurement) goes out raw rather than under
+    # someone else's window.
+    other = _transcript(turns=2)
+    await model.request(other, None, ModelRequestParameters())
+    assert seen[1] is other
+
+
+def test_clear_tool_results_leaves_typed_returns_alone():
+    """A `capability-load` return's content is a dict by type; a string
+    placeholder there is unloadable, so the trim must skip it (the 2026-09-10
+    graph-curator conversation that 'chat error'ed on every send)."""
+    from pydantic_ai._deferred_capabilities import LoadCapabilityReturnPart
+
+    typed = LoadCapabilityReturnPart(content={"instructions": "x" * 3000}, tool_call_id="c0")
+    msgs = [
+        ModelRequest(parts=[UserPromptPart("go")]),
+        ModelResponse(parts=[ToolCallPart("load_capability", {"name": "graphiti"}, tool_call_id="c0")]),
+        ModelRequest(parts=[typed]),
+        ModelResponse(parts=[ToolCallPart("read_thing", {}, tool_call_id="c1")]),
+        ModelRequest(parts=[ToolReturnPart("read_thing", "y" * 3000, tool_call_id="c1")]),
+        ModelResponse(parts=[TextPart("done")]),
+    ]
+    out = context.clear_tool_results(msgs, keep_turns=0)
+    assert out[2].parts[0].content == typed.content
+    assert str(out[4].parts[0].content).startswith("[cleared from context")
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+    ModelMessagesTypeAdapter.validate_python(ModelMessagesTypeAdapter.dump_python(out, mode="json"))
+
+
+def test_load_messages_repairs_a_typed_return_damaged_by_the_leak():
+    from central_command.runtime.durable import load_messages
+
+    damaged = {"messages": [{"kind": "request", "parts": [{
+        "part_kind": "tool-return", "tool_kind": "capability-load",
+        "tool_name": "load_capability", "tool_call_id": "c0",
+        "content": "[cleared from context: 3224 chars of `load_capability` output from an earlier turn]",
+    }]}]}
+    msgs = load_messages(damaged)
+    assert msgs[0].parts[0].content.startswith("[cleared from context")
+    assert "tool_kind" not in damaged["messages"][0]["parts"][0]
 
 
 async def test_a_broken_step_sends_the_raw_history(monkeypatch):
@@ -196,6 +263,7 @@ async def test_a_broken_step_sends_the_raw_history(monkeypatch):
         raise RuntimeError("no")
     monkeypatch.setattr(context, "drop_thinking", boom)
     assert await context.prepare_window(_ctx(), msgs) is msgs
+    assert context.working_window(msgs) is msgs
 
 
 @needs_pg
@@ -218,7 +286,7 @@ async def test_summary_spends_one_call_and_is_cached_in_run_state(monkeypatch):
 
     msgs = _transcript(turns=6, payload=2000)  # ~13k chars -> ~3.3k tokens... make it big
     msgs = _transcript(turns=6, payload=6000)  # ~40k chars -> ~10k tokens against a 10k window
-    out = await context.prepare_window(_ctx(session_id=session_id), msgs)
+    out = await _window(_ctx(session_id=session_id), msgs)
 
     assert calls, "over the threshold, the summary step ran"
     assert any(isinstance(p, UserPromptPart) and "SUMMARY-TEXT" in p.content
@@ -232,7 +300,7 @@ async def test_summary_spends_one_call_and_is_cached_in_run_state(monkeypatch):
     assert len(events) == 1 and events[0]["payload"]["after"] < events[0]["payload"]["before"]
 
     # Same history again: the cached summary applies, no second model call.
-    out2 = await context.prepare_window(_ctx(session_id=session_id), msgs)
+    out2 = await _window(_ctx(session_id=session_id), msgs)
     assert len(calls) == 1
     assert context.estimate_messages(out2) == context.estimate_messages(out)
 

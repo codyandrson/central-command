@@ -21,9 +21,12 @@ whether sessions reach 60% of the window.
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from pydantic_ai import RunContext
+from pydantic_ai.models.wrapper import WrapperModel
 
 from central_command.config import settings
 
@@ -159,10 +162,18 @@ async def check_pressure(
 # --- slice 2: the WORKING WINDOW (2026-09-10) ---------------------------------
 # What the model is SENT is no longer what the record HOLDS. The persisted
 # history (`run_state.messages`) stays complete and raw; a pydantic-ai
-# `ProcessHistory` capability (`prepare_window`) rewrites the outgoing request
-# only. Every step is an operator toggle in `app_setting` (Settings › Context)
-# and switching one off takes effect at the next model request — nothing here
-# mutates the transcript, so "off" means the full history is sent again.
+# `ProcessHistory` capability (`prepare_window`) MEASURES the window and
+# `WindowedModel` (wrapped around every live model at the `resolve_model`
+# seam) swaps it in on the wire. The processor itself returns the history
+# UNCHANGED, and that is load-bearing: pydantic-ai writes a processor's
+# output back into `state.message_history`, which is what every persistence
+# path snapshots — so a processor that returned the trimmed list put the
+# placeholders INTO the record (v2.24.0–v2.24.2), compounding turn over turn,
+# and a typed `capability-load` return whose dict became a string made the
+# whole transcript unloadable. Every step is an operator toggle in
+# `app_setting` (Settings › Context) and switching one off takes effect at
+# the next model request — nothing here mutates the transcript, so "off"
+# means the full history is sent again.
 #
 # The shape follows what the field converged on (2026-09-10 survey: Anthropic
 # context editing, Claude Code microcompact, OpenCode prune, MemGPT): drop
@@ -279,7 +290,10 @@ def clear_tool_results(messages, keep_turns: int = 3, min_chars: int = 200):
             continue
         parts = []
         for p in m.parts:
-            if isinstance(p, ToolReturnPart):
+            # A typed return (`tool_kind` set: capability-load, tool-search)
+            # constrains `content` to a dict — a string placeholder there is
+            # a ValidationError at the next load, not a smaller window.
+            if isinstance(p, ToolReturnPart) and not getattr(p, "tool_kind", None):
                 text = p.model_response_str()
                 if len(text) > min_chars and not text.startswith("[cleared from context"):
                     p = replace(p, content=CLEARED.format(n=len(text), tool=p.tool_name))
@@ -374,16 +388,56 @@ async def summarize(model, messages) -> str:
     return result.output
 
 
+# (outgoing request object, working window) measured by the last
+# `prepare_window` call in this task. A ContextVar because the processor and
+# the model request run in the same task, one after the other; the identity
+# check on the request is the guard against a stale value.
+_pending: ContextVar[tuple | None] = ContextVar("cc_working_window", default=None)
+
+
 async def prepare_window(ctx: RunContext[Any], messages: list):
-    """THE history processor. Never raises — a trim that fails sends the raw
-    history, which is exactly yesterday's behaviour."""
+    """The `ProcessHistory` seam. Measures the working window for this request
+    and hands it to `WindowedModel` via `_pending`; RETURNS THE INPUT UNCHANGED
+    so the record pydantic-ai persists stays raw (see the slice-2 note). A step
+    that breaks means the raw history is sent, never a dead run."""
     try:
-        return await _prepare_window(ctx, messages)
+        working = await _prepare_window(ctx, messages)
     except Exception:
         import logging
 
         logging.getLogger(__name__).exception("context.prepare_window failed; sending raw history")
-        return messages
+        working = messages
+    if messages:
+        _pending.set((messages[-1], working))
+    return messages
+
+
+def working_window(messages: list) -> list:
+    """What goes on the wire for `messages`: the window `prepare_window` just
+    measured for exactly this outgoing request, else the messages themselves."""
+    pending = _pending.get()
+    if pending and messages and pending[0] is messages[-1]:
+        return pending[1]
+    return messages
+
+
+class WindowedModel(WrapperModel):
+    """Sends `working_window(messages)` to the wrapped model. Wrapped around
+    every live model at `resolve_model` — the one model seam — so the record
+    never carries a trim and every run path (fresh, resume, consult) is
+    covered without knowing it."""
+
+    async def request(self, messages, model_settings, model_request_parameters):
+        return await self.wrapped.request(
+            working_window(messages), model_settings, model_request_parameters)
+
+    @asynccontextmanager
+    async def request_stream(self, messages, model_settings, model_request_parameters,
+                             run_context=None):
+        async with self.wrapped.request_stream(
+            working_window(messages), model_settings, model_request_parameters, run_context,
+        ) as stream:
+            yield stream
 
 
 async def _prepare_window(ctx, messages):

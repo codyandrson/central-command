@@ -184,7 +184,11 @@ async def _live_model(model_name: str, agent_id=None, thinking: str | None = Non
         body = await _thinking_body(model_name, thinking)
         if body:
             model_settings["extra_body"] = body
-    return OpenAIChatModel(model_name, provider=provider, settings=model_settings)
+    from central_command.runtime.context import WindowedModel
+
+    # The working window is applied HERE, on the wire, so the persisted record
+    # stays raw whichever run path snapshots it (runtime/context.py, slice 2).
+    return WindowedModel(OpenAIChatModel(model_name, provider=provider, settings=model_settings))
 
 
 async def resolve_session_model(session_id: str | None, agent_id: str | None):

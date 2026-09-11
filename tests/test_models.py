@@ -38,7 +38,9 @@ async def test_the_configured_provider_is_used(monkeypatch):
     _configure(monkeypatch)
 
     model = await resolve_model()
-    assert type(model).__name__ == "OpenAIChatModel"
+    # The working window rides on every live model (runtime/context.py, slice 2).
+    assert type(model).__name__ == "WindowedModel"
+    assert type(model.wrapped).__name__ == "OpenAIChatModel"
     assert "localhost:4000" in _base_url(model)
     assert _api_key(model) == "sk-cc-virtual"
 

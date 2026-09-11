@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.24.3: the working window stays off the record
+
+v2.24.0's working window was meant to rewrite only the outgoing request. It
+did not: pydantic-ai writes a `ProcessHistory` processor's output back into
+the run's message history, which is what every persistence path snapshots —
+so the `[cleared from context …]` placeholders went INTO `run_state.messages`,
+the cleared tool output was gone from the record for good, each turn trimmed
+the previous turn's trimmed copy, and a typed `capability-load` return whose
+dict content became a string made the whole transcript fail validation on the
+next load. The cockpit showed it as "chat error" on every send into that
+conversation (the graph curator, 2026-09-10).
+
+- `prepare_window` now returns the history unchanged and measures the window
+  into a task-local; `WindowedModel`, wrapped around every live model at the
+  `resolve_model` seam, swaps it in on the wire. The record stays raw on every
+  run path (fresh, resume, consult) without any of them knowing.
+- `clear_tool_results` leaves typed returns (`tool_kind` set) alone — their
+  content is a dict by type.
+- `durable.load_messages` repairs a row the leak already damaged: a typed
+  return holding a string drops its `tool_kind` and loads as the plain part it
+  now is. Idempotent, and the same repair to apply to the database if a
+  deployment ran v2.24.0–v2.24.2 (the payload itself is unrecoverable).
+
 ## 2026-09-10 — v2.24.2: the graphiti skill names the action it means
 
 Follow-up to v2.24.1 from the full graph audit. `episodes-entities-facts`
