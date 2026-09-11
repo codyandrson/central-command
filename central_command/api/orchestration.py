@@ -688,6 +688,35 @@ async def resume_sweep() -> dict:
 # --- the gated retry sweep (outage equivalence, slice 5) -----------------------
 
 
+# Detached drivers the sweep has dispatched and not yet seen finish. Held
+# only so a finished task is not garbage-collected mid-flight (asyncio keeps
+# weak references) and so tests can await convergence (`sweep_settle`).
+_sweep_inflight: set = set()
+
+
+def _spawn_detached(unit: str, unit_id: str, driver) -> None:
+    import asyncio
+
+    async def _run():
+        try:
+            await driver()
+        except Exception:  # noqa: BLE001 — the driver already landed the record
+            log.exception("retry sweep: detached %s %s failed", unit, unit_id)
+
+    t = asyncio.create_task(_run())
+    _sweep_inflight.add(t)
+    t.add_done_callback(_sweep_inflight.discard)
+
+
+async def sweep_settle() -> None:
+    """Await every driver the sweep dispatched — for tests and for the
+    graceful-shutdown path; production ticks never wait on it."""
+    import asyncio
+
+    while _sweep_inflight:
+        await asyncio.gather(*list(_sweep_inflight), return_exceptions=True)
+
+
 async def retry_sweep(cache=None) -> dict:
     """Drive every parked unit whose dependency is UP — the cadence half of
     outage equivalence, called by the `retry.sweep` heartbeat action.
@@ -696,6 +725,10 @@ async def retry_sweep(cache=None) -> dict:
     resume killed with its process is only FINDABLE once it is stale — later
     than the startup `resume_sweep` can ever see it. Recurring is the only
     cadence on which that worklist converges.
+
+    Agent work — a session resume, a task re-run — is DISPATCHED detached and
+    never awaited here (see `_drive(detached=True)`): the tick must return in
+    milliseconds whatever the lanes are doing.
 
     It adds CADENCE and a HEALTH GATE and nothing else: every unit goes through
     the driver that already owns it (`resume_parked_session`,
@@ -732,11 +765,23 @@ async def retry_sweep(cache=None) -> dict:
     skipped_gated: list[dict] = []
     errors: list[dict] = []
 
-    async def _drive(unit: str, unit_id: str, dependency, driver, landed: list):
+    async def _drive(unit: str, unit_id: str, dependency, driver, landed: list,
+                     *, detached: bool = False):
         if not await cache.healthy(dependency):
             skipped_gated.append(
                 {"unit": unit, "id": unit_id, "dependency": dependency}
             )
+            return
+        if detached:
+            # AGENT WORK IS DISPATCHED, NEVER AWAITED, from the heartbeat tick
+            # (2026-09-11): a task retry queues on its agent's lane lock
+            # (`routes._agent_task_lock`) and a resume is a full model turn.
+            # Awaiting either here held EVERY schedule hostage for seven
+            # hours behind one agent's backlog. The driver still owns the
+            # claim, the attempt accounting and the failure landing; only
+            # the waiting moved off the tick.
+            _spawn_detached(unit, unit_id, driver)
+            landed.append(unit_id)
             return
         try:
             out = await driver()
@@ -748,13 +793,15 @@ async def retry_sweep(cache=None) -> dict:
         if out is not None:  # None = someone else holds the claim, or it moved
             landed.append(unit_id)
 
-    # (a) Sessions parked AWAITING_RESUME — their retry IS an agent run.
-    # Orphans are parked FIRST so this same pass drives them: they are only
-    # findable once stale, which is later than the startup sweep can ever see.
+    # (a) Sessions parked AWAITING_RESUME — their retry IS an agent run, so
+    # it is dispatched, not awaited. Orphans are parked FIRST so this same
+    # pass drives them: they are only findable once stale, which is later
+    # than the startup sweep can ever see.
     orphaned = await park_orphaned_resumes()
     for sid in await repo.sessions_awaiting_resume():
         await _drive("session", sid, probes.LLM,
-                     lambda sid=sid: resume_parked_session(sid), resumed)
+                     lambda sid=sid: resume_parked_session(sid), resumed,
+                     detached=True)
 
     # (b) Approved proposals parked RETRY_PENDING — the blocked call is the
     # EXECUTOR's, so the gate is the failed capability's own system. NOT also
@@ -775,7 +822,8 @@ async def retry_sweep(cache=None) -> dict:
     # SQL) — a re-run is an agent run, so it gates on the LLM.
     for task in await repo.tasks_awaiting_retry(due_only=True):
         await _drive("task", task["id"], probes.LLM,
-                     lambda tid=task["id"]: retry_parked_task(tid), retried_tasks)
+                     lambda tid=task["id"]: retry_parked_task(tid), retried_tasks,
+                     detached=True)
 
     result = {"resumed": resumed, "orphaned": orphaned,
               "retried_executions": retried_executions,

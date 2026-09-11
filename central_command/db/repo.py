@@ -3555,6 +3555,22 @@ async def fail_sessionless_in_progress_tasks() -> list[dict]:
         await conn.close()
 
 
+async def tasks_with_title_prefix(prefix: str) -> list[dict]:
+    """Every task (any status) whose title starts with `prefix`, with its
+    instructions — how autodiscovery bootstraps a credential's snapshot from
+    the add-tasks of passes that predate the snapshot."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select id, status, instructions from task where title like $1 || '%' "
+            "order by created_at",
+            prefix,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
 async def count_nonterminal_tasks_with_title_prefix(prefix: str) -> int:
     """Count of non-terminal (ASSIGNED/IN_PROGRESS/REVIEW) tasks whose title
     starts with `prefix` — the litellm.discovery generation guard's read: a

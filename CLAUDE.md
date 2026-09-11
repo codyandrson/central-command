@@ -442,6 +442,21 @@ where the story is gone.
   only on `agent/lifecycle` end frames and the panel updates on
   `cc.conversation.ended` / `cc.session.*` events. If you add a new
   turn/close path, push the frames, or the UI lies.
+- **A heartbeat action never AWAITS agent work.** A task re-run queues on
+  its agent's lane lock (`routes._agent_task_lock`) and a resume is a full
+  model turn; awaiting either inside the tick held every schedule hostage
+  for seven hours behind one agent's backlog (2026-09-11). The retry sweep
+  DISPATCHES both detached (`orchestration._spawn_detached`) and the tick
+  returns; `sweep_settle()` is for tests and shutdown only. Guarded by
+  `test_the_sweep_returns_while_an_agent_lane_is_busy`.
+- **Autodiscovery has MEMORY, and only new/changed/failed ids reach the
+  agent.** The `autodiscovery_snapshot` app_setting records, per credential
+  and catalog id, a fingerprint of `FINGERPRINT_FIELDS` and a disposition
+  (registered / skipped / pending). A skip is inferred from a DONE task that
+  registered nothing — the agent never bookkeeps it — and a skipped id with
+  an unchanged fingerprint is never shown again. "Any change" means exactly
+  those fields: a provider catalog carries no price, context or description,
+  so a fingerprint cannot see them. `reconcile_snapshot` is pure; keep it so.
 - **`master` is the only branch** — no `main`. A feature branch is a
   deliberate choice to raise with the operator, not a default.
 

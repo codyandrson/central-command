@@ -716,6 +716,124 @@ def compute_discovery_drift(
     return {"missing": missing, "stale": stale, "unhealthy": unhealthy_managed}
 
 
+# The catalog fields whose change re-opens a decided model. Explicit and
+# closed on purpose: a provider's /v1/models entry is nearly immutable (id,
+# created, owned_by), so "any change" must name the fields that CAN move —
+# OpenAI's `shutdown_date`, Anthropic's `display_name` — or it silently means
+# "new or removed" while everyone believes it means more. Price, context and
+# description are NOT in the catalog (they live in LiteLLM's cost map), so no
+# fingerprint can see them.
+FINGERPRINT_FIELDS = ("id", "shutdown_date", "display_name")
+
+SNAPSHOT_SETTING = "autodiscovery_snapshot"
+
+
+def catalog_fingerprint(entry: dict) -> str:
+    import json
+
+    return json.dumps({f: entry.get(f) for f in FINGERPRINT_FIELDS if f in entry},
+                      sort_keys=True, default=str)
+
+
+def reconcile_snapshot(
+    previous: dict,
+    catalog: list[dict],
+    missing_ids: set[str],
+    configured_ids: set[str],
+    task_statuses: dict[str, str | None],
+) -> dict:
+    """Autodiscovery's MEMORY (2026-09-11): decide, per catalog id, whether
+    the agent needs to look at it THIS pass. Pure — the caller reads the
+    snapshot from `app_setting` and writes the returned one back.
+
+    `previous` is the credential's stored snapshot `{id: {fp, disposition,
+    task_id?}}`; disposition is `registered` (on the proxy), `skipped` (a
+    task examined it and proposed nothing) or `pending` (a task is open).
+    `task_statuses` maps every task_id the snapshot names to its current
+    status (None = row gone).
+
+    The rule: an id reaches the agent when it is NEW, when its fingerprint
+    CHANGED since it was decided (even if skipped or registered), or when the
+    task that was examining it FAILED. A skipped id with the same fingerprint
+    is never shown again — that is the whole fix for the daily re-examination
+    of 60 dated snapshots. A pending id whose task finished DONE without
+    registering it becomes skipped; nothing else is inferred.
+
+    Returns `{"snapshot", "to_task": [catalog entries], "changed": [...]}`
+    where `changed` lists REGISTERED ids whose fingerprint moved (a
+    maintenance finding — e.g. a shutdown date announced), and `snapshot` is
+    the new state with every to-task id already marked pending (the caller
+    stamps the task_id once it exists).
+    """
+    snapshot: dict = {}
+    to_task: list[dict] = []
+    changed: list[dict] = []
+    for entry in catalog:
+        cid = str(entry.get("id") or "")
+        if not cid:
+            continue
+        fp = catalog_fingerprint(entry)
+        prev = previous.get(cid) or {}
+        if cid in configured_ids:
+            if prev.get("disposition") == "registered" and prev.get("fp") not in (None, fp):
+                changed.append({"id": cid, "before": prev["fp"], "after": fp})
+            snapshot[cid] = {"fp": fp, "disposition": "registered"}
+            continue
+        if cid not in missing_ids:
+            continue  # the operator's own skip list: not ours to track
+        if not prev:
+            reason = "new"
+        elif prev.get("fp") not in (None, fp):
+            reason = "changed"
+        elif prev.get("disposition") == "pending":
+            status = task_statuses.get(prev.get("task_id") or "")
+            if status == "DONE":
+                snapshot[cid] = {"fp": fp, "disposition": "skipped"}
+                continue
+            if status in ("FAILED", "CANCELLED", None):
+                reason = "retask"
+            else:
+                snapshot[cid] = {**prev, "fp": fp}  # still being examined
+                continue
+        else:
+            snapshot[cid] = {**prev, "fp": fp}  # skipped, unchanged: never shown again
+            continue
+        snapshot[cid] = {"fp": fp, "disposition": "pending", "reason": reason}
+        to_task.append(entry)
+    return {"snapshot": snapshot, "to_task": to_task, "changed": changed}
+
+
+def brief_model_ids(instructions: str) -> list[str]:
+    """The catalog ids an add-task brief carries (its trailing JSON block) —
+    how a snapshot is bootstrapped from tasks that predate it."""
+    import json
+
+    try:
+        block = instructions.rsplit("```json\n", 1)[1].rstrip("`\n")
+        return [str(m["id"]) for m in json.loads(block) if isinstance(m, dict) and m.get("id")]
+    except (IndexError, ValueError, TypeError):
+        return []
+
+
+def bootstrap_snapshot(tasks: list[dict]) -> dict:
+    """A snapshot for a credential that has none yet, from the add-tasks of
+    earlier passes: a DONE task's ids are `skipped` (it proposed nothing that
+    stuck, or the id would be configured), an open task's are `pending` under
+    that task, FAILED/CANCELLED ones are forgotten. The fingerprint is unknown
+    (""), so the first pass with a snapshot re-fingerprints without re-tasking."""
+    snap: dict = {}
+    for t in tasks:
+        status = t.get("status")
+        if status in ("FAILED", "CANCELLED"):
+            continue
+        for cid in brief_model_ids(t.get("instructions") or ""):
+            if status == "DONE":
+                snap.setdefault(cid, {"fp": None, "disposition": "skipped"})
+            else:
+                snap[cid] = {"fp": None, "disposition": "pending", "task_id": t.get("id")}
+    return snap
+
+
 _DISCOVERY_INTRO = (
     "This is a scheduled model-autodiscovery pass (see AUTODISCOVERY in "
     "your charter). The block below is GROUND TRUTH computed by plain code "
@@ -777,6 +895,9 @@ def _add_brief(credential_name: str, models: list[dict]) -> str:
         "realtime) still registers — the probe reports inconclusive and the "
         "capabilities are declared from the model card. Don't skip a model "
         "just because it isn't chat.\n\n"
+        "MEMORY: a model you do NOT propose is recorded as skipped and will "
+        "not be shown to you again unless its catalog entry changes, so a "
+        "skip needs no bookkeeping proposal — just don't propose it.\n\n"
         "SKIP CANDIDATES: if any model in this slice looks like a dated "
         "snapshot of an undated alias already covered elsewhere, or carries "
         "an imminent shutdown/deprecation date, don't propose it — recommend "
@@ -804,6 +925,11 @@ def _maintenance_brief(findings: dict[str, dict]) -> str:
         "read-only to you.\n\n"
         "Verification of any fix is the NEXT discovery pass observing health "
         "clean; you don't need to re-check it now.\n\n"
+        "CHANGED (a REGISTERED model whose provider catalog entry moved since "
+        "it was last seen — `before`/`after` are the fingerprinted fields, "
+        "typically a shutdown date being announced): read the diff and "
+        "propose litellm.update_model or litellm.delete_model only if it "
+        "warrants one; otherwise say so in your result.\n\n"
         "UNDECLARED (managed deployments whose measured capabilities are not "
         "declared): propose ONE litellm.update_model per alias carrying "
         "exactly its `suggested_model_info` as `model_info` — measured, "
@@ -881,6 +1007,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
 
     decisions = await repo.get_app_setting("autodiscovery_decisions", {"skip": []})
     skip = decisions.get("skip") or []
+    snapshots = dict(await repo.get_app_setting(SNAPSHOT_SETTING, {}))
 
     deployments = (await litellm_client.list_models())["models"]
     cred_names = {c["credential_name"] for c in credentials}
@@ -955,9 +1082,34 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
             findings[name] = {"error": f"{type(e).__name__}: {e}"}
             continue
         drift = compute_discovery_drift(name, cred.get("provider"), catalog, deployments, unhealthy, skip)
-        if drift["missing"] or drift["stale"] or drift["unhealthy"]:
+        # MEMORY (2026-09-11): only what is new, changed, or re-examinable
+        # reaches the agent. `missing` is the raw diff; the snapshot decides
+        # which of it is actually work this pass. Configured ids are the
+        # catalog minus missing minus the operator's skip list.
+        missing_ids = {str(m["id"]) for m in drift["missing"]}
+        configured_ids = {
+            str(m["id"]) for m in catalog
+            if isinstance(m, dict) and m.get("id")
+            and str(m["id"]) not in missing_ids and str(m["id"]) not in set(skip)
+        }
+        previous = snapshots.get(name) or {}
+        if not previous:
+            previous = bootstrap_snapshot(await repo.tasks_with_title_prefix(
+                f"LiteLLM autodiscovery: {name} batch"))
+        task_ids_named = {e.get("task_id") for e in previous.values() if e.get("task_id")}
+        statuses: dict[str, str | None] = {}
+        for tid in task_ids_named:
+            row = await repo.get_task(tid)
+            statuses[tid] = row.get("status") if row else None
+        rec = reconcile_snapshot(previous, catalog, missing_ids, configured_ids, statuses)
+        snapshots[name] = rec["snapshot"]
+        drift["missing"] = rec["to_task"]
+        if rec["changed"]:
+            drift["changed"] = rec["changed"]
+        if drift["missing"] or drift["stale"] or drift["unhealthy"] or drift.get("changed"):
             findings[name] = drift
 
+    await repo.set_app_setting(SNAPSHOT_SETTING, snapshots)
     if not findings and not undeclared:
         return {"drift": False}
 
@@ -981,7 +1133,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
     maintenance = {
         name: {k: v for k, v in d.items() if k != "missing"}
         for name, d in findings.items()
-        if d.get("error") or d.get("stale") or d.get("unhealthy")
+        if d.get("error") or d.get("stale") or d.get("unhealthy") or d.get("changed")
     }
     if undeclared:
         maintenance["undeclared"] = undeclared
@@ -1006,6 +1158,8 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         )
         if open_count:
             backlog[name] = len(missing)
+            for m in missing:  # not tasked this pass: forget, so the next pass re-offers them
+                snapshots.get(name, {}).pop(str(m.get("id")), None)
             continue
         chunks = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
         n = len(chunks)
@@ -1016,6 +1170,11 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
             )
             if result.get("task_id"):
                 task_ids.append(result["task_id"])
+                for m in chunk:
+                    entry = snapshots.get(name, {}).get(str(m.get("id")))
+                    if entry is not None:
+                        entry["task_id"] = result["task_id"]
+    await repo.set_app_setting(SNAPSHOT_SETTING, snapshots)
 
     out = {
         "drift": True,

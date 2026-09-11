@@ -951,6 +951,8 @@ def discovery_stubs(monkeypatch):
         "decisions": {"skip": []},
         "deployments": [], "unhealthy": [], "catalog": [],
         "open_counts": {},  # credential_name -> count, generation-guard input
+        "snapshot": {},  # autodiscovery_snapshot app_setting, written back by the action
+        "prior_tasks": [],  # rows for tasks_with_title_prefix / get_task
         "probes": {},  # alias -> probe_model() return (or an Exception instance)
     }
     probed: list[str] = []
@@ -968,7 +970,22 @@ def discovery_stubs(monkeypatch):
     async def fake_get_app_setting(key, default):
         if key == "autodiscovery_decisions":
             return state["decisions"]
+        if key == hb_actions.SNAPSHOT_SETTING:
+            return state["snapshot"]
         return default
+
+    async def fake_set_app_setting(key, value):
+        if key == hb_actions.SNAPSHOT_SETTING:
+            state["snapshot"] = value
+
+    async def fake_tasks_with_title_prefix(prefix):
+        return [t for t in state["prior_tasks"] if t["title"].startswith(prefix)]
+
+    async def fake_get_task(task_id):
+        for t in state["prior_tasks"]:
+            if t["id"] == task_id:
+                return t
+        return None
 
     async def fake_list_models():
         return {"models": state["deployments"]}
@@ -995,6 +1012,9 @@ def discovery_stubs(monkeypatch):
 
     monkeypatch.setattr(litellm_credstore, "list_provider_credentials", fake_list_provider_credentials)
     monkeypatch.setattr(repo, "get_app_setting", fake_get_app_setting)
+    monkeypatch.setattr(repo, "set_app_setting", fake_set_app_setting)
+    monkeypatch.setattr(repo, "tasks_with_title_prefix", fake_tasks_with_title_prefix)
+    monkeypatch.setattr(repo, "get_task", fake_get_task)
     monkeypatch.setattr(repo, "count_nonterminal_tasks_with_title_prefix",
                         fake_count_nonterminal_tasks_with_title_prefix)
     monkeypatch.setattr(litellm_client, "list_models", fake_list_models)
@@ -1290,3 +1310,134 @@ async def test_a_probe_exception_becomes_an_error_entry_and_the_tick_completes(d
     assert out["drift"] is True
     task = discovery_stubs["tasks"][0]
     assert "RuntimeError: provider flap" in task["instructions"]
+
+
+# --- autodiscovery memory (2026-09-11) -----------------------------------------
+
+
+def _snap(fp_entry, disposition, task_id=None):
+    e = {"fp": hb_actions.catalog_fingerprint(fp_entry), "disposition": disposition}
+    if task_id:
+        e["task_id"] = task_id
+    return e
+
+
+def test_reconcile_only_new_changed_or_failed_reach_the_agent():
+    catalog = [
+        {"id": "m-new"},
+        {"id": "m-skipped", "shutdown_date": None},
+        {"id": "m-changed", "shutdown_date": "2027-01-01"},
+        {"id": "m-pending-open"},
+        {"id": "m-pending-done"},
+        {"id": "m-pending-failed"},
+        {"id": "m-registered", "shutdown_date": "2026-12-31"},
+        {"id": "m-registered-same"},
+    ]
+    previous = {
+        "m-skipped": _snap({"id": "m-skipped", "shutdown_date": None}, "skipped"),
+        "m-changed": _snap({"id": "m-changed", "shutdown_date": None}, "skipped"),
+        "m-pending-open": _snap({"id": "m-pending-open"}, "pending", "t-open"),
+        "m-pending-done": _snap({"id": "m-pending-done"}, "pending", "t-done"),
+        "m-pending-failed": _snap({"id": "m-pending-failed"}, "pending", "t-failed"),
+        "m-registered": _snap({"id": "m-registered", "shutdown_date": None}, "registered"),
+        "m-registered-same": _snap({"id": "m-registered-same"}, "registered"),
+        "m-gone": _snap({"id": "m-gone"}, "skipped"),
+    }
+    configured = {"m-registered", "m-registered-same"}
+    missing = {m["id"] for m in catalog} - configured
+    rec = hb_actions.reconcile_snapshot(
+        previous, catalog, missing, configured,
+        {"t-open": "REVIEW", "t-done": "DONE", "t-failed": "FAILED"},
+    )
+    assert sorted(m["id"] for m in rec["to_task"]) == [
+        "m-changed", "m-new", "m-pending-failed"]
+    snap = rec["snapshot"]
+    assert snap["m-skipped"]["disposition"] == "skipped"
+    assert snap["m-pending-open"] == previous["m-pending-open"]
+    assert snap["m-pending-done"]["disposition"] == "skipped", "DONE without registering = skipped"
+    assert snap["m-registered"]["disposition"] == "registered"
+    assert [c["id"] for c in rec["changed"]] == ["m-registered"], "a registered id that moved is a maintenance finding"
+    assert "m-gone" not in snap, "an id the catalog dropped is forgotten"
+    for m in rec["to_task"]:
+        assert snap[m["id"]]["disposition"] == "pending"
+
+
+def test_reconcile_adopts_a_bootstrapped_fingerprint_without_retasking():
+    previous = {"m-old": {"fp": None, "disposition": "skipped"}}
+    rec = hb_actions.reconcile_snapshot(previous, [{"id": "m-old"}], {"m-old"}, set(), {})
+    assert rec["to_task"] == []
+    assert rec["snapshot"]["m-old"]["fp"] == hb_actions.catalog_fingerprint({"id": "m-old"})
+
+
+def test_bootstrap_snapshot_reads_prior_add_tasks():
+    brief = lambda ids: "x\n```json\n" + json.dumps([{"id": i} for i in ids]) + "\n```"
+    snap = hb_actions.bootstrap_snapshot([
+        {"id": "t1", "status": "DONE", "instructions": brief(["a", "b"])},
+        {"id": "t2", "status": "REVIEW", "instructions": brief(["c"])},
+        {"id": "t3", "status": "FAILED", "instructions": brief(["d"])},
+    ])
+    assert snap == {
+        "a": {"fp": None, "disposition": "skipped"},
+        "b": {"fp": None, "disposition": "skipped"},
+        "c": {"fp": None, "disposition": "pending", "task_id": "t2"},
+    }
+
+
+async def test_a_second_pass_does_not_retask_examined_models(discovery_stubs):
+    """The daily re-examination of the same 60 dated snapshots, ended: pass 1
+    tasks the new model; its task finishes DONE without registering; pass 2
+    finds nothing to do; a catalog change on that model re-opens it."""
+    state = discovery_stubs["state"]
+    state["catalog"] = [{"id": "claude-new", "display_name": "Claude New"}]
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["queued"] == 1
+    snap = state["snapshot"]["anthropic-main"]["claude-new"]
+    assert snap["disposition"] == "pending" and snap["task_id"] == "task_discovery_stub_0"
+
+    # The task finished; the agent proposed nothing.
+    state["prior_tasks"] = [{"id": "task_discovery_stub_0", "status": "DONE",
+                             "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
+                             "instructions": ""}]
+    discovery_stubs["tasks"].clear()
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out == {"drift": False}
+    assert discovery_stubs["tasks"] == []
+    assert state["snapshot"]["anthropic-main"]["claude-new"]["disposition"] == "skipped"
+
+    # Same again tomorrow: still nothing.
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out == {"drift": False} and discovery_stubs["tasks"] == []
+
+    # The provider renamed it: that is a change, so it is examined again.
+    state["catalog"] = [{"id": "claude-new", "display_name": "Claude New (retiring)"}]
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["queued"] == 1
+    assert state["snapshot"]["anthropic-main"]["claude-new"]["reason"] == "changed"
+
+
+async def test_a_registered_model_whose_entry_moved_is_a_maintenance_finding(discovery_stubs):
+    state = discovery_stubs["state"]
+    state["deployments"] = [{"model_name": "cc-x", "provider": "anthropic",
+                             "provider_model": "anthropic/claude-x",
+                             "credential_name": "anthropic-main"}]
+    state["catalog"] = [{"id": "claude-x", "display_name": "Claude X"}]
+    assert await hb_actions.ACTIONS["litellm.discovery"].run("s1", {}) == {"drift": False}
+    state["catalog"] = [{"id": "claude-x", "display_name": "Claude X (deprecated)"}]
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["queued"] == 1
+    task = discovery_stubs["tasks"][0]
+    assert task["title"] == "LiteLLM autodiscovery: maintenance"
+    assert '"changed"' in task["instructions"] and "Claude X (deprecated)" in task["instructions"]
+
+
+async def test_a_credential_without_a_snapshot_bootstraps_from_prior_tasks(discovery_stubs):
+    state = discovery_stubs["state"]
+    state["catalog"] = [{"id": "claude-a"}, {"id": "claude-b"}]
+    brief = "x\n```json\n" + json.dumps([{"id": "claude-a"}]) + "\n```"
+    state["prior_tasks"] = [{"id": "t-old", "status": "DONE",
+                             "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
+                             "instructions": brief}]
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["queued"] == 1
+    assert '"claude-b"' in discovery_stubs["tasks"][0]["instructions"]
+    assert '"claude-a"' not in discovery_stubs["tasks"][0]["instructions"]

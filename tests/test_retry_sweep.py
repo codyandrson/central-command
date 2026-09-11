@@ -453,6 +453,7 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
     )
 
     result = await orchestration.retry_sweep()
+    await orchestration.sweep_settle()  # agent work is dispatched, never awaited by the tick
 
     assert parked_session["session_id"] in result["resumed"]
     assert parked_exec["proposal_id"] in result["retried_executions"]
@@ -574,4 +575,56 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch):
     assert session_id in out["result"]["resumed"], (
         "one pass must both park and drive it — two passes is 5 more minutes"
     )
+    await orchestration.sweep_settle()
     assert await repo.session_status(session_id) == "DONE"
+
+
+# --- the tick never waits on an agent lane (2026-09-11) -------------------------
+
+
+async def test_the_sweep_returns_while_an_agent_lane_is_busy(monkeypatch):
+    """The 2026-09-11 freeze: the sweep awaited a task retry inline, the
+    retry queued on its agent's lane lock behind thirty other tasks, and every
+    schedule on the heartbeat stopped for seven hours. The tick must return
+    while the lane is held, and the retry must run only once the lane frees.
+    """
+    from central_command import events
+
+    task_id = "task_" + uuid.uuid4().hex[:12]
+    await repo.create_task(task_id, "lane guard", "Advise only.", "jira-expert")
+    await orchestration.park_task_retry(task_id, OUTAGE)
+    conn = await repo._conn()
+    try:
+        await conn.execute(
+            "update task set retry_state = jsonb_set(retry_state, '{not_before}', "
+            "to_jsonb($2::text)) where id = $1",
+            task_id, (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        )
+    finally:
+        await conn.close()
+    _no_probes(monkeypatch, llm=True)
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _advice_model()))
+
+    started: list[str] = []
+    real_emit = events.emit
+
+    async def spy_emit(kind, ref_id=None, payload=None, actor=None):
+        if kind == "task.started" and ref_id == task_id:
+            started.append(kind)
+        return await real_emit(kind, ref_id=ref_id, payload=payload, actor=actor)
+
+    monkeypatch.setattr(events, "emit", spy_emit)
+
+    lane = routes._agent_task_lock("jira-expert")
+    async with lane:  # somebody else's task holds the lane
+        result = await asyncio.wait_for(orchestration.retry_sweep(), timeout=10)
+        assert task_id in result["retried_tasks"], "dispatched, not skipped"
+        await asyncio.sleep(0.2)
+        assert started == [], "the run must not start while the lane is held"
+        assert (await repo.get_task(task_id))["status"] == "IN_PROGRESS", (
+            "the claim is taken at dispatch — no second sweep can double-run it"
+        )
+
+    await orchestration.sweep_settle()
+    assert started == ["task.started"]
+    assert (await repo.get_task(task_id))["status"] == "DONE"

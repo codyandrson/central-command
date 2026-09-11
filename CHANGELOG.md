@@ -4,6 +4,33 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-11 — v2.25.0: autodiscovery remembers, and the heartbeat never waits on a lane
+
+Two findings from one bad day. The LiteLLM autodiscovery pass had no memory:
+every night it re-diffed the provider catalog and handed the litellm-manager
+one task per model it had already examined — 67 tasks and a dozen review
+items on 2026-09-11, 21 of which concluded "skip" for models skipped the day
+before, because a skip lived only in the agent's prose. Then the workstation
+went offline, the retry sweep re-ran one of those parked tasks INLINE in the
+heartbeat tick, the run queued on the litellm-manager lane lock behind thirty
+siblings, and every schedule on the heartbeat (mail poll, graph verification,
+drain window, the sweep itself) froze for seven hours.
+
+- Autodiscovery keeps a per-credential snapshot (`autodiscovery_snapshot`):
+  a fingerprint of the catalog fields that can actually move (`id`,
+  `shutdown_date`, `display_name`) and a disposition — registered, skipped,
+  pending. Only NEW ids, ids whose fingerprint CHANGED (even if skipped or
+  registered), and ids whose examining task FAILED reach the agent. A
+  pending id whose task finished DONE without registering it becomes skipped
+  and is never re-offered while unchanged. A registered id whose entry moved
+  is a CHANGED maintenance finding. A credential with no snapshot bootstraps
+  one from the add-tasks of earlier passes, so the first pass after this
+  release does not repeat the wave already examined.
+- The retry sweep dispatches session resumes and task re-runs detached and
+  returns immediately; the drivers keep the claim, the attempt accounting and
+  the failure landing. `sweep_settle()` awaits the in-flight set for tests.
+- Two new bite marks in CLAUDE.md; six new tests.
+
 ## 2026-09-10 — v2.24.3: the working window stays off the record
 
 v2.24.0's working window was meant to rewrite only the outgoing request. It
