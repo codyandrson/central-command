@@ -4,6 +4,16 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.24.2: the graphiti skill names the action it means
+
+Follow-up to v2.24.1 from the full graph audit. `episodes-entities-facts`
+described `add_episode(name, episode_body, source_description)` — Graphiti's
+client call, not the `graph.add_episode` proposal an agent actually makes —
+and so omitted `scope`; it now points at `what-belongs` for the argument
+list. `what-belongs` also states where agent-specific doctrine goes (that
+agent's private partition via `for_agent`, never shared), which retires the
+2026-08-29 "record private, operator relocates" workaround episode.
+
 ## 2026-09-10 — v2.24.1: two skills say what the graph was saying for them
 
 A graph sweep found tool-usage facts living as episodes — API behaviour that

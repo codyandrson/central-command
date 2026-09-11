@@ -10,8 +10,10 @@ Every entity identified during ingestion is linked back to the episode by a
 `MENTIONS` edge, so the graph can always answer "where did this come from" and
 "what did we believe at time T".
 
-You create episodes. `add_episode(name, episode_body, source_description)`
-submits one to the `central_command` group with `source: "text"`.
+You create episodes by proposing `graph.add_episode`; its arguments (`name`,
+`episode_body`, `source_description`, the required `scope`, optional
+`for_agent`) are in `what-belongs`. It lands with `source: "text"` in the
+group the scope selects.
 
 **Ingestion is queued and asynchronous.** The return value is Graphiti's
 acknowledgement, **not the finished graph state**. An episode you just

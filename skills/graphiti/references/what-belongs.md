@@ -61,7 +61,9 @@ choose the one that matters most and **say in your intent what you left out**.
   because the partition is part of what the operator approves. `shared` is
   the team graph (a domain steward's write lands in its domain group, still
   inside the shared read set); `private` is your own partition, or another
-  active roster agent's when you add `for_agent: '<agent id>'`.
+  active roster agent's when you add `for_agent: '<agent id>'`. One
+  teammate's operating doctrine is that teammate's private episode via
+  `for_agent`, never a shared one.
 
 Proposal envelope: `target_ref = {'system': 'graphiti', 'id': 'central_command',
 'read_version': 'unknown'}`, `reversibility = 'reversible'`.
