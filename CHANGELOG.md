@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-10 — v2.24.1: two skills say what the graph was saying for them
+
+A graph sweep found tool-usage facts living as episodes — API behaviour that
+belongs in a skill, not in the knowledge graph. The skills now carry them, so
+the episodes can be deleted:
+
+- `jira` / `jql` — `statusCategory` values with a space must be double-quoted
+  (`"In Progress"`); the unquoted form is an HTTP 400.
+- `graphiti` / `what-belongs` — `graph.add_episode` takes a required `scope`
+  of exactly `shared` or `private` (plus `for_agent` for another agent's
+  partition). The reference listed the other arguments and omitted this one,
+  which the contract already requires.
+
+Re-import both skills (`POST /api/skills/import` with `skill_id`) to deliver
+the new document versions to the agents that hold them.
+
 ## 2026-09-10 — v2.24.0: an agent's window is managed, not just measured
 
 Found live the same day: a graph-curator conversation failed with

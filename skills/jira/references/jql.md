@@ -70,7 +70,10 @@ was never pre-flighted is a guess wearing a name.
   `GET /rest/api/3/jql/autocompletedata` (`jqlReservedWords`) if you need to be
   certain.
 - **Quote anything with a space, a hyphen or punctuation.** `"is blocked by"`,
-  `"Won't Do"`. Escape an embedded quote with `\"`.
+  `"Won't Do"`. Escape an embedded quote with `\"`. This includes
+  `statusCategory`: `statusCategory = "In Progress"` runs clean, the unquoted
+  form is rejected with **HTTP 400**, and single-word values (`Done`) work
+  either way.
 - **`~` is not `=`.** `summary ~ "INV-4471"` may match on tokenisation quirks and
   may miss exact punctuation. To find a specific issue, use its key.
 - **The search index is EVENTUALLY CONSISTENT.** A write that was just executed

@@ -57,6 +57,11 @@ choose the one that matters most and **say in your intent what you left out**.
   reader who never sees the source. Never pasted source text.
 - `source_description` — where it came from (e.g. `email <message-id>`, the
   document id, or the operator).
+- `scope` — **required**, exactly `shared` or `private`; nothing defaults,
+  because the partition is part of what the operator approves. `shared` is
+  the team graph (a domain steward's write lands in its domain group, still
+  inside the shared read set); `private` is your own partition, or another
+  active roster agent's when you add `for_agent: '<agent id>'`.
 
 Proposal envelope: `target_ref = {'system': 'graphiti', 'id': 'central_command',
 'read_version': 'unknown'}`, `reversibility = 'reversible'`.
