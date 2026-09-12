@@ -234,11 +234,15 @@ export function InlineSelect({
               highlighted ? 'bg-secondary/80 text-foreground' : active ? 'bg-secondary text-foreground' : 'text-foreground/80',
               'hover:bg-secondary/80 hover:text-foreground'
             )}
+            // Select on click, never on pointerdown: a touch scroll starts
+            // with a pointerdown too, and selecting there made the list
+            // unscrollable on phones. preventDefault on pointerdown still
+            // stops the compat mouse events from retargeting underneath.
             onPointerDown={(e) => {
-              // Prevent touch browsers from retargeting a follow-up click onto
-              // whatever sits underneath the menu after we close it.
               e.preventDefault();
               e.stopPropagation();
+            }}
+            onClick={() => {
               onChange(option.value);
               close();
             }}

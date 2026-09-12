@@ -33,6 +33,10 @@ describe('InlineSelect', () => {
     fireEvent(option, event);
 
     expect(event.defaultPrevented).toBe(true);
+    // A touch scroll begins with a pointerdown; it must not select.
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.click(option);
     expect(onChange).toHaveBeenCalledWith('medium');
   });
 });

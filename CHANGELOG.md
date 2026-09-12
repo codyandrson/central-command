@@ -4,6 +4,16 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-11 — v2.25.1: a dropdown you can scroll on a phone
+
+Granting a pack from a phone was impossible past the first screenful of
+options: the cockpit's inline select chose an option on `pointerdown`, and a
+touch scroll begins with a pointerdown too, so the first swipe selected
+whatever was under the finger and closed the menu. Selection now happens on
+`click`, which touch browsers only synthesize for a tap. `preventDefault` on
+pointerdown stays, since that is what stops the compat mouse events from
+retargeting a click onto whatever sits under the menu.
+
 ## 2026-09-11 — v2.25.0: autodiscovery remembers, and the heartbeat never waits on a lane
 
 Two findings from one bad day. The LiteLLM autodiscovery pass had no memory:
