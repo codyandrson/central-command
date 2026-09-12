@@ -1,0 +1,85 @@
+{
+  "id": "kC81tDmXwPb25Nsj",
+  "name": "cc-email-facade",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cc-email-facade",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "webhookId": "3ce8f52b-74be-4436-9d20-c473cc71bf55"
+    },
+    {
+      "id": "auth",
+      "name": "Auth + unwrap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const TOKEN = '__CC_EMAIL_FACADE_TOKEN__';\nconst item = $input.first().json;\nconst hdr = item.headers || {};\nconst supplied = hdr['x-cc-token'];\nif (supplied !== TOKEN) { throw new Error('cc-email-facade - unauthorized'); }\nconst body = item.body || {};\nif (!body || !body.mode) { throw new Error('cc-email-facade - missing mode'); }\n// Attachments are never requested through this facade: Central Command\n// ingests text only (attachments are extracted at the gateway).\nif (body.include_attachments) { throw new Error('cc-email-facade - attachments are not served through this facade'); }\nreturn [{ json: body }];\n"
+      }
+    },
+    {
+      "id": "call",
+      "name": "Call lib-email-provider",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        80,
+        0
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": true
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "tfoEVgB8uHHIokWQ",
+          "cachedResultName": "lib-email-provider"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Auth + unwrap": {
+      "main": [
+        [
+          {
+            "node": "Call lib-email-provider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Auth + unwrap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

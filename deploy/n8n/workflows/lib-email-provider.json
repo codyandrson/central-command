@@ -1,0 +1,724 @@
+{
+  "id": "tfoEVgB8uHHIokWQ",
+  "name": "lib-email-provider",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "When Called (source ref + mode)",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "validate",
+      "name": "Validate request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// lib-email-provider - validate the request. Fail fast, provider-agnostic.\nconst items = $input.all();\nif (items.length > 1) throw new Error('lib-email-provider: expects exactly one input item, got ' + items.length);\nconst inp = (items[0] && items[0].json) || {};\nconst mode = inp.mode;\nif (!['message', 'thread', 'list', 'report_spam'].includes(mode)) throw new Error(`lib-email-provider: bad or missing mode '${mode}' (must be 'message', 'thread', 'list', or 'report_spam')`);\nconst ref = inp.source_ref || {};\n// Ids are URL path segments: restrict to the provider id alphabet so a crafted\n// reference cannot rewrite the request path/query (by-reference boundary).\nconst ID_RE = /^[A-Za-z0-9_-]+$/;\nif ((mode === 'message' || mode === 'report_spam') && !ID_RE.test(String(ref.uuid ?? ''))) throw new Error(`lib-email-provider: mode \"${mode}\" requires source_ref.uuid (non-empty, [A-Za-z0-9_-] only)`);\n// list mode: scope_query is a Gmail search string, required non-empty.\nif (mode === 'list' && (typeof inp.scope_query !== 'string' || inp.scope_query.trim() === '')) throw new Error('lib-email-provider: mode \"list\" requires scope_query (non-empty Gmail search string)');\nif (mode === 'thread' && !ID_RE.test(String(ref.conversation_id ?? ''))) throw new Error('lib-email-provider: mode \"thread\" requires source_ref.conversation_id (non-empty, [A-Za-z0-9_-] only)');\nif (inp.include_attachments !== undefined && typeof inp.include_attachments !== 'boolean') throw new Error('lib-email-provider: include_attachments must be boolean when present, got ' + JSON.stringify(inp.include_attachments));\n// Optional pre-download ceiling: over-cap or unknown-size\n// attachments are skipped BEFORE the bytes transit Gmail + Code-node memory.\nif (inp.max_attachment_bytes !== undefined && (typeof inp.max_attachment_bytes !== 'number' || !Number.isFinite(inp.max_attachment_bytes) || inp.max_attachment_bytes <= 0)) throw new Error('lib-email-provider: max_attachment_bytes must be a positive number when present, got ' + JSON.stringify(inp.max_attachment_bytes));\nreturn [{ json: { ...inp, source_ref: ref, include_attachments: inp.include_attachments === true, max_attachment_bytes: inp.max_attachment_bytes ?? null } }];\n"
+      }
+    },
+    {
+      "id": "switch",
+      "name": "Route (mode)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "unmatched"
+        },
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "message",
+                    "leftValue": "={{ $json.mode }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "message"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "outputKey": "message",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "thread",
+                    "leftValue": "={{ $json.mode }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "thread"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "outputKey": "thread",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "list",
+                    "leftValue": "={{ $json.mode }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "list"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "outputKey": "list",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "report_spam",
+                    "leftValue": "={{ $json.mode }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "report_spam"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "outputKey": "report_spam",
+              "renameOutput": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gmail_msg",
+      "name": "Get message (Gmail API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        180
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.source_ref.uuid }}?format=full",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": null,
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "gmail_thread",
+      "name": "Get thread (Gmail API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        400
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/threads/{{ $json.source_ref.conversation_id }}?format=full",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": null,
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "unmatched",
+      "name": "Unmatched route (error)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        600
+      ],
+      "parameters": {
+        "jsCode": "const mode = $input.first().json.mode;\nthrow new Error(`lib-email-provider: unmatched mode '${mode}' - validation and Switch routing have drifted`);\nreturn [];\n"
+      }
+    },
+    {
+      "id": "note_contract",
+      "name": "note_contract",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -40
+      ],
+      "parameters": {
+        "color": 4,
+        "width": 780,
+        "height": 300,
+        "content": "## lib-email-provider\n\n**One boundary** to fetch a Gmail **message** or **thread** *by reference*, search the mailbox (`list`), or report a message as spam (`report_spam`) — the single Gmail→other-provider swap point (one credential, one access point).\n\n**Input** (Execute Sub-workflow):\n- `mode`: message | thread | list | report_spam\n- `source_ref`: { `uuid` (message id — message / report_spam), `conversation_id` (thread id — thread) } — ids must match `[A-Za-z0-9_-]+`\n- `scope_query`: Gmail search string (list, non-empty)\n- `include_attachments` / `max_attachment_bytes`: optional; the cc-email-facade webhook refuses attachments outright\n\n**Output**: `{kind:'email', mode, source_ref, messages:[…]}` with each message normalized (from/to/cc/subject/date/snippet/body_text/body_html/attachments) plus the unsubscribe facts (list_unsubscribe, list_unsubscribe_post, authentication_results[], dkim_signatures[]); report_spam returns `{ok, label_ids}`.\n\nShipped in the Central Command repo as `deploy/n8n/workflows/lib-email-provider.json` and applied by `deploy/n8n/apply-workflows.sh` — edit it THERE, not here; the next update overwrites this canvas."
+      }
+    },
+    {
+      "id": "note_trust",
+      "name": "note_trust",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        560
+      ],
+      "parameters": {
+        "color": 3,
+        "width": 680,
+        "height": 260,
+        "content": "### Trust\n- Reads use the raw Gmail REST API (`messages/threads .get?format=full`, `messages/{id}/attachments/{id}`, `messages.list`) under the single `gmailOAuth2` credential as a predefined HTTP auth — no mutation, no persistence, ungated.\n- `report_spam` is the ONE write (`messages/{id}/modify`, +SPAM −INBOX). Central Command calls it only from its credentialed Executor after an operator approval; nothing in the agent tier can reach it.\n- This boundary passes through untrusted email content and never feeds an LLM itself — callers own the data-not-instructions discipline."
+      }
+    },
+    {
+      "id": "normalize",
+      "name": "Normalize response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        220
+      ],
+      "parameters": {
+        "jsCode": "\n// Normalize (raw Gmail REST -> canonical messages[]). The ONLY Gmail-shape-aware\n// code: the provider swap point.\nconst req = $('When Called (source ref + mode)').first().json;\nconst includeAttachments = req.include_attachments === true;\nconst capBytes = (typeof req.max_attachment_bytes === 'number' && req.max_attachment_bytes > 0) ? req.max_attachment_bytes : null;   // pre-download ceiling\nconst mode = req.mode;\n\n// HTTP node runs with fullResponse+neverError: unwrap the body and map provider\n// failures to the lib's provider-agnostic error contract.\nfunction httpBody(resp, what) {\n  const r = resp || {};\n  if (r.statusCode === undefined) return r; // defensive: plain body shape\n  const s = r.statusCode;\n  if (s >= 200 && s < 300) return r.body || {};\n  if (s === 404) throw new Error('lib-email-provider: ' + what + ' not found for the given reference');\n  if (s === 401 || s === 403) throw new Error('lib-email-provider: provider auth failed (' + s + ') - check the shared email credential');\n  if (s === 429) throw new Error('lib-email-provider: provider rate limit hit - retry later');\n  throw new Error('lib-email-provider: provider fetch failed (' + s + ')');\n}\nfunction headerMap(payload) {\n  const m = {};\n  const hs = (payload && Array.isArray(payload.headers)) ? payload.headers : [];\n  for (const h of hs) { if (h && h.name) m[h.name.toLowerCase()] = h.value; }\n  return m;\n}\nfunction headerAll(payload, name) {\n  const hs = (payload && Array.isArray(payload.headers)) ? payload.headers : [];\n  return hs.filter(h => h && h.name && h.name.toLowerCase() === name).map(h => String(h.value || ''));\n}\nfunction charsetOf(part) {\n  const hs = (part && Array.isArray(part.headers)) ? part.headers : [];\n  for (const h of hs) {\n    if (h && h.name && h.name.toLowerCase() === 'content-type') {\n      const m = /charset\\s*=\\s*\"?([\\w.:-]+)\"?/i.exec(String(h.value || ''));\n      if (m) return m[1].toLowerCase();\n    }\n  }\n  return '';\n}\nfunction decode(data, charset) {\n  if (!data) return '';\n  try {\n    const buf = Buffer.from(String(data).replace(/-/g, '+').replace(/_/g, '/'), 'base64');\n    const cs = (charset || 'utf-8').toLowerCase();\n    if (['utf-8', 'utf8', 'us-ascii', 'ascii'].includes(cs)) return buf.toString('utf-8');\n    if (typeof TextDecoder !== 'undefined') { try { return new TextDecoder(cs).decode(buf); } catch (e) { /* unknown label - fall through */ } }\n    if (['iso-8859-1', 'latin1', 'windows-1252', 'cp1252'].includes(cs)) return buf.toString('latin1');\n    return buf.toString('utf-8');\n  } catch (e) { return ''; }\n}\nfunction dispositionOf(part) {\n  const hs = (part && Array.isArray(part.headers)) ? part.headers : [];\n  let disp = '', cid = '';\n  for (const h of hs) {\n    if (!h || !h.name) continue;\n    const n = h.name.toLowerCase();\n    if (n === 'content-disposition') disp = String(h.value || '').toLowerCase();\n    else if (n === 'content-id') cid = String(h.value || '');\n  }\n  // An explicit `attachment` disposition WINS over a\n  // Content-ID — Gmail attaches cid headers to real attachments on forwards,\n  // which made the 1.4 heuristic (`inline-disposition OR cid`) misclassify\n  // them as inline (live-caught on fixture 19f019f83c19f815).\n  const isAttachment = disp.startsWith('attachment');\n  return { isAttachment, isInline: !isAttachment && (disp.startsWith('inline') || !!cid) };\n}\nfunction walk(part, acc) {\n  if (!part) return;\n  const mime = (part.mimeType || '').toLowerCase();\n  const body = part.body || {};\n  const d = dispositionOf(part);\n  if (body.attachmentId) {\n    // Presence keys on attachmentId (a filename-less part is still an attachment);\n    // is_inline lets the bridge filter embedded signature images from surface-or-flag.\n    acc.attachments.push({ filename: part.filename || '', mime_type: part.mimeType || '', size: (body.size === undefined ? null : body.size), attachment_id: body.attachmentId, is_inline: d.isInline });\n    // A body-role text part delivered by reference only: signal, don't return '' silently.\n    if ((mime === 'text/plain' || mime === 'text/html') && !d.isAttachment && !body.data) acc.body_truncated = true;\n  } else if (mime === 'text/plain' && body.data && !d.isAttachment && !acc.body_text) {\n    acc.body_text = decode(body.data, charsetOf(part));\n  } else if (mime === 'text/html' && body.data && !d.isAttachment && !acc.body_html) {\n    acc.body_html = decode(body.data, charsetOf(part));\n  }\n  if (mime === 'message/rfc822') return; // a forwarded message's body must not win the outer slots\n  if (Array.isArray(part.parts)) for (const p of part.parts) walk(p, acc);\n}\nfunction normalizeOne(msg) {\n  const acc = { body_text: '', body_html: '', attachments: [], body_truncated: false };\n  const payload = msg.payload;\n  const hdr = headerMap(payload);\n  if (payload) {\n    walk(payload, acc);\n    if (!acc.body_text && !acc.body_html && payload.body && payload.body.data) {\n      const d = decode(payload.body.data, charsetOf(payload));\n      if ((payload.mimeType || '').includes('html')) acc.body_html = d; else acc.body_text = d;\n    }\n  }\n  let date = null;\n  if (msg.internalDate) date = new Date(Number(msg.internalDate)).toISOString();\n  else { const t = Date.parse(hdr['date'] || ''); if (!Number.isNaN(t)) date = new Date(t).toISOString(); }\n  return {\n    uuid: msg.id,\n    conversation_id: msg.threadId,\n    from: hdr['from'] || '',\n    to: hdr['to'] || '',\n    cc: hdr['cc'] || '',\n    subject: hdr['subject'] || '',\n    // Unsubscribe facts (RFC 8058) — reported, never decided here. headerMap keeps\n    // the LAST header of a name; these are collected in order (Gmail prepends its\n    // own Authentication-Results, so index 0 is Gmail's verdict).\n    list_unsubscribe: hdr['list-unsubscribe'] || '',\n    list_unsubscribe_post: hdr['list-unsubscribe-post'] || '',\n    authentication_results: headerAll(payload, 'authentication-results'),\n    dkim_signatures: headerAll(payload, 'dkim-signature'),\n    date,\n    snippet: msg.snippet || '',\n    body_text: acc.body_text,\n    body_html: acc.body_html,\n    body_truncated: acc.body_truncated,\n    has_attachments: acc.attachments.length > 0,\n    attachments: acc.attachments,\n  };\n}let messages;\nif (mode === 'message') {\n  messages = [normalizeOne(httpBody($input.first().json, 'message'))];\n} else {\n  const top = httpBody($input.first().json, 'thread');\n  if (!Array.isArray(top.messages) || top.messages.length === 0) {\n    throw new Error('lib-email-provider: thread fetch returned no messages for the given reference');\n  }\n  // oldest -> newest; fall back to the RFC2822 Date header when internalDate is absent.\n  function sortKey(msg) {\n    if (msg.internalDate) return Number(msg.internalDate);\n    const hs = (msg.payload && Array.isArray(msg.payload.headers)) ? msg.payload.headers : [];\n    const dh = hs.find(h => h && h.name && h.name.toLowerCase() === 'date');\n    const t = dh ? Date.parse(String(dh.value || '')) : NaN;\n    return Number.isNaN(t) ? 0 : t;\n  }\n  messages = top.messages.slice().sort((a, b) => sortKey(a) - sortKey(b)).map(m => normalizeOne(m));\n}\n\n// include_attachments:true -> plan REAL byte downloads. Non-inline parts only: inline parts (signature images\n// etc.) stay metadata-only, marked bytes_skipped:'inline'.\nconst downloads = [];\nif (includeAttachments) {\n  messages.forEach((m, mi) => m.attachments.forEach((a, ai) => {\n    if (a.is_inline) { a.bytes_skipped = 'inline'; return; }\n    if (capBytes != null && a.size != null && a.size > capBytes) { a.bytes_skipped = 'size ' + a.size + ' B exceeds max_attachment_bytes ' + capBytes + ' — not downloaded'; return; }\n    if (capBytes != null && a.size == null) { a.bytes_skipped = 'size unknown — not downloaded while max_attachment_bytes is set'; return; }\n    downloads.push({ message_uuid: m.uuid, attachment_id: a.attachment_id,\n      binary_key: 'att_' + downloads.length, filename: a.filename || ('attachment-' + downloads.length),\n      mime_type: a.mime_type || 'application/octet-stream', size: a.size, msg_index: mi, att_index: ai });\n  }));\n}\nreturn [{ json: { kind: 'email', mode, source_ref: req.source_ref || {}, messages, __downloads: downloads } }];"
+      }
+    },
+    {
+      "id": "dlq",
+      "name": "Downloads needed?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        220
+      ],
+      "parameters": {
+        "options": {},
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "yes",
+                    "leftValue": "={{ $json.__downloads.length > 0 ? 'yes' : 'no' }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "yes"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "outputKey": "yes",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "no",
+                    "leftValue": "={{ $json.__downloads.length > 0 ? 'yes' : 'no' }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "no"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "outputKey": "no",
+              "renameOutput": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "listdl",
+      "name": "List downloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        120
+      ],
+      "parameters": {
+        "jsCode": "// One item per attachment to download (the Download node runs per item).\nreturn $input.first().json.__downloads.map(d => ({ json: d }));"
+      }
+    },
+    {
+      "id": "dl",
+      "name": "Download attachment (Gmail API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        120
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.message_uuid }}/attachments/{{ $json.attachment_id }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": null,
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "attach",
+      "name": "Attach binaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        120
+      ],
+      "parameters": {
+        "jsCode": "// base64url -> base64 binary items (1.5 Finding #5 topology, steps 3-4).\n// Per-attachment failure is NON-fatal: metadata keeps flowing with bytes_error\n// so the caller's flag-with-pointer path can take over.\nconst env = JSON.parse(JSON.stringify($('Normalize response').first().json));\nconst plans = $('List downloads').all().map(i => i.json);\nconst resps = $input.all().map(i => i.json);\nconst binary = {};\nplans.forEach((d, i) => {\n  const r = resps[i] || {};\n  const att = env.messages[d.msg_index].attachments[d.att_index];\n  if (r.statusCode === 200 && r.body && r.body.data) {\n    binary[d.binary_key] = { data: String(r.body.data).replace(/-/g, '+').replace(/_/g, '/'),\n      mimeType: d.mime_type, fileName: d.filename };\n    att.binary_key = d.binary_key;\n  } else {\n    att.bytes_error = 'download failed (' + (r.statusCode ?? (r.error ? 'connection error: ' + String((r.error && r.error.message) ?? r.error).slice(0, 120) : 'no response')) + ')';\n  }\n});\nreturn [{ json: env, binary }];"
+      }
+    },
+    {
+      "id": "retenv",
+      "name": "Return envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        220
+      ],
+      "parameters": {
+        "jsCode": "// Single terminal keeps the sub-workflow's output deterministic on both branches.\nconst it = $input.first();\nconst j = { ...it.json };\ndelete j.__downloads;\nreturn [{ json: j, binary: it.binary ?? {} }];"
+      }
+    },
+    {
+      "id": "gmail_list",
+      "name": "List messages (Gmail API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        -60
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": null,
+          "name": "Gmail account"
+        }
+      },
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.scope_query }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "500"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "pageToken",
+                    "value": "={{ $response?.body?.nextPageToken ?? '' }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body?.nextPageToken }}",
+              "limitPagesFetched": true,
+              "maxRequests": 5
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "list_env",
+      "name": "Build list envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        -60
+      ],
+      "parameters": {
+        "jsCode": "// list mode -> refs-ONLY envelope. Deliberately BYPASSES\n// `Normalize response` and the download branch: list never fetches content, so\n// references-only holds on the wire. This is the only list-shape-aware code.\nconst req = $('When Called (source ref + mode)').first().json;\nconst pages = $input.all().map(i => i.json);\nfunction pageBody(r) {\n  // Connection-level failure (DNS/refused/timeout): the HTTP node runs with\n  // onError:continueRegularOutput (1.7 review P1 - same class 1.6 fixed on the\n  // download node), so transport failures arrive as error items - re-throw\n  // with the provider prefix instead of leaking a raw axios error.\n  if (r && r.error !== undefined && r.statusCode === undefined) throw new Error('lib-email-provider: list request failed before a response (connection/transport): ' + String(r.error && r.error.message ? r.error.message : r.error).slice(0, 200));\n  // A page we cannot read is NOT an empty page - fail loud (1.7 review P3).\n  if (!r || typeof r !== 'object' || r.statusCode === undefined) throw new Error('lib-email-provider: unexpected list response shape (no statusCode) - refusing to treat as an empty page');\n  const s = r.statusCode;\n  if (s >= 200 && s < 300) {\n    const b = r.body;\n    if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error('lib-email-provider: list page body is not a JSON object - refusing to treat as an empty page');\n    return b;\n  }\n  if (s === 400) throw new Error('lib-email-provider: provider rejected the list query (400) - check scope_query syntax');\n  if (s === 401 || s === 403) throw new Error('lib-email-provider: provider auth failed (' + s + ') - check the shared email credential');\n  if (s === 429) throw new Error('lib-email-provider: provider rate limit hit - retry later');\n  throw new Error('lib-email-provider: provider list failed (' + s + ')');\n}\nconst bodies = pages.map(pageBody);\n// Hard cap hit = a dangling nextPageToken after the last fetched page: that\n// many ids in one poll window means something is wrong upstream - fail loud.\nif (bodies.length && bodies[bodies.length - 1].nextPageToken) throw new Error('lib-email-provider: list pagination cap hit (' + bodies.length + ' pages fetched, more remain) - refusing to silently truncate; narrow scope_query');\nconst ID_RE = /^[A-Za-z0-9_-]+$/;\nconst messages = [];\nlet dropped = 0;\nfor (const b of bodies) {\n  // Gmail gotcha: an empty result OMITS the `messages` key entirely - normalize\n  // to [], never throw (callers ALWAYS read messages[]).\n  for (const m of (Array.isArray(b.messages) ? b.messages : [])) {\n    // Output ids re-validated against the provider id alphabet BEFORE any caller\n    // can put them in SQL/URLs (the input guard covers inputs, not Gmail output).\n    if (ID_RE.test(String(m.id ?? '')) && ID_RE.test(String(m.threadId ?? ''))) {\n      messages.push({ uuid: m.id, conversation_id: m.threadId });\n    } else {\n      dropped++;\n      console.log('lib-email-provider: list dropped out-of-alphabet entry: ' + JSON.stringify(m).slice(0, 200));\n    }\n  }\n}\nif (dropped) console.log('lib-email-provider: list dropped ' + dropped + ' malformed entries this poll');\n// Every entry dropped = systematic id-shape breach (provider swap / format\n// change), NOT an empty inbox - fail loud instead of a silent green no-op\n// (1.7 review P2). `dropped` rides the envelope so partial drops show up in\n// execution data, not only worker stdout.\nif (dropped && messages.length === 0) throw new Error('lib-email-provider: list dropped ALL ' + dropped + ' entries as out-of-alphabet - id shape breach, refusing to return an empty envelope');\nreturn [{ json: { kind: 'email', mode: 'list', source_ref: { scope_query: req.scope_query }, messages, dropped } }];\n"
+      }
+    },
+    {
+      "id": "gmail_spam",
+      "name": "Report spam (Gmail API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        680,
+        660
+      ],
+      "typeVersion": 4.2,
+      "parameters": {
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.source_ref.uuid }}/modify",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"addLabelIds\": [\"SPAM\"], \"removeLabelIds\": [\"INBOX\"]}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2"
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": null,
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "spam_envelope",
+      "name": "Build spam envelope",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        920,
+        660
+      ],
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// report_spam: the one write this provider performs. Same status mapping as\n// Normalize's httpBody(); the envelope carries ok + the labels Gmail reports.\nconst req = $('When Called (source ref + mode)').first().json;\nconst r = $input.first().json || {};\nconst s = r.statusCode;\nlet body = r;\nif (s !== undefined) {\n  if (s === 404) throw new Error('lib-email-provider: message not found for the given reference');\n  if (s === 401 || s === 403) throw new Error('lib-email-provider: provider auth failed (' + s + ') - check the shared email credential');\n  if (s === 429) throw new Error('lib-email-provider: provider rate limit hit - retry later');\n  if (s < 200 || s >= 300) throw new Error('lib-email-provider: report_spam failed (' + s + ')');\n  body = r.body || {};\n}\nreturn [{ json: { kind: 'email', mode: 'report_spam', source_ref: req.source_ref || {}, ok: true, label_ids: body.labelIds || [] } }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "When Called (source ref + mode)": {
+      "main": [
+        [
+          {
+            "node": "Validate request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate request": {
+      "main": [
+        [
+          {
+            "node": "Route (mode)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route (mode)": {
+      "main": [
+        [
+          {
+            "node": "Get message (Gmail API)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get thread (Gmail API)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "List messages (Gmail API)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report spam (Gmail API)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unmatched route (error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get message (Gmail API)": {
+      "main": [
+        [
+          {
+            "node": "Normalize response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get thread (Gmail API)": {
+      "main": [
+        [
+          {
+            "node": "Normalize response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize response": {
+      "main": [
+        [
+          {
+            "node": "Downloads needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Downloads needed?": {
+      "main": [
+        [
+          {
+            "node": "List downloads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List downloads": {
+      "main": [
+        [
+          {
+            "node": "Download attachment (Gmail API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download attachment (Gmail API)": {
+      "main": [
+        [
+          {
+            "node": "Attach binaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach binaries": {
+      "main": [
+        [
+          {
+            "node": "Return envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List messages (Gmail API)": {
+      "main": [
+        [
+          {
+            "node": "Build list envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build list envelope": {
+      "main": [
+        [
+          {
+            "node": "Return envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report spam (Gmail API)": {
+      "main": [
+        [
+          {
+            "node": "Build spam envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build spam envelope": {
+      "main": [
+        [
+          {
+            "node": "Return envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

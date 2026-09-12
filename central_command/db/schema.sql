@@ -950,7 +950,7 @@ on conflict (agent_id, pack) do nothing;
 -- unsubscribe is not. Same rules as the bulk-dismiss seed: `on conflict do
 -- nothing`, and the LIVE grant is made from the cockpit after the release
 -- that makes the packs exist AND after the n8n façade serves `report_spam`
--- (deploy/pi/n8n/email-facade-writes.md).
+-- (deploy/n8n/README.md — the façade ships as code and the updater applies it).
 insert into agent_grant (agent_id, pack, granted_by) values
     ('inbox-triage', 'mail-spam-propose', 'seed:2026-09-12'),
     ('inbox-triage', 'mail-unsubscribe-propose', 'seed:2026-09-12')

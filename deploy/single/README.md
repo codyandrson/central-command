@@ -23,7 +23,10 @@ templates + `podman kube play` on 2026-09-03 (design record
 
 - `n8n` — n8n + its postgres. Only needed by an n8n-backed integration
   (today: Gmail). Off by default; skip it and the install is two containers
-  lighter.
+  lighter. With it on: create a Gmail OAuth2 credential named exactly
+  `Gmail account` in the n8n UI, then `./deploy/n8n/apply-workflows.sh
+  --podman` installs the shipped façade workflows (`deploy/n8n/README.md`);
+  `update.sh apply` re-applies them on every release that changes them.
 - `crawler` — cc-crawler, the browser-rendering crawl service (rung 2 of docs
   ingestion). On by default. Its image is built locally and is large
   (Chromium); rung 1, a plain HTTP fetch, keeps working without it.

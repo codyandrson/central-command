@@ -267,6 +267,16 @@ where the story is gone.
   spinner. Capability is DECLARED, not guessed — `None` means "nobody said",
   never "yes". `MAX_ATTACHMENT_BYTES` only refuses cleanly because uvicorn's
   `--ws-max-size` sits above its base64-inflated frame.
+- **`n8n import:workflow` never activates outside queue mode, and the canvas
+  is not the source of truth.** The CLI refuses `--activeState=fromJson` in
+  regular mode and always lands `active=false`; `deploy/n8n/apply-workflows.sh`
+  activates by SQL (`active=true`, `activeVersionId=versionId`) and restarts
+  n8n, which is where webhooks get registered. n8n executes the
+  `workflow_history` row `activeVersionId` names, never `workflow_entity.nodes`.
+  Credentials in the shipped JSON carry `"id": null` so the importer resolves
+  them BY NAME (`Gmail account`) — an instance id would silently bind nothing
+  elsewhere. Edit `deploy/n8n/workflows/*.json`; a canvas edit is overwritten
+  by the next release.
 - **An unsubscribe URL is derived from the MAILBOX, never from the
   proposal.** `mail.unsubscribe` pins the URL at propose time for review, and
   the Executor re-reads the message's `List-Unsubscribe` headers and refuses
@@ -504,6 +514,8 @@ deploy/AIRGAP.md + airgap.env.example
               any mirrored or no-egress install
 deploy/single/ the single-node Compose profile: compose.yaml, deterministic
               setup.sh driver, resolve-images.sh + constraint/lock images.txt
+deploy/n8n/   the n8n façade workflows AS CODE (source of truth; the canvas is
+              a rendering) + apply-workflows.sh, run by both updaters
 deploy/pi/    legacy compose stack — kept for its comments and as a rollback
               reference; home of graphiti/ + litellm/ configs and
               graphiti/patches/ (upstream #1729, #1666 — drop when merged)

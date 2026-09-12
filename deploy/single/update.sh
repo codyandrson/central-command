@@ -356,6 +356,12 @@ deploy_current_tree() {
   fi
   (( lrc == 1 )) && { fail "llm" "./setup.sh llm failed — see above"; return 1; }
   step "app" "venv/deps/cockpit reconciled (./setup.sh app)" "$HERE/setup.sh" app || return 1
+  # The n8n façades are code (deploy/n8n/); idempotent, and a no-op when the
+  # n8n profile is off. The script's own USERACTION names a missing credential.
+  if [[ "$(get_kv "$ENV_FILE" CC_ENABLE_N8N)" == "1" ]]; then
+    step "n8n" "façade workflows applied into n8n (deploy/n8n/apply-workflows.sh)" \
+      bash "$REPO_ROOT/deploy/n8n/apply-workflows.sh" --podman || return 1
+  fi
   step "verify" "deployed + live verification passed (./setup.sh verify)" "$HERE/setup.sh" verify || return 1
   # CC_UPDATE_DRIVEN=1 is update-run.sh (the cockpit's detached runner): it
   # owns the restart, so the operator gate would turn its clean exit into an

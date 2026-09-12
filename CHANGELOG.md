@@ -4,6 +4,38 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-12 — v2.27.0: the n8n façade ships with the repo
+
+Until now the two n8n workflows behind the email façade existed only inside
+one deployment's n8n, built by hand; a new install had to reconstruct them
+from a runbook, and v2.26.0 shipped its `report_spam` mode as an edit sheet
+for the operator to apply on the canvas. Both are over: `deploy/n8n/` holds
+the workflows as code and the updaters apply them.
+
+- `deploy/n8n/workflows/cc-email-facade.json` and `lib-email-provider.json`
+  are the source of truth (sanitized exports, ids kept stable so an import
+  REPLACES the deployment's copy in place, credentials referenced by name).
+  They already include the `report_spam` mode and the unsubscribe header
+  fields v2.26.0 needs.
+- `deploy/n8n/apply-workflows.sh --k3s | --podman` renders the façade
+  token from `.env`, copies the files into the n8n container (sha-checked),
+  runs `n8n import:workflow`, activates by SQL (the CLI cannot activate
+  outside queue mode), restarts n8n and polls the webhook. `cc-update.sh`
+  runs it when a release touches `deploy/n8n/`; the single-node
+  `update.sh apply` runs it whenever the n8n profile is on. Both runbooks
+  point a fresh install at it.
+- A deployment provides two things: `CC_EMAIL_FACADE_TOKEN` and a Gmail
+  OAuth2 credential named exactly `Gmail account`. The script reports a
+  USERACTION when a node found no credential of that name.
+- `tests/test_n8n_workflows.py` pins the shipped files: stable ids, the
+  token placeholder, by-name credentials, every validated mode routed, the
+  unsubscribe fields present, and `report_spam` as the one write.
+- `deploy/pi/n8n/email-facade-writes.md` is gone; its content is the JSON.
+
+Both mail packs are seeded for inbox-triage in `schema.sql`, which the
+updaters apply, so an existing deployment gains the grants on update; the
+cockpit's grant dialog is the fallback.
+
 ## 2026-09-12 — v2.26.1: the unsubscribe POST trusts less
 
 Security review of v2.26.0, before it was deployed. Three things a sender

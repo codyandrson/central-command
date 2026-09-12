@@ -380,9 +380,12 @@ repo). Full commands are in the **RESTORE section at the bottom of
 1. **n8n workflows + the encrypted Gmail OAuth credential — REQUIRED for the
    email feed.** Nothing else holds the Gmail OAuth. Either restore
    `n8n_<stamp>.sql.gz` into `cc-n8n-db` (scale `cc-n8n` to 0 first; it holds
-   workflow rows open), or reconfigure by hand in the n8n UI —
-   `tailscale serve --bg --https=8443 http://127.0.0.1:5678`, then re-create the
-   Gmail credential and re-activate `cc-email-facade`. The restore only works if
+   workflow rows open), or set it up fresh: open the n8n UI
+   (`tailscale serve --bg --https=8443 http://127.0.0.1:5678`), create the
+   Gmail OAuth2 credential named exactly **`Gmail account`**, then apply the
+   shipped façade workflows with `./deploy/n8n/apply-workflows.sh --k3s`
+   (`deploy/n8n/README.md`; the updater re-applies them on every release that
+   changes them). The restore only works if
    `N8N_ENCRYPTION_KEY` in `deploy/pi/.env` is the value the dump was taken
    under; otherwise the rows are there and undecryptable — pair the dump with
    its **same-stamp `keys_<stamp>.env`**, not with whatever is in `.env` now.
