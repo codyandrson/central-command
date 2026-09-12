@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-12 — v2.27.3: autodiscovery can read an OpenAI-style gateway
+
+Storing an OpenAI-compatible credential the way every such gateway documents
+it — an `api_base` that already ends in `/v1` — left autodiscovery blind to
+it: the catalog fetcher appended `/v1/models` to the base and asked
+`/v1/v1/models`, which Kilo.ai answers with a 405 and no body. The credential
+was right (LiteLLM's `openai/` provider appends `/chat/completions` to that
+same base and chat works); the fetcher now strips one trailing `/v1` before
+adding its own.
+
+The second blocker sat one step later: a gateway names its models
+`vendor/model[:tag]`, so the provider string an add carries is
+`openai/vendor/model` — and the model-string validator allowed exactly one
+slash, rejecting every such registration (and, on paper, the Responses-bridge
+form `openai/chat_completions/<model>` too). The model half may now be a path.
+
 ## 2026-09-12 — v2.27.2: a rejection returns when it is recorded, not when the redraft ends
 
 Rejecting a proposal held the cockpit's rpc open for the whole redraft — a

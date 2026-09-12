@@ -27,7 +27,10 @@ from central_command.integrations import http as http_client
 # A LiteLLM model_name (alias) and a provider model string ("anthropic/claude-…").
 # Kept deliberately conservative — these are model-controlled and name real infra.
 ALIAS_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$")
-PROVIDER_MODEL_RE = re.compile(r"^[a-z0-9_-]+/[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$")
+# The model half may itself carry slashes: gateways (OpenRouter, Kilo) name
+# models `vendor/model[:tag]`, and LiteLLM's Responses bridge is
+# `openai/chat_completions/<model>` — a one-slash rule rejected all of them.
+PROVIDER_MODEL_RE = re.compile(r"^[a-z0-9_-]+/[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 # A virtual-key alias — a human label; same conservative shape as a model alias.
 KEY_ALIAS_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$")
 
@@ -955,7 +958,11 @@ async def _openai_compatible_catalog(api_key: str, api_base: str | None = None) 
     as the fallback for any credential that carries an api_base but isn't one
     of the specially-handled providers; a 404/error surfaces as that
     credential's own findings error rather than being swallowed."""
-    base = (api_base or "https://api.openai.com").rstrip("/")
+    # An OpenAI-compatible api_base conventionally already ends in `/v1`
+    # (that is what the OpenAI SDK, and so LiteLLM's `openai/` provider,
+    # appends `/chat/completions` to) — appending `/v1/models` to it asked
+    # `/v1/v1/models` and got a 405 (Kilo.ai, 2026-09-12).
+    base = re.sub(r"/v1$", "", (api_base or "https://api.openai.com").rstrip("/"))
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
             f"{base}/v1/models", headers={"Authorization": f"Bearer {api_key}"}

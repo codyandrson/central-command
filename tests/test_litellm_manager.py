@@ -127,6 +127,29 @@ async def test_provider_catalog_falls_back_to_openai_compatible_with_an_api_base
     assert fake.calls[0]["headers"]["Authorization"] == "Bearer sk-local"
 
 
+async def test_provider_catalog_does_not_double_the_v1_of_an_openai_style_api_base(monkeypatch):
+    # The OpenAI SDK convention is an api_base that already ends in /v1
+    # (Kilo.ai, OpenRouter, vLLM's documented form) — the fetcher must not
+    # ask /v1/v1/models.
+    fake = _FakeAsyncClient([{"data": [{"id": "vendor/model:free"}]}])
+    monkeypatch.setattr(litellm_client.httpx, "AsyncClient", lambda *a, **kw: fake)
+
+    await litellm_client.provider_catalog("openai_compatible", "sk-k", "https://gw.example.com/api/v1/")
+
+    assert fake.calls[0]["url"] == "https://gw.example.com/api/v1/models"
+
+
+def test_provider_model_accepts_a_vendor_path_in_the_model_half():
+    # Gateways name models vendor/model[:tag]; the Responses bridge is
+    # openai/chat_completions/<model>. Both are one provider prefix + a path.
+    for ok in ("openai/kilo-auto/free", "openai/nvidia/nemotron-3:free",
+               "openai/chat_completions/qwen3.8-27b", "anthropic/claude-sonnet-5"):
+        assert litellm_client._provider_model(ok) == ok
+    for bad in ("no-provider", "/leading/slash", "Upper/case", "openai/ space"):
+        with pytest.raises(litellm_client.LiteLLMError, match="bad model"):
+            litellm_client._provider_model(bad)
+
+
 async def test_provider_catalog_surfaces_a_provider_error(monkeypatch):
     fake = _FakeAsyncClient([{}])
 
