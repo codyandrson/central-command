@@ -37,6 +37,10 @@ class TriageDeps:
     session_id: str | None = None
     progress_ledger: list[dict] = field(default_factory=list)
     agent_id: str | None = None    # who is running — declare_gap records it
+    # The work item this triage run is handling (2026-09-12): the mail-action
+    # tools default to it, so the agent can act on "this email" without an id
+    # it was never shown (agent_input carries From/Subject/Date only).
+    item_id: str | None = None
     # Consult depth 2 (2026-08-22): the ids of agents already stacked in this
     # consultation chain BEFORE this run — empty for a top-level run. Read by
     # consult_agent/refusal_for to refuse mechanically past depth 2 or back

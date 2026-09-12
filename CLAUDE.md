@@ -267,6 +267,15 @@ where the story is gone.
   spinner. Capability is DECLARED, not guessed — `None` means "nobody said",
   never "yes". `MAX_ATTACHMENT_BYTES` only refuses cleanly because uvicorn's
   `--ws-max-size` sits above its base64-inflated frame.
+- **An unsubscribe URL is derived from the MAILBOX, never from the
+  proposal.** `mail.unsubscribe` pins the URL at propose time for review, and
+  the Executor re-reads the message's `List-Unsubscribe` headers and refuses
+  any URL that is not the message's own — a proposal can arrive by API with
+  any `url`, and the Executor is the tier with egress. Only RFC 8058
+  one-click is offered (https URI + `List-Unsubscribe-Post`, DKIM passed at
+  Gmail under the `mx.google.com` verdict, signature covering both headers);
+  `contract/mail.py` is the one rule both tiers run. Mailto and web-page
+  unsubscribes are the operator's, by design.
 - **A `failed=True` session must record WHY** (`land_session(...,
   reason=…)`). Guarded by a source walk
   (`tests/test_session_failure_reason.py`), NOT a runtime raise: every call

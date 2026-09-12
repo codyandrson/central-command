@@ -937,6 +937,62 @@ PACKS: dict[str, Pack] = {
             "tools change nothing: no mail is read-marked, moved or deleted."
         ),
     ),
+    # mail actions (2026-09-12): the first packs whose capabilities touch the
+    # MAILBOX rather than the queue. Two packs, not one (the bulk-dismiss
+    # precedent): a spam report is undone from Gmail, an unsubscribe is not,
+    # and holding either is a grant someone makes on purpose.
+    "mail-spam-propose": Pack(
+        name="mail-spam-propose",
+        description="Propose reporting an email as spam (Gmail moves it to Spam after approval).",
+        tool_names=("propose_report_spam",),
+        guidance=(
+            "REPORTING SPAM: `propose_report_spam(rationale)` asks the operator "
+            "to move the email you are handling to Gmail's Spam folder "
+            "(`message_ref` names a different one). Spam means unsolicited or "
+            "deceptive mail — not a newsletter or promotion the operator merely "
+            "does not want; dismiss those in plain text or `propose_bulk_dismiss` "
+            "the pattern. Reversible, but a wrong report teaches Gmail's filter "
+            "about a real sender, so say in the rationale what makes it spam."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="mail.report_spam",
+                arguments=("{'provider_uuid': '<pinned by the tool>', "
+                           "'sender': '<pinned>', 'subject': '<pinned>'}"),
+                notes=("You do not write these arguments: the tool resolves the "
+                       "email and pins them. target_ref = {'system': 'mailbox', "
+                       "'id': '<uuid>'}, reversibility = 'reversible'."),
+            ),
+        ),
+    ),
+    "mail-unsubscribe-propose": Pack(
+        name="mail-unsubscribe-propose",
+        description="Propose a one-click (RFC 8058) unsubscribe from the list an email came from.",
+        tool_names=("propose_unsubscribe",),
+        guidance=(
+            "UNSUBSCRIBING: `propose_unsubscribe(rationale)` asks the operator "
+            "to unsubscribe from the list the email you are handling came from, "
+            "when the sender offers one-click unsubscribe (`message_ref` names "
+            "a different one). The tool reads the message's own headers and "
+            "pins the URL — if it reports that one-click is not available, "
+            "nothing is proposed: say so in your plain-text dismissal, since "
+            "Gmail's own Unsubscribe button may still work for the operator. "
+            "IRREVERSIBLE: propose it for lists the operator has never wanted, "
+            "never for ones they may merely be behind on, and never to make "
+            "mail go away that a plain dismissal already handles."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="mail.unsubscribe",
+                arguments=("{'provider_uuid': '<pinned>', 'url': '<pinned from "
+                           "List-Unsubscribe>', 'sender': '<pinned>', "
+                           "'subject': '<pinned>'}"),
+                notes=("You do not write these arguments. target_ref = "
+                       "{'system': 'mailbox', 'id': '<uuid>'}, reversibility = "
+                       "'irreversible'."),
+            ),
+        ),
+    ),
     "skill-propose": Pack(
         name="skill-propose",
         description=(
@@ -1368,7 +1424,8 @@ PACKS: dict[str, Pack] = {
 DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     "inbox-triage": ("jira-read", "jira-propose", "graph-read", "graph-propose",
                      "consult", "task-propose", "ask-operator",
-                     "bulk-dismiss-propose", "mail-read"),
+                     "bulk-dismiss-propose", "mail-read",
+                     "mail-spam-propose", "mail-unsubscribe-propose"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "graph-read", "graph-propose",
                     "consult", "task-propose", "ask-operator", "web-read",
@@ -1502,6 +1559,11 @@ NON_ADVISORY_TOOLS = frozenset({
     # review-theater failure mode, wearing an approval's clothes. The queue is
     # inbox-triage's own surface anyway; nobody consults about it.
     "propose_bulk_dismiss",
+    # The mail actions (2026-09-12) act on "the email this run is handling"
+    # by default — `deps.item_id`, which only the triage HOST run sets — and
+    # the mailbox is inbox-triage's own surface exactly as the queue is.
+    "propose_report_spam",
+    "propose_unsubscribe",
 })
 
 # The deferral tools a consultation CAN drive — an explicit allowlist, never

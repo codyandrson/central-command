@@ -839,6 +839,58 @@ REGISTRY: list[Capability] = [
             "thread fold uses."
         ),
     ),
+    # --- mail actions (2026-09-12): the first capabilities that touch the
+    # MAILBOX itself — until now every mail capability changed only the queue.
+    Capability(
+        name="mail.report_spam",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "external but reversible — the message moves to Gmail's Spam folder, "
+            "which the operator undoes from Gmail within 30 days; a wrong report "
+            "also teaches Gmail's filter about a legitimate sender"
+        ),
+        holder="Executor",
+        route=(
+            "integrations/email_facade.py → n8n cc-email-facade webhook, mode "
+            "report_spam → Gmail messages.modify (+SPAM −INBOX); the OAuth stays "
+            "in n8n"
+        ),
+        arguments=["provider_uuid", "sender?", "subject?"],
+        description=(
+            "Report one message as spam. `provider_uuid` is pinned by "
+            "propose_report_spam from the ledger row or the mailbox — the agent "
+            "names the email, never the id — and sender/subject ride along for "
+            "review."
+        ),
+    ),
+    Capability(
+        name="mail.unsubscribe",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "external and IRREVERSIBLE — nobody can re-subscribe on the "
+            "operator's behalf, and the POST confirms the address to the "
+            "sender; one wrong approval silences a list the operator wanted"
+        ),
+        holder="Executor",
+        route=(
+            "one HTTPS POST from the Executor to the message's own "
+            "List-Unsubscribe URL (RFC 8058: body List-Unsubscribe=One-Click, "
+            "no cookies, no redirects); nothing goes through n8n and no "
+            "credential is involved"
+        ),
+        arguments=["provider_uuid", "url", "sender?", "subject?"],
+        description=(
+            "Unsubscribe from the list a message came from — one-click only. "
+            "`url` is pinned at propose time from the message's headers after "
+            "Gmail's DKIM verdict is checked, and the Executor RE-DERIVES it "
+            "from the mailbox before sending: a proposal whose url is not the "
+            "message's own is refused. Mailto-only and web-page unsubscribes "
+            "are deliberately not offered; the operator handles those with "
+            "Gmail's own button."
+        ),
+    ),
     # --- ungated reads: layered context, no approval needed -------------------
     Capability(
         name="loe.list",

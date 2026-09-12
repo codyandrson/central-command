@@ -1897,6 +1897,123 @@ async def propose_bulk_dismiss(ctx: RunContext, query: str, rationale: str) -> s
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
+# --- mail actions (2026-09-12): the first mail capabilities that touch the
+# MAILBOX itself. Both pin their target at propose time from the ledger and
+# the façade, so what the operator reviews (sender, subject, URL) is a read
+# fact, never an agent-written claim — and the Executor re-derives the
+# unsubscribe URL from the mailbox before it POSTs anywhere.
+async def _mail_target(ctx: RunContext, ref: str) -> tuple[str, str, str]:
+    """(provider_uuid, sender, subject) for the email `ref` names — a work-item
+    id, ledger message id or Gmail uuid — or, when `ref` is empty, the email
+    this run is handling. ModelRetry when nothing in the mailbox answers."""
+    from central_command.db import repo
+    from central_command.integrations import email_facade
+
+    ref = (ref or "").strip()
+    if not ref:
+        ref = (getattr(getattr(ctx, "deps", None), "item_id", None) or "").strip()
+        if not ref:
+            raise ModelRetry(
+                "name the email: pass its work-item id (wi_…) or Message-ID as "
+                "mail_search / mail_read show them."
+            )
+    row = await repo.mail_item(ref)
+    if row is not None:
+        if not row.get("provider_uuid"):
+            raise ModelRetry(
+                f"{ref!r} was hand-fed to the queue, not read from the mailbox — "
+                "there is no mailbox message to act on; finish in plain text."
+            )
+        return row["provider_uuid"], row.get("sender") or "", row.get("subject") or ""
+    try:
+        msg = await email_facade.get_message(ref)
+    except email_facade.EmailFacadeError as e:
+        raise ModelRetry(
+            f"{ref!r} is neither a queue item nor a mailbox message ({e}); pass "
+            "the work-item id (wi_…) or Message-ID as mail_search / mail_read "
+            "show them."
+        ) from e
+    return msg["uuid"], msg.get("from") or "", msg.get("subject") or ""
+
+
+async def propose_report_spam(ctx: RunContext, rationale: str, message_ref: str = "") -> str:
+    """Propose reporting one email as spam: once the operator approves, Gmail
+    moves it to the Spam folder and out of the inbox. `rationale` is one
+    sentence for the operator — what makes this SPAM (unsolicited, deceptive)
+    rather than a newsletter or promotion the operator merely does not want;
+    dismiss those in plain text, or `propose_bulk_dismiss` the pattern.
+    `message_ref` names a different email (work-item id `wi_…`, Message-ID, or
+    the Gmail uuid mail_read shows); leave it empty for the email you are
+    handling. Reversible: the operator can pull a message back out of Spam.
+    You never touch the mailbox yourself.
+    """
+    uuid, sender, subject = await _mail_target(ctx, message_ref)
+    proposal = Proposal(
+        intent=rationale,
+        actions=[Action(
+            capability="mail.report_spam@v1",
+            arguments={"provider_uuid": uuid, "sender": sender, "subject": subject},
+            target_ref={"system": "mailbox", "id": uuid, "read_version": "unknown"},
+            reversibility=Reversibility.reversible,
+        )],
+        evidence=[Evidence(
+            kind="email", source_ref=uuid,
+            locator="the message itself, as read from the mailbox",
+            claim=f"from {sender}: {subject}",
+        )],
+        expected_effect=(f"the message from {sender} ({subject!r}) moves to the "
+                         "Spam folder and out of the inbox"),
+    )
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
+async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str = "") -> str:
+    """Propose unsubscribing from the list an email came from, when the sender
+    offers one-click unsubscribe (RFC 8058). The tool reads the message's own
+    List-Unsubscribe headers and Gmail's DKIM verdict and pins the exact https
+    URL the control plane will POST to after approval — you never see or
+    choose the URL. When one-click is NOT available (mailto-only, a web page,
+    or an unsigned message) the tool says so and nothing is proposed: tell the
+    operator in your plain-text dismissal, since Gmail's own Unsubscribe button
+    may still work for them. `rationale` is one sentence: why the operator
+    should stop receiving this list. `message_ref` names a different email
+    (work-item id, Message-ID or Gmail uuid); leave it empty for the email you
+    are handling. IRREVERSIBLE: nobody can re-subscribe on the operator's
+    behalf, so propose it for lists the operator has never wanted — never for
+    ones they may merely be behind on.
+    """
+    from central_command.contract.mail import one_click_unsubscribe
+    from central_command.integrations import email_facade
+
+    uuid, sender, subject = await _mail_target(ctx, message_ref)
+    try:
+        msg = await email_facade.get_message(uuid)
+    except email_facade.EmailFacadeError as e:
+        return f"could not read the message from the mailbox ({e}); nothing proposed"
+    url, why = one_click_unsubscribe(msg)
+    if url is None:
+        return (f"one-click unsubscribe is not available for this message: {why}. "
+                "Nothing proposed — say so in your dismissal; the operator can "
+                "use Gmail's own Unsubscribe button.")
+    proposal = Proposal(
+        intent=rationale,
+        actions=[Action(
+            capability="mail.unsubscribe@v1",
+            arguments={"provider_uuid": uuid, "url": url, "sender": sender, "subject": subject},
+            target_ref={"system": "mailbox", "id": uuid, "read_version": "unknown"},
+            reversibility=Reversibility.irreversible,
+        )],
+        evidence=[Evidence(
+            kind="email", source_ref=uuid,
+            locator="List-Unsubscribe / List-Unsubscribe-Post headers, DKIM-verified by Gmail",
+            claim=f"{sender} offers one-click unsubscribe at {url}",
+        )],
+        expected_effect=(f"one HTTPS POST (List-Unsubscribe=One-Click) to the sender's "
+                         f"unsubscribe endpoint; {sender} stops sending to the operator"),
+    )
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
 async def loe_list(ctx: RunContext) -> str:
     """Read the operator's active lines of effort: each one's cadence, its
     CURRENT questions and thresholds (`semantic`), its latest check-in and up

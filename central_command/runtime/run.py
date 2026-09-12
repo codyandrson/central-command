@@ -280,7 +280,8 @@ async def ingest_and_propose(
     # cannot act on.
     session_id = "sess_" + uuid.uuid4().hex[:12]
     deps = TriageDeps(
-        thread=thread or ThreadContext(), agent_id=AGENT_ID, session_id=session_id
+        thread=thread or ThreadContext(), agent_id=AGENT_ID, session_id=session_id,
+        item_id=(context or {}).get("item_id"),
     )
     # The governed charter (M11): the DB's CURRENT version wins; no version rows
     # means the built-in code charter ("v0"). The tool surface and the generated

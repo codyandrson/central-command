@@ -4,6 +4,35 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-12 — v2.26.0: the triage agent can report spam and unsubscribe
+
+Until now every mail capability changed only the queue: a dismissal, bulk or
+single, left the mailbox exactly as it was. Two new packs let inbox-triage
+propose the two things the operator was doing by hand after every triage
+pass. Both are gated, both are performed by the Executor, and both are pinned
+at propose time, so the Decisions Inbox reviews read facts (sender, subject,
+URL) rather than agent-written claims.
+
+- `mail.report_spam` (pack `mail-spam-propose`): Gmail moves the message to
+  Spam and out of the inbox, through a new `report_spam` mode on the n8n
+  email façade. `deploy/pi/n8n/email-facade-writes.md` is the operator's edit
+  sheet; the façade must serve the mode before the pack is granted.
+  Reversible from Gmail.
+- `mail.unsubscribe` (pack `mail-unsubscribe-propose`): RFC 8058 one-click
+  only. The propose tool reads the message's own `List-Unsubscribe` headers
+  and Gmail's DKIM verdict (the façade's `message` mode now returns both),
+  refuses anything mailto-only, unsigned, or without `List-Unsubscribe-Post`,
+  and pins the https URL. The Executor re-derives the URL from the mailbox
+  and refuses to POST anywhere else, then sends the bare
+  `List-Unsubscribe=One-Click` POST with no cookies and no redirect
+  following. Marked irreversible. `contract/mail.py` holds the one
+  eligibility rule both tiers run.
+- The triage run now knows which work item it is handling
+  (`TriageDeps.item_id`), so both tools act on the current email by default.
+
+After the update: apply the façade edit, then grant both packs to
+inbox-triage from the cockpit.
+
 ## 2026-09-11 — v2.25.1: a dropdown you can scroll on a phone
 
 Granting a pack from a phone was impossible past the first screenful of

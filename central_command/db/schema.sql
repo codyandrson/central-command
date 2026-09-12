@@ -943,6 +943,19 @@ insert into agent_grant (agent_id, pack, granted_by) values
     ('inbox-triage', 'bulk-dismiss-propose', 'seed:2026-08-17')
 on conflict (agent_id, pack) do nothing;
 
+-- mail actions (2026-09-12): inbox-triage gains `mail-spam-propose` and
+-- `mail-unsubscribe-propose` — the first grants whose capabilities touch the
+-- MAILBOX (bulk dismissal deliberately changed only the queue). Two packs
+-- because the blast radii differ: a spam report is undone from Gmail, an
+-- unsubscribe is not. Same rules as the bulk-dismiss seed: `on conflict do
+-- nothing`, and the LIVE grant is made from the cockpit after the release
+-- that makes the packs exist AND after the n8n façade serves `report_spam`
+-- (deploy/pi/n8n/email-facade-writes.md).
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('inbox-triage', 'mail-spam-propose', 'seed:2026-09-12'),
+    ('inbox-triage', 'mail-unsubscribe-propose', 'seed:2026-09-12')
+on conflict (agent_id, pack) do nothing;
+
 -- EA widening slice A (2026-08-06, operator-approved, delete included by
 -- operator override of the design doc's no-delete-in-v1): the EA gains
 -- `calendar-propose` — it already reads the operator's calendar and can now

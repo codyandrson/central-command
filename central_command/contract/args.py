@@ -48,6 +48,11 @@ ARG_SPECS: dict[str, ArgSpec] = {
         required=("document_id", "tags"),
         enums={"mode": ("replace", "add", "remove")},
     ),
+    # mail actions (2026-09-12): both handlers subscript these. `url` is also
+    # RE-DERIVED by the Executor from the mailbox — the spec only says it must
+    # be present, the Executor says it must be the message's own.
+    "mail.report_spam": ArgSpec(required=("provider_uuid",)),
+    "mail.unsubscribe": ArgSpec(required=("provider_uuid", "url")),
 }
 
 

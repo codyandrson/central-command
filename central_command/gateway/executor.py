@@ -20,7 +20,9 @@ from pathlib import Path, PurePosixPath
 
 from central_command.config import settings
 from central_command.contract import ARG_SPECS, Action, Provenance, validate_action_args
-from central_command.integrations import calendar_facade, confluence, graphiti, jira
+import httpx
+
+from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
 
 
@@ -155,6 +157,42 @@ async def _calendar_delete_event(args: dict, approver: str, proposer: str | None
     deleted = await calendar_facade.delete_event(
         args["event_id"], calendar_id=args.get("calendar_id", "primary"))
     return f"calendar event {deleted} deleted — reason: {reason}"
+
+
+async def _mail_report_spam(args: dict, approver: str, proposer: str | None) -> str:
+    out = await email_facade.report_spam(args["provider_uuid"])
+    labels = ", ".join(out.get("label_ids") or []) or "unknown"
+    return (f"reported as spam: {args.get('sender') or '?'} — "
+            f"{args.get('subject') or '?'} (labels now {labels})")
+
+
+async def _mail_unsubscribe(args: dict, approver: str, proposer: str | None) -> str:
+    # The URL is RE-DERIVED from the mailbox, never taken from the arguments:
+    # a proposal can arrive by API with any `url`, and this is the tier with
+    # egress. Delivered mail is immutable, so the message's own headers are
+    # the one source the proposer cannot have written — the pinned URL must
+    # equal what they say, or nothing is sent.
+    from central_command.contract.mail import one_click_unsubscribe
+
+    msg = await email_facade.get_message(args["provider_uuid"])
+    url, why = one_click_unsubscribe(msg)
+    if url is None:
+        raise ExecutorError(f"mail.unsubscribe: {why}")
+    if url != args.get("url"):
+        raise ExecutorError(
+            "mail.unsubscribe: the pinned URL is not the message's own "
+            "List-Unsubscribe URL — nothing sent"
+        )
+    # RFC 8058 §3.2: a bare POST — no cookies, no credentials — and a redirect
+    # is a sender error, never something to follow.
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+        resp = await client.post(
+            url, content=b"List-Unsubscribe=One-Click",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    if not 200 <= resp.status_code < 300:
+        raise ExecutorError(f"mail.unsubscribe: {url} answered HTTP {resp.status_code}")
+    return f"one-click unsubscribe sent for {args.get('sender') or '?'} (HTTP {resp.status_code})"
 
 
 async def _graph_add_episode(args: dict, approver: str, proposer: str | None) -> str:
@@ -1923,6 +1961,8 @@ HANDLERS = {
     "loe.record_checkin": _loe_record_checkin,
     "loe.update": _loe_update,
     "work.bulk_dismiss": _work_bulk_dismiss,
+    "mail.report_spam": _mail_report_spam,
+    "mail.unsubscribe": _mail_unsubscribe,
     "catalog.tag": _catalog_tag,
     "skill.create": _skill_create,
     "skill.doc_add": _skill_doc_add,

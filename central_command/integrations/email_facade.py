@@ -1,10 +1,11 @@
 """Client for the n8n email tool façade (cc-email-facade → lib-email-provider).
 
-Gmail credentials live only inside n8n — Central Command never sees them. This
-boundary is READ-ONLY by construction: the façade refuses attachment downloads,
-and the provider's list mode returns references only. Untrusted email content
-passes through here as data; the callers (ledger/agent prompts) own the
-data-not-commands discipline.
+Gmail credentials live only inside n8n — Central Command never sees them. The
+façade refuses attachment downloads and the provider's list mode returns
+references only. One write mode exists (`report_spam`, 2026-09-12) and it is
+called from the Executor alone, after approval — the runtime tier only reads.
+Untrusted email content passes through here as data; the callers
+(ledger/agent prompts) own the data-not-commands discipline.
 """
 
 from __future__ import annotations
@@ -40,9 +41,23 @@ async def list_refs(scope_query: str) -> list[dict]:
 
 
 async def get_message(uuid: str) -> dict:
-    """One normalized message (from/subject/date/body_text/body_html/snippet)."""
+    """One normalized message (from/subject/date/body_text/body_html/snippet,
+    plus the unsubscribe headers and DKIM facts `contract.mail` reads:
+    list_unsubscribe, list_unsubscribe_post, authentication_results[],
+    dkim_signatures[] — a façade predating 2026-09-12 omits them, which reads
+    as "not eligible", never as "eligible")."""
     out = await _call({"mode": "message", "source_ref": {"uuid": uuid}})
     messages = out.get("messages", [])
     if not messages:
         raise EmailFacadeError(f"message {uuid}: empty envelope from provider")
     return messages[0]
+
+
+async def report_spam(uuid: str) -> dict:
+    """Move one message to Spam and out of the inbox (Gmail +SPAM/-INBOX). The
+    façade's ONE write mode: Executor-only, after approval; the OAuth stays in
+    n8n. Returns the envelope ({ok, label_ids})."""
+    out = await _call({"mode": "report_spam", "source_ref": {"uuid": uuid}})
+    if not out.get("ok"):
+        raise EmailFacadeError(f"message {uuid}: report_spam refused: {str(out)[:200]}")
+    return out

@@ -55,6 +55,7 @@ PROPOSE_TOOLS = frozenset(
         "propose_skill_create", "propose_skill_doc",
         "propose_loe",
         "propose_bulk_dismiss",
+        "propose_report_spam", "propose_unsubscribe",
     }
 )
 ASK_TOOLS = frozenset({"ask_operator"})
