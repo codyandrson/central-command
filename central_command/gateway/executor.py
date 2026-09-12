@@ -9,19 +9,21 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import ipaddress
 import json
 import logging
 import re
 import shlex
+import socket
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from central_command.config import settings
-from central_command.contract import ARG_SPECS, Action, Provenance, validate_action_args
 import httpx
 
+from central_command.config import settings
+from central_command.contract import ARG_SPECS, Action, Provenance, validate_action_args
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
 
@@ -183,6 +185,7 @@ async def _mail_unsubscribe(args: dict, approver: str, proposer: str | None) -> 
             "mail.unsubscribe: the pinned URL is not the message's own "
             "List-Unsubscribe URL — nothing sent"
         )
+    await _refuse_non_public(url)
     # RFC 8058 §3.2: a bare POST — no cookies, no credentials — and a redirect
     # is a sender error, never something to follow.
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
@@ -193,6 +196,32 @@ async def _mail_unsubscribe(args: dict, approver: str, proposer: str | None) -> 
     if not 200 <= resp.status_code < 300:
         raise ExecutorError(f"mail.unsubscribe: {url} answered HTTP {resp.status_code}")
     return f"one-click unsubscribe sent for {args.get('sender') or '?'} (HTTP {resp.status_code})"
+
+
+async def _refuse_non_public(url: str) -> None:
+    """The one outbound request the Executor makes to a URL an EMAIL chose.
+    Resolve the host first and refuse anything that is not a public address:
+    loopback, RFC 1918, link-local and the tailnet's CGNAT range all reach
+    services on this host or cluster that a POST could drive (n8n webhooks,
+    the proxy) — the SSRF shape. `is_global` is False for every one of them.
+    """
+    from urllib.parse import urlparse
+
+    host = urlparse(url).hostname or ""
+    port = urlparse(url).port or 443
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as e:
+        raise ExecutorError(f"mail.unsubscribe: {host!r} does not resolve ({e})") from e
+    # ponytail: resolve-then-connect is two lookups (DNS rebinding window);
+    # pin the resolved address on a custom transport if that ever matters.
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise ExecutorError(
+                f"mail.unsubscribe: {host!r} resolves to {ip}, which is not a "
+                "public address — nothing sent"
+            )
 
 
 async def _graph_add_episode(args: dict, approver: str, proposer: str | None) -> str:

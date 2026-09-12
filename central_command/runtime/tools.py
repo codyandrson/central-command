@@ -1990,9 +1990,9 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
         msg = await email_facade.get_message(uuid)
     except email_facade.EmailFacadeError as e:
         return f"could not read the message from the mailbox ({e}); nothing proposed"
-    url, why = one_click_unsubscribe(msg)
+    url, verdict = one_click_unsubscribe(msg)
     if url is None:
-        return (f"one-click unsubscribe is not available for this message: {why}. "
+        return (f"one-click unsubscribe is not available for this message: {verdict}. "
                 "Nothing proposed — say so in your dismissal; the operator can "
                 "use Gmail's own Unsubscribe button.")
     proposal = Proposal(
@@ -2006,7 +2006,7 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
         evidence=[Evidence(
             kind="email", source_ref=uuid,
             locator="List-Unsubscribe / List-Unsubscribe-Post headers, DKIM-verified by Gmail",
-            claim=f"{sender} offers one-click unsubscribe at {url}",
+            claim=f"{sender} offers one-click unsubscribe at {url} — {verdict}",
         )],
         expected_effect=(f"one HTTPS POST (List-Unsubscribe=One-Click) to the sender's "
                          f"unsubscribe endpoint; {sender} stops sending to the operator"),

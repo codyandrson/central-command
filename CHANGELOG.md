@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-12 — v2.26.1: the unsubscribe POST trusts less
+
+Security review of v2.26.0, before it was deployed. Three things a sender
+controls could satisfy the one-click rule on their own; none can now.
+
+- Only the FIRST `Authentication-Results` header is read — the one Gmail
+  prepends on receipt. A sender can add its own `mx.google.com; dkim=pass`
+  header, but never above Gmail's.
+- The signature that covers the `List-Unsubscribe` headers must be the
+  signature Gmail verified: the verdict's `header.b=` is required to be the
+  prefix of the covering signature's `b=`. The signing domain is surfaced in
+  the proposal ("eligible (signed by …)") so the operator sees who vouches
+  for the link; From-domain alignment is deliberately not required, since
+  RFC 8058 does not ask for it and service-sent newsletters would all fail.
+- The URL host must be a public name (no IP literal, no `localhost`), and
+  the Executor resolves it before connecting and refuses loopback, private,
+  link-local and tailnet addresses — a POST an email chose must never reach
+  an n8n webhook or the proxy on this host.
+
 ## 2026-09-12 — v2.26.0: the triage agent can report spam and unsubscribe
 
 Until now every mail capability changed only the queue: a dismissal, bulk or

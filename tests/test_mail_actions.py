@@ -28,9 +28,11 @@ ELIGIBLE = {
     "dkim_signatures": [
         ("v=1; a=rsa-sha256; c=relaxed/relaxed; d=shop.example; s=s1;        "
          "h=list-unsubscribe-post:list-unsubscribe:date:subject:to:from;        "
-         "bh=x;        b=y"),
+         "bh=x;        b=AbCdEfGh\n         IjKl"),
     ],
 }
+# The verdict's header.b= is the prefix of the covering signature's b= — the
+# signature Gmail verified IS the one covering the headers.
 
 
 class _Ctx:
@@ -39,7 +41,8 @@ class _Ctx:
 
 
 def test_eligibility_is_decided_from_the_headers():
-    assert one_click_unsubscribe(ELIGIBLE) == ("https://shop.example/u/abc", "eligible")
+    assert one_click_unsubscribe(ELIGIBLE) == (
+        "https://shop.example/u/abc", "eligible (signed by shop.example)")
 
 
 @pytest.mark.parametrize("change,why", [
@@ -49,8 +52,19 @@ def test_eligibility_is_decided_from_the_headers():
      "DKIM did not pass"),
     # A verdict under any other authserv-id is the sender's to forge.
     ({"authentication_results": ["relay.attacker.example; dkim=pass header.i=@shop.example"]},
+     "no authentication verdict"),
+    # So is one claiming mx.google.com that sits BELOW Gmail's own (Gmail
+    # prepends; only the first counts).
+    ({"authentication_results": ["mx.google.com; dkim=fail header.i=@shop.example",
+                                 "mx.google.com; dkim=pass header.i=@shop.example header.b=AbCd"]},
      "DKIM did not pass"),
-    ({"dkim_signatures": ["v=1; d=shop.example; h=from:subject:date; b=y"]}, "does not cover"),
+    ({"dkim_signatures": ["v=1; d=shop.example; h=from:subject:date; b=AbCdEfGh"]}, "covers"),
+    # A covering signature that is NOT the one Gmail verified (b= mismatch).
+    ({"dkim_signatures": ["v=1; d=attacker.example; "
+                          "h=list-unsubscribe:list-unsubscribe-post:from; b=ZZZZ"]}, "covers"),
+    ({"list_unsubscribe": "<https://127.0.0.1/u/abc>"}, "not a public hostname"),
+    ({"list_unsubscribe": "<https://localhost/u/abc>"}, "not a public hostname"),
+    ({"list_unsubscribe": "<https://[::1]/u/abc>"}, "not a public hostname"),
     # A façade predating the edit sends none of the fields: not eligible, never a crash.
     ({"list_unsubscribe": None, "list_unsubscribe_post": None,
       "authentication_results": None, "dkim_signatures": None}, "no https"),
@@ -157,7 +171,44 @@ def outbound(monkeypatch):
     _Client.posted.clear()
     _Client.status = 200
     monkeypatch.setattr(executor.httpx, "AsyncClient", _Client)
+
+    async def resolves_public(url):
+        return None
+
+    monkeypatch.setattr(executor, "_refuse_non_public", resolves_public)
     return _Client
+
+
+class _Loop:
+    def __init__(self, addrs):
+        self.addrs = addrs
+
+    async def getaddrinfo(self, host, port, **kw):
+        return [(None, None, None, "", (a, port)) for a in self.addrs]
+
+
+@pytest.mark.parametrize("addr", ["127.0.0.1", "10.0.0.5", "100.113.118.28", "169.254.1.1", "::1", "fd00::1"])
+@pytest.mark.asyncio
+async def test_executor_refuses_a_host_that_resolves_inward(monkeypatch, addr):
+    class A:
+        @staticmethod
+        def get_running_loop():
+            return _Loop(["93.184.216.34", addr])
+
+    monkeypatch.setattr(executor, "asyncio", A)
+    with pytest.raises(executor.ExecutorError):
+        await executor._refuse_non_public("https://shop.example/u/abc")
+
+
+@pytest.mark.asyncio
+async def test_executor_accepts_a_host_that_resolves_public(monkeypatch):
+    class A:
+        @staticmethod
+        def get_running_loop():
+            return _Loop(["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"])
+
+    monkeypatch.setattr(executor, "asyncio", A)
+    await executor._refuse_non_public("https://shop.example/u/abc")
 
 
 @pytest.mark.asyncio
