@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-12 — v2.27.1: a missing model alias is an outage, not a verdict
+
+Deleting the `cc-default` alias from LiteLLM for nine minutes failed 273
+sessions, exhausted 53 work items in twelve seconds and landed six curator
+tasks FAILED for good — because LiteLLM answers a missing alias with HTTP
+400, and the failure taxonomy filed every 400 as "the provider judged the
+request". It now reads the body first: a 400 whose body says `Invalid model
+name` classifies TRANSIENT, so tasks retry-park with backoff, resumes park
+instead of landing, and work items release without spending an attempt, all
+gated on the retry sweep's LLM probe. Any other 400 is still semantic — the
+taxonomy's unknown-means-semantic rule is unchanged.
+
 ## 2026-09-12 — v2.27.0: the n8n façade ships with the repo
 
 Until now the two n8n workflows behind the email façade existed only inside

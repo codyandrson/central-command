@@ -49,6 +49,9 @@ TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504, 529})
 # event log — not a general-purpose list:
 #   "no deployments available"  LiteLLM with every deployment in cooldown
 #                               (heartbeat.error 4756, 2026-07-31)
+#   "invalid model name"        LiteLLM answering 400 for an alias nobody has
+#                               registered — a config outage, never a judged
+#                               request (session.failed ×273, 2026-09-12)
 #   "try again in"              LiteLLM/Anthropic rate-limit phrasing
 #   "database is not ready"     n8n starting up behind the façade (feed.error 4366)
 #   "cooldown"                  LiteLLM's own wording for the same state
@@ -71,6 +74,7 @@ _NETWORK_ERRNOS = frozenset(
 
 _TRANSIENT_MARKERS = (
     "no deployments available",
+    "invalid model name",
     "try again in",
     "database is not ready",
     "cooldown",
@@ -135,7 +139,12 @@ def classify_failure(exc: BaseException | None) -> str:
         return SEMANTIC
 
     if ModelHTTPError and isinstance(exc, ModelHTTPError):
-        return TRANSIENT if exc.status_code in TRANSIENT_STATUS else SEMANTIC
+        if exc.status_code in TRANSIENT_STATUS:
+            return TRANSIENT
+        # A 4xx is the provider judging the request — unless the body says the
+        # dependency itself was misconfigured (a missing LiteLLM alias answers
+        # 400). The sniff runs on the BODY only, so a generic 400 stays semantic.
+        return classify_failure_text(str(exc.body))
 
     if FallbackExceptionGroup and isinstance(exc, FallbackExceptionGroup):
         leaves = _leaves(exc)

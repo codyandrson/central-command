@@ -45,6 +45,10 @@ TRANSIENT_CASES = [
     ("http 503", ModelHTTPError(503, "cc-default")),
     ("http 504", ModelHTTPError(504, "cc-default")),
     ("http 529 (anthropic overloaded)", ModelHTTPError(529, "cc-default")),
+    ("http 400 whose body names a missing LiteLLM alias (2026-09-12)",
+     ModelHTTPError(400, "cc-default", body={
+         "message": "/chat/completions: Invalid model name passed in "
+                    "model=cc-default. Call `/v1/models` to view available models."})),
     ("every fallback leg was transient", FallbackExceptionGroup(
         "all models failed",
         [ModelHTTPError(429, "primary"), ModelHTTPError(503, "fallback")],
