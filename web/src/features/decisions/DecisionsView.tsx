@@ -904,6 +904,17 @@ function ProposalPane({
     return () => { alive = false; };
   }, [pendingGone, id, getProposal]);
 
+  // The decision is recorded long before the rpc returns — approve waits on
+  // the write, reject used to wait on the whole redraft — and past the rpc
+  // timeout `act` never reaches onDone, leaving the decided record on screen
+  // with no action row and nowhere to show the error (2026-09-12). If the
+  // proposal leaves pending while THIS pane's action is in flight, that is
+  // our decision landing: close. Decided elsewhere (acting idle) stays put —
+  // the no-displacement rule.
+  useEffect(() => {
+    if (pendingGone && acting !== '') onDone();
+  }, [pendingGone, acting, onDone]);
+
   const act = useCallback(async (kind: 'approve' | 'reject' | 'dismiss') => {
     setActing(kind); setError('');
     try {

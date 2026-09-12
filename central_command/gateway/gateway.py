@@ -980,14 +980,34 @@ async def release_folds_for(proposal_id: str, reason: str) -> int:
     return released
 
 
+_detached_resumes: set = set()
+
+
+def _detach(coro) -> None:
+    """Run a resume in the background, holding a strong ref until it lands.
+    The park record was armed BEFORE this is called, so a process death mid-
+    resume is `resume_sweep`'s to finish — same guarantee as the awaited path."""
+    import asyncio
+
+    t = asyncio.create_task(coro)
+    _detached_resumes.add(t)
+    t.add_done_callback(_detached_resumes.discard)
+
+
 async def reject_with_feedback(
-    session_id: str, proposal_id: str, feedback: str, model=None
+    session_id: str, proposal_id: str, feedback: str, model=None, *, detach: bool = False
 ) -> dict:
     """Reject a proposal: return the reason into the agent's run. No world change
     occurs. The agent may redraft against the feedback — that redraft is a new
     proposal in the same session, persisted and routed for approval like any
     other; operator feedback is trusted evidence for it. If the agent instead
-    closes out in text, the session completes."""
+    closes out in text, the session completes.
+
+    `detach=True` (the cockpit/REST path) returns as soon as the rejection is
+    RECORDED and the resume is armed; the redraft — a full model turn, often
+    longer than the cockpit's 30s RPC timeout — runs in the background and
+    announces itself through the event log like any other resume. Awaiting it
+    here made every reject look like a timeout on a slow model (2026-09-12)."""
     prop_row = await repo.load_proposal(proposal_id)
     if prop_row is None:
         raise GatewayError(f"no proposal {proposal_id}")
@@ -1026,35 +1046,42 @@ async def reject_with_feedback(
     )
     await resume_park.arm(session_id, pending)
     agent = await build_agent_for(prop_row["agent_id"], model=model)
-    # Best-effort like the approve/failure paths: the proposal is already
-    # REJECTED and recorded; a resume error must not orphan the session.
-    final = None
-    try:
-        final = await agent.run(
-            message_history=messages,
-            deferred_tool_results=results,
-            model=model,
-            deps=TriageDeps(agent_id=prop_row["agent_id"], session_id=session_id),
-        )
-    except Exception as e:  # noqa: BLE001 — the rejection record outranks the resume
-        if await resume_park.park_if_transient(session_id, e, pending):
-            return {"final_output": None, "resume_parked": True}
-        await events.emit(
-            "session.resume_failed", ref_id=session_id,
-            payload={"error": str(e), "proposal_id": proposal_id,
-                     "after": "rejected", "transient": False},
-            actor="system",
+
+    async def _resume() -> dict:
+        # Best-effort like the approve/failure paths: the proposal is already
+        # REJECTED and recorded; a resume error must not orphan the session.
+        final = None
+        try:
+            final = await agent.run(
+                message_history=messages,
+                deferred_tool_results=results,
+                model=model,
+                deps=TriageDeps(agent_id=prop_row["agent_id"], session_id=session_id),
+            )
+        except Exception as e:  # noqa: BLE001 — the rejection record outranks the resume
+            if await resume_park.park_if_transient(session_id, e, pending):
+                return {"final_output": None, "resume_parked": True}
+            await events.emit(
+                "session.resume_failed", ref_id=session_id,
+                payload={"error": str(e), "proposal_id": proposal_id,
+                         "after": "rejected", "transient": False},
+                actor="system",
+            )
+
+        # No redraft — the agent closed out in text (or the resume failed). A
+        # conversation continues (the rejection is just another turn); any other
+        # session is finished.
+        return await finish_decision_resume(
+            session_id=session_id, agent_id=prop_row["agent_id"],
+            proposal_id=proposal_id, after="rejected", final=final, agent=agent,
+            model=model, feedback=feedback, decided_event_id=decided["id"],
+            pending=pending,
         )
 
-    # No redraft — the agent closed out in text (or the resume failed). A
-    # conversation continues (the rejection is just another turn); any other
-    # session is finished.
-    return await finish_decision_resume(
-        session_id=session_id, agent_id=prop_row["agent_id"],
-        proposal_id=proposal_id, after="rejected", final=final, agent=agent,
-        model=model, feedback=feedback, decided_event_id=decided["id"],
-        pending=pending,
-    )
+    if detach:
+        _detach(_resume())
+        return {"proposal_id": proposal_id, "verdict": "rejected", "resume": "detached"}
+    return await _resume()
 
 
 async def dismiss_proposal(

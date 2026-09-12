@@ -334,6 +334,28 @@ describe('DecisionsView — one item acting never touches another', () => {
     expect(screen.queryByText(/Select an item to review/)).not.toBeInTheDocument();
   });
 
+  it('closes the pane when the acted-on proposal leaves pending before the rpc returns', async () => {
+    // The rpc never resolves — a timeout stand-in. The decision has still
+    // landed server-side, so the list refresh drops p1 from pending.
+    state.reject = vi.fn(() => new Promise<void>(() => {}));
+    state.proposals = [
+      { id: 'p1', agent_id: 'inbox-triage', intent: 'First', created_at: hoursAgo(1) },
+    ];
+    state.detail = {
+      id: 'p1', agent_id: 'inbox-triage', intent: 'First', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(1), actions: [], evidence: [],
+    };
+    const { rerender } = render(<DecisionsView />);
+    await userEvent.click(screen.getByText('First'));
+    await userEvent.type(await screen.findByPlaceholderText(/Rejection feedback/), 'no');
+    await userEvent.click(screen.getByRole('button', { name: /Reject/ }));
+    expect(state.reject).toHaveBeenCalledWith('p1', 'no');
+
+    state.proposals = [];
+    rerender(<DecisionsView />);
+    await waitFor(() => expect(screen.getByText(/Select an item to review/)).toBeInTheDocument());
+  });
+
   it('does the same for agent asks', async () => {
     let settle: () => void = () => {};
     state.answerOperatorItem = vi.fn(() => new Promise<void>((res) => { settle = res; }));

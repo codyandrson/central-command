@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-12 — v2.27.2: a rejection returns when it is recorded, not when the redraft ends
+
+Rejecting a proposal held the cockpit's rpc open for the whole redraft — a
+full model turn — and on a slow model that outran the 30s rpc timeout every
+time. The decision had landed, the list refreshed, the pane re-rendered the
+proposal as REJECTED with its action row gone, and the timeout error had
+nowhere left to render: the operator saw a closed record that never went
+away and no explanation.
+
+- `gateway.reject_with_feedback(detach=True)` — the REST/cockpit path —
+  returns once the rejection is recorded and the resume is armed; the
+  redraft runs in the background and announces itself through the event log
+  like any other resume. A process death mid-redraft is `resume_sweep`'s
+  to finish, exactly as before. Direct callers (tests, replay scripts) keep
+  the awaited contract.
+- The proposal pane now closes when the proposal it is ACTING on leaves the
+  pending pool, whether or not the rpc has returned. A proposal decided
+  elsewhere still stays on screen (the no-displacement rule).
+
 ## 2026-09-12 — v2.27.1: a missing model alias is an outage, not a verdict
 
 Deleting the `cc-default` alias from LiteLLM for nine minutes failed 273

@@ -277,3 +277,28 @@ async def test_the_close_out_note_carries_the_unanswerable_question():
     assert out.get("redraft_proposal_id") is None
     assert question in out["final_output"]
     assert await repo.session_status(run["session_id"]) == "DONE"
+
+
+async def test_detached_reject_returns_recorded_and_the_redraft_still_lands():
+    """The cockpit path: `detach=True` returns once the rejection is RECORDED
+    (status + decided event + armed park) — before the redraft, which is a
+    full model turn and used to hold the rpc past its timeout. The redraft
+    then lands in the background exactly as the awaited path lands it."""
+    import asyncio
+
+    model = make_redraft_model()
+    run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
+
+    out = await gateway.reject_with_feedback(
+        run["session_id"], run["proposal_id"], FEEDBACK, model=model, detach=True
+    )
+    assert out == {"proposal_id": run["proposal_id"], "verdict": "rejected", "resume": "detached"}
+    assert (await repo.load_proposal(run["proposal_id"]))["status"] == "REJECTED"
+    assert gateway._detached_resumes  # the resume is running, not dropped
+
+    await asyncio.gather(*gateway._detached_resumes)
+    redrafts = [
+        p for p in await repo.list_proposals("AWAITING_HUMAN")
+        if p["session_id"] == run["session_id"]
+    ]
+    assert len(redrafts) == 1  # the redraft, awaiting its own review

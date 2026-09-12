@@ -2208,6 +2208,7 @@ async def reject(proposal_id: str, body: RejectIn) -> dict:
         out = await gateway.reject_with_feedback(
             row["session_id"], proposal_id, body.feedback,
             model=await resolve_session_model(row["session_id"], row["agent_id"]),
+            detach=True,  # recorded + armed, then return; the redraft runs behind
         )
     except gateway.GatewayError as e:
         raise HTTPException(409, str(e))
