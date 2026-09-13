@@ -11,7 +11,7 @@ from tests.conftest import needs_pg
 
 @needs_pg
 async def test_schema_seeds_the_founding_experts_steward_groups():
-    """A fresh database (conftest re-executes schema.sql into central_command_test
+    """A fresh database (conftest re-executes schema.sql into this checkout's test database
     every run) must seed the two founding experts' domain groups — that's
     what makes domain stewardship work on a brand-new install, not just a
     hand-migrated one."""

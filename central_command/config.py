@@ -415,6 +415,20 @@ class Settings(BaseSettings):
     # retries forever silently.
     resume_retry_limit: int = 5
 
+    # ADMISSION CONTROL for model turns (2026-09-13, v2.28.1). How many model
+    # requests Central Command lets be in flight at once, across every agent
+    # and every path (fresh runs, resumes, conversations, heartbeat work);
+    # 0 = unlimited. A local backend serving one request at a time
+    # (llama-server `--parallel 1`) queues FIFO, so N concurrent turns each
+    # wait N turns; the proxy's 300s timeout then abandons most of them
+    # while the GPU keeps grinding the abandoned ones to completion —
+    # measured 2026-09-13: completions returned after 1h08m to clients gone
+    # at 5 minutes, and a 4-token request could not get a slot in 120s.
+    # Queueing in-process instead costs nothing and a client timeout no
+    # longer leaves a ghost request running. Size it to the backend's real
+    # parallelism; leave 0 for a hosted API.
+    model_concurrency: int = 0
+
     # Outage equivalence slice 3: how many times an APPROVED proposal whose
     # execution hit a transient dependency failure may be replayed before the
     # same promotion applies (terminal FAILED + an operator item). The decision

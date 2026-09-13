@@ -20,6 +20,7 @@ whether sessions reach 60% of the window.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -421,20 +422,45 @@ def working_window(messages: list) -> list:
     return messages
 
 
+# One admission gate per event loop: an asyncio.Semaphore binds to the first
+# loop that awaits it and raises from every other (the module-scope
+# asyncio.Event bite mark), and pytest runs one loop per test. Keyed on the
+# limit too, so a changed setting takes effect without a restart.
+_gates: dict[tuple[int, int], asyncio.Semaphore] = {}
+
+
+@asynccontextmanager
+async def model_turn_slot():
+    """Hold one of `settings.model_concurrency` slots for the duration of a
+    model request; a no-op when the limit is 0 (unlimited)."""
+    n = int(settings.model_concurrency)
+    if n <= 0:
+        yield
+        return
+    key = (id(asyncio.get_running_loop()), n)
+    gate = _gates.get(key)
+    if gate is None:
+        gate = _gates[key] = asyncio.Semaphore(n)
+    async with gate:
+        yield
+
+
 class WindowedModel(WrapperModel):
-    """Sends `working_window(messages)` to the wrapped model. Wrapped around
-    every live model at `resolve_model` — the one model seam — so the record
-    never carries a trim and every run path (fresh, resume, consult) is
-    covered without knowing it."""
+    """Sends `working_window(messages)` to the wrapped model, under the
+    admission gate (`model_turn_slot`). Wrapped around every live model at
+    `resolve_model` — the one model seam — so the record never carries a
+    trim, every run path (fresh, resume, consult) is covered without knowing
+    it, and no path can submit a turn the backend has no slot for."""
 
     async def request(self, messages, model_settings, model_request_parameters):
-        return await self.wrapped.request(
-            working_window(messages), model_settings, model_request_parameters)
+        async with model_turn_slot():
+            return await self.wrapped.request(
+                working_window(messages), model_settings, model_request_parameters)
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters,
                              run_context=None):
-        async with self.wrapped.request_stream(
+        async with model_turn_slot(), self.wrapped.request_stream(
             working_window(messages), model_settings, model_request_parameters, run_context,
         ) as stream:
             yield stream

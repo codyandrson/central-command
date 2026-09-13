@@ -573,7 +573,11 @@ async def close_session(
     # proposal that refuses to die. `dismiss_proposal` is the only close path
     # that reaches here with this reason (approve/reject land, they do not
     # close), so this one line is the whole loop.
-    if settings.demo_mode or not settings.reflection_enabled or reason == "dismissed":
+    # "cancelled" joined it 2026-09-13: cancelling a task closes its session,
+    # and a bulk cancel of 38 parked autodiscovery tasks fanned out into 38
+    # reflection turns against a backend already buried — the run was cut
+    # short by the operator, there is no completed work to reflect on.
+    if settings.demo_mode or not settings.reflection_enabled or reason in ("dismissed", "cancelled"):
         return
     from central_command.runtime.reflection import reflect_on_close
 

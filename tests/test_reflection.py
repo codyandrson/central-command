@@ -179,6 +179,12 @@ async def test_a_dismissed_session_is_never_reflected_on(monkeypatch):
     await asyncio.sleep(0)
     assert called == []
 
+    # Cancelled (2026-09-13): the operator cut the run short; nothing to reflect on.
+    sid_c = await _closed_session(agent_id)
+    await converse.close_session(sid_c, agent_id=agent_id, reason="cancelled", actor="operator")
+    await asyncio.sleep(0)
+    assert called == []
+
     sid2 = await _closed_session(agent_id)
     await converse.close_session(sid2, agent_id=agent_id, reason="concluded", actor="operator")
     await asyncio.sleep(0)

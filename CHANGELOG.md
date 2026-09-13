@@ -4,6 +4,49 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.28.1: model turns are admitted, not just submitted
+
+An afternoon of approving a hundred autodiscovery proposals left 40 sessions
+parked AWAITING_RESUME on "Request timed out", six more RUNNING for twenty
+minutes, and a 4-token request unable to get a slot in two minutes. The
+backend's own log explained it: a llama-server with `--parallel 1` and a FIFO
+queue was returning completions after 1h08m to 1h12m — HTTP 200, to clients
+that LiteLLM had abandoned at 300 s. Every timed-out turn still burned its
+full turn of GPU time, the retry sweep re-dispatched every parked session in
+the same minute behind it, and the queue never drained: a livelock, with
+every individual mechanism (the parks, the retries, the health gate that
+correctly stopped the sweep) working as designed. The gap was admission
+control: nothing bounded how many turns Central Command submits at once
+against a backend that serves one.
+
+- `CC_MODEL_CONCURRENCY` (default 0 = unlimited): how many model requests
+  may be in flight at once across every agent and path. Enforced at the one
+  model seam, `WindowedModel`, so fresh runs, resumes, conversations and
+  heartbeat work all queue IN-PROCESS instead of at the backend — waiting
+  costs nothing, a client timeout no longer leaves a ghost request running,
+  and each request's wall time drops to its real turn time, inside the
+  proxy's timeout. One semaphore per event loop (the module-scope
+  `asyncio.Event` lesson), keyed on the limit.
+- Size it to the backend's real parallelism (a single-slot local model → 1);
+  leave 0 for a hosted API. The retry sweep is untouched: under the gate its
+  herd is harmless.
+- Two things the clean-up itself exposed, fixed alongside: cancelling a
+  task closes its session, and that close spawned a REFLECTION turn per
+  session — a bulk cancel of 38 parked autodiscovery tasks became 38 more
+  model turns against the same backend. A `cancelled` close now reflects on
+  nothing, like `dismissed`. And the task board's list capped EVERYTHING at
+  the newest 100 rows, so yesterday's 40 REVIEW tasks were off the board
+  behind today's churn — an open task the operator cannot see cannot be
+  cancelled. The cap now applies to terminal rows only; open tasks always
+  list.
+- Test infrastructure: the suite's database is now ONE PER CHECKOUT
+  (`central_command_test_<hash of the repo root>`). Worktrees isolate code,
+  not the database, and the fixture drops the test database with force at
+  the start of every run — so two sessions gating releases in two worktrees
+  pulled each other's tables away mid-suite, which read as flaky asyncpg
+  failures. Concurrent sessions in different worktrees can no longer
+  collide. A deleted worktree leaves its database behind; drop it by hand.
+
 ## 2026-09-13 — v2.28.0: autodiscovery asks before it adds
 
 A gateway credential surfaced 377 catalog models at once, and autodiscovery

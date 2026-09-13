@@ -3485,18 +3485,26 @@ async def get_task(task_id: str) -> dict | None:
 async def list_tasks(
     status: str | None = None, limit: int = 100, agent_id: str | None = None
 ) -> list[dict]:
+    """Every OPEN task, plus the newest `limit` terminal ones. The cap is for
+    the Done column only (2026-09-13): a flat `limit 100` over everything
+    dropped 40 REVIEW tasks from yesterday off the board behind today's
+    churn, and an open task the operator cannot see cannot be cancelled."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
             """
+            with recent_terminal as (
+                select id from task where status = any($4::text[])
+                order by created_at desc limit $2
+            )
             select t.*, s.status as session_status
               from task t left join session s on s.id = t.session_id
             where ($1::text is null or t.status = $1)
               and ($3::text is null or t.agent_id = $3)
+              and (t.status <> all($4::text[]) or t.id in (select id from recent_terminal))
             order by t.created_at desc
-            limit $2
             """,
-            status, limit, agent_id,
+            status, limit, agent_id, list(TASK_TERMINAL),
         )
         return [_task_row(r) for r in rows]
     finally:

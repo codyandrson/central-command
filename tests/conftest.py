@@ -38,13 +38,22 @@ def aresolve(fn):
 
 
 PARKED = "PARKED_FOR_TEST"
-# Under pytest-xdist every worker gets its OWN database (central_command_test_gw0,
-# …), because the suite's isolation model — park all foreign UNPROCESSED rows,
-# assert on rows you created — is per-DATABASE, not per-row. Two workers
-# sharing one database would park each other's fixtures mid-test. The suffix
-# comes from xdist itself; a plain serial run keeps the unsuffixed name.
+# ONE DATABASE PER CHECKOUT (2026-09-13). Worktrees isolate code, not the
+# database: every checkout used to point at the one `central_command_test`,
+# and `_switch_to_test_database` DROPS it with force at the start of every
+# run — so a second session starting pytest pulled the tables out from under
+# the first mid-suite, which read as flaky asyncpg failures for weeks. The
+# name now carries a hash of this checkout's root, so concurrent sessions in
+# different worktrees can never touch each other. Under pytest-xdist every
+# worker additionally gets its own (`…_gw0`), because the suite's isolation
+# model — park all foreign UNPROCESSED rows, assert on rows you created — is
+# per-DATABASE, not per-row. A deleted worktree leaves its database behind;
+# `drop database` it by hand (listed by `\l central_command_test_*`).
+import hashlib
+
+_CHECKOUT = hashlib.sha1(str(Path(__file__).resolve().parents[1]).encode()).hexdigest()[:8]
 _WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
-TEST_DB = "central_command_test" + (f"_{_WORKER}" if _WORKER else "")
+TEST_DB = f"central_command_test_{_CHECKOUT}" + (f"_{_WORKER}" if _WORKER else "")
 
 
 @pytest.fixture(autouse=True)
