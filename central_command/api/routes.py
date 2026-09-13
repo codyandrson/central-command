@@ -2200,6 +2200,7 @@ async def approve(proposal_id: str) -> dict:
         out = await gateway.approve_and_execute(
             row["session_id"], proposal_id,
             model=await resolve_session_model(row["session_id"], row["agent_id"]),
+            detach=True,  # recorded + armed, then return; the closing turn runs behind
         )
     except gateway.GatewayError as e:
         raise HTTPException(409, str(e))

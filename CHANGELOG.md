@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.29.3: an approval returns when the write is recorded, not when the agent's turn ends
+
+After approving a proposal or two, the next click in the cockpit — the next
+proposal, another tab — took minutes to load. The approve RPC executed the
+write, then awaited the agent's closing turn before replying, and on a local
+model that turn is a full re-prefill queued behind every other agent's work:
+a median of 18 minutes across three days of live logs. Each cockpit socket
+allows eight RPCs in flight; a few approvals in a row held most of them, and
+every later request queued behind the semaphore — invisible in the timings,
+which are stamped only once a slot is acquired.
+
+Approve now follows the contract reject has had since v2.27.2: the reply
+comes once the execution is recorded (proposal EXECUTED, provenance stamped,
+folds committed, park record armed) and the agent's closing turn runs
+detached, announcing itself through the event log as before. The failed-
+execution leg detaches its resume the same way. The awaited form remains for
+the auditor and the acceptance script.
 ## 2026-09-13 — v2.29.2: the episode walk's source pane wraps like the rest of the cockpit
 
 v2.29.0's Episode Walk rendered episode content in a `whitespace-pre-wrap`

@@ -494,10 +494,19 @@ def _operator_actor() -> str:
 
 
 async def approve_and_execute(
-    session_id: str, proposal_id: str, approver: str | None = None, model=None
+    session_id: str, proposal_id: str, approver: str | None = None, model=None,
+    *, detach: bool = False,
 ) -> dict:
     """Approve a pending proposal: execute it for real, stamp provenance, and
-    resume the agent with the outcome."""
+    resume the agent with the outcome.
+
+    `detach=True` (the cockpit/REST path) returns once the EXECUTION is
+    recorded (proposal EXECUTED, provenance, folds, armed park) and runs the
+    agent's closing turn in the background — same contract as
+    `reject_with_feedback(detach=True)`. Awaiting that turn here held one of
+    the cockpit socket's eight RPC slots for the whole model turn (median 18
+    minutes on the local model, 2026-09-13); a few approvals in a row
+    exhausted the slots and every later click queued behind them."""
     approver = approver or _operator_actor()
     prop_row = await repo.load_proposal(proposal_id)
     if prop_row is None:
@@ -549,12 +558,13 @@ async def approve_and_execute(
         # nothing), the partial results on the log, and the agent told the
         # truth on resume.
         return await _record_execution_failure(
-            session_id, proposal_id, prop_row["agent_id"], failure, model
+            session_id, proposal_id, prop_row["agent_id"], failure, model,
+            detach=detach,
         )
     return await _record_execution_success(
         session_id, proposal_id, prop_row["agent_id"],
         outcome.result_text, outcome.provenance.model_dump(mode="json"),
-        approver, model=model, task_wait=outcome.task_wait,
+        approver, model=model, task_wait=outcome.task_wait, detach=detach,
     )
 
 
@@ -567,6 +577,7 @@ async def _record_execution_success(
     approver: str,
     model=None,
     task_wait: dict | None = None,
+    detach: bool = False,
 ) -> dict:
     """Everything that follows a successful execution — for the approve path AND
     for a retried one (slice 3). ONE copy, for the same reason
@@ -636,8 +647,6 @@ async def _record_execution_success(
     # the failure path already honors this, and so must the success path (the
     # 2026-07-22 incident: a resume error left the session stuck AWAITING_HUMAN
     # with an EXECUTED proposal). The finalize/continue step below runs either way.
-    final = None
-    agent = None
     pending = None
     try:
         run_state = await repo.load_paused_session(session_id)
@@ -661,36 +670,44 @@ async def _record_execution_success(
         "result_text": result_text,
         "provenance": provenance,
     }
-    try:
-        if run_state is None:
-            raise GatewayError(f"no paused session {session_id}")
-        agent = await build_agent_for(agent_id, model=model)
-        final = await resume(
-            agent, load_messages(run_state), run_state["tool_call_id"],
-            result_text, model=model, agent_id=agent_id,
-            session_id=session_id,
-        )
-    except Exception as e:  # noqa: BLE001 — the executed record outranks the resume
-        # Outage equivalence: a provider that was DOWN cost this run its final
-        # turn, not its result. Park it — the world change stands, the session
-        # is retryable, and nothing about the decision is in doubt.
-        if pending is not None and await resume_park.park_if_transient(
-            session_id, e, pending
-        ):
-            out["resume_parked"] = True
-            return out
-        await events.emit(
-            "session.resume_failed", ref_id=session_id,
-            payload={"error": str(e), "proposal_id": proposal_id,
-                     "after": "approved", "transient": False},
-            actor="system",
+    async def _resume() -> dict:
+        final = agent = None
+        try:
+            if run_state is None:
+                raise GatewayError(f"no paused session {session_id}")
+            agent = await build_agent_for(agent_id, model=model)
+            final = await resume(
+                agent, load_messages(run_state), run_state["tool_call_id"],
+                result_text, model=model, agent_id=agent_id,
+                session_id=session_id,
+            )
+        except Exception as e:  # noqa: BLE001 — the executed record outranks the resume
+            # Outage equivalence: a provider that was DOWN cost this run its
+            # final turn, not its result. Park it — the world change stands,
+            # the session is retryable, and nothing about the decision is in
+            # doubt.
+            if pending is not None and await resume_park.park_if_transient(
+                session_id, e, pending
+            ):
+                out["resume_parked"] = True
+                return out
+            await events.emit(
+                "session.resume_failed", ref_id=session_id,
+                payload={"error": str(e), "proposal_id": proposal_id,
+                         "after": "approved", "transient": False},
+                actor="system",
+            )
+
+        return await finish_decision_resume(
+            session_id=session_id, agent_id=agent_id,
+            proposal_id=proposal_id, after="approved", final=final, agent=agent,
+            model=model, out=out, outcome_text=result_text, pending=pending,
         )
 
-    return await finish_decision_resume(
-        session_id=session_id, agent_id=agent_id,
-        proposal_id=proposal_id, after="approved", final=final, agent=agent,
-        model=model, out=out, outcome_text=result_text, pending=pending,
-    )
+    if detach:
+        _detach(_resume())
+        return {**out, "resume": "detached"}
+    return await _resume()
 
 
 async def _record_execution_failure(
@@ -699,6 +716,7 @@ async def _record_execution_failure(
     agent_id: str,
     failure: executor.ExecutionFailed,
     model=None,
+    detach: bool = False,
 ) -> dict:
     await repo.set_proposal_status(proposal_id, "FAILED")
 
@@ -736,44 +754,51 @@ async def _record_execution_failure(
         "completed_actions": failure.completed,
         "final_output": None,
     }
-    final = None
-    agent = None
     pending = None
     summary = f"{failure.failed_capability}: {failure.error}"
     run_state = await repo.load_paused_session(session_id)
-    if run_state is not None:
-        if run_state.get("tool_call_id"):  # see the note on the approve path
-            pending = resume_park.pending_resume(
-                kind="result", text=report,
-                tool_call_id=run_state["tool_call_id"],
-                after="failed", proposal_id=proposal_id, failure_summary=summary,
-            )
-            await resume_park.arm(session_id, pending)
-        try:
-            agent = await build_agent_for(agent_id, model=model)
-            final = await resume(
-                agent, load_messages(run_state), run_state["tool_call_id"], report,
-                model=model, agent_id=agent_id, session_id=session_id,
-            )
-        except Exception as e:  # noqa: BLE001 — the failure record outranks the resume
-            if await resume_park.park_if_transient(session_id, e, pending):
-                out["resume_parked"] = True
-                return out
-            await events.emit(
-                "session.resume_failed",
-                ref_id=session_id,
-                payload={"error": str(e), "proposal_id": proposal_id,
-                         "after": "failed", "transient": False},
-                actor="system",
-            )
+    if run_state is not None and run_state.get("tool_call_id"):
+        # see the note on the approve path
+        pending = resume_park.pending_resume(
+            kind="result", text=report,
+            tool_call_id=run_state["tool_call_id"],
+            after="failed", proposal_id=proposal_id, failure_summary=summary,
+        )
+        await resume_park.arm(session_id, pending)
 
-    # A conversation continues even past a failed action (the agent got the
-    # honest failure report as text) — only a terminal session closes out.
-    return await finish_decision_resume(
-        session_id=session_id, agent_id=agent_id, proposal_id=proposal_id,
-        after="failed", final=final, agent=agent, model=model, out=out,
-        failure_summary=summary, pending=pending,
-    )
+    async def _resume() -> dict:
+        final = agent = None
+        if run_state is not None:
+            try:
+                agent = await build_agent_for(agent_id, model=model)
+                final = await resume(
+                    agent, load_messages(run_state), run_state["tool_call_id"], report,
+                    model=model, agent_id=agent_id, session_id=session_id,
+                )
+            except Exception as e:  # noqa: BLE001 — the failure record outranks the resume
+                if await resume_park.park_if_transient(session_id, e, pending):
+                    out["resume_parked"] = True
+                    return out
+                await events.emit(
+                    "session.resume_failed",
+                    ref_id=session_id,
+                    payload={"error": str(e), "proposal_id": proposal_id,
+                             "after": "failed", "transient": False},
+                    actor="system",
+                )
+
+        # A conversation continues even past a failed action (the agent got
+        # the honest failure report as text) — only a terminal session closes.
+        return await finish_decision_resume(
+            session_id=session_id, agent_id=agent_id, proposal_id=proposal_id,
+            after="failed", final=final, agent=agent, model=model, out=out,
+            failure_summary=summary, pending=pending,
+        )
+
+    if detach:
+        _detach(_resume())
+        return {**out, "resume": "detached"}
+    return await _resume()
 
 
 # --- retryable executions (outage equivalence, slice 3) -----------------------

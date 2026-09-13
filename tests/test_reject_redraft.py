@@ -302,3 +302,26 @@ async def test_detached_reject_returns_recorded_and_the_redraft_still_lands():
         if p["session_id"] == run["session_id"]
     ]
     assert len(redrafts) == 1  # the redraft, awaiting its own review
+
+
+async def test_detached_approve_returns_recorded_and_the_closing_turn_still_lands():
+    """The cockpit path for approve, same contract as the detached reject:
+    `detach=True` returns once the EXECUTION is recorded (EXECUTED + provenance
+    + armed park) — before the agent's closing turn, which held one of the
+    cockpit socket's eight RPC slots for a whole model turn and starved every
+    click made after a few approvals (2026-09-13). The turn still lands."""
+    import asyncio
+
+    model = make_spike_model()
+    run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
+
+    out = await gateway.approve_and_execute(
+        run["session_id"], run["proposal_id"], model=model, detach=True
+    )
+    assert out["ok"] is True and out["resume"] == "detached"
+    assert out["provenance"]  # the execution's record rides the reply, as before
+    assert (await repo.load_proposal(run["proposal_id"]))["status"] == "EXECUTED"
+    assert gateway._detached_resumes  # the closing turn is running, not dropped
+
+    await asyncio.gather(*gateway._detached_resumes)
+    assert await repo.session_status(run["session_id"]) == "DONE"
