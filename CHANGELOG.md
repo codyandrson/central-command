@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.28.4: the output ceiling is the model's, not the deployment's
+
+Every live run sent one `max_tokens` — the deployment ceiling, sized to the
+local model — to whichever model it addressed. A hosted alias with a smaller
+cap rejects that outright rather than clamping, and an OpenRouter-style
+gateway counts the requested output against its context: 262144 of output
+alone overran a 256k window, so the alias failed on every run with the
+prompt barely 27k. Lowering the ceiling for everyone was the wrong lever.
+
+- `max_tokens` is now the LOWER of the deployment ceiling and what the model
+  DECLARES — `max_output_tokens` on its proxy entry, read once per alias
+  through the same `/model/info` discovery the context window already uses
+  (`context.output_cap_for`). Undeclared means "nobody said" and keeps the
+  ceiling; a declaration above the ceiling never raises it.
+- The `config.py` note that prescribed a global `CC_MAX_OUTPUT_TOKENS`
+  override for a smaller hosted model now says to declare the cap on the
+  model instead. A fallback deployment still receives the ORIGINAL
+  `max_tokens` from LiteLLM; clamping there is the proxy's
+  `modify_params` switch, deliberately not turned on here.
+
+Operator step: declare `max_input_tokens`/`max_output_tokens` on any hosted
+alias whose cap is below the ceiling (the litellm-manager's mandate).
+
 ## 2026-09-13 — v2.28.3: a parked run has its levers where you are looking at it
 
 Forty task runs sat "IDLE" in the sessions panel with nothing to click: the

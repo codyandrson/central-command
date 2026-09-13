@@ -179,12 +179,19 @@ async def _live_model(model_name: str, agent_id=None, thinking: str | None = Non
     # whole document. See settings.max_output_tokens for the incident. Pinning
     # it at the seam means every agent inherits it and no future call site can
     # forget.
-    model_settings = OpenAIChatModelSettings(max_tokens=settings.max_output_tokens)
+    # …and CLAMPED to what the model itself declares (`max_output_tokens` on
+    # its proxy entry, via `context.output_cap_for`) — the deployment ceiling
+    # is the local model's, and a hosted model with a smaller cap rejects
+    # anything above it rather than clamping. Undeclared means the ceiling.
+    from central_command.runtime.context import WindowedModel, output_cap_for
+
+    cap = await output_cap_for(model_name)
+    max_tokens = min(settings.max_output_tokens, cap) if cap else settings.max_output_tokens
+    model_settings = OpenAIChatModelSettings(max_tokens=max_tokens)
     if thinking:
         body = await _thinking_body(model_name, thinking)
         if body:
             model_settings["extra_body"] = body
-    from central_command.runtime.context import WindowedModel
 
     # The working window is applied HERE, on the wire, so the persisted record
     # stays raw whichever run path snapshots it (runtime/context.py, slice 2).

@@ -35,6 +35,7 @@ from central_command.config import settings
 # start only — the `cc-default` alias being re-pointed mid-process is not a case
 # worth code.
 _windows: dict[str, int] = {}
+_output_caps: dict[str, int | None] = {}
 # session_id -> the fraction at the last emit, so one long session emits a
 # handful of events rather than one per node.
 #
@@ -75,11 +76,32 @@ async def window_for(model: str | None) -> int:
     return _windows[name]
 
 
+async def output_cap_for(model: str | None) -> int | None:
+    """The model's DECLARED output ceiling — LiteLLM `/model/info`
+    `max_output_tokens` for the alias — or None when nobody said. Same
+    discovery and cache as `window_for`; the caller (`models._live_model`)
+    pins `max_tokens` to the lower of this and `settings.max_output_tokens`,
+    so a hosted model with a small cap is not sent the local model's ceiling
+    (a Kilo.ai alias counting 262144 of requested output against a 256k
+    context rejected every run, 2026-09-13). Declared, never guessed: an
+    undeclared cap leaves the deployment default in force."""
+    if settings.demo_mode:
+        return None
+    name = (model or settings.default_model or "").split(":", 1)[-1]
+    if name not in _output_caps:
+        _output_caps[name] = await _discover(name, "max_output_tokens")
+    return _output_caps[name]
+
+
 async def _discover_window(name: str) -> int:
+    return await _discover(name, "max_input_tokens") or settings.context_window
+
+
+async def _discover(name: str, field: str) -> int | None:
     from central_command.integrations import litellm
 
     if not name or not litellm.configured():
-        return settings.context_window
+        return None
     try:
         # `_call` rather than `list_models()`: the public read deliberately
         # strips every `max_*` key (it exists to keep the manager agent out of
@@ -87,12 +109,12 @@ async def _discover_window(name: str) -> int:
         resp = await litellm._call("GET", "/model/info")
         for m in resp.json().get("data") or []:
             if m.get("model_name") == name:
-                value = (m.get("model_info") or {}).get("max_input_tokens")
+                value = (m.get("model_info") or {}).get(field)
                 if value:
                     return int(value)
     except Exception:
         pass
-    return settings.context_window
+    return None
 
 
 def estimate_tokens(run_state: dict) -> int:

@@ -44,20 +44,27 @@ class Settings(BaseSettings):
     # bigger document later needs no code change. llama.cpp clamps generation
     # to whatever context the prompt leaves free.
     #
-    # Note for whoever tiers an agent onto a hosted model via CC_MODEL_<AGENT>:
-    # a request whose max_tokens exceeds THAT model's cap fails rather than
-    # clamping (opus/sonnet cap at 128000, haiku at 64000 — see the note in
-    # deploy/pi/litellm/config.yaml). Set CC_MAX_OUTPUT_TOKENS for that case.
+    # A hosted model with a SMALLER cap fails rather than clamping (opus/
+    # sonnet cap at 128000, haiku at 64000, a Kilo.ai alias 10000 — and an
+    # OpenRouter-style gateway counts requested output against its context,
+    # so 262144 of output alone overran a 256k window, 2026-09-13). That is a
+    # PER-MODEL fact and it is answered per model: declare `max_output_tokens`
+    # on the model's proxy entry and `runtime/models._live_model` sends the
+    # lower of that and this ceiling (`context.output_cap_for`). This value is
+    # the ceiling for models that declare nothing — never lower it for one
+    # model's sake.
     #
     # THE FALLBACK IS PART OF THE DEPLOYMENT (found 2026-07-29, the first real
     # workstation outage): cc-default falls back to claude-haiku-4-5, and a
     # 262144 max_tokens request is REJECTED by haiku (64000 cap) — so with the
     # workstation off, every agent run failed even though the fallback route
     # itself was healthy. "Sized to the deployment" therefore means sized to
-    # the MINIMUM across primary + fallback: the Pi's .env sets
-    # CC_MAX_OUTPUT_TOKENS=64000. This default stays at the workstation
-    # ceiling for single-model dev setups; the deployment override is the
-    # mechanism this note always prescribed.
+    # the MINIMUM across primary + fallback — and since the per-model clamp
+    # above, the way to say that is to declare the fallback's cap on the
+    # fallback's entry, not to lower this ceiling for everyone. (LiteLLM
+    # re-sends the ORIGINAL max_tokens to a fallback deployment; a fallback
+    # whose entry declares less than the primary's still needs
+    # `litellm_settings: modify_params: true` on the proxy to clamp there.)
     max_output_tokens: int = 262144
 
     # THE LLM provider agents talk to (live mode). Presence is enablement:

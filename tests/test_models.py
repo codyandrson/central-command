@@ -184,6 +184,7 @@ async def test_live_model_pins_max_tokens_above_the_client_default(monkeypatch):
     monkeypatch.setattr(cfg, "demo_mode", False)
     monkeypatch.setattr(cfg, "llm_base_url", "http://localhost:4000")
     monkeypatch.setattr(cfg, "llm_api_key", "sk-test-not-a-real-key")
+    _declare_output_cap(monkeypatch, None)
 
     m = await resolve_model(agent_id="coach")
     assert m.settings is not None, "no ModelSettings attached — back on the 4096 default"
@@ -192,6 +193,41 @@ async def test_live_model_pins_max_tokens_above_the_client_default(monkeypatch):
         "max_tokens must exceed pydantic-ai's 4096 default; a full charter "
         "does not fit in 4096 tokens once JSON-escaped"
     )
+
+
+def _declare_output_cap(monkeypatch, cap):
+    """What the proxy declares as `max_output_tokens` for every alias — None
+    means nobody said. Patched at the discovery seam so the test neither
+    reaches a proxy nor inherits another test's cached answer."""
+    from central_command.runtime import context
+
+    monkeypatch.setattr(context, "_output_caps", {})
+
+    async def fake_discover(name, field):
+        return cap if field == "max_output_tokens" else None
+
+    monkeypatch.setattr(context, "_discover", fake_discover)
+
+
+async def test_live_model_clamps_max_tokens_to_the_models_declared_cap(monkeypatch):
+    """A hosted model with a smaller output cap than the deployment ceiling
+    REJECTS a request above it rather than clamping (Kilo.ai counted 262144 of
+    requested output against a 256k context, 2026-09-13). The ceiling stays
+    the deployment's; a model that DECLARES less gets less — per model, never
+    a global knob. Undeclared ("nobody said") keeps the ceiling."""
+    from central_command.config import settings as cfg
+    from central_command.runtime.models import resolve_model
+
+    monkeypatch.setattr(cfg, "demo_mode", False)
+    monkeypatch.setattr(cfg, "llm_base_url", "http://localhost:4000")
+    monkeypatch.setattr(cfg, "llm_api_key", "sk-test-not-a-real-key")
+
+    _declare_output_cap(monkeypatch, 10000)
+    assert (await resolve_model(agent_id="coach")).settings["max_tokens"] == 10000
+
+    # A declared cap ABOVE the ceiling never raises it.
+    _declare_output_cap(monkeypatch, cfg.max_output_tokens * 2)
+    assert (await resolve_model(agent_id="coach")).settings["max_tokens"] == cfg.max_output_tokens
 
 
 async def test_the_ceiling_clears_the_largest_real_charter():
