@@ -51,6 +51,11 @@ class ActionSpec:
     # background loop nobody is watching. Documenting the choices in `params`
     # prose alone would be guidance with no mechanism behind it.
     choices: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # The agent an action hands its work to when that agent is FIXED by the
+    # action rather than chosen by a param (task.create / sandbox.run_script
+    # read `agent_id` from params). Cockpit display only — a string literal,
+    # pinned to the runtime constant by test_heartbeat.py so it cannot drift.
+    runs_as: str | None = None
 
 
 async def _feed_poll(schedule_id: str, params: dict) -> dict:
@@ -1493,6 +1498,7 @@ ACTIONS: dict[str, ActionSpec] = {
             params={"kind": "digest | check_in | morning_report | week_ahead "
                             "| onboarding_tour"},
             required=("kind",),
+            runs_as="ea",
             levers=("api.routes.create_and_run_task",),
             run=_ea_contact,
             choices={"kind": EA_CONTACT_KINDS},
@@ -1519,6 +1525,7 @@ ACTIONS: dict[str, ActionSpec] = {
                 ),
             },
             required=(),
+            runs_as="litellm-manager",
             levers=(
                 "integrations.litellm_credstore.list_provider_credentials",
                 "integrations.litellm.provider_catalog",

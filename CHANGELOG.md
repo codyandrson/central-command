@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.29.1: a scheduled lever explains itself
+
+Opening "LiteLLM model autodiscovery" in the cron dialog showed a one-line
+description and two blank text boxes. The action registry knew far more —
+the run function's docstring, the integrations the lever touches, which
+params are enums, and that the work it creates lands on the litellm-manager
+— but the list endpoint served three keys, the cockpit's hand-declared wire
+types carried the same three, and the dialog rendered what survived.
+
+- **The API serves the whole `ActionSpec`.** `GET /heartbeat/schedules`'s
+  `actions` now carry `doc` (the run function's docstring), `levers`,
+  `choices` and a new `runs_as` — the agent an action hands its work to when
+  the action fixes that agent (`litellm.discovery` → litellm-manager,
+  `ea.contact` → ea). `runs_as` is a display literal pinned to the runtime
+  constant by a test, since a module-scope runtime import from the registry
+  would be circular. `tests/test_cc_routes_wire.py` pins the wire shape.
+- **The dialog renders it.** A built-in action's Execution section shows
+  "Runs as", the levers it reads or touches, and a collapsible "How it
+  works". A param with declared choices is a select; a blank param shows its
+  default as the placeholder. Every registry kind has a friendly label
+  (before, three did).
+- **Run history renders the result, not a JSON dump.** A firing's
+  `task_ids` become links that open the task on the board; the remaining
+  keys render as labelled facts (`backlog: kilo 3`, `credentials: kilo`), a
+  manual firing carries its trigger chip, and an empty result reads
+  "Nothing to do". Before, the whole result was stringified and clamped at
+  150 characters.
+
 ## 2026-09-13 — v2.29.0: the graph can be walked one episode at a time
 
 The Graph panel could be searched, shown whole, clustered and audited, but
@@ -128,7 +156,6 @@ against a backend that serves one.
   pulled each other's tables away mid-suite, which read as flaky asyncpg
   failures. Concurrent sessions in different worktrees can no longer
   collide. A deleted worktree leaves its database behind; drop it by hand.
-
 ## 2026-09-13 — v2.28.0: autodiscovery asks before it adds
 
 A gateway credential surfaced 377 catalog models at once, and autodiscovery

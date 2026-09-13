@@ -4,11 +4,84 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Play, Plus, Trash2, Pencil, ChevronDown, ChevronRight, CheckCircle, XCircle, Circle, Loader2, Settings2, Clock3 } from 'lucide-react';
-import { useCrons, type CronJob, type CronRun } from '../hooks/useCrons';
+import { useCrons, ACTION_LABELS, type CronJob, type CronRun } from '../hooks/useCrons';
 import { CronDialog } from './CronDialog';
 import { useSessionContext } from '@/contexts/SessionContext';
 
 type CronRowJob = CronJob;
+
+/** Keys whose value is a task id (or list of them) — rendered as links to the board. */
+const TASK_ID_KEYS = new Set(['task_ids', 'task_id', 'review_task_id']);
+/** Bookkeeping keys the operator never needs to read. */
+const HIDDEN_RESULT_KEYS = new Set(['drift', 'queued']);
+
+function taskIdsOf(result: Record<string, unknown>): string[] {
+  const ids: string[] = [];
+  for (const k of TASK_ID_KEYS) {
+    const v = result[k];
+    if (typeof v === 'string' && v) ids.push(v);
+    else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string' && x) ids.push(x);
+  }
+  return ids;
+}
+
+/** One labelled fact per result key; nested objects summarise to a count with the JSON on hover. */
+function factOf(key: string, value: unknown): string {
+  if (value === null || value === undefined) return `${key}: —`;
+  if (Array.isArray(value)) return `${key}: ${value.length === 0 ? 'none' : value.map(String).join(', ')}`;
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    // {credential: count} shapes (backlog) read best inline.
+    if (entries.every(([, v]) => typeof v === 'number' || typeof v === 'string')) {
+      return `${key}: ${entries.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`;
+    }
+    return `${key}: ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`;
+  }
+  return `${key}: ${String(value)}`;
+}
+
+function RunResult({ result, onOpenTask }: { result: Record<string, unknown>; onOpenTask?: (id: string) => void }) {
+  const taskIds = taskIdsOf(result);
+  const facts = Object.entries(result).filter(([k]) => !TASK_ID_KEYS.has(k) && !HIDDEN_RESULT_KEYS.has(k));
+  if (!taskIds.length && !facts.length) {
+    return <div className="text-[0.7rem] text-muted-foreground">Nothing to do.</div>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      {taskIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 text-[0.667rem] text-muted-foreground">
+          <span>{taskIds.length === 1 ? 'Task' : `${taskIds.length} tasks`}</span>
+          {taskIds.map((id) => onOpenTask ? (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onOpenTask(id)}
+              className="cockpit-badge min-h-6 px-2 font-mono text-[0.633rem] hover:bg-primary/10"
+              aria-label={`Open task ${id}`}
+            >
+              {id.slice(0, 8)}
+            </button>
+          ) : (
+            <span key={id} className="cockpit-badge min-h-6 px-2 font-mono text-[0.633rem]">{id.slice(0, 8)}</span>
+          ))}
+        </div>
+      )}
+      {facts.length > 0 && (
+        <ul className="flex flex-wrap gap-1">
+          {facts.map(([k, v]) => (
+            <li
+              key={k}
+              className="cockpit-badge min-h-6 min-w-0 max-w-full truncate px-2 text-[0.633rem]"
+              title={typeof v === 'object' && v !== null ? JSON.stringify(v, null, 1) : undefined}
+            >
+              {factOf(k, v)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 /** Convert cron-like schedule to human-readable string */
 function humanSchedule(job: CronJob): string {
@@ -79,8 +152,9 @@ function relativeUntil(ts: string): string {
   return remHours === 0 ? `in ${days}d` : `in ${days}d ${remHours}h`;
 }
 
-function CronRow({ job, onToggle, onRun, onDelete, onEdit, onFetchRuns }: {
+function CronRow({ job, onToggle, onRun, onDelete, onEdit, onFetchRuns, onOpenTask }: {
   job: CronRowJob;
+  onOpenTask?: (taskId: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onRun: (id: string) => Promise<boolean | undefined>;
   onDelete: (id: string) => void;
@@ -167,7 +241,7 @@ function CronRow({ job, onToggle, onRun, onDelete, onEdit, onFetchRuns }: {
   const executionLabel = job.payloadKind === 'agentTurn'
     ? 'Agent task'
     : job.actionKind
-      ? `Built-in: ${job.actionKind}`
+      ? `Built-in: ${ACTION_LABELS[job.actionKind] || job.actionKind}`
       : 'Main thread event';
   const targetTone = job.payloadKind === 'agentTurn' ? 'primary' : 'warning';
 
@@ -306,6 +380,9 @@ function CronRow({ job, onToggle, onRun, onDelete, onEdit, onFetchRuns }: {
                           {runOk ? <CheckCircle size={10} /> : <XCircle size={10} />}
                           {r.status}
                         </span>
+                        {r.trigger && r.trigger !== 'schedule' && (
+                          <span className="cockpit-badge min-h-6 px-2 text-[0.667rem]">{r.trigger}</span>
+                        )}
                         {r.duration !== undefined && (
                           <span className="cockpit-badge min-h-6 px-2 text-[0.667rem] tabular-nums">{Math.round(r.duration / 1000)}s</span>
                         )}
@@ -313,9 +390,11 @@ function CronRow({ job, onToggle, onRun, onDelete, onEdit, onFetchRuns }: {
                       {r.error && (
                         <div className="text-[0.7rem] text-red/80 break-words" title={r.error}>{r.error}</div>
                       )}
-                      {r.summary && (
+                      {r.result ? (
+                        <RunResult result={r.result} onOpenTask={onOpenTask} />
+                      ) : r.summary ? (
                         <div className="text-[0.7rem] leading-4.5 text-foreground/70 line-clamp-2">{r.summary.slice(0, 150)}{r.summary.length > 150 ? '…' : ''}</div>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -329,7 +408,7 @@ function CronRow({ job, onToggle, onRun, onDelete, onEdit, onFetchRuns }: {
 }
 
 /** Workspace tab listing cron jobs with create/edit/delete/toggle controls. */
-export function CronsTab() {
+export function CronsTab({ onOpenTask }: { onOpenTask?: (taskId: string) => void } = {}) {
   const { jobs, engine, actions, isLoading, error, fetchJobs, toggleJob, runJob, fetchRuns, addJob, updateJob, deleteJob, setEngineRunning } = useCrons();
   const { refreshSessions } = useSessionContext();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -533,6 +612,7 @@ export function CronsTab() {
               onDelete={deleteJob}
               onEdit={handleEdit}
               onFetchRuns={fetchRuns}
+              onOpenTask={onOpenTask}
             />
           );
           })}

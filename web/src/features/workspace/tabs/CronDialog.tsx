@@ -5,7 +5,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type SelectHTMLAttributes } from 'react';
 import { ChevronDown, Cpu, Gauge, X } from 'lucide-react';
 import { InlineSelect } from '@/components/ui/InlineSelect';
-import type { CronJob, CronActionSpec } from '../hooks/useCrons';
+import { ACTION_LABELS, paramDefault, type CronJob, type CronActionSpec } from '../hooks/useCrons';
 import { useSessionContext } from '@/contexts/SessionContext';
 import { useGatewayModelCatalog } from '@/hooks/useGatewayModelCatalog';
 
@@ -22,13 +22,6 @@ interface CronDialogProps {
 
 type ScheduleKind = 'cron' | 'every' | 'at';
 type DeliveryMode = 'none' | 'announce';
-
-/** Friendly labels for the built-in heartbeat actions; unknown kinds fall back to the kind itself. */
-const ACTION_LABELS: Record<string, string> = {
-  'feed.poll': 'Mail poll (built-in)',
-  'dispatch.window': 'Dispatcher drain window (built-in)',
-  'report.audit_agreement': 'Auditor agreement report (built-in)',
-};
 
 const INTERVAL_PRESETS = [
   { value: '300000', label: '5 minutes' },
@@ -498,7 +491,7 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
                 >
                   {!editingBuiltin && <option value="agentTurn">Agent task (assigned Task)</option>}
                   {(mode === 'create' || editingBuiltin) && builtinKinds.map((k) => (
-                    <option key={k} value={k}>{ACTION_LABELS[k] || k}</option>
+                    <option key={k} value={k}>{ACTION_LABELS[k] ? `${ACTION_LABELS[k]} (built-in)` : k}</option>
                   ))}
                 </CronSelect>
                 {mode === 'edit' && (
@@ -533,6 +526,40 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
                   ? `Agent tasks run in their own private cron session beneath ${agentName}'s main agent and keep the main thread clean.`
                   : actionSpec?.description || 'A built-in heartbeat action — an operator lever fired on a schedule.'}
               </div>
+              {!isAgentTurn && actionSpec && (
+                <div className="flex flex-col gap-2 text-[0.7rem] leading-4.5">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span className="cockpit-field-label">Runs as</span>
+                    {actionSpec.runs_as ? (
+                      <span className="cockpit-badge min-h-6 px-2 text-[0.667rem]" data-tone="primary">{actionSpec.runs_as}</span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {'agent_id' in actionSpec.params
+                          ? 'the agent named in its parameters'
+                          : 'no agent — plain code on the heartbeat, nothing tasked'}
+                      </span>
+                    )}
+                  </div>
+                  {(actionSpec.levers?.length ?? 0) > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <span className="cockpit-field-label">Reads / touches</span>
+                      <ul className="flex flex-wrap gap-1" aria-label="Levers">
+                        {actionSpec.levers!.map((l) => (
+                          <li key={l} className="cockpit-badge min-h-6 px-2 font-mono text-[0.633rem]">{l}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {actionSpec.doc && (
+                    <details className="group">
+                      <summary className="cockpit-field-label cursor-pointer select-none">How it works</summary>
+                      <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap cockpit-wrap rounded-lg border border-border/60 bg-background/40 p-2 font-sans text-[0.7rem] leading-4.5 text-foreground/80">
+                        {actionSpec.doc}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
             </SectionShell>
           </div>
 
@@ -566,13 +593,25 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
                     <label htmlFor={`cron-param-${param}`} className="cockpit-field-label">
                       {param}{actionSpec?.required.includes(param) ? '' : ' (optional)'}
                     </label>
-                    <input
-                      id={`cron-param-${param}`}
-                      type="text"
-                      value={actionParams[param] ?? ''}
-                      onChange={e => setActionParams(prev => ({ ...prev, [param]: e.target.value }))}
-                      className="cockpit-input cockpit-input-mono"
-                    />
+                    {actionSpec?.choices?.[param]?.length ? (
+                      <CronSelect
+                        id={`cron-param-${param}`}
+                        value={actionParams[param] ?? ''}
+                        onChange={e => setActionParams(prev => ({ ...prev, [param]: e.target.value }))}
+                      >
+                        <option value="">{actionSpec.required.includes(param) ? 'Pick one…' : 'Default'}</option>
+                        {actionSpec.choices[param].map((c) => <option key={c} value={c}>{c}</option>)}
+                      </CronSelect>
+                    ) : (
+                      <input
+                        id={`cron-param-${param}`}
+                        type="text"
+                        value={actionParams[param] ?? ''}
+                        onChange={e => setActionParams(prev => ({ ...prev, [param]: e.target.value }))}
+                        placeholder={paramDefault(doc) ? `default ${paramDefault(doc)}` : undefined}
+                        className="cockpit-input cockpit-input-mono"
+                      />
+                    )}
                     <span className="cockpit-field-hint">{doc}</span>
                   </div>
                 ))

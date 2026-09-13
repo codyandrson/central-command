@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import logging
@@ -1879,9 +1880,17 @@ async def list_heartbeat_schedules() -> dict:
     rows = await repo.list_heartbeat_schedules()
     return {
         "schedules": [await _heartbeat_schedule_view(r) for r in rows],
+        # The WHOLE spec, not a summary: the cockpit's cron dialog renders
+        # doc / levers / choices / runs_as for a built-in action, and a key
+        # dropped here is a section that silently never renders
+        # (tests/test_cc_routes_wire.py pins the shape).
         "actions": {
             k: {"description": s.description, "params": s.params,
-                "required": list(s.required)}
+                "required": list(s.required),
+                "doc": inspect.getdoc(s.run) or "",
+                "levers": list(s.levers),
+                "choices": {p: list(v) for p, v in s.choices.items()},
+                "runs_as": s.runs_as}
             for k, s in ACTIONS.items()
         },
     }

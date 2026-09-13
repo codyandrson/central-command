@@ -55,6 +55,20 @@ def test_heartbeat_never_imports_the_gate():
             assert banned not in source, f"{py.name} references {banned}"
 
 
+def test_runs_as_pins_the_agent_the_action_actually_tasks():
+    """`runs_as` is a display literal (a module-scope runtime import from the
+    registry would be circular); this pins each one to the constant the run
+    body passes to create_and_run_task, so a renamed agent cannot leave the
+    cockpit naming the old one."""
+    from central_command.runtime import ea, litellm_manager
+
+    assert hb_actions.ACTIONS["litellm.discovery"].runs_as == litellm_manager.AGENT_ID
+    assert hb_actions.ACTIONS["ea.contact"].runs_as == ea.AGENT_ID
+    for kind, spec in hb_actions.ACTIONS.items():
+        if "agent_id" in spec.params:
+            assert spec.runs_as is None, f"{kind} picks its agent from params — runs_as must not claim one"
+
+
 def test_action_registry_parity_with_the_lever_allowlist():
     """The registry is executable truth: every action's levers must be in this
     explicit allowlist. Extending the registry means extending this test in

@@ -48,6 +48,10 @@ export interface CronRun {
   duration?: number;
   error?: string;
   summary?: string;
+  /** What fired it: 'schedule' or 'manual' (Central Command heartbeat). */
+  trigger?: string;
+  /** The heartbeat action's structured result — task_ids, backlog, skipped… */
+  result?: Record<string, unknown>;
 }
 
 /** Central Command heartbeat engine state — enabled schedules are dormant while it's stopped. */
@@ -62,6 +66,34 @@ export interface CronActionSpec {
   description: string;
   params: Record<string, string>;
   required: string[];
+  /** The run function's docstring — how the lever actually works. */
+  doc?: string;
+  /** The integrations / levers the action may touch. */
+  levers?: string[];
+  /** Enum params: name → the only values it accepts (rendered as a select). */
+  choices?: Record<string, string[]>;
+  /** The agent the action hands work to, when the action fixes it. */
+  runs_as?: string | null;
+}
+
+/** Friendly labels for the built-in heartbeat actions; unknown kinds fall back to the kind itself. */
+export const ACTION_LABELS: Record<string, string> = {
+  'feed.poll': 'Mail poll',
+  'dispatch.window': 'Dispatcher drain window',
+  'source.walk': 'Source walk',
+  'wiki.freshness': 'Wiki freshness sweep',
+  'report.audit_agreement': 'Auditor agreement report',
+  'discussion.sweep': 'Stalled-discussion sweep',
+  'retry.sweep': 'Retry sweep',
+  'graph.verify_sweep': 'Graph verify sweep',
+  'sandbox.run_script': 'Sandbox script run',
+  'ea.contact': 'Executive assistant contact',
+  'litellm.discovery': 'LiteLLM model autodiscovery',
+};
+
+/** Pull "default N" out of a param's doc string so a blank field can show what it means. */
+export function paramDefault(doc: string): string | undefined {
+  return /default\s+([^\s,;)]+)/i.exec(doc)?.[1];
 }
 
 export function normalizeCronJob(j: Record<string, unknown>): CronJob {
@@ -202,6 +234,8 @@ export function useCrons() {
         duration: (r.durationMs as number) ?? (r.duration as number),
         error: r.error as string | undefined,
         summary: r.summary as string | undefined,
+        trigger: r.trigger as string | undefined,
+        result: r.result && typeof r.result === 'object' ? r.result as Record<string, unknown> : undefined,
       }));
     } catch {
       return [];

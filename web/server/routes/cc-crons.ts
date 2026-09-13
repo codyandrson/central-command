@@ -130,6 +130,10 @@ interface CcActionSpec {
   description: string;
   params: Record<string, string>;
   required: string[];
+  doc: string;
+  levers: string[];
+  choices: Record<string, string[]>;
+  runs_as: string | null;
 }
 
 interface CcEngineStatus {
@@ -399,8 +403,11 @@ app.get('/api/crons/:id/runs', rateLimitGeneral, async (c) => {
         timestamp: e.created_at,
         status: e.kind === 'heartbeat.error' ? 'error' : 'ok',
         error: e.kind === 'heartbeat.error' ? String(e.payload.error ?? '') : undefined,
-        summary: e.kind === 'heartbeat.completed'
-          ? `${String(e.payload.trigger ?? 'schedule')}: ${JSON.stringify(e.payload.result ?? {})}`
+        trigger: String(e.payload.trigger ?? 'schedule'),
+        // The action's own result object, unflattened — the tab renders
+        // task_ids as links and the rest as labelled facts, not a JSON dump.
+        result: e.kind === 'heartbeat.completed' && e.payload.result && typeof e.payload.result === 'object'
+          ? e.payload.result as Record<string, unknown>
           : undefined,
       }));
     return c.json({ ok: true, result: { entries } });

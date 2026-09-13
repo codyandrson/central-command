@@ -67,6 +67,24 @@ async def test_heartbeat_schedules_carry_every_field_the_crons_adapter_reads(mon
     assert "last_error" in sched, "without last_error a failed schedule's error text is unreadable"
 
 
+async def test_heartbeat_actions_carry_the_whole_spec_the_cron_dialog_renders(monkeypatch):
+    """CronDialog.tsx renders a built-in action's `doc` ("How it works"),
+    `levers` ("Reads / touches"), `choices` (enum params become a select) and
+    `runs_as` ("Runs as <agent>") — and the cockpit hand-declares its wire
+    types, so a key dropped here is a section that silently never renders."""
+    monkeypatch.setattr(repo, "list_heartbeat_schedules", lambda **k: _async([]))
+
+    out = await routes.list_heartbeat_schedules()
+
+    spec = out["actions"]["litellm.discovery"]
+    assert set(spec) == {"description", "params", "required", "doc", "levers", "choices", "runs_as"}
+    assert "STORED CREDENTIAL" in spec["doc"], "doc is the run function's docstring, the only real explanation"
+    assert "integrations.litellm.provider_catalog" in spec["levers"]
+    assert spec["runs_as"] == "litellm-manager"
+    assert out["actions"]["ea.contact"]["choices"]["kind"], "an enum param must reach the dialog as its choices"
+    assert out["actions"]["feed.poll"]["runs_as"] is None, "an action that tasks nobody says so"
+
+
 async def test_heartbeat_schedule_action_params_carry_the_task_create_fields(monkeypatch):
     """A `task.create` schedule's payload mapping (cc-crons.ts `mapSchedule`)
     reads `agent_id`/`instructions`/`model`/`thinking` off action_params — the

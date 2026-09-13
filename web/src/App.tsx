@@ -1213,7 +1213,7 @@ export default function App({ onLogout }: AppProps) {
         {viewMode === 'crons' && (
           <div className="shell-panel boot-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden rounded-[28px]">
             <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-xs bg-background">Loading…</div>}>
-              <CronsTab />
+              <CronsTab onOpenTask={openTaskInBoard} />
             </Suspense>
           </div>
         )}
