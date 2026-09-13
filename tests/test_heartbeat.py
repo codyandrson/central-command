@@ -961,9 +961,12 @@ def discovery_stubs(monkeypatch):
         return state["credentials"]
 
     async def fake_count_nonterminal_tasks_with_title_prefix(prefix):
-        # prefix is "LiteLLM autodiscovery: <credential> batch"
+        # prefix is "LiteLLM autodiscovery: <credential> batch" or "… review"
         for name, n in state["open_counts"].items():
             if prefix == f"LiteLLM autodiscovery: {name} batch":
+                return n
+        for name, n in state.get("open_reviews", {}).items():
+            if prefix == f"LiteLLM autodiscovery: {name} review":
                 return n
         return 0
 
@@ -1027,6 +1030,18 @@ def discovery_stubs(monkeypatch):
     return calls
 
 
+def _reviewed(stubs, credential="anthropic-main", review_id="t-review"):
+    """Pretend the credential's review task finished DONE: every pending entry
+    the last pass tasked for review now resolves as `reviewed` next pass."""
+    stubs["state"]["prior_tasks"].append(
+        {"id": review_id, "status": "DONE", "instructions": "",
+         "title": f"LiteLLM autodiscovery: {credential} review"})
+    for entry in stubs["state"]["snapshot"].get(credential, {}).values():
+        if entry.get("disposition") == "pending":
+            entry["review_task_id"] = review_id
+    stubs["tasks"].clear()
+
+
 async def test_no_credentials_stored_skips_everything(discovery_stubs):
     discovery_stubs["state"]["credentials"] = []
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
@@ -1072,6 +1087,79 @@ async def test_no_drift_creates_no_task(discovery_stubs):
     assert discovery_stubs["tasks"] == []
 
 
+async def test_new_models_go_to_one_review_task_that_registers_nothing(discovery_stubs):
+    state = discovery_stubs["state"]
+    state["catalog"] = [{"id": f"claude-{i}", "display_name": f"Claude {i}"} for i in range(12)]
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"batch_size": "5"})
+    assert out["drift"] is True and out["queued"] == 1
+    task = discovery_stubs["tasks"][0]
+    assert task["title"] == "LiteLLM autodiscovery: anthropic-main review"
+    assert "REGISTERS NOTHING" in task["instructions"]
+    assert "autodiscovery.skip" in task["instructions"]
+    assert "claude-11 — Claude 11" in task["instructions"]
+    snap = state["snapshot"]["anthropic-main"]
+    assert all(e["review_task_id"] == "task_discovery_stub_0" and "task_id" not in e
+               for e in snap.values())
+
+    # Review still open tomorrow: nothing new, the outstanding count reported.
+    state["open_reviews"] = {"anthropic-main": 1}
+    discovery_stubs["tasks"].clear()
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["queued"] == 0 and out["backlog"] == {"anthropic-main": 12}
+    assert discovery_stubs["tasks"] == []
+
+
+async def test_a_done_review_turns_the_survivors_into_add_tasks(discovery_stubs):
+    """The operator skipped some in the review; the skip landed on their
+    per-credential list; what is still missing is an agreed add."""
+    state = discovery_stubs["state"]
+    state["catalog"] = [{"id": f"claude-{i}"} for i in range(12)]
+    await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    _reviewed(discovery_stubs)
+    state["decisions"] = {"skip": [], "skip_by_credential": {
+        "anthropic-main": ["claude-0", "claude-1"], "other-cred": ["claude-2"]}}
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"batch_size": "5"})
+    assert out["queued"] == 2 and "backlog" not in out
+    titles = sorted(t["title"] for t in discovery_stubs["tasks"])
+    assert titles == ["LiteLLM autodiscovery: anthropic-main batch 1/2",
+                      "LiteLLM autodiscovery: anthropic-main batch 2/2"]
+    tasked = sorted(
+        m["id"] for t in discovery_stubs["tasks"]
+        for m in json.loads(t["instructions"].rsplit("```json\n", 1)[1].rstrip("`\n")))
+    assert tasked == sorted(f"claude-{i}" for i in range(2, 12))  # other-cred's skip is not ours
+    snap = state["snapshot"]["anthropic-main"]
+    assert "claude-0" not in snap  # skipped ids are the operator's, not tracked
+    assert snap["claude-5"]["task_id"].startswith("task_discovery_stub_")
+    assert snap["claude-5"]["review_task_id"] == "t-review"
+
+    # A FAILED add re-offers the id straight to an add-task, never to review.
+    state["prior_tasks"].append({"id": snap["claude-5"]["task_id"], "status": "FAILED",
+                                 "title": "LiteLLM autodiscovery: anthropic-main batch 1/2",
+                                 "instructions": ""})
+    state["prior_tasks"].append({"id": snap["claude-10"]["task_id"], "status": "DONE",
+                                 "title": "LiteLLM autodiscovery: anthropic-main batch 2/2",
+                                 "instructions": ""})
+    discovery_stubs["tasks"].clear()
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"batch_size": "5"})
+    assert [t["title"] for t in discovery_stubs["tasks"]] == [
+        "LiteLLM autodiscovery: anthropic-main batch 1/1"]
+    assert "review" not in discovery_stubs["tasks"][0]["title"]
+    assert state["snapshot"]["anthropic-main"]["claude-10"]["disposition"] == "skipped"
+
+
+async def test_a_failed_review_is_reviewed_again(discovery_stubs):
+    state = discovery_stubs["state"]
+    state["catalog"] = [{"id": "claude-a"}]
+    await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    state["prior_tasks"] = [{"id": "task_discovery_stub_0", "status": "CANCELLED",
+                             "title": "LiteLLM autodiscovery: anthropic-main review",
+                             "instructions": ""}]
+    discovery_stubs["tasks"].clear()
+    out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    assert out["queued"] == 1
+    assert discovery_stubs["tasks"][0]["title"] == "LiteLLM autodiscovery: anthropic-main review"
+
+
 async def test_drift_creates_one_task_carrying_the_findings(discovery_stubs):
     discovery_stubs["state"]["catalog"] = [{"id": "claude-new"}]
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
@@ -1082,6 +1170,13 @@ async def test_drift_creates_one_task_carrying_the_findings(discovery_stubs):
     task = discovery_stubs["tasks"][0]
     assert task["agent_id"] == "litellm-manager"
     assert task["actor"] == "heartbeat:s1"
+    assert task["title"] == "LiteLLM autodiscovery: anthropic-main review"
+    assert "claude-new" in task["instructions"]
+    assert "ask_operator(needs_discussion=True)" in task["instructions"]
+    # The registration procedure belongs to the add-task, not the review.
+    _reviewed(discovery_stubs)
+    await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    task = discovery_stubs["tasks"][0]
     assert task["title"] == "LiteLLM autodiscovery: anthropic-main batch 1/1"
     assert '"claude-new"' in task["instructions"]
     assert "supports_vision" in task["instructions"]
@@ -1159,7 +1254,7 @@ def test_maintenance_brief_instructs_on_errors_and_carries_no_missing():
     brief = hb_actions._maintenance_brief({"openai": {"error": "boom"}})
     assert "ask_operator" in brief
     assert "blind" in brief
-    assert "skip list" in brief
+    assert "autodiscovery.skip" in brief
     assert '"missing"' not in brief
 
 
@@ -1167,7 +1262,7 @@ def test_add_brief_carries_only_its_slice_and_skip_guidance():
     brief = hb_actions._add_brief("anthropic-main", [{"id": "claude-new"}])
     assert '"claude-new"' in brief
     assert "anthropic-main" in brief
-    assert "skip list" in brief
+    assert "recorded as skipped" in brief
     assert "shutdown" in brief or "deprecation" in brief
     assert '"missing"' not in brief  # the slice is bare models, not a findings wrapper
 
@@ -1182,10 +1277,12 @@ async def test_bad_batch_size_raises(discovery_stubs):
 
 
 async def test_large_missing_list_chunks_into_all_tasks_no_cap(discovery_stubs):
-    # 12 missing models, batch_size 5 -> three add tasks of 5/5/2, all
+    # 12 reviewed models, batch_size 5 -> three add tasks of 5/5/2, all
     # created in the same pass — the per-agent queue drains them, no
-    # per-pass cap any more.
+    # per-pass cap: the operator's review is what bounds the count.
     discovery_stubs["state"]["catalog"] = [{"id": f"claude-{i}"} for i in range(12)]
+    await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    _reviewed(discovery_stubs)
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"batch_size": "5"})
     assert out["drift"] is True
     assert len(out["task_ids"]) == 3
@@ -1203,7 +1300,7 @@ async def test_large_missing_list_chunks_into_all_tasks_no_cap(discovery_stubs):
 
 async def test_maintenance_task_created_first(discovery_stubs, monkeypatch):
     # An errored credential forces a maintenance task, created before any
-    # add-chunk task.
+    # review or add-chunk task.
     from central_command.integrations import litellm as litellm_client
 
     discovery_stubs["state"]["credentials"] = [
@@ -1222,7 +1319,7 @@ async def test_maintenance_task_created_first(discovery_stubs, monkeypatch):
     monkeypatch.setattr(litellm_client, "provider_catalog", fake_catalog)
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"batch_size": "5"})
     assert out["drift"] is True
-    assert len(out["task_ids"]) == 4  # 1 maintenance + 3 add chunks
+    assert len(out["task_ids"]) == 2  # 1 maintenance + 1 review
     assert discovery_stubs["tasks"][0]["title"] == "LiteLLM autodiscovery: maintenance"
     assert "provider answered 401" in discovery_stubs["tasks"][0]["instructions"]
     assert '"missing"' not in discovery_stubs["tasks"][0]["instructions"]
@@ -1233,6 +1330,8 @@ async def test_generation_guard_skips_credential_with_open_batch_task(discovery_
     # earlier pass — the guard reports the outstanding count as `backlog`
     # instead of creating anything new for that credential.
     discovery_stubs["state"]["catalog"] = [{"id": f"claude-{i}"} for i in range(3)]
+    await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    _reviewed(discovery_stubs)
     discovery_stubs["state"]["open_counts"] = {"anthropic-main": 1}
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out["drift"] is True
@@ -1385,19 +1484,22 @@ def test_bootstrap_snapshot_reads_prior_add_tasks():
 
 async def test_a_second_pass_does_not_retask_examined_models(discovery_stubs):
     """The daily re-examination of the same 60 dated snapshots, ended: pass 1
-    tasks the new model; its task finishes DONE without registering; pass 2
-    finds nothing to do; a catalog change on that model re-opens it."""
+    reviews the new model, pass 2 tasks the agreed add; that task finishes
+    DONE without registering; pass 3 finds nothing to do; a catalog change on
+    that model re-opens it (at review, since the decision may have moved)."""
     state = discovery_stubs["state"]
     state["catalog"] = [{"id": "claude-new", "display_name": "Claude New"}]
+    await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
+    _reviewed(discovery_stubs)
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out["queued"] == 1
     snap = state["snapshot"]["anthropic-main"]["claude-new"]
     assert snap["disposition"] == "pending" and snap["task_id"] == "task_discovery_stub_0"
 
     # The task finished; the agent proposed nothing.
-    state["prior_tasks"] = [{"id": "task_discovery_stub_0", "status": "DONE",
-                             "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
-                             "instructions": ""}]
+    state["prior_tasks"].append({"id": "task_discovery_stub_0", "status": "DONE",
+                                 "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
+                                 "instructions": ""})
     discovery_stubs["tasks"].clear()
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out == {"drift": False}
@@ -1413,6 +1515,7 @@ async def test_a_second_pass_does_not_retask_examined_models(discovery_stubs):
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out["queued"] == 1
     assert state["snapshot"]["anthropic-main"]["claude-new"]["reason"] == "changed"
+    assert discovery_stubs["tasks"][0]["title"] == "LiteLLM autodiscovery: anthropic-main review"
 
 
 async def test_a_registered_model_whose_entry_moved_is_a_maintenance_finding(discovery_stubs):
@@ -1439,5 +1542,5 @@ async def test_a_credential_without_a_snapshot_bootstraps_from_prior_tasks(disco
                              "instructions": brief}]
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out["queued"] == 1
-    assert '"claude-b"' in discovery_stubs["tasks"][0]["instructions"]
-    assert '"claude-a"' not in discovery_stubs["tasks"][0]["instructions"]
+    assert "claude-b" in discovery_stubs["tasks"][0]["instructions"]
+    assert "claude-a" not in discovery_stubs["tasks"][0]["instructions"]

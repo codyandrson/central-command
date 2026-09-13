@@ -53,6 +53,10 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # be present, the Executor says it must be the message's own.
     "mail.report_spam": ArgSpec(required=("provider_uuid",)),
     "mail.unsubscribe": ArgSpec(required=("provider_uuid", "url")),
+    # autodiscovery.skip (2026-09-13): the Executor subscripts both. The list
+    # is checked for shape only; that the ids exist in a catalog is not a
+    # world-state fact worth a call — an unknown id on the skip list is inert.
+    "autodiscovery.skip": ArgSpec(required=("credential_name", "model_ids")),
 }
 
 

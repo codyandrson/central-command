@@ -288,9 +288,12 @@ one's live model catalog (litellm_provider_catalog — fetched with THAT
 credential, NOT the proxy) against what the proxy has configured, using plain
 code, not you. Only on real drift does it hand you a task carrying the
 structured findings and the operating procedure — read that brief when it
-arrives; the per-run detail lives there, not here. A drift pass arrives as
-many small batched tasks rather than one big one, and your per-agent task
-queue works through them one at a time — a long queue of autodiscovery
+arrives; the per-run detail lives there, not here. New catalog ids reach you
+first as ONE REVIEW task per credential: you open a discussion, the operator
+settles which to add and which to skip, and the skips become a gated
+`autodiscovery.skip` proposal — the review registers nothing. The agreed adds
+then arrive as small batched add-tasks on a later pass, and your per-agent
+task queue works through them one at a time — a queue of autodiscovery
 tasks on your board is normal, not a backlog to rush.
 
 CANONICAL NAMING: a model_name is lowercase-kebab, family + version — the

@@ -988,6 +988,30 @@ async def _litellm_delete_model(args: dict, approver: str, proposer: str | None)
     return f"litellm model {args['model_id']} deleted"
 
 
+async def _autodiscovery_skip(args: dict, approver: str, proposer: str | None) -> str:
+    """Append catalog ids to ONE credential's never-add list in the
+    `autodiscovery_decisions` app setting (2026-09-13). Gated on purpose: the
+    operator settles add-vs-skip in a review discussion, and this is the
+    record of that answer — reviewed once more in the Inbox before it binds.
+    Per-credential because raw ids collide across providers (`gpt-4o` at
+    OpenAI and behind a gateway are different decisions); the legacy flat
+    `skip` list stays honoured, read-only."""
+    from central_command.db import repo
+
+    name = str(args["credential_name"])
+    ids = sorted({str(i) for i in args["model_ids"] if str(i).strip()})
+    if not ids:
+        raise ExecutorError("refusing autodiscovery.skip: model_ids is empty")
+    decisions = dict(await repo.get_app_setting("autodiscovery_decisions", {"skip": []}))
+    by_cred = dict(decisions.get("skip_by_credential") or {})
+    merged = sorted(set(by_cred.get(name) or []) | set(ids))
+    by_cred[name] = merged
+    decisions["skip_by_credential"] = by_cred
+    await repo.set_app_setting("autodiscovery_decisions", decisions)
+    return (f"autodiscovery: {len(ids)} catalog id(s) under credential {name!r} "
+            f"will never be offered again ({len(merged)} skipped for it in total)")
+
+
 async def _litellm_create_key(args: dict, approver: str, proposer: str | None) -> str:
     """Issue a virtual key. The client returns only a MASKED preview + token_id —
     the plaintext key never comes back here, so it cannot reach result_text, the
@@ -1999,6 +2023,7 @@ HANDLERS = {
     "litellm.add_model": _litellm_add_model,
     "litellm.update_model": _litellm_update_model,
     "litellm.delete_model": _litellm_delete_model,
+    "autodiscovery.skip": _autodiscovery_skip,
     "litellm.create_key": _litellm_create_key,
     "litellm.update_key": _litellm_update_key,
     "litellm.delete_key": _litellm_delete_key,

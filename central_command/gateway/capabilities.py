@@ -891,6 +891,31 @@ REGISTRY: list[Capability] = [
             "Gmail's own button."
         ),
     ),
+    Capability(
+        name="autodiscovery.skip",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "none to the world — a control-plane bookkeeping write; a wrong "
+            "skip hides a catalog model from autodiscovery until the operator "
+            "edits the list or the provider changes the entry"
+        ),
+        holder="Executor",
+        route=(
+            "db/repo.set_app_setting('autodiscovery_decisions') — the per-"
+            "credential never-add list `heartbeat.actions._litellm_discovery` "
+            "subtracts before it offers anything"
+        ),
+        arguments=["credential_name", "model_ids", "reason?"],
+        description=(
+            "Record the operator's decision, settled in an autodiscovery "
+            "REVIEW discussion, that these catalog ids under one credential "
+            "are never to be registered. Gated on purpose (2026-09-13): the "
+            "agent transcribes the answer, the Inbox is where the operator "
+            "confirms the transcription before it binds. Per-credential "
+            "because raw ids collide across providers."
+        ),
+    ),
     # --- ungated reads: layered context, no approval needed -------------------
     Capability(
         name="loe.list",

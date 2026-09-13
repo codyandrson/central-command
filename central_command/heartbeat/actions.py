@@ -759,6 +759,15 @@ def reconcile_snapshot(
     of 60 dated snapshots. A pending id whose task finished DONE without
     registering it becomes skipped; nothing else is inferred.
 
+    REVIEW (2026-09-13): a new id is first offered to a REVIEW task (entry
+    carries `review_task_id`), where the operator settles add-vs-skip. Skips
+    land on the operator's skip list and leave `missing_ids`; what remains
+    when that review is DONE comes back with reason `reviewed` — the
+    caller's cue to task the ADD. `review_task_id` rides along on the add
+    entry so a FAILED add re-offers the id as `reviewed`, never back to
+    review. `to_task` therefore carries both kinds; the caller partitions
+    on the entry's reason.
+
     Returns `{"snapshot", "to_task": [catalog entries], "changed": [...]}`
     where `changed` lists REGISTERED ids whose fingerprint moved (a
     maintenance finding — e.g. a shutdown date announced), and `snapshot` is
@@ -785,20 +794,33 @@ def reconcile_snapshot(
             reason = "new"
         elif prev.get("fp") not in (None, fp):
             reason = "changed"
-        elif prev.get("disposition") == "pending":
-            status = task_statuses.get(prev.get("task_id") or "")
+        elif prev.get("disposition") == "pending" and prev.get("task_id"):
+            status = task_statuses.get(prev["task_id"])
             if status == "DONE":
                 snapshot[cid] = {"fp": fp, "disposition": "skipped"}
                 continue
             if status in ("FAILED", "CANCELLED", None):
-                reason = "retask"
+                reason = "reviewed" if prev.get("review_task_id") else "retask"
             else:
                 snapshot[cid] = {**prev, "fp": fp}  # still being examined
                 continue
+        elif prev.get("disposition") == "pending" and prev.get("review_task_id"):
+            status = task_statuses.get(prev["review_task_id"])
+            if status == "DONE":
+                reason = "reviewed"  # still missing after the review: an agreed add
+            elif status in ("FAILED", "CANCELLED", None):
+                reason = "retask"  # review never happened — review again
+            else:
+                snapshot[cid] = {**prev, "fp": fp}  # under review
+                continue
+        elif prev.get("disposition") == "pending":
+            reason = "retask"  # pending under no task at all
         else:
             snapshot[cid] = {**prev, "fp": fp}  # skipped, unchanged: never shown again
             continue
         snapshot[cid] = {"fp": fp, "disposition": "pending", "reason": reason}
+        if reason == "reviewed":
+            snapshot[cid]["review_task_id"] = prev.get("review_task_id")
         to_task.append(entry)
     return {"snapshot": snapshot, "to_task": to_task, "changed": changed}
 
@@ -848,9 +870,9 @@ _DISCOVERY_NAMING = (
     "(`claude-sonnet-4-5-20250929` -> `claude-sonnet-4-5`). When two "
     "providers offer the same underlying model, they share ONE canonical "
     "model_name — that sharing IS the routing group. If a mapping is "
-    "ambiguous, `ask_operator`; a 'never add this one' answer belongs in "
-    "the operator's own skip list (the `autodiscovery_decisions` app "
-    "setting) — note it for them to record, you don't write it yourself.\n\n"
+    "ambiguous, `ask_operator`; a 'never add this one' answer is recorded "
+    "by an `autodiscovery.skip` proposal (gated, one per credential) — "
+    "normally from the REVIEW task where the operator settles it.\n\n"
 )
 
 
@@ -898,12 +920,56 @@ def _add_brief(credential_name: str, models: list[dict]) -> str:
         "MEMORY: a model you do NOT propose is recorded as skipped and will "
         "not be shown to you again unless its catalog entry changes, so a "
         "skip needs no bookkeeping proposal — just don't propose it.\n\n"
-        "SKIP CANDIDATES: if any model in this slice looks like a dated "
-        "snapshot of an undated alias already covered elsewhere, or carries "
-        "an imminent shutdown/deprecation date, don't propose it — recommend "
-        "it for the operator's skip list (`autodiscovery_decisions`) via "
-        "ask_operator or in your task result instead.\n\n"
+        "SKIP CANDIDATES: the operator already agreed to add this slice in "
+        "the review discussion. If registering one still looks wrong (a dated "
+        "snapshot of an alias already covered elsewhere, an imminent "
+        "shutdown), don't propose it and say why in your result — it is "
+        "recorded as skipped.\n\n"
         "```json\n" + json.dumps(models, indent=2, default=str) + "\n```"
+    )
+
+
+def _review_brief(credential_name: str, models: list[dict]) -> str:
+    """One credential's NEW catalog ids, for the operator to settle add-vs-
+    skip with the agent in a discussion (2026-09-13). Compact on purpose: a
+    gateway credential can surface hundreds of ids at once, and this brief
+    registers nothing — the agreed adds become one add-task per model on the
+    next pass, once this task is DONE."""
+    lines = []
+    for m in models:
+        label = str(m.get("id"))
+        if m.get("display_name"):
+            label += f" — {m['display_name']}"
+        if m.get("shutdown_date"):
+            label += f" (shutdown {m['shutdown_date']})"
+        lines.append(label)
+    return (
+        _DISCOVERY_INTRO
+        + _DISCOVERY_NAMING
+        + f"NEW under credential {credential_name!r}: {len(models)} catalog "
+        "model(s) the proxy does not have and nobody has decided on yet. "
+        "This task REGISTERS NOTHING. Its job is the decision:\n\n"
+        "1. Group the list by vendor prefix / model family and form a "
+        "recommendation per group (add, skip, or ask) — dated snapshots of an "
+        "undated alias, imminent shutdowns, and non-chat modes the operator "
+        "has no use for are the usual skips.\n"
+        "2. Open a discussion with `ask_operator(needs_discussion=True)`: put "
+        "the grouped list and your recommendation in the question, and settle "
+        "with the operator which ids to ADD and which to SKIP. Answers come "
+        "in patterns ('all anthropic, skip the rest') — resolve each pattern "
+        "to exact ids yourself and read the result back before proposing.\n"
+        "3. Propose ONE `autodiscovery.skip` (via propose_litellm_change, "
+        "credential_name = this credential, model_ids = exactly the agreed "
+        "skips, reason = the operator's words). It is gated: they approve it "
+        "in the Inbox like any change.\n"
+        "4. `conclude_discussion`, then end with a result naming the agreed "
+        "ADDS. Do NOT register them here: once this task is DONE the next "
+        "discovery pass hands you one add-task per agreed model, each with "
+        "the full registration procedure.\n\n"
+        "If the operator wants none of them, propose the skip for the whole "
+        "list. If they do not settle a group, leave it OUT of the skip — an "
+        "undecided id is reviewed again next pass, a skipped one never is.\n\n"
+        + "\n".join(lines) + "\n"
     )
 
 
@@ -974,16 +1040,17 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
 
     A large drift is split (2026-08-20b) so one pass never hands the agent a
     single sprawling task: an optional MAINTENANCE task (errors + stale +
-    unhealthy, all credentials) plus one ADD task per `batch_size`-sized
-    chunk of one credential's `missing` list. Every chunk becomes a task in
-    the SAME pass now (2026-08-21) — there is no per-pass cap any more,
-    because the per-agent task queue (`api/routes._agent_task_lock`) drains
-    them one at a time regardless of how many land on the board at once.
+    unhealthy, all credentials) plus, per credential, ONE REVIEW task for
+    every id nobody has decided on (2026-09-13: the agent opens a discussion
+    and the operator settles add-vs-skip; skips become a gated
+    `autodiscovery.skip`), and one ADD task per `batch_size`-sized chunk of
+    the ids a DONE review left standing. Every chunk becomes a task in the
+    SAME pass (2026-08-21); the operator's review is what bounds the count.
 
     GENERATION GUARD: before tasking a credential's missing list, this checks
-    for still-open ("LiteLLM autodiscovery: <credential> batch …") tasks from
-    an earlier pass. If any are still open, nothing new is created for that
-    credential this pass — a daily tick mid-drain must not re-task models
+    for still-open ("LiteLLM autodiscovery: <credential> batch …" / "… review")
+    tasks from an earlier pass. If any are still open, nothing new of that
+    kind is created for that credential this pass — a daily tick mid-drain must not re-task models
     that are already queued or in flight — and the credential's outstanding
     count is reported under `backlog` instead."""
     from central_command.db import repo
@@ -1006,7 +1073,8 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         return {"skipped": "no credentials stored"}
 
     decisions = await repo.get_app_setting("autodiscovery_decisions", {"skip": []})
-    skip = decisions.get("skip") or []
+    skip_all = list(decisions.get("skip") or [])
+    skip_by_cred = decisions.get("skip_by_credential") or {}
     snapshots = dict(await repo.get_app_setting(SNAPSHOT_SETTING, {}))
 
     deployments = (await litellm_client.list_models())["models"]
@@ -1081,6 +1149,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         except Exception as e:  # noqa: BLE001 — one bad credential must not block the rest
             findings[name] = {"error": f"{type(e).__name__}: {e}"}
             continue
+        skip = skip_all + list(skip_by_cred.get(name) or [])
         drift = compute_discovery_drift(name, cred.get("provider"), catalog, deployments, unhealthy, skip)
         # MEMORY (2026-09-11): only what is new, changed, or re-examinable
         # reaches the agent. `missing` is the raw diff; the snapshot decides
@@ -1096,7 +1165,10 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         if not previous:
             previous = bootstrap_snapshot(await repo.tasks_with_title_prefix(
                 f"LiteLLM autodiscovery: {name} batch"))
-        task_ids_named = {e.get("task_id") for e in previous.values() if e.get("task_id")}
+        task_ids_named = {
+            tid for e in previous.values()
+            for tid in (e.get("task_id"), e.get("review_task_id")) if tid
+        }
         statuses: dict[str, str | None] = {}
         for tid in task_ids_named:
             row = await repo.get_task(tid)
@@ -1147,19 +1219,38 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
 
     backlog: dict[str, int] = {}
     for name, d in findings.items():
-        missing = d.get("missing") or []
+        entries = snapshots.get(name, {})
+        to_review = [m for m in (d.get("missing") or [])
+                     if entries.get(str(m.get("id")), {}).get("reason") != "reviewed"]
+        missing = [m for m in (d.get("missing") or [])
+                   if entries.get(str(m.get("id")), {}).get("reason") == "reviewed"]
+        # Generation guards, one per task kind: a still-open review or batch
+        # task from an earlier pass means this credential is already queued
+        # or in flight for that kind — task nothing new of it this pass and
+        # report what's outstanding instead. An entry not tasked this pass
+        # keeps its snapshot row, which the reconciler re-offers next pass.
+        if to_review:
+            if await repo.count_nonterminal_tasks_with_title_prefix(
+                f"LiteLLM autodiscovery: {name} review"
+            ):
+                backlog[name] = backlog.get(name, 0) + len(to_review)
+            else:
+                result = await create_and_run_task(
+                    _review_brief(name, to_review), f"LiteLLM autodiscovery: {name} review",
+                    litellm_manager.AGENT_ID, actor=f"heartbeat:{schedule_id}", background=True,
+                )
+                if result.get("task_id"):
+                    task_ids.append(result["task_id"])
+                    for m in to_review:
+                        entry = entries.get(str(m.get("id")))
+                        if entry is not None:
+                            entry["review_task_id"] = result["task_id"]
         if not missing:
             continue
-        # Generation guard: a still-open batch task from an earlier pass
-        # means this credential is already queued or in flight — task
-        # nothing new for it this pass, report what's outstanding instead.
-        open_count = await repo.count_nonterminal_tasks_with_title_prefix(
+        if await repo.count_nonterminal_tasks_with_title_prefix(
             f"LiteLLM autodiscovery: {name} batch"
-        )
-        if open_count:
-            backlog[name] = len(missing)
-            for m in missing:  # not tasked this pass: forget, so the next pass re-offers them
-                snapshots.get(name, {}).pop(str(m.get("id")), None)
+        ):
+            backlog[name] = backlog.get(name, 0) + len(missing)
             continue
         chunks = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
         n = len(chunks)
@@ -1415,9 +1506,10 @@ ACTIONS: dict[str, ActionSpec] = {
             kind="litellm.discovery",
             description=(
                 "Diff each STORED CREDENTIAL's live model catalog against the "
-                "LiteLLM proxy's configured deployments; hand the litellm-"
-                "manager small batched tasks only when something actually "
-                "drifted."
+                "LiteLLM proxy's configured deployments; on real drift hand "
+                "the litellm-manager a review task per credential (the "
+                "operator settles add-vs-skip in a discussion) and one small "
+                "add-task per agreed model."
             ),
             params={
                 "batch_size": "models per add-task, default 1",

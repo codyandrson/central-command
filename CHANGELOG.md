@@ -4,6 +4,37 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.28.0: autodiscovery asks before it adds
+
+A gateway credential surfaced 377 catalog models at once, and autodiscovery
+did what it was built to do: one add-task per model, 262 of them queued on
+the litellm-manager's board and 99 registration proposals waiting in the
+Inbox. The per-pass cap had been removed on 2026-08-21 because the agent's
+task queue drains any count one at a time — true, and beside the point: the
+count that mattered was the operator's, not the queue's.
+
+New catalog ids now reach the agent first as ONE review task per credential.
+The brief carries the compact id list and registers nothing; the agent
+groups it by family, opens a discussion (`ask_operator(needs_discussion=True)`),
+and the operator settles which to add and which to skip. The skips become a
+gated `autodiscovery.skip` proposal — a new capability on the
+`litellm-admin-propose` pack, executed by the Executor into the
+`autodiscovery_decisions` app setting, per credential (`skip_by_credential`)
+because raw ids collide across providers. Once the review is DONE, the next
+pass hands out the agreed adds as the same small add-tasks as before, one
+model each. A day with nothing new creates nothing, as the snapshot already
+guaranteed.
+
+- The snapshot entry carries `review_task_id` alongside `task_id`; a DONE
+  review re-offers what is still missing as `reviewed` (the add cue), a
+  FAILED add re-offers as `reviewed` too, a FAILED or CANCELLED review is
+  reviewed again. Both generation guards (`… review`, `… batch`) hold per
+  credential.
+- The legacy flat `skip` list stays honoured; `skip_by_credential` is added
+  next to it, never replacing it.
+- Operator follow-up on an instance mid-wave: cancel the queued add-tasks
+  from earlier passes; the next pass offers those ids for review.
+
 ## 2026-09-12 — v2.27.3: autodiscovery can read an OpenAI-style gateway
 
 Storing an OpenAI-compatible credential the way every such gateway documents
