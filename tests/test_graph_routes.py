@@ -408,3 +408,54 @@ async def test_a_refused_curation_write_emits_nothing(monkeypatch):
     with pytest.raises(Exception):
         await routes.graph_node_delete("nope")
     assert emitted == [], "a write that never landed must not go on the record"
+
+
+async def test_episode_walk_wire_shape(monkeypatch):
+    """The episode walk (2026-09-13) declares its own interfaces over these
+    two payloads: the index row and the subgraph whose nodes/edges must be
+    the SAME shape the canvas already renders. A field missing here is
+    invisible to tsc and every frontend test."""
+    from fastapi import HTTPException
+
+    index_row = {
+        "uuid": "ep-1", "name": "mail 42", "source_description": "gmail",
+        "group_id": "central_command", "created_at": "2026-09-13T00:00:00+00:00",
+        "valid_at": None, "entity_count": 3,
+    }
+    seen = {}
+
+    async def fake_index(group_id, limit):
+        seen["index"] = (group_id, limit)
+        return [index_row]
+
+    async def fake_subgraph(uuid):
+        seen["subgraph"] = uuid
+        if uuid != "ep-1":
+            return None
+        return {
+            "episode": {**index_row, "content": "the text"},
+            "nodes": [{"uuid": "n1", "name": "Jane Doe", "labels": ["Entity", "Person"],
+                       "summary": "", "group_id": "central_command"}],
+            "edges": [{"uuid": "e1", "source": "n1", "target": "n2", "name": "KNOWS",
+                       "fact": "f", "valid_at": None, "invalid_at": None,
+                       "created_at": "2026-09-13T00:00:00+00:00", "invalid": False}],
+        }
+
+    monkeypatch.setattr(neo4j_reader, "episode_index", fake_index)
+    monkeypatch.setattr(neo4j_reader, "episode_subgraph", fake_subgraph)
+
+    index = await routes.graph_episode_index(group_id="central_command", limit=99999)
+    assert seen["index"] == ("central_command", 5000)  # clamped
+    assert index == {"episodes": [index_row]}
+
+    sg = await routes.graph_episode_subgraph(uuid="ep-1")
+    assert set(sg) == {"episode", "nodes", "edges"}
+    assert sg["episode"]["content"] == "the text"
+    assert set(sg["nodes"][0]) == {"uuid", "name", "labels", "summary", "group_id"}
+    assert set(sg["edges"][0]) == {
+        "uuid", "source", "target", "name", "fact", "valid_at", "invalid_at", "created_at", "invalid",
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        await routes.graph_episode_subgraph(uuid="nope")
+    assert exc.value.status_code == 404

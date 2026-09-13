@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.29.0: the graph can be walked one episode at a time
+
+The Graph panel could be searched, shown whole, clustered and audited, but
+not stepped through: reviewing what a week of ingestion did to the graph
+meant already knowing what to search for. The unit that grows during use,
+and the one place extraction errors enter, is the episode.
+
+- **Walk** in the Graph toolbar opens an episode walk: newest episode first,
+  its source text in a side panel, and exactly the entities and
+  relationships it produced on the canvas — previous / next, or jump from
+  the list. Each step replaces the canvas; editing goes through the same
+  detail drawer as any other selection. Nothing is written to the graph and
+  no "reviewed" mark exists — this is a navigation view, by decision.
+- Two read-only bolt routes back it, `/graph/episodes/index` and
+  `/graph/episodes/subgraph`, same node/edge wire shape as the neighbourhood
+  read (a backend test pins it). The as-of filter does not apply to a walk
+  step: an episode's subgraph is what it produced, whenever.
 ## 2026-09-13 — v2.28.4: the output ceiling is the model's, not the deployment's
 
 Every live run sent one `max_tokens` — the deployment ceiling, sized to the

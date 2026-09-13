@@ -3017,6 +3017,32 @@ async def graph_provenance(uuid: str) -> dict:
     return {"episodes": episodes}
 
 
+@router.get("/graph/episodes/index")
+async def graph_episode_index(group_id: str | None = None, limit: int = 500) -> dict:
+    """The episode walk's table of contents: every episode (or one group's),
+    newest first, with how many entities each mentions. Bolt-read, not the
+    MCP `get_episodes` the memory panel uses — this one needs no scope logic,
+    the operator sees every partition when auditing."""
+    try:
+        episodes = await neo4j_reader.episode_index(group_id, max(1, min(limit, 5000)))
+    except Exception as e:
+        raise HTTPException(503, f"graph unavailable: {e}") from e
+    return {"episodes": episodes}
+
+
+@router.get("/graph/episodes/subgraph")
+async def graph_episode_subgraph(uuid: str) -> dict:
+    """One episode's text plus exactly the entities and relationships it
+    produced — the review unit of the episode walk."""
+    try:
+        result = await neo4j_reader.episode_subgraph(uuid)
+    except Exception as e:
+        raise HTTPException(503, f"graph unavailable: {e}") from e
+    if result is None:
+        raise HTTPException(404, "no such episode")
+    return result
+
+
 @router.get("/graph/audit")
 async def graph_audit(group_id: str | None = None, threshold: float = 0.87) -> dict:
     """Read-only graph quality report: duplicate candidates, duplicate edges,

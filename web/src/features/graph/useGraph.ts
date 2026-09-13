@@ -39,6 +39,23 @@ export interface GraphEpisode {
   content_preview: string;
 }
 
+/** One row of the episode walk's index (`/api/graph/episodes/index`). */
+export interface EpisodeIndexRow {
+  uuid: string;
+  name: string;
+  source_description: string;
+  group_id: string;
+  created_at: string | null;
+  valid_at: string | null;
+  entity_count: number;
+}
+
+export interface EpisodeSubgraph {
+  episode: EpisodeIndexRow & { content: string };
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
 export interface GraphGroupScope {
   id: string;
   scope: 'public' | 'private';
@@ -193,6 +210,33 @@ export function useGraph() {
     }
   }, []);
 
+  // --- Episode walk (2026-09-13) ------------------------------------------
+  const episodeIndex = useCallback(async (groupId?: string): Promise<EpisodeIndexRow[]> => {
+    try {
+      const params = new URLSearchParams();
+      if (groupId) params.set('group_id', groupId);
+      const qs = params.toString();
+      const result = await fetchResult<{ episodes: EpisodeIndexRow[] }>(`/api/graph/episodes/index${qs ? `?${qs}` : ''}`);
+      setError(null);
+      return result.episodes;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return [];
+    }
+  }, []);
+
+  const episodeSubgraph = useCallback(async (uuid: string): Promise<EpisodeSubgraph | null> => {
+    try {
+      const params = new URLSearchParams({ uuid });
+      const result = await fetchResult<EpisodeSubgraph>(`/api/graph/episodes/subgraph?${params.toString()}`);
+      setError(null);
+      return result;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }, []);
+
   const audit = useCallback(async (groupId?: string, threshold = 0.87): Promise<GraphAudit | null> => {
     try {
       const params = new URLSearchParams({ threshold: String(threshold) });
@@ -277,6 +321,7 @@ export function useGraph() {
 
   return {
     status, error, fetchStatus, search, neighborhood, provenance, saveSettings, loadAll, audit,
+    episodeIndex, episodeSubgraph,
     entityTypes, createNode, updateNode, deleteNode,
     createEdge, updateEdge, deleteEdge, mergeNodes,
   };

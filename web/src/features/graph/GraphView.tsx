@@ -13,11 +13,12 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import cytoscape, { type Core, type NodeSingular, type EdgeSingular } from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import expandCollapse from 'cytoscape-expand-collapse';
-import { Waypoints, Search, X, AlertTriangle, Plus, ShieldAlert, Boxes } from 'lucide-react';
+import { Waypoints, Search, X, AlertTriangle, Plus, ShieldAlert, Boxes, Footprints } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useGraph, type GraphNode, type GraphEdge, type GraphEpisode, type GraphGroupScope } from './useGraph';
 import { AuditPanel } from './AuditPanel';
+import { EpisodeWalk } from './EpisodeWalk';
 import { communitiesFrom } from './clustering';
 
 cytoscape.use(fcose);
@@ -710,6 +711,7 @@ export function GraphView() {
   const [loadingAll, setLoadingAll] = useState(false);
   const [truncated, setTruncated] = useState(false);
   const [clustered, setClustered] = useState(false);
+  const [walking, setWalking] = useState(false);
   // Mirrors nodeDataRef as STATE, because the merge/relate pickers have to
   // re-render when the canvas gains a node; a ref alone never triggers that.
   const [loadedNodes, setLoadedNodes] = useState<GraphNode[]>([]);
@@ -853,7 +855,7 @@ export function GraphView() {
   // Tracks how the canvas was populated ('all' via Show all, 'neighborhood'
   // via search + expansion) so the as-of effect below knows which fetch to
   // re-run rather than guessing.
-  const viewModeRef = useRef<'neighborhood' | 'all'>('neighborhood');
+  const viewModeRef = useRef<'neighborhood' | 'all' | 'episode'>('neighborhood');
 
   // Re-run whichever view is showing when the as-of filter changes, so the
   // temporal view stays live rather than only affecting future loads.
@@ -862,6 +864,8 @@ export function GraphView() {
     if (asOfRef.current === asOf) return;
     asOfRef.current = asOf;
     if (nodeDataRef.current.size === 0) return;
+    // An episode's subgraph is what it produced, whenever — as-of never applies.
+    if (viewModeRef.current === 'episode') return;
     void (async () => {
       if (viewModeRef.current === 'all') {
         const { nodes, edges, truncated } = await loadAll(groupId || undefined, asOf || undefined);
@@ -964,6 +968,14 @@ export function GraphView() {
     if (nodes[0]) setSelection({ kind: 'node', node: nodes[0] });
     for (const n of nodes) void expandNode(n.uuid);
   }, [mergeIn, expandNode]);
+
+  /** The episode walk REPLACES the canvas each step: the point is to see
+   *  exactly what one episode produced, not what was already loaded. */
+  const loadEpisode = useCallback((nodes: GraphNode[], edges: GraphEdge[]) => {
+    viewModeRef.current = 'episode';
+    rebuild(nodes, edges);
+    setTruncated(false);
+  }, [rebuild]);
 
   const groupOptions = useMemo(() => status?.groups ?? [], [status]);
 
@@ -1202,6 +1214,15 @@ export function GraphView() {
         <Button
           type="button"
           size="sm"
+          variant={walking ? 'default' : 'outline'}
+          onClick={() => { setResults([]); setWalking((v) => !v); }}
+          title="Step through the graph one episode at a time: its source text beside what it produced"
+        >
+          <Footprints size={12} aria-hidden="true" /> Walk
+        </Button>
+        <Button
+          type="button"
+          size="sm"
           variant="outline"
           onClick={() => setAuditing((v) => !v)}
           title="Duplicate candidates and structural health, read-only"
@@ -1224,10 +1245,24 @@ export function GraphView() {
           shape would overwrite the two-pane one. */}
       <SplitGroup
         id="cc-graph-results"
-        panelIds={results.length > 0 ? ['results', 'canvas'] : ['canvas']}
+        panelIds={walking ? ['walk', 'canvas'] : results.length > 0 ? ['results', 'canvas'] : ['canvas']}
         className="relative min-h-0 flex-1"
       >
-        {results.length > 0 && (
+        {walking && (
+          <>
+            <Panel id="walk" defaultSize={320} minSize={220} maxSize={560} className="border-r border-border/40">
+              <EpisodeWalk
+                groupId={groupId}
+                episodeIndex={graph.episodeIndex}
+                episodeSubgraph={graph.episodeSubgraph}
+                onLoad={loadEpisode}
+                onClose={() => setWalking(false)}
+              />
+            </Panel>
+            <SplitSeparator inset={false} />
+          </>
+        )}
+        {!walking && results.length > 0 && (
           <>
             <Panel id="results" defaultSize={260} minSize={180} maxSize={480} className="border-r border-border/40">
               {results.map((n) => (

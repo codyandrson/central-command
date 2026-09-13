@@ -250,6 +250,90 @@ async def provenance(uuid: str) -> list[dict]:
     return episodes
 
 
+async def episode_index(group_id: str | None, limit: int) -> list[dict]:
+    """Every Episodic node (or one group's), newest first — the order the
+    episode walk steps through. An episode is the unit that GROWS during use
+    and the one place extraction errors enter, so "review what each episode
+    produced" is the maintenance loop (D-graph-walk 2026-09-13). Content is
+    left out here — the walk fetches one episode's text with its subgraph."""
+    return [
+        {**dict(row), "created_at": _iso(row["created_at"]), "valid_at": _iso(row["valid_at"])}
+        for row in await _read(
+            """
+            MATCH (e:Episodic)
+            WHERE $group_id IS NULL OR e.group_id = $group_id
+            OPTIONAL MATCH (e)-[:MENTIONS]->(n:Entity)
+            WITH e, count(n) AS entity_count
+            RETURN e.uuid AS uuid, e.name AS name, e.source_description AS source_description,
+                   e.group_id AS group_id, e.created_at AS created_at, e.valid_at AS valid_at,
+                   entity_count
+            ORDER BY e.created_at DESC, e.uuid
+            LIMIT $limit
+            """,
+            group_id=group_id, limit=limit,
+        )
+    ]
+
+
+async def episode_subgraph(uuid: str) -> dict | None:
+    """One episode's source text beside exactly what it produced: the entities
+    it MENTIONS and the RELATES_TO edges whose `episodes` list names it. Same
+    node/edge wire shape as `neighborhood`, so the canvas renders it unchanged.
+    None when no such episode exists."""
+    ep_rows = await _read(
+        """
+        MATCH (e:Episodic {uuid: $uuid})
+        RETURN e.uuid AS uuid, e.name AS name, e.source_description AS source_description,
+               e.group_id AS group_id, e.created_at AS created_at, e.valid_at AS valid_at,
+               e.content AS content
+        """,
+        uuid=uuid,
+    )
+    if not ep_rows:
+        return None
+    ep = ep_rows[0]
+    node_rows = await _read(
+        """
+        MATCH (:Episodic {uuid: $uuid})-[:MENTIONS]->(n:Entity)
+        RETURN DISTINCT n.uuid AS uuid, n.name AS name, labels(n) AS labels,
+               n.summary AS summary, n.group_id AS group_id
+        ORDER BY n.name
+        """,
+        uuid=uuid,
+    )
+    edge_rows = await _read(
+        """
+        MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity)
+        WHERE $uuid IN e.episodes
+        RETURN e.uuid AS uuid, e.source_node_uuid AS source, e.target_node_uuid AS target,
+               e.name AS name, e.fact AS fact, e.valid_at AS valid_at,
+               e.invalid_at AS invalid_at, e.created_at AS created_at
+        """,
+        uuid=uuid,
+    )
+    now = datetime.now(timezone.utc)
+    edges = []
+    for row in edge_rows:
+        invalid_at_native = row["invalid_at"].to_native() if isinstance(
+            row["invalid_at"], Neo4jDateTime
+        ) else None
+        edges.append({
+            "uuid": row["uuid"], "source": row["source"], "target": row["target"],
+            "name": row["name"], "fact": row["fact"],
+            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
+            "created_at": _iso(row["created_at"]),
+            "invalid": invalid_at_native is not None and invalid_at_native <= now,
+        })
+    return {
+        "episode": {
+            **dict(ep), "content": ep["content"] or "",
+            "created_at": _iso(ep["created_at"]), "valid_at": _iso(ep["valid_at"]),
+        },
+        "nodes": node_rows,
+        "edges": edges,
+    }
+
+
 async def count_episodes(group_ids: list[str]) -> int:
     """Total Episodic nodes across `group_ids` — the memory panel's "N of
     TOTAL" figure, so a fixed `limit` never reads as the whole truth."""
