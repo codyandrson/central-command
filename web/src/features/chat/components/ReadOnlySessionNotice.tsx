@@ -11,9 +11,13 @@
  * state, never re-deriving the rule client-side.
  */
 import { useState, useCallback } from 'react';
-import { Lock, ArrowRight, Loader2, Play } from 'lucide-react';
+import { Lock, ArrowRight, Loader2, Play, Square, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import type { ChatComposerState } from '@/types';
+
+const TERMINAL_TASK = new Set(['DONE', 'FAILED', 'CANCELLED']);
+const TERMINAL_SESSION = new Set(['DONE', 'FAILED']);
 
 interface ReadOnlySessionNoticeProps {
   composer: ChatComposerState;
@@ -23,15 +27,46 @@ interface ReadOnlySessionNoticeProps {
   onOpenTask?: (taskId: string) => void;
   /** Resume a session the operator stopped (composer.session.id). */
   onResume?: (sessionId: string) => Promise<void>;
+  /** Stop the task's LIVE run at its next node boundary (composer.task.id). */
+  onStopTask?: (taskId: string) => Promise<void>;
+  /** Cancel the task for good — closes its parked session (composer.task.id). */
+  onCancelTask?: (taskId: string) => Promise<void>;
 }
 
 export function ReadOnlySessionNotice({
-  composer, onOpenDecisions, onOpenTask, onResume,
+  composer, onOpenDecisions, onOpenTask, onResume, onStopTask, onCancelTask,
 }: ReadOnlySessionNoticeProps) {
   const { session, task, blocking } = composer;
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  const [acting, setActing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const isStopped = composer.code === 'stopped';
+  // Central Command (2026-09-13): the two levers a task run has, offered where
+  // the operator is looking at it. A LIVE run can be stopped (cooperative,
+  // parks STOPPED); any PARKED run can be cancelled (the server's
+  // /tasks/{id}/cancel closes the session with its transcript kept). Forty
+  // sessions parked AWAITING_RESUME sat "IDLE" in the panel with no lever
+  // because the board's list had aged their tasks off the newest-100 page.
+  const sessionStatus = session?.status ?? '';
+  const openTask = !!task && !TERMINAL_TASK.has(task.status);
+  const canStop = openTask && sessionStatus === 'RUNNING' && !!onStopTask;
+  const canCancel = openTask && sessionStatus !== 'RUNNING'
+    && !TERMINAL_SESSION.has(sessionStatus) && !!onCancelTask;
+
+  const runAction = useCallback(async (fn: (id: string) => Promise<void>) => {
+    if (!task || acting) return;
+    setActing(true);
+    setActionError(null);
+    try {
+      await fn(task.id);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setActing(false);
+    }
+  }, [task, acting]);
 
   const handleResume = useCallback(async () => {
     if (!session || !onResume || resuming) return;
@@ -104,7 +139,46 @@ export function ReadOnlySessionNotice({
                   <ArrowRight size={12} />
                 </Button>
               )}
+              {canStop && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={acting}
+                  onClick={() => runAction(onStopTask!)}
+                  className="border-warning/30 bg-warning/8 text-warning hover:bg-warning/12"
+                >
+                  {acting ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
+                  Stop run
+                </Button>
+              )}
+              {canCancel && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={acting}
+                  onClick={() => setConfirmCancel(true)}
+                  className="border-destructive/30 bg-destructive/8 text-destructive hover:bg-destructive/12"
+                >
+                  {acting ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+                  Cancel task
+                </Button>
+              )}
             </div>
+          )}
+          {actionError && (
+            <p className="mt-1.5 text-[0.733rem] text-destructive">{actionError}</p>
+          )}
+          {task && (
+            <ConfirmDialog
+              open={confirmCancel}
+              title="Cancel this task?"
+              message={`"${task.title}" ends here: its open proposals and questions are withdrawn and the session closes. The transcript is kept. This cannot be undone.`}
+              confirmLabel="Cancel task"
+              cancelLabel="Keep it"
+              variant="danger"
+              onConfirm={() => { setConfirmCancel(false); void runAction(onCancelTask!); }}
+              onCancel={() => setConfirmCancel(false)}
+            />
           )}
 
           {composer.code === 'pending_proposal' && onOpenDecisions && (

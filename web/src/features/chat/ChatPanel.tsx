@@ -68,6 +68,9 @@ interface ChatPanelProps {
   onOpenTask?: (taskId: string) => void;
   /** Resume a session the operator stopped (composer.session.id). */
   onResume?: (sessionId: string) => Promise<void>;
+  /** Stop a task's live run / cancel a parked task (composer.task.id). */
+  onStopTask?: (taskId: string) => Promise<void>;
+  onCancelTask?: (taskId: string) => Promise<void>;
 }
 
 export interface ChatPanelHandle {
@@ -95,6 +98,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   onOpenDecisions,
   onOpenTask,
   onResume,
+  onStopTask,
+  onCancelTask,
 }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -438,6 +443,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
           onOpenDecisions={onOpenDecisions}
           onOpenTask={onOpenTask}
           onResume={onResume}
+          onStopTask={onStopTask}
+          onCancelTask={onCancelTask}
         />
       ) : (
         <InputBar

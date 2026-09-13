@@ -121,3 +121,65 @@ describe('ReadOnlySessionNotice', () => {
     });
   });
 });
+
+describe('ReadOnlySessionNotice — the task run levers (2026-09-13)', () => {
+  const parkedOnOutage: ChatComposerState = {
+    ...pausedRun,
+    message: 'This is a task run, paused — a dependency outage interrupted its last turn; the control plane retries it.',
+    session: { id: 'sess_2', mode: 'oneshot', status: 'AWAITING_RESUME', agentId: 'litellm-manager' },
+    task: { id: 'task_2', title: 'LiteLLM autodiscovery: Kilo.ai batch 12/377', status: 'REVIEW' },
+    blocking: null,
+  };
+
+  it('offers Cancel for a parked run and cancels only after the operator confirms', async () => {
+    const onCancelTask = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup({ delay: null });
+    render(<ReadOnlySessionNotice composer={parkedOnOutage} onCancelTask={onCancelTask} />);
+
+    expect(screen.queryByRole('button', { name: /Stop run/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Cancel task/ }));
+    expect(onCancelTask).not.toHaveBeenCalled(); // terminal: the dialog stands between
+    await user.click(screen.getByRole('button', { name: /Keep it/ }));
+    expect(onCancelTask).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Cancel task/ }));
+    expect(screen.getByText(/Cancel this task\?/)).toBeInTheDocument();
+    // The dialog's confirm is the LAST "Cancel task" button on screen.
+    await user.click(screen.getAllByRole('button', { name: /Cancel task/ }).at(-1)!);
+    expect(onCancelTask).toHaveBeenCalledWith('task_2');
+  });
+
+  it('offers Stop, never Cancel, while the run is live', async () => {
+    const onStopTask = vi.fn().mockResolvedValue(undefined);
+    const onCancelTask = vi.fn();
+    const user = userEvent.setup({ delay: null });
+    render(
+      <ReadOnlySessionNotice
+        composer={{ ...parkedOnOutage, session: { ...parkedOnOutage.session!, status: 'RUNNING' } }}
+        onStopTask={onStopTask}
+        onCancelTask={onCancelTask}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Cancel task/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Stop run/ }));
+    expect(onStopTask).toHaveBeenCalledWith('task_2');
+  });
+
+  it('offers neither once the task is terminal, and surfaces a failed action', async () => {
+    const { rerender } = render(
+      <ReadOnlySessionNotice
+        composer={{ ...parkedOnOutage, task: { ...parkedOnOutage.task!, status: 'CANCELLED' } }}
+        onStopTask={vi.fn()}
+        onCancelTask={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Cancel task|Stop run/ })).not.toBeInTheDocument();
+
+    const failing = vi.fn().mockRejectedValue(new Error('task task_2 has a live run — stop it first'));
+    const user = userEvent.setup({ delay: null });
+    rerender(<ReadOnlySessionNotice composer={parkedOnOutage} onCancelTask={failing} />);
+    await user.click(screen.getByRole('button', { name: /Cancel task/ }));
+    await user.click(screen.getAllByRole('button', { name: /Cancel task/ }).at(-1)!);
+    expect(await screen.findByText(/stop it first/)).toBeInTheDocument();
+  });
+});

@@ -122,6 +122,7 @@ export default function App({ onLogout }: AppProps) {
     messages, isGenerating, stream, processingStage,
     lastEventTimestamp, activityLog, currentToolDescription,
     handleSend, handleAbort, handleResume, handleReset,
+    handleStopTask, handleCancelTask,
     loadMore, hasMore, composer, sourceEmail,
     showResetConfirm, confirmReset, cancelReset,
   } = useChat();
@@ -857,6 +858,8 @@ export default function App({ onLogout }: AppProps) {
             // button that silently does nothing is worse than no button.
             onOpenTask={kanbanVisible ? openTaskInBoard : undefined}
             onResume={handleResume}
+            onStopTask={handleStopTask}
+            onCancelTask={handleCancelTask}
           />
         </PanelErrorBoundary>
       }

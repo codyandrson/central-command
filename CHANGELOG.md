@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.28.3: a parked run has its levers where you are looking at it
+
+Forty task runs sat "IDLE" in the sessions panel with nothing to click: the
+read-only notice under a paused run named the task and said what held it,
+but the only stop and cancel lived on the task board — and the board's list
+had aged those tasks off its page (fixed in v2.28.1). An open run the
+operator can see but cannot act on is the same failure as one they cannot
+see.
+
+- The notice now carries the run's two levers. **Stop run** on a LIVE run
+  (cooperative, parks STOPPED at the next node boundary, the existing
+  `/tasks/{id}/stop`). **Cancel task** on any PARKED run — awaiting a
+  decision, a dependency retry, a continuation, or stopped — behind a
+  confirm, through the existing `/tasks/{id}/cancel`, which withdraws the
+  session's open proposals and questions and closes it with the transcript
+  kept. Neither shows once the task is terminal.
+- After either, the cockpit reloads the session's history and the notice
+  reflects the server's account — never a client-side status flip (the
+  "push the frames, or the UI lies" rule). A refused action (a live run
+  cannot be cancelled: stop it first) is shown under the buttons in the
+  server's own words.
+
 ## 2026-09-13 — v2.28.2: the admission limit belongs to the backend
 
 v2.28.1's `CC_MODEL_CONCURRENCY` was one global integer, which is the wrong

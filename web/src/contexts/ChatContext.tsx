@@ -87,6 +87,10 @@ interface ChatContextValue {
   handleAbort: () => Promise<void>;
   /** Resume a session the operator stopped (composer.session.id). */
   handleResume: (sessionId: string) => Promise<void>;
+  /** Stop a task's live run / cancel a parked task, then reload the history
+   *  so the notice reflects the server's account (2026-09-13). */
+  handleStopTask: (taskId: string) => Promise<void>;
+  handleCancelTask: (taskId: string) => Promise<void>;
   handleReset: () => void;
   loadHistory: (session?: string) => Promise<void>;
   /** Load more (older) messages — returns true if there are still more to show */
@@ -703,6 +707,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     await loadHistory(currentSessionRef.current);
   }, [rpc, loadHistory, currentSessionRef]);
 
+  // Same shape as handleResume: the kanban server routes already proxy
+  // /tasks/{id}/stop and /tasks/{id}/cancel; after either, the history reload
+  // is what clears or changes the notice — never a client-side status flip.
+  const taskAction = useCallback(async (url: string, method: 'POST' | 'DELETE') => {
+    const res = await fetch(url, { method });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.details || body.error || `HTTP ${res.status}`);
+    }
+    await loadHistory(currentSessionRef.current);
+  }, [loadHistory, currentSessionRef]);
+
+  const handleStopTask = useCallback(
+    (taskId: string) => taskAction(`/api/kanban/tasks/${encodeURIComponent(taskId)}/abort`, 'POST'),
+    [taskAction],
+  );
+  const handleCancelTask = useCallback(
+    (taskId: string) => taskAction(`/api/kanban/tasks/${encodeURIComponent(taskId)}`, 'DELETE'),
+    [taskAction],
+  );
+
   const handleReset = useCallback(() => {
     setShowResetConfirm(true);
   }, []);
@@ -767,6 +792,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleSend,
     handleAbort,
     handleResume,
+    handleStopTask,
+    handleCancelTask,
     handleReset,
     loadHistory: loadHistory,
     loadMore: msgHook.loadMore,
@@ -787,6 +814,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleSend,
     handleAbort,
     handleResume,
+    handleStopTask,
+    handleCancelTask,
     handleReset,
     loadHistory,
     msgHook.loadMore,
