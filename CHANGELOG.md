@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.28.2: the admission limit belongs to the backend
+
+v2.28.1's `CC_MODEL_CONCURRENCY` was one global integer, which is the wrong
+shape: the constraint is a property of the BACKEND. The workstation serves
+one request at a time; a hosted API serves hundreds, and a global 1 would
+have parked a cloud model behind a local 27B turn and serialised the
+orchestrator for no reason.
+
+- The setting is now a spec of alias GROUPS that share one backend:
+  `cc-default+gpt-4.1-nano=1` gives both aliases one shared slot (a request
+  to either lands on the same single-slot server); `;` separates pools; `*`
+  is the pool for any alias not named, and without it unnamed aliases are
+  unlimited. A bare integer still means `*=N`, so a v2.28.1 `.env` keeps
+  working. The gate resolves per request from the wrapped model's name, so
+  the cockpit's per-session model override is honoured.
+- Embedding and rerank never pass through the chat model seam and are
+  outside the gate by construction; Graphiti's own extraction traffic
+  likewise. The gate's job is only to stop Central Command from being the
+  flood.
+
 ## 2026-09-13 — v2.28.1: model turns are admitted, not just submitted
 
 An afternoon of approving a hundred autodiscovery proposals left 40 sessions

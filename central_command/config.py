@@ -415,19 +415,27 @@ class Settings(BaseSettings):
     # retries forever silently.
     resume_retry_limit: int = 5
 
-    # ADMISSION CONTROL for model turns (2026-09-13, v2.28.1). How many model
-    # requests Central Command lets be in flight at once, across every agent
-    # and every path (fresh runs, resumes, conversations, heartbeat work);
-    # 0 = unlimited. A local backend serving one request at a time
-    # (llama-server `--parallel 1`) queues FIFO, so N concurrent turns each
-    # wait N turns; the proxy's 300s timeout then abandons most of them
-    # while the GPU keeps grinding the abandoned ones to completion —
-    # measured 2026-09-13: completions returned after 1h08m to clients gone
-    # at 5 minutes, and a 4-token request could not get a slot in 120s.
-    # Queueing in-process instead costs nothing and a client timeout no
-    # longer leaves a ghost request running. Size it to the backend's real
-    # parallelism; leave 0 for a hosted API.
-    model_concurrency: int = 0
+    # ADMISSION CONTROL for model turns (2026-09-13, v2.28.1; per-backend in
+    # v2.28.2). How many model requests Central Command lets be in flight at
+    # once PER BACKEND, across every agent and every path (fresh runs,
+    # resumes, conversations, heartbeat work). A local backend serving one
+    # request at a time (llama-server `--parallel 1`) queues FIFO, so N
+    # concurrent turns each wait N turns; the proxy's 300s timeout then
+    # abandons most of them while the GPU keeps grinding the abandoned ones
+    # — measured 2026-09-13: completions returned after 1h08m to clients
+    # gone at 5 minutes. Queueing in-process costs nothing and a client
+    # timeout no longer leaves a ghost request running.
+    #
+    # The limit is a property of the BACKEND, not of Central Command: a
+    # hosted API takes hundreds in parallel and must not wait behind a local
+    # 27B turn. So the spec names alias GROUPS that share one backend:
+    #   "cc-default+gpt-4.1-nano=1"          one slot shared by both aliases
+    #   "cc-default=1;*=8"                    plus a pool of 8 for everything else
+    # `+` joins aliases onto one pool, `;` (or `,`) separates pools, `*` is
+    # the pool for any alias not named. Unnamed aliases are UNLIMITED when
+    # there is no `*`. A bare integer means "*=N" (the v2.28.1 global form).
+    # Empty = no gate at all.
+    model_concurrency: str = ""
 
     # Outage equivalence slice 3: how many times an APPROVED proposal whose
     # execution hit a transient dependency failure may be replayed before the

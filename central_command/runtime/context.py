@@ -422,22 +422,50 @@ def working_window(messages: list) -> list:
     return messages
 
 
-# One admission gate per event loop: an asyncio.Semaphore binds to the first
-# loop that awaits it and raises from every other (the module-scope
-# asyncio.Event bite mark), and pytest runs one loop per test. Keyed on the
-# limit too, so a changed setting takes effect without a restart.
-_gates: dict[tuple[int, int], asyncio.Semaphore] = {}
+def parse_concurrency_spec(spec: str | int) -> dict[str, tuple[str, int]]:
+    """`CC_MODEL_CONCURRENCY` → {alias: (pool, limit)}. Pools are alias groups
+    that share one backend; `*` is the pool for unnamed aliases; a bare
+    integer is the v2.28.1 global form and means `*=N`. Malformed pieces
+    raise at first use rather than silently gating nothing."""
+    text = str(spec or "").strip()
+    if not text:
+        return {}
+    if text.isdigit():
+        text = f"*={text}"
+    out: dict[str, tuple[str, int]] = {}
+    for piece in (p.strip() for p in text.replace(",", ";").split(";")):
+        if not piece:
+            continue
+        names, sep, limit = piece.rpartition("=")
+        if not sep or not limit.strip().isdigit():
+            raise ValueError(f"CC_MODEL_CONCURRENCY: {piece!r} is not '<alias>[+<alias>…]=<n>'")
+        aliases = [a.strip() for a in names.split("+") if a.strip()]
+        if not aliases:
+            raise ValueError(f"CC_MODEL_CONCURRENCY: {piece!r} names no alias")
+        pool = "+".join(aliases)
+        for a in aliases:
+            out[a] = (pool, int(limit))
+    return out
+
+
+# One admission gate per (event loop, pool, limit): an asyncio.Semaphore
+# binds to the first loop that awaits it and raises from every other (the
+# module-scope asyncio.Event bite mark), and pytest runs one loop per test.
+# Keyed on the limit too, so a changed setting takes effect without a restart.
+_gates: dict[tuple[int, str, int], asyncio.Semaphore] = {}
 
 
 @asynccontextmanager
-async def model_turn_slot():
-    """Hold one of `settings.model_concurrency` slots for the duration of a
-    model request; a no-op when the limit is 0 (unlimited)."""
-    n = int(settings.model_concurrency)
-    if n <= 0:
+async def model_turn_slot(model_name: str | None):
+    """Hold one of the slots of `model_name`'s backend pool for the duration
+    of a model request; a no-op for an alias the spec does not cover."""
+    table = parse_concurrency_spec(settings.model_concurrency)
+    entry = table.get(model_name or "") or table.get("*")
+    if entry is None or entry[1] <= 0:
         yield
         return
-    key = (id(asyncio.get_running_loop()), n)
+    pool, n = entry
+    key = (id(asyncio.get_running_loop()), pool, n)
     gate = _gates.get(key)
     if gate is None:
         gate = _gates[key] = asyncio.Semaphore(n)
@@ -453,14 +481,14 @@ class WindowedModel(WrapperModel):
     it, and no path can submit a turn the backend has no slot for."""
 
     async def request(self, messages, model_settings, model_request_parameters):
-        async with model_turn_slot():
+        async with model_turn_slot(self.wrapped.model_name):
             return await self.wrapped.request(
                 working_window(messages), model_settings, model_request_parameters)
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters,
                              run_context=None):
-        async with model_turn_slot(), self.wrapped.request_stream(
+        async with model_turn_slot(self.wrapped.model_name), self.wrapped.request_stream(
             working_window(messages), model_settings, model_request_parameters, run_context,
         ) as stream:
             yield stream
