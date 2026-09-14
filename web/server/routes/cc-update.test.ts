@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 let dir: string;
 
 async function buildApp() {
+  vi.doMock('../lib/config.js', () => ({ config: { gatewayUrl: 'http://cc.test' } }));
   vi.doMock('../middleware/rate-limit.js', () => ({
     rateLimitGeneral: vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   }));
@@ -19,6 +20,7 @@ async function buildApp() {
 
 describe('cc-update routes', () => {
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"active":true}', { status: 200 })));
     vi.resetModules();
     dir = mkdtempSync(join(tmpdir(), 'cc-update-'));
     process.env.CC_UPDATE_TRIGGER = join(dir, 'trigger');
@@ -28,6 +30,7 @@ describe('cc-update routes', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     rmSync(dir, { recursive: true, force: true });
     delete process.env.CC_UPDATE_TRIGGER;
@@ -36,7 +39,9 @@ describe('cc-update routes', () => {
     delete process.env.CC_UPDATE_STAGE_STATUS;
   });
 
-  it('apply writes the trigger file and reports 202', async () => {
+  it('apply engages the API hold instead of writing the trigger (the API triggers when the agents land)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ active: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
     const app = await buildApp();
     const res = await app.request('/api/update/apply', {
       method: 'POST',
@@ -44,13 +49,13 @@ describe('cc-update routes', () => {
       headers: { 'Content-Type': 'application/json' },
     });
     expect(res.status).toBe(202);
-    expect(existsSync(join(dir, 'trigger'))).toBe(true);
-    const trigger = JSON.parse(readFileSync(join(dir, 'trigger'), 'utf-8'));
-    expect(trigger.target).toBe('1.2.3');
-    expect(trigger.force).toBe(false);
+    expect(await res.json()).toEqual({ triggered: false, held: true });
+    expect(existsSync(join(dir, 'trigger'))).toBe(false);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('http://cc.test/api/update/hold');
+    vi.unstubAllGlobals();
   });
 
-  it('apply carries force:true through to the trigger (the "update anyway" path)', async () => {
+  it('apply with force writes the trigger file itself and reports 202 (the "update anyway" path)', async () => {
     const app = await buildApp();
     const res = await app.request('/api/update/apply', {
       method: 'POST',
@@ -58,7 +63,25 @@ describe('cc-update routes', () => {
       headers: { 'Content-Type': 'application/json' },
     });
     expect(res.status).toBe(202);
-    expect(JSON.parse(readFileSync(join(dir, 'trigger'), 'utf-8')).force).toBe(true);
+    const trigger = JSON.parse(readFileSync(join(dir, 'trigger'), 'utf-8'));
+    expect(trigger.target).toBe('1.2.3');
+    expect(trigger.force).toBe(true);
+  });
+
+  it('the hold routes proxy to the API: GET reads, /now forces, /cancel releases', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ active: false }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = await buildApp();
+    expect((await app.request('/api/update/hold')).status).toBe(200);
+    expect((await app.request('/api/update/hold/now', { method: 'POST' })).status).toBe(200);
+    expect((await app.request('/api/update/hold/cancel', { method: 'POST' })).status).toBe(200);
+    const calls = fetchMock.mock.calls.map((c) => [String(c[0]), (c[1] as RequestInit).method]);
+    expect(calls).toEqual([
+      ['http://cc.test/api/update/hold', 'GET'],
+      ['http://cc.test/api/update/hold/now', 'POST'],
+      ['http://cc.test/api/update/hold', 'DELETE'],
+    ]);
+    vi.unstubAllGlobals();
   });
 
   it('apply refuses while a trigger is pending (server-side double-click guard)', async () => {

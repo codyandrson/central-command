@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.30.0: an update waits for the agents to finish
+
+v2.29.6 taught the updater to refuse while agents were mid-turn; this release
+makes "Apply update" do the waiting. Clicking it now engages an **update
+hold** in the API tier instead of writing the trigger:
+
+- The heartbeat, feed and dispatch loops stop, so nothing new is scheduled.
+  Fresh task runs are refused (the task stays ASSIGNED and starts after the
+  restart) and the chat composer is disabled with the reason shown.
+- Every task-linked run and conversation turn is asked to stop at its next
+  node boundary. It parks STOPPED with its re-entry point kept, marked as
+  parked *for the update* — and the process the updater starts resumes those
+  on its own, because the operator never pressed stop on them. Triage runs
+  finish on their own; nothing parks a run mid-item.
+- The update dialog shows what is still running, with each run's time since
+  its last step (a run silent for half an hour is called out as likely dead),
+  and two buttons: **Update now** (writes the trigger with `force`, killing
+  what is listed) and **Cancel update** (loops restart, parked runs resume).
+- The moment nothing is RUNNING the API writes the trigger itself and the
+  existing updater flow takes over. The wait is unbounded by design and the
+  root updater never waits: all of it happens in the process that owns the
+  loops and the run gate.
+
 ## 2026-09-13 — v2.29.6: the updater refuses to stop the API under a running agent
 
 Six releases went live on 2026-09-13, and each one killed whatever the agents

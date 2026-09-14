@@ -175,6 +175,11 @@ async def lifespan(app: FastAPI):
         from central_command.api import orchestration
 
         asyncio.create_task(orchestration.resume_sweep())
+        # Sessions the previous process parked for an update hold resume
+        # here — the operator never pressed stop on them (api/hold.py).
+        from central_command.api import hold as update_hold
+
+        asyncio.create_task(update_hold.resume_held_sessions())
         # Same guarantee for audits: the inline hooks a restart's
         # CancelledError killed (or a transient 5xx degraded) re-run here,
         # so a parked dismissal never waits on the human gate by accident.
@@ -245,6 +250,19 @@ app.include_router(speech_router)
 from central_command.api.update import router as update_router  # noqa: E402
 
 app.include_router(update_router)
+
+# The update hold (k3s and single alike): pause, wait for the agents, trigger.
+from central_command.api.hold import router as hold_router  # noqa: E402
+from central_command.runtime.hold import RunHeld  # noqa: E402
+
+app.include_router(hold_router)
+
+
+@app.exception_handler(RunHeld)
+async def _run_held(_request, exc: RunHeld):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse({"detail": str(exc)}, status_code=409)
 
 
 @app.get("/health")

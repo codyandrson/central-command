@@ -490,9 +490,13 @@ async def _run_assigned_task(task: dict, actor: str = "operator", *,
     exception still propagates: an HTTP caller gets its 500 and the heartbeat
     still records `heartbeat.error`. Only the task's record is new.
     """
+    from central_command.runtime.hold import RunHeld
+
     try:
         return await _run_assigned_task_inner(
             task, actor=actor, model_name=model_name, thinking=thinking)
+    except RunHeld:
+        raise  # nothing ran and nothing failed: the task stays ASSIGNED
     except Exception as e:  # noqa: BLE001 — any run error must reach the record
         await _land_run_failure(task, e)
         raise
@@ -565,9 +569,18 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
     queue lock in that function wraps it without nesting the lock's own
     `async with` around a huge block. Not a new entry point — call
     `_run_assigned_task_inner` (or `_run_assigned_task`), never this."""
+    from central_command.runtime import hold
     from central_command.runtime.run import run_task
 
     task_id, agent_id = task["id"], task["agent_id"]
+    # The update hold's gate, BEFORE `task.started`/`start_task`: refused here
+    # the task is still plain ASSIGNED, which is exactly what the next
+    # process's `startup_task_sweep` relaunches. One boundary later it would be
+    # IN_PROGRESS with no session — the shape that sweep FAILS.
+    if hold.active:
+        raise hold.RunHeld(
+            f"task {task_id} not started: an update is waiting for the agents "
+            "to finish — it starts after the restart")
     await events.emit(
         "task.started",
         ref_id=task_id,
@@ -707,9 +720,13 @@ async def _run_assigned_task_detached(task: dict, actor: str, *,
     equivalence, slice 4), because a provider outage must cost the operator's
     ask a delay, never the ask itself.
     """
+    from central_command.runtime.hold import RunHeld
+
     try:
         await _run_assigned_task(task, actor=actor, model_name=model_name,
                                  thinking=thinking)
+    except RunHeld as e:
+        log.info("%s", e)
     except Exception:  # noqa: BLE001 — already on the record; nobody to raise to
         log.exception("task %s: run failed", task["id"])
 

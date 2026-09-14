@@ -30,6 +30,17 @@ import { Hono } from 'hono';
 import { readFileSync, writeFileSync, existsSync, renameSync, statSync } from 'node:fs';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { readProductVersion } from '../lib/release-source.js';
+import { config } from '../lib/config.js';
+
+// The update hold lives in the API tier (it owns the loops and the run gate);
+// these routes only proxy it so the cockpit reaches it same-origin.
+async function holdProxy(method: string, sub = '', body?: unknown): Promise<Response> {
+  return fetch(`${config.gatewayUrl.replace(/\/+$/, '')}/api/update/hold${sub}`, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
 
 // Env-overridable for tests only; production uses the tmpfiles.conf paths.
 const TRIGGER = process.env.CC_UPDATE_TRIGGER || '/run/cc-update/trigger';
@@ -164,8 +175,20 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   if (body.target && body.target === readProductVersion()) {
     return c.json({ error: `v${body.target} is already installed` }, 409);
   }
+  // Unforced: engage the hold instead of writing the trigger. The API pauses
+  // the team, waits for the agents to land and writes the trigger itself;
+  // "Update anyway"/"Update now" is the forced path, which writes it here.
+  if (body.force !== true) {
+    try {
+      const res = await holdProxy('POST', '', { target: body.target ?? '' });
+      if (!res.ok) return c.json({ error: `could not engage the update hold (HTTP ${res.status})` }, 502);
+      return c.json({ triggered: false, held: true }, 202);
+    } catch (err) {
+      return c.json({ error: `could not reach the API to engage the update hold [${err instanceof Error ? err.message : String(err)}]` }, 502);
+    }
+  }
   try {
-    writeTrigger(TRIGGER, body.target ?? '', body.force === true);
+    writeTrigger(TRIGGER, body.target ?? '', true);
   } catch (err) {
     return c.json({
       error: `could not write ${TRIGGER} — is cc-update installed? `
@@ -177,3 +200,18 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
 });
 
 export default app;
+
+for (const [route, method, sub] of [
+  ['/api/update/hold', 'GET', ''],
+  ['/api/update/hold/now', 'POST', '/now'],
+  ['/api/update/hold/cancel', 'POST', ''],
+] as const) {
+  app.on(method, route, rateLimitGeneral, async (c) => {
+    try {
+      const res = await holdProxy(method === 'POST' && sub === '' ? 'DELETE' : method, sub);
+      return c.json(await res.json().catch(() => ({})), res.status as 200);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+  });
+}

@@ -5303,3 +5303,62 @@ async def wiki_claim_states(page_ref: str | None = None) -> list[dict]:
         state = "unsupported" if unsupported else ("stale" if stale else "supported")
         out.append({"claim": c, "state": state, "reasons": unsupported + stale})
     return out
+
+
+# ── update hold (api/hold.py) ───────────────────────────────────────────────
+
+async def request_stop_for_update() -> int:
+    """Ask every RUNNING run the hold can park to stop at its next boundary.
+
+    Task-linked runs and conversation turns: both park STOPPED with a re-entry
+    marker the resume driver already understands. Dispatch (triage) runs are
+    left to finish — a triage session parked mid-item would be resumed outside
+    its work_item claim and the item re-run from scratch beside it. Re-applied
+    every hold tick, so a turn that starts DURING the hold (an approval's
+    resume) parks at its first boundary too. Returns rows newly flagged."""
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update session s set stop_requested = true
+             where s.status = 'RUNNING' and not s.stop_requested
+               and (s.mode = 'conversation'
+                    or exists (select 1 from task t where t.session_id = s.id))
+               and not exists (select 1 from work_item w where w.session_id = s.id)
+            """
+        )
+        return int(r.rsplit(" ", 1)[-1] or 0)
+    finally:
+        await conn.close()
+
+
+async def running_sessions_for_hold() -> list[dict]:
+    """Every RUNNING session with what the wait screen needs to tell a live
+    turn from a corpse: seconds since its last persisted step."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select s.id, s.agent_id, s.mode, s.stop_requested,
+                   extract(epoch from now() - s.updated_at)::int as last_step_age_s,
+                   (select t.id from task t where t.session_id = s.id limit 1) as task_id,
+                   exists (select 1 from work_item w where w.session_id = s.id) as dispatch
+              from session s where s.status = 'RUNNING' order by s.updated_at
+            """
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def sessions_stopped_for_update() -> list[str]:
+    """Sessions the HOLD parked (not the operator) — the resume worklist."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select id from session where status = 'STOPPED' "
+            "and run_state->'pending_stop'->>'reason' = 'update_hold' order by updated_at"
+        )
+        return [r["id"] for r in rows]
+    finally:
+        await conn.close()

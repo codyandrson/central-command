@@ -363,12 +363,20 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
 
     Codes: not_a_conversation | pending_proposal | turn_in_progress |
     awaiting_agents | failed | discussion_concluded | awaiting_continue |
-    stopped.
+    stopped | update_hold.
 
     Adding a code means adding it to `nerve_gateway._COMPOSER_DISABLING` too if
     the operator should not type — that tuple is an ALLOWLIST, not a check, so a
     code missing from it leaves an enabled box that `_chat_send` then 409s.
     """
+    from central_command.runtime import hold
+
+    if hold.active:
+        return (
+            "update_hold",
+            "an update is waiting for the agents to finish — chat resumes after "
+            "the restart (or cancel the update from the update dialog)",
+        )
     session_id = session.get("id")
     if session.get("mode") != "conversation":
         return (

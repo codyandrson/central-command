@@ -219,12 +219,14 @@ async def _run_live(
             # operator's decision. Unconditional (not gated on `continuable`):
             # an operator may stop any live run, and every one of them can be
             # resumed from its persisted history.
+            from central_command.runtime import hold
             from central_command.runtime.resume_park import park_stopped
 
             await park_stopped(
                 session_id=session_id, agent_id=agent_id, after=after,
                 task_id=task_id or (continue_state or {}).get("task_id"),
                 state=continue_state,
+                reason=hold.REASON if hold.active else "operator",
             )
             raise
         if continuable and isinstance(exc, UsageLimitExceeded):

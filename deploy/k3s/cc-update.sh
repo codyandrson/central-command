@@ -185,6 +185,11 @@ die() { # <phase> <message> — best-effort recovery: services back up, honest s
 }
 
 # ── busy gate ────────────────────────────────────────────────────────────────
+# The cockpit's "Apply update" no longer writes the trigger directly: it
+# engages the API's update hold (central_command/api/hold.py), which pauses the
+# team, parks what it can, and writes the trigger when nothing is RUNNING —
+# so this gate normally passes. It still stands for a hand-written trigger,
+# and for a turn that starts in the window between trigger and stop.
 # A RUNNING session is a model turn in THIS process; stopping cc-uvicorn kills
 # it, and the next startup's orphan sweep lands it FAILED (2026-09-13: six
 # deploys in a day killed twelve task runs, each re-created by hand). Parked

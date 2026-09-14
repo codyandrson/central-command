@@ -485,6 +485,7 @@ async def _send_target(key: str) -> dict:
 # (2026-07-25, "my inputs should never disappear").
 _COMPOSER_DISABLING = ("not_a_conversation", "pending_proposal", "failed",
                        "no_session", "no_lane", "discussion_concluded",
+                       "update_hold",
                        # A window-parked turn is exactly the "you can DO
                        # something about this" case: the continue item is in the
                        # Inbox. Absent from this tuple it would render an enabled

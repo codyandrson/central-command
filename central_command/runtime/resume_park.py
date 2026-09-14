@@ -215,8 +215,14 @@ async def park_stopped(
     after: str = "task",
     task_id: str | None = None,
     state: dict | None = None,
+    reason: str = "operator",
 ) -> dict:
     """Park a run the OPERATOR stopped, at the node boundary where it noticed.
+
+    `reason` is "operator" (the button) or `hold.REASON` (an update waiting for
+    the agents to finish) — the latter is the one kind of STOPPED session a
+    background driver may resume (`api.hold.resume_held_sessions`), because the
+    operator never pressed stop on it.
 
     A sibling of `park_continuation` — same marker shape (`after`, `task_id`,
     `state`), because the resume driver re-enters through the same three landing
@@ -236,14 +242,16 @@ async def park_stopped(
         "after": after,
         "task_id": task_id,
         "state": state,
+        "reason": reason,
         "stopped_at": datetime.now(timezone.utc).isoformat(),
     }
     await repo.park_session_stopped(session_id, marker)
     await events.emit(
         "session.stopped",
         ref_id=session_id,
-        payload={"agent_id": agent_id, "after": after, "task_id": task_id},
-        actor="operator",
+        payload={"agent_id": agent_id, "after": after, "task_id": task_id,
+                 "reason": reason},
+        actor="operator" if reason == "operator" else "system",
     )
     return {"marker": marker}
 

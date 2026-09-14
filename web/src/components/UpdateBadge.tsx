@@ -39,6 +39,25 @@ interface UpdateProgress {
 
 const PROGRESS_POLL_MS = 3000;
 
+/** GET /api/update/hold — the API-tier pause that waits for the agents. */
+interface HoldStatus {
+  active: boolean;
+  target: string;
+  since: string | null;
+  running: Array<{
+    id: string; agent_id: string; mode: string; stop_requested: boolean;
+    last_step_age_s: number; task_id: string | null; dispatch: boolean;
+  }>;
+  triggered_at: string | null;
+  trigger_error: string | null;
+}
+
+function age(s: number): string {
+  if (s < 90) return `${s}s`;
+  if (s < 5400) return `${Math.round(s / 60)}m`;
+  return `${(s / 3600).toFixed(1)}h`;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -79,6 +98,7 @@ interface UpdateDialogProps {
 /** The apply-or-instructions modal — opened from the badge and from Settings › Updates. */
 export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogProps) {
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [hold, setHold] = useState<HoldStatus | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
 
@@ -107,6 +127,13 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
       } catch {
         // server restarting under us — keep polling
       }
+      try {
+        const res = await fetch('/api/update/hold');
+        if (res.ok) setHold(await res.json() as HoldStatus);
+      } catch {
+        // the API is down mid-update: the hold is over by definition
+        setHold(null);
+      }
     };
     void tick();
     const iv = setInterval(tick, PROGRESS_POLL_MS);
@@ -124,12 +151,33 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
         body: JSON.stringify({ target: versionInfo?.latest ?? '', force }),
       });
       if (res.status === 202) {
+        const out = await res.json().catch(() => ({})) as { held?: boolean };
+        if (out.held) return; // the hold panel takes over from the next poll
         setApplying(true);
         setProgress({ pending: true, inFlight: false, status: null });
         return;
       }
       const body = await res.json().catch(() => ({})) as { error?: string };
       setApplyError(body.error ?? `HTTP ${res.status}`);
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const holdAction = async (path: string) => {
+    setApplyError(null);
+    try {
+      const res = await fetch(path, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string; detail?: string };
+        setApplyError(body.error ?? body.detail ?? `HTTP ${res.status}`);
+        return;
+      }
+      if (path.endsWith('/now')) {
+        setApplying(true);
+        setProgress({ pending: true, inFlight: false, status: null });
+      }
+      setHold(await res.json() as HoldStatus);
     } catch (err) {
       setApplyError(err instanceof Error ? err.message : String(err));
     }
@@ -222,7 +270,55 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                 {applyError}
               </div>
             )}
-            {!applying && progress?.status?.state !== 'running' && (
+            {hold?.active && !applying && progress?.status?.state !== 'running' ? (
+              <div className="space-y-3">
+                <div className="rounded-md border border-amber-500/40 px-3 py-2 text-sm space-y-2">
+                  {hold.triggered_at ? (
+                    <p className="text-amber-500 animate-pulse">
+                      Every agent has landed — update triggered, waiting for the updater to start…
+                    </p>
+                  ) : hold.running.length === 0 ? (
+                    <p className="text-amber-500 animate-pulse">Nothing is running — triggering the update…</p>
+                  ) : (
+                    <p className="text-amber-500">
+                      Paused for the update — waiting for {hold.running.length} agent run
+                      {hold.running.length === 1 ? '' : 's'} to finish. Task runs and chats have been
+                      asked to pause at their next step; triage runs finish on their own. Nothing new
+                      starts until the restart.
+                    </p>
+                  )}
+                  {hold.running.length > 0 && (
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {hold.running.map((r) => (
+                        <li key={r.id} className="flex justify-between gap-2">
+                          <span className="font-mono truncate">{r.agent_id} · {r.dispatch ? 'triage' : r.task_id ? 'task' : r.mode}</span>
+                          <span className={r.last_step_age_s > 1800 ? 'text-red-500' : ''}>
+                            last step {age(r.last_step_age_s)} ago{r.last_step_age_s > 1800 ? ' — likely dead' : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {hold.trigger_error && (
+                    <p className="text-red-500 text-xs">{hold.trigger_error}</p>
+                  )}
+                </div>
+                {hold.running.length > 0 && !hold.triggered_at && (
+                  <button
+                    onClick={() => holdAction('/api/update/hold/now')}
+                    className="w-full rounded-md border border-amber-500/60 text-amber-500 py-2 text-sm font-semibold hover:bg-amber-500/10 transition-colors"
+                  >
+                    Update now (kills the runs above)
+                  </button>
+                )}
+                <button
+                  onClick={() => holdAction('/api/update/hold/cancel')}
+                  className="w-full rounded-md border border-border py-2 text-sm hover:bg-muted transition-colors"
+                >
+                  Cancel update — resume the team
+                </button>
+              </div>
+            ) : !applying && progress?.status?.state !== 'running' && (
               progress === null ? (
                 <p className="text-sm text-muted-foreground animate-pulse">Checking update preparation…</p>
               ) : staging ? (
