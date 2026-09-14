@@ -1236,15 +1236,20 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="autodiscovery.skip",
                 arguments=("{'credential_name': '<the discovering credential>', "
-                           "'model_ids': ['<raw catalog id>', ...]} plus optional "
+                           "'vendors': ['<vendor prefix as written in the review "
+                           "brief>', ...], 'model_ids': ['<raw catalog id>', ...]} "
+                           "— at least one of the two lists — plus optional "
                            "'reason'"),
                 notes=("Record the operator's NEVER-ADD decision for catalog ids "
                        "under one credential (the `autodiscovery_decisions` skip "
                        "list). Only from an autodiscovery REVIEW task, only for "
-                       "ids the operator agreed to skip in that discussion — one "
-                       "proposal per credential. Skipped ids are never offered "
-                       "again unless their catalog entry changes; nothing on the "
-                       "proxy is touched."),
+                       "what the operator agreed to skip in that discussion — one "
+                       "proposal per credential. Name whole groups with 'vendors' "
+                       "(the Executor expands each to its exact ids; never "
+                       "enumerate them yourself) and individual ids with "
+                       "'model_ids'. Skipped ids are never offered again unless "
+                       "their catalog entry changes; nothing on the proxy is "
+                       "touched."),
             ),
             GatedCapability(
                 name="litellm.create_key",

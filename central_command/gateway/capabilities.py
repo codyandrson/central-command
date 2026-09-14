@@ -906,11 +906,14 @@ REGISTRY: list[Capability] = [
             "credential never-add list `heartbeat.actions._litellm_discovery` "
             "subtracts before it offers anything"
         ),
-        arguments=["credential_name", "model_ids", "reason?"],
+        arguments=["credential_name", "model_ids?", "vendors?", "reason?"],
         description=(
             "Record the operator's decision, settled in an autodiscovery "
             "REVIEW discussion, that these catalog ids under one credential "
-            "are never to be registered. Gated on purpose (2026-09-13): the "
+            "are never to be registered — by exact id (`model_ids`) and/or "
+            "by whole vendor group (`vendors`, expanded to exact ids from the "
+            "credential's snapshot at execution; at least one of the two). "
+            "Gated on purpose (2026-09-13): the "
             "agent transcribes the answer, the Inbox is where the operator "
             "confirms the transcription before it binds. Per-credential "
             "because raw ids collide across providers."

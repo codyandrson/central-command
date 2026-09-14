@@ -184,11 +184,21 @@ lands on your board.
   stored credential. There is no `cc_managed` flag — a hand-tuned or
   env-keyed model (like the workstation entries) is structurally invisible to
   discovery and will never be touched or flagged by it.
-- **On real drift it hands you small batch tasks**, titled
-  `"LiteLLM autodiscovery: <credential> batch i/n"` (`batch_size` default 5,
-  a maintenance task first). Treat each like any other task: read the diff it
-  describes, propose adds/removes/fixes through the normal `litellm.*` gates
-  — autodiscovery does not grant you a different write path.
+- **On real drift it hands you small tasks** — a maintenance task first
+  (stale / unhealthy / changed / undeclared), then per credential ONE
+  review task (`"LiteLLM autodiscovery: <credential> review"`) carrying the
+  new catalog ids ALREADY GROUPED by vendor prefix: you recommend per group,
+  the operator settles add-vs-skip by group in a discussion, and the skips
+  become one gated `autodiscovery.skip` proposal naming `vendors` (the
+  Executor expands a group to its exact ids — never enumerate them) and any
+  individual `model_ids`. Agreed adds arrive on a later pass as
+  `"… batch i/n"` add-tasks (`batch_size` default 1). Treat each like any
+  other task: propose through the normal `litellm.*` gates — autodiscovery
+  does not grant you a different write path.
+- **A mechanism failure is never yours to surface.** A probe or health call
+  the tick itself could not make is recorded on the heartbeat run as an
+  error; it does not reach you as a finding, so a brief never asks you to
+  diagnose the discovery code or ask the operator about it.
 - **New capability facts belong in native `model_info` fields**
   (`supports_vision`, etc.) — the same fields this document already covers,
   not custom keys.

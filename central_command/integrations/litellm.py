@@ -26,7 +26,10 @@ from central_command.integrations import http as http_client
 
 # A LiteLLM model_name (alias) and a provider model string ("anthropic/claude-…").
 # Kept deliberately conservative — these are model-controlled and name real infra.
-ALIAS_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$")
+# '/' is allowed in an alias (2026-09-14): the proxy accepts it, the operator
+# registers gateway models as 'kilo-auto/free' by hand, and a read path
+# (probe, health) that refuses an alias the proxy serves is blind to it.
+ALIAS_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,63}$")
 # The model half may itself carry slashes: gateways (OpenRouter, Kilo) name
 # models `vendor/model[:tag]`, and LiteLLM's Responses bridge is
 # `openai/chat_completions/<model>` — a one-slash rule rejected all of them.
@@ -62,7 +65,7 @@ def _require_configured(op: str) -> None:
 def _alias(value: str) -> str:
     if not isinstance(value, str) or not ALIAS_RE.match(value or ""):
         raise LiteLLMError(
-            f"bad model_name {value!r} — must be [a-zA-Z0-9][a-zA-Z0-9._:-]{{0,63}}"
+            f"bad model_name {value!r} — must be [a-zA-Z0-9][a-zA-Z0-9._:/-]{{0,63}}"
         )
     return value
 

@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 class ArgSpec:
     required: tuple[str, ...] = ()
     enums: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Groups of keys of which AT LEAST ONE must be present and non-empty.
+    any_of: tuple[tuple[str, ...], ...] = ()
 
 
 ARG_SPECS: dict[str, ArgSpec] = {
@@ -56,7 +58,9 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # autodiscovery.skip (2026-09-13): the Executor subscripts both. The list
     # is checked for shape only; that the ids exist in a catalog is not a
     # world-state fact worth a call — an unknown id on the skip list is inert.
-    "autodiscovery.skip": ArgSpec(required=("credential_name", "model_ids")),
+    # `vendors` (2026-09-14) names whole groups; the Executor expands them.
+    "autodiscovery.skip": ArgSpec(required=("credential_name",),
+                                  any_of=(("model_ids", "vendors"),)),
 }
 
 
@@ -75,6 +79,12 @@ def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
             f"{capability}: missing required argument(s) {', '.join(missing)} "
             f"(present: {', '.join(sorted(args)) or 'none'})"
         )
+    for group in spec.any_of:
+        if not any(args.get(k) for k in group):
+            problems.append(
+                f"{capability}: at least one of {', '.join(group)} is required "
+                f"(present: {', '.join(sorted(args)) or 'none'})"
+            )
     for key, allowed in spec.enums.items():
         if key in args and args[key] not in allowed:
             problems.append(

@@ -1575,3 +1575,16 @@ async def test_probe_model_unknown_mode_is_inconclusive_not_a_chat_404(monkeypat
     assert out["ok"] is None
     assert seen == ["/model/info"]
     assert any("no probe battery" in n for n in out["notes"])
+
+
+def test_an_alias_may_carry_a_slash_because_the_proxy_serves_one():
+    """2026-09-14: the operator registers gateway models as 'kilo-auto/free'
+    in the LiteLLM UI; a read path that refuses the alias is blind to it."""
+    from central_command.integrations import litellm as litellm_client
+
+    assert litellm_client._alias("kilo-auto/free") == "kilo-auto/free"
+    assert litellm_client._alias("claude-sonnet-4-5") == "claude-sonnet-4-5"
+    with pytest.raises(litellm_client.LiteLLMError):
+        litellm_client._alias("/leading-slash")
+    with pytest.raises(litellm_client.LiteLLMError):
+        litellm_client._alias("has space")

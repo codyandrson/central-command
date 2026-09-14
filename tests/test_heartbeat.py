@@ -920,6 +920,32 @@ def test_compute_discovery_drift_missing_stale_skip_and_hand_configured():
     assert [u["model"] for u in drift["unhealthy"]] == ["cc-managed-retired"]
 
 
+def test_compute_discovery_drift_sees_a_gateway_credentials_deployments():
+    """The live Kilo.ai shape (2026-09-14): the credential's provider is
+    'openai_compatible', the hand-registered deployment says provider
+    'openai' with model 'kilo-auto/free' (no prefix), the agent-registered
+    one 'openai/vendor/model'. Ownership by credential_name finds both;
+    matching on the full model string as well as the stripped one keeps the
+    hand-registered id from reading as 'free'."""
+    catalog = [{"id": "kilo-auto/free"}, {"id": "vendor/model"}, {"id": "vendor/new"}]
+    deployments = [
+        {"model_name": "kilo-auto/free", "provider": "openai",
+         "provider_model": "kilo-auto/free", "credential_name": "Kilo.ai"},
+        {"model_name": "model", "provider": None,
+         "provider_model": "openai/vendor/model", "credential_name": "Kilo.ai"},
+        {"model_name": "gone", "provider": None,
+         "provider_model": "openai/vendor/retired", "credential_name": "Kilo.ai"},
+    ]
+    unhealthy = [{"model": "kilo-auto/free", "error": "429"}, {"model": "cc-default", "error": "x"}]
+    drift = hb_actions.compute_discovery_drift(
+        "Kilo.ai", "openai_compatible", catalog, deployments, unhealthy, [])
+    assert [m["id"] for m in drift["missing"]] == ["vendor/new"]
+    assert [d["model_name"] for d in drift["stale"]] == ["gone"]
+    assert hb_actions._candidate_ids("openai/chat_completions/vendor/m") == {
+        "openai/chat_completions/vendor/m", "chat_completions/vendor/m", "openai/vendor/m", "vendor/m"}
+    assert [u["model"] for u in drift["unhealthy"]] == ["kilo-auto/free"]
+
+
 def test_compute_discovery_drift_quiet_when_nothing_moved():
     catalog = [{"id": "claude-x"}]
     deployments = [{"model_name": "cc-x", "provider": "anthropic",
@@ -1201,8 +1227,8 @@ async def test_health_is_probed_per_managed_alias_only(discovery_stubs, monkeypa
     # Whole-fleet /health walks the hand-tuned local fleet (GPU swaps, 30s
     # timeout — measured live 2026-08-20). The action must probe health one
     # scoped call per MANAGED alias (credential_name tied to a stored
-    # credential), and a probe that raises must read as unhealthy, not kill
-    # the tick.
+    # credential), and a call that raises must not kill the tick — it is the
+    # tick's own error (2026-09-14), not an unhealthy finding for the agent.
     from central_command.integrations import litellm as litellm_client
 
     probed = []
@@ -1222,9 +1248,8 @@ async def test_health_is_probed_per_managed_alias_only(discovery_stubs, monkeypa
     ]
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert probed == ["cc-x"]  # never the hand-tuned alias
-    assert out["drift"] is True
-    task = discovery_stubs["tasks"][0]
-    assert "LiteLLMError: boom" in task["instructions"]
+    assert out == {"drift": False, "errors": {"health:cc-x": "LiteLLMError: boom"}}
+    assert discovery_stubs["tasks"] == []
 
 
 async def test_one_bad_credential_does_not_block_the_rest(discovery_stubs, monkeypatch):
@@ -1405,8 +1430,8 @@ async def test_declared_and_bridge_aliases_are_never_probed(discovery_stubs):
         "supports_response_schema": True, "supports_vision": False,
     })
     bridge = _managed_deployment(
-        "cc-bridge", provider_model="openai/chat_completions/graphiti-llm",
-        provider="openai",  # excluded from the anthropic-credential's catalog diff too
+        "cc-bridge", provider_model="openai/chat_completions/claude-x",
+        provider="openai",  # the bridge prefix is routing, not id: still claude-x
     )
     discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
     discovery_stubs["state"]["deployments"] = [declared, bridge]
@@ -1415,14 +1440,30 @@ async def test_declared_and_bridge_aliases_are_never_probed(discovery_stubs):
     assert out == {"drift": False}
 
 
-async def test_a_probe_exception_becomes_an_error_entry_and_the_tick_completes(discovery_stubs):
+async def test_a_probe_or_health_exception_is_the_ticks_own_error_not_agent_work(
+        discovery_stubs, monkeypatch):
+    """2026-09-14: the probe refused a slashed alias the proxy serves, the
+    brief told the agent a probe error is a mechanism failure to surface via
+    ask_operator, and a code bug became a question the operator had to
+    answer. Mechanism exceptions land in the result's `errors` (material to
+    the engine) and never in a brief."""
+    from central_command.integrations import litellm as litellm_client
+
     discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
     discovery_stubs["state"]["deployments"] = [_managed_deployment("cc-x")]
     discovery_stubs["state"]["probes"]["cc-x"] = RuntimeError("provider flap")
+
+    async def health_raises(model=None):
+        raise litellm_client.LiteLLMError("bad model_name")
+
+    monkeypatch.setattr(litellm_client, "check_model_health", health_raises)
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
-    assert out["drift"] is True
-    task = discovery_stubs["tasks"][0]
-    assert "RuntimeError: provider flap" in task["instructions"]
+    assert out["drift"] is False
+    assert out["errors"] == {"probe:cc-x": "RuntimeError: provider flap",
+                             "health:cc-x": "LiteLLMError: bad model_name"}
+    assert discovery_stubs["tasks"] == []
+    assert hb_actions.ACTIONS["litellm.discovery"].material(out), "an error is material"
+    assert "probe `error`" not in hb_actions._maintenance_brief({"x": {"stale": []}})
 
 
 # --- autodiscovery memory (2026-09-11) -----------------------------------------
@@ -1473,6 +1514,34 @@ def test_reconcile_only_new_changed_or_failed_reach_the_agent():
     assert "m-gone" not in snap, "an id the catalog dropped is forgotten"
     for m in rec["to_task"]:
         assert snap[m["id"]]["disposition"] == "pending"
+
+
+def test_reconcile_reoffers_a_registered_model_that_left_the_proxy():
+    """2026-09-14: 46 approved-and-registered models were removed from the
+    proxy by hand and the memory carried them as decided. A registered id
+    that is now missing goes back to review as `removed`, never silently
+    skipped or kept registered."""
+    previous = {"m-x": _snap({"id": "m-x"}, "registered")}
+    rec = hb_actions.reconcile_snapshot(previous, [{"id": "m-x"}], {"m-x"}, set(), {})
+    assert [m["id"] for m in rec["to_task"]] == ["m-x"]
+    assert rec["snapshot"]["m-x"] == {
+        "fp": hb_actions.catalog_fingerprint({"id": "m-x"}),
+        "disposition": "pending", "reason": "removed"}
+
+
+def test_review_brief_is_grouped_by_vendor_and_the_agent_answers_by_group():
+    brief = hb_actions._review_brief("Kilo.ai", [
+        {"id": "openai/gpt-a"}, {"id": "anthropic/claude-b"}, {"id": "openai/gpt-c"},
+        {"id": "bare-id"}, {"id": "anthropic/claude-d", "shutdown_date": "2026-12-01"},
+    ], removed_ids={"bare-id"})
+    assert "5 catalog model(s) in 3 vendor group(s)" in brief
+    assert "openai (2): openai/gpt-a, openai/gpt-c" in brief
+    assert "anthropic (2): anthropic/claude-b, anthropic/claude-d (shutdown 2026-12-01)" in brief
+    assert "(no vendor) (1): bare-id [was registered; since removed from the proxy]" in brief
+    assert "`vendors` = exactly the agreed skip groups" in brief
+    assert "resolve each pattern to exact ids yourself" not in brief
+    assert hb_actions.group_by_vendor(["a/1", "b/2", "a/3", "c"]) == {
+        "a": ["a/1", "a/3"], "b": ["b/2"], hb_actions.NO_VENDOR: ["c"]}
 
 
 def test_reconcile_adopts_a_bootstrapped_fingerprint_without_retasking():

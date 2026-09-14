@@ -4,6 +4,46 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.32.0: autodiscovery can see a gateway, and the review answers by group
+
+A review of the autodiscovery run against a gateway credential (Kilo.ai)
+found the diff had never seen a single one of its deployments. The
+credential's provider is `openai_compatible`; its deployments say `openai`,
+or carry the model with no prefix at all when registered by hand in the
+LiteLLM UI (`kilo-auto/free`). Nothing matched, so every catalog id read as
+NEW — the registered one included — the managed set was empty, and stale and
+unhealthy could never fire for a gateway. The same alias then failed the
+capability probe: our validator refused the `/` the proxy happily serves,
+and the maintenance brief told the agent a probe error was a mechanism
+failure to surface with `ask_operator`, so a code bug became a question the
+operator had to answer. Meanwhile the review task — 314 ids in one model
+turn with "group them and resolve the operator's patterns to exact ids
+yourself" — had not finished on two consecutive days.
+
+- **Ownership decides provider membership.** A deployment tied to the
+  credential is that credential's provider, whatever its provider fields
+  say, and a configured model matches a catalog id on the full model string
+  as well as its prefix-stripped form (and through the Responses-bridge
+  segment). Tested with the live gateway shape.
+- **An alias may carry `/`.** `ALIAS_RE` accepts what the proxy accepts, so
+  probe and health can read a hand-registered gateway alias.
+- **Mechanism failures are the tick's own.** A probe or health call that
+  raises lands in the run result's `errors` (material to the engine, visible
+  in the run history), never in a brief; the `ask_operator` instruction for
+  probe errors is gone.
+- **The review is pre-grouped by vendor prefix**, in code. The agent
+  recommends per group, the operator answers per group, and
+  `autodiscovery.skip` takes `vendors` (expanded to exact ids from the
+  credential's snapshot by the Executor; an unknown vendor is refused) as
+  well as `model_ids` — at least one of the two (`ArgSpec.any_of`).
+- **A registered model that leaves the proxy re-enters review** (`removed`),
+  instead of being carried as registered forever or inferred as a skip: 46
+  approved-and-registered models had been removed by hand and the memory
+  never noticed.
+
+Operator follow-up on an instance: cancel any still-running review task
+from before this release; the next pass re-offers its ids grouped.
+
 ## 2026-09-14 — v2.31.6: a tool-search miss no longer reads as a missing tool
 
 Two agents on one day declared `missing_tool` gaps for tools they held. The

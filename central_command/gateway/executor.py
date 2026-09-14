@@ -1000,18 +1000,36 @@ async def _autodiscovery_skip(args: dict, approver: str, proposer: str | None) -
     OpenAI and behind a gateway are different decisions); the legacy flat
     `skip` list stays honoured, read-only."""
     from central_command.db import repo
+    from central_command.heartbeat.actions import SNAPSHOT_SETTING, vendor_of
 
     name = str(args["credential_name"])
-    ids = sorted({str(i) for i in args["model_ids"] if str(i).strip()})
+    ids = {str(i) for i in (args.get("model_ids") or []) if str(i).strip()}
+    # `vendors` (2026-09-14): whole groups, expanded HERE from the
+    # credential's snapshot — every catalog id under that prefix that is not
+    # registered on the proxy. Plain code, so the review agent never has to
+    # enumerate 80 ids from 'skip all openai'.
+    vendors = {str(v).strip() for v in (args.get("vendors") or []) if str(v).strip()}
+    if vendors:
+        snapshot = (await repo.get_app_setting(SNAPSHOT_SETTING, {})).get(name) or {}
+        expanded = {cid for cid, e in snapshot.items()
+                    if vendor_of(cid) in vendors and e.get("disposition") != "registered"}
+        unknown = vendors - {vendor_of(cid) for cid in snapshot}
+        if unknown:
+            raise ExecutorError(
+                f"refusing autodiscovery.skip: no catalog id under credential {name!r} "
+                f"has vendor {', '.join(sorted(unknown))}")
+        ids |= expanded
+    ids = sorted(ids)
     if not ids:
-        raise ExecutorError("refusing autodiscovery.skip: model_ids is empty")
+        raise ExecutorError("refusing autodiscovery.skip: nothing to skip (model_ids and vendors empty)")
     decisions = dict(await repo.get_app_setting("autodiscovery_decisions", {"skip": []}))
     by_cred = dict(decisions.get("skip_by_credential") or {})
     merged = sorted(set(by_cred.get(name) or []) | set(ids))
     by_cred[name] = merged
     decisions["skip_by_credential"] = by_cred
     await repo.set_app_setting("autodiscovery_decisions", decisions)
-    return (f"autodiscovery: {len(ids)} catalog id(s) under credential {name!r} "
+    via = f" ({len(vendors)} vendor group(s) expanded)" if vendors else ""
+    return (f"autodiscovery: {len(ids)} catalog id(s) under credential {name!r}{via} "
             f"will never be offered again ({len(merged)} skipped for it in total)")
 
 

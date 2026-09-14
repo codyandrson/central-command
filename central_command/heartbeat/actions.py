@@ -654,12 +654,23 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     }
 
 
-def _raw_provider_id(provider_model: str) -> str:
-    """Strip a leading 'provider/' so a catalog id and a configured
-    deployment's provider_model compare on the same string regardless of
-    which side carries the prefix ('anthropic/claude-sonnet-4-5-20250929'
-    and 'claude-sonnet-4-5-20250929' are the same raw id)."""
-    return provider_model.split("/", 1)[1] if "/" in provider_model else provider_model
+def _candidate_ids(provider_model: str) -> set[str]:
+    """Every string a configured deployment's model could match a catalog id
+    on: the model string as stored AND with its leading 'provider/' stripped.
+    Both, because which side carries the prefix depends on who registered
+    the deployment (2026-09-14): the agent writes 'openai/vendor/model' for
+    a gateway id 'vendor/model', but the LiteLLM UI stores a hand-registered
+    gateway model as 'kilo-auto/free' with the provider only in
+    custom_llm_provider — and stripping THAT leaves 'free', which matches
+    nothing. Anthropic stays as before: 'anthropic/claude-x' and 'claude-x'
+    are the same raw id."""
+    ids = {provider_model}
+    if "/" in provider_model:
+        ids.add(provider_model.split("/", 1)[1])
+    # The Responses bridge ('openai/chat_completions/<model>') is a routing
+    # prefix, not part of the id.
+    ids |= {i.replace("chat_completions/", "", 1) for i in list(ids) if "chat_completions/" in i}
+    return ids
 
 
 def compute_discovery_drift(
@@ -691,15 +702,22 @@ def compute_discovery_drift(
     # A deployment's explicit `provider` (custom_llm_provider) is usually
     # unset — the provider normally rides only as the model-string prefix
     # ("anthropic/claude-…"), verified live 2026-08-20 — so match on either.
+    # And a deployment tied to THIS credential is this provider's by
+    # definition, whatever its provider fields say (2026-09-14): a gateway
+    # credential's provider is 'openai_compatible' while its deployments say
+    # 'openai', so the name-based match alone found nothing — every catalog
+    # id read as NEW, including the registered one, and the managed set was
+    # empty, so stale/unhealthy could never fire for a gateway.
     this_provider = [
         d for d in deployments
-        if d.get("provider") == provider
+        if d.get("credential_name") == credential_name
+        or d.get("provider") == provider
         or str(d.get("provider_model") or "").startswith(f"{provider}/")
     ]
-    configured_ids = {
-        _raw_provider_id(d["provider_model"])
-        for d in this_provider if d.get("provider_model")
-    }
+    configured_ids: set[str] = set()
+    for d in this_provider:
+        if d.get("provider_model"):
+            configured_ids |= _candidate_ids(d["provider_model"])
     skip_set = set(skip or [])
 
     missing = [
@@ -713,7 +731,7 @@ def compute_discovery_drift(
     stale = [
         d for d in managed
         if d.get("provider_model")
-        and _raw_provider_id(d["provider_model"]) not in catalog_by_id
+        and not (_candidate_ids(d["provider_model"]) & set(catalog_by_id))
     ]
     managed_names = {d.get("model_name") for d in managed}
     unhealthy_managed = [u for u in unhealthy if u.get("model") in managed_names]
@@ -758,8 +776,9 @@ def reconcile_snapshot(
     status (None = row gone).
 
     The rule: an id reaches the agent when it is NEW, when its fingerprint
-    CHANGED since it was decided (even if skipped or registered), or when the
-    task that was examining it FAILED. A skipped id with the same fingerprint
+    CHANGED since it was decided (even if skipped or registered), when it was
+    REGISTERED and has since left the proxy (`removed`), or when the task
+    that was examining it FAILED. A skipped id with the same fingerprint
     is never shown again — that is the whole fix for the daily re-examination
     of 60 dated snapshots. A pending id whose task finished DONE without
     registering it becomes skipped; nothing else is inferred.
@@ -797,6 +816,13 @@ def reconcile_snapshot(
             continue  # the operator's own skip list: not ours to track
         if not prev:
             reason = "new"
+        elif prev.get("disposition") == "registered":
+            # It was on the proxy and is not any more (2026-09-14): someone
+            # removed it outside a decision this memory recorded. Review it
+            # again — the operator says skip there if that is what the
+            # removal meant — rather than carrying `registered` forever or
+            # inferring a skip nobody made.
+            reason = "removed"
         elif prev.get("fp") not in (None, fp):
             reason = "changed"
         elif prev.get("disposition") == "pending" and prev.get("task_id"):
@@ -934,46 +960,86 @@ def _add_brief(credential_name: str, models: list[dict]) -> str:
     )
 
 
-def _review_brief(credential_name: str, models: list[dict]) -> str:
+NO_VENDOR = "(no vendor)"
+
+
+def vendor_of(catalog_id: str) -> str:
+    """The vendor prefix a gateway catalog id carries ('anthropic/claude-x'
+    -> 'anthropic'); a bare id has none. The unit the operator answers a
+    review in, and the unit `autodiscovery.skip` expands by."""
+    return catalog_id.split("/", 1)[0] if "/" in catalog_id else NO_VENDOR
+
+
+def group_by_vendor(ids: list[str]) -> dict[str, list[str]]:
+    """Catalog ids grouped by vendor prefix, in first-seen order — plain
+    code, so the agent never has to derive or resolve the grouping."""
+    groups: dict[str, list[str]] = {}
+    for cid in ids:
+        groups.setdefault(vendor_of(cid), []).append(cid)
+    return groups
+
+
+def _review_brief(credential_name: str, models: list[dict],
+                  removed_ids: set[str] = frozenset()) -> str:
     """One credential's NEW catalog ids, for the operator to settle add-vs-
     skip with the agent in a discussion (2026-09-13). Compact on purpose: a
     gateway credential can surface hundreds of ids at once, and this brief
     registers nothing — the agreed adds become one add-task per model on the
-    next pass, once this task is DONE."""
-    lines = []
+    next pass, once this task is DONE.
+
+    Pre-grouped by vendor (2026-09-14): a 314-id list handed to one model
+    turn with 'group it and resolve the operator's patterns to exact ids
+    yourself' never finished. The grouping is code, the operator answers by
+    group, and the skip proposal names GROUPS (`vendors`) — the Executor
+    expands them to exact ids from the snapshot. The model does no set
+    arithmetic."""
+    labels: dict[str, str] = {}
     for m in models:
-        label = str(m.get("id"))
+        cid = str(m.get("id"))
+        label = cid
         if m.get("display_name"):
             label += f" — {m['display_name']}"
         if m.get("shutdown_date"):
             label += f" (shutdown {m['shutdown_date']})"
-        lines.append(label)
+        if cid in removed_ids:
+            label += " [was registered; since removed from the proxy]"
+        labels[cid] = label
+    groups = group_by_vendor(list(labels))
+    lines = [f"{vendor} ({len(ids)}): " + ", ".join(labels[c] for c in ids)
+             for vendor, ids in groups.items()]
     return (
         _DISCOVERY_INTRO
         + _DISCOVERY_NAMING
         + f"NEW under credential {credential_name!r}: {len(models)} catalog "
-        "model(s) the proxy does not have and nobody has decided on yet. "
-        "This task REGISTERS NOTHING. Its job is the decision:\n\n"
-        "1. Group the list by vendor prefix / model family and form a "
-        "recommendation per group (add, skip, or ask) — dated snapshots of an "
-        "undated alias, imminent shutdowns, and non-chat modes the operator "
-        "has no use for are the usual skips.\n"
+        f"model(s) in {len(groups)} vendor group(s) the proxy does not have "
+        "and nobody has decided on yet. This task REGISTERS NOTHING. Its job "
+        "is the decision, and the list below is ALREADY GROUPED by vendor "
+        "prefix — do not regroup it, and never retype the ids:\n\n"
+        "1. Form a recommendation per GROUP (add, skip, or ask) — dated "
+        "snapshots of an undated alias, imminent shutdowns, and non-chat "
+        "modes the operator has no use for are the usual skips.\n"
         "2. Open a discussion with `ask_operator(needs_discussion=True)`: put "
-        "the grouped list and your recommendation in the question, and settle "
-        "with the operator which ids to ADD and which to SKIP. Answers come "
-        "in patterns ('all anthropic, skip the rest') — resolve each pattern "
-        "to exact ids yourself and read the result back before proposing.\n"
+        "the group summary (vendor, count, your recommendation) in the "
+        "question — not every id — and settle with the operator which GROUPS "
+        "to ADD and which to SKIP; they may also name individual ids either "
+        "way.\n"
         "3. Propose ONE `autodiscovery.skip` (via propose_litellm_change, "
-        "credential_name = this credential, model_ids = exactly the agreed "
-        "skips, reason = the operator's words). It is gated: they approve it "
-        "in the Inbox like any change.\n"
+        "credential_name = this credential, `vendors` = exactly the agreed "
+        "skip groups as written in the list below, `model_ids` = only the "
+        "individual ids the operator named, reason = the operator's words). "
+        "Plain code expands each vendor to its exact ids on execution; you "
+        "never enumerate them. It is gated: they approve it in the Inbox "
+        "like any change.\n"
         "4. `conclude_discussion`, then end with a result naming the agreed "
-        "ADDS. Do NOT register them here: once this task is DONE the next "
-        "discovery pass hands you one add-task per agreed model, each with "
-        "the full registration procedure.\n\n"
-        "If the operator wants none of them, propose the skip for the whole "
-        "list. If they do not settle a group, leave it OUT of the skip — an "
-        "undecided id is reviewed again next pass, a skipped one never is.\n\n"
+        "ADD groups. Do NOT register them here: once this task is DONE the "
+        "next discovery pass hands you one add-task per agreed model, each "
+        "with the full registration procedure.\n\n"
+        "If the operator wants none of them, propose the skip with every "
+        "vendor. If they do not settle a group, leave it OUT of the skip — "
+        "an undecided id is reviewed again next pass, a skipped one never "
+        "is. An entry marked [was registered; since removed from the proxy] "
+        "was on the proxy once and is gone: ask whether the removal meant "
+        "skip.\n\n"
         + "\n".join(lines) + "\n"
     )
 
@@ -1005,9 +1071,7 @@ def _maintenance_brief(findings: dict[str, dict]) -> str:
         "declared): propose ONE litellm.update_model per alias carrying "
         "exactly its `suggested_model_info` as `model_info` — measured, "
         "never guessed. This converges: once declared, an alias never "
-        "re-qualifies. A probe `error` entry here is a mechanism failure "
-        "like any other — surface it via ask_operator, same as the ERRORS "
-        "paragraph below.\n\n"
+        "re-qualifies.\n\n"
         "ERRORS: a findings entry carrying `error` instead of a diff means the "
         "DISCOVERY MECHANISM itself failed for that credential — the pass was "
         "blind there, and blind is never 'nothing to do'. Diagnose what you "
@@ -1089,7 +1153,14 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
     # tool here: it walks the hand-tuned local fleet too — swapping GPU
     # models on the workstation and blowing the 30s client timeout (measured
     # 2026-08-20) — and no managed deployments means no health call at all.
+    # A health call that RAISES is not a finding about the model — the proxy
+    # answers 200 with the failing endpoint listed when a model is down. An
+    # exception is this mechanism failing (our client refusing the alias,
+    # the proxy unreachable), so it lands in the tick's own `errors`, which
+    # the engine records as material, instead of being handed to the agent
+    # to diagnose and ask the operator about (2026-09-14).
     unhealthy: list[dict] = []
+    errors: dict[str, str] = {}
     for d in deployments:
         if d.get("credential_name") not in cred_names:
             continue
@@ -1099,8 +1170,8 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         try:
             res = await litellm_client.check_model_health(alias)
             unhealthy.extend(res.get("unhealthy") or [])
-        except Exception as e:  # noqa: BLE001 — a dead model must read as unhealthy, not kill the tick
-            unhealthy.append({"model": alias, "error": f"{type(e).__name__}: {e}"})
+        except Exception as e:  # noqa: BLE001 — one failed call must not kill the tick
+            errors[f"health:{alias}"] = f"{type(e).__name__}: {e}"
 
     # UNDECLARED-CAPABILITY reconciliation: "declare the undeclared", not
     # continuous re-measurement. A probe costs ~10 real requests, so this
@@ -1133,7 +1204,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         try:
             probe = await litellm_client.probe_model(alias)
         except Exception as e:  # noqa: BLE001 — one bad probe must not kill the tick
-            undeclared[alias] = {"error": f"{type(e).__name__}: {e}"}
+            errors[f"probe:{alias}"] = f"{type(e).__name__}: {e}"
             continue
         suggested = probe.get("suggested_model_info") or {}
         if suggested:
@@ -1188,7 +1259,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
 
     await repo.set_app_setting(SNAPSHOT_SETTING, snapshots)
     if not findings and not undeclared:
-        return {"drift": False}
+        return {"drift": False, "errors": errors} if errors else {"drift": False}
 
     batch_size = _parse_positive_int(params, "batch_size", 1)
 
@@ -1240,8 +1311,9 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
             ):
                 backlog[name] = backlog.get(name, 0) + len(to_review)
             else:
+                removed = {cid for cid, e in entries.items() if e.get("reason") == "removed"}
                 result = await create_and_run_task(
-                    _review_brief(name, to_review), f"LiteLLM autodiscovery: {name} review",
+                    _review_brief(name, to_review, removed), f"LiteLLM autodiscovery: {name} review",
                     litellm_manager.AGENT_ID, actor=f"heartbeat:{schedule_id}", background=True,
                 )
                 if result.get("task_id"):
@@ -1278,6 +1350,8 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         "credentials": sorted(findings),
         "queued": len(task_ids),
     }
+    if errors:
+        out["errors"] = errors
     if backlog:
         out["backlog"] = backlog
     return out
@@ -1548,7 +1622,11 @@ ACTIONS: dict[str, ActionSpec] = {
             # because everything is already queued from a prior pass is not
             # "nothing happened" — it's drift the operator should still be
             # able to see accounted for, without re-tasking it.
-            material=lambda r: bool(r.get("task_ids") or r.get("backlog")),
+            # Truthy on errors too (2026-09-14): a probe or health call the
+            # mechanism itself could not make is a failure of THIS action,
+            # recorded here, never a question routed to the operator via
+            # the agent.
+            material=lambda r: bool(r.get("task_ids") or r.get("backlog") or r.get("errors")),
         ),
     )
 }
