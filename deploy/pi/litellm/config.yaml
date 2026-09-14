@@ -35,6 +35,19 @@ general_settings:
   database_url: os.environ/DATABASE_URL
   store_model_in_db: true
   store_prompts_in_spend_logs: true
+  # Spend-log retention (2026-09-14). LiteLLM_SpendLogs had no retention at
+  # all and reached 577 MB / 20k rows in 16 days with prompts stored; the
+  # bundled Prisma query engine's high-water mark tracks its largest
+  # statements, and on the chromebox it grew to 5.3 GB over four days and
+  # OOM-killed the pod (the 6Gi limit in deploy/k3s/30-litellm.yaml is the
+  # backstop, not the fix). The cockpit's usage panel reads the DAILY
+  # aggregate tables, so the 30-day chart is unaffected; what expires is the
+  # per-request prompt/response text in the proxy UI. Cleanup runs after the
+  # 03:00 backup. Operator-chosen window.
+  maximum_spend_logs_retention_period: "30d"
+  maximum_spend_logs_cleanup_cron: "0 4 * * *"
+  maximum_spend_logs_cleanup_batch_size: 1000
+  maximum_spend_logs_cleanup_run_budget: "5m"
   # Health-check-driven routing: a background loop pings every deployment and a
   # failing one is dropped from the routing pool BEFORE a request lands on it,
   # rather than after one has already failed. That is what would let the

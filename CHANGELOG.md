@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.33.2: a resumed run that dies lands its task
+
+LiteLLM was OOM-killed on the compute node: its bundled Prisma query engine
+had grown to 5.3 GB over four days inside the pod's 6 GiB cap. Every agent
+turn in flight for the ~40 s restart failed with a connection error. The
+outage logic handled all of it — six queue items released with backoff,
+four tasks retry-parked — except one: a task session the update hold had
+stopped and the next process resumed. Its resume driver caught only "stopped
+again" and "window exhausted"; the connection error escaped, `_run_live`
+landed the SESSION failed, and the task sat IN_PROGRESS on a failed
+transcript with no owner. The startup sweep could not see it (it lands tasks
+whose session is still RUNNING).
+
+- **`resume_stopped_session` and `continue_session` land the task when the
+  run dies.** Transient → the same retry park a first run gets (a fresh run
+  through the normal wrapper; the transcript stays on the failed session);
+  semantic → FAILED with the reason. Orchestrator and conversation resumes
+  are untouched — the orchestrator loop has its own failure protocol, and a
+  conversation has no task. Guarded by `tests/test_stop_resume.py`.
+- **LiteLLM spend logs get a retention period** (`deploy/pi/litellm/config.yaml`,
+  30 days, cleanup at 04:00 after the backup). `LiteLLM_SpendLogs` had no
+  retention and reached 577 MB in 16 days with prompts stored; LiteLLM's own
+  guidance ties the query engine's high-water mark to its largest statements.
+  The cockpit's usage panel reads the daily aggregate tables and is
+  unaffected; the per-request prompt text in the proxy UI expires. The 6Gi
+  cap stays as the backstop — this stretches the interval, it is not a
+  promise the engine never grows.
+
+Operator follow-up on an instance: the one stuck task from 2026-09-14 was
+parked for retry by hand (the SQL the fixed code would have run). The new
+proxy config is applied by the updater's ConfigMap step; the retention job
+starts on the proxy's next start.
+
 ## 2026-09-14 — v2.33.1: the spend repair sets daily rows from the log, not by delta
 
 Running v2.33.0's `repair_spend_prices.py` left the Usage panel at

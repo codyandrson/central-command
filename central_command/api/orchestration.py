@@ -1653,6 +1653,34 @@ async def _continue_agent(after: str, agent_id: str, model):
     return await build_agent_for(agent_id, model=resolved), resolved
 
 
+async def _land_resumed_run_failure(task_id: str | None, e: BaseException, *,
+                                    after: str) -> None:
+    """A resumed or continued run died mid-turn. `_run_live` has already
+    landed the SESSION (FAILED, with the reason); this lands the TASK, which
+    nothing else owns from here — the startup sweep only lands tasks whose
+    session is still RUNNING, so a task left IN_PROGRESS against a FAILED
+    transcript sat on the board with no owner (2026-09-14: an update-hold
+    resume that died in a LiteLLM restart).
+
+    Transient → the same retry park a first run that dies gets, re-entered
+    as a fresh run through the normal wrapper (the transcript stays on the
+    failed session for the record). Semantic → FAILED with the reason, the
+    startup sweep's stance. Orchestrator and conversation resumes are left
+    alone: the orchestrator loop has its own failure protocol, and a
+    conversation has no task row.
+    """
+    if after != "task" or not task_id:
+        return
+    if await park_task_retry(task_id, e, kind="run", attempts=1) is not None:
+        return
+    await repo.resolve_task(task_id, "FAILED", outcome=f"resumed run failed: {e}")
+    await events.emit(
+        "task.run_failed", ref_id=task_id,
+        payload={"error": str(e)[:300], "transient": False, "after": after},
+        actor="system",
+    )
+
+
 async def continue_session(item_id: str, model=None) -> dict | None:
     """Grant a window-parked run another request window, and land it normally.
 
@@ -1724,6 +1752,9 @@ async def continue_session(item_id: str, model=None) -> dict | None:
             await repo.park_task_review(task_id, session_id)
             await _land_task_question_outcome(task_id, out)
         return {"window": window, **out}
+    except Exception as e:  # the task must not outlive its run ownerless
+        await _land_resumed_run_failure(task_id, e, after=after)
+        raise
 
     if after == "orchestrator":
         task = await repo.get_task(state["task_id"])
@@ -1828,6 +1859,9 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
             await repo.park_task_review(task_id, session_id)
             await _land_task_question_outcome(task_id, out)
         return out
+    except Exception as e:  # the task must not outlive its run ownerless
+        await _land_resumed_run_failure(task_id, e, after=after)
+        raise
 
     if after == "orchestrator":
         task = await repo.get_task(state["task_id"])

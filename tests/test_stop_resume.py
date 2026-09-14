@@ -539,3 +539,71 @@ async def test_stop_click_leaves_the_session_sweepable():
     from central_command.ingest.dispatcher import sweep_orphaned_sessions
     await sweep_orphaned_sessions(0)
     assert (await repo.get_session(session_id))["status"] == "FAILED"
+
+
+# ── H: a resumed run that dies lands its task ─────────────────────────────────
+#
+# 2026-09-14: an update-hold resume died in a LiteLLM restart. The driver
+# caught only RunStopped / RunWindowExhausted, the connection error escaped,
+# `_run_live` landed the SESSION failed, and the task sat IN_PROGRESS on a
+# failed transcript with no owner — the startup sweep only lands tasks whose
+# session is still RUNNING.
+
+
+def _dying_model(message: str) -> FunctionModel:
+    def _respond(messages, info) -> ModelResponse:
+        raise RuntimeError(message)
+    return FunctionModel(_respond)
+
+
+async def _stopped_task(monkeypatch) -> tuple[str, str]:
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _looping_model()))
+    task_id = "task_" + uuid.uuid4().hex[:12]
+    await repo.create_task(task_id, "Stoppable", "Loop until stopped.", "jira-expert")
+    _press_stop_mid_run(monkeypatch)
+    out = await routes._run_assigned_task(await repo.get_task(task_id))
+    assert out["stopped"] is True
+    return task_id, out["session_id"]
+
+
+@needs_pg
+async def test_a_transient_death_on_resume_parks_the_task_for_retry(monkeypatch):
+    task_id, session_id = await _stopped_task(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="Connection error"):
+        await orchestration.resume_stopped_session(
+            session_id, model=_dying_model("Connection error.")
+        )
+
+    row = await repo.get_task(task_id)
+    assert row["status"] == "ASSIGNED", "a transient death is the retry sweep's, not the board's"
+    assert (row.get("retry_state") or {}).get("kind") == "run"
+    assert await repo.session_status(session_id) == "FAILED"
+
+
+@needs_pg
+async def test_a_semantic_death_on_resume_fails_the_task_with_its_reason(monkeypatch):
+    task_id, session_id = await _stopped_task(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="schema"):
+        await orchestration.resume_stopped_session(
+            session_id, model=_dying_model("invalid schema")
+        )
+
+    row = await repo.get_task(task_id)
+    assert row["status"] == "FAILED"
+    assert "invalid schema" in (row.get("outcome") or "")
+    assert not row.get("retry_state")
+    assert await repo.session_status(session_id) == "FAILED"
+
+
+def test_both_resume_drivers_land_the_task_when_the_run_dies():
+    """Source walk: the landing lives in a wrapper, so a new except clause
+    that swallows the error — or a driver without the clause — is the bug
+    coming back wearing a refactor's clothes."""
+    import inspect
+
+    for fn in (orchestration.resume_stopped_session, orchestration.continue_session):
+        src = inspect.getsource(fn)
+        assert "except Exception as e:" in src, fn.__name__
+        assert "_land_resumed_run_failure(task_id, e, after=after)" in src, fn.__name__
