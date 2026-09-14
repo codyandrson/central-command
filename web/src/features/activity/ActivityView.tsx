@@ -438,33 +438,17 @@ export function ActivityView({ onOpenSession }: {
             </button>
           ))}
         </div>
-        {/* Quick links to sibling systems on the same host. Deriving from
-            the current location (rather than hard-coding the Pi's tailnet
-            name) works from any host without configuration. n8n (8443) is
-            tailscale-serve TLS, and so is VictoriaLogs (9428) — both inherit
-            the page's own scheme, which matches whichever listener (serve TLS
-            via tailnet name, ServiceLB raw via LAN) the operator came in
-            through. LiteLLM (4000) stays explicit http: no serve entry exists
-            for it, so ServiceLB raw-TCP is the only listener on that port. */}
+        {/* The one quick link that belongs on this screen: the infra log
+            console, next to the runs and events it explains. Every other
+            system link (n8n, LiteLLM, ...) lives on the Systems view, which
+            reads configured URLs and shows liveness — one launchpad, not
+            two. Deriving from the current location (rather than hard-coding
+            a tailnet name) works from any host without configuration:
+            VictoriaLogs (9428) is tailscale-serve TLS and inherits the page's
+            own scheme, which matches whichever listener (serve TLS via
+            tailnet name, ServiceLB raw via LAN) the operator came in
+            through. */}
         <div className="ml-auto flex items-center gap-3">
-          <a
-            href={`${window.location.protocol}//${window.location.hostname}:8443`}
-            target="_blank"
-            rel="noreferrer"
-            title="n8n workflows"
-            className="flex items-center gap-1 panel-label uppercase text-muted-foreground opacity-70 transition-colors hover:opacity-100 hover:text-foreground"
-          >
-            n8n <ExternalLink size={11} />
-          </a>
-          <a
-            href={`http://${window.location.hostname}:4000/ui/`}
-            target="_blank"
-            rel="noreferrer"
-            title="LiteLLM admin UI"
-            className="flex items-center gap-1 panel-label uppercase text-muted-foreground opacity-70 transition-colors hover:opacity-100 hover:text-foreground"
-          >
-            LiteLLM <ExternalLink size={11} />
-          </a>
           <a
             href={`${window.location.protocol}//${window.location.hostname}:9428/select/vmui/`}
             target="_blank"

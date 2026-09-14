@@ -4,6 +4,19 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.29.5: the Activity screen keeps one quick link
+
+The Activity screen's header carried three external links — n8n, LiteLLM
+and the infra log console — built by hard-coding a port onto the page's own
+hostname. The Systems view has since become the launchpad: it reads
+configured URLs, shows up/down and latency, and now lists the local-model
+slot too (v2.29.4). Two link sources that derive the same destinations two
+different ways is how one of them silently rots, and n8n and LiteLLM have
+nothing to do with what the Activity screen shows.
+
+The n8n and LiteLLM links are removed from Activity. The infra log console
+link stays: it belongs beside the runs and events it explains.
+
 ## 2026-09-13 — v2.29.4: the Systems view lists the local-model slot
 
 The local-model slot LiteLLM routes to is a llama-swap instance on the
