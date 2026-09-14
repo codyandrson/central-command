@@ -362,7 +362,10 @@ def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, 
         from central_command.integrations import neo4j_writer
 
         kwargs = {k: args[k] for k in required}
-        kwargs |= {k: args[k] for k in optional if args.get(k) is not None}
+        # An absent optional is forwarded as None, never dropped: the writer
+        # signatures have no defaults, and a dropped `labels` was a TypeError
+        # after approval (2026-09-14, three proposals).
+        kwargs |= {k: args.get(k) for k in optional}
         try:
             result = await getattr(neo4j_writer, fn_name)(**kwargs)
         except neo4j_writer.WriteError as e:

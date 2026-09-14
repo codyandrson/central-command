@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.31.4: the curator pack tells the truth about graph writes
+
+Nine graph-curator remediation proposals failed after approval in a week,
+and in every one the agent had followed its pack text exactly — the text
+was wrong, incomplete, or asked for something impossible. The pack said
+`labels` was optional; the Executor dropped an absent optional and the
+writer's signature has no default, so the write died on a `TypeError`.
+The pack listed the ontology as "(Person, Organization, …)"; the agent
+guessed Task, Email and EmailList for the ellipsis. And the edge template
+said `'<entity>'`, so the agent named a node it was creating in the same
+proposal, which has no uuid until it executes.
+
+- `graph.create_node`'s pack entry now requires `labels` and names all
+  ten ontology types, with the two most-guessed non-types called out. A
+  guard test pins the typed list to the writer's `ENTITY_TYPES`.
+- `graph.create_edge`'s entry says both endpoints are uuids of entities
+  that already exist, and that a node created in the same proposal has
+  none yet: create the nodes first, then propose the edges.
+- The Executor's curation handler forwards an absent optional as `None`
+  instead of dropping it, so a missing `labels` is a valid node with no
+  ontology type rather than a failure.
+
 ## 2026-09-14 — v2.31.3: an indented block in chat no longer rules every line
 
 The chat bubble's inline-code pill (`.msg-body code`: 1px border, 8px

@@ -303,3 +303,27 @@ async def test_rescoping_an_episode_moves_exclusive_content_and_splits_shared(li
         await neo4j_writer._write(
             "MATCH (n:Entity {group_id: $t}) DETACH DELETE n", t=target)
         _ = staying
+
+
+@pytest.mark.asyncio
+async def test_executor_forwards_an_absent_optional_as_none(monkeypatch):
+    """`graph.create_node` without `labels` reached the writer with the
+    argument missing and died on a TypeError after approval (2026-09-14)."""
+    from central_command.gateway import executor as ex
+    from central_command.integrations import neo4j_writer
+
+    seen: dict = {}
+
+    async def fake_create_node(name, labels, summary, group_id):
+        seen.update(name=name, labels=labels)
+        return {"uuid": "x"}
+
+    monkeypatch.setattr(neo4j_writer, "create_node", fake_create_node)
+    monkeypatch.setattr(ex, "_reverify_after_curation", _noop)
+    handler = ex._GRAPH_CURATION_HANDLERS["graph.create_node"]
+    await handler({"name": "n", "summary": "s", "group_id": "g"}, "op", None)
+    assert seen == {"name": "n", "labels": None}
+
+
+async def _noop(args):
+    return None

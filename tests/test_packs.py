@@ -388,3 +388,19 @@ def test_deprecated_propose_jira_update_dropped_but_still_classifies():
         assert durable.classify_deferred(call) == "proposal"
     for pack in packs.PACKS.values():
         assert "propose_jira_update" not in pack.tool_names, pack.name
+
+
+def test_curator_pack_names_every_entity_type():
+    """The create_node notes TYPE the closed ontology rather than generate it
+    (2026-09-14: the old '(Person, Organization, …)' ellipsis produced four
+    guessed labels in a week). A typed list drifts; this pins it to the
+    writer's tuple so adding a type without updating the pack fails here."""
+    from central_command.integrations.neo4j_writer import ENTITY_TYPES
+
+    cap = next(
+        c for p in packs.PACKS.values() for c in p.capabilities
+        if c.name == "graph.create_node"
+    )
+    for t in ENTITY_TYPES:
+        assert t in cap.notes, f"pack notes omit entity type {t}"
+    assert "?" not in cap.arguments, "labels is required, not optional"

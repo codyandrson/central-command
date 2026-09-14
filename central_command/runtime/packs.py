@@ -491,25 +491,39 @@ PACKS: dict[str, Pack] = {
                 name="graph.create_node",
                 arguments="{'name': '<entity name>', 'group_id': '<the "
                           "verification row's graph group>', 'summary': "
-                          "'<one-line description>', 'labels': ['<Type>', …]?, "
+                          "'<one-line description>', 'labels': ['<Type>'], "
                           "'verification_id': '<…>'}",
                 notes=("target_ref = {'system': 'graphiti', 'id': 'central_command', "
                        "'read_version': 'unknown'}, reversibility = 'reversible'. "
                        "For an entity the extraction DROPPED — state exactly what "
-                       "the approved text says, nothing inferred. Labels come "
-                       "from the closed ontology (Person, Organization, …)."),
+                       "the approved text says, nothing inferred. `labels` is "
+                       "REQUIRED and every entry must be one of exactly these "
+                       "ten (the closed ontology; anything else is rejected at "
+                       "execution): Person, Preference, Requirement, Procedure, "
+                       "Location, Event, Organization, Document, Topic, Object. "
+                       "There is no Task, Email or EmailAddress type — an email "
+                       "address or a mailing list is an Object, a Jira issue is "
+                       "a Document."),
             ),
             GatedCapability(
                 name="graph.create_edge",
-                arguments="{'source_uuid': '<entity>', 'target_uuid': "
-                          "'<entity>', 'name': '<RELATION_NAME>', 'fact': "
+                arguments="{'source_uuid': '<entity uuid>', 'target_uuid': "
+                          "'<entity uuid>', 'name': '<RELATION_NAME>', 'fact': "
                           "'<the claim, in the approved text's words>', "
                           "'valid_at'?/'invalid_at'?: '<ISO datetime>', "
                           "'verification_id': '<…>'}",
                 notes=("target_ref = {'system': 'graphiti', 'id': "
                        "'<source_uuid>', 'read_version': 'unknown'}, "
                        "reversibility = 'reversible'. For a relationship the "
-                       "extraction DROPPED. Set the validity window from the "
+                       "extraction DROPPED. Both endpoints must be the uuids of "
+                       "entities that ALREADY exist in the graph — the Executor "
+                       "never resolves a name, an email address or any other "
+                       "label, and a node created earlier in the same proposal "
+                       "has no uuid until it executes. So never put a "
+                       "graph.create_node and an edge to that node in one "
+                       "proposal: create the nodes first, then read their uuids "
+                       "from the graph and propose the edges in a follow-up "
+                       "with the same verification_id. Set the validity window from the "
                        "approved text's own dates: valid_at when it became "
                        "true, invalid_at when it ceased; omit what the text "
                        "does not say — an omitted valid_at is stamped as "
