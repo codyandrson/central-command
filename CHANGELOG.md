@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.29.6: the updater refuses to stop the API under a running agent
+
+Six releases went live on 2026-09-13, and each one killed whatever the agents
+were doing at that moment: twelve task runs died with the process and were
+swept FAILED at the next startup, to be re-created by hand. The updater's stop
+phase was a plain `systemctl stop` with no idea what was in flight.
+
+- `cc-update.sh` now checks for RUNNING sessions before it touches anything and
+  again right before the stop, and refuses with the agents named (`status.json`
+  phase `busy`). Parked sessions survive a restart by construction, so RUNNING
+  is the whole criterion. The request's `force: true` is the override.
+- The cockpit's update dialog explains the refusal and offers **Update anyway
+  (kills in-flight runs)**, which re-applies with `force`.
+- A failure before the stop phase no longer restarts `cc-nerve`; there was
+  nothing to bring back and the cockpit blipped for no reason.
+
 ## 2026-09-13 — v2.29.5: the Activity screen keeps one quick link
 
 The Activity screen's header carried three external links — n8n, LiteLLM

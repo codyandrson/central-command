@@ -47,6 +47,18 @@ describe('cc-update routes', () => {
     expect(existsSync(join(dir, 'trigger'))).toBe(true);
     const trigger = JSON.parse(readFileSync(join(dir, 'trigger'), 'utf-8'));
     expect(trigger.target).toBe('1.2.3');
+    expect(trigger.force).toBe(false);
+  });
+
+  it('apply carries force:true through to the trigger (the "update anyway" path)', async () => {
+    const app = await buildApp();
+    const res = await app.request('/api/update/apply', {
+      method: 'POST',
+      body: JSON.stringify({ target: '1.2.3', force: true }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status).toBe(202);
+    expect(JSON.parse(readFileSync(join(dir, 'trigger'), 'utf-8')).force).toBe(true);
   });
 
   it('apply refuses while a trigger is pending (server-side double-click guard)', async () => {

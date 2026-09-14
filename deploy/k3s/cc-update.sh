@@ -59,6 +59,8 @@ STARTED_AT="$(date -u +%FT%TZ)"
 CTR_NS=k8s.io
 SSHQ=(ssh -o BatchMode=yes -o ConnectTimeout=10)
 
+STOPPED=0   # set the moment services are stopped; die() restarts them only then
+FORCE=0     # request.json force:true — the operator chose "update anyway"
 # What the forward pass actually touched — rollback reverses only these.
 RETAGGED=()          # "<node>|<ref>" per node whose running image we preserved
 IMAGE_DEPLOYS=()     # deployments whose image bytes changed under the same tag
@@ -176,10 +178,36 @@ remove_worktree() {
 die() { # <phase> <message> — best-effort recovery: services back up, honest status
   note "FAILED at $1: $2"
   write_status failed "$1" "$2"
-  # Stage mode never stopped anything — restarting cc-nerve here would blip
-  # the cockpit for no reason.
-  [[ $STAGE_MODE -eq 1 ]] || start_services || true
+  # Nothing before the stop phase (and nothing in stage mode) stopped a
+  # service — restarting cc-nerve there would blip the cockpit for no reason.
+  [[ $STAGE_MODE -eq 1 || $STOPPED -eq 0 ]] || start_services || true
   exit 1
+}
+
+# ── busy gate ────────────────────────────────────────────────────────────────
+# A RUNNING session is a model turn in THIS process; stopping cc-uvicorn kills
+# it, and the next startup's orphan sweep lands it FAILED (2026-09-13: six
+# deploys in a day killed twelve task runs, each re-created by hand). Parked
+# sessions (AWAITING_HUMAN, REVIEW, STOPPED) survive a restart by construction,
+# so RUNNING is the whole criterion. The API answering is what makes the query
+# meaningful: unreachable means nothing is running in it.
+running_sessions() { # prints "N agent, agent, …" (N=0 with no list)
+  curl -fsS -m 10 'http://127.0.0.1:8080/api/sessions?status=RUNNING&limit=200' 2>/dev/null \
+    | python3 -c '
+import collections, json, sys
+rows = json.load(sys.stdin).get("sessions", [])
+c = collections.Counter(r.get("agent_id", "?") for r in rows)
+print(len(rows), ", ".join(f"{a} x{n}" if n > 1 else a for a, n in sorted(c.items())))' 2>/dev/null \
+    || echo 0
+}
+
+refuse_if_busy() { # <phase> — the request's force:true is the operator's "update anyway"
+  local out n
+  out="$(running_sessions)"; n="${out%% *}"
+  if [[ "$n" != 0 && $FORCE -ne 1 ]]; then
+    die "$1" "$n agent run(s) in flight (${out#* }) — wait for them to land, or apply again with 'Update anyway'"
+  fi
+  [[ "$n" == 0 ]] || note "WARNING: forced — $n in-flight run(s) will be killed and swept FAILED at startup (${out#* })"
 }
 
 # A SIGTERM (TimeoutStartSec) must not leave a silent corpse.
@@ -194,6 +222,7 @@ main() {
   PHASE_NOW=resolve; phase "resolving target version"
   local requested=""
   [[ -f "$REQUEST" ]] && requested="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("target",""))' "$REQUEST" 2>/dev/null)"
+  [[ -f "$REQUEST" ]] && [[ "$(python3 -c 'import json,sys;print(bool(json.load(open(sys.argv[1])).get("force")))' "$REQUEST" 2>/dev/null)" == True ]] && FORCE=1
 
   CUR_VERSION="$(sed -n 's/^version=//p' "$REPO/VERSION" | head -1)"
   [[ -n "$CUR_VERSION" ]] || die resolve "no version= in $REPO/VERSION"
@@ -223,6 +252,11 @@ main() {
   if [[ -n "$minfrom" && "$(printf '%s\n%s\n' "$CUR_VERSION" "$minfrom" | sort -V | head -1)" == "$CUR_VERSION" && "$CUR_VERSION" != "$minfrom" ]]; then
     die resolve "v$TARGET_VERSION requires upgrading from >= $minfrom (installed $CUR_VERSION) — apply the intermediate release first"
   fi
+
+  # Twice: here so the common refusal costs nothing, and again right before
+  # the stop, because prebuild + dumps leave a window a new run can start in.
+  PHASE_NOW=busy; phase "checking for in-flight agent runs"
+  refuse_if_busy busy
 
   PHASE_NOW=checkpoint; phase "tagging rollback checkpoint"
   # One stamp names both rollback records: the git tag and the containerd tags
@@ -339,7 +373,10 @@ main() {
   [[ -n "${N8N_ENCRYPTION_KEY:-}" && -n "${LITELLM_SALT_KEY:-}" ]] \
     || note "WARNING: a decryption key is missing from deploy/pi/.env — the litellm/n8n dumps above would not be restorable"
 
+  PHASE_NOW=busy; refuse_if_busy busy
+
   PHASE_NOW=stop; phase "stopping cc-uvicorn and cc-sandbox-runner"
+  STOPPED=1
   systemctl stop cc-uvicorn cc-sandbox-runner || die stop "systemctl stop failed"
 
   PHASE_NOW=merge; phase "merging v$TARGET_VERSION"

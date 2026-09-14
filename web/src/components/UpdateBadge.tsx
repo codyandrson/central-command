@@ -113,13 +113,15 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
     return () => clearInterval(iv);
   }, [open]);
 
-  const applyNow = async () => {
+  // `force` is "Update anyway": the updater refuses to stop the API while agent
+  // runs are in flight (status.phase === 'busy'); forcing kills them.
+  const applyNow = async (force = false) => {
     setApplyError(null);
     try {
       const res = await fetch('/api/update/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: versionInfo?.latest ?? '' }),
+        body: JSON.stringify({ target: versionInfo?.latest ?? '', force }),
       });
       if (res.status === 202) {
         setApplying(true);
@@ -194,6 +196,11 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                     Update failed its health check and was <b>rolled back</b> — you are on v{versionInfo.current}.
                     {progress.status.error ? ` (${progress.status.error})` : ''}
                   </p>
+                ) : progress?.status?.state === 'failed' && progress.status.phase === 'busy' ? (
+                  <p className="text-amber-500">
+                    Not applied — {progress.status.error}. Nothing was changed; applying
+                    now would kill those runs, and they would be marked failed on restart.
+                  </p>
                 ) : progress?.status?.state === 'failed' ? (
                   <p className="text-red-500">
                     Update failed at <span className="font-mono">{progress.status.phase}</span>
@@ -247,11 +254,19 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
               ) : (
                 <>
                   <button
-                    onClick={applyNow}
+                    onClick={() => applyNow()}
                     className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
                   >
                     Apply update now
                   </button>
+                  {progress?.status?.state === 'failed' && progress.status.phase === 'busy' && (
+                    <button
+                      onClick={() => applyNow(true)}
+                      className="w-full rounded-md border border-amber-500/60 text-amber-500 py-2 text-sm font-semibold hover:bg-amber-500/10 transition-colors"
+                    >
+                      Update anyway (kills in-flight runs)
+                    </button>
+                  )}
                   {staged && (
                     <p className="text-xs text-muted-foreground">
                       {local

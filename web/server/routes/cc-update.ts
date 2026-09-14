@@ -80,12 +80,14 @@ function stagePending(): boolean {
   }
 }
 
-function writeTrigger(path: string, target: string): void {
+function writeTrigger(path: string, target: string, force = false): void {
   // Atomic write (tmp + rename) so the path unit never sees a half-written
   // trigger. The dir is tmpfs (cleared on boot) and codyslab-writable —
   // see deploy/k3s/cc-update-tmpfiles.conf.
   const tmp = `${path}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ target, requested_at: new Date().toISOString() }));
+  // `force` is the operator's "update anyway": the updater refuses to stop the
+  // API while agent runs are in flight (it would kill them) unless this is set.
+  writeFileSync(tmp, JSON.stringify({ target, force, requested_at: new Date().toISOString() }));
   renameSync(tmp, path);
 }
 
@@ -125,7 +127,7 @@ app.get('/api/update/status', rateLimitGeneral, (c) => {
 });
 
 app.post('/api/update/stage', rateLimitGeneral, async (c) => {
-  const body = await c.req.json().catch(() => ({})) as { target?: string };
+  const body = await c.req.json().catch(() => ({})) as { target?: string; force?: boolean };
   const result = requestStage(body.target ?? '');
   if (result === 'error') {
     return c.json({
@@ -155,7 +157,7 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   if (inFlight(status)) {
     return c.json({ error: `an update is already running (phase: ${status?.phase})` }, 409);
   }
-  const body = await c.req.json().catch(() => ({})) as { target?: string };
+  const body = await c.req.json().catch(() => ({})) as { target?: string; force?: boolean };
   // The stale-button trap: after a successful update the UI's version info
   // lags until its next check — a re-click must not re-run the whole
   // pipeline against the version that is already installed.
@@ -163,7 +165,7 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
     return c.json({ error: `v${body.target} is already installed` }, 409);
   }
   try {
-    writeTrigger(TRIGGER, body.target ?? '');
+    writeTrigger(TRIGGER, body.target ?? '', body.force === true);
   } catch (err) {
     return c.json({
       error: `could not write ${TRIGGER} — is cc-update installed? `
