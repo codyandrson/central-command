@@ -4,6 +4,14 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.29.2: the episode walk's source pane wraps like the rest of the cockpit
+
+v2.29.0's Episode Walk rendered episode content in a `whitespace-pre-wrap`
+block without the cockpit's `cockpit-wrap` class, so an unbroken token (a
+long URL, a hash) could push the Graph panel wider than its column. The
+source-walking guard in `wrapUnbreakableText.test.ts` caught it and has been
+red on master since. The class is added; nothing else changes.
+
 ## 2026-09-13 — v2.29.1: a scheduled lever explains itself
 
 Opening "LiteLLM model autodiscovery" in the cron dialog showed a one-line

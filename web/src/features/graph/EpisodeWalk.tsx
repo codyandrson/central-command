@@ -94,7 +94,7 @@ export function EpisodeWalk({ groupId, episodeIndex, episodeSubgraph, onLoad, on
             ))}
           </select>
           <div className="mt-2 mb-1 text-[0.667rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Source</div>
-          <pre className="whitespace-pre-wrap break-words font-sans text-[0.7rem] text-foreground/90">
+          <pre className="whitespace-pre-wrap cockpit-wrap break-words font-sans text-[0.7rem] text-foreground/90">
             {loaded ? loaded.episode.content || '(empty)' : '…'}
           </pre>
         </div>
