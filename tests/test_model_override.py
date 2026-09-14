@@ -83,6 +83,24 @@ async def test_catalog_endpoint_carries_the_fields_the_cockpit_reads():
 
 
 @needs_pg
+async def test_catalog_default_is_the_agent_row_model(monkeypatch):
+    """The dropdown's "Default (…)" label must name what a no-override run
+    resolves to — the agent ROW first (`configured_model_name`), not the
+    env/global default it read for three weeks (2026-09-13)."""
+    agent = "agent-" + uuid.uuid4().hex[:8]
+    await repo.upsert_agent(agent, "Row Model Test", "", "")
+    try:
+        session_id = await _session(agent)
+        assert (await routes.list_model_catalog(session_id=session_id))["default"] == (
+            settings.default_model.split(":", 1)[-1]
+        )
+        await repo.set_agent_model(agent, "openai/gpt-5.2", "")
+        assert (await routes.list_model_catalog(session_id=session_id))["default"] == "openai/gpt-5.2"
+    finally:
+        await repo.set_agent_model(agent, "", "")
+
+
+@needs_pg
 async def test_catalog_endpoint_reports_a_session_override():
     session_id = await _session()
     await repo.set_session_model_override(session_id, "openai/gpt-5.2")
@@ -284,9 +302,10 @@ async def test_gateway_models_carries_the_shape_the_cockpit_hook_declares():
     # The pinned catalog: cc-default is the resolved default -> primary.
     assert by_id["cc-default"]["role"] == "primary"
     assert by_id["cc-default"]["thinkingLevels"] == list(models_mod.THINKING_LEVELS)
-    # A namespaced id splits into provider/label; a bare id falls back.
-    assert by_id["openai/gpt-5.2"]["provider"] == "openai"
-    assert by_id["openai/gpt-5.2"]["label"] == "gpt-5.2"
+    # The id IS the label, slash or not — `kilo-auto/free` is one alias, and
+    # splitting it rendered as "free" (2026-09-13).
+    assert by_id["openai/gpt-5.2"]["label"] == "openai/gpt-5.2"
+    assert by_id["openai/gpt-5.2"]["provider"] == "litellm"
     assert by_id["cc-default"]["provider"] == "litellm"
 
 

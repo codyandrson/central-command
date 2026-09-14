@@ -70,10 +70,20 @@ async def resolve_model(model=None, agent_id=None, model_name=None, thinking=Non
         # '' is the UNSET sentinel in both columns — never a model id.
         model_name = model_name or (row.get("model") or None)
         thinking = thinking or (row.get("thinking") or None)
-    name = (
-        model_name or settings.agent_model(agent_id) or settings.default_model
-    ).split(":", 1)[-1]
+    name = configured_model_name(agent_id, model_name)
     return await _live_model(name, agent_id, thinking=thinking)
+
+
+def configured_model_name(agent_id: str | None, row_model: str | None = None) -> str:
+    """The LiteLLM id a run for `agent_id` lands on below any session/schedule
+    override: the agent ROW's model (pass it in — `row_model`), then
+    CC_MODEL_<AGENT_ID>, then the global default. The one precedence for
+    `resolve_model` AND for what the cockpit prints as an agent's default —
+    two copies of it read "cc-default" for an agent pinned to another alias
+    for three weeks (2026-09-13)."""
+    return (
+        row_model or settings.agent_model(agent_id) or settings.default_model
+    ).split(":", 1)[-1]
 
 
 # The thinking levels Qwen3.8's chat template accepts, and how each spells

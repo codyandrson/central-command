@@ -99,12 +99,13 @@ async function getModelCatalog(): Promise<{ models: GatewayModelInfo[]; error: s
   // The agent/global default is what the dropdown shows as "primary"
   // (inherited); a per-session override rides sessions.patch, not this catalog.
   const primary = data.default || null;
+  // The id IS the label: a LiteLLM alias such as `kilo-auto/free` is one
+  // name, not a provider prefix to strip — it rendered as "free".
   const models: GatewayModelInfo[] = (data.models || []).map(({ id, thinking_levels }) => {
-    const [provider, ...rest] = id.split('/');
     return {
       id,
-      label: rest.length ? rest.join('/') : id,
-      provider: rest.length ? provider : 'litellm',
+      label: id,
+      provider: 'litellm',
       configured: true as const,
       role: id === primary ? 'primary' : 'allowed',
       thinkingLevels: Array.isArray(thinking_levels) ? thinking_levels : [],

@@ -108,10 +108,10 @@ describe('gateway routes', () => {
       expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3100/api/models');
       expect(await res.json()).toEqual({
         models: [
-          // A slash-less LiteLLM alias has no provider segment to split off, so
-          // the id IS the label and the provider is the proxy itself.
+          // The id IS the label, slash or not: a LiteLLM alias is one name,
+          // and the provider is always the proxy itself.
           { id: 'cc-default', label: 'cc-default', provider: 'litellm', configured: true, role: 'primary', thinkingLevels: ['off', 'low', 'medium', 'xhigh'] },
-          { id: 'anthropic/claude-sonnet-5', label: 'claude-sonnet-5', provider: 'anthropic', configured: true, role: 'allowed', thinkingLevels: [] },
+          { id: 'anthropic/claude-sonnet-5', label: 'anthropic/claude-sonnet-5', provider: 'litellm', configured: true, role: 'allowed', thinkingLevels: [] },
         ],
         error: null,
         source: 'litellm',

@@ -36,6 +36,7 @@ class AgentDef:
     # on the Agent Workspace. Set where "work with it iteratively" is the point.
     conversational: bool = False
     status: str = "ACTIVE"    # ACTIVE | RETIRED (D24 lifecycle)
+    model: str = ""           # the operator's per-agent model; "" = unset
 
 
 SEED: tuple[AgentDef, ...] = (
@@ -155,6 +156,7 @@ def _def_from_row(row: dict) -> AgentDef:
         deviations=row.get("deviations") or "",
         conversational=bool(row.get("conversational")),
         status=row.get("status") or "ACTIVE",
+        model=row.get("model") or "",
     )
 
 

@@ -2260,8 +2260,9 @@ async def list_model_catalog(session_id: str | None = None) -> dict:
     """The models Central Command exposes, straight from the LiteLLM proxy — the
     cockpit's model dropdown reads this.
 
-    `default` is what a run resolves to with no override (the per-agent
-    CC_MODEL_<AGENT_ID> when a session is named, else CC_DEFAULT_MODEL);
+    `default` is what a run resolves to with no override (when a session is
+    named: its agent's row model, then CC_MODEL_<AGENT_ID>, else
+    CC_DEFAULT_MODEL — `configured_model_name`, the runtime's own precedence);
     `override` is that session's cockpit-set model, if any. A proxy we cannot
     reach returns `error` with an empty list — never a fake empty success, which
     would render as "this deployment has no models".
@@ -2278,13 +2279,16 @@ async def list_model_catalog(session_id: str | None = None) -> dict:
         thinking_levels_by_model,
     )
 
-    default = settings.default_model.split(":", 1)[-1]
+    from central_command.runtime.models import configured_model_name
+
+    default = configured_model_name(None)
     override = None
     if session_id:
         row = await repo.get_session(session_id)
         if row:
             override = row.get("model_override")
-            default = (settings.agent_model(row["agent_id"]) or settings.default_model).split(":", 1)[-1]
+            agent = await repo.get_agent(row["agent_id"]) or {}
+            default = configured_model_name(row["agent_id"], agent.get("model"))
     try:
         ids = await exposed_model_ids()
         # ONE proxy read for the whole catalog, not one per model.
@@ -2317,11 +2321,12 @@ async def gateway_model_catalog() -> dict:
     models = []
     for m in data["models"]:
         mid = m["id"]
-        provider, _, rest = mid.partition("/")
+        # The id IS the label: a LiteLLM alias like `kilo-auto/free` is one
+        # name, not a provider prefix to strip (it rendered as "free").
         models.append({
             "id": mid,
-            "label": rest or mid,
-            "provider": provider if rest else "litellm",
+            "label": mid,
+            "provider": "litellm",
             "configured": True,
             "role": "primary" if mid == primary else "allowed",
             "thinkingLevels": m.get("thinking_levels") or [],

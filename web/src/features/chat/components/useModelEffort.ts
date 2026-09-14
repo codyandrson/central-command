@@ -64,33 +64,21 @@ function effortLevelsFor(entry: GatewayModelInfo | undefined): EffortLevel[] {
   return entry.thinkingLevels.filter((l): l is EffortLevel => (EFFORT_OPTIONS as string[]).includes(l));
 }
 
-/** Extract the base model name from a "provider/model" ref. */
-function baseModelName(ref: string): string {
-  const idx = ref.indexOf('/');
-  return idx >= 0 ? ref.slice(idx + 1) : ref;
-}
-
-/** Resolve a raw model string to a canonical ID from the options list. */
+/** Resolve a raw model string to a canonical ID from the options list.
+ * Exact id or label only: every id here is a LiteLLM alias the gateway
+ * validates verbatim, so "same name under another provider" is not a match —
+ * `kilo-auto/free` and a hypothetical `free` are two different aliases. */
 function resolveModelId(raw: string, options: GatewayModelInfo[]): string {
   const exact = options.find(m => m.id === raw);
   if (exact) return exact.id;
   const byLabel = options.find(m => m.label === raw);
   if (byLabel) return byLabel.id;
-  const rawBase = baseModelName(raw);
-  const byBaseName = options.find(m => baseModelName(m.id) === rawBase);
-  if (byBaseName) return byBaseName.id;
-  const bySuffix = options.find(m => m.id.endsWith('/' + raw) || raw.endsWith('/' + m.label));
-  if (bySuffix) return bySuffix.id;
   return raw;
 }
 
 function modelRefsMatch(a: string | null | undefined, b: string | null | undefined, options: GatewayModelInfo[]): boolean {
   if (!a || !b) return false;
-  if (a === b) return true;
-  const resolvedA = resolveModelId(a, options);
-  const resolvedB = resolveModelId(b, options);
-  if (resolvedA === resolvedB) return true;
-  return baseModelName(resolvedA) === baseModelName(resolvedB);
+  return a === b || resolveModelId(a, options) === resolveModelId(b, options);
 }
 
 export function buildSelectableModelList(
@@ -100,15 +88,9 @@ export function buildSelectableModelList(
   const list = [...(gatewayModels || [])];
 
   if (currentModel && currentModel !== '--' && !list.some((m) => m.id === currentModel || m.label === currentModel)) {
-    const base = baseModelName(currentModel);
-    const hasSameBase = list.some((m) => baseModelName(m.id) === base);
-    if (!hasSameBase) {
-      list.push({
-        id: currentModel,
-        label: baseModelName(currentModel),
-        provider: currentModel.includes('/') ? currentModel.split('/', 1)[0] : 'unknown',
-      });
-    }
+    // A session pinned to an alias the proxy no longer serves still shows
+    // that alias — the honest label, not a lookalike from the catalog.
+    list.push({ id: currentModel, label: currentModel, provider: 'litellm' });
   }
 
   const byId = new Map<string, GatewayModelInfo>();
@@ -250,22 +232,13 @@ export function useModelEffort(): UseModelEffortReturn {
   // Sync model dropdown when switching sessions (setState-during-render pattern)
   //
   // Resolve the gateway-reported model to a canonical ID from our options list.
-  // Handles bare model names, full provider/model refs, and cross-provider
-  // mismatches (e.g. gateway says "openai-codex/gpt-5.2" but only "openai/gpt-5.2"
-  // is available).
   const rawModelSource = currentSessionModel || model || '--';
   let modelSource = rawModelSource;
 
   if (modelSource !== '--' && modelRefsMatch(modelSource, primaryModelId, modelOptionsList)) {
     modelSource = INHERITED_MODEL_VALUE;
-  } else if (modelSource !== '--' && modelSource !== INHERITED_MODEL_VALUE && !modelOptionsList.some(m => m.id === modelSource)) {
-    const byLabel = modelOptionsList.find(m => m.label === modelSource);
-    const srcBase = baseModelName(modelSource);
-    const byBaseName = modelOptionsList.find(m => baseModelName(m.id) === srcBase);
-    const bySuffix = modelOptionsList.find(m => m.id.endsWith('/' + modelSource));
-    if (byLabel) modelSource = byLabel.id;
-    else if (byBaseName) modelSource = byBaseName.id;
-    else if (bySuffix) modelSource = bySuffix.id;
+  } else if (modelSource !== '--' && modelSource !== INHERITED_MODEL_VALUE) {
+    modelSource = resolveModelId(modelSource, modelOptionsList);
   }
 
   // Include currentSession in the source key so switching sessions always
@@ -423,7 +396,7 @@ export function useModelEffort(): UseModelEffortReturn {
   }, [controlsDisabled, selectedEffort, rpc, currentSession, updateSession]);
 
   const handleModelChange = useCallback(async (nextInput: string) => {
-    let next = nextInput;
+    const next = nextInput;
     if (controlsDisabled) return;
     setUiError(null);
 
@@ -463,23 +436,8 @@ export function useModelEffort(): UseModelEffortReturn {
           }
         }
 
-        // Attempt 2: Cross-provider fallback via WS
-        if (!wsSucceeded && !selectingInheritedPrimary) {
-          const nextBase = baseModelName(next);
-          const alt = modelOptionsList.find(m => m.id !== next && baseModelName(m.id) === nextBase);
-          if (alt) {
-            try {
-              await rpc('sessions.patch', { key: currentSession, model: alt.id });
-              next = alt.id;
-              patchModel = alt.id;
-              setSelectedModel(next);
-              try { localStorage.setItem(MODEL_KEY, next); } catch { /* ignore */ }
-              wsSucceeded = true;
-            } catch {
-              // WS completely broken — fall through to HTTP
-            }
-          }
-        }
+        // No "same name under another provider" retry: it could silently pin
+        // a different LiteLLM alias than the one chosen.
 
         if (!wsSucceeded) {
           wsError = (patchErr as Error).message;

@@ -403,18 +403,22 @@ async def prepare(
 async def session_model_id(session_id: str | None, agent_id: str | None) -> str | None:
     """The model alias this send would run on — the SAME precedence
     `runtime.models.resolve_session_model` applies (per-session override, then
-    the per-agent override, then the default), so the capability we check is
-    the capability the turn will actually have.
+    the agent row, then CC_MODEL_<AGENT_ID>, then the default), so the
+    capability we check is the capability the turn will actually have.
 
-    Duplicated rather than imported because `runtime/` may not be reached into
-    for a gateway-tier decision; `test_attachments.py` pins the two in step.
+    Below the session override it calls the runtime's own
+    `configured_model_name` rather than restating it: the restated copy
+    skipped the agent row (2026-09-13). `api/` may import `runtime/` — the
+    boundary is that `runtime/` never imports the gateway.
     """
+    from central_command.db import repo
+    from central_command.runtime.models import configured_model_name
+
     if settings.demo_mode:
         return None
     if session_id:
-        from central_command.db import repo
-
         override = await repo.get_session_model_override(session_id)
         if override:
             return override.split(":", 1)[-1]
-    return (settings.agent_model(agent_id) or settings.default_model).split(":", 1)[-1]
+    row = (await repo.get_agent(agent_id) if agent_id else None) or {}
+    return configured_model_name(agent_id, row.get("model"))

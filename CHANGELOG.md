@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.31.1: the cockpit names the model an agent actually runs on
+
+Since 2026-08-19 a run with no session override lands on the AGENT ROW's
+model, but both places the cockpit reads a default from — the `/api/models`
+catalog behind the dropdown's "Default (…)" entry and the per-session
+`model` in `sessions.list` — still read the env/global default. An agent
+pinned to `kilo-auto/free` showed "Default (cc-default)" for three weeks
+while the proxy's spend log put every call on the free alias. The precedence
+now lives once, in `runtime.models.configured_model_name` (row → env →
+global), and `resolve_model`, both label sites and the attachment capability
+check (`api/attachments.session_model_id`, a third restated copy that also
+skipped the row) call it. A backend wire test pins the root row and a
+no-override session to the agent row's model.
+
+Two smaller truths in the same surface: a LiteLLM alias is one name, so the
+catalog no longer strips everything before the first `/` from the label
+(`kilo-auto/free` read as "free"), and the cockpit's "same name under another
+provider" matching is gone with it — an alias could have been silently
+swapped for a lookalike. And changing the model while every conversation of
+an agent is closed now says "press New session first" (409) instead of "no
+Central Command session behind the key" (404).
+
 ## 2026-09-13 — v2.31.0: the spine pools its database connections
 
 `pytest -q` took 16.5 minutes on the Pi, and four fifths of that was the

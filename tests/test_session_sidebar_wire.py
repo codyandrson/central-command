@@ -151,6 +151,34 @@ async def test_a_retired_agent_root_row_is_history_not_an_open_lane(monkeypatch)
     assert "(retired)" in retired["label"]
 
 
+async def test_a_session_and_its_root_report_the_agent_row_model_not_the_spine_default(monkeypatch):
+    """`resolve_model` runs a no-override session on the AGENT ROW's model
+    (2026-08-19), but both label sites kept reading the spine default — an
+    agent pinned to `kilo-auto/free` showed "Default (cc-default)" in the
+    dropdown for three weeks while every call landed on the free alias
+    (2026-09-13, proved from the proxy's spend log). Assert the wire, on the
+    backend: a frontend test building its own payload proves nothing."""
+    from central_command.runtime.roster import AgentDef
+
+    _wire(monkeypatch, [_row("sess_free"), _row("sess_pinned", model_override="openai/gpt-5.2")])
+
+    async def fake_roster(include_retired=False):
+        return (AgentDef(id="jira-expert", name="Jira Expert", role="jira",
+                         conversational=True, model="kilo-auto/free"),)
+
+    monkeypatch.setattr(roster_mod, "roster", fake_roster)
+
+    rows = {r["sessionKey"]: r for r in (await nerve_gateway._sessions_list({}))["sessions"]}
+
+    assert rows["agent:jira-expert:main"]["model"] == "kilo-auto/free", (
+        "the root row is what the dropdown reads before any lane is open"
+    )
+    assert rows["agent:jira-expert:sess_free"]["model"] == "kilo-auto/free"
+    assert rows["agent:jira-expert:sess_pinned"]["model"] == "openai/gpt-5.2", (
+        "a session override still sits above the agent row"
+    )
+
+
 async def test_the_sidebar_asks_list_sessions_to_exclude_terminal_oneshots(monkeypatch):
     """Live DB has 3408 terminal oneshot dispatch runs vs 50 closed
     conversations — an unfiltered fetch pushes conversations out of the

@@ -68,10 +68,16 @@ def _session_key(row: dict) -> str:
     return f"agent:{row['agent_id']}:{row['id']}"
 
 
-def _row_model(row: dict) -> str:
+def _row_model(row: dict, agent_models: dict[str, str] | None = None) -> str:
     """The model this session actually runs on — its override if the operator
-    pinned one (`_patch_session_model`), otherwise the spine's default."""
-    return (row.get("model_override") or settings.default_model or "").split(":")[-1]
+    pinned one (`_patch_session_model`), otherwise what `resolve_model` lands
+    on for its agent: the agent row (`agent_models`, from the roster the list
+    already loaded), then env, then the spine's default."""
+    from central_command.runtime.models import configured_model_name
+
+    override = (row.get("model_override") or "").split(":")[-1]
+    return override or configured_model_name(
+        row["agent_id"], (agent_models or {}).get(row["agent_id"]))
 
 
 def _row_label(row: dict, names: dict[str, str] | None) -> str:
@@ -93,6 +99,7 @@ def _session_row_dict(
     windows: dict[str, int] | None = None,
     names: dict[str, str] | None = None,
     source_emails: dict[str, dict] | None = None,
+    agent_models: dict[str, str] | None = None,
 ) -> dict:
     # Explicit parent: our "agent:<id>:sess_x" keys match none of Nerve's
     # key-shape conventions, so without this the sidebar's lineage filter
@@ -122,7 +129,7 @@ def _session_row_dict(
         # the reason, or null. Drives the sidebar's red chip and makes the row
         # hand-closable. Pinned by a BACKEND wire-shape test, like every field.
         "execFailure": row.get("exec_failure"),
-        "model": _row_model(row),
+        "model": _row_model(row, agent_models),
         # Per-session thinking override — the effort dropdown's saved value
         # (`useModelEffort` reads `thinkingLevel` off the session row); absent/
         # null means the deployment default. The cockpit hand-declares its
@@ -132,7 +139,7 @@ def _session_row_dict(
         # Context-usage bar: the estimate the list query computed, over the
         # window of THIS session's model (cached per model, see context.py).
         "totalTokens": row.get("token_estimate") or 0,
-        "contextTokens": (windows or {}).get(_row_model(row))
+        "contextTokens": (windows or {}).get(_row_model(row, agent_models))
                          or settings.context_window,
         "intent": row.get("latest_intent"),
         "proposalCount": row.get("proposal_count", 0),
@@ -170,12 +177,12 @@ async def _agent_opened_lanes() -> dict[str, str | None]:
     return {i["discussion_session_id"]: titles.get(i.get("task_id")) for i in items}
 
 
-async def _windows_for(rows: list[dict]) -> dict[str, int]:
+async def _windows_for(rows: list[dict], agent_models: dict[str, str] | None = None) -> dict[str, int]:
     """model -> context window, one lookup per DISTINCT model. `window_for`
     caches in-process, so a 50-row list costs at most one proxy call."""
     from central_command.runtime.context import window_for
 
-    return {m: await window_for(m) for m in {_row_model(r) for r in rows}}
+    return {m: await window_for(m) for m in {_row_model(r, agent_models) for r in rows}}
 
 
 async def _sessions_list(params: dict) -> dict:
@@ -190,11 +197,13 @@ async def _sessions_list(params: dict) -> dict:
                 if r.get("parent_session_id") == parent_sess]
         from central_command.runtime.roster import roster
 
-        names = {a.id: a.name for a in await roster(include_retired=True)}
-        windows = await _windows_for(rows)
+        agents = await roster(include_retired=True)
+        names = {a.id: a.name for a in agents}
+        agent_models = {a.id: a.model for a in agents}
+        windows = await _windows_for(rows, agent_models)
         source_emails = await repo.work_items_for_sessions([r["id"] for r in rows])
         return {"sessions": [
-            _session_row_dict(r, agent_lanes, windows, names, source_emails)
+            _session_row_dict(r, agent_lanes, windows, names, source_emails, agent_models)
             for r in rows
         ]}
 
@@ -207,8 +216,11 @@ async def _sessions_list(params: dict) -> dict:
     # default — the roster page, not the chat panel, is where retirees show.
     from central_command.runtime.roster import roster
 
+    from central_command.runtime.models import configured_model_name
+
     agents = await roster(include_retired=True)
     names = {a.id: a.name for a in agents}
+    agent_models = {a.id: a.model for a in agents}
     sessions: list[dict] = [
         {
             "sessionKey": f"agent:{a.id}:main",
@@ -221,7 +233,9 @@ async def _sessions_list(params: dict) -> dict:
             # conversational lane exists — roster truth, never a hardcoded list.
             "conversational": a.conversational and a.status == "ACTIVE",
             "status": "IDLE" if a.status == "ACTIVE" else "DONE",
-            "model": _model_label(),
+            # The agent's OWN default, not the spine's: the root row is what
+            # the dropdown reads before any lane is open.
+            "model": configured_model_name(a.id, a.model),
         }
         for a in agents
     ]
@@ -232,12 +246,12 @@ async def _sessions_list(params: dict) -> dict:
     # them. RUNNING oneshots still come through — the paused-task-run-in-panel
     # behavior needs them.
     rows = await repo.list_sessions(limit, exclude_terminal_oneshot=True)
-    windows = await _windows_for(rows)
+    windows = await _windows_for(rows, agent_models)
     # One batched lookup for the whole page — never per-row, or a page of N
     # sessions costs N round-trips for a field most rows don't even carry.
     source_emails = await repo.work_items_for_sessions([r["id"] for r in rows])
     sessions.extend(
-        _session_row_dict(row, agent_lanes, windows, names, source_emails)
+        _session_row_dict(row, agent_lanes, windows, names, source_emails, agent_models)
         for row in rows
     )
     return {"sessions": sessions}
@@ -374,7 +388,11 @@ async def _patch_session_model(key: str, model) -> dict:
 
     session_id = await _resolve_history_session(key)
     if not session_id:
-        raise HTTPException(404, f"no Central Command session behind {key!r}")
+        # The `:main` alias with no open lane — every one of this agent's
+        # conversations is closed. Say what to do, not what is missing.
+        raise HTTPException(
+            409, "no open session to set a model on — press New session first"
+        )
     new = str(model).strip() if model else None
     if new:
         try:

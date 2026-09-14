@@ -524,10 +524,10 @@ def test_attachments_are_resolved_before_the_turn_is_created():
 
 
 async def test_session_model_precedence_matches_the_runtime_seam():
-    """`session_model_id` duplicates `runtime.models.resolve_session_model`'s
-    precedence because the gateway may not reach into `runtime/`. If the runtime
-    seam's precedence changes and this does not, the capability we check stops
-    describing the model the turn actually runs on."""
+    """`session_model_id` must land on the model the turn actually runs on:
+    the session override, then `configured_model_name` (agent row -> env ->
+    default) — the runtime's own precedence, called, not restated. A restated
+    copy skipped the agent row for three weeks (2026-09-13)."""
     import inspect
 
     from central_command.runtime import models
@@ -535,12 +535,11 @@ async def test_session_model_precedence_matches_the_runtime_seam():
     src = inspect.getsource(models.resolve_session_model) + inspect.getsource(
         models.resolve_model
     )
-    # Both sides resolve: session override -> per-agent -> default.
     assert "get_session_model_override" in src
-    assert "agent_model" in src and "default_model" in src
+    assert "configured_model_name" in src and 'row.get("model")' in src
     ours = inspect.getsource(attachments.session_model_id)
     assert "get_session_model_override" in ours
-    assert "agent_model" in ours and "default_model" in ours
+    assert "configured_model_name" in ours and "get_agent" in ours
 
 
 async def test_a_file_with_no_message_is_a_valid_send(monkeypatch):

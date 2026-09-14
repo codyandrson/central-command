@@ -38,19 +38,22 @@ describe('buildSelectableModelList', () => {
     expect(buildSelectableModelList([], null)).toEqual([]);
   });
 
-  it('appends the current active model when it is missing from the configured catalog', () => {
+  it('appends the current active model, under its full alias, when it is missing from the configured catalog', () => {
     expect(buildSelectableModelList(CONFIGURED_MODELS, 'openrouter/xiaomi/mimo-v2-pro')).toEqual([
       ...CONFIGURED_MODELS,
-      { id: 'openrouter/xiaomi/mimo-v2-pro', label: 'xiaomi/mimo-v2-pro', provider: 'openrouter' },
+      { id: 'openrouter/xiaomi/mimo-v2-pro', label: 'openrouter/xiaomi/mimo-v2-pro', provider: 'litellm' },
     ]);
   });
 
-  it('does not append a phantom model when a configured option already has the same base name', () => {
+  it('does not treat a same-suffix alias as the configured one — every LiteLLM alias is its own model', () => {
     const models: GatewayModelInfo[] = [
-      { id: 'openai/gpt-5.4', label: 'gpt-5.4', provider: 'openai' },
+      { id: 'openai/gpt-5.4', label: 'openai/gpt-5.4', provider: 'litellm' },
     ];
 
-    expect(buildSelectableModelList(models, 'openai-codex/gpt-5.4')).toEqual(models);
+    expect(buildSelectableModelList(models, 'openai-codex/gpt-5.4')).toEqual([
+      ...models,
+      { id: 'openai-codex/gpt-5.4', label: 'openai-codex/gpt-5.4', provider: 'litellm' },
+    ]);
   });
 });
 
@@ -112,7 +115,7 @@ describe('useModelEffort', () => {
       { value: 'primary', label: 'Default (glm-4.7)' },
       { value: 'zai/glm-4.7', label: 'glm-4.7' },
       { value: 'ollama/qwen2.5:7b-instruct-q5_K_M', label: 'qwen-local' },
-      { value: 'openrouter/xiaomi/mimo-v2-pro', label: 'xiaomi/mimo-v2-pro' },
+      { value: 'openrouter/xiaomi/mimo-v2-pro', label: 'openrouter/xiaomi/mimo-v2-pro' },
     ]);
   });
 
@@ -127,7 +130,7 @@ describe('useModelEffort', () => {
     mockUseSessionContext.mockReturnValue({
       currentSession: 'agent:main:main',
       sessions: [
-        { key: 'agent:main:main', model: 'openai-codex/gpt-5.4', thinking: 'medium' },
+        { key: 'agent:main:main', model: 'openai/gpt-5.4', thinking: 'medium' },
       ],
       updateSession: vi.fn(),
     });
@@ -172,7 +175,7 @@ describe('useModelEffort', () => {
     mockUseSessionContext.mockReturnValue({
       currentSession: 'agent:main:main',
       sessions: [
-        { key: 'agent:main:main', model: 'openai-codex/gpt-5.4', thinking: 'xhigh' },
+        { key: 'agent:main:main', model: 'openai/gpt-5.4', thinking: 'xhigh' },
       ],
       updateSession: vi.fn(),
     });
