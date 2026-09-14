@@ -72,7 +72,10 @@ async def window_for(model: str | None) -> int:
         return settings.context_window
     name = (model or settings.default_model or "").split(":", 1)[-1]
     if name not in _windows:
-        _windows[name] = await _discover_window(name)
+        try:
+            _windows[name] = await _discover(name, "max_input_tokens") or settings.context_window
+        except ProxyUnreachable:
+            return settings.context_window  # not cached — the next run asks again
     return _windows[name]
 
 
@@ -89,12 +92,18 @@ async def output_cap_for(model: str | None) -> int | None:
         return None
     name = (model or settings.default_model or "").split(":", 1)[-1]
     if name not in _output_caps:
-        _output_caps[name] = await _discover(name, "max_output_tokens")
+        try:
+            _output_caps[name] = await _discover(name, "max_output_tokens")
+        except ProxyUnreachable:
+            return None  # not cached — the next run asks again
     return _output_caps[name]
 
 
-async def _discover_window(name: str) -> int:
-    return await _discover(name, "max_input_tokens") or settings.context_window
+class ProxyUnreachable(Exception):
+    """`/model/info` could not be read. Distinct from "the proxy answered and
+    the field is absent" (a cacheable None): a failed lookup must NOT be
+    cached, or one proxy hiccup at first sight pins "nobody said" — the
+    deployment ceiling — on that alias for the life of the process."""
 
 
 async def _discover(name: str, field: str) -> int | None:
@@ -112,8 +121,8 @@ async def _discover(name: str, field: str) -> int | None:
                 value = (m.get("model_info") or {}).get(field)
                 if value:
                     return int(value)
-    except Exception:
-        pass
+    except Exception as e:  # any transport/parse failure is "unreachable"
+        raise ProxyUnreachable(str(e)) from e
     return None
 
 

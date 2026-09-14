@@ -4,6 +4,41 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.33.3: a measured ceiling fills a blank, never overwrites a declaration
+
+The capability probe's output-ceiling step asks for a million tokens and
+reads the cap out of the refusal. A gateway that counts requested output
+against its CONTEXT refuses with the context length and the request echoed
+back — "requested about 1000008 tokens" — and the parser took the echo as
+the ceiling. The discovery tick then handed the manager a "measured"
+`max_output_tokens` of 1000008 for an alias whose hand-declared cap was
+10000, with instructions to propose it verbatim. Approving it would have
+restored the exact request shape v2.28.4 fixed. The tick re-probes that
+alias every pass (its `mode`/`supports_*` are undeclared), so the trap was
+regenerated on every run.
+
+- **A context-length refusal is inconclusive** (`integrations/litellm.py`
+  probe step 8): no request isolates the output cap on such an endpoint, so
+  the result is "declare from the model card" — the same answer as when the
+  million is accepted. Any number at or above what was asked for is the
+  request echoed back, never a ceiling.
+- **A measured `max_output_tokens`/`max_input_tokens` only fills a blank.**
+  `suggested_model_info` never carries a ceiling over a declared one; the
+  measurement stays visible in `observed`. One guard at the probe covers
+  test-on-add, the discovery tick and the manager's tool.
+- **A failed cap/window discovery is not cached** (`runtime/context.py`).
+  `/model/info` unreachable at first sight used to pin "nobody said" — the
+  deployment ceiling — on that alias for the life of the process, silently.
+  Now the lookup answers with the default and the next run asks again; only
+  a proxy answer is cached. Defensive: 25 requests on 2026-09-14 carried the
+  ceiling after the cap was declared, and this is the candidate cause, not a
+  proven one.
+
+Operator follow-up on an instance: dismiss any pending `litellm.update_model`
+carrying `max_output_tokens: 1000008`; after deploy, run discovery once and
+approve the alias's `mode`/`supports_*` declaration so it stops re-qualifying,
+then re-enable the discovery schedule.
+
 ## 2026-09-14 — v2.33.2: a resumed run that dies lands its task
 
 LiteLLM was OOM-killed on the compute node: its bundled Prisma query engine

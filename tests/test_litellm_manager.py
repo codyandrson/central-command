@@ -1191,6 +1191,7 @@ def _make_probe_fake_call(
     *, model_name="probe-model", declared_info=None, fail_chat_status=None,
     schema_inconclusive=False, single_tool_call=False, bisect_limit=None,
     seen_bodies=None, pdf_fail=False, thinking_template_seen=False,
+    ceiling_message="max_tokens must be <= 32768",
 ):
     """A battery-wide fake `litellm_client._call` covering every check
     `probe_model` makes, dispatched purely on method/path/body shape — never
@@ -1257,7 +1258,7 @@ def _make_probe_fake_call(
             ]})
 
         if body.get("max_tokens") == 1_000_000:
-            return _ProbeResp(400, {"error": {"message": "max_tokens must be <= 32768"}})
+            return _ProbeResp(400, {"error": {"message": ceiling_message}})
 
         if bisect_limit is not None and messages and \
                 "Reply OK." in (messages[0].get("content") or ""):
@@ -1337,6 +1338,55 @@ async def test_probe_model_measures_each_capability_and_suggests_the_diff(monkey
     }
     # a secret belongs in the Authorization header, never in a chat body
     assert all("api_key" not in b for b in seen_bodies)
+
+
+async def test_probe_model_context_length_refusal_is_inconclusive_not_a_cap(monkeypatch):
+    """A gateway that counts requested output against its CONTEXT refuses the
+    million with the context length and our own request echoed back; the
+    parser once took the echo ("about 1000008") as the ceiling and offered
+    it for a Kilo.ai alias whose hand-declared cap was 10000 (2026-09-14).
+    No request isolates the output cap on such an endpoint: no value."""
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(ceiling_message=(
+        "This endpoint's maximum context length is 262144 tokens. However, you "
+        "requested about 1000008 tokens (8 of text input, 1000000 in the output)."))
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["max_output_tokens"]["value"] is None
+    assert "model card" in out["observed"]["max_output_tokens"]["detail"]
+    assert "max_output_tokens" not in out["suggested_model_info"]
+
+
+async def test_probe_model_echoed_request_size_is_never_a_cap(monkeypatch):
+    """Even without the context-length wording, a number at or above the
+    million we asked for is the request echoed back, never a ceiling."""
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(
+        ceiling_message="requested 1000008 tokens; max_tokens must be <= 32768")
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["max_output_tokens"]["value"] == 32768
+
+
+async def test_probe_model_measured_ceiling_fills_a_blank_never_overwrites_a_declaration(monkeypatch):
+    """The declared cap is the one the runtime clamps to; every probe caller
+    carries `suggested_model_info` into an update_model proposal, so a
+    measurement may only fill a blank. It stays visible in `observed`."""
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+    fake_call = _make_probe_fake_call(declared_info={"max_output_tokens": 10000})
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+
+    out = await litellm_client.probe_model("probe-model")
+
+    assert out["observed"]["max_output_tokens"]["value"] == 32768
+    assert "max_output_tokens" not in out["suggested_model_info"]
 
 
 async def test_probe_model_reports_budget_exhaustion_as_inconclusive_not_false(monkeypatch):

@@ -828,8 +828,21 @@ async def probe_model(
     if st == 200:
         observed["max_output_tokens"] = {"ok": None, "detail": "max_tokens=1000000 accepted — no "
                                          "request-time ceiling; declare from the model card"}
+    elif re.search(r"context length", _err(out), re.IGNORECASE):
+        # A gateway that counts requested OUTPUT against its context window
+        # refuses with the CONTEXT length, not an output cap — and echoes our
+        # own request back ("about 1000008 tokens"), which is how a Kilo.ai
+        # alias was measured at 1000008 (2026-09-14) and offered as a cap
+        # that would have undone its hand-declared 10000. No request can
+        # isolate the output cap on such an endpoint: inconclusive.
+        observed["max_output_tokens"] = {"ok": None, "value": None,
+                                         "detail": f"{st}: {_err(out)} — the endpoint counts "
+                                         "requested output against its context; declare "
+                                         "from the model card"}
     else:
-        nums = [int(n) for n in re.findall(r"\d{3,}", _err(out)) if int(n) != 1_000_000]
+        # Numbers at or above what we asked for are the request echoed back,
+        # never a ceiling.
+        nums = [int(n) for n in re.findall(r"\d{3,}", _err(out)) if int(n) < 1_000_000]
         observed["max_output_tokens"] = {"ok": None, "detail": f"{st}: {_err(out)}",
                                          "value": max(nums) if nums else None}
 
@@ -874,9 +887,14 @@ async def probe_model(
     suggested = {k: v for k, v in flags.items() if v is not None and declared.get(k) != v}
     if declared.get("mode") is None:
         suggested["mode"] = "chat"
+    # A measured ceiling fills a BLANK, never overwrites a declaration: the
+    # operator's declared cap is the one the runtime clamps to, and every
+    # probe caller (test-on-add, the discovery tick, the manager's tool)
+    # would otherwise carry the measurement into an update_model proposal.
+    # The measurement stays visible in `observed`.
     for key in ("max_output_tokens", "max_input_tokens"):
         val = (observed.get(key) or {}).get("value")
-        if val and declared.get(key) != val:
+        if val and not declared.get(key):
             suggested[key] = val
     if flags["supports_function_calling"] is False and declared.get("supports_function_calling"):
         notes.append("declared tool-capable but produced no tool_calls — re-run before trusting either")

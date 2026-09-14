@@ -230,6 +230,33 @@ async def test_live_model_clamps_max_tokens_to_the_models_declared_cap(monkeypat
     assert (await resolve_model(agent_id="coach")).settings["max_tokens"] == cfg.max_output_tokens
 
 
+async def test_a_failed_cap_discovery_is_not_cached(monkeypatch):
+    """One proxy hiccup at first sight must not pin "nobody said" — the
+    deployment ceiling — on an alias for the life of the process. The failed
+    lookup answers with the default and the next run asks again; only a
+    proxy ANSWER (value or absent) is cached."""
+    from central_command.config import settings as cfg
+    from central_command.runtime import context
+
+    monkeypatch.setattr(cfg, "demo_mode", False)
+    monkeypatch.setattr(context, "_output_caps", {})
+    monkeypatch.setattr(context, "_windows", {})
+    answers = iter([None, 10000, 10000])  # None = raise this time
+
+    async def flaky_discover(name, field):
+        value = next(answers)
+        if value is None:
+            raise context.ProxyUnreachable("connection refused")
+        return value
+
+    monkeypatch.setattr(context, "_discover", flaky_discover)
+
+    assert await context.output_cap_for("hosted-alias") is None      # proxy down
+    assert await context.output_cap_for("hosted-alias") == 10000     # asked again
+    assert await context.output_cap_for("hosted-alias") == 10000     # cached now
+    assert await context.window_for("hosted-alias") == 10000
+
+
 async def test_the_ceiling_clears_the_largest_real_charter():
     """The ceiling is only meaningful against the document it must carry."""
     from central_command.config import settings as cfg
