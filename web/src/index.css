@@ -913,8 +913,15 @@
   border-radius: 14px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
+/* The inline-code pill above is INLINE: its border fragments per line box,
+   so on a block (any indented code block — a pasted email with a 4-space
+   indented template dumps hundreds of them) every line grew a top and bottom
+   rule and whitespace-only lines showed as bare hairlines the width of their
+   indentation (2026-09-14). Reset the pill here, not just its background. */
 .msg-body pre code {
   background: none;
+  border: none;
+  border-radius: 0;
   padding: 0;
   white-space: pre;
 }

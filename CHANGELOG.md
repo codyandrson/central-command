@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.31.3: an indented block in chat no longer rules every line
+
+The chat bubble's inline-code pill (`.msg-body code`: 1px border, 8px
+radius) was never reset on `pre code`, only its background and padding.
+The `code` inside a block is `display: inline`, so the border fragmented
+per line box: every line of an indented code block carried a top and bottom
+rule, and a whitespace-only line rendered as a bare hairline the width of its
+indentation. Marketing mail whose text/plain part is a flattened HTML
+template (four-space indentation on nearly every line) hit it hardest — the
+transcript read as a staircase of rules. `pre code` now resets the border
+and radius too; no behaviour change, the agent always saw the plain text.
+
 ## 2026-09-13 — v2.31.2: the update-hold routes are visible to the route-parity guard
 
 `web/server/api-route-parity.test.ts` reads every `app.<method>('/api/…')`
