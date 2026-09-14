@@ -4,6 +4,15 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.31.2: the update-hold routes are visible to the route-parity guard
+
+`web/server/api-route-parity.test.ts` reads every `app.<method>('/api/…')`
+from source and fails on a frontend fetch no server route serves. v2.30.0
+registered the three `/api/update/hold` proxy routes through a table loop,
+so the guard could not see them and has failed on `master` since — a real
+green suite was one file short. The three are literal registrations now;
+no behaviour change.
+
 ## 2026-09-13 — v2.31.1: the cockpit names the model an agent actually runs on
 
 Since 2026-08-19 a run with no session override lands on the AGENT ROW's

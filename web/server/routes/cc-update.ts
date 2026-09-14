@@ -26,7 +26,7 @@
  * flight, and for a target that equals the installed version (the stale-
  * button re-run trap).
  */
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { readFileSync, writeFileSync, existsSync, renameSync, statSync } from 'node:fs';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { readProductVersion } from '../lib/release-source.js';
@@ -199,19 +199,20 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   return c.json({ triggered: true }, 202);
 });
 
-export default app;
-
-for (const [route, method, sub] of [
-  ['/api/update/hold', 'GET', ''],
-  ['/api/update/hold/now', 'POST', '/now'],
-  ['/api/update/hold/cancel', 'POST', ''],
-] as const) {
-  app.on(method, route, rateLimitGeneral, async (c) => {
+// Literal registrations, not a table: `api-route-parity.test.ts` reads
+// `app.<method>('/api/...')` from source, and a loop hid these three from it.
+function holdRoute(method: string, sub = '') {
+  return async (c: Context) => {
     try {
-      const res = await holdProxy(method === 'POST' && sub === '' ? 'DELETE' : method, sub);
+      const res = await holdProxy(method, sub);
       return c.json(await res.json().catch(() => ({})), res.status as 200);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
     }
-  });
+  };
 }
+app.get('/api/update/hold', rateLimitGeneral, holdRoute('GET'));
+app.post('/api/update/hold/now', rateLimitGeneral, holdRoute('POST', '/now'));
+app.post('/api/update/hold/cancel', rateLimitGeneral, holdRoute('DELETE'));
+
+export default app;
