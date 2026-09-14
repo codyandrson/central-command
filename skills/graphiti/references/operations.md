@@ -2,17 +2,27 @@
 
 ## Your surface
 
-You hold exactly **two** graph tools, both ungated reads, both from the
-`graph-read` pack. Nothing else in this document is callable by you — the rest
-are internal client functions.
+Every holder of the `graph-read` pack has two ungated reads. Every line they
+render leads with the item's **uuid** — what `graph.create_edge` endpoints,
+`graph.update_node` / `update_edge` / `delete_*` and `graph.merge_nodes` take.
+Never guess a uuid; read it here.
 
 - `search_knowledge_graph(query)` — relationships. Up to 25 hits, rendered
-  `- <fact> (<RELATION_TYPE>) [valid from …]` /
-  `- <fact> (<RELATION_TYPE>) [SUPERSEDED as of …]`. The endpoints come back as
-  UUIDs, not names, so the relation type is all the naming you get.
+  `- <uuid> | <fact> (<RELATION_TYPE>) [valid from …]` /
+  `- <uuid> | <fact> (<RELATION_TYPE>) [SUPERSEDED as of …]`. The endpoints are
+  not named, so the relation type is all the naming you get.
 - `search_knowledge_graph_entities(query)` — entities. Up to 15, rendered
-  `- <name>: <summary>`. Ask this when the question is about a *thing* ("what do
-  you know about X"); a fact search alone returns fragments.
+  `- <uuid> | <name>: <summary>`. Ask this when the question is about a *thing*
+  ("what do you know about X"); a fact search alone returns fragments.
+
+Holders of `graph-curate` (the curator) have three more, which see EVERY
+partition: `list_graph_groups`, `list_graph_group_episodes(group_id)` (episode
+uuids, for `graph.rescope_episode`) and `search_graph_group(group_id, query)`
+(facts and entities inside one group, uuids leading).
+
+`search_tools` searches only skill reference material — a miss there never
+means a tool above is missing. Nothing else in this document is callable by
+you — the rest are internal client functions.
 
 There is **no** tool to list episodes and **no** tool to check graph health —
 `get_episodes` feeds the cockpit's memory panel and `get_status` is

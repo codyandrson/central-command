@@ -615,3 +615,27 @@ async def test_reactivate_emits_and_is_reachable_through_the_gateway(clean_skill
     # there would have been nothing to click in the first place.
     listed = await nerve_gateway._dispatch("skills.list", {}, notify=noop)
     assert "cc-test-emitback" in [s["id"] for s in listed["skills"]]
+
+
+@pytest.mark.asyncio
+async def test_the_search_tools_description_says_a_miss_is_not_a_missing_tool():
+    """pydantic-ai's default `search_tools` text ends "If no tools are found,
+    they do not exist" — and two agents (2026-09-14) declared missing_tool
+    gaps for pack tools they held after a miss. Every builder appends
+    `context.capabilities()`, so the truthful description rides every agent."""
+    from central_command.runtime import agent as agent_mod
+    from central_command.runtime.context import TOOL_SEARCH_DESCRIPTION
+
+    captured: dict = {}
+
+    def capture(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        captured["tools"] = {t.name: t for t in info.function_tools}
+        return ModelResponse(parts=[TextPart("ok")])
+
+    from pydantic_ai.capabilities import Capability
+    cap = Capability(id="cc-test-deferred", description="x", instructions="y", defer_loading=True)
+    cap.tool_plain(name="search_cc_test_deferred_reference")(lambda query: query)
+    agent = await agent_mod.build_agent(model=FunctionModel(capture), capabilities=[cap])
+    from central_command.runtime.deps import TriageDeps
+    await agent.run("hi", deps=TriageDeps(agent_id="inbox-triage"))
+    assert captured["tools"]["search_tools"].description == TOOL_SEARCH_DESCRIPTION

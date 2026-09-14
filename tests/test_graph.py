@@ -105,6 +105,26 @@ async def test_read_tool_entities_stamp_steward_attribution_too(monkeypatch):
     assert "[domain: domain_jira — steward: jira-expert]" in out
 
 
+async def test_read_tools_lead_every_line_with_the_uuid(monkeypatch):
+    """graph.create_edge endpoints and every node/edge edit take a uuid; a
+    holder who cannot read one asks the operator or guesses (2026-08-31,
+    2026-09-14). The uuid leads the line on BOTH graph-read tools."""
+    async def fake_nodes(query, max_nodes=8, agent_id=None):
+        return [{"uuid": "node-1", "name": "DUSK", "summary": "an org"}]
+
+    async def fake_facts(query, max_facts=8, agent_id=None):
+        return [{"uuid": "edge-1", "fact": "DUSK is an org", "name": "IS_ORGANIZATION_FOR"}]
+
+    async def no_stewards():
+        return {}
+
+    monkeypatch.setattr(graphiti, "search_nodes", fake_nodes)
+    monkeypatch.setattr(graphiti, "search_facts", fake_facts)
+    monkeypatch.setattr(graphiti, "steward_map", no_stewards)
+    assert "- node-1 | DUSK: an org" in await tools.search_knowledge_graph_entities(None, "DUSK")
+    assert "- edge-1 | DUSK is an org (IS_ORGANIZATION_FOR)" in await tools.search_knowledge_graph(None, "DUSK")
+
+
 async def test_read_tool_degrades_when_graph_is_down(monkeypatch):
     async def broken(query, max_facts=8, agent_id=None):
         raise ConnectionError("nope")

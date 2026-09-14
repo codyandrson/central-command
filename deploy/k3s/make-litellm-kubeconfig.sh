@@ -68,6 +68,10 @@ mint() {
   rm -f "$ca_file"
   mv "$tmp_out" "$out"
   chmod 0600 "$out"
+  # Run under sudo (kubectl needs root on k3s) this lands root-owned in the
+  # operator's home, and cc-uvicorn runs as the operator — every read/write
+  # through it was "permission denied" (gap declared 2026-09-04). Hand it back.
+  chown "${SUDO_USER:-$USER}:" "$out"
   echo "wrote $out (namespace=$NS, server=$SERVER)"
 }
 

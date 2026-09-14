@@ -582,6 +582,21 @@ async def _prepare_window(ctx, messages):
 
 def capabilities() -> list:
     """What every long-lived agent builder appends to its capability list."""
-    from pydantic_ai.capabilities import ProcessHistory
+    from pydantic_ai.capabilities import ProcessHistory, ToolSearch
 
-    return [ProcessHistory(prepare_window)]
+    return [ProcessHistory(prepare_window), ToolSearch(tool_description=TOOL_SEARCH_DESCRIPTION)]
+
+
+# pydantic-ai's default `search_tools` description says "If no tools are found,
+# they do not exist — do not retry." In this runtime the ONLY searchable corpus
+# is the per-skill reference-search tool, which load_capability reveals anyway;
+# every pack tool is already on the wire. Two agents (2026-09-14) read a miss
+# as "the tool is not granted" and declared missing_tool gaps for tools they
+# held (jira_search_issues; search_graph_group). The description is the seam.
+TOOL_SEARCH_DESCRIPTION = (
+    "Searches ONLY the reference-search tools of skills in your library, which "
+    "load_capability reveals anyway. Every other tool you hold is ALREADY in "
+    "your tool list — a miss here never means a tool is missing or ungranted. "
+    "Never declare a missing_tool gap on the strength of a miss here; read "
+    "your tool list instead."
+)

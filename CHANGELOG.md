@@ -4,6 +4,38 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.31.6: a tool-search miss no longer reads as a missing tool
+
+Two agents on one day declared `missing_tool` gaps for tools they held. The
+Jira expert's nightly sweep asked `search_tools` for "jira search" and got
+"No matching tools found. The tools you need may not be available."; the
+graph curator asked it for "graph entity uuid" and got the same, then asked
+the operator for uuids it could have read with `search_graph_group`. Both
+had the tools on the wire from turn one — pydantic-ai's `search_tools` only
+indexes DEFERRED tools (here: each skill's reference search, which
+`load_capability` reveals anyway), and its default description tells the
+model "If no tools are found, they do not exist — do not retry."
+
+- **`search_tools` now carries a truthful description** (`ToolSearch` in
+  `runtime/context.capabilities()`, so every builder gets it): it searches
+  only skill reference material, every other tool is already in the list,
+  and a miss is never grounds for a `missing_tool` gap. Guarded by a
+  first-turn capture test.
+- **The `graph-read` pair leads every line with the uuid.** `graph.create_edge`
+  endpoints and every node/edge edit take one, and the only readers that
+  rendered it were the curator's any-partition tools — so a `graph-propose`
+  holder had no way to name an existing node (declared 2026-08-31, again
+  2026-09-14). `- <uuid> | <fact> …` and `- <uuid> | <name>: <summary>`.
+- **The graphiti skill's `operations` reference told the curator it holds
+  "exactly two graph tools".** It now names the three `graph-curate` reads,
+  the uuid-leading render, and what `search_tools` does and does not search.
+  Re-import the skill folder for the live library to see it.
+- **`make-litellm-kubeconfig.sh` hands the minted kubeconfigs to the
+  operator.** Run under sudo it left both files root-owned in the operator's
+  home, and `cc-uvicorn` runs as the operator — `litellm_read_logs` had been
+  "permission denied" since install (declared 2026-09-04). It now chowns to
+  `$SUDO_USER`; an existing install fixes it with one `chown`.
+
 ## 2026-09-14 — v2.31.5: the suite's parallel run is documented as working
 
 Docs only. `pyproject.toml` and CLAUDE.md still described pytest-xdist as
