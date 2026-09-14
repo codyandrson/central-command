@@ -29,6 +29,32 @@ class ArgSpec:
     enums: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Groups of keys of which AT LEAST ONE must be present and non-empty.
     any_of: tuple[tuple[str, ...], ...] = ()
+    # Dotted path → inclusive maximum. A value present at that path must be a
+    # number no greater than the ceiling; absent passes.
+    ceilings: dict[str, float] = field(default_factory=dict)
+
+
+# LiteLLM's per-token cost fields — the only price vocabulary a proposal may
+# carry, shared with the Executor (which overwrites them from the credential's
+# catalog) and the spend repair script. Contract-level because both tiers
+# check it and contract has no dependencies.
+COST_FIELDS = (
+    "input_cost_per_token", "output_cost_per_token",
+    "cache_read_input_token_cost", "cache_creation_input_token_cost",
+)
+
+# USD per TOKEN. The dearest model on any public card is around 1.5e-4; a
+# value above a cent per token is a unit error — the per-MILLION card price
+# written as the per-token price (2026-09-13: nine gateway models registered
+# at 2.0/7.5 instead of 2e-7/7.5e-7, and the probe's 12 requests each booked
+# $80,589 of spend). LiteLLM answers 200 and prices every request with it,
+# so this is the kind of failure a shape guard exists for.
+COST_CEILING = 0.01
+_COST_CEILINGS = {
+    f"{parent}.{f}": COST_CEILING
+    for parent in ("model_info", "litellm_params", "extra")
+    for f in COST_FIELDS
+}
 
 
 ARG_SPECS: dict[str, ArgSpec] = {
@@ -61,7 +87,22 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # `vendors` (2026-09-14) names whole groups; the Executor expands them.
     "autodiscovery.skip": ArgSpec(required=("credential_name",),
                                   any_of=(("model_ids", "vendors"),)),
+    # litellm model writes (2026-09-14): every handler subscripts these, and
+    # a per-token price is a shape fact — see COST_CEILING. `extra` is
+    # add_model's litellm_params; update_model names it litellm_params.
+    "litellm.add_model": ArgSpec(required=("model_name", "model"), ceilings=_COST_CEILINGS),
+    "litellm.update_model": ArgSpec(required=("model_id",), ceilings=_COST_CEILINGS),
+    "litellm.delete_model": ArgSpec(required=("model_id",)),
 }
+
+
+def _at_path(args: dict, path: str):
+    node = args
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
 
 
 def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
@@ -89,5 +130,20 @@ def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
         if key in args and args[key] not in allowed:
             problems.append(
                 f"{capability}: {key}={args[key]!r} is not one of {', '.join(allowed)}"
+            )
+    for path, ceiling in spec.ceilings.items():
+        value = _at_path(args, path)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            problems.append(f"{capability}: {path}={value!r} is not a number")
+            continue
+        if number > ceiling:
+            problems.append(
+                f"{capability}: {path}={value!r} exceeds {ceiling} — prices are USD per "
+                f"TOKEN, not per million (a $2.00/1M card price is 2e-06). Leave cost "
+                f"fields out: the Executor copies them from the credential's catalog."
             )
     return problems

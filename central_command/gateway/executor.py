@@ -24,6 +24,7 @@ import httpx
 
 from central_command.config import settings
 from central_command.contract import ARG_SPECS, Action, Provenance, validate_action_args
+from central_command.contract.args import COST_FIELDS
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
 
@@ -909,24 +910,81 @@ def _uses_named_credential(litellm_params: dict | None) -> bool:
     return bool(isinstance(litellm_params, dict) and litellm_params.get("litellm_credential_name"))
 
 
+def _strip_costs(d: dict | None) -> dict:
+    return {k: v for k, v in (d or {}).items() if k not in COST_FIELDS}
+
+
+def _agent_costs(*dicts: dict | None) -> dict:
+    out: dict = {}
+    for d in dicts:
+        out.update({k: v for k, v in (d or {}).items() if k in COST_FIELDS})
+    return out
+
+
+async def _catalog_prices(credential_name: str | None, provider_model: str,
+                          proposed: dict) -> tuple[dict, str]:
+    """The per-token prices a deployment gets, and one line saying where they
+    came from. A PRICE IS CATALOG DATA, NEVER AN AGENT'S CLAIM (2026-09-13:
+    nine gateway models registered with the card's per-million price as the
+    per-token price booked $80,589 of spend before anyone looked) — so the
+    proposal's cost fields are always dropped, and the credential's own
+    catalog fills them when it publishes pricing (OpenRouter-shaped gateways
+    do, in USD per token; OpenAI's and Anthropic's lists do not, and there
+    LiteLLM's cost map prices the model via `base_model`). An unreadable
+    catalog is reported, not fatal: an unpriced deployment costs $0 in the
+    ledger until the next discovery pass, a mispriced one costs $80k."""
+    dropped = f" — dropped the proposal's {sorted(proposed)}" if proposed else ""
+    if not credential_name:
+        return {}, "no stored credential, so no catalog to price from; LiteLLM's cost map decides" + dropped
+    try:
+        entry = await litellm_client.catalog_entry_for(credential_name, provider_model)
+    except Exception as e:  # noqa: BLE001 — the add still happens; the price gap is reported
+        return {}, f"catalog for {credential_name!r} unreadable ({type(e).__name__}: {str(e)[:120]}); unpriced" + dropped
+    prices = litellm_client.pricing_from_catalog(entry)
+    if entry is None:
+        return {}, f"{provider_model!r} is not in the {credential_name!r} catalog; unpriced" + dropped
+    if not prices:
+        return {}, f"the {credential_name!r} catalog carries no pricing; LiteLLM's cost map decides" + dropped
+    same = proposed and all(
+        _close(proposed.get(k), v) for k, v in prices.items()) and set(proposed) <= set(prices)
+    return prices, (f"priced from the {credential_name!r} catalog: "
+                    + ", ".join(f"{k}={v:g}" for k, v in prices.items())
+                    + ("" if same or not proposed else
+                       f" (replacing the proposal's {proposed})"))
+
+
+def _close(a, b) -> bool:
+    try:
+        return abs(float(a) - float(b)) <= 1e-12
+    except (TypeError, ValueError):
+        return False
+
+
 async def _litellm_add_model(args: dict, approver: str, proposer: str | None) -> str:
     # An explicit key in the args is unexpected (the charter forbids it) but
     # honored; a named credential authenticates on its own; otherwise the Executor
     # supplies the provider credential.
-    if _uses_named_credential(args.get("extra")):
+    extra = args.get("extra")
+    if _uses_named_credential(extra):
         api_key = args.get("api_key")  # honor an explicit one, but inject nothing
     else:
         api_key = args.get("api_key") or _provider_key(args["model"])
     # PROVENANCE IS STAMPED HERE, never agent-supplied — the same rule that
     # hands `proposer` to this function instead of trusting the args. LiteLLM's
     # UI reads created_by/updated_by out of model_info; an agent-written value
-    # would be a claim, so the Executor overwrites unconditionally.
-    model_info = dict(args.get("model_info") or {})
+    # would be a claim, so the Executor overwrites unconditionally. Prices
+    # are the same kind of claim and get the same treatment (_catalog_prices).
+    proposed_costs = _agent_costs(args.get("model_info"), extra)
+    model_info = _strip_costs(args.get("model_info"))
+    extra = _strip_costs(extra) if isinstance(extra, dict) else extra
     model_info["created_by"] = proposer or approver
     model_info["updated_by"] = proposer or approver
+    credential = (extra or {}).get("litellm_credential_name") if isinstance(extra, dict) else None
+    prices, pricing_note = await _catalog_prices(credential, args["model"], proposed_costs)
+    model_info.update(prices)
     out = await litellm_client.add_model(
         args["model_name"], args["model"], api_key=api_key,
-        model_info=model_info, extra=args.get("extra"),
+        model_info=model_info, extra=extra,
     )
     m = out.get("model") or {}
     # Test-on-add (the autodiscovery contract, FULL PROBE since v2.4.0 by
@@ -957,7 +1015,7 @@ async def _litellm_add_model(args: dict, approver: str, proposer: str | None) ->
     except Exception as e:  # noqa: BLE001
         health = f"probe errored: {type(e).__name__}: {str(e)[:200]}"
     return (f"litellm model '{m.get('model_name')}' → {m.get('provider_model')} "
-            f"added (id {m.get('model_id')}) — tested on add: {health}")
+            f"added (id {m.get('model_id')}) — {pricing_note} — tested on add: {health}")
 
 
 async def _litellm_update_model(args: dict, approver: str, proposer: str | None) -> str:
@@ -976,14 +1034,29 @@ async def _litellm_update_model(args: dict, approver: str, proposer: str | None)
     # Executor-stamped provenance, as in add_model. Stamped even when the
     # edit carries no model_info of its own — the PATCH merge preserves the
     # rest of the stored model_info either way.
-    model_info = dict(args.get("model_info") or {})
+    proposed_costs = _agent_costs(args.get("model_info"), params)
+    model_info = _strip_costs(args.get("model_info"))
+    if isinstance(params, dict):
+        params = _strip_costs(params)
     model_info["updated_by"] = proposer or approver
+    pricing_note = ""
+    if proposed_costs:
+        # An edit that touches a price is re-priced from the catalog, exactly
+        # as an add is; the deployment's credential and provider model are
+        # read from the proxy, never from the proposal. An edit that leaves
+        # prices alone makes no catalog call.
+        d = next((x for x in (await litellm_client.list_models())["models"]
+                  if x.get("model_id") == args["model_id"]), {})
+        prices, pricing_note = await _catalog_prices(
+            d.get("credential_name"), str(d.get("provider_model") or ""), proposed_costs)
+        model_info.update(prices)
     out = await litellm_client.update_model(
         args["model_id"], model_info=model_info,
         litellm_params=params, model_name=args.get("model_name"),
     )
     m = out.get("model") or {}
-    return f"litellm model {m.get('model_id')} updated ({', '.join(m.get('updated') or [])})"
+    return (f"litellm model {m.get('model_id')} updated ({', '.join(m.get('updated') or [])})"
+            + (f" — {pricing_note}" if pricing_note else ""))
 
 
 async def _litellm_delete_model(args: dict, approver: str, proposer: str | None) -> str:

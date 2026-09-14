@@ -510,7 +510,9 @@ REGISTRY: list[Capability] = [
             "carries custom METADATA (created_by, created_date, …); extra is "
             "litellm_params (rpm, etc.). Provider keys are NEVER in a proposal — "
             "the Executor supplies them (a keyless re-registration once broke the "
-            "Claude models, 2026-07-22)."
+            "Claude models, 2026-07-22). Per-token prices are never in one "
+            "either: the Executor copies them from the credential's catalog and "
+            "drops any the proposal carried (2026-09-13)."
         ),
     ),
     Capability(

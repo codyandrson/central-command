@@ -22,6 +22,7 @@ import struct
 import httpx
 
 from central_command.config import settings
+from central_command.contract.args import COST_FIELDS
 from central_command.integrations import http as http_client
 
 # A LiteLLM model_name (alias) and a provider model string ("anthropic/claude-…").
@@ -986,6 +987,83 @@ PROVIDER_CATALOGS = {
     "anthropic": _anthropic_catalog,
     "openai": _openai_compatible_catalog,
 }
+
+
+# --- catalog pricing ----------------------------------------------------------
+#
+# A price is CATALOG DATA, never something an agent types (2026-09-13: the
+# litellm-manager registered nine Kilo.ai models with the card's per-MILLION
+# price written as the per-TOKEN price — mercury-2.5 at 2.0/7.5 instead of
+# 2e-7/7.5e-7 — and the capability probe's 12 requests booked $80,589 of
+# spend in LiteLLM). OpenRouter-shaped gateways publish `pricing` in USD per
+# token, which is LiteLLM's own unit; the Executor copies it and overwrites
+# whatever the proposal carried, the same way it stamps `created_by`.
+
+# The per-token cost vocabulary is contract.COST_FIELDS (both tiers check it).
+
+_CATALOG_PRICE_KEYS = {
+    "prompt": "input_cost_per_token",
+    "completion": "output_cost_per_token",
+    "input_cache_read": "cache_read_input_token_cost",
+    "input_cache_write": "cache_creation_input_token_cost",
+}
+
+
+def pricing_from_catalog(entry: dict | None) -> dict:
+    """The LiteLLM cost fields a catalog entry answers, USD per token, as
+    floats — `{}` when the catalog carries no pricing (OpenAI's and
+    Anthropic's /v1/models do not; LiteLLM's cost map covers those via
+    `base_model`). Pure. A zero is kept: a free model's price is 0, and
+    declaring it beats the cost map's guess."""
+    pricing = (entry or {}).get("pricing")
+    if not isinstance(pricing, dict):
+        return {}
+    out: dict = {}
+    for key, field in _CATALOG_PRICE_KEYS.items():
+        raw = pricing.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            out[field] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def candidate_ids(provider_model: str) -> set[str]:
+    """Every string a configured deployment's model could match a catalog id
+    on: the model string as stored AND with its leading 'provider/' stripped.
+    Both, because which side carries the prefix depends on who registered
+    the deployment (2026-09-14): the agent writes 'openai/vendor/model' for
+    a gateway id 'vendor/model', but the LiteLLM UI stores a hand-registered
+    gateway model as 'kilo-auto/free' with the provider only in
+    custom_llm_provider — and stripping THAT leaves 'free', which matches
+    nothing. Anthropic stays as before: 'anthropic/claude-x' and 'claude-x'
+    are the same raw id."""
+    ids = {provider_model}
+    if "/" in provider_model:
+        ids.add(provider_model.split("/", 1)[1])
+    # The Responses bridge ('openai/chat_completions/<model>') is a routing
+    # prefix, not part of the id.
+    ids |= {i.replace("chat_completions/", "", 1) for i in list(ids) if "chat_completions/" in i}
+    return ids
+
+
+async def catalog_entry_for(credential_name: str, provider_model: str) -> dict | None:
+    """The stored credential's live catalog entry for `provider_model`, or
+    None when the catalog has no such id. Raises (CredStoreError /
+    LiteLLMError) when the credential is unknown or its catalog cannot be
+    fetched — the caller decides what an unanswerable price means."""
+    from central_command.integrations import litellm_credstore
+
+    cred = next((c for c in await litellm_credstore.list_provider_credentials()
+                 if c.get("credential_name") == credential_name), None)
+    if cred is None:
+        raise LiteLLMError(f"catalog_entry_for — no stored credential named {credential_name!r}")
+    values = cred.get("values") or {}
+    catalog = await provider_catalog(cred.get("provider"), values.get("api_key"), values.get("api_base"))
+    wanted = candidate_ids(provider_model)
+    return next((e for e in catalog if isinstance(e, dict) and str(e.get("id")) in wanted), None)
 
 
 async def provider_catalog(provider: str, api_key: str, api_base: str | None = None) -> list[dict]:

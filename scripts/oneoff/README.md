@@ -22,6 +22,14 @@ embedding-model swap, cited by `skills/graphiti/references/operations.md` and
 `--verify`) any time the embedding model changes; it stays here because it is
 still a manual, deliberate-invocation operation, not because it is finished.
 
+**`repair_spend_prices.py` is NOT spent until the operator runs it** (v2.33.0,
+2026-09-14): it re-prices the LiteLLM spend rows booked under the wrong
+per-token prices on 2026-09-13 ($80,589 from nine Kilo.ai models whose
+per-million card price was written as per-token) from the credential's
+catalog, and carries the deltas into every aggregate LiteLLM keeps. Dry run,
+then `--apply`, once, after the release is live. Run from the live checkout
+(its editable install must be the release that carries `pricing_from_catalog`).
+
 | script | what it did | why it is spent |
 |---|---|---|
 | `replay_cancelled_reject_resume.py` | Replayed the resume half of one reject (prop_075d96b53965) whose RPC the 2026-08-13 WS drop cancelled mid-flight, un-sticking sess_10e406047961. | The decision half had committed; only that one session was owed its resume. The general fix is `resume_park.arm()` before every decision resume. |

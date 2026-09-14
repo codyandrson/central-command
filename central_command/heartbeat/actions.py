@@ -654,23 +654,9 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     }
 
 
-def _candidate_ids(provider_model: str) -> set[str]:
-    """Every string a configured deployment's model could match a catalog id
-    on: the model string as stored AND with its leading 'provider/' stripped.
-    Both, because which side carries the prefix depends on who registered
-    the deployment (2026-09-14): the agent writes 'openai/vendor/model' for
-    a gateway id 'vendor/model', but the LiteLLM UI stores a hand-registered
-    gateway model as 'kilo-auto/free' with the provider only in
-    custom_llm_provider — and stripping THAT leaves 'free', which matches
-    nothing. Anthropic stays as before: 'anthropic/claude-x' and 'claude-x'
-    are the same raw id."""
-    ids = {provider_model}
-    if "/" in provider_model:
-        ids.add(provider_model.split("/", 1)[1])
-    # The Responses bridge ('openai/chat_completions/<model>') is a routing
-    # prefix, not part of the id.
-    ids |= {i.replace("chat_completions/", "", 1) for i in list(ids) if "chat_completions/" in i}
-    return ids
+# The id-matching rule lives with the catalog helpers (the Executor prices a
+# deployment from the same match); kept under this name for the diff.
+from central_command.integrations.litellm import candidate_ids as _candidate_ids  # noqa: E402
 
 
 def compute_discovery_drift(
@@ -742,11 +728,15 @@ def compute_discovery_drift(
 # The catalog fields whose change re-opens a decided model. Explicit and
 # closed on purpose: a provider's /v1/models entry is nearly immutable (id,
 # created, owned_by), so "any change" must name the fields that CAN move —
-# OpenAI's `shutdown_date`, Anthropic's `display_name` — or it silently means
-# "new or removed" while everyone believes it means more. Price, context and
-# description are NOT in the catalog (they live in LiteLLM's cost map), so no
-# fingerprint can see them.
-FINGERPRINT_FIELDS = ("id", "shutdown_date", "display_name")
+# OpenAI's `shutdown_date`, Anthropic's `display_name`, a gateway's
+# `pricing` — or it silently means "new or removed" while everyone believes it
+# means more. Context and description are NOT in the catalog (they live in
+# LiteLLM's cost map), so no fingerprint can see them. `pricing` IS, for
+# OpenRouter-shaped gateways (2026-09-14): the Executor copies it onto the
+# deployment at add time, and a price the provider moves must re-open the
+# model so the copy is refreshed — otherwise it is right on the day of the
+# add and stale forever after.
+FINGERPRINT_FIELDS = ("id", "shutdown_date", "display_name", "pricing")
 
 SNAPSHOT_SETTING = "autodiscovery_snapshot"
 
@@ -923,7 +913,11 @@ def _add_brief(credential_name: str, models: list[dict]) -> str:
         "propose_litellm_change, one litellm.add_model action per model, "
         "carrying only what you know for certain (the format prefix, the "
         "credential, `mode`, and `model_info.base_model` = the public "
-        "counterpart if one exists, for cost-map defaults). On approval the "
+        "counterpart if one exists, for cost-map defaults). NEVER set a "
+        "price (input_cost_per_token and its siblings): the Executor copies "
+        "per-token prices from the credential's own catalog and drops any "
+        "you wrote — a card's per-million price typed as a per-token price "
+        "booked $80,589 of spend on 2026-09-13. On approval the "
         "Executor runs the full capability probe and the execution result "
         "carries the declared→observed diff — read it and propose "
         "litellm.update_model with that `suggested_model_info` (re-run "

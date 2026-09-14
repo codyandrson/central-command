@@ -4,6 +4,54 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.33.0: a price is catalog data, never an agent's claim
+
+The cockpit's Usage panel showed $80,589 for the last 30 days. Every dollar
+was booked on 2026-09-13 against Kilo.ai models the autodiscovery add-tasks
+had just registered: the litellm-manager had written each card's per-MILLION
+price as the per-TOKEN price (`mercury-2.5` at 2.0/7.5 instead of 2e-7 /
+7.5e-7 — its own description quoted "$0.20/$0.75 per 1M"), and LiteLLM
+priced the capability probe's twelve requests per model with it. The panel
+relays LiteLLM's own aggregation and was right; the price was wrong. The
+gateway's catalog had carried the correct per-token price the whole time,
+in LiteLLM's own unit, and the agent transcribed it.
+
+- **The Executor prices a deployment from the credential's catalog.** On
+  every `litellm.add_model`, and on every `litellm.update_model` that
+  touches a price, the proposal's cost fields are dropped and the stored
+  credential's own catalog entry fills them (OpenRouter-shaped gateways
+  publish `pricing` in USD per token); the execution result says where the
+  price came from and what it replaced. A catalog with no pricing (OpenAI,
+  Anthropic) leaves the model to LiteLLM's cost map via `base_model`, as
+  before; an unreadable catalog is reported, not fatal — unpriced costs $0
+  in the ledger until the next pass, mispriced cost $80k. The same rule as
+  `created_by`: an agent-written value is a claim, the Executor stamps.
+- **A moved price re-opens the model.** `pricing` joins the autodiscovery
+  fingerprint, so a provider price change flows through the same copy
+  instead of leaving the deployment right on the day of the add and stale
+  forever after.
+- **A per-token price above a cent is refused at the contract.**
+  `contract.ARG_SPECS` gains `ceilings`, and the three litellm model
+  capabilities gain the shape spec every subscripting handler owes: the
+  runtime hands the draft back naming the unit error, the Executor refuses
+  the same proposal arriving by API. LiteLLM answers 200 to a wrong price
+  and bills with it — the kind of failure a shape guard exists for.
+- **The add brief, the manager's profile and the capability text say
+  never to set a price.** Smallest part, last: pack text alone left the
+  hole open for the next inconsistent draft, which is what happened within
+  a single batch (four models in the same run were priced correctly).
+- **`scripts/oneoff/repair_spend_prices.py` re-prices the record.** It
+  recomputes each affected spend row from its tokens and the catalog's
+  current price and carries the per-row delta into every table LiteLLM
+  aggregates spend into (daily user/team/tag/end-user/organization/agent/
+  tool, and the running user/team/key totals). Deltas, never rebuilt sums,
+  so rows it never touches are untouched. Dry run by default.
+
+Operator follow-up on an instance, after the update: run the repair script
+for 2026-09-13 (dry run, then `--apply`). Nothing budget-scoped was affected
+— the probe requests ran under the master key and every virtual key shows
+zero spend.
+
 ## 2026-09-14 — v2.32.0: autodiscovery can see a gateway, and the review answers by group
 
 A review of the autodiscovery run against a gateway credential (Kilo.ai)
