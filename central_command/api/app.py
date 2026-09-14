@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from central_command import __version__
 from central_command.api.routes import router
 from central_command.config import settings
+from central_command.db import repo
 from central_command.events import bridge as event_bridge
 from central_command.events import log as event_log
 from central_command.heartbeat import engine as heartbeat_engine
@@ -207,6 +208,8 @@ async def lifespan(app: FastAPI):
     await sweeper.stop()
     await feed.stop()
     await dispatcher.stop()
+    # Last: everything above may still need a connection to land its stop.
+    await repo.close_pool()
 
 
 # Docs live under the /api prefix with everything else, so the cockpit server

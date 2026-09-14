@@ -257,3 +257,7 @@ async def isolated_queue():
             )
         finally:
             await conn.close()
+        # The pool is per event loop and pytest-asyncio closes this test's
+        # loop right after us — release the connections while it still runs,
+        # or every test leaves its members open until the GC gets to them.
+        await repo.close_pool()

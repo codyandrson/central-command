@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.31.0: the spine pools its database connections
+
+`pytest -q` took 16.5 minutes on the Pi, and four fifths of that was the
+Postgres handshake: `repo._conn()` opened a fresh connection for every call
+(387 call sites, ~19 per test), and a fresh connection costs ~38 ms there —
+backend fork plus scram, since traffic through ServiceLB misses the loopback
+`trust` rule — against 0.2 ms for a query on an open one. Connections now
+come from one asyncpg pool per event loop; every caller keeps its
+`_conn()` … `close()` shape and `close()` releases instead of hanging up.
+The app shuts the pool down last in the lifespan, and the suite releases it
+at every test's teardown because pytest-asyncio gives each test its own loop.
+`tests/test_db_pool.py` pins the reuse, the two-handles-two-backends case
+the ledger's `skip locked` tests depend on, and the concurrent-first-use
+race.
+
 ## 2026-09-13 — v2.30.1: the updater applies the n8n workflows every time
 
 The first `mail.report_spam` approval failed with n8n's `Error in workflow`:

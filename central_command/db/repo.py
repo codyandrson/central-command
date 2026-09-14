@@ -1,11 +1,16 @@
 """Minimal async persistence for the spine (asyncpg).
 
-# ponytail: connect-per-call by design, not a stopgap — a pool is the known
-# upgrade if connection overhead ever measures as a problem.
+Connections come from ONE pool per event loop. Every caller keeps the shape it
+always had — `conn = await _conn()` … `await conn.close()` — and `close()`
+returns the connection to the pool instead of hanging up. Measured 2026-09-13:
+a fresh connection cost ~38 ms on the Pi (backend fork + scram; the raw TCP
+connect is 0.3 ms) against 0.2 ms for a query on an open one, and with ~19
+connects per test that handshake was ~80% of the suite's 16.5 minutes.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime
@@ -14,9 +19,91 @@ import asyncpg
 
 from central_command.config import settings
 
+# ponytail: max_size=20 is a guess above anything measured; raise it if
+# `acquire` ever shows up waiting. min_size=0 so a pool costs nothing until
+# it is used — pytest makes a fresh loop (hence a fresh pool) per test.
+_POOL_MAX = 20
+_POOL_CLOSE_TIMEOUT_S = 5.0
+
+_pool: asyncpg.Pool | None = None
+_pool_loop: asyncio.AbstractEventLoop | None = None
+_pool_url: str | None = None
+_pool_lock: asyncio.Lock | None = None
+
+
+class _PooledConnection:
+    """A pooled connection whose `close()` is a release.
+
+    asyncpg's own proxy forwards `close()` to the real connection, which would
+    hang up the socket and hand the pool a dead member — so the one method
+    callers use to finish is the one we intercept. Everything else forwards.
+    """
+
+    __slots__ = ("_pool", "_proxy")
+
+    def __init__(self, pool: asyncpg.Pool, proxy) -> None:
+        self._pool = pool
+        self._proxy = proxy
+
+    def __getattr__(self, name):
+        return getattr(self._proxy, name)
+
+    async def close(self) -> None:
+        proxy, self._proxy = self._proxy, None
+        if proxy is not None:
+            await self._pool.release(proxy)
+
+
+async def _get_pool() -> asyncpg.Pool:
+    """The pool for the RUNNING loop, keyed the way `neo4j_reader._get_driver`
+    keys its driver: a pool holds futures bound to the loop that created it,
+    so a module-global one raises from every loop but the first. Production
+    has one loop and never sees it; pytest gives each test its own.
+
+    The loop check and the lock swap happen with no `await` between them, so
+    two coroutines racing onto a fresh loop share one lock and build one pool.
+    """
+    global _pool, _pool_loop, _pool_url, _pool_lock
+    loop = asyncio.get_running_loop()
+    if _pool_loop is not loop:
+        old_pool, old_loop = _pool, _pool_loop
+        _pool, _pool_loop, _pool_url, _pool_lock = None, loop, None, asyncio.Lock()
+        # Nobody closed the previous loop's pool (a test that skipped the
+        # conftest teardown, say). Its sockets can be torn down without that
+        # loop; its futures cannot, so only terminate while the loop lives.
+        if old_pool is not None and old_loop is not None and not old_loop.is_closed():
+            old_pool.terminate()
+    async with _pool_lock:
+        if _pool is None or _pool_url != settings.database_url:
+            if _pool is not None:
+                _pool.terminate()
+            _pool = await asyncpg.create_pool(
+                settings.database_url, min_size=0, max_size=_POOL_MAX
+            )
+            _pool_url = settings.database_url
+        return _pool
+
 
 async def _conn() -> asyncpg.Connection:
-    return await asyncpg.connect(settings.database_url)
+    pool = await _get_pool()
+    return _PooledConnection(pool, await pool.acquire())  # type: ignore[return-value]
+
+
+async def close_pool() -> None:
+    """Return every connection and forget the pool (app shutdown; test teardown).
+
+    Waits for members still checked out, then gives up and terminates: a
+    holder that never releases (a leaked task, an advisory-lock lease whose
+    owner died) must not turn shutdown into a hang.
+    """
+    global _pool, _pool_loop, _pool_url, _pool_lock
+    pool, _pool, _pool_loop, _pool_url, _pool_lock = _pool, None, None, None, None
+    if pool is None:
+        return
+    try:
+        await asyncio.wait_for(pool.close(), _POOL_CLOSE_TIMEOUT_S)
+    except TimeoutError:
+        pass  # asyncpg terminates the pool itself when close() is cancelled
 
 
 async def upsert_agent(agent_id: str, name: str, model: str, charter: str) -> None:
