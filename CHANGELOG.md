@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.29.4: the Systems view lists the local-model slot
+
+The local-model slot LiteLLM routes to is a llama-swap instance on the
+compute host, and llama-swap ships a Web UI of its own — loaded models, swap
+state, and per-request token counts and timings — that the cockpit had no
+way to reach: the Systems launchpad knew LiteLLM, n8n, VictoriaLogs and the
+rest, but not the server actually running the weights.
+
+A `CC_LLAMA_SWAP_UI_URL` setting adds it, same "unset = no link" pattern as
+the other display-only browser URLs. It is the one Systems entry whose
+liveness probe is the browser URL's origin: llama-swap runs on the compute
+host and is reached over the tailnet by LiteLLM and browser alike, so no
+ServiceLB loopback carries it. `verify.sh` exempts the new variable from the
+loopback rule accordingly. Nothing changes for an install that leaves it
+unset.
+
 ## 2026-09-13 — v2.29.3: an approval returns when the write is recorded, not when the agent's turn ends
 
 After approving a proposal or two, the next click in the cockpit — the next

@@ -584,6 +584,14 @@ class Settings(BaseSettings):
     # Systems view. Same pattern as llm_proxy_ui_url. Unset = no link.
     vlogs_ui_url: str = ""
 
+    # Browser-reachable llama-swap Web UI (tailnet) — the local-model slot
+    # LiteLLM routes to (models, load state, request activity, token counts).
+    # Display-only, for the Systems view; same pattern as llm_proxy_ui_url.
+    # llama-swap lives on the compute host, not behind ServiceLB, so its
+    # liveness probe is the same tailnet origin (no loopback exists for it).
+    # Unset = no link.
+    llama_swap_ui_url: str = ""
+
     # Browser-reachable Swagger (/docs) URLs for the sandbox runner and the
     # crawler — display-only, for the Systems view, labelled "Swagger" there.
     # Both services are loopback/cluster-internal; a value here implies the

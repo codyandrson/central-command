@@ -22,6 +22,7 @@ async def test_systems_wire_shape_and_no_credential_leak(monkeypatch):
     monkeypatch.setattr(settings, "llm_proxy_ui_url", "https://litellm.tail.example/ui")
     monkeypatch.setattr(settings, "n8n_ui_url", "https://n8n.tail.example/")
     monkeypatch.setattr(settings, "vlogs_ui_url", "https://vlogs.tail.example/")
+    monkeypatch.setattr(settings, "llama_swap_ui_url", "http://swap.tail.example:8081/ui")
     monkeypatch.setattr(settings, "neo4j_browser_url", "https://neo4j.tail.example/")
     monkeypatch.setattr(settings, "sandbox_docs_url", "https://sandbox.tail.example/docs")
     monkeypatch.setattr(settings, "crawler_docs_url", "https://crawler.tail.example/docs")
@@ -60,6 +61,8 @@ async def test_systems_wire_shape_and_no_credential_leak(monkeypatch):
     assert by_id["n8n"]["url"] == "https://n8n.tail.example/"
     assert by_id["litellm"]["url"] == "https://litellm.tail.example/ui"
     assert by_id["victorialogs"]["url"] == "https://vlogs.tail.example/"
+    assert by_id["llama-swap"]["url"] == "http://swap.tail.example:8081/ui"
+    assert by_id["llama-swap"]["kind"] == "ui"
     assert by_id["neo4j"]["url"] == "https://neo4j.tail.example/"
     assert by_id["cockpit"]["status"] == "up"
     # Swagger links: the control plane's is same-origin relative (proxied by
@@ -98,3 +101,35 @@ async def test_systems_includes_external_entries_only_when_configured(monkeypatc
     by_id = {row["id"]: row for row in out["systems"]}
     assert by_id["jira"]["url"] == "https://example.atlassian.net"
     assert "confluence" not in by_id
+
+
+async def test_llama_swap_probe_is_the_browser_origin(monkeypatch):
+    """llama-swap has no loopback carrier — the probe is the browser URL's
+    ORIGIN (never the /ui path, so a UI path change cannot read as down),
+    and an unset URL is 'unknown' with no probe at all."""
+    monkeypatch.setattr(settings, "llama_swap_ui_url", "http://swap.tail.example:8081/ui")
+    probed: list[str | None] = []
+
+    async def fake_http_check(url):
+        probed.append(url)
+        return ("up", 1.0) if url else ("unknown", None)
+
+    async def fake_tcp_check(url, default_port):
+        return ("unknown", None)
+
+    async def fake_neo4j_status():
+        return ("unknown", None)
+
+    monkeypatch.setattr(systems, "_http_check", fake_http_check)
+    monkeypatch.setattr(systems, "_tcp_check", fake_tcp_check)
+    monkeypatch.setattr(systems, "_neo4j_status_via_graphiti", fake_neo4j_status)
+
+    by_id = {row["id"]: row for row in (await systems.list_systems())["systems"]}
+    assert by_id["llama-swap"]["status"] == "up"
+    assert "http://swap.tail.example:8081" in probed
+    assert "http://swap.tail.example:8081/ui" not in probed
+
+    monkeypatch.setattr(settings, "llama_swap_ui_url", "")
+    by_id = {row["id"]: row for row in (await systems.list_systems())["systems"]}
+    assert by_id["llama-swap"]["url"] is None
+    assert by_id["llama-swap"]["status"] == "unknown"

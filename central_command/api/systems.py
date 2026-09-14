@@ -138,6 +138,22 @@ def _entries() -> list[dict]:
             },
         },
         {
+            "id": "llama-swap",
+            "name": "llama-swap",
+            "kind": "ui",
+            "url": settings.llama_swap_ui_url or None,
+            # The one entry whose probe target IS its browser URL: llama-swap
+            # runs on the compute host, reached over the tailnet by LiteLLM
+            # and browser alike — no ServiceLB loopback carries it. The
+            # origin only (no path) so a UI path change cannot fake "down";
+            # llama-swap answers any GET at its root with a redirect to /ui.
+            "health": _http_check(_origin(settings.llama_swap_ui_url)),
+            "credential": {
+                "label": "none — tailnet-gated",
+                "location": "n/a",
+            },
+        },
+        {
             "id": "postgres",
             "name": "Postgres",
             "kind": "store",
