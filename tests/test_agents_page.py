@@ -402,25 +402,34 @@ async def test_coaching_a_retired_agent_says_retired_not_unknown():
         await _drop_agent(agent_id)
 
 
-async def _await_detached(seen: dict, timeout: float = 5.0, *, key: str | None = None) -> None:
-    """Wait for a detached coach run to have started and finished.
+async def _await_detached(seen: dict, timeout: float = 5.0, *, key: str) -> None:
+    """Wait for a detached coach run to have reached `key`.
 
-    Polling on mere truthiness of `seen` was a race (2026-08-21 W7): the stub
-    sets keys one at a time, awaiting a real DB call (`repo.latest_event_id()`)
-    between the first key and the last — `seen` goes truthy the moment the
-    FIRST key lands, before the awaited call resolves, and the fixed 0.02s
-    grace sleep afterward is not guaranteed to outlast that call. Callers that
-    care about a specific key (e.g. `event_at_call`, set only after the await)
-    must pass it so the poll waits for THAT key, not just any key."""
+    Polling on mere truthiness of `seen` was a race (2026-08-21 W7, again
+    2026-09-14): the stub sets keys one at a time, awaiting real DB calls
+    between them — `seen` goes truthy the moment the FIRST key lands, and a
+    fixed grace sleep afterward is not guaranteed to outlast the rest. So the
+    key is required: name the thing you are about to assert on. A test that
+    asserts on the TASK RECORD wants `_await_landed`, not this."""
     for _ in range(int(timeout / 0.02)):
-        if key is not None:
-            if key in seen:
-                return
-        elif seen:
-            await asyncio.sleep(0.02)  # let the landing finish too
+        if key in seen:
             return
         await asyncio.sleep(0.02)
     raise AssertionError("the detached coach run never started")
+
+
+async def _await_landed(task_id: str, timeout: float = 5.0) -> dict:
+    """Wait for a detached run's task record to leave IN_PROGRESS.
+
+    The landing (REVIEW / FAILED) is written by the detached wrapper AFTER the
+    stubbed run returns, so the stub having been entered proves nothing about
+    the record — poll the record itself."""
+    for _ in range(int(timeout / 0.02)):
+        task = await repo.get_task(task_id)
+        if task["status"] != "IN_PROGRESS":
+            return task
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"task {task_id} never landed")
 
 
 @needs_pg
@@ -491,10 +500,7 @@ async def test_a_coach_run_rides_a_task_record_and_lands_on_it(monkeypatch):
     from central_command.api import routes as rest
     from central_command.runtime import run as run_module
 
-    seen: dict = {}
-
     async def drafts(agent_id, **kwargs):
-        seen["task_id"] = kwargs["task_id"]
         # A real run links the session to the task inside `_run_live`.
         await repo.start_task(kwargs["task_id"], "sess_coachtest")
         return {"deferred": True, "session_id": "sess_coachtest",
@@ -512,22 +518,18 @@ async def test_a_coach_run_rides_a_task_record_and_lands_on_it(monkeypatch):
     # The task belongs to the DRAFTER, never the coaching target.
     assert (await repo.get_task(task_id))["agent_id"] == "coach"
 
-    await _await_detached(seen)
-    task = await repo.get_task(task_id)
+    task = await _await_landed(task_id)
     assert task["status"] == "REVIEW", "a drafted edit holds the task for the operator"
     # Linked by session, which is what lets the gateway resolve the task when
     # the operator decides the proposal (`_resolve_task_after`).
     assert task["session_id"] == "sess_coachtest"
 
     async def explodes(agent_id, **kwargs):
-        seen["failed"] = True
         raise RuntimeError("the model is down")
 
     monkeypatch.setattr(run_module, "run_coach", explodes)
-    seen.clear()
     out = await rest.coach_agent("inbox-triage", rest.CoachIn(note="again"))
-    await _await_detached(seen)
-    failed = await repo.get_task(out["task_id"])
+    failed = await _await_landed(out["task_id"])
     assert failed["status"] == "FAILED"
     assert "the model is down" in failed["outcome"]
 
