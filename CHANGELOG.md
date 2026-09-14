@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.33.1: the spend repair sets daily rows from the log, not by delta
+
+Running v2.33.0's `repair_spend_prices.py` left the Usage panel at
+−$77,405. The log rows and the running totals came out exact ($0.25
+all-time), but the daily aggregates did not: LiteLLM keeps a SEPARATE daily
+row per model for its failed requests (no provider, no endpoint, spend 0),
+the script keyed its daily deltas without the provider, and each delta
+landed on both rows.
+
+- **Daily rows are recomputed from the corrected log**, keyed the way
+  LiteLLM keys them (date, key, model, `custom_llm_provider`, and the
+  table's own dimension — tag rows expand `request_tags`, tool rows join
+  `LiteLLM_SpendLogToolIndex`). Exact, idempotent, and it heals the rows
+  the first run over-subtracted. The running user/team/key totals keep the
+  delta: they span all time and cannot be rebuilt.
+- **The dry run shows the final state.** Phase 1's log update runs inside
+  the same transaction and is rolled back on a dry run, so the daily diff
+  is computed against the log as it will be.
+
+Operator follow-up on an instance: re-run the script for 2026-09-13 (dry
+run, then `--apply`); expect the eight negative daily rows to return to 0
+and the `get_weather` tool row to its real value.
+
 ## 2026-09-14 — v2.33.0: a price is catalog data, never an agent's claim
 
 The cockpit's Usage panel showed $80,589 for the last 30 days. Every dollar

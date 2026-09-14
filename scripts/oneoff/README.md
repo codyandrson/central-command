@@ -27,7 +27,8 @@ still a manual, deliberate-invocation operation, not because it is finished.
 per-token prices on 2026-09-13 ($80,589 from nine Kilo.ai models whose
 per-million card price was written as per-token) from the credential's
 catalog, and carries the deltas into every aggregate LiteLLM keeps. Dry run,
-then `--apply`, once, after the release is live. Run from the live checkout
+then `--apply`, after the release is live (re-run under v2.33.1: the v2.33.0
+run over-subtracted the daily failure rows). Run from the live checkout
 (its editable install must be the release that carries `pricing_from_catalog`).
 
 | script | what it did | why it is spent |
