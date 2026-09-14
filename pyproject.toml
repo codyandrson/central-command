@@ -80,12 +80,11 @@ packages = ["central_command"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-# SEQUENTIAL by default. conftest.py can give each xdist worker its own
-# database, but that path is broken in practice (2026-08-21: `database
-# "central_command_test_gwN" does not exist` plus cross-worker FK races on a shared
-# `skill` row — 10 failures that vanish single-worker). `pytest -q` (~11 min on
-# a Pi, measured 2026-08-23) is
-# the documented gate; opt into `-n auto` deliberately, never by default.
+# SEQUENTIAL by default, on purpose: `pytest -q` (~4 min on a Pi since the
+# connection pool, v2.31.0) is the gate because it is the run that exposes a
+# test leaking state into its neighbour. `-n 4` (~2 min) passes cleanly —
+# conftest.py gives every xdist worker its own database — and is the quick
+# pass, opted into per run rather than made the default.
 
 [tool.ruff]
 line-length = 100

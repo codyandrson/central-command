@@ -406,11 +406,12 @@ where the story is gone.
   email terminal at fold time — that's how you silently drop mail.
 - **Agents take `deps`** (`runtime/deps.py`). Every `agent.run()` needs
   `deps=TriageDeps(...)`; resume paths pass a fresh one on purpose.
-- **Run the suite SEQUENTIALLY.** conftest.py was built for xdist's
-  per-worker DBs but they are broken in practice (missing per-worker
-  databases, cross-worker FK races). Plain `pytest -q` is the gate; a
-  mysteriously red suite is worth checking for `-n` before diagnosing
-  anything else.
+- **`pytest -q`, sequential, is the gate; `-n 4` is the quick pass.** The
+  suite is ~4 minutes sequential since the connection pool (v2.31.0) and
+  ~2 minutes at `-n 4`, and both pass: each xdist worker gets its own
+  database from conftest.py, so the cross-worker failures of 2026-08-21 are
+  gone. Sequential stays the gate on purpose — it is the run that catches a
+  test leaking state into its neighbour, which workers hide.
 - **Tests must pin `demo_mode=True` if they hit code that calls
   `resolve_model()` itself** (e.g. `routes.feed_email`) — with a real key in
   `.env` the "offline" suite will otherwise call the model for real and spend

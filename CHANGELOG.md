@@ -4,6 +4,16 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-14 — v2.31.5: the suite's parallel run is documented as working
+
+Docs only. `pyproject.toml` and CLAUDE.md still described pytest-xdist as
+broken (missing per-worker databases, cross-worker FK races, 2026-08-21) and
+cited an 11-minute sequential gate. Retrialled on v2.31.0: `-n 2` and `-n 4`
+pass in full (each worker gets its own database), at roughly half the
+sequential wall time on the Pi. Sequential `pytest -q` remains the gate by
+decision — it is the run that catches a test leaking state into its
+neighbour — and `-n 4` is the sanctioned quick pass.
+
 ## 2026-09-14 — v2.31.4: the curator pack tells the truth about graph writes
 
 Nine graph-curator remediation proposals failed after approval in a week,
