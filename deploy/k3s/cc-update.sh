@@ -450,13 +450,16 @@ main() {
     # unit whose ExecStart is this script would kill the update mid-flight.
   fi
 
-  # The n8n façades are code (deploy/n8n/): a release that touches them is
-  # applied into the running n8n — upsert by id, activate, restart n8n. The
-  # n8n database dump above is the rollback for this step.
-  if [[ -n "$(changed_between 'deploy/n8n/*')" ]]; then
-    PHASE_NOW=n8n; phase "applying n8n workflows (deploy/n8n/)"
-    bash "$REPO/deploy/n8n/apply-workflows.sh" --k3s || die n8n "deploy/n8n/apply-workflows.sh failed — the n8n dump from the db-backup phase restores the previous workflows"
-  fi
+  # The n8n façades are code (deploy/n8n/): applied into the running n8n on
+  # EVERY update — upsert by id, activate, restart n8n (services are already
+  # stopped here, so the restart costs nothing visible). Not gated on
+  # changed_between: the run that installs release N executes release N-1's
+  # script, so a phase gated on N's own diff never fires for the release that
+  # introduced it, and no later release re-diffs it (v2.27.0's report_spam
+  # branch reached the live n8n by hand, 2026-09-13). The n8n database dump
+  # above is the rollback for this step.
+  PHASE_NOW=n8n; phase "applying n8n workflows (deploy/n8n/)"
+  bash "$REPO/deploy/n8n/apply-workflows.sh" --k3s || die n8n "deploy/n8n/apply-workflows.sh failed — the n8n dump from the db-backup phase restores the previous workflows"
 
   PHASE_NOW=restart; phase "starting services"
   start_services || die restart "systemctl start failed"

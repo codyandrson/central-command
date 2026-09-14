@@ -47,7 +47,9 @@ if [[ $RT == k3s ]]; then
   DB_ENV="$REPO/deploy/pi/.env"          # where the k3s profile keeps N8N_DB_*
   K=(k3s kubectl -n "$NS")
   [[ $EUID -eq 0 ]] || K=(sudo k3s kubectl -n "$NS")
-  n8n_pod()  { "${K[@]}" get pod -l app=cc-n8n -o jsonpath='{.items[0].metadata.name}'; }
+  # Running only: a rollout leaves Completed/old pods under the same label,
+  # and items[0] of those is an exec into a dead container.
+  n8n_pod()  { "${K[@]}" get pod -l app=cc-n8n --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}'; }
   n8n_exec() { "${K[@]}" exec "$(n8n_pod)" -- "$@"; }
   n8n_cp()   { "${K[@]}" cp "$1" "$(n8n_pod):$2"; }
   n8n_psql() { "${K[@]}" exec -i deploy/cc-n8n-db -- psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" -tA "$@"; }

@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-13 — v2.30.1: the updater applies the n8n workflows every time
+
+The first `mail.report_spam` approval failed with n8n's `Error in workflow`:
+the live `lib-email-provider` was still the July canvas, without the
+`report_spam` mode v2.27.0 shipped. The updater's n8n phase was gated on
+"this release touches `deploy/n8n/`" — but the run that installs release N
+executes release N-1's script, so the phase never fired for the release that
+introduced it, and every later release diffed only newer tags. The phase now
+runs on every update (the apply is an idempotent upsert, and services are
+already stopped at that point). Alongside:
+
+- `apply-workflows.sh` selects the **Running** n8n pod — after a rollout the
+  label also matches Completed pods, and `items[0]` of those is an exec into
+  a dead container.
+- trafilatura's own ERROR records (it logs three for every empty page it is
+  handed, e.g. a login redirect with no body) no longer reach the cockpit as
+  `log.error` notices; the fetch tool already reports its outcome and
+  journald keeps the records.
+- `tests/test_feed.py` no longer probes the live email façade when
+  `CC_EMAIL_FACADE_TOKEN` is empty — a worktree suite was hitting the real
+  n8n untokened every run and filling its execution log with "unauthorized".
+
 ## 2026-09-13 — v2.30.0: an update waits for the agents to finish
 
 v2.29.6 taught the updater to refuse while agents were mid-turn; this release

@@ -15,6 +15,7 @@ import asyncio
 
 import pytest
 
+from central_command.config import settings
 from central_command.db import repo
 from central_command.ingest import feed, ledger
 from central_command.integrations import email_facade
@@ -111,6 +112,9 @@ async def test_poll_skips_known_mail_without_refetching(monkeypatch):
 
 
 def _facade_up() -> bool:
+    if not settings.email_facade_token:  # a worktree without .env would probe the live n8n untokened
+        return False
+
     async def probe() -> bool:
         try:
             await email_facade.list_refs("newer_than:1d")

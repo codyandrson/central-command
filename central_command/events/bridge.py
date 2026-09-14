@@ -32,7 +32,10 @@ import traceback
 
 from central_command.events import log as event_log
 
-_SKIP_PREFIXES = ("central_command.events",)
+# trafilatura logs ERROR for every empty/JS-shell page it is handed (a login
+# redirect with no body is a normal fetch outcome); the fetch tool reports its
+# own result to the agent, so those records stay in journald only.
+_SKIP_PREFIXES = ("central_command.events", "trafilatura")
 _TRACEBACK_LIMIT = 4000
 
 _bridging: contextvars.ContextVar[bool] = contextvars.ContextVar(
