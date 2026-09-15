@@ -173,9 +173,10 @@ async def remediation_instructions(row: dict, note: str) -> str:
     )
 
 
-async def _approved_episode_body(row: dict) -> str | None:
-    """The claim the operator actually approved, from the proposal row — the
-    control plane's record, deliberately not the graph's copy of it.
+async def _approved_episode(row: dict) -> tuple[dict, str] | None:
+    """The `graph.add_episode` arguments the operator actually approved, plus
+    the approver — from the proposal row, the control plane's record,
+    deliberately not the graph's copy of it.
 
     A remediation RE-CHECK row's own proposal is the curation proposal (no
     episode on it) — follow `remediation_of` back to the row that carries the
@@ -186,13 +187,46 @@ async def _approved_episode_body(row: dict) -> str | None:
         for action in (proposal or {}).get("actions") or []:
             capability = str(action.get("capability", "")).split("@", 1)[0]
             if capability == "graph.add_episode":
-                return (action.get("arguments") or {}).get("episode_body")
+                args = action.get("arguments") or {}
+                if not args.get("episode_body"):
+                    return None
+                approver = ((proposal.get("provenance") or {}).get("approver")) or "human:operator"
+                return args, approver
         if not row.get("remediation_of"):
             return None
         row = await repo.get_graph_verification(row["remediation_of"]) or {}
         if not row:
             return None
     return None
+
+
+async def _approved_episode_body(row: dict) -> str | None:
+    """The approved claim text alone — what the judgment compares against."""
+    approved = await _approved_episode(row)
+    return approved[0]["episode_body"] if approved else None
+
+
+async def _resubmit(row: dict) -> bool:
+    """Re-send the approved episode, byte-identical to the Executor's first
+    send (same name, body, provenance stamp and marker), so the sweep finds it
+    by the same marker next tick. Graphiti's ingestion queue is in memory: a
+    restart — the nightly Neo4j dump scales it to zero — drops every episode
+    it had acked but not extracted (2026-09-15: 64 replays and four fresh
+    approvals in one night), and a LiteLLM alias outage drops them one by one.
+    False when nothing can be re-sent: no approved text on record."""
+    from central_command.gateway.executor import episode_source_description
+    from central_command.integrations import graphiti
+
+    approved = await _approved_episode(row)
+    if approved is None:
+        return False
+    args, approver = approved
+    await graphiti.add_episode(
+        args["name"], args["episode_body"],
+        episode_source_description(args.get("source_description", ""), approver, row["marker"]),
+        group_id=row["group_id"],
+    )
+    return True
 
 
 async def _judge(
@@ -228,7 +262,7 @@ async def _judge(
 async def verify_one(row: dict, model=None, missing_after_minutes: int = 360) -> str:
     """Audit one PENDING verification row and land it. Returns the outcome
     bucket for the sweep's tally:
-    'waiting' | 'missing' | 'auto_verified' | 'awaiting'."""
+    'waiting' | 'resubmitted' | 'missing' | 'auto_verified' | 'awaiting'."""
     episode = await neo4j_reader.episode_by_marker(row["marker"], row["group_id"])
     if episode is None:
         # Absence is only evidence once the row is STALE. Ingestion is a
@@ -236,15 +270,26 @@ async def verify_one(row: dict, model=None, missing_after_minutes: int = 360) ->
         # approvals lands 50-70 minutes after execute — measured 2026-08-20,
         # when a 10-minute settle false-parked nine healthy episodes as
         # "missing". Inside the deadline the row just stays PENDING for the
-        # next tick; past it, absence IS the silent-drop finding (the class
-        # that lost 25 acked episodes on 2026-08-15).
+        # next tick. Past it, the episode is re-submitted ONCE and the clock
+        # restarts (Graphiti's queue is in memory — see `_resubmit`); a
+        # second absence IS the silent-drop finding (the class that lost 25
+        # acked episodes on 2026-08-15).
         from datetime import datetime, timezone
 
-        created = row["created_at"]
-        age_minutes = (datetime.now(timezone.utc) - created).total_seconds() / 60
+        since = row.get("resubmitted_at") or row["created_at"]
+        age_minutes = (datetime.now(timezone.utc) - since).total_seconds() / 60
         if age_minutes < missing_after_minutes:
             return "waiting"
-        mechanical = {"missing": True}
+        if row.get("resubmitted_at") is None and await _resubmit(row):
+            await repo.mark_graph_verification_resubmitted(row["id"])
+            await events.emit(
+                "graph.verification.resubmitted", ref_id=row["id"],
+                payload={"proposal_id": row["proposal_id"],
+                         "episode_name": row["episode_name"], "marker": row["marker"]},
+                actor="graph-auditor",
+            )
+            return "resubmitted"
+        mechanical = {"missing": True, "resubmitted": row.get("resubmitted_at") is not None}
         await repo.finish_graph_verification(
             row["id"], status="AWAITING_OPERATOR", mechanical=mechanical,
         )
@@ -349,7 +394,7 @@ async def verify_sweep(
     row."""
     rows = await repo.due_graph_verifications(settle_minutes)
     summary = {"checked": 0, "auto_verified": 0, "awaiting": 0, "missing": 0,
-               "waiting": 0, "errors": []}
+               "waiting": 0, "resubmitted": 0, "errors": []}
     for row in rows:
         summary["checked"] += 1
         try:

@@ -1114,6 +1114,10 @@ on conflict (id) do nothing;
 -- episode — `remediation_of` points that re-check row at the PROBLEM row it
 -- re-verifies (and its proposal_id is the curation proposal that fixed it).
 alter table graph_verification add column if not exists remediation_of text;
+-- v2.34.0: an absent episode is RE-SUBMITTED once before it is a finding.
+-- Graphiti's ingestion queue is in memory; a restart (the nightly Neo4j
+-- dump scales it to zero) drops whatever it had acked but not extracted.
+alter table graph_verification add column if not exists resubmitted_at timestamptz;
 
 -- Confluence founders (2026-08-21, operator decision): confluence-expert is
 -- jira-expert's twin (practice knowledge + the narrow space-creation grant —

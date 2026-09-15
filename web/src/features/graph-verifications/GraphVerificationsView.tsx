@@ -47,7 +47,7 @@ function StatusChip({ status }: { status: VerificationRow['status'] }) {
 /** The mechanical-check messages, plainly worded — the spec's list, verbatim. */
 function mechanicalMessages(m: VerificationRow['mechanical']): string[] {
   const out: string[] = [];
-  if (m.missing) out.push('episode never landed');
+  if (m.missing) out.push(m.resubmitted ? 'episode never landed, even after a re-submission' : 'episode never landed');
   if (m.empty_delta) out.push('extraction produced nothing');
   if (m.unembedded && m.unembedded.length > 0) {
     out.push(`${m.unembedded.length} entities unembedded (invisible to semantic recall)`);

@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-15 — v2.34.0: an absent episode is re-submitted once before it is a finding
+
+Graphiti acknowledges an approved episode the moment it is QUEUED, and that
+queue lives in memory. Anything that stops the pod before extraction finishes
+— the nightly Neo4j dump scales it to zero, a node reboot, an OOM — drops
+every acked-but-unextracted episode without a trace, and an LLM-side failure
+(a missing proxy alias, an exhausted retry) drops them one by one. The only
+detector was the verify sweep's six-hour "episode never landed" finding,
+which told the operator the episode was gone and offered nothing that could
+bring it back: a curation re-check re-looks for the same marker, so a fix
+task on a missing episode loops forever.
+
+The sweep now recovers instead of reporting. When a PENDING row's episode is
+absent past the ingestion deadline, the sweep re-sends the approved episode
+byte-identical to the Executor's original send — same name, body, provenance
+stamp and marker, read from the approved proposal (following `remediation_of`
+back to the original for a re-check row) — stamps `resubmitted_at`, and the
+settle/deadline clock restarts from there. Once only: a second absence parks
+the row as before, with `mechanical.resubmitted` telling the operator the
+system already tried. A row with no approved text on record (an unattributed
+write) still parks on the first miss. `graph.verification.resubmitted` goes
+on the log and counts as a material sweep outcome.
+
+Additive schema: `graph_verification.resubmitted_at`. The Executor's
+source-description stamp is now one shared composition
+(`executor.episode_source_description`) so a replay cannot drift from the
+original.
+
 ## 2026-09-14 — v2.33.3: a measured ceiling fills a blank, never overwrites a declaration
 
 The capability probe's output-ceiling step asks for a million tokens and

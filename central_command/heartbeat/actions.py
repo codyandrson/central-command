@@ -1522,7 +1522,7 @@ ACTIONS: dict[str, ActionSpec] = {
             # and must write nothing.
             material=lambda r: bool(
                 r.get("auto_verified") or r.get("awaiting")
-                or r.get("missing") or r.get("errors")
+                or r.get("missing") or r.get("resubmitted") or r.get("errors")
             ),
         ),
         ActionSpec(

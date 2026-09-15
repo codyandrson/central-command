@@ -15,6 +15,8 @@ const POLL_MS = 30_000;
 
 export interface VerificationMechanical {
   missing: boolean;
+  /** v2.34.0: the sweep re-sent the approved episode once before giving up. */
+  resubmitted?: boolean;
   empty_delta?: boolean;
   unembedded?: string[];
   no_approved_text?: boolean;

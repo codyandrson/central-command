@@ -311,8 +311,7 @@ async def _graph_add_episode(args: dict, approver: str, proposer: str | None) ->
     ack = await graphiti.add_episode(
         args["name"],
         args["episode_body"],
-        f"{args.get('source_description', '')}"
-        f" | trust=human-approved | approver={approver} | {marker}",
+        episode_source_description(args.get("source_description", ""), approver, marker),
         group_id=group_id,
     )
     return f"graph episode '{args['name']}' committed ({ack})"
@@ -327,6 +326,13 @@ async def _graph_add_episode(args: dict, approver: str, proposer: str | None) ->
 # verification_id it remediates; the first action of a curation proposal to
 # execute creates ONE fresh read-back row for the same episode, so the fix
 # lands back in the operator's Verify tab (`remediation_of` links the two).
+
+
+def episode_source_description(source_description: str, approver: str, marker: str) -> str:
+    """The provenance stamp every approved episode carries into the graph. One
+    composition, shared with the verify sweep's re-submission so a replayed
+    episode is byte-identical to the one the Executor first sent."""
+    return f"{source_description} | trust=human-approved | approver={approver} | {marker}"
 
 
 async def _reverify_after_curation(args: dict) -> None:

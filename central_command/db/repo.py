@@ -4622,13 +4622,29 @@ async def due_graph_verifications(settle_minutes: int, limit: int = 20) -> list[
             """
             select * from graph_verification
              where status = 'PENDING'
-               and created_at < now() - make_interval(mins => $1)
+               and coalesce(resubmitted_at, created_at) < now() - make_interval(mins => $1)
              order by created_at
              limit $2
             """,
             settle_minutes, limit,
         )
         return [_graph_verification_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def mark_graph_verification_resubmitted(verification_id: str) -> bool:
+    """The sweep re-submitted the approved episode: the row stays PENDING and
+    its settle/deadline clock restarts from `resubmitted_at`. Once only —
+    a second absence is the finding."""
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """update graph_verification set resubmitted_at = now()
+                where id = $1 and status = 'PENDING' and resubmitted_at is null""",
+            verification_id,
+        )
+        return r.endswith(" 1")
     finally:
         await conn.close()
 

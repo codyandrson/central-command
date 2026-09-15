@@ -85,7 +85,7 @@ async def _row(**kwargs):
 async def _events_for(ref_id):
     rows = await repo.list_events_of_kinds(
         ["graph.audit.verdict", "graph.verification.parked",
-         "graph.verification.confirmed"])
+         "graph.verification.confirmed", "graph.verification.resubmitted"])
     return [r for r in rows if r.get("ref_id") == ref_id]
 
 
@@ -102,17 +102,82 @@ async def test_absent_episode_waits_inside_the_ingestion_deadline(monkeypatch):
     assert await _events_for(row["id"]) == []
 
 
-async def test_missing_episode_parks_loud_without_judgment(monkeypatch):
+def _approved(monkeypatch, args=None, approver="human:doe"):
+    """Stub the proposal record behind `_approved_episode` and capture what
+    the sweep re-sends to Graphiti."""
+    from central_command.integrations import graphiti
+
+    sent = []
+
+    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+        sent.append(dict(name=name, episode_body=episode_body,
+                         source_description=source_description, group_id=group_id))
+        return "queued"
+
+    async def fake_approved(row):
+        return None if args is None else (args, approver)
+
+    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
+    monkeypatch.setattr(graph_auditor, "_approved_episode", fake_approved)
+    return sent
+
+
+ARGS = {"name": "probe", "episode_body": "Ada leads the probe team.",
+        "source_description": "operator statement"}
+
+
+async def test_absent_episode_past_the_deadline_is_resubmitted_once(monkeypatch):
+    """Graphiti's ingestion queue is in memory: the nightly Neo4j dump scales
+    it to zero and every acked-but-unextracted episode is gone (2026-09-15,
+    68 in one night). The first absence past the deadline RE-SENDS the approved
+    episode byte-identical to the Executor's send — same marker, so the same
+    lookup finds it — and restarts the clock. The row stays PENDING."""
     _graph(monkeypatch, episode=None)
+    sent = _approved(monkeypatch, ARGS)
     row = await _row()
+    assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "resubmitted"
+    assert sent == [dict(
+        name="probe", episode_body="Ada leads the probe team.",
+        source_description="operator statement | trust=human-approved"
+                           " | approver=human:doe | proposal=p-test",
+        group_id="central_command")]
+    landed = await repo.get_graph_verification(row["id"])
+    assert landed["status"] == "PENDING"
+    assert landed["resubmitted_at"] is not None
+    assert [e["kind"] for e in await _events_for(row["id"])] == ["graph.verification.resubmitted"]
+    # The deadline now runs from the re-submission, not the original row.
+    assert await graph_auditor.verify_one(landed) == "waiting"
+    assert len(sent) == 1
+
+
+async def test_missing_episode_parks_loud_without_judgment(monkeypatch):
+    """A SECOND absence is the finding — no third send, ever."""
+    _graph(monkeypatch, episode=None)
+    sent = _approved(monkeypatch, ARGS)
+    row = await _row()
+    assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "resubmitted"
+    row = await repo.get_graph_verification(row["id"])
     outcome = await graph_auditor.verify_one(row, missing_after_minutes=0)
     assert outcome == "missing"
+    assert len(sent) == 1
     landed = await repo.get_graph_verification(row["id"])
     assert landed["status"] == "AWAITING_OPERATOR"
-    assert landed["mechanical"]["missing"] is True
+    assert landed["mechanical"] == {"missing": True, "resubmitted": True}
     assert landed["verdict"] is None
     kinds = [e["kind"] for e in await _events_for(row["id"])]
-    assert kinds == ["graph.verification.parked"]
+    assert kinds == ["graph.verification.resubmitted", "graph.verification.parked"]
+
+
+async def test_nothing_to_resend_parks_missing_at_once(monkeypatch):
+    """An unattributed row has no approved text — the sweep cannot invent an
+    episode, so absence parks on the first miss, marked as never re-sent."""
+    _graph(monkeypatch, episode=None)
+    sent = _approved(monkeypatch, None)
+    row = await _row()
+    assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "missing"
+    assert sent == []
+    landed = await repo.get_graph_verification(row["id"])
+    assert landed["mechanical"] == {"missing": True, "resubmitted": False}
 
 
 async def test_shadow_mode_parks_even_an_aligned_clean_row(monkeypatch):
@@ -253,7 +318,8 @@ def test_sweep_action_is_registered_and_quiet_when_idle():
     spec = ACTIONS["graph.verify_sweep"]
     assert spec.material is not None
     assert not spec.material({"checked": 0, "auto_verified": 0, "awaiting": 0,
-                              "missing": 0, "errors": []})
+                              "missing": 0, "resubmitted": 0, "errors": []})
+    assert spec.material({"checked": 1, "resubmitted": 1})
     assert spec.material({"checked": 1, "awaiting": 1})
     assert spec.material({"checked": 1, "errors": [{"id": "x"}]})
 
