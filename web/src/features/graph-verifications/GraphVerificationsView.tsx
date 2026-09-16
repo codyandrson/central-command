@@ -140,8 +140,17 @@ function DeltaBlock({ delta }: { delta: VerificationRow['delta'] }) {
                 {e.source} —{e.name}→ {e.target}: {e.fact}
                 <span className="ml-1.5 no-underline text-[0.667rem] text-foreground/70">
                   (attributed by {e.attributed_by}
+                  {e.created_at ? `, known since ${fmtTime(e.created_at)}` : ''}
                   {e.expired_at ? `, retired ${fmtTime(e.expired_at)}` : ''})
                 </span>
+                {e.attributed_by === 'window' && (
+                  <span
+                    className="ml-1.5 rounded border border-warning/60 px-1 no-underline text-[0.6rem] uppercase tracking-wide text-warning"
+                    title="Expired during this episode's ingestion window with no recorded link to it — may be a neighbouring episode's retirement"
+                  >
+                    window only
+                  </span>
+                )}
               </li>
             ))}
           </ul>

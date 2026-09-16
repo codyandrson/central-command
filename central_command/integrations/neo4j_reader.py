@@ -18,7 +18,7 @@ read here degrades to "unavailable" rather than raising past the route.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from neo4j import READ_ACCESS, AsyncGraphDatabase
 from neo4j.time import DateTime as Neo4jDateTime
@@ -380,10 +380,24 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
     live 2026-08-19 (tests/test_graph_delta_live.py): of two edges one
     contradiction retired, only ONE carried the invalidating episode's uuid in
     `r.episodes`; the other was caught solely by `expired_at` falling in the
-    ingestion window. The window is load-bearing, not a fallback. Its own
-    residual: a concurrent episode in the same group could expire an edge
-    inside this episode's window — acceptable because ingestion is queued
-    serially per group and volume is human-approved-low."""
+    ingestion window. The window is load-bearing, not a fallback.
+
+    Two guards, both from the 2026-09-15 audit (89 of 90 "invalidations" on
+    the Verify tab were neither retirements nor this episode's):
+
+    - An invalidated fact must PRE-DATE the episode. Graphiti stamps
+      `expired_at = now` on a brand-new edge whenever the extractor supplied
+      an `invalid_at` — a deadline, a "through <date>" range, even a future
+      date (graphiti_core edge_operations.py, unchanged from 0.28.2 to main,
+      asserted by upstream's own test). Such an edge is a new fact with an
+      end date, not a retired one; it already appears under `edges` with its
+      validity window. `r.created_at < e.created_at` keeps it out of here.
+    - The window ENDS at the next episode's `created_at` in the group (capped
+      at `window_minutes`). Ingestion is one serial worker per group and an
+      Episodic node's `created_at` is stamped when its worker starts, so an
+      expiry after the next episode began is the next episode's doing. With
+      a fixed 30 minutes, a backlog draining every 2-8 minutes credited each
+      retirement to 3-5 neighbouring episodes."""
     # `new` distinguishes CREATED-BY-THIS-EPISODE from touched-but-pre-existing
     # (extraction dedupes onto existing nodes/edges, and MENTIONS points at
     # whatever it resolved to). Compared in Cypher against the Episodic node's
@@ -432,54 +446,77 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
     )
     invalidated: dict[str, dict] = {}
 
+    def _retired(row: dict, attributed_by: str) -> dict:
+        return {
+            "uuid": row["uuid"], "name": row["name"], "fact": row["fact"],
+            "source": row["source"], "target": row["target"],
+            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
+            "expired_at": _iso(row["expired_at"]), "created_at": _iso(row["created_at"]),
+            "attributed_by": attributed_by,
+        }
+
     via_episodes_rows = await _read(
         """
+        MATCH (e:Episodic {uuid: $uuid})
         MATCH (a)-[r:RELATES_TO]->(b)
         WHERE $uuid IN r.episodes AND r.expired_at IS NOT NULL
+          AND r.created_at < e.created_at
         RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
                a.name AS source, b.name AS target,
                r.valid_at AS valid_at, r.invalid_at AS invalid_at,
-               r.expired_at AS expired_at
+               r.expired_at AS expired_at, r.created_at AS created_at
         """,
         uuid=episode_uuid,
     )
     for row in via_episodes_rows:
-        invalidated[row["uuid"]] = {
-            "uuid": row["uuid"], "name": row["name"], "fact": row["fact"],
-            "source": row["source"], "target": row["target"],
-            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
-            "expired_at": _iso(row["expired_at"]), "attributed_by": "episodes",
-        }
+        invalidated[row["uuid"]] = _retired(row, "episodes")
 
     if episode_row and episode_row[0]["created_at"] is not None:
+        group_id = episode_row[0]["group_id"]
+        created_at = _iso(episode_row[0]["created_at"])
+        window_end = await invalidation_window_end(group_id, created_at, window_minutes)
         via_window_rows = await _read(
             """
             MATCH (a)-[r:RELATES_TO]->(b)
             WHERE a.group_id = $group_id AND b.group_id = $group_id
               AND r.expired_at IS NOT NULL
+              AND r.created_at < datetime($created_at)
               AND r.expired_at >= datetime($created_at)
-              AND r.expired_at <= datetime($created_at) + duration({minutes: $window})
+              AND r.expired_at <= datetime($window_end)
             RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
                    a.name AS source, b.name AS target,
                    r.valid_at AS valid_at, r.invalid_at AS invalid_at,
-                   r.expired_at AS expired_at
+                   r.expired_at AS expired_at, r.created_at AS created_at
             """,
-            group_id=episode_row[0]["group_id"],
-            created_at=_iso(episode_row[0]["created_at"]),
-            window=window_minutes,
+            group_id=group_id, created_at=created_at, window_end=window_end,
         )
         for row in via_window_rows:
             if row["uuid"] in invalidated:
                 invalidated[row["uuid"]]["attributed_by"] = "both"
             else:
-                invalidated[row["uuid"]] = {
-                    "uuid": row["uuid"], "name": row["name"], "fact": row["fact"],
-                    "source": row["source"], "target": row["target"],
-                    "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
-                    "expired_at": _iso(row["expired_at"]), "attributed_by": "window",
-                }
+                invalidated[row["uuid"]] = _retired(row, "window")
 
     return {"entities": entities, "edges": edges, "invalidated": list(invalidated.values())}
+
+
+async def invalidation_window_end(group_id: str, created_at: str, window_minutes: int) -> str:
+    """Where this episode's ingestion window closes: the next episode's
+    `created_at` in the same group if one began within `window_minutes`,
+    else `created_at + window_minutes`. ISO string, ready for `datetime()`."""
+    rows = await _read(
+        """
+        MATCH (n:Episodic {group_id: $group_id})
+        WHERE n.created_at > datetime($created_at)
+          AND n.created_at < datetime($created_at) + duration({minutes: $window})
+        RETURN min(n.created_at) AS next_created_at
+        """,
+        group_id=group_id, created_at=created_at, window=window_minutes,
+    )
+    nxt = rows[0]["next_created_at"] if rows else None
+    if nxt is not None:
+        return _iso(nxt)
+    start = datetime.fromisoformat(created_at)
+    return (start + timedelta(minutes=window_minutes)).isoformat()
 
 
 async def audit(group_id: str | None, threshold: float) -> dict:

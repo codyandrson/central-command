@@ -4,6 +4,47 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-15 — v2.35.0: an invalidation is a fact that pre-dates the episode
+
+The Verify tab filled with retirements that made no sense — 46 rows, 90
+"invalidated" facts, and on audit only one of them was a fact an episode had
+actually retired (and the curator had already reversed that one). Two
+mechanisms, both in how `episode_delta` read Neo4j, not in what Graphiti
+wrote:
+
+- Graphiti stamps `expired_at = now` on a brand-new edge whenever the
+  extractor supplied an `invalid_at` — a deadline, a "through <date>" range,
+  a future date — unchanged from 0.28.2 to upstream main and asserted by
+  upstream's own test. The reader took every `expired_at` as a retired
+  existing fact, so an episode was reported as retiring a fact it had
+  created a minute earlier (33 of 90). Now a fact must PRE-DATE the episode
+  to count, and each entry carries when it was first known.
+- The 30-minute attribution window credited one retirement to every episode
+  ingested in the preceding half hour; with a backlog draining every 2-8
+  minutes, each retirement appeared under 3-5 neighbouring rows (56 of 90).
+  The window now closes when the next episode in the group begins.
+
+The judge's rendering and the cockpit say what `window` attribution means
+(timing, not a recorded link) and show when the retired fact was known.
+
+Also in this release:
+
+- The v2.34.0 re-submit fired on 13 episodes that were merely queued behind
+  a 72-episode replay (the serial worker was 6.5 hours behind) and every one
+  landed twice. The MCP server exposes no queue depth, so the absence
+  deadline now stretches with the PENDING rows queued ahead in the group at
+  the measured drain rate (15 min/episode), floor unchanged.
+- `graph.delete_node` records the uuids of the edges it detached, not just a
+  count — two edges a verification row had recorded vanished on 2026-09-01
+  and nothing in Postgres named them until the delete's proposal was read
+  by hand.
+- Two one-off scripts for the operator to run after this deploys, dry-run by
+  default: `scripts/oneoff/requeue_invalidation_rows_2026_09_15.py` sends
+  the open invalidation rows back through the sweep under the new reader;
+  `scripts/oneoff/delete_duplicate_episodes_2026_09_15.py` removes the 13
+  duplicate Episodic nodes, re-pointing their provenance to the surviving
+  copy and deleting no edges.
+
 ## 2026-09-15 — v2.34.0: an absent episode is re-submitted once before it is a finding
 
 Graphiti acknowledges an approved episode the moment it is QUEUED, and that

@@ -15,6 +15,8 @@ against the real test database.
 
 from __future__ import annotations
 
+import uuid as _uuid
+
 import pytest
 
 from central_command.config import settings
@@ -46,6 +48,7 @@ def _delta(*, edges=True, embedded=True, invalidated=False, fact="Ada leads the 
         "invalidated": ([{"uuid": "e0", "name": "LEADS", "fact": "Bo leads the probe team",
                           "source": "Bo", "target": "probe team", "valid_at": None,
                           "invalid_at": None, "expired_at": "2026-08-19T00:00:00Z",
+                          "created_at": "2026-08-01T00:00:00Z",
                           "attributed_by": "window"}]
                         if invalidated else []),
     }
@@ -73,6 +76,13 @@ def _graph(monkeypatch, episode=EPISODE, delta=None):
 
     monkeypatch.setattr(neo4j_reader, "episode_by_marker", by_marker)
     monkeypatch.setattr(neo4j_reader, "episode_delta", get_delta)
+
+
+def _fresh_group() -> str:
+    """The absence deadline counts PENDING rows queued ahead in the GROUP, so
+    a test that wants 'past the deadline' needs a group no earlier test left
+    a PENDING row in."""
+    return f"gv-{_uuid.uuid4().hex[:8]}"
 
 
 async def _row(**kwargs):
@@ -134,13 +144,14 @@ async def test_absent_episode_past_the_deadline_is_resubmitted_once(monkeypatch)
     lookup finds it — and restarts the clock. The row stays PENDING."""
     _graph(monkeypatch, episode=None)
     sent = _approved(monkeypatch, ARGS)
-    row = await _row()
+    group = _fresh_group()
+    row = await _row(group_id=group)
     assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "resubmitted"
     assert sent == [dict(
         name="probe", episode_body="Ada leads the probe team.",
         source_description="operator statement | trust=human-approved"
                            " | approver=human:doe | proposal=p-test",
-        group_id="central_command")]
+        group_id=group)]
     landed = await repo.get_graph_verification(row["id"])
     assert landed["status"] == "PENDING"
     assert landed["resubmitted_at"] is not None
@@ -154,7 +165,7 @@ async def test_missing_episode_parks_loud_without_judgment(monkeypatch):
     """A SECOND absence is the finding — no third send, ever."""
     _graph(monkeypatch, episode=None)
     sent = _approved(monkeypatch, ARGS)
-    row = await _row()
+    row = await _row(group_id=_fresh_group())
     assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "resubmitted"
     row = await repo.get_graph_verification(row["id"])
     outcome = await graph_auditor.verify_one(row, missing_after_minutes=0)
@@ -173,11 +184,48 @@ async def test_nothing_to_resend_parks_missing_at_once(monkeypatch):
     episode, so absence parks on the first miss, marked as never re-sent."""
     _graph(monkeypatch, episode=None)
     sent = _approved(monkeypatch, None)
-    row = await _row()
+    row = await _row(group_id=_fresh_group())
     assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "missing"
     assert sent == []
     landed = await repo.get_graph_verification(row["id"])
     assert landed["mechanical"] == {"missing": True, "resubmitted": False}
+
+
+async def test_absence_deadline_stretches_with_the_queue_ahead(monkeypatch):
+    """2026-09-15: a fixed 360-minute deadline re-sent 13 episodes that were
+    merely QUEUED behind a 72-episode replay, and every one landed twice.
+    The MCP server exposes no queue depth, so the PENDING rows queued ahead
+    of a row in its group, at the measured drain rate, stretch the deadline;
+    the floor still applies to the row at the head of the queue."""
+    _graph(monkeypatch, episode=None)
+    sent = _approved(monkeypatch, ARGS)
+    group = _fresh_group()
+    head = await _row(group_id=group)
+    behind = await _row(group_id=group, proposal_id="p-behind", marker="proposal=p-behind")
+    assert await graph_auditor.absence_deadline_minutes(head, 0) == 0
+    assert await graph_auditor.absence_deadline_minutes(behind, 0) == (
+        graph_auditor.INGEST_MINUTES_PER_EPISODE)
+    # The row behind waits even with the floor at zero; the head does not.
+    assert await graph_auditor.verify_one(behind, missing_after_minutes=0) == "waiting"
+    assert sent == []
+    assert await graph_auditor.verify_one(head, missing_after_minutes=0) == "resubmitted"
+    assert len(sent) == 1
+
+
+def test_render_delta_explains_window_attribution():
+    """The judge and the operator read the same rendering. A window-only
+    entry is timing, not a recorded link — 56 of 90 entries on 2026-09-15
+    were a neighbouring episode's retirement — so the rendering says so,
+    and says when the retired fact was first known."""
+    delta = _delta(invalidated=True)
+    delta["invalidated"][0]["created_at"] = "2026-09-01T00:00:00+00:00"
+    text = graph_auditor.render_delta(delta)
+    assert "known since 2026-09-01" in text
+    assert "attributed_by=window" in text
+    assert "may be a neighbouring episode's retirement" in text
+    delta["invalidated"][0]["attributed_by"] = "episodes"
+    assert "neighbouring" not in graph_auditor.render_delta(delta)
+
 
 
 async def test_shadow_mode_parks_even_an_aligned_clean_row(monkeypatch):
@@ -428,6 +476,9 @@ async def test_verifications_wire_shape_for_the_cockpit(monkeypatch):
     # source-material-inspectable: the claim sits beside the delta it produced.
     assert mine["approved_text"] == "Ada leads the probe team."
     assert mine["delta"]["invalidated"][0]["fact"]
+    # `created_at` is what lets the cockpit say "known since": the reader
+    # only reports facts that PRE-DATE the episode (2026-09-15).
+    assert "created_at" in mine["delta"]["invalidated"][0]
     assert mine["has_invalidations"] is True
 
 

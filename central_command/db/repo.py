@@ -4633,6 +4633,27 @@ async def due_graph_verifications(settle_minutes: int, limit: int = 20) -> list[
         await conn.close()
 
 
+async def pending_graph_verifications_ahead(row: dict) -> int:
+    """PENDING rows in the same group queued no later than this one — the
+    episodes Graphiti's serial worker must drain before it reaches this
+    row's. A re-submitted row joins the back of the queue, hence the
+    coalesce on both sides."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            """
+            select count(*) from graph_verification
+             where status = 'PENDING' and group_id = $1 and id <> $2
+               and coalesce(resubmitted_at, created_at)
+                   <= (select coalesce(resubmitted_at, created_at)
+                         from graph_verification where id = $2)
+            """,
+            row["group_id"], row["id"],
+        )
+    finally:
+        await conn.close()
+
+
 async def mark_graph_verification_resubmitted(verification_id: str) -> bool:
     """The sweep re-submitted the approved episode: the row stays PENDING and
     its settle/deadline clock restarts from `resubmitted_at`. Once only —

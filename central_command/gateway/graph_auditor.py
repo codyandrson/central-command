@@ -146,9 +146,20 @@ def render_delta(delta: dict, include_uuids: bool = False) -> str:
         )
     lines.append(f"INVALIDATED EXISTING FACTS ({len(invalidated)}):")
     for e in invalidated:
+        since = f", known since {e['created_at']}" if e.get("created_at") else ""
         lines.append(
             f"  - RETIRED: {e.get('source')} —[{e.get('name')}]→ {e.get('target')}: "
-            f"{e.get('fact')}{_uuid(e)} (attributed_by={e.get('attributed_by')})"
+            f"{e.get('fact')}{_uuid(e)} (attributed_by={e.get('attributed_by')}{since})"
+        )
+    if any(e.get("attributed_by") == "window" for e in invalidated):
+        # The judge and the operator both need to know what "window" means:
+        # timing alone, not a recorded link — the 2026-09-15 audit found
+        # 56 of 90 entries were a neighbouring episode's retirement.
+        lines.append(
+            "  note: attributed_by=window means the fact expired during this "
+            "episode's ingestion window with no recorded link to it — it may "
+            "be a neighbouring episode's retirement. Weigh it as a question, "
+            "not as this episode's act."
         )
     return "\n".join(lines)
 
@@ -259,6 +270,23 @@ async def _judge(
         return None
 
 
+# Measured 2026-09-15 (instance journal): 8-19 minutes per episode while the
+# extraction model's slot is shared with agent turns, not the 2-3 the deadline
+# was first built on. The MCP server exposes no queue depth, so the PENDING
+# rows ahead of a row are the only queue-position signal we have.
+INGEST_MINUTES_PER_EPISODE = 15
+
+
+async def absence_deadline_minutes(row: dict, floor_minutes: int) -> int:
+    """How long a row may sit with no episode before absence means anything:
+    the floor, or the queue ahead of it at the measured drain rate, whichever
+    is longer. A fixed 360 re-sent 13 merely-queued episodes on 2026-09-15
+    (the sweep saw absence; the serial worker was 6.5 hours behind after a
+    72-episode replay) and every one landed twice."""
+    ahead = await repo.pending_graph_verifications_ahead(row)
+    return max(floor_minutes, ahead * INGEST_MINUTES_PER_EPISODE)
+
+
 async def verify_one(row: dict, model=None, missing_after_minutes: int = 360) -> str:
     """Audit one PENDING verification row and land it. Returns the outcome
     bucket for the sweep's tally:
@@ -266,19 +294,19 @@ async def verify_one(row: dict, model=None, missing_after_minutes: int = 360) ->
     episode = await neo4j_reader.episode_by_marker(row["marker"], row["group_id"])
     if episode is None:
         # Absence is only evidence once the row is STALE. Ingestion is a
-        # serial queue on the local model (~2-3 min/episode), so a BATCH of
-        # approvals lands 50-70 minutes after execute — measured 2026-08-20,
-        # when a 10-minute settle false-parked nine healthy episodes as
-        # "missing". Inside the deadline the row just stays PENDING for the
-        # next tick. Past it, the episode is re-submitted ONCE and the clock
-        # restarts (Graphiti's queue is in memory — see `_resubmit`); a
-        # second absence IS the silent-drop finding (the class that lost 25
-        # acked episodes on 2026-08-15).
+        # serial queue on the local model, so a BATCH of approvals lands long
+        # after execute — a 10-minute settle false-parked nine healthy
+        # episodes on 2026-08-20. Inside the deadline (the floor, stretched
+        # by the queue ahead — `absence_deadline_minutes`) the row just stays
+        # PENDING for the next tick. Past it, the episode is re-submitted
+        # ONCE and the clock restarts (Graphiti's queue is in memory — see
+        # `_resubmit`); a second absence IS the silent-drop finding (the
+        # class that lost 25 acked episodes on 2026-08-15).
         from datetime import datetime, timezone
 
         since = row.get("resubmitted_at") or row["created_at"]
         age_minutes = (datetime.now(timezone.utc) - since).total_seconds() / 60
-        if age_minutes < missing_after_minutes:
+        if age_minutes < await absence_deadline_minutes(row, missing_after_minutes):
             return "waiting"
         if row.get("resubmitted_at") is None and await _resubmit(row):
             await repo.mark_graph_verification_resubmitted(row["id"])

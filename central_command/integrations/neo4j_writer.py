@@ -268,9 +268,10 @@ async def delete_node(uuid: str) -> dict:
     rows = await _write(
         """
         MATCH (n:Entity {uuid: $uuid})
-        WITH n, count { (n)-[:RELATES_TO]-() } AS edges
+        OPTIONAL MATCH (n)-[r:RELATES_TO]-()
+        WITH n, collect(DISTINCT r.uuid) AS edge_uuids
         DETACH DELETE n
-        RETURN edges
+        RETURN edge_uuids
         """,
         uuid=uuid,
     )
@@ -279,7 +280,11 @@ async def delete_node(uuid: str) -> dict:
     # RELATES_TO only: DETACH DELETE also drops MENTIONS provenance links, but
     # counting those read as knowledge edges the operator never had (a node
     # with 1 fact reported edges_removed: 3 — found in the 2026-08-25 sweep).
-    return {"uuid": uuid, "edges_removed": rows[0]["edges"]}
+    # The uuids ride along because a count is untraceable: two edges a
+    # verification row had recorded vanished on 2026-09-01 and nothing in
+    # Postgres named them until this delete's proposal was read by hand.
+    edge_uuids = [u for u in rows[0]["edge_uuids"] if u]
+    return {"uuid": uuid, "edges_removed": len(edge_uuids), "edge_uuids": edge_uuids}
 
 
 async def create_edge(

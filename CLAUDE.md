@@ -364,6 +364,17 @@ where the story is gone.
   (unset temperature means the backend default, not deterministic), and the
   field ORDER of the schema (with schema-constrained decoding, index arrays
   before a `reasoning` field means the model answers before it thinks).
+- **An edge with `expired_at` is not necessarily a retired fact.** Graphiti
+  expires a NEW edge at birth whenever the extractor supplied an `invalid_at`
+  — a deadline, a "through <date>" range, even a future date — and that is
+  upstream intent (its own test asserts it). A retirement is an edge that
+  PRE-DATES the episode; `episode_delta` guards on `r.created_at <
+  e.created_at`, and its attribution window closes when the next episode in
+  the group begins, because a fixed window credits one retirement to every
+  neighbour while a backlog drains (2026-09-15: 89 of 90 entries were
+  artifacts). Graphiti's MCP queue is in memory, serial per group, and
+  exposes no depth — an "absent" episode may just be queued, so the
+  re-submit deadline stretches with the PENDING rows ahead of it.
 - **The ontology needs somewhere for every category to go.** Graphiti's
   upstream default entity types had no `Person`, so every person landed as a
   bare `Entity` while orgs typed correctly. Declare high-priority types FIRST

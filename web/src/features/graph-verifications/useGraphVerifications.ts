@@ -50,8 +50,14 @@ export interface DeltaInvalidated {
   name: string;
   target: string;
   fact: string;
+  /** 'episodes' = the edge records this episode; 'window' = it merely expired
+   *  during this episode's ingestion window (may be a neighbour's retirement);
+   *  'both'. */
   attributed_by: string;
   expired_at: string | null;
+  /** When the retired fact was first recorded; absent on deltas audited
+   *  before 2026-09-15. */
+  created_at?: string | null;
 }
 
 export interface VerificationDelta {
