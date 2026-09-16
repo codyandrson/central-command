@@ -270,13 +270,31 @@ async def search_graph_group(ctx: RunContext, group_id: str, query: str) -> str:
 # which is how the 2026-07-28 coach failure happened on the tool-CALL side.
 # If you find yourself lowering this to "save tokens", don't — that is the
 # decision this constant exists to record.
+#
+# 2026-09-16 postscript: as a TOOL-RESULT ceiling this was the wrong window.
+# It is the OUTPUT cap (262144 tokens → a million characters) and the model's
+# INPUT window is 81920 tokens, so it never fired; four full marketing emails
+# read in one turn overflowed the proxy and failed ten sessions in a day.
+# `_clip`'s default now comes from the input window
+# (`context.tool_result_ceiling`, a share of the smallest window discovered).
+# The constant stays for `consult.ANSWER_CEILING`, where it IS the right size.
 _MODEL_TEXT_CEILING = _settings.max_output_tokens * 4
 
+# An email body beyond this is delivery noise for a triage read — the agent
+# opens siblings to classify a SENDER, not to quote them. Sized so four reads
+# in one turn stay under a third of the 81920-token window at mail's ~2
+# chars/token.
+_MAIL_BODY_CEILING = 8000
 
-def _clip(payload: str, limit: int = _MODEL_TEXT_CEILING) -> str:
+
+def _clip(payload: str, limit: int | None = None) -> str:
     """Bound a tool result HONESTLY. A silently cut JSON blob reads to the model
     as a complete one — an empty tail looks like "no more links", which is how a
     reader invents facts. Say that it was cut instead."""
+    if limit is None:
+        from central_command.runtime import context
+
+        limit = context.tool_result_ceiling()
     if len(payload) <= limit:
         return payload
     return payload[:limit] + (
@@ -1754,7 +1772,8 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
         return _clip(
             f"NOT ENROLLED in the queue (read from the mailbox)\n"
             f"From: {msg.get('from')}\nSubject: {msg.get('subject')}\n"
-            f"Date: {msg.get('date')}\n\n{msg.get('body_text') or msg.get('snippet') or ''}"
+            f"Date: {msg.get('date')}\n\n"
+            + _clip(msg.get('body_text') or msg.get('snippet') or '', _MAIL_BODY_CEILING)
         )
     audit = row.get("audit") or {}
     parts = [
@@ -1781,7 +1800,7 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
                     + ledger.agent_input(ledger._provider_parsed(msg)))
         except email_facade.EmailFacadeError as e:
             text = f"(not yet fetched by the queue, and the mailbox could not return it: {e})"
-    parts.append(text or "(no message text recorded)")
+    parts.append(_clip(text or "(no message text recorded)", _MAIL_BODY_CEILING))
     return _clip("\n".join(parts))
 
 

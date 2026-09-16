@@ -282,10 +282,12 @@ async def test_summary_spends_one_call_and_is_cached_in_run_state(monkeypatch):
     monkeypatch.setattr(context, "summarize", fake_summarize)
     # Trims off so the only thing that can bring the window down is the summary.
     _pin(monkeypatch, {"drop_thinking": False, "clear_tool_results": False,
-                       "output_headroom": False, "summarize_threshold": 0.5}, window=10_000)
+                       "output_headroom": False, "summarize_threshold": 0.5}, window=13_500)
 
-    msgs = _transcript(turns=6, payload=2000)  # ~13k chars -> ~3.3k tokens... make it big
-    msgs = _transcript(turns=6, payload=6000)  # ~40k chars -> ~10k tokens against a 10k window
+    # ~40k chars -> ~13k tokens at CHARS_PER_TOKEN=3, against a 13.5k window:
+    # one summary brings it under the 0.5 threshold, so the second pass
+    # must find the cache sufficient and spend nothing.
+    msgs = _transcript(turns=6, payload=6000)
     out = await _window(_ctx(session_id=session_id), msgs)
 
     assert calls, "over the threshold, the summary step ran"

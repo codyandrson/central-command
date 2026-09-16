@@ -25,6 +25,23 @@ from dataclasses import dataclass
 from pydantic_ai import Tool
 from pydantic_ai.toolsets import FunctionToolset
 
+from central_command.config import settings as _settings
+
+
+def _operator_naming_rule() -> str:
+    """How an episode names the human team lead. The graph's Person type
+    refuses a role as a name ('the operator'), so an episode written that way
+    either loses its subject — the claim 'the operator is subscribed to X'
+    lands as a list with no subscriber (69 of 147 such episodes, 2026-09-16) —
+    or spawns a bare 'operator' entity beside the real Person node."""
+    name = _settings.operator_name
+    who = (f"'{name}'" if name and name != "the operator"
+           else "the operator's configured name (CC_OPERATOR_NAME)")
+    return (f"NAME THE OPERATOR: write {who} in the episode_body, never 'the "
+            "operator' — the graph types people by full name and drops a role "
+            "as a subject, so 'the operator is subscribed to X' records no "
+            "subscriber at all. ")
+
 
 @dataclass(frozen=True)
 class GatedCapability:
@@ -347,7 +364,8 @@ PACKS: dict[str, Pack] = {
                        "'read_version': 'unknown'}, reversibility = 'reversible'. "
                        "The episode_body is a distilled claim of 1-3 sentences: "
                        "self-contained, naming issue keys, dates, and people — "
-                       "NEVER pasted source text. RETENTION TEST — the graph's "
+                       "NEVER pasted source text. " + _operator_naming_rule() +
+                       "RETENTION TEST — the graph's "
                        "failure mode is over-inclusion (noise dilutes every "
                        "future search), so when in doubt, do NOT propose the "
                        "episode. Keep a fact only if BOTH hold: (1) a teammate "
@@ -360,7 +378,7 @@ PACKS: dict[str, Pack] = {
                        "mechanics that rode in with it: which email address a "
                        "subscription uses is delivery metadata, not a fact "
                        "about the person. Worked example: a sandwich-chain "
-                       "promo email evidences at most 'the operator is a "
+                       "promo email evidences at most '<operator name> is a "
                        "rewards member there' — not the subscription address, "
                        "not this week's offer — and if the membership is "
                        "already in the graph at equal detail, it evidences "

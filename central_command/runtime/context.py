@@ -126,6 +126,44 @@ async def _discover(name: str, field: str) -> int | None:
     return None
 
 
+# Characters per token for the estimates below. 4 is the English-prose rule
+# of thumb; a triage session measured 2026-09-16 carried ~186k chars of
+# message text (four marketing emails read in one turn) and the proxy counted
+# 111k tokens — HTML-flavoured mail tokenises at ~2 chars/token, and the
+# estimate at 4 called that request half-full while the model rejected it.
+# 3 splits the difference: pressure fires earlier on prose, and never late on
+# mail. The window guard below (`OVERFLOW_FRACTION`) covers the rest.
+CHARS_PER_TOKEN = 3
+
+# One tool result may take this share of the model's input window
+# (`tool_result_ceiling`) — enough for a whole email thread, and four of them
+# in one turn still leave room for the charter and the model's own answer.
+TOOL_RESULT_SHARE = 0.10
+
+# The working window is sent when its estimate reaches this fraction of the
+# input window only after its tool results have been clipped to
+# `OVERFLOW_CLIP_SHARE` each; past it, the proxy answers 400 and the session
+# dies — ten did on 2026-09-16, every one a turn that opened several full
+# emails at once.
+OVERFLOW_FRACTION = 0.85
+OVERFLOW_CLIP_SHARE = 0.04
+CLIPPED = (
+    "\n… [CLIPPED at {n} chars: this turn's tool results overflowed the model's "
+    "context window — a PARTIAL result. Re-read one item at a time if the "
+    "tail matters.]"
+)
+
+
+def tool_result_ceiling() -> int:
+    """Characters a single tool result may return before `tools._clip` cuts
+    it (honestly, with a marker): `TOOL_RESULT_SHARE` of the smallest input
+    window discovered so far, or of the configured fallback before any run
+    has asked the proxy. Derived from the INPUT window on purpose — the old
+    ceiling was the OUTPUT cap × 4 (a million characters) and never fired."""
+    window = min(_windows.values()) if _windows else settings.context_window
+    return int(window * TOOL_RESULT_SHARE * CHARS_PER_TOKEN)
+
+
 def estimate_tokens(run_state: dict) -> int:
     """Rough input-token size of the LIVE WINDOW (`messages`), never the archive
     — the archive is not sent, so it exerts no pressure.
@@ -138,7 +176,7 @@ def estimate_tokens(run_state: dict) -> int:
     if not messages:
         return 0
     try:
-        return len(json.dumps(messages)) // 4
+        return len(json.dumps(messages)) // CHARS_PER_TOKEN
     except (TypeError, ValueError):
         return 0
 
@@ -279,7 +317,7 @@ def estimate_messages(messages) -> int:
     """`estimate_tokens` for pydantic-ai message objects."""
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-    return len(ModelMessagesTypeAdapter.dump_json(messages)) // 4
+    return len(ModelMessagesTypeAdapter.dump_json(messages)) // CHARS_PER_TOKEN
 
 
 def drop_thinking(messages):
@@ -329,6 +367,33 @@ def clear_tool_results(messages, keep_turns: int = 3, min_chars: int = 200):
                 text = p.model_response_str()
                 if len(text) > min_chars and not text.startswith("[cleared from context"):
                     p = replace(p, content=CLEARED.format(n=len(text), tool=p.tool_name))
+            parts.append(p)
+        out.append(replace(m, parts=parts))
+    return out
+
+
+def clip_tool_results(messages, max_chars: int):
+    """Cut every tool result longer than `max_chars` down to it, with the
+    `CLIPPED` marker — the overflow guard's last resort, run on the working
+    window only when the request would otherwise exceed the model's input
+    window. Unlike `clear_tool_results` this keeps the HEAD of every result,
+    including the current turn's, so the model can still act on what it just
+    asked for. Typed returns are left alone for the same reason as there."""
+    from dataclasses import replace
+
+    from pydantic_ai.messages import ModelRequest, ToolReturnPart
+
+    out = []
+    for m in messages:
+        if not isinstance(m, ModelRequest):
+            out.append(m)
+            continue
+        parts = []
+        for p in m.parts:
+            if isinstance(p, ToolReturnPart) and not getattr(p, "tool_kind", None):
+                text = p.model_response_str()
+                if len(text) > max_chars and "[CLIPPED at" not in text[-300:]:
+                    p = replace(p, content=text[:max_chars] + CLIPPED.format(n=max_chars))
             parts.append(p)
         out.append(replace(m, parts=parts))
     return out
@@ -581,6 +646,25 @@ async def _prepare_window(ctx, messages):
                 actor="system",
             )
             fraction = (after + headroom) / window
+
+    if fraction >= OVERFLOW_FRACTION:
+        # The request would not fit. Clip rather than send a doomed turn: the
+        # proxy's 400 fails the whole session and the dispatcher re-runs the
+        # same oversized read (2026-09-16, ten sessions, three items).
+        before = estimate_messages(working)
+        clipped = clip_tool_results(working, int(window * OVERFLOW_CLIP_SHARE * CHARS_PER_TOKEN))
+        after = estimate_messages(clipped)
+        if after < before:
+            from central_command import events
+
+            working = clipped
+            fraction = (after + headroom) / window
+            await events.emit(
+                "session.context_overflow_clipped", ref_id=session_id,
+                payload={"agent_id": getattr(ctx.deps, "agent_id", None),
+                         "before": before, "after": after, "window": window},
+                actor="system",
+            )
 
     if session_id:
         _sent[session_id] = estimate_messages(working)

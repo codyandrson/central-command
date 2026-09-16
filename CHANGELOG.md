@@ -4,6 +4,43 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-16 — v2.36.0: a tool result is sized by the input window, and the operator has a name
+
+Ten inbox-triage sessions died in one day with the proxy's 400
+"context window exceeded" — daily since 2026-09-03. One turn had opened
+four full marketing emails through `mail_read`; the tool-result clip never
+fired because its ceiling was the OUTPUT cap × 4 (a million characters
+against an 81920-token input window), and the working window's estimate at
+4 chars/token called a 111k-token request half-full — mail tokenises at
+about 2. Three seams:
+
+- `_clip` now defaults to a share of the smallest input window the runtime
+  has discovered (`context.tool_result_ceiling`), and `mail_read` caps the
+  message body at 8000 characters on top — the agent reads siblings to
+  classify a sender, not to quote them. Both cuts carry their marker.
+- The estimate counts 3 characters per token; pressure and compaction fire
+  earlier on prose and no longer late on mail.
+- A request the estimate says would not fit is clipped before it is sent
+  (every tool result down to a small share, head kept, marker appended,
+  `session.context_overflow_clipped` emitted) instead of failing the
+  session and re-running the same oversized read.
+
+The Verify tab, once its invalidation noise was gone (v2.35.0), showed the
+next thing: about half the "operator subscribed to X" episodes land with no
+subscriber, because agents write "the operator" and the graph's Person type
+refuses a role as a name — the extractor either drops the subject or spawns
+a bare `operator` entity beside the real Person node (109 edges on one, 301
+on the other). The graph-propose pack now tells agents to write the
+configured operator name in every episode, and the Person type text in both
+ontology files says a role mention resolves to that one named Person. The
+one-time merge of the bare node into the named one is a curator proposal for
+the operator to approve after this deploys.
+
+Also: `cc-update.sh` never refreshed the three configmaps that
+`make-secrets.sh` builds from files, so an ontology or LiteLLM config edit
+in a release changed nothing in the cluster; it now re-applies the ones the
+release touched and restarts their consumer.
+
 ## 2026-09-15 — v2.35.0: an invalidation is a fact that pre-dates the episode
 
 The Verify tab filled with retirements that made no sense — 46 rows, 90

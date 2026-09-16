@@ -364,6 +364,23 @@ where the story is gone.
   (unset temperature means the backend default, not deterministic), and the
   field ORDER of the schema (with schema-constrained decoding, index arrays
   before a `reasoning` field means the model answers before it thinks).
+- **A tool result is bounded by the INPUT window, and mail tokenises at ~2
+  chars/token.** `tools._clip` derives its ceiling from the smallest
+  discovered input window (`context.tool_result_ceiling`), never from the
+  output cap; the estimate uses `CHARS_PER_TOKEN = 3`; and `prepare_window`
+  clips a request that would not fit rather than sending it (2026-09-16:
+  four `mail_read`s in one turn, ten dead sessions). A per-tool cap goes on
+  the tool (`_MAIL_BODY_CEILING`), not on the constant.
+- **Episodes name the operator; "the operator" is not a graph subject.** The
+  Person ontology refuses a role as a name, so an episode written "the
+  operator is subscribed to X" lands with no subscriber or spawns a bare
+  `operator` entity. The graph-propose pack renders the configured name into
+  its rule; keep any new episode-writing pack on the same rule.
+- **The file-built configmaps are refreshed by the updater, per file.**
+  `make-secrets.sh` builds `cc-graphiti-config`, `cc-litellm-config` and
+  `cc-schema-sql` from files; `kubectl apply -f deploy/k3s/` never touches
+  them. `cc-update.sh` re-applies the ones a release changed — add a new
+  file-built configmap to that list or it silently never deploys.
 - **An edge with `expired_at` is not necessarily a retired fact.** Graphiti
   expires a NEW edge at birth whenever the extractor supplied an `invalid_at`
   — a deadline, a "through <date>" range, even a future date — and that is

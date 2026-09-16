@@ -413,6 +413,34 @@ main() {
     done <<<"$changed_yaml"
   fi
 
+  # Three configmaps are built FROM FILES by make-secrets.sh, not declared in
+  # a manifest, so `apply -f deploy/k3s/` never refreshes them: a release
+  # that edits the Graphiti ontology or the LiteLLM config changed nothing
+  # in the cluster (found 2026-09-16 — the Person description in
+  # deploy/pi/graphiti/config.yaml had no path to the pod). Re-apply the
+  # ones this release touched and restart their consumer; schema.sql is
+  # applied to the live database above and its configmap only seeds a
+  # FRESH install, so it is refreshed without a restart.
+  local cm_file cm_name cm_key cm_deploy
+  while IFS='|' read -r cm_file cm_name cm_key cm_deploy; do
+    [[ -n "$(changed_between "$cm_file")" ]] || continue
+    "${K[@]}" create configmap "$cm_name" --from-file="$cm_key=$REPO/$cm_file" \
+      --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null \
+      || die manifests "refreshing configmap/$cm_name from $cm_file failed"
+    note "refreshed configmap/$cm_name from $cm_file"
+    # A configmap edit rolls nothing by itself — the consumer must restart
+    # to mount the new bytes (`rollout status` below waits on it).
+    if [[ -n "$cm_deploy" ]]; then
+      "${K[@]}" rollout restart "deploy/$cm_deploy" \
+        || die manifests "rollout restart deploy/$cm_deploy after configmap refresh failed"
+      TOUCHED_DEPLOYS+=("$cm_deploy")
+    fi
+  done <<'CM'
+deploy/pi/graphiti/config.yaml|cc-graphiti-config|config.yaml|cc-graphiti
+deploy/pi/litellm/config.yaml|cc-litellm-config|config.yaml|cc-litellm
+central_command/db/schema.sql|cc-schema-sql|01-schema.sql|
+CM
+
   # `apply -f <dir>` never DELETES: a resource whose manifest left the tree
   # runs forever (v2.18.3's Adminer outlived its manifest and held hostPort
   # 8092 against pgweb). removed.txt is the explicit tombstone list —

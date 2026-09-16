@@ -140,8 +140,9 @@ def test_full_messages_reads_both_halves_and_tolerates_neither():
 
 def _bulky(fraction: float, window: int) -> dict:
     """A run_state whose live window estimates to roughly `fraction` of `window`
-    (the estimate is chars/4, and json.dumps adds ~20 chars of framing)."""
-    chars = int(fraction * window * 4)
+    (the estimate is chars/CHARS_PER_TOKEN, and json.dumps adds ~20 chars of
+    framing)."""
+    chars = int(fraction * window * context.CHARS_PER_TOKEN)
     return {"messages": [{"kind": "request", "parts": [
         {"part_kind": "user-prompt", "content": "x" * chars}]}]}
 

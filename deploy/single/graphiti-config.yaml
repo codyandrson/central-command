@@ -64,7 +64,7 @@ graphiti:
   # FIRST so it beats the "use as last resort" types below.
   entity_types:
     - name: "Person"
-      description: "An individual human being — family, friends, colleagues, contacts. Use the person's canonical full name as the entity name, never a role or pronoun ('the operator'). A NAME IS NOT A PERSON: a bare surname, maiden name, married name, nickname or alias must NEVER become an entity of its own, because that invents a second human who does not exist. Do still RECORD what someone is called — attach it to the person it belongs to, as a fact about that one person. Drop the name, never the fact."
+      description: "An individual human being — family, friends, colleagues, contacts. Use the person's canonical full name as the entity name, never a role or pronoun ('the operator'). A NAME IS NOT A PERSON: a bare surname, maiden name, married name, nickname or alias must NEVER become an entity of its own, because that invents a second human who does not exist. Do still RECORD what someone is called — attach it to the person it belongs to, as a fact about that one person. Drop the name, never the fact. THE OPERATOR IS ONE OF THESE PEOPLE: 'the operator' / 'the user' means the human team lead, a single Person the episode usually names elsewhere — resolve the mention to that named Person and keep the claim; never create an entity named 'operator', and never drop a fact because its subject was written as a role."
     - name: "Preference"
       description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
     - name: "Requirement"
