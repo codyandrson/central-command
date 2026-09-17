@@ -459,3 +459,31 @@ async def test_episode_walk_wire_shape(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await routes.graph_episode_subgraph(uuid="nope")
     assert exc.value.status_code == 404
+
+
+async def test_a_graph_outage_is_a_503_not_a_traceback(monkeypatch):
+    """The nightly backup takes Neo4j down for about a minute (Community
+    Edition can only dump a stopped store), and the loopback relay's first
+    connection after the pod comes back used to be the one that failed. Either
+    way the driver raises ServiceUnavailable — an expected state the cockpit
+    should see as 503 "graph unavailable", never as a 500 traceback and a red
+    "Exception in ASGI application" toast (2026-09-17, v2.36.1)."""
+    from neo4j.exceptions import ServiceUnavailable
+
+    from central_command.api.app import app
+    from central_command.integrations import graphiti
+
+    async def fake_episodes(**_kw):
+        return []
+
+    async def fake_count(_groups):
+        raise ServiceUnavailable("Couldn't connect to 127.0.0.1:7687")
+
+    monkeypatch.setattr(graphiti, "get_episodes", fake_episodes)
+    monkeypatch.setattr(neo4j_reader, "count_episodes", fake_count)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cc") as c:
+        r = await c.get("/api/graph/episodes", params={"agent_id": "main", "scope": "private"})
+    assert r.status_code == 503
+    assert r.json()["detail"] == "graph unavailable"
+    assert r.headers["retry-after"] == "10"

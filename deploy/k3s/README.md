@@ -54,6 +54,8 @@ Assumed already true before phase 2:
 - **Repo-root `.env`** populated (see `.env.example`). Different audience: the
   app's own `CC_*` settings. Both files are gitignored.
 - **uv-managed CPython 3.12** and **NodeSource 22** on the Pi.
+- **`socat`** on the Pi (`sudo apt install socat`) — the loopback relay
+  `cc-graph-bolt` runs on it (§6).
 - **Docker CE** still installed on the Pi — `build-graphiti-image.sh` builds the
   arm64 half with `docker`. (The compose *stack* is superseded; the daemon is
   still the arm64 builder.)
@@ -339,8 +341,11 @@ still means the unit comes up on every subsequent boot.
   backend via `web/.env`'s `GATEWAY_URL` (above). Tailnet exposure is
   `tailscale serve --bg http://127.0.0.1:3080`, which persists in tailscaled
   state on its own.
-- **cc-graph-bolt** — loopback-only `port-forward` of `svc/neo4j` 7687 for the
-  cockpit's Graph panel. Keeps neo4j ClusterIP-only.
+- **cc-graph-bolt** — loopback-only `socat` relay of `svc/neo4j` 7687/7474
+  (by ClusterIP) for the cockpit's Graph panel. Keeps neo4j ClusterIP-only.
+  Needs `apt install socat` on the anchor node (preflight checks). Not
+  `kubectl port-forward`: that pins one pod at start and goes stale, silently,
+  every time the nightly backup replaces the Neo4j pod (v2.36.1).
 - **cc-sandbox-runner** — needs `make-sandbox-kubeconfig.sh` to have run first.
 - **cc-backup** — `deploy/k3s/cc-backup.service` runs `deploy/k3s/backup.sh` as
   **root** (k3s's kubeconfig is root-owned 0600; under `User=codyslab` every

@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-17 — v2.36.1: a relay that cannot go stale, and a graph outage is a 503
+
+The first Graph-panel read after every nightly backup was a 500 and a red
+"Exception in ASGI application" toast (three mornings running). Neo4j
+Community can only dump a STOPPED store, so the backup replaces the pod —
+and `cc-graph-bolt` was a `kubectl port-forward`, which resolves `svc/neo4j`
+to one pod at start, never re-resolves, and does not exit when that pod
+dies: it errors on the NEXT client connection, hours later
+(kubernetes/kubernetes#67059, kubernetes/kubectl#686 — unfixed since 2018).
+`Restart=always` cannot cover a failure that arrives lazily.
+
+- `deploy/k3s/cc-graph-bolt.service` is now a `socat` relay from
+  127.0.0.1:7687/7474 to the Service's ClusterIP: a fresh upstream connection
+  per client connection, with kube-proxy carrying the ClusterIP to whichever
+  pod is current. Same unit name, same loopback-only contract, Neo4j stays
+  ClusterIP-only. `socat` is a new anchor-node prerequisite: `setup.sh`
+  preflight checks for it and `cc-update.sh` installs it when the unit
+  changes, then restarts the relay (the one unit nothing else restarted).
+- The API answers `neo4j.exceptions.ServiceUnavailable` with **503 "graph
+  unavailable"** and `Retry-After: 10` from one app-level handler. The graph
+  is legitimately down for about a minute every night; that is an expected
+  state, not a traceback. `tests/test_graph_routes.py` pins it through the
+  real app.
+
 ## 2026-09-16 — v2.36.0: a tool result is sized by the input window, and the operator has a name
 
 Ten inbox-triage sessions died in one day with the proxy's 400

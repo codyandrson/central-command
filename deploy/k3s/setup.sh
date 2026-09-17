@@ -331,7 +331,7 @@ phase_preflight() {
   fi
 
   local t
-  for t in curl openssl uv git ssh scp; do
+  for t in curl openssl uv git ssh scp socat; do
     command -v "$t" >/dev/null 2>&1 \
       && pass "tool-${t}" "present" \
       || fail "tool-${t}" "$t not found on PATH"

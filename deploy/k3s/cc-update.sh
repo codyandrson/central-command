@@ -476,6 +476,17 @@ CM
     systemctl daemon-reload || die manifests "systemctl daemon-reload failed"
     # A changed cc-update.service takes effect on the NEXT run: restarting the
     # unit whose ExecStart is this script would kill the update mid-flight.
+    #
+    # cc-graph-bolt is the one unit nothing else restarts (start_services only
+    # touches the app units), so a changed definition would otherwise sit
+    # unapplied until its process next died. v2.36.1 also moved it from
+    # `kubectl port-forward` to socat — a package the anchor node may not have.
+    if grep -qx 'deploy/k3s/cc-graph-bolt.service' <<<"$changed_units"; then
+      command -v socat >/dev/null 2>&1 \
+        || DEBIAN_FRONTEND=noninteractive apt-get install -y -q socat \
+        || die manifests "cc-graph-bolt needs socat and apt-get could not install it"
+      systemctl restart cc-graph-bolt || die manifests "systemctl restart cc-graph-bolt failed"
+    fi
   fi
 
   # The n8n façades are code (deploy/n8n/): applied into the running n8n on

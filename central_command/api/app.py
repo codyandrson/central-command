@@ -230,6 +230,25 @@ app.add_middleware(
 
 app.include_router(router)
 
+
+# The graph is legitimately offline for about a minute every night (Community
+# Edition can only dump a stopped store, so the backup replaces the pod) and
+# whenever the loopback relay is between the pod and its successor. That is an
+# expected state, not an application exception: answer 503 with a body the
+# panel can show, never a traceback and a red "Exception in ASGI application".
+from fastapi import Request  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from neo4j.exceptions import ServiceUnavailable  # noqa: E402
+
+
+@app.exception_handler(ServiceUnavailable)
+async def _graph_unavailable(_request: Request, exc: ServiceUnavailable) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "graph unavailable", "error": str(exc).splitlines()[0]},
+        headers={"Retry-After": "10"},
+    )
+
 # The Nerve cockpit (web/) speaks the OpenClaw gateway protocol at /ws.
 from central_command.api.nerve_gateway import router as nerve_gateway_router  # noqa: E402
 
