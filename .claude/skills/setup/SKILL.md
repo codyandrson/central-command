@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (ten phases: validate/preflight/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with the onboarding interview and a working dry-run demo. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (ten phases: validate/preflight/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -12,8 +12,8 @@ the whole install. Your job is: (a) elicit answers and write them into
 `deploy/single/.env`, (b) run `./setup.sh` (or have the user run it) and read
 its PASS/WARN/FAIL lines and exit code, (c) on failure, run `./setup.sh
 diagnose` and reason over `setup-diagnostics.txt`, then name the fix — never
-freehand a replacement command, (d) conduct the onboarding interview
-(Phase 2), (e) verify integrations and walk the go-live checklist
+freehand a replacement command, (d) hand off to the cockpit (Phase 2),
+(e) verify integrations and walk the go-live checklist
 (Phase 3). Delegate read-only investigation
 ("where is X defined", multi-file config reads) to an Explore sub-agent;
 never end a turn mid-phase with no text.
@@ -71,14 +71,20 @@ Rules that hold for the whole run:
   `test` (the pytest gate, via the venv), `boot` (elicits the operator name
   on a terminal, starts the API detached — `./setup.sh stop` is its
   counterpart) and `demo` (fixture email → the operator approves in the
-  cockpit → dry-run provenance verified).** Do not hand-conduct those steps
+  cockpit → the real execution and its provenance verified).** Do not hand-conduct those steps
   on the podman substrate any more — run `./setup.sh` and interpret. The
   late phases skip by probing reality (healthy API skips test+boot; a
   decided proposal skips demo), so re-runs converge. A red `test` phase is
   a real defect — diagnose it, don't wave it through.
-- **The interview's `.env` answer is only `CC_OPERATOR_NAME`, and `boot`
-  elicits it interactively** — the fuller onboarding interview (operator
-  episodes into the graph) remains yours to conduct, any time after boot.
+- **You do not interview anybody (2026-09-18).** The podman `boot` phase still
+  asks for the operator's name on a terminal (it lands as `CC_OPERATOR_NAME`,
+  the env fallback); everywhere else the COCKPIT asks it on first run — a
+  non-dismissible prompt bar, stored as the `operator_name` app setting via the
+  `operator.name.set` RPC and applied to the live settings at once. The work
+  environment, the team and the working preferences are the EA-hosted team
+  tour's step **1b. THEIR WORLD**, recorded as gated `graph.add_episode`
+  proposals. There is no graph interview for you to conduct, and
+  `scripts/onboard_episode.py` no longer exists.
 - **Capability manifest and vlogs disclosure are mandatory.** `./setup.sh
   verify` prints what this profile installed vs. the k3s deployment, naming
   vlogs (the log console) as the one deliberate omission — podman doesn't
@@ -210,10 +216,13 @@ The late phases are interactive where they must be: `test` is the pytest
 gate (sequential, ~11 minutes — a red suite is a real defect in the install
 or the repo; diagnose it, don't wave it through), `boot` elicits the
 operator's name on the terminal and starts the API detached (`./setup.sh
-stop` is its counterpart), and `demo` feeds a fixture email, waits for the
-operator's approval in the cockpit, then verifies the dry-run provenance.
-If the demo wedges, Phase 3's recovery shapes apply — never re-POST the
-same fixture.
+stop` is its counterpart), and `demo` feeds a fixture email
+(`fixtures/emails/007-ownership-change.eml` — knowledge-only, so the approved
+episode is performed FOR REAL against the local graph and no Jira is needed),
+waits for the operator's approval in the cockpit, then verifies the execution
+and its provenance. A `work.failed` event fails the phase honestly rather than
+reading as a rejection. If the demo wedges, Phase 3's recovery shapes apply —
+never re-POST the same fixture.
 
 If the user is running it themselves instead of you, have them paste the
 output; interpret it the same way.
@@ -256,69 +265,49 @@ all.
 Gate: `./setup.sh` exits 0 (or 2 with WARNs the operator has read and
 accepted — a WARN is a stop-and-discuss point, not a drive-past).
 
-### Phase 2 — the onboarding interview
+### Phase 2 — hand off to the cockpit
 
-`boot` already elicited `CC_OPERATOR_NAME` into the root `.env` (everything
-else — the virtual key, `CC_NEO4J_PASSWORD`, `CC_EMBED_DIM`/`CC_EMBED_ALIAS`,
-the LiteLLM db url and salt, `CC_EXECUTOR_MODE=dry_run` — the `app` phase
-already wrote). The fuller interview below is yours to conduct, any time
-after boot. Also write in the Jira/Confluence/network-trust values you
-elicited in Phase 0 if the root `.env` doesn't already carry them — check
-before re-typing anything.
+Onboarding is the product's job now (2026-09-18). Nothing here is an
+interview:
 
-You are the interviewer. The answers here are OPERATOR INPUT — trusted
-evidence, not agent claims — so nothing in this phase rides the approval
-gate: config values go to `.env`, facts go to the graph as operator-direct
-episodes, and confirming each section back to the user in this conversation
-IS the review.
+- **The name.** The podman `boot` phase already asked for it on the terminal
+  (`CC_OPERATOR_NAME` in the root `.env`, the env fallback). If it was not
+  asked — a headless run, the k3s substrate — the cockpit asks on first run
+  with a non-dismissible prompt bar, and the answer is stored as the
+  `operator_name` app setting and applied immediately. Until then the agents
+  say "the operator". Say this out loud, because it is the one thing the
+  operator must do before anything reads their name.
+- **Everything else** — work environment, the team, working preferences — is
+  the EA-hosted team tour's step **1b. THEIR WORLD**, recorded as
+  `graph.add_episode` proposals the operator approves ("Work environment:
+  `<topic>`", "Team: `<full name>`", "Operator preferences"). Approving them is
+  also how they learn the propose→approve loop. Creating that tour is your last
+  act (Phase 3).
 
-Work through the sections in order. For each: elicit, summarize back what
-you will record, get an explicit yes, then write it. Skip nothing; if the
-user declines a section, record that they declined. **One `AskUserQuestion`
-per section, then follow-ups until it has real substance** — a team member
-needs role, expertise and reporting line, not just a name — never bundle
-sections into one question.
+The one thing still yours: write in the Jira/Confluence/network-trust values
+you elicited in Phase 0 if the root `.env` doesn't already carry them — check
+before re-typing anything. (The virtual key, `CC_NEO4J_PASSWORD`,
+`CC_EMBED_DIM`/`CC_EMBED_ALIAS` and the LiteLLM db url and salt the `app` phase
+already wrote; `CC_EXECUTOR_MODE` it leaves at the shipped default, `live`.)
 
-1. **Identity.** Confirm the name `boot` recorded (`CC_OPERATOR_NAME` in
-   the root `.env`) is what the agents should call them. It also becomes
-   the provenance actor on their decisions (`human:<name-slug>`).
-2. **Work environment.** What they do, where they work, the systems that
-   matter (their Jira, their repos, their wiki), what a normal week looks
-   like. One episode per topic, each 1–5 sentences of DISTILLED claims
-   (never pasted raw answers). When the user says when a fact became true,
-   state it in the claim — a dateless claim is recorded as becoming true
-   today.
-   ```bash
-   python scripts/onboard_episode.py "Work environment: <topic>" "<distilled claims>"
-   ```
-3. **The team.** For each person: canonical full name, role, who they report
-   to, what systems/areas they are expert in, anything known about current
-   load. One episode per person (`"Team: <full name>"`). These seed the
-   staffing doctrine's competency map — an empty graph can't route work.
-4. **Working preferences.** Approval appetite (what they want to review vs
-   would delegate as trust builds), communication style, quiet hours, pet
-   peeves. One episode (`"Operator preferences"`) — these are facts agents
-   will read, not charter text.
-5. **Summary episode.** One final episode (`"Onboarding interview
-   2026-XX-XX"`) recording that onboarding ran, what was covered, and what
-   was declined — so the interview itself is on the record inside the
-   system, not only in this chat's transcript.
-
-Gate: the user confirms the summary; every episode command returned an
-acknowledgement.
+Gate: the root `.env` carries the Phase-0 integration values, and the operator
+knows the cockpit will ask their name.
 
 ### Phase 3 — integration proof + go-live
 
 `./setup.sh boot` and `demo` already did the mechanical part on this
 substrate: first boot self-hired the roster, and the operator watched the
-demo loop (fixture email → their approval in the cockpit → dry-run
-provenance). Be honest about what renders where: the
-founding agents are seeded by `schema.sql` at database init and don't carry
-template markers yet, so THOSE charters read "the operator" — a recorded
-future rebuild. What does use the interview's values today: any agent hired
-from the menu (`POST /api/agents/hire`) renders `<<operator_name>>`, the
-provenance actor on every decision is `human:<name-slug>`, and every agent
-reads the interview's episodes from the graph.
+demo loop (fixture email → their approval in the cockpit → a real execution
+with provenance stamped). Be honest about what renders where: the founding
+agents are seeded by `schema.sql` at database init and don't carry template
+markers yet, so THOSE charters read "the operator" until coached — as do the
+five template hires at startup (EA, editor, steward, MCP manager, graph
+curator), which bake the name in ONCE, so naming yourself after first boot
+leaves them saying "the operator". That is the accepted cost of moving the
+name prompt into the cockpit. What does use the name today: any agent hired
+from the menu (`POST /api/agents/hire`) renders `<<operator_name>>`, every
+`_v0` founder renders it on READ against current settings, and the provenance
+actor on every decision is `human:<name-slug>`.
 
 Gate: the roster lists its agents (`GET /api/agents`) and, if the cockpit was
 built, `GET /` serves it — the cockpit is served BY uvicorn on this same port
@@ -327,11 +316,12 @@ in this profile; if `/` 404s, the web build was skipped (check the
 
 The install ends inside a working demo the user watches, not a success
 message — `./setup.sh demo` runs that loop here; on the k3s substrate you
-conduct it by hand: feed one fixture email from `fixtures/emails/` via
-`POST /api/emails`, watch the proposal land in the Decisions Inbox, have the
-user approve it, and confirm the dry-run execution + provenance in the event
-log. Either way, these are the shapes for conducting or recovering it, so
-you don't guess them:
+conduct it by hand: feed `fixtures/emails/007-ownership-change.eml` via
+`POST /api/emails` (knowledge-only, so the approved episode is a REAL graph
+write and needs no Jira), watch the proposal land in the Decisions Inbox, have
+the user approve it, and confirm the execution + provenance in the event log —
+a `work.failed` event is a failure to diagnose, not a rejection. Either way,
+these are the shapes for conducting or recovering it, so you don't guess them:
 
 - `POST /api/emails` takes exactly one field —
   `{"text": "<the raw RFC-822 message>"}` (`EmailIn` in
@@ -371,31 +361,21 @@ per-use discovery doctrine still covers whatever wasn't harvested.
 
 Only after they have seen the demo loop (and the Jira/Confluence reads, if
 configured) does GO-LIVE happen — and it is a PROMPTED CHECKLIST, never a
-default and never skipped silently (The operator, 2026-08-27: "off until onboarding
-finishes" is right, but off-by-default with no prompted turn-on is a cliff —
-the first instance sat in dry_run for a day of approvals nobody knew were
-simulated). Walk each item as its own question, one line on what it does,
-apply what they choose, and record the choices as one operator episode
-("Go-live <date>"):
+default and never skipped silently (The operator, 2026-08-27: off-by-default
+with no prompted turn-on is a cliff). The EXECUTOR is no longer on this list
+(2026-09-18): a fresh install runs `live`, because `dry_run` no-ops every
+capability including the internal ones and its whole record is incidents. What
+remains off is the work INTAKE. Walk each item as its own question, one line on
+what it does, apply what they choose, and record the choices as one operator
+episode ("Go-live <date>"):
 
-1. **Executor**: flip `CC_EXECUTOR_MODE` to `live` + restart. Until this,
-   every EXECUTED proposal was a `[dry-run]` simulation — say that plainly.
-   Flipping it is the USER'S choice, never yours. WHERE it flips is
-   substrate-specific: podman profile → root `.env`. k3s substrate → a
-   systemd drop-in (`/etc/systemd/system/cc-uvicorn.service.d/*.conf` with
-   `[Service]` `Environment=CC_EXECUTOR_MODE=live`, then daemon-reload +
-   restart) — the tracked unit pins `Environment=CC_EXECUTOR_MODE=dry_run`
-   as the clean-install safe default, and a systemd `Environment=` BEATS
-   pydantic's env_file, so editing `.env` silently does nothing there
-   (bit round 4, 2026-08-27: go-live "took", the honest banner said
-   otherwise). Verify with the `status` RPC's `executorMode`, not the file.
-2. **Email feed**: `CC_FEED_ENABLED` + the `mail-poll` schedule. New-mail-only
+1. **Email feed**: `CC_FEED_ENABLED` + the `mail-poll` schedule. New-mail-only
    is the default posture (`feed_query` is `newer_than`-scoped); populating
    the BACKLOG is a separate deliberate step needing `CC_BACKLOG_CUTOFF_DATE`
    — offer it, don't assume it.
-3. **Dispatch drain**: `CC_DISPATCH_ENABLED` + the `drain-window` schedule
+2. **Dispatch drain**: `CC_DISPATCH_ENABLED` + the `drain-window` schedule
    (the approval-limit valve keeps it human-paced).
-4. **Recurring schedules**: list what is actually seeded
+3. **Recurring schedules**: list what is actually seeded
    (`GET /api/heartbeat/schedules`) and let them pick — EA contacts
    (morning-report/checkin/digest/week-ahead), jira-hygiene, maintenance
    sweeps, litellm-discovery. Enable via
@@ -405,11 +385,12 @@ apply what they choose, and record the choices as one operator episode
 Anything declined stays off and is recorded as declined — the Crons tab
 flips any of them later.
 
-**The tour comes AFTER go-live, never before.** The tour produces real
-knowledge (the operator's contact doctrine, tour-state episodes) through
-gated proposals — run in dry_run those approvals simulate and the knowledge
-evaporates, which is exactly what happened on 2026-08-27: a full tour's
-worth of episodes read EXECUTED and wrote nothing.
+**The tour needs nothing flipped any more (2026-09-18) — run it right after
+the demo.** It used to have to wait for go-live: its episodes ride the gate,
+and under `dry_run` those approvals simulated and the knowledge evaporated
+(2026-08-27, a full tour's worth read EXECUTED and wrote nothing). A fresh
+install executes for real, so the tour is simply the next thing that happens,
+and its step 1b is where the operator's world gets recorded.
 
 Your LAST act is to hand them to their team and get out of the way. Create
 the EA-hosted team tour (a product contact kind, not a setup script, so it's
@@ -478,7 +459,7 @@ the *why*, the placement table, §8's instance-data decisions and rollback.
   runs — a restore under a different key leaves rows undecryptable.
 - Integration choices (Jira/Confluence/email/network-trust) — identical
   elicitation to the podman substrate's Phase 0; the values go into the
-  root `.env` (the driver creates it with `CC_EXECUTOR_MODE=dry_run`).
+  root `.env` (the driver creates it at the shipped `CC_EXECUTOR_MODE=live`).
 
 **Run the driver.**
 
@@ -498,31 +479,33 @@ restart → `--check`), mints the virtual keys, then probes `cc-default`,
 `cc-embedding` through the proxy — a probe failure is the same
 exit-3 gate.
 `stack` builds the per-arch images only if missing and rolls out every
-manifest. `app` installs the venv/cockpit and the systemd units, holding
-`cc-uvicorn` enabled-but-stopped, and ends at the **first-boot exit-3
-gate** — that gate is where the onboarding interview happens.
+manifest. `app` installs the venv/cockpit and the systemd units and **enables
+and starts `cc-uvicorn` with the rest of them** (2026-09-18) — there is no
+first-boot gate any more, because there is no interview to land before the API
+reads its env. First boot hires the roster; the cockpit's first-run prompt bar
+asks the operator's name.
 
-**At the first-boot gate:** conduct the onboarding interview (identical to
-the podman substrate's Phase 2 above, except `CC_OPERATOR_NAME` is yours to
-elicit here — land it and the episodes first, BEFORE starting uvicorn:
-first boot hires the roster from what's already in `.env`/graph), write in
-the Phase-0 integration values if the root `.env`
-does not carry them yet, then have the operator:
+**After `app`:** write in the Phase-0 integration values if the root `.env`
+does not carry them yet, then:
 
 ```bash
-sudo systemctl start cc-uvicorn
 ./deploy/k3s/setup.sh verify --clean-install   # zero failures is the gate
 ```
+
+`--clean-install` asserts the running API is LIVE — a stale `dry_run` systemd
+drop-in or `.env` would simulate every approval, and that drop-in is the trap
+now that the unit pins nothing.
 
 Then read `deploy/k3s/README.md` §8 with the operator and decide each
 instance-data item deliberately — on a fully-clean deployment the answer is
 "restore nothing" (§7). The demo (fixture email → approval → provenance,
 Jira/Confluence first-read verification, macro harvest offer, team tour)
 and the GO-LIVE checklist are identical to the podman substrate's Phase 3
-above (there the demo is hand-conducted, per its shapes) — with the
-k3s-specific executor flip: a systemd drop-in, not the
-`.env` (the tracked unit pins dry_run and systemd `Environment=` beats
-pydantic's env_file; verify via the `status` RPC's `executorMode`).
+above (there the demo is hand-conducted, per its shapes). No executor flip on
+either substrate any more — if the operator ever wants `dry_run` here, note
+that a systemd `Environment=` in a drop-in BEATS pydantic's env_file, so
+editing `.env` alone does nothing; verify via the `status` RPC's
+`executorMode`, never the file.
 
 **Uninstalling (k3s).** Per-manifest: `sudo k3s kubectl delete -f
 deploy/k3s/<file>.yaml` for each of `20-postgres`, `40-graph`, `50-n8n`,

@@ -291,8 +291,7 @@ sudo cp deploy/k3s/cc-update-tmpfiles.conf   /etc/tmpfiles.d/cc-update.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
 
 sudo systemctl daemon-reload
-sudo systemctl enable cc-uvicorn                     # enabled, NOT started — see below
-sudo systemctl enable --now cc-nerve cc-sandbox-runner cc-graph-bolt
+sudo systemctl enable --now cc-uvicorn cc-nerve cc-sandbox-runner cc-graph-bolt
 sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
 ```
 
@@ -325,14 +324,13 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   commits to downtime); the apply then fast-forwards through the warm
   caches. Log: `journalctl -u cc-update-stage`.
 
-**`cc-uvicorn` is enabled here but started in §9**, after the onboarding
-interview has written the instance's env — the API reads it once at start, so a
-first boot before the interview runs the whole app under stale answers. Starting
-`cc-nerve` used to start it anyway: `cc-nerve.service` carried
-`Wants=cc-uvicorn.service`, and `Wants=` is a START dependency. That was dropped
-2026-08-26 (it brought the API up 40 minutes early and hired an agent under the
-rehearsal persona), so the hold now actually holds. `enable` without `--now`
-still means the unit comes up on every subsequent boot.
+**`cc-uvicorn` is enabled AND started here** (2026-09-18). The `app` phase no
+longer holds first boot: the onboarding it used to wait for happens in the
+cockpit now — a first-run prompt bar asks the operator's name — so there is
+nothing to write into the env before the API reads it. (`cc-nerve.service`'s
+`Wants=cc-uvicorn.service` was dropped 2026-08-26, when the hold still
+mattered: `Wants=` is a START dependency and it brought the API up 40 minutes
+early under the rehearsal persona. It stays dropped.)
 
 - **cc-uvicorn** — `Requires=k3s.service`. Its `ExecStartPre` is a *readiness
   wait* on 127.0.0.1:5442 (120s ceiling), not a bring-up: Kubernetes is
@@ -439,19 +437,22 @@ answers):
 - The instance env files (`.env`, `web/.env`, `deploy/pi/.env`) — usually
   already backed up and removed by the teardown, but verify rather than
   assume.
-- **The go-live systemd drop-in**: `/etc/systemd/system/cc-uvicorn.service.d/`
-  (`executor-live.conf`). It lives outside the repo AND the cluster, beats the
-  unit's `Environment=CC_EXECUTOR_MODE=dry_run`, and survives every teardown —
-  on 2026-08-29 a fresh install executed its demo approval LIVE because of it.
-  `verify.sh --clean-install` now asserts the running process is in dry_run.
+- **A leftover executor drop-in**: `/etc/systemd/system/cc-uvicorn.service.d/`
+  (e.g. `executor-live.conf`). The unit no longer pins `CC_EXECUTOR_MODE` at
+  all (2026-09-18 — a fresh install runs `live`), so the trap has inverted: a
+  drop-in that pins **`dry_run`** lives outside the repo AND the cluster,
+  survives every teardown, beats `.env`, and would silently simulate every
+  approval on the new install. `verify.sh --clean-install` asserts the running
+  process is LIVE.
 
 ## 9. Verification
 
-First boot of the API — §6 enabled `cc-uvicorn` without starting it, so the
-onboarding interview's answers are already in the env it reads:
+The API is already up — §6 both enabled and started `cc-uvicorn` (its
+`ExecStartPre` waits on 127.0.0.1:5442), and there is no onboarding to land
+before it reads its env: the cockpit asks the operator's name on first run. So
+this section is verification only:
 
 ```bash
-sudo systemctl start cc-uvicorn          # ExecStartPre waits on 127.0.0.1:5442
 ./deploy/k3s/verify.sh --clean-install   # the clean-install gate: 0 failures
 ```
 

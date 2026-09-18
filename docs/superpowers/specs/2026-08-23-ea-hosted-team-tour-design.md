@@ -5,7 +5,8 @@
 
 ## The problem
 
-The onboarding interview (setup phase 5) captures the operator's facts, but
+The onboarding interview (setup phase 5) captures the operator's facts
+(superseded 2026-09-18, see addendum), but
 the operator never meets the system. The operator's framing after running the first
 fully-clean setup: a new boss doesn't read the org chart — they sit down with
 each report, hear how things are supposed to work, and adjust what doesn't
@@ -126,3 +127,16 @@ a grants change that breaks a promised proposal fails the suite.
 | 4 | Calibration recording | Agent proposals through the gate, operator approves each — chosen over EA-batched single proposal |
 | 5 | Scope | Core five (EA, triage, jira-expert, steward, coach) + offer the rest |
 | 6 | Build timing | Design record now; build after the setup-review fix batch |
+
+## Addendum 2026-09-18 — the tour also carries the operator's world
+
+The setup interview is gone (see
+`2026-08-21-setup-onboarding-design.md`'s 2026-09-18 addendum), so the facts it
+used to capture are the tour's now: a new step **1b. THEIR WORLD** in the host
+brief (`central_command/runtime/tour.py`) asks the work environment, the team
+and the working preferences, recorded as `graph.add_episode` proposals the
+operator approves ("Work environment: `<topic>`", "Team: `<full name>`",
+"Operator preferences"). The operator's NAME is not asked here — the cockpit's
+first-run prompt bar asks it. Decision 4 (calibration rides the gate) is what
+made this the obvious home: recording the operator's own words through the gate
+was already ratified here.

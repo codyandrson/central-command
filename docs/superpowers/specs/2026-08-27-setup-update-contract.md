@@ -9,7 +9,8 @@ kept and extended); the sandbox/crawler-parity half of that spec is untouched.
 ## The one-line contract
 
 > **A deterministic driver is the spine; the agent is the exception handler.**
-> The agent elicits answers, conducts the onboarding interview, and — when a
+> The agent elicits answers, conducts the onboarding interview (2026-09-18:
+> no longer — it moved into the product), and — when a
 > phase fails — diagnoses and PROPOSES. It never composes a mutating command,
 > and a proposal is applied only as an answer-file change or an
 > operator-approved command followed by re-running the phase.
@@ -73,7 +74,8 @@ what happened and waits. It does not proceed, retry, or remediate on its own.
 into `deploy/single/.env` (now including the install-vs-update question only
 if detection is ambiguous — normally detection is automatic) → driver runs
 phases autonomously, printing every check → LiteLLM phase (below) → remaining
-phases → status log written → onboarding interview → in-browser hand-off.
+phases → status log written → in-browser hand-off (2026-09-18: the interview
+that used to sit here is the cockpit's name prompt plus the EA tour).
 The installed tree carries `update.sh` (git `local`/`upstream` branches), so
 the extracted zip is disposable after install.
 

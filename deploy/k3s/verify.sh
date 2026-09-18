@@ -106,8 +106,8 @@ if [[ "$CLEAN" == "1" ]]; then
   # cc-uvicorn.service.d/ outlives a teardown and beats Environment= in the
   # unit (2026-08-29: a "clean" install executed its demo approval live).
   # systemd's value is in the process env; absent that, .env decides.
-  check "executor: the running API is in dry_run (a leftover go-live drop-in would make it live)" \
-    "mode=\$(sudo tr '\\0' '\\n' </proc/\$(systemctl show -p MainPID --value cc-uvicorn)/environ | sed -n 's/^CC_EXECUTOR_MODE=//p'); [[ -z \$mode ]] && mode=\$(sed -n 's/^CC_EXECUTOR_MODE=//p' .env); [[ \$mode == dry_run ]]"
+  check "executor: the running API is live (a stale dry_run drop-in or .env would simulate every approval)" \
+    "mode=\$(sudo tr '\\0' '\\n' </proc/\$(systemctl show -p MainPID --value cc-uvicorn)/environ | sed -n 's/^CC_EXECUTOR_MODE=//p'); [[ -z \$mode ]] && mode=\$(sed -n 's/^CC_EXECUTOR_MODE=//p' .env); [[ \${mode:-live} == live ]]"
   skip "n8n: (run without --clean-install after the phase-8 restore to assert both)"
 else
   check "spine: event log carried over" \

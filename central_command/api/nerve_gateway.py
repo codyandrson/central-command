@@ -1073,6 +1073,21 @@ async def _agents_detail(agent_id: str) -> dict:
     }
 
 
+async def _operator_name_set(params: dict) -> dict:
+    """Name the operator from the cockpit. Operator input is trusted, so no
+    gate; persisted as an app setting and applied to the live settings at
+    once — the graph naming rule and the provenance slug read it live.
+    Charters rendered at an earlier hire keep 'the operator' until coached."""
+    name = " ".join(str(params.get("name") or "").split())
+    if not name or name.lower() == "the operator":
+        raise HTTPException(400, "a real name is required")
+    if len(name) > 80:
+        raise HTTPException(400, "name too long (80 characters max)")
+    await repo.set_app_setting("operator_name", {"name": name})
+    settings.operator_name = name
+    return {"operatorName": name}
+
+
 async def _dispatch(method: str, params: dict, notify) -> Any:
     # Route-handler imports are deferred: routes.py imports runtime modules
     # that must not load at interpreter start in every context (tests pin
@@ -1095,7 +1110,12 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
             # six proposals believing they executed, and NOTHING on screen said
             # they were simulated (2026-08-26). Pinned by a backend wire test.
             "executorMode": settings.executor_mode,
+            # The cockpit prompts for a name while this reads the unnamed
+            # default — the in-product half of onboarding (v2.37.0).
+            "operatorName": settings.operator_name,
         }
+    if method == "operator.name.set":
+        return await _operator_name_set(params)
     if method == "sessions.list":
         return await _sessions_list(params)
     if method == "chat.history":

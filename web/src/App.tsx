@@ -107,7 +107,21 @@ export default function App({ onLogout }: AppProps) {
   // Gateway state
   const {
     connectionState, connectError, reconnectAttempt, sparkline, executorMode,
+    operatorName, nameOperator,
   } = useGateway();
+  // First-run prompt: the in-product half of onboarding (v2.37.0). Shown
+  // while the server still reads the unnamed default; the team tour asks
+  // everything else. Not dismissible — an unnamed operator lands in the
+  // graph as a bare 'operator' node.
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameBusy, setNameBusy] = useState(false);
+  const operatorUnnamed = operatorName === 'the operator';
+  const submitOperatorName = useCallback(async () => {
+    const n = nameDraft.trim();
+    if (!n || nameBusy) return;
+    setNameBusy(true);
+    try { await nameOperator(n); } finally { setNameBusy(false); }
+  }, [nameDraft, nameBusy, nameOperator]);
 
   // Session state
   const {
@@ -998,6 +1012,28 @@ export default function App({ onLogout }: AppProps) {
       {/* Dry run is INVISIBLE otherwise: the operator approved six proposals
           believing they had executed, and every one was simulated
           (2026-08-26). Not dismissible — it is true for as long as the mode is. */}
+      {operatorUnnamed && (
+        <form
+          role="status"
+          data-testid="operator-name-prompt"
+          className="flex shrink-0 items-center justify-center gap-2 bg-accent/15 px-4 py-1.5 text-[0.733rem] font-semibold"
+          onSubmit={(e) => { e.preventDefault(); void submitOperatorName(); }}
+        >
+          <span>What should your team call you?</span>
+          <input
+            aria-label="Your name"
+            className="rounded border border-border bg-background px-2 py-0.5 font-normal"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            maxLength={80}
+            autoFocus
+          />
+          <button type="submit" disabled={!nameDraft.trim() || nameBusy} className="rounded bg-accent px-2 py-0.5 text-accent-foreground disabled:opacity-50">
+            Save
+          </button>
+        </form>
+      )}
+
       {executorMode === 'dry_run' && (
         <div
           role="status"

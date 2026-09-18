@@ -148,6 +148,22 @@ async def arc() -> list[dict]:
     return out
 
 
+_WORLD_EPISODES = (
+    "RECORD AS THEY ANSWER: one `graph.add_episode` proposal per environment "
+    "topic ('Work environment: <topic>'), one per person ('Team: <full "
+    "name>'), one for preferences ('Operator preferences'). Each body is 1 to "
+    "5 sentences of DISTILLED claims in your own words — never their answer "
+    "pasted — naming every person by full name. A dateless claim is recorded "
+    "as becoming true today, so carry any date they give you. Their words are "
+    "trusted; the approval is a read-through, not a challenge, and you say so."
+)
+
+_WORLD_NO_EPISODES = (
+    "You cannot record these yourself — you hold no episode-propose "
+    "capability — so summarise each section back to them and name "
+    "knowledge-steward as the teammate who can carry it into the graph."
+)
+
 _SUMMARY_EPISODE = (
     "CLOSE THE TOUR. Propose one `graph.add_episode` recording that the tour "
     "happened and what it settled about how this operator wants the team to "
@@ -207,6 +223,22 @@ async def brief() -> str:
         "This is exactly where it died on day one: the host closed in plain "
         "text after the calibration exchange and the tour ended with nine "
         "teammates unmet.",
+        "",
+        "1b. THEIR WORLD, before any teammate. This is where the team learns "
+        "who it works for — it replaced the setup-time interview (2026-09-18), "
+        "so nothing here has been asked before. Three sections, in order, one "
+        "at a time, with follow-ups until each has real substance: (a) WORK "
+        "ENVIRONMENT — what they do, where they work, the systems that matter "
+        "(their Jira, their repos, their wiki), what a normal week looks "
+        "like; (b) THE TEAM — for each person, canonical full name, role, who "
+        "they report to, what they are expert in, anything known about "
+        "current load (a name alone is not a team member); (c) WORKING "
+        "PREFERENCES — what they want to review versus delegate as trust "
+        "builds, communication style, quiet hours, pet peeves. If they "
+        "decline a section, say so in the closing episode and move on.",
+        "",
+        "   " + (_WORLD_EPISODES if await can_propose_episode("ea")
+                 else _WORLD_NO_EPISODES),
         "",
         "2. THE ARC. Then, in this order, broker an introduction to each of "
         "these teammates. The `instructions` text under each is the intro "

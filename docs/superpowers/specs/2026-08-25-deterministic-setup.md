@@ -12,6 +12,9 @@ exactly this script"*):
 > step, (c) the onboarding interview. Everything else is a deterministic
 > script.**
 
+_(2026-09-18: (c) is gone — the interview moved into the product, so the
+agent's whole job is (a) and (b).)_
+
 And the second decision: **no deployment profile ships less capability than
 another unless literally impossible.** deploy/single's exclusion of the
 sandbox/crawler was an undisclosed scope cut; it ends here (vlogs is the one
@@ -85,6 +88,8 @@ that duplicates them)
    (NEO4J_PASSWORD → CC_NEO4J_PASSWORD, CC_EMBED_DIM, CC_EMBED_ALIAS,
    LITELLM db url/salt, CC_EXECUTOR_MODE=dry_run) → npm build if node.
    CC_OPERATOR_NAME is left for the interview (Claude's job, later).
+   _(2026-09-18: CC_EXECUTOR_MODE now stays at the shipped default `live`, and
+   the cockpit's first-run prompt asks for the name.)_
 6. `verify` — verify.sh, then CC_VERIFY_LIVE=1 verify.sh. Final summary
    prints the CAPABILITY MANIFEST: what this profile installed vs. the k3s
    deployment, naming anything absent and why (disclosure is mandatory).
@@ -146,7 +151,8 @@ console.
 
 The podman path of the skill shrinks to: elicit answers → fill .env → run
 `./setup.sh` → interpret PASS/WARN/FAIL and diagnose bundles → conduct the
-Phase-5 interview → conduct the Phase-6 demo. The k3s substrate section is
+Phase-5 interview → conduct the Phase-6 demo (2026-09-18: no interview any
+more — the cockpit asks the name and the EA tour asks the rest). The k3s substrate section is
 UNTOUCHED this round (The operator's deployment, already script-railed). The
 conductor-discipline rules collapse to one: **if you are composing a command
 that mutates anything, you are off the rails — the script does that.**

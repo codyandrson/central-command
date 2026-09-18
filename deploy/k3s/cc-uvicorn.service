@@ -32,7 +32,6 @@ User=codyslab
 Group=codyslab
 WorkingDirectory=/home/codyslab/central-command
 Environment=CC_DEMO_MODE=false
-Environment=CC_EXECUTOR_MODE=dry_run
 # NOTE: CC_DISPATCH_APPROVAL_LIMIT=5 used to be pinned here. It is not a
 # run-mode flag, and a systemd Environment= beats pydantic-settings' env_file,
 # so it SILENTLY shadowed .env: raising the valve there changed nothing and the

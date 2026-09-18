@@ -34,7 +34,7 @@
 #     boot        elicit the operator's name (once), start the API detached,
 #                 assert the roster hired          (counterpart: ./setup.sh stop)
 #     demo        fixture email -> triage -> YOUR approval in the cockpit ->
-#                 dry-run execution + provenance verified on the event log
+#                 a real execution + provenance verified on the event log
 #
 #     stop        stop the API that `boot` started
 #     status      re-run postconditions only, nothing mutating
@@ -964,15 +964,13 @@ phase_app() {
     "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD:-}@127.0.0.1:${CC_LITELLM_DB_PORT}/litellm" \
     "app-litellm-db-url"
 
-  # dry_run is the safe first state: the Executor LOGS writes instead of
-  # performing them. Forced only on a .env we just created — an operator who
-  # deliberately set `live` keeps it across a re-run.
-  if (( fresh )); then
-    set_kv "$APP_ENV" CC_EXECUTOR_MODE dry_run
-    pass "app-executor-mode" "CC_EXECUTOR_MODE=dry_run (nothing reaches the outside world until you change it)"
-  else
-    set_kv_if_unset "$APP_ENV" CC_EXECUTOR_MODE dry_run "app-executor-mode"
-  fi
+  # CC_EXECUTOR_MODE is left at .env.example's `live` (v2.37.0). A fresh
+  # install used to be forced to dry_run — a global no-op on EVERY capability,
+  # including the internal ones — and the operator forgot the flip more often
+  # than it protected anything: a day of approvals nobody knew were simulated,
+  # a tour whose episodes evaporated, a rename that ran production dry for 40
+  # minutes. The approval gate is the safety; the feed, the drain and every
+  # schedule stay off until the operator turns them on.
   # CC_OPERATOR_NAME is deliberately NOT set here: it is the interview's, and
   # the default ("the operator") is correct until someone is asked.
 
@@ -1178,7 +1176,7 @@ phase_boot() {
       warn "boot-at-logon" "could not register the cc-boot scheduled task — after a reboot, run: ./setup.sh boot"
     fi
   fi
-  note "cockpit: http://127.0.0.1:${cport}  (a fresh install runs the executor in dry_run — nothing touches the world until you flip it)"
+  note "cockpit: http://127.0.0.1:${cport}  (the feed, the drain and every schedule are OFF until you turn them on)"
 }
 
 demo_decided() { # true once the event log shows a decided proposal
@@ -1200,7 +1198,11 @@ phase_demo() {
   fi
 
   if ! demo_awaiting; then
-    local eml="$REPO_ROOT/fixtures/emails/001-invoice-due.eml"
+    # Knowledge-only email: triage proposes a graph episode, which the
+    # Executor performs for REAL against the local graph — no Jira needed.
+    # (The invoice fixture named a Jira issue no fresh install has; dry_run
+    # used to make that free.)
+    local eml="$REPO_ROOT/fixtures/emails/007-ownership-change.eml"
     [[ -f "$eml" ]] || { fail "demo-feed" "$eml missing"; return 1; }
     step "demo-feed" "fixture email enrolled (a repeat Message-ID is a no-op by design)" \
       bash -c "$PY -c 'import json,sys,pathlib;print(json.dumps({\"text\":pathlib.Path(sys.argv[1]).read_text()}))' '$eml' \
@@ -1237,7 +1239,7 @@ phase_demo() {
   fi
 
   # ── the operator's moment — never scripted away ────────────────────────────
-  useraction "demo-approve" "a proposal is waiting in the Decisions Inbox — open http://127.0.0.1:${CC_COCKPIT_PORT:-3080}, review it, and decide (approve to see the dry-run execution)"
+  useraction "demo-approve" "a proposal is waiting in the Decisions Inbox — open http://127.0.0.1:${CC_COCKPIT_PORT:-3080}, review it, and decide (approve to see the Executor perform it)"
   if ! is_tty; then
     return 3
   fi
@@ -1257,17 +1259,22 @@ phase_demo() {
   ACTIONS=0
 
   local execd; execd="$(api_json "$(api_url)/api/events?kind=proposal.executed&limit=1" 'len(d.get("events",[]))')"
+  local wfail; wfail="$(api_json "$(api_url)/api/events?kind=work.failed&limit=1" 'len(d.get("events",[]))')"
   if [[ "$execd" =~ ^[1-9] ]]; then
-    pass "demo-executed" "execution recorded with provenance (dry-run: a logged simulation — flip CC_EXECUTOR_MODE deliberately for live writes)"
+    pass "demo-executed" "the Executor performed the approved action and stamped provenance (a real write to the local graph)"
+  elif [[ "$wfail" =~ ^[1-9] ]]; then
+    fail "demo-executed" "the approval was recorded but execution FAILED — read $HERE/uvicorn.log (the graph service is the usual suspect: ./setup.sh status)"
+    return 1
   else
     # Reject/dismiss is a legitimate decision — the loop is still proven.
     pass "demo-executed" "no execution event — you rejected or dismissed, which proves the gate just as well"
   fi
   note ""
   note "The install is complete and the spine is proven end to end."
-  note "Deliberately still OFF: live executor mode, the mail feed, the dispatch"
-  note "drain, and every recurring schedule — the cockpit's Crons tab and the"
-  note "root .env flip each one when YOU decide."
+  note "Deliberately still OFF: the mail feed, the dispatch drain, and every"
+  note "recurring schedule — the cockpit's Crons tab and the root .env flip"
+  note "each one when YOU decide. The rest of onboarding is your EA's: the"
+  note "cockpit asks your name, then the team tour asks about your world."
 }
 
 # Stop one detached server: TERM its pid file, then PROVE the port is free.
@@ -1449,7 +1456,7 @@ usage: ./setup.sh [validate|preflight|fetch|llm|stack|app|verify|test|boot|
   test          the pytest gate (via the venv — no activation needed)
   boot          asks your name (once), starts the API detached, checks roster
   demo          feeds a fixture email, waits for YOUR approval in the
-                cockpit, verifies the dry-run execution + provenance
+                cockpit, verifies the execution + provenance
   stop          stops the API this script started (boot's counterpart)
   exit codes    0 clean · 1 hard failure · 2 completed with warnings
                 3 stopped for USER ACTION (see the last USERACTION line)

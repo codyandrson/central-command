@@ -196,3 +196,65 @@ a change; the union renders document-for-document identical. Only the core file
 carries `CC_EMBED_DIM`, so `render.sh llm` runs before the dimension exists and
 the index-permanence rule is enforced by construction: the graph cannot come up
 before the measurement. `discover-llm.sh --proxy` is the through-alias sugar.
+
+## Addendum 2026-09-18 — the interview moves into the product; dry_run is no longer the fresh-install default
+
+_The operator's decision. Decisions 9 (revised) and 10 are reversed in the two
+places named below; the original text stands as the record of what was decided
+on 2026-08-21._
+
+**1. Setup no longer interviews anybody.** Claude Code is not needed once the
+drivers finish.
+
+- **The name is asked by the cockpit.** On first run a non-dismissible prompt
+  bar appears while the server still reads the unnamed default "the operator";
+  the answer is stored as the `operator_name` app setting via the
+  `operator.name.set` RPC and applied to the live settings at once.
+  `CC_OPERATOR_NAME` in `.env` remains the env fallback, and the podman `boot`
+  phase's terminal prompt for the name STAYS.
+- **Everything else the interview collected is now the EA-hosted team tour's**
+  — a new step **1b. THEIR WORLD** in the tour host brief
+  (`central_command/runtime/tour.py`) asks the work environment, the team and
+  the working preferences, recorded as `graph.add_episode` proposals the
+  operator approves ("Work environment: `<topic>`", "Team: `<full name>`",
+  "Operator preferences"). `scripts/onboard_episode.py` is DELETED.
+- **The k3s driver no longer holds first boot.** `cc-uvicorn` is enabled AND
+  started in the `app` phase with the other units; there is no first-boot
+  USERACTION gate any more.
+
+Why decision 9's "interview before first boot" reason turned out weak: founders
+render the placeholder on READ against current settings until coached
+(`runtime/agent.py` `_v0`); only the template hires at startup (EA, editor,
+steward, MCP manager, graph curator) bake the name in once; and nothing
+consumes the team episodes yet — the staffing agent is unscheduled. The
+"review theater" argument against gate-mediated recording was already
+contradicted by the tour spec (2026-08-23, decision 4), which ratified
+recording the operator's own words through the gate. **Accepted cost:** an
+operator who names themselves after first boot leaves those five
+startup-hired charters reading "the operator" until coached.
+
+**2. A fresh install starts LIVE.** `CC_EXECUTOR_MODE` stays at the shipped
+default `live` (`config.py` and `.env.example` already said `live`; both
+drivers were overriding a freshly created `.env` to `dry_run`, and the k3s unit
+hard-pinned `Environment=CC_EXECUTOR_MODE=dry_run`, which beat `.env` and
+required a systemd drop-in to go live). The flag itself remains — tests use it,
+and the cockpit still banners it if someone sets it — and
+`verify.sh --clean-install` now asserts the running API is LIVE, because a
+stale `dry_run` drop-in or `.env` would simulate every approval.
+
+Why: `dry_run` is one line in the Executor that no-ops EVERY capability,
+including the internal ones (`task.create`, `graph.add_episode`,
+`charter.update`), and its record is only incidents — 2026-08-27 a full tour's
+episodes read EXECUTED and wrote nothing; the same week, a day of approvals
+nobody knew were simulated; 2026-08-29 a dropped drop-in ran production dry for
+~40 minutes. On a fresh install the external capabilities all need credentials
+the operator typed in, and the approval gate is the product's safety.
+
+The go-live checklist loses its executor item. The feed, the dispatch drain and
+every schedule still ship OFF and remain the operator's explicit flips. The
+demo now feeds `fixtures/emails/007-ownership-change.eml` — a knowledge-only
+email whose graph episode the Executor performs FOR REAL against the local
+graph, no Jira needed — instead of the invoice fixture, whose Jira due-date
+write no fresh install could perform (`dry_run` had made it free), and it fails
+honestly on a `work.failed` event instead of reporting a failed execution as
+"you rejected".

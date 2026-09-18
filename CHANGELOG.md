@@ -4,6 +4,47 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.37.0: onboarding happens in the product, and a fresh install starts live
+
+- **The operator's name is asked by the cockpit, not by Claude Code.** While
+  the server still reads the unnamed default, the cockpit shows a first-run
+  prompt bar; the answer lands as the `operator_name` app setting through a
+  new `operator.name.set` RPC and applies to the live settings at once (the
+  graph naming rule and the provenance slug read it live). `CC_OPERATOR_NAME`
+  stays the env fallback and the podman `boot` phase still asks on a
+  terminal. Charters rendered at an earlier hire keep "the operator" until
+  coached — the five startup template hires, if the name comes after first
+  boot.
+- **The team tour asks about the operator's world.** The EA's host brief
+  gains step 1b — work environment, the team (full name, role, reporting
+  line, expertise, load), working preferences — recorded as
+  `graph.add_episode` proposals the operator approves, one per topic and one
+  per person. This replaces the setup-time interview: its sections are gone
+  from the /setup skill and `scripts/onboard_episode.py` is deleted. The
+  2026-08-21 reason for interviewing before first boot was weaker than
+  recorded: founders render the name placeholder on read until coached, and
+  the tour spec had already ratified gate-mediated recording of the
+  operator's own words.
+- **The k3s driver no longer holds first boot.** `cc-uvicorn` is enabled and
+  started in the `app` phase with the other units; the first-boot USERACTION
+  gate is gone.
+- **A fresh install runs the executor `live`.** Both drivers stop overriding a
+  new `.env` to `dry_run`, and the k3s unit's `Environment=CC_EXECUTOR_MODE`
+  pin is removed with the systemd drop-in it required. The flag itself stays
+  (and the cockpit still banners it). `dry_run` is one line that no-ops
+  every capability, internal ones included, and its record was only
+  incidents: a tour whose episodes evaporated, a day of approvals nobody knew
+  were simulated, forty minutes of production running dry after a rename.
+  The approval gate is the safety; the feed, the drain and every schedule
+  still ship off. `verify.sh --clean-install` now asserts the running API is
+  live, and the go-live checklist loses its executor item.
+- **The demo performs a real write.** It feeds
+  `fixtures/emails/007-ownership-change.eml`, a knowledge-only email whose
+  proposal is a graph episode the Executor performs against the local graph —
+  the invoice fixture named a Jira issue no fresh install has. A `work.failed`
+  event after the approval now fails the phase instead of reading as a
+  rejection.
+
 ## 2026-09-18 — v2.36.7: the API and cockpit come back at logon, and the update dialog notices success
 
 - **A logon scheduled task re-runs `./setup.sh boot` on Windows.** podman-restart

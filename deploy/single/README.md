@@ -74,8 +74,10 @@ permanent.
 
 ## Prerequisites
 
-- **Claude Code CLI** — a hard prerequisite: it conducts the install and the
-  onboarding interview. There is no no-Claude-Code install path.
+- **Claude Code CLI** — a hard prerequisite: it conducts the install. There is
+  no no-Claude-Code install path. Onboarding is not part of it (2026-09-18):
+  the cockpit asks your name and the EA tour asks the rest, after the install
+  ends.
 - podman ≥ 4.9 (validated on 4.9.3) **with compose support** (`podman compose`
   must answer; `docker compose` is accepted as a dev-box fallback), plus
   `curl`, `openssl`, `git`, and `uv` (which supplies CPython 3.12). Node ≥ 22
@@ -204,7 +206,7 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh verify      # verify.sh, then live, then the capability manifest
 ./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
 ./setup.sh boot        # asks your name (once), starts the API detached, checks the roster
-./setup.sh demo        # fixture email -> triage -> YOUR approval -> dry-run provenance
+./setup.sh demo        # fixture email -> triage -> YOUR approval -> a real graph write, provenance stamped
 ./setup.sh status      # postconditions only, mutates nothing
 ./setup.sh stop        # stops the API that `boot` started
 ```
@@ -224,12 +226,16 @@ waits in place for both:
 1. **Your name** (`boot`) — becomes `CC_OPERATOR_NAME` and the provenance
    actor on your decisions. Headless runs gate with exit 3 instead of asking.
 2. **The demo approval** (`demo`) — the script feeds
-   `fixtures/emails/001-invoice-due.eml`, steps the dispatcher (a real
+   `fixtures/emails/007-ownership-change.eml`, steps the dispatcher (a real
    inference against your endpoint — commonly a few minutes), and then waits
    while you open the cockpit at http://127.0.0.1:3080, read the proposal in
    the **Decisions Inbox**, and decide. That gate is the product; the script
-   never decides for you. It then verifies the decision and the `[dry-run]`
-   execution landed on the event log.
+   never decides for you. It then verifies the decision and the execution
+   landed on the event log — and fails honestly on a `work.failed` event
+   rather than reporting a failed execution as a rejection. The fixture is
+   knowledge-only on purpose: triage proposes a graph episode, which the
+   Executor performs **for real** against your local graph, so the demo needs
+   no Jira and proves the whole spine.
 
 The API runs detached afterward (log: `deploy/single/uvicorn.log`), and so
 does the **cockpit server** — `web/server-dist`, the same Node process the k3s
@@ -240,13 +246,14 @@ WebSocket proxy the Node server owns, so 8080 alone sits at CONNECTING with
 404s (2026-09-17 Windows run). `./setup.sh stop` stops both and PROVES the
 ports are free — under Git Bash `kill` reports success against a native
 Windows process it never signalled. **Deliberately still OFF after the demo, each one an
-explicit flip when you decide:** live executor mode (`CC_EXECUTOR_MODE` in
-the root `.env` — until then every EXECUTED proposal is a logged simulation),
-the mail feed and dispatch drain (`CC_FEED_ENABLED` / `CC_DISPATCH_ENABLED` +
-their schedules in the cockpit's Crons tab), every recurring schedule (seeded
-disabled), the onboarding interview (run `/setup` with Claude any time — it
-writes operator episodes into the knowledge graph), and the sandbox runner
-(below). Two demo traps worth knowing: re-POSTing the same email is a silent
+explicit flip when you decide:** the mail feed and dispatch drain
+(`CC_FEED_ENABLED` / `CC_DISPATCH_ENABLED` + their schedules in the cockpit's
+Crons tab), every recurring schedule (seeded disabled), and the sandbox runner
+(below). The executor is NOT one of them — it runs `live` from the first
+approval (2026-09-18); the gate is the safety, and `dry_run` no-ops every
+capability including the internal ones. Onboarding waits for you in the
+cockpit: a first-run prompt bar asks your name, and the EA's team tour asks
+the rest and records it in the knowledge graph through the normal gate. Two demo traps worth knowing: re-POSTing the same email is a silent
 no-op (repeat Message-IDs are terminal by design — recover a stuck item with
 `POST /api/work/<id>/requeue`), and the model pickers need the API restarted
 at least once after an update that adds routes.

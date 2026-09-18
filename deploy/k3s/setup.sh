@@ -7,7 +7,7 @@
 #   same protocol; the substrate is the only difference.
 #
 #   The rule it exists to enforce: an AGENT elicits answers, diagnoses a
-#   failure, and conducts the interview. EVERYTHING that mutates anything is
+#   failure. EVERYTHING that mutates anything is
 #   this script. If a conductor is composing a command, it is off the rails.
 #
 #   This file ORCHESTRATES; it does not reimplement. Every real operation
@@ -26,7 +26,7 @@
 #     stack       build the three local images if missing, apply every
 #                 manifest, mint the kubeconfigs, gVisor
 #     app         venv, editable install, root .env, web/.env, cockpit build,
-#                 systemd units — ends at the first-boot USER-ACTION gate
+#                 systemd units, first boot (the roster hires itself)
 #     verify      verify.sh (+ --clean-install passthrough) + README §9 smokes
 #
 #     status      re-run postconditions only, nothing mutating
@@ -175,10 +175,11 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
 # INTO it and FATALs if the file is absent (mint-keys.sh:42). That is why this
 # lives here and is called from the llm phase, not only from app.
 #
-# CC_EXECUTOR_MODE is forced to dry_run on a file we just created: .env.example
-# ships `live`, and a fresh install must not reach the outside world before the
-# operator says so. An existing file is never touched — a deliberate `live`
-# survives every re-run.
+# CC_EXECUTOR_MODE stays at .env.example's `live` (v2.37.0; a fresh install
+# used to be forced to dry_run, and the unit pinned it — see the unit file's
+# history). The approval gate is the safety; nothing proposes on its own until
+# the operator enables the feed, the drain or a schedule. An existing file is
+# never touched.
 ensure_app_env() {
   if [[ -f "$APP_ENV" ]]; then
     pass "app-env" "the app's .env already exists — only empty values will be filled"
@@ -186,8 +187,7 @@ ensure_app_env() {
   fi
   cp "$REPO_ROOT/.env.example" "$APP_ENV" || { fail "app-env" "could not create $APP_ENV"; return 1; }
   chmod 600 "$APP_ENV"
-  set_kv "$APP_ENV" CC_EXECUTOR_MODE dry_run
-  pass "app-env" "created the app's .env from .env.example (0600), CC_EXECUTOR_MODE=dry_run"
+  pass "app-env" "created the app's .env from .env.example (0600)"
 }
 
 # ssh to the compute node, non-interactively. Used read-only everywhere in
@@ -781,34 +781,16 @@ phase_app() {
     sudo cp "$REPO_ROOT/deploy/pi/cc-nerve.service" /etc/systemd/system/ || return 1
   step "daemon-reload" "systemd reloaded" sudo systemctl daemon-reload || return 1
 
-  # cc-uvicorn is ENABLED, NOT STARTED — the first-boot hold. The API reads the
-  # instance's env once at start, so a boot before the onboarding interview
-  # runs the whole app under stale answers (it hired an agent under the
-  # rehearsal persona once, 2026-08-26). `enable` without `--now` still brings
-  # it up on every subsequent boot.
-  step "enable-cc-uvicorn" "cc-uvicorn enabled but NOT started (first-boot hold — the interview lands first)" \
-    sudo systemctl enable cc-uvicorn || return 1
-  step "enable-rest" "cc-nerve, cc-sandbox-runner, cc-graph-bolt, the backup timer and the update watcher enabled and started" \
-    sudo systemctl enable --now cc-nerve cc-sandbox-runner cc-graph-bolt cc-backup.timer cc-update.path || return 1
-
-  # The gate DISSOLVES once the API runs: a re-run after first boot must
-  # converge to clean and continue into verify, not stop here forever.
-  if systemctl is-active --quiet cc-uvicorn; then
-    pass "first-boot" "cc-uvicorn is running — first boot already happened"
-    return 0
-  fi
-  useraction "first-boot" "the stack is installed and holding — conduct the onboarding interview, then start the API and verify"
+  # First boot is no longer held for an interview (v2.37.0): the operator's
+  # name is asked in the cockpit and stored as an app setting, and the team
+  # tour asks the rest. The unit's ExecStartPre waits on 127.0.0.1:5442.
+  step "enable-units" "cc-uvicorn, cc-nerve, cc-sandbox-runner, cc-graph-bolt, the backup timer and the update watcher enabled and started" \
+    sudo systemctl enable --now cc-uvicorn cc-nerve cc-sandbox-runner cc-graph-bolt cc-backup.timer cc-update.path || return 1
   note ""
-  note "== your move: first boot is deliberately manual =="
-  note "cc-uvicorn is enabled but NOT running. The API reads the instance's env"
-  note "once at start, so the interview has to land first."
-  note ""
-  note "  1. conduct the onboarding interview (the /setup skill drives it)"
-  note "  2. sudo systemctl start cc-uvicorn      # ExecStartPre waits on 127.0.0.1:5442"
-  note "  3. ./deploy/k3s/setup.sh verify --clean-install"
-  note ""
-  note "Then README.md phase 8: INSTANCE DATA — what a clean install does NOT"
+  note "First boot hires the roster. Next: ./deploy/k3s/setup.sh verify --clean-install,"
+  note "then README.md phase 8: INSTANCE DATA — what a clean install does NOT"
   note "restore (the n8n Gmail credential above all). Decide each deliberately."
+  note "Open the cockpit: it asks your name, and your EA runs the team tour."
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -875,7 +857,6 @@ phase_status() {
     if systemctl is-active --quiet "$u"; then
       pass "unit-${u}" "active"
     elif systemctl is-enabled --quiet "$u" 2>/dev/null; then
-      # cc-uvicorn reads exactly this way between the app phase and first boot.
       warn "unit-${u}" "enabled but not running"
     else
       fail "unit-${u}" "not enabled — run: ./deploy/k3s/setup.sh app"

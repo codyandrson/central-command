@@ -73,6 +73,17 @@ async def lifespan(app: FastAPI):
     # events). Installed here because the handler needs the serving loop.
     event_bridge.install()
     _signal_handlers = _release_followers_on_signal()
+    # The operator's name is an app setting since v2.37.0 (set from the
+    # cockpit's first-run prompt); CC_OPERATOR_NAME stays the env fallback.
+    # Loaded BEFORE the startup hires below: a template hire renders the
+    # name into its charter exactly once.
+    try:
+        from central_command.db import repo as _repo
+        stored = await _repo.get_app_setting("operator_name", {})
+        if isinstance(stored, dict) and str(stored.get("name") or "").strip():
+            settings.operator_name = str(stored["name"]).strip()
+    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+        pass
     # The roster reflects the whole team from startup — an agent must be
     # visible (and its charter editable) BEFORE its first run, not after.
     try:

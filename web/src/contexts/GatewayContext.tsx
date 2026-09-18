@@ -18,6 +18,11 @@ interface GatewayContextValue {
   /** Executor mode from the `status` RPC: 'dry_run' means every approval is
    *  SIMULATED. '' until the first poll answers — never assume 'live'. */
   executorMode: string;
+  /** The operator's name from the `status` RPC. '' until the first poll;
+   *  'the operator' is the UNNAMED default the first-run prompt keys on. */
+  operatorName: string;
+  /** Name the operator (persisted server-side as an app setting). */
+  nameOperator: (name: string) => Promise<void>;
   sparkline: string;
   isVisibleRef: React.MutableRefObject<boolean>;
   /** Subscribe to all gateway events. Returns unsubscribe function. */
@@ -45,6 +50,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const [model, setModel] = useState('--');
   const [thinking, setThinking] = useState('--');
   const [executorMode, setExecutorMode] = useState('');
+  const [operatorName, setOperatorName] = useState('');
   const [sparkline, setSparkline] = useState('▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁');
   const activityBuckets = useRef<number[]>(new Array(30).fill(0));
   const currentBucketEvents = useRef(0);
@@ -86,6 +92,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       const agent = h?.agent as Record<string, unknown> | undefined;
       const config = h?.config as Record<string, unknown> | undefined;
       setExecutorMode(String(h?.executorMode || ''));
+      setOperatorName(String(h?.operatorName || ''));
       let clean = normalizeModel(String(agent?.model || h?.model || config?.model || h?.defaultModel || '--'));
 
       // Extract thinking/effort level from status response
@@ -133,6 +140,11 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(iv);
   }, [connectionState, updateStatus]);
 
+  const nameOperator = useCallback(async (name: string) => {
+    const r = await rpcRef.current('operator.name.set', { name }) as { operatorName?: string };
+    setOperatorName(String(r?.operatorName || name));
+  }, []);
+
   const value = useMemo<GatewayContextValue>(() => ({
     connectionState,
     connect,
@@ -143,12 +155,14 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     model,
     thinking,
     executorMode,
+    operatorName,
+    nameOperator,
     sparkline,
     isVisibleRef,
     subscribe,
   }), [
     connectionState, connect, disconnect, rpc, connectError,
-    reconnectAttempt, model, thinking, executorMode, sparkline, subscribe,
+    reconnectAttempt, model, thinking, executorMode, operatorName, nameOperator, sparkline, subscribe,
     // isVisibleRef is a stable ref — no need to track
   ]);
 

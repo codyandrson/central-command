@@ -26,8 +26,9 @@ mirror/no-egress installs read [`deploy/AIRGAP.md`](deploy/AIRGAP.md) first.
 
 ### 2. Prerequisites
 
-- **[Claude Code](https://claude.com/claude-code)** — it conducts the install
-  and the onboarding interview; there is no by-hand path.
+- **[Claude Code](https://claude.com/claude-code)** — it conducts the install;
+  there is no by-hand path. Onboarding is not its job any more (2026-09-18):
+  that happens in the cockpit, after the install ends.
 - **podman ≥ 4.9**, plus `git`, `curl`, `openssl`, `envsubst` (gettext), and
   `uv`. Node ≥ 22 is optional (without it the cockpit UI is not built; the
   API still runs). `./setup.sh preflight` checks every one by name.
@@ -52,12 +53,21 @@ the script does all the mutating.
 
 ### 4. Onboarding
 
-`/setup` ends with the **onboarding interview**: Claude asks who you are and
-how you want the team to operate (your name for canonical graph naming, graph
-scope, approval posture), seeds the knowledge graph, and hands you a **watched
-dry-run demo** — the executor starts in `dry_run`, so every write is logged,
-gated, and performed against nothing until you deliberately flip
-`CC_EXECUTOR_MODE=live`.
+`/setup` ends inside a **watched demo** — a fixture email in, a proposal in the
+Decisions Inbox, your approval, a real execution with provenance stamped — and
+then hands off to the cockpit. Claude Code is done at that point.
+
+Onboarding itself is the product's, in two parts: the cockpit asks **your
+name** on first run (a prompt bar you cannot dismiss; until you answer, the
+agents call you "the operator"), and your EA hosts the **team tour**, which
+introduces each agent and asks the rest — your work environment, your team,
+how you like to work — recording your answers as knowledge-graph episodes you
+approve one by one, which is also how you learn the propose→approve loop.
+
+The executor is **live** from the start: every approval performs the real
+write. The approval gate is the safety, not a simulation mode. What still
+ships OFF, each an explicit flip when you decide: the mail feed, the dispatch
+drain, and every recurring schedule.
 
 ## Updating a deployment
 
@@ -134,7 +144,8 @@ approval and survive a restart.
 
 **Fresh install** (you have an LLM API key and nothing else): run **`/setup`**
 in Claude Code from the repo root — Claude Code is a hard prerequisite of
-setup — and it takes you from zero to a verified, onboarded, dry-run system
+setup — and it takes you from zero to a verified system and a watched demo,
+then hands off to the cockpit for onboarding
 (`.claude/skills/setup/`, deployment profile `deploy/single/`).
 
 Dev checkout:

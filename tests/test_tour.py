@@ -138,6 +138,12 @@ async def test_the_brief_routes_around_agents_a_task_would_fail_for():
     # the tour identically to the day-one calibration death, so the brief
     # must state the re-ask rule that survives it.
     assert "CLOSES the lane" in text
+    # v2.37.0: the tour replaced the setup-time interview, so the host brief
+    # must ask about the operator's world — environment, team, preferences —
+    # BEFORE the first teammate, and record it as episodes.
+    world = text.index("THEIR WORLD")
+    assert world < text.index("2. THE ARC")
+    assert "Team: <full name>" in text or "knowledge-steward" in text
     assert text.count("`ask_operator(needs_discussion=True)` again") >= 1
 
 
