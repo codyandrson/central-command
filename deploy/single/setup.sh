@@ -852,9 +852,16 @@ phase_stack() {
   # MACHINE (Windows/macOS) ships disabled: after a host reboot every
   # container sat Exited (2026-09-17 Windows run). Enable it where there is
   # a machine; a Linux host with a system podman has no machine and skips.
+  # The machine's containers are ROOTLESS by default (the `user` account),
+  # so the unit that restarts them is the USER instance — the system unit
+  # restarted nothing after the 2026-09-18 reboot. Enable both; the user's
+  # session lingers on a podman machine, so the user unit runs at boot.
   if [[ -n "$(podman machine list --format '{{.Name}}' 2>/dev/null)" ]]; then
-    if podman machine ssh -- sudo systemctl enable --now podman-restart.service </dev/null >/dev/null 2>&1; then
-      pass "restart-on-boot" "podman-restart.service enabled in the podman machine (containers return after a host reboot)"
+    # `--global`, not `--user enable`: the machine's ~/.config/systemd is
+    # root-owned, so a user enable is "Access denied"; --global writes
+    # /etc/systemd/user and covers every user instance.
+    if podman machine ssh -- 'sudo systemctl --global enable podman-restart.service && XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user start podman-restart.service; sudo systemctl enable --now podman-restart.service' </dev/null >/dev/null 2>&1; then
+      pass "restart-on-boot" "podman-restart.service enabled in the podman machine, user and system instances (containers return after a host reboot)"
     else
       warn "restart-on-boot" "could not enable podman-restart.service in the podman machine — run: podman machine ssh -- sudo systemctl enable --now podman-restart.service"
     fi

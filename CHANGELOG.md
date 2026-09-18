@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.36.6: containers come back on a rootless machine, and staging outlives a fetch
+
+Two reboots and one cockpit-driven update on the Windows box, after v2.36.5.
+
+- **`podman-restart` is the USER unit on a podman machine.** The machine's
+  containers are rootless, so the system unit v2.36.4 enabled restarted
+  nothing after a reboot; and `systemctl --user enable` is "Access denied"
+  there because the machine's `~/.config/systemd` is root-owned. The stack
+  phase enables it with `--global` (and starts it) — every container was
+  back, healthy, within a minute of the next boot with nothing started by
+  hand.
+- **The cockpit's update proxy streams over `node:http` with no timeout.**
+  The upload reached the API and staging began, then undici's fetch gave up
+  on response headers at 300 s ("gateway unreachable: fetch failed") while
+  the API went on staging.
+- **The API's `update.sh` ceiling is an hour, not ten minutes.** A 600 s
+  `subprocess.run` timeout killed the stage after the import of a 270 MB zip
+  (~13 minutes on that box: `unzip` and `tar` over docs/vendor's thousands
+  of small files) — the import committed, no plan was written.
+
 ## 2026-09-18 — v2.36.5: the cockpit's update routes, and a Windows proxy is three seams
 
 The v2.27.3 → v2.36.4 update ran on the Windows box through

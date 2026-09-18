@@ -236,7 +236,10 @@ async def update_status() -> JSONResponse:
 def _run_update_sh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [_bash() or "bash", str(SINGLE_DIR / "update.sh"), *args],
-        capture_output=True, text=True, cwd=str(SINGLE_DIR), timeout=600,
+        # 600 s killed a stage mid-plan on a Windows box where import alone is
+        # ~13 min (unzip + tar of docs/vendor, 2026-09-18). The script's own
+        # gates bound the work; this is a last-resort ceiling, not a budget.
+        capture_output=True, text=True, cwd=str(SINGLE_DIR), timeout=3600,
     )
 
 
