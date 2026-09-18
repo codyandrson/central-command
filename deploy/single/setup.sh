@@ -1170,10 +1170,16 @@ phase_boot() {
     local wrapper="$HERE/cc-boot.cmd" bashw
     bashw="$(cygpath -w "$(command -v bash)")"
     printf '@echo off\r\n"%s" -lc "cd '\''%s'\'' && ./setup.sh boot >> boot-at-logon.log 2>&1"\r\n' "$bashw" "$HERE" >"$wrapper"
+    # An onlogon task needs an elevated shell ("Access is denied" otherwise,
+    # 2026-09-18); the user's Startup folder needs nothing — same moment, a
+    # console window while boot runs. Task first, Startup folder as the fallback.
+    local startup="$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup"
     if schtasks //create //f //tn cc-boot //sc onlogon //tr "$(cygpath -w "$wrapper")" >/dev/null 2>&1; then
       pass "boot-at-logon" "scheduled task cc-boot re-runs ./setup.sh boot at every logon (log: $HERE/boot-at-logon.log)"
+    elif [[ -d "$startup" ]] && cp "$wrapper" "$startup/cc-boot.cmd" 2>/dev/null; then
+      pass "boot-at-logon" "Startup-folder entry cc-boot.cmd re-runs ./setup.sh boot at every logon (no elevation; an elevated shell can instead: schtasks /create /f /tn cc-boot /sc onlogon /tr \"$(cygpath -w "$wrapper")\")"
     else
-      warn "boot-at-logon" "could not register the cc-boot scheduled task — after a reboot, run: ./setup.sh boot"
+      warn "boot-at-logon" "could not register a logon entry — after a reboot, run: ./setup.sh boot"
     fi
   fi
   note "cockpit: http://127.0.0.1:${cport}  (the feed, the drain and every schedule are OFF until you turn them on)"

@@ -4,6 +4,15 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.37.1: the logon entry needs no elevation
+
+`schtasks /create … /sc onlogon` is "Access is denied" from a shell that is
+not elevated — which is what an operator's Git Bash usually is (and what the
+v2.36.7 boot phase ran under on the Windows box). The boot phase now falls
+back to the user's Startup folder (`cc-boot.cmd`, same moment, no
+privilege; a console window while boot runs) and says which of the two it
+registered. Proven on the box: the logon trigger fired at the next boot and
+the task's wrapper brought the API and the cockpit back.
 ## 2026-09-18 — v2.37.0: onboarding happens in the product, and a fresh install starts live
 
 - **The operator's name is asked by the cockpit, not by Claude Code.** While
