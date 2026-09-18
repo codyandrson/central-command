@@ -1240,6 +1240,27 @@ async def park_proposal_retry(proposal_id: str, retry_state: dict) -> None:
         await conn.close()
 
 
+async def claim_proposal_for_execution(proposal_id: str) -> str | None:
+    """Atomically claim an operator decision: AWAITING_HUMAN/PROPOSED →
+    EXECUTING, returning the status it held, or None if it is no longer
+    awaiting one. The flip IS the lock (2026-09-17): an add's full probe
+    keeps the Executor busy 20–40 s, and the old read-then-check guard let
+    every click in that window execute again — 11 duplicate proxy rows and
+    three parallel resumes of one session in a single evening."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            """
+            update proposal set status = 'EXECUTING'
+             where id = $1 and status in ('AWAITING_HUMAN', 'PROPOSED')
+            returning (select status from proposal where id = $1)
+            """,
+            proposal_id,
+        )
+    finally:
+        await conn.close()
+
+
 async def claim_proposal_retry(proposal_id: str) -> dict | None:
     """Atomically claim a parked execution: RETRY_PENDING → EXECUTING, returning
     the whole row, or None if it is not parked (someone else claimed it). The

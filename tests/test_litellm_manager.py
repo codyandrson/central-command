@@ -218,7 +218,9 @@ async def test_update_model_patches_only_sent_fields(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"model_name": "claude-sonnet-5", "model_info": {"id": "abc-123"}}
+            # A phantom id, as the live proxy answers (2026-09-17): the client
+            # must report the row it addressed.
+            return {"model_name": "claude-sonnet-5", "model_info": {"id": "not-the-row"}}
 
     async def fake_call(method, path, json_body=None):
         seen.update(method=method, path=path, body=json_body)

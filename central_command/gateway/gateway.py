@@ -511,7 +511,12 @@ async def approve_and_execute(
     prop_row = await repo.load_proposal(proposal_id)
     if prop_row is None:
         raise GatewayError(f"no proposal {proposal_id}")
-    if prop_row["status"] not in ("AWAITING_HUMAN", "PROPOSED"):
+    # The status flip is the lock, not a read-then-check: the Executor holds
+    # this proposal for the length of the write (an add's probe is 20–40 s),
+    # and a second click inside that window used to pass the same check and
+    # execute again (2026-09-17: 8 proposals ran 2–4×). EXECUTING is a status
+    # the cockpit already knows and the inbox already hides.
+    if await repo.claim_proposal_for_execution(proposal_id) is None:
         raise GatewayError(
             f"proposal {proposal_id} is not awaiting approval (status {prop_row['status']})"
         )
@@ -561,6 +566,12 @@ async def approve_and_execute(
             session_id, proposal_id, prop_row["agent_id"], failure, model,
             detach=detach,
         )
+    except BaseException:
+        # Not the Executor's verdict — a crash on the way. Every action it
+        # completed is on the log; the claim is handed back so the operator
+        # can decide again instead of the row sitting EXECUTING forever.
+        await repo.set_proposal_status(proposal_id, prop_row["status"])
+        raise
     return await _record_execution_success(
         session_id, proposal_id, prop_row["agent_id"],
         outcome.result_text, outcome.provenance.model_dump(mode="json"),

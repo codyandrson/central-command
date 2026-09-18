@@ -1182,9 +1182,11 @@ async def update_model(
     resp = await _call("PATCH", f"/model/{mid}/update", body)
     _check(resp, "update_model")
     body_out = resp.json()
-    info = (body_out.get("model_info") or {}) if isinstance(body_out, dict) else {}
     return {"ok": True, "kind": "litellm", "operation": "update_model", "model": {
-        "model_id": info.get("id") or mid,
+        # The id we ADDRESSED, never the response's: LiteLLM's PATCH answers with
+        # a model_info.id that is not the row's (2026-09-17: three updates, three
+        # phantom ids, one 404 and one flag-set written onto the wrong model).
+        "model_id": mid,
         "model_name": (body_out.get("model_name") if isinstance(body_out, dict) else None) or model_name,
         "updated": sorted(body.keys()),
     }}

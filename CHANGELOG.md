@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-17 — v2.36.2: an approval executes once, and an update names the row it touched
+
+Reviewing the first full Kilo.ai autodiscovery pass (318 single-model add
+tasks): 8 proposals were approved and executed two to four times, 20 seconds
+apart, leaving 11 duplicate deployments on the proxy and resuming the same
+session two or three times in parallel — which is where the repeated
+"declare the measured capabilities" and "add the document" proposals came
+from. The gateway checked the status BEFORE the Executor ran and flipped it
+to EXECUTED only after; an add's full capability probe keeps the Executor
+busy 20–40 s, and every click inside that window passed the same check.
+
+- `gateway.approve_and_execute` now CLAIMS the proposal atomically
+  (`AWAITING_HUMAN`/`PROPOSED` → `EXECUTING`, `repo.claim_proposal_for_execution`)
+  before anything runs — the status flip is the lock, the same idiom as the
+  retry sweep's `claim_proposal_retry`. A second approve, or a reject, during
+  execution is a 409. A crash that is not the Executor's verdict hands the
+  claim back so the operator can decide again. `tests/test_approve_once.py`.
+- `integrations/litellm.update_model` reports the model id it ADDRESSED.
+  LiteLLM's `PATCH /model/{id}/update` answers with a `model_info.id` that is
+  not the row's; the client preferred it, the agent read the phantom id from
+  the execution result, targeted it (404, FAILED) and then wrote one model's
+  measured flags onto another's row.
+
 ## 2026-09-17 — v2.36.1: a relay that cannot go stale, and a graph outage is a 503
 
 The first Graph-panel read after every nightly backup was a 500 and a red
