@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.37.4: the estimate learns its density from the proxy's own count
+
+The v2.36.0 overflow guard estimated at a fixed 3 chars per token and never
+tripped: a turn that opened eleven 8k-character emails read as 65% of the
+window and the proxy rejected it (one more dead session after the fix,
+2026-09-18). The proxy counts the exact bytes sent, tool schemas included,
+and reports them in every response — `WindowedModel` now records that count
+per model (`record_density`, clamped, one measurement replaces the guess),
+and the estimate, the overflow guard and the tool-result ceiling use the
+measured density from the first response on.
+
 ## 2026-09-18 — v2.37.3: the bolt relay's second socat had no address
 
 `cc-graph-bolt.service` (v2.36.1) relays 127.0.0.1:7474 and :7687 to the

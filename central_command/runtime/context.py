@@ -135,6 +135,40 @@ async def _discover(name: str, field: str) -> int | None:
 # mail. The window guard below (`OVERFLOW_FRACTION`) covers the rest.
 CHARS_PER_TOKEN = 3
 
+# Measured chars-per-token per model, from the proxy's own count: every
+# response carries `usage.input_tokens` for the exact bytes `WindowedModel`
+# just sent, and that count INCLUDES the tool schemas the estimate cannot
+# see. One measurement per model replaces the guess above for every later
+# request on that model (a session that opened eleven 8k-char emails read as
+# 65% full at 3 chars/token and was rejected, 2026-09-18 — the proxy counted
+# ~2.1 including ~60 tool schemas).
+_density: dict[str, float] = {}
+DENSITY_BOUNDS = (1.0, 6.0)
+
+
+def _model_key(model: str | None) -> str:
+    return (model or settings.default_model or "").split(":", 1)[-1]
+
+
+def density_for(model: str | None) -> float:
+    """Chars per token to estimate with for `model`: measured if any response
+    from it has been seen this process, else `CHARS_PER_TOKEN`."""
+    return _density.get(_model_key(model), float(CHARS_PER_TOKEN))
+
+
+def record_density(model: str | None, messages, usage) -> None:
+    """Calibrate from what the proxy counted for `messages`. Cache tokens are
+    input the provider counted separately; they still occupied the window."""
+    tokens = sum(int(getattr(usage, f, 0) or 0)
+                 for f in ("input_tokens", "cache_read_tokens", "cache_write_tokens"))
+    if tokens <= 0 or not messages:
+        return
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    chars = len(ModelMessagesTypeAdapter.dump_json(messages))
+    lo, hi = DENSITY_BOUNDS
+    _density[_model_key(model)] = min(hi, max(lo, chars / tokens))
+
 # One tool result may take this share of the model's input window
 # (`tool_result_ceiling`) — enough for a whole email thread, and four of them
 # in one turn still leave room for the charter and the model's own answer.
@@ -161,7 +195,8 @@ def tool_result_ceiling() -> int:
     has asked the proxy. Derived from the INPUT window on purpose — the old
     ceiling was the OUTPUT cap × 4 (a million characters) and never fired."""
     window = min(_windows.values()) if _windows else settings.context_window
-    return int(window * TOOL_RESULT_SHARE * CHARS_PER_TOKEN)
+    density = min(_density.values(), default=float(CHARS_PER_TOKEN))
+    return int(window * TOOL_RESULT_SHARE * density)
 
 
 def estimate_tokens(run_state: dict) -> int:
@@ -316,11 +351,12 @@ async def load_settings() -> dict:
     return {**DEFAULTS, **(stored if isinstance(stored, dict) else {})}
 
 
-def estimate_messages(messages) -> int:
-    """`estimate_tokens` for pydantic-ai message objects."""
+def estimate_messages(messages, model: str | None = None) -> int:
+    """`estimate_tokens` for pydantic-ai message objects, at the measured
+    density of `model` when one is known."""
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-    return len(ModelMessagesTypeAdapter.dump_json(messages)) // CHARS_PER_TOKEN
+    return int(len(ModelMessagesTypeAdapter.dump_json(messages)) / density_for(model))
 
 
 def drop_thinking(messages):
@@ -580,9 +616,14 @@ class WindowedModel(WrapperModel):
     it, and no path can submit a turn the backend has no slot for."""
 
     async def request(self, messages, model_settings, model_request_parameters):
+        sent = working_window(messages)
         async with model_turn_slot(self.wrapped.model_name):
-            return await self.wrapped.request(
-                working_window(messages), model_settings, model_request_parameters)
+            response = await self.wrapped.request(sent, model_settings, model_request_parameters)
+        try:
+            record_density(self.wrapped.model_name, sent, getattr(response, "usage", None))
+        except Exception:  # noqa: BLE001 — a calibration miss is never a failed turn
+            pass
+        return response
 
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters,
@@ -598,8 +639,12 @@ async def _prepare_window(ctx, messages):
         return messages
     cfg = await load_settings()
     session_id = getattr(ctx.deps, "session_id", None)
-    window = await window_for(getattr(ctx.model, "model_name", None))
+    model_name = getattr(ctx.model, "model_name", None)
+    window = await window_for(model_name)
     headroom = int(cfg["output_headroom_tokens"]) if cfg["output_headroom"] else 0
+
+    def est(msgs) -> int:
+        return estimate_messages(msgs, model_name)
 
     def trimmed(msgs):
         if cfg["drop_thinking"]:
@@ -623,7 +668,7 @@ async def _prepare_window(ctx, messages):
         return apply_summary(messages, int(summary["through"]), summary["text"]) if summary else messages
 
     working = trimmed(with_summary(cached))
-    fraction = (estimate_messages(working) + headroom) / window
+    fraction = (est(working) + headroom) / window
 
     if cfg["summarize"] and session_id and fraction >= float(cfg["summarize_threshold"]):
         base = with_summary(cached)          # what the model currently sees, raw
@@ -655,7 +700,7 @@ async def _prepare_window(ctx, messages):
 
             await repo.update_session_run_state(session_id, {"context_summary": summary})
             working = trimmed(with_summary(summary))
-            after = estimate_messages(working)
+            after = est(working)
             await events.emit(
                 "session.context_compacted", ref_id=session_id,
                 payload={"agent_id": getattr(ctx.deps, "agent_id", None),
@@ -669,9 +714,10 @@ async def _prepare_window(ctx, messages):
         # The request would not fit. Clip rather than send a doomed turn: the
         # proxy's 400 fails the whole session and the dispatcher re-runs the
         # same oversized read (2026-09-16, ten sessions, three items).
-        before = estimate_messages(working)
-        clipped = clip_tool_results(working, int(window * OVERFLOW_CLIP_SHARE * CHARS_PER_TOKEN))
-        after = estimate_messages(clipped)
+        before = est(working)
+        clipped = clip_tool_results(
+            working, int(window * OVERFLOW_CLIP_SHARE * density_for(model_name)))
+        after = est(clipped)
         if after < before:
             from central_command import events
 
@@ -685,7 +731,7 @@ async def _prepare_window(ctx, messages):
             )
 
     if session_id:
-        _sent[session_id] = estimate_messages(working)
+        _sent[session_id] = est(working)
     if cfg["pressure_warning"] and fraction >= settings.context_pressure_threshold:
         working = add_pressure_note(working, fraction)
     return working

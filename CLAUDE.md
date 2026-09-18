@@ -364,10 +364,16 @@ where the story is gone.
   (unset temperature means the backend default, not deterministic), and the
   field ORDER of the schema (with schema-constrained decoding, index arrays
   before a `reasoning` field means the model answers before it thinks).
+- **In a unit's `ExecStart=/bin/sh -c`, `A && B & exec C` backgrounds A and B
+  together.** `&` binds the whole `&&` chain into one background subshell,
+  so a variable set in A is empty in C (the bolt relay opened to "" for 13
+  hours, 2026-09-18). Terminate the lookup with `;` and let only the relay
+  that should background carry the `&`; `tests/test_graph_bolt_unit.py`
+  runs the line under stubs and asserts both relays get the address.
 - **A tool result is bounded by the INPUT window, and mail tokenises at ~2
   chars/token.** `tools._clip` derives its ceiling from the smallest
   discovered input window (`context.tool_result_ceiling`), never from the
-  output cap; the estimate uses `CHARS_PER_TOKEN = 3`; and `prepare_window`
+  output cap; the estimate starts at `CHARS_PER_TOKEN = 3` and switches to the density the proxy's own token count reveals (`record_density`, per model, tool schemas included); and `prepare_window`
   clips a request that would not fit rather than sending it (2026-09-16:
   four `mail_read`s in one turn, ten dead sessions). A per-tool cap goes on
   the tool (`_MAIL_BODY_CEILING`), not on the constant.

@@ -24,9 +24,11 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", False)
     context._windows.clear()
     context._sent.clear()
+    context._density.clear()
     yield
     context._windows.clear()
     context._sent.clear()
+    context._density.clear()
 
 
 def test_tool_result_ceiling_follows_the_smallest_discovered_window():
@@ -122,6 +124,59 @@ async def test_a_request_that_fits_is_not_clipped(monkeypatch):
     assert "session.context_overflow_clipped" not in emitted
     assert not any("[CLIPPED" in p.content for m in out if isinstance(m, ModelRequest)
                    for p in m.parts if isinstance(p, ToolReturnPart))
+
+
+async def test_density_is_measured_from_what_the_proxy_counted(monkeypatch):
+    """The estimate's chars-per-token is a guess until the first response:
+    the proxy counts the exact bytes sent, tool schemas included."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.usage import RequestUsage
+
+    msgs = _transcript(turns=2, payload=3000)
+    chars = len(__import__("pydantic_ai.messages", fromlist=["x"]).ModelMessagesTypeAdapter.dump_json(msgs))
+    counted = chars // 2  # the proxy says ~2 chars/token, not 3
+
+    def echo(messages, info):
+        return ModelResponse(parts=[TextPart("ok")], usage=RequestUsage(input_tokens=counted))
+    # Trims off: the density is measured on the bytes actually SENT, and the
+    # count below was taken over the raw transcript.
+    _pin(monkeypatch, {"summarize": False, "pressure_warning": False, "drop_thinking": False,
+                       "clear_tool_results": False, "output_headroom": False}, window=100_000)
+    model = context.WindowedModel(FunctionModel(echo))
+    name = model.wrapped.model_name
+    before = context.estimate_messages(msgs, name)
+    await context.prepare_window(_ctx(model_name=name), msgs)
+    await model.request(msgs, None, ModelRequestParameters())
+    assert abs(context.density_for(name) - 2.0) < 0.05
+    assert context.estimate_messages(msgs, name) > before * 1.4
+    # Clamped: a nonsense count cannot make the estimate vanish.
+    context.record_density(name, msgs, RequestUsage(input_tokens=1))
+    assert context.density_for(name) == context.DENSITY_BOUNDS[1]
+    context.record_density(name, msgs, RequestUsage(input_tokens=0))
+    assert context.density_for(name) == context.DENSITY_BOUNDS[1], "no tokens counted, no change"
+
+
+async def test_the_guard_trips_on_the_measured_density(monkeypatch):
+    """2026-09-18: eleven 8k-char reads estimated at 65% of the window at 3
+    chars/token and were rejected by the proxy. At the measured density the
+    same request is over the line and gets clipped."""
+    msgs = _transcript(turns=1, payload=20_000)
+    _pin(monkeypatch, {"summarize": False, "pressure_warning": False, "output_headroom": False},
+         window=12_000)
+    emitted = []
+
+    async def fake_emit(kind, **kw):
+        emitted.append(kind)
+    from central_command import events
+    monkeypatch.setattr(events, "emit", fake_emit)
+    assert context.estimate_messages(msgs, "cc-default") < 12_000 * context.OVERFLOW_FRACTION
+    await _window(_ctx(session_id="sess_d1"), msgs)
+    assert "session.context_overflow_clipped" not in emitted, "under the line at the default"
+    context._density["cc-default"] = 1.5
+    await _window(_ctx(session_id="sess_d2"), msgs)
+    assert "session.context_overflow_clipped" in emitted
 
 
 def test_context_overflow_is_semantic_so_the_attempt_cap_holds():
