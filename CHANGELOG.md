@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.36.7: the API and cockpit come back at logon, and the update dialog notices success
+
+- **A logon scheduled task re-runs `./setup.sh boot` on Windows.** podman-restart
+  brings the containers back after a reboot; the API and the cockpit server are
+  host processes and nothing brought them back. The boot phase registers
+  `cc-boot` (the mechanism the podman machine itself starts with); boot is
+  idempotent, so a process that already answers is left alone.
+- **The update dialog notices success.** After the runner reported healthy, the
+  header still offered the old version and Apply stayed enabled — a second
+  click would have re-applied the same version. The title, description and
+  button change, and the version badge refreshes.
+- **The demo phase exits 0 once the decision is taken in the same run** — the
+  gate's counted USERACTION no longer turns a completed install into
+  "stopped for your action".
+
 ## 2026-09-18 — v2.36.6: containers come back on a rootless machine, and staging outlives a fetch
 
 Two reboots and one cockpit-driven update on the Windows box, after v2.36.5.

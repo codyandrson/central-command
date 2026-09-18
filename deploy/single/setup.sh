@@ -1163,6 +1163,21 @@ phase_boot() {
       return 1
     fi
   fi
+  # The API and the cockpit are host processes, not containers: podman-restart
+  # brings the containers back after a reboot, nothing brings these two. On
+  # Windows a logon-triggered scheduled task re-runs this phase (idempotent —
+  # a process that answers is left alone), the same mechanism the podman
+  # machine itself starts with. Linux hosts have systemd units for this.
+  if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && command -v schtasks >/dev/null 2>&1; then
+    local wrapper="$HERE/cc-boot.cmd" bashw
+    bashw="$(cygpath -w "$(command -v bash)")"
+    printf '@echo off\r\n"%s" -lc "cd '\''%s'\'' && ./setup.sh boot >> boot-at-logon.log 2>&1"\r\n' "$bashw" "$HERE" >"$wrapper"
+    if schtasks //create //f //tn cc-boot //sc onlogon //tr "$(cygpath -w "$wrapper")" >/dev/null 2>&1; then
+      pass "boot-at-logon" "scheduled task cc-boot re-runs ./setup.sh boot at every logon (log: $HERE/boot-at-logon.log)"
+    else
+      warn "boot-at-logon" "could not register the cc-boot scheduled task — after a reboot, run: ./setup.sh boot"
+    fi
+  fi
   note "cockpit: http://127.0.0.1:${cport}  (a fresh install runs the executor in dry_run — nothing touches the world until you flip it)"
 }
 
@@ -1236,6 +1251,10 @@ phase_demo() {
     return 1
   fi
   pass "demo-decided" "decision recorded on the event log"
+  # The gate above counted a USERACTION; the operator has now taken it in this
+  # very run, so the phase must not exit 3 ("stopped for your action") on a
+  # completed install (2026-09-18 Windows run: PASS, PASS, exit 3).
+  ACTIONS=0
 
   local execd; execd="$(api_json "$(api_url)/api/events?kind=proposal.executed&limit=1" 'len(d.get("events",[]))')"
   if [[ "$execd" =~ ^[1-9] ]]; then

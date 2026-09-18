@@ -206,6 +206,10 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
   const local = progress?.mode === 'local';
   const logRef = local ? 'deploy/single/.update/apply.log' : 'journalctl -u cc-update';
   const stage = progress?.stage;
+  const done = progress?.status?.state === 'success';
+  // The badge and the header read the shared version store; refresh it once
+  // the runner is done so "Running vX" matches the version now serving.
+  useEffect(() => { if (done) void checkVersion(true); }, [done]);
   const staged = stage?.status?.state === 'success'
     && (stage.status.target === versionInfo.latest || stage.status.phase === 'up-to-date');
   const staging = !!(stage && (stage.pending || stage.inFlight || stage.status?.state === 'running'));
@@ -228,10 +232,14 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Update Available</DialogTitle>
+            <DialogTitle>{done ? 'Update Complete' : 'Update Available'}</DialogTitle>
             <DialogDescription>
-              Central Command <span className="font-mono font-semibold text-foreground">v{versionInfo.latest}</span> is
-              available. You're running <span className="font-mono text-muted-foreground">v{versionInfo.current}</span>.
+              {done ? (
+                <>Central Command <span className="font-mono font-semibold text-foreground">v{versionInfo.latest}</span> is running.</>
+              ) : (
+                <>Central Command <span className="font-mono font-semibold text-foreground">v{versionInfo.latest}</span> is
+                available. You're running <span className="font-mono text-muted-foreground">v{versionInfo.current}</span>.</>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
@@ -319,7 +327,17 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                 </button>
               </div>
             ) : !applying && progress?.status?.state !== 'running' && (
-              progress === null ? (
+              done ? (
+                // The runner reported healthy: the header and the button must
+                // notice, or a second click re-applies the same version
+                // (2026-09-18 Windows run).
+                <button
+                  onClick={() => onOpenChange(false)}
+                  className="w-full rounded-md border border-border py-2 text-sm hover:bg-muted transition-colors"
+                >
+                  Close
+                </button>
+              ) : progress === null ? (
                 <p className="text-sm text-muted-foreground animate-pulse">Checking update preparation…</p>
               ) : staging ? (
                 <p className="text-sm text-muted-foreground animate-pulse">

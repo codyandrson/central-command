@@ -10,3 +10,5 @@ uvicorn.pid
 cockpit.log
 cockpit.pid
 .curl/
+cc-boot.cmd
+boot-at-logon.log
