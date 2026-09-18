@@ -227,6 +227,7 @@ async def test_build_refuses_missing_dockerfile(monkeypatch, tmp_path):
     try:
         monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
+        monkeypatch.setattr(settings, "mcp_build_host", "build-host.example")
         (tmp_path / "servers" / server_id).mkdir(parents=True)
         with pytest.raises(executor.ExecutionFailed, match="Dockerfile does not exist"):
             await executor.execute(

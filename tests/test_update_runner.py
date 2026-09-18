@@ -12,14 +12,28 @@ from __future__ import annotations
 
 import json
 import shutil
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 RUNNER_SRC = Path(__file__).resolve().parents[1] / "deploy" / "single" / "update-run.sh"
 
-pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+# The harness shadows curl/podman/setup.sh with stub scripts on PATH. Git
+# Bash PREPENDS /mingw64/bin:/usr/bin to whatever PATH it is handed, so on
+# Windows the real curl always wins and every health poll runs against nothing
+# (2026-09-17: three tests timed out). The runner itself is exercised on
+# Windows by a real update; the sequencing harness is POSIX.
+
+pytestmark = [
+    pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash"),
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Git Bash prepends /mingw64/bin:/usr/bin to PATH; stub binaries cannot shadow curl/podman",
+    ),
+]
 
 
 @pytest.fixture()
@@ -61,9 +75,13 @@ exit 0
     shutil.copyfile(RUNNER_SRC, runner)
 
     def run(target="2.22.0"):
-        env = {"PATH": f"{stub_bin}:/usr/bin:/bin", "HOME": str(tmp_path)}
+        # The bash the product itself would use (Git's on Windows, where PATH's
+        # first `bash` is WSL's launcher), and a PATH joined the way this OS
+        # joins one — the stubs must shadow the real curl/podman for bash.
+        from central_command.api.update import _bash
+        env = {"PATH": os.pathsep.join([str(stub_bin), "/usr/bin", "/bin"]), "HOME": str(tmp_path)}
         proc = subprocess.run(
-            ["bash", str(runner), target, str(single)],
+            [_bash() or "bash", str(runner), target, str(single)],
             capture_output=True, text=True, timeout=120, env=env,
         )
         status = json.loads((upd / "status.json").read_text())

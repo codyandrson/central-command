@@ -133,13 +133,13 @@ else
 fi
 
 if [[ "${CC_VERIFY_LIVE:-0}" == "1" ]]; then
-  body="$(curl -fsS -m 60 -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
+  body="$(curl -fsS -m "${CC_PROBE_TIMEOUT:-300}" -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
     -H 'Content-Type: application/json' \
     -d '{"model":"cc-default","messages":[{"role":"user","content":"reply with the single word: ok"}],"max_tokens":8}' \
     "${LL}/v1/chat/completions" 2>/dev/null)"
   check "live completion through cc-default" grep -qF '"content"' <<<"$body"
 
-  emb="$(curl -fsS -m 60 -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
+  emb="$(curl -fsS -m "${CC_PROBE_TIMEOUT:-300}" -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
     -H 'Content-Type: application/json' \
     -d '{"model":"cc-embedding","input":"dimension probe"}' \
     "${LL}/v1/embeddings" 2>/dev/null)"

@@ -21,7 +21,10 @@ class Settings(BaseSettings):
 
     # Database — the framework spine.
     # 5442 = Central Command's own PG (docker-compose.yml). 5432 is n8n's nat-postgres.
-    database_url: str = "postgresql://central_command:central_command@localhost:5442/central_command"
+    # 127.0.0.1, never localhost, in every default: Windows resolves localhost
+    # to ::1 first and the podman machine publishes IPv4 only — 2.1 s per
+    # connection, a 35-dot pytest in 25 minutes (2026-09-17 Windows run).
+    database_url: str = "postgresql://central_command:central_command@127.0.0.1:5442/central_command"
 
     # Provider:model string for Pydantic AI. Confirm the exact current id at M0.
     default_model: str = "anthropic:claude-sonnet-5"
@@ -108,7 +111,7 @@ class Settings(BaseSettings):
     # LiteLLM address and master key whether or not llm_base_url points at it.
     #   llm_proxy_base_url -> proxy root for /model/new, /key/generate, …
     #   llm_proxy_admin_key -> see below
-    llm_proxy_base_url: str = "http://localhost:4000"
+    llm_proxy_base_url: str = "http://127.0.0.1:4000"
     # Browser-reachable LiteLLM UI URL (tailnet) — display-only, for the
     # cockpit's "View in LiteLLM" link. Distinct from llm_proxy_base_url,
     # which is loopback by rule (the failover invariant). Unset = no link.
@@ -157,7 +160,7 @@ class Settings(BaseSettings):
     litellm_salt_key: str = ""
 
     # MCP endpoints (existing homelab services).
-    graphiti_mcp_url: str = "http://localhost:8000/mcp"
+    graphiti_mcp_url: str = "http://127.0.0.1:8000/mcp"
 
     # Knowledge graph tenanting: reads span the preserved homelab graph ("main")
     # plus Central Command's own group; writes land ONLY in Central Command's group, so
@@ -177,7 +180,7 @@ class Settings(BaseSettings):
     reflection_min_transcript_chars: int = 2000
 
     # n8n tool façade — the Jira provider, holding credentials inside n8n (M3).
-    n8n_jira_url: str = "http://localhost:5678/webhook/cc-jira-facade"
+    n8n_jira_url: str = "http://127.0.0.1:5678/webhook/cc-jira-facade"
     jira_facade_token: str = ""
 
     # Native Jira client (D23) — set email + api token to cut over from the
@@ -191,7 +194,7 @@ class Settings(BaseSettings):
     jira_api_token: str = ""
 
     # n8n email façade (M12) — wraps lib-email-provider; Gmail creds stay in n8n.
-    email_facade_url: str = "http://localhost:5678/webhook/cc-email-facade"
+    email_facade_url: str = "http://127.0.0.1:5678/webhook/cc-email-facade"
     email_facade_token: str = ""
 
     # n8n calendar façade — wraps the operator's Google Calendar; the OAuth
@@ -199,7 +202,7 @@ class Settings(BaseSettings):
     # decision: read-only is enforced by the façade workflow's mode gate and by
     # integrations/calendar_facade.py exposing only a list. Empty token =
     # not configured; the EA's brief simply carries no calendar.
-    calendar_facade_url: str = "http://localhost:5678/webhook/cc-calendar-facade"
+    calendar_facade_url: str = "http://127.0.0.1:5678/webhook/cc-calendar-facade"
     calendar_facade_token: str = ""
 
     # Web fetch (D-web-read): an ungated read, granted only via the `web-read`

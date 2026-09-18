@@ -88,7 +88,12 @@ def _manifest() -> dict[tuple[str, str], tuple[str, str, str, str]]:
 def test_resolver_tag_matcher_self_test():
     """The substitution rule is the one piece of resolve-images.sh with real
     logic; its own --self-test pins it (same flavour, series boundary)."""
-    r = subprocess.run(["bash", str(SINGLE / "resolve-images.sh"), "--self-test"], capture_output=True, text=True)
+    # cwd= + basename, not the full path: on Windows the first `bash` on PATH
+    # may be WSL's launcher, which cannot open a Windows path.
+    r = subprocess.run(
+        ["bash", "resolve-images.sh", "--self-test"],
+        cwd=SINGLE, capture_output=True, text=True,
+    )
     assert r.returncode == 0, r.stdout + r.stderr
 
 
@@ -211,4 +216,6 @@ def test_airgap_env_example_teaches_the_live_uv_variable():
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
 def test_scripts_parse(script: pathlib.Path):
-    subprocess.run(["bash", "-n", str(script)], check=True)
+    # cwd= + basename, not the full path: on Windows the first `bash` on PATH
+    # may be WSL's launcher, which cannot open a Windows path.
+    subprocess.run(["bash", "-n", script.name], cwd=script.parent, check=True)

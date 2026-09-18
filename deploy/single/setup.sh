@@ -208,6 +208,7 @@ get_kv() { # get_kv <file> <key>
   local f="$1" k="$2" line out=""
   [[ -f "$f" ]] || { printf ''; return 0; }
   while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"   # a CRLF file (Windows checkout) must not turn "" into "\r"
     [[ "$line" == "$k="* ]] && out="${line#*=}"
   done <"$f"
   printf '%s' "$out"
@@ -221,6 +222,7 @@ set_kv() { # set_kv <file> <key> <value>
   tmp="$(mktemp)" || return 1
   chmod 600 "$tmp" 2>/dev/null
   while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
     if [[ "$line" == "$k="* ]]; then
       printf '%s=%s\n' "$k" "$v" >>"$tmp"; found=1
     else
@@ -626,6 +628,9 @@ llm_gate() { # llm_gate <what-failed>
   note "    CC_LLM_BASE_URL=<url>/v1 CC_LLM_API_KEY=<key> ./discover-llm.sh models"
   note "  A probe failed after you filled things in? Direct works + proxy fails ="
   note "  the alias row is wrong; direct fails = the URL or key is wrong."
+  note "  'curl: (28) Operation timed out' = the backend answered nothing within"
+  note "  CC_PROBE_TIMEOUT seconds (default 300) — a shared or queued server may"
+  note "  need longer:  CC_PROBE_TIMEOUT=900 ./setup.sh llm"
   note ""
   note "When it looks right, re-run:  ./setup.sh llm   (it validates every alias, then continues)"
 }
@@ -800,6 +805,20 @@ phase_stack() {
   compose_profile_flags
   step "up-stack" "the stack is up and healthy (${PROFILE_FLAGS[*]:-no optional profiles})" \
     compose "${PROFILE_FLAGS[@]}" up -d --wait || return 1
+
+  # `restart: always` is honoured by podman-restart.service, which a podman
+  # MACHINE (Windows/macOS) ships disabled: after a host reboot every
+  # container sat Exited (2026-09-17 Windows run). Enable it where there is
+  # a machine; a Linux host with a system podman has no machine and skips.
+  if [[ -n "$(podman machine list --format '{{.Name}}' 2>/dev/null)" ]]; then
+    if podman machine ssh -- sudo systemctl enable --now podman-restart.service </dev/null >/dev/null 2>&1; then
+      pass "restart-on-boot" "podman-restart.service enabled in the podman machine (containers return after a host reboot)"
+    else
+      warn "restart-on-boot" "could not enable podman-restart.service in the podman machine — run: podman machine ssh -- sudo systemctl enable --now podman-restart.service"
+    fi
+  else
+    pass "restart-on-boot" "no podman machine (system podman) — restart policies apply natively"
+  fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1064,7 +1083,30 @@ phase_boot() {
     fail "boot-roster" "the roster is empty — read $HERE/uvicorn.log (seed guard? database?)"
     return 1
   fi
-  note "cockpit: $(api_url)  (a fresh install runs the executor in dry_run — nothing touches the world until you flip it)"
+
+  # The cockpit is the Node server in web/ (server-dist), NOT the SPA uvicorn
+  # serves from web/dist: every panel is a route or a WebSocket proxy that
+  # server owns, so the SPA alone sits at CONNECTING with 404s (2026-09-17
+  # Windows run). On k3s it is the cc-nerve unit; here it is a second
+  # detached process, configured by web/.env exactly as the unit expects.
+  local cport="${CC_COCKPIT_PORT:-3080}" curl_ok
+  if [[ ! -f "$REPO_ROOT/web/server-dist/index.js" ]]; then
+    warn "boot-cockpit" "web/server-dist is missing (node absent at build time?) — the API runs, the cockpit does not"
+  elif curl -fsS -m 5 "http://127.0.0.1:${cport}/" >/dev/null 2>&1; then
+    pass "boot-cockpit" "cockpit already answering at http://127.0.0.1:${cport} — not starting a second one"
+  else
+    [[ -f "$REPO_ROOT/web/.env" ]] || printf 'PORT=%s\nGATEWAY_URL=%s\n' "$cport" "$(api_url)" >"$REPO_ROOT/web/.env"
+    note "--> starting the cockpit server detached (log: $HERE/cockpit.log · stop: ./setup.sh stop)"
+    ( cd "$REPO_ROOT/web" && nohup node server-dist/index.js >>"$HERE/cockpit.log" 2>&1 &
+      echo $! >"$HERE/cockpit.pid" )
+    if wait_http "http://127.0.0.1:${cport}/" 60; then
+      pass "boot-cockpit" "cockpit answering at http://127.0.0.1:${cport} (proxies to $(api_url))"
+    else
+      fail "boot-cockpit" "the cockpit server never answered — read $HERE/cockpit.log"
+      return 1
+    fi
+  fi
+  note "cockpit: http://127.0.0.1:${cport}  (a fresh install runs the executor in dry_run — nothing touches the world until you flip it)"
 }
 
 demo_decided() { # true once the event log shows a decided proposal
@@ -1097,8 +1139,17 @@ phase_demo() {
     if [[ "$busy" =~ ^[1-9] ]]; then
       pass "demo-dispatch" "a run is already in flight — riding it"
     else
-      step "demo-dispatch" "dispatcher claimed the item (a real inference against your endpoint starts now)" \
-        curl -fsS -m 30 -X POST "$(api_url)/api/dispatch/step" || return 1
+      # /api/dispatch/step AWAITS the whole triage run, and on a modest or shared
+      # backend that outlives any curl ceiling (30 s here read as FAIL while the
+      # run went on to park its proposal — 2026-09-17 Windows run). curl's 28
+      # means "still running", not "failed": the proposal poll below is the wait.
+      note "--> curl -fsS -m 30 -X POST $(api_url)/api/dispatch/step"
+      local drc=0; curl -fsS -m 30 -X POST "$(api_url)/api/dispatch/step" >&2 || drc=$?
+      case "$drc" in
+        0)  pass "demo-dispatch" "dispatcher claimed the item (a real inference against your endpoint ran)" ;;
+        28) pass "demo-dispatch" "dispatcher claimed the item — the inference is still running (outlived the 30 s call; polling for the proposal)" ;;
+        *)  fail "demo-dispatch" "POST /api/dispatch/step failed (curl $drc) — read $HERE/uvicorn.log"; return 1 ;;
+      esac
     fi
 
     note "triage is thinking — a real model call; this commonly takes a few minutes"
@@ -1114,7 +1165,7 @@ phase_demo() {
   fi
 
   # ── the operator's moment — never scripted away ────────────────────────────
-  useraction "demo-approve" "a proposal is waiting in the Decisions Inbox — open $(api_url), review it, and decide (approve to see the dry-run execution)"
+  useraction "demo-approve" "a proposal is waiting in the Decisions Inbox — open http://127.0.0.1:${CC_COCKPIT_PORT:-3080}, review it, and decide (approve to see the dry-run execution)"
   if ! is_tty; then
     return 3
   fi
@@ -1143,22 +1194,39 @@ phase_demo() {
   note "root .env flip each one when YOU decide."
 }
 
+# Stop one detached server: TERM its pid file, then PROVE the port is free.
+# Under Git Bash `kill` reports success against a native Windows process it
+# never signalled (2026-09-17: "sent TERM", API still answering, boot then
+# "already answering" on the stale process) — so the listener on the port is
+# what gets killed when the signal did not land.
+stop_listener() { # stop_listener <name> <pidfile> <port> <probe-path>
+  local name="$1" pidf="$2" port="$3" path="$4" pid
+  if [[ -f "$pidf" ]]; then
+    pid="$(cat "$pidf")"; kill "$pid" 2>/dev/null || true; rm -f "$pidf"
+  fi
+  local i; for i in 1 2 3 4 5; do
+    curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${port}${path}" 2>/dev/null || break
+    sleep 1
+  done
+  if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${port}${path}" 2>/dev/null; then
+    if command -v taskkill >/dev/null 2>&1; then
+      pid="$(netstat -ano 2>/dev/null | grep LISTENING | grep ":${port} " | awk '{print $NF}' | head -1)"
+      [[ -n "$pid" ]] && taskkill //F //PID "$pid" >/dev/null 2>&1
+      sleep 1
+    fi
+    if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${port}${path}" 2>/dev/null; then
+      fail "stop-$name" "$name still answers on 127.0.0.1:${port} after TERM — stop it where you started it"
+      return 1
+    fi
+  fi
+  pass "stop-$name" "$name is down on 127.0.0.1:${port}"
+}
+
 cmd_stop() {
   CURPHASE=stop
-  local pidf="$HERE/uvicorn.pid"
-  if [[ -f "$pidf" ]]; then
-    local pid; pid="$(cat "$pidf")"
-    if kill "$pid" 2>/dev/null; then
-      pass "stop" "sent TERM to uvicorn (pid $pid)"
-    else
-      warn "stop" "pid $pid was not running — removing the stale pid file"
-    fi
-    rm -f "$pidf"
-  elif api_up; then
-    warn "stop" "an API answers at $(api_url) but was not started by this script — stop it where you started it"
-  else
-    pass "stop" "nothing to stop"
-  fi
+  load_env >/dev/null 2>&1 || true
+  stop_listener cockpit "$HERE/cockpit.pid" "${CC_COCKPIT_PORT:-3080}" /
+  stop_listener uvicorn "$HERE/uvicorn.pid" "$(api_url | sed 's/.*://')" /health
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

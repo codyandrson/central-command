@@ -280,7 +280,7 @@ def build_results_json(dataset_path: Path, model_timings: dict) -> dict:
     comparison record — keep it stable, this docstring is its spec.
     """
     return {
-        "dataset": str(dataset_path),
+        "dataset": dataset_path.as_posix(),
         "run_at": datetime.now(timezone.utc).isoformat(),
         "models": {
             alias: {**_score_report(report), "seconds": seconds}

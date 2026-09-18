@@ -4,6 +4,63 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.36.4: a Windows install is measured, not assumed
+
+The single-node profile's first end-to-end run on a Windows 10 box (Git Bash
++ podman machine, 2026-09-17) found four things the Linux runs never could.
+Every one is a seam the real target — a Windows Podman Desktop box behind
+enterprise mirrors — will hit on day one.
+
+- **Every text file is LF.** Root `.gitattributes` pinned only `*.sh`, `*.tmpl`
+  and `*.sql`, so under `core.autocrlf=true` `images.txt`, `env.example`,
+  `compose.yaml`, `models.json` and `requirements.lock` all checked out CRLF
+  and the resolver refused `images.txt` ("expected 6 columns"). Now
+  `* text=auto eol=lf` (web/ already had its own).
+- **`localhost` is gone from every config default.** Windows resolves it to
+  `::1` first and the podman machine publishes IPv4 only, so each Postgres
+  connection cost 2.1 s (35 tests in 25 minutes). `.env.example` already said
+  127.0.0.1; a minimal or hand-made `.env` fell to the code default.
+  `config.py` now defaults postgres, LiteLLM, Graphiti and the n8n façades to
+  127.0.0.1 — 0.06 s per connection, measured.
+- **A probe timeout is a seam, not a verdict.** `discover-llm.sh` and
+  `verify.sh` hard-coded `--max-time 60`; a shared backend that queues
+  requests (a `--parallel 1` llama-server serving another deployment) read as
+  "the alias row is wrong" three runs in a row. `CC_PROBE_TIMEOUT` (default
+  300) governs both, and the LiteLLM gate text names curl's 28.
+- **Containers come back after a host reboot.** `restart: always` is
+  honoured by `podman-restart.service`, which a podman machine ships
+  disabled — every container sat Exited after the first reboot. The stack
+  phase now enables it inside the machine (`restart-on-boot`; a system
+  podman has no machine and skips).
+
+- **The boot phase starts the cockpit server.** The SPA uvicorn serves from
+  `web/dist` is not the cockpit: every panel is a route or a WebSocket proxy
+  the Node server in `web/server-dist` owns (the k3s `cc-nerve` unit), and
+  without it the cockpit sat at CONNECTING behind a wall of 404s. `boot` now
+  writes `web/.env` (`PORT`, `GATEWAY_URL` → the API) on first run and starts
+  the server detached on `CC_COCKPIT_PORT` (3080); the demo gate and README
+  point there. Proven on the box: enrol → triage → durable pause → cockpit
+  Approve → dry-run execution with provenance.
+- **`./setup.sh stop` proves the ports are free.** Under Git Bash `kill`
+  reports success against a native Windows process it never signalled, so
+  "sent TERM" left the API running and the next `boot` adopted the stale
+  process (old `.env`, no key). Stop now TERMs the pid file, waits, and if
+  the port still answers kills the listener (`taskkill` by port on Windows)
+  — or FAILs, never claims.
+- **`get_kv`/`set_kv` strip a trailing CR.** A fresh `.env` copied from a
+  CRLF `.env.example` made `CC_LLM_API_KEY=` read as `"\r"` — "already set",
+  no key minted, and the API refused every run with
+  `LLMProviderNotConfigured`. Belt to the `.gitattributes` braces.
+- **A dispatch step that outlives curl is in flight, not failed.** The demo's
+  `POST /api/dispatch/step` awaits the whole triage; on a modest or shared
+  backend it outlived the 30-second call, curl's 28 read as FAIL, and the
+  proposal parked anyway. 28 now means "still running" and the proposal poll
+  is the wait.
+- **Tests no longer depend on the developer's `.env`** (a live key,
+  `mcp_build_host`), on POSIX path separators, or on `bash` accepting a
+  Windows path — the Windows run of the offline suite is what found the 20
+  that did.
+
 ## 2026-09-18 — v2.36.3: a gateway catalog id is the whole model string
 
 The litellm-manager registered `openai/gpt-5.6-sol` where the Kilo.ai catalog
@@ -18,7 +75,6 @@ routed on whatever the gateway aliased the bare name to.
   `openai/openai/…` looks wrong and is right. The add brief
   (`heartbeat/actions._add_brief`) states it inline, next to the catalog
   block the agent reads the id from.
-
 ## 2026-09-17 — v2.36.2: an approval executes once, and an update names the row it touched
 
 Reviewing the first full Kilo.ai autodiscovery pass (318 single-model add

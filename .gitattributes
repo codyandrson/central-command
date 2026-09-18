@@ -1,6 +1,10 @@
 # Shell scripts and rendered-template inputs MUST stay LF: a Windows checkout
 # with core.autocrlf=true would otherwise corrupt shebangs and heredocs for
 # the Git Bash-driven deploy/single pipeline (2026-09-03 Windows review).
+# Everything text is LF: images.txt, env.example, compose.yaml, models.json and
+# requirements.lock all checked out CRLF on the 2026-09-17 Windows run and the
+# resolver refused images.txt ("expected 6 columns"). (web/ has its own file.)
+* text=auto eol=lf
 *.sh text eol=lf
 *.tmpl text eol=lf
 *.sql text eol=lf

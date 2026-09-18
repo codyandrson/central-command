@@ -226,13 +226,20 @@ waits in place for both:
 2. **The demo approval** (`demo`) — the script feeds
    `fixtures/emails/001-invoice-due.eml`, steps the dispatcher (a real
    inference against your endpoint — commonly a few minutes), and then waits
-   while you open the cockpit at http://127.0.0.1:8080, read the proposal in
+   while you open the cockpit at http://127.0.0.1:3080, read the proposal in
    the **Decisions Inbox**, and decide. That gate is the product; the script
    never decides for you. It then verifies the decision and the `[dry-run]`
    execution landed on the event log.
 
-The API runs detached afterward (log: `deploy/single/uvicorn.log`; stop it
-with `./setup.sh stop`). **Deliberately still OFF after the demo, each one an
+The API runs detached afterward (log: `deploy/single/uvicorn.log`), and so
+does the **cockpit server** — `web/server-dist`, the same Node process the k3s
+profile runs as `cc-nerve`, on `CC_COCKPIT_PORT` (3080), configured by
+`web/.env` (written on first boot: `PORT` + `GATEWAY_URL` → the API). The SPA
+uvicorn serves on 8080 is NOT the cockpit: every panel is a route or a
+WebSocket proxy the Node server owns, so 8080 alone sits at CONNECTING with
+404s (2026-09-17 Windows run). `./setup.sh stop` stops both and PROVES the
+ports are free — under Git Bash `kill` reports success against a native
+Windows process it never signalled. **Deliberately still OFF after the demo, each one an
 explicit flip when you decide:** live executor mode (`CC_EXECUTOR_MODE` in
 the root `.env` — until then every EXECUTED proposal is a logged simulation),
 the mail feed and dispatch drain (`CC_FEED_ENABLED` / `CC_DISPATCH_ENABLED` +

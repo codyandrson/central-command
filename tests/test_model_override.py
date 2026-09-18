@@ -289,7 +289,11 @@ async def test_label_only_patches_stay_a_no_op():
 # absent, and its absence rendered as "Gateway HTTP 404" in three UI spots.)
 
 
-async def test_gateway_models_carries_the_shape_the_cockpit_hook_declares():
+async def test_gateway_models_carries_the_shape_the_cockpit_hook_declares(monkeypatch):
+    # The "cc-default -> primary" assertion below depends on the resolved
+    # default matching "cc-default" — pin it rather than relying on whatever
+    # CC_DEFAULT_MODEL happens to be set in the developer's .env.
+    monkeypatch.setattr(settings, "default_model", "cc-default")
     payload = await routes.gateway_model_catalog()
     assert set(payload) == {"models", "error", "source"}
     assert payload["source"] == "litellm"

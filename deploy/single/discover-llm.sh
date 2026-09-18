@@ -105,8 +105,12 @@ fi
 # /proc/<pid>/fd path it cannot open ("Failed to open /proc/752/fd/63", found
 # live 2026-08-28 on Git Bash); a stdin pipe is a real handle everywhere.
 # (curl >= 7.55 for -H @file/@-. No probe uses stdin for anything else.)
-_api()  { printf 'Authorization: Bearer %s\n' "$CC_LLM_API_KEY"   | curl -sS --fail-with-body --max-time 60 -H @- "$@"; }
-_eapi() { printf 'Authorization: Bearer %s\n' "$CC_EMBED_API_KEY" | curl -sS --fail-with-body --max-time 60 -H @- "$@"; }
+# A probe waits CC_PROBE_TIMEOUT seconds (default 300, was 60): a shared
+# backend queues requests behind whatever it is already serving, and a
+# 60-second ceiling read a busy llama-server as "the alias is wrong"
+# (2026-09-17 Windows run, three setup attempts).
+_api()  { printf 'Authorization: Bearer %s\n' "$CC_LLM_API_KEY"   | curl -sS --fail-with-body --max-time "${CC_PROBE_TIMEOUT:-300}" -H @- "$@"; }
+_eapi() { printf 'Authorization: Bearer %s\n' "$CC_EMBED_API_KEY" | curl -sS --fail-with-body --max-time "${CC_PROBE_TIMEOUT:-300}" -H @- "$@"; }
 
 case "${1:-}" in
   models)

@@ -64,7 +64,11 @@ def _bash() -> str | None:
     if sys.platform == "win32":
         git = shutil.which("git")
         if git:
-            for rel in ("../../bin/bash.exe", "../../usr/bin/bash.exe"):
+            # git.exe lives in Git/cmd (PATH from cmd/PowerShell/a service) or
+            # Git/mingw64/bin (PATH from Git Bash) — one or two levels below
+            # the install root. A process launched from cmd found WSL's bash
+            # here on 2026-09-17 because only the two-level form was tried.
+            for rel in ("../bin/bash.exe", "../../bin/bash.exe", "../../usr/bin/bash.exe"):
                 candidate = (Path(git).parent / rel).resolve()
                 if candidate.is_file():
                     return str(candidate)
