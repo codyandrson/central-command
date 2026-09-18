@@ -31,6 +31,28 @@ right.
   Same shape as `openai/` but keeps vLLM-specific defaults distinct in
   LiteLLM's routing.
 
+## A gateway catalog id is the WHOLE model string — never strip its vendor
+
+An aggregator gateway (Kilo.ai, OpenRouter and their kind) speaks the
+OpenAI format, so the prefix is `openai/`, and the model it expects is the
+catalog id **exactly as the catalog lists it** — vendor segment included:
+
+| catalog id                  | register as                              | NOT                      |
+|-----------------------------|------------------------------------------|--------------------------|
+| `openai/gpt-5.6-sol`        | `openai/openai/gpt-5.6-sol`              | `openai/gpt-5.6-sol`     |
+| `anthropic/claude-opus-5`   | `openai/anthropic/claude-opus-5`         | `anthropic/claude-opus-5`|
+| `nvidia/nemotron-3:free`    | `openai/nvidia/nemotron-3:free`          | `openai/nemotron-3:free` |
+
+The rule is mechanical: `model = "openai/" + catalog_id`. The first `openai/`
+is LiteLLM's format prefix and is stripped before the request leaves; what
+reaches the gateway must be the catalog id. A doubled `openai/openai/` looks
+wrong and is right. Stripping the vendor because it "repeats" sends the
+gateway a bare `gpt-5.6-sol`, which it may 404 — or may silently resolve to
+whatever it aliases that name to (2026-09-17: 14 of 121 registrations,
+five 404s, the rest routed on a guess). And `anthropic/<id>` is LiteLLM's
+NATIVE Anthropic provider, not a gateway path — it authenticates against
+api.anthropic.com with the gateway's key and is rejected on the spot.
+
 ## Detecting an unknown gateway's format
 
 Don't guess — probe cheaply before registering for real:

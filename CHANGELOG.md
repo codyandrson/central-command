@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.36.3: a gateway catalog id is the whole model string
+
+The litellm-manager registered `openai/gpt-5.6-sol` where the Kilo.ai catalog
+id is `openai/gpt-5.6-sol` — dropping the vendor segment because it "repeated"
+the format prefix — and `anthropic/claude-opus-5` where LiteLLM's native
+Anthropic provider is not a gateway path at all. 14 of 121 registrations in
+the first full autodiscovery pass; five 404'd on their add probe, the rest
+routed on whatever the gateway aliased the bare name to.
+
+- `skills/model-evaluation/references/registration-recipes.md` gains the
+  rule with a table: `model = "openai/" + catalog_id`, vendor included;
+  `openai/openai/…` looks wrong and is right. The add brief
+  (`heartbeat/actions._add_brief`) states it inline, next to the catalog
+  block the agent reads the id from.
+
 ## 2026-09-17 — v2.36.2: an approval executes once, and an update names the row it touched
 
 Reviewing the first full Kilo.ai autodiscovery pass (318 single-model add
