@@ -34,7 +34,11 @@ After=k3s.service
 # ponytail: the 7474 relay is a background child of the same shell; the unit
 # only tracks the 7687 one. Split into two units if Browser reachability ever
 # needs its own restart.
-ExecStart=/bin/sh -c 'IP=$(/usr/local/bin/k3s kubectl -n central-command get svc neo4j -o jsonpath={.spec.clusterIP}) && [ -n "$IP" ] && echo "relaying 127.0.0.1:7687,7474 -> $IP" && socat TCP-LISTEN:7474,bind=127.0.0.1,fork,reuseaddr TCP:$IP:7474 & exec socat TCP-LISTEN:7687,bind=127.0.0.1,fork,reuseaddr TCP:$IP:7687'
+# `;` not `&&` before the background relay: `A && B & C` parses as `(A && B) & C`,
+# which put the ClusterIP lookup INSIDE the backgrounded 7474 relay and exec'd
+# the 7687 relay with an empty target (socat: getaddrinfo("") — 2026-09-18,
+# v2.37.3; tests/test_graph_bolt_unit.py runs this line under stubs).
+ExecStart=/bin/sh -c 'IP=$(/usr/local/bin/k3s kubectl -n central-command get svc neo4j -o jsonpath={.spec.clusterIP}); [ -n "$IP" ] || exit 1; echo "relaying 127.0.0.1:7687,7474 -> $IP"; socat TCP-LISTEN:7474,bind=127.0.0.1,fork,reuseaddr TCP:$IP:7474 & exec socat TCP-LISTEN:7687,bind=127.0.0.1,fork,reuseaddr TCP:$IP:7687'
 Restart=always
 RestartSec=5
 

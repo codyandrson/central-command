@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.37.3: the bolt relay's second socat had no address
+
+`cc-graph-bolt.service` (v2.36.1) relays 127.0.0.1:7474 and :7687 to the
+Neo4j ClusterIP with two `socat` processes from one shell line: `IP=$(…) &&
+[ -n "$IP" ] && echo … && socat …7474… & exec socat …7687…`. In sh, `A && B
+& C` is `(A && B) & C` — the lookup, the guard and the 7474 relay all ran in
+the backgrounded subshell, and the `exec`'d 7687 relay started with `$IP`
+empty: `socat … E getaddrinfo("", "NULL")`, the unit restarting every five
+seconds, and every bolt client on the anchor node (the Graph panel, the
+verify sweep) seeing "closed with incomplete handshake response". Browser on
+7474 worked, which is how it hid.
+
+The line had never actually run before: the anchor node had no `socat`, so
+the unit died at `exec` with exit 127 from the moment v2.36.1 was applied —
+8,743 restarts over two days — and the updater's install-if-missing step is
+gated on the unit file being in the release diff, which it was not on the
+run that first needed it. Fixed the shell line (`;` before the background
+relay, so the address is set in the shell that execs) and added
+`tests/test_graph_bolt_unit.py`, which runs the ExecStart line under stubbed
+`k3s` and `socat` and asserts both relays receive the address. This release
+changes the unit file, so the updater installs `socat` and restarts the
+relay.
+
 ## 2026-09-18 — v2.37.2: a dead summary degrades to the clip, and a 404 is not an outage
 
 Investigation of one afternoon of litellm-manager errors on a 318-model
