@@ -182,7 +182,8 @@ def estimate_tokens(run_state: dict) -> int:
 
 
 async def check_pressure(
-    session_id: str, run_state: dict, agent_id: str | None = None
+    session_id: str, run_state: dict, agent_id: str | None = None,
+    model: str | None = None,
 ) -> None:
     """Emit `session.context_pressure` when the live window crosses the
     threshold, throttled by growth. Never raises: this is telemetry riding on a
@@ -203,7 +204,9 @@ async def check_pressure(
         estimate = min(estimate, _sent.get(session_id, estimate))
         cfg = await load_settings()
         headroom = int(cfg["output_headroom_tokens"]) if cfg["output_headroom"] else 0
-        window = await context_window()
+        # The SESSION's model, not the spine's default: a 256k-window session
+        # was reporting 140% of the 81k cc-default window (2026-09-18).
+        window = await window_for(model)
         fraction = (estimate + headroom) / window
         if fraction < settings.context_pressure_threshold:
             return
@@ -630,7 +633,22 @@ async def _prepare_window(ctx, messages):
             # in for raw[1:cached.through], so raw_through = through + (cached.through - 2).
             raw_through = through + (int(cached["through"]) - 2 if cached else 0)
             region = trimmed(base[1:through]) if cfg["drop_thinking"] else base[1:through]
-            text = await summarize(ctx.model, region)
+            # The summary is one model call and it can die like any other (a
+            # reasoning model spending its whole output cap thinking, 2026-09-18).
+            # Losing the summary must leave the trimmed window and the overflow
+            # clip below in play — raising here sent the RAW record instead,
+            # which was the one request guaranteed not to fit.
+            try:
+                text = await summarize(ctx.model, region)
+            except Exception:  # degrade, never a dead run
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "context.summarize failed; continuing without a summary")
+                text = None
+        else:
+            text = None
+        if text is not None:
             summary = {"through": raw_through, "text": text}
             from central_command import events
             from central_command.db import repo

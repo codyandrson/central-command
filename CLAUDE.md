@@ -371,6 +371,16 @@ where the story is gone.
   clips a request that would not fit rather than sending it (2026-09-16:
   four `mail_read`s in one turn, ten dead sessions). A per-tool cap goes on
   the tool (`_MAIL_BODY_CEILING`), not on the constant.
+- **A failed compaction degrades to the clip, never to the raw record.** The
+  summary is a model call and can die like any other (a reasoning model
+  spending its output cap thinking); `_prepare_window` guards that call on
+  its own so the trimmed window and the overflow clip stay in play. Sending
+  raw history "rather than a dead run" IS the dead run once the record is
+  bigger than the window (2026-09-18: 607k tokens against 262k).
+- **A status-code sniff must match a TOKEN.** `"429" in text` fired inside a
+  model uuid and retried a 404 as an outage five times. And an operator item
+  with no `tool_call_id` has nothing paused on it — answering it is an
+  acknowledgement, not a resume.
 - **Episodes name the operator; "the operator" is not a graph subject.** The
   Person ontology refuses a role as a name, so an episode written "the
   operator is subscribed to X" lands with no subscriber or spawns a bare

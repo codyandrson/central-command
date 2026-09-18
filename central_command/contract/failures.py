@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import re
 import socket
 
 TRANSIENT = "transient"
@@ -55,7 +56,7 @@ TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504, 529})
 #   "try again in"              LiteLLM/Anthropic rate-limit phrasing
 #   "database is not ready"     n8n starting up behind the façade (feed.error 4366)
 #   "cooldown"                  LiteLLM's own wording for the same state
-#   "429"                       the code itself, in a stringified error
+#   429 (as a token)            the code itself, in a stringified error
 #   "timed out"/"timeout"       any of the client timeouts
 #   "connection"                refused/reset/error, incl. APIConnectionError
 #                               (feed.error 2671)
@@ -72,13 +73,14 @@ _NETWORK_ERRNOS = frozenset(
     if e is not None
 )
 
+_STATUS_429 = re.compile(r"(?<![0-9a-f])429(?![0-9a-f])")
+
 _TRANSIENT_MARKERS = (
     "no deployments available",
     "invalid model name",
     "try again in",
     "database is not ready",
     "cooldown",
-    "429",
     "timed out",
     "timeout",
     "connection",
@@ -91,7 +93,11 @@ def classify_failure_text(text: str | None) -> str:
     a payload field). Same sniffing core as `classify_failure`'s last resort —
     and the same default: unrecognised is SEMANTIC."""
     low = (text or "").lower()
-    return TRANSIENT if any(m in low for m in _TRANSIENT_MARKERS) else SEMANTIC
+    if any(m in low for m in _TRANSIENT_MARKERS):
+        return TRANSIENT
+    # The status code as a TOKEN. A bare substring match fired inside a model
+    # uuid ("…-34292af4…") and retried a 404 five times as an outage (2026-09-18).
+    return TRANSIENT if _STATUS_429.search(low) else SEMANTIC
 
 
 def _leaves(exc: BaseException) -> list[BaseException]:

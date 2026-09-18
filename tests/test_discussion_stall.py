@@ -161,9 +161,12 @@ async def _make_discussion(*, quiet_hours: float, last_turn: str) -> dict:
     await repo.create_conversation_session(ids["discussion_session"], AGENT)
     await repo.update_session_run_state(ids["discussion_session"], _transcript(last_turn))
     await repo.mark_session_awaiting_operator(ids["discussion_session"])
+    # An agent's ask carries the tool call it paused on; an item without one
+    # is a notice and is acknowledged, not resumed (v2.37.0).
     await repo.create_operator_item(
         ids["item_id"], "question", ids["task_session"], AGENT,
         "Which project should this land in?", task_id=ids["task_id"],
+        tool_call_id=f"call-{suffix}",
     )
     await repo.link_operator_item_discussion(ids["item_id"], ids["discussion_session"])
     conn = await repo._conn()
@@ -623,7 +626,8 @@ async def test_answering_an_unlinked_question_is_unchanged(
     suffix = uuid.uuid4().hex[:8]
     item_id, session_id = f"{PREFIX}item-{suffix}", f"{PREFIX}task-{suffix}"
     await repo.create_running_session(session_id, AGENT)
-    await repo.create_operator_item(item_id, "question", session_id, AGENT, "A or B?")
+    await repo.create_operator_item(item_id, "question", session_id, AGENT, "A or B?",
+                                    tool_call_id=f"call-{suffix}")
 
     before = await repo.latest_event_id()
     await answer_item(item_id, ANSWER)

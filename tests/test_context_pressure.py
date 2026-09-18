@@ -201,3 +201,24 @@ def test_the_estimate_ignores_the_archive():
     """Archived messages are not sent, so they exert no pressure."""
     big = {"archived": [{"content": "x" * 40_000}], "messages": []}
     assert context.estimate_tokens(big) == 0
+
+
+async def test_pressure_measures_against_the_session_models_window(monkeypatch):
+    """A 256k-window session was reporting 140% of the 81k cc-default window
+    (2026-09-18): the check must size against the model the session runs on."""
+    _pin_window(10_000)
+    context._windows["big-model"] = 1_000_000
+    emitted = []
+
+    async def fake_emit(kind, **kw):
+        emitted.append((kind, kw["payload"]))
+    from central_command import events
+    monkeypatch.setattr(events, "emit", fake_emit)
+    run_state = {"messages": [{"kind": "request", "parts": [
+        {"part_kind": "user-prompt", "content": "x" * 40_000}]}]}
+
+    await context.check_pressure("sess_bigmodel", run_state, agent_id="a", model="big-model")
+    assert emitted == [], "under 2% of a 1M window is not pressure"
+    await context.check_pressure("sess_default", run_state, agent_id="a")
+    assert [k for k, _ in emitted] == ["session.context_pressure"]
+    assert emitted[0][1]["window"] == 10_000

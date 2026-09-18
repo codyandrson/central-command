@@ -154,6 +154,12 @@ def test_model_api_error_follows_its_cause():
         ("Connection refused", "transient"),
         ("Service temporarily unavailable", "transient"),
         ("404: issue DEMO-9 does not exist", "semantic"),
+        # The 2026-09-18 shape: a 404 whose model uuid happens to contain "429"
+        # was retried five times as an outage.
+        (('update_model — not found (404): {"error":{"message":"Model '
+          '0e6dc227-0b80-460d-aa7c-34292af47192 not found on proxy."}}'), "semantic"),
+        ("status_code: 429, model_name: cc-default", "transient"),
+        ("error_code=429", "transient"),
         ("field 'due_date' is not a valid date", "semantic"),
         ("", "semantic"),
         (None, "semantic"),

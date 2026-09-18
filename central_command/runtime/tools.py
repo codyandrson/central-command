@@ -8,7 +8,9 @@ import difflib
 import json
 import re
 from pathlib import Path, PurePosixPath
+from typing import Annotated
 
+from pydantic import BeforeValidator
 from pydantic_ai import CallDeferred, ModelRetry, RunContext
 
 from central_command.config import settings as _settings
@@ -1162,6 +1164,18 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
     )
 
 
+def _loads_if_str(value):
+    """Some models hand a nested object over as its JSON text (kilo-auto/free:
+    19 sessions in a week of "Input should be an object" retries, one exhausting
+    all ten). The wire schema is unchanged — this only accepts what the model
+    meant; a string that is not JSON is still a validation error."""
+    return json.loads(value) if isinstance(value, str) else value
+
+
+# The `proposal` parameter of every propose_* tool.
+ProposalArg = Annotated[Proposal, BeforeValidator(_loads_if_str)]
+
+
 async def _validate_proposal(ctx: RunContext, proposal: Proposal) -> None:
     """Reject an invented capability or a malformed action IN-RUN, before the
     proposal parks — the model gets every problem at once as a tool error
@@ -1221,7 +1235,7 @@ async def _validate_proposal(ctx: RunContext, proposal: Proposal) -> None:
     )
 
 
-async def propose_action(ctx: RunContext, proposal: Proposal) -> str:
+async def propose_action(ctx: RunContext, proposal: ProposalArg) -> str:
     """Propose one or more gated actions. Each action's `capability` names what
     it does (a Jira write, a graph episode, a task, a charter edit, …). The
     proposal is reviewed and, once approved, executed by the control plane —
@@ -1234,7 +1248,7 @@ async def propose_action(ctx: RunContext, proposal: Proposal) -> str:
     raise CallDeferred(metadata={"kind": "proposal"})
 
 
-async def propose_jira_update(ctx: RunContext, proposal: Proposal) -> str:
+async def propose_jira_update(ctx: RunContext, proposal: ProposalArg) -> str:
     """Deprecated alias of propose_action — dropped from every pack's
     `tool_names` 2026-08-21, so no charter can offer this any more. Kept
     defined (never called) only because `test_consult.py`'s classification
@@ -1245,10 +1259,13 @@ async def propose_jira_update(ctx: RunContext, proposal: Proposal) -> str:
     return await propose_action(ctx, proposal)
 
 
-async def litellm_list_models(ctx: RunContext) -> str:
-    """List every model the LiteLLM proxy serves, with its alias and provider
-    mapping. Call this before proposing any proxy change, so your proposal names
-    real aliases and model_ids rather than assumptions. Read-only.
+async def litellm_list_models(ctx: RunContext, name: str | None = None) -> str:
+    """List the models the LiteLLM proxy serves, with alias, model_id and
+    provider mapping. Call this before proposing any proxy change, so your
+    proposal names real aliases and model_ids rather than assumptions. The
+    full list is long and gets TRUNCATED — pass `name` (a substring of the
+    alias, model_id or provider model) to get just the rows you need. Never
+    guess a model_id: read it here. Read-only.
     """
     # Reads are ungated and best-effort — a down/unconfigured proxy degrades the
     # answer, never wedges the run.
@@ -1259,6 +1276,14 @@ async def litellm_list_models(ctx: RunContext) -> str:
             f"litellm read unavailable ({type(e).__name__}: {e})"
             f"{_attempts_note(e)}; proceed without it"
         )
+    # The filter exists because the unfiltered list did not fit the tool
+    # ceiling at 318 models, and an agent that could not find its own row
+    # in the truncated text invented a model_id (seven sessions, 2026-09-18).
+    if name and isinstance(data, dict) and isinstance(data.get("models"), list):
+        needle = name.strip().lower()
+        rows = [m for m in data["models"] if needle in " ".join(
+            str(m.get(k) or "") for k in ("model_name", "model_id", "provider_model")).lower()]
+        data = {**data, "models": rows, "count": len(rows), "filter": name}
     return _clip(json.dumps(data, default=str))
 
 
@@ -1644,7 +1669,7 @@ async def litellm_probe_model(
     return _clip(json.dumps(data, default=str))
 
 
-async def propose_litellm_change(ctx: RunContext, proposal: Proposal) -> str:
+async def propose_litellm_change(ctx: RunContext, proposal: ProposalArg) -> str:
     """Propose a change to the LiteLLM proxy — a model, key, team or fallback
     change, or a CONFIG-FILE change (litellm.apply_config_change: routing
     strategy and everything else the admin API cannot reach, carrying the full
@@ -1655,7 +1680,7 @@ async def propose_litellm_change(ctx: RunContext, proposal: Proposal) -> str:
     raise CallDeferred(metadata={"kind": "litellm_change"})
 
 
-async def propose_calendar_change(ctx: RunContext, proposal: Proposal) -> str:
+async def propose_calendar_change(ctx: RunContext, proposal: ProposalArg) -> str:
     """Propose a change to the operator's calendar (create, update or cancel an
     event). Reviewed and, once approved, applied by the control-plane Executor —
     this tool does not change the calendar, and nothing happens until a human
@@ -1665,7 +1690,7 @@ async def propose_calendar_change(ctx: RunContext, proposal: Proposal) -> str:
     raise CallDeferred(metadata={"kind": "calendar_change"})
 
 
-async def propose_loe(ctx: RunContext, proposal: Proposal) -> str:
+async def propose_loe(ctx: RunContext, proposal: ProposalArg) -> str:
     """Propose a line-of-effort change — create a new line of effort
     (`loe.create`), record a check-in (`loe.record_checkin`), or
     recalibrate/retire one (`loe.update`). Reviewed

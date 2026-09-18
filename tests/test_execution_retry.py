@@ -295,6 +295,18 @@ async def test_retries_are_bounded_and_exhaustion_promotes(monkeypatch):
     item = await repo.get_operator_item(exhausted["payload"]["operator_item_id"])
     assert item["status"] == "OPEN" and item["kind"] == "question"
     assert parked["proposal_id"] in item["body"]
+    # Answering the notice acknowledges it. Nothing is paused on it (no
+    # tool_call_id), so no resume runs — driving one raised "not paused on a
+    # question" and emitted task.run_failed (2026-09-18).
+
+    async def must_not_resume(*a, **kw):
+        raise AssertionError("an exhaustion notice must not be resumed")
+    monkeypatch.setattr(orchestration, "_resume_task_question", must_not_resume)
+    monkeypatch.setattr(orchestration, "child_resolved", must_not_resume)
+    answered = await orchestration.answer_item(item["id"], "Dismiss")
+    await asyncio.sleep(0)  # let any create_task the answer spawned run
+    assert answered["kind"] == "question"
+    assert (await repo.get_operator_item(item["id"]))["status"] == "ANSWERED"
     # The honest partial record names what landed across ALL attempts.
     failed = await _event(parked["proposal_id"], "proposal.failed")
     assert failed["payload"]["completed_actions"] == [

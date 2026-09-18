@@ -1979,7 +1979,13 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
             else _decline_continue(item_id)
         )
     elif item["kind"] == "question" and not await _belongs_to_a_project(item):
-        asyncio.create_task(_resume_task_question(item_id, answer.strip()))
+        # Only a question an AGENT asked has a run paused on it (its
+        # `tool_call_id`). The exhaustion notices (`_promote_exhausted_execution`,
+        # `_promote_exhausted_task`) carry none: the session already got the
+        # failure report, so the answer is the acknowledgement — resuming it
+        # raised "not paused on a question" and failed the task (2026-09-18).
+        if item.get("tool_call_id"):
+            asyncio.create_task(_resume_task_question(item_id, answer.strip()))
     else:
         asyncio.create_task(child_resolved({"parent_session_id": item["session_id"]}))
     return {"item_id": item_id, "kind": item["kind"], "verdict": verdict,

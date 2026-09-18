@@ -4,6 +4,46 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.37.2: a dead summary degrades to the clip, and a 404 is not an outage
+
+Investigation of one afternoon of litellm-manager errors on a 318-model
+autodiscovery batch. Six seams, each traced to a row on the event log.
+
+- **Compaction that fails falls through to the clip, never to raw history.**
+  The context summary is one model call; when the session's reasoning model
+  spent its whole output cap thinking, the summarizer raised and
+  `prepare_window`'s outer guard sent the RAW 600k-token record — the one
+  request guaranteed not to fit (proxy 400, session and task failed). The
+  summary call is now guarded on its own: no summary, trimmed window, overflow
+  clip as before.
+- **The transient sniff no longer matches "429" inside an id.** A 404
+  ("Model 0e6dc227-…-34292af47192 not found") classified as transient because
+  the uuid contained the digits, so every phantom-id update was retried five
+  times as a dependency outage and then promoted to a question. The status
+  code now matches as a token.
+- **An exhaustion notice is acknowledged, not resumed.** The question the
+  retry budget promotes carries no `tool_call_id` because nothing is paused
+  on it; answering routed through `resume_with_answer`, which raised "not
+  paused on a question" and emitted `task.run_failed`. Only a question an
+  agent asked (one with a `tool_call_id`) resumes a run.
+- **`litellm_list_models` takes a `name` filter.** The unfiltered list did not
+  fit the tool ceiling at 318 models; an agent that could not find its own row
+  in the truncated text invented a model_id (seven sessions, one re-proposing
+  the same phantom id three times). The docstring now says to read the id
+  here, never guess it.
+- **A stringified `proposal` parses.** kilo-auto/free hands the nested object
+  over as JSON text; pydantic rejected it as "Input should be an object" in 19
+  sessions in a week, one exhausting all ten retries. A `BeforeValidator` on
+  every propose_* tool's `proposal` parameter loads the text; the wire schema
+  is unchanged and non-JSON text is still a validation error.
+- **Context pressure is measured against the session's model.** A 256k-window
+  session was reporting 140% of the 81k cc-default window.
+
+Not fixed here, by decision: the litellm-manager's model declares a 10000
+max_output_tokens and routinely spends it reasoning (30 failed resumes a
+day). That is a per-model declaration on the proxy, probed and set by the
+operator, not a code change.
+
 ## 2026-09-18 — v2.37.1: the logon entry needs no elevation
 
 `schtasks /create … /sc onlogon` is "Access is denied" from a shell that is

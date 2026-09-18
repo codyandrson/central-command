@@ -139,7 +139,10 @@ async def _run_live(
         # it is the only place that sees a run growing mid-flight — a run that
         # blows the window does it between turns, not at its edges. Never
         # raises (see `context.check_pressure`), no-op in demo mode.
-        await context.check_pressure(session_id, {"messages": dumped}, agent_id=agent_id)
+        await context.check_pressure(
+            session_id, {"messages": dumped}, agent_id=agent_id,
+            model=getattr(model, "model_name", None),
+        )
         await events.emit(
             "session.step",
             ref_id=session_id,

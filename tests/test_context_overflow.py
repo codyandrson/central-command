@@ -82,6 +82,33 @@ async def test_a_request_that_would_not_fit_is_clipped_not_sent(monkeypatch):
     assert context.estimate_messages(msgs) > 30_000, "the record is untouched"
 
 
+async def test_a_dead_summarizer_still_ends_in_the_clip_not_raw_history(monkeypatch):
+    """2026-09-18: the summary call hit the model's output cap mid-reasoning and
+    raised; `prepare_window` caught it at the top and sent the RAW 600k-token
+    record, which the proxy refused. Losing the summary must fall through to
+    the trimmed window and the overflow clip."""
+    msgs = _transcript(turns=6, payload=20_000)
+    _pin(monkeypatch, {"summarize": True, "summarize_threshold": 0.5,
+                       "pressure_warning": False, "tool_results_keep_turns": 6},
+         window=30_000)
+
+    async def dead_summarizer(model, region):
+        raise RuntimeError("Model token limit (10000) exceeded before any response was generated")
+    monkeypatch.setattr(context, "summarize", dead_summarizer)
+    emitted = []
+
+    async def fake_emit(kind, **kw):
+        emitted.append(kind)
+    from central_command import events
+    monkeypatch.setattr(events, "emit", fake_emit)
+
+    out = await _window(_ctx(session_id="sess_deadsum"), msgs)
+    assert "session.context_compacted" not in emitted
+    assert "session.context_overflow_clipped" in emitted
+    assert context.estimate_messages(out) < 30_000 * context.OVERFLOW_FRACTION
+    assert _pairs_ok(out)
+
+
 async def test_a_request_that_fits_is_not_clipped(monkeypatch):
     msgs = _transcript(turns=1, payload=2000)
     _pin(monkeypatch, {"summarize": False, "pressure_warning": False}, window=100_000)
