@@ -20,12 +20,20 @@ class EmailFacadeError(Exception):
 
 
 async def _call(payload: dict, timeout: float = 60.0) -> dict:
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            settings.email_facade_url,
-            headers={"x-cc-token": settings.email_facade_token},
-            json=payload,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                settings.email_facade_url,
+                headers={"x-cc-token": settings.email_facade_token},
+                json=payload,
+            )
+    except httpx.HTTPError as e:
+        # An install without n8n (CC_ENABLE_N8N=0) has no façade at all; a raw
+        # ConnectError here was a 500 + three toasts from the bulk-dismiss
+        # preview (2026-09-18 Windows walk). Same error type as an HTTP failure.
+        raise EmailFacadeError(
+            f"email façade {payload.get('mode')} unreachable at {settings.email_facade_url}: {e}"
+        ) from e
     if resp.status_code != 200:
         raise EmailFacadeError(
             f"email façade {payload.get('mode')} failed: HTTP {resp.status_code} "

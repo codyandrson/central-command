@@ -37,6 +37,7 @@ import claudeCodeLimitsRoutes from './routes/claude-code-limits.js';
 import versionRoutes from './routes/version.js';
 import channelsRoutes from './routes/channels.js';
 import versionCheckRoutes from './routes/version-check.js';
+import updateProxyRoutes from './routes/cc-update-proxy.js';
 import gatewayRoutes from './routes/gateway.js';
 import connectDefaultsRoutes from './routes/connect-defaults.js';
 import workspaceRoutes from './routes/workspace.js';
@@ -91,6 +92,9 @@ app.use(
   }),
 );
 app.use('*', securityHeaders);
+// Single-node profile: the gateway owns the update routes; mount the proxy
+// BEFORE the body limit so a release zip streams through (routes/cc-update-proxy.ts).
+if (config.updateBackend === 'api') app.route('/', updateProxyRoutes);
 app.use(
   '/api/*',
   bodyLimit({

@@ -112,11 +112,17 @@ function mapTask(t: CcTask) {
   };
 }
 
-async function fetchGvTasks(agentId?: string): Promise<CcTask[]> {
+// `taskable_agents` rides along: the backend's roster truth for the assignee
+// picker (D24). It was dropped here and the Create-task dialog offered every
+// session, including agents the backend then 422s (2026-09-18 Windows walk).
+async function fetchGvTasksPage(agentId?: string): Promise<{ tasks: CcTask[]; taskableAgents: string[] }> {
   const res = await cc(`/tasks${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`);
   if (!res.ok) throw new Error(await gvError(res));
-  const data = await res.json() as { tasks: CcTask[] };
-  return data.tasks;
+  const data = await res.json() as { tasks: CcTask[]; taskable_agents?: string[] };
+  return { tasks: data.tasks, taskableAgents: data.taskable_agents ?? [] };
+}
+async function fetchGvTasks(agentId?: string): Promise<CcTask[]> {
+  return (await fetchGvTasksPage(agentId)).tasks;
 }
 
 /* ── Routes ── */
@@ -149,7 +155,8 @@ app.get('/api/kanban/tasks', rateLimitGeneral, async (c) => {
     // `assignee` is Nerve's `agent:<id>` form; Central Command filters in SQL on the
     // bare id, so it goes to the source rather than being sliced out here.
     const assignee = c.req.query('assignee') || '';
-    let tasks = await fetchGvTasks(assignee.replace(/^agent:/, '') || undefined);
+    const fetched = await fetchGvTasksPage(assignee.replace(/^agent:/, '') || undefined);
+    let tasks = fetched.tasks;
     const q = (c.req.query('q') || '').toLowerCase();
     if (q) {
       tasks = tasks.filter(t =>
@@ -164,6 +171,7 @@ app.get('/api/kanban/tasks', rateLimitGeneral, async (c) => {
       limit,
       offset,
       hasMore: offset + page.length < tasks.length,
+      taskableAgents: fetched.taskableAgents,
     });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);

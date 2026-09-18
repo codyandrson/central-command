@@ -4,6 +4,61 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-18 — v2.36.5: the cockpit's update routes, and a Windows proxy is three seams
+
+The v2.27.3 → v2.36.4 update ran on the Windows box through
+`deploy/single/update.sh`, then the cockpit came up on the Node server for
+the first time on that profile — and its Updates panel said "Up to date" at
+v2.27.3 while v2.36.4 was published, and Update from file answered 413.
+
+- **The Node server proxies the update routes on the single-node profile.**
+  On k3s it owns `/api/update/*` and `/api/version/check` (root helper units,
+  local git tags); on the single-node profile the FastAPI app owns them
+  (`update.sh` through a detached runner, upload from file). With
+  `CC_UPDATE_BACKEND=api` in `web/.env` — written by the boot phase — the
+  five routes forward to the gateway, body streamed, mounted before the
+  `/api/*` body limit so a release zip is not a 413 (`routes/cc-update-proxy.ts`).
+- **Git's bash is found from `Git/cmd` as well as `Git/mingw64/bin`.** The
+  resolver only tried the two-level form, so an API launched from cmd,
+  PowerShell or a service spawned WSL's bash for `update.sh`.
+- **A proxy on Windows is three seams, and preflight checks all three.** Git
+  for Windows' curl is schannel-only: it ignores `CURL_CA_BUNDLE` and it
+  checks revocation, which an intercepting proxy cannot answer
+  (`CRYPT_E_REVOCATION_OFFLINE`). So the CA must be in the Windows Root store
+  (`ca-windows-store` names the `certutil` command), `setup.sh` writes a
+  setup-owned `.curlrc` (`ssl-revoke-best-effort`, via `CURL_HOME`), and the
+  podman MACHINE — a second host with its own egress — must carry the proxy
+  at start and the CA in its anchors (`machine-egress`, `machine-ca`). With a
+  dead host proxy, pulls went DIRECT and fetch passed; the resolver's blind
+  path now names curl's error and says whose egress it used. `deploy/AIRGAP.md`
+  states the Windows contract.
+- **A CRLF `images.txt` survives the merge that fixes it.** The `.gitattributes`
+  that pins LF lands in the same merge, so the working file stayed CRLF and
+  the resolver read a blank line as a one-column row. The resolver strips CR.
+- **`update.sh init` moves a clone checked out at a tag onto `local`.** It
+  created the branch at that very commit and then WARNed that HEAD was
+  detached; apply would have refused.
+- **Boot polls the roster** instead of sampling it once right after
+  `/health` — v2.36.4's startup hires after the health endpoint answers.
+- The cockpit server's `cockpit.log`/`cockpit.pid` and the setup-owned
+  `.curl/` are ignored.
+
+Three defects from the first full cockpit walk on that box (every view,
+every control, Playwright-driven):
+
+- **Bulk-dismiss preview on an install without n8n was a 500** plus three
+  "Exception in ASGI application" toasts: the email façade client let httpx's
+  `ConnectError` through. It is an `EmailFacadeError` now, so the route
+  answers a 400 that names the façade URL.
+- **The New-task assignee picker offered agents the backend then 422s.** The
+  API sends `taskable_agents` with every task list (roster truth, D24); the
+  Node kanban route dropped it and the dialog built its list from sessions.
+  It rides through as `taskableAgents` and the picker filters on it (a Node
+  test pins the pass-through).
+- **The long skill dialogs scroll** (`max-h-[calc(100dvh-2rem)]`, the
+  agents dialogs' pattern) — Add document's Save button sat below the fold on
+  a short viewport.
+
 ## 2026-09-18 — v2.36.4: a Windows install is measured, not assumed
 
 The single-node profile's first end-to-end run on a Windows 10 box (Git Bash

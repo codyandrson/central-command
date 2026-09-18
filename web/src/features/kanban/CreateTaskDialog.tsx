@@ -46,9 +46,11 @@ interface CreateTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (payload: CreateTaskPayload) => Promise<void>;
+  /** Roster truth from GET /api/kanban/tasks — the backend 422s any other agent. */
+  taskableAgents?: string[];
 }
 
-export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDialogProps) {
+export function CreateTaskDialog({ open, onOpenChange, onCreate, taskableAgents }: CreateTaskDialogProps) {
   const { sessions, agentName } = useSessionContext();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -85,8 +87,11 @@ export function CreateTaskDialog({ open, onOpenChange, onCreate }: CreateTaskDia
   const trimmedTitle = title.trim();
   const isValid = trimmedTitle.length > 0 && trimmedTitle.length <= 500;
   const assigneeOptions = useMemo(
-    () => buildAssigneeOptions(sessions, agentName),
-    [agentName, sessions],
+    () => buildAssigneeOptions(sessions, agentName).filter(o => {
+      const m = /^agent:([^:]+)/.exec(o.value);
+      return !m || !taskableAgents?.length || taskableAgents.includes(m[1]);
+    }),
+    [agentName, sessions, taskableAgents],
   );
 
   const handleFilesSelected = useCallback((files: FileList | null) => {

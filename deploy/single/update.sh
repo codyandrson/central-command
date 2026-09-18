@@ -197,6 +197,12 @@ cmd_init() {
     fi
     G rev-parse --verify -q local    >/dev/null 2>&1 || G branch local
     G rev-parse --verify -q upstream >/dev/null 2>&1 || G branch upstream
+    # A clone checked out at a tag is DETACHED: `local` was just created at
+    # this very commit, so moving onto it changes nothing but the branch name
+    # (2026-09-18 Windows run: init WARNed, apply would have refused).
+    if ! on_local_branch && [[ "$(G rev-parse HEAD)" == "$(G rev-parse local)" ]]; then
+      G checkout -q local
+    fi
     if on_local_branch; then
       pass "init" "repo ready — branches \`upstream\` and \`local\` present"
     else

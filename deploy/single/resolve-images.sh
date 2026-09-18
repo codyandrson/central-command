@@ -87,6 +87,7 @@ set_kv() { # set_kv <file> <key> <value>
   tmp="$(mktemp)" || return 1
   chmod 600 "$tmp" 2>/dev/null
   while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"   # images.txt may be CRLF: the merge that brings .gitattributes writes it first (2026-09-18 Windows run)
     if [[ "$line" == "$k="* ]]; then
       printf '%s=%s\n' "$k" "$v" >>"$tmp"; found=1
     else
@@ -134,6 +135,7 @@ api_host() { [[ "$1" == "docker.io" || "$1" == "index.docker.io" ]] && echo regi
 # are also left in $LAST_HEADERS — a FILE, not a variable, because callers
 # invoke reg_req inside $(...) and a variable set there dies with the subshell
 # (tag listing needs the Link header afterwards).
+LAST_CURL_ERR=""
 LAST_HEADERS="$(mktemp)"; trap 'rm -f "$LAST_HEADERS"' EXIT
 reg_req() { # reg_req <method> <api-host> <url-path> [accept]
   local method="$1" api="$2" path="$3" accept="${4:-}"
@@ -141,7 +143,8 @@ reg_req() { # reg_req <method> <api-host> <url-path> [accept]
   [[ -n "$accept" ]] && args+=(-H "Accept: $accept")
   [[ "$method" == HEAD ]] && args+=(-I)
   hdr="$(mktemp)" || return 1
-  body="$(curl -sS --max-time 30 -D "$hdr" "${args[@]}" "$url" 2>/dev/null)"
+  body="$(curl -sS --max-time 30 -D "$hdr" "${args[@]}" "$url" 2>"$hdr.err")"
+  LAST_CURL_ERR="$(head -c 200 "$hdr.err" 2>/dev/null)"; rm -f "$hdr.err"
   code="$(awk 'toupper($1) ~ /^HTTP/ {c=$2} END{print c}' "$hdr")"
   if [[ "$code" == "401" ]]; then
     # Bearer realm="…",service="…",scope="…" — ask for exactly what it wants.
@@ -264,7 +267,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
     # blind way — a successful pull is the only proof that matters — before
     # calling it a failure.
     if command -v podman >/dev/null 2>&1 && podman pull -q "${host}/${path}:${lock}" >/dev/null 2>&1; then
-      warn "$check" "${host}/${path}: the registry answered no tag list — resolved BLIND to the locked tag ${lock}, which pulled"
+      warn "$check" "${host}/${path}: the registry answered no tag list${LAST_CURL_ERR:+ ($LAST_CURL_ERR)} — resolved BLIND to the locked tag ${lock}, which pulled (podman's own egress, which a proxy/CA seam on the HOST does not govern — see deploy/AIRGAP.md)"
       chosen="$lock"; mode=locked; dig="(blind)"
     else
       fail "$check" "${host}/${path}: the registry's tags API is unreachable and the locked tag ${lock} could not be pulled either — seam: CC_REGISTRY_${key^^} in .env (or a registries.conf mirror podman sees)"
@@ -306,6 +309,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
 
 note "resolving images against $( [[ -n "${CC_REGISTRY_DOCKERIO:-}${CC_REGISTRY_GHCR:-}${CC_REGISTRY_MCR:-}" ]] && echo "the configured mirrors" || echo "the public registries" )"
 while read -r key path cons lock ldig comp; do
+  comp="${comp%$'\r'}"; key="${key%$'\r'}"   # CRLF images.txt: a blank line reads as a 1-column row otherwise
   [[ -z "${key:-}" || "$key" == \#* ]] && continue
   if [[ -z "${comp:-}" ]]; then
     fail "images-txt" "expected 6 columns, got: $key $path ${cons:-} ${lock:-} ${ldig:-}"

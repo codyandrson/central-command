@@ -43,6 +43,7 @@ export function KanbanPanel({ initialTaskId, onInitialTaskConsumed, onOpenSessio
     showOldTerminal,
     setShowOldTerminal,
     oldTerminalHiddenCount,
+    taskableAgents,
   } = useKanban();
 
   // Same agent source CreateTaskDialog/TaskDetailDrawer use — real active
@@ -130,6 +131,7 @@ export function KanbanPanel({ initialTaskId, onInitialTaskConsumed, onOpenSessio
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreate={handleCreate}
+        taskableAgents={taskableAgents}
       />
 
       {/* Task Detail Drawer */}

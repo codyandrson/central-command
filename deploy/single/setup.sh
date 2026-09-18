@@ -191,6 +191,14 @@ load_env() {
     export CURL_CA_BUNDLE="$CC_CA_BUNDLE" SSL_CERT_FILE="$CC_CA_BUNDLE" \
            REQUESTS_CA_BUNDLE="$CC_CA_BUNDLE" NODE_EXTRA_CA_CERTS="$CC_CA_BUNDLE" \
            NPM_CONFIG_CAFILE="$CC_CA_BUNDLE"
+    # Git for Windows' curl is schannel-ONLY: it ignores CURL_CA_BUNDLE (the
+    # CA must be in the Windows Root store — preflight checks) and it checks
+    # revocation, which an intercepting proxy cannot answer
+    # (CRYPT_E_REVOCATION_OFFLINE, 2026-09-18 Windows run). A setup-owned
+    # .curlrc relaxes that to best-effort for every curl this driver spawns.
+    if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
+      mkdir -p "$HERE/.curl" && printf 'ssl-revoke-best-effort\n' >"$HERE/.curl/.curlrc" && export CURL_HOME="$HERE/.curl"
+    fi
   fi
   if [[ -n "${CC_PROXY:-}" ]]; then
     export http_proxy="$CC_PROXY" https_proxy="$CC_PROXY" \
@@ -407,6 +415,40 @@ phase_preflight() {
       || warn "linger" "run 'loginctl enable-linger ${USER:-$(id -un)}' or containers die with your login session"
   else
     pass "linger" "no logind here — not applicable"
+  fi
+
+  # On Windows the OS trust store is what schannel curl and podman.exe
+  # consult — CC_CA_BUNDLE alone never reaches them. Usually the corporate CA
+  # is there by policy; when it is not, the fix is the operator's (admin).
+  if [[ -n "${CC_CA_BUNDLE:-}" && ( "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ) ]] && command -v certutil >/dev/null 2>&1; then
+    local thumb; thumb="$(openssl x509 -in "$CC_CA_BUNDLE" -noout -fingerprint -sha1 2>/dev/null | sed 's/.*=//; s/://g')"
+    if [[ -n "$thumb" ]] && certutil -store Root "$thumb" >/dev/null 2>&1; then
+      pass "ca-windows-store" "CC_CA_BUNDLE's CA is in the Windows Root store (schannel curl and podman.exe trust it)"
+    else
+      useraction "ca-windows-store" "CC_CA_BUNDLE's CA is NOT in the Windows Root store — Git's curl (schannel) and podman.exe will not trust the proxy; as Administrator: certutil -addstore Root \"$(cygpath -w "$CC_CA_BUNDLE" 2>/dev/null || echo "$CC_CA_BUNDLE")\""
+    fi
+  fi
+
+  # A podman MACHINE (Windows/macOS) has its own egress: the host's CC_PROXY /
+  # CC_CA_BUNDLE never reach a pull unless the VM carries them. podman passes
+  # the host's HTTP(S)_PROXY into the VM at START, and `--import-native-ca`
+  # imports the host's trusted CAs at every boot (podman ≥ 5.5). With a dead
+  # proxy on the host, pulls went DIRECT and fetch passed (2026-09-18) — so
+  # check the machine, and name the two commands when it is not configured.
+  if [[ -n "${CC_PROXY:-}${CC_CA_BUNDLE:-}" ]] && [[ -n "$(podman machine list --format '{{.Name}}' 2>/dev/null)" ]]; then
+    local mproxy; mproxy="$(podman machine ssh -- 'printenv HTTPS_PROXY https_proxy 2>/dev/null | head -1' </dev/null 2>/dev/null | tr -d '\r')"
+    if [[ -n "${CC_PROXY:-}" && "$mproxy" != "$CC_PROXY" ]]; then
+      useraction "machine-egress" "the podman machine has no proxy (host CC_PROXY=$CC_PROXY, machine '${mproxy:-none}') — pulls would go direct or fail; run: podman machine stop && HTTPS_PROXY=$CC_PROXY HTTP_PROXY=$CC_PROXY podman machine start"
+    else
+      pass "machine-egress" "the podman machine carries the host proxy (${mproxy:-no proxy configured})"
+    fi
+    if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
+      if podman machine ssh -- 'test -s /etc/pki/ca-trust/source/anchors/*.pem -o -s /etc/pki/ca-trust/source/anchors/*.crt 2>/dev/null || grep -qs . /etc/pki/ca-trust/source/anchors/ 2>/dev/null' </dev/null >/dev/null 2>&1; then
+        pass "machine-ca" "the podman machine has CA anchors installed"
+      else
+        useraction "machine-ca" "the podman machine trusts no extra CA — install it in the VM: podman machine ssh -- sudo tee /etc/pki/ca-trust/source/anchors/cc-ca.pem < \"$CC_CA_BUNDLE\" && podman machine ssh -- sudo update-ca-trust (podman ≥ 5.9 can instead import the host store at every boot: podman machine set --import-native-ca; 5.8 has no such flag)"
+      fi
+    fi
   fi
 
   # 127.0.0.1, never localhost: Windows resolves localhost to ::1 first and the
@@ -1076,7 +1118,13 @@ phase_boot() {
     fi
   fi
 
-  local n; n="$(api_json "$(api_url)/api/agents" 'len(d.get("agents", d if isinstance(d, list) else []))')"
+  # The roster is hired AFTER startup completes; one read right after /health
+  # saw zero agents on 2026-09-18 (Windows, v2.36.4) — poll, do not sample.
+  local n i; for i in $(seq 1 30); do
+    n="$(api_json "$(api_url)/api/agents" 'len(d.get("agents", d if isinstance(d, list) else []))')"
+    [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )) && break
+    sleep 2
+  done
   if [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )); then
     pass "boot-roster" "$n agents on the roster"
   else
@@ -1096,6 +1144,8 @@ phase_boot() {
     pass "boot-cockpit" "cockpit already answering at http://127.0.0.1:${cport} — not starting a second one"
   else
     [[ -f "$REPO_ROOT/web/.env" ]] || printf 'PORT=%s\nGATEWAY_URL=%s\n' "$cport" "$(api_url)" >"$REPO_ROOT/web/.env"
+    # The API owns the update routes on this profile; the Node server proxies.
+    grep -q '^CC_UPDATE_BACKEND=' "$REPO_ROOT/web/.env" || printf 'CC_UPDATE_BACKEND=api\n' >>"$REPO_ROOT/web/.env"
     note "--> starting the cockpit server detached (log: $HERE/cockpit.log · stop: ./setup.sh stop)"
     ( cd "$REPO_ROOT/web" && nohup node server-dist/index.js >>"$HERE/cockpit.log" 2>&1 &
       echo $! >"$HERE/cockpit.pid" )

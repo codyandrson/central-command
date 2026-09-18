@@ -9,6 +9,7 @@ interface TasksResponse {
   limit: number;
   offset: number;
   hasMore: boolean;
+  taskableAgents?: string[];
 }
 
 /* ── Filter state ──
@@ -92,6 +93,7 @@ export interface BoardConfig {
 export function useKanban(assignee?: string) {
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
   const [total, setTotal] = useState(0);
+  const [taskableAgents, setTaskableAgents] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ownFilters, setFilters] = useState<KanbanFilters>(EMPTY_FILTERS);
@@ -135,6 +137,7 @@ export function useKanban(assignee?: string) {
       const data: TasksResponse = await res.json();
       setTasks(data.items);
       setTotal(data.total);
+      setTaskableAgents(data.taskableAgents ?? []);
       if (!silent) setError(null);
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -353,6 +356,7 @@ export function useKanban(assignee?: string) {
     setTasks,
     total,
     loading,
+    taskableAgents,
     error,
     filters,
     setFilters,

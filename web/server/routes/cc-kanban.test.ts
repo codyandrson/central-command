@@ -62,6 +62,15 @@ describe('cc-kanban adapter — operator stop/resume', () => {
     });
   }
 
+  it('passes the backend\'s taskable_agents through as taskableAgents (the assignee picker\'s truth)', async () => {
+    const app = await buildApp();
+    routeFetch({ '/api/tasks': () => respond({ tasks: [STOPPED_TASK], taskable_agents: ['jira-expert', 'editor'] }) });
+
+    const res = await app.request('/api/kanban/tasks');
+    const body = await res.json();
+    expect(body.taskableAgents).toEqual(['jira-expert', 'editor']);
+  });
+
   it('forwards `stopped` onto the wire task', async () => {
     const app = await buildApp();
     routeFetch({ '/api/tasks': () => respond({ tasks: [STOPPED_TASK] }) });

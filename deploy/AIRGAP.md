@@ -71,6 +71,21 @@ dependency comes from"); blank means the public source.
 | a private/corporate CA (TLS interception, self-signed mirror) | every host-side acquisition: curl, uv/pip, npm, node | `CC_CA_BUNDLE` | fanned out to `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `NPM_CONFIG_CAFILE`; NOT podman pulls or the in-build package fetches — see below |
 | a mandatory egress proxy | every host-side acquisition | `CC_PROXY` | fanned out to `http(s)_proxy` both cases, `no_proxy` pinned to loopback; podman forwards proxy vars into builds on its own |
 
+**Windows (Git Bash + a podman machine) — measured 2026-09-18.** Git for
+Windows' curl is schannel-only: it IGNORES `CURL_CA_BUNDLE`, and it checks
+revocation, which an intercepting proxy cannot answer
+(`CRYPT_E_REVOCATION_OFFLINE`). So on Windows the CA must ALSO be in the
+Windows Root store (usually there by policy; else, as Administrator,
+`certutil -addstore Root <ca.cer>` — the preflight check `ca-windows-store`
+names it), and `setup.sh` writes a setup-owned `.curlrc`
+(`ssl-revoke-best-effort`, via `CURL_HOME`) for every curl it spawns. uv, npm
+and node take the bundle from the variables as on Linux. The podman MACHINE
+is a second host with its own egress: podman passes the host's `HTTP(S)_PROXY`
+into the VM when it STARTS, and `podman machine set --import-native-ca`
+imports the host's trusted CAs at every boot — the preflight checks
+`machine-egress` / `machine-ca` name both commands. Without them a pull goes
+DIRECT (a dead host proxy still "passed" fetch) or fails naming the registry.
+
 **What `CC_CA_BUNDLE` does not cover.** podman PULLS verify against the host
 trust store (`update-ca-certificates` / `/etc/containers/certs.d/<registry>/ca.crt`),
 not the exported variables. And the apt/pip/npm fetches INSIDE the three

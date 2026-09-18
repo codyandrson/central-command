@@ -264,7 +264,7 @@ export function AddDocDialog({ skill, open, onOpenChange, onAdd }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-[1.2rem] font-semibold text-foreground">
             Add a document to <span className="font-mono">{skill.id}</span>
@@ -414,7 +414,7 @@ export function ImportDocDialog({ skill, open, onOpenChange, onImport, onImportF
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-[1.2rem] font-semibold text-foreground">
             Import a document into <span className="font-mono">{skill.id}</span>
@@ -568,7 +568,7 @@ export function ImportSiteDialog({ skill, open, onOpenChange, onImport }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-[1.2rem] font-semibold text-foreground">
             Import a whole site into <span className="font-mono">{skill.id}</span>

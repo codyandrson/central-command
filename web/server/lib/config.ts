@@ -68,6 +68,9 @@ export const config = {
 
   // Gateway connection
   gatewayUrl: process.env.GATEWAY_URL || DEFAULT_GATEWAY_URL,
+  // 'api' = the gateway owns /api/update/* + /api/version/check (single-node
+  // profile); anything else = this server does (k3s helper units).
+  updateBackend: process.env.CC_UPDATE_BACKEND || '',
   gatewayToken: process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN || '',
   publicOrigin: process.env.NERVE_PUBLIC_ORIGIN || '',
 
