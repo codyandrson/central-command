@@ -116,6 +116,12 @@ def proposal_from_call(call, metadata: dict | None = None) -> Proposal:
     if isinstance(raw, str):
         raw = json.loads(raw)
     payload = raw.get("proposal", raw) if isinstance(raw, dict) else raw
+    # The same tolerance the tool's own validator has (`tools.ProposalArg`):
+    # some models hand the nested object over as its JSON text. The gateway
+    # re-parses the PERSISTED call on every decision resume, so a redraft
+    # that parsed at propose time must parse here too (v2.37.2 → v2.37.5).
+    if isinstance(payload, str):
+        payload = json.loads(payload)
     return Proposal.model_validate(payload)
 
 

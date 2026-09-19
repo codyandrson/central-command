@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.5: the gateway re-parses what the tool accepted
+
+- **A stringified `proposal` parses on the decision resume too.** v2.37.2
+  taught the propose_* tools to load a `proposal` handed over as JSON text;
+  the gateway re-parses the PERSISTED tool call on every decision resume
+  through `proposal_from_call`, which only loaded a string at the top level,
+  not one nested under `proposal`. The first redraft in that shape died
+  inside a detached resume ("Task exception was never retrieved") and left
+  its session AWAITING_HUMAN over a proposal that was never parked — the
+  orphan shape the resume sweep's first worklist exists for, so it converges
+  on the next sweep once this is applied.
+
 ## 2026-09-18 — v2.37.4: the estimate learns its density from the proxy's own count
 
 The v2.36.0 overflow guard estimated at a fixed 3 chars per token and never

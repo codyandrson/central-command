@@ -222,3 +222,16 @@ async def test_confidence_survives_the_round_trip_through_the_park_path(monkeypa
     # Undecided, so it must sit in awaiting — never counted as an agreement.
     assert report["awaiting_decision"] >= 1
     assert ledger  # the enroll path this proposal's real siblings come from
+
+
+def test_proposal_from_call_tolerates_a_stringified_nested_proposal():
+    """kilo-auto/free hands `proposal` over as JSON text. The tool accepts it
+    since v2.37.2; the gateway's redraft re-parse must accept the same call
+    (2026-09-19: `_record_execution_failure._resume` died un-retrieved)."""
+    import json
+
+    body = {**_CORE, "confidence": {"level": "low", "rationale": "inferred"}}
+    nested = ToolCallPart(tool_name="propose_action", args={"proposal": json.dumps(body)})
+    assert proposal_from_call(nested).confidence.level.value == "low"
+    whole = ToolCallPart(tool_name="propose_action", args=json.dumps({"proposal": json.dumps(body)}))
+    assert proposal_from_call(whole).confidence.level.value == "low"
