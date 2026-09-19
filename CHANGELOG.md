@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.11: an unhealthy model is a finding, and a schedule fires once at a time
+
+Found by the first two v2.37.9 discovery passes, which still failed the same way.
+
+- **A single-alias health check that comes back 503 is READ, not raised.**
+  The proxy answers 503 whenever no checked endpoint is healthy — for one
+  alias, that is exactly "this model is down" — with the report in the body.
+  `check_model_health` raised on it, so every unhealthy managed model has
+  been landing in the tick's `errors` (the `health:<alias>` chips) and never
+  in the agent's UNHEALTHY list; the maintenance task had nothing to fix.
+  A 503 whose body is not the report is still a proxy failure.
+- **One firing per schedule at a time.** Two run-now presses two seconds
+  apart ran the discovery sweep twice concurrently, doubling its provider
+  requests; the second press now returns `skipped: already running`.
+- **`health_batch` defaults to 15, down from 40**, sized to the one
+  published budget we know of: Kilo.ai allows 200 requests per hour per IP
+  on free models, shared by every Kilo call this host makes — the manager's
+  own turns, the capability probes and a failing probe's retries included —
+  and the ban hits the whole IP, catalog fetch and all.
+
 ## 2026-09-19 — v2.37.10: a rollback retires the success it undid
 
 - **`update.sh rollback` rewrites the cockpit's status record to

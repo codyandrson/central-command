@@ -452,8 +452,23 @@ async def check_model_health(model: str | None = None) -> dict:
     if model is not None:
         path += f"?model={_alias(model)}"
     resp = await _call("GET", path)
-    _check(resp, "check_model_health")
-    d = resp.json()
+    # The proxy answers 503 whenever NO checked endpoint is healthy — for a
+    # single-alias call that is every unhealthy model — with the report in
+    # the body. That is the finding, not a proxy failure: raising here sent
+    # every unhealthy managed model to the tick's `errors` and never to the
+    # agent's UNHEALTHY list (2026-09-19). Only a body that is not the report
+    # is a real error.
+    d = None
+    if resp.status_code == 503:
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+        if isinstance(body, dict) and "unhealthy_endpoints" in body:
+            d = body
+    if d is None:
+        _check(resp, "check_model_health")
+        d = resp.json()
     healthy = [e.get("model") or e.get("api_base") for e in (d.get("healthy_endpoints") or [])]
     unhealthy = [
         {"model": e.get("model"), "error": e.get("error") or e.get("exception")}

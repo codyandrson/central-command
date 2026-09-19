@@ -1168,11 +1168,15 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
     # (2026-09-19). At most `health_batch` deployments per credential per
     # tick, resuming after the alias the last tick stopped at
     # (`autodiscovery_health_cursor`), so the fleet still converges over a
-    # few nights. A LiteLLM-side rpm limit is not a substitute: it is per
+    # few nights. The default is sized to the one published budget we know
+    # of — Kilo.ai: 200 requests per hour per IP, shared by EVERY Kilo call
+    # this host makes (the manager's own turns, the capability probes, and
+    # a failing probe's retries) — 40 tripped it when a double press ran two
+    # sweeps at once. A LiteLLM-side rpm limit is not a substitute: it is per
     # DEPLOYMENT (282 deployments × 1 call each never trips it), the proxy's
     # /health calls the provider directly past the router anyway, and a limit
     # refuses with 429 rather than pacing.
-    health_batch = _parse_positive_int(params, "health_batch", 40)
+    health_batch = _parse_positive_int(params, "health_batch", 15)
     cursors = dict(await repo.get_app_setting(HEALTH_CURSOR_SETTING, {}))
     by_cred: dict[str, set[str]] = {}
     for d in deployments:
@@ -1619,7 +1623,7 @@ ACTIONS: dict[str, ActionSpec] = {
                 ),
                 "health_batch": (
                     "managed deployments health-checked per credential per "
-                    "tick (rotating), default 40"
+                    "tick (rotating), default 15"
                 ),
             },
             required=(),

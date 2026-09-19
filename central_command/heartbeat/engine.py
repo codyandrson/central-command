@@ -88,6 +88,14 @@ def compute_next_due(
     raise ValueError(f"unknown schedule kind {schedule_kind!r}")
 
 
+# Schedule ids with a firing in progress. Two run-now presses two seconds
+# apart ran the discovery sweep twice concurrently, doubling its provider
+# requests and tripping a gateway's per-IP limit (2026-09-19). One firing per
+# schedule at a time; the second returns skipped. Process-local on purpose:
+# the lease already makes this the only ticking process.
+_in_flight: set[str] = set()
+
+
 async def fire(schedule: dict, trigger: str = "schedule") -> dict:
     """Fire one schedule's action now — the ONE firing path (the tick loop and
     the operator's run-now button both land here, so the log can't tell them
@@ -95,6 +103,16 @@ async def fire(schedule: dict, trigger: str = "schedule") -> dict:
     spec = actions.ACTIONS.get(schedule["action_kind"])
     if spec is None:
         raise ValueError(f"unknown action kind {schedule['action_kind']!r}")
+    if schedule["id"] in _in_flight:
+        return {"ok": True, "skipped": "already running", "quiet": True}
+    _in_flight.add(schedule["id"])
+    try:
+        return await _fire(schedule, spec, trigger)
+    finally:
+        _in_flight.discard(schedule["id"])
+
+
+async def _fire(schedule: dict, spec, trigger: str) -> dict:
     params = schedule.get("action_params") or {}
     quiet_eligible = spec.material is not None
 

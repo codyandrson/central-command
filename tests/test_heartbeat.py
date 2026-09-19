@@ -500,6 +500,39 @@ async def test_missed_fires_are_skipped_never_replayed(monkeypatch):
     assert due is not None and due > datetime.now(timezone.utc)
 
 
+async def test_a_schedule_fires_once_at_a_time(monkeypatch):
+    """Two run-now presses two seconds apart ran a sweep twice concurrently
+    (2026-09-19); the second firing is skipped while the first runs."""
+    import importlib
+    hb_engine = importlib.import_module("central_command.heartbeat.engine")
+    started = asyncio.Event()
+    release = asyncio.Event()
+    runs = []
+
+    async def slow_run(schedule_id, params):
+        runs.append(schedule_id)
+        started.set()
+        await release.wait()
+        return {}
+
+    async def noop(*a, **kw):
+        return None
+
+    monkeypatch.setitem(hb_actions.ACTIONS, "test.slow", hb_actions.ActionSpec(
+        kind="test.slow", description="", params={}, required=(), levers=(), run=slow_run,
+        material=lambda r: False))
+    monkeypatch.setattr(hb_engine.repo, "touch_heartbeat_fired", noop)
+    sched = {"id": "s-slow", "action_kind": "test.slow", "action_params": {}}
+    first = asyncio.create_task(hb_engine.fire(sched, trigger="run-now"))
+    await started.wait()
+    second = await hb_engine.fire(sched, trigger="run-now")
+    assert second["skipped"] == "already running"
+    release.set()
+    await first
+    assert runs == ["s-slow"]
+    assert "s-slow" not in hb_engine._in_flight  # released for the next tick
+
+
 async def test_run_now_works_with_the_engine_stopped(monkeypatch):
     rec = _Recorder(monkeypatch)
     from central_command.db import repo

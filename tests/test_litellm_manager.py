@@ -786,6 +786,43 @@ async def test_check_model_health_targets_one_model_and_reports_failures(monkeyp
     assert out["unhealthy"] == [{"model": "claude-sonnet-5", "error": "x-api-key required"}]
 
 
+async def test_check_model_health_reads_the_report_out_of_a_503(monkeypatch):
+    """The proxy answers 503 when every checked endpoint is unhealthy — for a
+    single alias, that is the normal shape of "this model is down"."""
+    monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
+
+    class FakeResp:
+        status_code = 503
+        text = "{...}"
+
+        def json(self):
+            return {"healthy_endpoints": [],
+                    "unhealthy_endpoints": [{"model": "openai/openai/o1-pro",
+                                             "error": "model does not exist"}]}
+
+    async def fake_call(method, path, json_body=None):
+        return FakeResp()
+
+    monkeypatch.setattr(litellm_client, "_call", fake_call)
+    out = await litellm_client.check_model_health(model="o1-pro")
+    assert out["unhealthy"] == [{"model": "openai/openai/o1-pro", "error": "model does not exist"}]
+
+    class Down:  # a 503 that is NOT the report is still a proxy failure
+        status_code = 503
+        text = "upstream unavailable"
+
+        def json(self):
+            raise ValueError
+
+    async def fake_down(method, path, json_body=None):
+        return Down()
+
+    monkeypatch.setattr(litellm_client, "_call", fake_down)
+    with pytest.raises(litellm_client.LiteLLMError):
+        await litellm_client.check_model_health(model="o1-pro")
+
+
 # --- key update + teams (Phase 4/5: no budgets) ------------------------------
 
 
