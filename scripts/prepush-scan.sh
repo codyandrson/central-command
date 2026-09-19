@@ -8,7 +8,7 @@
 #
 # git feeds "<local ref> <local sha> <remote ref> <remote sha>" per ref on
 # stdin. Never weaken this to get a push through — move the content to the
-# instance repo instead (CLAUDE.md, the sensitivity rule).
+# instance repo instead (AGENTS.md, the sensitivity rule).
 set -uo pipefail
 SECRET_SHAPES='sk-ant-[A-Za-z0-9_-]{20,}|ATATT[0-9A-Za-z_-]{10,}|gh[pousr]_[0-9A-Za-z]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[0-9A-Za-z-]{10,}'
 LIST="${CC_PRIVATE_IDENTIFIERS:-$HOME/.cc-private-identifiers}"

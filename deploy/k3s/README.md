@@ -12,9 +12,10 @@ From bare cluster to a running Central Command. Every command is
 copy-pasteable and every `apply`/`make-*` step is idempotent, so a re-run
 reconciles rather than breaks.
 
-Context for *why* the two-node split looks like this: `CLAUDE.md` → "Where it
-runs". Live state (counts, roster, what's in the queue): the instance repo's
-`STATUS.md`. This file does not repeat either.
+Context for *why* the two-node split looks like this:
+`.claude/rules/deploy-k3s.md` → "Placement splits by STATE". Live state
+(counts, roster, what's in the queue) belongs to your private instance repo.
+This file does not repeat either.
 
 ---
 

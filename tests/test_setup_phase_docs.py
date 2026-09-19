@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 DOCS = [
     "README.md",
-    "CLAUDE.md",
+    ".claude/rules/deploy-single.md",
     "deploy/single/README.md",
     ".claude/skills/setup/SKILL.md",
 ]
