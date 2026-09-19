@@ -63,13 +63,25 @@ def no_stewards(monkeypatch):
 
 
 async def test_add_episode_defaults_to_the_shared_group(captured):
-    await graphiti.add_episode("n", "body", "src")
+    await graphiti.add_episode("n", "body", "src", reference_time="2026-01-01T00:00:00Z")
     assert captured[0][1]["group_id"] == graphiti.settings.graph_write_group
+    # The reference time rides every add_memory call (2026-09-19): Graphiti's
+    # own default is "the moment I processed this", which is the assumption
+    # the argument exists to end — so the client has no default either.
+    assert captured[0][1]["reference_time"] == "2026-01-01T00:00:00Z"
 
 
 async def test_add_episode_honors_an_explicit_group_id(captured):
-    await graphiti.add_episode("n", "body", "src", group_id="central_command_jira-expert")
+    await graphiti.add_episode("n", "body", "src", group_id="central_command_jira-expert",
+                               reference_time="2026-01-01T00:00:00Z")
     assert captured[0][1]["group_id"] == "central_command_jira-expert"
+
+
+def test_add_episode_has_no_reference_time_default():
+    import inspect
+    param = inspect.signature(graphiti.add_episode).parameters["reference_time"]
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert param.default is inspect.Parameter.empty
 
 
 async def test_reads_without_agent_id_use_only_the_shared_groups(captured, no_stewards):
@@ -139,12 +151,12 @@ def test_every_group_id_satisfies_graphitis_charset():
 async def test_executor_shared_scope_uses_default_group(monkeypatch, verification_rows, no_stewards):
     seen = {}
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         seen["group_id"] = group_id
         return "ack"
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
-    args = {"name": "n", "episode_body": "b", "scope": "shared"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert seen["group_id"] is None
 
@@ -157,7 +169,7 @@ async def test_executor_shared_scope_defaults_to_a_stewards_domain_group(
     shared group."""
     seen = {}
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         seen["group_id"] = group_id
         return "ack"
 
@@ -166,7 +178,7 @@ async def test_executor_shared_scope_defaults_to_a_stewards_domain_group(
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "scope": "shared"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert seen["group_id"] == "domain_jira"
 
@@ -176,7 +188,7 @@ async def test_executor_shared_scope_explicit_group_id_wins_over_steward(
 ):
     seen = {}
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         seen["group_id"] = group_id
         return "ack"
 
@@ -185,7 +197,7 @@ async def test_executor_shared_scope_explicit_group_id_wins_over_steward(
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "scope": "shared", "group_id": "some_other_group"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared", "group_id": "some_other_group"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert seen["group_id"] == "some_other_group"
 
@@ -195,14 +207,14 @@ async def test_executor_private_scope_uses_proposers_partition_regardless_of_arg
 ):
     seen = {}
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         seen["group_id"] = group_id
         return "ack"
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     # An agent-authored "agent_id" in args must be ignored — proposer is the
     # only trusted partition owner.
-    args = {"name": "n", "episode_body": "b", "scope": "private", "agent_id": "someone-else"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "agent_id": "someone-else"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert seen["group_id"] == "central_command_jira-expert"
 
@@ -217,7 +229,7 @@ async def test_executor_stamps_marker_and_records_verification_before_the_write(
     order = []
     seen = {}
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         order.append("write")
         seen["source_description"] = source_description
         seen["group_id"] = group_id
@@ -230,7 +242,7 @@ async def test_executor_stamps_marker_and_records_verification_before_the_write(
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "create_graph_verification", fake_create)
-    args = {"name": "n", "episode_body": "b", "scope": "private"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
 
     assert order == ["row", "write"]
@@ -245,13 +257,13 @@ async def test_executor_stamps_marker_and_records_verification_before_the_write(
 
 
 async def test_executor_private_scope_without_proposer_raises(monkeypatch):
-    args = {"name": "n", "episode_body": "b", "scope": "private"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private"}
     with pytest.raises(ExecutorError):
         await _graph_add_episode(args, approver="lee", proposer=None)
 
 
 async def test_executor_unknown_scope_raises(monkeypatch):
-    args = {"name": "n", "episode_body": "b", "scope": "team"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "team"}
     with pytest.raises(ExecutorError):
         await _graph_add_episode(args, approver="lee", proposer="jira-expert")
 
@@ -264,7 +276,7 @@ async def test_executor_private_for_agent_targets_that_agents_partition(
 ):
     seen = {}
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         seen["group_id"] = group_id
         return "ack"
 
@@ -273,7 +285,7 @@ async def test_executor_private_for_agent_targets_that_agents_partition(
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "scope": "private", "for_agent": "inbox-triage"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "inbox-triage"}
     await _graph_add_episode(args, approver="lee", proposer="ea")
     assert seen["group_id"] == "central_command_inbox-triage"
     assert verification_rows[0]["group_id"] == "central_command_inbox-triage"
@@ -295,7 +307,7 @@ async def test_executor_private_for_agent_must_be_an_active_roster_member(
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "scope": "private", "for_agent": "ghost"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "ghost"}
     with pytest.raises(ExecutorError, match="for_agent"):
         await _graph_add_episode(args, approver="lee", proposer="ea")
 
@@ -307,7 +319,7 @@ async def test_executor_private_for_agent_self_needs_no_roster_lookup(
     proposer that is not (yet) a roster member keeps working as before."""
     seen = {}
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         seen["group_id"] = group_id
         return "ack"
 
@@ -316,7 +328,7 @@ async def test_executor_private_for_agent_self_needs_no_roster_lookup(
 
     monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "scope": "private", "for_agent": "ea"}
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "ea"}
     await _graph_add_episode(args, approver="lee", proposer="ea")
     assert seen["group_id"] == "central_command_ea"
 

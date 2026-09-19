@@ -119,6 +119,7 @@ _SC1_PROPOSAL = {
                     "announced by Dana."
                 ),
                 "source_description": "email gmail:msg_1846d2",
+                "reference_time": "2026-07-20T14:02:00Z",
                 "scope": "shared",
             },
             "target_ref": {"system": "graphiti", "id": "central_command", "read_version": "unknown"},
@@ -686,6 +687,7 @@ def make_steward_model(
                         "The document states a durable team fact: " + quoted
                     ),
                     "source_description": "hand-fed document",
+                    "reference_time": "2026-07-20T00:00:00Z",
                     "scope": "shared",
                 },
                 "target_ref": {"system": "graphiti", "id": "central_command",
@@ -739,6 +741,7 @@ def make_steward_multifact_model(facts: list[str]) -> FunctionModel:
                         "The document states a durable team fact: " + quoted
                     ),
                     "source_description": "hand-fed document",
+                    "reference_time": "2026-07-20T00:00:00Z",
                     "scope": "shared",
                 },
                 "target_ref": {"system": "graphiti", "id": "central_command",
@@ -967,6 +970,7 @@ _EA_EPISODE_PROPOSAL = {
                 "the queue currently awaiting decision."
             ),
             "source_description": "executive assistant contact with the operator",
+            "reference_time": "2026-07-20T09:00:00Z",
             "scope": "shared",
         },
         "target_ref": {"system": "graphiti", "id": "central_command",
@@ -1097,6 +1101,7 @@ _INTRO_EPISODE_PROPOSAL = {
                 "agent to weigh its judgment calls."
             ),
             "source_description": "the onboarding tour introduction",
+            "reference_time": "2026-07-20T09:00:00Z",
             "scope": "shared",
         },
         "target_ref": {"system": "graphiti", "id": "central_command",

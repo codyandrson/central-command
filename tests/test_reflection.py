@@ -99,6 +99,7 @@ def _reflecting_model(reflection_args: dict):
                         "name": episode["name"],
                         "episode_body": episode["episode_body"],
                         "source_description": episode["source_description"],
+                        "reference_time": "2026-01-01T00:00:00Z",
                         "scope": episode["scope"],
                     },
                     "target_ref": {"system": "graphiti", "id": "central_command",

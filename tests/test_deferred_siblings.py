@@ -52,7 +52,7 @@ def _episode(name: str) -> dict:
         "actions": [{
             "capability": "graph.add_episode",
             "arguments": {"name": name, "episode_body": f"{name} happened.",
-                          "scope": "shared"},
+                          "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"},
             "target_ref": {"system": "graphiti", "id": f"episode:{name}",
                            "read_version": "n/a"},
             "reversibility": "reversible",

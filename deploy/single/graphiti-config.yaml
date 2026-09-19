@@ -2,7 +2,7 @@
 # /app/mcp/config/config.yaml by compose.yaml (it used to be an inline
 # ConfigMap in stack.yaml.tmpl).
 #
-# Schema is the one zepai/knowledge-graph-mcp:1.0.2-standalone parses. EVERY
+# Schema is the one zepai/knowledge-graph-mcp:1.1.0-standalone parses. EVERY
 # ${VAR} below is expanded by GRAPHITI ITSELF, at startup, from its container
 # environment — nothing renders this file, so the refs must survive verbatim.
 # ${VAR:default} is Graphiti's own default syntax (one colon), not shell's.
@@ -27,9 +27,11 @@ llm:
   providers:
     openai:
       api_key: ${GRAPHITI_LLM_API_KEY}
-      # Decorative: the MCP factory's `openai` case builds its LLM config
-      # without base_url, so the endpoint actually comes from OPENAI_BASE_URL
-      # in the container env. Stated here for intent only.
+      # Load-bearing since MCP 1.1.0: the factory passes this as the LLM
+      # client's base_url (1.0.2 ignored it and used OPENAI_BASE_URL). The
+      # same URL also drives 1.1.0's client sniff — compose.yaml sets
+      # GRAPHITI_OPENAI_CLIENT=responses to keep the Responses-API client
+      # the bridged alias exists for.
       api_url: ${LLM_API_URL}
 
 embedder:

@@ -217,6 +217,21 @@ spec:
             - name: GRAPHITI_LLM_API_KEY
               valueFrom:
                 secretKeyRef: {name: cc-graphiti, key: GRAPHITI_LLM_API_KEY}
+            # LOAD-BEARING since MCP 1.1.0 (2026-09-19): the factory now passes
+            # config.yaml's llm api_url as the client's base_url (1.0.2 ignored
+            # it and fell back to OPENAI_BASE_URL). Stated explicitly rather
+            # than relying on the yaml default so the two cannot drift.
+            - name: LLM_API_URL
+              value: http://litellm:4000/v1
+            # MCP 1.1.0 picks the CHAT-COMPLETIONS client for any LLM URL that
+            # is not api.openai.com. A plain chat call to the bridged
+            # `graphiti-llm` alias sends "chat_completions/<model>" upstream
+            # and llama-swap 404s (measured 2026-09-19). `responses` keeps the
+            # Responses-API client the bridge exists for
+            # (patches/cc-openai-client-switch.patch). Move to `generic` only
+            # together with an un-bridged alias.
+            - name: GRAPHITI_OPENAI_CLIENT
+              value: responses
             # ANTHROPIC_API_KEY is deliberately NO LONGER PASSED (2026-08-01).
             # config.yaml's llm block is `provider: openai` now, so nothing
             # constructs an AnthropicClient and nothing reads this. Graphiti

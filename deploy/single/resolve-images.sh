@@ -216,7 +216,7 @@ self_test() {
   t 3.12.8-slim-bookworm 3.12 3.12-slim-bookworm yes; t 3.12-alpine 3.12 3.12-slim-bookworm no
   t v1.62.1-noble v1.62 v1.62.0-noble yes; t v1.62.1-jammy v1.62 v1.62.0-noble no
   t 0.8.4-cpu 0.8 0.8.3-cpu yes;    t 0.8.4-cuda 0.8 0.8.3-cpu no;    t 2.30.1 2 2.29.0 yes
-  t 1.0.3-standalone 1.0 1.0.2-standalone yes; t 1.0.3 1.0 1.0.2-standalone no
+  t 1.1.1-standalone 1.1 1.1.0-standalone yes; t 1.1.1 1.1 1.1.0-standalone no; t 1.0.2-standalone 1.1 1.1.0-standalone no
   t main-stable main-stable main-stable yes; t main-stable-2 main-stable main-stable no
   (( ok )) && echo "self-test: fits ok"
   (( ok ))

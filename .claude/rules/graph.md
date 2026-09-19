@@ -38,7 +38,23 @@ when a matching file is read.
   drops the `text.format` json_schema and every extraction fails. Registering
   the model as **`openai/chat_completions/<model>`** forces LiteLLM's
   Responses→chat bridge, which converts it into a real `response_format:
-  json_schema`. That prefix is the whole fix.
+  json_schema`. That prefix is the whole fix. **And the bridge only answers
+  Responses calls** — MCP server 1.1.0 picks the chat-completions client for
+  any non-OpenAI LLM URL, and a plain chat call to the bridged alias sends
+  `chat_completions/<model>` upstream and 404s (2026-09-19).
+  `GRAPHITI_OPENAI_CLIENT=responses` (our `cc-openai-client-switch.patch`)
+  keeps the Responses client; flip it to `generic` only together with an
+  un-bridged alias, and change nothing else about the pair.
+- **Graphiti never assumes an episode's time.** Every present-tense fact's
+  `valid_at` is anchored to the episode's `reference_time`, and Graphiti's
+  own fallback is the moment it PROCESSED the episode — under MCP 1.0.2 that
+  fallback was the only behaviour, and 44% of the live graph's edges read
+  "became true when ingested" (2026-09-19). `graph.add_episode` therefore
+  REQUIRES `reference_time` (the instant the SOURCE material is from, derived
+  by the agent, approved by the operator): the shared `ARG_SPECS` refuses a
+  proposal without it in both tiers, the Executor refuses anything that is
+  not an ISO-8601 instant ("today" included), and `graphiti.add_episode` has
+  no default for it. Don't add one anywhere — a default IS the assumption.
 - **Graphiti will retire a fact it merely RECOGNISES, and the guard is not
   the model.** Upstream's `resolve_extracted_edges` offers a whole-group
   semantic search as invalidation candidates (empty `SearchFilters()`); we

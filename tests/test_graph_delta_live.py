@@ -80,6 +80,7 @@ async def test_invalidation_attribution_live():
             ),
             source_description=f"gvtest | marker={marker1}",
             group_id=GROUP,
+            reference_time="2026-01-01T00:00:00Z",
         )
         result1 = await _poll_for_episode(marker1, want_edge=True)
         assert result1 is not None, (
@@ -98,6 +99,7 @@ async def test_invalidation_attribution_live():
             ),
             source_description=f"gvtest | marker={marker2}",
             group_id=GROUP,
+            reference_time="2026-01-02T00:00:00Z",
         )
         result2 = await _poll_for_invalidation(marker2)
         assert result2 is not None, (

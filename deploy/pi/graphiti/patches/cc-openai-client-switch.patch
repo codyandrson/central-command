@@ -1,0 +1,31 @@
+--- a/src/services/factories.py	2026-09-01 17:09:54.000000000 -0600
++++ b/src/services/factories.py	2026-09-19 17:02:00.257932990 -0600
+@@ -1,5 +1,7 @@
+ """Factory classes for creating LLM, Embedder, and Database clients."""
+ 
++import os
++
+ from graphiti_core.cross_encoder.client import CrossEncoderClient
+ from graphiti_core.embedder import EmbedderClient, OpenAIEmbedder
+ from graphiti_core.llm_client import LLMClient, OpenAIClient
+@@ -159,7 +161,19 @@
+                 )
+ 
+                 # Detect if we're using a non-OpenAI provider (Ollama, LM Studio, etc)
+-                use_generic_client = is_non_openai_provider(config.providers.openai.api_url)
++                # Central Command: GRAPHITI_OPENAI_CLIENT overrides the URL sniff.
++                # 'responses' keeps the Responses-API client (OpenAIClient) for an
++                # OpenAI-compatible proxy that bridges /v1/responses — LiteLLM's
++                # `openai/chat_completions/<model>` alias, where a plain chat call
++                # would send "chat_completions/<model>" upstream and 404. 'generic'
++                # forces the chat-completions client; unset is upstream behaviour.
++                _client_pref = os.environ.get('GRAPHITI_OPENAI_CLIENT', '').strip().lower()
++                if _client_pref == 'responses':
++                    use_generic_client = False
++                elif _client_pref == 'generic':
++                    use_generic_client = True
++                else:
++                    use_generic_client = is_non_openai_provider(config.providers.openai.api_url)
+ 
+                 if use_generic_client:
+                     # Use OpenAIGenericClient for Ollama and other OpenAI-compatible providers

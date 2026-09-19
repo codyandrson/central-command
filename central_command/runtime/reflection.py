@@ -111,6 +111,12 @@ async def _charter_context(agent_id: str) -> str:
         return ""
 
 
+def _session_close_time() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def _distill_prompt(charter: str, transcript: str) -> str:
     return (
         "YOUR SESSION JUST CLOSED. Read the transcript below and distill 0 to a "
@@ -140,7 +146,12 @@ def _distill_prompt(charter: str, transcript: str) -> str:
     )
 
 
-def _episode_prompt(episode: ReflectedEpisode, source_session_id: str) -> str:
+def _episode_prompt(
+    episode: ReflectedEpisode, source_session_id: str, reference_time: str
+) -> str:
+    # reference_time is the SESSION's close — the source material here is the
+    # transcript, and its time is a fact the code holds; the agent is told it
+    # rather than asked to guess it (graph.add_episode requires the argument).
     return (
         "You already distilled this lesson when your session closed. Record it "
         "now, exactly as given — do not re-word, re-scope, or add a second "
@@ -151,6 +162,7 @@ def _episode_prompt(episode: ReflectedEpisode, source_session_id: str) -> str:
         f"    'name': {episode.name!r},\n"
         f"    'episode_body': {episode.episode_body!r},\n"
         f"    'source_description': {episode.source_description!r},\n"
+        f"    'reference_time': {reference_time!r},\n"
         f"    'scope': {episode.scope!r}\n"
         "  }\n"
         "  target_ref = {'system': 'graphiti', 'id': 'central_command', "
@@ -194,7 +206,8 @@ async def _propose_episode(
         team_section=await team_section(agent_id),
     )
     result = await _run_live(
-        agent, _episode_prompt(episode, source_session_id), model=model,
+        agent, _episode_prompt(episode, source_session_id, _session_close_time()),
+        model=model,
         deps=TriageDeps(agent_id=agent_id, session_id=session_id),
         agent_id=agent_id, session_id=session_id,
     )

@@ -242,11 +242,17 @@ async def get_status() -> dict:
 
 
 async def add_episode(
-    name: str, episode_body: str, source_description: str, group_id: str | None = None
+    name: str, episode_body: str, source_description: str, group_id: str | None = None,
+    *, reference_time: str,
 ) -> str:
     """Commit one distilled, approved episode to a graph group — Central Command's
     shared group by default, or `group_id` (e.g. `private_group(agent_id)`)
     when the approved proposal scoped it private.
+    `reference_time` is the ISO-8601 instant the source material is from; it
+    is keyword-only and has NO default on purpose — Graphiti's own default is
+    "now", and an episode anchored to its ingestion moment is the mistake the
+    whole argument exists to end (MCP server >= 1.1.0 accepts it; 1.0.2 did
+    not, and stamped every episode at processing time).
     Graphiti queues ingestion (entity/fact extraction) server-side; the return
     is its acknowledgement, not the finished graph state."""
     out = await _call_tool(
@@ -257,6 +263,7 @@ async def add_episode(
             "source": "text",
             "source_description": source_description,
             "group_id": group_id or settings.graph_write_group,
+            "reference_time": reference_time,
         },
         timeout=60.0,
     )

@@ -143,6 +143,7 @@ _GRAPH_ACTION = Action(
         "name": "DEMO-1 deadline slip",
         "episode_body": "DEMO-1's deadline moved to 2026-08-03.",
         "source_description": "email gmail:msg_1846d2",
+        "reference_time": "2026-07-20T14:02:00Z",
         # Scope is REQUIRED since the 2026-08-27 no-default guard (the
         # partition is part of what the operator approved). This action broke
         # the suite for a day because the guard landed without updating it —
@@ -157,7 +158,7 @@ _GRAPH_ACTION = Action(
 async def test_executor_stamps_trust_and_approver_into_the_episode(monkeypatch):
     calls = []
 
-    async def fake_add(name, episode_body, source_description, group_id=None):
+    async def fake_add(name, episode_body, source_description, group_id=None, reference_time=None):
         calls.append((name, episode_body, source_description))
         return "queued"
 
@@ -191,7 +192,7 @@ async def test_dry_run_never_touches_the_graph(monkeypatch):
 async def test_sc1_one_approval_commits_jira_and_graph(monkeypatch):
     graph_calls, jira_calls = [], []
 
-    async def fake_add(name, episode_body, source_description, group_id=None):
+    async def fake_add(name, episode_body, source_description, group_id=None, reference_time=None):
         graph_calls.append(name)
         return "queued"
 

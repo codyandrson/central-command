@@ -4,6 +4,73 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.38.0: an episode's time is stated, never assumed
+
+Reviewing the Verify tab, the operator noticed that most facts' "valid from"
+dates matched the day they were entered, not the dates in the episodes. The
+live graph agreed: of 2,739 relationship edges, 1,194 (44%) carried a
+`valid_at` within half an hour of their own ingestion. Two causes, one
+upstream and one ours. Graphiti's extractor anchors every present-tense fact
+to the episode's *reference time*, and the deployed MCP server (1.0.2)
+hard-coded that to the moment it processed the episode — its `add_memory`
+had no parameter for anything else. And Central Command never tried to send
+one. The operator's rule for the fix: the agent determines the time from the
+source material, the operator approves it, and Graphiti is never left to
+assume it — no exceptions.
+
+- **`graph.add_episode` requires `reference_time`** — the ISO-8601 instant
+  the source material is from (the mail's sent date, the issue event, the
+  moment the operator said it). It joins `name`, `episode_body` and `scope`
+  in the one shared argument spec, so the runtime hands a draft without it
+  back to the model and the Executor refuses it before any action runs. The
+  Executor also refuses anything that is not a real instant ("today" is the
+  assumption in different clothes) and normalises what it accepts to UTC.
+  The graph-propose pack states the argument and where it comes from; the
+  capability registry lists it; the demo model's fixtures carry it; the
+  reflection path supplies the session's close time in code, since the
+  transcript is the source there and its time is a fact the code holds.
+- **The Graphiti client has no default for it** and sends it on every
+  `add_memory` call. A keyword-only parameter with no default is the
+  mechanical form of "never assumed".
+- **The Graphiti MCP server moves from 1.0.2 to 1.1.0** (graphiti-core
+  0.28.2 → 0.30.1, the newest published image), because 1.1.0's `add_memory`
+  accepts `reference_time`. Verified end to end against a scratch Neo4j
+  before release: a present-tense episode sent with a 2024-03-01 reference
+  time produced edges valid from 2024-03-01, created on the day of the test.
+  Upstream research found no schema or index migration between the two
+  cores, no Neo4j version change, and no config key removed; one new key
+  (`structured_output_mode`) affects only a client this deployment does not
+  use. The base image already ships the Anthropic SDK, so the build's only
+  PyPI install layer is gone.
+- **Two 1.1.0 behaviour changes are handled by patches.** The server now
+  selects graphiti-core's chat-completions client for any LLM URL that is
+  not api.openai.com — and a plain chat call to the bridged `graphiti-llm`
+  alias sends `chat_completions/<model>` upstream, which llama-swap answers
+  with 404 (measured). `cc-openai-client-switch.patch` adds
+  `GRAPHITI_OPENAI_CLIENT`: `responses` (set in both profiles) keeps the
+  Responses-API client the bridge exists for. The server also builds its own
+  cross-encoder from the provider config now, so `cc-rerank-client.patch`
+  was rewritten to wrap that pick instead of racing it (the old hunks would
+  have passed `cross_encoder` twice). The two upstream patches (1729
+  invalidation scope, 1666 reasoning-first dedupe) apply to 0.30.1 unchanged;
+  both PRs remain open upstream.
+- **`LLM_API_URL` is load-bearing now.** 1.0.2 ignored the config's llm
+  `api_url`; 1.1.0 passes it as the client's base URL. Both profiles set it
+  explicitly and the "decorative" comments are gone.
+- The single profile's image manifest locks `1.1.0-standalone` by digest
+  (constraint series `1.1`); the resolver's self-test covers the new series.
+  The local image tag `cc-graphiti:1.0.2-anthropic` is deliberately
+  unchanged — it is a build identifier referenced from the Deployment, the
+  updater, both setup scripts and verify.sh, and renaming it buys nothing.
+
+Existing edges keep their dates; the curator fixes specific ones the operator
+flags. The review flag `episodes-carry-their-time` (a body with no dates in
+its words) stays — it is about the claims' own dates, which the extractor
+still reads from the text. Follow-ups noted, not done: graphiti-core 0.30.2
+(two multi-group concurrency fixes; the 1.1.0 image pins 0.30.1), and
+retiring the Responses bridge in favour of an un-bridged alias plus the
+generic client, which is a LiteLLM registration change with its own gates.
+
 ## 2026-09-19 — v2.37.14: the instructions load where they apply
 
 `CLAUDE.md` had grown to about 5,650 words, all of it accurate and all of it

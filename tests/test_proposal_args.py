@@ -52,9 +52,9 @@ def test_all_problems_are_reported_at_once():
     per-round grind is what turned one bad draft into three failed approvals."""
     problems = validate_action_args("graph.add_episode", _BAD_ARGS)
     assert len(problems) == 1
-    assert "name, episode_body, scope" in problems[0]
+    assert "name, episode_body, scope, reference_time" in problems[0]
     assert "present: summary" in problems[0]
-    assert validate_action_args("graph.add_episode@v1", {"scope": "team", "name": "n", "episode_body": "b"}) == [
+    assert validate_action_args("graph.add_episode@v1", {"scope": "team", "name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z"}) == [
         "graph.add_episode@v1: scope='team' is not one of shared, private"
     ]
     assert validate_action_args("jira.add_comment", {}) == []  # no spec = no guess
@@ -69,13 +69,13 @@ async def test_bad_draft_is_handed_back_in_run_and_recorded():
     ctx = SimpleNamespace(deps=TriageDeps(agent_id="ea", session_id="sess_test_args"))
     with pytest.raises(ModelRetry) as excinfo:
         await tools_mod._validate_proposal(ctx, _proposal(_BAD_ARGS))
-    assert "name, episode_body, scope" in str(excinfo.value)
+    assert "name, episode_body, scope, reference_time" in str(excinfo.value)
     rows = await repo.list_events(since_id=since, kind="proposal.rejected_in_run")
     assert len(rows) == 1
     assert rows[0]["ref_id"] == "sess_test_args"
     assert rows[0]["payload"]["agent_id"] == "ea"
     assert rows[0]["payload"]["capabilities"] == ["graph.add_episode"]
-    assert "name, episode_body, scope" in rows[0]["payload"]["problems"][0]
+    assert "name, episode_body, scope, reference_time" in rows[0]["payload"]["problems"][0]
 
 
 async def test_executor_refuses_the_same_shape_before_any_action_runs(monkeypatch):
@@ -88,7 +88,7 @@ async def test_executor_refuses_the_same_shape_before_any_action_runs(monkeypatc
 
     monkeypatch.setattr(graphiti, "add_episode", explode)
     good = Action(capability="graph.add_episode",
-                  arguments={"name": "n", "episode_body": "b", "scope": "shared"},
+                  arguments={"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"},
                   target_ref={"system": "graphiti", "id": "central_command"},
                   reversibility=Reversibility.reversible)
     bad = _proposal(_BAD_ARGS).actions[0]
@@ -98,8 +98,26 @@ async def test_executor_refuses_the_same_shape_before_any_action_runs(monkeypatc
             await executor.execute([good, bad], approver="human:lee", source_refs=[])
         assert excinfo.value.completed == []
         assert excinfo.value.failed_capability == "graph.add_episode"
-        assert "name, episode_body, scope" in excinfo.value.error
+        assert "name, episode_body, scope, reference_time" in excinfo.value.error
         assert excinfo.value.error != "'name'"  # the bare KeyError is gone
+
+
+def test_executor_normalises_the_reference_time_and_refuses_words():
+    """The shape half of the reference-time law (2026-09-19): a real ISO-8601
+    instant is normalised to UTC `Z` form (a bare date reads as midnight UTC,
+    an offset is converted); "today"/"now" are refused — a relative time is
+    the assumption the argument exists to outlaw. Presence is the shared
+    ARG_SPECS' job; this is what the handler does with the value."""
+    from central_command.gateway.executor import ExecutorError, _episode_reference_time
+
+    assert _episode_reference_time("2026-05-12T09:30:00Z") == "2026-05-12T09:30:00Z"
+    assert _episode_reference_time("2026-05-12") == "2026-05-12T00:00:00Z"
+    assert _episode_reference_time("2026-05-12T09:30:00-06:00") == "2026-05-12T15:30:00Z"
+    assert _episode_reference_time("2026-05-12T09:30:00") == "2026-05-12T09:30:00Z"
+    for bad in ("today", "now", "", None, "May 12th"):
+        with pytest.raises(ExecutorError) as excinfo:
+            _episode_reference_time(bad)
+        assert "reference_time" in str(excinfo.value)
 
 
 def test_every_propose_tool_has_a_redraft_budget():

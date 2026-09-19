@@ -288,6 +288,15 @@ async def _graph_add_episode(args: dict, approver: str, proposer: str | None) ->
         raise ExecutorError(
             f"graph.add_episode: unknown scope {scope!r} (expected 'shared' or 'private')"
         )
+    # No default here either (2026-09-19). The reference time is the instant
+    # the SOURCE MATERIAL is from — the mail's date, the issue event, the
+    # conversation — derived by the agent and approved by the operator.
+    # Graphiti anchors every present-tense fact to it, and its own fallback is
+    # "the moment I processed this", which is how 44% of the live graph's
+    # edges came to read as becoming true on their ingestion day. The shared
+    # ARG_SPECS already refuses a missing value before any action runs; this
+    # is the shape check (a real instant, not "today") and the direct-call guard.
+    reference_time = _episode_reference_time(args.get("reference_time"))
     # Verification (2026-08-19 spec): the ack below is Graphiti ACCEPTING the
     # episode, never the finished graph state — extraction is queued and has
     # silently dropped acked episodes before. The marker stamped into
@@ -313,8 +322,33 @@ async def _graph_add_episode(args: dict, approver: str, proposer: str | None) ->
         args["episode_body"],
         episode_source_description(args.get("source_description", ""), approver, marker),
         group_id=group_id,
+        reference_time=reference_time,
     )
     return f"graph episode '{args['name']}' committed ({ack})"
+
+
+def _episode_reference_time(raw) -> str:
+    """The episode's reference time as a normalised ISO-8601 UTC instant, or an
+    ExecutorError. Accepts a date or datetime, `Z` or an offset; a naive value
+    is read as UTC (what Graphiti does too). Words ("today", "now") are refused:
+    a relative time is the assumption this argument exists to outlaw."""
+    text = str(raw or "").strip()
+    if not text:
+        raise ExecutorError(
+            "graph.add_episode: no `reference_time` given — the proposal must carry "
+            "the ISO-8601 instant its source material is from (the mail's date, the "
+            "issue event, the conversation); Graphiti never assumes it"
+        )
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1] in "Zz" else text)
+    except ValueError:
+        raise ExecutorError(
+            f"graph.add_episode: reference_time {text!r} is not an ISO-8601 instant "
+            "(e.g. 2026-05-12T09:30:00Z or 2026-05-12)"
+        ) from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 # --- graph curation (the remediation loop, 2026-08-20) --------------------------

@@ -103,7 +103,8 @@ REGISTRY: list[Capability] = [
         risk="internal, append-only — a wrong fact is supersedable, never silently edited",
         holder="Executor",
         route="Graphiti MCP add_episode → group central_command (tenanted; never `main`)",
-        arguments=["name", "episode_body", "source_description", "scope", "for_agent"],
+        arguments=["name", "episode_body", "source_description", "reference_time",
+                   "scope", "for_agent"],
         description=(
             "Commit a distilled, human-approved claim to the team knowledge "
             "graph. The Executor stamps trust=human-approved and the approver "

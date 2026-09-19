@@ -65,7 +65,7 @@ def _jira_spy(monkeypatch, *, fail: str | None = None) -> list[tuple]:
 def _graph_spy(monkeypatch, *, fail: str | None = None) -> list[tuple]:
     calls: list[tuple] = []
 
-    async def add_episode(name, body, source_description="", group_id=None):
+    async def add_episode(name, body, source_description="", group_id=None, reference_time=None):
         calls.append((name, body))
         if fail:
             raise RuntimeError(fail)

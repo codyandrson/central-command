@@ -1,8 +1,8 @@
---- a/src/graphiti_mcp_server.py	2026-08-19 21:11:32.106336421 -0600
-+++ b/src/graphiti_mcp_server.py	2026-08-19 21:16:14.733374724 -0600
-@@ -33,6 +33,66 @@
+--- a/src/graphiti_mcp_server.py	2026-09-01 17:09:54.000000000 -0600
++++ b/src/graphiti_mcp_server.py	2026-09-19 17:01:38.729733374 -0600
+@@ -44,6 +44,66 @@
+     LLMClientFactory,
  )
- from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
  from services.queue_service import QueueService
 +
 +# ---------------------------------------------------------------------------
@@ -64,53 +64,49 @@
 +        model=model,
 +    )
 +
- from utils.formatting import format_fact_result
+ from utils.formatting import format_fact_result, to_edge_result, to_node_result
+ from utils.type_config import (
+     build_edge_type_map,
+@@ -221,7 +281,11 @@
+             # Create cross-encoder (reranker) client. Without this, Graphiti defaults to
+             # OpenAIRerankerClient, which needs an OpenAI API key even on non-OpenAI setups.
+             # Reranker setup errors must remain fatal rather than silently restoring that default.
+-            cross_encoder_client = CrossEncoderFactory.create(self.config.llm, self.config.embedder)
++            # Central Command: GRAPHITI_RERANK_MODEL set -> the true cross-encoder
++            # (GVRerankClient above) wins; unset -> upstream's provider pick.
++            cross_encoder_client = _cc_cross_encoder() or CrossEncoderFactory.create(
++                self.config.llm, self.config.embedder
++            )
  
- # Load .env file from mcp_server directory
-@@ -226,6 +286,7 @@
-                         graph_driver=falkor_driver,
-                         llm_client=llm_client,
-                         embedder=embedder_client,
-+                        cross_encoder=_cc_cross_encoder(),
-                         max_coroutines=self.semaphore_limit,
-                     )
-                 else:
-@@ -236,6 +297,7 @@
-                         password=db_config['password'],
-                         llm_client=llm_client,
-                         embedder=embedder_client,
-+                        cross_encoder=_cc_cross_encoder(),
-                         max_coroutines=self.semaphore_limit,
-                     )
-             except Exception as db_error:
-@@ -441,12 +503,23 @@
-             node_labels=entity_types,
+             # Get database configuration
+             db_config = DatabaseDriverFactory.create_config(self.config.database)
+@@ -544,13 +608,22 @@
+         # that recipe when a center node is given (mirroring core's Graphiti.search);
+         # otherwise use RRF.
+         from graphiti_core.search.search_config_recipes import (
++            NODE_HYBRID_SEARCH_CROSS_ENCODER,
+             NODE_HYBRID_SEARCH_NODE_DISTANCE,
+             NODE_HYBRID_SEARCH_RRF,
          )
  
--        # Use the search_ method with node search config
--        from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
-+        # Use the search_ method with node search config.
+-        node_config = (
+-            NODE_HYBRID_SEARCH_NODE_DISTANCE if center_node_uuid else NODE_HYBRID_SEARCH_RRF
+-        )
 +        # Central Command: with GRAPHITI_RERANK_MODEL set, the true cross-encoder
-+        # (GVRerankClient) reranks candidates; unset falls back to RRF, the
-+        # upstream default. One env var controls client AND recipe together.
-+        from graphiti_core.search.search_config_recipes import (
-+            NODE_HYBRID_SEARCH_CROSS_ENCODER,
-+            NODE_HYBRID_SEARCH_RRF,
-+        )
- 
-+        node_config = (
-+            NODE_HYBRID_SEARCH_CROSS_ENCODER
-+            if os.environ.get('GRAPHITI_RERANK_MODEL', '').strip()
-+            else NODE_HYBRID_SEARCH_RRF
-+        )
++        # (GVRerankClient) reranks candidates; unset falls back to upstream's
++        # pick. The centered variant keeps node-distance reranking either way —
++        # distance to an anchor is not a relevance judgement a cross-encoder
++        # can make. One env var controls client AND recipe together.
++        if center_node_uuid:
++            node_config = NODE_HYBRID_SEARCH_NODE_DISTANCE
++        elif os.environ.get('GRAPHITI_RERANK_MODEL', '').strip():
++            node_config = NODE_HYBRID_SEARCH_CROSS_ENCODER
++        else:
++            node_config = NODE_HYBRID_SEARCH_RRF
          results = await client.search_(
              query=query,
--            config=NODE_HYBRID_SEARCH_RRF,
-+            config=node_config,
-             group_ids=effective_group_ids,
-             search_filter=search_filters,
-         )
-@@ -520,12 +593,30 @@
+             config=node_config,
+@@ -636,13 +709,32 @@
              else []
          )
  
@@ -119,6 +115,7 @@
 -            query=query,
 -            num_results=max_facts,
 -            center_node_uuid=center_node_uuid,
+-            search_filter=search_filter,
 -        )
 +        # Central Command: same GRAPHITI_RERANK_MODEL switch as search_nodes. The
 +        # centered variant keeps upstream node-distance reranking — distance to
@@ -135,6 +132,7 @@
 +                    query=query,
 +                    config=_cfg,
 +                    group_ids=effective_group_ids,
++                    search_filter=search_filter,
 +                )
 +            ).edges
 +        else:
@@ -143,6 +141,7 @@
 +                query=query,
 +                num_results=max_facts,
 +                center_node_uuid=center_node_uuid,
++                search_filter=search_filter,
 +            )
  
          if not relevant_edges:

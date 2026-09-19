@@ -413,7 +413,7 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
     # write never ran.
     graph_calls: list[tuple] = []
 
-    async def add_episode(name, body, source_description="", group_id=None):
+    async def add_episode(name, body, source_description="", group_id=None, reference_time=None):
         graph_calls.append((name, body))
         if down["on"]:
             raise RuntimeError("Connection refused talking to graphiti")

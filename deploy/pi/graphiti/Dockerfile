@@ -20,6 +20,22 @@
 #
 #   anthropic==0.116.0 is what graphiti-core[anthropic]==0.28.2 resolved on
 #   2026-07-09 — pinned explicitly for reproducibility.
+#
+#   BASE MOVED 2026-09-19: 1.0.2-standalone (graphiti-core 0.28.2) ->
+#   1.1.0-standalone (graphiti-core 0.30.1). The reason is one parameter:
+#   1.1.0's `add_memory` accepts `reference_time`, and 1.0.2's queue worker
+#   hard-coded it to the processing moment, so every present-tense fact was
+#   stamped "became true when ingested" regardless of what the approved episode
+#   said. Central Command now REQUIRES the proposal to carry it (contract
+#   `graph.add_episode.reference_time`) and passes it through — Graphiti never
+#   assumes it. The 1.1.0 image already ships the anthropic SDK (1.3.0), so the
+#   extra install layer below is gone; the temperature sed on the (unused)
+#   Anthropic client is kept so reverting to Anthropic stays config-only.
+#   Two 1.1.0 behaviour changes matter here and are handled by patches/: the
+#   server picks the chat-completions client for any non-OpenAI URL (we keep
+#   the Responses client — see cc-openai-client-switch.patch), and it builds
+#   its own cross-encoder from the provider config (our GVRerankClient now
+#   wraps that pick — see cc-rerank-client.patch).
 # ============================================================================
 # Mirror seams (2026-08-30). A build container sees none of the host's mirror
 # configuration, so every external source this build touches is a build-arg:
@@ -29,7 +45,7 @@
 # defaults. Digest pinning of the base is done by the caller (setup.sh fetch
 # pulls images.txt's digest and tags it, so this FROM resolves locally).
 ARG CC_REGISTRY_DOCKERIO=docker.io
-FROM ${CC_REGISTRY_DOCKERIO}/zepai/knowledge-graph-mcp:1.0.2-standalone
+FROM ${CC_REGISTRY_DOCKERIO}/zepai/knowledge-graph-mcp:1.1.0-standalone
 ARG CC_APT_MIRROR=
 ARG CC_APT_SECURITY_MIRROR=
 # uv reads UV_DEFAULT_INDEX (UV_INDEX_URL is deprecated; PIP_* is ignored).
@@ -50,8 +66,9 @@ RUN if [ -n "$CC_APT_MIRROR" ]; then \
         "$CC_APT_SECURITY_MIRROR" "$VERSION_CODENAME" >>/etc/apt/sources.list.d/debian.sources; \
     fi
 
-RUN uv pip install --python /app/mcp/.venv/bin/python \
-      "graphiti-core[anthropic]==0.28.2" "anthropic==0.116.0"
+# (2026-09-19) No install layer any more: 1.1.0-standalone ships graphiti-core
+# 0.30.1 AND anthropic 1.3.0 (verified in the pulled image), so the build no
+# longer needs PyPI at all. UV_DEFAULT_INDEX stays declared for a future layer.
 
 # Second pinned fix (found live at the 2.1 smoke test): claude-sonnet-5 REJECTS
 # the `temperature` param ("deprecated for this model"), but core 0.28.2's
@@ -85,12 +102,13 @@ RUN f=/app/mcp/src/graphiti_mcp_server.py \
 # Fourth and fifth fixes (2026-08-15) — the two halves of a graph that DESTROYED
 # true facts. Carried as real patch files under patches/ rather than sed, because
 # both are multi-line and one is a verbatim upstream PR we want to drop when it
-# merges. `patch -F 5` tolerates the line drift between our pinned 0.28.2 and the
-# 0.29.3 the PR was cut against; the trailing greps fail the build loud if either
-# stops applying.
+# merges. `patch -F 5` tolerates line drift between our pinned core and the
+# revision each PR was cut against (both apply to 0.30.1 with no fuzz, checked
+# 2026-09-19); the trailing greps fail the build loud if either stops applying.
 #
-# 1729 — INVALIDATION SCOPE (upstream getzep/graphiti#1729, still OPEN, and the
-# unfiltered search is still present in 0.29.3, so upgrading does NOT fix this).
+# 1729 — INVALIDATION SCOPE (upstream getzep/graphiti#1729, still OPEN as of
+# 2026-09-19, and the unfiltered search is still present in 0.30.1, so
+# upgrading did NOT fix this).
 # `resolve_extracted_edges` scopes its DUPLICATE search to edges between the same
 # two nodes, but passes an EMPTY `SearchFilters()` for invalidation candidates —
 # so every edge in the group that is merely semantically similar is offered to
@@ -126,6 +144,8 @@ RUN apt-get update \
     && cd /app/mcp \
     && patch -p1 -F 5 < /tmp/graphiti-patches/cc-rerank-client.patch \
     && grep -q 'GVRerankClient' src/graphiti_mcp_server.py \
+    && patch -p1 -F 5 < /tmp/graphiti-patches/cc-openai-client-switch.patch \
+    && grep -q 'GRAPHITI_OPENAI_CLIENT' src/services/factories.py \
     && rm -rf /tmp/graphiti-patches
 
 # cc-rerank-client (2026-08-19) is OURS, not an upstream PR — unlike the two
@@ -135,3 +155,15 @@ RUN apt-get update \
 # workstation) instead of boolean-classifier prompts against the chat LLM;
 # unset -> upstream default, so rollback is deleting one env var. Patched into
 # src/ (the MCP server), not site-packages — hence the separate `cd`.
+
+# cc-openai-client-switch (2026-09-19, ours, permanent carry). MCP 1.1.0 picks
+# graphiti_core's chat-completions client (OpenAIGenericClient) for ANY LLM URL
+# that is not api.openai.com — including our LiteLLM. That client calls
+# /v1/chat/completions on the `graphiti-llm` alias, whose
+# `openai/chat_completions/<model>` bridge prefix exists for the RESPONSES
+# path; a plain chat call sends "chat_completions/<model>" upstream and
+# llama-swap answers 404 "no router for requested model" (measured
+# 2026-09-19). GRAPHITI_OPENAI_CLIENT=responses keeps the Responses-API client
+# the bridge was built for; `generic` forces the chat client (what a future
+# un-bridged alias would use); unset is upstream's URL sniff. Set in
+# deploy/k3s/40-graph.yaml and deploy/single/compose.yaml.

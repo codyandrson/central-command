@@ -58,8 +58,14 @@ _COST_CEILINGS = {
 
 
 ARG_SPECS: dict[str, ArgSpec] = {
+    # `reference_time` (2026-09-19): the instant the source material is from,
+    # REQUIRED. Graphiti anchors every present-tense fact's validity to the
+    # episode's reference time, and without one it uses the moment it
+    # processed the episode — so 44% of the live graph's edges read "became
+    # true when ingested". The agent derives it from the source and the
+    # operator approves it; nothing here or downstream may assume it.
     "graph.add_episode": ArgSpec(
-        required=("name", "episode_body", "scope"),
+        required=("name", "episode_body", "scope", "reference_time"),
         enums={"scope": ("shared", "private")},
     ),
     "graph.create_node": ArgSpec(required=("name", "group_id", "summary")),

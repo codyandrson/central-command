@@ -3,8 +3,12 @@
 #
 #   Mounted read-only into nat-graphiti at /app/mcp/config/config.yaml
 #   (CONFIG_PATH). Based on the config-docker-neo4j.yaml template embedded in
-#   zepai/knowledge-graph-mcp:1.0.2-standalone — the exact schema this image
-#   parses; only the providers we deploy are kept.
+#   zepai/knowledge-graph-mcp:1.1.0-standalone (base moved from 1.0.2 on
+#   2026-09-19 for `add_memory`'s `reference_time`) — the exact schema this
+#   image parses; only the providers we deploy are kept. 1.1.0 added one llm
+#   key, `structured_output_mode` (json_schema|json_object) — it only affects
+#   the chat-completions client, which this deployment does not use (see
+#   GRAPHITI_OPENAI_CLIENT in the manifest), so it is left at its default.
 #
 #   Secrets are ${ENV} references ONLY — values come from the container env
 #   (docker-compose.yml <- .env), never from this tracked file (NFR-4).
@@ -85,12 +89,14 @@ llm:
       # A LiteLLM virtual key scoped to models=["graphiti-llm"] ONLY, matching
       # the embedder/reranker pattern: a leak here cannot spend on anything else.
       api_key: ${GRAPHITI_LLM_API_KEY}
-      # ⚠️ DECORATIVE — read this before "fixing" it. The MCP factory's `openai`
-      # case builds CoreLLMConfig WITHOUT base_url (factories.py:122-129), so
-      # this value is never used for the LLM. The endpoint actually comes from
-      # the OPENAI_BASE_URL env var via the openai SDK's own fallback — the same
-      # var the reranker needs. Kept here only so the file states the intent;
-      # if you point the LLM somewhere else, change OPENAI_BASE_URL, not this.
+      # LOAD-BEARING since MCP 1.1.0 (2026-09-19). Under 1.0.2 this was
+      # decorative (the factory built CoreLLMConfig without base_url and the
+      # openai SDK fell back to OPENAI_BASE_URL); 1.1.0's factory passes it as
+      # the client's base_url AND sniffs it to choose the client — any URL
+      # that is not api.openai.com selects the chat-completions client, which
+      # the bridged alias cannot serve. GRAPHITI_OPENAI_CLIENT=responses in the
+      # manifest overrides that sniff. The manifest also sets LLM_API_URL
+      # explicitly so it cannot drift from this default.
       api_url: ${LLM_API_URL:http://litellm:4000/v1}
 
 embedder:

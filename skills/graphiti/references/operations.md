@@ -87,6 +87,23 @@ If extraction starts producing prose or nothing at all, this alias is the first
 thing to check — and re-pointing it at a bare `openai/…` model is how it
 breaks.
 
+Since the MCP server moved to 1.1.0 (2026-09-19) there is a second half:
+1.1.0 selects graphiti_core's *chat-completions* client for any LLM URL that
+is not api.openai.com, and a plain chat call to the bridged alias sends
+`chat_completions/<model>` upstream, which the backend 404s. The deployment
+sets `GRAPHITI_OPENAI_CLIENT=responses` (a Central Command patch) to keep the
+Responses-API client. The alias and that variable change together or not at
+all.
+
+## Every episode carries its reference time
+
+`add_memory` on 1.1.0 accepts `reference_time`, and Central Command sends it
+on every call — `graph.add_episode` requires the argument (the instant the
+source material is from), the Executor refuses a proposal without a real
+ISO-8601 instant, and the client has no default. Graphiti anchors every
+present-tense fact to it; its own fallback ("when I processed this") is what
+produced ingestion-dated facts under 1.0.2 and is never relied on now.
+
 ## The embedder is not optional
 
 Graphiti has **no embedding fallback** — OpenAI cannot substitute because the

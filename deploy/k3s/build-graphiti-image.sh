@@ -6,7 +6,12 @@
 #   cc-graphiti is the one image in the stack that is built here rather than
 #   pulled. Every other image (litellm-database, postgres:16, redis:7-alpine,
 #   neo4j:5.26.2, n8n:2.29.0) is multi-arch upstream, verified 2026-07-31 —
-#   and so is this one's base, zepai/knowledge-graph-mcp:1.0.2-standalone.
+#   and so is this one's base, zepai/knowledge-graph-mcp:1.1.0-standalone
+#   (1.0.2 until 2026-09-19). The LOCAL tag stays cc-graphiti:1.0.2-anthropic
+#   on purpose — read it as a build identifier: renaming it touches the
+#   Deployment, the updater's registry line, both setup scripts, verify.sh and
+#   the single profile's CC_GRAPHITI_TAG for zero functional gain, and a
+#   stale ref on one node is an ImagePullBackOff found only at failover.
 #
 #   Because cc-graphiti FLOATS, the image has to exist on both nodes: arm64 on
 #   the Pi, amd64 on the chromebox. There is no registry in the homelab, so each

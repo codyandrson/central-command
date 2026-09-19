@@ -119,7 +119,7 @@ def _approved(monkeypatch, args=None, approver="human:doe"):
 
     sent = []
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None):
+    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
         sent.append(dict(name=name, episode_body=episode_body,
                          source_description=source_description, group_id=group_id))
         return "queued"
@@ -133,7 +133,8 @@ def _approved(monkeypatch, args=None, approver="human:doe"):
 
 
 ARGS = {"name": "probe", "episode_body": "Ada leads the probe team.",
-        "source_description": "operator statement"}
+        "source_description": "operator statement",
+        "reference_time": "2026-01-01T00:00:00Z"}
 
 
 async def test_absent_episode_past_the_deadline_is_resubmitted_once(monkeypatch):

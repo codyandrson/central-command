@@ -3,7 +3,7 @@
 # Build the derived graphiti image for the SINGLE-NODE profile, with podman.
 #
 #   cc-graphiti is the one image in this stack that is built rather than
-#   pulled: the published zepai/knowledge-graph-mcp:1.0.2-standalone needs the
+#   pulled: the published zepai/knowledge-graph-mcp:1.1.0-standalone needs the
 #   patches under deploy/pi/graphiti/patches/ (invalidation scope, dedupe
 #   field order, the FastMCP Host allowlist). Every other image is multi-arch
 #   upstream and just pulls.
