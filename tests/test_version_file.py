@@ -14,14 +14,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _version_file() -> str:
-    text = (ROOT / "VERSION").read_text()
+    text = (ROOT / "VERSION").read_text(encoding="utf-8")
     m = re.search(r"^version=(\d+\.\d+\.\d+)$", text, re.M)
     assert m, "VERSION has no version=X.Y.Z line"
     return m.group(1)
 
 
 def _newest_changelog_release() -> str:
-    for line in (ROOT / "CHANGELOG.md").read_text().splitlines():
+    for line in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").splitlines():
         m = re.match(r"^## \S+ — v(\d+\.\d+\.\d+)\b", line)
         if m:
             return m.group(1)

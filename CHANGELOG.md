@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.8: the by-hand suite is green on Windows too
+
+Second pass of the unattended Windows install, after v2.37.7 was applied
+through `update.sh`.
+
+- **`tests/test_version_file.py` reads its files as UTF-8.** `setup.sh` exports
+  `PYTHONUTF8=1`, so the `test` phase passed — but the phase skips while the
+  API is healthy and names `python -m pytest -q` as the by-hand gate, and there
+  cp1252 mangled the heading's em dash.
+- **The EA report's boundary test takes its boundary from the database's
+  clock** — the rows it is compared with carry that clock, and a podman
+  machine a few milliseconds ahead of Windows put the "before" event inside
+  the window (the intermittent failure of the first pass; same cause as
+  v2.37.7's verification-row age).
+- `.gitignore` covers `uv.lock` and `NUL`: on Windows `uv run` writes the
+  former at the root, and podman hands Git's MSYS ssh
+  `UserKnownHostsFile=NUL`, which creates a literal file of that name in the
+  deployment tree.
+
 ## 2026-09-19 — v2.37.7: a headless boot leaves the name to the cockpit
 
 Found by a clean Windows single-node install driven end to end with nobody at

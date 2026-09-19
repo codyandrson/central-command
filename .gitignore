@@ -40,3 +40,8 @@ deploy/k3s/setup-diagnostics.txt
 deploy/discovery.out/
 deploy/discovery.conf
 CLAUDE.local.md
+
+# Windows: `uv run` at the root writes uv.lock; podman hands Git's MSYS ssh
+# `UserKnownHostsFile=NUL`, which creates a literal file named NUL.
+uv.lock
+NUL

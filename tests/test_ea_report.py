@@ -101,9 +101,11 @@ async def test_the_window_boundary_is_inclusive_of_since_and_excludes_before():
     """The boundary itself: an event emitted before `since` must not appear."""
     old = await events.emit("gap.declared", ref_id="eareport_old",
                             payload={"subject": "old"}, actor="agent:eareport")
-    boundary = datetime.now(timezone.utc)
     new = await events.emit("gap.declared", ref_id="eareport_new",
                             payload={"subject": "new"}, actor="agent:eareport")
+    # The boundary is the DATABASE's clock, like the rows it is compared with:
+    # a host clock a few ms behind the DB put `old` inside the window.
+    boundary = datetime.fromisoformat(new["created_at"])
 
     rows = await ea_report.activity_since(boundary)
     ids = {r["id"] for r in rows}
