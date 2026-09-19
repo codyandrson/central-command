@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.6: the update dialog reads the record for THIS target
+
+- **A previous run's success is not this update's completion.** The update
+  status record is durable and belongs to whichever run was last; the dialog
+  read any `success` as done, opened as "Update Complete — vNEXT is
+  running" with only a Close button, and so hid "Apply update now" for every
+  update after the first successful one (2026-09-18: v2.37.5 offered,
+  v2.37.4's record shown as its completion). The dialog now treats the
+  record as this update's only when its `target` is the version offered,
+  the same comparison the staging gate beside it already made.
+
 ## 2026-09-19 — v2.37.5: the gateway re-parses what the tool accepted
 
 - **A stringified `proposal` parses on the decision resume too.** v2.37.2

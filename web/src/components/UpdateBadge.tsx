@@ -206,7 +206,12 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
   const local = progress?.mode === 'local';
   const logRef = local ? 'deploy/single/.update/apply.log' : 'journalctl -u cc-update';
   const stage = progress?.stage;
-  const done = progress?.status?.state === 'success';
+  // The status record is DURABLE — it is the last run's, whichever target
+  // that was. A success for the version already installed is not this
+  // update's completion: read that way it hid the Apply button behind
+  // "Update Complete" for every update after the first (2026-09-18, v2.37.6).
+  const thisRun = !!progress?.status && progress.status.target === versionInfo.latest;
+  const done = thisRun && progress?.status?.state === 'success';
   // The badge and the header read the shared version store; refresh it once
   // the runner is done so "Running vX" matches the version now serving.
   useEffect(() => { if (done) void checkVersion(true); }, [done]);
@@ -243,9 +248,9 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {(applying || progress) && (
+            {(applying || (progress && thisRun)) && (
               <div className="rounded-md border border-border px-3 py-2 text-sm space-y-1">
-                {progress?.status?.state === 'success' ? (
+                {done ? (
                   <p className="text-green-500">Update complete — the system is healthy on the new version.</p>
                 ) : progress?.status?.state === 'rolled_back' ? (
                   <p className="text-amber-500">
