@@ -28,9 +28,15 @@ from datetime import datetime, timedelta, timezone
 
 from central_command import events
 from central_command.config import settings
-from central_command.contract import TRANSIENT, classify_failure, retry_backoff_seconds
+from central_command.contract import (
+    TRANSIENT,
+    classify_failure,
+    is_context_overflow,
+    retry_backoff_seconds,
+)
 from central_command.db import repo
 from central_command.ingest import ledger
+from central_command.runtime import context
 from central_command.runtime.deps import ThreadContext
 from central_command.runtime.models import resolve_model
 from central_command.runtime.run import ingest_and_propose
@@ -169,6 +175,22 @@ async def _with_pending_proposals_context(prompt: str) -> str:
     )
 
 
+# The first prompt may take this many tool-result ceilings (each one
+# `TOOL_RESULT_SHARE` of the smallest input window): ~30% of the window, which
+# leaves room for the charter, the tool schemas and the turns that follow.
+_PROMPT_CEILINGS = 3
+
+
+def _bound_prompt(prompt: str) -> str:
+    limit = _PROMPT_CEILINGS * context.tool_result_ceiling()
+    if len(prompt) <= limit:
+        return prompt
+    return prompt[:limit] + (
+        f"\n… [CLIPPED at {limit} chars to fit your context window — this mail "
+        "is longer than you can see. Say so if the unseen tail could matter.]"
+    )
+
+
 async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
     if siblings:
         prompt = _bundle_prompt(item, siblings, siblings_capped=siblings_capped)
@@ -179,6 +201,12 @@ async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
     else:
         prompt = item["payload"]["text"]
         thread = None
+    # The backstop. `mailtext` makes ordinary mail small, but nothing bounds a
+    # 400k-character digest — and the first prompt sits outside every window
+    # guard (`clip_tool_results` only ever cuts tool returns). Cut with the
+    # honest marker; `payload.text` stays whole, so a quote is still checked
+    # against the full record.
+    prompt = _bound_prompt(prompt)
     prompt = await _with_recurrence_context(prompt, item)
     prompt = await _with_pending_proposals_context(prompt)
     return await ingest_and_propose(
@@ -504,7 +532,9 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
                          "not_before": not_before.isoformat()},
                 actor="dispatcher",
             )
-        elif item["attempts"] >= settings.dispatch_max_attempts:
+        elif item["attempts"] >= settings.dispatch_max_attempts or is_context_overflow(e):
+            # An overflow is decided by the INPUT, which a retry re-sends
+            # unchanged: five attempts were five identical 400s (2026-09-19).
             await repo.finish_work_item(item["id"], "FAILED", error=str(e))
             await events.emit(
                 "work.failed",

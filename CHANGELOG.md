@@ -4,6 +4,49 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.13: a mail body is converted, not tag-stripped
+
+Two airline confirmations killed ten triage runs — five attempts each, all
+context overflows. The mails held about 2,400 tokens of content. The prompt
+held 313,000 characters, 96% of them whitespace.
+
+- **HTML mail goes through a real converter** (`ingest/mailtext.py`,
+  inscriptis). The old path was a tag regex, which keeps everything that is
+  not a tag: the whole `<style>` sheet, undecoded `&zwnj;&nbsp;` preheader
+  padding, and the indentation of every nested layout table. Measured on 39
+  real messages: 124k tokens before, 41k after, no fact lost; a table row
+  stays one line ("Depart: … | Arrive: …"). Markdown converters were tried
+  and cost 5-8x MORE than plain text on mail (layout-table pipes, tracking
+  URLs); article extractors deleted receipts outright.
+- **The HTML part wins over text/plain.** The plain part of marketing mail is
+  mostly raw tracking URLs — 6x the tokens of the converted HTML over the
+  mails that carried both. When only a plain part exists, URLs longer than 80
+  characters are cut to their host. Link targets are dropped from HTML;
+  unsubscribe was always derived from the message headers, never the body.
+- **Text a reader cannot see is not text.** Elements hidden by inline
+  `display:none`, `visibility:hidden`, or a zero `font-size` / `max-height` /
+  `opacity` are removed before conversion — the documented injection vector
+  against mail summarisers, and one no converter covers on its own. Colour
+  tricks are not detected.
+- **`mail_read` and the hand-fed RFC-822 path use the same function.**
+  `mail_read` on an unenrolled message read `body_text or snippet` and never
+  the HTML; `parse_email` handed a single-part `text/html` mail to the agent
+  as raw markup.
+- **The first prompt is bounded**, at three tool-result ceilings (~30% of the
+  smallest input window), with an honest marker. It was outside every window
+  guard — `clip_tool_results` only cuts tool returns. `payload.text` stays
+  whole, so quotes are still checked against the full record.
+- **A context overflow parks FAILED on the first attempt.** The verdict is
+  decided by the input and a retry re-sends the same input. Matched on the
+  proxy's own words (`ContextWindowExceededError`), not on pydantic-ai's
+  output-cap message, which a retry CAN change.
+- New pinned dependency: `inscriptis==2.7.4` (Apache-2.0, pure Python over
+  the already-locked lxml and requests). A mirrored install needs it served.
+
+After applying: reopen the two FAILED "Flight Confirmation" items. Rows
+hydrated before this release keep their old text; refs-only backlog rows are
+converted when they are claimed.
+
 ## 2026-09-19 — v2.37.12: a gateway 403 is "come back later"
 
 - **HTTP 403 from the model gateway is classified TRANSIENT**, so a task

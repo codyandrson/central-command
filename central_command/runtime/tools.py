@@ -1785,6 +1785,7 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
     matters, say that you could not see it rather than describing it. Read-only.
     """
     from central_command.db import repo
+    from central_command.ingest import ledger
     from central_command.integrations import email_facade
 
     ref = (ref or "").strip()
@@ -1798,7 +1799,7 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
             f"NOT ENROLLED in the queue (read from the mailbox)\n"
             f"From: {msg.get('from')}\nSubject: {msg.get('subject')}\n"
             f"Date: {msg.get('date')}\n\n"
-            + _clip(msg.get('body_text') or msg.get('snippet') or '', _MAIL_BODY_CEILING)
+            + _clip(ledger.provider_body(msg), _MAIL_BODY_CEILING)
         )
     audit = row.get("audit") or {}
     parts = [
@@ -1818,7 +1819,6 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
         # Enrolled as a reference only; the body is fetched at claim time. Read
         # it from the mailbox now, shaped exactly as the agent would be fed it,
         # and leave the ledger row alone — this is a read tool.
-        from central_command.ingest import ledger
         try:
             msg = await email_facade.get_message(row["provider_uuid"])
             text = ("ENROLLED, not yet fetched by the queue (read from the mailbox)\n"

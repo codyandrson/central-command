@@ -19,6 +19,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from central_command.db import repo
+from central_command.ingest import mailtext
 
 _RE_PREFIX = re.compile(r"^\s*(?:re|fwd|fw)\s*:\s*", re.IGNORECASE)
 
@@ -52,9 +53,17 @@ def parse_email(raw: str) -> dict:
         except (TypeError, ValueError):
             received_at = None
 
+    # One converter for every mail body (`ingest/mailtext.py`): HTML first — a
+    # marketing mail's plain part is mostly raw tracking URLs — and an HTML
+    # part is CONVERTED, never handed to the agent as markup.
     if msg.is_multipart():
-        part = msg.get_body(preferencelist=("plain", "html"))
-        body = part.get_content() if part is not None else ""
+        def part(kind: str) -> str:
+            p = msg.get_body(preferencelist=(kind,))
+            return p.get_content() if p is not None else ""
+
+        body = mailtext.body_text(part("html"), part("plain"))
+    elif msg.get_content_type() == "text/html":
+        body = mailtext.html_to_text(msg.get_content())
     else:
         body = msg.get_content() if msg.get_content_maintype() == "text" else raw
 
@@ -263,9 +272,6 @@ async def enroll_fixture_dir(path: str | Path, *, feed: str = "backlog") -> dict
 
 # --- the real provider feed (M12) ----------------------------------------------
 
-_TAG_RE = re.compile(r"<[^>]+>")
-
-
 def provider_message_id(uuid: str) -> str:
     """Stable ledger identity for a provider message. Gmail's immutable message
     id is the strongest identity we have on this path (no raw RFC-822 headers
@@ -284,14 +290,9 @@ def provider_uuid(message_id: str) -> str | None:
 
 
 def provider_body(msg: dict) -> str:
-    """Best available text: body_text, else tag-stripped HTML (real inboxes are
-    full of HTML-only mail), else the provider snippet."""
-    if msg.get("body_text", "").strip():
-        return msg["body_text"].strip()
-    html = msg.get("body_html", "")
-    if html.strip():
-        return _TAG_RE.sub(" ", html).strip()
-    return msg.get("snippet", "").strip()
+    """Best available text: converted HTML, else the plain part, else the
+    provider snippet — `mailtext.body_text` is the one rule."""
+    return mailtext.body_text(msg.get("body_html"), msg.get("body_text"), msg.get("snippet"))
 
 
 def _provider_parsed(msg: dict) -> dict:

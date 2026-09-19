@@ -277,6 +277,19 @@ where the story is gone.
   them BY NAME (`Gmail account`) — an instance id would silently bind nothing
   elsewhere. Edit `deploy/n8n/workflows/*.json`; a canvas edit is overwritten
   by the next release.
+- **A mail body reaches a model through `ingest/mailtext.py`, and nowhere
+  else.** A tag regex keeps everything that is not a tag — the `<style>`
+  sheet, entity padding, the indentation of nested layout tables — and one
+  itinerary became 313k characters, 96% whitespace (2026-09-19, ten dead
+  runs). Measured, not guessed: markdown converters cost 5-8x MORE than plain
+  text on mail, article extractors (trafilatura, readability) delete
+  receipts, and the text/plain part of marketing mail is mostly tracking URLs
+  — so HTML wins when both exist. `test_mailtext.py` walks the source for any
+  other reader of `body_html`/`body_text`. Web pages are a different problem
+  (`integrations/webfetch.py`, where dropping boilerplate IS the job). And
+  **the first prompt sits outside every window guard** — `clip_tool_results`
+  only cuts tool returns — so a fresh-run path that puts unbounded content
+  in its prompt must bound it itself (`dispatcher._bound_prompt`).
 - **An unsubscribe URL is derived from the MAILBOX, never from the
   proposal.** `mail.unsubscribe` pins the URL at propose time for review, and
   the Executor re-reads the message's `List-Unsubscribe` headers and refuses

@@ -12,6 +12,7 @@ from .failures import (
     TRANSIENT,
     classify_failure,
     classify_failure_text,
+    is_context_overflow,
     is_transient,
     retry_backoff_seconds,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "SEMANTIC",
     "classify_failure",
     "classify_failure_text",
+    "is_context_overflow",
     "is_transient",
     "retry_backoff_seconds",
     "RETRY_BACKOFF_CAP_SECONDS",

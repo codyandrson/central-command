@@ -228,3 +228,17 @@ def retry_backoff_seconds(prior_failures: int) -> int:
     if n >= 32:  # 2**32 * 60 is already centuries past the cap; don't compute it
         return RETRY_BACKOFF_CAP_SECONDS
     return min(RETRY_BACKOFF_BASE_SECONDS * (2**n), RETRY_BACKOFF_CAP_SECONDS)
+
+# The proxy's own words for "this request is bigger than the model's window".
+# Phrases, not status codes: the status is a plain 400, which says nothing.
+_OVERFLOW_MARKERS = ("contextwindowexceeded", "exceeds the available context size")
+
+
+def is_context_overflow(exc: BaseException | None) -> bool:
+    """The request did not FIT. Semantic like any 400, but unlike the rest a
+    retry cannot change the verdict — the same input is re-sent — so a caller
+    that retries semantic failures should stop at the first one of these.
+    Deliberately NOT pydantic-ai's "token limit exceeded before any response":
+    that is a reasoning model spending its OUTPUT cap, and a retry can differ."""
+    low = str(exc or "").lower()
+    return any(m in low for m in _OVERFLOW_MARKERS)

@@ -23,6 +23,10 @@ dependencies = [
     # (litellm.apply_config_change); deploy/pi/litellm/policy.py reads the
     # routing declaration with it too.
     "pyyaml>=6",
+    # HTML mail -> the text an agent reads (ingest/mailtext.py). Layout-table
+    # aware and drops nothing; chosen by bake-off over markdown converters
+    # (5-8x the tokens) and article extractors (which delete receipts).
+    "inscriptis>=2.7,<3",
     # Decrypting LiteLLM's stored credentials for autodiscovery
     # (integrations/litellm_credstore.py): pynacl for its default SecretBox
     # scheme (still the default in 1.94.1), cryptography for the opt-in

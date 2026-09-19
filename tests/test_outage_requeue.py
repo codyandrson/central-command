@@ -194,6 +194,24 @@ async def test_a_semantic_dispatch_failure_keeps_todays_behaviour(
     assert (await _event(first["id"], "work.failed"))["payload"]["transient"] is False
 
 
+# 2a
+async def test_a_context_overflow_parks_on_the_first_attempt(monkeypatch, clean_ledger):
+    """The request did not FIT, and a retry re-sends the same input: five
+    attempts were five identical 400s (2026-09-19). Through the entry, with
+    attempts to spare — FAILED at once, never released."""
+    monkeypatch.setattr(settings, "dispatch_max_attempts", 5)
+    _boom_handler(monkeypatch, RuntimeError(
+        "status_code: 400, model_name: cc-default, body: litellm.ContextWindowExceededError: "
+        "request (84314 tokens) exceeds the available context size (81920 tokens)"))
+    await ledger.enroll_email(_raw(21))
+
+    item = await repo.claim_next_work_item("sess_overflow")
+    await dispatcher.process_claimed(item)
+    row = await _row(item["id"])
+    assert row["state"] == "FAILED" and row["attempts"] == 1
+    assert (await _event(item["id"], "work.failed"))["payload"]["transient"] is False
+
+
 # 2b
 async def test_a_cancelled_run_releases_its_claim(monkeypatch, clean_ledger):
     """A shutdown mid-run is CancelledError — a BaseException that sails past

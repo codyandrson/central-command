@@ -60,7 +60,11 @@ async def _wipe():
 def test_provider_body_falls_back_html_then_snippet():
     assert ledger.provider_body(MSG) == "TASKS-12 moves to Sep 1."
     html_only = {**MSG, "body_text": "", "body_html": "<p>Hello <b>world</b></p>"}
-    assert ledger.provider_body(html_only) == "Hello  world"
+    assert ledger.provider_body(html_only) == "Hello world"
+    # HTML wins when both parts exist: the plain part of marketing mail is
+    # mostly tracking URLs (`ingest/mailtext.py`).
+    both = {**MSG, "body_html": "<p>from the html part</p>"}
+    assert ledger.provider_body(both) == "from the html part"
     bare = {**MSG, "body_text": "", "body_html": ""}
     assert ledger.provider_body(bare) == "the snippet"
 
