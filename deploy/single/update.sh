@@ -486,6 +486,12 @@ cmd_rollback() {
   fi
 
   step "reset" "\`local\` reset to $tag (working tree restored)" G reset -q --hard "$tag" || return 1
+  # The cockpit's durable status record still says the rolled-back version
+  # SUCCEEDED; when that version is offered again the dialog read it as
+  # "Update Complete" and hid Apply (2026-09-19 Windows run).
+  if [[ -f "$HERE/.update/status.json" ]]; then
+    sed -i 's/"state":"success"/"state":"rolled_back"/' "$HERE/.update/status.json"
+  fi
   note "NOTE: schema changes already applied to Postgres are NOT undone — additive-only schema makes the restored code run fine against them."
   deploy_current_tree
 }

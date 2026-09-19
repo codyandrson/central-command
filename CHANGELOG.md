@@ -4,6 +4,15 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.10: a rollback retires the success it undid
+
+- **`update.sh rollback` rewrites the cockpit's status record to
+  `rolled_back`.** The record is durable and the dialog reads "success for
+  the offered version" as *Update Complete*, hiding Apply. After a rollback
+  the undone version is exactly what gets offered again — so from the cockpit
+  it could never be re-applied. Found on the Windows testbed by rolling a
+  test build back while the real release of the same number was published.
+
 ## 2026-09-19 — v2.37.9: the health walk stops getting the whole gateway banned
 
 - **The discovery pass health-checks at most `health_batch` managed
