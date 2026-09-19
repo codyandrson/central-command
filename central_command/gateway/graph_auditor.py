@@ -305,7 +305,9 @@ async def verify_one(row: dict, model=None, missing_after_minutes: int = 360) ->
         from datetime import datetime, timezone
 
         since = row.get("resubmitted_at") or row["created_at"]
-        age_minutes = (datetime.now(timezone.utc) - since).total_seconds() / 60
+        # `since` is the DATABASE's clock and now() is this host's: a DB a few
+        # ms ahead (a podman machine on Windows) makes a fresh row's age negative.
+        age_minutes = max(0.0, (datetime.now(timezone.utc) - since).total_seconds() / 60)
         if age_minutes < await absence_deadline_minutes(row, missing_after_minutes):
             return "waiting"
         if row.get("resubmitted_at") is None and await _resubmit(row):

@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.7: a headless boot leaves the name to the cockpit
+
+Found by a clean Windows single-node install driven end to end with nobody at
+the keyboard.
+
+- **The podman `boot` phase no longer gates a headless run on
+  `CC_OPERATOR_NAME`.** v2.37.0 moved the question into the cockpit and removed
+  the k3s gate, but this driver still exited 3 without a name — so on the
+  single-node profile the API never started unnamed and the cockpit's first-run
+  prompt could not appear. A terminal is still asked in place; a headless run
+  passes with a note and the agents say "the operator" until the cockpit is
+  answered.
+- **A verification row's age is never negative.** `created_at` is the
+  database's clock and "now" is the host's; a podman machine's clock a few
+  milliseconds ahead of Windows made a fresh row's age negative, so an absence
+  past a zero deadline read `waiting` instead of `resubmitted`.
+- **The demo's "your move" text names the cockpit port**, like the USERACTION
+  line above it — it pointed at the API's port, which serves the static build
+  without the cockpit server's routes.
+- `tests/test_graph_bolt_unit.py` runs a systemd unit's `/bin/sh` line and is
+  skipped on Windows, where it could only fail.
+
 ## 2026-09-19 — v2.37.6: the update dialog reads the record for THIS target
 
 - **A previous run's success is not this update's completion.** The update

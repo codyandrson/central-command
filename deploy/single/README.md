@@ -224,7 +224,8 @@ log skips `demo`. Only two moments are yours, and on a terminal the script
 waits in place for both:
 
 1. **Your name** (`boot`) — becomes `CC_OPERATOR_NAME` and the provenance
-   actor on your decisions. Headless runs gate with exit 3 instead of asking.
+   actor on your decisions. A headless run does not ask: the cockpit does, on
+   first run.
 2. **The demo approval** (`demo`) — the script feeds
    `fixtures/emails/007-ownership-change.eml`, steps the dispatcher (a real
    inference against your endpoint — commonly a few minutes), and then waits

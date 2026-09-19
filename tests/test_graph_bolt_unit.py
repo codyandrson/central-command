@@ -14,11 +14,15 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 UNIT = Path(__file__).resolve().parents[1] / "deploy/k3s/cc-graph-bolt.service"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a systemd unit's /bin/sh line — no sh on Windows")
 def test_both_relays_get_the_cluster_ip(tmp_path):
     line = next(l for l in UNIT.read_text().splitlines() if l.startswith("ExecStart="))
     m = re.fullmatch(r"ExecStart=/bin/sh -c '(.*)'", line)

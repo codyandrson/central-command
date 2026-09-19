@@ -1092,7 +1092,7 @@ phase_boot() {
   else
     # CC_OPERATOR_NAME is the one value only a human can supply. On a
     # terminal, ask it here (elicitation IS allowed to be a prompt — it is
-    # the script asking, deterministically); headless, gate.
+    # the script asking, deterministically); headless, the cockpit asks.
     local opname; opname="$(get_kv "$APP_ENV" CC_OPERATOR_NAME)"
     if is_placeholder "$opname"; then
       if is_tty; then
@@ -1103,8 +1103,9 @@ phase_boot() {
         set_kv "$APP_ENV" CC_OPERATOR_NAME "$opname"
         pass "operator-name" "CC_OPERATOR_NAME recorded in the root .env"
       else
-        useraction "operator-name" "set CC_OPERATOR_NAME in the root .env, then re-run: ./setup.sh boot"
-        return 3
+        # Headless: the cockpit asks on first run (v2.37.0) — gating here made
+        # that prompt unreachable on this profile.
+        pass "operator-name" "not set — the cockpit asks on first run (agents say 'the operator' until then)"
       fi
     else
       pass "operator-name" "CC_OPERATOR_NAME already set — left alone"
@@ -1251,7 +1252,7 @@ phase_demo() {
   fi
   note ""
   note "== your move =="
-  note "Open $(api_url) -> Decisions Inbox. Read the proposal and its evidence,"
+  note "Open http://127.0.0.1:${CC_COCKPIT_PORT:-3080} -> Decisions Inbox. Read the proposal and its evidence,"
   note "then decide. This gate IS the product; nothing here will decide for you."
   note "(waiting — checks every 10s, Ctrl-C to abandon and re-run later)"
   if ! poll_until 1800 10 demo_decided; then
