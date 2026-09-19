@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.9: the health walk stops getting the whole gateway banned
+
+- **The discovery pass health-checks at most `health_batch` managed
+  deployments PER CREDENTIAL per tick (default 40), rotating** through the
+  credential's fleet from where the last tick stopped
+  (`autodiscovery_health_cursor` app setting), so every alias is still
+  reached over a few nights. One probe per deployment is one request at the
+  provider, and 282 of them in ten minutes got the egress IP banned by a
+  gateway's edge for ~2 hours — which then failed that credential's catalog
+  fetch AND the maintenance task's own model, twice in one night. A
+  LiteLLM-side rpm limit is not the lever: it is per deployment, the proxy's
+  `/health` calls the provider past the router, and a limit refuses rather
+  than paces. The maintenance brief now says a fix is verified by a LATER
+  pass, not necessarily the next one. `tests/test_heartbeat.py` walks three
+  ticks over two credentials and asserts the windows and the wrap.
+
 ## 2026-09-19 — v2.37.8: the by-hand suite is green on Windows too
 
 Second pass of the unattended Windows install, after v2.37.7 was applied

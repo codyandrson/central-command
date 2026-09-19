@@ -996,6 +996,7 @@ def discovery_stubs(monkeypatch):
         "probes": {},  # alias -> probe_model() return (or an Exception instance)
     }
     probed: list[str] = []
+    health_calls: list[str] = []
 
     async def fake_list_provider_credentials():
         return state["credentials"]
@@ -1015,11 +1016,15 @@ def discovery_stubs(monkeypatch):
             return state["decisions"]
         if key == hb_actions.SNAPSHOT_SETTING:
             return state["snapshot"]
+        if key == hb_actions.HEALTH_CURSOR_SETTING:
+            return state.get("health_cursor", default)
         return default
 
     async def fake_set_app_setting(key, value):
         if key == hb_actions.SNAPSHOT_SETTING:
             state["snapshot"] = value
+        if key == hb_actions.HEALTH_CURSOR_SETTING:
+            state["health_cursor"] = value
 
     async def fake_tasks_with_title_prefix(prefix):
         return [t for t in state["prior_tasks"] if t["title"].startswith(prefix)]
@@ -1034,6 +1039,7 @@ def discovery_stubs(monkeypatch):
         return {"models": state["deployments"]}
 
     async def fake_check_model_health(model=None):
+        health_calls.append(model)
         return {"unhealthy": state["unhealthy"]}
 
     async def fake_provider_catalog(provider, api_key, api_base=None):
@@ -1067,6 +1073,7 @@ def discovery_stubs(monkeypatch):
     monkeypatch.setattr(routes, "create_and_run_task", fake_create)
     calls["state"] = state
     calls["probed"] = probed
+    calls["health_calls"] = health_calls
     return calls
 
 
@@ -1422,6 +1429,29 @@ async def test_probe_batch_caps_how_many_undeclared_aliases_are_probed(discovery
     assert len(discovery_stubs["probed"]) == 2
     # Nothing suggested by the default stub probe, so this pass is quiet.
     assert out == {"drift": False}
+
+
+async def test_health_batch_walks_each_credential_in_rotating_windows(discovery_stubs):
+    """282 probes in ten minutes got the egress IP banned by a gateway's edge
+    (2026-09-19): the health walk is capped PER CREDENTIAL per tick and
+    resumes where it stopped, wrapping, so every alias is still reached."""
+    st = discovery_stubs["state"]
+    st["catalog"] = [{"id": "claude-x"}]
+    st["deployments"] = [_managed_deployment(f"cc-{i}") for i in range(5)]
+    st["deployments"].append({**_managed_deployment("other-a"), "credential_name": "other"})
+    st["credentials"].append({"credential_name": "other", "provider": "anthropic",
+                              "values": {"api_key": "k"}})
+    run = hb_actions.ACTIONS["litellm.discovery"].run
+    seen = []
+    for _ in range(3):
+        discovery_stubs["health_calls"].clear()
+        await run("s1", {"health_batch": "2", "probe_batch": "1"})
+        seen.append(sorted(discovery_stubs["health_calls"]))
+    # anthropic-main walks two per tick and wraps; the other credential has
+    # its own window, so a big fleet never starves a small one.
+    assert seen == [["cc-0", "cc-1", "other-a"], ["cc-2", "cc-3", "other-a"],
+                    ["cc-0", "cc-4", "other-a"]]
+    assert st["health_cursor"] == {"anthropic-main": "cc-0", "other": "other-a"}
 
 
 async def test_declared_and_bridge_aliases_are_never_probed(discovery_stubs):

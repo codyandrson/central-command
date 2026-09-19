@@ -16,6 +16,7 @@ the gateway package. The guard test pins that exact import and nothing wider.
 from __future__ import annotations
 
 import asyncio
+import bisect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -739,6 +740,7 @@ def compute_discovery_drift(
 FINGERPRINT_FIELDS = ("id", "shutdown_date", "display_name", "pricing")
 
 SNAPSHOT_SETTING = "autodiscovery_snapshot"
+HEALTH_CURSOR_SETTING = "autodiscovery_health_cursor"
 
 
 def catalog_fingerprint(entry: dict) -> str:
@@ -1058,8 +1060,9 @@ def _maintenance_brief(findings: dict[str, dict]) -> str:
         "deployment whose litellm_credential_name isn't the discovering "
         "credential — those are hand-tuned or another credential's, and "
         "read-only to you.\n\n"
-        "Verification of any fix is the NEXT discovery pass observing health "
-        "clean; you don't need to re-check it now.\n\n"
+        "Verification of any fix is a LATER discovery pass observing health "
+        "clean (the health walk is capped per credential per pass and "
+        "rotates); you don't need to re-check it now.\n\n"
         "CHANGED (a REGISTERED model whose provider catalog entry moved since "
         "it was last seen — `before`/`after` are the fingerprinted fields, "
         "typically a shutdown date being announced): read the diff and "
@@ -1157,19 +1160,38 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
     # the proxy unreachable), so it lands in the tick's own `errors`, which
     # the engine records as material, instead of being handed to the agent
     # to diagnose and ask the operator about (2026-09-14).
+    #
+    # And the walk is CAPPED per credential: one probe per deployment is one
+    # request at the provider, and 282 of them in ten minutes got the egress
+    # IP banned by a gateway's edge for ~2h — taking that credential's catalog
+    # fetch AND the manager's own model down with it, twice in one night
+    # (2026-09-19). At most `health_batch` deployments per credential per
+    # tick, resuming after the alias the last tick stopped at
+    # (`autodiscovery_health_cursor`), so the fleet still converges over a
+    # few nights. A LiteLLM-side rpm limit is not a substitute: it is per
+    # DEPLOYMENT (282 deployments × 1 call each never trips it), the proxy's
+    # /health calls the provider directly past the router anyway, and a limit
+    # refuses with 429 rather than pacing.
+    health_batch = _parse_positive_int(params, "health_batch", 40)
+    cursors = dict(await repo.get_app_setting(HEALTH_CURSOR_SETTING, {}))
+    by_cred: dict[str, set[str]] = {}
+    for d in deployments:
+        if d.get("credential_name") in cred_names and d.get("model_name"):
+            by_cred.setdefault(d["credential_name"], set()).add(d["model_name"])
     unhealthy: list[dict] = []
     errors: dict[str, str] = {}
-    for d in deployments:
-        if d.get("credential_name") not in cred_names:
-            continue
-        alias = d.get("model_name")
-        if not alias:
-            continue
-        try:
-            res = await litellm_client.check_model_health(alias)
-            unhealthy.extend(res.get("unhealthy") or [])
-        except Exception as e:  # noqa: BLE001 — one failed call must not kill the tick
-            errors[f"health:{alias}"] = f"{type(e).__name__}: {e}"
+    for cred, names in by_cred.items():
+        aliases = sorted(names)
+        start = bisect.bisect_right(aliases, cursors.get(cred, ""))
+        window = (aliases[start:] + aliases[:start])[:health_batch]
+        for alias in window:
+            try:
+                res = await litellm_client.check_model_health(alias)
+                unhealthy.extend(res.get("unhealthy") or [])
+            except Exception as e:  # noqa: BLE001 — one failed call must not kill the tick
+                errors[f"health:{alias}"] = f"{type(e).__name__}: {e}"
+        cursors[cred] = window[-1]
+    await repo.set_app_setting(HEALTH_CURSOR_SETTING, cursors)
 
     # UNDECLARED-CAPABILITY reconciliation: "declare the undeclared", not
     # continuous re-measurement. A probe costs ~10 real requests, so this
@@ -1594,6 +1616,10 @@ ACTIONS: dict[str, ActionSpec] = {
                 "probe_batch": (
                     "managed deployments with undeclared capabilities to "
                     "probe per tick, default 3"
+                ),
+                "health_batch": (
+                    "managed deployments health-checked per credential per "
+                    "tick (rotating), default 40"
                 ),
             },
             required=(),
