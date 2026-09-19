@@ -45,6 +45,9 @@ TRANSIENT_CASES = [
     ("http 503", ModelHTTPError(503, "cc-default")),
     ("http 504", ModelHTTPError(504, "cc-default")),
     ("http 529 (anthropic overloaded)", ModelHTTPError(529, "cc-default")),
+    # A gateway's edge firewall denies the egress IP for minutes, not forever
+    # (Kilo.ai behind Vercel, 2026-09-19).
+    ("http 403 (edge firewall deny)", ModelHTTPError(403, "cc-default")),
     ("http 400 whose body names a missing LiteLLM alias (2026-09-12)",
      ModelHTTPError(400, "cc-default", body={
          "message": "/chat/completions: Invalid model name passed in "

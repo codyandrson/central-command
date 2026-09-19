@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.37.12: a gateway 403 is "come back later"
+
+- **HTTP 403 from the model gateway is classified TRANSIENT**, so a task
+  whose first model turn meets it is parked and re-run on the existing
+  backoff (1, 2, 4 minutes…) instead of landing FAILED on the spot. A
+  gateway's edge firewall (Vercel in front of Kilo.ai) denies a whole
+  egress IP for about six minutes with a bare 403 — seven maintenance tasks
+  died that way in one day, each before its first turn — and the retry
+  window outlasts the deny. A genuinely revoked key still fails, through
+  retry exhaustion, a few minutes later and still loudly; 401 stays
+  semantic because no credential appears by waiting.
+
 ## 2026-09-19 — v2.37.11: an unhealthy model is a finding, and a schedule fires once at a time
 
 Found by the first two v2.37.9 discovery passes, which still failed the same way.

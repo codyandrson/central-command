@@ -42,7 +42,15 @@ SEMANTIC = "semantic"
 # answer as well as a provider rate limit), 5xx server-side, 529 Anthropic's
 # overloaded. 409 is deliberately NOT here: a conflict is the dependency
 # answering — a re-send of the same request gets the same conflict.
-TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504, 529})
+#
+# 403 IS here, since 2026-09-19: a gateway's edge firewall (Vercel in front of
+# Kilo.ai) denies a whole egress IP for ~6 minutes with a bare 403, and a
+# task whose first model turn met that deny was FAILED on the spot — seven
+# times in one day. The retry window (1, 2, 4 min…) outlasts the deny. The
+# cost is that a genuinely revoked key fails a few minutes later than it did,
+# through exhaustion, still loudly. 401 stays semantic: no credential is
+# going to appear by waiting.
+TRANSIENT_STATUS = frozenset({403, 408, 429, 500, 502, 503, 504, 529})
 
 # Last-resort sniffing, for errors that reach a seam already stringified (the
 # Executor records `str(e)`) or wrapped past recognition. These are the shapes
