@@ -7,25 +7,26 @@ resilience, and the runtime's context/window handling. See
 ### DL-021 — Two run modes: CC_DEMO_MODE and CC_EXECUTOR_MODE
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-19
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**Two run modes** (config): `CC_DEMO_MODE`"
-- **Why:** Not recorded beyond the stated mechanism: a deterministic
-  `FunctionModel` (demo) vs real Claude, and a dry-run-logs-writes vs
-  live-performs-writes Executor mode, with `runtime/models.py:resolve_model()`
-  as the one model seam.
+- **Why:** Early testing had used a scripted stand-in model to validate the
+  system's plumbing, but that stand-in could not prove an agent's decisions
+  were actually sound — only real inference could. The two concerns (which
+  model answers, versus whether a write is actually performed) were kept as
+  separate switches so neither could be mistaken for the other.
 - **Enforced:** code structure only — `central_command/config.py`; exercised indirectly across most of `tests/` via `demo_mode=True` fixtures, no single dedicated test
 - **Source:** AGENTS.md bite marks
 
 ### DL-022 — A fresh run must load the charter; build_agent_for does not
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-29
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**A fresh run must load the charter; `build_agent_for` does not.**"
-- **Why:** Not recorded beyond the stated invariant: `build_agent_for` is the
-  RESUME factory and passes no charter because the persisted message history
-  already carries the original prompt; `run_task` and `run_coach` load the
-  real charter for a fresh run.
-- **Enforced:** discipline only — no guard test located
+- **Why:** A helper function built for resuming an existing session (which
+  correctly skips re-loading instructions) was reused for starting a brand-new
+  one, silently running the new session under a different agent's leftover
+  default instructions instead of its own charter.
+- **Enforced:** test: `tests/test_agent_run_contract.py::test_every_fresh_run_path_loads_a_charter` (with `tests/test_agent_run_contract.py::test_the_resume_factory_is_still_the_only_charter_free_builder` pinning the one exemption)
 - **Source:** AGENTS.md bite marks
 
 ### DL-023 — system_prompt= is load-bearing; never modernise it to instructions=
@@ -45,24 +46,24 @@ resilience, and the runtime's context/window handling. See
 ### DL-024 — Agents take deps
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-19
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**Agents take `deps`** (`runtime/deps.py`)."
-- **Why:** Not recorded beyond the stated invariant: every `agent.run()`
-  needs `deps=TriageDeps(...)`, and resume paths pass a fresh one on purpose.
-- **Enforced:** discipline only — no guard test located
+- **Why:** When a run pauses partway through a multi-step decision and later
+  resumes, it needs fresh per-run state so it cannot accidentally redo or re-
+  litigate a step that already took effect before the pause.
+- **Enforced:** test: `tests/test_agent_run_contract.py::test_every_agent_run_passes_deps` (the three deps-free auditor/summarizer agents are named exemptions, re-checked by `tests/test_agent_run_contract.py::test_the_deps_exemptions_are_still_deps_free`)
 - **Source:** AGENTS.md bite marks
 
 ### DL-025 — Sessions are never destroyed; agent:<id>:main means the current lane only
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-23
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**Sessions are never destroyed.**"
-- **Why:** Not recorded beyond the stated invariant: closing a conversation
-  is a status flip with the transcript kept forever; the `agent:<id>:main`
-  alias means the newest conversation IF it is open, and NONE when that
-  newest lane is terminal — it deliberately does not fall back to an older
-  still-open session, because multiple concurrent sessions per agent is the
-  target architecture.
+- **Why:** A UI control implied it could permanently clear an agent's history,
+  which was both untrue and not actually the workflow wanted; separately, the
+  "current session" shortcut kept pointing at an agent's newest conversation
+  even after that conversation was closed, making a closed lane appear to
+  still be live.
 - **Enforced:** code structure only — `central_command/api/nerve_gateway.py:341` (`_latest_conversation(open_only=True)`), called at lines 373/484/892/1394; no dedicated pytest guard found by name
 - **Source:** AGENTS.md bite marks
 
@@ -71,12 +72,11 @@ resilience, and the runtime's context/window handling. See
 - **Status:** active
 - **Date:** undated
 - **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**An attachment reaches the agent as content, or the SEND fails — there is no third state**"
-- **Why:** Not recorded beyond the stated invariant: a text-only model
-  silently drops a native `document` block and answers anyway, so
-  attachments are extracted to text at the gateway; the empty-output check is
-  load-bearing because `markitdown` converts an image-only PDF without
-  raising and returns zero characters — the OUTPUT must be checked, never
-  just the exception.
+- **Why:** A model that cannot use an attached file may still return a normal-
+  looking 200 response that silently ignored it, which is worse than an error
+  — so the system now either delivers attachment content as real text the
+  agent can act on, or refuses before the turn runs at all, rather than risk a
+  silent, invisible drop.
 - **Enforced:** discipline only — no guard test located
 - **Source:** .claude/rules/runtime-resilience.md
 
@@ -94,26 +94,27 @@ resilience, and the runtime's context/window handling. See
 ### DL-028 — A failure-landing guard that lives in one wrapper is not a landing
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-09-14
 - **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A failure landing that lives in ONE wrapper is not a landing.**"
-- **Why:** Not recorded beyond the stated invariant: the guard that resolves
-  a dead task FAILED (or retry-parks it) lives in `_run_assigned_task`, not
-  the raw `_run_assigned_task_inner`, so a new caller gets the guard by
-  default; the one deliberate `_inner` caller
-  (`orchestration.retry_parked_task`) has its own attempt-aware handler.
+- **Why:** A failure that happened while resuming a previously paused piece of
+  work escaped through a code path that assumed some other part of the system
+  had already recorded the failure — leaving a task stuck with no visible
+  outcome. The fix consolidated failure-landing into one shared function used
+  by every entry path, not just the first-run path.
 - **Enforced:** discipline only — no guard test located by name; rule states the principle, not a specific test
 - **Source:** .claude/rules/runtime-resilience.md
 
 ### DL-029 — A shutdown hook in the FastAPI lifespan runs too late; release from SIGTERM instead
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-08-15
 - **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A shutdown hook in the FastAPI lifespan runs too late to release a connection.**"
-- **Why:** Uvicorn waits on open connections BEFORE running lifespan
-  shutdown, and the SSE stream / cockpit WebSocket follow the event log
-  forever by construction, so the close must fire from the SIGTERM handler
-  (`api/app.py` wraps uvicorn's `handle_exit`); `--timeout-graceful-shutdown`
-  is the backstop that should never fire.
+- **Why:** The server wound up waiting forever on its own always-open
+  streaming connections before it would even attempt its shutdown logic,
+  because the code that was supposed to release those connections ran in a
+  hook that fires only after the wait it needed to unblock. Every deploy
+  therefore hung until forcibly killed; the fix moved the release into the
+  earliest hook available (the termination signal itself).
 - **Enforced:** discipline only — no guard test located
 - **Source:** .claude/rules/runtime-resilience.md
 

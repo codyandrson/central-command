@@ -4,6 +4,48 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-20 — v2.38.5: an invariant nobody tests is a convention
+
+Tests and records only — no runtime behavior changes. v2.38.3's decision log
+made it visible which load-bearing rules were held up by discipline alone;
+this release gives the ones with a real code seam a guard, each proven to fail
+against an injected violation before it was kept.
+
+- **The runtime's reach into credentialed clients is now a checked boundary.**
+  `runtime/` imports Jira, Confluence, forge, Graphiti, LiteLLM and mail
+  clients, and until now "it only ever reads through them" was true by
+  inspection. `tests/test_runtime_integration_reads.py` walks every runtime
+  module, resolves every spelling of an `integrations` import, and compares
+  each attribute reached against a per-client allowlist of confirmed reads — a
+  new name fails until someone confirms it is a read or routes the write
+  through a `propose_*` tool and the Executor. The sandbox client is exempt by
+  design (the sandbox holds no credentials); `neo4j_writer` may not be imported
+  at all; the one raw LiteLLM transport call is pinned to a literal `GET`.
+  Recorded as DL-103.
+- **Seven more guards**: every agent run passes `deps=` and every fresh-run
+  builder loads a charter, with the resume factory pinned as the only
+  charter-free one (`tests/test_agent_run_contract.py`); the Executor's
+  `proposer` comes from the proposal row, never from agent-authored arguments
+  (`tests/test_executor_provenance.py`, behavioural plus source walk); dispatch,
+  feed and heartbeat loops stay off unless asked for, and
+  `dispatcher.process_claimed()` stays the one path a work item takes
+  (`tests/test_dispatch_one_path.py`); a mis-sized embedding is dropped and
+  every text-changing graph write re-embeds
+  (`tests/test_graph_embedding_width.py`); every composer refusal code is
+  classified (`tests/test_composer_refusal_codes.py`); and the autodiscovery
+  fingerprint's field list is pinned, closing the gap where dropping `pricing`
+  or adding a volatile field would have passed silently
+  (`tests/test_autodiscovery_fingerprint.py`). No violation was found.
+- **The decision log learned its history.** Two dozen entries that could only
+  say "not recorded" now carry the incident that produced the rule, in generic
+  terms, with dates. One entry was simply wrong and is corrected: a removed
+  k3s manifest is handled by the `deploy/k3s/removed.txt` tombstone list
+  (v2.19.2), not an open limit.
+- **`docs/ARCHITECTURE.md`**: the id index now explains the founding numbers
+  that never appeared in code (they were open-decisions-register entries, not
+  architecture decisions) and M0; `ProposalStatus.proposed` is described
+  correctly as the in-memory default before a proposal is parked, not as dead.
+
 ## 2026-09-20 — v2.38.4: a required attribute is an unbounded one
 
 Graphiti extraction was spending most of the local model's time on output

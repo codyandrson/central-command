@@ -74,8 +74,12 @@ Confluence, the git forge, Graphiti, LiteLLM `/model/info`, the mail façade's
 `integrations/sandbox_client.py`, against the sandbox — which holds no
 credentials by design (containment, not restriction; see AGENTS.md). Every
 write method on a credentialed client is called from `gateway/executor.py`
-only. *This read-only property is verified by call-site enumeration, not by a
-guard test* — see [`ROADMAP.md`](ROADMAP.md).
+only. This read-only property is a guard test, not an inspection:
+`tests/test_runtime_integration_reads.py` walks every module under `runtime/`,
+resolves every name bound to an `integrations` submodule, and checks each
+attribute reached through it against a frozen per-client allowlist of confirmed
+reads — so a write that appears in the runtime tier fails the suite in the
+commit that adds it (DL-103).
 
 **Two intentional package cycles**, both broken with function-scoped imports
 and neither crossing the forbidden edge: `api ⇄ gateway` (`api/routes.py`
@@ -168,9 +172,10 @@ stateDiagram-v2
   (`repo.commit_folds`) and return to `UNPROCESSED` on reject, dismiss or failure.
 - **Founding states that were never built.** `DESIGN.md` §2 lists DRAFT,
   UNDER_AUDIT, AUTO_APPROVED, STALE and EXPIRED; none exists in code.
-  `ProposalStatus.proposed` and `.approved` are declared in
-  `contract/enums.py` and tolerated in a few `status in (...)` reads, but
-  nothing ever assigns them (cleanup candidate — see [`ROADMAP.md`](ROADMAP.md)).
+  `ProposalStatus.proposed` is only the in-memory default of a proposal
+  record before it is parked — it is never persisted (rows begin at
+  `AWAITING_HUMAN`); `ProposalStatus.approved` is declared and tolerated in a
+  few `status in (...)` reads but never assigned.
 
 ### Who may approve what
 
@@ -336,7 +341,7 @@ Code comments cite these; this is where they resolve.
 
 | Id | Meaning | Lives in |
 |---|---|---|
-| M0 | Pre-skeleton setup (only weakly attested: `config.py` "confirm the exact id at M0") | — |
+| M0 | Scaffolding: package, schema, contract models, API health check | `central_command/`, `db/schema.sql` |
 | M1 | The Proposal/Action contract round-trips cleanly | `contract/`, `tests/test_contract.py` |
 | M2 | Durable pause: a deferred proposal survives a full process restart (deferred tool call + persisted message history — not DBOS) | `runtime/durable.py`, `scripts/m2_spike.py` |
 | M3 | The Executor: first real write against a reversible target | `gateway/executor.py` |
@@ -377,8 +382,14 @@ Code comments cite these; this is where they resolve.
 | D26 | `packs.toolset_for()` is the one tool-surface assembly seam | standing (cited once) |
 | D27 | The heartbeat scheduler | standing |
 
-D2–D4, D6, D10 and D14 are not defined anywhere in this repository
-*(unresolved — they lived in the pre-public design artifacts)*.
+D2–D4, D6, D10 and D14 were entries in the founding *open-decisions register*
+rather than architecture decisions, which is why no code cites a definition:
+D2 the starting agent roster · D3 v1 scope = the walking skeleton (done,
+Phase 1) · D4 how proactive the EA is on day one · D6 next-step fidelity ·
+D10 heartbeat cadence and EA scope (now schedule rows, D27) · D14 the
+document-retrieval vector store choice. D19–D21 were recorded there as
+*process isolation + credential split*, *no egress policy* and *reuse the
+integration tool's credential isolation*.
 
 ### Local namespaces — same numbers, different meanings
 
@@ -387,7 +398,7 @@ D2–D4, D6, D10 and D14 are not defined anywhere in this repository
 | "D1"–"D5" in `deploy/single/` and deploy docs | Compose substrate / version pins / update pipeline / Helm / Zarf-not-adopted | [deploy-refactor spec](superpowers/specs/2026-09-03-deploy-refactor-design.md) |
 | "Decision 9" in `gateway/wiki_claims.py`, `ingest/wiki_freshness.py`, `schema.sql` | Wiki claims: the wiki forgets deterministically | [sources-catalog spec](superpowers/specs/2026-08-23-sources-catalog-design.md) |
 | "Decision 1–6", "Decision 1–5" | Local to the [expert-team-scaling](superpowers/specs/2026-08-22-expert-team-scaling-design.md) and [teaming doctrine](superpowers/specs/2026-07-29-teaming-consultation-doctrine-design.md) specs; not cited elsewhere | those specs |
-| "D9 / Story 2.1 / AR-9" in `deploy/pi/graphiti/` | A pre-public numbering for the Graphiti LLM-client choice — **not** founding D9 *(origin unresolved)* | — |
+| "D9 / Story 2.1 / AR-9" in `deploy/pi/graphiti/` | A pre-public numbering for the Graphiti LLM-client choice — **not** founding D9 *(origin lost: no surviving document defines that Story/AR scheme)* | — |
 | `D-sandbox`, `D-web-read`, `D-confluence`, `D-graph-inspect` | Named, unnumbered decisions; each resolves to the design record of the same topic | [`superpowers/README.md`](superpowers/README.md) |
 | "D1–D12" with 2026-09-19/20 dates | The 2026-09 consistency audit's operator decisions; the durable ones are in the [decision log](decisions/README.md) | — |
 

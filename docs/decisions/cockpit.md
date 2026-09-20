@@ -7,12 +7,15 @@ for the entry format and how to add one.
 ### DL-087 — @container must sit on a parent of whatever uses @3xl:
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-08-10
 - **Rule:** [.claude/rules/cockpit.md](../../.claude/rules/cockpit.md) — "**`@container` must sit on a PARENT of whatever uses `@3xl:`.**"
-- **Why:** A container query resolves against an ANCESTOR container, never
-  the element's own, so the variant silently never applies on the element
-  that declares the container while its children's variants work; jsdom has
-  no layout engine, so no render test can catch this.
+- **Why:** A responsive-layout rule that depends on a container query was
+  placed on the very element that declares the query, but a container query
+  can only resolve against an ancestor, never itself — so the layout rule
+  silently never took effect, while the affected element's children (whose own
+  container queries correctly targeted it) grew to sizes the never-resized
+  parent could not contain, collapsing an entire pane's visible height with no
+  visible error.
 - **Enforced:** test: `web/src/features/container-query-scope.test.ts` (file confirmed to exist; content not opened this pass — TS/vitest test outside the Python suite)
 - **Source:** .claude/rules/cockpit.md
 
@@ -42,12 +45,14 @@ for the entry format and how to add one.
 ### DL-090 — _COMPOSER_DISABLING is an allowlist, not a check; a new refusal code needs its own guard
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-29
 - **Rule:** [.claude/rules/cockpit.md](../../.claude/rules/cockpit.md) — "**`nerve_gateway._COMPOSER_DISABLING` is an ALLOWLIST, not a check.**"
-- **Why:** A new `why_not_sendable` refusal code missing from that tuple
-  leaves the cockpit rendering an ENABLED message box that `_chat_send` then
-  409s. Adding a refusal code means adding it there too, with a guard test.
-- **Enforced:** code structure only — `central_command/api/nerve_gateway.py:504`, used at line 614; "needs a guard test per future change" is a process rule, not itself an existing test
+- **Why:** A UI control that should disable itself for certain known "you
+  can't send here" conditions only recognizes conditions on an explicit
+  allowlist — so introducing any new such condition elsewhere in the system,
+  without also adding it to that list, leaves the control looking enabled
+  right up until the send request is rejected.
+- **Enforced:** test: `tests/test_composer_refusal_codes.py::test_every_refusal_code_is_classified` — every code `why_not_sendable` and `_send_target` can emit must be in the allowlist or named non-disabling with its reason, so a new code fails until someone decides
 - **Source:** .claude/rules/cockpit.md
 
 ### DL-091 — The cockpit believes push frames, not hope

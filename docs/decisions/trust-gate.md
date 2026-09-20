@@ -79,11 +79,14 @@ for the entry format and how to add one.
 ### DL-005 — The agent sandbox is containment, not restriction
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-08-04
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**The agent sandbox is CONTAINMENT, not restriction.**"
-- **Why:** Not recorded in-repo beyond the stated principle: egress is open by
-  design; the real gate is CAPABILITY (every world-changing tool is a gated
-  `propose_*`), never reachability, because the sandbox holds no credentials.
+- **Why:** An early sandbox design blocked all outbound network access;
+  deprived of a way to check a real library's current API, an agent wrote code
+  against its own (stale) training-data assumptions and shipped code that
+  crashed. The operator decided the sandbox exists to contain an agent, not to
+  restrict what it can reach — the gate belongs on capability (credentials,
+  gated writes), not on network reachability.
 - **Enforced:** discipline only — no test asserts egress stays open or that a sandbox tool never becomes credentialed
 - **Source:** AGENTS.md bite marks
 
@@ -128,15 +131,13 @@ for the entry format and how to add one.
 ### DL-009 — A proposal's agent_id is the drafter, never the subject
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-29
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**A proposal's `agent_id` is the DRAFTER, never the subject.**"
-- **Why:** Not recorded beyond the stated invariant: the coach drafts charter
-  edits for OTHER agents, so the proposal row's attribution (session, Inbox,
-  throttle count) must track who generated the draft, while the target of the
-  edit lives in the action arguments the Executor reads — an actor an agent
-  could write into its own arguments would be a self-authored provenance
-  claim.
-- **Enforced:** discipline only — no guard test located
+- **Why:** Once one agent (a coach role) began drafting proposals on behalf of
+  other agents, provenance had to record who actually wrote the proposal, not
+  who it is about — otherwise attribution and session history would
+  misattribute a coaching edit to the agent being coached.
+- **Enforced:** test: `tests/test_executor_provenance.py::test_the_handler_is_handed_the_gateways_proposer_not_the_agents`, test: `tests/test_executor_provenance.py::test_no_executor_handler_reads_provenance_out_of_the_arguments`, test: `tests/test_executor_provenance.py::test_every_execute_call_names_a_proposer_from_the_proposal_row`
 - **Source:** AGENTS.md bite marks
 
 ### DL-010 — A proposal's argument shape is checked in both tiers from one list
@@ -237,11 +238,12 @@ for the entry format and how to add one.
 ### DL-017 — Roster membership is a non-empty role column; hire it, don't upsert it
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-22
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**Roster membership = a non-empty `role` column**"
-- **Why:** Not recorded beyond the stated invariant: a plain `upsert_agent`
-  registration never joins the roster, so "fixing" an agent's absence by
-  upserting silently leaves it off the roster.
+- **Why:** Ad-hoc registration calls (including test fixtures) had been
+  silently creating agent rows that were never real team members; the system
+  needed one authoritative signal for "this is a hired agent" so temporary or
+  accidental rows could never be mistaken for roster members.
 - **Enforced:** test: `tests/test_hiring.py::test_ensure_hired_creates_a_full_roster_member_and_is_idempotent`
 - **Source:** AGENTS.md bite marks
 

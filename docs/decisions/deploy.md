@@ -79,12 +79,13 @@ the entry format and how to add one.
 ### DL-080 — Use the fully-qualified image ref; podman's localhost/ tag is invisible to Kubernetes
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-08-01
 - **Rule:** [.claude/rules/deploy-k3s.md](../../.claude/rules/deploy-k3s.md) — "**podman tags local builds `localhost/<name>`; Kubernetes looks up `docker.io/library/<name>`.**"
-- **Why:** An image imported under the `localhost/` ref is invisible to the
-  kubelet — ImagePullBackOff on that node only, discovered at failover.
-  Always build and verify with the fully-qualified ref, and assert with
-  `grep -qx`, never a substring.
+- **Why:** A container image built locally with one tool gets tagged under a
+  local-only prefix, but the cluster scheduler resolves an unqualified image
+  name to a public-registry path instead — so a locally built image can be
+  silently unreachable to the scheduler, a mismatch that would only surface
+  during a failover, the worst possible moment to find it.
 - **Enforced:** script: `grep -qx` assertion in the build script (script-level)
 - **Source:** .claude/rules/deploy-k3s.md
 
@@ -150,16 +151,17 @@ the entry format and how to add one.
 - **Enforced:** test: `tests/test_update_hold.py::test_engage_waits_while_runs_are_live_then_triggers_unforced`, `::test_a_fresh_task_run_is_refused_while_held_and_the_task_stays_assigned`, `::test_the_hold_disables_the_cockpit_composer`
 - **Source:** CHANGELOG v2.30.0
 
-### DL-086 — A deleted manifest takes its resource with it, or it should — kubectl apply does not prune
+### DL-086 — Removing a k3s manifest means adding its tombstone
 
 - **Status:** active
 - **Date:** 2026-09-01
 - **Rule:** (recorded here) `kubectl apply -f deploy/k3s/` creates and
-  updates but never deletes, so removing a manifest from the tree does not
-  remove its live resource — a deletion needs explicit handling in the
-  updater.
-- **Why:** CHANGELOG `2026-09-01 — v2.19.2: a deleted manifest takes its
-  resource with it` records this as a known limit of the update surface, not
-  a bug that was ever fully closed.
-- **Enforced:** discipline only — a known, documented limit; no test guards against a stale resource surviving a manifest deletion
+  updates but never deletes. A manifest removed from the tree must be named
+  in `deploy/k3s/removed.txt` (`<namespace> <kind> <name>`); the updater's
+  manifests phase deletes each line with `--ignore-not-found`.
+- **Why:** A replaced deployment kept its host port after its manifest left
+  the tree, so its successor sat unschedulable from the moment it shipped.
+  An explicit tombstone list was chosen over `--prune`, which deletes by
+  label selection and can take more than was meant.
+- **Enforced:** script: `deploy/k3s/cc-update.sh` (reads `deploy/k3s/removed.txt`); adding the tombstone is discipline
 - **Source:** CHANGELOG v2.19.2

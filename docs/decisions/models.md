@@ -24,12 +24,13 @@ to add one.
 - **Status:** active
 - **Date:** undated
 - **Rule:** [.claude/rules/models.md](../../.claude/rules/models.md) — "**A model's capabilities are MEASURED, never guessed — and an undeclared flag is not neutral.**"
-- **Why:** Not recorded beyond the stated mechanism: Central Command reads an
-  absent `supports_*` as "nobody said" (fails closed), while LiteLLM's
-  aggregate `/model_group/info` coerces the same absence to false;
-  `litellm_probe_model` sends one real request per capability. A thinking
-  model can spend a small `max_tokens` on reasoning and answer HTTP 200 with
-  EMPTY content — that is "inconclusive", never "no".
+- **Why:** (Best-supported reading of the record.) An agent asserting a
+  capability or fact about a model from memory, rather than reading it from a
+  verified source, produced a silent, costly error (a 10-million-times price
+  inflation that billed real spend, and separately a wrongly-assumed vision
+  capability that would have silently dropped an attachment). The rule
+  generalizes: nothing about what a model can do should be asserted unless
+  something in the system actually measured it.
 - **Enforced:** discipline only — no guard test located this pass
 - **Source:** .claude/rules/models.md
 
@@ -56,7 +57,7 @@ to add one.
   `FINGERPRINT_FIELDS` and a disposition (registered/skipped/pending); a
   skip is inferred from a DONE task that registered nothing, and a skipped
   id with an unchanged fingerprint is never shown again.
-- **Enforced:** UNVERIFIED — `tests/test_catalog_enroll.py` exists and is extensive, but a grep for `FINGERPRINT_FIELDS`/`autodiscovery_snapshot` inside it returns zero hits (re-checked this pass), so it does not actually name-check this invariant despite being the plausible candidate
+- **Enforced:** test: `tests/test_heartbeat.py::test_reconcile_only_new_changed_or_failed_reach_the_agent` (the rule over every disposition) and test: `tests/test_heartbeat.py::test_a_second_pass_does_not_retask_examined_models` (the whole loop through `ACTIONS["litellm.discovery"]`, snapshot written back); `tests/test_catalog_enroll.py` was the wrong place to look. The one gap that left — nothing pinned `FINGERPRINT_FIELDS` itself, so a volatile field added to it would restore daily re-examination silently — is closed by test: `tests/test_autodiscovery_fingerprint.py::test_the_fingerprint_fields_are_the_agreed_four`
 - **Source:** .claude/rules/models.md
 
 ### DL-067 — Local→cloud model fallback is deliberately off

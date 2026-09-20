@@ -24,7 +24,7 @@
 | EA follow-ups (EA-widening Slice B) | Slice A (calendar writes) is built; Slice B is not | [EA widening](superpowers/research/2026-08-06-ea-widening-design.md) |
 | Episode-walk cluster walk | The Graph panel's Walk toggle is navigation-only; walking a cluster is the agreed next increment | [graph inspection](superpowers/specs/2026-08-09-graph-inspection-design.md) |
 | Comprehensive onboarding flow | The in-product first-run prompt and EA tour exist; an end-to-end guided onboarding does not | [setup & onboarding](superpowers/specs/2026-08-21-setup-onboarding-design.md), [team tour](superpowers/specs/2026-08-23-ea-hosted-team-tour-design.md) |
-| Guard tests for unguarded invariants | Several trust and data-loss invariants are enforced by code structure only — see the `Enforced:` line of each entry in the [decision log](decisions/README.md). Includes: runtime's use of credentialed `integrations/` clients is read-only by inspection, not by test | [decision log](decisions/README.md) |
+| Guard tests for unguarded invariants | Eight landed 2026-09-20: runtime's reads-only use of credentialed `integrations/` clients (DL-103, the one that was inspection-only), `deps=` on every agent run (DL-024), a charter on every fresh run (DL-022), the Executor's proposer coming from the proposal row (DL-009), dispatch staying opt-in (DL-048), `process_claimed` as the one work-item path (DL-050), the graph's 1024-dimension embedding check (DL-052), the composer refusal-code allowlist (DL-090), plus the `FINGERPRINT_FIELDS` gap in DL-066. The entries still reading `discipline only` are the deliberate remainder: operational lore (placement, image refs, shell-pipeline gotchas, "don't reintroduce X") and process practices, which have no code seam a walk could hold — left unguarded on purpose rather than pending | [decision log](decisions/README.md) |
 | Cockpit RPC pressure: `sessions.list` storm, approve-resume still inline | Approve and reject return when recorded; the session-list polling load remains | [`CHANGELOG.md`](../CHANGELOG.md) v2.27.2, v2.29.3 |
 
 ## Blocked
@@ -59,12 +59,12 @@
 
 ## Small cleanups (no spec needed)
 
-- `ProposalStatus.proposed` / `.approved` and `SessionStatus.awaiting_input` /
-  `.aborted` (`central_command/contract/enums.py`) are declared and never
-  assigned; remove them with the `status in (...)` reads that tolerate them, or
-  document why they stay.
+- `ProposalStatus.approved` and `SessionStatus.awaiting_input` / `.aborted`
+  (`central_command/contract/enums.py`) are declared and never assigned.
+  Harmless; removing them means touching the `status in (...)` guards around
+  the approval claim, so leave them unless that code is being changed anyway.
+  (`ProposalStatus.proposed` is live: it is the in-memory default before a
+  proposal is parked.)
 - A legacy-identifier rename across the cockpit's proxy helpers and remaining
   comments, as its own release.
 - A Windows service wrapper for the API and cockpit on the single-node profile.
-- `deploy/k3s/` build scripts and runbook carry example node names and
-  addresses from the reference deployment as defaults; parameterise them.

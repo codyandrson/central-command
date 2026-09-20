@@ -20,14 +20,15 @@ how to add one.
 ### DL-052 — Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-08-21
 - **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**a node with no `name_embedding` is invisible to the semantic half of hybrid search**"
-- **Why:** Not recorded beyond the stated mechanism: still turning up in
-  keyword hits, a node with no embedding is invisible to semantic search, so
-  every write re-embeds through the `cc-embedding` alias at exactly 1024
-  dimensions; nothing schema-side enforces the width, so a mis-sized vector
-  is dropped rather than stored.
-- **Enforced:** discipline only — no guard test located this pass (an embedding-dimension mismatch would surface as a runtime error, not a named test)
+- **Why:** The knowledge graph's vector database does not itself enforce that
+  every stored embedding has the same dimensionality, so a wrongly-sized
+  vector written by mistake would silently corrupt similarity search for
+  everyone; a verification check that was itself off-by-one very nearly
+  normalized exactly that mistake, so the write path now checks the size
+  itself and refuses/drops anything that doesn't match.
+- **Enforced:** test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_dropped_not_stored` (a fake embedder, no live graph) and test: `tests/test_graph_embedding_width.py::test_every_text_changing_graph_write_re_embeds_and_stamps` (the walk over the write functions)
 - **Source:** .claude/rules/graph.md
 
 ### DL-053 — The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1
@@ -97,12 +98,14 @@ how to add one.
 ### DL-058 — Episodes name the operator; "the operator" is not a graph subject
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-09-16
 - **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**Episodes name the operator; "the operator" is not a graph subject.**"
-- **Why:** Not recorded beyond the stated mechanism: the Person ontology
-  refuses a role as a name, so an episode written "the operator is
-  subscribed to X" lands with no subscriber or spawns a bare `operator`
-  entity; the graph-propose pack renders the configured name into its rule.
+- **Why:** Agents kept writing graph facts about "the operator" using that
+  role word as if it were the subject's name; because the person- identity
+  rule correctly refuses to treat a role as a name, those facts were either
+  silently dropped or attached to a placeholder node instead of the real
+  person. The fix has agents substitute the operator's actual configured name
+  before writing to the graph.
 - **Enforced:** test: `tests/test_context_overflow.py::test_graph_propose_notes_tell_the_agent_to_name_the_operator`
 - **Source:** .claude/rules/graph.md; CHANGELOG v2.36.0
 
@@ -124,12 +127,14 @@ how to add one.
 ### DL-060 — The ontology needs somewhere for every category; declare high-priority types first
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-08-15
 - **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**The ontology needs somewhere for every category to go.**"
-- **Why:** Graphiti's upstream default entity types had no `Person`, so every
-  person landed as a bare `Entity` while orgs typed correctly.
-  High-priority types must be declared FIRST so they beat the "use as last
-  resort" types.
+- **Why:** Without an explicit "this is a person" type declared ahead of the
+  graph's generic catch-all type, every human mentioned in ingested material
+  landed as an untyped, generic node — and a naive fix in the other direction
+  (naming every mention a separate person) started inventing duplicate
+  fictional people out of nicknames. The ontology has to name real entity
+  types, like Person, before falling back to a generic type.
 - **Enforced:** discipline only — no guard test located this pass
 - **Source:** .claude/rules/graph.md
 

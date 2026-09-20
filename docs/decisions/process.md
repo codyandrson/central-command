@@ -136,3 +136,31 @@ hygiene, and how the test suite itself must be written. See
   produced its seed data).
 - **Enforced:** discipline only — a process practice, not a guarded invariant
 - **Source:** CHANGELOG v2.17.0
+
+### DL-103 — The runtime's use of credentialed integrations clients is read-only
+
+- **Status:** active
+- **Date:** 2026-09-20
+- **Rule:** (recorded here) `runtime/` may call READ functions on the
+  credentialed clients in `central_command/integrations/`, and nothing else.
+  Every write method on a credentialed client is reachable only from
+  `gateway/executor.py` (or other tier-2 code), after the approval gate.
+  `integrations/sandbox_client.py` is exempt — the sandbox holds no
+  credentials, so writing into it changes nothing in the world — and
+  `integrations/neo4j_writer.py` is banned outright, being the operator's own
+  ungated hand on the graph.
+- **Why:** The import ban (DL-004) stops `runtime/` reaching `gateway/`, but
+  says nothing about the clients the runtime legitimately imports for its
+  reads — and every one of those modules exposes its reads and its writes side
+  by side. `jira.get_issue` and `jira.transition_issue` are one import apart;
+  so are `confluence.get_page`/`trash_page`, `graphiti.search_facts`/
+  `add_episode`, `email_facade.get_message`/`report_spam`,
+  `litellm.list_models`/`delete_model`. A `propose_*` tool "simplified" into
+  the write it was drafting would pass the import ban (the module is already
+  imported) and never reach the approval gate, leaving the operator clicking
+  approve on something that had already happened.
+  `docs/ARCHITECTURE.md` recorded the property as verified by call-site
+  enumeration rather than by a guard test; this entry records the decision to
+  freeze the enumeration as an allowlist instead.
+- **Enforced:** test: `tests/test_runtime_integration_reads.py::test_runtime_reaches_only_read_functions_on_credentialed_clients`, with test: `tests/test_runtime_integration_reads.py::test_the_raw_litellm_transport_is_only_ever_asked_to_GET`, test: `tests/test_runtime_integration_reads.py::test_runtime_never_imports_a_write_only_integration` and test: `tests/test_runtime_integration_reads.py::test_a_write_function_imported_by_name_is_caught_too` closing the three bypasses
+- **Source:** `docs/ARCHITECTURE.md`

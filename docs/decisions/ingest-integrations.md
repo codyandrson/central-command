@@ -7,23 +7,26 @@ one.
 ### DL-041 — A Jira gadget's config keys are declared by the gadget, read from its XML
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-08-10
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**A Jira gadget's config keys are declared BY THE GADGET — read its XML, never a table.**"
-- **Why:** A gadget silently ignores any preference it does not declare, so a
-  wrong key is a 200 with no binding and no error; `_prepare_gadget_configs`
-  fetches each gadget's own `<UserPref>` list and refuses undeclared keys.
+- **Why:** A dashboard-embed widget accepted any preference key with an
+  ordinary success response, silently discarding one it didn't recognize;
+  internal guidance had the wrong key name for several gadget types, so agents
+  kept "successfully" configuring gadgets that stayed blank. The fix reads
+  each widget's own declared configuration schema instead of trusting a hand-
+  written map.
 - **Enforced:** code structure only — `_prepare_gadget_configs`; no pytest guard named this pass
 - **Source:** .claude/rules/integrations.md
 
 ### DL-042 — n8n import:workflow never activates outside queue mode; the canvas is not the source of truth
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-09-12
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**`n8n import:workflow` never activates outside queue mode, and the canvas is not the source of truth.**"
-- **Why:** Not recorded beyond the stated mechanism: the CLI refuses
-  `--activeState=fromJson` in regular mode and always lands `active=false`;
-  `deploy/n8n/apply-workflows.sh` activates by SQL and restarts n8n (where
-  webhooks register); a canvas edit is overwritten by the next release.
+- **Why:** The workflow-automation tool's own workflow-import command cannot
+  activate a workflow outside one specific deployment mode, so importing a
+  workflow file is not enough to make it live — activation has to be a
+  deliberate, separate step every time.
 - **Enforced:** script: `deploy/n8n/apply-workflows.sh` (SQL activation, script-level, no pytest)
 - **Source:** .claude/rules/integrations.md
 
@@ -61,49 +64,52 @@ one.
 ### DL-045 — An unsubscribe URL is derived from the mailbox, never from the proposal
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-09-12
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**An unsubscribe URL is derived from the MAILBOX, never from the proposal.**"
-- **Why:** Not recorded beyond the stated mechanism: `mail.unsubscribe` pins
-  the URL at propose time for review, but the Executor re-reads the
-  message's `List-Unsubscribe` headers and refuses any URL that is not the
-  message's own, because a proposal can arrive by API with any `url` and the
-  Executor is the tier with egress. Only RFC 8058 one-click is offered.
+- **Why:** Because a proposal to unsubscribe could in principle arrive
+  carrying any URL — including one pointed at an internal address — the system
+  was changed to always recompute the unsubscribe target itself from the real,
+  verified email headers, rather than trust a URL supplied inside the
+  proposal.
 - **Enforced:** code structure only — `central_command/contract/mail.py`; the RFC 8058 logic is not independently pinned to a named test this pass
 - **Source:** .claude/rules/integrations.md
 
 ### DL-046 — Ledger invariants live in SQL, not Python, and are never mocked in tests
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-18
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**Ledger invariants live in SQL, not Python.**"
-- **Why:** Not recorded beyond the stated mechanism: idempotent enrollment is
-  `unique (message_id)` + `on conflict do nothing`; the atomic claim is
-  `for update skip locked` — neither is reimplemented in application code.
+- **Why:** Correctness properties like "never process the same item twice" and
+  "never let two workers claim the same item" are the kind of thing a test
+  double can accidentally paper over; putting them directly in the database's
+  own constraints and locking clauses means they hold under real concurrency,
+  not just under a mocked happy path.
 - **Enforced:** test: `tests/test_ledger.py` (skips without a real Postgres by design, per `needs_pg`)
 - **Source:** .claude/rules/integrations.md
 
 ### DL-047 — Header-less email still needs a stable key, synthesised from the content hash
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-18
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**Header-less email still needs a stable key:**"
-- **Why:** Not recorded beyond the stated mechanism: `parse_email()`
-  synthesises a Message-ID from the content hash so the hand-fed path stays
-  idempotent.
+- **Why:** Deduplicating ingested items needs a stable identity, but content
+  that arrives without real mail headers (hand-fed or demo text) has none —
+  hashing the content alone would wrongly treat "the same words submitted
+  twice on purpose" as a duplicate, so header-less items get a fresh synthetic
+  id per submission instead.
 - **Enforced:** test: `tests/test_ledger.py::test_bare_text_gets_a_stable_synthetic_message_id`
 - **Source:** .claude/rules/integrations.md
 
 ### DL-048 — Dispatch is opt-in; the drain loop never starts by surprise
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-18
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**Dispatch is opt-in.**"
-- **Why:** Not recorded beyond the stated invariant: the drain loop should
-  never start by surprise and quietly burn tokens. The setting is the
-  Pydantic field `dispatch_enabled` (default `False`) in
-  `central_command/config.py`; with `env_prefix="CC_"` (`config.py:19`) the
-  corresponding environment variable is `CC_DISPATCH_ENABLED`.
-- **Enforced:** code structure only — `central_command/config.py:328` (`dispatch_enabled: bool = False`), prefix confirmed at `central_command/config.py:19`
+- **Why:** The background process that autonomously starts processing queued
+  work is a deliberate switch the operator has to flip on, so a fresh or test
+  deployment cannot accidentally start acting on real items before anyone
+  decided it should.
+- **Enforced:** test: `tests/test_dispatch_one_path.py::test_a_settings_object_built_from_nothing_has_the_loops_off` (the shipped default) and test: `tests/test_dispatch_one_path.py::test_app_startup_starts_no_loop_that_was_not_asked_for` (the lifespan seam)
 - **Source:** .claude/rules/integrations.md
 
 ### DL-049 — A fold is a claim of coverage, not an outcome; it goes terminal only on covering-approval
@@ -121,10 +127,11 @@ one.
 ### DL-050 — Every email takes one path: dispatcher.process_claimed()
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-07-20
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**Every email takes one path:** `dispatcher.process_claimed()`."
-- **Why:** Not recorded beyond the stated invariant: queued work arrives via
-  `dispatch_once`, hand-fed work via `dispatch_item` — both claim from the
-  ledger first, so no route may call `ingest_and_propose()` directly.
-- **Enforced:** code structure only — exercised by `tests/test_dispatch_concurrency.py` and `tests/test_outage_requeue.py`, but no source-walk test found asserting `process_claimed` is the ONLY entry point
+- **Why:** A convenience entry point for manually submitting an item had grown
+  into a second, unrecorded way to trigger agent work, bypassing the durable
+  queue entirely. Routing every item — however it arrives — through the one
+  shared claim-and-process function closed that gap.
+- **Enforced:** test: `tests/test_dispatch_one_path.py::test_a_registered_handler_is_reachable_only_through_the_registry`, test: `tests/test_dispatch_one_path.py::test_only_process_claimed_drives_a_handler`, test: `tests/test_dispatch_one_path.py::test_nothing_outside_the_dispatcher_starts_a_work_item_run` — the source walks that were missing; behaviour is still exercised by `tests/test_dispatch_concurrency.py` and `tests/test_outage_requeue.py`
 - **Source:** .claude/rules/integrations.md
