@@ -232,6 +232,13 @@ spec:
             # together with an un-bridged alias.
             - name: GRAPHITI_OPENAI_CLIENT
               value: responses
+            # The entity types in cc-graphiti-config are OURS: `config` makes
+            # their descriptions win over MCP 1.1.0's same-named built-in
+            # models, which discard that text and add a required, uncapped
+            # `description` attribute that grows without bound on a hub
+            # entity (patches/cc-entity-type-source.patch).
+            - name: GRAPHITI_ENTITY_TYPE_SOURCE
+              value: config
             # ANTHROPIC_API_KEY is deliberately NO LONGER PASSED (2026-08-01).
             # config.yaml's llm block is `provider: openai` now, so nothing
             # constructs an AnthropicClient and nothing reads this. Graphiti

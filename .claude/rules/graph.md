@@ -45,6 +45,27 @@ when a matching file is read.
   `GRAPHITI_OPENAI_CLIENT=responses` (our `cc-openai-client-switch.patch`)
   keeps the Responses client; flip it to `generic` only together with an
   un-bridged alias, and change nothing else about the pair.
+- **A REQUIRED string attribute on a Graphiti entity type is an unbounded
+  one.** graphiti-core re-extracts a typed entity's attributes on EVERY
+  episode with the prior value in the prompt, and its 250-char cap exempts
+  required fields (`attribute_length_cap_skipped_required` — dropping one
+  would fail validation), so the value is rewritten longer each time. MCP
+  1.1.0 made this the default: it substitutes its own built-in model — each
+  with a required `description` — for any configured type whose NAME it
+  knows, silently discarding the description in `config.yaml`. On the hub
+  Person (502 edges) that reached 4378 chars and generations of 41-52k chars
+  into the output cap: ~700 GPU-minutes a week, discarded (2026-09-20).
+  `GRAPHITI_ENTITY_TYPE_SOURCE=config` (our `cc-entity-type-source.patch`)
+  makes the configured, field-less types win, which also skips the
+  per-entity attribute call. If you ever add a real attribute, make it
+  Optional or give it `Field(max_length=…)`. Three things rode along and
+  belong together: thinking is switched OFF on the `graphiti-llm` ALIAS
+  (`chat_template_kwargs: {"enable_thinking": false}` in its litellm_params —
+  graphiti-core sends reasoning controls only for gpt-5/o1/o3 names, and
+  llama.cpp does not enforce a json_schema grammar while the model thinks);
+  `llm.max_tokens` is only ENFORCED because the client-switch patch passes it
+  (upstream #763); and a log line is the only place the symptom shows — read
+  the Graphiti pod's log before theorising about the model.
 - **Graphiti never assumes an episode's time.** Every present-tense fact's
   `valid_at` is anchored to the episode's `reference_time`, and Graphiti's
   own fallback is the moment it PROCESSED the episode — under MCP 1.0.2 that

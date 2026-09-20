@@ -1,0 +1,32 @@
+--- a/src/utils/type_config.py	2026-09-20 15:39:13.655751517 -0600
++++ b/src/utils/type_config.py	2026-09-20 15:39:32.071912546 -0600
+@@ -12,6 +12,7 @@
+   ``dict[tuple[str, str], list[str]]`` shape expected by ``Graphiti.add_episode``.
+ """
+ 
++import os
+ from datetime import datetime, timezone
+ 
+ from graphiti_core.search.search_filters import (
+@@ -89,9 +90,20 @@
+     if not entity_type_configs:
+         return None
+ 
++    # Central Command: GRAPHITI_ENTITY_TYPE_SOURCE=config makes the CONFIGURED
++    # description win over a same-named built-in rich model. The built-ins (new
++    # in MCP 1.1.0) silently discard the configured text, and each carries a
++    # REQUIRED `description: str` attribute that graphiti-core exempts from its
++    # length cap (attribute_length_cap_skipped_required) — on a hub entity it is
++    # rewritten longer every episode until the generation hits the output cap.
++    # A documentation-only model has no fields, so attribute extraction is
++    # skipped outright; the type label and its description still classify.
++    # Unset is upstream behaviour.
++    config_wins = os.environ.get('GRAPHITI_ENTITY_TYPE_SOURCE', '').strip().lower() == 'config'
++
+     result: dict[str, type[BaseModel]] = {}
+     for cfg in entity_type_configs:
+-        registered = ENTITY_TYPES.get(cfg.name)
++        registered = None if config_wins else ENTITY_TYPES.get(cfg.name)
+         result[cfg.name] = (
+             registered if registered is not None else _doc_only_model(cfg.name, cfg.description)
+         )

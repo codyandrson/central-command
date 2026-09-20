@@ -146,6 +146,9 @@ RUN apt-get update \
     && grep -q 'GVRerankClient' src/graphiti_mcp_server.py \
     && patch -p1 -F 5 < /tmp/graphiti-patches/cc-openai-client-switch.patch \
     && grep -q 'GRAPHITI_OPENAI_CLIENT' src/services/factories.py \
+    && grep -q 'OpenAIClient(config=llm_config, max_tokens=config.max_tokens)' src/services/factories.py \
+    && patch -p1 -F 5 < /tmp/graphiti-patches/cc-entity-type-source.patch \
+    && grep -q 'GRAPHITI_ENTITY_TYPE_SOURCE' src/utils/type_config.py \
     && rm -rf /tmp/graphiti-patches
 
 # cc-rerank-client (2026-08-19) is OURS, not an upstream PR — unlike the two
@@ -167,3 +170,26 @@ RUN apt-get update \
 # the bridge was built for; `generic` forces the chat client (what a future
 # un-bridged alias would use); unset is upstream's URL sniff. Set in
 # deploy/k3s/40-graph.yaml and deploy/single/compose.yaml.
+# The same patch also passes `max_tokens=config.max_tokens` to OpenAIClient
+# (2026-09-20). BaseOpenAIClient takes its output cap from the CONSTRUCTOR
+# kwarg (default 16384) and never from config.max_tokens (upstream
+# getzep/graphiti#763, OPEN); upstream's factory passes it on the generic and
+# Azure branches and forgets it on this one, so config.yaml's `llm.max_tokens`
+# was decorative and a runaway generation ran to 16384 tokens (4-6 minutes on
+# the local model) before failing validation and being retried twice.
+# cc-entity-type-source (2026-09-20, ours, permanent carry). MCP 1.1.0 prefers
+# its built-in "rich" model for any configured entity type whose NAME it knows
+# — all ten of ours — which (a) silently discards the description written in
+# config.yaml, the Person guidance included, and (b) gives every typed entity a
+# REQUIRED `description: str` attribute. graphiti-core re-extracts attributes
+# every episode with the prior value in the prompt, and exempts REQUIRED
+# fields from its 250-char cap (`attribute_length_cap_skipped_required`), so
+# on a hub entity the description only grows: measured 2026-09-20 at 4378
+# chars on one Person with 502 edges (next largest in the graph: 254), with
+# generations running 41-52k chars into the output cap — 197 calls over 8k
+# tokens and ~700 GPU-minutes in a week, nearly all discarded.
+# GRAPHITI_ENTITY_TYPE_SOURCE=config makes the configured description win: a
+# documentation-only model has no fields, so graphiti-core skips attribute
+# extraction outright (node_operations: `len(entity_type.model_fields) == 0`)
+# while the label and the description still classify. Unset is upstream
+# behaviour. Set in deploy/k3s/40-graph.yaml and deploy/single/compose.yaml.

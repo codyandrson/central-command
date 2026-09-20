@@ -233,6 +233,10 @@ services:
       # backend. `responses` keeps the Responses-API client the bridge exists
       # for (deploy/pi/graphiti/patches/cc-openai-client-switch.patch).
       GRAPHITI_OPENAI_CLIENT: responses
+      # config.yaml's entity-type descriptions win over MCP 1.1.0's same-named
+      # built-in models, which discard them and add a required, uncapped
+      # `description` attribute (patches/cc-entity-type-source.patch).
+      GRAPHITI_ENTITY_TYPE_SOURCE: config
       # The RERANKER's endpoint, and the LLM's. graphiti_core builds its
       # cross-encoder as OpenAIRerankerClient() with no config, so the openai
       # SDK falls back to these two vars — the only seam available without

@@ -4,6 +4,45 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-20 — v2.38.4: a required attribute is an unbounded one
+
+Graphiti extraction was spending most of the local model's time on output
+nobody kept. Measured over a week: 197 calls ran past 8k output tokens, ~700
+GPU-minutes, nearly all of it discarded — each a 4-6 minute generation that
+failed JSON validation and was retried twice, on the one serial model slot
+every agent run and graph verification also waits on.
+
+- **The cause was one entity's `description`, not the model thinking.** The
+  Graphiti log names it: a `Person` reply whose `description` string ran to
+  41-52k characters before the output cap cut it off. MCP server 1.1.0
+  substitutes its own built-in model for any configured entity type whose
+  name it knows — all ten of ours — discarding the descriptions written in
+  `config.yaml` and adding a REQUIRED `description` attribute. graphiti-core
+  re-extracts attributes on every episode with the prior value in the prompt
+  and exempts required fields from its 250-character cap, so on a hub entity
+  the value only grows (4378 characters on a node with 502 edges; the next
+  largest in the graph was 254).
+- **`GRAPHITI_ENTITY_TYPE_SOURCE=config`** (new image patch
+  `cc-entity-type-source.patch`, set in both deploy profiles) makes the
+  configured types win. They carry no fields, so graphiti-core skips the
+  per-entity attribute call entirely; the type label and its description
+  still classify. The Person guidance in `config.yaml` reaches the model
+  again. Unset is upstream behaviour. Node searches stop returning a
+  `description` attribute for newly written entities; `summary` is unchanged.
+- **`llm.max_tokens` is now enforced.** The Responses client took its cap from
+  a constructor default of 16384 and never from the config (upstream
+  getzep/graphiti#763); the client-switch patch now passes it. Edge
+  extraction still sets its own (upstream #1869).
+- **Operator action for a hybrid-thinking local model:** switch thinking off
+  on the `graphiti-llm` alias — `chat_template_kwargs: {"enable_thinking":
+  false}` in its litellm_params. graphiti-core sends reasoning controls only
+  for gpt-5/o1/o3 model names, and llama.cpp does not enforce a json_schema
+  grammar while the model thinks. It is an alias value, not a tracked one: a
+  cloud model behind the alias would reject the key. The enforced output cap
+  assumes it, because thinking tokens count against the cap.
+- An existing oversized `description` is not rewritten by this release (a
+  field-less type leaves prior attributes untouched) — remove it by hand.
+
 ## 2026-09-20 — v2.38.3: the map is drawn from the code, and every record says what it became
 
 A documentation release: no runtime behavior changes. The 2026-09 consistency

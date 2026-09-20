@@ -48,6 +48,14 @@
 #   No entry carries `chat_template_kwargs`: reasoning control is injected
 #   PER REQUEST from the `thinking_mechanism` / `thinking_levels` declarations
 #   above (runtime/models._thinking_body), never baked into a deployment.
+#   ONE EXCEPTION, and it is the operator's to set, not this file's:
+#   `graphiti-llm`. Its only caller is Graphiti, which is not our runtime and
+#   cannot inject anything per request (graphiti-core sends reasoning controls
+#   only for gpt-5/o1/o3 model names). Behind a hybrid-thinking local model the
+#   alias itself must carry `chat_template_kwargs: {"enable_thinking": false}`
+#   — see deploy/pi/graphiti/config.yaml. It was set by hand on 2026-08-18,
+#   silently lost when the alias was re-created, and found again on 2026-09-20
+#   as unbounded extraction turns. A re-created alias needs it re-entered.
 # ============================================================================
 
 models:
