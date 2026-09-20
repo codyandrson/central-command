@@ -55,6 +55,13 @@ when a matching file is read.
   proposal without it in both tiers, the Executor refuses anything that is
   not an ISO-8601 instant ("today" included), and `graphiti.add_episode` has
   no default for it. Don't add one anywhere — a default IS the assumption.
+  The same law covers the operator's hand: `graph.create_edge` requires
+  `valid_at`, spelled `unbounded` when the text gives no start (the Executor
+  maps it to null), and `neo4j_writer.create_edge` stores a None start as
+  null rather than the creation instant. Windows live on FACTS and are read
+  from words — Graphiti has no per-fact date input — so the pack tells agents
+  the phrasings the extractor keys on, and the auditor's judgment prompt
+  compares every fact's window with the text's dates.
 - **Graphiti will retire a fact it merely RECOGNISES, and the guard is not
   the model.** Upstream's `resolve_extracted_edges` offers a whole-group
   semantic search as invalidation candidates (empty `SearchFilters()`); we

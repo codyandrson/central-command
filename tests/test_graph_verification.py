@@ -610,3 +610,79 @@ async def test_create_edge_carries_the_validity_window(monkeypatch):
     assert created["invalid_at"] == "2022-03-01T00:00:00Z"
     recheck = await repo.graph_verification_for_proposal("prop_create_1")
     assert recheck and recheck["remediation_of"] == original["id"]
+
+
+def test_create_edge_requires_a_start_and_spells_the_unknown_one():
+    """The operator's-hand half of the reference-time law (2026-09-19): a
+    created edge with no `valid_at` used to be stamped "became true now".
+    The argument is required in the shared spec, and the literal `unbounded`
+    is the explicit spelling for "the text gives no start"."""
+    from central_command.contract import validate_action_args
+    from central_command.gateway import executor
+
+    base = {"source_uuid": "n1", "target_uuid": "n2", "name": "KNOWS", "fact": "A knows B"}
+    problems = validate_action_args("graph.create_edge", base)
+    assert len(problems) == 1 and "valid_at" in problems[0]
+    assert validate_action_args("graph.create_edge", {**base, "valid_at": "unbounded"}) == []
+    assert executor.UNBOUNDED == "unbounded"
+
+
+async def test_unbounded_reaches_the_writer_as_null(monkeypatch):
+    from central_command.gateway import executor
+    from central_command.integrations import neo4j_writer
+
+    _graph(monkeypatch)
+    original = await _row(marker="proposal=p-unbounded")
+    created = {}
+
+    async def fake_create_edge(source_uuid, target_uuid, name, fact,
+                               valid_at=None, invalid_at=None):
+        created.update(valid_at=valid_at, invalid_at=invalid_at)
+        return {"uuid": "e-unb"}
+
+    monkeypatch.setattr(neo4j_writer, "create_edge", fake_create_edge)
+    token = executor._current_proposal_id.set("prop_unbounded_1")
+    try:
+        await executor.HANDLERS["graph.create_edge"](
+            {"source_uuid": "n1", "target_uuid": "n2", "name": "KNOWS",
+             "fact": "A has long known B", "valid_at": "Unbounded",
+             "verification_id": original["id"]},
+            approver="human:lee", proposer="graph-curator")
+    finally:
+        executor._current_proposal_id.reset(token)
+    assert created == {"valid_at": None, "invalid_at": None}
+
+
+async def test_judgment_prompt_checks_every_window_against_the_text(monkeypatch):
+    """The judge is asked, in so many words, to compare each fact's window
+    with the dates the approved text states, and is shown the episode's
+    reference time so 'dated to the reference time' is a check it can make
+    (2026-09-19). Prompt text is the seam the operator's charter cannot
+    remove, so it is pinned here rather than in the charter."""
+    seen = {}
+
+    class _Run:
+        output = None
+
+    class _Agent:
+        async def run(self, prompt):
+            seen["prompt"] = prompt
+            return _Run()
+
+    async def fake_resolve(model):
+        return model
+
+    monkeypatch.setattr(graph_auditor, "build_graph_auditor", lambda model, charter=None: _Agent())
+    monkeypatch.setattr(graph_auditor, "_resolve_model", fake_resolve)
+    row = await _row(marker="proposal=p-judge-window")
+    delta = {"episode": {"uuid": "ep", "valid_at": "2026-05-12T09:30:00Z",
+                         "created_at": "2026-09-19T00:00:00Z"},
+             "entities": [], "invalidated": [],
+             "edges": [{"uuid": "e1", "name": "SUBSCRIBED_TO", "fact": "Lee is subscribed",
+                        "source": "Lee", "target": "List", "new": True,
+                        "valid_at": "2026-05-12T09:30:00Z", "invalid_at": None}]}
+    await graph_auditor._judge(row, "Lee has been subscribed since 2025-03-11.", delta)
+    prompt = seen["prompt"]
+    assert "Episode reference time" in prompt and "2026-05-12T09:30:00Z" in prompt
+    assert "CHECK EVERY FACT'S WINDOW" in prompt
+    assert "valid from 2026-05-12T09:30:00Z" in prompt

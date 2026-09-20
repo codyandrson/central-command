@@ -4,6 +4,43 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-19 — v2.38.1: a fact's window is read from words, so say the words and check the read
+
+The operator's follow-up to v2.38.0: does the law cover both the start and
+the end, and can either be unbounded? On a fact, yes — Graphiti reads each
+relationship's `valid_at` / `invalid_at` from the sentence that states it,
+and null on either side means unbounded. An episode has no window of its
+own, only the reference time v2.38.0 made mandatory, and Graphiti offers no
+per-fact date input (its direct `add_triplet` takes none). So the honest
+design is: write the dates the extractor keys on, and verify what it read.
+
+- **The graph-propose pack names the phrasings.** `since <date>` for a
+  start; `until` / `through` / `ended on <date>` for an end; `from … until …`
+  for both; an outright end-state sentence for something that stopped; full
+  dates over month names; one sentence per claim so each window binds to its
+  own fact. It says plainly that a present-tense claim with no date is dated
+  to the reference time — right for "true as of the source", wrong when the
+  source says it started earlier — and that a start the source omits is
+  written into the claim as not stated, never guessed.
+- **The auditor checks every window against the text.** The judgment prompt
+  now shows the episode's reference time and asks, fact by fact, whether the
+  window carries the start or end the approved text states — flagging a fact
+  dated to the reference time when the text gives an earlier start, and a
+  fact with no end when the text says it ceased, while a dateless
+  present-tense claim on the reference time is correct and not flagged. The
+  built-in charter says the same; the prompt is the seam a charter edit
+  cannot remove. Flags route to the curator as before.
+- **The operator's hand obeys the same law.** `graph.create_edge` now
+  requires `valid_at`, with the literal `unbounded` as the explicit spelling
+  for "the text gives no start" (the Executor maps it to null); the writer
+  stores a None start as null instead of the creation instant, so the
+  cockpit's "new relationship" form — which gained a "valid from" date
+  field — records exactly what was given and nothing more. The curator's
+  pack and profile carry the new wording.
+
+Not built, by decision after discussion: an auto-approved repair lane for
+plain date mismatches. The judge stays a judge; repairs stay proposals.
+
 ## 2026-09-19 — v2.38.0: an episode's time is stated, never assumed
 
 Reviewing the Verify tab, the operator noticed that most facts' "valid from"

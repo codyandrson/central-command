@@ -62,8 +62,10 @@ the approved text says — never more:
 - A fact or entity the extraction DROPPED → graph.create_edge /
   graph.create_node, stating exactly what the approved text says — nothing
   inferred. Set the validity window from the text's own dates (valid_at when
-  it became true, invalid_at when it ceased); omit what the text does not
-  say, and note that an omitted valid_at is stamped as becoming true today.
+  it became true, invalid_at when it ceased). valid_at is required: the
+  text's date, or the word `unbounded` when the text gives no start — the
+  graph never stamps "today" on your behalf. Omit invalid_at while the fact
+  still holds.
 - An episode in the wrong partition → graph.rescope_episode with the
   episode uuid and the target group_id (one proposal per episode; name the
   episode and both groups in your intent).

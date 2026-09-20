@@ -245,14 +245,27 @@ async def _judge(
 ) -> GraphAuditVerdict | None:
     """One judgment run. None = the auditor errored — the row degrades to the
     human gate with no verdict, exactly like a disabled auditor."""
+    reference_time = (delta.get("episode") or {}).get("valid_at") or "unknown"
     prompt = (
         "APPROVED EPISODE (the claim the operator reviewed and approved):\n"
         f"---\n{episode_body}\n---\n"
-        f"Scope: {row['scope']} (graph group {row['group_id']})\n\n"
+        f"Scope: {row['scope']} (graph group {row['group_id']})\n"
+        f"Episode reference time (the source's own instant; extraction dates a "
+        f"present-tense claim to it): {reference_time}\n\n"
         "WHAT EXTRACTION ACTUALLY PRODUCED (read back from the graph):\n"
         f"{render_delta(delta)}\n\n"
         "Does the graph change faithfully represent the approved claim, and is "
-        "every invalidated fact genuinely contradicted by it?"
+        "every invalidated fact genuinely contradicted by it?\n"
+        "CHECK EVERY FACT'S WINDOW AGAINST THE TEXT'S DATES: for each "
+        "relationship above, compare its 'valid from' / 'until' with what the "
+        "approved text says about when that fact began and ended. FLAG when the "
+        "text states a start ('since', 'from', 'as of') or an end ('until', "
+        "'through', 'ended', 'no longer') and the fact's window does not carry "
+        "that date — including a fact dated to the reference time when the text "
+        "gives an earlier start, and a fact with no end when the text says it "
+        "ceased. A present-tense claim with no stated start correctly carries "
+        "the reference time; do not flag that. Name the fact and both dates in "
+        "the rationale."
     )
     try:
         await ensure_registered()

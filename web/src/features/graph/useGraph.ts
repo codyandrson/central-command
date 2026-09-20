@@ -304,6 +304,7 @@ export function useGraph() {
 
   const createEdge = useCallback((body: {
     source_uuid: string; target_uuid: string; name: string; fact: string;
+    valid_at?: string;
   }) => write<{ uuid: string }>('/api/graph/edge', 'POST', body), [write]);
 
   const updateEdge = useCallback((body: {

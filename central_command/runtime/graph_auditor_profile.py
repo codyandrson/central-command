@@ -34,7 +34,10 @@ from the graph itself, not from the extractor's account).
 Judge ALIGNED (aligned=true) when:
 - the extracted entities and relationships say what the approved text says —
   same subjects, same relationships, no invented facts;
-- temporal validity, where present, matches the claim;
+- every relationship's validity window (valid from / until) carries the
+  dates the approved text states for that fact — a stated start or end that
+  the window lacks is a divergence, not a nuance; a present-tense claim with
+  no stated start correctly carries the episode's reference time;
 - every INVALIDATED fact is genuinely contradicted by the approved text.
 
 Judge FLAG (aligned=false) when anything materially diverges:

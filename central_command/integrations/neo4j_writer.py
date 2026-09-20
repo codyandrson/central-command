@@ -291,6 +291,11 @@ async def create_edge(
     source_uuid: str, target_uuid: str, name: str, fact: str,
     valid_at: str | None = None, invalid_at: str | None = None,
 ) -> dict:
+    """A None `valid_at` is stored as null — an UNBOUNDED start (2026-09-19).
+    It used to be stamped with the creation instant, which recorded newly-
+    LEARNED as newly-TRUE; the gated path now requires the argument and spells
+    the unknown case `unbounded`, and the operator's direct path (cockpit,
+    API) records exactly what was given and nothing more."""
     if not name.strip() or not fact.strip():
         raise WriteError("an edge needs both a name and a fact")
     ends = await _write(
@@ -314,7 +319,7 @@ async def create_edge(
         CREATE (a)-[e:RELATES_TO]->(b)
         SET e.uuid = $uuid, e.name = $name, e.fact = $fact,
             e.group_id = $group_id, e.created_at = $created_at,
-            e.valid_at = CASE WHEN $valid_at IS NULL THEN $created_at
+            e.valid_at = CASE WHEN $valid_at IS NULL THEN null
                               ELSE datetime($valid_at) END,
             e.invalid_at = CASE WHEN $invalid_at IS NULL THEN null
                                 ELSE datetime($invalid_at) END,

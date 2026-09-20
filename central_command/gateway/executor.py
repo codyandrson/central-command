@@ -391,6 +391,9 @@ async def _reverify_after_curation(args: dict) -> None:
     )
 
 
+UNBOUNDED = "unbounded"
+
+
 def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, ...]):
     """One handler per writer primitive, built from the same recipe: the
     required args come from `contract.ARG_SPECS` (already enforced by
@@ -407,6 +410,13 @@ def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, 
         # signatures have no defaults, and a dropped `labels` was a TypeError
         # after approval (2026-09-14, three proposals).
         kwargs |= {k: args.get(k) for k in optional}
+        # `unbounded` is the explicit spelling for "no start / no end" on a
+        # validity date (2026-09-19): it becomes null in the graph. The word
+        # exists so that a REQUIRED date can still say "the text gives none"
+        # without a silent default doing it.
+        for k in ("valid_at", "invalid_at"):
+            if str(kwargs.get(k) or "").strip().lower() == UNBOUNDED:
+                kwargs[k] = None
         try:
             result = await getattr(neo4j_writer, fn_name)(**kwargs)
         except neo4j_writer.WriteError as e:

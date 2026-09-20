@@ -206,6 +206,7 @@ function NodeEditor({ node, entityTypes, curate, onDone }: {
   const [edgeTarget, setEdgeTarget] = useState('');
   const [edgeName, setEdgeName] = useState('');
   const [edgeFact, setEdgeFact] = useState('');
+  const [edgeValidFrom, setEdgeValidFrom] = useState('');
 
   // Re-seed when the operator selects a different node without closing.
   useEffect(() => {
@@ -316,6 +317,17 @@ function NodeEditor({ node, entityTypes, curate, onDone }: {
             placeholder="The fact, in a full sentence — this is what agents recall."
             aria-label="Relationship fact"
           />
+          <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground">
+            <span className="shrink-0">valid from</span>
+            <input
+              type="date"
+              className={FIELD}
+              value={edgeValidFrom}
+              onChange={(e) => setEdgeValidFrom(e.target.value)}
+              aria-label="Relationship valid from (blank = unbounded)"
+              title="When this fact became true. Blank records no start (unbounded), never today."
+            />
+          </label>
           <Button
             size="sm"
             variant="outline"
@@ -324,9 +336,10 @@ function NodeEditor({ node, entityTypes, curate, onDone }: {
               await curate.createEdge({
                 source_uuid: node.uuid, target_uuid: edgeTarget,
                 name: edgeName.trim(), fact: edgeFact.trim(),
+                ...(edgeValidFrom ? { valid_at: `${edgeValidFrom}T00:00:00Z` } : {}),
               });
               onDone({ kind: 'refresh', uuid: node.uuid });
-              setEdgeTarget(''); setEdgeName(''); setEdgeFact('');
+              setEdgeTarget(''); setEdgeName(''); setEdgeFact(''); setEdgeValidFrom('');
             })}
           >Add relationship</Button>
         </div>

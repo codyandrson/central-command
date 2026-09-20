@@ -69,7 +69,12 @@ ARG_SPECS: dict[str, ArgSpec] = {
         enums={"scope": ("shared", "private")},
     ),
     "graph.create_node": ArgSpec(required=("name", "group_id", "summary")),
-    "graph.create_edge": ArgSpec(required=("source_uuid", "target_uuid", "name", "fact")),
+    # `valid_at` REQUIRED (2026-09-19, same law as reference_time): the writer
+    # used to stamp an omitted start as "became true now". The spelling for
+    # "the text gives no start" is the literal `unbounded`, which the Executor
+    # maps to null — an explicit unknown, never a silent default.
+    "graph.create_edge": ArgSpec(
+        required=("source_uuid", "target_uuid", "name", "fact", "valid_at")),
     "graph.merge_nodes": ArgSpec(required=("keep_uuid", "drop_uuid")),
     "graph.update_node": ArgSpec(required=("uuid",)),
     "graph.delete_node": ArgSpec(required=("uuid",)),
