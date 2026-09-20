@@ -1,5 +1,9 @@
 # Quality-router migration — design
 
+> **Status:** superseded — proposal withdrawn, superseded by the cc-default alias seam; evidence stands as reference
+> **As-built:** `docs/superpowers/specs/2026-07-27-default-alias-seam-design.md`
+> **As-built note (2026-09-20):** Withdrawn — superseded by the `cc-default` alias seam. Its evidence stands and is the reference for why neither the adaptive router nor the complexity classifier is usable.
+
 > **⛔ MODELS RETIRED 2026-08-01.** `qwen3.6-35b` and `north-mini-code` are gone for good — deleted from LiteLLM, from `model-preferences.yaml` and from the workstation. They were never routed to and never given a role. Anything below that scores, declares, or proposes adopting them is HISTORY, not a to-do. Do not re-register them.
 
 > Supersedes the routing half of `2026-07-26-adaptive-routing-that-learns-design.md`.

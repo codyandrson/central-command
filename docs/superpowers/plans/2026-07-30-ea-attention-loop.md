@@ -1,5 +1,9 @@
 # Plan — the executive assistant, slice 1: the attention loop (delivery item 4)
 
+> **Status:** implemented — hired `ea`, `ea.contact` heartbeat action, attention budget, deterministic snapshot; schedules seeded disabled
+> **As-built:** `central_command/runtime/templates.py`
+> **As-built note (2026-09-20):** Built — hired `ea`, `ea.contact` heartbeat action, mechanical attention budget, deterministic snapshot; all schedules seeded disabled.
+
 _Plan written 2026-07-30 under the teaming doctrine (Decisions 4 & 5). Slice 1
 is the ATTENTION LOOP only: daily digest, scheduled check-ins, morning report,
 and the enforced contact budget. No calendar/Gmail/Google integration (its own

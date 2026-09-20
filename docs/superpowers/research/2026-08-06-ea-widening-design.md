@@ -1,5 +1,9 @@
 # EA widening — design proposal (2026-08-06, DRAFT for operator review)
 
+> **Status:** partial — Slice A (gated calendar write) built; Slice B (follow-up tracking) not built; Slice C not built as recommended, though the EA separately holds a read-only mail-read pack beyond that boundary
+> **As-built:** `central_command/integrations/calendar_facade.py`
+> **As-built note (2026-09-20):** Slice A (gated calendar write) is fully built — `calendar.create_event`/`update_event`/`delete_event` in `gateway/capabilities.py`, the `calendar-propose` pack granted to the EA in `runtime/templates.py`, write helpers in `integrations/calendar_facade.py`. Slice B (follow-up/open-loop tracking via private-scope graph episodes) is not built — no open-follow-ups digest or private-partition follow-up query code exists. Slice C (thread reply drafting) was not built as the shape recommended here — drafting stays with inbox-triage, no new EA email access — but the EA separately holds a read-only `mail-read` pack (granted for an unrelated reason: a review digest of what inbox-triage already dismissed) that sits past the boundary Slice C's recommendation drew, though by a different mechanism than the one Slice C debated.
+
 Operator direction (2026-08-06): widen the EA beyond digest/lanes, and give it
 **gated calendar write**, not just read. This doc proposes the shape. Slices are
 independent; A is approved in principle, B and C carry open questions.

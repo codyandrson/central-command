@@ -1,5 +1,9 @@
 # Outage equivalence — failures cost latency, never work
 
+> **Status:** implemented — doctrine + all six slices built same week
+> **As-built:** `central_command/gateway/gateway.py`, `central_command/db/schema.sql`
+> **As-built note (2026-09-20):** All six slices built 2026-07-31 — taxonomy on every error event; AWAITING_RESUME / RETRY_PENDING / attempt-refunding ledger backoff / task requeue; health-gated `retry-sweep` (seeded enabled); bounded read retries. The acceptance test is the next real outage. See the slice plans under `../plans/`.
+
 _Design record written 2026-07-31, from the operator's requirement stated after the
 first live provider outage touched a decision flow: **"outages/failures can
 cause interruptions/delays, but once the underlying issue has been resolved,

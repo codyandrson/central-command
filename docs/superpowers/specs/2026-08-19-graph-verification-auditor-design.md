@@ -1,5 +1,9 @@
 # Graph verification auditor — closing the loop after `graph.add_episode`
 
+> **Status:** implemented — tasks 1-6 done; the verification classes default off/shadow pending the operator enabling them
+> **As-built:** `central_command/runtime/graph_auditor_profile.py`
+> **As-built note (2026-09-20):** Built and deployed — tasks 1-6 done (delta read-back with measured attribution finding, worklist + executor stamping, sweep, graph-auditor, agreement record, cockpit Verify tab). `graph_auditor_mode` defaults to `"shadow"` in `central_command/config.py`; task 7 live acceptance waits on the operator turning the class on. See `../plans/2026-08-19-graph-verification-auditor.md`.
+
 _Design record written 2026-08-19, from an operator-raised gap: the approval
 gate reviews the INPUT to graph ingestion, never the resulting graph change,
 and nothing audits the change afterward. This record fixes the decided shape.

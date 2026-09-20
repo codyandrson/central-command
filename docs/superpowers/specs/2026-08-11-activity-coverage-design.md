@@ -1,5 +1,9 @@
 # Activity coverage — every run and every event has a surface (2026-08-11)
 
+> **Status:** implemented — all five slices shipped
+> **As-built:** `web/src/features/activity/`
+> **As-built note (2026-09-20):** All five slices shipped (`web/src/features/activity/`, `cc-activity.ts`, sidebar one-shot filter last) — one Activity view covers every run and event by construction. See `../plans/2026-08-11-activity-coverage.md`.
+
 **Status when written:** approved by the operator 2026-08-11, in the session that
 produced the audit below. Started from a narrow UX question — "the *show closed
 sessions* toggle dumps 600 rows into the chat sidebar, what's the established

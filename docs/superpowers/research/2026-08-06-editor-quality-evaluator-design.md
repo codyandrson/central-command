@@ -1,5 +1,9 @@
 # The editor — a content-quality evaluator (2026-08-06, DRAFT for operator review)
 
+> **Status:** implemented — the hire itself (the record's only concrete slice) is fully built
+> **As-built:** `central_command/runtime/editor_profile.py`
+> **As-built note (2026-09-20):** The hire itself — the record's only concrete slice — is fully built: the `editor` agent is hired via the singleton template, registered at API startup, with zero propose packs and no consult pack (both by design), and a charter matching this record's rubric almost verbatim. Coaching other drafters to consult it is an operator-coaching rollout order, not additional code.
+
 Operator direction (2026-08-06): build the one composition gap the team review
 found — a **quality** evaluator distinct from the **safety** auditor. This doc
 is the detailed proposal for review/discussion/approval.

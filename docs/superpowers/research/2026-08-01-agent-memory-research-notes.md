@@ -1,5 +1,8 @@
 # Agent memory research notes — 2026-08-01
 
+> **Status:** open — evidence base behind the self-directed-learning spec (implemented); this file is citations only
+> **As-built:** `docs/superpowers/specs/2026-08-01-self-directed-learning-design.md`
+
 _Two research passes behind the self-directed-learning design record
 (`../specs/2026-08-01-self-directed-learning-design.md`). Kept so the spec's
 claims can be traced to sources rather than taken on trust. Condensed from the

@@ -1,5 +1,9 @@
 # Gated LiteLLM config change with verified restart + auto-rollback (2026-08-06)
 
+> **Status:** superseded — explicitly self-superseded by the DB-based model-management reversal
+> **As-built:** `deploy/pi/litellm/model-preferences.yaml`
+> **As-built note (2026-09-20):** Superseded 2026-08-30 by the DB-based model-management reversal — models now live in LiteLLM's own database, and the config file is the fallback path only.
+
 > **Superseded 2026-08-30 by the DB-based model-management reversal**: models
 > now live in LiteLLM's own database (`store_model_in_db: true`), and
 > `register-models.py` is create-only — the config file is the fallback for

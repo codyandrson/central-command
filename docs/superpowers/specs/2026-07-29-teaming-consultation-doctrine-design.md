@@ -1,5 +1,9 @@
 # Teaming & consultation doctrine
 
+> **Status:** partial — doctrine decided; all four delivery slices built same week; strikes the unbuilt `agent.request`/`agent.response` line
+> **As-built:** `central_command/runtime/consult.py`
+> **As-built note (2026-09-20):** Doctrine decided; all four delivery slices built 2026-07-29/30 — supervised star + bounded consults; specialist drafts the proposal; agent-initiated contact on an attention budget; notification tiers. Strikes the unbuilt `agent.request`/`agent.response` design line.
+
 _Spec written 2026-07-29, out of the teaming-strategy review (see the journal
 entry of the same date). This is a **doctrine record**: it fixes the decided
 shape of how the team collaborates and how agents interact with the operator,

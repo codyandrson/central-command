@@ -1,5 +1,9 @@
 # Plan — consult slice 2: the specialist drafts the proposal (doctrine Decision 2)
 
+> **Status:** implemented — specialist drafts and parks the gated proposal itself, consult chain in provenance
+> **As-built:** `central_command/runtime/proposals.py`, `central_command/runtime/consult.py`
+> **As-built note (2026-09-20):** Built — advisory sub-run holds granted propose packs; parks under the specialist's own session; `origin` provenance on the wire; decision-resume deferral guard.
+
 _Plan written 2026-07-30 under the teaming & consultation doctrine record.
 Slice 1 (read-only consult) is built and live. This slice lets a consulted
 specialist draft and park the gated proposal ITSELF, with the consult chain in

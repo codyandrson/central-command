@@ -1,5 +1,9 @@
 # Stage 5 — Coaching experiences: hire the coach
 
+> **Status:** partial — stage 5a shipped (coach hired); stages 5b-5d deliberately not built
+> **As-built:** `central_command/runtime/coach_profile.py`
+> **As-built note (2026-09-20):** Stage 5a shipped — `coach` is a founding roster member with a governed charter. Stages 5b-5d are deliberately not built, deferred with reasons recorded in the operator's private deployment status notes. See `../plans/2026-07-27-stage-5a-coach-spine.md` for the 5a implementation record.
+
 _Spec written 2026-07-27. Supersedes the original "team-wide Performance &
 Coaching screen" framing of stage 5 (see **Decision 3**)._
 

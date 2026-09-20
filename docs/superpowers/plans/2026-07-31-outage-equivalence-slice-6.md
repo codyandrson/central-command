@@ -1,5 +1,8 @@
 # Plan — outage equivalence slice 6: read-path bounded retries
 
+> **Status:** implemented — bounded read-path retries; the mechanism family is confirmed present, this slice's specific call sites were not individually re-checked this pass — secondary record, see `../specs/2026-07-31-outage-equivalence-design.md`
+> **As-built:** `central_command/contract/failures.py`
+
 _Plan written 2026-07-31. The smallest slice, last on purpose: a live turn
 is not rewindable (doctrine boundary), so all a read can do is try briefly
 and then degrade honestly — this slice just makes "briefly" real._

@@ -4,6 +4,57 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-20 — v2.38.3: the map is drawn from the code, and every record says what it became
+
+A documentation release: no runtime behavior changes. The 2026-09 consistency
+audit found the code in good shape and the records *about* the code drifting —
+a founding design standing in for a current map, 53 design records with no
+status of their own, and load-bearing decisions living only in a YAML comment
+or a plan file. This release gives each of those a home and a guard.
+
+- **`docs/ARCHITECTURE.md` is the living map.** Written from the code as it
+  is, not from what the founding design intended: every package under
+  `central_command/` (including the ones `DESIGN.md` never named — the
+  orchestration driver, `contract/`, `heartbeat/`, `integrations/`,
+  `reports/`, the out-of-process sandbox and crawler), the verified package
+  import graph, the as-built proposal and session lifecycles, the cockpit's
+  two channels to the API, the deploy surfaces, and an index that finally
+  resolves the M0–M16 and D-number citations scattered through code comments
+  (including the places two specs reuse D-numbers for unrelated things).
+  `DESIGN.md` stays frozen as the founding design.
+- **"Who may approve what" is written down.** Every world-change passes one
+  seam; the approver is the operator by default; an action class graduates to
+  the independent auditor only by per-class, revocable configuration and only
+  on a concurring verdict; and two deterministic write paths carry no proposal
+  at all. All of it defaults to the human gate.
+- **What the founding design promised and the code never built is now said
+  plainly**: the DRAFT / UNDER_AUDIT / AUTO_APPROVED / STALE / EXPIRED proposal
+  states and the BLOCKED task state do not exist, and `ProposalStatus` declares
+  two members nothing assigns (listed as a cleanup in the roadmap).
+- **`docs/decisions/` is the decision log** — the index and the *why* behind
+  the rules in `AGENTS.md` and `.claude/rules/`, which remain the operative
+  text (entries link to a rule by its lead phrase; they never restate it).
+  Seeded with every invariant those files carry, the decisions that had no
+  durable home, and the durable principles from this changelog's release
+  titles. Each entry names what enforces it — a test, a script, SQL, code
+  structure, or discipline. `tests/test_decision_log.py` fails on a duplicate
+  id, a dead rule link, a quoted lead phrase that no longer appears in its
+  rule file, or a cited guard test that does not exist.
+- **Every design record carries its own `Status:` and `As-built:` header**
+  (implemented · diverged · partial · superseded · open), verified against the
+  code. `docs/superpowers/README.md` is generated from those headers by
+  `scripts/gen_records_index.py`, and `tests/test_design_record_headers.py`
+  fails on a missing header, an as-built path that no longer exists, or a stale
+  index. The hand-maintained table in `DESIGN.md` — which had two wrong cells
+  and a missing row — is replaced by a pointer; its as-built prose moved into
+  the records it described.
+- **`docs/ROADMAP.md`** lists the unfinished work the records contain, each
+  marked spec-next, blocked (on what), operator task, or deliberately deferred.
+- **`web/VENDORED.md` named the wrong file as the seam to the API.**
+  `server/lib/gateway-rpc.ts` is upstream's remote workspace-file client; the
+  real seam is the `cc-*` routes' HTTP proxying plus the `/ws` relay to
+  `api/nerve_gateway.py`.
+
 ## 2026-09-20 — v2.38.2: a shared proposal tool needs the same retry budget as its siblings
 
 A cleanup release: no new capability, but one real bug and a pass through

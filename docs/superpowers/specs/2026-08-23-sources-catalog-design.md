@@ -1,5 +1,9 @@
 # Sources, the catalog & incremental document processing
 
+> **Status:** partial — slices 1-7 built; slice 8 (work adapters) waits for the work migration by design
+> **As-built:** `central_command/ingest/catalog_enroll.py`, `web/src/features/sources/SourcesView.tsx`
+> **As-built note (2026-09-20):** Slices 1-7 built (catalog + extraction seam, filesystem & Confluence watchers, Sources panel with the email feed as its first row, deterministic dedupe/autofold tier, ledger enrollment on lineage thread keys, document auditing shadow-first, gated `catalog.tag`, and the Decision 9 claims runtime). Slice 8 (work adapters — Cloud to DC, SMB to SharePoint) waits for the work migration by design, not a gap. Per-slice code pointers beyond the two cited here were accepted from the prior status record's citations rather than independently re-derived in this pass.
+
 _Spec written 2026-08-23, out of the sources design discussion with the operator (each
 decision below was explicitly ratified there). This is a **doctrine record with
 a slice order**: it fixes how long-running document sources — shared drives,

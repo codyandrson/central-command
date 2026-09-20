@@ -1,5 +1,9 @@
 # Setup & onboarding — zero to functioning from an API key and Claude Code
 
+> **Status:** superseded — the original interview-conducted-by-agent mechanism was replaced by the deterministic-setup and setup-update-contract specs and the later in-product move; the setup skeleton it introduced remains in use
+> **As-built:** `deploy/single/`, `central_command/runtime/tour.py`
+> **As-built note (2026-09-20):** Built 2026-08-21 and revised twice since: `deploy/single/` podman-kube-play profile, `discover-llm.sh`, charter templates rendered once at hire, and the six-phase /setup skill with an interview before first boot. 2026-08-25 rebuilt the flow around a deterministic driver script with the agent restricted to elicitation/diagnosis/interview only (see `../specs/2026-08-25-deterministic-setup.md`). 2026-08-27 generalized that into the setup-and-update contract (see `../specs/2026-08-27-setup-update-contract.md`); the k3s substrate's setup driver runs the identical contract. Later, the interview moved in-product — the cockpit's first-run prompt asks the operator's name and the EA tour's step 1b asks the rest; the standalone interview script was deleted, and fresh installs start with the executor live. This record's own original interview-script mechanism is superseded by that lineage; the setup skeleton it introduced remains in use.
+
 _Design record written 2026-08-21 from a design discussion with the operator. Goal in
 his words: "I can hand this to either myself or a teammate that has literally
 nothing other than an API key and Claude Code CLI, and they can get up and

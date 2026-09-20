@@ -1,5 +1,8 @@
 # Stage 5a — Coach Spine Implementation Plan
 
+> **Status:** implemented — every named artefact exists, though module layout differs from the plan's literal path guess — secondary record, see `../specs/2026-07-27-coaching-experiences-design.md` (partial: 5b-5d deliberately not built)
+> **As-built:** `central_command/runtime/coach_profile.py`, `central_command/runtime/run.py`
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Hire `coach` as a real rostered agent whose governed charter IS its system prompt, and fix the false provenance stamp so a coach-drafted charter version names the coach as drafter and the target as subject.

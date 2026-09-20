@@ -1,5 +1,8 @@
 # The setup & update contract (2026-08-27)
 
+> **Status:** partial — Phase A+B built; Phase C (connected update check) built but diverged from the spec — an in-process 1-hour cache rather than ETag-conditional-GET cached in the spine DB — secondary record, see `../specs/2026-08-21-setup-onboarding-design.md`
+> **As-built:** `central_command/api/update.py`
+
 Operator decision (The operator, 2026-08-27), after a failed air-gapped work install
 where the conducting agent responded to a mid-install failure by freehanding
 fixes for an hour. Supersedes the *process* half of

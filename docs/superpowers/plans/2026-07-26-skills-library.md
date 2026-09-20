@@ -1,5 +1,8 @@
 # Skills Library Implementation Plan
 
+> **Status:** implemented — all 12 tasks done, skills are DB rows delivered on demand — secondary record, see `../specs/2026-07-26-skills-library-design.md`
+> **As-built:** `central_command/runtime/packs.py`
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give agents curated, governed, versioned subject knowledge — granted per agent, loaded only when needed — and a structured way to report what knowledge is missing or demonstrably stale.

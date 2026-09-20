@@ -1,5 +1,8 @@
 # Adaptive Routing (Units 1–2) Implementation Plan
 
+> **Status:** partial — Units 1-2 (tiers/costs/declarations) landed; fallback declared but never turned on by operator decision; Unit 3 out of scope — secondary record, see `../specs/2026-07-26-adaptive-routing-that-learns-design.md`
+> **As-built:** `deploy/pi/litellm/model-preferences.yaml`
+
 > **⛔ MODELS RETIRED 2026-08-01.** `qwen3.6-35b` and `north-mini-code` are gone for good — deleted from LiteLLM, from `model-preferences.yaml` and from the workstation. They were never routed to and never given a role. Anything below that scores, declares, or proposes adopting them is HISTORY, not a to-do. Do not re-register them.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

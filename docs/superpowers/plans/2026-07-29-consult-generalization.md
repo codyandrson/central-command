@@ -1,5 +1,9 @@
 # Plan — generalize consultation: `consult_agent` (doctrine Decision 1, slice 1)
 
+> **Status:** implemented — slice 1 read-only `consult_agent`, depth-1, real-caller provenance
+> **As-built:** `central_command/runtime/consult.py`
+> **As-built note (2026-09-20):** Built — pack `consult`, generic advisory sub-run, depth-1 by construction, real-caller provenance.
+
 _Plan written 2026-07-29 under the teaming & consultation doctrine record.
 Slice 1 is the READ-ONLY consult: any granted agent may ask any consultable
 ACTIVE agent a question and get a distilled text answer. Specialist-drafts-

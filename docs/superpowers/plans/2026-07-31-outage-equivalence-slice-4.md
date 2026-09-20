@@ -1,5 +1,8 @@
 # Plan — outage equivalence slice 4: dispatch + task requeue on transient failure
 
+> **Status:** implemented — dispatch + task requeue on transient failure — secondary record, see `../specs/2026-07-31-outage-equivalence-design.md`
+> **As-built:** `central_command/runtime/resume_park.py`
+
 _Plan written 2026-07-31. Depends on slice 1's classifier. The ledger half is
 mostly refinement — the dispatcher ALREADY releases-and-retries with an
 attempts cap; what it lacks is the transient/semantic distinction and the

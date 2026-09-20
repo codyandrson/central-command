@@ -1,5 +1,9 @@
 # The `cc-default` alias seam — design
 
+> **Status:** implemented — routing logic deferred to LiteLLM; `cc-smart` deleted (never routed)
+> **As-built:** `deploy/pi/litellm/model-preferences.yaml`
+> **As-built note (2026-09-20):** Shipped — routing logic is deferred to LiteLLM; the spine addresses one alias, `cc-default`. `cc-smart` was deleted (it never routed).
+
 > **⛔ MODELS RETIRED 2026-08-01.** `qwen3.6-35b` and `north-mini-code` are gone for good — deleted from LiteLLM, from `model-preferences.yaml` and from the workstation. They were never routed to and never given a role. Anything below that scores, declares, or proposes adopting them is HISTORY, not a to-do. Do not re-register them.
 
 > Closes the routing question left open by

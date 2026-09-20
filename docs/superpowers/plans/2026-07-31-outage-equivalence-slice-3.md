@@ -1,5 +1,8 @@
 # Plan — outage equivalence slice 3: Executor RETRY_PENDING + idempotent replay
 
+> **Status:** implemented — Executor RETRY_PENDING + idempotent replay — secondary record, see `../specs/2026-07-31-outage-equivalence-design.md`
+> **As-built:** `central_command/gateway/gateway.py`
+
 _Plan written 2026-07-31 under the outage-equivalence doctrine. Depends on
 slice 1's classifier (`contract/failures.py`) and composes with slice 2's
 AWAITING_RESUME (a retried execution that succeeds hands off to the same

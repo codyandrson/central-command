@@ -1,5 +1,8 @@
 # Plan — outage equivalence slices 1+2: failure taxonomy + decision-resume parking
 
+> **Status:** implemented — taxonomy + decision-resume AWAITING_RESUME parking — secondary record, see `../specs/2026-07-31-outage-equivalence-design.md`
+> **As-built:** `central_command/contract/failures.py`
+
 _Plan written 2026-07-31 under the outage-equivalence doctrine record. Slice 1
 is the taxonomy (no behaviour change — every error event gains an honest
 `transient` label). Slice 2 makes the first surface converge: a decision

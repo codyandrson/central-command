@@ -1,5 +1,8 @@
 # Deterministic setup + single-node parity (2026-08-25)
 
+> **Status:** superseded — the process half is superseded by the 2026-08-27 setup-update-contract; the sandbox/crawler-parity half stands — secondary record, see `../specs/2026-08-21-setup-onboarding-design.md`
+> **As-built:** `deploy/single/update.sh`
+
 Operator decision (The operator, 2026-08-25, after the Windows rollout): the /setup
 flow had inverted the intended division of labor — the agent was conducting
 probes, installs, renders and deploys from a 700-line prose runbook, which is

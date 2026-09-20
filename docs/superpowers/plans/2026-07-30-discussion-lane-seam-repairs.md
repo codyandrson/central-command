@@ -1,5 +1,9 @@
 # Plan — discussion-lane seam repairs + declare_gap widening (2026-07-30)
 
+> **Status:** implemented — `answer_item` closes lane, decision-resume drives deferred conclude, `declare_gap` cites ingested documents
+> **As-built:** `central_command/runtime/questions.py`
+> **As-built note (2026-09-20):** Built — `answer_item` closes its lane, decision resumes drive a deferred conclude, `declare_gap` cites ingested documents.
+
 _Plan written 2026-07-30, picking up the seams recorded by the teaming
 delivery. Motivation for doing these now: two of the three are discussion-lane
 hygiene, and the EA (whose whole delivery surface is agent-opened lanes) is

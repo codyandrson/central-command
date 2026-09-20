@@ -1,5 +1,9 @@
 # Plan — ledger source-generalization + knowledge-steward, slice 1 (delivery item 3)
 
+> **Status:** implemented — `work_item.kind`, handler registry, hired steward, typed confidence, citation verification
+> **As-built:** `central_command/runtime/context.py`, `central_command/gateway/auditor.py`
+> **As-built note (2026-09-20):** Built and live-proven — `work_item.kind`, handler registry, hired steward, typed confidence, citation verification, agreement report. Confluence/OpenSearch adapters remain unbuilt (later covered differently by the sources-catalog record).
+
 _Plan written 2026-07-29 under the knowledge-layer routing record. Scope set by
 the architect: sources = email (existing) + hand-fed DOCUMENT only (Confluence
 and OpenSearch are air-gapped at work and unreachable from the Pi — the source

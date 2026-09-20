@@ -1,5 +1,9 @@
 # Scheduled script + agent-verifies — pattern survey and Central Command mapping
 
+> **Status:** implemented — answers the cron-script-agent-verifies design question; the sandbox mechanism it composes with has since shipped (the header below predates the build)
+> **As-built:** `central_command/sandbox/runner.py`
+> **As-built note (2026-09-20):** The design question this record answers is settled, and the sandbox mechanism it composes with — Job-per-exec, gVisor, copy-in, one gated sync-back — has since shipped (see the mcp-sandbox-creation research record and its slice 1 plan). Its in-file '(not yet built)' aside describes the state as of 2026-08-03, before that shipped. Deliberately not built: no Argo Workflows/Events, no CronJob-as-schedule-of-record — still accurate.
+
 > Research task, 2026-08-03. Answers the open question in `docs/STATUS.md`
 > ("Agent workspace / sandbox — design decision owed" /
 > cron→script→agent-verifies scenario) and composes with

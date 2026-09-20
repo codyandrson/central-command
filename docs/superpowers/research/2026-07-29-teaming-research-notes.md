@@ -1,5 +1,8 @@
 # Teaming-strategy research notes (2026-07-29)
 
+> **Status:** open — evidence base for the two 2026-07-29 doctrine specs; this file is citations only, nothing built here directly
+> **As-built:** `docs/superpowers/specs/2026-07-29-teaming-consultation-doctrine-design.md`
+
 _The evidence base behind the two doctrine records
 (`specs/2026-07-29-teaming-consultation-doctrine-design.md`,
 `specs/2026-07-29-knowledge-layer-routing-design.md`). Five research tracks,

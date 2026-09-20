@@ -1,5 +1,9 @@
 # Adaptive routing that learns — design
 
+> **Status:** superseded — Units 1-2 live; Unit 3 (the feedback loop) withdrawn by the quality-router-migration spec
+> **As-built:** `deploy/pi/litellm/model-preferences.yaml`
+> **As-built note (2026-09-20):** Units 1-2 (declared tiers, costs, fallback declarations) are applied, but no fallback is actually configured (`fallbacks: {}`) by operator decision — a workstation outage was silently reaching for a fallback provider and dying on a token-limit mismatch anyway, so failing fast with the real connection error replaced it. Unit 3 (the feedback loop) was withdrawn by the quality-router-migration spec. See `../plans/2026-07-26-adaptive-routing-units-1-2.md` for the Units 1-2 implementation record.
+
 > **⛔ MODELS RETIRED 2026-08-01.** `qwen3.6-35b` and `north-mini-code` are gone for good — deleted from LiteLLM, from `model-preferences.yaml` and from the workstation. They were never routed to and never given a role. Anything below that scores, declares, or proposes adopting them is HISTORY, not a to-do. Do not re-register them.
 
 > Status: design approved 2026-07-26 (The operator). Units 1–2 are live (see

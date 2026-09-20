@@ -1,5 +1,8 @@
 # Tier-3 Discussion Stall Escalation — Implementation Plan
 
+> **Status:** implemented — S1 sweep flag + S2 nudge + close-seam shipped; `discussion-sweep` schedule seeded disabled (dormant, not unbuilt) — secondary record, see `../specs/2026-07-27-discussion-stall-escalation-design.md`
+> **As-built:** `central_command/db/schema.sql`
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** A task blocked behind a clarification discussion no longer sits there silently — the sweep flags it at you (S1) or nudges the agent (S2), and concluding a discussion visibly closes it.

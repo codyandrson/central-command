@@ -1,5 +1,9 @@
 # Self-directed learning & scoped agent memory — design record
 
+> **Status:** implemented — built, enabled by default; per-agent graph partitions, session-close reflection, trust-tier-graduated volume
+> **As-built:** `central_command/runtime/reflection.py`
+> **As-built note (2026-09-20):** Built, enabled by default (`reflection_enabled=True` in `central_command/config.py`) — per-agent graph partitions (scope visible on every episode proposal), session-close reflection (bounded graph episodes + one coaching self-nomination per session), volume governed by trust-tier graduation per scope class; cross-session reviewer as a later slice; provisional/expiry writes rejected outright.
+
 _Design record written 2026-08-01, from operator direction plus two research
 passes (agent-memory state of the art; self-reflection / routing / approval-at-
 scale — evidence and sources in

@@ -1,5 +1,9 @@
 # Plan — notification tiers + agent-initiated conversation awareness (doctrine Decisions 4 & 5)
 
+> **Status:** implemented — interrupt/badge tiers, projection-diff toasts, aging chips, per-session unread fix; digest tier resolved into the EA
+> **As-built:** `web/src/features/activity/`
+> **As-built note (2026-09-20):** Built — interrupt/badge tiers, projection-diff toasts, aging chips, `openedBy`, per-session unread fix; digest tier resolved into the EA rather than shipped as its own tier.
+
 _Plan written 2026-07-29 (delivery item 2 of the teaming doctrine). Planning
 finding that shapes the whole slice: the scheduled agent-initiated conversation
 ALREADY WORKS end-to-end in the runtime — heartbeat `task.create` →

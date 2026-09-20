@@ -1,5 +1,8 @@
 # Sandbox slice 1 — the mechanism alone, no exit
 
+> **Status:** implemented — in-sandbox exec/read/write/copy_in, ungated, nothing durable reachable — secondary record, see `../research/2026-08-03-mcp-sandbox-creation-design.md`
+> **As-built:** `central_command/sandbox/runner.py`
+
 Plan for slice 1 of `docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md`
 (§10.1): in-sandbox exec/read/write/copy_in, fully ungated, **nothing produced
 inside can reach anywhere durable** — `mcp.sync_source` is a later slice.

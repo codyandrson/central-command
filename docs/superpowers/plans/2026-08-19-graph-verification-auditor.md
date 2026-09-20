@@ -1,5 +1,8 @@
 # Graph verification auditor — implementation plan
 
+> **Status:** implemented — tasks 1-6 done; task 7 (live acceptance) waits on the operator enabling the flag/schedule — secondary record, see `../specs/2026-08-19-graph-verification-auditor-design.md`
+> **As-built:** `central_command/runtime/graph_auditor_profile.py`, `central_command/gateway/graph_auditor.py`
+
 _Plan for [the 2026-08-19 spec](../specs/2026-08-19-graph-verification-auditor-design.md).
 Seven tasks, in dependency order. Task 1 resolves the one empirical unknown
 (invalidation attribution); everything else is assembly of proven patterns:

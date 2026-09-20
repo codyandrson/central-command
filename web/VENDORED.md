@@ -16,8 +16,15 @@ them. The cost is that a lot of this tree describes, tests, and documents a
   deleted outright rather than quarantined — it had no `cc-` twin to point
   at). **`server/app.ts` is the authority** on what is live: if a route module
   is not imported there, it does not run.
-- **`server/lib/gateway-*.ts`** — the RPC seam to the FastAPI control plane
-  (`central_command/api/nerve_gateway.py`). This is the ~700-line boundary the
+- **The seam to the FastAPI control plane is two channels, neither of them
+  `server/lib/gateway-rpc.ts`** (corrected 2026-09-20 — that file is upstream's
+  WebSocket client for remote *workspace-file* access, unrelated to Central
+  Command). (1) Every `cc-*` route is a thin HTTP proxy:
+  `fetch(config.gatewayUrl + '/api' + path)`. (2) Chat, sessions and live push
+  ride a WebSocket: the browser connects to the cockpit server's `/ws`
+  (`server/lib/ws-proxy.ts`), which relays to FastAPI's own `/ws`
+  (`central_command/api/nerve_gateway.py`) — FastAPI answers the gateway wire
+  protocol the upstream client already speaks — that module is the boundary the
   pivot was designed around.
 - **`src/features/decisions`, `agents`, `workspace`, `skills`, `attention`** —
   the Central Command screens.

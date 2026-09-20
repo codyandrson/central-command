@@ -1,5 +1,9 @@
 # Air-gapped mirrors plan — 2026-08-03
 
+> **Status:** implemented — registry mirror env vars and a k3s registries.yaml example exist
+> **As-built:** `deploy/AIRGAP.md`, `deploy/k3s/registries.yaml.example`
+> **As-built note (2026-09-20):** The mechanism this checklist called for exists today — `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` mirror variables are documented and wired in `deploy/AIRGAP.md`, and `deploy/k3s/registries.yaml.example` ships as the k3s-side example.
+
 Re-derived after the prior write-up was lost to a `/tmp` scratchpad wipe.
 Tracked in `docs/STATUS.md`: "Air-gapped mirrors gap: no containerd
 `registries.yaml`, no pip/npm index overrides anywhere in deploy/. Needed

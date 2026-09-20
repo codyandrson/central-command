@@ -1,5 +1,9 @@
 # Expert team scaling
 
+> **Status:** implemented — decided + four slices built same day
+> **As-built:** `central_command/runtime/consult.py`
+> **As-built note (2026-09-20):** Decided + four slices built same day — experts generalize the jira-expert pattern, operator-hired on evidence (roster cap deleted); discovery generates a YOUR TEAM prompt section from the live roster; consults reach depth 2 with runtime cycle refusal; task proposals can await-result; expert knowledge is stewarded in shared per-domain graph groups with steward attribution on reads. Threaded consults in the A2A shape are a named next step, not built.
+
 _Spec written 2026-08-22, out of the expert-agents design discussion with the operator
 (this record's decisions were each explicitly ratified there). This is a
 **doctrine record with an implementation slice list**: it fixes how the roster

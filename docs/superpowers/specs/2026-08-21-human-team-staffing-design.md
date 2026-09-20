@@ -1,5 +1,9 @@
 # Human-team staffing — the humans are graph data, the staffing is an agent
 
+> **Status:** open — doctrine decided, not scheduled; no staffing agent or `Person`-entity query mechanism exists in code — nothing built
+> **As-built:** `docs/ROADMAP.md`
+> **As-built note (2026-09-20):** Doctrine decided, not scheduled — human roster/competency as graph queries over `Person` entities, capacity from live Jira reads, assignment as one staffing agent proposing through the normal gate; cold start seeded by the onboarding flow. Waits on real team traffic at the work transition; nothing of this record's own mechanism has been built.
+
 _Design record written 2026-08-21 from a design discussion with the operator. The
 problem: processing emails/chats yields a well-populated graph and a pile of
 tasks, and the EA prioritizes the operator's day — but nothing decides who on their

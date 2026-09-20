@@ -1,5 +1,9 @@
 # Trust-tier graduation — the ladder, generalized
 
+> **Status:** open — pure doctrine (ladder generalized from three existing ladders); no new mechanism of its own — each customer implements its own instance
+> **As-built:** `central_command/gateway/auditor.py`
+> **As-built note (2026-09-20):** Doctrine decided — shadow to agreement record to operator-flips-a-class, extracted from the auditor/steward/D7 ladders; names the post-graduation evidence-starvation blind spot. Nothing to point at beyond the customers that already implement their own ladder instance (auditor, graph-verification-auditor, graph-curator, self-directed-learning).
+
 _Design record written 2026-07-30, extracting the auditor's
 shadow → evidence → operator-flips-a-class ladder into a named, reusable
 mechanism. Like the two 2026-07-29 doctrine records, this fixes the decided

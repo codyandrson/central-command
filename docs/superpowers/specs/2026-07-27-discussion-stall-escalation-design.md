@@ -1,5 +1,9 @@
 # Tier-3 discussion stall escalation — design
 
+> **Status:** implemented — closes NEXT SESSION item 13; `discussion-sweep` schedule seeded disabled and dormant until enabled
+> **As-built:** `central_command/db/schema.sql`
+> **As-built note (2026-09-20):** Built — but the `discussion-sweep` schedule is seeded disabled and has never fired by default, so it is dormant until enabled in the crons tab. See `../plans/2026-07-27-discussion-stall-escalation.md`.
+
 > Closes NEXT SESSION item 13: *"A task blocked behind a clarification
 > discussion nobody concludes stays blocked. It is visible in three places but
 > nothing escalates it the way D7 escalates a stalled project."*

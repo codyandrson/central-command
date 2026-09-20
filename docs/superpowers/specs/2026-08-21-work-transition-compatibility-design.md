@@ -1,5 +1,9 @@
 # Work-transition compatibility — Exchange via the internal automation toolset, and what must be true before on-site
 
+> **Status:** partial — off-site buildables shipped (Jira auth-mode seam, pluggable-trust httpx factory, `CC_REGISTRY` prefix); toolset adapter + endpoint verification deferred on-site by design (the work environment is not reachable from this deployment)
+> **As-built:** `central_command/integrations/jira.py`, `central_command/integrations/webfetch.py`, `deploy/AIRGAP.md`
+> **As-built note (2026-09-20):** Decided from the sanitized work profile — corrects two assumptions: Exchange is an adapter over the existing internal automation toolset (draft-first defaults match the existing gate; send is its own gated step), and the work Atlassian deployment is Server/DC, not Cloud. Off-site buildables: Jira auth-mode seam, pluggable-trust httpx factory (`CC_CA_BUNDLE`/mTLS), `CC_REGISTRY` image prefix — all shipped. The toolset adapter and endpoint verification are deferred on-site by design; that half cannot be verified from this deployment.
+
 _Design record written 2026-08-21 from the sanitized compatibility profile
 The operator brought out of the work environment
 (`docs/reference/work-environment-compatibility.md` — the deduplicated

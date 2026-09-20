@@ -1,5 +1,8 @@
 # Plan — Activity coverage (2026-08-11)
 
+> **Status:** implemented — all five slices, sidebar filter last — secondary record, see `../specs/2026-08-11-activity-coverage-design.md`
+> **As-built:** `web/src/features/activity/`, `web/server/routes/cc-activity.ts`
+
 _Implements [the Activity coverage spec](../specs/2026-08-11-activity-coverage-design.md).
 Five slices, each independently shippable. The ordering is load-bearing: the
 sidebar filter is LAST, because it is only safe once Runs exists._

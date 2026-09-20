@@ -1,5 +1,9 @@
 # Deploy refactor: standard substrates, flexible pins, symmetric rollback
 
+> **Status:** partial — D1+D2 shipped; D3 (update pipeline) partial; D4 (k3s Helm chart) not started
+> **As-built:** `deploy/single/compose.yaml`, `deploy/single/update.sh`
+> **As-built note (2026-09-20):** D1+D2 shipped as v2.22.0 — one `compose.yaml` replaces the bespoke choreography; image versions gained a constraint/lock/resolve seam. D3 (update pipeline): `deploy/single/update.sh` has `cmd_plan`/`cmd_apply`/`cmd_stage`/`cmd_rollback` — plan/apply/rollback exist, but `cmd_stage` is only the promptless half of `cmd_run` (import+plan), with no separate staging/pre-test phase and no constraint resolution against a mirror at plan time — partial, not the full spec. D4 (k3s Helm chart): not started — no `Chart.yaml` anywhere in the repo; `deploy/k3s/` still runs the bespoke `cc-update.sh` and hand-written manifests this record's phase 3 was meant to replace.
+
 **Date:** 2026-09-03 · **Status:** approved direction (operator decision) ·
 **Supersedes the orchestration half of** `2026-08-25-deterministic-setup.md`
 (its elicitation/protocol half stands).

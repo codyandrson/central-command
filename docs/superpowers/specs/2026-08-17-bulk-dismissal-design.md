@@ -1,5 +1,9 @@
 # Bulk dismissal — chewing the 105k archive without 105k decisions
 
+> **Status:** implemented — pattern-level dismissal for the refs-only Gmail backlog
+> **As-built:** `central_command/runtime/tools.py`
+> **As-built note (2026-09-20):** Shipped — pattern-level dismissal for the refs-only Gmail backlog so bulk mail gets one decision per pattern instead of one per message. Standing rules and auto-confirm via the auditor remain deferred.
+
 **Date:** 2026-08-17 · **Status:** decided (The operator approved the recommendation
 in-session) · **Problem:** the full Gmail archive (105,222 UNPROCESSED refs,
 enrolled 2026-08-12) drains one claim at a time; most of it is bulk mail that

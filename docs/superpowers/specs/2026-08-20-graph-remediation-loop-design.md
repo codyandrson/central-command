@@ -1,5 +1,9 @@
 # Graph remediation loop — a PROBLEM verdict becomes a proposed fix
 
+> **Status:** implemented — built and deployed same day; graph-curator hired with seven gated curation capabilities
+> **As-built:** `central_command/runtime/graph_curator_profile.py`
+> **As-built note (2026-09-20):** Built and deployed — a PROBLEM note tasks the hired `graph-curator`, whose seven gated curation capabilities (create/merge/update/delete node, create/update/delete edge) ride the normal Decisions gate; each applied fix queues a `remediation_of` re-check row back into the Verify tab. Named, not built: auto-linking the re-check verdict back to coaching.
+
 _Design record written 2026-08-20, extending the graph verification auditor
 (2026-08-19 spec) with the fix half, at the operator's direction: "provide the
 feedback in such a way that it gets fixed and then I re-verify the new

@@ -1,5 +1,9 @@
 # EA-hosted team tour — onboarding as meeting the team
 
+> **Status:** implemented — built and run live
+> **As-built:** `central_command/runtime/tour.py`
+> **As-built note (2026-09-20):** Built — the new-boss-meets-the-team onboarding phase: a re-runnable `ea.contact` kind (`onboarding_tour`) the setup flow creates as its last act; the EA brokers the arc but each agent introduces itself in its own lane, generated from charter + grants + skills; calibration answers ride the gate as per-agent low-stakes proposals so a new operator learns propose-then-approve by repetition, with charter-worthy items routed to the existing coach loop.
+
 **Date:** 2026-08-23 · **Status:** decided (all decisions the operator's, this date) ·
 **Build:** after the setup-review fix batch lands (decision 6)
 

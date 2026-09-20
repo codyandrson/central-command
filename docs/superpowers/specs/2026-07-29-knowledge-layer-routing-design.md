@@ -1,5 +1,9 @@
 # Knowledge-layer routing & the steward
 
+> **Status:** partial — doctrine decided; steward slice 1 built; hybrid Confluence capture shipped later under the sources-catalog record
+> **As-built:** `central_command/gateway/auditor.py`
+> **As-built note (2026-09-20):** Doctrine decided; steward slice 1 built; hybrid Confluence capture shipped (see the sources-catalog spec, `2026-08-23-sources-catalog-design.md`) — packs=may, skills=how, graph/KB=what, MCP=transport; uncertainty-triggered review live; contradictions as gated proposals.
+
 _Spec written 2026-07-29, out of the teaming-strategy review (see the journal
 entry of the same date). This is a **doctrine record**: it fixes which layer
 each kind of knowledge lives in, and the decided shape of the knowledge-steward

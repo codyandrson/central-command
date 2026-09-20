@@ -1,5 +1,9 @@
 # MCP server creation via sandbox — design (reconstructed v3)
 
+> **Status:** implemented — the sandbox mechanism this record designed is built
+> **As-built:** `central_command/sandbox/runner.py`
+> **As-built note (2026-09-20):** Shipped, now at podman-backend parity — `sandbox/runner.py` (credential-free, `CC_SANDBOX_BACKEND=kubectl`|`podman`), slice 1's ungated exec/read/write/copy_in with nothing produced inside reaching anywhere durable, and slice 2's one gated exit (`mcp.sync_source` — content captured at propose time, never re-read from the sandbox). See `../plans/2026-08-03-sandbox-slice1.md` for the slice 1 implementation record.
+
 > Reconstructed 2026-08-03. A prior round of this design (v3) was produced in a
 > scratchpad and lost before landing in the repo. This is a full rewrite from
 > the accumulated verified facts and the operator's settled decisions, re-checked

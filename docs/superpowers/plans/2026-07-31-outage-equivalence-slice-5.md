@@ -1,5 +1,8 @@
 # Plan — outage equivalence slice 5: `retry.sweep` on the heartbeat, behind health gates
 
+> **Status:** implemented — `retry.sweep` heartbeat action, seeded enabled, health-gated — secondary record, see `../specs/2026-07-31-outage-equivalence-design.md`
+> **As-built:** `central_command/db/schema.sql`
+
 _Plan written 2026-07-31. Turns the parked states from slices 2–4 into
 automatic convergence. Depends on all three landing first._
 

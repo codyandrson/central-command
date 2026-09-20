@@ -1,5 +1,9 @@
 # Scrub housekeeping plan — 2026-08-03
 
+> **Status:** partial — a checklist of 8 small independent items; #2 and #8 self-declared fixed at write time, #3 explicitly rejected; #1/#4/#5/#6/#7 unverified this pass
+> **As-built:** `central_command/db/schema.sql`
+> **As-built note (2026-09-20):** A checklist of 8 small independent items rather than one mechanism. #2 and #8 were self-declared fixed/implemented at write time (2026-08-03); #3 was explicitly rejected (do-not-do); #1, #4, #5, #6 (small housekeeping) and #7 (needs a product decision) were not individually re-verified in this pass — unverified.
+
 Re-derived after the prior write-up was lost to a `/tmp` scratchpad wipe.
 Source list: `docs/STATUS.md`'s "Scrub housekeeping" bullet
 (2026-08-02 migration-scrub investigation). Each item below was re-verified
