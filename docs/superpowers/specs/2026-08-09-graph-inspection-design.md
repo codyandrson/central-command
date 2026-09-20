@@ -1,5 +1,11 @@
 # Graph inspection & curation — the rung ladder (2026-08-09)
 
+> **Status (corrected 2026-09-20):** the "recorded next increments" section
+> below is stale — curation writes shipped 2026-08-15, and NOT through the
+> proposal gate this line implies. See that section's own as-built correction
+> for the shape that actually landed (`integrations/neo4j_writer.py`, a
+> closed write set the API tier calls directly).
+
 **Status when written:** approved by the operator 2026-08-09 ("let's also immediately
 start working on all of these rungs (except the actual graphistry
 implementation, that should stay as a documented enhancement, deferred until

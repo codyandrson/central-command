@@ -29,6 +29,11 @@ Requires=k3s.service
 [Service]
 Type=oneshot
 WorkingDirectory=/home/codyslab/central-command
+# Root, no HOME, WorkingDirectory=the checkout: kubectl's discovery cache
+# would otherwise resolve the relative default `.kube/cache` and land
+# root-owned inside the repo. Point it somewhere that isn't the checkout.
+CacheDirectory=cc-kube
+Environment=KUBECACHEDIR=/var/cache/cc-kube
 ExecStart=/home/codyslab/central-command/deploy/k3s/backup.sh
 # The neo4j stop/dump/start window dominates the runtime; 30min is generous
 # headroom. On timeout systemd sends SIGTERM, which the script traps to bring

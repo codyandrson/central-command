@@ -21,6 +21,13 @@ RemainAfterExit=no
 # pip + npm builds on a Pi are slow, and image prebuilds (Chromium!) are slower
 # — safe to wait for now that they happen BEFORE the stop; downtime is unchanged.
 TimeoutStartSec=5400
+# Root, no HOME set: kubectl's discovery cache would otherwise resolve the
+# relative default `.kube/cache` against systemd's default WorkingDirectory
+# (`/` for a system service with none set) and land root-owned there. Same
+# fix as cc-backup.service, whose explicit WorkingDirectory=<repo> puts the
+# same bug inside the checkout instead.
+CacheDirectory=cc-kube
+Environment=KUBECACHEDIR=/var/cache/cc-kube
 ExecStartPre=-/usr/bin/mv -f /run/cc-update/trigger /run/cc-update/request.json
 ExecStart=/home/codyslab/central-command/deploy/k3s/cc-update.sh
 

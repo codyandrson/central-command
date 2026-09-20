@@ -10,7 +10,7 @@ version + capability grants + lifecycle status, in one transaction).
 `tests/test_governance.py` guards the invariant against the DATABASE now, not
 a code tuple.
 
-`SEED` below is the founding five — the same rows `db/schema.sql` seeds — kept
+`SEED` below is the founding roster — the same rows `db/schema.sql` seeds — kept
 as the bootstrap record and the read fallback when no database is reachable
 (module-import contexts and DB-less tooling). It is not the membership truth
 anymore: a hired agent appears only in the DB.

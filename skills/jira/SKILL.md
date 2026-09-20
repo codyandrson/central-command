@@ -12,7 +12,7 @@ shapes it hands you, and the errors it raises. Where upstream Jira behaviour
 matters it is marked as such.
 
 You read Jira with your read tools. You **never write** — every change is a
-`propose_jira_update` proposal that the operator approves before the Executor
+`propose_action` proposal that the operator approves before the Executor
 performs it.
 
 ## Load this skill when

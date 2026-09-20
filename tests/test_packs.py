@@ -377,18 +377,22 @@ async def test_a_consult_advisory_prompt_also_carries_the_team_section(monkeypat
 def test_deprecated_propose_jira_update_dropped_but_still_classifies():
     """propose_jira_update predates every non-Jira proposal kind (graph, tasks,
     charters ride the same deferral), which is why the cockpit read "jira" on
-    graph writes — renamed to propose_action 2026-08-16, and dropped from every
-    toolset 2026-08-21. No pack offers it any more (a fresh run can never call
-    it), but `durable.classify_deferred` must still recognize the name so a
-    session parked under it before the drop stays resumable —
-    `tests/test_resume_dropped_tool_alias.py` proves the actual resume."""
+    graph writes — renamed to propose_action 2026-08-16, dropped from every
+    toolset 2026-08-21, and the alias function itself removed from tools.py
+    2026-09-20 (resume is tool_call_id-based and never called it — see
+    `tests/test_resume_dropped_tool_alias.py`). `durable.classify_deferred`
+    must still recognize the NAME so a session parked under it before the
+    drop stays resumable; nothing anywhere may define or offer a callable
+    under that name any more."""
     from types import SimpleNamespace
 
     from central_command.runtime import durable
+    from central_command.runtime import tools as tools_mod
 
     for name in ("propose_action", "propose_jira_update"):
         call = SimpleNamespace(tool_name=name)
         assert durable.classify_deferred(call) == "proposal"
+    assert getattr(tools_mod, "propose_jira_update", None) is None
     for pack in packs.PACKS.values():
         assert "propose_jira_update" not in pack.tool_names, pack.name
 

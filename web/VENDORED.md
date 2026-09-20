@@ -117,10 +117,15 @@ Treat every one as third-party documentation:
 - **`docs/DEPLOYMENT-A.md`, `-B`, `-C`, `INSTALL.md`, `INSTALLER-STEPS.md`,
   `UPDATING.md`, `TAILSCALE.md`** — upstream's install and deploy paths. They
   **contradict** how Central Command is actually deployed. The real deployment is
-  `deploy/k3s/` at the repo root (the two-node k3s cluster, 2026-07-31);
-  `deploy/pi/` is the SUPERSEDED compose stack kept as the rollback path — see
-  the root `CLAUDE.md`'s "Where it runs". Nothing here is used, including
-  `install.sh` (49 KB).
+  `deploy/k3s/` at the repo root (the two-node k3s cluster, 2026-07-31).
+  `deploy/pi/` is only PARTLY superseded — its `docker-compose.yml`,
+  `cc-uvicorn.service` and `backup.sh` are retired rollback references, but
+  `deploy/pi/.env` (secrets), `deploy/pi/litellm/` (the live LiteLLM
+  policy), `deploy/pi/graphiti/` (the image build context) and
+  `deploy/pi/cc-nerve.service` (still the live cockpit unit — it is
+  installed FROM `deploy/pi/` by `deploy/k3s/README.md`'s own runbook) are
+  still read by `deploy/k3s/`; see `deploy/pi/README.md`.
+  Nothing in *this* `docs/` directory is used, including `install.sh` (49 KB).
 - **`docs/API.md` (2,125 lines), `ARCHITECTURE.md`, `CONFIGURATION.md`** —
   accurate for upstream's API surface, partially true here. The Central Command
   contract is `central_command/api/nerve_gateway.py` plus `docs/DESIGN.md`.

@@ -5,9 +5,14 @@
 > the accumulated verified facts and the operator's settled decisions, re-checked
 > against the current repo (`runtime/packs.py`, `gateway/capabilities.py`,
 > `runtime/litellm_manager.py`, `db/schema.sql`, `tests/test_governance.py`).
-> Not yet built. Sections marked "proposed" are this document's design
-> opinions, awaiting the operator's ratification — everything else is either a
-> verified repo fact or one of the operator's settled decisions.
+> **Status (corrected 2026-09-20): built.** The sandbox lives in
+> `central_command/sandbox/`, the `mcp.*` capabilities (`sync_source`,
+> `build_image`, `server_deploy`, `tool_call`, …) are gated in
+> `gateway/capabilities.py`, and `servers/echo-demo` is a server that arrived
+> through that path. Sections marked "proposed" were this document's design
+> opinions at the time, offered for the operator's ratification — everything
+> else was either a verified repo fact or one of the operator's settled
+> decisions.
 
 ## 1. Problem
 

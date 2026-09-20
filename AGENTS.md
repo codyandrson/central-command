@@ -39,6 +39,10 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 
 <!-- /bmad:context -->
 
+`deploy/pi/` is part LIVE, part retired — never delete it as a whole as
+"the superseded compose stack." See `deploy/pi/README.md` for which files
+`deploy/k3s/` still reads directly and which are rollback-only.
+
 ## Architecture — runtime is Pydantic AI 2.0 + Claude
 
 Modular monolith, 4 tiers:

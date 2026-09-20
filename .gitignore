@@ -45,3 +45,11 @@ CLAUDE.local.md
 # `UserKnownHostsFile=NUL`, which creates a literal file named NUL.
 uv.lock
 NUL
+
+# BMad is local tooling (skills + scratch state), not project content.
+_bmad/
+.claude/skills/bmad-*/
+
+# kubectl's discovery cache, written here when a root systemd unit runs with
+# no HOME set (see deploy/k3s/cc-backup.service, cc-update.service).
+.kube/

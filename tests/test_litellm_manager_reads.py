@@ -58,7 +58,7 @@ def test_a_stringified_proposal_is_parsed_like_an_object():
                              "reversibility": "reversible"}],
                 "evidence": [], "confidence": {"level": "high", "rationale": "read it"},
                 "expected_effect": "mode declared", "intent": "declare the mode"}
-    for fn in (tools.propose_litellm_change, tools.propose_action, tools.propose_jira_update,
+    for fn in (tools.propose_litellm_change, tools.propose_action,
                tools.propose_calendar_change, tools.propose_loe):
         as_object = _validator(fn).validate_python({"proposal": proposal})
         as_text = _validator(fn).validate_python({"proposal": json.dumps(proposal)})

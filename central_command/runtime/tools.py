@@ -1248,17 +1248,6 @@ async def propose_action(ctx: RunContext, proposal: ProposalArg) -> str:
     raise CallDeferred(metadata={"kind": "proposal"})
 
 
-async def propose_jira_update(ctx: RunContext, proposal: ProposalArg) -> str:
-    """Deprecated alias of propose_action — dropped from every pack's
-    `tool_names` 2026-08-21, so no charter can offer this any more. Kept
-    defined (never called) only because `test_consult.py`'s classification
-    guard asserts every name in `ADVISORY_DEFERRAL_TOOLS` resolves to a real
-    tool — that set itself is kept for pre-drop paused sessions (see
-    durable.py:PROPOSE_TOOLS), which resume by tool_call_id and never invoke
-    this function body."""
-    return await propose_action(ctx, proposal)
-
-
 async def litellm_list_models(ctx: RunContext, name: str | None = None) -> str:
     """List the models the LiteLLM proxy serves, with alias, model_id and
     provider mapping. Call this before proposing any proxy change, so your

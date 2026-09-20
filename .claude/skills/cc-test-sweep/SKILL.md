@@ -116,12 +116,14 @@ created), `findings/`, `baseline/`, `verify/`.
 - **Fast local models finish trivial tasks in 5-9s** — you cannot catch a
   live RUNNING session with a trivial task; give restart-race subjects
   genuinely long work, or accept the pytest coverage.
-- **The approve endpoint stamps `approver: human:lee` regardless of
-  caller** (accepted risk, operator decision 2026-08-20) — provenance does
-  not distinguish operator clicks from API calls; don't cite it as proof of
-  operator action.
-- **The operator skills-import API is deliberately ungated** (same
-  decision) — not a finding, don't re-file it.
+- **The approve endpoint's `approver` stamp does not distinguish operator
+  clicks from API calls** — `gateway.gateway._operator_actor()` derives it
+  from `CC_OPERATOR_NAME` (fixed 2026-08-21, rehearsal finding F11; it used
+  to hardcode a literal operator name), so any caller that reaches the
+  endpoint gets the same stamp. Provenance proves the endpoint was called,
+  not that the operator clicked — don't cite it as proof of operator action.
+- **The operator skills-import API is deliberately ungated** (operator
+  decision 2026-08-20) — not a finding, don't re-file it.
 - Assert on rows your test created, never global counts; pin
   `dispatch_approval_limit` and `demo_mode` where the existing test rules
-  say so (see CLAUDE.md).
+  say so (see `.claude/rules/tests.md`).

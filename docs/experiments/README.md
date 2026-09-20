@@ -3,6 +3,10 @@
 Scripts that produced findings recorded in `docs/superpowers/specs/`. Kept so a
 result can be re-derived rather than trusted.
 
+**Status:** this is evidence for the withdrawn quality-router proposal (see
+`docs/DESIGN.md`'s records table — superseded by the `cc-default` alias
+seam), not runnable tooling for the current system.
+
 ## 2026-07-26 — LiteLLM complexity-classifier characterization
 
 Ran LiteLLM's `ComplexityRouter.classify` over 283 real emails from

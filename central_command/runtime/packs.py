@@ -1641,10 +1641,11 @@ NON_ADVISORY_TOOLS = frozenset({
 # is named here, which is the safe direction.
 ADVISORY_DEFERRAL_TOOLS = frozenset({
     "propose_action",
-    "propose_jira_update",  # dropped from every toolset 2026-08-21, but a
-    # deferred call under this name can still be resumed (see durable.py's
-    # PROPOSE_TOOLS) — kept here so a pre-drop consult-parked proposal of
-    # that shape stays drivable too.
+    # propose_jira_update (dropped from every toolset 2026-08-21) was kept
+    # here and in tools.py only as a stand-in for pre-drop consult-parked
+    # proposals; the resume path is tool_call_id-based (see
+    # durable.py:PROPOSE_TOOLS) and never calls this name as a function, so
+    # the alias itself carried no behavior — removed 2026-09-20.
     "propose_litellm_change",
     # A calendar change parks like any other proposal and carries nothing
     # caller-specific (unlike the mcp family, whose sandbox/gate context has no
@@ -1844,8 +1845,15 @@ async def mcp_toolsets_for(agent_id: str, pack_names) -> list:
             toolsets.append(_mcp_live_toolset(agent_id, server_id, ungated))
 
     if has_gated:
+        # Same wrap as toolset_for's propose_* tools (2026-08-18 incident):
+        # pydantic-ai's default retry budget is ONE, and a bad draft against
+        # this shared MCP-call tool would fail the whole session on its
+        # second try.
         toolsets.append(
-            FunctionToolset([tools_mod.propose_mcp_tool_call], id="mcp-tool-propose")
+            FunctionToolset(
+                [Tool(tools_mod.propose_mcp_tool_call, max_retries=10)],
+                id="mcp-tool-propose",
+            )
         )
     return toolsets
 

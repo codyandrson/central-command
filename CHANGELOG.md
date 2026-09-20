@@ -4,6 +4,84 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-20 — v2.38.2: a shared proposal tool needs the same retry budget as its siblings
+
+A cleanup release: no new capability, but one real bug and a pass through
+several places where the code, the docs and the ignore file had drifted from
+what is actually true.
+
+- **`propose_mcp_tool_call` had no redraft budget.** Every other `propose_*`
+  tool gets wrapped in `Tool(fn, max_retries=10)` at attach time
+  (`runtime/packs.py:toolset_for`, the 2026-08-18 incident fix) — the one
+  tool `mcp_toolsets_for` attaches for gated MCP calls was handed to its
+  `FunctionToolset` bare, so a second bad draft against it would fail the
+  whole session exactly like the original incident. A new source-walk guard
+  (`tests/test_propose_max_retries.py`) fails the suite if any `propose_*`
+  function reaches a `FunctionToolset(...)` literal unwrapped, on this path
+  or a future one.
+- **`propose_jira_update` is gone.** The alias was renamed to `propose_action`
+  in 2026-08-16, dropped from every pack in 2026-08-21, and had carried no
+  behavior since — it existed only because a test asserted every name in
+  `ADVISORY_DEFERRAL_TOOLS` resolved to a real tool. The function, that set's
+  entry and every other live reference are removed; the resume-compat path
+  (old parked sessions still classify and resume under the dropped name) is
+  untouched, since it was always tool-call-id-based and never called the
+  function.
+- **The roster docstring stopped naming a count that rots.** `SEED` is called
+  "the founding roster," not "the founding five" — it has held eight rows for
+  a while.
+- **Two root-owned `.kube/` caches, fixed at the source.** `cc-backup.service`
+  and `cc-update.service` run `kubectl` as root with no `HOME`; without a cache
+  directory, kubectl's discovery cache resolves the relative default
+  `.kube/cache` against whatever the working directory happens to be (the
+  checkout for `cc-backup.service`, systemd's default `/` for
+  `cc-update.service`) and lands root-owned there. Both units now set
+  `CacheDirectory=cc-kube` and `KUBECACHEDIR=/var/cache/cc-kube`. `_bmad/` and
+  `.claude/skills/bmad-*/` (local tooling) and `.kube/` (this cache, if it's
+  already there) are now gitignored too.
+- **`deploy/pi/` gets a README saying which of its files are still live.**
+  Several comments called the whole directory "the superseded compose
+  stack," but `deploy/k3s/` still reads `deploy/pi/.env` (secrets),
+  `deploy/pi/litellm/` (the live routing policy) and `deploy/pi/graphiti/`
+  (the image build context) directly, and installs `deploy/pi/cc-nerve.service`
+  as the live cockpit unit. Only the compose stack, the old `cc-uvicorn`
+  unit and the old `backup.sh` are actually retired.
+- **`docs/DESIGN.md` gets a founding-design banner** pointing at the living
+  `docs/ARCHITECTURE.md` being written, plus corrections (marked "corrected
+  2026-09-20") to statements the code no longer matches: a mail body IS
+  persisted (fetched once, converted, stored in `work_item.payload`, not
+  re-fetched); n8n is the email/calendar façade, not "mutation credentials"
+  generally — Jira is a native client; the local-serving/embedding spec's
+  Units 2–4 are built (Unit 1 was replaced by `llama-swap` instead of the
+  specced router mode); the adaptive-routing spec's fallback declarations
+  are applied but `fallbacks: {}` by operator decision, so nothing actually
+  falls back; the deploy-refactor spec gets its missing row (D1+D2 shipped
+  as v2.22.0, D3 partial, D4 not started); and the graph-inspection row no
+  longer calls curation writes a deferred increment — they shipped
+  2026-08-15, as a closed write set, not through the proposal gate. Two
+  other design records get short corrected-status notes for the same
+  reason: the MCP-sandbox research doc no longer says "not yet built," and
+  the graph-inspection spec gets a pointer at its own as-built correction.
+- **`.claude/skills/cc-test-sweep/SKILL.md` no longer teaches a hardcoded
+  approver name as a permanent accepted risk.** The approve endpoint's
+  actor is derived from `CC_OPERATOR_NAME` (fixed 2026-08-21) — the real,
+  still-true finding is that provenance does not distinguish an operator
+  click from any other caller reaching the endpoint.
+- **Two more one-off scripts documented, four removed.**
+  `requeue_invalidation_rows_2026_09_15.py` and
+  `delete_duplicate_episodes_2026_09_15.py` get rows in
+  `scripts/oneoff/README.md`; the four scripts the README already marked
+  spent (`replay_cancelled_reject_resume.py`,
+  `arm_orphaned_resumes_2026_08_15.py`, `recommit_lost_private_episodes.py`,
+  `clear_and_requeue_inbox_2026_08_16.py`) are deleted — their rows stay,
+  marked "removed 2026-09-20 — in git history."
+- **`.env.example` documents `CC_TTS_VOICE` and `CC_N8N_JIRA_URL`**, neither
+  of which was declared before.
+
+**Operator note:** after applying this release, delete the stray root-owned
+`.kube/` directory in the checkout once (`sudo rm -rf .kube/`) — it predates
+this release's fix and will not clean itself up.
+
 ## 2026-09-19 — v2.38.1: a fact's window is read from words, so say the words and check the read
 
 The operator's follow-up to v2.38.0: does the law cover both the start and
