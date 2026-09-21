@@ -8,6 +8,7 @@ import {
   getRootAgentId,
   getRootAgentSessionKey,
   getSessionDisplayLabel,
+  formatLabelStamp,
   getTopLevelAgentSessions,
   inferParentSessionKey,
   isRootChildSession,
@@ -101,6 +102,22 @@ describe('sessionKeys', () => {
     expect(getSessionDisplayLabel(session('agent:reviewer:main', { identityName: 'Reviewer Prime' }), 'Nerve')).toBe('Reviewer Prime (reviewer)');
     expect(getSessionDisplayLabel(session('agent:reviewer:main'), 'Nerve')).toBe('reviewer');
     expect(getSessionDisplayLabel(session('agent:main:main'), 'Nerve')).toBe('Nerve (main)');
+  });
+
+  it('appends createdAt in the browser timezone when the label is the server fallback', () => {
+    // The server sends "<agent> · <mode>" and the ISO instant; the browser
+    // owns the rendering — a server-formatted time is UTC text nobody can
+    // re-localise (2026-09-20: "Sep 21 03:05" shown at 21:05 Sep 20 local).
+    const createdAt = '2026-09-21T03:05:07+00:00';
+    const expected = `Inbox Triage · oneshot ${formatLabelStamp(createdAt)}`;
+    expect(getSessionDisplayLabel(session('agent:inbox-triage:sess_1', { label: 'Inbox Triage · oneshot', labelStamped: true, createdAt }))).toBe(expected);
+    expect(formatLabelStamp(createdAt)).toMatch(/^Sep 2[01] \d{2}:\d{2}$/);
+    expect(formatLabelStamp(createdAt)).toBe(
+      `${new Date(createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${new Date(createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}`,
+    );
+    // A titled lane is never stamped, and a stamped lane without an instant is left alone.
+    expect(getSessionDisplayLabel(session('agent:inbox-triage:sess_2', { label: 'Reconcile the sprint board', labelStamped: false, createdAt }))).toBe('Reconcile the sprint board');
+    expect(getSessionDisplayLabel(session('agent:inbox-triage:sess_3', { label: 'Inbox Triage · oneshot', labelStamped: true }))).toBe('Inbox Triage · oneshot');
   });
 
   it('ignores gateway display names for non-main root sessions', () => {

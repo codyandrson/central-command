@@ -37,6 +37,10 @@ export interface Session {
   kind?: string;
   displayName?: string;
   mode?: string; // Central Command: 'conversation' | 'oneshot' — conversation rows are closable
+  /** Central Command: `label` is the generic "<agent> · <mode>" fallback and the
+   *  sidebar appends `createdAt` in the BROWSER's timezone. The server never
+   *  formats a time into text — it cannot know the viewer's zone. */
+  labelStamped?: boolean;
   conversational?: boolean; // Central Command roots: agent has a conversational lane (shows the + action)
   /** Central Command: which roster agent this session belongs to. */
   agentId?: string;

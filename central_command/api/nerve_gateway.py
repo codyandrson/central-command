@@ -82,15 +82,18 @@ def _row_model(row: dict, agent_models: dict[str, str] | None = None) -> str:
 
 def _row_label(row: dict, names: dict[str, str] | None) -> str:
     """What the sidebar calls this lane. The frontend's last resort is the
-    session-key tail — a raw uuid — so anything is better than nothing here."""
+    session-key tail — a raw uuid — so anything is better than nothing here.
+
+    The fallback carries NO timestamp. It used to end in `created_at`
+    formatted server-side, which rendered the row's UTC instant as text the
+    browser could not re-localise — the cockpit read "Sep 21 03:05" at 21:05
+    on Sep 20 in the operator's zone (2026-09-20). The server does not know
+    the viewer's timezone; `createdAt` goes over the wire as an ISO instant
+    and `labelStamped` tells the cockpit to append it in local time."""
     if row.get("task_title"):
         return row["task_title"]
     who = (names or {}).get(row["agent_id"], row["agent_id"])
-    created_at = row.get("created_at")
-    # %-d is a glibc strftime extension; the MSVC CRT raises ValueError on it
-    # (2026-08-21 Windows validation, W3) — build the portable form instead.
-    when = f"{created_at:%b} {created_at.day} {created_at:%H:%M}" if created_at else ""
-    return f"{who} · {row.get('mode') or 'run'} {when}".strip()
+    return f"{who} · {row.get('mode') or 'run'}"
 
 
 def _session_row_dict(
@@ -117,6 +120,9 @@ def _session_row_dict(
         "parentSessionKey": parent_key,
         "agentId": row["agent_id"],
         "label": _row_label(row, names),
+        # True when `label` is the generic fallback and the cockpit should
+        # append `createdAt` in the VIEWER's timezone (see `_row_label`).
+        "labelStamped": not row.get("task_title"),
         "status": row["status"],
         # The badge's "is it working" test is lowercase `state`; Central Command's
         # vocabulary is uppercase and other panels read it (SessionList's

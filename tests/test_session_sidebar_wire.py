@@ -105,6 +105,30 @@ async def test_a_waiting_session_is_not_running_and_still_gets_a_label(monkeypat
     assert "jira-expert" in row["label"]
 
 
+async def test_the_fallback_label_carries_no_server_rendered_time(monkeypatch):
+    """The fallback used to end in `created_at` formatted on the SERVER — UTC
+    text the browser cannot re-localise, so the sidebar read "Sep 21 03:05"
+    at 21:05 on Sep 20 in the operator's zone (2026-09-20). The instant goes
+    over as ISO `createdAt`; `labelStamped` tells the cockpit to append it in
+    the VIEWER's timezone. A titled lane is not stamped."""
+    _wire(monkeypatch, [
+        _row("sess_fallback", task_title=None),
+        _row("sess_titled", task_title="Reconcile the sprint board"),
+    ])
+
+    rows = {r["sessionKey"]: r for r in (await nerve_gateway._sessions_list({}))["sessions"]}
+    fallback = rows["agent:jira-expert:sess_fallback"]
+    titled = rows["agent:jira-expert:sess_titled"]
+
+    assert fallback["label"] == "jira-expert · oneshot"
+    assert "09:00" not in fallback["label"] and "Aug" not in fallback["label"], (
+        "the server never formats a time into label text — it cannot know the viewer's zone"
+    )
+    assert fallback["labelStamped"] is True
+    assert fallback["createdAt"] == NOW.isoformat()
+    assert titled["labelStamped"] is False
+
+
 async def test_an_exec_failed_rest_carries_its_reason_to_the_sidebar(monkeypatch):
     _wire(monkeypatch, [_row(
         "sess_exec", status="AWAITING_OPERATOR",

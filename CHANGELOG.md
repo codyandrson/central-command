@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-20 — v2.38.6: the server sends an instant, the browser renders a time
+
+Cockpit fix. A task-less lane's sidebar fallback label read "Inbox Triage ·
+oneshot Sep 21 03:05" at 21:05 on Sep 20 in the operator's zone. The clocks
+were fine: the gateway built the fallback as finished text on the server,
+formatting the row's UTC `created_at` with no idea what timezone the viewer
+was in, and the browser had nothing it could re-localise.
+
+- **`label` no longer carries a time.** The fallback is "<agent> · <mode>"; the
+  row's ISO `createdAt` (already on the wire) is the instant, and a new
+  `labelStamped` flag marks rows whose label the cockpit should finish. A
+  titled lane is never stamped.
+- **The cockpit appends the stamp in the browser's timezone, 24-hour**, via
+  `formatLabelStamp` in `sessionKeys.ts` — the same `toLocaleTimeString('en-GB',
+  hour12: false)` convention every other timestamp in the cockpit already
+  follows. This was the one place a server-rendered time slipped through.
+- Guards: `tests/test_session_sidebar_wire.py` pins that the fallback label
+  contains no formatted time and that `labelStamped` is set only without a
+  title; `sessionKeys.test.ts` pins the browser-side rendering.
+
 ## 2026-09-20 — v2.38.5: an invariant nobody tests is a convention
 
 Tests and records only — no runtime behavior changes. v2.38.3's decision log

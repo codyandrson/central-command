@@ -172,11 +172,26 @@ export function extractIdentityName(content: string): string | null {
   return match?.[1]?.trim() || null;
 }
 
+/** "Sep 20 21:05" in the browser's timezone, 24h. Central Command: the
+ *  server sends `createdAt` as an ISO instant and never pre-renders it — a
+ *  server-formatted time is UTC text the viewer cannot re-localise. */
+export function formatLabelStamp(createdAt: string | number): string {
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return '';
+  const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${day} ${time}`;
+}
+
 export function getSessionDisplayLabel(session: Session, agentName = 'Agent'): string {
   const sessionKey = getSessionKey(session);
   const rootId = getRootAgentId(sessionKey);
   const identityName = session.identityName?.trim();
-  const explicitLabel = session.label?.trim();
+  let explicitLabel = session.label?.trim();
+  if (explicitLabel && session.labelStamped && session.createdAt != null) {
+    const stamp = formatLabelStamp(session.createdAt);
+    if (stamp) explicitLabel = `${explicitLabel} ${stamp}`;
+  }
 
   if (sessionKey === 'agent:main:main') {
     const normalized = explicitLabel?.toLowerCase();
