@@ -651,7 +651,9 @@ llm_gate() { # llm_gate <what-failed>
   note "  (the model id after the prefix, the api_base host) and enter the API"
   note "  key — or create a credential under Endpoints and attach it. Keep:"
   note "    cc-default     openai/<your chat model>          the spine's alias"
-  note "    graphiti-llm   openai/chat_completions/<model>   the prefix is REQUIRED"
+  note "    graphiti-llm   openai/<model>   PLAIN prefix — same as cc-default"
+  note "                   (the old chat_completions/ bridge prefix now 404s;"
+  note "                   Graphiti's MCP server uses the stock chat client)"
   note "    cc-embedding   openai/<your embedding model>     dimension is permanent"
   note "    gpt-4.1-nano   openai/<your chat model>          Graphiti's reranker"
   note "    cc-tts         openai/<your TTS model>           cockpit read-aloud"
@@ -736,9 +738,9 @@ phase_llm() {
     llm_gate "the cc-default alias did not return a completion"
     return 3
   fi
-  if ! step "probe-structured" "graphiti-llm returned schema-constrained JSON through the Responses bridge" \
+  if ! step "probe-structured" "graphiti-llm returned schema-constrained JSON through chat/completions" \
     "$HERE/discover-llm.sh" --proxy structured graphiti-llm; then
-    llm_gate "the graphiti-llm alias did not return structured output (is the openai/chat_completions/ prefix intact?)"
+    llm_gate "the graphiti-llm alias did not return schema-constrained JSON (a chat_completions/ prefix on the registration is a likely cause — it should be a plain openai/<model>)"
     return 3
   fi
   if ! step "probe-rerank-model" "a completion came back through gpt-4.1-nano (Graphiti's reranker alias)" \

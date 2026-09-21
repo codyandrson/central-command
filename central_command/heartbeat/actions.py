@@ -1220,7 +1220,12 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
         ):
             continue
         if "/chat_completions/" in str(d.get("provider_model") or ""):
-            continue  # Responses-bridge alias — the chat battery can't probe it
+            # Responses-bridge alias — the chat battery can't probe it. Not
+            # graphiti-llm any more by decision (2026-09-21: its caller uses
+            # the stock chat-completions client and a bridged registration
+            # 404s there); this skip is for any other alias still bridging.
+            continue
+
         alias = d.get("model_name")
         if not alias:
             continue

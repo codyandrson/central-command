@@ -101,8 +101,10 @@ Assumed already true before phase 2:
     `model-preferences.yaml` declares every alias — the `cc-*` ROLE aliases
     the app addresses (cc-default, cc-embedding, cc-rerank) AND the
     real-model rows they point at — plus the two invariants most easily got
-    wrong: `graphiti-llm` must keep the `openai/chat_completions/`
-    Responses→chat bridge prefix, and the rerank rows' (`cc-rerank`,
+    wrong: `graphiti-llm` must be a PLAIN `openai/<model>`, same prefix as
+    `cc-default` (2026-09-21 — Graphiti's MCP server uses the stock
+    chat-completions client now, and the old `openai/chat_completions/`
+    Responses→chat bridge prefix 404s), and the rerank rows' (`cc-rerank`,
     `qwen3-rerank-local`) **`api_base` must end in `/v1/rerank`** (the
     `cohere/` client POSTs the base verbatim and appends nothing). Nothing
     you enter in the UI is ever overwritten by the script. Timeouts have

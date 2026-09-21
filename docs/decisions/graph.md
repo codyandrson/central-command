@@ -55,9 +55,9 @@ how to add one.
 
 ### DL-055 — Graphiti's extraction needs the bridged LiteLLM alias
 
-- **Status:** active
+- **Status:** superseded
 - **Date:** 2026-09-19
-- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**Graphiti's extraction needs the BRIDGED LiteLLM alias.**"
+- **Rule:** (recorded here) Register `graphiti-llm` as `openai/chat_completions/<model>` so LiteLLM's Responses→chat bridge serves graphiti_core's Responses-API client, and pin that client with `GRAPHITI_OPENAI_CLIENT=responses`.
 - **Why:** graphiti_core drives extraction through the Responses API with no
   chat-completions fallback; an OpenAI-compatible backend without
   `/v1/responses` silently drops `text.format` json_schema and every
@@ -66,8 +66,9 @@ how to add one.
   The bridge only answers Responses calls — MCP server 1.1.0 picks the
   chat-completions client for any non-OpenAI LLM URL, and a plain chat call
   to the bridged alias 404s (2026-09-19).
-- **Enforced:** discipline only — `GRAPHITI_OPENAI_CLIENT=responses` (`cc-openai-client-switch.patch`) keeps the Responses client; no guard test located this pass
-- **Source:** .claude/rules/graph.md; MEMORY.md v2.38.0 entry
+- **Enforced:** discipline only — the pin and the prefix were removed in v2.39.0
+- **Source:** CHANGELOG v2.38.0; CHANGELOG v2.39.0
+- **Superseded-by:** DL-104
 
 ### DL-056 — Graphiti will retire a fact it merely recognises; the guard is the invalidation scope, not the model
 

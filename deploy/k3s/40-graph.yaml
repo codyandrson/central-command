@@ -223,22 +223,14 @@ spec:
             # than relying on the yaml default so the two cannot drift.
             - name: LLM_API_URL
               value: http://litellm:4000/v1
-            # MCP 1.1.0 picks the CHAT-COMPLETIONS client for any LLM URL that
-            # is not api.openai.com. A plain chat call to the bridged
-            # `graphiti-llm` alias sends "chat_completions/<model>" upstream
-            # and llama-swap 404s (measured 2026-09-19). `responses` keeps the
-            # Responses-API client the bridge exists for
-            # (patches/cc-openai-client-switch.patch). Move to `generic` only
-            # together with an un-bridged alias.
-            - name: GRAPHITI_OPENAI_CLIENT
-              value: responses
-            # The entity types in cc-graphiti-config are OURS: `config` makes
-            # their descriptions win over MCP 1.1.0's same-named built-in
-            # models, which discard that text and add a required, uncapped
-            # `description` attribute that grows without bound on a hub
-            # entity (patches/cc-entity-type-source.patch).
-            - name: GRAPHITI_ENTITY_TYPE_SOURCE
-              value: config
+            # MCP 1.1.0's built-in entity-type models each carry a REQUIRED
+            # `description` attribute that grows without bound on a hub entity
+            # (2026-09-20). `none` keeps every built-in model's DOCSTRING — the
+            # per-type extraction guidance in the prompt — and drops its
+            # fields, so the prompt is upstream's and attribute extraction is
+            # skipped (patches/cc-entity-type-source.patch). Unset is upstream.
+            - name: GRAPHITI_ENTITY_TYPE_FIELDS
+              value: none
             # ANTHROPIC_API_KEY is deliberately NO LONGER PASSED (2026-08-01).
             # config.yaml's llm block is `provider: openai` now, so nothing
             # constructs an AnthropicClient and nothing reads this. Graphiti

@@ -398,12 +398,16 @@ into the graphiti config and thus into the Neo4j vector index. A mis-sized
 vector does not error — it corrupts retrieval silently. Changing the embedder
 later means dropping the index and re-embedding the whole graph.
 
-**The `openai/chat_completions/` prefix on `graphiti-llm` is load-bearing.**
-graphiti_core drives extraction through the Responses API; LiteLLM passes a
-plain `openai/...` model straight through, and an endpoint that does not
-implement `/v1/responses` silently drops the json_schema, so the model answers
-prose and every extraction fails. The prefix forces LiteLLM's Responses→chat
-bridge. It looks like a redundant duplicate of `cc-default`. It is not.
+**`graphiti-llm` must be a PLAIN `openai/<model>` — the old `chat_completions/`
+bridge prefix now 404s.** (2026-09-21) Graphiti's MCP server uses upstream's
+stock chat-completions client, which POSTs `/v1/chat/completions` with a
+`response_format` json_schema; LiteLLM forwards that to the upstream server
+unchanged, so a plain registration — exactly like `cc-default` — carries it
+through correctly. The old `openai/chat_completions/` prefix forced LiteLLM's
+Responses→chat bridge, which now sends `chat_completions/<model>` upstream and
+the server 404s. It looks like a redundant duplicate of `cc-default`. It is
+not — it carries its own `chat_template_kwargs` to keep thinking off — but the
+model prefix itself should match `cc-default`'s pattern now.
 
 **Rootless podman needs lingering.** Without `loginctl enable-linger $USER`,
 the pause process dies when your last login session ends and takes every

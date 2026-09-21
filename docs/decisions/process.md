@@ -164,3 +164,21 @@ hygiene, and how the test suite itself must be written. See
   freeze the enumeration as an allowlist instead.
 - **Enforced:** test: `tests/test_runtime_integration_reads.py::test_runtime_reaches_only_read_functions_on_credentialed_clients`, with test: `tests/test_runtime_integration_reads.py::test_the_raw_litellm_transport_is_only_ever_asked_to_GET`, test: `tests/test_runtime_integration_reads.py::test_runtime_never_imports_a_write_only_integration` and test: `tests/test_runtime_integration_reads.py::test_a_write_function_imported_by_name_is_caught_too` closing the three bypasses
 - **Source:** `docs/ARCHITECTURE.md`
+
+### DL-104 — Graphiti's LLM client is upstream's; graphiti-llm is a plain alias and the built-in docstrings are the guidance
+
+- **Status:** active
+- **Date:** 2026-09-21
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**Graphiti's LLM client is upstream's, and `graphiti-llm` is a PLAIN `openai/<model>` alias.**"
+- **Why:** v2.38.4's fix for the unbounded attribute replaced MCP 1.1.0's
+  built-in entity-type models with field-less models built from config.yaml's
+  one-line descriptions — and the extraction prompt's entity-types block is
+  built from docstrings alone, so the per-type guidance vanished. With
+  thinking off, the local model answered `{"extracted_entities": []}` for
+  short episodes (0/4 with the one-liners vs 4/4 with the built-in
+  docstrings, logprobs 2026-09-21). The Responses-client pin was circular (it
+  preserved an alias that only existed for the old client); the stock chat
+  client with a plain alias was verified through the proxy.
+- **Enforced:** test: `tests/test_graphiti_image_patches.py::test_the_entity_type_patch_keeps_the_builtin_docstring_and_drops_the_fields`, test: `tests/test_graphiti_image_patches.py::test_the_responses_client_pin_is_retired`, test: `tests/test_litellm_policy.py` and `tests/test_single_models_declaration.py` (plain prefix), script: `deploy/single/discover-llm.sh` (structured probe)
+- **Source:** CHANGELOG v2.39.0
+- **Supersedes:** DL-055

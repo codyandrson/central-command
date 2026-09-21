@@ -14,9 +14,9 @@ server:
 llm:
   # "openai" is the WIRE PROTOCOL, not the vendor.
   provider: "openai"
-  # The BRIDGED alias: graphiti_core drives extraction through the Responses
-  # API with no chat-completions fallback, and registering the model as
-  # openai/chat_completions/<model> forces LiteLLM's Responses→chat bridge.
+  # A PLAIN openai/<model> alias (since v2.39.0): MCP 1.1.0's chat-completions
+  # client sends response_format json_schema, which LiteLLM forwards and
+  # llama.cpp enforces. A `chat_completions/` prefix on it 404s.
   model: "graphiti-llm"
   max_tokens: 4096
   # PINNED. Unset does not mean deterministic: the param is OMITTED from the
@@ -29,9 +29,8 @@ llm:
       api_key: ${GRAPHITI_LLM_API_KEY}
       # Load-bearing since MCP 1.1.0: the factory passes this as the LLM
       # client's base_url (1.0.2 ignored it and used OPENAI_BASE_URL). The
-      # same URL also drives 1.1.0's client sniff — compose.yaml sets
-      # GRAPHITI_OPENAI_CLIENT=responses to keep the Responses-API client
-      # the bridged alias exists for.
+      # same URL drives 1.1.0's client sniff: any non-OpenAI URL selects the
+      # chat-completions client, which is what we want.
       api_url: ${LLM_API_URL}
 
 embedder:

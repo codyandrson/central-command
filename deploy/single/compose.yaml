@@ -228,15 +228,11 @@ services:
       # LOAD-BEARING since MCP 1.1.0 (2026-09-19): the factory passes the
       # config file's llm api_url as the client's base_url (1.0.2 ignored it).
       LLM_API_URL: http://litellm:4000/v1
-      # MCP 1.1.0 picks the chat-completions client for any non-OpenAI LLM
-      # URL; a plain chat call to the bridged graphiti-llm alias 404s at the
-      # backend. `responses` keeps the Responses-API client the bridge exists
-      # for (deploy/pi/graphiti/patches/cc-openai-client-switch.patch).
-      GRAPHITI_OPENAI_CLIENT: responses
-      # config.yaml's entity-type descriptions win over MCP 1.1.0's same-named
-      # built-in models, which discard them and add a required, uncapped
-      # `description` attribute (patches/cc-entity-type-source.patch).
-      GRAPHITI_ENTITY_TYPE_SOURCE: config
+      # MCP 1.1.0's built-in entity-type models carry a required `description`
+      # attribute that grows without bound on a hub entity. `none` keeps their
+      # docstrings (the extraction guidance) and drops the fields
+      # (deploy/pi/graphiti/patches/cc-entity-type-source.patch).
+      GRAPHITI_ENTITY_TYPE_FIELDS: none
       # The RERANKER's endpoint, and the LLM's. graphiti_core builds its
       # cross-encoder as OpenAIRerankerClient() with no config, so the openai
       # SDK falls back to these two vars — the only seam available without

@@ -41,6 +41,8 @@ export interface Session {
    *  sidebar appends `createdAt` in the BROWSER's timezone. The server never
    *  formats a time into text — it cannot know the viewer's zone. */
   labelStamped?: boolean;
+  /** ISO instant the lane was created; rendered client-side. */
+  createdAt?: string | number;
   conversational?: boolean; // Central Command roots: agent has a conversational lane (shows the + action)
   /** Central Command: which roster agent this session belongs to. */
   agentId?: string;

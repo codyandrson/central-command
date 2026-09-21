@@ -361,12 +361,15 @@ def test_timeout_has_exactly_one_home(policy):
         )
 
 
-def test_graphiti_llm_keeps_the_responses_to_chat_bridge_prefix(policy):
+def test_graphiti_llm_is_a_plain_openai_alias(policy):
     reg = policy["registration_only"]["graphiti-llm"]["registration"]
-    assert reg["model"].startswith("openai/chat_completions/"), (
-        "graphiti-llm must be registered as openai/chat_completions/<model>: a plain "
-        "openai/ prefix makes LiteLLM pass the Responses request through and SILENTLY "
-        "drop text.format, so every structured extraction receives prose"
+    assert reg["model"].startswith("openai/") and not reg["model"].startswith(
+        "openai/chat_completions/"
+    ), (
+        "graphiti-llm must be registered as openai/<model>, same as cc-default "
+        "(2026-09-21): Graphiti's MCP server uses the stock chat-completions client "
+        "now, so the old Responses->chat bridge prefix (openai/chat_completions/) "
+        "sends 'chat_completions/<model>' upstream and 404s"
     )
 
 

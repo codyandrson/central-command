@@ -252,8 +252,9 @@ always "re-run `./setup.sh <phase>`" after correcting `.env`.
 **Exit 3 in the `llm` phase (the model gate) is EXPECTED on every fresh
 install** — it is the pause where the operator enters the provider into
 the LiteLLM UI, and it also fires if a PLACEHOLDER was left in, an
-invariant was broken (the `openai/chat_completions/` prefix on
-`graphiti-llm`), or a probe failed after filling in. The script's stderr
+invariant was broken (`graphiti-llm` must be a PLAIN `openai/<model>` — the
+old `chat_completions/` bridge prefix now 404s), or a probe failed after
+filling in. The script's stderr
 already printed the full hand-off: the UI URL (`http://127.0.0.1:4000/ui`),
 the credential's location by name, the alias table with what each needs,
 and the direct-vs-proxy discrimination command (direct success + proxy
@@ -472,10 +473,11 @@ brings up ONLY the LiteLLM trio, creates every alias `model-preferences.yaml`
 declares as a SKELETON (`register-models.py`, create-only) and **pauses
 (exit 3) on a fresh catalog** for the operator to enter providers, model
 ids and keys/credentials in the LiteLLM UI; the re-run checks the
-invariants (the `openai/chat_completions/` bridge prefix; rerank's
+invariants (`graphiti-llm` must be a PLAIN `openai/<model>`, same prefix as
+`cc-default` — the old `chat_completions/` bridge prefix 404s; rerank's
 `/v1/rerank` api_base), applies the routing policy (`policy.py --apply` →
 restart → `--check`), mints the virtual keys, then probes `cc-default`,
-`graphiti-llm` (a structured Responses round trip) and
+`graphiti-llm` (a structured chat/completions round trip) and
 `cc-embedding` through the proxy — a probe failure is the same
 exit-3 gate.
 `stack` builds the per-arch images only if missing and rolls out every

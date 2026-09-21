@@ -14,8 +14,9 @@ is managed through its UI/API — that is the operator's decision (2026-08-30):
 the config file is the fallback for what the API cannot set, never the
 default. So this script is CREATE-ONLY. An alias that does not exist is
 created as a SKELETON — the name plus the facts that are not the operator's
-to choose (`graphiti-llm`'s `openai/chat_completions/` bridge prefix, the
-reranker's `mode: rerank` and `/v1/rerank` path, per-alias timeouts) — with
+to choose (`graphiti-llm`'s plain `openai/` prefix — the Responses->chat
+bridge prefix is no longer wanted, see below — the reranker's `mode: rerank`
+and `/v1/rerank` path, per-alias timeouts) — with
 the literal token `PLACEHOLDER` where the provider information goes: the
 model id, the api_base, and (never declared here) the api_key or credential.
 An alias that exists is NEVER written to, whatever it says, so everything the
@@ -26,12 +27,17 @@ skeletons in and creates their provider credential BEFORE anything else is
 deployed; the re-run validates (this script's checks, then real probes
 through each alias) and continues.
 
-A declared value is a PATTERN: `openai/chat_completions/PLACEHOLDER` means
-"must start with the bridge prefix and must no longer be the placeholder";
+A declared value is a PATTERN: `openai/PLACEHOLDER` means "must start with
+the plain openai/ prefix and must no longer be the placeholder";
 `PLACEHOLDER/v1/rerank` means "must end in /v1/rerank" (a bare
 `PLACEHOLDER` api_base is entirely the operator's: scheme, host, path); a value with
 no PLACEHOLDER (`mode: rerank`, a timeout) must match exactly. api_key is
 never checked — LiteLLM never echoes it — the probes catch a wrong key.
+`graphiti-llm` additionally fails (drift, exit 3) if its filled-in model
+still carries a `chat_completions/` bridge prefix — that prefix forced
+LiteLLM's Responses->chat bridge, which Graphiti's MCP server no longer
+needs (it uses the stock chat-completions client since 2026-09-21) and which
+404s against llama-swap.
 
 The declaration is `.yaml` (PyYAML) or `.json` (stdlib — the single-node
 profile's, so the pre-venv python needs nothing). `models:` entries take
@@ -159,6 +165,20 @@ def plan(want: dict[str, dict], live_models: list[dict]) -> list[tuple[str, str,
             continue
         problems = [f"{k}: {live_params.get(k)!r} does not match declared {v!r}"
                     for k, v in params.items() if not matches(v, live_params.get(k))]
+        # graphiti-llm-specific invariant: the Responses->chat bridge prefix is
+        # no longer wanted (2026-09-21) — Graphiti's MCP server uses upstream's
+        # stock chat-completions client now, and a bridged model 404s against
+        # llama-swap. A generic prefix/suffix pattern match would not catch
+        # this (both "openai/qwen..." and "openai/chat_completions/qwen..."
+        # start with "openai/"), so it is checked explicitly.
+        if alias == "graphiti-llm" and "chat_completions/" in str(live_params.get("model", "")):
+            problems.append(
+                f"model: {live_params.get('model')!r} still carries the "
+                "chat_completions/ bridge prefix, which is no longer wanted — "
+                "Graphiti's MCP server uses the stock chat-completions client "
+                "and a bridged alias 404s. Change the model to openai/<model> "
+                "in the LiteLLM UI."
+            )
         out.append((("drift" if problems else "ok"), alias, problems))
     return out
 

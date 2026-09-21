@@ -417,8 +417,11 @@ llm_gate() { # llm_gate <what-failed>
   note "  the Anthropic rows create the credential under Endpoints and attach"
   note "  it (ANTHROPIC_API_KEY is deliberately NOT in the pod). The invariants"
   note "  the re-run checks are in deploy/pi/litellm/model-preferences.yaml:"
-  note "    graphiti-llm           MUST keep openai/chat_completions/<model> —"
-  note "                           the Responses->chat bridge prefix"
+  note "    graphiti-llm           MUST be a PLAIN openai/<model> — same as"
+  note "                           cc-default. The old chat_completions/"
+  note "                           bridge prefix is now WRONG: Graphiti's MCP"
+  note "                           server uses the stock chat-completions"
+  note "                           client, and a bridged alias 404s."
   note "    cc-rerank + qwen3-rerank-local  api_base MUST end in /v1/rerank, mode rerank"
   note "    cc-embedding           the embedding ROLE — same upstream as"
   note "                           qwen3-embedding-local; both rows must exist"
@@ -537,9 +540,9 @@ phase_llm() {
     llm_gate "the cc-default alias did not return a completion"
     return 3
   fi
-  if ! step "probe-structured" "graphiti-llm returned schema-constrained JSON through the Responses bridge" \
+  if ! step "probe-structured" "graphiti-llm returned schema-constrained JSON through chat/completions" \
     probe_alias structured graphiti-llm; then
-    llm_gate "the graphiti-llm alias did not return structured output (is the openai/chat_completions/ prefix intact?)"
+    llm_gate "the graphiti-llm alias did not return schema-constrained JSON (a chat_completions/ prefix on the registration is a likely cause — it should be a plain openai/<model>)"
     return 3
   fi
   # cc-embedding is the embedding ROLE alias (2026-08-30, parity with the

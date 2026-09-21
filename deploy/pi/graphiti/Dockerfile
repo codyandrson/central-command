@@ -144,11 +144,8 @@ RUN apt-get update \
     && cd /app/mcp \
     && patch -p1 -F 5 < /tmp/graphiti-patches/cc-rerank-client.patch \
     && grep -q 'GVRerankClient' src/graphiti_mcp_server.py \
-    && patch -p1 -F 5 < /tmp/graphiti-patches/cc-openai-client-switch.patch \
-    && grep -q 'GRAPHITI_OPENAI_CLIENT' src/services/factories.py \
-    && grep -q 'OpenAIClient(config=llm_config, max_tokens=config.max_tokens)' src/services/factories.py \
     && patch -p1 -F 5 < /tmp/graphiti-patches/cc-entity-type-source.patch \
-    && grep -q 'GRAPHITI_ENTITY_TYPE_SOURCE' src/utils/type_config.py \
+    && grep -q 'GRAPHITI_ENTITY_TYPE_FIELDS' src/utils/type_config.py \
     && rm -rf /tmp/graphiti-patches
 
 # cc-rerank-client (2026-08-19) is OURS, not an upstream PR — unlike the two
@@ -159,37 +156,32 @@ RUN apt-get update \
 # unset -> upstream default, so rollback is deleting one env var. Patched into
 # src/ (the MCP server), not site-packages — hence the separate `cd`.
 
-# cc-openai-client-switch (2026-09-19, ours, permanent carry). MCP 1.1.0 picks
-# graphiti_core's chat-completions client (OpenAIGenericClient) for ANY LLM URL
-# that is not api.openai.com — including our LiteLLM. That client calls
-# /v1/chat/completions on the `graphiti-llm` alias, whose
-# `openai/chat_completions/<model>` bridge prefix exists for the RESPONSES
-# path; a plain chat call sends "chat_completions/<model>" upstream and
-# llama-swap answers 404 "no router for requested model" (measured
-# 2026-09-19). GRAPHITI_OPENAI_CLIENT=responses keeps the Responses-API client
-# the bridge was built for; `generic` forces the chat client (what a future
-# un-bridged alias would use); unset is upstream's URL sniff. Set in
-# deploy/k3s/40-graph.yaml and deploy/single/compose.yaml.
-# The same patch also passes `max_tokens=config.max_tokens` to OpenAIClient
-# (2026-09-20). BaseOpenAIClient takes its output cap from the CONSTRUCTOR
-# kwarg (default 16384) and never from config.max_tokens (upstream
-# getzep/graphiti#763, OPEN); upstream's factory passes it on the generic and
-# Azure branches and forgets it on this one, so config.yaml's `llm.max_tokens`
-# was decorative and a runaway generation ran to 16384 tokens (4-6 minutes on
-# the local model) before failing validation and being retried twice.
-# cc-entity-type-source (2026-09-20, ours, permanent carry). MCP 1.1.0 prefers
-# its built-in "rich" model for any configured entity type whose NAME it knows
-# — all ten of ours — which (a) silently discards the description written in
-# config.yaml, the Person guidance included, and (b) gives every typed entity a
-# REQUIRED `description: str` attribute. graphiti-core re-extracts attributes
-# every episode with the prior value in the prompt, and exempts REQUIRED
-# fields from its 250-char cap (`attribute_length_cap_skipped_required`), so
-# on a hub entity the description only grows: measured 2026-09-20 at 4378
-# chars on one Person with 502 edges (next largest in the graph: 254), with
-# generations running 41-52k chars into the output cap — 197 calls over 8k
-# tokens and ~700 GPU-minutes in a week, nearly all discarded.
-# GRAPHITI_ENTITY_TYPE_SOURCE=config makes the configured description win: a
-# documentation-only model has no fields, so graphiti-core skips attribute
-# extraction outright (node_operations: `len(entity_type.model_fields) == 0`)
-# while the label and the description still classify. Unset is upstream
-# behaviour. Set in deploy/k3s/40-graph.yaml and deploy/single/compose.yaml.
+# THE LLM CLIENT IS UPSTREAM'S (since v2.39.0, 2026-09-21). MCP 1.1.0 picks
+# graphiti_core's chat-completions client (OpenAIGenericClient) for any LLM URL
+# that is not api.openai.com — ours included — and that client already passes
+# `llm.max_tokens` and sends `response_format: json_schema`, which LiteLLM
+# forwards to llama.cpp unchanged. The 2026-09-19/20 `cc-openai-client-switch`
+# patch that pinned the Responses-API client (and the `openai/chat_completions/`
+# bridge alias it needed) is gone; `graphiti-llm` is a plain `openai/<model>`
+# alias like cc-default (deploy/pi/litellm/model-preferences.yaml).
+# cc-entity-type-source (2026-09-20, reshaped 2026-09-21, ours, permanent
+# carry). MCP 1.1.0 substitutes its built-in "rich" model for every configured
+# entity type whose NAME it knows — all ten of ours. Each built-in declares a
+# REQUIRED `description: str` attribute; graphiti-core re-extracts attributes
+# every episode with the prior value in the prompt and exempts REQUIRED fields
+# from its 250-char cap (`attribute_length_cap_skipped_required`), so on a hub
+# entity the description only grows: measured 2026-09-20 at 4378 chars on one
+# Person with 502 edges, generations of 41-52k chars into the output cap, ~700
+# GPU-minutes a week discarded.
+# The first cut (v2.38.4) replaced the built-ins with field-less models built
+# from config.yaml's one-line descriptions. That dropped the built-ins'
+# DOCSTRINGS — the per-type "Instructions for identifying and extracting …"
+# guidance that IS the entity-types block of the extraction prompt — and the
+# local model, with thinking off, started answering `{"extracted_entities":
+# []}` for short episodes (0/4 vs 4/4 with the docstrings, measured 2026-09-21
+# with logprobs). GRAPHITI_ENTITY_TYPE_FIELDS=none now keeps the built-in
+# docstring and drops only the fields: the extraction prompt is byte-identical
+# to upstream's, and graphiti-core skips attribute extraction outright
+# (node_operations: `len(entity_type.model_fields) == 0`). config.yaml's
+# description is used only for a name upstream has no model for. Unset is
+# upstream behaviour. Set in deploy/k3s/40-graph.yaml and deploy/single/compose.yaml.

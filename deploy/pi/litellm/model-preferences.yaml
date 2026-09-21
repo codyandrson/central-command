@@ -268,15 +268,18 @@ models:
 # the `models:` entries where the top-level `timeout:` is the single home.
 # ============================================================================
 registration_only:
-  # THE BRIDGE. `openai/chat_completions/` forces LiteLLM's Responses->chat
-  # bridge: graphiti_core's OpenAIClient always drives extraction through
-  # `client.responses.parse`, llama.cpp implements no /v1/responses, and a plain
-  # `openai/` prefix makes LiteLLM pass the request through with the
-  # `text.format` json_schema SILENTLY DROPPED — the model answers prose and
-  # every extraction fails. The prefix is the whole fix. Do not "normalise" it.
+  # THE BRIDGE IS GONE (2026-09-21). Graphiti's MCP server now uses upstream's
+  # stock chat-completions client (`OpenAIGenericClient`, chosen automatically
+  # for any non-OpenAI URL) instead of the Responses-API client we used to
+  # patch in — it POSTs to `/v1/chat/completions` with a `response_format`
+  # json_schema, and LiteLLM forwards that to llama.cpp unchanged. So the
+  # alias must be a PLAIN `openai/<model>`, exactly like cc-default. The old
+  # `openai/chat_completions/` prefix is now WRONG: it forces LiteLLM's
+  # Responses->chat bridge, which sends "chat_completions/<model>" upstream
+  # and llama-swap 404s. Do not re-add the prefix.
   graphiti-llm:
     registration:
-      model: openai/chat_completions/PLACEHOLDER
+      model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
       timeout: 300
 

@@ -45,47 +45,30 @@ llm:
   # Qwen3-Coder-Next, through the Pi's LiteLLM. Same reasoning as the embedder
   # below — "openai" is the WIRE PROTOCOL, not the vendor.
   provider: "openai"
-  # NOT `cc-default`, and the difference is load-bearing.
-  #
-  # graphiti_core's OpenAIClient drives extraction through the RESPONSES API
-  # (`client.responses.parse`, openai_client.py:99) whenever a response_model is
-  # present — and extraction ALWAYS passes one, with no chat-completions
-  # fallback (openai_base_client.py:171). llama.cpp does not implement
-  # /v1/responses, and LiteLLM treats `openai/...` as NATIVELY supporting it
-  # (ProviderConfigManager returns OpenAIResponsesAPIConfig), so it passes the
-  # request straight through and the `text.format` json_schema is silently
-  # DROPPED. Measured 2026-08-01: cc-default answered that request with markdown
-  # prose, which would fail every extraction.
-  #
-  # `graphiti-llm` is registered in LiteLLM as
-  #   openai/chat_completions/qwen3.8-27b
-  # The `openai/chat_completions/` prefix forces LiteLLM's Responses ->
-  # chat-completions BRIDGE (responses/main.py:1058), which translates
-  # text.format into a real `response_format: json_schema`
-  # (_transform_text_format_to_response_format). llama.cpp enforces that via
-  # GBNF, so extraction gets schema-conforming JSON. Verified end to end.
-  #
-  # Upstream says the same thing about local models:
-  # help.getzep.com/graphiti/configuration/llm-configuration — an OpenAI-compatible
-  # endpoint "does not support the /v1/responses endpoint that OpenAIClient
-  # uses". The bridge is how we satisfy that WITHOUT patching the image.
+  # `graphiti-llm` is a PLAIN `openai/<model>` LiteLLM alias (since v2.39.0,
+  # 2026-09-21), registered exactly like cc-default but scoped to its own
+  # virtual key and carrying thinking-off (below). MCP 1.1.0 picks
+  # graphiti_core's chat-completions client for any non-OpenAI URL; it sends
+  # `response_format: json_schema`, LiteLLM forwards it, llama.cpp enforces it
+  # as a grammar. Verified 2026-09-21. The former `openai/chat_completions/`
+  # bridge prefix (2026-08-01 .. 2026-09-20) served the Responses-API client we
+  # no longer pin; on the chat client it sends "chat_completions/<model>"
+  # upstream and 404s — never reintroduce it.
   model: "graphiti-llm"
   # THINKING OFF, ON THE ALIAS (2026-09-20). A hybrid-thinking local model
   # (Qwen3.x) reasons before every one of these structured calls unless told
   # not to, and graphiti-core only sends reasoning controls for gpt-5/o1/o3
   # model names — so the switch belongs on the LiteLLM `graphiti-llm` alias, in
   # its litellm_params:  chat_template_kwargs: {"enable_thinking": false}
-  # Measured through the Responses bridge: 60 output tokens with a reasoning
-  # item -> 7 tokens without. llama.cpp documents json_schema + thinking-off as
+  # Measured 2026-09-20: 60 output tokens with a reasoning item -> 7 without. llama.cpp documents json_schema + thinking-off as
   # the working combination (ggml-org/llama.cpp#20345: the grammar is not
   # enforced while the model thinks). It is an operator-owned alias value, not
   # a tracked one: a cloud model behind this alias would reject the key.
   #
-  # ENFORCED since 2026-09-20 (patches/cc-openai-client-switch.patch) — before
-  # that the Responses client ignored it and every call ran under
-  # graphiti-core's 16384 default (upstream #763). Edge extraction still
-  # passes its own 16384 (upstream #1869). Thinking tokens count against this
-  # cap, so it assumes the alias switch above.
+  # Enforced: the chat-completions client passes it to the request (the
+  # Responses client we pinned until v2.39.0 ignored it, upstream #763). Edge
+  # extraction still passes its own 16384 (upstream #1869). Thinking tokens
+  # count against this cap, so it assumes the alias switch above.
   max_tokens: 4096
   # PINNED TO 0.0 (2026-08-15). It was unset for claude-sonnet-5, which rejected
   # the param, and the comment here claimed it stayed unset "because extraction
@@ -164,14 +147,19 @@ graphiti:
   # it the extractor has nowhere to put a human and coreference has one less
   # signal to work with. Person is declared FIRST so it wins over the "use as
   # last resort" types below.
-  # THESE DESCRIPTIONS ONLY REACH THE MODEL WITH GRAPHITI_ENTITY_TYPE_SOURCE=config
-  # (set in the manifest; patches/cc-entity-type-source.patch). MCP 1.1.0
-  # otherwise substitutes its own built-in model for every name below and
-  # discards this text — and adds a required `description` attribute that
-  # grows without bound on a hub entity.
+  # WHAT THE MODEL IS TOLD (since v2.39.0): MCP 1.1.0 has a built-in model for
+  # every name below, and the extraction prompt's entity-types block is built
+  # from those models' DOCSTRINGS — multi-line "Instructions for identifying
+  # and extracting …" guidance per type. The descriptions here reach the prompt
+  # ONLY for a name upstream has no model for (none today); they are kept as
+  # the documented fallback, not as the guidance. GRAPHITI_ENTITY_TYPE_FIELDS=
+  # none (manifest; patches/cc-entity-type-source.patch) keeps those
+  # docstrings and drops the built-ins' required `description` attribute,
+  # which grew without bound on a hub entity. v2.38.4 briefly made THESE
+  # one-liners the guidance instead, and short episodes stopped extracting.
   entity_types:
     - name: "Person"
-      description: "An individual human being — family, friends, colleagues, contacts. Use the person's canonical full name as the entity name, never a role or pronoun ('the operator'). A NAME IS NOT A PERSON: a bare surname, maiden name, married name, nickname or alias ('Doe', 'Rivers', 'Janie', 'Hawk') must NEVER become an entity of its own, because that invents a second human who does not exist. Do still RECORD what someone is called — attach it to the person it belongs to, as a fact about that one person ('Jonathan Lee Rivers is also known as Hawk'). Drop the name, never the fact. THE OPERATOR IS ONE OF THESE PEOPLE: 'the operator' / 'the user' means the human team lead, a single Person the episode usually names elsewhere — resolve the mention to that named Person and keep the claim; never create an entity named 'operator', and never drop a fact because its subject was written as a role."
+      description: "An individual human being — family, friends, colleagues, contacts. (Fallback text only: MCP 1.1.0's built-in Person docstring is what the prompt carries.)"
     - name: "Preference"
       description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
     - name: "Requirement"

@@ -4,6 +4,53 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-21 — v2.39.0: the built-in docstrings are the guidance, and the client is upstream's
+
+Graph extraction. Since the v2.38.4 apply (2026-09-20 22:35 UTC) nine
+approved episodes landed with no entities and the Verify tab parked them as
+"extraction produced nothing". Nothing was lost: the local model answered
+`{"extracted_entities": []}`, an 8-token reply, and Graphiti saved the episode
+as told. Two things put it there, both ours.
+
+- **v2.38.4 removed the extraction guidance.** The prompt's entity-types block
+  is built from each type model's docstring and nothing else. MCP 1.1.0's
+  built-in models carry multi-line "Instructions for identifying and
+  extracting …" per type; the v2.38.4 patch replaced them with field-less
+  models built from `config.yaml`'s one-line descriptions to stop the
+  built-ins' required `description` attribute growing without bound, and the
+  guidance went with it. With thinking off the model no longer wanted JSON at
+  all, and the two grammar-legal openers `{` and `{"` sat 0.1 nats apart —
+  pretty-printed lists the entities, compact closes the list empty — with
+  llama.cpp's prompt-cache state deciding which won (identical request: 8
+  empties, then 13 successes). Measured on four failing texts with the
+  prompt cache off: config descriptions 0/4, built-in docstrings 4/4 with a
+  0.5–1.2 nat margin. `cc-entity-type-source.patch` now keeps the built-in
+  docstring and drops only the fields, switched by
+  `GRAPHITI_ENTITY_TYPE_FIELDS=none`: the prompt is byte-identical to
+  upstream's and attribute extraction is still skipped.
+- **The Responses-client pin is gone.** `cc-openai-client-switch.patch` kept
+  graphiti_core's Responses-API client on MCP 1.1.0 so the
+  `openai/chat_completions/` bridge alias kept working — an alias that only
+  existed because 1.0.2 had no other client. 1.1.0's stock chat-completions
+  client is what upstream picks for a local model: it passes `llm.max_tokens`
+  itself and sends `response_format: json_schema`, which LiteLLM forwards and
+  llama.cpp enforces (verified through the proxy 2026-09-21). `graphiti-llm`
+  is now a plain `openai/<model>` alias like cc-default; a `chat_completions/`
+  prefix on it 404s, and the setup, update and discovery probes now POST a
+  chat completion with `response_format` and assert the prefix is absent.
+  **Operator action on update:** in the LiteLLM UI change `graphiti-llm`'s
+  model from `openai/chat_completions/<model>` to `openai/<model>` (keep its
+  api_base, key scope and `chat_template_kwargs: {"enable_thinking": false}`)
+  right before running the updater — the running Responses client 404s on the
+  plain alias and the new chat client 404s on the bridged one, so the window
+  is the update itself.
+- **Cockpit build fix.** v2.38.6 appended `createdAt` to the fallback label but
+  never declared it on the `Session` type, so `tsc -b` failed and the updater
+  stopped at rebuild (2026-09-21 04:48 UTC). Declared.
+- Guards: `tests/test_graphiti_image_patches.py` rewritten for the new shape and
+  the retired pin; the model-preferences and single-node declaration tests pin
+  the plain prefix; DL-063 records the decision and supersedes DL-055.
+
 ## 2026-09-20 — v2.38.6: the server sends an instant, the browser renders a time
 
 Cockpit fix. A task-less lane's sidebar fallback label read "Inbox Triage ·

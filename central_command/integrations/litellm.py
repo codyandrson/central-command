@@ -717,9 +717,16 @@ async def probe_model(
                 # A Responses→chat bridge alias serves ONLY the Responses API —
                 # a plain chat call sends "chat_completions/<model>" upstream,
                 # which no server routes (graphiti-llm, measured 2026-08-30).
+                # graphiti-llm itself must NOT carry this prefix any more
+                # (2026-09-21): Graphiti's MCP server uses the stock
+                # chat-completions client now, and a bridged registration
+                # 404s there too — this branch is for any OTHER alias that
+                # still intentionally bridges.
                 notes.append("this is a Responses-bridge alias (openai/chat_completions/ "
                              "prefix) — it answers /v1/responses only; probe the "
-                             "underlying model's own alias instead")
+                             "underlying model's own alias instead. If this is "
+                             "graphiti-llm, remove the prefix — its caller now uses "
+                             "the stock chat-completions client and the bridge 404s.")
             else:
                 notes.append("404 on chat: check api_base ends in /v1 and the provider "
                              "prefix matches the gateway's format (openai/ vs anthropic/)")

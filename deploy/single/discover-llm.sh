@@ -10,7 +10,7 @@
 #   Usage (direct mode: endpoint via CC_LLM_BASE_URL / CC_LLM_API_KEY env vars):
 #     ./discover-llm.sh models                   # list model ids the endpoint serves
 #     ./discover-llm.sh chat       <model-id>    # prove a real completion works
-#     ./discover-llm.sh structured <model-id>    # a Responses-API json_schema round trip
+#     ./discover-llm.sh structured <model-id>    # a chat/completions json_schema round trip
 #     ./discover-llm.sh embed      <model-id>    # embed one string, print DIMENSION
 #     ./discover-llm.sh speech     <model-id> <out.mp3>   # synthesise one sentence
 #     ./discover-llm.sh transcribe <model-id> <audio>     # transcribe it back
@@ -26,11 +26,12 @@
 #                 ./discover-llm.sh --proxy transcribe cc-stt /tmp/p.mp3
 #               speech then transcribe is the round trip setup runs: the
 #               transcription must contain what was synthesised.
-#               `structured` is the graphiti-llm check: graphiti_core drives
-#               extraction through /v1/responses with a json_schema, and a
-#               registration without the openai/chat_completions/ bridge
-#               prefix answers PROSE with HTTP 200 — the one failure a plain
-#               chat probe cannot see.
+#               `structured` is the graphiti-llm check: Graphiti's MCP server
+#               drives extraction through /v1/chat/completions with a
+#               response_format json_schema, and a registration that still
+#               carries the old openai/chat_completions/ bridge prefix sends
+#               "chat_completions/<model>" upstream and llama-swap 404s — the
+#               one failure a plain chat probe cannot see.
 #               This is the normal validation path — it proves what production
 #               actually uses (spine -> proxy -> upstream), not a path nothing
 #               takes at runtime.
@@ -146,20 +147,22 @@ else:
     ;;
   structured)
     [[ -n "${2:-}" ]] || { echo "usage: $0 structured <model-id>" >&2; exit 1; }
-    # The exact call graphiti_core makes: /v1/responses with text.format
-    # json_schema. Through the proxy this is what proves the bridge prefix.
+    # The exact call Graphiti's MCP server makes now (2026-09-21, stock
+    # OpenAIGenericClient): /v1/chat/completions with response_format
+    # json_schema. Through the proxy this is what proves the alias is a
+    # PLAIN openai/<model> registration, not a bridged one.
     _api -H 'Content-Type: application/json' \
-      -d "{\"model\": \"$2\", \"input\": \"What word follows ping? Answer as JSON.\", \"text\": {\"format\": {\"type\": \"json_schema\", \"name\": \"probe\", \"strict\": true, \"schema\": {\"type\": \"object\", \"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"additionalProperties\": false}}}}" \
-      "${CC_LLM_BASE_URL}/responses" | $PY -c '
+      -d "{\"model\": \"$2\", \"messages\": [{\"role\": \"user\", \"content\": \"What word follows ping? Answer as JSON.\"}], \"response_format\": {\"type\": \"json_schema\", \"json_schema\": {\"name\": \"probe\", \"schema\": {\"type\": \"object\", \"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"]}}}}" \
+      "${CC_LLM_BASE_URL}/chat/completions" | $PY -c '
 import json, sys
 r = json.load(sys.stdin)
-text = "".join(c.get("text") or "" for o in r.get("output", []) if o.get("type") == "message"
-               for c in o.get("content", []))
+text = r.get("choices", [{}])[0].get("message", {}).get("content") or ""
 try:
     answer = json.loads(text)["answer"]
 except Exception:
-    sys.exit(f"FATAL: structured output is not the requested JSON (got {text[:120]!r}) — "
-             "is the model registered as openai/chat_completions/<id>?")
+    sys.exit(f"FATAL: the alias did not return schema-constrained JSON (got {text[:120]!r}) — "
+             "a chat_completions/ prefix on the registration is a likely cause; "
+             "it should be a plain openai/<model>.")
 m = r.get("model")
 print(f"structured ok: {m} -> {answer!r}")'
     ;;

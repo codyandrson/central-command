@@ -32,19 +32,17 @@ when a matching file is read.
   driver cached at module scope is loop-bound**; `neo4j_reader._get_driver`
   keys its cache on the running loop, and the writer shares that driver
   because access mode is a property of the SESSION, never of the driver.
-- **Graphiti's extraction needs the BRIDGED LiteLLM alias.** graphiti_core
-  drives extraction through the **Responses API** with no chat-completions
-  fallback; an OpenAI-compatible backend without `/v1/responses` silently
-  drops the `text.format` json_schema and every extraction fails. Registering
-  the model as **`openai/chat_completions/<model>`** forces LiteLLM's
-  Responses→chat bridge, which converts it into a real `response_format:
-  json_schema`. That prefix is the whole fix. **And the bridge only answers
-  Responses calls** — MCP server 1.1.0 picks the chat-completions client for
-  any non-OpenAI LLM URL, and a plain chat call to the bridged alias sends
-  `chat_completions/<model>` upstream and 404s (2026-09-19).
-  `GRAPHITI_OPENAI_CLIENT=responses` (our `cc-openai-client-switch.patch`)
-  keeps the Responses client; flip it to `generic` only together with an
-  un-bridged alias, and change nothing else about the pair.
+- **Graphiti's LLM client is upstream's, and `graphiti-llm` is a PLAIN
+  `openai/<model>` alias.** MCP 1.1.0 picks graphiti_core's chat-completions
+  client for any non-OpenAI LLM URL; it sends `response_format: json_schema`,
+  LiteLLM forwards it, llama.cpp enforces it as a grammar, and the client
+  passes `llm.max_tokens` itself (verified 2026-09-21). From 2026-08-01 to
+  v2.39.0 the alias carried an `openai/chat_completions/` prefix to bridge
+  the Responses-API client we then pinned with a patch; on the chat client
+  that prefix sends `chat_completions/<model>` upstream and 404s. The setup
+  probes now assert the prefix is ABSENT. Do not reintroduce the pin or the
+  prefix; if a future graphiti_core release changes the client choice, change
+  the alias and the probe together.
 - **A REQUIRED string attribute on a Graphiti entity type is an unbounded
   one.** graphiti-core re-extracts a typed entity's attributes on EVERY
   episode with the prior value in the prompt, and its 250-char cap exempts
@@ -55,17 +53,22 @@ when a matching file is read.
   knows, silently discarding the description in `config.yaml`. On the hub
   Person (502 edges) that reached 4378 chars and generations of 41-52k chars
   into the output cap: ~700 GPU-minutes a week, discarded (2026-09-20).
-  `GRAPHITI_ENTITY_TYPE_SOURCE=config` (our `cc-entity-type-source.patch`)
-  makes the configured, field-less types win, which also skips the
-  per-entity attribute call. If you ever add a real attribute, make it
-  Optional or give it `Field(max_length=…)`. Three things rode along and
-  belong together: thinking is switched OFF on the `graphiti-llm` ALIAS
+  `GRAPHITI_ENTITY_TYPE_FIELDS=none` (our `cc-entity-type-source.patch`)
+  keeps each built-in model's DOCSTRING and drops its fields, which skips the
+  per-entity attribute call. **The docstrings are the guidance**: the
+  extraction prompt's entity-types block is built from `__doc__` alone, and
+  the first cut of this fix (v2.38.4) swapped them for `config.yaml`'s
+  one-line descriptions — with thinking off, the local model then answered
+  `{"extracted_entities": []}` for short episodes (0/4 vs 4/4 with the
+  docstrings, logprobs 2026-09-21). config.yaml's descriptions reach the
+  prompt only for a name upstream has no model for. If you ever add a real
+  attribute, make it Optional or give it `Field(max_length=…)`. Two things
+  ride along: thinking is switched OFF on the `graphiti-llm` ALIAS
   (`chat_template_kwargs: {"enable_thinking": false}` in its litellm_params —
   graphiti-core sends reasoning controls only for gpt-5/o1/o3 names, and
-  llama.cpp does not enforce a json_schema grammar while the model thinks);
-  `llm.max_tokens` is only ENFORCED because the client-switch patch passes it
-  (upstream #763); and a log line is the only place the symptom shows — read
-  the Graphiti pod's log before theorising about the model.
+  llama.cpp does not enforce a json_schema grammar while the model thinks),
+  and a log line is the only place the symptom shows — read the Graphiti
+  pod's log before theorising about the model.
 - **Graphiti never assumes an episode's time.** Every present-tense fact's
   `valid_at` is anchored to the episode's `reference_time`, and Graphiti's
   own fallback is the moment it PROCESSED the episode — under MCP 1.0.2 that

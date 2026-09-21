@@ -138,7 +138,7 @@ recorded in-repo." rather than inventing one.
 | DL-052 | Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped | active | 2026-08-21 | test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_dropped_not_stored` | [graph.md](graph.md) |
 | DL-053 | The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1 | active | undated | test: `tests/conftest.py::no_live_graph_writes` | [graph.md](graph.md) |
 | DL-054 | An async bolt driver cached at module scope is loop-bound | active | undated | discipline only | [graph.md](graph.md) |
-| DL-055 | Graphiti's extraction needs the bridged LiteLLM alias | active | 2026-09-19 | discipline only | [graph.md](graph.md) |
+| DL-055 | Graphiti's extraction needs the bridged LiteLLM alias | superseded | 2026-09-19 | discipline only | [graph.md](graph.md) |
 | DL-056 | Graphiti will retire a fact it merely recognises; the guard is the invalidation scope, not the model | active | undated | test: `tests/test_graph_verification.py` | [graph.md](graph.md) |
 | DL-057 | graph.add_episode requires reference_time; no defaults, anywhere | active | 2026-09-19 | test: `tests/test_proposal_args.py::test_executor_normalises_the_reference_time_and_refuses_words` | [graph.md](graph.md) |
 | DL-058 | Episodes name the operator; "the operator" is not a graph subject | active | 2026-09-16 | test: `tests/test_context_overflow.py::test_graph_propose_notes_tell_the_agent_to_name_the_operator` | [graph.md](graph.md) |
@@ -187,3 +187,4 @@ recorded in-repo." rather than inventing one.
 | DL-101 | One name everywhere: the historical identifiers are gone | active | 2026-08-29 | discipline only | [process.md](process.md) |
 | DL-102 | The great scrub: a whole-repo audit is itself a periodic decision | active | 2026-08-31 | discipline only | [process.md](process.md) |
 | DL-103 | The runtime's use of credentialed integrations clients is read-only | active | 2026-09-20 | test: `tests/test_runtime_integration_reads.py::test_runtime_reaches_only_read_functions_on_credentialed_clients` | [process.md](process.md) |
+| DL-104 | Graphiti's LLM client is upstream's; graphiti-llm is a plain alias and the built-in docstrings are the guidance | active | 2026-09-21 | test: `tests/test_graphiti_image_patches.py::test_the_responses_client_pin_is_retired` | [process.md](process.md) |
