@@ -225,17 +225,26 @@ async def _resubmit(row: dict) -> bool:
     it had acked but not extracted (2026-09-15: 64 replays and four fresh
     approvals in one night), and a LiteLLM alias outage drops them one by one.
     False when nothing can be re-sent: no approved text on record."""
-    from central_command.gateway.executor import episode_source_description
+    from central_command.gateway.executor import (
+        _episode_reference_time,
+        episode_source_description,
+    )
     from central_command.integrations import graphiti
 
     approved = await _approved_episode(row)
     if approved is None:
         return False
     args, approver = approved
+    # The SAME instant the Executor sent: `reference_time` is keyword-only
+    # with no default (DL-057), and this call omitted it from v2.38.0 until
+    # v2.39.1 — every re-submission raised TypeError and the sweep logged
+    # "graph verification failed" for the row on every tick. The test fake
+    # had a default the real function does not; it now mirrors the signature.
     await graphiti.add_episode(
         args["name"], args["episode_body"],
         episode_source_description(args.get("source_description", ""), approver, row["marker"]),
         group_id=row["group_id"],
+        reference_time=_episode_reference_time(args.get("reference_time")),
     )
     return True
 

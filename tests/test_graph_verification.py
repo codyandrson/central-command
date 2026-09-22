@@ -119,9 +119,14 @@ def _approved(monkeypatch, args=None, approver="human:doe"):
 
     sent = []
 
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
+    # Mirrors graphiti.add_episode's REAL signature: reference_time is
+    # keyword-only with no default. A fake with a default hid the v2.38.0
+    # regression where the re-submit omitted it (found live 2026-09-21).
+    async def fake_add_episode(name, episode_body, source_description, group_id=None,
+                               *, reference_time: str):
         sent.append(dict(name=name, episode_body=episode_body,
-                         source_description=source_description, group_id=group_id))
+                         source_description=source_description, group_id=group_id,
+                         reference_time=reference_time))
         return "queued"
 
     async def fake_approved(row):
@@ -152,7 +157,10 @@ async def test_absent_episode_past_the_deadline_is_resubmitted_once(monkeypatch)
         name="probe", episode_body="Ada leads the probe team.",
         source_description="operator statement | trust=human-approved"
                            " | approver=human:doe | proposal=p-test",
-        group_id=group)]
+        group_id=group,
+        # The instant the operator approved, normalised exactly as the
+        # Executor's first send — never omitted, never "now".
+        reference_time="2026-01-01T00:00:00Z")]
     landed = await repo.get_graph_verification(row["id"])
     assert landed["status"] == "PENDING"
     assert landed["resubmitted_at"] is not None

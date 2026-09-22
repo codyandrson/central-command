@@ -4,6 +4,24 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-21 — v2.39.1: a re-submitted episode carries the instant it was approved with
+
+Graph verification. Ten episodes acked by Graphiti but not yet extracted when
+the v2.38.4 apply replaced the pod were lost with its in-memory queue. Once
+past their absence deadline, the verify sweep re-sent each one every tick —
+and every re-send raised `add_episode() missing 1 required keyword-only
+argument: 'reference_time'`, logged as "graph verification failed for <row>".
+v2.38.0 made `reference_time` mandatory with no default (DL-057) and updated
+the Executor's first send; the sweep's re-submit still called the old shape.
+The suite missed it because the test's fake `add_episode` gave the argument a
+default the real function refuses.
+
+- `graph_auditor._resubmit` now passes the approved proposal's
+  `reference_time` through the Executor's own normaliser, so a re-sent
+  episode is byte-for-byte the first send.
+- The test fake mirrors the real keyword-only signature and the re-submit
+  assertion pins the instant, so a call that omits it fails the suite.
+
 ## 2026-09-21 — v2.39.0: the built-in docstrings are the guidance, and the client is upstream's
 
 Graph extraction. Since the v2.38.4 apply (2026-09-20 22:35 UTC) nine
