@@ -719,6 +719,82 @@ function LoeCreateBlock({ args }: { args: Record<string, unknown> }) {
   );
 }
 
+/** mail.create_rule: a standing auto-dismiss rule an agent drafted (or the
+ *  operator created directly). The server-generated `description` reads
+ *  aloud as the plain-words summary; criteria/exceptions are labelled rows
+ *  (JSON is not a review surface for a rule the operator has to trust
+ *  indefinitely); queued_matches + apply_to_queued tell the operator whether
+ *  approving this also folds mail sitting in the queue right now; samples
+ *  are the same from/subject/date shape the preview endpoint returns. */
+function MailCreateRuleBlock({ args }: { args: Record<string, unknown> }) {
+  const {
+    criteria, exceptions, description, reason, apply_to_queued, queued_matches, samples,
+    ...rest
+  } = args;
+  const criteriaObj = (criteria && typeof criteria === 'object' ? criteria as Record<string, unknown> : {});
+  const exceptionsObj = (exceptions && typeof exceptions === 'object' ? exceptions as Record<string, unknown> : {});
+  const sampleRows = Array.isArray(samples)
+    ? samples.filter((s): s is { from?: unknown; subject?: unknown; date?: unknown } => s != null && typeof s === 'object')
+    : [];
+  delete rest.criteria; delete rest.exceptions; delete rest.description;
+  delete rest.reason; delete rest.apply_to_queued; delete rest.queued_matches; delete rest.samples;
+
+  const criteriaRows = (obj: Record<string, unknown>) =>
+    Object.entries(obj).filter(([, v]) => v != null && v !== '');
+
+  return (
+    <div className="space-y-1.5">
+      {typeof description === 'string' && description && (
+        <blockquote className="whitespace-pre-wrap cockpit-wrap rounded-lg border-l-2 border-primary/40 bg-muted/40 p-2.5 text-[0.7rem] leading-relaxed text-foreground/90">
+          {description}
+        </blockquote>
+      )}
+      {typeof reason === 'string' && reason && (
+        <p className="text-[0.7rem] text-foreground/80"><span className="font-semibold text-muted-foreground">reason: </span>{reason}</p>
+      )}
+      {criteriaRows(criteriaObj).length > 0 && (
+        <dl className="space-y-0.5 text-[0.7rem] text-foreground/80">
+          <dt className="font-semibold text-muted-foreground">criteria:</dt>
+          {criteriaRows(criteriaObj).map(([k, v]) => (
+            <div key={k} className="pl-2"><dt className="inline font-semibold text-muted-foreground">{k}: </dt><dd className="inline">{String(v)}</dd></div>
+          ))}
+        </dl>
+      )}
+      {criteriaRows(exceptionsObj).length > 0 && (
+        <dl className="space-y-0.5 text-[0.7rem] text-foreground/80">
+          <dt className="font-semibold text-muted-foreground">exceptions:</dt>
+          {criteriaRows(exceptionsObj).map(([k, v]) => (
+            <div key={k} className="pl-2"><dt className="inline font-semibold text-muted-foreground">{k}: </dt><dd className="inline">{String(v)}</dd></div>
+          ))}
+        </dl>
+      )}
+      <p className="text-[0.7rem] text-foreground/80">
+        <span className="font-semibold text-muted-foreground">queued matches now: </span>
+        {typeof queued_matches === 'number' ? queued_matches : 0}
+        {' — '}
+        {apply_to_queued
+          ? 'will be dismissed on approval'
+          : 'will NOT be dismissed on approval (rule applies going forward only)'}
+      </p>
+      {sampleRows.length > 0 && (
+        <ul className="space-y-1">
+          {sampleRows.map((s, i) => (
+            <li key={i} className="text-[0.667rem] text-muted-foreground">
+              {String(s.from ?? '')} — {String(s.subject ?? '')} ({String(s.date ?? '')})
+            </li>
+          ))}
+        </ul>
+      )}
+      {Object.keys(rest).length > 0 && (
+        <details className="text-[0.7rem] text-muted-foreground">
+          <summary className="cursor-pointer">other arguments</summary>
+          <JsonBlock value={rest} />
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** mcp.sync_source: one DiffBlock per synced file, headed by its path. Falls
  *  back to raw JSON if the backend sent no diffs (shouldn't happen — guards
  *  against a payload shape mismatch rather than rendering nothing). */
@@ -1055,6 +1131,7 @@ function ProposalPane({
                 ? (a.skill_diff ? <DiffBlock diff={a.skill_diff} /> : <SkillDocBlock args={a.arguments ?? {}} />)
               : cap === 'mcp.sync_source' ? <McpSyncBlock diffs={a.mcp_diffs ?? []} args={a.arguments ?? {}} />
               : cap === 'loe.create' ? <LoeCreateBlock args={a.arguments ?? {}} />
+              : cap === 'mail.create_rule' ? <MailCreateRuleBlock args={a.arguments ?? {}} />
               : <JsonBlock value={a.arguments ?? {}} />}
           </div>
           );

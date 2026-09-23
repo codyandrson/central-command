@@ -143,8 +143,44 @@ async def _with_recurrence_context(prompt: str, item: dict) -> str:
     )
 
 
-async def _with_pending_proposals_context(prompt: str) -> str:
-    """The proposals already waiting on the operator, as fact (2026-08-18).
+# Intent embeddings of pending proposals, keyed by proposal id. Pruned to the
+# currently pending set on every use, so it never outgrows the approval
+# limit; lost on restart, which costs one re-embed per pending intent.
+_intent_vectors: dict[str, list[float]] = {}
+
+
+async def _item_vector(item: dict) -> list[float] | None:
+    """The item's embedding — the one the semantic freeze computed and stored
+    on the row, or a fresh one from the same text. None when the embedder is
+    unreachable or the item has no text yet."""
+    vector = item.get("embedding")
+    if vector:
+        return vector
+    if settings.demo_mode:
+        return None
+    try:
+        from central_command.integrations.neo4j_writer import embed
+
+        text = (
+            f"{item.get('subject') or ''}\n"
+            f"{(((item.get('payload') or {}).get('text')) or '')[:1500]}"
+        )
+        vector = await embed(text)
+    except Exception:  # noqa: BLE001 — best-effort, fail open
+        log.exception("item embedding failed — proceeding without it")
+        return None
+    if vector:
+        item["embedding"] = vector
+        try:
+            await repo.set_work_item_embedding(item["id"], vector)
+        except Exception:  # noqa: BLE001
+            log.exception("storing item embedding failed — proceeding")
+    return vector
+
+
+async def _with_pending_proposals_context(prompt: str, item: dict | None = None) -> str:
+    """The pending proposals RELATED to this item, as fact (2026-08-18,
+    targeted 2026-09-22).
 
     A parked proposal RELEASES its claim and marks its item PROCESSED, and its
     effect only reaches the world at approval — so the next email runs with the
@@ -154,25 +190,63 @@ async def _with_pending_proposals_context(prompt: str) -> str:
     The thread lock cannot cover this and never could — the emails share no
     thread; that is exactly what makes them siblings in MEANING only.
 
+    Until v2.40.0 this appended the intents of up to TWENTY pending proposals,
+    related or not — and every prompt then opened with twenty examples of
+    whatever the queue was full of, which the agent read as house style (the
+    AKVIS run of 2026-09-22 cited "the standing practice for the dozens of
+    other opted-in marketing senders" as its reason). Now only intents whose
+    embedding sits within `pending_context_threshold` of the item's are
+    shown, at most `pending_context_limit`, nearest first; an unreachable
+    embedder means NO block — the duplicate guard then rests on the claim
+    query's hard keys and the semantic freeze, both of which still stand.
     Facts, not directives: the agent is told what is pending and decides.
-    Since 2026-08-19 the claim query DOES hard-lock the cheap relatedness
-    signals (same thread, same normalized subject — including while a parked
-    proposal awaits its verdict), so this context is the remaining soft layer
-    for relatedness those keys cannot see: same fact, different thread and
-    different subject. That judgement is semantic and stays the agent's.
     """
     pending = await repo.list_proposals("AWAITING_HUMAN")
     if not pending:
+        _intent_vectors.clear()
         return prompt
-    shown = pending[:20]
-    more = "" if len(shown) == len(pending) else f" (showing {len(shown)} of {len(pending)})"
-    lines = "\n".join(f"- {p['intent']}" for p in shown)
+    if item is None:
+        return prompt
+    vector = await _item_vector(item)
+    if not vector:
+        return prompt
+    pending_ids = {p["id"] for p in pending}
+    for stale in [k for k in _intent_vectors if k not in pending_ids]:
+        _intent_vectors.pop(stale, None)
+    scored: list[tuple[float, str]] = []
+    for p in pending:
+        iv = _intent_vectors.get(p["id"])
+        if iv is None:
+            iv = await _embed_intent(p.get("intent") or "")
+            if iv is None:
+                continue
+            _intent_vectors[p["id"]] = iv
+        score = _cosine(vector, iv)
+        if score >= settings.pending_context_threshold:
+            scored.append((score, p["intent"]))
+    if not scored:
+        return prompt
+    scored.sort(key=lambda s: -s[0])
+    shown = scored[: max(1, int(settings.pending_context_limit))]
+    lines = "\n".join(f"- {intent}" for _, intent in shown)
     return prompt + (
-        f"\n\n[queue context] These proposals are already awaiting the "
-        f"operator's decision and have NOT taken effect yet{more}. If one of "
+        "\n\n[queue context] These related proposals are already awaiting "
+        "the operator's decision and have NOT taken effect yet. If one of "
         "them already covers what this item calls for, do not propose it "
         "again:\n" + lines
     )
+
+
+async def _embed_intent(text: str) -> list[float] | None:
+    if settings.demo_mode or not text.strip():
+        return None
+    try:
+        from central_command.integrations.neo4j_writer import embed
+
+        return await embed(text)
+    except Exception:  # noqa: BLE001 — best-effort, fail open
+        log.exception("intent embedding failed — proceeding without it")
+        return None
 
 
 # The first prompt may take this many tool-result ceilings (each one
@@ -208,7 +282,7 @@ async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
     # against the full record.
     prompt = _bound_prompt(prompt)
     prompt = await _with_recurrence_context(prompt, item)
-    prompt = await _with_pending_proposals_context(prompt)
+    prompt = await _with_pending_proposals_context(prompt, item)
     return await ingest_and_propose(
         _with_operator_note(prompt, note),
         model=model or await resolve_model(agent_id="inbox-triage"),
@@ -289,6 +363,42 @@ HANDLERS: dict[str, _KindHandler] = {
     # refuses.
     "wiki_repair": _KindHandler(_handle_wiki_repair, "agent:wiki-agent", False),
 }
+
+
+async def _match_mail_rule(item: dict) -> dict | None:
+    """The first active mail rule that takes this item, or None. Fail-open:
+    a rules read that errors must never block dispatch — the item just runs
+    like it did before rules existed."""
+    from central_command.ingest import mail_rules
+
+    try:
+        rules = await repo.active_mail_rules()
+    except Exception:  # noqa: BLE001 — best-effort, the run is the fallback
+        log.exception("mail rules read failed — dispatching without rules")
+        return None
+    return mail_rules.first_match(rules, item)
+
+
+async def _fold_under_rule(item: dict, rule: dict) -> dict:
+    from central_command.ingest import mail_rules
+
+    rationale = mail_rules.dismissal_rationale(rule)
+    moved = await repo.fold_by_mail_rule([item["id"]], rule, rationale)
+    if not moved:
+        # The claim's row moved under us (a concurrent operator action).
+        # Release it rather than run it: the next claim re-checks.
+        await repo.release_work_item(item["id"], error="rule fold raced", count_attempt=False)
+        return {"item_id": item["id"], "ok": True, "released": True}
+    await events.emit(
+        "work.rule_dismissed",
+        ref_id=item["id"],
+        payload={"rule_id": rule["id"], "description": rule["description"],
+                 "subject": item.get("subject"), "rationale": rationale},
+        actor=f"rule:{rule['id']}",
+    )
+    log.info("dispatch: %s folded under mail rule %s", item["id"], rule["id"])
+    return {"item_id": item["id"], "ok": True, "rule_dismissed": True,
+            "rule_id": rule["id"]}
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -451,6 +561,17 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         # Inside the try: a provider flap gets the same release/retry treatment
         # as any other transient failure.
         await ledger.hydrate_work_item(item)
+
+        # Standing mail rules (2026-09-22, v2.40.0), FIRST thing after the
+        # item has content and BEFORE anything that costs: no sibling
+        # hydration, no embedding, no model call. A rule is operator-approved
+        # policy that this mail never needs action; matching it here is the
+        # whole point of having one. The fold is terminal but reopenable, and
+        # a reopened item is rule-exempt for good (mail_rules.matches).
+        if kind == "email":
+            rule = await _match_mail_rule(item)
+            if rule is not None:
+                return await _fold_under_rule(item, rule)
 
         # Post-hydration freezes, now that the item has content — BEFORE
         # spending sibling hydrations or a run. First the exact keys re-check:

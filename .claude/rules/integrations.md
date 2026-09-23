@@ -67,3 +67,11 @@ when a matching file is read.
   arrives via `dispatch_once`, hand-fed work via `dispatch_item` — both claim
   from the ledger first. Don't add a route that calls `ingest_and_propose()`
   directly.
+- **A rule fold is the one terminal fold at claim time, and only because the
+  approval already happened.** `dispatcher._fold_under_rule` lands a row
+  `FOLDED` before any run because the operator approved the RULE (or wrote
+  it themselves); the fold-is-a-claim doctrine above is about an AGENT's
+  claim of coverage, which a rule is not. Keep the two apart: never let a
+  rule be created without the gate, and never let an agent fold terminal on
+  its own say-so. A reopened rule fold is `rule_exempt` for good — a rule
+  that re-takes what the operator pulled back is a loop they cannot escape.

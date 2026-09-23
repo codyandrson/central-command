@@ -31,6 +31,32 @@ curl 'localhost:8080/api/events?since=0&kind=work'   # the work.* audit trail
 shut — most often the approval throttle, which means the Decisions Inbox is
 waiting on you, not the system on itself.
 
+## Mail rules (standing dismissals)
+
+A mail rule is operator-approved policy that mail matching stated criteria
+never needs action. The dispatcher checks the active rules the moment a
+claimed item has content — before sibling hydration, before any model call —
+and a match folds the row (`FOLDED`, reopenable) at zero model cost. Rules
+are AND-combined, case-insensitive criteria (`from_address` exact,
+`from_domain` or a subdomain, `subject_contains`, `body_contains`) with
+optional exceptions on the same fields; a rule must identify the sender.
+They apply in creation order, first match wins.
+
+Agents propose rules (`propose_mail_rule` → `mail.create_rule`, through the
+Decisions Inbox like any write); the operator creates them directly from the
+cockpit's Mail rules settings or the API, previewing first:
+
+```bash
+curl localhost:8080/api/mail/rules                       # active rules, with match and reopen counts
+curl -X POST localhost:8080/api/mail/rules/preview -H 'content-type: application/json' \
+     -d '{"criteria": {"from_domain": "shop.example", "subject_contains": "weekly digest"}}'
+curl -X POST localhost:8080/api/mail/rules/<id>/revoke -d '{"reason": "took real mail"}'
+```
+
+Reopening a rule-folded item (`POST /api/work/{id}/reopen` with a note) puts
+it back in the queue rule-exempt, so no rule takes it again, and counts
+against the rule — a rising `reopened_count` is the signal to revoke.
+
 ## Changing settings
 
 All knobs are `CC_*` environment variables read at process start from the

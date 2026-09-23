@@ -533,6 +533,49 @@ async def _work_bulk_dismiss(args: dict, approver: str, proposer: str | None) ->
     )
 
 
+async def _mail_create_rule(args: dict, approver: str, proposer: str | None) -> str:
+    """Create a standing mail rule (2026-09-22) and, when asked, sweep the
+    queue it matches right now. Shape is checked from `contract.ARG_SPECS`
+    before this runs; what belongs here is the rule's MEANING — the criteria
+    re-validated by the same function the tool used, and the description
+    re-derived from them — so neither an agent nor a stale preview can put a
+    rule in the table that says one thing and matches another. The sweep
+    count is what actually moved, never the propose-time number."""
+    from central_command import events
+    from central_command.db import repo
+    from central_command.ingest import mail_rules
+
+    criteria, exceptions = mail_rules.validate(
+        args.get("criteria") or {}, args.get("exceptions") or {}
+    )
+    description = mail_rules.describe(criteria, exceptions)
+    reason = str(args.get("reason") or "").strip()
+    if not reason:
+        raise RuntimeError("mail.create_rule: reason must not be empty")
+    proposal_id = _current_proposal_id.get()
+    created_by = (
+        f"proposal:{proposal_id}" if proposal_id else "executor"
+    ) + (f" ({proposer})" if proposer else "")
+    rule = await repo.create_mail_rule(criteria, exceptions, description, reason, created_by)
+    swept = 0
+    if bool(args.get("apply_to_queued", True)):
+        swept = await repo.sweep_mail_rule(rule, mail_rules.dismissal_rationale(rule))
+    # After the write: the rule's creation is authorised by the approval
+    # already on the log; this records what the sweep did.
+    await events.emit(
+        "mail.rule_created", ref_id=rule["id"],
+        payload={"description": description, "reason": reason, "swept": swept,
+                 "proposal_id": proposal_id, "proposer": proposer},
+        actor=approver,
+    )
+    tail = (
+        f"; {swept} queued item(s) dismissed under it now"
+        if bool(args.get("apply_to_queued", True))
+        else "; queued mail left for its own turn"
+    )
+    return f"mail rule {rule['id']} created — {description}{tail}"
+
+
 async def _catalog_tag(args: dict, approver: str, proposer: str | None) -> str:
     """Curate a catalog lineage's tags (sources-catalog slice 6, Decision 7).
 
@@ -2160,6 +2203,7 @@ HANDLERS = {
     "work.bulk_dismiss": _work_bulk_dismiss,
     "mail.report_spam": _mail_report_spam,
     "mail.unsubscribe": _mail_unsubscribe,
+    "mail.create_rule": _mail_create_rule,
     "catalog.tag": _catalog_tag,
     "skill.create": _skill_create,
     "skill.doc_add": _skill_doc_add,

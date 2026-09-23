@@ -346,6 +346,17 @@ class Settings(BaseSettings):
     semantic_freeze_enabled: bool = True
     semantic_freeze_threshold: float = 0.70
 
+    # Targeted pending-proposal context (2026-09-22, v2.40.0). The triage
+    # prompt used to carry the intents of up to 20 proposals awaiting the
+    # operator, related or not — twenty examples of whatever the queue was
+    # full of, which primed the agent into repeating the pattern (the
+    # sender-disposition episode flood). Now only pending intents whose
+    # embedding sits within `pending_context_threshold` of the item are
+    # shown, at most `pending_context_limit`, and none when the embedder is
+    # unreachable (the duplicate guard degrades to the mechanical locks).
+    pending_context_threshold: float = 0.50
+    pending_context_limit: int = 3
+
     # Heartbeat (Phase 4, D27) — the scheduler for recurring team work.
     # Approval attaches to what the work DOES, never to the trigger: the
     # heartbeat only invokes levers the operator already has (enroll mail,

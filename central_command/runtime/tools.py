@@ -1935,6 +1935,96 @@ async def propose_bulk_dismiss(ctx: RunContext, query: str, rationale: str) -> s
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
+async def propose_mail_rule(
+    ctx: RunContext,
+    reason: str,
+    from_address: str | None = None,
+    from_domain: str | None = None,
+    subject_contains: str | None = None,
+    body_contains: str | None = None,
+    except_from_address: str | None = None,
+    except_from_domain: str | None = None,
+    except_subject_contains: str | None = None,
+    except_body_contains: str | None = None,
+    apply_to_queued: bool = True,
+) -> str:
+    """Propose a STANDING inbox rule: from approval on, mail matching every
+    stated criterion (and no exception) is dismissed at intake without
+    reaching any agent. Criteria are AND-combined and case-insensitive:
+    `from_address` is the sender's exact address; `from_domain` matches the
+    domain or any subdomain; `subject_contains` / `body_contains` are
+    substring matches (3+ characters). At least one criterion is required and
+    it must identify the SENDER — a bare provider domain (gmail.com) or a
+    phrase alone is refused. `except_*` fields exempt mail on any match.
+
+    `reason` is one sentence for the operator: why this mail never needs
+    action (what it is, why the operator gets it). `apply_to_queued=True`
+    also dismisses the copies already waiting in the queue on approval; set
+    it False to leave them for their own turn.
+
+    The tool previews the queue and pins the plain-words description, the
+    current match count and sample rows into the proposal — the operator
+    approves exactly what you and they can both read. A rule is revocable
+    and every fold is reopenable, so a wrong rule costs a delay, never a lost
+    email. Dismiss the email you are handling in plain text as usual.
+    """
+    from central_command.db import repo
+    from central_command.ingest import mail_rules
+
+    criteria = {
+        "from_address": from_address, "from_domain": from_domain,
+        "subject_contains": subject_contains, "body_contains": body_contains,
+    }
+    exceptions = {
+        "from_address": except_from_address, "from_domain": except_from_domain,
+        "subject_contains": except_subject_contains, "body_contains": except_body_contains,
+    }
+    try:
+        criteria, exceptions = mail_rules.validate(criteria, exceptions)
+    except ValueError as e:
+        raise ModelRetry(
+            f"{e}. State criteria that identify the sender (from_address, or "
+            "from_domain plus a subject/body phrase) and try again — or, if no "
+            "standing rule fits, just dismiss this one email in plain text."
+        ) from e
+    if not (reason or "").strip():
+        raise ModelRetry("reason must say, in one sentence, why this mail never needs action.")
+    description = mail_rules.describe(criteria, exceptions)
+    preview = await repo.mail_rule_matches(criteria, exceptions)
+    proposal = Proposal(
+        intent=(reason or "").strip(),
+        actions=[Action(
+            capability="mail.create_rule@v1",
+            arguments={
+                "criteria": criteria,
+                "exceptions": exceptions,
+                "description": description,
+                "reason": (reason or "").strip(),
+                "apply_to_queued": bool(apply_to_queued),
+                "queued_matches": preview["queued_matches"],
+                "samples": preview["samples"],
+            },
+            target_ref={"system": "mail_rule", "id": description, "read_version": "unknown"},
+            reversibility=Reversibility.reversible,
+        )],
+        evidence=[Evidence(
+            kind="queue",
+            source_ref="work_item scan: " + json.dumps(criteria, sort_keys=True),
+            locator="repo.mail_rule_matches over UNPROCESSED rows at propose time",
+            claim=(
+                f"{preview['queued_matches']} unprocessed queue item(s) match "
+                "these criteria right now"
+            ),
+        )],
+        expected_effect=(
+            f"a standing rule exists: {description} "
+            + (f"The {preview['queued_matches']} matching queued item(s) are FOLDED on approval."
+               if apply_to_queued else "Queued mail is left for its own turn.")
+        ),
+    )
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
 # --- mail actions (2026-09-12): the first mail capabilities that touch the
 # MAILBOX itself. Both pin their target at propose time from the ledger and
 # the façade, so what the operator reviews (sender, subject, URL) is a read

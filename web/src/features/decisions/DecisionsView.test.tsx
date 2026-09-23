@@ -204,6 +204,26 @@ describe('DecisionsView proposal pane', () => {
     expect(screen.queryByText('other arguments')).not.toBeInTheDocument();
   });
 
+  it('renders a mail.create_rule proposal with its description, queued count and a sample', async () => {
+    state.detail = {
+      id: 'p1', agent_id: 'inbox-triage', intent: 'Auto-dismiss newsletter noise', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(1), evidence: [],
+      actions: [{ capability: 'mail.create_rule@v1', arguments: {
+        criteria: { from_domain: 'newsletters.example.com' },
+        exceptions: {},
+        description: 'dismisses mail from newsletters.example.com',
+        reason: 'recurring low-value noise',
+        apply_to_queued: true,
+        queued_matches: 5,
+        samples: [{ from: 'digest@newsletters.example.com', subject: 'This week', date: '2026-09-20' }],
+      } }],
+    };
+    await openProposal();
+    await waitFor(() => expect(screen.getByText('dismisses mail from newsletters.example.com')).toBeInTheDocument());
+    expect(screen.getByText(/queued matches now:/).closest('p')).toHaveTextContent('queued matches now: 5 — will be dismissed on approval');
+    expect(screen.getByText(/This week/)).toBeInTheDocument();
+  });
+
   it('shows no badge when the agent stated none — absent is not low', async () => {
     state.detail = {
       id: 'p1', agent_id: 'inbox-triage', intent: 'Record it', status: 'AWAITING_HUMAN',

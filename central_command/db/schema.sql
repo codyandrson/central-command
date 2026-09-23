@@ -1283,3 +1283,42 @@ on conflict (id) do nothing;
 insert into agent_grant (agent_id, pack, granted_by) values
     ('inbox-triage', 'mail-read', 'seed:2026-09-02')
 on conflict (agent_id, pack) do nothing;
+
+-- Mail rules (2026-09-22, v2.40.0): standing inbox rules — "auto-dismiss mail
+-- matching these criteria" — the shape Gmail filters and Outlook rules take.
+-- Until now a sender disposition had no home: the triage agent wrote "X sends
+-- expected no-action mail" into the SHARED knowledge graph, one approval per
+-- sender (~266 such episodes in the fortnight before this), and nothing read
+-- them back at claim time. A rule is POLICY, not knowledge: it lives here,
+-- the dispatcher matches it BEFORE any model call, and a matched row folds
+-- without a run. Criteria are AND-combined; exceptions (same fields) exempt
+-- on any match; rules apply in `position` order, first match wins
+-- (Outlook's "stop processing more rules", on by default). Revocation is a
+-- timestamp, never a delete — the grant precedent — so the record of what
+-- was auto-dismissed, by which rule, stays reconstructible. `matched_count`
+-- counts rows this rule folded (sweep + claim time); reopens are counted from
+-- the event log (`work.reopened` carrying `rule_id`), the wrongness signal.
+create table if not exists mail_rule (
+    id              text primary key,
+    position        int not null,
+    action          text not null default 'dismiss',   -- v1: dismiss only
+    criteria        jsonb not null,                    -- {from_address?, from_domain?, subject_contains?, body_contains?}
+    exceptions      jsonb not null default '{}'::jsonb,
+    description     text not null,                     -- plain words, server-generated from the criteria
+    reason          text not null,                     -- why, in the proposer's words
+    created_by      text not null,                     -- 'operator' | 'proposal:<id>' (+ proposer agent)
+    created_at      timestamptz not null default now(),
+    revoked_at      timestamptz,
+    revoked_reason  text,
+    matched_count   int not null default 0,
+    last_matched_at timestamptz
+);
+create index if not exists mail_rule_active_idx on mail_rule (position) where revoked_at is null;
+
+-- The agent-side pack for proposing a rule (mail-rule-propose): inbox-triage
+-- is the one agent that meets the same sender a hundred times. Seeded like
+-- mail-read; a live database gets the same row from this idempotent insert
+-- at the updater's schema phase.
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('inbox-triage', 'mail-rule-propose', 'seed:2026-09-22')
+on conflict (agent_id, pack) do nothing;

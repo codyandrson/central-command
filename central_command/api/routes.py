@@ -1595,10 +1595,95 @@ async def acknowledge_failure(item_id: str) -> dict:
 
 @router.post("/work/{item_id}/reopen")
 async def reopen_work_item(item_id: str, body: ReopenIn) -> dict:
-    if not await repo.reopen_work_item(item_id, body.note):
+    if await repo.reopen_work_item(item_id, body.note):
+        await events.emit(
+            "work.reopened", ref_id=item_id, payload={"note": body.note}, actor="operator"
+        )
+        return {"ok": True}
+    # A row a mail RULE folded (2026-09-22) reopens the same way — back to
+    # the queue with the note, and rule-exempt from then on. The rule id on
+    # the event is what `mail_rule.reopened_count` counts: a rule the
+    # operator keeps overriding is a rule to revoke.
+    rule_id = await repo.reopen_rule_folded(item_id, body.note)
+    if rule_id is None:
         raise HTTPException(409, "item is not awaiting dismissal confirmation")
     await events.emit(
-        "work.reopened", ref_id=item_id, payload={"note": body.note}, actor="operator"
+        "work.reopened", ref_id=item_id,
+        payload={"note": body.note, "rule_id": rule_id}, actor="operator",
+    )
+    return {"ok": True, "rule_id": rule_id}
+
+
+# --- mail rules (2026-09-22, v2.40.0): the operator path -------------------
+# Ungated like the operator's bulk dismissal: the operator is the author.
+# The agent path is `propose_mail_rule` → `mail.create_rule`, gated.
+
+
+class MailRuleCriteriaIn(BaseModel):
+    criteria: dict
+    exceptions: dict | None = None
+
+
+class MailRuleIn(MailRuleCriteriaIn):
+    reason: str
+    apply_to_queued: bool = True
+
+
+class MailRuleRevokeIn(BaseModel):
+    reason: str | None = None
+
+
+@router.get("/mail/rules")
+async def list_mail_rules(include_revoked: bool = False) -> dict:
+    return {"rules": await repo.list_mail_rules(include_revoked=include_revoked)}
+
+
+@router.post("/mail/rules/preview")
+async def preview_mail_rule(body: MailRuleCriteriaIn) -> dict:
+    from central_command.ingest import mail_rules
+
+    try:
+        criteria, exceptions = mail_rules.validate(body.criteria, body.exceptions or {})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    out = await repo.mail_rule_matches(criteria, exceptions)
+    out["description"] = mail_rules.describe(criteria, exceptions)
+    out["criteria"], out["exceptions"] = criteria, exceptions
+    return out
+
+
+@router.post("/mail/rules")
+async def create_mail_rule(body: MailRuleIn) -> dict:
+    from central_command.ingest import mail_rules
+
+    try:
+        criteria, exceptions = mail_rules.validate(body.criteria, body.exceptions or {})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(422, "reason must not be empty")
+    description = mail_rules.describe(criteria, exceptions)
+    rule = await repo.create_mail_rule(criteria, exceptions, description, reason, "operator")
+    swept = 0
+    if body.apply_to_queued:
+        swept = await repo.sweep_mail_rule(rule, mail_rules.dismissal_rationale(rule))
+    await events.emit(
+        "mail.rule_created", ref_id=rule["id"],
+        payload={"description": description, "reason": reason, "swept": swept},
+        actor="operator",
+    )
+    rule["matched_count"] = swept
+    return {"ok": True, "rule": {**rule, "reopened_count": 0}, "swept": swept}
+
+
+@router.post("/mail/rules/{rule_id}/revoke")
+async def revoke_mail_rule(rule_id: str, body: MailRuleRevokeIn) -> dict:
+    reason = (body.reason or "").strip() or None
+    if not await repo.revoke_mail_rule(rule_id, reason):
+        raise HTTPException(404, f"no active mail rule {rule_id!r}")
+    await events.emit(
+        "mail.rule_revoked", ref_id=rule_id, payload={"reason": reason}, actor="operator"
     )
     return {"ok": True}
 

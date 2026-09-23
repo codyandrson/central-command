@@ -1045,6 +1045,57 @@ PACKS: dict[str, Pack] = {
             ),
         ),
     ),
+    # mail-rule-propose (2026-09-22): a standing rule is the home a sender
+    # disposition never had. Before this, "X sends expected no-action mail"
+    # went into the SHARED graph one episode per sender (~266 in a
+    # fortnight), and nothing read them back at claim time. Its own pack, by
+    # the bulk-dismiss precedent: a rule keeps taking mail for as long as it
+    # stands, and holding that is a grant someone makes on purpose.
+    "mail-rule-propose": Pack(
+        name="mail-rule-propose",
+        description=(
+            "Propose a standing inbox rule that auto-dismisses future mail "
+            "matching stated criteria (the operator approves; revocable)."
+        ),
+        tool_names=("propose_mail_rule",),
+        guidance=(
+            "STANDING RULES: `propose_mail_rule(reason, from_address=, "
+            "from_domain=, subject_contains=, body_contains=, except_…=, "
+            "apply_to_queued=)` asks the operator to approve an inbox rule: "
+            "from then on, mail matching every stated criterion (and no "
+            "exception) is dismissed at intake without reaching you, and with "
+            "apply_to_queued the copies already waiting in the queue are "
+            "dismissed on approval too. Propose one when the operator has "
+            "said future mail like this should never reach them, or when you "
+            "are handling one of MANY copies of the same expected, "
+            "no-action mail (a marketing list, an automated notice) and the "
+            "sender history confirms the pattern. The criteria must name the "
+            "SENDER (address, or domain plus a subject/body phrase) — a bare "
+            "provider domain or a phrase alone is refused. The tool previews "
+            "the queue and pins the plain-words description, the match count "
+            "and sample rows into the proposal; the operator approves exactly "
+            "that. This is the ONLY place a sender disposition lives: never "
+            "write one into the knowledge graph. Dismiss the email you are "
+            "handling in plain text as usual; the rule covers the rest."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="mail.create_rule",
+                arguments=("{'criteria': {'from_address'?, 'from_domain'?, "
+                           "'subject_contains'?, 'body_contains'?}, "
+                           "'exceptions'?: {same fields}, 'reason': '<why>', "
+                           "'description': '<pinned by the tool>', "
+                           "'apply_to_queued': true|false, "
+                           "'queued_matches': <pinned>, 'samples': <pinned>}"),
+                notes=("You do not write these arguments: the tool validates "
+                       "the criteria, previews the queue and pins the rest. "
+                       "target_ref = {'system': 'mail_rule', 'id': '<the "
+                       "description>'}, reversibility = 'reversible' (the "
+                       "operator can revoke the rule; folded mail is "
+                       "reopenable)."),
+            ),
+        ),
+    ),
     "skill-propose": Pack(
         name="skill-propose",
         description=(
@@ -1495,7 +1546,8 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     "inbox-triage": ("jira-read", "jira-propose", "graph-read", "graph-propose",
                      "consult", "task-propose", "ask-operator",
                      "bulk-dismiss-propose", "mail-read",
-                     "mail-spam-propose", "mail-unsubscribe-propose"),
+                     "mail-spam-propose", "mail-unsubscribe-propose",
+                     "mail-rule-propose"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "graph-read", "graph-propose",
                     "consult", "task-propose", "ask-operator", "web-read",
@@ -1629,6 +1681,8 @@ NON_ADVISORY_TOOLS = frozenset({
     # review-theater failure mode, wearing an approval's clothes. The queue is
     # inbox-triage's own surface anyway; nobody consults about it.
     "propose_bulk_dismiss",
+    # A standing rule is queue policy for the same surface (2026-09-22).
+    "propose_mail_rule",
     # The mail actions (2026-09-12) act on "the email this run is handling"
     # by default — `deps.item_id`, which only the triage HOST run sets — and
     # the mailbox is inbox-triage's own surface exactly as the queue is.

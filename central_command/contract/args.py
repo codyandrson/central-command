@@ -92,6 +92,11 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # be present, the Executor says it must be the message's own.
     "mail.report_spam": ArgSpec(required=("provider_uuid",)),
     "mail.unsubscribe": ArgSpec(required=("provider_uuid", "url")),
+    # mail.create_rule (2026-09-22): the handler subscripts all three; the
+    # criteria's own validity (at least one field, no bare public domain) is
+    # `mail_rules.validate`, run again by the Executor — shape here, meaning
+    # there.
+    "mail.create_rule": ArgSpec(required=("criteria", "description", "reason")),
     # autodiscovery.skip (2026-09-13): the Executor subscripts both. The list
     # is checked for shape only; that the ids exist in a catalog is not a
     # world-state fact worth a call — an unknown id on the skip list is inert.

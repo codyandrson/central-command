@@ -4,6 +4,55 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-22 — v2.40.0: a sender disposition is a rule, not a fact
+
+Inbox triage. A review of 200 live triage sessions found the agent writing
+"X sends the operator expected no-action mail" into the SHARED knowledge
+graph — 499 episode proposals in a fortnight, roughly 266 of them this
+shape, one approval each — and nothing ever read them back when the next
+copy of that mail was claimed. Two mechanisms fed it: the triage charter
+framed the whole job as Jira-change detection with graph sync as "half the
+job", and every prompt carried the intents of up to twenty pending
+proposals, related or not, which the model read as house style (one run
+cited "the standing practice for the dozens of other opted-in marketing
+senders" as its reason). This release gives that memory a home that acts,
+and stops the priming. The charter itself was rewritten the same day as a
+governed version (v2, operator-authored, no code) — see the instance journal.
+
+- **Mail rules** (`mail_rule` table, `ingest/mail_rules.py`): standing inbox
+  rules in the shape Gmail filters and Outlook rules take. Criteria are
+  AND-combined and case-insensitive — `from_address` exact, `from_domain` or
+  a subdomain, `subject_contains`, `body_contains` — with optional
+  exceptions on the same fields; a rule must identify the sender, and a bare
+  provider domain (gmail.com) is refused. Rules apply in creation order,
+  first match wins. The dispatcher matches them at claim time, right after
+  hydration and BEFORE sibling hydration, embedding or any model call: a
+  match folds the row (FOLDED, reopenable) at zero model cost.
+- **`propose_mail_rule` / `mail.create_rule`** (new pack `mail-rule-propose`,
+  seeded to inbox-triage): the agent previews the queue and the proposal
+  pins the plain-words description, the current match count and sample
+  rows — the operator approves exactly what they can read. `apply_to_queued`
+  (default on) also folds the queued matches on approval. The Executor
+  re-validates the criteria and re-derives the description from them rather
+  than trusting either as written.
+- **Operator path**, ungated like the operator's bulk dismissal: `GET
+  /api/mail/rules`, `POST /api/mail/rules/preview`, `POST /api/mail/rules`,
+  `POST /api/mail/rules/{id}/revoke`. Revocation is a timestamp, never a
+  delete. A rule-folded item reopens through the existing
+  `POST /api/work/{id}/reopen`, goes back to the queue with the note, and is
+  rule-exempt from then on; the reopen event carries the rule id, so a rule
+  the operator keeps overriding shows a rising `reopened_count`.
+- **Cockpit:** a "Mail rules" settings category lists active (and, on
+  request, revoked) rules with revoke, and a new-rule form with preview
+  before create; the Decisions Inbox renders a `mail.create_rule` action
+  with its description, criteria, match count and samples.
+- **Targeted pending-proposal context:** the prompt block now carries only
+  pending intents whose embedding sits within `pending_context_threshold`
+  (0.50) of the item, at most `pending_context_limit` (3), nearest first —
+  and no block at all when the embedder is unreachable, since the claim
+  query's hard keys and the semantic freeze still stand behind the
+  duplicate guard. Intent vectors are cached in-process and pruned to the
+  pending set.
 ## 2026-09-22 — v2.39.3: every top-level yaml in deploy/k3s/ is a manifest to the updater
 
 k3s deployment. The v2.39.2 apply died at the manifests phase: `kubectl apply

@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { X, Settings, Mic, Monitor, Shield, Waypoints, Gauge } from 'lucide-react';
+import { X, Settings, Mic, Monitor, Shield, Waypoints, Gauge, MailX } from 'lucide-react';
 import { ConnectionSettings } from './ConnectionSettings';
 import { UpdateSettings } from './UpdateSettings';
 import { useVersionCheck } from '@/lib/version-check';
@@ -7,6 +7,7 @@ import { AudioSettings } from './AudioSettings';
 import { AppearanceSettings } from './AppearanceSettings';
 import { GraphSettings } from './GraphSettings';
 import { ContextSettings } from './ContextSettings';
+import { MailRulesSettings } from './MailRulesSettings';
 import type { TTSProvider } from '@/features/tts/useTTS';
 import type { STTInputMode, STTProvider } from '@/contexts/SettingsContext';
 
@@ -43,7 +44,7 @@ interface SettingsDrawerProps {
   onLogout?: () => void;
 }
 
-type SettingsCategory = 'advanced' | 'audio' | 'appearance' | 'graph' | 'context';
+type SettingsCategory = 'advanced' | 'audio' | 'appearance' | 'graph' | 'context' | 'mail-rules';
 type LegacySettingsCategory = SettingsCategory | 'audio-input' | 'voice-output';
 
 const SETTINGS_CATEGORY_KEY = 'nerve:settings-category';
@@ -52,7 +53,7 @@ function normalizeSavedCategory(value: string | null): SettingsCategory | null {
   const raw = value as LegacySettingsCategory | null;
   if (!raw) return null;
   if (raw === 'audio-input' || raw === 'voice-output') return 'audio';
-  if (raw === 'advanced' || raw === 'audio' || raw === 'appearance' || raw === 'graph' || raw === 'context') return raw;
+  if (raw === 'advanced' || raw === 'audio' || raw === 'appearance' || raw === 'graph' || raw === 'context' || raw === 'mail-rules') return raw;
   return null;
 }
 
@@ -62,6 +63,7 @@ const SETTINGS_CATEGORIES = [
   { key: 'appearance', label: 'Appearance', icon: Monitor },
   { key: 'graph', label: 'Graph', icon: Waypoints },
   { key: 'context', label: 'Context', icon: Gauge },
+  { key: 'mail-rules', label: 'Mail rules', icon: MailX },
 ] as const satisfies ReadonlyArray<{ key: SettingsCategory; label: string; icon: typeof Mic }>;
 
 /** Slide-in drawer containing connection, audio, and appearance settings. */
@@ -250,6 +252,8 @@ export function SettingsDrawer({
             {currentCategory === 'graph' && <GraphSettings />}
 
             {currentCategory === 'context' && <ContextSettings />}
+
+            {currentCategory === 'mail-rules' && <MailRulesSettings />}
 
             {currentCategory === 'advanced' && (
               <ConnectionSettings

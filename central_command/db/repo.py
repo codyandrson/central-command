@@ -5507,3 +5507,255 @@ async def sessions_stopped_for_update() -> list[str]:
         return [r["id"] for r in rows]
     finally:
         await conn.close()
+
+
+# --- mail rules (2026-09-22, v2.40.0) -----------------------------------------
+# Standing inbox rules matched at claim time. The Python matcher is
+# `ingest/mail_rules.py`; the SQL predicate below is its twin for previews
+# and sweeps (pinned to each other by tests/test_mail_rules.py).
+
+_RULE_ADDR = (
+    "btrim(lower(coalesce(substring(w.payload->>'from' from '<([^>]+)>'), "
+    "w.payload->>'from', '')))"
+)
+_RULE_BODY = (
+    "lower(regexp_replace(coalesce(w.payload->>'text', ''), E'^.*?\\n\\n', '', 's'))"
+)
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _rule_predicate(spec: dict, params: list) -> str:
+    """AND over one spec's fields as SQL, appending its parameters to `params`
+    (1-based `$n` placeholders continue from len(params))."""
+    parts = []
+    if "from_address" in spec:
+        params.append(spec["from_address"])
+        parts.append(f"{_RULE_ADDR} = ${len(params)}")
+    if "from_domain" in spec:
+        params.append(spec["from_domain"])
+        n = len(params)
+        parts.append(
+            f"(split_part({_RULE_ADDR}, '@', 2) = ${n} "
+            f"or split_part({_RULE_ADDR}, '@', 2) like '%.' || ${n})"
+        )
+    if "subject_contains" in spec:
+        params.append("%" + _like_escape(spec["subject_contains"]) + "%")
+        parts.append(f"lower(coalesce(w.subject, '')) like ${len(params)} escape '\\'")
+    if "body_contains" in spec:
+        params.append("%" + _like_escape(spec["body_contains"]) + "%")
+        parts.append(f"{_RULE_BODY} like ${len(params)} escape '\\'")
+    return "(" + " and ".join(parts) + ")" if parts else "true"
+
+
+def _rule_where(criteria: dict, exceptions: dict, params: list) -> str:
+    where = _rule_predicate(criteria, params)
+    if exceptions:
+        where += " and not " + _rule_predicate(exceptions, params)
+    where += " and coalesce((w.payload->>'rule_exempt')::boolean, false) = false"
+    return where
+
+
+async def mail_rule_matches(criteria: dict, exceptions: dict, samples: int = 5) -> dict:
+    """What a rule would take from the queue RIGHT NOW: the count of matching
+    UNPROCESSED rows and up to `samples` from/subject/date lines, newest
+    first. Refs-only rows carry no text yet, so a body/subject criterion can
+    only see hydrated rows — the count is honest about the rows it can read,
+    and claim-time matching covers the rest after hydration."""
+    params: list = []
+    where = _rule_where(criteria, exceptions, params)
+    conn = await _conn()
+    try:
+        count = await conn.fetchval(
+            f"select count(*) from work_item w where w.state = 'UNPROCESSED' and {where}",
+            *params,
+        )
+        rows = await conn.fetch(
+            f"""
+            select w.payload->>'from' as "from", w.subject, w.received_at
+            from work_item w
+            where w.state = 'UNPROCESSED' and {where}
+            order by w.received_at desc nulls last
+            limit {int(samples)}
+            """,
+            *params,
+        )
+    finally:
+        await conn.close()
+    return {
+        "queued_matches": int(count or 0),
+        "samples": [
+            {"from": r["from"], "subject": r["subject"],
+             "date": r["received_at"].isoformat() if r["received_at"] else None}
+            for r in rows
+        ],
+    }
+
+
+def _rule_row(r) -> dict:
+    d = dict(r)
+    for key in ("criteria", "exceptions"):
+        v = d.get(key)
+        d[key] = json.loads(v) if isinstance(v, str) else (v or {})
+    return d
+
+
+async def create_mail_rule(
+    criteria: dict, exceptions: dict, description: str, reason: str, created_by: str,
+) -> dict:
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            insert into mail_rule
+              (id, position, criteria, exceptions, description, reason, created_by)
+            values ($1, (select coalesce(max(position), 0) + 1 from mail_rule),
+                    $2::jsonb, $3::jsonb, $4, $5, $6)
+            returning *
+            """,
+            "rule_" + uuid.uuid4().hex[:12], json.dumps(criteria), json.dumps(exceptions),
+            description, reason, created_by,
+        )
+        return _rule_row(row)
+    finally:
+        await conn.close()
+
+
+_RULE_SELECT = """
+    select r.*,
+           (select count(*) from audit_event e
+             where e.kind = 'work.reopened' and e.payload->>'rule_id' = r.id) as reopened_count
+    from mail_rule r
+"""
+
+
+async def list_mail_rules(include_revoked: bool = False) -> list[dict]:
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            _RULE_SELECT
+            + ("" if include_revoked else " where r.revoked_at is null")
+            + " order by r.position, r.created_at"
+        )
+        return [_rule_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_mail_rule(rule_id: str) -> dict | None:
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(_RULE_SELECT + " where r.id = $1", rule_id)
+        return _rule_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def active_mail_rules() -> list[dict]:
+    """The rules the dispatcher matches at claim time, in position order.
+    Small by construction (tens, not thousands); read per claim so a revoke
+    takes effect on the next item."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from mail_rule where revoked_at is null order by position, created_at"
+        )
+        return [_rule_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def revoke_mail_rule(rule_id: str, reason: str | None) -> bool:
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update mail_rule set revoked_at = now(), revoked_reason = $2
+             where id = $1 and revoked_at is null
+            """,
+            rule_id, reason,
+        )
+        return r.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def fold_by_mail_rule(item_ids: list[str], rule: dict, rationale: str) -> list[str]:
+    """Fold the named rows under a rule: FOLDED (terminal, reopenable), the
+    rationale and rule id on the payload, the session cleared. Scoped to the
+    two states a rule may take a row from — UNPROCESSED (a sweep) and
+    CLAIMED (the dispatcher's own claim) — so a row another run holds can
+    never be yanked. Bumps the rule's counters by the rows actually moved."""
+    if not item_ids:
+        return []
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            update work_item
+               set state = 'FOLDED', terminal_at = now(), session_id = null,
+                   claimed_at = null,
+                   payload = coalesce(payload, '{}'::jsonb)
+                             || jsonb_build_object('dismissal_rationale', $2::text,
+                                                   'rule_id', $3::text)
+             where id = any($1::text[]) and state in ('UNPROCESSED', 'CLAIMED')
+            returning id
+            """,
+            item_ids, rationale, rule["id"],
+        )
+        moved = [r["id"] for r in rows]
+        if moved:
+            await conn.execute(
+                """
+                update mail_rule
+                   set matched_count = matched_count + $2, last_matched_at = now()
+                 where id = $1
+                """,
+                rule["id"], len(moved),
+            )
+        return moved
+    finally:
+        await conn.close()
+
+
+async def sweep_mail_rule(rule: dict, rationale: str) -> int:
+    """Fold every UNPROCESSED row the rule matches right now — the
+    'also apply to existing mail' opt-in. Returns the count folded."""
+    params: list = []
+    where = _rule_where(rule.get("criteria") or {}, rule.get("exceptions") or {}, params)
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"select w.id from work_item w where w.state = 'UNPROCESSED' and {where}",
+            *params,
+        )
+    finally:
+        await conn.close()
+    return len(await fold_by_mail_rule([r["id"] for r in rows], rule, rationale))
+
+
+async def reopen_rule_folded(item_id: str, note: str | None) -> str | None:
+    """Put a rule-folded row back in the queue with the operator's note, and
+    mark it `rule_exempt` so no rule takes it again. Returns the rule id it
+    was folded under, or None if the row is not a rule fold."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            update work_item
+               set state = 'UNPROCESSED', claimed_at = null, session_id = null,
+                   terminal_at = null, last_error = null, attempts = 0,
+                   not_before = null,
+                   payload = (case when $2::text is null then payload
+                                   else payload || jsonb_build_object('operator_note', $2::text) end)
+                             || '{"rule_exempt": true}'::jsonb
+             where id = $1 and state = 'FOLDED' and payload ? 'rule_id'
+            returning payload->>'rule_id' as rule_id
+            """,
+            item_id, note,
+        )
+        return row["rule_id"] if row else None
+    finally:
+        await conn.close()

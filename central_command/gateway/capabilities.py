@@ -842,6 +842,42 @@ REGISTRY: list[Capability] = [
             "thread fold uses."
         ),
     ),
+    # --- mail rules (2026-09-22, v2.40.0) ------------------------------------
+    Capability(
+        name="mail.create_rule",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "internal, reversible — a standing rule keeps folding matching "
+            "mail at intake until revoked (POST /api/mail/rules/{id}/revoke), "
+            "so a wrong rule silently buries a real sender for as long as it "
+            "stands; every fold is FOLDED (reopenable with a note, after which "
+            "the item is rule-exempt for good), and nothing leaves Central "
+            "Command or touches the mailbox"
+        ),
+        holder="Executor",
+        route=(
+            "repo.create_mail_rule (the `mail_rule` table), then, when "
+            "apply_to_queued, repo.sweep_mail_rule folds every UNPROCESSED row "
+            "the criteria match right now; from then on the dispatcher matches "
+            "the rule at claim time, before hydration of siblings and before "
+            "any model call (ingest/mail_rules.py)"
+        ),
+        arguments=["criteria", "description", "reason", "exceptions?",
+                   "apply_to_queued?", "queued_matches?", "samples?"],
+        description=(
+            "Create a standing inbox rule: mail matching every criterion "
+            "(from_address exact, from_domain or subdomain, subject_contains, "
+            "body_contains; all case-insensitive, AND-combined) and no "
+            "exception is dismissed at intake without an agent run. Rules apply "
+            "in creation order, first match wins. The proposing tool previews "
+            "the queue and pins `description`, `queued_matches` and `samples`, "
+            "so the operator approves what they saw; the Executor re-validates "
+            "the criteria (mail_rules.validate) and re-derives the description "
+            "rather than trusting either as written. A rule is POLICY: the one "
+            "home for a sender disposition, which is never a graph episode."
+        ),
+    ),
     # --- mail actions (2026-09-12): the first capabilities that touch the
     # MAILBOX itself — until now every mail capability changed only the queue.
     Capability(
