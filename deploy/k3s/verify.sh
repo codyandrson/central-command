@@ -230,7 +230,7 @@ fi
 if sudo grep -qs 'terminated-pod-gc-threshold' /etc/rancher/k3s/config.yaml /etc/rancher/k3s/config.yaml.d/*.yaml 2>/dev/null; then
   ok "k3s server: terminated-pod-gc-threshold set (dead pod records get collected)"
 else
-  bad "k3s server: no terminated-pod-gc-threshold — install deploy/k3s/k3s-server-config.yaml (README §1), restart k3s"
+  bad "k3s server: no terminated-pod-gc-threshold — install deploy/k3s/host/10-central-command.yaml (README §1), restart k3s"
 fi
 
 echo

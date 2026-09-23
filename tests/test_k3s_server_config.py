@@ -1,12 +1,18 @@
-"""deploy/k3s/k3s-server-config.yaml is the hand-installed k3s server drop-in.
+"""deploy/k3s/host/ holds files a node's filesystem gets BY HAND; the k3s
+server drop-in is the first. Two things this pins.
 
-It exists to set terminated-pod-gc-threshold (v2.39.2): below the default of
-12500 a dead pod record is never collected, and every anchor reboot leaves a
-generation behind. Two ways the file can lie: a threshold of zero or below
-DISABLES the collector (the flag's documented semantics), and a stray
-second controller-manager argument would ride into the control plane on the
-next k3s restart, unreviewed. The runbook and both check scripts must also
-still point at the file, or the drop-in silently stops being installed.
+The drop-in itself (v2.39.2): it sets terminated-pod-gc-threshold, and a
+value of zero or below DISABLES the collector (the flag's documented
+semantics); a stray second controller-manager argument would ride into the
+control plane on the next k3s restart, unreviewed. The runbook and both
+check scripts must keep naming the file, or it silently stops being
+installed.
+
+The directory it must NOT be in (v2.39.3): `kubectl apply -f deploy/k3s/`
+reads every top-level *.yaml as a Kubernetes manifest, and v2.39.2 shipped
+the drop-in there — the updater died on "apiVersion not set, kind not set"
+after every real manifest had applied. `apply -f <dir>` is not recursive,
+so host/ is out of its reach; every top-level yaml must be a manifest.
 """
 
 import re
@@ -16,7 +22,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 K3S = ROOT / "deploy" / "k3s"
-DROPIN = K3S / "k3s-server-config.yaml"
+DROPIN = K3S / "host" / "10-central-command.yaml"
+DROPIN_REL = "deploy/k3s/host/10-central-command.yaml"
 
 
 def _args() -> list[str]:
@@ -40,6 +47,26 @@ def test_threshold_is_positive_and_the_only_argument():
 def test_runbook_and_checks_reference_the_dropin():
     for rel in ("README.md", "setup.sh", "verify.sh"):
         text = (K3S / rel).read_text(encoding="utf-8")
-        assert "k3s-server-config.yaml" in text, f"deploy/k3s/{rel} no longer names the drop-in"
+        assert DROPIN_REL in text, f"deploy/k3s/{rel} no longer names the drop-in"
     for rel in ("setup.sh", "verify.sh"):
         assert "terminated-pod-gc-threshold" in (K3S / rel).read_text(encoding="utf-8")
+
+
+def test_every_top_level_yaml_in_deploy_k3s_is_a_kubernetes_manifest():
+    """What `kubectl apply -f deploy/k3s/` will read: *.yaml, *.yml, *.json
+    directly in the directory (not recursive). Each document needs
+    apiVersion and kind or the whole apply fails."""
+    files = sorted(
+        p for p in K3S.iterdir()
+        if p.is_file() and p.suffix in {".yaml", ".yml", ".json"}
+    )
+    assert files, "no manifests found in deploy/k3s/"
+    for path in files:
+        docs = [d for d in yaml.safe_load_all(path.read_text(encoding="utf-8")) if d]
+        assert docs, f"{path.name}: no documents"
+        for i, doc in enumerate(docs):
+            assert isinstance(doc, dict) and "apiVersion" in doc and "kind" in doc, (
+                f"deploy/k3s/{path.name} document {i} is not a Kubernetes manifest "
+                "(apiVersion/kind missing) — kubectl apply -f deploy/k3s/ will die "
+                "on it; hand-installed files go in deploy/k3s/host/"
+            )

@@ -384,7 +384,7 @@ phase_preflight() {
   if sudo grep -qs 'terminated-pod-gc-threshold' /etc/rancher/k3s/config.yaml /etc/rancher/k3s/config.yaml.d/*.yaml 2>/dev/null; then
     pass "k3s-pod-gc" "terminated-pod-gc-threshold is set on the k3s server"
   else
-    warn "k3s-pod-gc" "no terminated-pod-gc-threshold on the k3s server — install deploy/k3s/k3s-server-config.yaml (README §1) and restart k3s"
+    warn "k3s-pod-gc" "no terminated-pod-gc-threshold on the k3s server — install deploy/k3s/host/10-central-command.yaml (README §1) and restart k3s"
   fi
 
   # Air-gap probe: INFORMATIONAL. Unreachable indexes are a fact about the

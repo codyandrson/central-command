@@ -65,10 +65,10 @@ Assumed already true before phase 2:
   present). Without it, sandbox Jobs never start — the `gvisor` RuntimeClass
   applies fine and the failure only shows at first use, which is why verify.sh
   asserts it too. Run the script again after phase 4 for its pod-level proof.
-- **The k3s server drop-in** on the Pi (v2.39.2) — copies
-  `deploy/k3s/k3s-server-config.yaml` to
-  `/etc/rancher/k3s/config.yaml.d/10-central-command.yaml`, then
-  `sudo systemctl restart k3s`. It sets `terminated-pod-gc-threshold`, which
+- **The k3s server drop-in** on the Pi (v2.39.2; moved under `host/` in
+  v2.39.3 — `apply -f deploy/k3s/` reads every top-level yaml as a manifest)
+  — `sudo cp deploy/k3s/host/10-central-command.yaml
+  /etc/rancher/k3s/config.yaml.d/` then `sudo systemctl restart k3s`. It sets `terminated-pod-gc-threshold`, which
   Kubernetes defaults to 12500: every Pi reboot otherwise leaves a generation
   of Succeeded/Failed pod records behind forever (and a LiteLLM failover pod
   killed by a reboot reads "Error" in every pod listing). Hand-installed
@@ -205,8 +205,11 @@ sudo k3s kubectl apply -f deploy/k3s/
 sudo k3s kubectl -n central-command get pods -o wide -w
 ```
 
-`apply -f <dir>` reads the `*.yaml` files only; the scripts, units,
-`sandbox.Dockerfile` and `registries.yaml.example` are ignored.
+`apply -f <dir>` reads the `*.yaml` files only and is not recursive; the
+scripts, units, `sandbox.Dockerfile`, `registries.yaml.example` and the
+hand-installed files under `host/` are ignored. Every top-level yaml must
+therefore be a Kubernetes manifest (a guard test pins it — v2.39.2 shipped a
+k3s drop-in there and the updater died on it).
 
 Expected placement once settled:
 

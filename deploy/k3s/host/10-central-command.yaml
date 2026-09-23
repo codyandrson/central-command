@@ -5,9 +5,14 @@
 # something the updater manages, and applying this needs a k3s restart:
 #
 #   sudo mkdir -p /etc/rancher/k3s/config.yaml.d
-#   sudo cp deploy/k3s/k3s-server-config.yaml \
-#           /etc/rancher/k3s/config.yaml.d/10-central-command.yaml
+#   sudo cp deploy/k3s/host/10-central-command.yaml /etc/rancher/k3s/config.yaml.d/
 #   sudo systemctl restart k3s
+#
+# It lives under host/ because `kubectl apply -f deploy/k3s/` reads EVERY
+# *.yaml in that directory as a Kubernetes manifest — v2.39.2 shipped this
+# file one level up and the updater died on "apiVersion not set, kind not
+# set" (2026-09-22). `apply -f <dir>` is not recursive, so a subdirectory is
+# outside its reach; a guard test pins every top-level yaml to be a manifest.
 #
 # k3s loads /etc/rancher/k3s/config.yaml.d/*.yaml alphabetically alongside
 # whatever the unit's ExecStart passes; a drop-in never edits the unit. NOT

@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-22 — v2.39.3: every top-level yaml in deploy/k3s/ is a manifest to the updater
+
+k3s deployment. The v2.39.2 apply died at the manifests phase: `kubectl apply
+-f deploy/k3s/` reads every `*.yaml` in the directory, and the k3s server
+drop-in it shipped there is not a Kubernetes object ("apiVersion not set,
+kind not set"). It was the last file alphabetically, so every real manifest
+had already applied; the updater's recovery restarted the services on the
+merged tree and the deployment ran on unchanged code throughout.
+
+- The drop-in moves to `deploy/k3s/host/10-central-command.yaml`, named as
+  it is installed. `apply -f <dir>` is not recursive, so `host/` is the
+  place for files a node's filesystem gets by hand and kubectl must never
+  see. README §1, `setup.sh`, `verify.sh` and the guard test follow it.
+- The guard test now also loads every top-level `deploy/k3s/*.yaml` and
+  requires `apiVersion` and `kind` on each document — the check the suite
+  lacked, since a file only kubectl reads was one nothing pinned.
+- Operator step on the reference cluster: "Check for updates" again; the
+  drop-in install + `systemctl restart k3s` from v2.39.2 still applies.
+
 ## 2026-09-22 — v2.39.2: a terminated pod is a record until something collects it
 
 k3s deployment. `kubectl get pods` on the reference cluster listed 16 dead
