@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-22 — v2.39.2: a terminated pod is a record until something collects it
+
+k3s deployment. `kubectl get pods` on the reference cluster listed 16 dead
+pods beside 14 live ones: fifteen `Completed` and one LiteLLM pod in `Error`.
+None was a fault. Kubernetes keeps a Succeeded/Failed pod's record until the
+cluster-wide count passes kube-controller-manager's
+`terminated-pod-gc-threshold`, whose default of 12500 is never on a two-node
+cluster, and every anchor-node reboot runs graceful node shutdown, which
+terminates that node's pods and lets the ReplicaSets replace them — one full
+generation of dead records per reboot (four reboots since the 2026-08-29
+clean install, each one datable from the records). The `Error` pod was the
+LiteLLM instance that had failed over to the anchor on 2026-09-08 — the
+designed behaviour, working — killed mid-flight by the 2026-09-10 reboot.
+
+- `deploy/k3s/k3s-server-config.yaml` — a k3s server drop-in
+  (`/etc/rancher/k3s/config.yaml.d/`) setting the threshold to 10, so the
+  collector keeps only the most recent few. Hand-installed on the anchor
+  (README §1): it needs a k3s restart, which is not the updater's to run.
+- `setup.sh preflight` warns and `verify.sh` fails while it is missing; a
+  guard test pins the file's shape (one controller-manager argument, a
+  positive threshold — zero or negative DISABLES the collector).
+- The 16 records on the reference cluster were deleted by hand the same day.
+
 ## 2026-09-21 — v2.39.1: a re-submitted episode carries the instant it was approved with
 
 Graph verification. Ten episodes acked by Graphiti but not yet extracted when

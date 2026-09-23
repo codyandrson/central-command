@@ -1,0 +1,32 @@
+# ============================================================================
+# k3s SERVER drop-in for the control-plane (anchor) node.
+#
+# Install ONCE, by hand, on the anchor node — k3s is a prerequisite here, not
+# something the updater manages, and applying this needs a k3s restart:
+#
+#   sudo mkdir -p /etc/rancher/k3s/config.yaml.d
+#   sudo cp deploy/k3s/k3s-server-config.yaml \
+#           /etc/rancher/k3s/config.yaml.d/10-central-command.yaml
+#   sudo systemctl restart k3s
+#
+# k3s loads /etc/rancher/k3s/config.yaml.d/*.yaml alphabetically alongside
+# whatever the unit's ExecStart passes; a drop-in never edits the unit. NOT
+# for the agent node: this is a controller-manager setting and only the
+# server runs one. verify.sh and setup.sh preflight assert it is installed.
+#
+# WHY: Kubernetes keeps a terminated pod's record until the cluster-wide
+# count exceeds kube-controller-manager's terminated-pod-gc-threshold, and
+# the default is 12500 — effectively never for a two-node cluster. Every
+# anchor-node reboot triggers graceful node shutdown, which marks that
+# node's pods Succeeded/Failed and lets the ReplicaSets replace them, so
+# each reboot leaves a full generation of dead pod records behind (five
+# cc-* plus four kube-system per reboot; 16 in the namespace by 2026-09-22,
+# one of them a LiteLLM failover pod reading "Error"). They cost nothing,
+# but every `kubectl get pods` read carries them and the "Error" one reads
+# as an outage. 10 keeps the most recent few (a failed sandbox Job's pod
+# stays inspectable) and lets the collector delete the oldest beyond that.
+# Nothing here reads a terminated pod: the sandbox runner execs into LIVE
+# Job pods, backup.sh deletes its own dumper pod, and Job TTLs are separate.
+# ============================================================================
+kube-controller-manager-arg:
+  - "terminated-pod-gc-threshold=10"

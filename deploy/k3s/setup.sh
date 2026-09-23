@@ -377,6 +377,16 @@ phase_preflight() {
     fail "gvisor-host" "runsc missing/unregistered on the compute node — run: ./deploy/k3s/install-gvisor.sh"
   fi
 
+  # Terminated-pod garbage collection (v2.39.2). Kubernetes never collects
+  # dead pod records below a 12500 cluster-wide threshold, so every anchor
+  # reboot leaves a generation of Succeeded/Failed pods behind. A WARN, not a
+  # FAIL: nothing stops working without it, the install can proceed.
+  if sudo grep -qs 'terminated-pod-gc-threshold' /etc/rancher/k3s/config.yaml /etc/rancher/k3s/config.yaml.d/*.yaml 2>/dev/null; then
+    pass "k3s-pod-gc" "terminated-pod-gc-threshold is set on the k3s server"
+  else
+    warn "k3s-pod-gc" "no terminated-pod-gc-threshold on the k3s server — install deploy/k3s/k3s-server-config.yaml (README §1) and restart k3s"
+  fi
+
   # Air-gap probe: INFORMATIONAL. Unreachable indexes are a fact about the
   # network, and CC_AIRGAP is how the operator says it is deliberate.
   local u reach=1

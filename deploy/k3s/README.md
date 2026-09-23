@@ -65,6 +65,15 @@ Assumed already true before phase 2:
   present). Without it, sandbox Jobs never start — the `gvisor` RuntimeClass
   applies fine and the failure only shows at first use, which is why verify.sh
   asserts it too. Run the script again after phase 4 for its pod-level proof.
+- **The k3s server drop-in** on the Pi (v2.39.2) — copies
+  `deploy/k3s/k3s-server-config.yaml` to
+  `/etc/rancher/k3s/config.yaml.d/10-central-command.yaml`, then
+  `sudo systemctl restart k3s`. It sets `terminated-pod-gc-threshold`, which
+  Kubernetes defaults to 12500: every Pi reboot otherwise leaves a generation
+  of Succeeded/Failed pod records behind forever (and a LiteLLM failover pod
+  killed by a reboot reads "Error" in every pod listing). Hand-installed
+  because a k3s restart is not the updater's to perform; `setup.sh preflight`
+  warns and `verify.sh` fails while it is missing.
 - **The LiteLLM trio** (`cc-litellm`, `cc-litellm-db`, `cc-litellm-redis`) is
   either already running or absent, and both are fine.
   - **Already running:** leave it. Every step below is safe against it —

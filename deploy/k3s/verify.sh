@@ -222,6 +222,16 @@ if [[ "$gvisor_ok" == "yes" ]]; then
 else
   bad "gvisor: runsc missing/unregistered on the compute node — run deploy/k3s/install-gvisor.sh"
 fi
+# Terminated-pod GC (v2.39.2). Below kube-controller-manager's default
+# threshold of 12500, a Succeeded/Failed pod record is never collected — and
+# graceful node shutdown creates a whole generation of them on every anchor
+# reboot. The drop-in is hand-installed (a k3s restart is outside the
+# updater), which is exactly why it has to be asserted here.
+if sudo grep -qs 'terminated-pod-gc-threshold' /etc/rancher/k3s/config.yaml /etc/rancher/k3s/config.yaml.d/*.yaml 2>/dev/null; then
+  ok "k3s server: terminated-pod-gc-threshold set (dead pod records get collected)"
+else
+  bad "k3s server: no terminated-pod-gc-threshold — install deploy/k3s/k3s-server-config.yaml (README §1), restart k3s"
+fi
 
 echo
 echo "== D. host config still points at loopback =="
