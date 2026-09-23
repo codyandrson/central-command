@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-23 — v2.40.1: the built-in triage charter is the v2 procedure
+
+Inbox triage. v2.40.0 shipped the mechanism (mail rules, targeted pending
+context) but the charter rewrite it was built for landed only as a governed
+version in one instance's database; the public tree's built-in "v0" charter
+still opened with "when an email implies a change to a Jira issue" and told
+the agent to ask questions in plain text — the two lines behind most of the
+misses that review found. A fresh installation would have started exactly
+there.
+
+- `runtime/agent.py`'s built-in `CHARTER` is now the v2 procedure, rendered
+  for any deployment: `<<operator_name>>` placeholder, neutral pronouns, the
+  task project read from `jira_list_projects` rather than named. Identify
+  (what is this and why does the operator get it), extract, decide (task /
+  tracked work / untracked work / knowledge / dismiss, in that order),
+  verify; the operator's personal affairs explicitly in scope; sender
+  dispositions never as episodes, a standing rule instead when the agent
+  holds `mail-rule-propose`; questions through `ask_operator`, with an
+  answer's durable content proposed back as an episode citing the
+  operator's words; "when in doubt, surface". THREADS, REJECTIONS and DATES
+  carried verbatim.
+- A deployment that already runs a governed charter is unaffected: the
+  database version wins over the built-in.
+
 ## 2026-09-22 — v2.40.0: a sender disposition is a rule, not a fact
 
 Inbox triage. A review of 200 live triage sessions found the agent writing
