@@ -55,6 +55,11 @@ class GatedCapability:
     name: str          # the registry wire name the Action carries
     arguments: str     # the args shape, as charter text
     notes: str = ""    # usage guidance appended under the entry
+    # The Jira API flavors this capability exists on (Jira Data Center flavor
+    # design, decision 3). Default: both. A capability whose endpoint has no
+    # Data Center equivalent is WITHHELD there — never offered-to-fail — by
+    # `_offered()` below, which every agent-facing view goes through.
+    flavors: tuple[str, ...] = ("cloud", "server")
 
 
 @dataclass(frozen=True)
@@ -72,7 +77,9 @@ _JIRA_TARGET = ("target_ref = {'system': 'jira', 'id': '<the issue or project ke
 PACKS: dict[str, Pack] = {
     "jira-read": Pack(
         name="jira-read",
-        description="Read live Jira state: projects, one issue, JQL search, legal transitions, custom fields, filters, dashboards, gadgets.",
+        description=("Read live Jira state: projects, one issue, JQL search, "
+                     "legal transitions, custom fields (filters, dashboards, "
+                     "gadgets on Cloud)."),
         tool_names=("jira_get_issue", "jira_search_issues", "jira_get_transitions",
                     "jira_list_projects", "jira_list_fields", "jira_list_filters",
                     "jira_list_dashboards", "jira_list_gadgets"),
@@ -162,7 +169,10 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="jira.create_filter",
                 arguments="{'name': '<name>', 'jql': '<jql>', 'description'?: '<text>'}",
-                notes="Check jira_list_filters first — never duplicate an existing filter.",
+                notes=("Check jira_list_filters first when it is granted "
+                       "(Cloud); on Data Center no filter listing exists — "
+                       "say in the intent that you could not check for "
+                       "duplicates."),
             ),
             GatedCapability(
                 name="jira.create_dashboard",
@@ -178,6 +188,7 @@ PACKS: dict[str, Pack] = {
                        "proposal — the name is resolved to the id at "
                        "execution time. Never write a placeholder id. "
                        "String values, e.g. 'num': '10'."),
+                flavors=("cloud",),
             ),
         ),
     ),
@@ -1602,6 +1613,42 @@ def _packs(pack_names) -> list[Pack]:
     return [PACKS[p] for p in static_names]
 
 
+# Read tools whose Jira endpoint is Cloud-only (Jira Data Center flavor
+# design, decision 3). A Data Center deployment has NO filter-search,
+# dashboard-search or gadget-catalog endpoint at all, so offering these tools
+# there is offering a guaranteed 404 — and an agent that gets one reasons
+# about "the instance has no filters" rather than "this tool cannot work
+# here". Keyed by tool name because a read tool carries no GatedCapability to
+# hang a `flavors` tuple off.
+TOOL_FLAVORS: dict[str, tuple[str, ...]] = {
+    "jira_list_filters": ("cloud",),
+    "jira_list_dashboards": ("cloud",),
+    "jira_list_gadgets": ("cloud",),
+}
+
+
+def _offered(pack: Pack) -> tuple[tuple[str, ...], tuple[GatedCapability, ...]]:
+    """What this pack offers ON THIS DEPLOYMENT — its tools and capabilities
+    minus whatever the configured Jira flavor cannot do.
+
+    The ONE filter every agent-facing view goes through (`toolset_for`,
+    `charter_section`, `granted_capability_names`, `advisory_packs`,
+    `has_advisory_deferral`), so the toolset, the generated charter section
+    and the gateway's granted-capability policy check can never disagree
+    about what the agent holds. The grant ROWS are untouched: the same pack
+    grant means "what this pack offers on this deployment".
+
+    `known_capability_names()` deliberately does NOT go through here — a
+    withheld capability is UNGRANTED, not INVENTED, and the propose-time
+    validity check must keep telling those two apart.
+    """
+    flavor = _settings.jira_api_flavor or "cloud"
+    tools = tuple(t for t in pack.tool_names
+                  if flavor in TOOL_FLAVORS.get(t, ("cloud", "server")))
+    caps = tuple(c for c in pack.capabilities if flavor in c.flavors)
+    return tools, caps
+
+
 def mcp_server_ids_from_grants(pack_names) -> list[str]:
     """The server ids named by this grant set's `mcp:<server_id>` entries, in
     grant order. The one place both `mcp_toolsets_for` and
@@ -1618,7 +1665,7 @@ def toolset_for(pack_names) -> FunctionToolset:
 
     seen: dict[str, object] = {}
     for pack in _packs(pack_names):
-        for tool_name in pack.tool_names:
+        for tool_name in _offered(pack)[0]:
             fn = getattr(tools_mod, tool_name)
             if tool_name.startswith("propose_"):
                 # Every propose tool hands a bad draft back to the model
@@ -1756,7 +1803,7 @@ def advisory_packs(pack_names) -> tuple[str, ...]:
     direction; split the pack if that ever costs something real."""
     keep: list[str] = []
     for pack in _packs(pack_names):
-        if any(t in NON_ADVISORY_TOOLS for t in pack.tool_names):
+        if any(t in NON_ADVISORY_TOOLS for t in _offered(pack)[0]):
             continue
         keep.append(pack.name)
     return tuple(keep)
@@ -1776,7 +1823,7 @@ def has_advisory_deferral(pack_names) -> bool:
     return any(
         t in ADVISORY_DEFERRAL_TOOLS or t in ADVISORY_GRACEFUL_TOOLS
         for pack in _packs(pack_names)
-        for t in pack.tool_names
+        for t in _offered(pack)[0]
     )
 
 
@@ -1798,7 +1845,7 @@ def charter_section(pack_names) -> str:
         if pack.guidance:
             lines.append("")
             lines.append(pack.guidance)
-        for cap in pack.capabilities:
+        for cap in _offered(pack)[1]:
             if cap.name in caps_seen:
                 continue
             caps_seen.add(cap.name)
@@ -1832,7 +1879,7 @@ def granted_capability_names(pack_names) -> set[str]:
     tool (design §7) — holding ANY `mcp:` grant is enough to cover it here;
     the FINE-GRAINED per-(agent, tool) gate check happens inside
     propose_mcp_tool_call itself, not in this coarse policy comparison."""
-    names = {c.name for p in _packs(pack_names) for c in p.capabilities}
+    names = {c.name for p in _packs(pack_names) for c in _offered(p)[1]}
     if any(p.startswith("mcp:") for p in pack_names):
         names.add("mcp.tool_call")
     return names

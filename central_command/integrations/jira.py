@@ -1,4 +1,4 @@
-"""Native Jira Cloud client (D23) — Central Command's Jira surface without n8n.
+"""Native Jira client (D23) — Central Command's Jira surface without n8n.
 
 The toolbox rule (The operator, 2026-07-20): n8n earns its place where it has already
 solved a hard integration problem (the Gmail OAuth in cc-email-facade); a
@@ -10,9 +10,21 @@ façade returned: `{ok, kind: "jira", operation, issue|issues|transitions|link,
 ...}`. Input validation of model-controlled strings (issue keys, dates, link
 types) happens here — the last stop before the provider.
 
-**Cutover:** while CC_JIRA_EMAIL / CC_JIRA_API_TOKEN are unset, every call
-falls through to the n8n façade, so shipping this module changes nothing
-until the operator adds credentials; rollback is deleting them again.
+**Cutover:** while the credentials CC_JIRA_AUTH_MODE calls for are unset,
+every call falls through to the n8n façade, so shipping this module changes
+nothing until the operator adds credentials; rollback is deleting them again.
+
+**Two products, one switch (`CC_JIRA_API_FLAVOR`, 2026-09-23).** Jira Cloud
+exposes REST v3; Jira Data Center (and the retired Server line) only ever
+exposed v2. Beyond the version segment, rich text is an ADF document on Cloud
+and a wiki-markup STRING on Data Center, JQL search is a cursor on Cloud and
+an offset on Data Center, project listing is paginated on Cloud and not on
+Data Center, and filter search / dashboards / gadgets have no Data Center
+equivalent at all. Every path in this module goes through `_api()`; the
+literal version segment appears nowhere else (a guard test walks the source).
+The Data Center shapes are coded to Atlassian's published Data Center REST
+reference — `scripts/atlassian_probe.py` is how they get verified against a
+real instance.
 """
 
 from __future__ import annotations
@@ -99,8 +111,28 @@ class JiraError(Exception):
     pass
 
 
+def _flavor() -> str:
+    """The configured product: `server` (Jira Data Center / Server) or
+    `cloud` (the default)."""
+    return "server" if settings.jira_api_flavor == "server" else "cloud"
+
+
+def auth_mode() -> str:
+    """The resolved auth mode. An explicit CC_JIRA_AUTH_MODE always wins —
+    Basic works on BOTH products, so the flavor can only pick a default:
+    bearer (a PAT) under `server`, basic (email + API token) under `cloud`."""
+    explicit = (settings.jira_auth_mode or "").strip().lower()
+    if explicit:
+        return explicit
+    return "bearer" if _flavor() == "server" else "basic"
+
+
 def configured() -> bool:
-    return bool(settings.jira_email and settings.jira_api_token)
+    """A bearer PAT needs no email — demanding one silently routed a
+    PAT-configured Data Center deployment back to the n8n façade."""
+    if not settings.jira_api_token:
+        return False
+    return auth_mode() == "bearer" or bool(settings.jira_email)
 
 
 def _or_facade(facade_name: str):
@@ -145,19 +177,33 @@ def _date(value: str, op: str, key: str) -> str:
 
 def _auth_kwargs() -> dict:
     """Cloud (default) sends Basic email+token; Data Center sends a Bearer PAT
-    via CC_JIRA_API_TOKEN (CC_JIRA_EMAIL is ignored) — auth-mode only, no
-    endpoint-shape changes (work-transition compatibility design, decision 2;
-    DC endpoint differences are verified on-site, not guessed here)."""
-    if settings.jira_auth_mode == "bearer":
+    via CC_JIRA_API_TOKEN (CC_JIRA_EMAIL is ignored). The mode is resolved by
+    `auth_mode()` — explicit setting first, otherwise the flavor's default."""
+    if auth_mode() == "bearer":
         return {"headers": {"Authorization": f"Bearer {settings.jira_api_token}"}}
     return {"auth": (settings.jira_email, settings.jira_api_token)}
 
 
+def _api(path: str, flavor: str | None = None) -> str:
+    """`path` under the REST version the flavor speaks — v2 on Data Center
+    (which never shipped v3), v3 on Cloud. THE one place a version segment is
+    written; `tests/test_jira_flavor.py` walks this file for any other."""
+    version = "2" if (flavor or _flavor()) == "server" else "3"
+    return f"/rest/api/{version}{path}"
+
+
+# The Cloud spelling, kept as a module constant because callers and tests
+# import it. `_myself_path()` is what the code uses — it follows the flavor.
 MYSELF_PATH = "/rest/api/3/myself"
+
+
+def _myself_path() -> str:
+    return _api("/myself")
+
 
 # A dead/expired token does NOT 401 on list-shaped reads: Jira Cloud answers an
 # ANONYMOUS caller with 200 and an empty page (verified live 2026-08-26 against
-# /rest/api/3/project/search — total 0, no error), so `_check` sees success and
+# the project-search read — total 0, no error), so `_check` sees success and
 # the agent is told "this instance has no projects" and reasons from it. Only
 # identity-style endpoints refuse anonymously, so ONE of them is the sanity
 # check for the whole client.
@@ -171,26 +217,85 @@ MYSELF_PATH = "/rest/api/3/myself"
 _auth_verified = False
 
 
+def _flavor_mismatch(reported: str) -> JiraError:
+    """The message the operator actually needed: not "authCheck — not found"
+    but "this is the other product, and here is the switch"."""
+    should_be = "server" if reported.strip().lower() == "server" else "cloud"
+    return JiraError(
+        f"Jira flavor mismatch — CC_JIRA_API_FLAVOR is "
+        f"{settings.jira_api_flavor!r} but this instance reports "
+        f"deploymentType {reported!r}. Set CC_JIRA_API_FLAVOR={should_be}: "
+        "Data Center/Server serves only /rest/api/2, Cloud serves "
+        "/rest/api/3, and nothing works across that line."
+    )
+
+
+async def _deployment_type(flavor: str | None = None) -> str | None:
+    """`serverInfo.deploymentType` ("Cloud" or "Server"), or None when the
+    instance did not answer with one.
+
+    None is NOT a failure — this check exists to catch a wrong switch, never
+    to add a new way to be down. Both products expose `serverInfo`, so the
+    call itself is cheap and unauthenticated-tolerant."""
+    try:
+        resp = await _call("GET", _api("/serverInfo", flavor))
+    except Exception:  # noqa: BLE001 — a probe that cannot run proves nothing
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        body = resp.json()
+    except Exception:  # noqa: BLE001
+        return None
+    value = body.get("deploymentType") if isinstance(body, dict) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+async def _cross_check_flavor() -> None:
+    reported = await _deployment_type()
+    if reported is None:
+        return
+    low = reported.strip().lower()
+    if (_flavor() == "cloud" and low == "server") or (
+        _flavor() == "server" and low == "cloud"
+    ):
+        raise _flavor_mismatch(reported)
+
+
 async def _verify_auth_once() -> None:
     global _auth_verified
+    myself = _myself_path()
     if _auth_verified:
         return
-    resp = await _call("GET", MYSELF_PATH)
+    resp = await _call("GET", myself)
     if resp.status_code in (401, 403):
         raise JiraError(
-            f"Jira token invalid/expired ({resp.status_code} from {MYSELF_PATH}) — "
+            f"Jira token invalid/expired ({resp.status_code} from {myself}) — "
             "check CC_JIRA_EMAIL/CC_JIRA_API_TOKEN. Refusing to return a result: "
             "Jira Cloud silently degrades an unauthenticated caller to ANONYMOUS "
             "on list-shaped reads (project/search answers 200 with an empty list), "
             "so this would have read as 'the instance has nothing' rather than as "
             "an auth failure."
         )
+    if resp.status_code == 404 and _flavor() == "cloud":
+        # The Data Center symptom, exactly: v3 answers 404 to everything. Ask
+        # v2 who it is before reporting a bare "not found".
+        reported = await _deployment_type(flavor="server")
+        if reported and reported.strip().lower() == "server":
+            raise _flavor_mismatch(reported)
     _check(resp, "authCheck")
+    await _cross_check_flavor()
     _auth_verified = True
 
 
+def _preflight_path(path: str) -> bool:
+    """Paths the auth check itself uses — they must not recurse into it."""
+    return path in (_myself_path(), _api("/serverInfo"),
+                    _api("/serverInfo", "server"))
+
+
 async def _call(method: str, path: str, json_body: dict | None = None) -> httpx.Response:
-    if path != MYSELF_PATH:
+    if not _preflight_path(path):
         await _verify_auth_once()
     async with httpx.AsyncClient(
         timeout=30, **_auth_kwargs(), **http_client.client_kwargs()
@@ -252,6 +357,13 @@ def _adf(text: str) -> dict:
         for p in text.split("\n")
     ]
     return {"type": "doc", "version": 1, "content": paragraphs}
+
+
+def _rich(text: str):
+    """Rich text in the flavor's own shape: an ADF document on Cloud (REST v3
+    write endpoints demand one), a plain wiki-markup STRING on Data Center
+    (REST v2 takes and returns text, and an ADF dict there is a 400)."""
+    return text if _flavor() == "server" else _adf(text)
 
 
 # --- field flatteners (provider shapes -> the flat rows agents reason over) ---
@@ -331,7 +443,7 @@ async def _custom_fields() -> list[dict]:
     now = time.monotonic()
     if _custom_fields_cache and now - _custom_fields_cache[0] < CUSTOM_FIELDS_TTL:
         return _custom_fields_cache[1]
-    resp = await _call("GET", "/rest/api/3/field")
+    resp = await _call("GET", _api("/field"))
     _check(resp, "listFields")
     fields = [
         {"id": f["id"], "name": f.get("name"),
@@ -363,6 +475,10 @@ def _custom_value(raw):
     """
     if raw is None or raw == "" or raw == []:
         return None
+    if isinstance(raw, str):
+        # A textarea custom field arrives as an ADF dict on Cloud and as a
+        # wiki-markup STRING on Data Center — both are "the field's text".
+        return _clip_custom(re.sub(r"\n{3,}", "\n\n", raw).strip() or None)
     if isinstance(raw, dict):
         if raw.get("type") == "doc":            # rich text (textarea) — the
             return _clip_custom(               # cost/benefit fields' shape
@@ -411,7 +527,7 @@ async def get_issue(issue_key: str) -> dict:
     key = _key(issue_key)
     declared, note = await _declared_or_note("getIssue")
     asked = FIELDS + "".join("," + f["id"] for f in declared)
-    resp = await _call("GET", f"/rest/api/3/issue/{key}?fields={asked}")
+    resp = await _call("GET", _api(f"/issue/{key}?fields={asked}"))
     _check(resp, "getIssue", key)
     raw = resp.json()
     f = raw.get("fields") or {}
@@ -461,15 +577,24 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
     # picture, internals included, is one getIssue away.
     declared = [f for f in all_declared if f["writable"]]
     asked = SEARCH_FIELDS + [f["id"] for f in declared]
-    issues, token = [], None
+    # Two pagination shapes, one loop: Cloud's `POST /search/jql` is a CURSOR
+    # (nextPageToken/isLast), Data Center's `POST /search` is an OFFSET
+    # (startAt/maxResults/total). Same 10-page cap, same honest `truncated`.
+    issues, token, start, more = [], None, 0, False
     for _ in range(10):  # page cap — never an unbounded crawl
-        body = {"jql": jql, "maxResults": bound, "fields": asked}
-        if token:
-            body["nextPageToken"] = token
-        resp = await _call("POST", "/rest/api/3/search/jql", body)
+        if _flavor() == "server":
+            body = {"jql": jql, "startAt": start,
+                    "maxResults": bound, "fields": asked}
+            resp = await _call("POST", _api("/search"), body)
+        else:
+            body = {"jql": jql, "maxResults": bound, "fields": asked}
+            if token:
+                body["nextPageToken"] = token
+            resp = await _call("POST", _api("/search/jql"), body)
         _check(resp, "searchIssues")
         page = resp.json()
-        for it in page.get("issues") or []:
+        rows = page.get("issues") or []
+        for it in rows:
             if not it.get("key"):
                 continue
             f = it.get("fields") or {}
@@ -495,13 +620,19 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
                 "url": settings.jira_base_url.rstrip("/") + "/browse/" + it["key"],
                 **({"custom_fields": row_custom} if row_custom else {}),
             })
-        token = page.get("nextPageToken")
         # 100 is Jira's per-page maxResults cap, NOT a result ceiling: page until
         # `limit` is satisfied. This used to break on the first page whenever a
         # limit was passed — and jira_search_issues always passes one — so
         # limit=500 silently returned 100 with no marker, the exact "empty tail
         # reads as no-more-rows" failure `_clip` exists to prevent.
-        if page.get("isLast") or not token or (limit is not None and len(issues) >= limit):
+        if _flavor() == "server":
+            start += len(rows)
+            total = page.get("total")
+            more = bool(rows) and isinstance(total, int) and start < total
+        else:
+            token = page.get("nextPageToken")
+            more = bool(token) and not page.get("isLast")
+        if not more or (limit is not None and len(issues) >= limit):
             break
     out = issues[:limit] if limit else issues
     return {"ok": True, "kind": "jira", "operation": "searchIssues",
@@ -509,13 +640,13 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
             **({"custom_fields_error": note} if note else {}),
             # More rows the 10-page cap (or `limit`) did not return. Say so —
             # a reader that cannot tell a full result from a cut one invents facts.
-            "truncated": bool(token) or len(issues) > len(out)}
+            "truncated": bool(more) or len(issues) > len(out)}
 
 
 @_or_facade('get_transitions')
 async def get_transitions(issue_key: str) -> dict:
     key = _key(issue_key)
-    resp = await _call("GET", f"/rest/api/3/issue/{key}/transitions")
+    resp = await _call("GET", _api(f"/issue/{key}/transitions"))
     _check(resp, "getTransitions", key)
     transitions = [
         {"id": t.get("id"), "name": t.get("name"),
@@ -535,7 +666,7 @@ async def get_transitions(issue_key: str) -> dict:
 async def set_due_date(issue_key: str, due_date: str) -> dict:
     key = _key(issue_key)
     d = _date(due_date, "setDueDate", key)
-    resp = await _call("PUT", f"/rest/api/3/issue/{key}", {"fields": {"duedate": d}})
+    resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": {"duedate": d}})
     _check(resp, "setDueDate", key)
     return {"ok": True, "kind": "jira", "operation": "setDueDate",
             "issue": {"issue_key": key, "due_date": d}}
@@ -591,7 +722,7 @@ async def create_issue(
         "issuetype": {"name": issue_type},
     }
     if description and description.strip():
-        fields["description"] = _adf(description.strip())
+        fields["description"] = _rich(description.strip())
     if due_date:
         fields["duedate"] = due_date
     if labels:
@@ -599,7 +730,7 @@ async def create_issue(
     if parent:
         fields["parent"] = {"key": parent}
     fields.update(custom_payload)
-    resp = await _call("POST", "/rest/api/3/issue", {"fields": fields})
+    resp = await _call("POST", _api("/issue"), {"fields": fields})
     _check(resp, "createIssue", project_key)
     key = resp.json().get("key")
     return {"ok": True, "kind": "jira", "operation": "createIssue", "issue": {
@@ -619,7 +750,7 @@ async def add_comment(issue_key: str, body: str) -> dict:
     key = _key(issue_key)
     if not isinstance(body, str) or not body.strip():
         raise JiraError(f"addComment for {key} — body must be a non-empty string")
-    resp = await _call("POST", f"/rest/api/3/issue/{key}/comment", {"body": _adf(body)})
+    resp = await _call("POST", _api(f"/issue/{key}/comment"), {"body": _rich(body)})
     _check(resp, "addComment", key)
     return {"ok": True, "kind": "jira", "operation": "addComment",
             "issue": {"issue_key": key},
@@ -635,7 +766,7 @@ async def update_attributes(
         due_date = _date(due_date, "updateAttributes", key)
     if not isinstance(labels, list):
         raise JiraError(f"updateAttributes for {key} — labels must be the full replacement list")
-    resp = await _call("PUT", f"/rest/api/3/issue/{key}", {"fields": {
+    resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": {
         "priority": {"name": priority}, "duedate": due_date, "labels": labels}})
     _check(resp, "updateAttributes", key)
     return {"ok": True, "kind": "jira", "operation": "updateAttributes",
@@ -653,7 +784,7 @@ async def link_issues(from_key: str, to_key: str, link_type: str) -> dict:
         raise JiraError(
             f"linkIssues — bad link_type {link_type!r} (must be one of {', '.join(LINK_TYPES)})"
         )
-    resp = await _call("POST", "/rest/api/3/issueLink", {
+    resp = await _call("POST", _api("/issueLink"), {
         "type": {"name": link_type},
         "outwardIssue": {"key": fk}, "inwardIssue": {"key": tk}})
     _check(resp, "linkIssues", fk)
@@ -679,7 +810,7 @@ async def transition_issue(issue_key: str, transition: str) -> dict:
             f"transitionIssue for {key} — transition {transition!r} is not available "
             f"from the issue's current status (available: {names})"
         )
-    resp = await _call("POST", f"/rest/api/3/issue/{key}/transitions",
+    resp = await _call("POST", _api(f"/issue/{key}/transitions"),
                        {"transition": {"id": match["id"]}})
     _check(resp, "transitionIssue", key)
     return {"ok": True, "kind": "jira", "operation": "transitionIssue",
@@ -693,7 +824,23 @@ async def transition_issue(issue_key: str, transition: str) -> dict:
 
 def _require_native(op: str) -> None:
     if not configured():
-        raise JiraError(f"{op} requires native Jira credentials (CC_JIRA_EMAIL/CC_JIRA_API_TOKEN)")
+        raise JiraError(
+            f"{op} requires native Jira credentials — CC_JIRA_API_TOKEN, plus "
+            "CC_JIRA_EMAIL under basic auth. The auth mode follows "
+            "CC_JIRA_API_FLAVOR unless CC_JIRA_AUTH_MODE names one "
+            f"(flavor={settings.jira_api_flavor!r}, auth_mode={auth_mode()!r})"
+        )
+
+
+def _require_cloud(op: str) -> None:
+    """Withhold, never offer-to-fail. Filter search, dashboard listing/creation
+    and the gadget catalog have NO Data Center equivalent — the pack machinery
+    already drops these from an agent's surface under `server`, and this is the
+    same refusal for a proposal that arrives by API."""
+    if _flavor() == "server":
+        raise JiraError(
+            f"{op} — not available on Jira Data Center (Cloud-only REST endpoint)"
+        )
 
 
 async def list_fields() -> dict:
@@ -717,7 +864,7 @@ def _coerce_custom(name: str, shape: str, value, op: str = "setFields"):
     if shape == "doc":
         if not isinstance(value, str):
             raise JiraError(bad + "is a rich-text field — value must be a string")
-        return _adf(value)
+        return _rich(value)
     if shape == "text":
         if not isinstance(value, str):
             raise JiraError(bad + "is a text field — value must be a string")
@@ -788,15 +935,16 @@ async def set_fields(issue_key: str, fields: dict) -> dict:
     _require_native("setFields")
     key = _key(issue_key)
     payload, applied = await _resolve_custom_writes(fields, "setFields", key)
-    resp = await _call("PUT", f"/rest/api/3/issue/{key}", {"fields": payload})
+    resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": payload})
     _check(resp, "setFields", key)
     return {"ok": True, "kind": "jira", "operation": "setFields",
             "issue": {"issue_key": key, "fields": applied}}
 
 
 async def list_filters(query: str | None = None) -> dict:
+    _require_cloud("listFilters")
     _require_native("listFilters")
-    path = "/rest/api/3/filter/search?expand=jql,description,owner"
+    path = _api("/filter/search?expand=jql,description,owner")
     if query:
         from urllib.parse import quote
         path += f"&filterName={quote(query)}"
@@ -815,8 +963,9 @@ async def list_filters(query: str | None = None) -> dict:
 
 
 async def list_dashboards(query: str | None = None) -> dict:
+    _require_cloud("listDashboards")
     _require_native("listDashboards")
-    path = "/rest/api/3/dashboard/search?expand=description"
+    path = _api("/dashboard/search?expand=description")
     if query:
         from urllib.parse import quote
         path += f"&dashboardName={quote(query)}"
@@ -833,8 +982,9 @@ async def list_dashboards(query: str | None = None) -> dict:
 
 
 async def list_gadgets() -> dict:
+    _require_cloud("listGadgets")
     _require_native("listGadgets")
-    resp = await _call("GET", "/rest/api/3/dashboard/gadgets")
+    resp = await _call("GET", _api("/dashboard/gadgets"))
     _check(resp, "listGadgets")
     raw = resp.json().get("gadgets") or []
     gadgets = [
@@ -859,24 +1009,37 @@ async def list_projects() -> dict:
     Unbounded on purpose (`isLast`, not a fixed page): under-reporting projects
     is not a smaller version of the same answer — a project missing from this
     list reads as "no project fits, create one", which is a one-way door.
+
+    Data Center has no `/project/search` at all: `GET /project` answers with
+    the LIST ITSELF, unpaginated — so there is nothing to page and nothing to
+    under-report.
     """
     _require_native("listProjects")
-    projects, start = [], 0
-    while True:
-        resp = await _call(
-            "GET", f"/rest/api/3/project/search?maxResults=100&startAt={start}"
-        )
+
+    def _row(p: dict) -> dict:
+        return {"key": p.get("key"), "name": p.get("name"),
+                "id": p.get("id"), "type": p.get("projectTypeKey")}
+
+    projects: list[dict] = []
+    if _flavor() == "server":
+        resp = await _call("GET", _api("/project"))
         _check(resp, "listProjects")
         body = resp.json()
-        values = body.get("values") or []
-        projects += [
-            {"key": p.get("key"), "name": p.get("name"),
-             "id": p.get("id"), "type": p.get("projectTypeKey")}
-            for p in values
-        ]
-        if body.get("isLast", True) or not values:
-            break
-        start += len(values)
+        projects = [_row(p) for p in body if isinstance(p, dict)] \
+            if isinstance(body, list) else []
+    else:
+        start = 0
+        while True:
+            resp = await _call(
+                "GET", _api(f"/project/search?maxResults=100&startAt={start}")
+            )
+            _check(resp, "listProjects")
+            body = resp.json()
+            values = body.get("values") or []
+            projects += [_row(p) for p in values]
+            if body.get("isLast", True) or not values:
+                break
+            start += len(values)
     return {"ok": True, "kind": "jira", "operation": "listProjects",
             "projects": projects, "count": len(projects)}
 
@@ -895,7 +1058,7 @@ async def create_filter(name: str, jql: str, description: str | None = None) -> 
     body = {"name": name, "jql": jql}
     if description is not None:
         body["description"] = description
-    resp = await _call("POST", "/rest/api/3/filter", body)
+    resp = await _call("POST", _api("/filter"), body)
     _check(resp, "createFilter")
     out = resp.json()
     fid = out.get("id")
@@ -969,6 +1132,7 @@ async def _gadget_prefs(spec: dict) -> frozenset[str] | None:
     `/rest/gadgets/1.0/dashboards/10000/gadget/pie-chart?title=…`; all four
     came back 400 "The URI of this gadget is not present in the directory" and
     the empty dashboard stood)."""
+    _require_cloud("createDashboard.gadget")
     uri = spec.get("uri")
     if not uri:
         return None
@@ -1002,6 +1166,7 @@ async def _prepare_gadget_configs(gadgets: list[dict]) -> None:
     Resolution happens BEFORE the dashboard is created, so an unresolvable
     binding fails the whole write rather than leaving another empty dashboard
     behind."""
+    _require_cloud("createDashboard.gadget")
     bindings = [_filter_binding(g) for g in gadgets]  # pure — costs no requests
     for spec, binding in zip(gadgets, bindings):
         # Every uri is fetched, config or not: the fetch IS the uri check, and
@@ -1041,6 +1206,7 @@ async def _prepare_gadget_configs(gadgets: list[dict]) -> None:
 async def create_dashboard(
     name: str, description: str | None = None, gadgets: list[dict] | None = None
 ) -> dict:
+    _require_cloud("createDashboard")
     _require_native("createDashboard")
     name = _filter_or_dashboard_name(name, "createDashboard")
     if gadgets is not None:
@@ -1061,7 +1227,7 @@ async def create_dashboard(
     body = {"name": name, "sharePermissions": [], "editPermissions": []}
     if description is not None:
         body["description"] = description
-    resp = await _call("POST", "/rest/api/3/dashboard", body)
+    resp = await _call("POST", _api("/dashboard"), body)
     _check(resp, "createDashboard")
     dash = resp.json()
     dash_id = dash.get("id")
@@ -1077,14 +1243,14 @@ async def create_dashboard(
         }
         try:
             gresp = await _call(
-                "POST", f"/rest/api/3/dashboard/{dash_id}/gadget", gadget_body
+                "POST", _api(f"/dashboard/{dash_id}/gadget"), gadget_body
             )
             _check(gresp, "createDashboard.gadget")
             gadget_id = gresp.json().get("id")
             if spec.get("config"):
                 cresp = await _call(
                     "PUT",
-                    f"/rest/api/3/dashboard/{dash_id}/items/{gadget_id}/properties/config",
+                    _api(f"/dashboard/{dash_id}/items/{gadget_id}/properties/config"),
                     spec["config"],
                 )
                 _check(cresp, "createDashboard.gadget.config")
@@ -1127,16 +1293,25 @@ async def create_project(key: str, name: str, project_type_key: str = "software"
     key = _new_project_key(key)
     if not isinstance(name, str) or not name.strip() or len(name) > 255:
         raise JiraError("createProject — name must be a non-empty string under 255 chars")
-    me = await _call("GET", "/rest/api/3/myself")
+    me = await _call("GET", _myself_path())
     _check(me, "createProject — myself")
-    account_id = me.json().get("accountId")
-    if not account_id:
-        raise JiraError("createProject — could not resolve the credential's accountId")
-    body = {
-        "key": key, "name": name.strip(), "projectTypeKey": project_type_key,
-        "leadAccountId": account_id,
-    }
-    resp = await _call("POST", "/rest/api/3/project", body)
+    body = {"key": key, "name": name.strip(), "projectTypeKey": project_type_key}
+    if _flavor() == "server":
+        # Data Center identifies the lead by USERNAME (`lead`); there is no
+        # account id there, and `leadAccountId` binds nothing.
+        username = me.json().get("name")
+        if not username:
+            raise JiraError(
+                "createProject — could not resolve the credential's username "
+                "from /myself (Data Center names the project lead by username)"
+            )
+        body["lead"] = username
+    else:
+        account_id = me.json().get("accountId")
+        if not account_id:
+            raise JiraError("createProject — could not resolve the credential's accountId")
+        body["leadAccountId"] = account_id
+    resp = await _call("POST", _api("/project"), body)
     _check(resp, "createProject")
     out = resp.json()
     project_key = out.get("key", key)

@@ -60,10 +60,21 @@ class ConfluenceError(Exception):
     pass
 
 
+def auth_mode() -> str:
+    """The resolved auth mode. An explicit CC_CONFLUENCE_AUTH_MODE always
+    wins; empty means derive from the flavor — bearer (a PAT) under `server`,
+    basic (email + API token) under `cloud`. Same rule as `jira.auth_mode()`:
+    Basic works on both products, so the flavor picks a default, not a law."""
+    explicit = (settings.confluence_auth_mode or "").strip().lower()
+    if explicit:
+        return explicit
+    return "bearer" if settings.confluence_api_flavor == "server" else "basic"
+
+
 def configured() -> bool:
     if not settings.confluence_base_url:
         return False
-    if settings.confluence_auth_mode == "bearer":
+    if auth_mode() == "bearer":
         return bool(settings.confluence_api_token)
     return bool(settings.confluence_email and settings.confluence_api_token)
 
@@ -164,10 +175,10 @@ def _version_number(value: int, field: str = "expected_version") -> int:
 
 
 def _auth_kwargs() -> dict:
-    """Cloud (default) sends Basic email+token; Server/DC sends a Bearer PAT
-    — same auth-mode-only seam as jira.py's `_auth_kwargs`, no endpoint-shape
-    changes here."""
-    if settings.confluence_auth_mode == "bearer":
+    """Cloud (default) sends Basic email+token; Server/DC sends a Bearer PAT.
+    The mode comes from `auth_mode()` — explicit setting first, otherwise the
+    flavor's default, exactly as in jira.py."""
+    if auth_mode() == "bearer":
         return {"headers": {"Authorization": f"Bearer {settings.confluence_api_token}"}}
     return {"auth": (settings.confluence_email, settings.confluence_api_token)}
 

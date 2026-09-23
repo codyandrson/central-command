@@ -274,6 +274,33 @@ podman, not gVisor — weaker isolation than the k3s deployment.** The
 credential-free posture is unchanged (the runner holds no keys and the only
 exit is a reviewed `mcp.sync_source`), but the kernel boundary is the host's.
 
+### Verifying Atlassian connectivity (Jira / Confluence)
+
+Jira and Confluence are configured in the ROOT `.env` (`CC_JIRA_*` /
+`CC_CONFLUENCE_*`, documented in `.env.example`), not in
+`deploy/single/.env`. Both products ship in two flavors and the flavor is a
+real fork, not a login difference: **Cloud** serves Jira REST v3 and
+Confluence v2, **Server/Data Center** serves Jira REST v2 and Confluence v1
+only — different rich-text, search and listing shapes, and on Jira DC no
+filter-search, dashboard or gadget endpoints at all. Set
+`CC_JIRA_API_FLAVOR=server` / `CC_CONFLUENCE_API_FLAVOR=server` for Data
+Center; the auth mode follows the flavor unless you name one.
+
+Prove it against your instance before trusting it:
+
+```bash
+python scripts/atlassian_probe.py
+```
+
+Read-only. It walks every endpoint each configured flavor uses and prints one
+`PASS|FAIL|SKIP <product> <METHOD> <path> — <status> <body>` line per check,
+plus what the instance reports for `serverInfo.deploymentType`, the real shape
+of an issue's `description`, and whether epics surface as `parent` or as an
+"Epic Link" custom field. It never prints a token or an email, and it exits
+non-zero if any non-SKIP check failed. If the flavor is wrong, the client's
+own auth check says so by name (`CC_JIRA_API_FLAVOR`) rather than reporting a
+bare 404.
+
 ### What this profile does NOT install
 
 `./setup.sh verify` ends by printing the capability manifest; the one

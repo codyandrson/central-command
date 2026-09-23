@@ -163,14 +163,23 @@ credentials further down the file):
     bundle, or does plain HTTPS work? One shared seam
     (`integrations/http.py`). If yes, elicit `CC_CA_BUNDLE` and
     `CC_CLIENT_CERT`/`CC_CLIENT_KEY`.
-  - **Jira** — Cloud or Server/Data Center (a real fork: Cloud uses
-    email+API token, DC uses a bearer PAT and ignores email —
-    `central_command/config.py`'s `jira_auth_mode`). Elicit `CC_JIRA_BASE_URL`
-    either way, then `CC_JIRA_EMAIL`+`CC_JIRA_API_TOKEN` (Cloud) or a PAT
-    into `CC_JIRA_API_TOKEN` with `CC_JIRA_AUTH_MODE=bearer` (DC). Say
-    plainly that DC endpoint shapes are coded to docs, not yet proven live —
-    Phase 3's real read is the verification. No Jira: record that; jira-pack
-    agents fail loudly on reads until it's configured.
+  - **Jira** — Cloud or Server/Data Center. A real fork, and NOT just a
+    login: DC serves REST v2 only, takes wiki markup where Cloud takes ADF,
+    pages by offset, and has no filter-search/dashboard/gadget endpoints at
+    all. Elicit `CC_JIRA_BASE_URL`, then set `CC_JIRA_API_FLAVOR=server` for
+    Data Center (`cloud` is the default). The auth mode FOLLOWS the flavor —
+    bearer (a PAT in `CC_JIRA_API_TOKEN`, email ignored) under `server`,
+    basic (`CC_JIRA_EMAIL`+`CC_JIRA_API_TOKEN`) under `cloud` — so leave
+    `CC_JIRA_AUTH_MODE` unset unless they want Basic on DC. Say plainly that
+    DC endpoint shapes are coded to Atlassian's published reference, not yet
+    proven live, and that `python scripts/atlassian_probe.py` is how they
+    verify them: it walks every endpoint the flavor uses read-only, prints
+    PASS/FAIL per path, and names the mismatch if the flavor is wrong. Run it
+    once credentials are in `.env`. Under `server` the Cloud-only tools
+    (`jira_list_filters`/`_dashboards`/`_gadgets`) and the
+    `jira.create_dashboard` capability are withheld from agents by design.
+    No Jira: record that; jira-pack agents fail loudly on reads until it's
+    configured.
   - **Confluence** — same Cloud/DC shape into `CC_CONFLUENCE_BASE_URL` /
     `CC_CONFLUENCE_EMAIL` / `CC_CONFLUENCE_API_TOKEN` /
     `CC_CONFLUENCE_API_FLAVOR` / `CC_CONFLUENCE_AUTH_MODE`. Ask which macro
@@ -178,7 +187,9 @@ credentials further down the file):
     (`skills/confluence/references/instance-profiles.md`: `cloud-free` or
     `work-server-9.2`) — if neither matches, record `CC_CONFLUENCE_PROFILE`
     empty rather than guessing a macro that might not exist on their
-    instance. No Confluence: record that.
+    instance. `CC_CONFLUENCE_AUTH_MODE` follows the flavor the same way, and
+    `scripts/atlassian_probe.py` probes Confluence too. No Confluence:
+    record that.
   - **Email** — Gmail (needs `CC_ENABLE_N8N=1`, wired via the n8n UI on
     `http://127.0.0.1:5678` once `setup.sh` brings it up; or, migrating from
     a prior instance, offer decrypt-under-old-key/re-import as the

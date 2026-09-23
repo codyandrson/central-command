@@ -13,6 +13,26 @@ Rules below exist because a real failure produced them. Trust the rule even
 where the story is gone. Moved verbatim from the root instructions; they load
 when a matching file is read.
 
+- **Jira Cloud and Jira Data Center are two products, not two logins.** DC
+  (and the retired Server line) never exposed REST v3 — it answers 404 to
+  every `/rest/api/3/...` path — and beyond the version segment rich text is
+  wiki-markup STRING there, not an ADF document; JQL search is an offset
+  (`POST /search`, startAt/total), not a cursor; `GET /project` is the whole
+  list, unpaginated; the project lead is a username, not an account id; and
+  filter search, dashboard create and the gadget catalog have no equivalent
+  at all. So: every path goes through `_api()` (a guard test in
+  `test_jira_flavor.py` walks the source for a literal version segment),
+  `CC_JIRA_API_FLAVOR` also picks the DEFAULT auth mode, and it WITHHOLDS
+  the Cloud-only pack members — `jira_list_filters`/`_dashboards`/`_gadgets`
+  and `jira.create_dashboard` — from the toolset, the generated charter and
+  the granted-capability check alike, because an agent handed a guaranteed
+  404 reasons about "no filters exist" instead of "this cannot work here".
+  `_verify_auth_once` cross-checks the switch against the instance's own
+  `serverInfo.deploymentType` (a missing one is NOT a failure — the check
+  catches a wrong switch, it is not a new way to be down), and
+  `scripts/atlassian_probe.py` is the on-site verification: nothing about DC
+  can be proven from this deployment, so the DC shapes are coded to
+  Atlassian's published reference until that probe has run.
 - **A Jira gadget's config keys are declared BY THE GADGET — read its XML,
   never a table.** A gadget silently ignores any pref it does not declare, so
   a wrong key is a 200 with no binding and no error.

@@ -40,6 +40,10 @@ def _handler(paths, *, myself_status=200):
         paths.append(request.url.path)
         if request.url.path == jira.MYSELF_PATH:
             return httpx.Response(myself_status, json={"accountId": "abc"})
+        if request.url.path.endswith("/serverInfo"):
+            # The flavor cross-check (2026-09-23): no deploymentType means
+            # "unreadable", which is deliberately NOT a failure.
+            return httpx.Response(200, json={"version": "1001.0.0"})
         # The silent-degradation shape: 200 with an empty page.
         return httpx.Response(200, json={"values": [], "isLast": True, "total": 0})
 
@@ -59,7 +63,8 @@ async def test_a_live_token_passes_straight_through(monkeypatch):
     _patch_client(monkeypatch, _handler(paths))
     out = await jira.list_projects()
     assert out["ok"] and out["count"] == 0
-    assert paths == [jira.MYSELF_PATH, "/rest/api/3/project/search"]
+    assert paths == [jira.MYSELF_PATH, "/rest/api/3/serverInfo",
+                     "/rest/api/3/project/search"]
 
 
 async def test_the_check_runs_once_per_process_not_once_per_call(monkeypatch):

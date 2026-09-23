@@ -4,6 +4,55 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-23 — v2.41.0: Jira Data Center is a different product, not a different login
+
+Atlassian ships two products under one name, and the client only ever spoke
+to one of them. Jira Cloud exposes REST API v3; Jira Data Center (and the
+retired Server line) only ever exposed v2. `integrations/jira.py` hardcoded
+v3 in twenty-three places, so on a Data Center instance its very first call —
+the `/rest/api/3/myself` auth sanity check — is a 404 and every Jira
+operation fails before doing anything. The 2026-08-21 work-transition record
+had called this an auth-mode seam with verification deferred on-site; the
+verification happened, and the gap is a product boundary. Design record:
+`docs/superpowers/specs/2026-09-23-jira-data-center-flavor-design.md`.
+
+- **`CC_JIRA_API_FLAVOR=cloud|server`** (default `cloud` — nothing changes
+  for an existing deployment). Every path goes through one helper, `_api()`,
+  and a guard test fails the suite on a literal version segment anywhere
+  else. Four more shapes follow the switch: rich text is an ADF document on
+  Cloud and a wiki-markup string on Data Center, JQL search is a cursor there
+  and an offset here (`POST /search`, `startAt`/`total`, same ten-page cap),
+  `GET /project` is the whole unpaginated list, and a new project's lead is a
+  username rather than an account id.
+- **The auth mode now follows the flavor.** `CC_JIRA_AUTH_MODE` /
+  `CC_CONFLUENCE_AUTH_MODE` default to empty, meaning bearer under `server`
+  and basic under `cloud`; an explicit value still wins, because Basic works
+  on both products. `configured()` no longer demands an email under bearer —
+  requiring one silently routed a PAT-configured deployment back to the n8n
+  façade, so the cutover never happened.
+- **The switch is cross-checked against the instance, once.** After
+  `/myself` succeeds the client reads `serverInfo.deploymentType` and refuses
+  on a definitive mismatch, naming `CC_JIRA_API_FLAVOR` and what the instance
+  reported; a 404 from the flavor's own `/myself` triggers the same probe, so
+  the operator reads "this is a Data Center instance, set the flavor" instead
+  of "authCheck — not found". A missing `deploymentType` is NOT a failure —
+  the check catches a wrong switch, it is not a new way to be down.
+- **What cannot work is withheld, not offered-to-fail.** Under `server` the
+  pack machinery drops `jira_list_filters`, `jira_list_dashboards`,
+  `jira_list_gadgets` and `jira.create_dashboard` from the toolset, the
+  generated charter section and the granted-capability check alike — one
+  filtered view, so they cannot disagree. Grant rows are untouched, and
+  `known_capability_names()` stays whole: a withheld capability is ungranted,
+  never invented. The client functions behind them refuse by name.
+  `jira.create_filter` stays (Data Center has `POST /filter`); its note now
+  tells the agent to say it could not check for duplicates there.
+- **`scripts/atlassian_probe.py`** — read-only, pure Python, Windows-safe.
+  Walks every endpoint both configured flavors use, one PASS/FAIL/SKIP line
+  per check, never a token or an email. It also reports what the docs could
+  not settle: the real shape of an issue's `description`, and whether epics
+  surface as `parent` or as an "Epic Link" custom field. Until it has run on
+  a real instance the Data Center shapes here are coded to Atlassian's
+  published reference and are marked as such.
 ## 2026-09-23 — v2.40.1: the built-in triage charter is the v2 procedure
 
 Inbox triage. v2.40.0 shipped the mechanism (mail rules, targeted pending

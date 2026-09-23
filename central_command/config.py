@@ -233,12 +233,23 @@ class Settings(BaseSettings):
     client_cert: str = ""     # path to a client cert, or a combined cert+key PEM
     client_key: str = ""      # path to the client key, if not combined with client_cert above
 
-    # Jira auth mode (work-transition compatibility design, decision 2):
-    # "basic" (default, Cloud — email + API token) or "bearer" (Data Center —
-    # a PAT, email ignored). Endpoint-shape differences between Cloud and DC
-    # are NOT addressed here on purpose — this is an auth-only seam,
-    # verified against the real DC instance on-site.
-    jira_auth_mode: str = "basic"
+    # Jira API flavor (Jira Data Center flavor design, 2026-09-23, decision 1):
+    # "cloud" (default — REST API v3, ADF rich text, cursor search) or
+    # "server" (Data Center/Server — REST API v2 only, wiki-markup rich text,
+    # offset search, and no filter-search/dashboard/gadget endpoints at all).
+    # This is NOT an auth-only seam: the flavor selects the PATHS and body
+    # shapes `integrations/jira.py` uses, through `_api()`. The server shapes
+    # are coded to Atlassian's published Data Center REST reference;
+    # `scripts/atlassian_probe.py` is how they are verified against a real
+    # instance, and `_verify_auth_once` cross-checks the switch against the
+    # instance's own `serverInfo.deploymentType`.
+    jira_api_flavor: str = "cloud"
+    # Jira auth mode: "" (default) means DERIVE FROM THE FLAVOR — "bearer"
+    # under `server` (a PAT in CC_JIRA_API_TOKEN, email ignored), "basic"
+    # under `cloud` (email + API token). An explicit "basic"/"bearer" always
+    # wins: Basic works on BOTH products, so the flavor can only pick a
+    # sensible default, never dictate the mode.
+    jira_auth_mode: str = ""
 
     # Git-hosting read integration (work-transition compatibility design, the
     # "Git hosting" catalog-implications bullet): Central Command is a CLIENT of
@@ -265,13 +276,14 @@ class Settings(BaseSettings):
     confluence_base_url: str = ""
     confluence_email: str = ""
     confluence_api_token: str = ""
-    # Auth mode, same seam as jira_auth_mode: "basic" (default, Cloud — email
-    # + API token) or "bearer" (Server/DC — a PAT, email ignored).
-    confluence_auth_mode: str = "basic"
+    # Auth mode, same seam as jira_auth_mode: "" (default) derives from
+    # confluence_api_flavor — "bearer" under `server` (a PAT, email ignored),
+    # "basic" under `cloud` (email + API token). An explicit value wins.
+    confluence_auth_mode: str = ""
     # API flavor: "cloud" (default, REST API v2 + v1 search) or "server" (DC
     # 9.x, everything via REST API v1). The server shapes are coded to
-    # Atlassian's published DC 9.x docs and are VERIFY-ON-SITE, not proven
-    # against a live instance — same posture as jira_auth_mode's DC comment.
+    # Atlassian's published DC 9.x docs; `scripts/atlassian_probe.py` walks
+    # every path each flavor uses and is how they get verified on-site.
     confluence_api_flavor: str = "cloud"
     # Names the active macro/profile an operator is using (e.g. a documented
     # space layout or template set) — informational only, read by agents to
