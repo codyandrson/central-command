@@ -11,6 +11,8 @@
 #     locked tag present   PASS — use it, and check the registry's digest
 #                          against images.txt's. A mismatch on the LOCKED tag
 #                          is a drifted or poisoned tag: FAIL, never a shrug.
+#                          (On a CONFIGURED mirror the same mismatch is a WARN,
+#                          recorded locked-mirror: pushes re-serialise manifests.)
 #                          Unless the lock's digest column is `-`, which
 #                          declares the tag ROLLING (a series or a channel:
 #                          postgres:16, main-stable) — those move on every
@@ -143,6 +145,15 @@ set_kv() { # set_kv <file> <key> <value>
   (( found )) || printf '%s=%s\n' "$k" "$v" >>"$tmp"
   cat "$tmp" >"$f"     # rewrite in place: keeps the mode and the inode
   rm -f "$tmp"
+}
+
+public_host() { # public_host <key> — the registry images.txt names, before any CC_REGISTRY_* mirror
+  case "$1" in
+    dockerio) echo "docker.io" ;;
+    ghcr)     echo "ghcr.io" ;;
+    mcr)      echo "mcr.microsoft.com" ;;
+    *) return 1 ;;
+  esac
 }
 
 registry_host() { # registry_host <key>
@@ -427,8 +438,22 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
       # installed.manifest as provenance, not asserted.
       pass "$check" "${host}/${path}:${lock} (locked tag; rolling — digest recorded, not pinned)"
     elif [[ "$dig" != "$ldig" ]]; then
-      fail "$check" "${host}/${path}:${lock} DIGEST MISMATCH — images.txt locks ${ldig}, the registry serves ${dig}. That tag has drifted or been poisoned; do not install it. Bump the lock deliberately (a release) or use a registry that serves the tested artifact."
-      return 1
+      # The lock's digest defends against PUBLIC-registry tag poisoning — the
+      # header above says the mirrored air gap does not carry that threat, yet
+      # until 2026-09-24 this branch enforced it against the operator's own
+      # mirror: a mirror seeded by pull+push re-serialises the manifest, so
+      # 4 of 8 rows FAILed "poisoned" on a healthy mirror (Windows testbed).
+      # Under a CONFIGURED mirror (CC_REGISTRY_* set to something other than
+      # the public host) a mismatch on the locked tag is a WARN naming both
+      # digests and is recorded as locked-mirror; on the public host it stays
+      # a FAIL.
+      if [[ "$host" != "$(public_host "$key")" ]]; then
+        warn "$check" "${host}/${path}:${lock} digest differs from the lock — images.txt locks ${ldig}, the mirror serves ${dig}. A mirror seeded by push re-serialises manifests, so this is expected there; the tag is the pin. Recorded as locked-mirror."
+        mode=locked-mirror
+      else
+        fail "$check" "${host}/${path}:${lock} DIGEST MISMATCH — images.txt locks ${ldig}, the registry serves ${dig}. That tag has drifted or been poisoned; do not install it. Bump the lock deliberately (a release) or use a registry that serves the tested artifact."
+        return 1
+      fi
     else
       pass "$check" "${host}/${path}:${lock} (locked tag, digest verified)"
     fi

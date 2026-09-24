@@ -219,7 +219,11 @@ key, so the merge is plumbing, not a redesign.
 - Substitution stays as D2 of the 2026-09-03 record defines it: locked tag →
   PASS; newest tag satisfying the constraint with the same flavour → WARN
   naming the substitution; nothing → FAIL naming the constraint, so the
-  operator can pin.
+  operator can pin. **Amended 2026-09-24 (v2.45.4):** on a CONFIGURED mirror
+  a locked-tag digest mismatch is a WARN recorded as `locked-mirror`, not a
+  FAIL — a mirror seeded by push re-serialises manifests, and the lock's
+  digest guards public-registry poisoning, which the mirror does not carry.
+  On the public host it stays a FAIL.
 - `installed.manifest` moves to the state directory (D7).
 
 ### D3 — The LLM catalog is entered in the LiteLLM UI; `.env` may declare it
@@ -268,7 +272,7 @@ key, so the merge is plumbing, not a redesign.
 
   | Consumer | CA | Insecure |
   |---|---|---|
-  | curl (host) | `CURL_CA_BUNDLE` | `-k` via a generated `.curlrc` in the state dir, `CURL_HOME` pointed at it |
+  | curl (host) | `CURL_CA_BUNDLE` **plus a `cacert` line in the generated `.curlrc`** (CORRECTED on the 2026-09-24 Windows run: a Schannel curl — what Git for Windows ships — ignores the variable, and `--cacert` is what it honours; the CA does NOT have to be in the Windows Root store) | `-k` via the same `.curlrc` in the state dir, `CURL_HOME` pointed at it |
   | uv | `SSL_CERT_FILE` (`UV_NATIVE_TLS` is deprecated → `UV_SYSTEM_CERTS`) | `UV_INSECURE_HOST=<index host>` |
   | pip (builds) | `PIP_CERT` | `PIP_TRUSTED_HOST=<index host>` |
   | npm | `NPM_CONFIG_CAFILE` | `NPM_CONFIG_STRICT_SSL=false` |

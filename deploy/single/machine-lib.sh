@@ -98,6 +98,21 @@ cc_render_registries_conf() {
     [[ -n "$canon" ]] || continue
     body="${body}[[registry]]"$'\n'
     body="${body}prefix = \"${canon}\""$'\n'
+    # `location` is REQUIRED beside a non-wildcard `prefix`. Without it podman
+    # refuses to load the WHOLE drop-in:
+    #   Error: getting registries: loading drop-in registries configuration
+    #   "…/cc-central-command.conf": invalid condition: location is unset and
+    #   prefix is not in the format: *.example.com
+    # and then every registry operation in the machine fails — `podman info`
+    # included. So `./setup.sh machine` with any CC_REGISTRY_* set used to leave
+    # the machine unable to resolve ANY registry, which is the one mechanism the
+    # whole air-gapped design rests on. Found on the 2026-09-24 Windows run
+    # (podman 5.8.3); it could not be found on Linux because there is no machine
+    # there and the unit tests assert the rendered TEXT, never that podman
+    # accepts it. For a mirror, location == prefix: the canonical name is where
+    # the ref would have gone, and [[registry.mirror]] below is where it goes
+    # instead.
+    body="${body}location = \"${canon}\""$'\n'
     (( insecure )) && body="${body}insecure = true"$'\n'
     body="${body}"$'\n'
     body="${body}[[registry.mirror]]"$'\n'

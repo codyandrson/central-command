@@ -37,7 +37,7 @@ never silent and never a PASS: every command that sees it prints one
 
 | Consumer | `CC_CA_BUNDLE` | `CC_TLS_INSECURE=1` |
 |---|---|---|
-| curl (host) | `CURL_CA_BUNDLE` | `insecure` in the generated `<state>/curl/.curlrc` (`CURL_HOME` points there) |
+| curl (host) | `CURL_CA_BUNDLE` **and** a `cacert` line in the generated `<state>/curl/.curlrc` — a Schannel curl (Windows) ignores the variable and honours only the option | `insecure` in the same `.curlrc` (`CURL_HOME` points there) |
 | uv | `SSL_CERT_FILE` (`UV_NATIVE_TLS` is deprecated → `UV_SYSTEM_CERTS`) | `UV_INSECURE_HOST=<index hosts>` |
 | pip | `PIP_CERT` | `PIP_TRUSTED_HOST=<index hosts>` |
 | npm | `NPM_CONFIG_CAFILE` | `NPM_CONFIG_STRICT_SSL=false` |
@@ -236,14 +236,25 @@ own process environment is taken from the HOST environment at
 (`podman machine stop && HTTPS_PROXY=… podman machine start`). Writing systemd
 drop-ins inside the machine is not doc-verified and is an open item below.
 
-**Windows (Git Bash + a podman machine) — measured 2026-09-18.** Git for
-Windows' curl is schannel-only: it IGNORES `CURL_CA_BUNDLE`, and it checks
-revocation, which an intercepting proxy cannot answer
-(`CRYPT_E_REVOCATION_OFFLINE`). So on Windows the CA must ALSO be in the Windows
-Root store (usually there by policy; else, as Administrator,
-`certutil -addstore Root <ca.cer>` — the `ca-windows-store` check names it), and
-`setup.sh` writes a setup-owned `.curlrc` in the state directory
-(`ssl-revoke-best-effort`, via `CURL_HOME`) for every curl it spawns. uv, npm
+**Windows (Git Bash + a podman machine) — measured 2026-09-18, CORRECTED
+2026-09-24.** Git for Windows' curl is schannel-only, with two consequences:
+
+* it **IGNORES `CURL_CA_BUNDLE`** — but it does honour `--cacert`. Measured on
+  2026-09-24 against a private CA with curl 8.21.0 (Schannel):
+  `CURL_CA_BUNDLE=<pem>` → `000` (certificate failure), `--cacert <pem>` → `200`,
+  with `curl -v` reporting `schannel: added 1 certificate(s) from CA file`. The
+  earlier note here said the CA therefore had to be in the Windows Root store;
+  **that was wrong.** It only has to reach curl as an OPTION, so `CC_CA_BUNDLE`
+  is written as a `cacert` line into the setup-owned `.curlrc`. Putting the CA in
+  the Root store still works and is usually there by policy anyway (as
+  Administrator, `certutil -addstore Root <ca.cer>`; the `ca-windows-store` check
+  names it), but it is no longer REQUIRED;
+* it checks revocation, which an intercepting proxy cannot answer
+  (`CRYPT_E_REVOCATION_OFFLINE`), so the same `.curlrc` carries
+  `ssl-revoke-best-effort` on Windows unconditionally.
+
+That `.curlrc` lives in the state directory, is found via `CURL_HOME`, and is
+REWRITTEN every run — so a knob turned back off leaves no stale line. uv, npm
 and node take the bundle from the variables as on Linux.
 
 ## Partial availability — the minimal move per missing source

@@ -446,6 +446,57 @@ def _export_tls_env_body() -> str:
     return text[start:end]
 
 
+def test_the_host_curl_gets_the_ca_as_an_OPTION_not_only_an_env_var(tmp_path):
+    """A SCHANNEL curl ignores CURL_CA_BUNDLE, so the CA must also reach the
+    generated .curlrc as a `cacert` line.
+
+    Git for Windows ships a Schannel-built curl and Windows is this profile's
+    target. Measured on the 2026-09-24 Windows run against a private CA with
+    curl 8.21.0 (Schannel):
+
+        CURL_CA_BUNDLE=<pem>   -> 000, certificate failure
+        --cacert <pem>         -> 200 ("schannel: added 1 certificate(s) from
+                                  CA file", per curl -v)
+
+    So the CA does not need to be in the Windows Root store — it needs to arrive
+    as an OPTION. Without the `cacert` line every host-side probe in `check`
+    (the package indexes, the registry manifest HEADs, the upstream LLM) fails
+    against a private CA while CC_CA_BUNDLE is set, which is the exact
+    configuration the seam exists for.
+
+    Both knobs may apply at once, and the file is REWRITTEN each run, so a knob
+    turned back off must not leave its line behind.
+    """
+    def curlrc(**env) -> str:
+        state = tmp_path / ("-".join(sorted(env)) or "none")
+        r = subprocess.run(
+            ["bash", "-c",
+             f'. "{ENV_LIB.as_posix()}"; cc_export_tls_env "{state.as_posix()}"; '
+             'printf "CURL_HOME=%s\n" "${CURL_HOME:-unset}"; '
+             f'cat "{(state / "curl" / ".curlrc").as_posix()}" 2>/dev/null'],
+            capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin:/usr/local/bin", **env},
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout
+
+    ca = tmp_path / "corp-ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+
+    with_ca = curlrc(CC_CA_BUNDLE=str(ca))
+    assert f"cacert = {ca}" in with_ca, (
+        f"CC_CA_BUNDLE must become a `cacert` line in the .curlrc:\n{with_ca}"
+    )
+    assert "insecure" not in with_ca, "a CA is the opposite of turning verification off"
+    assert "CURL_HOME=unset" not in with_ca, "curl has to be told where the file is"
+
+    both = curlrc(CC_CA_BUNDLE=str(ca), CC_TLS_INSECURE="1")
+    assert f"cacert = {ca}" in both and "insecure" in both, both
+
+    only_insecure = curlrc(CC_TLS_INSECURE="1")
+    assert "insecure" in only_insecure and "cacert" not in only_insecure, only_insecure
+
+
 def test_the_trust_fanout_reaches_every_consumer_in_the_table():
     body = _export_tls_env_body()
     for consumer, (ca_var, insecure_var) in HOST_FANOUT.items():

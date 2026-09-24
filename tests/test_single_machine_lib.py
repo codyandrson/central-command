@@ -101,6 +101,43 @@ def test_one_mirror_renders_a_registry_and_a_mirror_table():
     assert "ghcr.io" not in out and "mcr.microsoft.com" not in out
 
 
+def test_every_prefix_block_also_sets_location():
+    """podman REFUSES the whole drop-in when a non-wildcard `prefix` has no
+    `location`, and then nothing in the machine can resolve a registry.
+
+    The exact failure, measured on the 2026-09-24 Windows run with podman 5.8.3
+    after `./setup.sh machine`:
+
+        Error: getting registries: loading drop-in registries configuration
+        ".../cc-central-command.conf": invalid condition: location is unset and
+        prefix is not in the format: *.example.com
+
+    `podman info` failed outright from then on. So the one mechanism the
+    air-gapped design rests on — point podman at a mirror — had never worked on
+    a real machine, and could not be caught here before because these tests
+    assert the rendered TEXT and there is no podman machine on Linux to feed it
+    to. This test is the text-level stand-in for "podman would accept it":
+    for a mirror, location == prefix (the canonical name is where the ref WOULD
+    have gone; `[[registry.mirror]]` is where it goes instead).
+    """
+    out = run("cc_render_registries_conf", {
+        "CC_REGISTRY_DOCKERIO": "mirror.corp.example",
+        "CC_REGISTRY_GHCR": "mirror.corp.example",
+    })
+    blocks = [b for b in out.split("[[registry]]") if "prefix = " in b]
+    assert blocks, out
+    for block in blocks:
+        prefix = next(l for l in block.splitlines() if l.startswith("prefix = "))
+        canon = prefix.split("=", 1)[1].strip().strip('"')
+        # The location must be in the SAME table — i.e. before the nested
+        # [[registry.mirror]] table starts.
+        table = block.split("[[registry.mirror]]", 1)[0]
+        assert f'location = "{canon}"' in table, (
+            f"prefix {canon!r} has no location in its own table; podman will "
+            f"refuse the entire drop-in:\n{block}"
+        )
+
+
 def test_a_url_shaped_seam_is_reduced_to_a_host():
     """A discovery mirror is a URL; registries.conf takes a host."""
     out = run("cc_render_registries_conf",

@@ -311,15 +311,32 @@ cc_migrate_legacy_env() { # cc_migrate_legacy_env <env-file> <repo-root> <state-
 # reaches — that is the `machine` phase's job and `--tls-verify=false`'s.
 cc_export_tls_env() { # cc_export_tls_env <state-dir>
   local state="${1:-}"
+  # Lines for the .curlrc this install owns (see cc__write_curlrc). Collected
+  # here because BOTH knobs can need one at the same time, and the file is
+  # rewritten in one go rather than twice.
+  local curlrc_extra=()
 
   if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
-    export CURL_CA_BUNDLE="$CC_CA_BUNDLE"      # curl (host)
+    export CURL_CA_BUNDLE="$CC_CA_BUNDLE"      # curl (host) — OpenSSL builds only
     export SSL_CERT_FILE="$CC_CA_BUNDLE"       # openssl, uv, python
     export REQUESTS_CA_BUNDLE="$CC_CA_BUNDLE"  # requests/httpx-based tools
     export PIP_CERT="$CC_CA_BUNDLE"            # pip
     export NODE_EXTRA_CA_CERTS="$CC_CA_BUNDLE" # node
     export NPM_CONFIG_CAFILE="$CC_CA_BUNDLE"   # npm
     export GIT_SSL_CAINFO="$CC_CA_BUNDLE"      # git over https
+    # ...and the same CA through the .curlrc, because a SCHANNEL curl — which is
+    # what Git for Windows ships, and Windows is this profile's target — ignores
+    # CURL_CA_BUNDLE entirely. MEASURED on the 2026-09-24 Windows run against a
+    # private CA and curl 8.21.0 (Schannel):
+    #   CURL_CA_BUNDLE=<pem>  -> 000, certificate failure
+    #   --cacert <pem>        -> 200, and `curl -v` says
+    #                            "schannel: added 1 certificate(s) from CA file"
+    # So the CA does NOT have to be in the Windows Root store, which is what the
+    # note below this function used to claim: it only has to reach curl as an
+    # OPTION rather than an environment variable. Without this line every
+    # host-side probe in `check` (the indexes, the registry manifest HEADs, the
+    # upstream LLM) failed on a private CA on Windows while CC_CA_BUNDLE was set.
+    curlrc_extra+=("cacert = $CC_CA_BUNDLE")
   fi
 
   # The hosts an index knob points at — pip and uv take HOSTS, not URLs.
@@ -332,14 +349,9 @@ cc_export_tls_env() { # cc_export_tls_env <state-dir>
   done
 
   if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
-    # curl has no environment variable for -k, so it travels in a config file
-    # this install owns. CURL_HOME is how curl finds a .curlrc that is not in
-    # $HOME, and the file is REWRITTEN each run rather than appended to, so a
-    # knob turned back off does not leave a stale `insecure` line behind.
-    if [[ -n "$state" ]] && mkdir -p "$state/curl" 2>/dev/null; then
-      cc__write_curlrc "$state/curl/.curlrc" insecure
-      export CURL_HOME="$state/curl"
-    fi
+    # curl has no environment variable for -k, so it travels in the same config
+    # file as the CA above.
+    curlrc_extra+=(insecure)
     # Space-separated: pip documents multi-value environment options that way,
     # and uv's list-valued environment variables follow the same convention
     # (UV_INSECURE_HOST is the documented env form of --allow-insecure-host —
@@ -352,18 +364,30 @@ cc_export_tls_env() { # cc_export_tls_env <state-dir>
     export NPM_CONFIG_STRICT_SSL=false
     export NODE_TLS_REJECT_UNAUTHORIZED=0
     export GIT_SSL_NO_VERIFY=1
-  elif [[ -n "$state" ]]; then
-    cc__write_curlrc "$state/curl/.curlrc"
+  fi
+
+  # ONE write, whatever the knobs said. CURL_HOME is how curl finds a .curlrc
+  # that is not in $HOME, and the file is REWRITTEN each run rather than appended
+  # to, so a knob turned back off does not leave a stale `insecure` (or a stale
+  # `cacert` pointing at a file that has moved) behind.
+  if [[ -n "$state" ]] && mkdir -p "$state/curl" 2>/dev/null; then
+    cc__write_curlrc "$state/curl/.curlrc" ${curlrc_extra[@]+"${curlrc_extra[@]}"}
     [[ -f "$state/curl/.curlrc" ]] && export CURL_HOME="$state/curl"
   fi
   return 0
 }
 
-# The setup-owned .curlrc. Git for Windows' curl is schannel-ONLY: it ignores
-# CURL_CA_BUNDLE (the CA must be in the Windows Root store) and it checks
-# revocation, which an intercepting proxy cannot answer
-# (CRYPT_E_REVOCATION_OFFLINE, 2026-09-18 Windows run) — so that line is
-# written on Windows unconditionally. Extra lines come from the caller.
+# The setup-owned .curlrc. Git for Windows' curl is schannel-ONLY, with two
+# consequences, and this file is where both are answered:
+#   * it IGNORES CURL_CA_BUNDLE. The old note here concluded "the CA must be in
+#     the Windows Root store" — MEASURED FALSE on the 2026-09-24 Windows run:
+#     `--cacert <pem>` works (curl -v: "schannel: added 1 certificate(s) from CA
+#     file"), it is only the ENVIRONMENT VARIABLE that is ignored. So the CA
+#     travels as a `cacert` line from cc_export_tls_env, not via the Root store;
+#   * it checks revocation, which an intercepting proxy cannot answer
+#     (CRYPT_E_REVOCATION_OFFLINE, 2026-09-18 Windows run) — so that line is
+#     written on Windows unconditionally.
+# Extra lines come from the caller.
 # Rewritten, never appended: the file is generated state, not a record.
 cc__write_curlrc() { # cc__write_curlrc <path> [extra-line ...]
   local f="$1"; shift

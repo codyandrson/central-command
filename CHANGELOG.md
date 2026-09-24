@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-24 — v2.45.4: pointing podman at a mirror had never worked on a real machine
+
+Scenario A of the Windows testbed run — a self-signed registry inside the
+podman machine, seeded WITHOUT the postgres lock tag and with redis under a
+renamed path — passed on every criterion: the resolver substituted `16.10`
+within the `16` constraint, honoured the renamed-path pin, every pull and all
+three local builds came from the mirror, and `check` converged at 48 pass /
+0 fail. Getting there found three defects:
+
+- **CRITICAL — the `machine` phase wrote a registries drop-in podman refuses
+  to load.** `[[registry]] prefix = "docker.io"` with no `location` is
+  "invalid condition" to podman; `podman info` then failed outright and
+  `fetch` could resolve nothing. The one mechanism the air-gapped design rests
+  on had never been exercised on a real machine — Linux has no machine, and
+  the unit tests asserted the rendered text, not podman's acceptance. Every
+  prefix block now carries `location`; a test walks them; verified live.
+- **`CC_CA_BUNDLE` never reached host-side curl on Windows.** Windows curl is
+  Schannel-built and ignores `CURL_CA_BUNDLE` (measured: 000 with the
+  variable, 200 with `--cacert`). The earlier note that "the CA must be in the
+  Windows Root store" was measured false. The CA is now written as a `cacert`
+  line into the `.curlrc` the fan-out already generates. D4's table corrected.
+- **A mirror seeded by push failed 4 of 8 rows as "poisoned".** `podman push`
+  re-serialises the manifest, so the locked digest never matches on such a
+  mirror — yet the lock's stated purpose is PUBLIC-registry tag poisoning, a
+  threat the mirrored air gap does not carry. Under a configured mirror a
+  locked-tag digest mismatch is now a WARN naming both digests, recorded as
+  `locked-mirror`; on the public host it stays a FAIL.
+
+Reported, not fixed: the `tls-insecure` WARN prints once per command and so
+several times per `check`; the loopback rule WARNs on `CC_REGISTRY_*=
+localhost:5000` although that is the spelling a machine-local mirror needs;
+the drop-in marks the public registries insecure too.
+
 ## 2026-09-24 — v2.45.3: v2.45.2 shipped an empty VERSION file
 
 A release-mechanics slip, not a product change: the v2.45.2 commit's `VERSION`
