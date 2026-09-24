@@ -9,8 +9,8 @@ project.
 
 **Discovery first, then mirrors; nothing falls back on its own.**
 `deploy/discover.sh` maps what the environment can actually reach; the
-single-node driver's `fetch` phase (`deploy/single/setup.sh fetch`, right
-after `preflight`, before anything is deployed) acquires every dependency —
+single-node driver's `fetch` phase (`deploy/single/setup.sh fetch`, after the
+dry `check` and `machine`, before anything is deployed) acquires every dependency —
 images by digest, the three locally-built images, the Python resolution, the
 cockpit's npm tree — and STOPS (exit 3) on the first artifact it cannot get,
 naming the `.env` seam that governs it. You fix the mirror seam and re-run
@@ -21,6 +21,86 @@ Every mirror layer we sit on — podman's `registries.conf`, containerd's —
 falls through to the public endpoint on a miss by DEFAULT; fail-loud is
 opt-in (`pull-from-mirror`, k3s's `--disable-default-registry-endpoint`).
 The `fetch` phase is where we make it loud.
+
+## The loop (v2.44.0) — `check` → triage → `check` → `./setup.sh`
+
+`./deploy/single/setup.sh check` runs every check that can be made **without
+changing anything** — the answer file, this host, the podman machine's current
+state, every image ref against its registry, the package indexes, the UPSTREAM
+LLM probed from this host, the compose render, the speech models' source — and
+prints one table, ending in
+`CHECK: <n> pass, <n> warn, <n> fail, <n> action` (design record
+`2026-09-23-airgap-check-configure-setup-design.md`, D5).
+`./setup.sh check --list` names the eight sections.
+
+```
+edit .env  ->  ./setup.sh check  ->  triage what it names  ->  ./setup.sh check
+                                                                   ...until green
+                                              ->  ./setup.sh      (the install)
+```
+
+Two properties make the loop worth running:
+
+* **it changes nothing but `.env`** — and inside `.env`, only `CC_STATE_DIR` and
+  `CC_EMBED_DIM` (measured from the upstream embedder, written only when unset).
+  Triage means editing `.env`, never editing a script, a Dockerfile or
+  `images.txt`: every seam this document lists is a key in that file.
+* **it is the GATE.** The full run starts with it and refuses to continue past a
+  `FAIL` or a `USERACTION`. A WARN-only check continues with
+  `--accept-warnings`, or with an interactive `y`; with no terminal and no flag
+  it stops and names the flag rather than deciding for you. So a configuration
+  problem is a line in a table before anything is pulled, built or deployed.
+
+**Its ceiling is printed with the summary, and it is honest:** *check proves
+inputs, not builds.* A local image build can still fail INSIDE the build (the
+apt/pip/npm work happens there), and the LiteLLM *alias* probes belong to the
+`llm` phase. What check proves is that every input those steps need is real —
+"no CONFIGURATION failure at setup", not "no failure of any kind".
+
+`deploy/discover.sh` still comes first on a network nobody has mapped: it
+classifies what is reachable and by what failure mode, and its report names the
+`.env` seams. `check` then proves THIS deployment's own inputs against the
+answers discovery produced.
+
+## The LLM: declared in `.env`, with the LiteLLM UI as the fallback
+
+Until v2.44.0 the model catalog was outside `.env` entirely: setup created
+`PLACEHOLDER` rows in LiteLLM's database and PAUSED (exit 3) while the operator
+typed provider, model id and key into the proxy's web UI. On an air-gapped
+install that was the worst possible place to discover that the endpoint, the key
+or a model id was wrong — half-deployed, with the UI as the only instrument.
+
+Declare it instead (design record D3), in the repo-root `.env`:
+
+| key | meaning |
+|---|---|
+| `CC_LLM_UPSTREAM_BASE_URL` | the `/v1` base THIS HOST can reach. A `127.0.0.1` value is rewritten to `host.containers.internal` for the LiteLLM row — the row is dialled by a CONTAINER — with a WARN saying so |
+| `CC_LLM_UPSTREAM_API_KEY` | its key. Never printed, never logged, never compared (LiteLLM masks it) |
+| `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | the UPSTREAM model id for each alias: `_CC_DEFAULT`, `_GRAPHITI_LLM`, `_CC_EMBEDDING`, `_GPT_4_1_NANO`, and with `CC_ENABLE_SPEECH=1` `_CC_TTS` and `_CC_STT` (the alias upper-cased, every non-alphanumeric `_`) |
+
+Then `check`'s `llm` section probes that endpoint FROM THE HOST with curl before
+any container exists — the model list (a 404 there is a WARN: some gateways do
+not implement it, and then membership is simply unchecked), one chat completion
+per distinct chat model id, one `json_schema` round trip for the `graphiti-llm`
+model, and one embedding call whose length IS `CC_EMBED_DIM` — and the `llm`
+phase registers real rows and skips its pause entirely.
+`register-models.py` stays CREATE-ONLY: with the keys unset it creates today's
+`PLACEHOLDER` skeletons (which is what the k3s profile relies on), a skeleton is
+UPDATED once `.env` declares the upstream, and a row the operator filled in is
+never written to — it WINS over `.env`, and the script says so.
+
+Which aliases are REQUIRED follows the feature flags, and
+`cc_required_aliases` in `deploy/env-lib.sh` is the one place that decides:
+the four core aliases always, the speech pair only with `CC_ENABLE_SPEECH=1`
+(with the engine off you point `cc-tts`/`cc-stt` at engines of your own in the
+UI, which is not an upstream `.env` can name).
+
+**Open item, unchanged:** the CA and the insecure knob reach the LiteLLM
+container (`SSL_CERT_FILE` / `SSL_VERIFY`, via compose), but `CC_PROXY` does
+NOT — `containers.conf`'s `[engine] env` covers pulls and builds, not
+containers. An upstream reachable only through an egress proxy needs
+`HTTP(S)_PROXY` added to the `litellm` service by hand; the `llm` phase's
+failure text says so too.
 
 ## Step 0 — discover the environment
 
@@ -79,6 +159,7 @@ source. `deploy/single/env.example` and `deploy/single/.env` are gone.
 | a mandatory egress proxy | every host-side acquisition, and (inside a podman machine) pulls and builds | `CC_PROXY` | fanned out to `http(s)_proxy` both cases, `no_proxy` pinned to loopback; `./setup.sh machine` writes the machine's `containers.conf` `[engine] env` drop-in. The machine's OWN environment still comes from `podman machine start` |
 | — (verification off) | everything the CA row covers, except the speech engine | `CC_TLS_INSECURE=1` | the other supported answer to interception. One switch, not six; every run that sees it prints one WARN naming what it covers, and it is never a PASS. See "Trust" |
 | — (credentials) | `deploy/discover.sh`'s probes | `CC_NETRC=1` | `--netrc`, so credentials stay in `~/.netrc` and never in `.env` |
+| the upstream LLM endpoint | LiteLLM (and `check`, from the host) | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0; blank means the LiteLLM-UI pause instead. See "The LLM" above |
 
 **Windows (Git Bash + a podman machine) — measured 2026-09-18.** Git for
 Windows' curl is schannel-only: it IGNORES `CURL_CA_BUNDLE`, and it checks

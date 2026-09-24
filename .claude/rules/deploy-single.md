@@ -15,9 +15,10 @@ when a matching file is read.
 
 - **`deploy/single/`** — the single-node **Compose** profile (`compose.yaml`,
   run under `podman compose`).
-  `setup.sh` is a deterministic driver (validate / preflight / machine / fetch /
+  `setup.sh` is a deterministic driver (check / machine / fetch /
   llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
-  exit 0/1/2/3, `diagnose` support bundle); the
+  exit 0/1/2/3, `diagnose` support bundle — `validate` and `preflight` stay
+  callable on their own and `check` composes them); the
   /setup skill's job is elicitation and diagnosis only. `compose.yaml` is the
   whole deployment (readiness is healthchecks + depends_on, optionals are
   profiles); `images.txt` holds a constraint, a locked tag and a locked digest
@@ -76,6 +77,32 @@ when a matching file is read.
   as `pinned`, and never rewritten; a pin that does not exist is a FAIL naming
   the key. The three `*-base` rows reach the builds through the same keys, and
   each Dockerfile's `ARG CC_IMG_*` default must equal its `images.txt` row.
+- **`check` EXECUTES nothing, and it is the GATE** (v2.44.0, design record D5).
+  Eight dry sections (`./setup.sh check --list`), one table, the same protocol
+  and exit taxonomy as a phase; the full run is `check` then the nine phases
+  that change something, and it refuses to continue past a FAIL or a
+  USERACTION — a WARN-only check needs `--accept-warnings` or an interactive
+  `y`, and with no TTY and no flag it STOPS rather than guessing (rustup's
+  rule). It COMPOSES `validate`, `preflight` and `machine --dry-run` instead of
+  copying their probes, writes nothing inside the checkout but `.env`
+  (`CC_STATE_DIR` and `CC_EMBED_DIM`, only when unset), and never generates a
+  secret — a blank credential is a WARN naming `make-secrets.sh`, because a
+  gate that refuses a FIRST install is worse than no gate.
+  `tests/test_single_check_is_dry.py` walks every function check can reach and
+  fails the suite on a `podman pull|build|run`, a `compose … up`, an install
+  or a `make-secrets` call. Its ceiling is PRINTED, not implied: check proves
+  inputs, not builds.
+- **The LLM catalog may be DECLARED in `.env`, and the UI is the fallback**
+  (v2.44.0, design record D3). `CC_LLM_UPSTREAM_BASE_URL`,
+  `CC_LLM_UPSTREAM_API_KEY` and one `CC_LLM_UPSTREAM_MODEL_<ALIAS>` per alias
+  `cc_required_aliases` (in `deploy/env-lib.sh` — the ONE list) says this
+  deployment needs. `register-models.py` stays CREATE-ONLY: real rows when the
+  keys are set, today's PLACEHOLDER skeletons when they are not (the k3s
+  profile depends on that), a PLACEHOLDER row UPDATED once the keys appear, and
+  a row anyone filled in never written to — it WINS over `.env`, and the script
+  says so. The key is never printed, never logged and never compared (LiteLLM
+  masks it); a loopback base URL is rewritten to `host.containers.internal`
+  for the row, with a WARN, because a CONTAINER dials it.
 - **The single-node install ACQUIRES before it deploys, and never falls back
   on its own.** `setup.sh fetch` is the one phase that touches the network;
   each failure names its `.env` seam and the phase exits 3; `deploy/discover.sh`

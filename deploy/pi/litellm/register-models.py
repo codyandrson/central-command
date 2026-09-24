@@ -9,6 +9,29 @@
             the LiteLLM UI (printed above the exit), then re-run
     exit 1  the proxy could not be reached / answered an error
 
+THE UPSTREAM MAY BE DECLARED IN `.env` (v2.44.0, 2026-09-23 design record D3).
+When CC_LLM_UPSTREAM_BASE_URL, CC_LLM_UPSTREAM_API_KEY and an alias's
+CC_LLM_UPSTREAM_MODEL_<ALIAS> are all set in the environment, that alias is
+created as a REAL row — `openai/<upstream id>` + `api_base` + `api_key` —
+instead of a skeleton, and setup has nothing to pause for. An alias whose key
+is missing keeps today's PLACEHOLDER skeleton, so nothing changes for an
+install that fills the catalog in the UI (which is what the k3s profile does).
+The key name is the alias upper-cased with every non-alphanumeric turned into
+`_` (`cc-default` -> `CC_LLM_UPSTREAM_MODEL_CC_DEFAULT`); the same derivation
+lives in `deploy/env-lib.sh` as `cc_alias_env_key`, because bash needs it too.
+
+Two rules about those values:
+  * a `127.0.0.1` / `localhost` upstream HOST is rewritten to
+    `host.containers.internal` for the row, with a WARN — the row is dialled by
+    a CONTAINER, and loopback there is the container itself;
+  * the key is never printed. Not in the CREATE line, not in a diff, not in an
+    error. `api_key` is also never COMPARED: LiteLLM masks it in /model/info.
+
+One narrow exception to create-only, for the operator who ran setup once and
+filled `.env` afterwards: a row that is still a PLACEHOLDER skeleton is
+UPDATED (POST /model/update) to the declared values. Anything else — any row
+whose owned params are filled in — is never touched, whoever filled it.
+
 The model catalog lives in LiteLLM's Postgres (`store_model_in_db: true`) and
 is managed through its UI/API — that is the operator's decision (2026-08-30):
 the config file is the fallback for what the API cannot set, never the
@@ -53,6 +76,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -70,6 +94,71 @@ PLACEHOLDER = "PLACEHOLDER"
 OWNED = ("model", "api_base", "timeout", "mode")
 
 EXIT_ACTION = 3
+
+# ── the upstream, when .env declares it (design record D3) ───────────────────
+UPSTREAM_BASE_KEY = "CC_LLM_UPSTREAM_BASE_URL"
+UPSTREAM_API_KEY = "CC_LLM_UPSTREAM_API_KEY"
+UPSTREAM_MODEL_PREFIX = "CC_LLM_UPSTREAM_MODEL_"
+# What a container means by "this machine". A loopback api_base would make
+# LiteLLM dial ITSELF (bitten 2026-08-28 on Windows), so it is rewritten and
+# the rewrite is reported.
+CONTAINER_HOST = "host.containers.internal"
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def alias_env_key(alias: str) -> str:
+    """`cc-default` -> `CC_LLM_UPSTREAM_MODEL_CC_DEFAULT`.
+
+    Mirrored by `cc_alias_env_key` in deploy/env-lib.sh — bash needs the same
+    derivation to tell the operator which key removes the pause.
+    """
+    return UPSTREAM_MODEL_PREFIX + re.sub(r"[^A-Z0-9]", "_", alias.upper())
+
+
+def container_api_base(url: str) -> tuple[str, bool]:
+    """The api_base as a CONTAINER must dial it. Returns (url, rewritten?)."""
+    m = re.match(r"^(\w+://)([^/]+)(.*)$", url)
+    if not m:
+        return url, False
+    scheme, netloc, rest = m.groups()
+    userinfo, _, hostport = netloc.rpartition("@")
+    host, sep, port = hostport.partition(":")
+    if host.lower() not in LOOPBACK_HOSTS:
+        return url, False
+    hostport = CONTAINER_HOST + sep + port
+    return f"{scheme}{userinfo}{'@' if userinfo else ''}{hostport}{rest}", True
+
+
+def upstream_rows(aliases, env) -> tuple[dict[str, dict], list[str]]:
+    """{alias: real litellm_params} for every alias .env declares, + notes.
+
+    All three of base URL, key and the alias's model key must be present for
+    that alias; anything less keeps the PLACEHOLDER skeleton. Notes are for
+    stderr/stdout and never contain the key.
+    """
+    base = (env.get(UPSTREAM_BASE_KEY) or "").strip()
+    key = (env.get(UPSTREAM_API_KEY) or "").strip()
+    notes: list[str] = []
+    if not base or not key:
+        return {}, notes
+    api_base, rewritten = container_api_base(base)
+    if rewritten:
+        notes.append(
+            f"{UPSTREAM_BASE_KEY} is a LOOPBACK address, which inside a container means "
+            f"the container itself — registering api_base as {api_base} instead"
+        )
+    rows: dict[str, dict] = {}
+    for alias in aliases:
+        model_id = (env.get(alias_env_key(alias)) or "").strip()
+        if not model_id:
+            continue
+        rows[alias] = {"model": f"openai/{model_id}", "api_base": api_base, "api_key": key}
+    return rows, notes
+
+
+def redacted(params: dict) -> dict:
+    """The params as they may be PRINTED — the key is never in a log line."""
+    return {k: ("(set, not printed)" if k == "api_key" else v) for k, v in params.items()}
 
 
 def _master_key() -> str:
@@ -110,8 +199,14 @@ def load_declaration(path: Path) -> dict:
     return yaml.safe_load(text)
 
 
-def declared(policy: dict) -> dict[str, dict]:
-    """alias -> the skeleton litellm_params, from BOTH declaration blocks."""
+def declared(policy: dict, upstream: dict[str, dict] | None = None) -> dict[str, dict]:
+    """alias -> the litellm_params to register, from BOTH declaration blocks.
+
+    `upstream` (from `upstream_rows`) REPLACES the PLACEHOLDER provider fields
+    for the aliases it covers, so a declared alias is created as a real row.
+    Passing nothing is the pre-v2.44.0 behaviour, which is what the k3s profile
+    and every UI-driven install get.
+    """
     out: dict[str, dict] = {}
     for alias, spec in (policy.get("models") or {}).items():
         reg = spec.get("registration")
@@ -124,6 +219,9 @@ def declared(policy: dict) -> dict[str, dict]:
     for alias, spec in (policy.get("registration_only") or {}).items():
         reg = spec.get("registration") or {}
         out[alias] = {k: v for k, v in reg.items() if k in OWNED}
+    for alias, real in (upstream or {}).items():
+        if alias in out:
+            out[alias] = {**out[alias], **real}
     return out
 
 
@@ -142,15 +240,29 @@ def matches(pattern, live) -> bool:
         and len(live) > len(prefix) + len(suffix)
 
 
-def plan(want: dict[str, dict], live_models: list[dict]) -> list[tuple[str, str, list[str]]]:
+def plan(want: dict[str, dict], live_models: list[dict],
+         invariants: dict[str, dict] | None = None) -> list[tuple[str, str, list[str]]]:
     """[(status, alias, problems)] — pure, so it is testable.
 
-    status: create   absent on the proxy -> a skeleton will be created
-            pending  present, still carries PLACEHOLDER in an owned param
+    `want` is what would be WRITTEN; `invariants` is what an existing row is
+    judged against (the DECLARATION's patterns, defaulting to `want`). The two
+    differ once .env declares an upstream: a row the operator filled in with
+    their own model id is not drift just because .env names another one — this
+    script does not overwrite a filled-in row, so it must not veto it either.
+    The invariants stay the declaration's: the plain `openai/` prefix,
+    `mode: rerank`, the timeouts, graphiti-llm's missing bridge prefix.
+
+    status: create   absent on the proxy -> it will be created (a skeleton, or
+                     a real row where .env declares the upstream)
+            pending  present, still carries PLACEHOLDER in an owned param, and
+                     nothing declares what it should be -> the operator's
+            update   present, still a PLACEHOLDER skeleton, and .env NOW
+                     declares the upstream -> overwrite it
             drift    present, filled in, but breaks a declared invariant
             ok
     """
     by_alias = {m.get("model_name"): m for m in live_models if m.get("model_name")}
+    invariants = invariants or want
     out = []
     for alias, params in want.items():
         live = by_alias.get(alias)
@@ -161,10 +273,22 @@ def plan(want: dict[str, dict], live_models: list[dict]) -> list[tuple[str, str,
         pending = [k for k in OWNED
                    if isinstance(live_params.get(k), str) and PLACEHOLDER in live_params[k]]
         if pending:
-            out.append(("pending", alias, [f"{k} is still {live_params[k]!r}" for k in pending]))
+            # A skeleton the operator never filled in, where .env NOW declares
+            # the upstream: the declared values may overwrite it (design record
+            # D3). A row with anything else in it is the operator's and is
+            # never touched, which is why only PLACEHOLDER rows reach here.
+            if not any(isinstance(v, str) and PLACEHOLDER in v for v in params.values()):
+                out.append(("update", alias,
+                            [f"{k} is still {live_params[k]!r}" for k in pending]))
+            else:
+                out.append(("pending", alias,
+                            [f"{k} is still {live_params[k]!r}" for k in pending]))
             continue
         problems = [f"{k}: {live_params.get(k)!r} does not match declared {v!r}"
-                    for k, v in params.items() if not matches(v, live_params.get(k))]
+                    for k, v in (invariants.get(alias) or {}).items()
+                    # api_key is never compared: LiteLLM masks it in /model/info,
+                    # so a comparison would report permanent drift.
+                    if k in OWNED and not matches(v, live_params.get(k))]
         # graphiti-llm-specific invariant: the Responses->chat bridge prefix is
         # no longer wanted (2026-09-21) — Graphiti's MCP server uses upstream's
         # stock chat-completions client now, and a bridged model 404s against
@@ -192,16 +316,44 @@ def main() -> int:
                     help=f"the declaration (.yaml or .json; default {POLICY_PATH})")
     args = ap.parse_args()
 
-    want = declared(load_declaration(args.policy))
-    live = _request("GET", "/model/info").get("data", [])
-    actions = plan(want, live)
+    policy = load_declaration(args.policy)
+    # The DECLARATION's own patterns — what an existing row is judged against,
+    # whatever .env says. Never replaced by the upstream values: see plan().
+    invariants = declared(policy)
+    want = invariants
+    # The upstream, when .env declares it (design record D3). Resolved from the
+    # ENVIRONMENT explicitly rather than inside declared(), so every caller that
+    # asks for the declaration alone gets the skeletons.
+    upstream, notes = upstream_rows(list(invariants), os.environ)
+    if upstream:
+        want = declared(policy, upstream)
+    for note in notes:
+        print(f"  note     {note}")
+    if upstream:
+        print("  declared in .env: " + " ".join(sorted(upstream))
+              + f"  (base {UPSTREAM_BASE_KEY}, key {UPSTREAM_API_KEY} — value not printed)")
 
-    created, action_needed = 0, []
+    live = _request("GET", "/model/info").get("data", [])
+    actions = plan(want, live, invariants)
+
+    created, updated, action_needed = 0, 0, []
     for status, alias, problems in actions:
         if status == "ok":
             print(f"  ok       {alias}")
+            # A filled-in row WINS over .env. Said out loud, because the two
+            # disagreeing silently is how an operator ends up debugging a model
+            # id that is in the answer file and nowhere else.
+            if alias in upstream:
+                lp = next((m.get("litellm_params") or {} for m in live
+                           if m.get("model_name") == alias), {})
+                if any(lp.get(k) != upstream[alias][k] for k in ("model", "api_base")):
+                    print(f"  note     {alias}: the row on the proxy is not what "
+                          f"{alias_env_key(alias)} / {UPSTREAM_BASE_KEY} declare — "
+                          "the row you filled in WINS; this script never overwrites one")
         elif status == "create":
-            print(f"  CREATE   {alias}  skeleton {json.dumps(want[alias], sort_keys=True)}")
+            real = alias in upstream
+            kind = "from .env" if real else "skeleton "
+            print(f"  CREATE   {alias}  {kind} {json.dumps(redacted(want[alias]), sort_keys=True)}")
             if not args.dry_run:
                 stamp = datetime.now(timezone.utc).isoformat()
                 _request("POST", "/model/new",
@@ -209,7 +361,22 @@ def main() -> int:
                           "model_info": {"created_by": "register-models.py", "created_at": stamp,
                                          "updated_by": "register-models.py", "updated_at": stamp}})
                 created += 1
-            action_needed.append((alias, ["created as a skeleton — fill in model, api_base and the key/credential"]))
+            if not real:
+                action_needed.append((alias, ["created as a skeleton — fill in model, api_base and the key/credential"]))
+        elif status == "update":
+            # Only ever a PLACEHOLDER row -> the values .env declares. `id` is
+            # how /model/update addresses an existing deployment.
+            print(f"  UPDATE   {alias}  was a skeleton ({'; '.join(problems)}), "
+                  f"now {json.dumps(redacted(want[alias]), sort_keys=True)}")
+            if not args.dry_run:
+                live_row = next(m for m in live if m.get("model_name") == alias)
+                stamp = datetime.now(timezone.utc).isoformat()
+                _request("POST", "/model/update",
+                         {"model_name": alias, "litellm_params": want[alias],
+                          "model_info": {"id": (live_row.get("model_info") or {}).get("id"),
+                                         "updated_by": "register-models.py",
+                                         "updated_at": stamp}})
+                updated += 1
         else:
             print(f"  {status.upper():8} {alias}  " + "; ".join(problems))
             action_needed.append((alias, problems))
@@ -220,12 +387,16 @@ def main() -> int:
 
     print()
     if args.dry_run:
-        print(f"dry run: {sum(1 for s, *_ in actions if s == 'create')} skeleton(s) would be created; nothing was written.")
+        counts = {s: sum(1 for x, *_ in actions if x == s) for s in ("create", "update")}
+        print(f"dry run: {counts['create']} row(s) would be created, "
+              f"{counts['update']} placeholder row(s) updated from .env; nothing was written.")
         return 0
     if not action_needed:
-        print(f"the proxy holds every alias {args.policy.name} requires, filled in and consistent")
+        print(f"the proxy holds every alias {args.policy.name} requires, filled in and consistent"
+              + (f" ({updated} placeholder row(s) updated from .env)" if updated else ""))
         return 0
-    print(f"OPERATOR ACTION — {created} skeleton(s) created; {len(action_needed)} alias(es) need you in the LiteLLM UI:")
+    print(f"OPERATOR ACTION — {created} row(s) created, {updated} updated from .env; "
+          f"{len(action_needed)} alias(es) need you in the LiteLLM UI:")
     for alias, problems in action_needed:
         print(f"  {alias}: " + "; ".join(problems))
     return EXIT_ACTION

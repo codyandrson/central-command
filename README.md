@@ -43,8 +43,9 @@ claude        # from the repo root, then type:  /setup
 
 `/setup` elicits your answers into the repo-root `.env` — one answer file for
 the app and the deployment (v2.42.0) — and runs the
-deterministic driver `./setup.sh` — eleven idempotent phases
-(`validate → preflight → machine → fetch → llm → stack → app → verify → test
+deterministic driver `./setup.sh` — a dry pre-deployment CHECK and nine
+idempotent phases
+(`check → machine → fetch → llm → stack → app → verify → test
 → boot → demo`), each re-runnable on its own, every check one
 `PASS|WARN|FAIL|USERACTION` line (exit 0/1/2/3 — 3 means the run paused
 for your move). A failure tells you which

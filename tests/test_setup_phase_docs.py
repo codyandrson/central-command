@@ -22,12 +22,22 @@ DOCS = [
 
 
 def canonical_phases() -> list[str]:
+    """The full run, as setup.sh actually performs it.
+
+    Since v2.44.0 that is `check` — the dry GATE, which composes validate and
+    preflight — and then the loop over the phases that change something. The
+    gate is outside the loop on purpose (it decides whether the loop runs at
+    all), so the canonical list is the two halves joined.
+    """
     src = (ROOT / "deploy/single/setup.sh").read_text()
+    assert re.search(r"^\s*run_phase check; local crc=", src, flags=re.M), (
+        "the full run must start with the check gate"
+    )
     for m in re.finditer(r"for p in ((?:\w+\s+)+\w+);", src):
         phases = m.group(1).split()
-        if phases[0] == "validate":
-            return phases
-    raise AssertionError("all-phases loop not found in deploy/single/setup.sh")
+        if phases[0] == "machine":
+            return ["check", *phases]
+    raise AssertionError("the mutating-phase loop was not found in deploy/single/setup.sh")
 
 
 def test_docs_carry_the_full_phase_list():

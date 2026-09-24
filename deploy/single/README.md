@@ -111,8 +111,46 @@ to find, so a hand-run `podman compose` needs that flag too.
 cp .env.example .env   # AT THE REPO ROOT — then fill it in, see below
 chmod 600 .env
 cd deploy/single
-./setup.sh             # validate -> preflight -> machine -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
+./setup.sh check       # everything dry, one table — the loop below
+./setup.sh             # check -> machine -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
 ```
+
+### The loop: edit `.env` → `check` → triage → `check` → `./setup.sh`
+
+`./setup.sh check` (v2.44.0, design record D5) runs every check that can be made
+**without changing anything** and prints one table. It is the gate: the full run
+starts with it and refuses to go past a `FAIL` or a `USERACTION`; a WARN-only
+check continues with `--accept-warnings` or an interactive `y` (no terminal and
+no flag → it stops and names the flag, rather than deciding for you). So the
+install is: fill in `.env`, run `check`, triage what it names (with Claude, if
+you like — it reads the same lines), run `check` again, and only then
+`./setup.sh`. Nothing but `.env` changes in that loop, and `check` itself writes
+only two keys there: `CC_STATE_DIR` and `CC_EMBED_DIM` (measured, see below).
+
+Eight sections, in order — `./setup.sh check --list` prints this table:
+
+| section | what it checks |
+|---|---|
+| `answers` | .env present and sourceable; every required key set; ports valid, unique and free |
+| `host` | podman, the compose provider, the host tools, RAM/disk, the Windows CA store |
+| `machine` | the podman machine's CA, registries and proxy — current state and the diff the machine phase would apply |
+| `images` | every images.txt row resolves against its registry, including the three build bases and operator pins |
+| `indexes` | PyPI, npm, the Python resolution, the apt archive, the CPython download mirror |
+| `llm` | the upstream endpoint FROM THIS HOST: the model list, one chat, one structured, one embedding |
+| `compose` | compose.yaml renders with this .env, with no variable it requires left unset |
+| `models` | the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model |
+
+It ends with `CHECK: <n> pass, <n> warn, <n> fail, <n> action`, the state-dir
+path, and one honest ceiling: **check proves inputs, not builds.** A local image
+build can still fail inside the build (the apt/pip/npm work happens there), and
+the LiteLLM *alias* probes belong to the `llm` phase — what check proves is that
+every input those steps need is real. `validate` and `preflight` remain
+callable on their own; check composes them rather than copying their probes.
+
+On a brand-new `.env` two things are WARNs by design: the credentials
+`make-secrets.sh` generates are still blank (check never generates a secret —
+the `llm` phase does), and compose therefore reports them unset.
+`--accept-warnings` is how you say "yes, generate them".
 
 Everything this install GENERATES — `setup-log.txt`, `setup-diagnostics.txt`,
 `installed.manifest`, the API and cockpit logs and pid files, the updater's
@@ -123,16 +161,26 @@ written back into `.env` on the first run). `./setup.sh diagnose` prints the
 path first and `./setup.sh status` shows it. `git status` is clean after every
 command.
 
-What you must supply in `.env` for the deployment: only the `CC_ENABLE_*` /
-`CC_AIRGAP` flags —
+What you must supply in `.env` for the deployment: the `CC_ENABLE_*` /
+`CC_AIRGAP` flags, the upstream LLM (below),
 and, behind a mirror or with no network, the seams under "Where every
 dependency comes from" (see below).
-Everything else is generated or measured. **The LLM provider is entered in
-the LiteLLM UI, not here:** the `llm` phase stops (exit 3) once the proxy is
-up, with the four aliases created as skeletons and the URL/login printed;
+Everything else is generated or measured.
+
+**The LLM provider: declare it in `.env`, or fill it in the LiteLLM UI**
+(v2.44.0, design record D3). Set `CC_LLM_UPSTREAM_BASE_URL`,
+`CC_LLM_UPSTREAM_API_KEY` and one `CC_LLM_UPSTREAM_MODEL_<ALIAS>` per required
+alias (the table is in `.env.example`; `cc_required_aliases` in
+`deploy/env-lib.sh` is the code) and setup registers LiteLLM's rows itself —
+and `check` probes that endpoint from the host, before any container exists,
+which is what turns "the LLM is wrong" from a mid-install surprise into a line
+in a table. Leave them blank and the old path is unchanged: the `llm` phase
+stops (exit 3) once the proxy is up, with the aliases created as skeletons and
+the URL/login printed;
 fill in model ids, `api_base` (what the container dials —
 `host.containers.internal`, never `127.0.0.1`, for a server on this machine)
-and the key, then re-run `./setup.sh llm`. To see what a server names its
+and the key, then re-run `./setup.sh llm`. A `127.0.0.1` upstream in `.env` is
+rewritten to `host.containers.internal` for the row, with a WARN saying so. To see what a server names its
 models before you fill the rows in:
 
 ```bash
@@ -228,6 +276,7 @@ Each phase is a subcommand of the same code path as the full run, and every
 step inside it is idempotent, so **resume is just re-run**:
 
 ```bash
+./setup.sh check       # ALL of the below that changes nothing, in one table (--list names the sections)
 ./setup.sh validate    # offline check of .env; no side effects
 ./setup.sh preflight   # podman/tooling/RAM/disk/linger checks; no side effects
 ./setup.sh machine     # write the podman MACHINE from .env: the CA into its trust

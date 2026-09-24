@@ -4,6 +4,68 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-23 — v2.44.0: prove every input before anything is installed
+
+An air-gapped install did not fail on reachability — it failed halfway through,
+on a value nobody could check in advance: a tag the mirror did not have, a model
+id the endpoint did not serve, a credential typed into a web UI while setup sat
+paused at an exit-3 gate. So there is a new command that checks EVERYTHING and
+changes NOTHING, and the LLM catalog — the last configuration that lived outside
+the answer file — can now be declared in it. P3 of
+`docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md` —
+D5 and D3.
+
+- **`./setup.sh check` — everything dry, one table.** Eight sections in order
+  (`./setup.sh check --list` names them): the answer file and every required key,
+  this host, the podman machine's current state and the diff `machine` would
+  apply, every `images.txt` row resolved against its registry, the package
+  indexes plus the Python resolution, the UPSTREAM LLM probed from this host, the
+  compose render, and the speech models' source. Same protocol and exit taxonomy
+  as every phase, plus a `CHECK: <n> pass, <n> warn, <n> fail, <n> action`
+  summary and the state-dir path. It COMPOSES `validate`, `preflight` and
+  `machine --dry-run` rather than copying their probes — a second copy of a probe
+  is a probe that drifts — and it executes nothing: no pull, no build, no
+  `compose up`, no install, no secret generated, and nothing written inside the
+  checkout but `.env` (`CC_STATE_DIR` and `CC_EMBED_DIM`, and only when unset).
+  A guard test walks every function `check` can reach and fails the suite on a
+  mutating construct.
+- **It is the gate.** A full `./setup.sh` run is now `check` and then the nine
+  phases that change something. It refuses to continue past a `FAIL` or a
+  `USERACTION`, and a WARN-only check continues only with `--accept-warnings` or
+  an interactive `y` — with no terminal and no flag it stops and names the flag
+  instead of deciding for you. `validate` and `preflight` stay callable on their
+  own. The operator's loop is: edit `.env` → `check` → triage → `check` → run.
+- **Its ceiling is printed, not implied:** *check proves inputs, not builds.* A
+  local image build can still fail inside the build, and the LiteLLM alias probes
+  still belong to the `llm` phase.
+- **The LLM catalog can be declared in `.env`.** `CC_LLM_UPSTREAM_BASE_URL`,
+  `CC_LLM_UPSTREAM_API_KEY` and one `CC_LLM_UPSTREAM_MODEL_<ALIAS>` per required
+  alias (the alias upper-cased, every non-alphanumeric `_`), with
+  `cc_required_aliases` in `deploy/env-lib.sh` as the one place that decides
+  which aliases a deployment needs — the speech pair only with
+  `CC_ENABLE_SPEECH=1`. Declared, `register-models.py` creates REAL rows
+  (`openai/<upstream id>` + `api_base` + `api_key`) and the `llm` phase skips its
+  UI pause; undeclared, it creates today's `PLACEHOLDER` skeletons and pauses
+  exactly as before, which is what the k3s profile relies on. A `127.0.0.1`
+  upstream is rewritten to `host.containers.internal` for the row, with a WARN
+  saying so — the row is dialled by a container. The key is never printed, never
+  logged and never compared (LiteLLM masks it).
+- **Create-only, with one narrow exception.** A row that is still a
+  `PLACEHOLDER` skeleton is UPDATED once `.env` declares the upstream (the
+  operator who ran setup first and filled the answer file afterwards); a row
+  anyone filled in is never written to, and it WINS over `.env` — said out loud,
+  because two sources disagreeing silently is how you end up debugging a model id
+  that exists only in a file.
+- **`CC_EMBED_DIM` stays measured, never declared.** `check` measures it against
+  the upstream embedder and writes it only when unset; the `llm` phase still
+  measures it through the proxy alias and still refuses to change a value that
+  differs — it is written into the Neo4j vector index and is permanent.
+- **A compose variable it requires and `.env` does not set is now a finding**,
+  per key: a FAIL normally, a WARN for the credentials `make-secrets.sh`
+  generates. Both providers report an unset variable as a warning and exit 0,
+  rendering an empty credential — which is exactly the failure a pre-deployment
+  check exists to catch.
+
 ## 2026-09-23 — v2.43.0: a seam only reaches what it is plumbed into
 
 v2.42.0 gave the install one answer file. This is the other half of the same

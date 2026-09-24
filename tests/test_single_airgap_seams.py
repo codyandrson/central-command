@@ -268,6 +268,9 @@ RUNTIME_ONLY = {
     "CC_UPDATE_DRIVEN", "CC_UPDATE_FORCE",     # set by update-run.sh / by hand
     "CC_UPDATE_DIR",                           # api/update.py hands it to the runner
     "CC_ENV_LIB_LOADED",                       # env-lib.sh's own source guard
+    # setup.sh's own LISTS, not answers: which keys are ports and which
+    # credentials make-secrets.sh owns (v2.44.0's `check` reads both).
+    "CC_PORT_KEYS", "CC_GENERATED_KEYS",
     # The retired UPSTREAM keys: discover-llm.sh still accepts them in DIRECT
     # mode (a bare probe against a server), but the provider lives in the
     # proxy's database now and validate() calls them out if they reappear.
@@ -300,6 +303,51 @@ def test_env_example_declares_every_key_the_deployment_interpolates():
         "undocumented deployment seams — add a line (commented is fine) to the "
         f".env.example deployment section, or to RUNTIME_ONLY if it is a per-run override: {missing}"
     )
+
+
+# ── D3: the LLM catalog may be declared in the answer file (v2.44.0) ─────────
+UPSTREAM_KEYS = [
+    "CC_LLM_UPSTREAM_BASE_URL",
+    "CC_LLM_UPSTREAM_API_KEY",
+    "CC_LLM_UPSTREAM_MODEL_CC_DEFAULT",
+    "CC_LLM_UPSTREAM_MODEL_GRAPHITI_LLM",
+    "CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING",
+    "CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO",
+    "CC_LLM_UPSTREAM_MODEL_CC_TTS",
+    "CC_LLM_UPSTREAM_MODEL_CC_STT",
+]
+
+
+def test_the_upstream_llm_keys_are_declared_in_env_example():
+    """The catalog can be declared instead of typed into the LiteLLM UI (design
+    record D3), so the answer file's template has to TEACH the keys — including
+    one per alias, which is the part an operator cannot guess."""
+    declared = _declared()
+    for key in UPSTREAM_KEYS:
+        assert key in declared, (
+            f".env.example does not declare {key} — the alias-to-key mapping is "
+            "the one part of D3 an operator cannot infer"
+        )
+    text = ENV_EXAMPLE.read_text(encoding="utf-8")
+    # The mapping table lives in ONE place, next to the keys.
+    assert "cc_required_aliases" in text, (
+        ".env.example must point at deploy/env-lib.sh's cc_required_aliases — the "
+        "code that decides which aliases a deployment must declare"
+    )
+
+
+def test_the_required_alias_list_is_one_function():
+    """bash decides it; setup.sh and `check` both ask that one function."""
+    lib = (ROOT / "deploy" / "env-lib.sh").read_text(encoding="utf-8")
+    assert "cc_required_aliases()" in lib and "cc_alias_env_key()" in lib
+    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    for fn in ("cc_required_aliases", "cc_alias_env_key"):
+        assert fn in setup, f"setup.sh must derive the keys through {fn}, never by hand"
+    # ...and the KEY derivation exists in python too (register-models.py turns
+    # the values into rows), which is why both sides are pinned to each other in
+    # tests/test_register_models_upstream.py.
+    rm = (ROOT / "deploy" / "pi" / "litellm" / "register-models.py").read_text(encoding="utf-8")
+    assert "def alias_env_key" in rm
 
 
 def test_the_answer_file_is_one_file():
@@ -340,13 +388,18 @@ def test_no_kube_play_path_survives():
 def test_fetch_phase_runs_before_anything_deploys():
     text = (SINGLE / "setup.sh").read_text(encoding="utf-8")
     # `machine` joined the order in v2.43.0, between preflight and fetch: the
-    # podman machine has to trust the mirror BEFORE anything is pulled.
+    # podman machine has to trust the mirror BEFORE anything is pulled. In
+    # v2.44.0 validate+preflight left the loop and became sections of the dry
+    # `check` GATE, which runs before it (design record D5).
     m = re.search(
-        r"for p in (validate preflight machine fetch llm stack app verify test boot demo); do",
+        r"for p in (machine fetch llm stack app verify test boot demo); do",
         text,
     )
     assert m, (
-        "setup.sh's full run must go validate -> preflight -> machine -> fetch -> llm -> ..."
+        "setup.sh's full run must go check -> machine -> fetch -> llm -> ..."
+    )
+    assert re.search(r"^\s*run_phase check; local crc=", text, flags=re.M), (
+        "the full run must start with the check gate, before any mutating phase"
     )
     assert "build_if_missing" not in text, "stack must ASSERT images (need_image), never build them mid-deploy"
 
@@ -494,7 +547,7 @@ def test_the_machine_phase_is_in_the_order_and_the_docs():
     m = re.search(r"for p in ((?:\w+\s+)+\w+); do", setup)
     assert m, "the all-phases loop is gone"
     phases = m.group(1).split()
-    assert phases[:4] == ["validate", "preflight", "machine", "fetch"], phases
+    assert phases[:2] == ["machine", "fetch"], phases
     assert "phase_machine --dry-run" in setup, (
         "preflight must REPORT the machine diff rather than hand out instructions"
     )

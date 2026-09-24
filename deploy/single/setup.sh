@@ -20,9 +20,21 @@
 #   PHASES — each a subcommand, each individually re-runnable via the SAME
 #   code path as the full run (kubeadm's shape):
 #
+#     check       EVERYTHING that can be checked without changing anything:
+#                 the answer file, this host, the podman machine's current
+#                 state, every image ref against its registry, the package
+#                 indexes, the UPSTREAM LLM probed from here, the compose
+#                 render, the speech models' source. Eight sections, one table,
+#                 `./setup.sh check --list` names them. It is the GATE: the
+#                 full run starts with it and refuses to go on past a FAIL or a
+#                 USERACTION (WARN needs --accept-warnings or an interactive
+#                 yes). Writes nothing but CC_STATE_DIR and CC_EMBED_DIM in
+#                 .env. Design record 2026-09-23, D5.
 #     validate    offline check of .env (the repo-root one — THE answer file
-#                 since v2.42.0; deploy/single/.env is retired). No side effects.
-#     preflight   named environment checks. No side effects.
+#                 since v2.42.0; deploy/single/.env is retired). No side
+#                 effects; `check`'s answers + compose sections ARE this phase.
+#     preflight   named environment checks. No side effects; `check`'s host and
+#                 machine sections ARE this phase.
 #     machine     write the podman MACHINE from .env — the CA into its trust
 #                 store, the registries mirror/insecure drop-in, the proxy
 #                 drop-in. A no-op where there is no machine (bare Linux).
@@ -46,9 +58,11 @@
 #     status      re-run postconditions only, nothing mutating
 #     diagnose    write <state>/setup-diagnostics.txt for pasting to Claude
 #
-#   No argument = ALL ELEVEN phases in order — zero to a working, human-approved
-#   demo in one command (2026-08-28), stopping at the first hard failure or
-#   gate. There is no state file: every step is idempotent and the late phases
+#   No argument = check, then the nine phases that CHANGE something, in order —
+#   zero to a working, human-approved demo in one command (2026-08-28), stopping
+#   at the first hard failure or gate. `validate` and `preflight` stay callable
+#   on their own; the full run reaches them through `check`, which composes them
+#   and adds what they never covered (design record 2026-09-23, D5). There is no state file: every step is idempotent and the late phases
 #   probe REALITY to skip (a healthy API skips test+boot; a decided proposal
 #   skips demo), so RESUME IS RE-RUN.
 #
@@ -105,7 +119,7 @@ done
 # 3 USER ACTION REQUIRED — the run stopped deliberately for the operator; the
 # last USERACTION line says what for. A conductor (human or agent) re-runs the
 # phase after acting; every phase is idempotent so that always converges.
-FAILS=0; WARNS=0; ACTIONS=0
+FAILS=0; WARNS=0; ACTIONS=0; PASSES=0
 CURPHASE=""
 # Both resolved by init_state() before the first log line — the state
 # directory is where every generated file goes (D7), and it is not knowable
@@ -113,7 +127,7 @@ CURPHASE=""
 STATE_DIR=""
 LOGFILE=""
 logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "${CURPHASE:-run}" "$*" >>"$LOGFILE" 2>/dev/null || true; }
-pass() { printf 'PASS %s: %s\n' "$1" "$2"; logline "PASS $1: $2"; }
+pass() { printf 'PASS %s: %s\n' "$1" "$2"; PASSES=$((PASSES+1)); logline "PASS $1: $2"; }
 warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
 fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); logline "FAIL $1: $2"; }
 useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); logline "USERACTION $1: $2"; }
@@ -374,7 +388,15 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE: validate — offline. Is the answer file answerable-from?
 # ─────────────────────────────────────────────────────────────────────────────
+# The phases below are COMPOSED by `check` (design record D5), so each one that
+# check reuses is its own function: check must run the same code, never a second
+# copy of the same probe.
 phase_validate() {
+  validate_answers || return 1
+  validate_compose_config
+}
+
+validate_answers() {
   load_env || return 1
   pass "answer-file" "$ENV_FILE present (the one answer file — app and deployment)"
 
@@ -393,20 +415,7 @@ phase_validate() {
     pass "provider-in-env" "no retired upstream-provider settings in .env"
   fi
 
-  # Ports: numeric, in range, and distinct — two services on one hostPort is a
-  # published port that half-starts the stack.
-  local seen="" p val dup=0 bad_port=0
-  for p in CC_PG_PORT CC_LITELLM_PORT CC_LITELLM_DB_PORT CC_GRAPHITI_PORT \
-           CC_NEO4J_BOLT_PORT CC_NEO4J_HTTP_PORT CC_N8N_PORT CC_CRAWLER_PORT CC_SPEECH_PORT; do
-    val="${!p:-}"
-    [[ -z "$val" ]] && continue
-    if [[ ! "$val" =~ ^[0-9]+$ ]] || (( val < 1 || val > 65535 )); then
-      fail "port-${p}" "$p=$val is not a valid port"; bad_port=1; continue
-    fi
-    if grep -qx "$val" <<<"$seen"; then dup=1; fail "port-${p}" "$p=$val collides with another CC_*_PORT"; fi
-    seen="$seen$val"$'\n'
-  done
-  (( bad_port || dup )) || pass "ports" "all configured ports are numeric, in range and distinct"
+  validate_ports
 
   # Mode flags must be exactly 0 or 1 — "true" would read as false everywhere.
   local f
@@ -422,30 +431,100 @@ phase_validate() {
     && pass "name-CC_POD_PREFIX" "${CC_POD_PREFIX}" \
     || fail "name-CC_POD_PREFIX" "CC_POD_PREFIX is empty"
 
+  # 127.0.0.1, never localhost: Windows resolves localhost to ::1 first and the
+  # podman machine publishes IPv4-only. A fact about the ANSWER FILE's content,
+  # so it lives with the other offline .env checks (it was in preflight until
+  # v2.44.0, where `check`'s answers section is its home).
+  local lh; lh="$(grep -n 'localhost' "$ENV_FILE" | grep -v '^[0-9]*:#')"
+  [[ -z "$lh" ]] \
+    && pass "loopback-addressing" ".env uses 127.0.0.1 throughout" \
+    || warn "loopback-addressing" ".env mentions localhost — use 127.0.0.1 (Windows resolves localhost to ::1 first)"
+
   # schema.sql is bind-mounted into the spine's initdb directory straight from
   # the repo, so its absence is a broken deployment, not just a broken test.
   [[ -f "$REPO_ROOT/central_command/db/schema.sql" ]] \
     && pass "repo-layout" "schema.sql found — running inside the repo" \
     || fail "repo-layout" "central_command/db/schema.sql not found — is this the Central Command repo?"
+}
 
-  # The arithmetic validate used to do by hand — service references, port
-  # collisions, profile membership, interpolation — is compose's now. This is
-  # the whole check: does the deployment file parse with THIS .env?
-  if compose_detect; then
-    if compose --profile n8n --profile crawler --profile speech config >/dev/null 2>&1; then
-      pass "compose-config" "compose.yaml is valid with this .env (all profiles)"
-    else
-      fail "compose-config" "compose.yaml does not validate — see: $(printf '%s ' "${COMPOSE_BIN[@]}")--env-file .env -f deploy/single/compose.yaml config"
+# THE ports, in one place: numeric, in range, and distinct — two services on one
+# hostPort is a published port that half-starts the stack. `check` calls this
+# and then adds a LISTENER probe per port, which needs no second list.
+CC_PORT_KEYS=(CC_PG_PORT CC_LITELLM_PORT CC_LITELLM_DB_PORT CC_GRAPHITI_PORT
+              CC_NEO4J_BOLT_PORT CC_NEO4J_HTTP_PORT CC_N8N_PORT CC_CRAWLER_PORT
+              CC_SPEECH_PORT CC_COCKPIT_PORT CC_API_PORT)
+validate_ports() {
+  local seen="" p val dup=0 bad_port=0
+  for p in "${CC_PORT_KEYS[@]}"; do
+    val="${!p:-}"
+    [[ -z "$val" ]] && continue
+    if [[ ! "$val" =~ ^[0-9]+$ ]] || (( val < 1 || val > 65535 )); then
+      fail "port-${p}" "$p=$val is not a valid port"; bad_port=1; continue
     fi
-  else
-    warn "compose-config" "no compose provider here to validate compose.yaml with (preflight checks for one)"
+    if grep -qx "$val" <<<"$seen"; then dup=1; fail "port-${p}" "$p=$val collides with another CC_*_PORT"; fi
+    seen="$seen$val"$'\n'
+  done
+  (( bad_port || dup )) || pass "ports" "all configured ports are numeric, in range and distinct"
+}
+
+# Does the deployment file parse with THIS .env? The arithmetic validate used to
+# do by hand — service references, port collisions, profile membership,
+# interpolation — is compose's now.
+#
+# Since v2.44.0 the provider's own WARNINGS are read too: both providers print
+# `variable is not set` (docker compose) / `Missing required variable`
+# (podman-compose) on stderr and still exit 0, rendering an EMPTY value into a
+# credential or an image ref. A silent empty password is the failure this check
+# exists to prevent, so each named variable becomes a FAIL.
+validate_compose_config() {
+  compose_detect || {
+    warn "compose-config" "no compose provider here to validate compose.yaml with (the host section checks for one)"
+    return 0
+  }
+  local out rc=0
+  out="$(compose --profile n8n --profile crawler --profile speech config 2>&1 >/dev/null)" || rc=$?
+  if (( rc )); then
+    note "$out"
+    fail "compose-config" "compose.yaml does not validate — see: $(printf '%s ' "${COMPOSE_BIN[@]}")--env-file .env -f deploy/single/compose.yaml config"
+    return 0
   fi
+  local unset_keys="" line
+  # `variable is not set` (compose-go), `Missing required variable` / `not set`
+  # (podman-compose) — the KEY is what either message quotes.
+  while IFS= read -r line; do
+    [[ "$line" == *"is not set"* || "$line" == *"Missing required variable"* ]] || continue
+    local k; k="$(printf '%s' "$line" | grep -oE '\b[A-Z][A-Z0-9_]{2,}\b' | head -1)"
+    [[ -n "$k" ]] || continue
+    [[ " $unset_keys " == *" $k "* ]] || unset_keys="${unset_keys:+$unset_keys }$k"
+  done <<<"$out"
+  if [[ -n "$unset_keys" ]]; then
+    note "$out"
+    local k g generated
+    for k in $unset_keys; do
+      generated=0
+      for g in "${CC_GENERATED_KEYS[@]}"; do [[ "$g" == "$k" ]] && generated=1; done
+      if (( generated )); then
+        # Blank ON PURPOSE in a fresh .env: make-secrets.sh generates it during
+        # the llm phase. A FAIL here would refuse every first install.
+        warn "compose-var-${k}" "compose.yaml needs $k and .env does not set it yet — deploy/single/make-secrets.sh generates it (the llm phase runs it). Until then compose would render an EMPTY credential, which it reports as a warning and not an error"
+      else
+        fail "compose-var-${k}" "compose.yaml needs $k and .env does not set it — the render would substitute an EMPTY value (a blank credential or a bare image tag), which compose reports as a warning and not an error"
+      fi
+    done
+  fi
+  pass "compose-config" "compose.yaml is valid with this .env (all profiles)${unset_keys:+ — but see the compose-var-* lines above}"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE: preflight — is this MACHINE able to run the install?
 # ─────────────────────────────────────────────────────────────────────────────
 phase_preflight() {
+  preflight_host || return 1
+  machine_report
+}
+
+# Everything about THIS host. `check`'s host section is exactly this function.
+preflight_host() {
   load_env || return 1
 
   if command -v podman >/dev/null 2>&1; then
@@ -540,34 +619,6 @@ phase_preflight() {
     fi
   fi
 
-  # A podman MACHINE (Windows/macOS) has its own egress: the host's CC_PROXY /
-  # CC_CA_BUNDLE never reach a pull unless the VM carries them. Since v2.43.0
-  # the `machine` phase APPLIES the CA and the registry/proxy drop-ins, so
-  # preflight only REPORTS current state and what that phase would change — no
-  # hand-instructions for what a phase now does. The machine's own egress for
-  # pulls is still set at `podman machine start` from the host environment
-  # (doc-verified; writing systemd drop-ins inside the machine is not, and is
-  # an open item in the design record), so THAT one keeps its USERACTION.
-  if [[ -n "$(machine_name)" ]]; then
-    if [[ -n "${CC_PROXY:-}" ]]; then
-      local mproxy; mproxy="$(machine_sh 'printenv HTTPS_PROXY https_proxy 2>/dev/null | head -1' | tr -d '\r')"
-      if [[ "$mproxy" != "$CC_PROXY" ]]; then
-        useraction "machine-egress" "the podman machine's own environment carries no proxy while CC_PROXY is set — a pull would go direct or fail. podman takes the proxy from the HOST environment at machine start, so: podman machine stop && HTTPS_PROXY=\"\$CC_PROXY\" HTTP_PROXY=\"\$CC_PROXY\" podman machine start (the value is in .env — not printed here). The 'machine' phase writes the containers.conf proxy drop-in, which covers pulls and BUILDS but not the VM's own environment."
-      else
-        pass "machine-egress" "the podman machine carries the host proxy"
-      fi
-    fi
-    # Both of these are now REPORTS plus the diff the machine phase will apply.
-    phase_machine --dry-run
-  fi
-
-  # 127.0.0.1, never localhost: Windows resolves localhost to ::1 first and the
-  # podman machine publishes IPv4-only.
-  local lh; lh="$(grep -n 'localhost' "$ENV_FILE" | grep -v '^[0-9]*:#')"
-  [[ -z "$lh" ]] \
-    && pass "loopback-addressing" ".env uses 127.0.0.1 throughout" \
-    || warn "loopback-addressing" ".env mentions localhost — use 127.0.0.1 (Windows resolves localhost to ::1 first)"
-
   # Index probe: INFORMATIONAL, against the CONFIGURED indexes (a mirror in
   # .env, else the public ones) — the real acquisition is the fetch phase.
   # Unreachable indexes are a fact about the network; CC_AIRGAP is how the
@@ -620,6 +671,33 @@ phase_preflight() {
   if command -v podman >/dev/null 2>&1; then
     local regs; regs="$(podman info --format '{{range .Registries}}{{.}} {{end}}' 2>/dev/null | tr -s ' ')"
     pass "podman-registries" "podman sees: ${regs:-no registries.conf entries (fully-qualified refs only)} (the 'machine' phase owns the drop-in that puts entries there — ./setup.sh machine --dry-run reports the diff)"
+  fi
+}
+
+# The machine, REPORTED: current state plus the diff the `machine` phase would
+# apply. `preflight` ends with this and `check`'s machine section IS this — one
+# function, so the two can never drift. Nothing here writes.
+machine_report() {
+  load_env || return 1
+  [[ -n "$(machine_name)" ]] || {
+    pass "machine" "no podman machine on this host — nothing to configure (bare Linux runs containers directly)"
+    return 0
+  }
+  machine_report_proxy_egress
+  phase_machine --dry-run
+}
+
+# The machine's OWN process environment for pulls is set at `podman machine
+# start` from the host environment (doc-verified); writing a systemd drop-in
+# inside the machine is not, and is an open item in the design record. So this
+# one stays a USERACTION — it is the operator's move, not a phase's.
+machine_report_proxy_egress() {
+  [[ -n "${CC_PROXY:-}" ]] || return 0
+  local mproxy; mproxy="$(machine_sh 'printenv HTTPS_PROXY https_proxy 2>/dev/null | head -1' | tr -d '\r')"
+  if [[ "$mproxy" != "$CC_PROXY" ]]; then
+    useraction "machine-egress" "the podman machine's own environment carries no proxy while CC_PROXY is set — a pull would go direct or fail. podman takes the proxy from the HOST environment at machine start, so: podman machine stop && HTTPS_PROXY=\"\$CC_PROXY\" HTTP_PROXY=\"\$CC_PROXY\" podman machine start (the value is in .env — not printed here). The 'machine' phase writes the containers.conf proxy drop-in, which covers pulls and BUILDS but not the VM's own environment."
+  else
+    pass "machine-egress" "the podman machine carries the host proxy"
   fi
 }
 
@@ -810,6 +888,447 @@ phase_machine() {
   return 0
 }
 
+# ═════════════════════════════════════════════════════════════════════════════
+# COMMAND: check — everything dry, one table, exit codes as today
+# ═════════════════════════════════════════════════════════════════════════════
+# Design record D5 (2026-09-23). The operator's stated experience: run a
+# pre-deployment check that prints plainly what it is checking and what failed,
+# triage the failures with the agent, re-run, loop until green with NOTHING
+# CHANGED BUT .env — then run setup, which succeeds because every input was
+# already validated. This is that command.
+#
+#   * it EXECUTES nothing: no pull, no build, no `compose up`, no install, no
+#     secret generation. `tests/test_single_check_is_dry.py` walks the call
+#     graph and fails the suite if one appears;
+#   * it writes nothing inside the checkout but `.env`, and only two keys
+#     there: CC_STATE_DIR (resolved once, so bash and Python agree on the
+#     spelling) and CC_EMBED_DIM (MEASURED from the upstream embedder — see
+#     check_llm; never declared, never overwritten);
+#   * it REUSES the phases rather than re-implementing their probes: the
+#     answers section IS `validate`, the host section IS `preflight`, the
+#     machine section IS `machine --dry-run`, the compose section IS validate's
+#     compose render. A second copy of a probe is a probe that drifts;
+#   * its ceiling is honest and printed: it proves INPUTS, not builds.
+#
+# The `all` driver runs it FIRST and refuses to continue on any FAIL or
+# USERACTION (KOTS's hard preflight gate); WARN needs --accept-warnings or an
+# interactive yes (rustup's rule: an installer that cannot ask does not guess).
+
+# The section table. ONE list: `check --list` prints it, the section headings
+# come from it, and tests/test_single_check_is_dry.py pins it against the table
+# in deploy/single/README.md. `id<TAB>what it does`.
+CHECK_SECTIONS=(
+  "answers|.env present and sourceable; every required key set; ports valid, unique and free"
+  "host|podman, the compose provider, the host tools, RAM/disk, the Windows CA store"
+  "machine|the podman machine's CA, registries and proxy — current state and the diff the machine phase would apply"
+  "images|every images.txt row resolves against its registry, including the three build bases and operator pins"
+  "indexes|PyPI, npm, the Python resolution, the apt archive, the CPython download mirror"
+  "llm|the upstream endpoint FROM THIS HOST: the model list, one chat, one structured, one embedding"
+  "compose|compose.yaml renders with this .env, with no variable it requires left unset"
+  "models|the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model"
+)
+
+check_list() {
+  local row
+  for row in "${CHECK_SECTIONS[@]}"; do
+    printf '%-9s %s\n' "${row%%|*}" "${row#*|}"
+  done
+}
+
+check_section() { # check_section <id>
+  local row
+  for row in "${CHECK_SECTIONS[@]}"; do
+    [[ "${row%%|*}" == "$1" ]] || continue
+    note ""; note "== $1 — ${row#*|}"
+    logline "== section $1"
+    return 0
+  done
+  note ""; note "== $1"
+}
+
+# ── one read-only HTTP probe, classified the way discover.sh classifies ──────
+# The failure MODE is the diagnosis: a timeout is a default-deny firewall, a
+# certificate error is interception or an untrusted CA, refused is a firewall
+# REJECT, DNS is a resolver that does not answer public names. Prints
+# "<http-code> <class>"; the TLS knobs reach curl through cc_export_tls_env
+# (CURL_CA_BUNDLE, and `insecure` in the state dir's .curlrc via CURL_HOME).
+http_probe() { # http_probe <url> [HEAD]
+  local url="$1" code rc=0 flags=(-sS -o /dev/null --max-time 20)
+  [[ "${2:-}" == HEAD ]] && flags+=(-I)
+  code="$(curl "${flags[@]}" -w '%{http_code}' "$url" 2>/dev/null)" || rc=$?
+  case "$rc" in
+    0)  printf '%s answered' "$code" ;;
+    5)  printf '000 the PROXY name does not resolve (curl 5) — CC_PROXY' ;;
+    6)  printf '000 DNS does not resolve this name (curl 6)' ;;
+    7)  printf '000 connection refused (curl 7)' ;;
+    28) printf '000 timed out after 20s — a silent drop, the classic default-deny (curl 28)' ;;
+    60) printf '000 CERTIFICATE failure (curl 60) — CC_CA_BUNDLE, or CC_TLS_INSECURE=1' ;;
+    *)  printf '000 unreachable (curl %s)' "$rc" ;;
+  esac
+}
+
+# PASS on 2xx/3xx (a mirror redirecting is a mirror answering), FAIL otherwise,
+# naming the seam that governs the source.
+probe_http() { # probe_http <check> <url> <what> <seam> [HEAD]
+  local out code rest
+  out="$(http_probe "$2" "${5:-GET}")"; code="${out%% *}"; rest="${out#* }"
+  if [[ "$code" == 2* || "$code" == 3* ]]; then
+    pass "$1" "$3 answers HTTP $code"
+  elif [[ "$rest" == answered ]]; then
+    fail "$1" "$3 answered HTTP $code — seam: $4"
+  else
+    fail "$1" "$3: $rest — seam: $4"
+  fi
+}
+
+# ── section: answers ────────────────────────────────────────────────────────
+# The credentials make-secrets.sh generates. check never generates one (that is
+# a side effect, and the `llm` phase owns it) — a blank one is a WARN naming
+# the command that fills it. P4's `configure` will fill them BEFORE check runs.
+CC_GENERATED_KEYS=(CC_LLM_PROXY_ADMIN_KEY CC_LITELLM_SALT_KEY LITELLM_POSTGRES_PASSWORD
+                   CC_NEO4J_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD)
+
+check_required_keys() {
+  local k blank=""
+  for k in "${CC_GENERATED_KEYS[@]}"; do
+    is_placeholder "$(get_kv "$ENV_FILE" "$k")" && blank="${blank:+$blank }$k"
+  done
+  if [[ -n "$blank" ]]; then
+    warn "answers-secrets" "not generated yet: $blank — deploy/single/make-secrets.sh writes them (the llm phase runs it). check never generates a secret, so this stays a WARN: --accept-warnings is how you say 'yes, generate them'"
+  else
+    pass "answers-secrets" "every credential make-secrets.sh owns is set"
+  fi
+
+  # The upstream LLM (design record D3). Genuinely the operator's, so a missing
+  # key is a USERACTION naming it — never a FAIL, and never a guess.
+  local missing="" a key
+  [[ -n "${CC_LLM_UPSTREAM_BASE_URL:-}" ]] || missing="CC_LLM_UPSTREAM_BASE_URL"
+  [[ -n "${CC_LLM_UPSTREAM_API_KEY:-}" ]] || missing="${missing:+$missing }CC_LLM_UPSTREAM_API_KEY"
+  for a in $(cc_required_aliases); do
+    key="$(cc_alias_env_key "$a")"
+    [[ -n "${!key:-}" ]] || missing="${missing:+$missing }${key}(${a})"
+  done
+  if [[ -n "$missing" ]]; then
+    useraction "answers-llm" "the upstream LLM is not declared in .env: $missing — set each one (the model keys take the UPSTREAM model id, not the alias) and the llm phase registers the rows and skips its UI pause. Leaving them unset is supported: the llm phase then creates PLACEHOLDER rows and stops so you fill them in at the LiteLLM UI instead"
+  else
+    pass "answers-llm" "the upstream LLM is declared in .env for every required alias ($(cc_required_aliases)) — the llm phase will not need its UI pause"
+  fi
+}
+
+# Is anything LISTENING on a port this deployment wants to publish? `ss` where
+# there is one, `netstat` on Windows, and a bash /dev/tcp connect as the
+# fallback that exists everywhere.
+port_listener() { # port_listener <port>  -> 0 = occupied
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | grep -qE "[:.]${port}\$" && return 0
+    return 1
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -an 2>/dev/null | grep -iE 'listen' | grep -qE "[:.]${port}[^0-9]" && return 0
+    return 1
+  fi
+  (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && { exec 3<&- 2>/dev/null; return 0; }
+  return 1
+}
+
+check_ports_free() {
+  # A port held by one of THIS install's containers is not a conflict — it is
+  # an install that is already deployed, which is the normal state for every
+  # re-run of check.
+  local published=""
+  command -v podman >/dev/null 2>&1 && published="$(podman ps --format '{{.Ports}}' 2>/dev/null)"
+  local p val busy=0
+  for p in "${CC_PORT_KEYS[@]}"; do
+    val="${!p:-}"
+    [[ "$val" =~ ^[0-9]+$ ]] || continue
+    port_listener "$val" || continue
+    if [[ "$published" == *":${val}->"* ]]; then
+      pass "port-free-${p}" "$p=$val is published by a container of this install already — not a conflict"
+    elif [[ "$p" == CC_API_PORT && -f "$STATE_DIR/uvicorn.pid" ]] \
+      || [[ "$p" == CC_COCKPIT_PORT && -f "$STATE_DIR/cockpit.pid" ]]; then
+      # `boot` starts these two as HOST processes, not containers, and records a
+      # pid file in the state dir — that is how a re-run tells its own listener
+      # from a foreign one. (./setup.sh stop is the counterpart.)
+      pass "port-free-${p}" "$p=$val is held by the process this install started (pid file in $STATE_DIR) — ./setup.sh stop releases it"
+    else
+      fail "port-free-${p}" "$p=$val already has a LISTENER that is not one of this install's containers: the stack could not publish it. Stop what holds it, or change $p in .env"
+      busy=1
+    fi
+  done
+  (( busy )) || pass "ports-free" "no foreign listener on any configured port"
+}
+
+# ── section: images ─────────────────────────────────────────────────────────
+# resolve-images.sh --dry-run prints this profile's protocol itself (one line
+# per image, the operator pins, the substitutions) and writes nothing; only its
+# exit code is folded into check's counters.
+check_images() {
+  local rc=0
+  "$HERE/resolve-images.sh" --dry-run || rc=$?
+  case "$rc" in
+    0) pass "images" "every images.txt row resolves to its locked tag on its registry" ;;
+    2) warn "images" "resolved, with substitutions or operator pins — see the WARN lines above; a green ./setup.sh verify is what makes a substitution supported" ;;
+    3) useraction "images" "image resolution stopped for you — see the USERACTION line above (the seams are CC_REGISTRY_* and a CC_IMG_<NAME> pin)" ;;
+    *) fail "images" "image resolution failed (exit $rc) — the FAIL lines above name the seam per image" ;;
+  esac
+}
+
+# ── section: indexes ────────────────────────────────────────────────────────
+check_indexes() {
+  # The PyPI SIMPLE index, probed at a project page rather than the root: a
+  # mirror may serve / as a portal and still resolve.
+  local pypi="${CC_PYPI_INDEX_URL:-https://pypi.org/simple}"
+  if [[ -z "${CC_PYPI_INDEX_URL:-}" && "$CC_AIRGAP" == "1" ]]; then
+    warn "index-pypi" "CC_AIRGAP=1 and CC_PYPI_INDEX_URL is unset, so the PUBLIC index is what a resolve would use — set the mirror; the resolution check below is what decides"
+  else
+    probe_http "index-pypi" "${pypi%/}/pip/" "the PyPI simple index (${pypi})" "CC_PYPI_INDEX_URL"
+  fi
+  local npm="${CC_NPM_REGISTRY:-https://registry.npmjs.org}"
+  probe_http "index-npm" "${npm%/}/npm" "the npm registry (${npm})" "CC_NPM_REGISTRY"
+
+  # apt runs INSIDE the three image builds, and the suite comes from each base
+  # image: zepai/knowledge-graph-mcp and library/python:3.12-slim-bookworm are
+  # Debian BOOKWORM, mcr playwright/python:v1.62.0-noble is Ubuntu NOBLE
+  # (images.txt's locked tags say so). Hardcoded here on purpose — a suite is a
+  # property of the base image, not an operator answer.
+  local apt="${CC_APT_MIRROR:-https://deb.debian.org/debian}"
+  probe_http "index-apt" "${apt%/}/dists/bookworm/Release" \
+    "the Debian bookworm archive (${apt}) — apt runs inside the graphiti and sandbox builds" "CC_APT_MIRROR"
+  if [[ "$CC_ENABLE_CRAWLER" == "1" ]]; then
+    probe_http "index-apt-ubuntu" "http://archive.ubuntu.com/ubuntu/dists/noble/Release" \
+      "the Ubuntu noble archive — apt runs inside the CRAWLER build (its base is Microsoft's Playwright image, Ubuntu noble). CC_APT_MIRROR is a DEBIAN path and cannot stand in" "CC_ENABLE_CRAWLER=0, or an archive.ubuntu.com mirror"
+  fi
+
+  # The CPython download only matters when the host has none to find.
+  if command -v uv >/dev/null 2>&1 && uv python find 3.12 >/dev/null 2>&1; then
+    pass "python-3.12" "uv finds a CPython 3.12 here — no interpreter download needed"
+  elif [[ -n "${CC_PYTHON_MIRROR:-}" ]]; then
+    probe_http "python-3.12" "$CC_PYTHON_MIRROR" "the python-build-standalone mirror (uv must DOWNLOAD a CPython 3.12: none was found here)" "CC_PYTHON_MIRROR" HEAD
+  else
+    warn "python-3.12" "no CPython 3.12 on this host, so uv must download one from python-build-standalone (github.com), and CC_PYTHON_MIRROR is unset — set it, or install CPython 3.12"
+  fi
+
+  # THE Python resolution — the same step the fetch phase runs, from the same
+  # function, so what check proves is what fetch performs. A resolve needs a
+  # TARGET environment: the install's own .venv when it exists, otherwise a
+  # throwaway one in the state directory (never inside the checkout, and never
+  # the install's venv — creating that one is the fetch phase's).
+  if venv_python >/dev/null; then
+    export VIRTUAL_ENV="$REPO_ROOT/.venv"
+    resolve_python_deps
+  elif command -v uv >/dev/null 2>&1 && uv venv --python 3.12 "$STATE_DIR/check-venv" >&2; then
+    export VIRTUAL_ENV="$STATE_DIR/check-venv"
+    resolve_python_deps
+    unset VIRTUAL_ENV
+  else
+    warn "python" "no .venv yet and no throwaway venv could be created in $STATE_DIR — the Python graph cannot be resolved until then; seams: CC_PYTHON_MIRROR, CC_PYPI_INDEX_URL"
+  fi
+}
+
+# ── section: llm ────────────────────────────────────────────────────────────
+# The upstream, probed DIRECTLY from this host with curl, before any container
+# exists — that is what lets an LLM misconfiguration fail before setup rather
+# than during it. The key travels via `-H @-` (stdin), so it is not in an argv
+# and never in `ps`; no probe prints it.
+upstream_curl() { # upstream_curl <curl args...>
+  printf 'Authorization: Bearer %s\n' "${CC_LLM_UPSTREAM_API_KEY:-}" \
+    | curl -sS --max-time "${CC_PROBE_TIMEOUT:-60}" -H @- "$@"
+}
+
+# One probe through discover-llm.sh in DIRECT mode — the same script the llm
+# phase runs against the proxy, so the two rungs ask the identical question and
+# a difference between them is the diagnosis (direct works + proxy fails = the
+# alias row; direct fails = the URL, the key or the model id).
+upstream_probe() { # upstream_probe <check> <message> <mode> <model-id> [extra...]
+  local check="$1" msg="$2"; shift 2
+  note "--> discover-llm.sh $1 $2 (direct, against CC_LLM_UPSTREAM_BASE_URL)"
+  if CC_LLM_BASE_URL="$CC_LLM_UPSTREAM_BASE_URL" CC_LLM_API_KEY="$CC_LLM_UPSTREAM_API_KEY" \
+     CC_EMBED_BASE_URL="$CC_LLM_UPSTREAM_BASE_URL" CC_EMBED_API_KEY="$CC_LLM_UPSTREAM_API_KEY" \
+     "$HERE/discover-llm.sh" "$@" >&2; then
+    pass "$check" "$msg"
+    return 0
+  fi
+  fail "$check" "$msg — FAILED; see the command's own output on stderr"
+  return 1
+}
+
+check_llm() {
+  local a key
+  if [[ -z "${CC_LLM_UPSTREAM_BASE_URL:-}" || -z "${CC_LLM_UPSTREAM_API_KEY:-}" ]]; then
+    useraction "llm-upstream" "CC_LLM_UPSTREAM_BASE_URL and/or CC_LLM_UPSTREAM_API_KEY are unset, so nothing about the LLM can be proven before the proxy exists. The three key families are CC_LLM_UPSTREAM_BASE_URL (the /v1 base THIS host can reach), CC_LLM_UPSTREAM_API_KEY, and one CC_LLM_UPSTREAM_MODEL_<ALIAS> per required alias ($(cc_required_aliases)). Declaring them is optional — the llm phase's LiteLLM-UI pause is the fallback — but then this section can check nothing"
+    return 0
+  fi
+  local base="${CC_LLM_UPSTREAM_BASE_URL%/}"
+
+  # What the endpoint SAYS it serves. Some gateways do not implement /models at
+  # all; that is a WARN, because it costs the membership check and nothing else.
+  local out code listed="" have_list=0
+  out="$STATE_DIR/check-models.json"
+  code="$(upstream_curl -o "$out" -w '%{http_code}' "${base}/models" 2>/dev/null)" || code=000
+  if [[ "$code" == 200 ]]; then
+    listed="$($PY -c 'import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+print("\n".join(str(m.get("id","")) for m in (d.get("data") or [])))' "$out" 2>/dev/null)"
+    have_list=1
+    pass "llm-models" "GET ${base}/models lists $(grep -c . <<<"$listed") model id(s)"
+  elif [[ "$code" == 404 ]]; then
+    warn "llm-models" "GET ${base}/models answers 404 — some gateways do not implement the model list, so MEMBERSHIP of your CC_LLM_UPSTREAM_MODEL_* ids could not be checked. The round trips below are then the whole proof"
+  else
+    fail "llm-models" "GET ${base}/models answered HTTP ${code} — seams: CC_LLM_UPSTREAM_BASE_URL (is it the /v1 base?), CC_LLM_UPSTREAM_API_KEY, CC_PROXY, CC_CA_BUNDLE"
+  fi
+  rm -f "$out"
+
+  # Membership, per declared id.
+  local id ids="" missing=""
+  for a in $(cc_required_aliases); do
+    key="$(cc_alias_env_key "$a")"; id="${!key:-}"
+    [[ -n "$id" ]] || { warn "llm-declared-${a}" "$key is unset — this alias cannot be checked (the llm phase will pause for it in the LiteLLM UI)"; continue; }
+    ids="${ids:+$ids }${a}=${id}"
+    (( have_list )) || continue
+    if grep -qxF "$id" <<<"$listed"; then
+      pass "llm-member-${a}" "$key=$id is in the endpoint's model list"
+    else
+      missing="${missing:+$missing }${key}=${id}"
+    fi
+  done
+  [[ -z "$missing" ]] || fail "llm-members" "declared model id(s) the endpoint does not list: $missing — fix the id, or the endpoint"
+
+  # One CHAT round trip per DISTINCT chat model id (three aliases commonly name
+  # one model; a second identical call proves nothing and costs tokens).
+  local seen="" cid
+  for a in cc-default graphiti-llm gpt-4.1-nano; do
+    key="$(cc_alias_env_key "$a")"; cid="${!key:-}"
+    [[ -n "$cid" ]] || continue
+    [[ " $seen " == *" $cid "* ]] && { pass "llm-chat-${a}" "same model id as an alias already probed ($cid) — one round trip covers both"; continue; }
+    seen="${seen:+$seen }$cid"
+    upstream_probe "llm-chat-${a}" "a real completion came back from $cid (the $a upstream)" chat "$cid"
+  done
+
+  # The STRUCTURED round trip, for graphiti-llm's id only: Graphiti's MCP server
+  # drives extraction through chat/completions with a json_schema
+  # response_format, and an endpoint that ignores the schema is the one failure
+  # a plain chat probe cannot see.
+  key="$(cc_alias_env_key graphiti-llm)"; cid="${!key:-}"
+  [[ -z "$cid" ]] || upstream_probe "llm-structured" "$cid returned schema-constrained JSON (what Graphiti needs)" structured "$cid"
+
+  # The EMBEDDING round trip, which is also THE measurement of CC_EMBED_DIM.
+  key="$(cc_alias_env_key cc-embedding)"; cid="${!key:-}"
+  if [[ -n "$cid" ]]; then
+    local dim
+    note "--> discover-llm.sh embed $cid (direct, against CC_LLM_UPSTREAM_BASE_URL)"
+    dim="$(CC_LLM_BASE_URL="$CC_LLM_UPSTREAM_BASE_URL" CC_LLM_API_KEY="$CC_LLM_UPSTREAM_API_KEY" \
+           CC_EMBED_BASE_URL="$CC_LLM_UPSTREAM_BASE_URL" CC_EMBED_API_KEY="$CC_LLM_UPSTREAM_API_KEY" \
+           "$HERE/discover-llm.sh" embed "$cid" | tail -1)"
+    if [[ ! "$dim" =~ ^[0-9]+$ ]]; then
+      fail "llm-embed" "$cid did not return a vector — see stderr"
+    else
+      pass "llm-embed" "$cid returned a ${dim}-dimension vector"
+      # MEASURED, never declared, and never overwritten: the dimension is
+      # written into the Neo4j vector index and is permanent once that index
+      # exists. Writing it here is inside check's "may update .env" allowance —
+      # the llm phase re-measures it through the proxy alias and FAILS on a
+      # mismatch, which is what catches a changed embedder.
+      local cur; cur="$(get_kv "$ENV_FILE" CC_EMBED_DIM)"
+      if [[ -z "$cur" ]]; then
+        set_kv "$ENV_FILE" CC_EMBED_DIM "$dim"
+        pass "llm-embed-dim" "CC_EMBED_DIM=${dim} recorded in .env (check MAY update .env — this key and CC_STATE_DIR are the only two it writes)"
+      elif [[ "$cur" == "$dim" ]]; then
+        pass "llm-embed-dim" "CC_EMBED_DIM=${cur} in .env matches what the endpoint returns"
+      else
+        fail "llm-embed-dim" "CC_EMBED_DIM is already ${cur} in .env but ${cid} returns ${dim} — REFUSING to change it: it is written into the Neo4j vector index, and changing it means dropping the index and re-embedding the graph. Fix the model, or clear CC_EMBED_DIM deliberately on a graph you are willing to lose"
+      fi
+    fi
+  fi
+
+  # Speech: MEMBERSHIP only. An audio round trip from the host would prove the
+  # upstream, not the deployment — the bundled engine is what usually serves
+  # these two aliases, and it does not exist yet at check time.
+  for a in cc-tts cc-stt; do
+    key="$(cc_alias_env_key "$a")"; cid="${!key:-}"
+    [[ -n "$cid" ]] || continue
+    pass "llm-speech-${a}" "$key=$cid declared (membership checked above; no audio round trip from the host — the llm phase probes these through the proxy)"
+  done
+}
+
+# ── section: models ─────────────────────────────────────────────────────────
+check_models() {
+  if [[ "$CC_ENABLE_SPEECH" != "1" ]]; then
+    pass "speech-models" "skipped (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt point at engines of your own)"
+  else
+    local hf="${CC_HF_ENDPOINT:-https://huggingface.co}" m n=0
+    # The pre-placed alternative: a snapshot already in the engine's volume.
+    # Its CONTENTS cannot be read without starting a container, and check starts
+    # nothing — so a present volume downgrades a missing hub to a WARN.
+    local vol="central-command_speech-models" have_vol=0
+    command -v podman >/dev/null 2>&1 && podman volume exists "$vol" 2>/dev/null && have_vol=1
+    for m in "$CC_SPEECH_TTS_MODEL" "$CC_SPEECH_STT_MODEL"; do
+      n=$((n+1))
+      local out code
+      out="$(http_probe "${hf%/}/api/models/${m}")"; code="${out%% *}"
+      if [[ "$code" == 2* || "$code" == 3* ]]; then
+        pass "speech-model-${n}" "${m} is on the hub at ${hf} (HTTP $code)"
+      elif (( have_vol )); then
+        warn "speech-model-${n}" "${m} is NOT reachable at ${hf} (${out#* }), but the ${vol} volume exists — check cannot verify its contents without starting a container, so this may be a pre-placed snapshot. Seams: CC_HF_ENDPOINT, or CC_ENABLE_SPEECH=0"
+      else
+        fail "speech-model-${n}" "${m} is not reachable at ${hf} (${out#* }) and there is no ${vol} volume holding a pre-placed snapshot — seams: CC_HF_ENDPOINT, pre-place the snapshot, or CC_ENABLE_SPEECH=0. huggingface_hub has NO insecure switch: an intercepted TLS path needs CC_CA_BUNDLE"
+      fi
+    done
+  fi
+
+  # The cockpit's LOCAL whisper engine: unused once cc-stt is registered, so
+  # nothing here is a FAIL — it is a source the operator may or may not need.
+  local wdir="${WHISPER_MODEL_DIR:-$HOME/.nerve/models}"
+  if compgen -G "$wdir/*.bin" >/dev/null 2>&1; then
+    pass "whisper-local" "$wdir holds a ggml .bin — the cockpit's local whisper engine needs no download"
+  elif [[ -n "${WHISPER_MODELS_BASE_URL:-}" ]]; then
+    probe_http "whisper-local" "$WHISPER_MODELS_BASE_URL" "the whisper model source for the cockpit's local engine" "WHISPER_MODELS_BASE_URL" HEAD
+  else
+    pass "whisper-local" "no ggml .bin in $wdir and no WHISPER_MODELS_BASE_URL — not needed while cc-stt serves the cockpit's voice input (it is the fallback engine)"
+  fi
+}
+
+check_summary() {
+  note ""
+  printf 'CHECK: %d pass, %d warn, %d fail, %d action\n' "$PASSES" "$WARNS" "$FAILS" "$ACTIONS"
+  printf 'NOTE: check proves inputs, not builds: a local image build can still fail inside the build, and the proxy alias probes run in the llm phase\n'
+  printf 'state dir: %s\n' "$STATE_DIR"
+  logline "CHECK: $PASSES pass, $WARNS warn, $FAILS fail, $ACTIONS action"
+}
+
+phase_check() {
+  check_section answers
+  if ! validate_answers; then check_summary; return 1; fi
+  check_required_keys
+  check_ports_free
+
+  check_section host
+  preflight_host
+
+  check_section machine
+  machine_report
+
+  check_section images
+  check_images
+
+  check_section indexes
+  check_indexes
+
+  check_section llm
+  check_llm
+
+  check_section compose
+  validate_compose_config
+
+  check_section models
+  check_models
+
+  check_summary
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE: fetch — acquire EVERY dependency before anything is deployed.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -866,6 +1385,23 @@ fetch_local() { # fetch_local <check> <ref> <build-script> <seams>
   fi
 }
 
+# The Python graph, RESOLVED — `uv pip install --dry-run`, which installs
+# nothing. Shared by `fetch` (against the .venv it just created) and `check`
+# (against the .venv if there is one, else a throwaway in the state dir), so
+# what check proves is the resolution fetch performs. Needs a target
+# environment in VIRTUAL_ENV.
+resolve_python_deps() {
+  if [[ "$CC_AIRGAP" == "1" ]]; then
+    in_repo uv pip install --dry-run -r "$REPO_ROOT/requirements.lock" >&2 \
+      && pass "python" "requirements.lock resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
+      || fail "python" "requirements.lock does not resolve — seam: CC_PYPI_INDEX_URL"
+  else
+    in_repo uv pip install --dry-run -e ".[dev,runtime]" >&2 \
+      && pass "python" "[dev,runtime] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
+      || fail "python" "the Python dependencies do not resolve — seam: CC_PYPI_INDEX_URL; or CC_AIRGAP=1 (lock only)"
+  fi
+}
+
 phase_fetch() {
   load_env || return 1
   : "${CC_GRAPHITI_TAG:=1.0.2-anthropic}"
@@ -897,15 +1433,7 @@ phase_fetch() {
   fi
   if venv_python >/dev/null; then
     export VIRTUAL_ENV="$REPO_ROOT/.venv"
-    if [[ "$CC_AIRGAP" == "1" ]]; then
-      in_repo uv pip install --dry-run -r "$REPO_ROOT/requirements.lock" >&2 \
-        && pass "python" "requirements.lock resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
-        || fail "python" "requirements.lock does not resolve — seam: CC_PYPI_INDEX_URL"
-    else
-      in_repo uv pip install --dry-run -e ".[dev,runtime]" >&2 \
-        && pass "python" "[dev,runtime] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
-        || fail "python" "the Python dependencies do not resolve — seam: CC_PYPI_INDEX_URL; or CC_AIRGAP=1 (lock only)"
-    fi
+    resolve_python_deps
   fi
 
   # Cockpit: `npm ci` is the acquisition; the build itself is the app phase's.
@@ -976,7 +1504,39 @@ llm_gate() { # llm_gate <what-failed>
   note "  CC_PROBE_TIMEOUT seconds (default 300) — a shared or queued server may"
   note "  need longer:  CC_PROBE_TIMEOUT=900 ./setup.sh llm"
   note ""
+  note ""
+  note "  OR SKIP THIS PAUSE ENTIRELY (v2.44.0): declare the upstream in the"
+  note "  repo-root .env and re-run — setup registers the rows itself."
+  note "  Keys this deployment wants:"
+  note "    $(llm_undeclared_keys)"
+  note "  (the model keys take the UPSTREAM model id; a 127.0.0.1 base URL is"
+  note "  rewritten to host.containers.internal for the row, because the row is"
+  note "  dialled by a CONTAINER. ./setup.sh check probes them from THIS host"
+  note "  before any of this is deployed.)"
+  note ""
+  note "  If the endpoint is only reachable through an egress PROXY: the CA and"
+  note "  the insecure knob reach the LiteLLM container (SSL_CERT_FILE /"
+  note "  SSL_VERIFY, via compose), but CC_PROXY does NOT — containers.conf's"
+  note "  [engine] env covers pulls and builds, not containers. That is an OPEN"
+  note "  item in the design record: add HTTP(S)_PROXY to the litellm service"
+  note "  by hand if you need it."
+  note ""
   note "When it looks right, re-run:  ./setup.sh llm   (it validates every alias, then continues)"
+}
+
+# The CC_LLM_UPSTREAM_MODEL_* keys (plus the base/key pair) this deployment
+# needs and .env does not have. Empty = the catalog can be registered from the
+# answer file and the UI pause is unnecessary. ONE list, from
+# deploy/env-lib.sh's cc_required_aliases, shared with the `check` command.
+llm_undeclared_keys() {
+  local out="" a key
+  [[ -n "${CC_LLM_UPSTREAM_BASE_URL:-}" ]] || out="CC_LLM_UPSTREAM_BASE_URL"
+  [[ -n "${CC_LLM_UPSTREAM_API_KEY:-}" ]] || out="${out:+$out }CC_LLM_UPSTREAM_API_KEY"
+  for a in $(cc_required_aliases); do
+    key="$(cc_alias_env_key "$a")"
+    [[ -n "${!key:-}" ]] || out="${out:+$out }${key}(${a})"
+  done
+  printf '%s' "$out"
 }
 
 phase_llm() {
@@ -1025,13 +1585,36 @@ phase_llm() {
   # register-models.py is SHARED with the k3s profile and reads the admin
   # credential as LITELLM_MASTER_KEY, so the one fact is handed over under the
   # name that script looks for — the seam, rather than a second key.
+#
+  # SINCE v2.44.0 the upstream may be DECLARED in .env (design record D3), and
+  # then register-models.py creates REAL rows and there is nothing to pause
+  # for. The keys are already exported by load_env, so the script sees them; the
+  # pause below is the FALLBACK, not the path.
+  local undeclared; undeclared="$(llm_undeclared_keys)"
+  if [[ -z "$undeclared" ]]; then
+    pass "catalog-declared" "every required alias ($(cc_required_aliases)) is declared in .env — registering real rows, no UI pause"
+  else
+    warn "catalog-declared" "these keys would remove the UI pause: $undeclared (set them in .env and re-run; the LiteLLM UI is the supported alternative)"
+  fi
   local rrc=0
   CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
   LITELLM_MASTER_KEY="${CC_LLM_PROXY_ADMIN_KEY:-}" \
     $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" >&2 || rrc=$?
   case "$rrc" in
     0) pass "catalog" "every required alias is registered, filled in and consistent" ;;
-    3) llm_gate "the model catalog needs your provider details (see the alias list above)"; return 3 ;;
+    3)
+      if [[ -z "$undeclared" ]]; then
+        # Every alias THESE flags require is declared, so whatever
+        # register-models.py is waiting on is not something .env can answer (an
+        # alias this deployment does not require — cc-tts/cc-stt with
+        # CC_ENABLE_SPEECH=0 — or a row the operator edited). Report it and let
+        # the probes, which are the real proof, decide.
+        warn "catalog" "register-models.py wants attention on an alias that .env does not declare (see its lines above); every alias these feature flags require IS declared, so the probes below decide"
+      else
+        llm_gate "the model catalog needs your provider details (see the alias list above). Declaring them in .env instead removes this pause entirely: $undeclared"
+        return 3
+      fi
+      ;;
     *) fail "catalog" "register-models.py failed (exit $rrc) — run: ./setup.sh diagnose"; return 1 ;;
   esac
 
@@ -1742,7 +2325,7 @@ phase_diagnose() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user action
-  FAILS=0; WARNS=0; ACTIONS=0
+  FAILS=0; WARNS=0; ACTIONS=0; PASSES=0
   CURPHASE="$1"
   note ""
   note "======== phase: $1"
@@ -1767,14 +2350,21 @@ pending_update() {
 
 usage() {
   cat >&2 <<USAGE
-usage: ./setup.sh [validate|preflight|machine|fetch|llm|stack|app|verify|
+usage: ./setup.sh [check|validate|preflight|machine|fetch|llm|stack|app|verify|
                    test|boot|demo|stop|status|diagnose]
+       ./setup.sh check [--list]       # everything dry; --list names the sections
        ./setup.sh machine --dry-run    # report the diff, write nothing
+       ./setup.sh [all] --accept-warnings   # let a WARN-only check through
 
-  no argument   runs validate -> preflight -> machine -> fetch -> llm -> stack
-                -> app -> verify -> test -> boot -> demo: zero to a working,
-                human-approved demo in one command, stopping at the first
-                phase that hard-fails or needs you
+  no argument   runs check -> machine -> fetch -> llm -> stack -> app -> verify
+                -> test -> boot -> demo: zero to a working, human-approved demo
+                in one command, stopping at the first phase that hard-fails or
+                needs you
+  check         the pre-deployment gate: eight dry sections (answers, host,
+                machine, images, indexes, llm, compose, models) in one table,
+                ending in a CHECK: summary line. It changes nothing but
+                CC_STATE_DIR / CC_EMBED_DIM in .env, so the loop is: edit
+                .env -> check -> triage -> check -> ... -> ./setup.sh
   machine       tells the podman MACHINE what .env says — the CA, the
                 registries mirror/insecure drop-in, the proxy drop-in. A no-op
                 on bare Linux (no machine); idempotent; prints the diff before
@@ -1795,8 +2385,56 @@ usage: ./setup.sh [validate|preflight|machine|fetch|llm|stack|app|verify|
 USAGE
 }
 
+# The WARN gate's answer, from the command line. Scanned before anything else so
+# it may appear anywhere: `./setup.sh --accept-warnings`, `./setup.sh all
+# --accept-warnings`, `./setup.sh check --accept-warnings`.
+ACCEPT_WARNINGS=0
+for arg in "$@"; do [[ "$arg" == "--accept-warnings" ]] && ACCEPT_WARNINGS=1; done
+
+# The KOTS gate, rustup's rule (design record D5): a check that FAILED or
+# stopped for the operator never continues into a mutating phase, and a
+# WARN-only check continues only if somebody said so. No TTY and no flag = stop,
+# naming the flag — an installer that cannot ask does not guess.
+check_gate() { # check_gate <check-exit-code>  -> 0 continue, else the exit code
+  local rc="$1" reply
+  case "$rc" in
+    0) return 0 ;;
+    1) note ""
+       note "check FAILED. Nothing has been changed. Fix the FAIL lines above (they name"
+       note "the .env key or the mirror seam), then re-run:  ./setup.sh check"
+       return 1 ;;
+    3) note ""
+       note "check stopped for YOUR action — see the USERACTION line(s) above. Nothing"
+       note "has been changed. When done, re-run:  ./setup.sh check"
+       return 3 ;;
+  esac
+  # WARN only.
+  if (( ACCEPT_WARNINGS )); then
+    note ""
+    note "check completed with warnings; --accept-warnings was given — continuing."
+    return 0
+  fi
+  if [[ -t 0 ]]; then
+    note ""
+    printf 'check completed with WARNINGS (see above). Continue with the install? [y/N] ' >&2
+    read -r reply
+    case "$reply" in
+      y|Y|yes|YES) return 0 ;;
+    esac
+    note "stopped at the check gate — nothing has been changed."
+    return 2
+  fi
+  note ""
+  note "check completed with WARNINGS and this is not an interactive terminal, so"
+  note "setup will not decide for you. Re-run with:  ./setup.sh --accept-warnings"
+  return 2
+}
+
 main() {
   local cmd="${1:-all}"
+  [[ "$cmd" == --accept-warnings ]] && cmd=all
+  # --list must work on a machine with no .env at all: it is documentation.
+  if [[ "$cmd" == check && "${2:-}" == --list ]]; then check_list; exit 0; fi
   init_state           # the log file lives in there — resolve before logging
   logline "run start: ./setup.sh $cmd"
   case "$cmd" in
@@ -1811,7 +2449,7 @@ main() {
       logline "run end: ./setup.sh machine ${2:-} -> exit $mrc"
       exit $mrc
       ;;
-    validate|preflight|fetch|llm|stack|app|verify|test|boot|demo|status|diagnose)
+    check|validate|preflight|fetch|llm|stack|app|verify|test|boot|demo|status|diagnose)
       run_phase "$cmd"; local prc=$?
       logline "run end: ./setup.sh $cmd -> exit $prc"
       exit $prc
@@ -1829,8 +2467,21 @@ main() {
         logline "run end: ./setup.sh all -> exit 3"
         exit 3
       fi
+      # THE GATE comes first (design record D5): every input is proven before
+      # anything is changed, so a mutating phase never discovers a
+      # configuration problem the check could have named.
+      run_phase check; local crc=$?
+      # NOT `if ! check_gate`: the negation would make $? the INVERTED status
+      # and the run would exit 0 on a refused gate.
+      local grc=0
+      check_gate "$crc" || grc=$?
+      if (( grc )); then
+        logline "run end: ./setup.sh all -> exit $grc (check gate)"
+        exit $grc
+      fi
       local worst=0 rc p
-      for p in validate preflight machine fetch llm stack app verify test boot demo; do
+      (( crc == 2 )) && worst=2
+      for p in machine fetch llm stack app verify test boot demo; do
         run_phase "$p"; rc=$?
         if (( rc == 1 )); then
           note ""

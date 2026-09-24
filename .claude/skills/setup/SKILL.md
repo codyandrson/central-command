@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into the ONE answer file, the repo-root .env, and runs the deterministic `./setup.sh` (eleven phases: validate/preflight/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into the ONE answer file, the repo-root .env, and runs the deterministic `./setup.sh` (a dry pre-deployment check, then nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator; `./setup.sh check` alone is the pre-deployment gate and the triage loop edits nothing but .env), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -129,26 +129,32 @@ section, at the bottom, is the map of what this profile reads (never run the
 install steps yourself: `./setup.sh` owns everything mechanical, including
 generating the credentials):
 
-- **The LLM provider is NOT elicited into `.env` (2026-08-30).** Tell the
-  operator up front what is coming: the `llm` phase brings LiteLLM up,
-  creates the four required aliases (`cc-default`, `graphiti-llm`,
-  `cc-embedding`, `gpt-4.1-nano`) as skeletons in the proxy's database, and
-  **pauses (exit 3)** for THEM to enter the provider in the LiteLLM UI —
-  model ids, `api_base`, the key (stored encrypted in the proxy). Re-running
-  `./setup.sh llm` validates every alias with a real request and continues.
-  Have them ready: endpoint URL (the one the CONTAINER dials —
-  `host.containers.internal`, never `127.0.0.1`, for a server on this
-  machine), the key (`none` if the server ignores it), and the model ids
-  (`CC_LLM_BASE_URL=… CC_LLM_API_KEY=… ./discover-llm.sh models` lists them
-  directly). Self-hosted embedders on another server are just a different
-  `api_base` on the `cc-embedding` row.
+- **The LLM provider: ELICIT IT into `.env`, or let the `llm` phase pause for
+  the LiteLLM UI** (v2.44.0, design record D3 — before that the UI pause was
+  the only path). Preferred, because `./setup.sh check` can then prove the
+  endpoint from the host BEFORE anything is deployed:
+  `CC_LLM_UPSTREAM_BASE_URL` (the `/v1` base THIS HOST reaches — a
+  `127.0.0.1` value is rewritten to `host.containers.internal` for the
+  container's row, with a WARN), `CC_LLM_UPSTREAM_API_KEY` (`none` if the
+  server ignores it, but never empty), and one
+  `CC_LLM_UPSTREAM_MODEL_<ALIAS>` per required alias — `_CC_DEFAULT`,
+  `_GRAPHITI_LLM`, `_CC_EMBEDDING`, `_GPT_4_1_NANO`, plus `_CC_TTS` /
+  `_CC_STT` when `CC_ENABLE_SPEECH=1`. The values are the UPSTREAM model ids
+  (`CC_LLM_BASE_URL=… CC_LLM_API_KEY=… ./discover-llm.sh models` lists what a
+  server names them). Leave them blank and the old path is unchanged: the
+  `llm` phase creates the aliases as skeletons in the proxy's database and
+  **pauses (exit 3)** for THEM to enter the provider in the LiteLLM UI. Either
+  way the operator owns the values; a row they fill in the UI always wins over
+  `.env`. Self-hosted embedders on another server are still just a different
+  `api_base` on the `cc-embedding` row, which is a UI edit.
 - **The embedding-permanence warning** — say it in one sentence: the
   embedding choice is effectively permanent, because `CC_EMBED_DIM` gets
   written into the Neo4j vector index. Changing the embedder later means
   dropping the index and re-embedding the whole graph. **Leave
-  `CC_EMBED_DIM` blank** — the `llm` phase of `setup.sh` measures it through
-  the `cc-embedding` alias and writes it back, and refuses to overwrite a
-  different value that's already there.
+  `CC_EMBED_DIM` blank** — `./setup.sh check` measures it against the declared
+  upstream embedder (writing it only when unset) and the `llm` phase measures
+  it through the `cc-embedding` alias; both refuse to overwrite a different
+  value that is already there.
 - **Enable flags** — `CC_ENABLE_N8N` (default 0; only needed by an
   n8n-backed integration, today Gmail), `CC_ENABLE_CRAWLER` (default 1; the
   Chromium crawl service — rung 2 of docs ingestion, large local image; rung
@@ -165,8 +171,10 @@ generating the credentials):
   restricted, propose running /discover first rather than eliciting blind.
   Record `CC_REGISTRY_DOCKERIO` / `CC_REGISTRY_GHCR` (the
   container registry mirror) and anything `deploy/AIRGAP.md` calls for (read
-  it now if air-gapped). Reachability itself is `setup.sh preflight`'s job —
-  its `package-indexes` check reports PASS/WARN/FAIL; you don't probe by hand.
+  it now if air-gapped). Reachability itself is `./setup.sh check`'s job — its
+  `indexes`, `images` and `llm` sections report PASS/WARN/FAIL/USERACTION per
+  source and name the `.env` seam for each; you don't probe by hand. Run it,
+  read it, fix `.env`, run it again.
 - **Integration choices** (the same file as everything above since v2.42.0 —
   write them straight in, or collect now and write before the `app` phase):
   - **Network trust** — ask ONCE, before Jira/Confluence, if either is
@@ -225,9 +233,15 @@ phase. Nothing else in the tree was touched — `git status` should be clean.
 ./setup.sh
 ```
 
-This runs all eleven phases — `validate → preflight → machine → fetch → llm →
-stack → app → verify → test → boot → demo` — in order, stopping at the first
-hard failure. (`machine` is new in v2.43.0: it tells the podman MACHINE what
+This runs the dry `check` and then the nine mutating phases — `check → machine
+→ fetch → llm → stack → app → verify → test → boot → demo` — in order, stopping
+at the first hard failure. (`check` is new in v2.44.0 and it is a GATE: the run
+refuses to continue past a FAIL or a USERACTION, and a WARN-only check needs
+`--accept-warnings` or an interactive `y`. Run `./setup.sh check` on its own
+first — the loop is *edit `.env` → check → triage → check → … → `./setup.sh`* —
+and never triage by editing anything but `.env`. `./setup.sh check --list` names
+its eight sections. P4 of the design record will add a `configure` command that
+ASKS for the missing answers before check runs; it does not exist yet.) (`machine` is new in v2.43.0: it tells the podman MACHINE what
 `.env` says — the CA into its trust store, the registries mirror/insecure
 drop-in, the proxy drop-in — and is a no-op on bare Linux. It prints the diff
 before each write, and `./setup.sh machine --dry-run` reports without writing,

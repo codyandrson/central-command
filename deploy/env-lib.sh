@@ -30,6 +30,8 @@
 #     cc_state_dir <env-file> <repo-root> resolve/create/persist the state dir
 #     cc_migrate_legacy_env <env-file> <repo-root> <state-dir>
 #                                         fold the retired files into .env
+#     cc_alias_env_key <alias>            the CC_LLM_UPSTREAM_MODEL_* key name
+#     cc_required_aliases                 the LiteLLM aliases THESE flags need
 # ============================================================================
 
 [[ -n "${CC_ENV_LIB_LOADED:-}" ]] && return 0
@@ -382,4 +384,40 @@ cc__write_curlrc() { # cc__write_curlrc <path> [extra-line ...]
 # one fact: a command passes what it actually drives.
 cc_tls_insecure_warn_text() { # cc_tls_insecure_warn_text <consumers>
   printf 'CC_TLS_INSECURE=1 — TLS verification is OFF for %s' "$1"
+}
+
+# ── the LLM catalog, declared in .env (D3) ──────────────────────────────────
+# Until v2.44.0 every LiteLLM alias was created as a PLACEHOLDER row and the
+# operator filled provider, model id and key in the proxy's web UI while setup
+# waited at an exit-3 gate. That pause is now the FALLBACK: the upstream can be
+# declared in the answer file instead, which is what lets `check` prove the LLM
+# from the host before a container exists.
+#
+#   CC_LLM_UPSTREAM_BASE_URL   the /v1 base THIS HOST can reach
+#   CC_LLM_UPSTREAM_API_KEY    its key (never printed, never logged)
+#   CC_LLM_UPSTREAM_MODEL_<A>  the UPSTREAM model id for alias <A>
+#
+# The key NAME is the alias upper-cased with every non-alphanumeric turned into
+# `_`: cc-default -> CC_LLM_UPSTREAM_MODEL_CC_DEFAULT, gpt-4.1-nano ->
+# CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO. Mirrored in
+# deploy/pi/litellm/register-models.py (`alias_env_key`) — that script is what
+# turns these into rows, and it runs as Python, so the derivation exists twice
+# on purpose; `tests/test_register_models_upstream.py` pins the pair.
+cc_alias_env_key() { # cc_alias_env_key <alias>
+  local a="${1^^}"
+  printf 'CC_LLM_UPSTREAM_MODEL_%s' "${a//[!A-Z0-9]/_}"
+}
+
+# WHICH aliases a given deployment requires. ONE list, read by the `check`
+# command (a missing key is a USERACTION naming it) and by setup's `llm` phase
+# (all declared = no UI pause). The four core aliases are always required; the
+# speech pair only with the bundled engine — with CC_ENABLE_SPEECH=0 the
+# operator points cc-tts/cc-stt at engines of their own, which is a UI job, not
+# an upstream this file can name.
+#
+# Reads CC_ENABLE_SPEECH from the environment (the caller has sourced .env).
+cc_required_aliases() {
+  printf 'cc-default graphiti-llm cc-embedding gpt-4.1-nano'
+  [[ "${CC_ENABLE_SPEECH:-1}" == "1" ]] && printf ' cc-tts cc-stt'
+  printf '\n'
 }

@@ -1,7 +1,40 @@
 # Air-gapped install: one answer file, a check that executes nothing, a setup that cannot surprise
 
-> **Status:** partial — P1+P2 shipped (v2.43.0); P3–P5 not built
+> **Status:** partial — P1–P3 shipped (v2.44.0); P4–P5 not built
 > **As-built:** P1 — `deploy/env-lib.sh`, `.env.example`, `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/single/resolve-images.sh`, `deploy/single/make-secrets.sh`, `deploy/discover.sh`, `central_command/config.py`, `central_command/api/update.py`, `tests/test_single_no_tree_writes.py`. P2 (v2.43.0, D2 + D4) — the same five scripts plus `deploy/single/machine-lib.sh` (new), `deploy/single/build-graphiti-image.sh`, `deploy/single/build-sandbox-image.sh`, `deploy/single/build-crawler-image.sh`, `deploy/single/verify.sh`, `deploy/single/discover-llm.sh`, `deploy/single/compose.yaml`, `deploy/single/images.txt`, `deploy/pi/graphiti/Dockerfile`, `deploy/k3s/sandbox.Dockerfile`, `central_command/crawler/Dockerfile`, `central_command/sandbox/runner.py`, `deploy/AIRGAP.md`, `deploy/single/README.md`, `.claude/rules/deploy-single.md`, `.claude/skills/setup/SKILL.md`, `tests/test_single_airgap_seams.py`, `tests/test_single_machine_lib.py` (new).
+> P3 (v2.44.0, D5 + D3) — `deploy/single/setup.sh` (the `check` command, the
+> phase split it composes, the gate in the `all` driver),
+> `deploy/env-lib.sh` (`cc_alias_env_key`, `cc_required_aliases`),
+> `deploy/pi/litellm/register-models.py` (real rows from `.env`, the
+> placeholder-only update path, the loopback rewrite, key redaction),
+> `.env.example`, `deploy/AIRGAP.md`, `deploy/single/README.md`, `README.md`,
+> `.claude/rules/deploy-single.md`, `.claude/skills/setup/SKILL.md`,
+> `tests/test_single_check_is_dry.py` (new),
+> `tests/test_register_models_upstream.py` (new),
+> `tests/test_single_airgap_seams.py`, `tests/test_setup_phase_docs.py`.
+>
+> **P3 deltas from the plan, decided while building.** The section order is the
+> record's, but three verdicts were softened because a pre-deployment gate that
+> refuses a FIRST install is worse than no gate: the credentials
+> `make-secrets.sh` generates are a WARN (check never generates a secret, and
+> P4's `configure` will fill them BEFORE check runs), a compose variable that is
+> one of those credentials is a WARN rather than a FAIL, and a port held by one
+> of this install's own containers (or by the host process `boot` started, per
+> its pid file in the state dir) is a PASS rather than a conflict. The upstream
+> values are CREATE material, never INVARIANTS: `plan()` gained an `invariants`
+> argument so a row the operator filled in with their own model id is not "drift"
+> because `.env` names another one — the declaration's own patterns (the plain
+> `openai/` prefix, `mode`, the timeouts) stay the invariants. `check` resolves
+> the Python graph against the install's `.venv` when it exists and otherwise
+> against a THROWAWAY venv in the state directory: a resolve needs a target
+> environment, and creating the install's own venv is the `fetch` phase's job.
+> `CC_API_PORT` and `CC_COCKPIT_PORT` joined the validated port list (they are
+> host ports like any other). `cc_required_aliases` gates the speech pair on
+> `CC_ENABLE_SPEECH`, which is a deliberate change from today's behaviour where
+> all six aliases are required unconditionally: the flag's whole meaning is
+> "those two point at engines of your own", which is a UI job, so they are not
+> required IN `.env` — `register-models.py` still creates all six skeletons and
+> the `llm` phase still probes all six through the proxy.
 >
 > **Scope:** the single-node profile (`deploy/single/`) on Windows Podman
 > Desktop (WSL2 podman machine) behind an enterprise mirror. The k3s
@@ -322,6 +355,17 @@ environment, not the developer's Linux box.
   `--import-native-ca` or the `certs.d` write is the primary CA path.
 - Whether machine edits survive a Podman Desktop upgrade (unverified);
   `check` re-verifies each run either way.
-- `CC_EMBED_DIM` pre-fill from the upstream embedding probe: keep the
-  "measured, never declared" rule by measuring through the upstream in
-  `check`, or keep it in `llm`. Decide in P3.
+- ~~`CC_EMBED_DIM` pre-fill from the upstream embedding probe~~ **DECIDED in
+  P3 (v2.44.0): both, and the rule is untouched.** `check` MEASURES it against
+  the upstream embedder from the host and writes it into `.env` only when the
+  key is unset (that write is inside check's "may update `.env`" allowance, and
+  its PASS line says so). The `llm` phase still measures it through the proxy
+  ALIAS — the path production takes — and still FAILS on a mismatch with the
+  recorded value rather than overwriting it. Nothing is ever declared: both
+  numbers come from an endpoint returning a real vector.
+
+- **A WARN-only `check` stops a non-interactive `all` run** (`--accept-warnings`
+  is the answer, by design). On a fresh `.env` that means two WARNs nobody can
+  act on — the credentials `make-secrets.sh` has not generated yet. P4's
+  `configure` generates them before `check` runs, which closes it; until then
+  the first install on a CI-shaped runner needs the flag.

@@ -182,3 +182,35 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_graphiti_image_patches.py::test_the_entity_type_patch_keeps_the_builtin_docstring_and_drops_the_fields`, test: `tests/test_graphiti_image_patches.py::test_the_responses_client_pin_is_retired`, test: `tests/test_litellm_policy.py` and `tests/test_single_models_declaration.py` (plain prefix), script: `deploy/single/discover-llm.sh` (structured probe)
 - **Source:** CHANGELOG v2.39.0
 - **Supersedes:** DL-055
+### DL-105 — `setup.sh check` executes nothing, and it is the gate
+
+- **Status:** active
+- **Date:** 2026-09-23
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "**`check` EXECUTES nothing, and it is the GATE**"
+- **Why:** The operator's air-gapped installs failed halfway through, on values
+  nobody could check in advance (a tag the mirror lacked, a model id the
+  endpoint did not serve). The asked-for experience was a pre-deployment check
+  that prints what it checked and what failed, triage with the agent, re-run
+  until green with nothing changed but `.env`, then install. That only works if
+  the check is trustworthy about changing nothing — so dryness is a guard test,
+  not an intention — and if it actually blocks (KOTS's hard preflight gate);
+  a WARN-only run needs an explicit yes, and with no TTY it refuses to decide
+  (rustup's fail-closed rule).
+- **Enforced:** test: `tests/test_single_check_is_dry.py::test_nothing_check_can_reach_mutates_anything`, `::test_check_reaches_the_phases_it_composes`
+- **Source:** CHANGELOG v2.44.0; docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md D5
+
+### DL-106 — The LLM catalog may be declared in `.env`; register-models.py stays create-only
+
+- **Status:** active
+- **Date:** 2026-09-23
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "**The LLM catalog may be DECLARED in `.env`, and the UI is the fallback**"
+- **Why:** The catalog was the last configuration outside the answer file, and
+  the LiteLLM UI pause put it in the worst possible place: mid-install, with the
+  UI as the only instrument. Declared in `.env`, the endpoint can be probed from
+  the HOST before a container exists. Create-only survives because the row the
+  operator filled in is the one they can see and change; `.env` may fill a
+  skeleton, never overrule a decision. The key stays out of every log line and
+  out of every comparison — LiteLLM masks it, so comparing it would report
+  permanent drift.
+- **Enforced:** test: `tests/test_register_models_upstream.py::test_a_row_the_operator_edited_is_never_touched`, `::test_declared_keys_create_real_rows`, `::test_no_keys_creates_placeholder_skeletons`
+- **Source:** CHANGELOG v2.44.0; docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md D3

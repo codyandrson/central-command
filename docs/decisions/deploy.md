@@ -100,15 +100,18 @@ the entry format and how to add one.
 - **Enforced:** discipline only — script-level fix only, no pytest guard
 - **Source:** .claude/rules/deploy-k3s.md
 
-### DL-082 — setup.sh runs eleven deterministic phases with PASS/WARN/FAIL/USERACTION exit codes
+### DL-082 — setup.sh runs a dry check and nine deterministic phases with PASS/WARN/FAIL/USERACTION exit codes
 
 - **Status:** active
-- **Date:** undated
-- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`setup.sh` is a deterministic driver (validate / preflight / machine / fetch / llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION, exit 0/1/2/3, `diagnose` support bundle)"
+- **Date:** 2026-09-23
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`setup.sh` is a deterministic driver (check / machine / fetch / llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION, exit 0/1/2/3, `diagnose` support bundle — `validate` and `preflight` stay callable on their own and `check` composes them)"
 - **Why:** Not recorded beyond the stated mechanism: a deterministic,
   resumable driver protocol lets the /setup skill's job stay elicitation and
-  diagnosis only, never freehand fixes.
-- **Enforced:** script: `deploy/single/setup.sh` (`phase_validate...phase_demo`, `run_phase()` returns 0-3)
+  diagnosis only, never freehand fixes. v2.44.0 put the dry `check` in front of
+  it as a hard gate (design record 2026-09-23, D5): the phases that CHANGE
+  something never start until every input has been proven, and `validate` /
+  `preflight` became sections of it rather than separate steps of the full run.
+- **Enforced:** script: `deploy/single/setup.sh` (`phase_check...phase_demo`, `run_phase()` returns 0-3)
 - **Source:** .claude/rules/deploy-single.md
 
 ### DL-083 — The single-node install acquires before it deploys, and never falls back on its own
