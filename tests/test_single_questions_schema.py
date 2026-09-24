@@ -148,16 +148,59 @@ def test_the_groups_are_in_ask_order_and_advanced_is_last():
     assert seen[-1] == "advanced", "the ports group is asked last (and only with --all)"
 
 
-def test_only_the_upstream_llm_keys_are_required():
-    """"Required" means setup cannot run without it. `CC_OPERATOR_NAME` is NOT
-    required — the cockpit asks it on first run (v2.37.0) — and every mirror is
-    optional, because blank means the public source."""
+def test_no_question_is_required():
+    """"Required" means setup cannot run without it — and nothing qualifies.
+
+    Every row has a working default or a documented blank meaning:
+    `CC_OPERATOR_NAME` is asked by the cockpit on first run (v2.37.0), a blank
+    mirror means the public source, and as of v2.45.1 a blank upstream LLM means
+    the catalog is entered in the LiteLLM UI at the `llm` phase's deliberate
+    exit-3 pause — the primary method, and the one the k3s profile uses, because
+    LiteLLM expresses provider nuance a flat answer file cannot.
+
+    The column and `configure`'s fail-closed path stay: the next genuinely
+    unanswerable dependency is a `y` here rather than new code.
+    """
     required = {r["key"] for r in ROWS if r["required"] == "y"}
-    assert all(k.startswith("CC_LLM_UPSTREAM") for k in required), (
-        "only the upstream LLM is required to run setup; everything else has a "
-        f"working default or a documented blank meaning: {sorted(required)}"
+    assert required == set(), (
+        "no question may be REQUIRED unless setup truly cannot run without it. "
+        "If you are adding one, say why in the schema header and update "
+        f"deploy/AIRGAP.md and the /setup skill with it: {sorted(required)}"
     )
-    assert "CC_OPERATOR_NAME" not in required
+
+
+def test_the_upstream_llm_rows_are_optional_and_say_so():
+    """The eight upstream keys are the shortcut past the UI pause, not the path.
+
+    A prompt that does not SAY the row may be left blank is how an operator ends
+    up inventing a base URL for a catalog they were going to fill in the UI.
+    """
+    rows = [r for r in ROWS if r["key"].startswith("CC_LLM_UPSTREAM")]
+    assert len(rows) == 8, [r["key"] for r in rows]
+    for row in rows:
+        assert row["required"] == "n", f"{row['key']} must be optional"
+        assert "LiteLLM UI" in row["prompt"], (
+            f"{row['key']}'s prompt must name the alternative it is optional "
+            f"against: {row['prompt']!r}"
+        )
+
+
+def test_check_reports_a_blank_catalog_as_a_pass_not_a_useraction():
+    """The `all` gate refuses to continue past a USERACTION, so a blank catalog
+    reported as one would make the NORMAL install impossible to run in one
+    command. It is a PASS naming the pause instead (v2.45.1)."""
+    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    body = setup[setup.index("check_llm() {"):]
+    body = body[: body.index("\n}\n")]
+    blank = body[: body.index("CC_LLM_UPSTREAM_API_KEY:-")]
+    assert 'pass "llm" "catalog will be entered in the LiteLLM UI' in blank, (
+        "check's llm section must PASS with the pause named when "
+        "CC_LLM_UPSTREAM_BASE_URL is blank"
+    )
+    assert "useraction" not in blank, (
+        "a blank catalog is the normal case and must never be a USERACTION — "
+        "the full run's gate would refuse to continue"
+    )
 
 
 def test_the_model_rows_cover_exactly_the_litellm_aliases():

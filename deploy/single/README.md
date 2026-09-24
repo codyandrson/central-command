@@ -166,7 +166,7 @@ Eight sections, in order — `./setup.sh check --list` prints this table:
 | `machine` | the podman machine's CA, registries and proxy — current state and the diff the machine phase would apply |
 | `images` | every images.txt row resolves against its registry, including the three build bases and operator pins |
 | `indexes` | PyPI, npm, the Python resolution, the apt archive, the CPython download mirror |
-| `llm` | the upstream endpoint FROM THIS HOST: the model list, one chat, one structured, one embedding |
+| `llm` | the upstream endpoint FROM THIS HOST — the model list, one chat, one structured, one embedding — ONLY when .env declares it; with the catalog left to the LiteLLM UI this section says so and probes nothing |
 | `compose` | compose.yaml renders with this .env, with no variable it requires left unset |
 | `models` | the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model |
 

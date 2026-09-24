@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate the agent CONDUCTS A LOOP and never mutates anything itself: `./setup.sh configure` (run in the operator's own terminal — it asks the questions in deploy/single/questions.tsv and is the one command that creates the ONE answer file, the repo-root .env; with no TTY it asks nothing and exits 3 listing the required keys) → `./setup.sh check` (the dry pre-deployment gate, eight sections) → triage every FAIL/WARN/USERACTION against deploy/AIRGAP.md's seam table, editing ONLY .env → check again until exit 0 (or an exit 2 the operator accepts) → `./setup.sh` (or `--accept-warnings`), which runs nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator. It reads `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDS ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate the agent CONDUCTS A LOOP and never mutates anything itself: `./setup.sh configure` (run in the operator's own terminal — it asks the questions in deploy/single/questions.tsv and is the one command that creates the ONE answer file, the repo-root .env; with no TTY it asks nothing rather than guessing) → `./setup.sh check` (the dry pre-deployment gate, eight sections) → triage every FAIL/WARN/USERACTION against deploy/AIRGAP.md's seam table, editing ONLY .env → check again until exit 0 (or an exit 2 the operator accepts) → `./setup.sh` (or `--accept-warnings`), which runs nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator. It reads `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDS ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -139,8 +139,10 @@ creates `.env` from `.env.example` — never `cp` it yourself.
   text; write each into `.env` as `KEY=value` (quote any value containing a
   space — the file is SOURCED, and `CC_OPERATOR_NAME=Jane Doe` unquoted runs
   `Doe` as a command); then run `./setup.sh configure --non-interactive` to
-  CONFIRM. It prompts for nothing, exits 0 when every required key is answered,
-  and exits 3 listing exactly what is still missing. Never pass
+  CONFIRM. It prompts for nothing and exits 0 once nothing REQUIRED is blank (no question
+  is required today — the upstream LLM keys became optional in v2.45.1, since the
+  catalog is normally entered in the LiteLLM UI), listing anything still missing
+  at exit 3. Never pass
   `--non-interactive` hoping it will fill something in: it is the check, not the
   filling.
 
@@ -150,10 +152,20 @@ integration choices the schema does not cover (never run the install steps
 yourself: `./setup.sh` owns everything mechanical, including generating the
 credentials):
 
-- **The LLM provider — the ONLY required answers, and `configure` asks for all
-  of them** (v2.44.0, design record D3; before that the LiteLLM-UI pause was the
-  only path). Declaring it is preferred, because `./setup.sh check` can then
-  prove the endpoint from the host BEFORE anything is deployed:
+- **The LLM provider — entered in the LiteLLM UI by default; the `.env` keys are
+  an OPTIONAL shortcut** (v2.44.0 design record D3, made optional in v2.45.1).
+  **The catalog lives in LiteLLM's database, not in `.env`**, and the `llm`
+  phase's exit-3 pause for the proxy's UI is a DELIBERATE exception to "a full
+  run does not stop" — the operator's decision, because LiteLLM expresses
+  provider nuance (credentials, per-provider parameters, routing, fallbacks) a
+  flat answer file cannot, and it is one method across both profiles. So do NOT
+  press for these values: ask once whether the upstream is a single
+  OpenAI-compatible endpoint the operator would rather declare, and take "I'll
+  do it in the UI" as the normal answer. `check` reports a blank catalog as a
+  PASS naming the coming pause, not as something to fix.
+  Declaring it buys ONE thing — `./setup.sh check` can then
+  prove the endpoint from the host BEFORE anything is deployed, which matters
+  most on an air-gapped install:
   `CC_LLM_UPSTREAM_BASE_URL` (the `/v1` base THIS HOST reaches — a
   `127.0.0.1` value is rewritten to `host.containers.internal` for the
   container's row, with a WARN), `CC_LLM_UPSTREAM_API_KEY` (`none` if the
@@ -162,7 +174,7 @@ credentials):
   `_GRAPHITI_LLM`, `_CC_EMBEDDING`, `_GPT_4_1_NANO`, plus `_CC_TTS` /
   `_CC_STT` when `CC_ENABLE_SPEECH=1`. The values are the UPSTREAM model ids
   (`CC_LLM_BASE_URL=… CC_LLM_API_KEY=… ./discover-llm.sh models` lists what a
-  server names them). Leave them blank and the old path is unchanged: the
+  server names them). Leave them blank — the normal case — and the
   `llm` phase creates the aliases as skeletons in the proxy's database and
   **pauses (exit 3)** for THEM to enter the provider in the LiteLLM UI. Either
   way the operator owns the values; a row they fill in the UI always wins over
@@ -244,8 +256,8 @@ credentials):
     `central_command/runtime/packs.py` actually defines rather than promising
     from memory.
 
-Gate: `./setup.sh configure --non-interactive` exits 0 (every required answer
-is in the repo-root `.env`), every other elicited variable above is in that file
+Gate: `./setup.sh configure --non-interactive` exits 0 (nothing REQUIRED is
+blank in the repo-root `.env`), every other elicited variable above is in that file
 or explicitly declined and recorded, and the integration choices are noted for
 the `app` phase. Nothing else in the tree was touched — `git status` should be
 clean.

@@ -4,6 +4,41 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-24 — v2.45.1: the first Windows run of the loop, and what it found
+
+The v2.45.0 install loop was exercised end to end on the Windows Podman
+Desktop testbed it was built for (ledger in the private instance repo). The
+install reached `verify` with every phase green — after five defects, two of
+them fatal on every Windows box. All five are fixed here; the run continues on
+the same install with the mirror and CA scenarios.
+
+- **The LLM catalog is the LiteLLM UI's, by operator decision — the same
+  methodology as k3s.** v2.44.0 made the `CC_LLM_UPSTREAM_*` keys REQUIRED,
+  so `check` raised a USERACTION on a blank catalog and the `all` gate refused
+  to run the very method the operator uses: enter provider details where
+  LiteLLM can express them, with setup PAUSING at the `llm` phase (exit 3)
+  until the aliases answer. Those keys are now optional (no question in
+  `questions.tsv` is required today), `check`'s llm section says the catalog
+  will be entered in the UI and probes nothing, and the pause is a PASS line,
+  not a WARN, so a UI-driven install ends at exit 0. The design record's D3 is
+  reworded accordingly. Per-alias `.env` overrides were considered and
+  rejected.
+- **`podman machine list` marks the default machine with a trailing `*`**
+  (`podman-machine-default*`), which every `podman machine ssh` then rejected
+  — so the whole machine section FAILed on a healthy machine, the normal case
+  on Windows and macOS. The marker is stripped.
+- **MSYS rewrites POSIX-looking values for native Windows processes, and
+  `podman-compose.exe` is one.** `/dev/null` became `nul` (`volume [nul] not
+  defined` on EVERY Windows compose render) and the in-machine CA path became
+  `C:/Program Files/Git/etc/pki/...`, silently breaking the CA route.
+  `MSYS2_ENV_CONV_EXCL` now exempts `CC_CA_BUNDLE_MOUNT_SRC` and
+  `CC_CA_BUNDLE_IN_CONTAINER` on every compose invocation.
+- `check` with no `.env` is a USERACTION (exit 3) pointing at `configure`,
+  not a FAIL — the gate already walks you there.
+- Reported, not fixed: `check`'s memory probe reads the HOST's RAM on a
+  machine-backed podman (the machine's 2 GiB is what matters); Windows curl is
+  Schannel-built, so `CURL_CA_BUNDLE` on the host side is unverified.
+
 ## 2026-09-23 — v2.45.0: the install asks its own questions, and refuses to guess
 
 `check` could prove every input, but nothing ASKED for one. The answers still

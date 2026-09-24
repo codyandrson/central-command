@@ -199,15 +199,23 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_single_check_is_dry.py::test_nothing_check_can_reach_mutates_anything`, `::test_check_reaches_the_phases_it_composes`
 - **Source:** CHANGELOG v2.44.0; docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md D5
 
-### DL-106 — The LLM catalog may be declared in `.env`; register-models.py stays create-only
+### DL-106 — The LLM catalog is entered in the LiteLLM UI; `.env` may declare it; register-models.py stays create-only
 
 - **Status:** active
-- **Date:** 2026-09-23
-- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "**The LLM catalog may be DECLARED in `.env`, and the UI is the fallback**"
-- **Why:** The catalog was the last configuration outside the answer file, and
-  the LiteLLM UI pause put it in the worst possible place: mid-install, with the
-  UI as the only instrument. Declared in `.env`, the endpoint can be probed from
-  the HOST before a container exists. Create-only survives because the row the
+- **Date:** 2026-09-24
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "**The LLM catalog is ENTERED IN THE LiteLLM UI, and `.env` may declare it
+  instead**"
+- **Why:** The catalog lives in LiteLLM's database, and the operator's practice
+  on both profiles is to enter the provider in the proxy's own UI: LiteLLM
+  expresses provider nuance — credentials, per-provider parameters, routing,
+  fallbacks — that a flat answer file cannot, and one method across both
+  profiles beats two that drift. **So the `llm` phase's exit-3 pause is a
+  deliberate exception to "a full run does not stop", not a defect**, and a
+  blank catalog is a PASS in `check` rather than a USERACTION the gate would
+  refuse to pass. Declaring the upstream in `.env` stays as an OPTIONAL
+  shortcut, and its real value is that the endpoint can then be probed from the
+  HOST before a container exists — which on an air-gapped install is much
+  earlier than the UI pause. Create-only survives because the row the
   operator filled in is the one they can see and change; `.env` may fill a
   skeleton, never overrule a decision. The key stays out of every log line and
   out of every comparison — LiteLLM masks it, so comparing it would report

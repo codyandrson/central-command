@@ -191,7 +191,7 @@ q_group_blurb() { # q_group_blurb <group>
     features) printf 'which optional components this install brings up' ;;
     network)  printf 'how this host reaches the outside world: the proxy and the two trust knobs' ;;
     mirrors)  printf 'where each dependency comes from — blank everywhere means the public source' ;;
-    llm)      printf 'the upstream LLM: one endpoint, one key, one model id per alias' ;;
+    llm)      printf 'OPTIONAL — one endpoint, one key, one model id per alias; leave every row blank and the llm phase pauses for the LiteLLM UI instead' ;;
     paths)    printf 'where this install keeps what it generates' ;;
     advanced) printf 'loopback ports — every default is fine unless something else already holds one' ;;
     *)        printf '' ;;

@@ -117,11 +117,24 @@ when a matching file is read.
   it did not ask about — which is what keeps `.env` a PRESEED file (carried in
   from a connected machine, it asks nothing and stays byte-identical:
   `tests/test_single_configure_preseed.py`). REQUIRED means "setup cannot run
-  without it", so it is the upstream LLM keys and nothing else —
-  `CC_OPERATOR_NAME` is not required, because the cockpit asks it on first run.
+  without it", and as of v2.45.1 **NO question is required**: every one has a
+  working default or a documented blank meaning, and the upstream LLM keys
+  became optional when UI entry was confirmed as the primary method. The column
+  and the fail-closed path stay — the next genuinely unanswerable dependency is
+  a `y` in the schema rather than new code.
   `check` and the full run never create `.env`; they say "run configure".
-- **The LLM catalog may be DECLARED in `.env`, and the UI is the fallback**
-  (v2.44.0, design record D3). `CC_LLM_UPSTREAM_BASE_URL`,
+- **The LLM catalog is ENTERED IN THE LiteLLM UI, and `.env` may declare it
+  instead** (v2.44.0 design record D3, reworded v2.45.1). The catalog lives in
+  LiteLLM's database, not in `.env`; UI entry is the PRIMARY method and the same
+  one the k3s profile uses, because LiteLLM expresses provider nuance
+  (credentials, per-provider parameters, routing) a flat answer file cannot.
+  **So the `llm` phase's exit-3 pause is a DELIBERATE exception to "a full run
+  does not stop", not a defect** — `check` reports a blank catalog as ONE PASS
+  line naming the coming pause (never a USERACTION, so the gate lets it
+  through), and the phase's `catalog-declared` line is a PASS either way: a WARN
+  there made every successful UI-driven run finish at exit 2. The declaration is
+  an OPTIONAL shortcut whose real value is proving the endpoint from the host
+  BEFORE anything deploys: `CC_LLM_UPSTREAM_BASE_URL`,
   `CC_LLM_UPSTREAM_API_KEY` and one `CC_LLM_UPSTREAM_MODEL_<ALIAS>` per alias
   `cc_required_aliases` (in `deploy/env-lib.sh` — the ONE list) says this
   deployment needs. `register-models.py` stays CREATE-ONLY: real rows when the

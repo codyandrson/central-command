@@ -80,7 +80,7 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 | registry.npmjs.org | the cockpit build (`npm ci`), `sandbox-runtime` inside the sandbox build | `CC_NPM_REGISTRY` | `NPM_CONFIG_REGISTRY`; the lockfile's `resolved` URLs point at npmjs and npm rewrites them to the configured registry (its `replace-registry-host` default) — a lock regenerated AGAINST a mirror would not be rewritten back |
 | huggingface.co | the speech engine's models (Kokoro TTS + faster-whisper STT), fetched by `cc-speech` when the `llm` phase installs them | `CC_HF_ENDPOINT`, or pre-place the hub snapshots in the `speech-models` volume | `HF_HUB_CACHE` is the volume; a present snapshot is not re-fetched. `CC_ENABLE_SPEECH=0` removes the source entirely (point `cc-tts`/`cc-stt` at your own engines) |
 | huggingface.co | Whisper STT for the cockpit's *local* engine (k3s Node server only) | `WHISPER_MODELS_BASE_URL`, or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file first; unused once `cc-stt` is registered |
-| the upstream LLM endpoint | LiteLLM — and `check`, directly from the host | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0. One base, one key, one upstream model id per alias (the alias upper-cased, every non-alphanumeric `_`). `cc_required_aliases` in `deploy/env-lib.sh` decides which aliases this deployment needs — the four core ones always, `cc-tts`/`cc-stt` only with `CC_ENABLE_SPEECH=1`. Blank means the LiteLLM-UI pause instead; see below |
+| the upstream LLM endpoint | LiteLLM — and `check`, directly from the host | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0. One base, one key, one upstream model id per alias (the alias upper-cased, every non-alphanumeric `_`). `cc_required_aliases` in `deploy/env-lib.sh` decides which aliases this deployment needs — the four core ones always, `cc-tts`/`cc-stt` only with `CC_ENABLE_SPEECH=1`. **All three families are OPTIONAL** (v2.45.1): blank is the normal case and means the catalog is entered in the LiteLLM UI at the `llm` phase's deliberate pause; see below |
 | a private/corporate CA (TLS interception, a self-signed mirror) | everything: host acquisition, the three builds, podman pulls, LiteLLM, the speech engine | `CC_CA_BUNDLE` | one key, fanned out — the table above |
 | a mandatory egress proxy | every host-side acquisition, and (inside a podman machine) pulls and builds | `CC_PROXY` | fanned out to `http(s)_proxy` in both cases, `no_proxy` pinned to loopback; `./setup.sh machine` writes the machine's `containers.conf` `[engine] env` drop-in |
 | — (verification off) | everything the CA row covers, except the speech engine | `CC_TLS_INSECURE=1` | the other supported answer to interception |
@@ -161,17 +161,31 @@ inputs, not builds.**
 
 The target is "no CONFIGURATION failure at setup", not "no failure of any kind".
 
-## The LLM: declared in `.env`, with the LiteLLM UI as the fallback
+## The LLM: entered in the LiteLLM UI, and optionally declared in `.env`
 
-Until v2.44.0 the model catalog was outside `.env` entirely: setup created
-`PLACEHOLDER` rows in LiteLLM's database and PAUSED (exit 3) while the operator
-typed provider, model id and key into the proxy's web UI. On an air-gapped
-install that was the worst possible place to discover that the endpoint, the key
-or a model id was wrong — half-deployed, with the UI as the only instrument.
+**The catalog lives in LiteLLM's database, not in `.env`, and entering it in the
+proxy's own UI is the primary method** — the same methodology the k3s profile
+uses. The operator's reason, in one sentence: LiteLLM expresses provider nuance
+(credentials, per-provider parameters, routing, fallbacks) that a flat answer
+file cannot, and one method across both profiles beats two that drift.
 
-Declare it in `.env` instead (the three keys are in the table above; `configure`
-asks for them, and they are the only REQUIRED answers). `check`'s `llm` section
-then probes that endpoint from the host with curl before any container exists:
+So the `llm` phase creating `PLACEHOLDER` skeletons and PAUSING at exit 3 for
+that entry is **a deliberate exception to "a full run does not stop"**, not a
+defect. `check` says so up front with a PASS line (`llm: catalog will be entered
+in the LiteLLM UI — setup pauses at the llm phase (exit 3) until the aliases
+answer`) rather than a USERACTION: there is nothing to fix, only a pause to
+expect. Fill the rows in at `http://127.0.0.1:4000/ui` (username `admin`,
+password = `CC_LLM_PROXY_ADMIN_KEY`), then re-run — setup is idempotent and
+fast-forwards.
+
+**The `.env` declaration is an optional shortcut past that pause**, for the
+simple case of one OpenAI-compatible endpoint serving every model (the three key
+families are in the table above; `configure` offers them and NONE of them is
+required). Its real value is not skipping a prompt but moving the failure
+earlier: on an air-gapped install, half-deployed with the UI as the only
+instrument is the worst place to discover that the endpoint, the key or a model
+id is wrong. With the keys set, `check`'s `llm` section
+probes that endpoint from the host with curl before any container exists:
 the model list (a 404 there is a WARN — some gateways do not implement it, and
 membership is then simply unchecked), one chat completion per distinct chat
 model id, one `json_schema` round trip for the `graphiti-llm` model, and one

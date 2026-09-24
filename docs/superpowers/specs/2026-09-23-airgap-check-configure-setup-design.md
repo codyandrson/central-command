@@ -222,7 +222,26 @@ key, so the merge is plumbing, not a redesign.
   operator can pin.
 - `installed.manifest` moves to the state directory (D7).
 
-### D3 — The LLM catalog is declared in `.env`; the UI becomes optional
+### D3 — The LLM catalog is entered in the LiteLLM UI; `.env` may declare it
+
+> **REWORDED 2026-09-24, on the Windows testbed run, by the operator.** The
+> heading used to read "The LLM catalog is declared in `.env`; the UI becomes
+> optional", and the phrasing had it backwards. **UI entry is the PRIMARY
+> methodology, matching the k3s profile; the `.env` keys are an OPTIONAL
+> convenience for a simple OpenAI-compatible upstream and are NOT required.**
+> The operator's reasoning, in one sentence: LiteLLM handles provider nuance —
+> credentials, per-provider parameters, routing, fallbacks — that a flat `.env`
+> cannot, and running one method across both profiles beats maintaining two that
+> drift. Consequences, all shipped in v2.45.1: the eight `CC_LLM_UPSTREAM_*`
+> rows in `questions.tsv` are `required=n`; `check`'s `llm` section reports a
+> blank catalog as ONE PASS line ("catalog will be entered in the LiteLLM UI —
+> setup pauses at the llm phase (exit 3) until the aliases answer") and probes
+> nothing, never a USERACTION, so the `all` gate lets it through; the `llm`
+> phase's `catalog-declared` line is a PASS rather than a WARN, because a
+> UI-driven install is not a degraded one and a WARN there made every successful
+> UI-driven run finish at exit 2. **The `llm` phase's exit-3 pause is therefore a
+> DELIBERATE exception to "a full run does not stop", not a defect** — the one
+> place the deterministic driver hands the keyboard back on purpose.
 
 - New keys: `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, and one
   `CC_LLM_UPSTREAM_MODEL_<ALIAS>` per required alias (`cc-default`,

@@ -20,8 +20,14 @@
 #                for a mirror, the SHAPE expected (host prefix vs full URL)
 #     default    the value a blank answer takes. `@state` is the one dynamic
 #                default: what deploy/env-lib.sh's cc_state_dir computes
-#     required   y = setup cannot run without it. Only the upstream LLM keys
-#                are required; CC_OPERATOR_NAME is NOT (the cockpit asks it)
+#     required   y = setup cannot run without it. NO row is required today
+#                (v2.45.1): every question has a working default or a
+#                documented blank meaning, and the upstream LLM keys are an
+#                OPTIONAL shortcut past the llm phase's LiteLLM-UI pause — the
+#                UI is the primary way the catalog gets filled in, the same
+#                methodology the k3s profile uses. The column stays because
+#                `configure` and `check` both read it, and the next genuinely
+#                unanswerable dependency is a `y` here rather than new code
 #     validator  a v_* function in questions-lib.sh, or `-` for none. It prints
 #                ONE line of reason on failure and is never allowed to write
 #     when       `KEY=value` / `KEY!=value`, comma-separated ANDs, evaluated
@@ -54,14 +60,14 @@ CC_APT_MIRROR	mirrors	Debian archive URL for the two image builds that apt-get �
 CC_APT_SECURITY_MIRROR	mirrors	Debian SECURITY archive URL, a separate path on every mirror — a full URL like https://mirror.corp.example/debian-security; blank = build without the security suite	-	n	v_url	-	n
 CC_HF_ENDPOINT	mirrors	Hugging Face mirror URL for the speech engine's model snapshots — a full URL; blank = huggingface.co, and pre-placed snapshots need neither	-	n	v_url	CC_ENABLE_SPEECH=1	n
 
-CC_LLM_UPSTREAM_BASE_URL	llm	The OpenAI-compatible /v1 base URL THIS HOST can reach for the LLM	-	y	v_url	-	n
-CC_LLM_UPSTREAM_API_KEY	llm	Its API key — never printed and never logged; use none if the server ignores keys, but it cannot be empty	-	y	v_nonempty	-	y
-CC_LLM_UPSTREAM_MODEL_CC_DEFAULT	llm	The UPSTREAM model id for chat, meaning what the server itself calls the model rather than the alias — this is the one alias the agents address	-	y	v_model_id	-	n
-CC_LLM_UPSTREAM_MODEL_GRAPHITI_LLM	llm	The upstream model id for knowledge-graph extraction, which must accept json_schema output — typically the same model as chat	-	y	v_model_id	-	n
-CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING	llm	The upstream EMBEDDING model id — its dimension is measured rather than declared, and is effectively permanent once the graph index exists	-	y	v_model_id	-	n
-CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO	llm	The upstream model id for the graph reranker, which graphiti_core addresses by that literal alias name — any chat model serves	-	y	v_model_id	-	n
-CC_LLM_UPSTREAM_MODEL_CC_TTS	llm	The upstream model id for text-to-speech — with the bundled engine it is the CC_SPEECH_TTS_MODEL hub id	-	y	v_model_id	CC_ENABLE_SPEECH=1	n
-CC_LLM_UPSTREAM_MODEL_CC_STT	llm	The upstream model id for speech-to-text — with the bundled engine it is the CC_SPEECH_STT_MODEL hub id	-	y	v_model_id	CC_ENABLE_SPEECH=1	n
+CC_LLM_UPSTREAM_BASE_URL	llm	OPTIONAL shortcut: the OpenAI-compatible /v1 base URL THIS HOST can reach, which lets setup register the aliases itself and lets check prove the LLM before anything is deployed — blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_url	-	n
+CC_LLM_UPSTREAM_API_KEY	llm	Its API key, never printed and never logged — use none if the server ignores keys; blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_nonempty	-	y
+CC_LLM_UPSTREAM_MODEL_CC_DEFAULT	llm	The UPSTREAM model id for chat, meaning what the server itself calls the model rather than the alias — this is the one alias the agents address; blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_GRAPHITI_LLM	llm	The upstream model id for knowledge-graph extraction, which must accept json_schema output — typically the same model as chat; blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING	llm	The upstream EMBEDDING model id — its dimension is measured rather than declared, and is effectively permanent once the graph index exists; blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO	llm	The upstream model id for the graph reranker, which graphiti_core addresses by that literal alias name — any chat model serves; blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_CC_TTS	llm	The upstream model id for text-to-speech — with the BUNDLED engine leave this blank: the llm phase registers cc-tts against it from CC_SPEECH_TTS_MODEL, and this key is only for a TTS server of your own; blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_model_id	CC_ENABLE_SPEECH=1	n
+CC_LLM_UPSTREAM_MODEL_CC_STT	llm	The upstream model id for speech-to-text — with the BUNDLED engine leave this blank: the llm phase registers cc-stt against it from CC_SPEECH_STT_MODEL, and this key is only for a Whisper server of your own; blank = enter the provider in the LiteLLM UI when the llm phase pauses for it	-	n	v_model_id	CC_ENABLE_SPEECH=1	n
 
 CC_STATE_DIR	paths	Where this install keeps its logs, diagnostics, manifests and pid files — outside the checkout, so git status stays clean	@state	n	v_path_dir_or_creatable	-	n
 

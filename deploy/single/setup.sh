@@ -30,7 +30,9 @@
 #     check       EVERYTHING that can be checked without changing anything:
 #                 the answer file, this host, the podman machine's current
 #                 state, every image ref against its registry, the package
-#                 indexes, the UPSTREAM LLM probed from here, the compose
+#                 indexes, the UPSTREAM LLM probed from here WHEN .env declares
+#                 it (otherwise the catalog is the LiteLLM UI's and the llm
+#                 phase pauses for it), the compose
 #                 render, the speech models' source. Eight sections, one table,
 #                 `./setup.sh check --list` names them. It is the GATE: the
 #                 full run starts with it and refuses to go on past a FAIL or a
@@ -50,7 +52,12 @@
 #     fetch       acquire every dependency (public or mirror) — the only phase
 #                 that needs the network; stops for the operator per artifact.
 #     llm         secrets + LiteLLM up + probe its aliases + MEASURE the
-#                 embedding dimension into .env
+#                 embedding dimension into .env. THE ONE DELIBERATE STOP in the
+#                 full run (operator's decision): unless .env declares the
+#                 upstream, this phase creates the alias skeletons and exits 3
+#                 so the provider details are entered in the LiteLLM UI — the
+#                 catalog lives in LiteLLM's database, not in .env, and that is
+#                 the same methodology the k3s profile uses. Re-run to continue.
 #     stack       assert the local images + bring the core stack up (compose)
 #     app         venv, editable install, the derived .env values, mint the
 #                 spine's virtual key, cockpit build
@@ -202,7 +209,17 @@ machine_name() {
   if [[ -z "$MACHINE_NAME" ]]; then
     MACHINE_NAME=" "
     if command -v podman >/dev/null 2>&1; then
+      # The trailing `*` is podman's DEFAULT MARKER, not part of the name:
+      # `podman machine list --format '{{.Name}}'` prints
+      # `podman-machine-default*` for the default machine, and every
+      # `podman machine ssh <name>` with that star in it fails — podman does not
+      # match the name, takes the star-suffixed word as the COMMAND instead, and
+      # every machine probe reports "does not answer 'podman machine ssh'" on a
+      # machine that is running fine. Found on the 2026-09-24 Windows run, where
+      # it FAILed check's whole machine section (podman 5.8.3). The default
+      # machine is the normal case on Windows and macOS, so this is not an edge.
       local n; n="$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 | tr -d '\r')"
+      n="${n%\*}"
       [[ -n "$n" ]] && MACHINE_NAME="$n"
     fi
   fi
@@ -254,9 +271,26 @@ compose_detect() {
 # order-independent and podman-compose's argparse takes them in any order
 # before the subcommand (podman_compose.py, verified 2026-09-23) — so this
 # position works on both, and anyone running compose BY HAND must pass it too.
+# The two DERIVED variables that carry a CONTAINER-side POSIX path into the
+# compose render (see the CA block in load_env). Under Git Bash they must be
+# excluded from MSYS's path conversion: MSYS rewrites POSIX-looking values in
+# the environment of a NATIVE Windows process, and `podman-compose.exe` is one.
+# Measured on the 2026-09-24 Windows run against podman-compose under podman
+# 5.8.3:
+#   CC_CA_BUNDLE_MOUNT_SRC=/dev/null              -> `nul`
+#       => RuntimeError: volume [nul] not defined in top level  (compose render
+#          FAILS on every Windows install, with or without a CA)
+#   CC_CA_BUNDLE_MOUNT_SRC=/etc/pki/.../cc-ca.pem -> C:/Program Files/Git/etc/pki/.../cc-ca.pem
+#       => ValueError: could not parse mount  (and the same rewrite would have
+#          put a Windows path into SSL_CERT_FILE inside a Linux container)
+# MSYS2_ENV_CONV_EXCL is the documented opt-out and fixed both cases exactly.
+# Harmless everywhere else: nothing but MSYS reads it.
+COMPOSE_ENV_CONV_EXCL="CC_CA_BUNDLE_MOUNT_SRC;CC_CA_BUNDLE_IN_CONTAINER"
+
 compose() { # compose <args...>
   compose_detect || { fail "compose" "no compose provider — install podman-compose (or the docker compose plugin)"; return 1; }
-  "${COMPOSE_BIN[@]}" --env-file "$ENV_FILE" -f "$HERE/compose.yaml" "$@"
+  MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:+${MSYS2_ENV_CONV_EXCL};}${COMPOSE_ENV_CONV_EXCL}" \
+    "${COMPOSE_BIN[@]}" --env-file "$ENV_FILE" -f "$HERE/compose.yaml" "$@"
 }
 # CC_ENABLE_* -> --profile flags, into the global PROFILE_FLAGS. The sandbox is
 # deliberately absent: it has no container here (its containers are created on
@@ -274,8 +308,13 @@ compose_profile_flags() {
 # ── .env helpers ────────────────────────────────────────────────────────────
 load_env() {
   init_state
+  # USERACTION, not FAIL: "run configure" is the operator's move, which is what
+  # exit 3 means in this protocol — and it is exactly the case `check_gate`'s
+  # exit-3 text already talks the operator through. Reporting it as a hard
+  # failure (exit 1) sent them to "fix the FAIL lines above" for a file that
+  # simply has not been created yet (seen on the 2026-09-24 Windows run).
   if [[ ! -f "$ENV_FILE" ]]; then
-    fail "answer-file" "$ENV_FILE not found — run ./setup.sh configure (it creates it from .env.example and asks what is missing; no other command creates it). There is ONE answer file, the repo-root .env, and deploy/single/.env is not it"
+    useraction "answer-file" "$ENV_FILE not found — run ./setup.sh configure (it creates it from .env.example and asks what is missing; no other command creates it). There is ONE answer file, the repo-root .env, and deploy/single/.env is not it"
     return 1
   fi
   # MIGRATION, before anything reads a value: an install made before v2.42.0
@@ -484,7 +523,7 @@ check_schema_answers() {
     fi
   done < <(q_rows "$QUESTIONS")
   if (( miss == 0 && bad == 0 )); then
-    pass "answers-schema" "every question in questions.tsv is answered and valid for these flags (required: the upstream LLM for $(cc_required_aliases))"
+    pass "answers-schema" "every question in questions.tsv that applies to these flags is answered and valid (no row is REQUIRED: each has a working default or a documented blank meaning, and a blank upstream LLM means the catalog is entered in the LiteLLM UI at the llm phase's pause)"
   fi
   return 0
 }
@@ -1244,7 +1283,7 @@ CHECK_SECTIONS=(
   "machine|the podman machine's CA, registries and proxy — current state and the diff the machine phase would apply"
   "images|every images.txt row resolves against its registry, including the three build bases and operator pins"
   "indexes|PyPI, npm, the Python resolution, the apt archive, the CPython download mirror"
-  "llm|the upstream endpoint FROM THIS HOST: the model list, one chat, one structured, one embedding"
+  "llm|the upstream endpoint FROM THIS HOST — the model list, one chat, one structured, one embedding — ONLY when .env declares it; with the catalog left to the LiteLLM UI this section says so and probes nothing"
   "compose|compose.yaml renders with this .env, with no variable it requires left unset"
   "models|the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model"
 )
@@ -1469,8 +1508,19 @@ upstream_probe() { # upstream_probe <check> <message> <mode> <model-id> [extra..
 
 check_llm() {
   local a key
-  if [[ -z "${CC_LLM_UPSTREAM_BASE_URL:-}" || -z "${CC_LLM_UPSTREAM_API_KEY:-}" ]]; then
-    useraction "llm-upstream" "CC_LLM_UPSTREAM_BASE_URL and/or CC_LLM_UPSTREAM_API_KEY are unset, so nothing about the LLM can be proven before the proxy exists. The three key families are CC_LLM_UPSTREAM_BASE_URL (the /v1 base THIS host can reach), CC_LLM_UPSTREAM_API_KEY, and one CC_LLM_UPSTREAM_MODEL_<ALIAS> per required alias ($(cc_required_aliases)). Declaring them is optional — the llm phase's LiteLLM-UI pause is the fallback — but then this section can check nothing"
+  # THE PRIMARY METHODOLOGY IS THE UI (v2.45.1). The operator's own practice —
+  # and what the k3s profile has always done — is to enter the provider details
+  # in the LiteLLM UI at the llm phase's pause: LiteLLM handles provider nuance
+  # (credentials, per-provider parameters, routing) that a flat answer file
+  # cannot, and one method across both profiles beats two. So a blank catalog is
+  # a PASS with the consequence stated, never a USERACTION: there is nothing for
+  # the operator to fix here, only a pause to expect later.
+  if [[ -z "${CC_LLM_UPSTREAM_BASE_URL:-}" ]]; then
+    pass "llm" "catalog will be entered in the LiteLLM UI — setup pauses at the llm phase (exit 3) until the aliases answer. Nothing about the LLM is proven before that pause, which is the trade for entering the provider where LiteLLM can express it. The optional shortcut past the pause is CC_LLM_UPSTREAM_BASE_URL + CC_LLM_UPSTREAM_API_KEY + one CC_LLM_UPSTREAM_MODEL_<ALIAS> per alias ($(cc_required_aliases)); with those set this section probes the endpoint from here instead"
+    return 0
+  fi
+  if [[ -z "${CC_LLM_UPSTREAM_API_KEY:-}" ]]; then
+    fail "llm-upstream" "CC_LLM_UPSTREAM_BASE_URL is set but CC_LLM_UPSTREAM_API_KEY is not — a declared upstream needs both (use none if the server ignores keys; LiteLLM needs something to send). Clear the base URL to go back to entering the catalog in the LiteLLM UI"
     return 0
   fi
   local base="${CC_LLM_UPSTREAM_BASE_URL%/}"
@@ -1905,10 +1955,15 @@ phase_llm() {
   # for. The keys are already exported by load_env, so the script sees them; the
   # pause below is the FALLBACK, not the path.
   local undeclared; undeclared="$(llm_undeclared_keys)"
+  # NOT a WARN when the catalog is undeclared (v2.45.1): entering the provider in
+  # the LiteLLM UI is the PRIMARY methodology — the same one the k3s profile
+  # uses — so an install that takes it is not a degraded install. A WARN here
+  # also made every successful UI-driven run finish at exit 2, which reads as
+  # "completed with warnings" over a deliberate choice.
   if [[ -z "$undeclared" ]]; then
-    pass "catalog-declared" "every required alias ($(cc_required_aliases)) is declared in .env — registering real rows, no UI pause"
+    pass "catalog-declared" "every alias ($(cc_required_aliases)) is declared in .env — registering real rows, so there is no UI pause"
   else
-    warn "catalog-declared" "these keys would remove the UI pause: $undeclared (set them in .env and re-run; the LiteLLM UI is the supported alternative)"
+    pass "catalog-declared" "the catalog is the LiteLLM UI's (the primary method, as on k3s): this phase creates the alias skeletons and PAUSES at exit 3 for you to fill in the provider. The optional shortcut past that pause is: $undeclared"
   fi
   local rrc=0
   CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
@@ -2613,7 +2668,8 @@ phase_diagnose() {
     fi
     echo
     echo "== compose services"
-    compose_detect && "${COMPOSE_BIN[@]}" --env-file "$ENV_FILE" -f "$HERE/compose.yaml" ps -a 2>&1 || echo "  (no compose provider)"
+    compose_detect && MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:+${MSYS2_ENV_CONV_EXCL};}${COMPOSE_ENV_CONV_EXCL}" \
+      "${COMPOSE_BIN[@]}" --env-file "$ENV_FILE" -f "$HERE/compose.yaml" ps -a 2>&1 || echo "  (no compose provider)"
     echo
     echo "== podman containers"
     podman ps -a --format '{{.Names}}\t{{.Status}}\t{{.Image}}' 2>&1
@@ -2677,14 +2733,19 @@ usage: ./setup.sh [configure|check|validate|preflight|machine|fetch|llm|stack|
   no argument   runs check -> machine -> fetch -> llm -> stack -> app -> verify
                 -> test -> boot -> demo: zero to a working, human-approved demo
                 in one command, stopping at the first phase that hard-fails or
-                needs you
+                needs you. ONE stop is EXPECTED rather than a fault: the llm
+                phase exits 3 so you enter the provider details in the LiteLLM
+                UI (the catalog lives in LiteLLM's database). Re-run to go on —
+                or declare CC_LLM_UPSTREAM_* in .env to skip that pause
   configure     ASKS the questions in deploy/single/questions.tsv that this
                 .env does not answer yet (creating .env from .env.example if it
                 is absent — the one command that does), prints the diff it will
                 write, writes ONLY .env, then generates the credentials.
                 --all re-asks every question including the ports; with no
-                terminal (or --non-interactive) it asks NOTHING and exits 3
-                listing the required keys instead of guessing
+                terminal (or --non-interactive) it asks NOTHING rather than
+                guessing, and exits 3 listing any REQUIRED key still blank
+                (no question is required today — every one has a working
+                default or a documented blank meaning)
   check         the pre-deployment gate: eight dry sections (answers, host,
                 machine, images, indexes, llm, compose, models) in one table,
                 ending in a CHECK: summary line. It changes nothing but

@@ -156,3 +156,53 @@ def test_only_import_native_ca_needs_a_machine_restart():
 @pytest.mark.parametrize("script", [LIB, ENV_LIB], ids=lambda p: p.name)
 def test_the_libraries_parse(script: pathlib.Path):
     subprocess.run(["bash", "-n", script.name], cwd=script.parent, check=True)
+
+
+# ── two Windows-only seams, guarded by a source walk ────────────────────────
+# Both were found on the 2026-09-24 Windows testbed run, and neither can be
+# exercised on Linux: one needs `podman machine`, the other needs MSYS. The
+# guard is a walk over `setup.sh` — narrow, and pinned to the exact reason.
+
+SETUP = ROOT / "deploy" / "single" / "setup.sh"
+
+
+def test_the_machine_name_strips_podmans_default_marker():
+    """`podman machine list --format '{{.Name}}'` prints the DEFAULT machine as
+    `podman-machine-default*`. That star is a marker, not part of the name:
+    `podman machine ssh podman-machine-default*` does not match a machine, so
+    podman takes the starred word as the COMMAND and every machine probe reports
+    "does not answer 'podman machine ssh'" on a machine that is running.
+    Measured on podman 5.8.3, where it FAILed check's whole machine section —
+    and the default machine is the normal case on Windows and macOS.
+    """
+    src = SETUP.read_text(encoding="utf-8")
+    body = src[src.index("machine_name() {"):]
+    body = body[: body.index("\n}\n")]
+    assert "podman machine list --format '{{.Name}}'" in body
+    assert '"${n%\\*}"' in body or "${n%\\*}" in body, (
+        "machine_name must strip a trailing '*' (podman's default marker) "
+        f"before the name is used as an ssh target:\n{body}"
+    )
+
+
+def test_compose_is_invoked_with_msys_path_conversion_disabled():
+    """MSYS rewrites POSIX-looking values in the environment of a NATIVE Windows
+    process, and `podman-compose.exe` is one. Measured on the 2026-09-24 run:
+    `/dev/null` arrived as `nul` (RuntimeError: volume [nul] not defined in top
+    level — the compose render FAILED on every Windows install) and
+    `/etc/pki/ca-trust/source/anchors/cc-ca.pem` arrived as
+    `C:/Program Files/Git/etc/pki/...` (ValueError: could not parse mount, and
+    the same rewrite would have put a Windows path into SSL_CERT_FILE inside a
+    Linux container). `MSYS2_ENV_CONV_EXCL` is the documented opt-out.
+    """
+    src = SETUP.read_text(encoding="utf-8")
+    assert "MSYS2_ENV_CONV_EXCL" in src, (
+        "every compose invocation must exclude the container-side POSIX paths "
+        "from MSYS path conversion"
+    )
+    body = src[src.index("compose() {"):]
+    body = body[: body.index("\n}\n")]
+    assert "MSYS2_ENV_CONV_EXCL" in body, f"the compose wrapper itself:\n{body}"
+    # Both derived CA variables, because both carry a container-side path.
+    for key in ("CC_CA_BUNDLE_MOUNT_SRC", "CC_CA_BUNDLE_IN_CONTAINER"):
+        assert key in src[src.index("COMPOSE_ENV_CONV_EXCL="):][:200], key
