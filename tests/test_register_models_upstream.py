@@ -103,6 +103,25 @@ def _run(rm, monkeypatch, capsys, live, env, argv=("--policy", str(SINGLE / "mod
     return rc, capsys.readouterr().out, proxy
 
 
+def _bash_exe() -> str:
+    """The bash that can run this repo's shell scripts — Git Bash on Windows.
+
+    A bare `"bash"` there is System32's WSL launcher, which cannot source a
+    Windows path (exit 127) and, with no WSL distribution registered, will not
+    start at all. `ENV_LIB` is passed `.as_posix()` for the same reason: a
+    backslash path inside double quotes is an escape sequence to bash, not a
+    path. Both bit the 2026-09-24 Windows testbed run, where they failed three
+    tests in this file and nine in test_single_machine_lib.py — and
+    `./setup.sh test` is the install gate.
+    """
+    from central_command.api.update import _bash
+
+    resolved = _bash()
+    if not resolved:
+        pytest.skip("no usable bash on this host")
+    return resolved
+
+
 def _live(alias, **params):
     return {"model_name": alias, "litellm_params": params, "model_info": {"id": f"id-{alias}"}}
 
@@ -113,7 +132,7 @@ def test_alias_env_key_matches_the_bash_derivation(rm):
     for alias in ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano",
                   "cc-tts", "cc-stt"):
         want = subprocess.run(
-            ["bash", "-c", f'. "{ENV_LIB}"; cc_alias_env_key {alias}'],
+            [_bash_exe(), "-c", f'. "{ENV_LIB.as_posix()}"; cc_alias_env_key {alias}'],
             capture_output=True, text=True, check=True).stdout.strip()
         assert rm.alias_env_key(alias) == want, alias
     assert rm.alias_env_key("gpt-4.1-nano") == "CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO"
@@ -127,7 +146,8 @@ def test_alias_env_key_matches_the_bash_derivation(rm):
 ])
 def test_cc_required_aliases_follows_the_speech_flag(speech, expected):
     out = subprocess.run(
-        ["bash", "-c", f'. "{ENV_LIB}"; CC_ENABLE_SPEECH={speech} cc_required_aliases'],
+        [_bash_exe(), "-c",
+         f'. "{ENV_LIB.as_posix()}"; CC_ENABLE_SPEECH={speech} cc_required_aliases'],
         capture_output=True, text=True, check=True).stdout.split()
     assert out == expected
 

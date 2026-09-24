@@ -18,8 +18,10 @@ PIN host is marked insecure too, and a proxy value is never printed.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
+import sys
 
 import pytest
 
@@ -28,15 +30,45 @@ LIB = ROOT / "deploy" / "single" / "machine-lib.sh"
 ENV_LIB = ROOT / "deploy" / "env-lib.sh"
 
 
+def bash() -> str:
+    """The bash that can actually run this repo's shell scripts.
+
+    A bare `"bash"` is NOT it on Windows: PATH's first `bash` is System32's WSL
+    launcher, a shell in a different filesystem where this checkout's paths mean
+    nothing. With no WSL distribution registered it does not even start — it
+    exits 1 with `Bash/Service/0x8007072c` and writes UTF-16LE to stdout, which
+    is what the assertion below then reports as gibberish. The product already
+    knows this (`central_command.api.update._bash` resolves Git Bash from git's
+    own install); the tests have to ask the same way.
+
+    Found on the 2026-09-24 Windows testbed run: 9 tests here and 3 in
+    test_register_models_upstream.py failed on it, and since `./setup.sh test`
+    is the install GATE, the gate was red on the platform this profile targets.
+    """
+    from central_command.api.update import _bash
+
+    resolved = _bash()
+    if not resolved:
+        pytest.skip("no usable bash on this host")
+    return resolved
+
+
 def run(func: str, env: dict[str, str]) -> str:
     """Call one machine-lib function with a clean environment."""
     # env -i equivalent: only what the test sets, plus PATH so coreutils exist.
-    # cwd= + basename, not a full path: on Windows the first `bash` on PATH may
-    # be WSL's launcher, which cannot open a Windows path.
+    # On Windows the inherited PATH is kept instead — Git Bash resolves its own
+    # coreutils through it, and a POSIX-only PATH leaves it without `printf`.
+    # What matters for the test's intent is that no CC_* leaks in, and none does.
+    base = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
+    if sys.platform == "win32":
+        base = {k: v for k, v in os.environ.items()
+                if k.upper() in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP")}
+    # cwd= + a RELATIVE source path: the script is sourced as `./machine-lib.sh`
+    # so no absolute Windows path ever reaches bash.
     r = subprocess.run(
-        ["bash", "-c", f". ./machine-lib.sh; {func}"],
+        [bash(), "-c", f". ./machine-lib.sh; {func}"],
         cwd=LIB.parent,
-        env={"PATH": "/usr/bin:/bin:/usr/local/bin", **env},
+        env={**base, **env},
         capture_output=True,
         text=True,
     )
@@ -140,13 +172,13 @@ def test_only_import_native_ca_needs_a_machine_restart():
     is applied at machine START (podman-machine-set(1))."""
     for item in ("registries", "proxy", "ca"):
         r = subprocess.run(
-            ["bash", "-c", f". ./machine-lib.sh; cc_machine_restart_needed {item}"],
+            [bash(), "-c", f". ./machine-lib.sh; cc_machine_restart_needed {item}"],
             cwd=LIB.parent, capture_output=True, text=True,
         )
         assert r.returncode == 1, f"{item} must NOT require a restart: {r.stdout}"
         assert r.stdout == ""
     r = subprocess.run(
-        ["bash", "-c", ". ./machine-lib.sh; cc_machine_restart_needed registries import-native-ca"],
+        [bash(), "-c", ". ./machine-lib.sh; cc_machine_restart_needed registries import-native-ca"],
         cwd=LIB.parent, capture_output=True, text=True,
     )
     assert r.returncode == 0
@@ -155,7 +187,7 @@ def test_only_import_native_ca_needs_a_machine_restart():
 
 @pytest.mark.parametrize("script", [LIB, ENV_LIB], ids=lambda p: p.name)
 def test_the_libraries_parse(script: pathlib.Path):
-    subprocess.run(["bash", "-n", script.name], cwd=script.parent, check=True)
+    subprocess.run([bash(), "-n", script.name], cwd=script.parent, check=True)
 
 
 # ── two Windows-only seams, guarded by a source walk ────────────────────────

@@ -425,3 +425,9 @@ Linux box cannot exercise), and whether `read -rsp` echoes nothing for the key.
   itself, so the credentials exist before `check` ever runs. A run that SKIPPED
   `configure` still sees those two WARNs, which is now the correct reading of
   them — it is what an install that did not answer its questions looks like.
+
+- `update.sh import` (Windows testbed, 2026-09-24): the unzip + tar-pipe tree
+  sync took over an hour on NTFS with Defender for a tree `git clone` wrote in
+  four minutes. A git-native checkout of the imported release is the lever; a
+  design change to the importer, not a patch. Also: `unzip` prints a symlink
+  error and exits 0, so an imported tree can silently lose a link.

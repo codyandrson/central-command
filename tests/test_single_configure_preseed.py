@@ -66,6 +66,20 @@ GENERATED = {
 }
 
 
+# Debris a WINDOWS deployment grows inside deploy/, which must never reach the
+# temp copy. `deploy/single/NUL` is the one that bites: podman's bundled MSYS ssh
+# is invoked with `UserKnownHostsFile=NUL` and creates a real file of that name,
+# and `NUL` is a RESERVED DEVICE NAME on Windows — `shutil.copytree` then dies
+# with `[WinError 87] The parameter is incorrect`. It is gitignored (so
+# `git status` is clean and nothing warns you) and it failed all seven tests in
+# this file on the 2026-09-24 Windows run, taking the `test` phase — the install
+# gate — down with it.
+_DEBRIS = shutil.ignore_patterns(
+    "NUL", "nul", "CON", "con", "AUX", "aux", "PRN", "prn",
+    ".env", ".env.*", "__pycache__", "*.pyc",
+)
+
+
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     """A temp copy of everything `configure` reads: the deploy tree and the
@@ -73,10 +87,22 @@ def tree(tmp_path: Path) -> Path:
     a database to ask a question."""
     repo = tmp_path / "repo"
     (repo).mkdir()
-    shutil.copytree(ROOT / "deploy", repo / "deploy")
+    shutil.copytree(ROOT / "deploy", repo / "deploy", ignore=_DEBRIS)
     shutil.copy2(ROOT / ".env.example", repo / ".env.example")
     (tmp_path / "home").mkdir()
     return repo
+
+
+def _bash_exe() -> str:
+    """Git Bash on Windows, where PATH's first `bash` is System32's WSL launcher
+    — a shell in a different filesystem, which cannot run this checkout at all.
+    The product resolves it the same way (`central_command.api.update._bash`)."""
+    from central_command.api.update import _bash
+
+    resolved = _bash()
+    if not resolved:
+        pytest.skip("no usable bash on this host")
+    return resolved
 
 
 def _run(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -94,7 +120,7 @@ def _run_setup(repo: Path, *args: str) -> subprocess.CompletedProcess:
                   *GENERATED):
         env.pop(stale, None)
     return subprocess.run(
-        ["bash", "setup.sh", *args],
+        [_bash_exe(), "setup.sh", *args],
         cwd=repo / "deploy" / "single",
         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300, env=env,
     )

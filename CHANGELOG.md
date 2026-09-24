@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-24 — v2.45.2: the install gate was red on Windows, in test code alone
+
+`./setup.sh test` is the install gate, and on the Windows testbed it failed —
+13 failures and 7 errors, every one in TEST code, none in the product. Four
+Windows-only causes, all fixed here:
+
+- A bare `"bash"` on Windows is System32's WSL launcher, not Git Bash; with no
+  WSL distribution it exits 1 writing UTF-16LE, which the assertions reported
+  as gibberish. Tests that shell out now resolve bash the way the product does
+  (`central_command.api.update._bash`) and keep the inherited PATH on Windows.
+- A backslash path inside double quotes is an escape sequence to bash: the
+  helper is sourced by its POSIX spelling.
+- `shutil.copytree` of `deploy/` died on `deploy/single/NUL`, a real file
+  podman's MSYS ssh creates (`UserKnownHostsFile=NUL`) that is a Windows
+  reserved device name; the fixture ignores reserved names and `.env`.
+- A tripwire allowlist keyed with forward slashes compared against
+  backslash paths, so it matched nothing and fired on a clean tree.
+
+Reported, not fixed (design items, recorded in the design record's open
+items): `update.sh import` round-trips the tree through unzip + a tar pipe,
+which on NTFS with Defender took over an hour for what `git clone` wrote in
+four minutes — a git-native checkout is the lever; and `unzip` reports a
+symlink error yet exits 0, so an imported tree could silently lose a link.
+
 ## 2026-09-24 — v2.45.1: the first Windows run of the loop, and what it found
 
 The v2.45.0 install loop was exercised end to end on the Windows Podman

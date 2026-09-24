@@ -103,10 +103,15 @@ def test_nothing_reads_a_mail_body_except_through_the_converter():
 
     root = pathlib.Path(dispatcher.__file__).resolve().parents[1]
     allowed = {"ingest/ledger.py", "ingest/mailtext.py", "integrations/email_facade.py"}
+    # `.as_posix()`, not `str()`: on Windows `str(relative_to(...))` is
+    # `ingest\ledger.py`, which matches nothing in `allowed`, so the allowlist
+    # empties and every legitimate reader is reported as an offender. The
+    # tripwire then fires on a clean tree — seen on the 2026-09-24 Windows run,
+    # where it failed the `test` phase (the install gate) for nothing.
     offenders = [
-        str(p.relative_to(root))
+        p.relative_to(root).as_posix()
         for p in root.rglob("*.py")
-        if str(p.relative_to(root)) not in allowed
+        if p.relative_to(root).as_posix() not in allowed
         and re.search(r"""["'](body_html|body_text)["']""", p.read_text(encoding="utf-8"))
     ]
     assert not offenders, offenders
