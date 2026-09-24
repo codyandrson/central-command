@@ -30,7 +30,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
 
 [[ -f "$ENV_FILE" ]] || {
-  echo "FATAL: $ENV_FILE not found. Start from: cp .env.example .env (at the repo root)" >&2
+  echo "FATAL: $ENV_FILE not found. Run ./setup.sh configure — it creates the answer file and asks what is missing." >&2
   exit 1
 }
 

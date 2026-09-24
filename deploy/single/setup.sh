@@ -20,6 +20,13 @@
 #   PHASES — each a subcommand, each individually re-runnable via the SAME
 #   code path as the full run (kubeadm's shape):
 #
+#     configure   ASK the operator every question in questions.tsv that .env
+#                 does not answer yet (one schema, read here and by `check`),
+#                 print the diff, write ONLY .env, then generate the
+#                 credentials. The ONE command that creates .env from
+#                 .env.example. Fail-closed: no TTY (or --non-interactive) and
+#                 it asks nothing, listing the required keys at exit 3.
+#                 Design record 2026-09-23, D6.
 #     check       EVERYTHING that can be checked without changing anything:
 #                 the answer file, this host, the podman machine's current
 #                 state, every image ref against its registry, the package
@@ -58,6 +65,10 @@
 #     status      re-run postconditions only, nothing mutating
 #     diagnose    write <state>/setup-diagnostics.txt for pasting to Claude
 #
+#   THE LOOP the operator runs: `configure` -> `check` -> triage (edit .env) ->
+#   `check` -> ... -> `all`. configure asks, check proves, and the only file
+#   either of them writes is the answer file.
+#
 #   No argument = check, then the nine phases that CHANGE something, in order —
 #   zero to a working, human-approved demo in one command (2026-08-28), stopping
 #   at the first hard failure or gate. `validate` and `preflight` stay callable
@@ -93,8 +104,19 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # migrated into it by load_env below. compose is always invoked with
 # --env-file "$ENV_FILE" — it has no .env of its own to find any more.
 ENV_FILE="$REPO_ROOT/.env"
+# The template `configure` copies when there is no answer file yet. It is the
+# ONE place .env is created (v2.45.0): check and the full run say "run
+# configure" instead, because a command that silently invents an answer file is
+# a command that can report PASS on a file nobody filled in.
+ENV_TEMPLATE="$REPO_ROOT/.env.example"
 # shellcheck source=../env-lib.sh
 . "$REPO_ROOT/deploy/env-lib.sh"
+# The question SCHEMA's validators and reader (design record D6). questions.tsv
+# is data; this is the code that reads it, shared by `configure` (which ASKS)
+# and `check`'s answers section (which VALIDATES).
+# shellcheck source=questions-lib.sh
+. "$HERE/questions-lib.sh"
+QUESTIONS="$HERE/questions.tsv"
 # The podman MACHINE's configuration, rendered as text. Pure functions, so the
 # decisions are unit-tested on Linux even though the writer can only run where
 # a machine exists (Windows/macOS) — design record D4.
@@ -253,7 +275,7 @@ compose_profile_flags() {
 load_env() {
   init_state
   if [[ ! -f "$ENV_FILE" ]]; then
-    fail "answer-file" "$ENV_FILE not found — start from: cp .env.example .env (at the repo root; since v2.42.0 there is ONE answer file and deploy/single/.env is not it)"
+    fail "answer-file" "$ENV_FILE not found — run ./setup.sh configure (it creates it from .env.example and asks what is missing; no other command creates it). There is ONE answer file, the repo-root .env, and deploy/single/.env is not it"
     return 1
   fi
   # MIGRATION, before anything reads a value: an install made before v2.42.0
@@ -383,6 +405,305 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
   else
     pass "$4" "$2 already set — left alone"
   fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE QUESTION SCHEMA (design record D6) — read by configure AND by check
+# ─────────────────────────────────────────────────────────────────────────────
+# questions.tsv declares every question ONCE: key, group, prompt, default,
+# required, validator, `when` guard, secret. Two commands read it, which is the
+# whole point — `configure` asks and `check` validates, so a new dependency is a
+# new ROW instead of a new prompt in one place and a new check in another.
+#
+# Q_ANS  is "the answers so far": the value currently in .env, replaced by an
+#        answer as configure collects one. `when` is evaluated against it.
+# Q_DEF  is the schema's default per key, which is what a blank answer takes and
+#        what a `when` clause falls back to for a key .env leaves blank (the
+#        CC_ENABLE_* flags are the case that matters: load_env defaults them,
+#        and the speech rows must be asked on a file that never named them).
+declare -A Q_ANS=()
+declare -A Q_DEF=()
+declare -A Q_REQ=()
+
+# The getter q_when_holds is handed: current answer, else the schema default.
+q_current() { # q_current <key>
+  local k="$1"
+  if [[ -n "${Q_ANS[$k]:-}" ]]; then printf '%s' "${Q_ANS[$k]}"
+  else printf '%s' "${Q_DEF[$k]:-}"; fi
+}
+
+# Load the schema and the current answers. `@state` is the one dynamic default:
+# the state directory init_state already resolved, shown so the operator can
+# override it rather than having to guess what the default would have been.
+q_schema_load() {
+  [[ -f "$QUESTIONS" ]] || { fail "questions" "$QUESTIONS is missing — it is release content, so re-extract the release"; return 1; }
+  Q_ANS=(); Q_DEF=(); Q_REQ=()
+  local row key def cur
+  while IFS= read -r row; do
+    key="$(q_field "$row" 1)"
+    def="$(q_field "$row" 4)"
+    [[ "$def" == "-" ]] && def=""
+    [[ "$def" == "@state" ]] && def="$STATE_DIR"
+    cur="$(q_unquote "$(get_kv "$ENV_FILE" "$key")")"
+    is_placeholder "$cur" && cur=""
+    Q_DEF["$key"]="$def"
+    Q_ANS["$key"]="$cur"
+    Q_REQ["$key"]="$(q_field "$row" 5)"
+  done < <(q_rows "$QUESTIONS")
+  return 0
+}
+
+# ── check's answers section, driven by the schema ────────────────────────────
+# Replaces the hand-written required-key list v2.44.0 carried: a required key
+# left blank is a USERACTION naming it and the command that asks it; a key that
+# IS set but fails its own validator is a FAIL carrying the validator's reason.
+# Nothing here writes, and no validator may — check executes nothing.
+check_schema_answers() {
+  q_schema_load || return 1
+  local row key prompt req validator when val reason
+  local miss=0 bad=0
+  while IFS= read -r row; do
+    key="$(q_field "$row" 1)"
+    prompt="$(q_field "$row" 3)"
+    req="$(q_field "$row" 5)"
+    validator="$(q_field "$row" 6)"
+    when="$(q_field "$row" 7)"
+    q_when_holds "$when" q_current || continue
+    val="${Q_ANS[$key]}"
+    if [[ -z "$val" ]]; then
+      if [[ "$req" == y ]]; then
+        useraction "answers-$key" "$key is required and .env does not set it — ./setup.sh configure asks it: $prompt"
+        miss=$((miss+1))
+      fi
+      continue
+    fi
+    [[ -n "$validator" && "$validator" != "-" ]] || continue
+    if ! reason="$("$validator" "$val")"; then
+      fail "answers-$key" "$key is set but not usable: $reason (./setup.sh configure asks it: $prompt)"
+      bad=$((bad+1))
+    fi
+  done < <(q_rows "$QUESTIONS")
+  if (( miss == 0 && bad == 0 )); then
+    pass "answers-schema" "every question in questions.tsv is answered and valid for these flags (required: the upstream LLM for $(cc_required_aliases))"
+  fi
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: configure — ask what is missing, write nothing but .env
+# ─────────────────────────────────────────────────────────────────────────────
+# Plain `read -rp`: gum and whiptail both break under Git Bash's mintty pty
+# (charmbracelet/gum#228), and there is no TUI to fail on a machine where the
+# venv does not exist yet.
+#
+# FAIL-CLOSED (rustup's rule): with no TTY, or with --non-interactive, it never
+# prompts and never guesses. It lists every unanswered REQUIRED key as a
+# USERACTION and exits 3. That is what makes the answer file a PRESEED file: a
+# .env filled in on a connected machine and carried across makes this run print
+# nothing but `keep`.
+Q_REPLY=""
+q_ask() { # q_ask <prompt> <default-display> <default-value> <secret> <validator> <required>
+  local prompt="$1" disp="$2" defv="$3" secret="$4" validator="$5" req="$6"
+  local tries=0 reply reason
+  Q_REPLY=""
+  while (( tries < 3 )); do
+    tries=$((tries+1))
+    reply=""
+    if [[ "$secret" == y ]]; then
+      # -s so a key never reaches the scrollback; the newline read did not echo.
+      read -rsp "$prompt [$disp]: " reply || return 1
+      printf '\n' >&2
+    else
+      read -rp "$prompt [$disp]: " reply || return 1
+    fi
+    [[ -n "$reply" ]] || reply="$defv"
+    if [[ -z "$reply" ]]; then
+      if [[ "$req" == y ]]; then note "  a value is required here."; continue; fi
+      return 0   # blank IS an answer for an optional key
+    fi
+    if [[ -n "$validator" && "$validator" != "-" ]]; then
+      if ! reason="$("$validator" "$reply")"; then
+        note "  $reason"
+        continue
+      fi
+    fi
+    Q_REPLY="$reply"
+    return 0
+  done
+  note "  three tries — leaving $prompt unanswered."
+  return 1
+}
+
+cmd_configure() { # cmd_configure <args...>
+  local ask_all=0 noninteractive=0 a
+  for a in "$@"; do
+    case "$a" in
+      --all)             ask_all=1 ;;
+      --non-interactive) noninteractive=1 ;;
+      --accept-warnings) ;;    # harmless here; the driver scans for it globally
+      *) note "configure: unknown option '$a'"; usage; return 1 ;;
+    esac
+  done
+
+  # THE one place the answer file is created. check and the full run refuse to,
+  # deliberately: an invented .env is a file whose checks pass and whose answers
+  # nobody gave.
+  if [[ ! -f "$ENV_FILE" ]]; then
+    local tmpl="$ENV_TEMPLATE"
+    if [[ ! -f "$tmpl" ]]; then
+      fail "answer-file" "neither $ENV_FILE nor .env.example exists — this is not a Central Command checkout"
+      return 1
+    fi
+    cp "$tmpl" "$ENV_FILE" || { fail "answer-file" "could not create $ENV_FILE from .env.example"; return 1; }
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+    pass "answer-file" "created $ENV_FILE from .env.example (the ONE answer file)"
+  fi
+
+  load_env || return 1
+  q_schema_load || return 1
+
+  local interactive=1
+  [[ -t 0 ]] || interactive=0
+  (( noninteractive )) && interactive=0
+
+  local set_keys=() set_vals=() set_secret=() missing=() group_now=""
+  local row key group prompt def req validator when secret val disp defv rc=0
+  # The schema is read on fd 3, NOT stdin: `read -rp` below reads stdin, and a
+  # `while read < <(...)` loop would feed it the next SCHEMA ROW as the
+  # operator's answer (it did, once — every prompt "answered" by a tsv line).
+  while IFS= read -r row <&3; do
+    key="$(q_field "$row" 1)"
+    group="$(q_field "$row" 2)"
+    prompt="$(q_field "$row" 3)"
+    def="${Q_DEF[$key]}"
+    req="$(q_field "$row" 5)"
+    validator="$(q_field "$row" 6)"
+    when="$(q_field "$row" 7)"
+    secret="$(q_field "$row" 8)"
+
+    q_when_holds "$when" q_current || continue
+    # `advanced` is the ports group: every default works, so it is asked only
+    # when the operator says they want every question.
+    [[ "$group" == advanced ]] && (( ! ask_all )) && continue
+
+    # The header goes up BEFORE the keep/ask decision, so a `keep` line lands
+    # under the group it belongs to rather than under the previous one.
+    if [[ "$group" != "$group_now" ]]; then
+      group_now="$group"
+      note ""
+      note "== $group — $(q_group_blurb "$group")"
+    fi
+
+    val="${Q_ANS[$key]}"
+    # Is the value currently in .env usable? Three consequences: a valid value is
+    # KEPT (this is what makes a carried-in answer file ask nothing), an invalid
+    # one is re-asked, and an invalid one is NOT offered back as the default —
+    # otherwise pressing Enter would re-accept exactly what check will FAIL on.
+    local val_ok=1 val_why=""
+    if [[ -n "$val" && -n "$validator" && "$validator" != "-" ]]; then
+      val_why="$("$validator" "$val")" || val_ok=0
+    fi
+    if [[ -n "$val" ]] && (( val_ok )) && (( ! ask_all )); then
+      note "  keep   $key"
+      continue
+    fi
+
+    if (( ! interactive )); then
+      # Never prompt, never guess. A required key with no value is the report;
+      # a set-but-invalid key is check's FAIL, not something to overwrite here.
+      [[ "$req" == y && -z "$val" ]] && missing+=("$key"$'\t'"$prompt")
+      continue
+    fi
+
+    (( val_ok )) || note "  $key is set to something unusable: $val_why"
+    # The default OFFERED: the current value when re-asking, else the schema's.
+    defv="$val"; (( val_ok )) || defv=""
+    [[ -n "$defv" ]] || defv="$def"
+    if [[ "$secret" == y ]]; then
+      disp="blank = keep what is there"; [[ -n "$val" ]] || disp="no default"
+    else
+      disp="$defv"; [[ -n "$disp" ]] || disp="blank"
+    fi
+    if q_ask "$prompt" "$disp" "$defv" "$secret" "$validator" "$req"; then
+      if [[ "$Q_REPLY" == "$val" ]]; then
+        note "  keep   $key"
+      else
+        Q_ANS["$key"]="$Q_REPLY"
+        set_keys+=("$key"); set_vals+=("$Q_REPLY"); set_secret+=("$secret")
+      fi
+    else
+      [[ "$req" == y ]] && missing+=("$key"$'\t'"$prompt")
+    fi
+  done 3< <(q_rows "$QUESTIONS")
+
+  # Fail-closed: report and stop, before writing anything.
+  if (( ! interactive )) && (( ${#missing[@]} )); then
+    note ""
+    local m
+    for m in "${missing[@]}"; do
+      useraction "${m%%$'\t'*}" "${m#*$'\t'} — set it in .env or run ./setup.sh configure in a terminal"
+    done
+    local why="stdin is not a terminal"
+    (( noninteractive )) && why="--non-interactive was given"
+    local hint=""
+    case "${OSTYPE:-}$(uname -o 2>/dev/null)" in
+      *[Mm][Ss][Yy][Ss]*|*[Cc][Yy][Gg]*)
+        hint=" On MSYS/Cygwin (Git Bash under mintty) a non-TTY stdin is the classic symptom of running a script without winpty — try: winpty ./setup.sh configure" ;;
+    esac
+    note ""
+    note "configure asked nothing: $why, and it does not guess. ${#missing[@]} required answer(s) are missing (listed above).${hint}"
+    note "next: fill them into $ENV_FILE, or run ./setup.sh configure in a terminal"
+    return 3
+  fi
+
+  # The diff BEFORE the write, secrets by name only.
+  note ""
+  if (( ${#set_keys[@]} )); then
+    note "configure will write into $ENV_FILE:"
+    local i
+    for i in "${!set_keys[@]}"; do
+      if [[ "${set_secret[$i]}" == y ]]; then
+        note "  set    ${set_keys[$i]}=(secret, not printed)"
+      else
+        note "  set    ${set_keys[$i]}=${set_vals[$i]}"
+      fi
+    done
+    for i in "${!set_keys[@]}"; do
+      if ! cc_set_kv "$ENV_FILE" "${set_keys[$i]}" "$(q_quote "${set_vals[$i]}")"; then
+        fail "configure" "could not write ${set_keys[$i]} into $ENV_FILE — check its permissions"
+        return 1
+      fi
+    done
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+    pass "configure" "${#set_keys[@]} answer(s) written to $ENV_FILE (nothing else was touched)"
+  else
+    note "configure has nothing to write — every question that applies is already answered."
+    pass "configure" "$ENV_FILE already answers every question that applies (a carried-in .env asks nothing)"
+  fi
+
+  # The credentials, so .env is COMPLETE before check runs. make-secrets.sh only
+  # ever fills a blank — it is what protects the two keys that can never be
+  # rotated (CC_LITELLM_SALT_KEY, N8N_ENCRYPTION_KEY).
+  note ""
+  note "--> $HERE/make-secrets.sh  (fills only the credentials that are still blank)"
+  if "$HERE/make-secrets.sh" >&2; then
+    pass "configure-secrets" "every credential make-secrets.sh owns is present in .env (it never overwrites one that is set)"
+  else
+    fail "configure-secrets" "make-secrets.sh failed — see its output on stderr"
+    return 1
+  fi
+
+  if (( ${#missing[@]} )); then
+    note ""
+    local m
+    for m in "${missing[@]}"; do
+      useraction "${m%%$'\t'*}" "${m#*$'\t'} — set it in .env or run ./setup.sh configure in a terminal"
+    done
+    rc=3
+  fi
+  note ""
+  note "next: ./setup.sh check"
+  return $rc
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -918,7 +1239,7 @@ phase_machine() {
 # come from it, and tests/test_single_check_is_dry.py pins it against the table
 # in deploy/single/README.md. `id<TAB>what it does`.
 CHECK_SECTIONS=(
-  "answers|.env present and sourceable; every required key set; ports valid, unique and free"
+  "answers|.env present and sourceable; every questions.tsv key required by these flags set, and every set key valid; ports valid, unique and free"
   "host|podman, the compose provider, the host tools, RAM/disk, the Windows CA store"
   "machine|the podman machine's CA, registries and proxy — current state and the diff the machine phase would apply"
   "images|every images.txt row resolves against its registry, including the three build bases and operator pins"
@@ -984,7 +1305,8 @@ probe_http() { # probe_http <check> <url> <what> <seam> [HEAD]
 # ── section: answers ────────────────────────────────────────────────────────
 # The credentials make-secrets.sh generates. check never generates one (that is
 # a side effect, and the `llm` phase owns it) — a blank one is a WARN naming
-# the command that fills it. P4's `configure` will fill them BEFORE check runs.
+# the command that fills it — and since v2.45.0 `./setup.sh configure` runs that
+# command itself, so the WARN is what a run that SKIPPED configure looks like.
 CC_GENERATED_KEYS=(CC_LLM_PROXY_ADMIN_KEY CC_LITELLM_SALT_KEY LITELLM_POSTGRES_PASSWORD
                    CC_NEO4J_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD)
 
@@ -994,25 +1316,17 @@ check_required_keys() {
     is_placeholder "$(get_kv "$ENV_FILE" "$k")" && blank="${blank:+$blank }$k"
   done
   if [[ -n "$blank" ]]; then
-    warn "answers-secrets" "not generated yet: $blank — deploy/single/make-secrets.sh writes them (the llm phase runs it). check never generates a secret, so this stays a WARN: --accept-warnings is how you say 'yes, generate them'"
+    warn "answers-secrets" "not generated yet: $blank — ./setup.sh configure generates them (so does the llm phase). check never generates a secret, so this stays a WARN: --accept-warnings is how you say 'yes, generate them'"
   else
     pass "answers-secrets" "every credential make-secrets.sh owns is set"
   fi
 
-  # The upstream LLM (design record D3). Genuinely the operator's, so a missing
-  # key is a USERACTION naming it — never a FAIL, and never a guess.
-  local missing="" a key
-  [[ -n "${CC_LLM_UPSTREAM_BASE_URL:-}" ]] || missing="CC_LLM_UPSTREAM_BASE_URL"
-  [[ -n "${CC_LLM_UPSTREAM_API_KEY:-}" ]] || missing="${missing:+$missing }CC_LLM_UPSTREAM_API_KEY"
-  for a in $(cc_required_aliases); do
-    key="$(cc_alias_env_key "$a")"
-    [[ -n "${!key:-}" ]] || missing="${missing:+$missing }${key}(${a})"
-  done
-  if [[ -n "$missing" ]]; then
-    useraction "answers-llm" "the upstream LLM is not declared in .env: $missing — set each one (the model keys take the UPSTREAM model id, not the alias) and the llm phase registers the rows and skips its UI pause. Leaving them unset is supported: the llm phase then creates PLACEHOLDER rows and stops so you fill them in at the LiteLLM UI instead"
-  else
-    pass "answers-llm" "the upstream LLM is declared in .env for every required alias ($(cc_required_aliases)) — the llm phase will not need its UI pause"
-  fi
+  # Everything else an answer file must carry is the SCHEMA's business now
+  # (v2.45.0, design record D6): questions.tsv is the one list, so a key that
+  # `configure` asks and `check` does not validate cannot exist. A required key
+  # left blank is a USERACTION naming the key and the command that asks it; a
+  # key that IS set but fails its own validator is a FAIL carrying the reason.
+  check_schema_answers
 }
 
 # Is anything LISTENING on a port this deployment wants to publish? `ss` where
@@ -1981,14 +2295,16 @@ phase_boot() {
     # CC_OPERATOR_NAME is the one value only a human can supply. On a
     # terminal, ask it here (elicitation IS allowed to be a prompt — it is
     # the script asking, deterministically); headless, the cockpit asks.
-    local opname; opname="$(get_kv "$ENV_FILE" CC_OPERATOR_NAME)"
+    local opname; opname="$(q_unquote "$(get_kv "$ENV_FILE" CC_OPERATOR_NAME)")"
     if is_placeholder "$opname"; then
       if is_tty; then
         note ""
         note "== one question before first boot =="
         read -rp "What should the agents call you? " opname
         [[ -n "$opname" ]] || { fail "operator-name" "no name given — first boot needs one"; return 1; }
-        set_kv "$ENV_FILE" CC_OPERATOR_NAME "$opname"
+        # Quoted: the answer file is SOURCED, and a two-word name written bare
+        # makes every later `set -a; . .env` run the surname as a command.
+        set_kv "$ENV_FILE" CC_OPERATOR_NAME "$(q_quote "$opname")"
         pass "operator-name" "CC_OPERATOR_NAME recorded in the root .env"
       else
         # Headless: the cockpit asks on first run (v2.37.0) — gating here made
@@ -2350,16 +2666,25 @@ pending_update() {
 
 usage() {
   cat >&2 <<USAGE
-usage: ./setup.sh [check|validate|preflight|machine|fetch|llm|stack|app|verify|
-                   test|boot|demo|stop|status|diagnose]
+usage: ./setup.sh [configure|check|validate|preflight|machine|fetch|llm|stack|
+                   app|verify|test|boot|demo|stop|status|diagnose]
+       ./setup.sh configure [--all] [--non-interactive]   # ask what is missing
        ./setup.sh check [--list]       # everything dry; --list names the sections
        ./setup.sh machine --dry-run    # report the diff, write nothing
        ./setup.sh [all] --accept-warnings   # let a WARN-only check through
 
+  THE LOOP      configure -> check -> (triage: edit .env) -> check -> ... -> all
   no argument   runs check -> machine -> fetch -> llm -> stack -> app -> verify
                 -> test -> boot -> demo: zero to a working, human-approved demo
                 in one command, stopping at the first phase that hard-fails or
                 needs you
+  configure     ASKS the questions in deploy/single/questions.tsv that this
+                .env does not answer yet (creating .env from .env.example if it
+                is absent — the one command that does), prints the diff it will
+                write, writes ONLY .env, then generates the credentials.
+                --all re-asks every question including the ports; with no
+                terminal (or --non-interactive) it asks NOTHING and exits 3
+                listing the required keys instead of guessing
   check         the pre-deployment gate: eight dry sections (answers, host,
                 machine, images, indexes, llm, compose, models) in one table,
                 ending in a CHECK: summary line. It changes nothing but
@@ -2405,7 +2730,9 @@ check_gate() { # check_gate <check-exit-code>  -> 0 continue, else the exit code
        return 1 ;;
     3) note ""
        note "check stopped for YOUR action — see the USERACTION line(s) above. Nothing"
-       note "has been changed. When done, re-run:  ./setup.sh check"
+       note "has been changed. An answers-* line means a key nobody has answered:"
+       note "    ./setup.sh configure      (it asks exactly those, and writes only .env)"
+       note "When done, re-run:  ./setup.sh check"
        return 3 ;;
   esac
   # WARN only.
@@ -2438,6 +2765,17 @@ main() {
   init_state           # the log file lives in there — resolve before logging
   logline "run start: ./setup.sh $cmd"
   case "$cmd" in
+    configure)
+      # Not a phase: it is the command BEFORE the gate, it takes its own flags,
+      # and its exit codes are its own (0 answered · 3 something required is
+      # still missing · 1 a write failed) rather than run_phase's worst-of.
+      FAILS=0; WARNS=0; ACTIONS=0; PASSES=0; CURPHASE=configure
+      note ""; note "======== configure${2:+ ${*:2}}"
+      shift || true
+      cmd_configure "$@"; local qrc=$?
+      logline "run end: ./setup.sh configure -> exit $qrc"
+      exit $qrc
+      ;;
     machine)
       # The one phase that takes a flag: --dry-run reports the diff and writes
       # nothing (which is what preflight calls it as).

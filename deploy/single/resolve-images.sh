@@ -101,7 +101,7 @@ fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); logline "FAIL $1:
 useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); logline "USERACTION $1: $2"; }
 note() { printf '%s\n' "$*" >&2; }
 
-(( SELFTEST )) || [[ -f "$ENV_FILE" ]] || { fail "answer-file" "$ENV_FILE not found — start from: cp .env.example .env (at the repo root)"; exit 1; }
+(( SELFTEST )) || [[ -f "$ENV_FILE" ]] || { fail "answer-file" "$ENV_FILE not found — run ./setup.sh configure (the one command that creates it)"; exit 1; }
 [[ -f "$IMAGES" ]] || { fail "images-txt" "$IMAGES missing"; exit 1; }
 set -a
 # shellcheck disable=SC1090

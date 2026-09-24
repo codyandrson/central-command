@@ -1,0 +1,78 @@
+# questions.tsv — the ONE question schema for the single-node profile.
+#
+#   Design record: docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md,
+#   D6. Data, not code, and read by TWO commands so a new dependency is a new
+#   ROW rather than a new prompt in one place and a new check in another:
+#
+#     ./setup.sh configure   ASKS every row whose `when` holds
+#     ./setup.sh check       VALIDATES them (answers section): a required key
+#                            left blank is a USERACTION naming it, a set key
+#                            failing its validator is a FAIL with the reason
+#
+#   Rows are in ASK ORDER. Groups are asked in the order they first appear;
+#   `advanced` is asked only with `./setup.sh configure --all`.
+#
+#   COLUMNS, tab-separated, `-` where a field is empty:
+#     key        the .env key. It must also have a line in .env.example
+#                (commented is fine) — tests/test_single_questions_schema.py
+#     group      identity | features | network | mirrors | llm | paths | advanced
+#     prompt     plain English, ONE sentence, saying what the seam MEANS and,
+#                for a mirror, the SHAPE expected (host prefix vs full URL)
+#     default    the value a blank answer takes. `@state` is the one dynamic
+#                default: what deploy/env-lib.sh's cc_state_dir computes
+#     required   y = setup cannot run without it. Only the upstream LLM keys
+#                are required; CC_OPERATOR_NAME is NOT (the cockpit asks it)
+#     validator  a v_* function in questions-lib.sh, or `-` for none. It prints
+#                ONE line of reason on failure and is never allowed to write
+#     when       `KEY=value` / `KEY!=value`, comma-separated ANDs, evaluated
+#                against the answers so far. NOT bash — see q_when_holds
+#     secret     y = read with no echo, and the diff prints `(secret, not printed)`
+#
+#   Blank is a VALID answer for a non-required key: a blank mirror means the
+#   public source, which is the whole point of the fan-out.
+#
+# key	group	prompt	default	required	validator	when	secret
+CC_OPERATOR_NAME	identity	What should the agents call you? Leave it blank and the cockpit asks on first run	-	n	-	-	n
+
+CC_ENABLE_N8N	features	Install n8n? It is needed only by an n8n-backed integration, which today means Gmail (1 = yes, 0 = no)	0	n	v_bool01	-	n
+CC_ENABLE_CRAWLER	features	Install the browser-rendering crawl service? Its image is built locally and is large (Chromium); plain HTTP fetch still works without it (1/0)	1	n	v_bool01	-	n
+CC_ENABLE_SANDBOX	features	Install the agent sandbox? On this profile its backend is rootless podman, which is weaker isolation than the k3s profile's gVisor (1/0)	1	n	v_bool01	-	n
+CC_ENABLE_SPEECH	features	Install the bundled speech engine behind cc-tts/cc-stt? 0 means you point both aliases at engines of your own instead (1/0)	1	n	v_bool01	-	n
+
+CC_AIRGAP	network	Is no public package index reachable at all? 1 makes the app phase install from requirements.lock instead of resolving (1/0)	0	n	v_bool01	-	n
+CC_PROXY	network	Mandatory egress proxy for host-side downloads, as a full URL like http://proxy.corp.example:8080 — blank if there is none, and credentials belong in ~/.netrc	-	n	v_url	-	n
+CC_CA_BUNDLE	network	Path to a private or corporate CA in PEM form, which the whole install will trust — blank if the public CAs are enough	-	n	v_path_readable	-	n
+CC_TLS_INSECURE	network	Turn TLS verification OFF everywhere this install reaches? Prefer the CA above; every command then prints one WARN naming what it covers (1/0)	0	n	v_bool01	-	n
+
+CC_REGISTRY_DOCKERIO	mirrors	Mirror HOST for docker.io images — a host or host:port with no scheme and no path, like registry.corp.example; blank = docker.io	-	n	v_host	-	n
+CC_REGISTRY_GHCR	mirrors	Mirror HOST for ghcr.io images (LiteLLM, the speech engine) — a host, no scheme; blank = ghcr.io	-	n	v_host	-	n
+CC_REGISTRY_MCR	mirrors	Mirror HOST for mcr.microsoft.com (the crawler's Playwright base) — a host, no scheme; blank = mcr.microsoft.com	-	n	v_host	-	n
+CC_PYPI_INDEX_URL	mirrors	PyPI simple-index URL for the venv and the image builds — a full URL like https://mirror.corp.example/pypi/simple; blank = pypi.org	-	n	v_url	-	n
+CC_PYTHON_MIRROR	mirrors	Where uv downloads a CPython 3.12 when this host has none — a full URL, and file:// works; blank = the public python-build-standalone mirror	-	n	v_url	-	n
+CC_NPM_REGISTRY	mirrors	npm registry URL for the cockpit build — a full URL like https://mirror.corp.example/npm/; blank = registry.npmjs.org	-	n	v_url	-	n
+CC_APT_MIRROR	mirrors	Debian archive URL for the two image builds that apt-get — a full URL like https://mirror.corp.example/debian; blank = deb.debian.org	-	n	v_url	-	n
+CC_APT_SECURITY_MIRROR	mirrors	Debian SECURITY archive URL, a separate path on every mirror — a full URL like https://mirror.corp.example/debian-security; blank = build without the security suite	-	n	v_url	-	n
+CC_HF_ENDPOINT	mirrors	Hugging Face mirror URL for the speech engine's model snapshots — a full URL; blank = huggingface.co, and pre-placed snapshots need neither	-	n	v_url	CC_ENABLE_SPEECH=1	n
+
+CC_LLM_UPSTREAM_BASE_URL	llm	The OpenAI-compatible /v1 base URL THIS HOST can reach for the LLM	-	y	v_url	-	n
+CC_LLM_UPSTREAM_API_KEY	llm	Its API key — never printed and never logged; use none if the server ignores keys, but it cannot be empty	-	y	v_nonempty	-	y
+CC_LLM_UPSTREAM_MODEL_CC_DEFAULT	llm	The UPSTREAM model id for chat, meaning what the server itself calls the model rather than the alias — this is the one alias the agents address	-	y	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_GRAPHITI_LLM	llm	The upstream model id for knowledge-graph extraction, which must accept json_schema output — typically the same model as chat	-	y	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING	llm	The upstream EMBEDDING model id — its dimension is measured rather than declared, and is effectively permanent once the graph index exists	-	y	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO	llm	The upstream model id for the graph reranker, which graphiti_core addresses by that literal alias name — any chat model serves	-	y	v_model_id	-	n
+CC_LLM_UPSTREAM_MODEL_CC_TTS	llm	The upstream model id for text-to-speech — with the bundled engine it is the CC_SPEECH_TTS_MODEL hub id	-	y	v_model_id	CC_ENABLE_SPEECH=1	n
+CC_LLM_UPSTREAM_MODEL_CC_STT	llm	The upstream model id for speech-to-text — with the bundled engine it is the CC_SPEECH_STT_MODEL hub id	-	y	v_model_id	CC_ENABLE_SPEECH=1	n
+
+CC_STATE_DIR	paths	Where this install keeps its logs, diagnostics, manifests and pid files — outside the checkout, so git status stays clean	@state	n	v_path_dir_or_creatable	-	n
+
+CC_API_PORT	advanced	Loopback port for the API (uvicorn)	8080	n	v_port	-	n
+CC_COCKPIT_PORT	advanced	Loopback port for the cockpit server (the Node process boot starts)	3080	n	v_port	-	n
+CC_PG_PORT	advanced	Loopback port for the spine's Postgres	5442	n	v_port	-	n
+CC_LITELLM_PORT	advanced	Loopback port for the LiteLLM proxy and its UI	4000	n	v_port	-	n
+CC_LITELLM_DB_PORT	advanced	Loopback port for LiteLLM's own Postgres	5443	n	v_port	-	n
+CC_GRAPHITI_PORT	advanced	Loopback port for Graphiti's MCP endpoint	8000	n	v_port	-	n
+CC_NEO4J_BOLT_PORT	advanced	Loopback port for Neo4j's bolt protocol	7687	n	v_port	-	n
+CC_NEO4J_HTTP_PORT	advanced	Loopback port for Neo4j's HTTP browser	7474	n	v_port	-	n
+CC_N8N_PORT	advanced	Loopback port for n8n, used only with the n8n profile on	5678	n	v_port	-	n
+CC_CRAWLER_PORT	advanced	Loopback port for the crawl service	8091	n	v_port	-	n
+CC_SPEECH_PORT	advanced	Loopback port for the speech engine	8093	n	v_port	-	n

@@ -15,6 +15,18 @@ findings from the evidence it already wrote under `<state>/discovery/raw/`,
 `raw/`, or the probe catalog is missing an endpoint and that is a code
 change to raise with the operator, not a freehand probe.
 
+**Where discovery sits in the install loop.** The single-node install is
+`./setup.sh configure` → `check` → triage (edit `.env`) → `check` → … → `all`
+(`deploy/AIRGAP.md`). Discovery comes BEFORE that loop on a network nobody has
+mapped, and it comes back DURING it whenever `check`'s `indexes`, `images` or
+`llm` sections fail with network-shaped errors — a timeout, a certificate
+failure, a 407, a name that does not resolve — because those are exactly what
+this prober classifies and `check` only reports. Its output goes to the STATE
+DIRECTORY (`$CC_STATE_DIR/discovery/`, outside the checkout), never into the
+tree, and its prescriptions name `.env` keys: the same keys `configure` asks for
+and `check` validates, so a finding converts into an answer with no translation
+step. Run it, write the answers into `.env`, and hand back to `check`.
+
 Boundaries that hold for the whole run:
 
 - **Your ONLY write target is the repo-root `.env`** (v2.42.0, design record

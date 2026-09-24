@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into the ONE answer file, the repo-root .env, and runs the deterministic `./setup.sh` (a dry pre-deployment check, then nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator; `./setup.sh check` alone is the pre-deployment gate and the triage loop edits nothing but .env), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate the agent CONDUCTS A LOOP and never mutates anything itself: `./setup.sh configure` (run in the operator's own terminal — it asks the questions in deploy/single/questions.tsv and is the one command that creates the ONE answer file, the repo-root .env; with no TTY it asks nothing and exits 3 listing the required keys) → `./setup.sh check` (the dry pre-deployment gate, eight sections) → triage every FAIL/WARN/USERACTION against deploy/AIRGAP.md's seam table, editing ONLY .env → check again until exit 0 (or an exit 2 the operator accepts) → `./setup.sh` (or `--accept-warnings`), which runs nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator. It reads `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDS ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -8,9 +8,12 @@ description: Install Central Command from scratch on this machine — the guided
 **The rule (2026-08-25 redesign, `docs/superpowers/specs/2026-08-25-deterministic-setup.md`):
 if you are composing a command that mutates anything, you are off the rails —
 the script does that.** On the podman substrate, `deploy/single/setup.sh` is
-the whole install. Your job is: (a) elicit answers and write them into the ONE
-answer file, the repo-root `.env`, (b) run `./setup.sh` (or have the user run
-it) and read its PASS/WARN/FAIL lines and exit code, (c) on failure, run
+the whole install. Your job is to CONDUCT THE LOOP — `configure` → `check` →
+triage → `check` → … → `all` — namely: (a) have the operator run
+`./setup.sh configure` in their terminal, and collect conversationally whatever
+it could not ask (see Phase 0), writing answers into the ONE answer file, the
+repo-root `.env`, (b) run `./setup.sh check`, then `./setup.sh`, and read the
+PASS/WARN/FAIL/USERACTION lines and exit code, (c) on failure, run
 `./setup.sh diagnose` and reason over the `setup-diagnostics.txt` it names
 (in the state dir, whose path it prints first), then name the fix — never
 freehand a replacement command, (d) hand off to the cockpit (Phase 2),
@@ -120,19 +123,37 @@ and `deploy/discovery.conf` are retired; on an existing install `setup.sh`
 migrates them into the root file itself and prints a `PASS env-migrate` line
 naming what moved. **It is the only file you ever write.**
 
-```bash
-cp .env.example .env && chmod 600 .env   # AT THE REPO ROOT; skip the copy if .env exists, still chmod
-```
+**`./setup.sh configure` asks most of this for you (v2.45.0, design record
+D6) — let it.** It reads `deploy/single/questions.tsv`, the one question schema,
+asks every row `.env` does not answer yet, prints the diff it will write, writes
+only `.env`, and then generates the credentials. It is also the ONE command that
+creates `.env` from `.env.example` — never `cp` it yourself.
 
-Elicit each of these and write it into that one `.env` — its deployment
-section, at the bottom, is the map of what this profile reads (never run the
-install steps yourself: `./setup.sh` owns everything mechanical, including
-generating the credentials):
+**You cannot answer its prompts, so route it:**
 
-- **The LLM provider: ELICIT IT into `.env`, or let the `llm` phase pause for
-  the LiteLLM UI** (v2.44.0, design record D3 — before that the UI pause was
-  the only path). Preferred, because `./setup.sh check` can then prove the
-  endpoint from the host BEFORE anything is deployed:
+* **The operator has a terminal** — the normal case. Tell them to run
+  `./deploy/single/setup.sh configure` (add `--all` if they want the ports too),
+  and what it will ask about. They answer; you read the result.
+* **This session has no TTY** (the usual case for an agent) — collect the
+  answers conversationally, one question at a time, using the schema's prompt
+  text; write each into `.env` as `KEY=value` (quote any value containing a
+  space — the file is SOURCED, and `CC_OPERATOR_NAME=Jane Doe` unquoted runs
+  `Doe` as a command); then run `./setup.sh configure --non-interactive` to
+  CONFIRM. It prompts for nothing, exits 0 when every required key is answered,
+  and exits 3 listing exactly what is still missing. Never pass
+  `--non-interactive` hoping it will fill something in: it is the check, not the
+  filling.
+
+Everything `configure` asks is a row in the schema; the list below is the
+ELICITATION that needs judgement — what it means, what is permanent, and the
+integration choices the schema does not cover (never run the install steps
+yourself: `./setup.sh` owns everything mechanical, including generating the
+credentials):
+
+- **The LLM provider — the ONLY required answers, and `configure` asks for all
+  of them** (v2.44.0, design record D3; before that the LiteLLM-UI pause was the
+  only path). Declaring it is preferred, because `./setup.sh check` can then
+  prove the endpoint from the host BEFORE anything is deployed:
   `CC_LLM_UPSTREAM_BASE_URL` (the `/v1` base THIS HOST reaches — a
   `127.0.0.1` value is rewritten to `host.containers.internal` for the
   container's row, with a WARN), `CC_LLM_UPSTREAM_API_KEY` (`none` if the
@@ -223,25 +244,43 @@ generating the credentials):
     `central_command/runtime/packs.py` actually defines rather than promising
     from memory.
 
-Gate: every ELICITED variable above is in the repo-root `.env` (or explicitly
-declined and recorded), and the integration choices are noted for the `app`
-phase. Nothing else in the tree was touched — `git status` should be clean.
+Gate: `./setup.sh configure --non-interactive` exits 0 (every required answer
+is in the repo-root `.env`), every other elicited variable above is in that file
+or explicitly declined and recorded, and the integration choices are noted for
+the `app` phase. Nothing else in the tree was touched — `git status` should be
+clean.
 
-### Phase 1 — run `./setup.sh`
+### Phase 1 — conduct the loop, then run `./setup.sh`
 
 ```bash
-./setup.sh
+./setup.sh configure   # in the OPERATOR's terminal (see Phase 0)
+./setup.sh check       # the dry gate — read every line
+#   triage: edit ONLY .env, per deploy/AIRGAP.md's seam table
+./setup.sh check       # ...until exit 0, or an exit 2 the operator accepts
+./setup.sh             # add --accept-warnings only if they accepted those WARNs
 ```
 
-This runs the dry `check` and then the nine mutating phases — `check → machine
-→ fetch → llm → stack → app → verify → test → boot → demo` — in order, stopping
-at the first hard failure. (`check` is new in v2.44.0 and it is a GATE: the run
-refuses to continue past a FAIL or a USERACTION, and a WARN-only check needs
-`--accept-warnings` or an interactive `y`. Run `./setup.sh check` on its own
-first — the loop is *edit `.env` → check → triage → check → … → `./setup.sh`* —
-and never triage by editing anything but `.env`. `./setup.sh check --list` names
-its eight sections. P4 of the design record will add a `configure` command that
-ASKS for the missing answers before check runs; it does not exist yet.) (`machine` is new in v2.43.0: it tells the podman MACHINE what
+**The triage rules, which are the whole reason the loop exists:**
+
+* Every FAIL/WARN/USERACTION line names its own seam. Match it to
+  `deploy/AIRGAP.md`'s seam table and change the `.env` key that governs it —
+  never a script, a Dockerfile, `images.txt`, or a file inside the podman
+  machine. If you cannot name the key, you do not yet understand the finding;
+  read the section it came from before proposing anything.
+* An `answers-<KEY>` USERACTION is `configure`'s question, not a mirror problem:
+  go back to eliciting that one answer.
+* Re-run `check` after every change. It is idempotent and it writes nothing but
+  `CC_STATE_DIR`/`CC_EMBED_DIM`, so the loop costs nothing but seconds.
+* Exit 2 (WARN only) is a **stop-and-discuss point**: surface the WARNs, let the
+  operator accept them explicitly, and only then run `./setup.sh
+  --accept-warnings`. Never pass that flag to get past a WARN they have not read.
+
+`./setup.sh` then runs the dry `check` and the nine mutating phases — `check →
+machine → fetch → llm → stack → app → verify → test → boot → demo` — in order,
+stopping at the first hard failure. (`check` is a GATE: the run refuses to
+continue past a FAIL or a USERACTION, and a WARN-only check needs
+`--accept-warnings` or an interactive `y`. `./setup.sh check --list` names its
+eight sections.) (`machine` is new in v2.43.0: it tells the podman MACHINE what
 `.env` says — the CA into its trust store, the registries mirror/insecure
 drop-in, the proxy drop-in — and is a no-op on bare Linux. It prints the diff
 before each write, and `./setup.sh machine --dry-run` reports without writing,
@@ -313,9 +352,11 @@ accepted — a WARN is a stop-and-discuss point, not a drive-past).
 Onboarding is the product's job now (2026-09-18). Nothing here is an
 interview:
 
-- **The name.** The podman `boot` phase already asked for it on the terminal
-  (`CC_OPERATOR_NAME` in the root `.env`, the env fallback). If it was not
-  asked — a headless run, the k3s substrate — the cockpit asks on first run
+- **The name.** `./setup.sh configure` asks it first (it is the `identity`
+  group's one question, and NOT required — blank is fine), and the podman `boot`
+  phase asks it on the terminal if `.env` still has none
+  (`CC_OPERATOR_NAME`, the env fallback). If neither asked — a headless run, the
+  k3s substrate — the cockpit asks on first run
   with a non-dismissible prompt bar, and the answer is stored as the
   `operator_name` app setting and applied immediately. Until then the agents
   say "the operator". Say this out loud, because it is the one thing the

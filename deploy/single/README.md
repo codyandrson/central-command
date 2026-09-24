@@ -87,9 +87,13 @@ permanent.
   optional — a GUI over the same machine) plus **Git Bash** for the `.sh`
   scripts (ships `openssl`, `curl`). Windows has no real
   `python3`; the scripts fall back to uv's (already required).
-- An OpenAI-compatible endpoint: base URL, API key, a chat model id, an
-  embedding model id, and the embedding model's **dimension**.
+- An OpenAI-compatible endpoint: base URL, API key, and a model id per alias
+  (chat, graph extraction, embedding, reranker, and the speech pair if you keep
+  the bundled engine). `./setup.sh configure` asks for exactly these, and they
+  are the ONLY answers it treats as required.
 - ~3 GB RAM for the stack, plus image pulls.
+- **A terminal, for `configure`.** It is the one interactive step; with no TTY it
+  refuses to guess and tells you which keys to fill in instead (see the loop).
 
 ## Install
 
@@ -108,30 +112,56 @@ with `--env-file <repo>/.env`: there is no `.env` beside `compose.yaml` for it
 to find, so a hand-run `podman compose` needs that flag too.
 
 ```bash
-cp .env.example .env   # AT THE REPO ROOT — then fill it in, see below
-chmod 600 .env
 cd deploy/single
+./setup.sh configure   # asks what .env does not answer yet; creates it if absent
 ./setup.sh check       # everything dry, one table — the loop below
 ./setup.sh             # check -> machine -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
 ```
 
-### The loop: edit `.env` → `check` → triage → `check` → `./setup.sh`
+You do not copy `.env.example` by hand any more: `configure` is the ONE command
+that creates the answer file, and `chmod 600` is its job too.
 
-`./setup.sh check` (v2.44.0, design record D5) runs every check that can be made
+### The loop: `configure` → `check` → triage (edit `.env`) → `check` → `./setup.sh`
+
+**`./setup.sh configure`** (v2.45.0, design record D6) asks every question in
+`deploy/single/questions.tsv` that `.env` does not answer yet — plain prompts,
+no TUI, grouped as `identity`, `features`, `network`, `mirrors`, `llm`, `paths`
+(`--all` adds the ports and re-asks everything with the current value as the
+default). One schema, read twice: `configure` ASKS from it and `check`
+VALIDATES from it, so a new seam is a new row rather than a new prompt in one
+place and a new check in another.
+
+It prints the diff before it writes (`set    KEY=<value>`, `keep   KEY`, and
+secrets as `(secret, not printed)`), writes **only** `.env`, then runs
+`make-secrets.sh` so the generated credentials exist before `check` runs, and
+ends by pointing at `check`. Blank is a valid answer wherever a key is optional
+— for a mirror it means "the public source".
+
+**It fails closed.** With no terminal, or with `--non-interactive`, it prompts
+for nothing: it lists every unanswered REQUIRED key as a `USERACTION` and exits
+3. An installer that cannot ask does not guess (rustup's rule). That is also
+what makes `.env` a preseed file — fill it in on a connected machine, carry it
+across with the zip, and `configure` reports `keep` for every row and asks
+nothing. Only the upstream LLM keys are required; `CC_OPERATOR_NAME` is not (the
+cockpit asks on first run).
+
+**`./setup.sh check`** (v2.44.0, design record D5) runs every check that can be made
 **without changing anything** and prints one table. It is the gate: the full run
 starts with it and refuses to go past a `FAIL` or a `USERACTION`; a WARN-only
 check continues with `--accept-warnings` or an interactive `y` (no terminal and
 no flag → it stops and names the flag, rather than deciding for you). So the
-install is: fill in `.env`, run `check`, triage what it names (with Claude, if
-you like — it reads the same lines), run `check` again, and only then
-`./setup.sh`. Nothing but `.env` changes in that loop, and `check` itself writes
-only two keys there: `CC_STATE_DIR` and `CC_EMBED_DIM` (measured, see below).
+install is: `configure`, run `check`, triage what it names (with Claude, if you
+like — it reads the same lines), run `check` again, and only then `./setup.sh`.
+Nothing but `.env` changes in that loop, and `check` itself writes only two keys
+there: `CC_STATE_DIR` and `CC_EMBED_DIM` (measured, see below). An
+`answers-<KEY>` USERACTION means a key nobody has answered — that is
+`configure`'s question, and the line names it.
 
 Eight sections, in order — `./setup.sh check --list` prints this table:
 
 | section | what it checks |
 |---|---|
-| `answers` | .env present and sourceable; every required key set; ports valid, unique and free |
+| `answers` | .env present and sourceable; every questions.tsv key required by these flags set, and every set key valid; ports valid, unique and free |
 | `host` | podman, the compose provider, the host tools, RAM/disk, the Windows CA store |
 | `machine` | the podman machine's CA, registries and proxy — current state and the diff the machine phase would apply |
 | `images` | every images.txt row resolves against its registry, including the three build bases and operator pins |
@@ -147,10 +177,12 @@ the LiteLLM *alias* probes belong to the `llm` phase — what check proves is th
 every input those steps need is real. `validate` and `preflight` remain
 callable on their own; check composes them rather than copying their probes.
 
-On a brand-new `.env` two things are WARNs by design: the credentials
-`make-secrets.sh` generates are still blank (check never generates a secret —
-the `llm` phase does), and compose therefore reports them unset.
-`--accept-warnings` is how you say "yes, generate them".
+Run `configure` first and there is nothing to accept: it generates the
+credentials itself. Skip it and two things are WARNs by design on a brand-new
+`.env` — the credentials `make-secrets.sh` owns are still blank (check never
+generates a secret; `configure` and the `llm` phase do), and compose therefore
+reports them unset. `--accept-warnings` is then how you say "yes, generate
+them".
 
 Everything this install GENERATES — `setup-log.txt`, `setup-diagnostics.txt`,
 `installed.manifest`, the API and cockpit logs and pid files, the updater's
@@ -161,11 +193,11 @@ written back into `.env` on the first run). `./setup.sh diagnose` prints the
 path first and `./setup.sh status` shows it. `git status` is clean after every
 command.
 
-What you must supply in `.env` for the deployment: the `CC_ENABLE_*` /
-`CC_AIRGAP` flags, the upstream LLM (below),
-and, behind a mirror or with no network, the seams under "Where every
-dependency comes from" (see below).
-Everything else is generated or measured.
+What you must supply for the deployment — all of it asked by `configure`, all
+of it a row in `questions.tsv`: the `CC_ENABLE_*` / `CC_AIRGAP` flags, the
+upstream LLM (below), and, behind a mirror or with no network, the seams under
+"Where every dependency comes from" (see below). Everything else is generated or
+measured.
 
 **The LLM provider: declare it in `.env`, or fill it in the LiteLLM UI**
 (v2.44.0, design record D3). Set `CC_LLM_UPSTREAM_BASE_URL`,
@@ -276,6 +308,8 @@ Each phase is a subcommand of the same code path as the full run, and every
 step inside it is idempotent, so **resume is just re-run**:
 
 ```bash
+./setup.sh configure   # ASK what .env does not answer yet (the one command that creates it);
+                       #   --all also asks the ports, --non-interactive never prompts
 ./setup.sh check       # ALL of the below that changes nothing, in one table (--list names the sections)
 ./setup.sh validate    # offline check of .env; no side effects
 ./setup.sh preflight   # podman/tooling/RAM/disk/linger checks; no side effects

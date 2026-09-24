@@ -104,13 +104,16 @@ the entry format and how to add one.
 
 - **Status:** active
 - **Date:** 2026-09-23
-- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`setup.sh` is a deterministic driver (check / machine / fetch / llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION, exit 0/1/2/3, `diagnose` support bundle — `validate` and `preflight` stay callable on their own and `check` composes them)"
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`setup.sh` is a deterministic driver (configure, then check / machine / fetch / llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION, exit 0/1/2/3, `diagnose` support bundle — `validate` and `preflight` stay callable on their own and `check` composes them)"
 - **Why:** Not recorded beyond the stated mechanism: a deterministic,
   resumable driver protocol lets the /setup skill's job stay elicitation and
   diagnosis only, never freehand fixes. v2.44.0 put the dry `check` in front of
   it as a hard gate (design record 2026-09-23, D5): the phases that CHANGE
   something never start until every input has been proven, and `validate` /
   `preflight` became sections of it rather than separate steps of the full run.
+  v2.45.0 put `configure` in front of THAT (D6), so the driver now covers the
+  whole loop — ask, prove, triage, prove, install — and the operator never has to
+  know that `cp .env.example .env` was ever a step.
 - **Enforced:** script: `deploy/single/setup.sh` (`phase_check...phase_demo`, `run_phase()` returns 0-3)
 - **Source:** .claude/rules/deploy-single.md
 

@@ -15,11 +15,11 @@ when a matching file is read.
 
 - **`deploy/single/`** — the single-node **Compose** profile (`compose.yaml`,
   run under `podman compose`).
-  `setup.sh` is a deterministic driver (check / machine / fetch /
+  `setup.sh` is a deterministic driver (configure, then check / machine / fetch /
   llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
   exit 0/1/2/3, `diagnose` support bundle — `validate` and `preflight` stay
   callable on their own and `check` composes them); the
-  /setup skill's job is elicitation and diagnosis only. `compose.yaml` is the
+  /setup skill's job is conducting the loop, elicitation and diagnosis only. `compose.yaml` is the
   whole deployment (readiness is healthchecks + depends_on, optionals are
   profiles); `images.txt` holds a constraint, a locked tag and a locked digest
   per image, which `resolve-images.sh` turns into the refs this registry can
@@ -92,6 +92,34 @@ when a matching file is read.
   fails the suite on a `podman pull|build|run`, a `compose … up`, an install
   or a `make-secrets` call. Its ceiling is PRINTED, not implied: check proves
   inputs, not builds.
+- **A new seam is a ROW, and the schema is the one list** (v2.45.0, design
+  record D6). `deploy/single/questions.tsv` declares every question once — key,
+  group, prompt, default, required, validator, `when` guard, secret — and TWO
+  commands read it: `configure` ASKS from it and `check`'s answers section
+  VALIDATES from it. So adding a dependency is **a row in `questions.tsv` + a
+  line in `.env.example` + its consumer**, and
+  `tests/test_single_questions_schema.py` fails the suite otherwise (an
+  undeclared key, a validator that does not exist, a `when` the expression
+  language cannot parse, a `CC_LLM_UPSTREAM_MODEL_*` row that does not match
+  `models.json`'s aliases). The validators live in
+  `deploy/single/questions-lib.sh`, print ONE line of reason, and may never
+  write — `check` reaches them. `when` is `KEY=value` / `KEY!=value`,
+  comma-separated ANDs, evaluated against the answers so far: a tiny expression
+  language and NOT bash, because `eval`ing a data file makes every row a code
+  path. Empty fields are written `-`: a genuinely empty TSV field COLLAPSES
+  under IFS-splitting. **An answer containing a space is written QUOTED**
+  (`q_quote`) — the answer file is SOURCED, so `CC_OPERATOR_NAME=Jane Doe`
+  unquoted runs `Doe` as a command (it did, once).
+- **`configure` FAILS CLOSED, and it is the only command that creates `.env`**
+  (v2.45.0, rustup's rule). With no TTY, or with `--non-interactive`, it prompts
+  for nothing: it lists every unanswered REQUIRED key as a USERACTION and exits
+  3. It never defaults its way past a required answer, and it never writes a key
+  it did not ask about — which is what keeps `.env` a PRESEED file (carried in
+  from a connected machine, it asks nothing and stays byte-identical:
+  `tests/test_single_configure_preseed.py`). REQUIRED means "setup cannot run
+  without it", so it is the upstream LLM keys and nothing else —
+  `CC_OPERATOR_NAME` is not required, because the cockpit asks it on first run.
+  `check` and the full run never create `.env`; they say "run configure".
 - **The LLM catalog may be DECLARED in `.env`, and the UI is the fallback**
   (v2.44.0, design record D3). `CC_LLM_UPSTREAM_BASE_URL`,
   `CC_LLM_UPSTREAM_API_KEY` and one `CC_LLM_UPSTREAM_MODEL_<ALIAS>` per alias

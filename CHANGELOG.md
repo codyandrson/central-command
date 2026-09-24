@@ -4,6 +4,78 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-23 — v2.45.0: the install asks its own questions, and refuses to guess
+
+`check` could prove every input, but nothing ASKED for one. The answers still
+arrived by reading `.env.example` and editing a file by hand — which is how a
+required key ends up blank, a mirror ends up spelled as a URL, and an install
+gets to `fetch` before anyone notices. So the questions are now DATA in the tree,
+one command asks them, the same data is what `check` validates, and an installer
+that cannot ask does not guess. P4 and P5 of
+`docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md` —
+D6, plus the documentation and the skill.
+
+- **One question schema: `deploy/single/questions.tsv`.** Key, group, prompt,
+  default, required, validator, a `when` guard and a secret flag — one row per
+  question, in ask order. TWO commands read it, which is the whole point:
+  `./setup.sh configure` ASKS from it and `./setup.sh check` VALIDATES from it,
+  so a new dependency is a new ROW rather than a new prompt in one place and a
+  new check in another (debconf-preseed and Zarf's InteractiveVariable, the two
+  patterns the research pass said to copy). The validators live in
+  `deploy/single/questions-lib.sh`, print one line of reason, and may never
+  write — `check` reaches them. `when` is `KEY=value` / `KEY!=value`,
+  comma-separated ANDs, evaluated against the answers so far: a tiny expression
+  language and not bash, because `eval`ing a data file makes every row a code
+  path.
+- **`./setup.sh configure [--all] [--non-interactive]`.** Plain `read -rp`
+  prompts grouped as `identity`, `features`, `network`, `mirrors`, `llm`,
+  `paths` (`--all` adds the ports and re-asks everything with the current value
+  as the default); no TUI, because gum and whiptail both break under Git Bash's
+  mintty and there is no venv yet to run anything else. It prints the diff before
+  it writes — `set KEY=<value>`, `keep KEY`, and a secret as
+  `(secret, not printed)` — writes nothing but `.env`, then runs
+  `make-secrets.sh` so the generated credentials exist before `check` runs, and
+  ends by naming the next command. A blank answer is a real answer wherever a key
+  is optional: for a mirror it means the public source.
+- **It fails closed (rustup's rule).** With no terminal, or with
+  `--non-interactive`, it prompts for nothing: it lists every unanswered
+  REQUIRED key as a `USERACTION` and exits 3. REQUIRED means "setup cannot run
+  without it", which is the upstream LLM keys and nothing else —
+  `CC_OPERATOR_NAME` is not required, because the cockpit asks it on first run.
+  Under Git Bash a non-TTY stdin is usually the missing `winpty`, and the summary
+  line says so.
+- **`.env` is a preseed file, and now provably so.** Filled in on a connected
+  machine and carried across with the release zip, it makes `configure` report
+  `keep` for every row, ask nothing, and leave the file byte-identical — a test
+  runs exactly that, plus the empty-file and absent-file cases.
+- **`configure` is the ONE command that creates `.env`.** `check` and the full
+  run no longer offer `cp .env.example .env`; they say "run configure". A command
+  that silently invents an answer file is a command that can report PASS on a
+  file nobody filled in.
+- **`check`'s answers section is the schema now.** Its hand-written required-key
+  list is gone: it walks `questions.tsv`, reports a blank required key as a
+  `USERACTION` naming the key and the command that asks it, and a key that IS set
+  but fails its own validator as a `FAIL` carrying the validator's reason. The
+  sourceability, loopback and ports checks are unchanged. A guard test pins the
+  schema to `.env.example`, to the validators that exist, to a `when` the parser
+  accepts, and to `models.json`'s alias list.
+- **An answer containing a space is written QUOTED.** The answer file is SOURCED,
+  so `CC_OPERATOR_NAME=Jane Doe` written bare runs `Doe` as a command and leaves
+  the variable unset. Found while building this; the `boot` phase's fallback name
+  prompt had the same hazard and is fixed with it.
+- **The documentation is the loop.** `deploy/AIRGAP.md` is restructured around
+  it — why, the two knobs, the seam table (including the `CC_IMG_<NAME>` pin as
+  the seam for a renamed path), the loop, what `check` cannot prove, the
+  podman-machine notes and what still needs a machine restart, and the design
+  record's open items — with no step left that asks the operator to edit anything
+  but `.env`. `deploy/single/README.md` and the root README follow.
+  `.claude/skills/setup/SKILL.md` now CONDUCTS the loop: it has the operator run
+  `configure` in their own terminal (an agent cannot answer prompts), or collects
+  the answers conversationally and confirms with `configure --non-interactive`,
+  then triages `check`'s lines against the seam table editing only `.env`, and
+  re-runs until green. `.claude/skills/discover/SKILL.md` says where discovery
+  sits in that loop.
+
 ## 2026-09-23 — v2.44.0: prove every input before anything is installed
 
 An air-gapped install did not fail on reachability — it failed halfway through,

@@ -1,6 +1,6 @@
 # Air-gapped install: one answer file, a check that executes nothing, a setup that cannot surprise
 
-> **Status:** partial — P1–P3 shipped (v2.44.0); P4–P5 not built
+> **Status:** implemented — every phase shipped (v2.42.0–v2.45.0)
 > **As-built:** P1 — `deploy/env-lib.sh`, `.env.example`, `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/single/resolve-images.sh`, `deploy/single/make-secrets.sh`, `deploy/discover.sh`, `central_command/config.py`, `central_command/api/update.py`, `tests/test_single_no_tree_writes.py`. P2 (v2.43.0, D2 + D4) — the same five scripts plus `deploy/single/machine-lib.sh` (new), `deploy/single/build-graphiti-image.sh`, `deploy/single/build-sandbox-image.sh`, `deploy/single/build-crawler-image.sh`, `deploy/single/verify.sh`, `deploy/single/discover-llm.sh`, `deploy/single/compose.yaml`, `deploy/single/images.txt`, `deploy/pi/graphiti/Dockerfile`, `deploy/k3s/sandbox.Dockerfile`, `central_command/crawler/Dockerfile`, `central_command/sandbox/runner.py`, `deploy/AIRGAP.md`, `deploy/single/README.md`, `.claude/rules/deploy-single.md`, `.claude/skills/setup/SKILL.md`, `tests/test_single_airgap_seams.py`, `tests/test_single_machine_lib.py` (new).
 > P3 (v2.44.0, D5 + D3) — `deploy/single/setup.sh` (the `check` command, the
 > phase split it composes, the gate in the `all` driver),
@@ -12,6 +12,16 @@
 > `tests/test_single_check_is_dry.py` (new),
 > `tests/test_register_models_upstream.py` (new),
 > `tests/test_single_airgap_seams.py`, `tests/test_setup_phase_docs.py`.
+> P4+P5 (v2.45.0, D6 + the docs and the skill) — `deploy/single/questions.tsv`
+> (new), `deploy/single/questions-lib.sh` (new), `deploy/single/setup.sh`
+> (`configure`, the schema reader, check's answers section, the usage/driver
+> text), `deploy/single/make-secrets.sh`, `deploy/single/resolve-images.sh`,
+> `deploy/AIRGAP.md`, `deploy/single/README.md`, `README.md`,
+> `.claude/rules/deploy-single.md`, `.claude/skills/setup/SKILL.md`,
+> `.claude/skills/discover/SKILL.md`, `docs/decisions/deploy.md`,
+> `tests/test_single_questions_schema.py` (new),
+> `tests/test_single_configure_preseed.py` (new),
+> `tests/test_single_airgap_seams.py`.
 >
 > **P3 deltas from the plan, decided while building.** The section order is the
 > record's, but three verdicts were softened because a pre-deployment gate that
@@ -63,6 +73,26 @@
 > exported fan-out (it probes AS the tools would, so flags are the point) and
 > only adopts the shared WARN wording.
 
+> **P4/P5 deltas from the plan, decided while building.** The schema's empty
+> fields are written `-`, not left empty: tab is an IFS *whitespace* character,
+> so bash's `read` collapses consecutive tabs and an empty column would shift
+> every field after it. `CC_ENABLE_SANDBOX` joined the `features` group — the
+> plan listed three flags, and the fourth is an install choice with the same
+> shape (it is also the one whose containment trade the operator should be told
+> about out loud). The port rows carry group `advanced`, which is the group
+> `--all` unlocks, so "asked only with --all" is a property of the DATA rather
+> than a special case in the code. One real defect surfaced and is fixed here:
+> an answer containing a space must be written QUOTED, because the answer file is
+> SOURCED — `CC_OPERATOR_NAME=Jane Doe` bare runs `Doe` as a command and leaves
+> the variable unset (`cc_env_unquoted_keys` would then refuse the next run).
+> `q_quote`/`q_unquote` own that, and `phase_boot`'s fallback name prompt — which
+> had the same hazard since it was written — uses them too. The schema is read on
+> fd 3 rather than stdin, because a `while read < <(…)` loop feeds `read -rp` the
+> next SCHEMA ROW as the operator's answer (observed, once). `configure` skips
+> `make-secrets.sh` on the fail-closed path: with nothing answered there is
+> nothing to complete, and a run that reported "stopped for you" should not have
+> generated six credentials on the way out.
+>
 **Date:** 2026-09-23 · **Research:** three-agent pass the same day — a repo
 audit of every pinned artifact, a doc-verified pass over podman machine /
 Registry v2 / per-tool TLS variables / LiteLLM / compose interpolation, and a
@@ -318,28 +348,34 @@ setup", not "no failure of any kind".
 
 ## Phasing (each a release; each verified on a Windows Podman Desktop testbed)
 
-1. **P1 — One file.** D1 + D7. Pure plumbing; the suite's env guard tests
+1. **P1 — One file (DONE, v2.42.0).** D1 + D7. Pure plumbing; the suite's env guard tests
    and `verify.sh` change with it. Acceptance: a fresh clone + one `.env`
    installs on Linux; `git status` clean after every command.
-2. **P2 — Seams reach everything.** D2 + D4 (fan-out and the machine
+2. **P2 — Seams reach everything (DONE, v2.43.0).** D2 + D4 (fan-out and the machine
    writer). Acceptance on the laptop with a local registry standing in for
    the mirror: a base-tag substitution and a path-renamed image install
    with no edit outside `.env`; `CC_TLS_INSECURE=1` completes against a
    self-signed mirror with one WARN per run.
-3. **P3 — `check`.** D5, with D3's upstream probe. Acceptance: with the
+3. **P3 — `check` (DONE, v2.44.0).** D5, with D3's upstream probe. Acceptance: with the
    network cut and the mirror missing one tag, `check` exits 3 naming the
    tag and the pin key; after the pin, exits 0; `setup` then completes with
    no FAIL.
-4. **P4 — `configure`.** D6. Acceptance: an empty `.env.example` copy
-   becomes a green `check` through prompts alone; the same run from a
-   prefilled `.env` asks nothing.
-5. **P5 — Docs and skill.** `AIRGAP.md` rewritten around the two knobs and
-   the loop; the `/setup` skill conducts `configure → check → (triage) →
-   check → setup` and never edits anything but `.env`.
+4. **P4 — `configure` (DONE, v2.45.0).** D6. Acceptance: an empty `.env.example`
+   copy becomes a green `check` through prompts alone; the same run from a
+   prefilled `.env` asks nothing. The second half is a test
+   (`tests/test_single_configure_preseed.py`: empty, absent and prefilled `.env`,
+   the last byte-identical); the first half is the Windows testbed's, because the
+   prompts need a real TTY and the green `check` needs the mirror.
+5. **P5 — Docs and skill (DONE, v2.45.0).** `AIRGAP.md` rewritten around the two
+   knobs and the loop; the `/setup` skill conducts `configure → check → (triage)
+   → check → setup` and never edits anything but `.env`.
 
 P2–P4 need a Windows Podman Desktop testbed with a local registry that can
 be made to lack a tag and to present a private CA; it is the acceptance
-environment, not the developer's Linux box.
+environment, not the developer's Linux box. What ONLY that testbed can settle
+for P4: whether `read -rp` under mintty behaves (a non-TTY stdin there is the
+`winpty` symptom `configure`'s summary line names, and it is the one branch a
+Linux box cannot exercise), and whether `read -rsp` echoes nothing for the key.
 
 ## Open items (do not block P1)
 
@@ -364,8 +400,9 @@ environment, not the developer's Linux box.
   recorded value rather than overwriting it. Nothing is ever declared: both
   numbers come from an endpoint returning a real vector.
 
-- **A WARN-only `check` stops a non-interactive `all` run** (`--accept-warnings`
-  is the answer, by design). On a fresh `.env` that means two WARNs nobody can
-  act on — the credentials `make-secrets.sh` has not generated yet. P4's
-  `configure` generates them before `check` runs, which closes it; until then
-  the first install on a CI-shaped runner needs the flag.
+- ~~**A WARN-only `check` stops a non-interactive `all` run** on a fresh `.env`,
+  over two WARNs nobody can act on — the credentials `make-secrets.sh` has not
+  generated yet~~ **CLOSED in P4 (v2.45.0):** `configure` runs `make-secrets.sh`
+  itself, so the credentials exist before `check` ever runs. A run that SKIPPED
+  `configure` still sees those two WARNs, which is now the correct reading of
+  them — it is what an install that did not answer its questions looks like.

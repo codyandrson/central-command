@@ -57,6 +57,7 @@ SCRIPTS = [
     SINGLE / "discover-llm.sh",
     SINGLE / "update-run.sh",
     SINGLE / "machine-lib.sh",
+    SINGLE / "questions-lib.sh",
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
 COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base", "speech"}
@@ -268,6 +269,7 @@ RUNTIME_ONLY = {
     "CC_UPDATE_DRIVEN", "CC_UPDATE_FORCE",     # set by update-run.sh / by hand
     "CC_UPDATE_DIR",                           # api/update.py hands it to the runner
     "CC_ENV_LIB_LOADED",                       # env-lib.sh's own source guard
+    "CC_QUESTIONS_LIB_LOADED",                 # questions-lib.sh's own source guard
     # setup.sh's own LISTS, not answers: which keys are ports and which
     # credentials make-secrets.sh owns (v2.44.0's `check` reads both).
     "CC_PORT_KEYS", "CC_GENERATED_KEYS",

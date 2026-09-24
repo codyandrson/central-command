@@ -41,9 +41,11 @@ mirror/no-egress installs read [`deploy/AIRGAP.md`](deploy/AIRGAP.md) first.
 claude        # from the repo root, then type:  /setup
 ```
 
-`/setup` elicits your answers into the repo-root `.env` — one answer file for
-the app and the deployment (v2.42.0) — and runs the
-deterministic driver `./setup.sh` — a dry pre-deployment CHECK and nine
+`/setup` conducts the loop *configure → check → triage (edit `.env`) → check →
+… → all*: `./setup.sh configure` ASKS for every answer the repo-root `.env`
+does not carry yet — one answer file for the app and the deployment (v2.42.0),
+one question schema (v2.45.0) — and then the
+deterministic driver `./setup.sh` runs a dry pre-deployment CHECK and nine
 idempotent phases
 (`check → machine → fetch → llm → stack → app → verify → test
 → boot → demo`), each re-runnable on its own, every check one
