@@ -41,7 +41,7 @@
 # configuration, so every external source this build touches is a build-arg:
 # the registry the base comes from, the Debian mirror apt-get uses, the PyPI
 # index uv uses. Blank = public. Passed by deploy/single/build-graphiti-image.sh
-# from deploy/single/.env; the k3s build script passes nothing and gets the
+# from the repo-root .env; the k3s build script passes nothing and gets the
 # defaults. Digest pinning of the base is done by the caller (setup.sh fetch
 # pulls images.txt's digest and tags it, so this FROM resolves locally).
 ARG CC_REGISTRY_DOCKERIO=docker.io

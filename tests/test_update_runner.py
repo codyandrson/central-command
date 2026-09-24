@@ -6,6 +6,11 @@ health-check, rolling back on failure, writing the status.json the dialog
 polls. Here it runs against a stub deploy/single (setup.sh / update.sh that
 record their calls) and a stub `curl` whose /health verdict is a flag file —
 no real API, podman or network anywhere.
+
+The working directory is the STATE dir's `update/` since v2.42.0 (design
+record 2026-09-23, D7 — nothing is written inside the checkout). CC_UPDATE_DIR
+is how api/update.py hands the spawned runner the directory it is polling, and
+it is how this rig pins it too.
 """
 
 from __future__ import annotations
@@ -44,8 +49,10 @@ def rig(tmp_path):
     single.mkdir(parents=True)
     (repo / "VERSION").write_text("version=2.21.1\n")
     (repo / ".env").write_text("CC_API_PORT=59321\n")
-    upd = single / ".update"
-    upd.mkdir()
+    # Where the runner writes status.json / apply.log — outside the (fake)
+    # checkout, exactly as the API's _update_dir() resolves it.
+    upd = tmp_path / "state" / "update"
+    upd.mkdir(parents=True)
     calls = tmp_path / "calls.log"
     calls.touch()
     health_flag = tmp_path / "health-ok"
@@ -79,7 +86,8 @@ exit 0
         # first `bash` is WSL's launcher), and a PATH joined the way this OS
         # joins one — the stubs must shadow the real curl/podman for bash.
         from central_command.api.update import _bash
-        env = {"PATH": os.pathsep.join([str(stub_bin), "/usr/bin", "/bin"]), "HOME": str(tmp_path)}
+        env = {"PATH": os.pathsep.join([str(stub_bin), "/usr/bin", "/bin"]),
+               "HOME": str(tmp_path), "CC_UPDATE_DIR": str(upd)}
         proc = subprocess.run(
             [_bash() or "bash", str(runner), target, str(single)],
             capture_output=True, text=True, timeout=120, env=env,
@@ -87,7 +95,7 @@ exit 0
         status = json.loads((upd / "status.json").read_text())
         return proc, status
 
-    return single, run, calls, health_flag, script
+    return single, run, calls, health_flag, script, upd
 
 
 def _lines(calls: Path) -> list[str]:
@@ -95,7 +103,7 @@ def _lines(calls: Path) -> list[str]:
 
 
 def test_success_path_stops_applies_restarts(rig):
-    single, run, calls, health_flag, _ = rig
+    single, run, calls, health_flag, _, upd = rig
     health_flag.touch()  # the API is up when the runner starts
     proc, status = run()
     assert proc.returncode == 0, proc.stderr
@@ -103,12 +111,12 @@ def test_success_path_stops_applies_restarts(rig):
     assert status["state"] == "success"
     assert status["target"] == "2.22.0"
     # CC_UPDATE_DRIVEN must reach update.sh or a clean apply exits 3.
-    log = (single / ".update" / "apply.log").read_text()
+    log = (upd / "apply.log").read_text()
     assert "target v2.22.0" in log
 
 
 def test_apply_failure_rolls_back(rig):
-    single, run, calls, health_flag, script = rig
+    single, run, calls, health_flag, script, _upd = rig
     script("update.sh", '[[ "$1" == apply ]] && { echo "FAIL merge: conflicts" ; exit 1; }\nexit 0')
     proc, status = run()
     assert proc.returncode == 1
@@ -118,7 +126,7 @@ def test_apply_failure_rolls_back(rig):
 
 
 def test_operator_pause_restarts_and_reports(rig):
-    single, run, calls, _flag, script = rig
+    single, run, calls, _flag, script, _upd = rig
     script("update.sh", 'echo "USERACTION llm: the model catalog needs your attention"\nexit 3')
     proc, status = run()
     assert proc.returncode == 3
@@ -129,11 +137,11 @@ def test_operator_pause_restarts_and_reports(rig):
 
 
 def test_unhealthy_restart_is_a_loud_failure(rig, tmp_path):
-    single, run, calls, health_flag, script = rig
+    single, run, calls, health_flag, script, upd = rig
     # boot "succeeds" but health never comes up.
     script("setup.sh", f"[[ \"$1\" == stop ]] && rm -f '{health_flag}'\nexit 0")
     # Patch the runner's health wait down so the test doesn't sit 90s.
-    runner = single / ".update" / "run.sh"
+    runner = upd / "run.sh"
     runner.write_text(runner.read_text().replace("seq 1 90", "seq 1 2"))
     proc, status = run()
     assert proc.returncode == 1

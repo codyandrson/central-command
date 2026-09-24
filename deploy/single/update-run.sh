@@ -15,7 +15,10 @@
 #   Invoked as:  update-run.sh <target-version> <deploy/single dir>
 #   ...but never from its checked-in path: the merge rewrites this very file
 #   while a run is in flight, and bash reads scripts incrementally — the API
-#   copies it to .update/run.sh first and spawns the copy.
+#   copies it to <state>/update/run.sh first and spawns the copy, handing over
+#   CC_UPDATE_DIR so both sides poll the same directory. Since v2.42.0 that
+#   directory is in the STATE DIR, never inside the checkout (design record
+#   2026-09-23, D7).
 #
 #   Failure contract: apply exit 1 -> automatic ./update.sh rollback (state
 #   "rolled_back"), matching the k3s helper. Apply exit 3 (a fetch/llm pause
@@ -27,10 +30,20 @@ set -uo pipefail
 
 TARGET="${1:?usage: update-run.sh <target-version> <deploy-single-dir>}"
 SINGLE="${2:?usage: update-run.sh <target-version> <deploy-single-dir>}"
-UPD="$SINGLE/.update"
+REPO_ROOT="$(cd "$SINGLE/../.." && pwd)"
+# CC_UPDATE_DIR is what the API passes (api/update.py `_update_dir`); without
+# it — a run started by hand — derive the same default from the state dir.
+if [[ -n "${CC_UPDATE_DIR:-}" ]]; then
+  UPD="$CC_UPDATE_DIR"
+else
+  # shellcheck source=../env-lib.sh
+  . "$REPO_ROOT/deploy/env-lib.sh"
+  STATE_DIR="$(cc_state_dir "$REPO_ROOT/.env" "$REPO_ROOT")" \
+    || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
+  UPD="$STATE_DIR/update"
+fi
 STATUS="$UPD/status.json"
 LOG="$UPD/apply.log"
-REPO_ROOT="$(cd "$SINGLE/../.." && pwd)"
 
 mkdir -p "$UPD"
 exec >>"$LOG" 2>&1
@@ -85,9 +98,9 @@ if (( rc == 1 )); then
   apply_err="$(last_protocol_line)"
   write_status running "rollback"
   if CC_UPDATE_DRIVEN=1 "$SINGLE/update.sh" rollback && restart_api; then
-    write_status rolled_back "rollback" "apply failed and was rolled back — ${apply_err:-see deploy/single/.update/apply.log}"
+    write_status rolled_back "rollback" "apply failed and was rolled back — ${apply_err:-see $LOG}"
   else
-    write_status failed "rollback" "apply failed AND rollback did not come back healthy — read deploy/single/.update/apply.log, then: ./update.sh rollback && ./setup.sh boot"
+    write_status failed "rollback" "apply failed AND rollback did not come back healthy — read $LOG, then: ./update.sh rollback && ./setup.sh boot"
   fi
   exit 1
 fi
@@ -106,6 +119,6 @@ if restart_api; then
   write_status success "done"
   echo "== update-run finished: healthy on v$(current_version) =="
 else
-  write_status failed "restart" "the updated API never answered /health — read deploy/single/uvicorn.log; roll back with: ./update.sh rollback && ./setup.sh boot"
+  write_status failed "restart" "the updated API never answered /health — read the uvicorn.log beside $LOG's directory (./setup.sh diagnose prints the state dir); roll back with: ./update.sh rollback && ./setup.sh boot"
   exit 1
 fi

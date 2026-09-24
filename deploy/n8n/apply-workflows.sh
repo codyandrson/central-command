@@ -60,7 +60,10 @@ if [[ $RT == k3s ]]; then
   present() { "${K[@]}" get deploy cc-n8n >/dev/null 2>&1; }
   FACADE_URL="http://127.0.0.1:5678/webhook/cc-email-facade"
 else
-  ENV_FILE="$REPO/deploy/single/.env"
+  # One answer file since v2.42.0 (2026-09-23 design record, D1): the
+  # single-node profile's keys live in the repo-root .env beside the app's —
+  # which is also where CC_EMAIL_FACADE_TOKEN below always was.
+  ENV_FILE="$REPO/.env"
   DB_ENV="$ENV_FILE"
   PFX="$(get_kv "$ENV_FILE" CC_POD_PREFIX)"; PFX="${PFX:-cc-}"
   C_N8N="${PFX}n8n"; C_DB="${PFX}n8n-db"

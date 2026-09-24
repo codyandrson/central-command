@@ -23,13 +23,14 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 CTX="$REPO_ROOT/central_command/crawler"
 # Mirror seams (2026-08-30): the build container sees none of the host's
 # mirror configuration, so each seam travels as a build-arg from
-# deploy/single/.env — blank = public. The registry prefix must also be the
+# the repo-root .env — blank = public. The registry prefix must also be the
 # name setup.sh fetch tagged the base image under, so the FROM resolves from
-# local storage without a pull.
-if [[ -f "$HERE/.env" ]]; then
+# local storage without a pull. (The answer file moved to the repo root in
+# v2.42.0 — one file for the app and the deployment.)
+if [[ -f "$REPO_ROOT/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
-  . "$HERE/.env"
+  . "$REPO_ROOT/.env"
   set +a
 fi
 BUILD_ARGS=(

@@ -12,8 +12,11 @@ without a walk:
   manifest is a floating pull at deploy time, exactly the drift the manifest
   exists to end — and a compose default whose tag is not the LOCKED tag would
   make a bare ``compose up`` deploy something the release never tested;
-* every ``CC_*`` seam the scripts read is declared (commented or not) in
-  ``env.example`` — the operator's only map of what can be set;
+* every ``CC_*`` seam the scripts read is declared (commented or not) in the
+  REPO-ROOT ``.env.example`` — the operator's only map of what can be set.
+  ``deploy/single/env.example`` is gone: v2.42.0 merged it into that file
+  (design record ``2026-09-23-airgap-check-configure-setup-design.md``, D1),
+  so a new seam without a documented line fails here;
 * ``deploy/airgap.env.example`` does not re-teach the deprecated
   ``UV_INDEX_URL`` as a live variable (uv reads ``UV_DEFAULT_INDEX``; the
   old name is still documented there ONLY as the thing not to use).
@@ -33,13 +36,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SINGLE = ROOT / "deploy" / "single"
 IMAGES_TXT = SINGLE / "images.txt"
 COMPOSE = SINGLE / "compose.yaml"
-ENV_EXAMPLE = SINGLE / "env.example"
+# THE answer file's template — one file for the app and the deployment.
+ENV_EXAMPLE = ROOT / ".env.example"
 DOCKERFILES = [
     ROOT / "deploy" / "pi" / "graphiti" / "Dockerfile",
     ROOT / "deploy" / "k3s" / "sandbox.Dockerfile",
     ROOT / "central_command" / "crawler" / "Dockerfile",
 ]
 SCRIPTS = [
+    ROOT / "deploy" / "env-lib.sh",
+    ROOT / "deploy" / "discover.sh",
     SINGLE / "setup.sh",
     SINGLE / "resolve-images.sh",
     SINGLE / "make-secrets.sh",
@@ -48,6 +54,8 @@ SCRIPTS = [
     SINGLE / "build-graphiti-image.sh",
     SINGLE / "build-sandbox-image.sh",
     SINGLE / "build-crawler-image.sh",
+    SINGLE / "discover-llm.sh",
+    SINGLE / "update-run.sh",
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
 COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base", "speech"}
@@ -178,13 +186,85 @@ def test_images_txt_has_no_orphans():
 SEAM_RE = re.compile(r"\bCC_(?:REGISTRY_[A-Z]+|APT_(?:SECURITY_)?MIRROR|PYPI_INDEX_URL|PYTHON_MIRROR|NPM_REGISTRY)\b")
 
 
+def _declared() -> set[str]:
+    return set(re.findall(r"^#?\s*(CC_[A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.M))
+
+
 def test_every_seam_the_scripts_read_is_declared_in_env_example():
-    declared = set(re.findall(r"^#?\s*(CC_[A-Z_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.M))
+    declared = _declared()
     for path in SCRIPTS + DOCKERFILES:
         for seam in set(SEAM_RE.findall(path.read_text(encoding="utf-8"))):
             if seam.endswith("_") or "${" in seam:
                 continue
-            assert seam in declared, f"{path.relative_to(ROOT)} reads {seam}, which env.example does not declare"
+            assert seam in declared, f"{path.relative_to(ROOT)} reads {seam}, which .env.example does not declare"
+
+
+# A PER-RUN override, never an answer: each of these is passed on the command
+# line for one invocation (CC_VERIFY_LIVE=1 ./verify.sh) or handed over by a
+# parent process, and writing it into .env would be a mistake rather than a
+# configuration. Everything else a deploy script interpolates must have a
+# documented line in .env.example — that is what makes the file the operator's
+# whole map.
+RUNTIME_ONLY = {
+    "CC_VERIFY_LIVE", "CC_VERIFY_MAX_WAIT",   # verify.sh: which checks to run
+    "CC_PROBE_TIMEOUT",                        # a slow backend, for one run
+    "CC_SKIP_DB_BACKUP", "CC_BACKUP_DIR",      # update.sh's deliberate opt-outs
+    "CC_UPDATE_DRIVEN", "CC_UPDATE_FORCE",     # set by update-run.sh / by hand
+    "CC_UPDATE_DIR",                           # api/update.py hands it to the runner
+    "CC_ENV_LIB_LOADED",                       # env-lib.sh's own source guard
+    # The retired UPSTREAM keys: discover-llm.sh still accepts them in DIRECT
+    # mode (a bare probe against a server), but the provider lives in the
+    # proxy's database now and validate() calls them out if they reappear.
+    "CC_EMBED_BASE_URL", "CC_EMBED_API_KEY",
+}
+
+
+def test_env_example_declares_every_key_the_deployment_interpolates():
+    """A new seam with no documented line in .env.example fails here.
+
+    The whole point of one answer file is that it is also the whole map. So
+    every ``${CC_...}`` / ``$CC_...`` in deploy/single/*.sh, compose.yaml,
+    deploy/discover.sh and deploy/env-lib.sh must be declared — commented or
+    not — in .env.example, except the resolver-owned ``CC_IMG_*`` family (one
+    line per image, written by resolve-images.sh and documented as a family)
+    and the per-run overrides above.
+    """
+    declared = _declared()
+    sources = sorted(SINGLE.glob("*.sh")) + [
+        COMPOSE, ROOT / "deploy" / "discover.sh", ROOT / "deploy" / "env-lib.sh",
+    ]
+    missing: dict[str, set[str]] = {}
+    for path in sources:
+        for m in re.finditer(r"\$\{?(CC_[A-Z0-9_]+)", path.read_text(encoding="utf-8")):
+            key = m.group(1)
+            if key.startswith("CC_IMG_") or key in RUNTIME_ONLY or key in declared:
+                continue
+            missing.setdefault(key, set()).add(path.name)
+    assert not missing, (
+        "undocumented deployment seams — add a line (commented is fine) to the "
+        f".env.example deployment section, or to RUNTIME_ONLY if it is a per-run override: {missing}"
+    )
+
+
+def test_the_answer_file_is_one_file():
+    """deploy/single/env.example and its .env are RETIRED (v2.42.0, D1)."""
+    assert not (SINGLE / "env.example").exists(), (
+        "deploy/single/env.example is back — its keys belong in the repo-root "
+        ".env.example's deployment section"
+    )
+    for script in SCRIPTS:
+        text = script.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            assert '"$HERE/.env"' not in code, (
+                f"{script.name}: reads a deploy/single/.env — the answer file is $REPO_ROOT/.env"
+            )
+    # ...and compose can no longer find an .env beside itself, so every
+    # invocation must name one.
+    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    assert '--env-file "$ENV_FILE" -f "$HERE/compose.yaml"' in setup, (
+        "the compose wrapper must pass --env-file: there is no .env beside compose.yaml"
+    )
 
 
 def test_no_kube_play_path_survives():

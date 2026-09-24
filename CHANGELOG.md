@@ -4,6 +4,67 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-23 — v2.42.0: one answer file, and nothing written inside the checkout
+
+The air-gapped installs did not fail on reachability — the site has mirrors and
+images pull. They failed on *finding where a value is defined*: a tag, a CA, a
+proxy, an index each lived somewhere else, across `deploy/single/.env`, the
+root `.env`, `web/.env` and `deploy/discovery.conf`, and the same fact was
+spelled two ways in two of them. Meanwhile every command dropped generated
+files into the tree, so `git status` was never clean and an update had to merge
+around a log file. This release is the plumbing half of the answer — D1 and D7
+of `docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md`.
+Nothing about the install's behaviour changes; where it reads and writes does.
+
+- **ONE answer file: the repo-root `.env`.** `deploy/single/env.example`'s 35
+  keys moved into `.env.example` as a delimited "Deployment — single-node
+  profile" section, comments and all. Every reader follows — `setup.sh`,
+  `update.sh`, `update-run.sh`, `resolve-images.sh`, `make-secrets.sh`,
+  `verify.sh`, `discover-llm.sh`, the three `build-*-image.sh`,
+  `deploy/discover.sh` and `deploy/n8n/apply-workflows.sh` — and compose is
+  invoked with `--env-file <repo>/.env`, before `-f`, because there is no
+  `.env` beside `compose.yaml` for it to find any more (a hand-run
+  `podman compose` needs the flag too).
+- **A duplicated fact now has ONE key, and the `CC_` app name wins.** The
+  `app` phase used to COPY five values from one file to the other;
+  `make-secrets.sh` generates `CC_LLM_PROXY_ADMIN_KEY`, `CC_LITELLM_SALT_KEY`
+  and `CC_NEO4J_PASSWORD` directly instead, the `llm` phase writes
+  `CC_EMBED_DIM` where the app already reads it, and the copy step is gone.
+  Container-side variable names inside `compose.yaml` are untouched — the
+  proxy still sees `LITELLM_MASTER_KEY`, neo4j still sees `NEO4J_AUTH` — since
+  those are the images' contract, not ours.
+- **`web/.env` and `deploy/discovery.conf` are retired on this profile.** The
+  cockpit launcher EXPORTS `PORT`, `GATEWAY_URL` and `CC_UPDATE_BACKEND=api`
+  into the node process, which is exactly equivalent (`dotenv/config` never
+  overrides an existing variable) and leaves the checkout clean; the prober
+  reads `CC_CA_BUNDLE`, `CC_PROXY`, `CC_NETRC`, `CC_TLS_INSECURE` and the
+  mirror seams from `.env` instead of its own `DISCO_*` file. `CC_TLS_INSECURE`
+  is introduced here as a DIAGNOSTIC the prober alone honours, and every run
+  that sees it prints a WARN — it is never a PASS and never a fix. The k3s
+  profile is out of scope throughout and keeps its own `web/.env`.
+- **Migration is the release path, not a manual step.** `setup.sh`'s
+  `load_env` and `update.sh` fold an existing `deploy/single/.env`, `web/.env`
+  and `deploy/discovery.conf` into the root `.env` (never over a value the
+  operator already set, renaming per the rule above), move each old file to
+  `<state>/migrated/` at 0600, print one `PASS env-migrate` line naming what
+  moved, and continue. Nothing is deleted and no value is ever printed. A
+  `web/.env` carrying anything this profile never wrote is left alone.
+- **Generated files live outside the checkout.** `CC_STATE_DIR` (default
+  `${XDG_STATE_HOME:-~/.local/state}/central-command/<dir>-<short-hash>`,
+  resolved on the first run and written back into `.env` so bash and Python
+  never disagree about a Windows path's spelling) holds `setup-log.txt`,
+  `setup-diagnostics.txt`, `installed.manifest`, the API and cockpit logs and
+  pid files, the generated `.curlrc`, the Windows logon wrapper and its log,
+  the cockpit-driven updater's working directory, and discovery's report and
+  evidence. `./setup.sh diagnose` prints the path first; `status` shows it.
+- **The `.gitignore` entries that used to hide the litter are deliberately
+  gone** — `deploy/single/.gitignore` is deleted and `deploy/discovery.out/` /
+  `deploy/discovery.conf` are out of the root file — so a regression is a
+  dirty checkout rather than a quiet line in a diff.
+  `tests/test_single_no_tree_writes.py` walks every write in the profile's
+  scripts and fails on a target inside the tree; a companion test fails a new
+  `${CC_…}` seam that has no documented line in `.env.example`.
+
 ## 2026-09-23 — v2.41.0: Jira Data Center is a different product, not a different login
 
 Atlassian ships two products under one name, and the client only ever spoke

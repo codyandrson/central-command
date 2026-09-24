@@ -24,7 +24,9 @@
 #                 (no network — safe to re-run after hand-reading raw/)
 #       selftest  offline unit check of the classifier. Touches no network.
 #
-#     --out DIR   default deploy/discovery.out (relative to this script)
+#     --out DIR   default $CC_STATE_DIR/discovery — OUTSIDE the checkout
+#                 (design record 2026-09-23, D7). A relative DIR is taken
+#                 relative to this script, as before.
 #
 #   OUTPUT PROTOCOL — the same one deploy/single/setup.sh uses:
 #     stdout   one line per check: `PASS|WARN|FAIL|USERACTION <check>: <msg>`
@@ -34,33 +36,41 @@
 #              almost always somebody's move, not a defect, and the exit code
 #              should say so)
 #
-#   OPERATOR CONFIG — deploy/discovery.conf, if present, is sourced. It is
-#   GITIGNORED and operator-local by design: it names internal hosts and may
-#   point at credentials. Keys, all optional:
+#   OPERATOR CONFIG — the repo-root `.env`, and nothing else.
+#   deploy/discovery.conf is RETIRED (v2.42.0): its keys were one-to-one with
+#   seams that already existed under CC_ names, and two files holding the same
+#   fact is the drift this design record set out to end (2026-09-23, D1). Keys
+#   read here, all optional, all documented in `.env.example`:
 #
-#     DISCO_CA_BUNDLE=/path/to/corp-root.pem   --cacert on every probe
-#     DISCO_PROXY=http://host:port             --proxy on every probe
-#     DISCO_NETRC=1                            --netrc (creds stay in ~/.netrc,
-#                                              never in this conf)
-#     DISCO_INSECURE=1                         -k on every probe. DIAGNOSTIC
-#                                              ONLY — it tells you whether TLS
-#                                              interception is the cause. It is
-#                                              never the fix, and standardizing
-#                                              on it trades a broken build for
-#                                              an unverifiable supply chain.
-#     DISCO_MIRROR_<KEY>=https://...           an internal mirror for one
-#                                              resource, probed IN ADDITION to
-#                                              the public endpoint. KEY is the
-#                                              probe key uppercased with `-`
-#                                              turned into `_` (DISCO_MIRROR_PYPI,
-#                                              DISCO_MIRROR_NPM, DISCO_MIRROR_DOCKERIO,
-#                                              DISCO_MIRROR_APT, DISCO_MIRROR_GITHUB…).
-#                                              A mirror that works becomes the
-#                                              report's recommended source.
+#     CC_CA_BUNDLE=/path/to/corp-root.pem  --cacert on every probe
+#     CC_PROXY=http://host:port            --proxy on every probe
+#     CC_NETRC=1                           --netrc (credentials stay in
+#                                          ~/.netrc, never in .env)
+#     CC_TLS_INSECURE=1                    -k on every probe. DIAGNOSTIC ONLY —
+#                                          it tells you whether TLS
+#                                          interception is the cause, and every
+#                                          run that sees it prints a WARN. It is
+#                                          never the fix, and standardizing on
+#                                          it trades a broken build for an
+#                                          unverifiable supply chain.
+#     the mirror seams                     CC_PYPI_INDEX_URL, CC_NPM_REGISTRY,
+#                                          CC_REGISTRY_DOCKERIO/_GHCR/_MCR,
+#                                          CC_APT_MIRROR,
+#                                          CC_APT_SECURITY_MIRROR,
+#                                          CC_HF_ENDPOINT — each probed IN
+#                                          ADDITION to the public endpoint it
+#                                          stands in for. A mirror that works
+#                                          becomes the report's recommended
+#                                          source.
+#     CC_DISCO_MIRROR_<KEY>=https://...    a mirror for a resource with no seam
+#                                          of its own (KEY is the probe key
+#                                          uppercased with `-` turned into `_`:
+#                                          GITHUB, CRATES, MAVEN_CENTRAL…).
 #
 #   The loop this is built for: run it, read the USERACTION lines, ask your
-#   platform team for the one thing each names, put the answer in
-#   discovery.conf, re-run. The report converges as the conf fills in.
+#   platform team for the one thing each names, put the answer in `.env`,
+#   re-run. The report converges as `.env` fills in — and `.env` is the ONLY
+#   file this loop ever writes.
 #
 #   Only hard dependency: bash + curl. git/podman/python3/node/openssl/jq and
 #   friends are all optional — their ABSENCE is a finding, reported, never an
@@ -78,8 +88,13 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONF="$HERE/discovery.conf"
-OUT="$HERE/discovery.out"
+REPO_ROOT="$(cd "$HERE/.." && pwd)"
+# shellcheck source=env-lib.sh
+. "$HERE/env-lib.sh"
+ENV_FILE="$REPO_ROOT/.env"
+# Resolved in main(), after --out has had its say. Everything this script
+# writes lands there, outside the checkout (2026-09-23 design record, D7).
+OUT=""
 
 # ── output protocol ─────────────────────────────────────────────────────────
 FAILS=0; WARNS=0; ACTIONS=0
@@ -152,16 +167,16 @@ classify() { # classify <curl_exit> <http_code> [group] [proxy_ctx]
 move_for() { # move_for <class> <KEYVAR>
   local c="$1" k="${2:-<KEY>}"
   case "$c" in
-    dns) printf 'internal DNS does not resolve public names — if a mirror exists for this resource, set DISCO_MIRROR_%s in discovery.conf and re-run' "$k" ;;
-    refused|timeout) printf 'egress to this host is blocked — ask for the sanctioned mirror/proxy; set DISCO_MIRROR_%s or DISCO_PROXY and re-run' "$k" ;;
-    tls-intercept) printf 'TLS is intercepted by %s — export the corporate root CA and set DISCO_CA_BUNDLE in discovery.conf; do NOT standardize on disabling verification' "${TLS_ISSUER_HINT:-the corporate proxy}" ;;
+    dns) printf 'internal DNS does not resolve public names — if a mirror exists for this resource, set %s in .env and re-run' "$(seam_for_var "$k")" ;;
+    refused|timeout) printf 'egress to this host is blocked — ask for the sanctioned mirror/proxy; set %s or CC_PROXY in .env and re-run' "$(seam_for_var "$k")" ;;
+    tls-intercept) printf 'TLS is intercepted by %s — export the corporate root CA and set CC_CA_BUNDLE in .env; do NOT standardize on disabling verification' "${TLS_ISSUER_HINT:-the corporate proxy}" ;;
     # One text for both surfaces of the same fact: a 407 on a plain-HTTP
     # request, and a refused CONNECT tunnel (exit 56) on an HTTPS one.
-    proxy-auth) printf 'the proxy wants credentials or refused the CONNECT tunnel (auth required or policy block) — set DISCO_PROXY with credentials or use DISCO_NETRC=1 with a ~/.netrc entry, and re-run' ;;
+    proxy-auth) printf 'the proxy wants credentials or refused the CONNECT tunnel (auth required or policy block) — set CC_PROXY with credentials or use CC_NETRC=1 with a ~/.netrc entry, and re-run' ;;
     throttled) printf 'reachable but rate-limited (anonymous quota) — expect this on Docker Hub; authenticated pulls or a pull-through mirror raise the limit' ;;
-    auth) printf 'reachable but wants credentials — add a ~/.netrc entry and set DISCO_NETRC=1, and re-run' ;;
+    auth) printf 'reachable but wants credentials — add a ~/.netrc entry and set CC_NETRC=1, and re-run' ;;
     denied) printf 'reachable but denied — likely proxy policy; ask what the sanctioned source for this resource is' ;;
-    proxy-dns) printf 'the configured proxy name does not resolve — check DISCO_PROXY / http_proxy spelling and internal DNS' ;;
+    proxy-dns) printf 'the configured proxy name does not resolve — check CC_PROXY / http_proxy spelling and internal DNS' ;;
     tls-other|tls-cert) printf 'TLS handshake failed for a reason -k does not explain — capture raw/%s.err and ask the network team' "$(printf '%s' "$k" | tr 'A-Z_' 'a-z-')" ;;
     error) printf 'the endpoint answered 5xx — transient, or a mirror in front of it is unhealthy; re-run before escalating' ;;
     portal) printf 'a captive portal or content-injecting proxy is rewriting plain HTTP — authenticate to the portal, and treat every unauthenticated HTTP result in this report as suspect' ;;
@@ -194,18 +209,64 @@ status_for() { # status_for <class>
 # key -> the DISCO_MIRROR_ / DISCO_ suffix form.
 keyvar() { printf '%s' "$1" | tr 'a-z-' 'A-Z_'; }
 
-# ── conf + curl flags ───────────────────────────────────────────────────────
+# ── answers + curl flags ────────────────────────────────────────────────────
+# The DISCO_* names stay as this script's INTERNAL vocabulary — they are what
+# the classifier, the report writer and discovery.env all speak — but their
+# values come from the one answer file's CC_ seams now. Nothing outside this
+# function reads a CC_ key, so the mapping is the whole seam.
+#
+# A CC_REGISTRY_* seam is a HOST PREFIX (that is the shape podman wants); a
+# probe needs a URL, so it is expanded to that registry's own /v2/ root here.
 load_conf() {
-  if [[ -f "$CONF" ]]; then
+  if [[ -f "$ENV_FILE" ]]; then
+    # An unquoted value containing a space is a COMMAND under `set -a; . .env`,
+    # and this is often the FIRST tool to read the file on a new machine — so
+    # say which key, by name, rather than leaving the operator with bash's
+    # "<word>: command not found".
+    local badkeys; badkeys="$(cc_env_unquoted_keys "$ENV_FILE")"
+    [[ -n "$badkeys" ]] && warn "answer-file" "these keys in $ENV_FILE have unquoted values containing a space (or a shell metacharacter): $badkeys — every deploy script SOURCES this file, so each is run as a command instead of assigned. Wrap the value in double quotes."
+    set -a
     # shellcheck disable=SC1090
-    . "$CONF"
-    note "conf: sourced $CONF"
+    . "$ENV_FILE"
+    set +a
+    note "answers: sourced $ENV_FILE"
+  else
+    note "answers: no $ENV_FILE yet — probing with no mirror, CA or proxy configured"
   fi
+  DISCO_CA_BUNDLE="${CC_CA_BUNDLE:-}"
+  DISCO_PROXY="${CC_PROXY:-}"
+  DISCO_NETRC="${CC_NETRC:-0}"
+  DISCO_INSECURE="${CC_TLS_INSECURE:-0}"
+  [[ -n "${CC_PYPI_INDEX_URL:-}" ]]      && DISCO_MIRROR_PYPI="$CC_PYPI_INDEX_URL"
+  [[ -n "${CC_NPM_REGISTRY:-}" ]]        && DISCO_MIRROR_NPM="$CC_NPM_REGISTRY"
+  [[ -n "${CC_APT_MIRROR:-}" ]]          && DISCO_MIRROR_DEB_DEBIAN="$CC_APT_MIRROR"
+  [[ -n "${CC_APT_SECURITY_MIRROR:-}" ]] && DISCO_MIRROR_DEB_SECURITY="$CC_APT_SECURITY_MIRROR"
+  [[ -n "${CC_HF_ENDPOINT:-}" ]]         && DISCO_MIRROR_HUGGINGFACE="$CC_HF_ENDPOINT"
+  local pair key seam host
+  for pair in DOCKERIO:CC_REGISTRY_DOCKERIO GHCR:CC_REGISTRY_GHCR MCR:CC_REGISTRY_MCR; do
+    key="${pair%%:*}"; seam="${pair#*:}"; host="${!seam:-}"
+    [[ -n "$host" ]] || continue
+    host="${host#*://}"; host="${host%%/*}"
+    printf -v "DISCO_MIRROR_$key" 'https://%s/v2/' "$host"
+  done
+  # A resource with no seam of its own keeps the verbatim form, one prefix
+  # deeper so it is visibly ours: CC_DISCO_MIRROR_<KEY>.
+  local v
+  while IFS= read -r v; do
+    [[ -n "$v" ]] || continue
+    printf -v "DISCO_MIRROR_${v#CC_DISCO_MIRROR_}" '%s' "${!v}"
+  done < <(compgen -A variable CC_DISCO_MIRROR_ | sort)
+
   CURL_FLAGS=()
   [[ -n "${DISCO_CA_BUNDLE:-}" ]] && CURL_FLAGS+=(--cacert "$DISCO_CA_BUNDLE")
   [[ -n "${DISCO_PROXY:-}" ]] && CURL_FLAGS+=(--proxy "$DISCO_PROXY")
   [[ "${DISCO_NETRC:-0}" == 1 ]] && CURL_FLAGS+=(--netrc)
-  [[ "${DISCO_INSECURE:-0}" == 1 ]] && CURL_FLAGS+=(-k)
+  if [[ "${DISCO_INSECURE:-0}" == 1 ]]; then
+    CURL_FLAGS+=(-k)
+    # Never silent, never a PASS (2026-09-23 design record, D4).
+    warn "tls-insecure" "CC_TLS_INSECURE=1 — every probe below ran with TLS verification OFF. That is a DIAGNOSTIC: it tells you whether interception is the cause. The FIX is exporting the corporate root CA into CC_CA_BUNDLE; leaving this on trades a broken build for an unverifiable supply chain."
+  fi
+  return 0
 }
 
 # ── result records ──────────────────────────────────────────────────────────
@@ -556,7 +617,7 @@ probe_net_fundamentals() {
   for n in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; do
     v="${!n:-}"; [[ -n "$v" ]] && pl+="$n=$(redact "$v") "
   done
-  [[ -n "${DISCO_PROXY:-}" ]] && pl+="DISCO_PROXY=$(redact "$DISCO_PROXY") "
+  [[ -n "${DISCO_PROXY:-}" ]] && pl+="CC_PROXY=$(redact "$DISCO_PROXY") "
   if [[ -n "$pl" ]]; then
     record_note proxy-env "proxy configuration" net ok "detected: ${pl% }"
   else
@@ -899,7 +960,7 @@ write_report_md() {
     printf 'one, see `deploy/AIRGAP.md` — this report says what the environment allows; that\n'
     printf 'document says which knob to turn.\n\n'
     printf '**Keep this file out of public trees.** It names internal mirror hosts, proxies and\n'
-    printf 'CA issuers. It lives under `deploy/discovery.out/`, which is gitignored.\n'
+    printf 'CA issuers. It lives in the state directory, outside the checkout entirely.\n'
   } >"$md"
 }
 
@@ -918,7 +979,7 @@ write_nuances_section() {
     if [[ -f "$OUT/raw/tls-inspection.result" ]]; then
       printf 'Note that **every probe still passed** — the corporate root is already in this host'"'"'s trust store, so the breakage will land on whatever brings its OWN root pool (Go binaries, pinned clients, a container that does not mount the host bundle) rather than on curl. '
     fi
-    printf 'Export that root CA to a PEM file, set `DISCO_CA_BUNDLE` in `discovery.conf`, and configure each toolchain (see below). Do NOT standardize on disabling verification — it converts one broken build into an unverifiable supply chain.\n'
+    printf 'Export that root CA to a PEM file, set `CC_CA_BUNDLE` in the repo-root `.env`, and configure each toolchain (see below). Do NOT standardize on disabling verification — it converts one broken build into an unverifiable supply chain.\n'
   else
     printf -- '- **TLS interception:** none detected — no probe recovered under `-k` after a certificate failure, and no inspection-appliance issuer was seen on the hosts that succeeded.\n'
   fi
@@ -1041,9 +1102,17 @@ write_howto_section() {
   printf '%s\n' "$body"
 }
 
-# The Central Command deploy seam (deploy/single/.env) a probe key maps
-# onto, empty when there is none. Same honest-lookup-table reasoning as
+# The Central Command deploy seam (a key in the repo-root .env) a probe key
+# maps onto, empty when there is none. Same honest-lookup-table reasoning as
 # reg_host below; the authoritative map is deploy/AIRGAP.md's seam table.
+#
+# seam_for_var() takes the UPPER_CASED form (what move_for is handed) and
+# always answers with something nameable, so a prescription never ends up
+# saying "set  in .env".
+seam_for_var() { # seam_for_var <KEY_UPPER>
+  local s; s="$(seam_for "$(printf '%s' "$1" | tr 'A-Z_' 'a-z-')")"
+  printf '%s' "${s:-CC_DISCO_MIRROR_$1}"
+}
 seam_for() {
   case "$1" in
     pypi|pythonhosted|pip-configured) printf 'CC_PYPI_INDEX_URL' ;;
@@ -1058,7 +1127,7 @@ seam_for() {
   esac
 }
 
-# Verified facts translated into ready-to-paste deploy/single/.env lines —
+# Verified facts translated into ready-to-paste repo-root .env lines —
 # COMMENTED on purpose: copying one in and uncommenting it is the operator's
 # approval, and a probe cannot see path-layout or policy nuances. Only
 # renders lines a finding actually earned (same rule as the howto section).
@@ -1078,12 +1147,12 @@ write_seams_section() {
     esac
   done
   [[ -n "${DISCO_CA_BUNDLE:-}" ]] && \
-    body+="#CC_CA_BUNDLE=${DISCO_CA_BUNDLE}   # also the root .env's CC_CA_BUNDLE for integration trust"$'\n'
+    body+="#CC_CA_BUNDLE=${DISCO_CA_BUNDLE}   # ONE fact: integration trust AND host-side acquisition"$'\n'
   [[ -n "${DISCO_PROXY:-}" ]] && \
     body+="#CC_PROXY=$(redact "$DISCO_PROXY")   # credentials go in ~/.netrc, never in .env"$'\n'
   [[ -n "$body" ]] || return 0
   printf '## Suggested Central Command deploy seams\n\n'
-  printf 'The verified findings above, translated to `deploy/single/.env` lines. They are\n'
+  printf 'The verified findings above, translated to repo-root `.env` lines. They are\n'
   printf 'commented out on purpose: pasting one in and uncommenting it is the operator'"'"'s\n'
   printf 'approval, and a probe cannot see path-layout or policy nuances — check each\n'
   printf 'against `deploy/AIRGAP.md`'"'"'s seam table before uncommenting.\n\n'
@@ -1242,14 +1311,17 @@ usage: ./discover.sh [probe|report|selftest] [--out DIR]
                  (offline — safe after hand-reading a raw result)
   selftest       offline unit check of the classifier; touches no network
 
-  --out DIR      output directory (default: deploy/discovery.out)
+  --out DIR      output directory (default: $CC_STATE_DIR/discovery, outside
+                 the checkout)
 
   exit codes     0 clean · 1 hard failure · 2 warnings
                  3 USER ACTION REQUIRED — see the USERACTION lines
 
-  operator config: deploy/discovery.conf (gitignored, operator-local) —
-  DISCO_CA_BUNDLE, DISCO_PROXY, DISCO_NETRC, DISCO_INSECURE,
-  DISCO_MIRROR_<KEY>. Read the header of this file for what each means.
+  operator config: the repo-root .env (gitignored) — CC_CA_BUNDLE, CC_PROXY,
+  CC_NETRC, CC_TLS_INSECURE and the mirror seams (CC_PYPI_INDEX_URL,
+  CC_NPM_REGISTRY, CC_REGISTRY_*, CC_APT_MIRROR, CC_APT_SECURITY_MIRROR,
+  CC_HF_ENDPOINT, CC_DISCO_MIRROR_<KEY>). Read the header of this file for
+  what each means. deploy/discovery.conf is retired.
 USAGE
 }
 
@@ -1266,8 +1338,15 @@ main() {
   done
   arg="${args[0]:-}"
   cmd="${arg:-all}"
-  # A relative --out is relative to the script, so `cd`-ing somewhere else and
-  # running it by path does not scatter output directories around the disk.
+  # No --out means the STATE DIRECTORY: nothing this script writes goes inside
+  # the checkout (2026-09-23 design record, D7). A relative --out stays
+  # relative to the script, so `cd`-ing somewhere else and running it by path
+  # does not scatter output directories around the disk.
+  if [[ -z "$OUT" ]]; then
+    local sd
+    sd="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT")" || sd="${TMPDIR:-/tmp}/central-command-state"
+    OUT="$sd/discovery"
+  fi
   [[ "$OUT" == /* ]] || OUT="$HERE/$OUT"
 
   case "$cmd" in

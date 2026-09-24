@@ -27,10 +27,14 @@ done
 # $PY may be multiple words (the uv fallback) — always invoke it unquoted: $PY -c ...
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -f "$HERE/.env" ]] || { echo "FATAL: $HERE/.env not found" >&2; exit 1; }
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+# The repo-root .env is THE answer file since v2.42.0 (design record
+# 2026-09-23, D1) — app configuration and this profile's, one file.
+ENV_FILE="$REPO_ROOT/.env"
+[[ -f "$ENV_FILE" ]] || { echo "FATAL: $ENV_FILE not found" >&2; exit 1; }
 set -a
 # shellcheck disable=SC1090
-. "$HERE/.env"
+. "$ENV_FILE"
 set +a
 
 : "${CC_POD_PREFIX:=cc-}"
@@ -45,7 +49,13 @@ set +a
 : "${CC_ENABLE_SANDBOX:=1}"
 : "${CC_SPEECH_PORT:=8093}"
 : "${CC_ENABLE_SPEECH:=1}"
-: "${CC_SANDBOX_RUNNER_PORT:=8090}"
+# The runner's port is not a second fact: it is the one in the app's
+# CC_SANDBOX_RUNNER_URL (which is what actually dials it). Derived, not
+# declared — v2.42.0's rule is that the same fact has one key.
+SANDBOX_RUNNER_PORT="${CC_SANDBOX_RUNNER_URL:-http://127.0.0.1:8090}"
+SANDBOX_RUNNER_PORT="${SANDBOX_RUNNER_PORT##*:}"
+SANDBOX_RUNNER_PORT="${SANDBOX_RUNNER_PORT%%/*}"
+[[ "$SANDBOX_RUNNER_PORT" =~ ^[0-9]+$ ]] || SANDBOX_RUNNER_PORT=8090
 : "${CC_VERIFY_MAX_WAIT:=600}"
 
 PASS=0; FAIL=0; SKIP=0
@@ -123,7 +133,7 @@ if wait_for 180 curl -fsS "${LL}/health/liveliness"; then
   ok "proxy answers /health/liveliness"
   # Configured, not merely alive: the three aliases this profile exists to
   # provide must be in the model list, under the master key.
-  models="$(curl -fsS -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" "${LL}/v1/models" 2>/dev/null)"
+  models="$(curl -fsS -H "Authorization: Bearer ${CC_LLM_PROXY_ADMIN_KEY:-}" "${LL}/v1/models" 2>/dev/null)"
   for m in cc-default graphiti-llm cc-embedding; do
     check "model alias ${m} registered" grep -qF "\"$m\"" <<<"$models"
   done
@@ -133,13 +143,13 @@ else
 fi
 
 if [[ "${CC_VERIFY_LIVE:-0}" == "1" ]]; then
-  body="$(curl -fsS -m "${CC_PROBE_TIMEOUT:-300}" -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
+  body="$(curl -fsS -m "${CC_PROBE_TIMEOUT:-300}" -H "Authorization: Bearer ${CC_LLM_PROXY_ADMIN_KEY:-}" \
     -H 'Content-Type: application/json' \
     -d '{"model":"cc-default","messages":[{"role":"user","content":"reply with the single word: ok"}],"max_tokens":8}' \
     "${LL}/v1/chat/completions" 2>/dev/null)"
   check "live completion through cc-default" grep -qF '"content"' <<<"$body"
 
-  emb="$(curl -fsS -m "${CC_PROBE_TIMEOUT:-300}" -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" \
+  emb="$(curl -fsS -m "${CC_PROBE_TIMEOUT:-300}" -H "Authorization: Bearer ${CC_LLM_PROXY_ADMIN_KEY:-}" \
     -H 'Content-Type: application/json' \
     -d '{"model":"cc-embedding","input":"dimension probe"}' \
     "${LL}/v1/embeddings" 2>/dev/null)"
@@ -260,10 +270,10 @@ if [[ "$CC_ENABLE_SANDBOX" == "1" ]]; then
   check "image localhost/cc-sandbox:1 present" grep -qx 'localhost/cc-sandbox:1' <<<"$imgs"
   # The runner exposes no /health route (it is /sessions and friends), so the
   # honest liveness question here is "is anything listening".
-  if bash -c "exec 3<>/dev/tcp/127.0.0.1/${CC_SANDBOX_RUNNER_PORT}" 2>/dev/null; then
-    ok "sandbox runner answers on 127.0.0.1:${CC_SANDBOX_RUNNER_PORT}"
+  if bash -c "exec 3<>/dev/tcp/127.0.0.1/${SANDBOX_RUNNER_PORT}" 2>/dev/null; then
+    ok "sandbox runner answers on 127.0.0.1:${SANDBOX_RUNNER_PORT}"
   else
-    skip "sandbox runner not answering on 127.0.0.1:${CC_SANDBOX_RUNNER_PORT} (a host process — see README)"
+    skip "sandbox runner not answering on 127.0.0.1:${SANDBOX_RUNNER_PORT} (a host process — see README)"
   fi
 else
   skip "sandbox disabled (CC_ENABLE_SANDBOX=0)"

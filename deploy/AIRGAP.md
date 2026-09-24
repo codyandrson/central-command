@@ -31,22 +31,28 @@ vs refused vs timeout vs TLS interception vs auth), because the mode is the
 diagnosis: a timeout is a default-deny firewall, a certificate failure that
 clears with `-k` is a TLS-intercepting proxy, a 407 is proxy credentials.
 
-It writes `deploy/discovery.out/discovery-report.md` — an exhaustive guide
+It writes `$CC_STATE_DIR/discovery/discovery-report.md` — an exhaustive guide
 to the environment for anyone (or anything) developing, deploying, or
 operating in it: what is reachable, what each nuance is, and the concrete
 config lines to consume each resource here — plus `discovery.env`,
-machine-readable facts for tooling. Both are gitignored: they name internal
-hosts.
+machine-readable facts for tooling. Both live OUTSIDE the checkout (v2.42.0,
+design record `2026-09-23-airgap-check-configure-setup-design.md` D7): they
+name internal hosts, and nothing a command generates belongs in the tree.
+`./deploy/single/setup.sh diagnose` prints the state dir's path.
 
-The elicitation loop is config-and-rerun, same shape as `setup.sh`: each
-finding's USERACTION names a key in `deploy/discovery.conf` (also
-gitignored) — `DISCO_CA_BUNDLE` for the corporate root CA, `DISCO_PROXY`,
-`DISCO_NETRC=1` for credentials, `DISCO_MIRROR_<KEY>` per-resource mirrors.
+The elicitation loop is answer-and-rerun, same shape as `setup.sh`, and it
+writes **only the repo-root `.env`**: each finding's USERACTION names a key
+there — `CC_CA_BUNDLE` for the corporate root CA, `CC_PROXY`, `CC_NETRC=1` for
+credentials, and the mirror seams in the table below (plus
+`CC_DISCO_MIRROR_<KEY>` for a resource with no seam of its own).
+`deploy/discovery.conf` is retired: its keys were one-to-one with those seams,
+and an existing one is merged into `.env` and moved aside on the next run.
 Fill in what your environment has and re-run; configured mirrors are probed
 too, and the report's "how to consume" section then points at them. Never
 standardize on disabled TLS verification — `discover.sh` uses `-k` only as
-a diagnostic to identify interception; the fix it prescribes is trusting
-the corporate CA.
+a diagnostic to identify interception, and only when `CC_TLS_INSECURE=1` says
+so explicitly, printing a WARN on every run that does; the fix it prescribes is
+trusting the corporate CA.
 
 The report's findings map directly onto the seam table below: a resource
 the report marks mirror-only is the value you put in that seam's `.env`
@@ -54,8 +60,10 @@ variable.
 
 ## Every external source, and its seam
 
-All seams live in `deploy/single/.env` (see `env.example`, "Where every
-dependency comes from"); blank means the public source.
+All seams live in the **repo-root `.env`** — one answer file for the app and
+the deployment since v2.42.0 (see `.env.example`'s "Deployment — single-node
+profile" section, "Where every dependency comes from"); blank means the public
+source. `deploy/single/env.example` and `deploy/single/.env` are gone.
 
 | Source | Used by | Seam | Notes |
 |---|---|---|---|
@@ -70,6 +78,8 @@ dependency comes from"); blank means the public source.
 | huggingface.co | Whisper STT model for the cockpit's *local* engine (k3s Node server only) | `WHISPER_MODELS_BASE_URL` (web server env) or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file before downloading; unused once `cc-stt` is registered |
 | a private/corporate CA (TLS interception, self-signed mirror) | every host-side acquisition: curl, uv/pip, npm, node | `CC_CA_BUNDLE` | fanned out to `CURL_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `NPM_CONFIG_CAFILE`; NOT podman pulls or the in-build package fetches — see below |
 | a mandatory egress proxy | every host-side acquisition | `CC_PROXY` | fanned out to `http(s)_proxy` both cases, `no_proxy` pinned to loopback; podman forwards proxy vars into builds on its own |
+| — (diagnosis only) | `deploy/discover.sh`'s probes, and nothing else today | `CC_TLS_INSECURE=1` | `-k` on every probe, to tell you whether TLS interception is the cause. Every run that sees it prints a WARN naming the fact; it is never a PASS and never the fix. Fanning it out to the rest of the toolchain is a later phase (D4 of the 2026-09-23 record). |
+| — (credentials) | `deploy/discover.sh`'s probes | `CC_NETRC=1` | `--netrc`, so credentials stay in `~/.netrc` and never in `.env` |
 
 **Windows (Git Bash + a podman machine) — measured 2026-09-18.** Git for
 Windows' curl is schannel-only: it IGNORES `CURL_CA_BUNDLE`, and it checks
@@ -77,8 +87,8 @@ revocation, which an intercepting proxy cannot answer
 (`CRYPT_E_REVOCATION_OFFLINE`). So on Windows the CA must ALSO be in the
 Windows Root store (usually there by policy; else, as Administrator,
 `certutil -addstore Root <ca.cer>` — the preflight check `ca-windows-store`
-names it), and `setup.sh` writes a setup-owned `.curlrc`
-(`ssl-revoke-best-effort`, via `CURL_HOME`) for every curl it spawns. uv, npm
+names it), and `setup.sh` writes a setup-owned `.curlrc` in the state
+directory (`ssl-revoke-best-effort`, via `CURL_HOME`) for every curl it spawns. uv, npm
 and node take the bundle from the variables as on Linux. The podman MACHINE
 is a second host with its own egress: podman passes the host's `HTTP(S)_PROXY`
 into the VM when it STARTS, and `podman machine set --import-native-ca`
@@ -96,6 +106,9 @@ chain to a publicly-trusted (or base-image-trusted) root. Plumbing the
 corporate CA into the builds themselves is a deliberate follow-up, not a
 variable that exists today. Never disable verification anywhere in this
 table — that converts one broken fetch into an unverifiable supply chain.
+`CC_TLS_INSECURE=1` is not an exception to that: it is honoured by
+`deploy/discover.sh`'s probes ONLY, as the diagnostic that identifies
+interception, and every run that sees it prints a WARN.
 
 Registries can alternatively be mirrored in podman's own `registries.conf`
 (`[[registry.mirror]]`, tried before the primary, with `pull-from-mirror =
@@ -135,7 +148,8 @@ tag satisfying the constraint is substituted with a WARN and no digest check
 (deliberate — the digest pin defended against public-registry tag poisoning, a
 threat a mirrored air gap does not carry); otherwise it FAILS naming the
 constraint and what the mirror has. Resolved refs are written to `.env` as
-`CC_IMG_*` (which `compose.yaml` reads) and recorded in `installed.manifest`.
+`CC_IMG_*` (which `compose.yaml` reads) and recorded in
+`$CC_STATE_DIR/installed.manifest`.
 A mirror serving no tags-list API still works: resolution falls back to a
 blind pull of the locked tag, with a WARN. The three locally built images pin
 their base tag in the Dockerfile, so a SUBSTITUTED base tag is not what the

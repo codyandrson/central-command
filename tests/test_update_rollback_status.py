@@ -17,14 +17,17 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "deploy/single/update.sh"
+# The record moved out of the checkout with everything else generated in
+# v2.42.0 (design record 2026-09-23, D7): $STATE_DIR/update/, not
+# deploy/single/.update/.
 
 
 @pytest.mark.skipif(shutil.which("sed") is None, reason="needs sed")
 def test_rollback_rewrites_a_success_record(tmp_path):
     body = SCRIPT.read_text(encoding="utf-8")
     rollback = body[body.index("cmd_rollback()"):]
-    m = re.search(r"^\s*(sed -i .*) \"\$HERE/\.update/status\.json\"$", rollback, re.M)
-    assert m, "cmd_rollback no longer rewrites .update/status.json"
+    m = re.search(r"^\s*(sed -i .*) \"\$STATE_DIR/update/status\.json\"$", rollback, re.M)
+    assert m, "cmd_rollback no longer rewrites <state>/update/status.json"
     record = tmp_path / "status.json"
     record.write_text(json.dumps({"state": "success", "phase": "done", "target": "9.9.9"},
                                  separators=(",", ":")))

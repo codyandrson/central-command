@@ -134,7 +134,8 @@ the entry format and how to add one.
   upstream registry, rather than one generic `CC_REGISTRY`.
 - **Why:** CHANGELOG `2026-08-30 — v2.2.0: the single-node setup acquires
   every dependency up front, from mirrors or an explicit bundle` — "One
-  answer file for every seam (`deploy/single/env.example`...):
+  answer file for every seam (`deploy/single/env.example`, whose keys v2.42.0
+  merged into the repo-root `.env.example`'s deployment section):
   `CC_REGISTRY_{DOCKERIO,GHCR,MCR}`...".
 - **Enforced:** test: `tests/test_single_airgap_seams.py::test_images_txt_is_well_formed` (validates `images.txt` format against the registry keys)
 - **Source:** CHANGELOG v2.2.0

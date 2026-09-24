@@ -41,7 +41,8 @@ mirror/no-egress installs read [`deploy/AIRGAP.md`](deploy/AIRGAP.md) first.
 claude        # from the repo root, then type:  /setup
 ```
 
-`/setup` elicits your answers into `deploy/single/.env` and runs the
+`/setup` elicits your answers into the repo-root `.env` — one answer file for
+the app and the deployment (v2.42.0) — and runs the
 deterministic driver `./setup.sh` — ten idempotent phases
 (`validate → preflight → fetch → llm → stack → app → verify → test → boot
 → demo`), each re-runnable on its own, every check one
@@ -179,5 +180,6 @@ belongs. See [`CHANGELOG.md`](CHANGELOG.md) for what has landed so far.
 
 ## Secrets
 
-All credentials live only in `.env` / `web/.env` (both git-ignored) — never in
+All credentials live only in `.env` (git-ignored; plus `web/.env` on the k3s
+profile, where the cockpit runs as its own unit) — never in
 the repo or its history. The tracked `.env.example` files are empty placeholders.

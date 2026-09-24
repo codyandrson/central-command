@@ -11,6 +11,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # so mirror .env into the process env too. load_dotenv never overrides vars
 # already set in the real environment, so systemd/CLI overrides still win.
 # (Found live 2026-07-22: the cc-smart canary in .env was silently ignored.)
+#
+# Since v2.42.0 the root `.env` is also the SINGLE-NODE DEPLOYMENT's answer
+# file (design record 2026-09-23, D1), so a handful of non-CC_ keys now land in
+# this process's environment too: LITELLM_POSTGRES_PASSWORD, N8N_*,
+# UI_USERNAME/UI_PASSWORD, GRAPHITI_LLM_API_KEY, EMBEDDER_API_KEY,
+# RERANKER_API_KEY. `extra="ignore"` means pydantic never sees them, and
+# nothing in central_command/ or web/server reads any of those names — checked
+# when the merge landed. Keep it that way: a deploy key whose name collides
+# with something the app or the cockpit reads (PORT, GATEWAY_URL, OPENAI_*,
+# NERVE_*, LLM_API_KEY) would be configuration by accident.
 load_dotenv()
 
 
@@ -629,6 +639,37 @@ class Settings(BaseSettings):
     # Browser-reachable database UI (e.g. Adminer, deploy/k3s/85-adminer.yaml)
     # — display-only, for the Systems view. Unset = no link.
     db_ui_url: str = ""
+
+    # Where everything a deploy command GENERATES lives — logs, diagnostics,
+    # the installed manifest, pid files, the cockpit-driven updater's working
+    # dir, discovery evidence (design record 2026-09-23, D7). Nothing under
+    # `deploy/` is written any more, so `git status` is clean after every
+    # command and an update never has to merge around a log file. The BASH
+    # side resolves this and writes it into `.env` on first run (deploy/
+    # env-lib.sh `cc_state_dir`), because bash-on-MSYS and Python disagree on
+    # how to spell a Windows path; `resolved_state_dir()` below is the
+    # fallback for a process that starts before any script has run, and it
+    # mirrors that function exactly.
+    state_dir: str = ""
+
+    def resolved_state_dir(self) -> str:
+        """`CC_STATE_DIR`, or the same default deploy/env-lib.sh computes.
+
+        Mirror of `cc_state_dir` / `cc_install_id`: `<basename>-<sha256[:8]>`
+        of the repo root's POSIX spelling, under
+        `${XDG_STATE_HOME:-~/.local/state}/central-command/`. A second checkout
+        of the same release on one machine therefore gets its own state dir.
+        """
+        if self.state_dir:
+            return self.state_dir
+        import hashlib
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        norm = root.as_posix()
+        install_id = f"{root.name}-{hashlib.sha256(norm.encode()).hexdigest()[:8]}"
+        base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+        return str(Path(base).as_posix() + f"/central-command/{install_id}")
 
     def agent_proxy_key(self, agent_id: str | None) -> str:
         """The per-agent LiteLLM virtual key for `agent_id`, from

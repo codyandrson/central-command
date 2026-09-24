@@ -144,14 +144,19 @@ async def test_upload_refuses_while_a_run_is_in_flight(monkeypatch):
 async def test_apply_spawns_the_runner_detached(monkeypatch):
     monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
     monkeypatch.setattr(update, "_staged_target", lambda: "2.22.0")
-    spawned: list[list[str]] = []
-    monkeypatch.setattr(update, "_spawn_detached", spawned.append)
+    spawned: list[tuple[list[str], dict | None]] = []
+    # Two arguments since v2.42.0: the second carries CC_UPDATE_DIR into the
+    # detached runner's environment, so both sides address the same working
+    # directory once this process is gone.
+    monkeypatch.setattr(update, "_spawn_detached",
+                        lambda cmd, env=None: spawned.append((cmd, env)))
 
     resp = await update.update_apply(update.ApplyRequest(target="2.22.0"))
     assert resp.status_code == 202
     assert _body(resp) == {"triggered": True, "target": "2.22.0"}
     # A copy runs, never the tracked file — the merge rewrites it mid-run.
-    assert spawned and spawned[0][1] == str(update._update_dir() / "run.sh")
+    assert spawned and spawned[0][0][1] == str(update._update_dir() / "run.sh")
+    assert spawned[0][1] == {"CC_UPDATE_DIR": str(update._update_dir())}
     assert (update._update_dir() / "run.sh").exists()
     status = json.loads((update._update_dir() / "status.json").read_text())
     assert status["state"] == "running" and status["phase"] == "requested"

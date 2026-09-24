@@ -31,14 +31,17 @@ web/bin-dist/
 .playwright-mcp/
 drafts/
 
-# Setup driver litter (the k3s driver; deploy/single/ has its own .gitignore)
+# Setup driver litter — the k3s driver's only. The SINGLE-NODE driver and
+# deploy/discover.sh write NOTHING inside the checkout since v2.42.0: every
+# generated file (logs, diagnostics, installed.manifest, pid files, the
+# updater's working dir, discovery's report and evidence) lives in
+# $CC_STATE_DIR, outside the tree — design record
+# docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md, D7.
+# `./deploy/single/setup.sh diagnose` prints that path first. So there is no
+# deploy/single/.gitignore any more, and no deploy/discovery.out/ or
+# deploy/discovery.conf to ignore: an entry here would only hide a regression.
 deploy/k3s/setup-log.txt
 deploy/k3s/setup-diagnostics.txt
-
-# Environment discovery output and operator-local config (deploy/discover.sh).
-# Both name internal mirror hosts and network posture — never commit them.
-deploy/discovery.out/
-deploy/discovery.conf
 CLAUDE.local.md
 
 # Windows: `uv run` at the root writes uv.lock; podman hands Git's MSYS ssh

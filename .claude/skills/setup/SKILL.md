@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into deploy/single/.env and runs the deterministic `./setup.sh` (ten phases: validate/preflight/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into the ONE answer file, the repo-root .env, and runs the deterministic `./setup.sh` (ten phases: validate/preflight/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -8,10 +8,11 @@ description: Install Central Command from scratch on this machine — the guided
 **The rule (2026-08-25 redesign, `docs/superpowers/specs/2026-08-25-deterministic-setup.md`):
 if you are composing a command that mutates anything, you are off the rails —
 the script does that.** On the podman substrate, `deploy/single/setup.sh` is
-the whole install. Your job is: (a) elicit answers and write them into
-`deploy/single/.env`, (b) run `./setup.sh` (or have the user run it) and read
-its PASS/WARN/FAIL lines and exit code, (c) on failure, run `./setup.sh
-diagnose` and reason over `setup-diagnostics.txt`, then name the fix — never
+the whole install. Your job is: (a) elicit answers and write them into the ONE
+answer file, the repo-root `.env`, (b) run `./setup.sh` (or have the user run
+it) and read its PASS/WARN/FAIL lines and exit code, (c) on failure, run
+`./setup.sh diagnose` and reason over the `setup-diagnostics.txt` it names
+(in the state dir, whose path it prints first), then name the fix — never
 freehand a replacement command, (d) hand off to the cockpit (Phase 2),
 (e) verify integrations and walk the go-live checklist
 (Phase 3). Delegate read-only investigation
@@ -34,26 +35,28 @@ Rules that hold for the whole run:
   operator's move (add/fix models in the LiteLLM UI, stop the API before an
   update, restart it after). Relay the script's own instructions — for the
   llm gate that includes the UI URL, where the credential lives (by NAME:
-  LITELLM_MASTER_KEY in deploy/single/.env — never print the value, or
+  CC_LLM_PROXY_ADMIN_KEY in the repo-root .env — never print the value, or
   UI_USERNAME/UI_PASSWORD if the operator set them), and the
   expected alias list. When the operator says they've acted, re-run the same
   phase; it is idempotent and verifies.
 - **Discovery evidence, if it exists, is part of your briefing.** Before
-  Phase 0, check for `deploy/discovery.out/discovery-report.md` — /discover's
-  converged environment map (gitignored; it names internal hosts, so its
-  contents stay in this conversation, never in tracked files). If present,
-  read it (and `discovery.out/discovery.env`, the machine-readable
+  Phase 0, check for `<state>/discovery/discovery-report.md` — /discover's
+  converged environment map, in the STATE DIRECTORY since v2.42.0 and never in
+  the checkout (`./setup.sh diagnose` prints the path; it names internal hosts,
+  so its contents stay in this conversation, never in tracked files). If
+  present, read it (and `discovery/discovery.env`, the machine-readable
   classifications) BEFORE eliciting: a discovery-verified mirror pre-fills
   the matching seam question (the operator confirms instead of recalling),
   and `DISCO_TLS_INTERCEPT=1` tells you the CA story must be settled before
   `fetch` hits it. Discovery output is EVIDENCE informing what you propose
   into `.env` — never source it or copy it wholesale, and a
-  `DISCO_INSECURE=1` diagnostic never translates into disabling TLS
+  `CC_TLS_INSECURE=1` diagnostic never translates into disabling TLS
   verification in any deploy config: the fix it indicates is trusting the
   corporate root CA.
 - **Existing install?** Before Phase 0, check: if the repo has an `upstream`
   branch (update.sh-initialized) — this is a deployment, not a fresh target.
-  Read the tail of `deploy/single/setup-log.txt` for where it last stopped.
+  Read the tail of `<state>/setup-log.txt` for where it last stopped
+  (`./setup.sh diagnose` prints the state dir first).
   A new release zip goes through `./update.sh import <zip>` → `plan` (show
   the operator the plan output and version gate) → on their explicit
   approval → `apply` — never through a fresh install, and never by
@@ -107,16 +110,24 @@ on both.
 
 ## Podman substrate
 
-### Phase 0 — elicit into `deploy/single/.env`
+### Phase 0 — elicit into the repo-root `.env`
+
+There is ONE answer file (v2.42.0, design record
+`docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md` D1):
+the repo-root `.env` holds the app's configuration AND the deployment's.
+`deploy/single/.env`, `deploy/single/env.example`, `web/.env` (on this profile)
+and `deploy/discovery.conf` are retired; on an existing install `setup.sh`
+migrates them into the root file itself and prints a `PASS env-migrate` line
+naming what moved. **It is the only file you ever write.**
 
 ```bash
-cd deploy/single
-cp env.example .env && chmod 600 .env    # skip the copy if .env already exists; still chmod
+cp .env.example .env && chmod 600 .env   # AT THE REPO ROOT; skip the copy if .env exists, still chmod
 ```
 
-Elicit each of these and write it into `.env` (never run the install steps
-yourself — `./setup.sh` owns everything mechanical, including generating the
-credentials further down the file):
+Elicit each of these and write it into that one `.env` — its deployment
+section, at the bottom, is the map of what this profile reads (never run the
+install steps yourself: `./setup.sh` owns everything mechanical, including
+generating the credentials):
 
 - **The LLM provider is NOT elicited into `.env` (2026-08-30).** Tell the
   operator up front what is coming: the `llm` phase brings LiteLLM up,
@@ -148,7 +159,7 @@ credentials further down the file):
   installs from `requirements.lock` instead of resolving).
 - **Air-gap mirrors, if `CC_AIRGAP=1`.** This is still elicitation — mirrors,
   CA bundles, and internal URLs are facts only the user knows, and `setup.sh`
-  can't discover them. If `deploy/discovery.out/` exists (see the briefing
+  can't discover them. If `<state>/discovery/` exists (see the briefing
   rule above), its report already verified these answers — offer each as a
   pre-fill for the operator to confirm; if it doesn't and the network is
   restricted, propose running /discover first rather than eliciting blind.
@@ -156,8 +167,8 @@ credentials further down the file):
   container registry mirror) and anything `deploy/AIRGAP.md` calls for (read
   it now if air-gapped). Reachability itself is `setup.sh preflight`'s job —
   its `package-indexes` check reports PASS/WARN/FAIL; you don't probe by hand.
-- **Integration choices** (these still feed the ROOT `.env` in the `app`
-  phase, not `deploy/single/.env` — collect now, write later):
+- **Integration choices** (the same file as everything above since v2.42.0 —
+  write them straight in, or collect now and write before the `app` phase):
   - **Network trust** — ask ONCE, before Jira/Confluence, if either is
     self-hosted: does reaching it need a client cert (mTLS) or a private CA
     bundle, or does plain HTTPS work? One shared seam
@@ -204,9 +215,9 @@ credentials further down the file):
     `central_command/runtime/packs.py` actually defines rather than promising
     from memory.
 
-Gate: every ELICITED variable above is in `deploy/single/.env` (or explicitly
+Gate: every ELICITED variable above is in the repo-root `.env` (or explicitly
 declined and recorded), and the integration choices are noted for the `app`
-phase.
+phase. Nothing else in the tree was touched — `git status` should be clean.
 
 ### Phase 1 — run `./setup.sh`
 
@@ -241,11 +252,12 @@ output; interpret it the same way.
 **On any non-zero exit — stop. This is the contract, not advice:**
 
 1. Optionally run the read-only rungs: `./setup.sh diagnose` (writes
-   `setup-diagnostics.txt` — pod/container states, last 100 log lines per
-   pod, `verify.sh` output, tool versions, `.env` key NAMES only) and read
-   the tail of `setup-log.txt`. For a network-shaped failure (fetch
+   `<state>/setup-diagnostics.txt` — the state dir path first, then
+   pod/container states, last 100 log lines per pod, `verify.sh` output, tool
+   versions, `.env` key NAMES only) and read
+   the tail of `<state>/setup-log.txt`. For a network-shaped failure (fetch
    timeouts, TLS/cert errors, 407s, registry pull failures), also read
-   `deploy/discovery.out/` if it exists — the report for the prescription,
+   `<state>/discovery/` if it exists — the report for the prescription,
    `raw/<key>.*` for the evidence — before proposing a cause; discovery
    already classified the failure mode you are looking at. If it does not
    exist and the failure smells like a restricted network, the proposal to
@@ -529,6 +541,7 @@ cc-graph-bolt cc-sandbox-runner cc-backup.timer`. Same `.env`-backup
 reminder, for `deploy/pi/.env`. For a FULLY-clean slate, also purge the
 gitignored leftovers a manifest wipe misses — the minted
 `~/.cc-*.kubeconfig` files (stale tokens outlive their namespaces) and the
-podman profile's litter in a shared checkout (`deploy/single/.env` — back it
-up first — plus its rendered yamls and `setup-diagnostics.txt`); the full
+podman profile's litter in a shared checkout — since v2.42.0 only what a
+PRE-v2.42.0 install left behind (`deploy/single/.env` — back it up first —
+plus its rendered yamls and `setup-diagnostics.txt`); the full
 list is `deploy/k3s/README.md` §8's purge block.

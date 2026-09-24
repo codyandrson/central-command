@@ -93,18 +93,38 @@ permanent.
 
 ## Install
 
-**Answers in `.env`, then one command.** `setup.sh` is the whole install; the
-agent's job is to elicit the answers, read the result, and diagnose a failure
-— never to compose the commands (design record
+**Answers in ONE `.env`, then one command.** `setup.sh` is the whole install;
+the agent's job is to elicit the answers, read the result, and diagnose a
+failure — never to compose the commands (design record
 `docs/superpowers/specs/2026-08-25-deterministic-setup.md`).
 
+The answer file is the **repo-root `.env`** — the app's configuration and this
+profile's, in one file, since v2.42.0 (`docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md`,
+D1). There is no `deploy/single/.env` and no `deploy/single/env.example` any
+more; an existing install's is merged into the root file and moved aside
+automatically on the next `setup.sh` or `update.sh` run, which prints a
+`PASS env-migrate` line naming what moved. Compose is therefore always invoked
+with `--env-file <repo>/.env`: there is no `.env` beside `compose.yaml` for it
+to find, so a hand-run `podman compose` needs that flag too.
+
 ```bash
+cp .env.example .env   # AT THE REPO ROOT — then fill it in, see below
+chmod 600 .env
 cd deploy/single
-cp env.example .env    # then fill it in — see below
 ./setup.sh             # validate -> preflight -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
 ```
 
-What you must supply in `.env`: only the `CC_ENABLE_*` / `CC_AIRGAP` flags —
+Everything this install GENERATES — `setup-log.txt`, `setup-diagnostics.txt`,
+`installed.manifest`, the API and cockpit logs and pid files, the updater's
+working directory, discovery's report — lives in the **state directory**,
+outside the checkout (`CC_STATE_DIR`; default
+`${XDG_STATE_HOME:-~/.local/state}/central-command/<dir>-<hash>`, resolved and
+written back into `.env` on the first run). `./setup.sh diagnose` prints the
+path first and `./setup.sh status` shows it. `git status` is clean after every
+command.
+
+What you must supply in `.env` for the deployment: only the `CC_ENABLE_*` /
+`CC_AIRGAP` flags —
 and, behind a mirror or with no network, the seams under "Where every
 dependency comes from" (see below).
 Everything else is generated or measured. **The LLM provider is entered in
@@ -157,7 +177,7 @@ never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `re
 - nothing satisfying it → `FAIL` naming the constraint and what the mirror has.
 
 The resolved refs are written to `.env` as `CC_IMG_*` (compose.yaml reads
-them) and recorded in `installed.manifest`. **A `WARN`-level substitution plus
+them) and recorded in `$CC_STATE_DIR/installed.manifest`. **A `WARN`-level substitution plus
 a green `./setup.sh verify` is a supported install** — capability is proven by
 probes, not by version strings. One limit worth knowing: the three locally
 built images pin their base tag in the Dockerfile, so a substituted *base*
@@ -183,7 +203,7 @@ tells you which phase to re-run.
 ### When something fails
 
 ```bash
-./setup.sh diagnose        # writes setup-diagnostics.txt
+./setup.sh diagnose        # writes <state>/setup-diagnostics.txt (and prints the state dir first)
 ```
 
 Paste that file to Claude. It carries pod/container states, the last 100 log
@@ -202,7 +222,7 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh fetch       # acquire every external artifact up front (the one network phase)
 ./setup.sh llm         # secrets + LiteLLM (+speech) up + probe its aliases + measure CC_EMBED_DIM
 ./setup.sh stack       # assert the local images, then `compose up -d --wait` (+crawler, +n8n)
-./setup.sh app         # venv, editable install, the app's .env, mint the spine's virtual key, cockpit
+./setup.sh app         # venv, editable install, the derived .env values, mint the spine's virtual key, cockpit
 ./setup.sh verify      # verify.sh, then live, then the capability manifest
 ./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
 ./setup.sh boot        # asks your name (once), starts the API detached, checks the roster
@@ -238,10 +258,14 @@ waits in place for both:
    Executor performs **for real** against your local graph, so the demo needs
    no Jira and proves the whole spine.
 
-The API runs detached afterward (log: `deploy/single/uvicorn.log`), and so
+The API runs detached afterward (log: `$CC_STATE_DIR/uvicorn.log`), and so
 does the **cockpit server** — `web/server-dist`, the same Node process the k3s
-profile runs as `cc-nerve`, on `CC_COCKPIT_PORT` (3080), configured by
-`web/.env` (written on first boot: `PORT` + `GATEWAY_URL` → the API). The SPA
+profile runs as `cc-nerve`, on `CC_COCKPIT_PORT` (3080). `web/.env` is retired
+on this profile (v2.42.0): the boot phase EXPORTS `PORT`, `GATEWAY_URL` and
+`CC_UPDATE_BACKEND=api` into the node process instead, which is exactly
+equivalent — the server's `dotenv/config` never overrides a variable already in
+its environment — and leaves the checkout clean. (The k3s profile still writes
+`web/.env`; there the file is `cc-nerve`'s.) The SPA
 uvicorn serves on 8080 is NOT the cockpit: every panel is a route or a
 WebSocket proxy the Node server owns, so 8080 alone sits at CONNECTING with
 404s (2026-09-17 Windows run). `./setup.sh stop` stops both and PROVES the
@@ -277,8 +301,8 @@ exit is a reviewed `mcp.sync_source`), but the kernel boundary is the host's.
 ### Verifying Atlassian connectivity (Jira / Confluence)
 
 Jira and Confluence are configured in the ROOT `.env` (`CC_JIRA_*` /
-`CC_CONFLUENCE_*`, documented in `.env.example`), not in
-`deploy/single/.env`. Both products ship in two flavors and the flavor is a
+`CC_CONFLUENCE_*`, documented in `.env.example`) — which since v2.42.0 is the
+same file as everything else here. Both products ship in two flavors and the flavor is a
 real fork, not a login difference: **Cloud** serves Jira REST v3 and
 Confluence v2, **Server/Data Center** serves Jira REST v2 and Confluence v1
 only — different rich-text, search and listing shapes, and on Jira DC no
@@ -357,8 +381,9 @@ release source. The apply is performed by `update-run.sh`, a detached runner
 the API spawns: it runs `./setup.sh stop`, `./update.sh apply` (all the same
 gates: version, DB backup, merge), `./setup.sh boot`, health-checks, and
 rolls back automatically on failure. Its log is
-`deploy/single/.update/apply.log`; the dialog polls
-`deploy/single/.update/status.json` straight through the restart. A pause
+`$CC_STATE_DIR/update/apply.log`; the dialog polls
+`$CC_STATE_DIR/update/status.json` straight through the restart (the API hands
+the runner that path as `CC_UPDATE_DIR`, so both sides always agree). A pause
 that needs you (a fetch seam, the LiteLLM catalog) restarts the cockpit and
 tells you the exact command to finish with. The named subcommands remain for
 granular or agent-conducted flows:
@@ -385,8 +410,9 @@ Rules that will save you:
 
 - **Commit your local file tweaks to `local` as you make them.** An
   uncommitted edit is invisible to the merge; `plan` warns about it and
-  `apply` refuses until it is committed. (`.env`, `installed.manifest`,
-  `.venv` are gitignored and never part of this — they survive untouched.)
+  `apply` refuses until it is committed. (`.env` is gitignored and `.venv`
+  too; everything generated is outside the tree entirely — none of it is ever
+  part of a merge.)
 - **Conflicts are a stop, not a failure.** If your local change and the update
   touch the same lines, `apply` stops with git's normal conflict markers:
   resolve, `git add`, `git commit`, and **re-run `./update.sh apply`** — every
@@ -413,7 +439,7 @@ no podman secrets and no hand-created network any more.
 
 ## Things that will bite you
 
-**`LITELLM_SALT_KEY` and `N8N_ENCRYPTION_KEY` can never be rotated.** The first
+**`CC_LITELLM_SALT_KEY` and `N8N_ENCRYPTION_KEY` can never be rotated.** The first
 encrypts the stored LiteLLM virtual keys, the second decrypts the stored Gmail
 OAuth credential. Starting the same database under a different value leaves
 the rows present but undecryptable. `make-secrets.sh` generates them once and
@@ -440,8 +466,12 @@ model prefix itself should match `cc-default`'s pattern now.
 the pause process dies when your last login session ends and takes every
 container with it. Hit during validation over SSH.
 
-**Secrets live in `.env` and nowhere else.** Compose reads that file natively,
-so the old rendered `secrets.yaml` is gone. It is chmod'd 0600 (honored on
+**Secrets live in the repo-root `.env` and nowhere else.** Compose reads that
+file natively (`--env-file`), so the old rendered `secrets.yaml` is gone — and
+since v2.42.0 there is no second `.env` either. Where a credential is also the
+app's, it has ONE key, the `CC_` one: `CC_LLM_PROXY_ADMIN_KEY` (the proxy's
+`LITELLM_MASTER_KEY`), `CC_LITELLM_SALT_KEY`, `CC_NEO4J_PASSWORD`. Compose
+hands each to its container under the name that container wants. It is chmod'd 0600 (honored on
 Linux/macOS; on Windows/NTFS chmod is a silent no-op and the file relies on the
 user account's ACLs instead — `make-secrets.sh` reports which case applied) and
 gitignored. Never commit it, and never print its values.

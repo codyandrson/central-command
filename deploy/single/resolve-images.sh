@@ -26,9 +26,11 @@
 #                          proven by probes, not by version strings.
 #     nothing fits         FAIL naming the constraint and what the mirror has.
 #
-#   Output: CC_IMG_<NAME>=<host/path:tag> written into deploy/single/.env
-#   (compose.yaml reads them), plus deploy/single/installed.manifest — the
-#   provenance record, and phase 2's rollback record.
+#   Output: CC_IMG_<NAME>=<host/path:tag> written into the repo-root .env
+#   (compose.yaml reads them, via --env-file), plus
+#   $CC_STATE_DIR/installed.manifest — the provenance record, and phase 2's
+#   rollback record. Since v2.42.0 there is ONE answer file and NOTHING is
+#   written inside the checkout (2026-09-23 design record, D1 + D7).
 #
 #   Same output protocol and exit taxonomy as setup.sh:
 #     PASS|WARN|FAIL|USERACTION <check>: <message> on stdout, detail on stderr
@@ -41,10 +43,15 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$HERE/.env"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+# shellcheck source=../env-lib.sh
+. "$REPO_ROOT/deploy/env-lib.sh"
+ENV_FILE="$REPO_ROOT/.env"
 IMAGES="$HERE/images.txt"
-MANIFEST="$HERE/installed.manifest"
-LOGFILE="$HERE/setup-log.txt"
+# Resolved below, once --self-test is known: the self-test must touch NOTHING,
+# and resolving the state dir persists CC_STATE_DIR into .env.
+MANIFEST=""
+LOGFILE=""
 
 # Windows has no real python3: the WindowsApps stub answers `command -v` but
 # exits 49 — so probe by RUNNING it. $PY may be multiple words (the uv
@@ -59,17 +66,23 @@ DRY=0
 [[ "${1:-}" == "--dry-run" ]] && DRY=1
 SELFTEST=0
 [[ "${1:-}" == "--self-test" ]] && SELFTEST=1
+if (( ! SELFTEST )); then
+  STATE_DIR="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT")" || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  MANIFEST="$STATE_DIR/installed.manifest"
+  LOGFILE="$STATE_DIR/setup-log.txt"
+fi
 
 # ── output protocol (identical to setup.sh's) ───────────────────────────────
 FAILS=0; WARNS=0; ACTIONS=0
-logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" resolve "$*" >>"$LOGFILE" 2>/dev/null || true; }
+logline() { [[ -n "$LOGFILE" ]] || return 0; printf '%s %s %s\n' "$(date -u +%FT%TZ)" resolve "$*" >>"$LOGFILE" 2>/dev/null || true; }
 pass() { printf 'PASS %s: %s\n' "$1" "$2"; logline "PASS $1: $2"; }
 warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
 fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); logline "FAIL $1: $2"; }
 useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); logline "USERACTION $1: $2"; }
 note() { printf '%s\n' "$*" >&2; }
 
-(( SELFTEST )) || [[ -f "$ENV_FILE" ]] || { fail "answer-file" "$ENV_FILE not found — start from: cp env.example .env"; exit 1; }
+(( SELFTEST )) || [[ -f "$ENV_FILE" ]] || { fail "answer-file" "$ENV_FILE not found — start from: cp .env.example .env (at the repo root)"; exit 1; }
 [[ -f "$IMAGES" ]] || { fail "images-txt" "$IMAGES missing"; exit 1; }
 set -a
 # shellcheck disable=SC1090
@@ -328,11 +341,11 @@ if (( ! DRY )) && [[ -n "$MANIFEST_ROWS" ]]; then
     echo "# <ref> <tag> <digest> <locked|substituted> <resolved-at>"
     printf '%s' "$MANIFEST_ROWS"
   } >"$MANIFEST"
-  pass "installed-manifest" "wrote $(basename "$MANIFEST")"
+  pass "installed-manifest" "wrote $MANIFEST"
 fi
 
 if (( FAILS )); then
-  useraction "resolve-images" "$FAILS image(s) could not be resolved — fix the seam(s) named above in deploy/single/.env and re-run: ./setup.sh fetch (deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams)"
+  useraction "resolve-images" "$FAILS image(s) could not be resolved — fix the seam(s) named above in the repo-root .env and re-run: ./setup.sh fetch (deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams)"
 fi
 (( ACTIONS )) && exit 3
 (( FAILS )) && exit 1

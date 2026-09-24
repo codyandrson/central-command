@@ -20,15 +20,16 @@
 #   PHASES — each a subcommand, each individually re-runnable via the SAME
 #   code path as the full run (kubeadm's shape):
 #
-#     validate    offline check of .env. No side effects.
+#     validate    offline check of .env (the repo-root one — THE answer file
+#                 since v2.42.0; deploy/single/.env is retired). No side effects.
 #     preflight   named environment checks. No side effects.
 #     fetch       acquire every dependency (public or mirror) — the only phase
 #                 that needs the network; stops for the operator per artifact.
 #     llm         secrets + LiteLLM up + probe its aliases + MEASURE the
 #                 embedding dimension into .env
 #     stack       assert the local images + bring the core stack up (compose)
-#     app         venv, editable install, root .env, mint the spine's virtual
-#                 key, cockpit build
+#     app         venv, editable install, the derived .env values, mint the
+#                 spine's virtual key, cockpit build
 #     verify      verify.sh (deployed) then live, then the capability manifest
 #     test        the pytest gate, via the venv (no activation stumbles)
 #     boot        elicit the operator's name (once), start the API detached,
@@ -38,7 +39,7 @@
 #
 #     stop        stop the API that `boot` started
 #     status      re-run postconditions only, nothing mutating
-#     diagnose    write setup-diagnostics.txt for pasting to Claude
+#     diagnose    write <state>/setup-diagnostics.txt for pasting to Claude
 #
 #   No argument = ALL TEN phases in order — zero to a working, human-approved
 #   demo in one command (2026-08-28), stopping at the first hard failure or
@@ -52,8 +53,11 @@
 #     exit 0   clean · 1 hard failure · 2 completed with warnings
 #              · 3 stopped for USER ACTION (the operator's move, not an error)
 #     log      every check line is also appended, timestamped, to
-#              deploy/single/setup-log.txt — the durable history a re-run
-#              (or a diagnosing agent) reads first
+#              $CC_STATE_DIR/setup-log.txt — the durable history a re-run
+#              (or a diagnosing agent) reads first. NOTHING this script writes
+#              lands inside the checkout except the answer file itself
+#              (2026-09-23 design record, D7) — so `git status` is clean after
+#              every command and an update never merges around a log file.
 #
 #   Secret VALUES are never printed. Keys are referred to by NAME.
 # ============================================================================
@@ -65,8 +69,13 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-ENV_FILE="$HERE/.env"
-APP_ENV="$REPO_ROOT/.env"
+# ONE answer file (2026-09-23 design record, D1): the repo-root .env holds the
+# app's configuration AND this profile's. deploy/single/.env is retired and is
+# migrated into it by load_env below. compose is always invoked with
+# --env-file "$ENV_FILE" — it has no .env of its own to find any more.
+ENV_FILE="$REPO_ROOT/.env"
+# shellcheck source=../env-lib.sh
+. "$REPO_ROOT/deploy/env-lib.sh"
 # Python on Windows encodes a PIPED stdout in the ANSI code page, so the em
 # dashes in register-models.py's operator banner reached the log as cp1252
 # bytes inside otherwise-UTF-8 output (2026-09-03 Windows run: `�`).
@@ -88,7 +97,11 @@ done
 # phase after acting; every phase is idempotent so that always converges.
 FAILS=0; WARNS=0; ACTIONS=0
 CURPHASE=""
-LOGFILE="$HERE/setup-log.txt"
+# Both resolved by init_state() before the first log line — the state
+# directory is where every generated file goes (D7), and it is not knowable
+# until .env has been consulted for CC_STATE_DIR.
+STATE_DIR=""
+LOGFILE=""
 logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "${CURPHASE:-run}" "$*" >>"$LOGFILE" 2>/dev/null || true; }
 pass() { printf 'PASS %s: %s\n' "$1" "$2"; logline "PASS $1: $2"; }
 warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
@@ -120,6 +133,19 @@ wait_http() { # wait_http <url> <seconds>
   done
 }
 
+# ── the state directory (D7) ────────────────────────────────────────────────
+# Resolved ONCE per run, before anything is logged. cc_state_dir creates it
+# 0700 and, on the first run, writes the resolved absolute path back into .env
+# — the one .env write a read-only command makes, so bash and Python never
+# disagree about the spelling of a Windows path.
+init_state() {
+  [[ -n "$STATE_DIR" ]] && return 0
+  STATE_DIR="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT")" \
+    || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  LOGFILE="$STATE_DIR/setup-log.txt"
+}
+
 # ── the compose provider ────────────────────────────────────────────────────
 # `podman compose` on the targets; `docker compose` is the dev-box fallback.
 # Detected once, by RUNNING it (the same reason $PY is probed by running):
@@ -135,11 +161,19 @@ compose_detect() {
   done
   return 1
 }
-# Every compose call goes through here: one file, one profile set, one place
-# to get the flags right.
+# Every compose call goes through here: one file, one answer file, one profile
+# set, one place to get the flags right.
+#
+# --env-file is MANDATORY now and it goes BEFORE -f: compose's default
+# environment file is the one beside the compose file, and that file
+# (deploy/single/.env) no longer exists. Both providers declare --env-file and
+# -f on the same top-level parser — docker compose's CLI options are
+# order-independent and podman-compose's argparse takes them in any order
+# before the subcommand (podman_compose.py, verified 2026-09-23) — so this
+# position works on both, and anyone running compose BY HAND must pass it too.
 compose() { # compose <args...>
   compose_detect || { fail "compose" "no compose provider — install podman-compose (or the docker compose plugin)"; return 1; }
-  "${COMPOSE_BIN[@]}" -f "$HERE/compose.yaml" "$@"
+  "${COMPOSE_BIN[@]}" --env-file "$ENV_FILE" -f "$HERE/compose.yaml" "$@"
 }
 # CC_ENABLE_* -> --profile flags, into the global PROFILE_FLAGS. The sandbox is
 # deliberately absent: it has no container here (its containers are created on
@@ -156,7 +190,35 @@ compose_profile_flags() {
 
 # ── .env helpers ────────────────────────────────────────────────────────────
 load_env() {
-  [[ -f "$ENV_FILE" ]] || { fail "answer-file" "$ENV_FILE not found — start from: cp env.example .env"; return 1; }
+  init_state
+  if [[ ! -f "$ENV_FILE" ]]; then
+    fail "answer-file" "$ENV_FILE not found — start from: cp .env.example .env (at the repo root; since v2.42.0 there is ONE answer file and deploy/single/.env is not it)"
+    return 1
+  fi
+  # MIGRATION, before anything reads a value: an install made before v2.42.0
+  # keeps its answers in deploy/single/.env (plus web/.env and
+  # deploy/discovery.conf). Each is folded into $ENV_FILE under the CC_ name
+  # where the same fact already had one, then MOVED to
+  # $STATE_DIR/migrated/ — never deleted, never printed. A no-op once the old
+  # files are gone, which is why it can run at the top of every phase.
+  local mig
+  if ! mig="$(cc_migrate_legacy_env "$ENV_FILE" "$REPO_ROOT" "$STATE_DIR")"; then
+    fail "env-migrate" "could not migrate the retired config files into $ENV_FILE — check the permissions on $STATE_DIR"
+    return 1
+  fi
+  if [[ -n "$mig" ]]; then
+    pass "env-migrate" "$mig"
+  fi
+  # Sourceable, before the first source. An unquoted value with a space is a
+  # COMMAND under `set -a; . .env` — the variable ends up unset here and the
+  # `set -e` scripts (make-secrets.sh, verify.sh, the build scripts) abort
+  # outright, with a message that names a word from the value rather than the
+  # key. Caught once, here, by NAME.
+  local bad; bad="$(cc_env_unquoted_keys "$ENV_FILE")"
+  if [[ -n "$bad" ]]; then
+    fail "answer-file" "these keys in .env have unquoted values containing a space (or a shell metacharacter) — the deploy scripts SOURCE this file, so each would be run as a command instead of assigned. Wrap the value in double quotes: $bad"
+    return 1
+  fi
   set -a
   # shellcheck disable=SC1090
   . "$ENV_FILE"
@@ -176,6 +238,11 @@ load_env() {
   : "${CC_ENABLE_SANDBOX:=1}"
   : "${CC_ENABLE_SPEECH:=1}"
   : "${CC_AIRGAP:=0}"
+  : "${CC_TLS_INSECURE:=0}"
+  # Never silent, never a PASS (2026-09-23 design record, D4). Today only
+  # deploy/discover.sh acts on it; every run that SEES it says so.
+  [[ "$CC_TLS_INSECURE" == "1" ]] && \
+    warn "tls-insecure" "CC_TLS_INSECURE=1 — TLS verification is disabled for deploy/discover.sh's probes. That is a DIAGNOSTIC, never a fix: trust the corporate CA through CC_CA_BUNDLE instead."
   # Tool-facing exports. uv reads no PIP_* variable (and UV_INDEX_URL is
   # deprecated), npm reads npm_config_* case-insensitively — so one seam each,
   # fanned out here to every name the tools actually look at.
@@ -197,7 +264,7 @@ load_env() {
     # (CRYPT_E_REVOCATION_OFFLINE, 2026-09-18 Windows run). A setup-owned
     # .curlrc relaxes that to best-effort for every curl this driver spawns.
     if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
-      mkdir -p "$HERE/.curl" && printf 'ssl-revoke-best-effort\n' >"$HERE/.curl/.curlrc" && export CURL_HOME="$HERE/.curl"
+      mkdir -p "$STATE_DIR/curl" && printf 'ssl-revoke-best-effort\n' >"$STATE_DIR/curl/.curlrc" && export CURL_HOME="$STATE_DIR/curl"
     fi
   fi
   if [[ -n "${CC_PROXY:-}" ]]; then
@@ -210,52 +277,26 @@ load_env() {
   return 0
 }
 
-# Read one key's value out of a dotenv file WITHOUT sourcing it (the app's
-# .env is not ours to execute). Last assignment wins, matching dotenv readers.
-get_kv() { # get_kv <file> <key>
-  local f="$1" k="$2" line out=""
-  [[ -f "$f" ]] || { printf ''; return 0; }
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"   # a CRLF file (Windows checkout) must not turn "" into "\r"
-    [[ "$line" == "$k="* ]] && out="${line#*=}"
-  done <"$f"
-  printf '%s' "$out"
-}
-
-# Set one key, in place, preserving the file's mode and every comment.
-# printf/read are BUILTINS, so unlike `sed -i s|..|VALUE|` the value never
-# appears in an argv and never shows up in `ps`.
-set_kv() { # set_kv <file> <key> <value>
-  local f="$1" k="$2" v="$3" tmp line found=0
-  tmp="$(mktemp)" || return 1
-  chmod 600 "$tmp" 2>/dev/null
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"
-    if [[ "$line" == "$k="* ]]; then
-      printf '%s=%s\n' "$k" "$v" >>"$tmp"; found=1
-    else
-      printf '%s\n' "$line" >>"$tmp"
-    fi
-  done <"$f"
-  (( found )) || printf '%s=%s\n' "$k" "$v" >>"$tmp"
-  cat "$tmp" >"$f"     # rewrite in place: keeps the mode and the inode
-  rm -f "$tmp"
-}
-
-# A value is "unset" for our purposes if it is empty or still a template
-# placeholder. CHANGEME is the app .env.example's marker.
-is_placeholder() { [[ -z "$1" || "$1" == *CHANGEME* ]]; }
+# get_kv / set_kv / is_placeholder live in deploy/env-lib.sh, because the
+# migration and the state-dir resolution need them before this file's own
+# helpers would be available, and update.sh needs the same three.
+get_kv()         { cc_get_kv "$@"; }
+set_kv()         { cc_set_kv "$@"; }
+is_placeholder() { cc_is_placeholder "$@"; }
 
 # Set only when the current value is empty/placeholder — the operator's own
 # edits are never overwritten. This is what makes the app phase re-runnable.
+# What it writes now is always a DERIVED value (one composed from other keys
+# in the same file), never a copy of a second file: with one answer file, the
+# same fact has one key.
 set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
   local cur; cur="$(get_kv "$1" "$2")"
   if [[ -z "$3" ]] && is_placeholder "$cur"; then
-    warn "$4" "$2 has no value to copy — the source variable is empty in deploy/single/.env"
+    warn "$4" "$2 has no value to derive — the keys it is composed from are empty in .env"
     return 0
   fi
   if is_placeholder "$cur"; then
-    set_kv "$1" "$2" "$3" && pass "$4" "$2 set in $(basename "$(dirname "$1")")/.env"
+    set_kv "$1" "$2" "$3" && pass "$4" "$2 derived into .env"
   else
     pass "$4" "$2 already set — left alone"
   fi
@@ -266,20 +307,21 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
 # ─────────────────────────────────────────────────────────────────────────────
 phase_validate() {
   load_env || return 1
-  pass "answer-file" "$ENV_FILE present"
+  pass "answer-file" "$ENV_FILE present (the one answer file — app and deployment)"
 
-  # The LLM provider (endpoint, key, model ids) is NOT an answer here any
-  # more (2026-08-30): it is entered in the LiteLLM UI during the llm phase's
-  # pause and stored in the proxy's database. A leftover from an older .env
-  # is harmless but misleading, so say so.
+  # The UPSTREAM provider (its endpoint, key and model ids) is NOT an answer
+  # here (2026-08-30): it is entered in the LiteLLM UI during the llm phase's
+  # pause and stored in the proxy's database. CC_LLM_BASE_URL / CC_LLM_API_KEY
+  # are a different fact and belong in this file — they are how the APP reaches
+  # the proxy. Only the retired upstream keys are called out.
   local v stale=""
-  for v in CC_LLM_BASE_URL CC_LLM_API_KEY CC_CHAT_MODEL CC_EMBED_MODEL CC_EMBED_BASE_URL CC_EMBED_API_KEY; do
+  for v in CC_CHAT_MODEL CC_EMBED_MODEL CC_EMBED_BASE_URL CC_EMBED_API_KEY; do
     [[ -n "${!v:-}" ]] && stale="$stale $v"
   done
   if [[ -n "$stale" ]]; then
-    warn "provider-in-env" "ignored (the provider is configured in the LiteLLM UI now):$stale"
+    warn "provider-in-env" "ignored (the upstream provider is configured in the LiteLLM UI now):$stale"
   else
-    pass "provider-in-env" "no provider settings in .env — they belong in the LiteLLM UI"
+    pass "provider-in-env" "no retired upstream-provider settings in .env"
   fi
 
   # Ports: numeric, in range, and distinct — two services on one hostPort is a
@@ -324,7 +366,7 @@ phase_validate() {
     if compose --profile n8n --profile crawler --profile speech config >/dev/null 2>&1; then
       pass "compose-config" "compose.yaml is valid with this .env (all profiles)"
     else
-      fail "compose-config" "compose.yaml does not validate — see: $(printf '%s ' "${COMPOSE_BIN[@]}")-f deploy/single/compose.yaml config"
+      fail "compose-config" "compose.yaml does not validate — see: $(printf '%s ' "${COMPOSE_BIN[@]}")--env-file .env -f deploy/single/compose.yaml config"
     fi
   else
     warn "compose-config" "no compose provider here to validate compose.yaml with (preflight checks for one)"
@@ -473,15 +515,16 @@ phase_preflight() {
   elif [[ "$CC_AIRGAP" == "1" ]]; then
     pass "package-indexes" "unreachable, as expected with CC_AIRGAP=1 — fetch will say per artifact"
   else
-    warn "package-indexes" "unreachable:$(printf ' %s' $probes) — run deploy/discover.sh to map this network, then set the mirror seams in .env (see env.example); deploy/AIRGAP.md"
+    warn "package-indexes" "unreachable:$(printf ' %s' $probes) — run deploy/discover.sh to map this network, then set the mirror seams in .env (see .env.example's deployment section); deploy/AIRGAP.md"
   fi
 
-  # Discovery cross-check (read-only). If /discover ran, its discovery.env
-  # records the observed failure CLASS per resource (classes only — no
-  # hostnames). It is EVIDENCE, never authority: a mismatch WARNs and names
-  # the seam; the decision stays in .env. The conf file (operator's probe
-  # answers, including diagnostic flags) is deliberately never read here.
-  local denv="$REPO_ROOT/deploy/discovery.out/discovery.env"
+  # Discovery cross-check (read-only). If /discover ran, its discovery.env —
+  # in the state directory since v2.42.0, never in the checkout — records the
+  # observed failure CLASS per resource (classes only, no hostnames). It is
+  # EVIDENCE, never authority: a mismatch WARNs and names the seam; the
+  # decision stays in .env, which is now also where the prober's own inputs
+  # live (deploy/discovery.conf is retired).
+  local denv="$STATE_DIR/discovery/discovery.env"
   if [[ -f "$denv" ]]; then
     dcls() { sed -n "s/^DISCO_$1=\"\(.*\)\"\$/\1/p" "$denv" | tail -1; }
     local pair dk seam cls dmiss=""
@@ -496,7 +539,7 @@ phase_preflight() {
     [[ "$(dcls TLS_INTERCEPT)" == "1" && -z "${CC_CA_BUNDLE:-}" ]] \
       && dmiss="$dmiss tls-intercept->CC_CA_BUNDLE"
     if [[ -n "$dmiss" ]]; then
-      warn "discovery-crosscheck" "discovery observed failures with no seam set:$dmiss — the prescription is in deploy/discovery.out/discovery-report.md"
+      warn "discovery-crosscheck" "discovery observed failures with no seam set:$dmiss — the prescription is in $STATE_DIR/discovery/discovery-report.md"
     else
       pass "discovery-crosscheck" "discovery's observations and the .env seams agree"
     fi
@@ -537,7 +580,7 @@ fetch_images() {
   "$HERE/resolve-images.sh" || rc=$?
   case "$rc" in
     0) pass "resolve-images" "every image resolved to its locked tag" ;;
-    2) pass "resolve-images" "resolved, with substitutions — see the WARN lines above and installed.manifest" ;;
+    2) pass "resolve-images" "resolved, with substitutions — see the WARN lines above and $STATE_DIR/installed.manifest" ;;
     *) fail "resolve-images" "image resolution failed (exit $rc) — the FAIL/USERACTION lines above name the seam"; return 1 ;;
   esac
   # resolve-images.sh writes CC_IMG_* into .env; re-read so this shell has them.
@@ -562,7 +605,7 @@ fetch_local() { # fetch_local <check> <ref> <build-script> <seams>
   if "$script" >&2; then
     pass "$check" "$ref built"
   else
-    fail "$check" "$ref failed to build against your sources — seams: $seams (see env.example)"
+    fail "$check" "$ref failed to build against your sources — seams: $seams (see .env.example's deployment section)"
   fi
 }
 
@@ -623,7 +666,7 @@ phase_fetch() {
   fi
 
   if (( FAILS )); then
-    useraction "fetch" "$FAILS artifact(s) could not be acquired — fix the seam(s) named above in deploy/single/.env and re-run ./setup.sh fetch (acquired ones fast-forward); deploy/discover.sh maps what this network can reach, deploy/AIRGAP.md maps the seams"
+    useraction "fetch" "$FAILS artifact(s) could not be acquired — fix the seam(s) named above in the repo-root .env and re-run ./setup.sh fetch (acquired ones fast-forward); deploy/discover.sh maps what this network can reach, deploy/AIRGAP.md maps the seams"
   fi
 }
 
@@ -643,9 +686,9 @@ llm_gate() { # llm_gate <what-failed>
   note "deployed. No agent registers or edits models on your behalf."
   note ""
   note "  UI:           http://127.0.0.1:${CC_LITELLM_PORT}/ui   (Models + Endpoints)"
-  note "  login:        username 'admin', password = LITELLM_MASTER_KEY"
+  note "  login:        username 'admin', password = CC_LLM_PROXY_ADMIN_KEY"
   note "                (or UI_USERNAME/UI_PASSWORD if set in .env)"
-  note "                (the value is in deploy/single/.env — not printed here)"
+  note "                (the value is in the repo-root .env — not printed here)"
   note ""
   note "  For each alias listed above, edit the row: replace every PLACEHOLDER"
   note "  (the model id after the prefix, the api_base host) and enter the API"
@@ -682,10 +725,10 @@ llm_gate() { # llm_gate <what-failed>
 phase_llm() {
   load_env || return 1
 
-  step "secrets" "credentials generated into deploy/single/.env" "$HERE/make-secrets.sh" || return 1
-  # make-secrets.sh may have generated LITELLM_MASTER_KEY into the .env we
-  # sourced before it; compose reads that file itself, and the register step
-  # below needs the key in this environment.
+  step "secrets" "credentials generated into the repo-root .env" "$HERE/make-secrets.sh" || return 1
+  # make-secrets.sh may have generated CC_LLM_PROXY_ADMIN_KEY into the .env we
+  # sourced before it; compose reads that file itself (--env-file), and the
+  # register step below needs the key in this environment.
   load_env || return 1
 
   # `up -d` converges rather than collides on a re-run — a container whose
@@ -720,9 +763,14 @@ phase_llm() {
   # provider goes) and an existing one is never touched. It exits 3 on a
   # fresh catalog, on a placeholder left in, or on a broken invariant — each
   # is the operator's, so it is the USER-ACTION gate, before anything else
-  # deploys. LITELLM_MASTER_KEY is in the environment from load_env.
+  # deploys.
+  #
+  # register-models.py is SHARED with the k3s profile and reads the admin
+  # credential as LITELLM_MASTER_KEY, so the one fact is handed over under the
+  # name that script looks for — the seam, rather than a second key.
   local rrc=0
   CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
+  LITELLM_MASTER_KEY="${CC_LLM_PROXY_ADMIN_KEY:-}" \
     $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" >&2 || rrc=$?
   case "$rrc" in
     0) pass "catalog" "every required alias is registered, filled in and consistent" ;;
@@ -804,7 +852,7 @@ phase_llm() {
     return 1
   fi
   set_kv "$ENV_FILE" CC_EMBED_DIM "$dim"
-  pass "embed-dimension" "CC_EMBED_DIM=${dim} recorded in deploy/single/.env"
+  pass "embed-dimension" "CC_EMBED_DIM=${dim} recorded in .env"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -837,7 +885,7 @@ phase_stack() {
   # The dimension is written into the Neo4j vector index and is effectively
   # permanent, so the graph may not be created before it has been MEASURED.
   [[ -n "${CC_EMBED_DIM:-}" ]] || {
-    fail "embed-dimension" "CC_EMBED_DIM is empty in deploy/single/.env — run: ./setup.sh llm (it measures it through the cc-embedding alias)"
+    fail "embed-dimension" "CC_EMBED_DIM is empty in .env — run: ./setup.sh llm (it measures it through the cc-embedding alias)"
     return 1
   }
 
@@ -911,34 +959,30 @@ phase_app() {
       in_repo uv pip install -e ".[dev,runtime]" || return 1
   fi
 
-  local fresh=0
-  if [[ -f "$APP_ENV" ]]; then
-    pass "app-env" "the app's .env already exists — only empty values will be filled"
+  # There is no second .env to create any more (v2.42.0): load_env required
+  # the one answer file before this phase could run. Its MODE is still worth
+  # asserting — on this profile it holds every credential in the install — and
+  # chmod is a silent no-op on NTFS (2026-08-21 Windows validation, W8), so the
+  # mode is verified rather than claimed.
+  chmod 600 "$ENV_FILE" 2>/dev/null
+  local mode; mode="$(stat -c %a "$ENV_FILE" 2>/dev/null || echo unknown)"
+  if [[ "$mode" == "600" ]]; then
+    pass "app-env" ".env is the one answer file, mode 0600"
   else
-    cp "$REPO_ROOT/.env.example" "$APP_ENV" || { fail "app-env" "could not create $APP_ENV"; return 1; }
-    chmod 600 "$APP_ENV" 2>/dev/null
-    fresh=1
-    # chmod is a silent no-op on NTFS (2026-08-21 Windows validation, W8) —
-    # verify the mode actually took rather than claiming it.
-    local mode; mode="$(stat -c %a "$APP_ENV" 2>/dev/null || echo unknown)"
-    if [[ "$mode" == "600" ]]; then
-      pass "app-env" "created the app's .env from .env.example (0600)"
-    else
-      warn "app-env" "created the app's .env from .env.example, but the filesystem did not apply 0600 (Windows/NTFS) — it relies on the account's ACLs"
-    fi
+    warn "app-env" ".env is the one answer file, but the filesystem did not apply 0600 (Windows/NTFS) — it relies on the account's ACLs"
   fi
 
   # The spine gets its OWN LiteLLM virtual key, never the master key: a leak of
   # the agents' credential must not be able to reconfigure the proxy.
-  local cur_key; cur_key="$(get_kv "$APP_ENV" CC_LLM_API_KEY)"
+  local cur_key; cur_key="$(get_kv "$ENV_FILE" CC_LLM_API_KEY)"
   if is_placeholder "$cur_key"; then
-    [[ -n "${LITELLM_MASTER_KEY:-}" ]] || { fail "mint-key" "LITELLM_MASTER_KEY is missing from deploy/single/.env — run the llm phase first"; return 1; }
+    [[ -n "${CC_LLM_PROXY_ADMIN_KEY:-}" ]] || { fail "mint-key" "CC_LLM_PROXY_ADMIN_KEY is missing from .env — run the llm phase first (make-secrets.sh generates it)"; return 1; }
     local body minted
     # The master key travels via `-H @-` (stdin), so it is not visible in `ps`
     # while the request runs. NOT `-H @<(...)`: native Windows curl cannot
     # open MSYS's /proc fd paths (found live 2026-08-28). No `tags` field:
     # tags are an Enterprise feature and their presence 403s a community proxy.
-    body="$(printf 'Authorization: Bearer %s\n' "$LITELLM_MASTER_KEY" | \
+    body="$(printf 'Authorization: Bearer %s\n' "$CC_LLM_PROXY_ADMIN_KEY" | \
       curl -sS --fail-with-body -m 60 \
       -H @- \
       -H 'Content-Type: application/json' \
@@ -949,20 +993,22 @@ phase_app() {
       fail "mint-key" "/key/generate did not return a key — is the proxy up? (the response is NOT echoed; run ./setup.sh diagnose)"
       return 1
     fi
-    set_kv "$APP_ENV" CC_LLM_API_KEY "$minted"
+    set_kv "$ENV_FILE" CC_LLM_API_KEY "$minted"
     pass "mint-key" "minted a LiteLLM virtual key scoped to cc-default + cc-tts + cc-stt and stored it as CC_LLM_API_KEY"
   else
     pass "mint-key" "CC_LLM_API_KEY already set — not minting a second key (a key minted before v2.21.0 lacks cc-tts/cc-stt: add them to it in the proxy UI, or clear CC_LLM_API_KEY to re-mint)"
   fi
 
-  # Cross-file values: the same fact lives in two files, so copy it rather than
-  # ask the operator to keep them in sync by hand.
-  set_kv_if_unset "$APP_ENV" CC_LLM_PROXY_ADMIN_KEY "${LITELLM_MASTER_KEY:-}"  "app-admin-key"
-  set_kv_if_unset "$APP_ENV" CC_EMBED_ALIAS         "cc-embedding"             "app-embed-alias"
-  set_kv_if_unset "$APP_ENV" CC_EMBED_DIM           "${CC_EMBED_DIM:-}"        "app-embed-dim"
-  set_kv_if_unset "$APP_ENV" CC_NEO4J_PASSWORD      "${NEO4J_PASSWORD:-}"      "app-neo4j-password"
-  set_kv_if_unset "$APP_ENV" CC_LITELLM_SALT_KEY    "${LITELLM_SALT_KEY:-}"    "app-litellm-salt"
-  set_kv_if_unset "$APP_ENV" CC_LITELLM_DB_URL \
+  # DERIVED values — the last two things in .env nobody should have to type.
+  # Until v2.42.0 this block COPIED five values out of deploy/single/.env into
+  # the app's .env (CC_LLM_PROXY_ADMIN_KEY, CC_NEO4J_PASSWORD,
+  # CC_LITELLM_SALT_KEY, CC_EMBED_DIM and this URL). With one answer file the
+  # same fact has ONE key and there is nothing to copy: make-secrets.sh
+  # generates the CC_ names directly and the llm phase writes CC_EMBED_DIM
+  # where the app already reads it. What is left is genuinely COMPOSED from
+  # other keys in this same file.
+  set_kv_if_unset "$ENV_FILE" CC_EMBED_ALIAS "cc-embedding" "app-embed-alias"
+  set_kv_if_unset "$ENV_FILE" CC_LITELLM_DB_URL \
     "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD:-}@127.0.0.1:${CC_LITELLM_DB_PORT}/litellm" \
     "app-litellm-db-url"
 
@@ -1022,7 +1068,7 @@ capability_manifest() {
   echo "                 CRI-format /var/log/containers/*.log, which podman does"
   echo "                 not produce, so the collector needs a redesign rather"
   echo "                 than a port. Deferred deliberately. Use instead:"
-  echo "                   podman compose -f deploy/single/compose.yaml logs <service>"
+  echo "                   podman compose --env-file .env -f deploy/single/compose.yaml logs <service>"
   echo "                   ./setup.sh diagnose"
   [[ "$CC_ENABLE_SANDBOX" == "1" ]] || echo "     sandbox     disabled by CC_ENABLE_SANDBOX=0"
   [[ "$CC_ENABLE_CRAWLER" == "1" ]] || echo "     crawler     disabled by CC_ENABLE_CRAWLER=0 (rung-1 HTTP fetch still works)"
@@ -1052,7 +1098,7 @@ phase_verify() {
 is_tty() { [[ -t 0 ]]; }
 
 api_url() { # the app's own port, from the root .env when set
-  local p; p="$(get_kv "$APP_ENV" CC_API_PORT)"; printf 'http://127.0.0.1:%s' "${p:-8080}"
+  local p; p="$(get_kv "$ENV_FILE" CC_API_PORT)"; printf 'http://127.0.0.1:%s' "${p:-8080}"
 }
 api_up() { curl -fsS -m 5 "$(api_url)/health" >/dev/null 2>&1; }
 
@@ -1095,14 +1141,14 @@ phase_boot() {
     # CC_OPERATOR_NAME is the one value only a human can supply. On a
     # terminal, ask it here (elicitation IS allowed to be a prompt — it is
     # the script asking, deterministically); headless, the cockpit asks.
-    local opname; opname="$(get_kv "$APP_ENV" CC_OPERATOR_NAME)"
+    local opname; opname="$(get_kv "$ENV_FILE" CC_OPERATOR_NAME)"
     if is_placeholder "$opname"; then
       if is_tty; then
         note ""
         note "== one question before first boot =="
         read -rp "What should the agents call you? " opname
         [[ -n "$opname" ]] || { fail "operator-name" "no name given — first boot needs one"; return 1; }
-        set_kv "$APP_ENV" CC_OPERATOR_NAME "$opname"
+        set_kv "$ENV_FILE" CC_OPERATOR_NAME "$opname"
         pass "operator-name" "CC_OPERATOR_NAME recorded in the root .env"
       else
         # Headless: the cockpit asks on first run (v2.37.0) — gating here made
@@ -1114,14 +1160,14 @@ phase_boot() {
     fi
 
     local uv_bin; uv_bin="$(venv_uvicorn)" || { fail "boot-api" "uvicorn not in .venv — run: ./setup.sh app"; return 1; }
-    note "--> starting uvicorn detached (log: $HERE/uvicorn.log · stop: ./setup.sh stop)"
+    note "--> starting uvicorn detached (log: $STATE_DIR/uvicorn.log · stop: ./setup.sh stop)"
     ( cd "$REPO_ROOT" && nohup "$uv_bin" central_command.api.app:app --host 127.0.0.1 \
-        --port "$(api_url | sed 's/.*://')" >>"$HERE/uvicorn.log" 2>&1 &
-      echo $! >"$HERE/uvicorn.pid" )
+        --port "$(api_url | sed 's/.*://')" >>"$STATE_DIR/uvicorn.log" 2>&1 &
+      echo $! >"$STATE_DIR/uvicorn.pid" )
     if wait_http "$(api_url)/health" 90; then
       pass "boot-api" "API answering at $(api_url) (first boot hires the roster)"
     else
-      fail "boot-api" "API never answered /health — read $HERE/uvicorn.log"
+      fail "boot-api" "API never answered /health — read $STATE_DIR/uvicorn.log"
       return 1
     fi
   fi
@@ -1136,7 +1182,7 @@ phase_boot() {
   if [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )); then
     pass "boot-roster" "$n agents on the roster"
   else
-    fail "boot-roster" "the roster is empty — read $HERE/uvicorn.log (seed guard? database?)"
+    fail "boot-roster" "the roster is empty — read $STATE_DIR/uvicorn.log (seed guard? database?)"
     return 1
   fi
 
@@ -1144,23 +1190,29 @@ phase_boot() {
   # serves from web/dist: every panel is a route or a WebSocket proxy that
   # server owns, so the SPA alone sits at CONNECTING with 404s (2026-09-17
   # Windows run). On k3s it is the cc-nerve unit; here it is a second
-  # detached process, configured by web/.env exactly as the unit expects.
+  # detached process.
+  #
+  # web/.env is RETIRED on this profile (v2.42.0): the server's `dotenv/config`
+  # loads that file from cwd and does NOT override variables already present in
+  # the environment, so EXPORTING the three settings is exactly equivalent and
+  # keeps the checkout clean. The k3s profile still writes web/.env — there the
+  # file is cc-nerve's, not ours.
   local cport="${CC_COCKPIT_PORT:-3080}" curl_ok
   if [[ ! -f "$REPO_ROOT/web/server-dist/index.js" ]]; then
     warn "boot-cockpit" "web/server-dist is missing (node absent at build time?) — the API runs, the cockpit does not"
   elif curl -fsS -m 5 "http://127.0.0.1:${cport}/" >/dev/null 2>&1; then
     pass "boot-cockpit" "cockpit already answering at http://127.0.0.1:${cport} — not starting a second one"
   else
-    [[ -f "$REPO_ROOT/web/.env" ]] || printf 'PORT=%s\nGATEWAY_URL=%s\n' "$cport" "$(api_url)" >"$REPO_ROOT/web/.env"
-    # The API owns the update routes on this profile; the Node server proxies.
-    grep -q '^CC_UPDATE_BACKEND=' "$REPO_ROOT/web/.env" || printf 'CC_UPDATE_BACKEND=api\n' >>"$REPO_ROOT/web/.env"
-    note "--> starting the cockpit server detached (log: $HERE/cockpit.log · stop: ./setup.sh stop)"
-    ( cd "$REPO_ROOT/web" && nohup node server-dist/index.js >>"$HERE/cockpit.log" 2>&1 &
-      echo $! >"$HERE/cockpit.pid" )
+    note "--> starting the cockpit server detached (log: $STATE_DIR/cockpit.log · stop: ./setup.sh stop)"
+    # CC_UPDATE_BACKEND=api: the API owns the update routes on this profile and
+    # the Node server only proxies them.
+    ( cd "$REPO_ROOT/web" && PORT="$cport" GATEWAY_URL="$(api_url)" CC_UPDATE_BACKEND=api \
+        nohup node server-dist/index.js >>"$STATE_DIR/cockpit.log" 2>&1 &
+      echo $! >"$STATE_DIR/cockpit.pid" )
     if wait_http "http://127.0.0.1:${cport}/" 60; then
       pass "boot-cockpit" "cockpit answering at http://127.0.0.1:${cport} (proxies to $(api_url))"
     else
-      fail "boot-cockpit" "the cockpit server never answered — read $HERE/cockpit.log"
+      fail "boot-cockpit" "the cockpit server never answered — read $STATE_DIR/cockpit.log"
       return 1
     fi
   fi
@@ -1170,15 +1222,19 @@ phase_boot() {
   # a process that answers is left alone), the same mechanism the podman
   # machine itself starts with. Linux hosts have systemd units for this.
   if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && command -v schtasks >/dev/null 2>&1; then
-    local wrapper="$HERE/cc-boot.cmd" bashw
+    local wrapper="$STATE_DIR/cc-boot.cmd" bashw
     bashw="$(cygpath -w "$(command -v bash)")"
-    printf '@echo off\r\n"%s" -lc "cd '\''%s'\'' && ./setup.sh boot >> boot-at-logon.log 2>&1"\r\n' "$bashw" "$HERE" >"$wrapper"
+    # The wrapper and its log live in the state dir with everything else
+    # generated; the `cd` is still the checkout, because that is where
+    # setup.sh is.
+    printf '@echo off\r\n"%s" -lc "cd '\''%s'\'' && ./setup.sh boot >> '\''%s/boot-at-logon.log'\'' 2>&1"\r\n' \
+      "$bashw" "$HERE" "$STATE_DIR" >"$wrapper"
     # An onlogon task needs an elevated shell ("Access is denied" otherwise,
     # 2026-09-18); the user's Startup folder needs nothing — same moment, a
     # console window while boot runs. Task first, Startup folder as the fallback.
     local startup="$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup"
     if schtasks //create //f //tn cc-boot //sc onlogon //tr "$(cygpath -w "$wrapper")" >/dev/null 2>&1; then
-      pass "boot-at-logon" "scheduled task cc-boot re-runs ./setup.sh boot at every logon (log: $HERE/boot-at-logon.log)"
+      pass "boot-at-logon" "scheduled task cc-boot re-runs ./setup.sh boot at every logon (log: $STATE_DIR/boot-at-logon.log)"
     elif [[ -d "$startup" ]] && cp "$wrapper" "$startup/cc-boot.cmd" 2>/dev/null; then
       pass "boot-at-logon" "Startup-folder entry cc-boot.cmd re-runs ./setup.sh boot at every logon (no elevation; an elevated shell can instead: schtasks /create /f /tn cc-boot /sc onlogon /tr \"$(cygpath -w "$wrapper")\")"
     else
@@ -1231,7 +1287,7 @@ phase_demo() {
       case "$drc" in
         0)  pass "demo-dispatch" "dispatcher claimed the item (a real inference against your endpoint ran)" ;;
         28) pass "demo-dispatch" "dispatcher claimed the item — the inference is still running (outlived the 30 s call; polling for the proposal)" ;;
-        *)  fail "demo-dispatch" "POST /api/dispatch/step failed (curl $drc) — read $HERE/uvicorn.log"; return 1 ;;
+        *)  fail "demo-dispatch" "POST /api/dispatch/step failed (curl $drc) — read $STATE_DIR/uvicorn.log"; return 1 ;;
       esac
     fi
 
@@ -1239,9 +1295,9 @@ phase_demo() {
     if ! poll_until 600 10 demo_awaiting; then
       local failed; failed="$(api_json "$(api_url)/api/dispatch" '(d.get("ledger") or {}).get("FAILED",0)')"
       if [[ "$failed" =~ ^[1-9] ]]; then
-        fail "demo" "the triage run FAILED — read $HERE/uvicorn.log; recover with POST $(api_url)/api/work/<item_id>/requeue (never re-POST the email: a repeat Message-ID is a silent no-op)"
+        fail "demo" "the triage run FAILED — read $STATE_DIR/uvicorn.log; recover with POST $(api_url)/api/work/<item_id>/requeue (never re-POST the email: a repeat Message-ID is a silent no-op)"
       else
-        fail "demo" "no proposal parked within 10 minutes — read $HERE/uvicorn.log and $(api_url)/api/dispatch"
+        fail "demo" "no proposal parked within 10 minutes — read $STATE_DIR/uvicorn.log and $(api_url)/api/dispatch"
       fi
       return 1
     fi
@@ -1272,7 +1328,7 @@ phase_demo() {
   if [[ "$execd" =~ ^[1-9] ]]; then
     pass "demo-executed" "the Executor performed the approved action and stamped provenance (a real write to the local graph)"
   elif [[ "$wfail" =~ ^[1-9] ]]; then
-    fail "demo-executed" "the approval was recorded but execution FAILED — read $HERE/uvicorn.log (the graph service is the usual suspect: ./setup.sh status)"
+    fail "demo-executed" "the approval was recorded but execution FAILED — read $STATE_DIR/uvicorn.log (the graph service is the usual suspect: ./setup.sh status)"
     return 1
   else
     # Reject/dismiss is a legitimate decision — the loop is still proven.
@@ -1317,8 +1373,8 @@ stop_listener() { # stop_listener <name> <pidfile> <port> <probe-path>
 cmd_stop() {
   CURPHASE=stop
   load_env >/dev/null 2>&1 || true
-  stop_listener cockpit "$HERE/cockpit.pid" "${CC_COCKPIT_PORT:-3080}" /
-  stop_listener uvicorn "$HERE/uvicorn.pid" "$(api_url | sed 's/.*://')" /health
+  stop_listener cockpit "$STATE_DIR/cockpit.pid" "${CC_COCKPIT_PORT:-3080}" /
+  stop_listener uvicorn "$STATE_DIR/uvicorn.pid" "$(api_url | sed 's/.*://')" /health
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1327,11 +1383,12 @@ cmd_stop() {
 phase_status() {
   phase_validate || true
   load_env || return 1
+  pass "state-dir" "$STATE_DIR (logs, diagnostics, installed.manifest, pids — nothing inside the checkout)"
 
   if venv_python >/dev/null; then pass "venv" ".venv present"; else fail "venv" ".venv missing — run: ./setup.sh app"; fi
   local k
   for k in CC_LLM_API_KEY CC_EMBED_DIM CC_NEO4J_PASSWORD CC_LITELLM_SALT_KEY; do
-    if is_placeholder "$(get_kv "$APP_ENV" "$k")"; then
+    if is_placeholder "$(get_kv "$ENV_FILE" "$k")"; then
       fail "app-${k}" "$k is unset in the app's .env — run: ./setup.sh app"
     else
       pass "app-${k}" "$k is set in the app's .env"
@@ -1354,12 +1411,17 @@ env_key_names() { # env_key_names <file>
 }
 
 phase_diagnose() {
-  local out="$HERE/setup-diagnostics.txt"
+  init_state
+  local out="$STATE_DIR/setup-diagnostics.txt"
   load_env || true
   : "${CC_POD_PREFIX:=cc-}"
   {
     echo "Central Command single-node setup diagnostics — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     echo "Paste this whole file to Claude. It contains key NAMES only, never values."
+    echo
+    echo "== state directory (everything this install GENERATES is in here;"
+    echo "   nothing is written inside the checkout)"
+    echo "  $STATE_DIR"
     echo
     echo "== host"
     uname -a 2>&1
@@ -1382,23 +1444,20 @@ phase_diagnose() {
     echo "== setup-log.txt (last 40 lines — WHERE the run stopped)"
     tail -40 "$LOGFILE" 2>/dev/null || echo "  (no log yet)"
     echo
-    echo "== deploy/single/.env (names only)"
+    echo "== .env — the one answer file (names only)"
     env_key_names "$ENV_FILE"
-    echo
-    echo "== the app's .env (names only)"
-    env_key_names "$APP_ENV"
     echo
     echo "== discovery (classes only — the REPORT names internal hosts, so it is"
     echo "   pointed to, never inlined here)"
-    if [[ -f "$REPO_ROOT/deploy/discovery.out/discovery.env" ]]; then
-      cat "$REPO_ROOT/deploy/discovery.out/discovery.env"
-      echo "  (full report: deploy/discovery.out/discovery-report.md)"
+    if [[ -f "$STATE_DIR/discovery/discovery.env" ]]; then
+      cat "$STATE_DIR/discovery/discovery.env"
+      echo "  (full report: $STATE_DIR/discovery/discovery-report.md)"
     else
       echo "  (no discovery run on this machine — deploy/discover.sh)"
     fi
     echo
     echo "== compose services"
-    compose_detect && "${COMPOSE_BIN[@]}" -f "$HERE/compose.yaml" ps -a 2>&1 || echo "  (no compose provider)"
+    compose_detect && "${COMPOSE_BIN[@]}" --env-file "$ENV_FILE" -f "$HERE/compose.yaml" ps -a 2>&1 || echo "  (no compose provider)"
     echo
     echo "== podman containers"
     podman ps -a --format '{{.Names}}\t{{.Status}}\t{{.Image}}' 2>&1
@@ -1421,7 +1480,7 @@ phase_diagnose() {
     CC_VERIFY_MAX_WAIT=15 "$HERE/verify.sh" 2>&1
   } >"$out"
   chmod 600 "$out" 2>/dev/null
-  pass "diagnostics" "wrote $out — paste it to Claude"
+  pass "diagnostics" "state dir is $STATE_DIR; wrote $out — paste it to Claude"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1469,12 +1528,14 @@ usage: ./setup.sh [validate|preflight|fetch|llm|stack|app|verify|test|boot|
   stop          stops the API this script started (boot's counterpart)
   exit codes    0 clean · 1 hard failure · 2 completed with warnings
                 3 stopped for USER ACTION (see the last USERACTION line)
-  status log    every check is appended to deploy/single/setup-log.txt
+  status log    every check is appended to <state>/setup-log.txt, outside the
+                checkout (./setup.sh diagnose prints the state dir first)
 USAGE
 }
 
 main() {
   local cmd="${1:-all}"
+  init_state           # the log file lives in there — resolve before logging
   logline "run start: ./setup.sh $cmd"
   case "$cmd" in
     validate|preflight|fetch|llm|stack|app|verify|test|boot|demo|status|diagnose)

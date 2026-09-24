@@ -445,7 +445,10 @@ answers):
   `~/.cc-litellm-operator.kubeconfig`, `~/.cc-mcp-deployer.kubeconfig`,
   `~/.cc-sandbox-runner.kubeconfig`. Their tokens die with the namespaces but
   the files keep looking valid; §4 re-mints them.
-- The OTHER profile's litter in a shared checkout: `deploy/single/.env`,
+- The OTHER profile's litter in a shared checkout — SHRINKING as of v2.42.0,
+  which moved the single-node profile's answers into the repo-root `.env` and
+  everything it generates into `$CC_STATE_DIR`, outside the tree. What may
+  still be there from before that release: `deploy/single/.env`,
   `deploy/single/{secrets,stack,stack-llm,optional-*}.yaml`,
   `deploy/single/setup-diagnostics.txt`. Back `deploy/single/.env` up to
   `~/cc-backups/` first — it may hold that profile's never-rotate keys.

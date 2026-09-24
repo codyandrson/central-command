@@ -450,10 +450,11 @@ llm_gate() { # llm_gate <what-failed>
   note "When it looks right, re-run:  ./deploy/k3s/setup.sh llm   (it validates every alias, then continues)"
 }
 
-# Probe an alias THROUGH this cluster's proxy. discover-llm.sh only sources
-# deploy/single/.env when CC_LLM_BASE_URL/CC_LLM_API_KEY are absent from the
-# environment (its --proxy mode reads the OTHER profile's .env, so it is not
-# usable here) — passing both as env vars is what keeps it on our proxy, and
+# Probe an alias THROUGH this cluster's proxy. discover-llm.sh sources an .env
+# only in its --proxy mode — the repo-root one since v2.42.0, where it expects
+# the SINGLE-NODE profile's CC_LLM_PROXY_ADMIN_KEY and CC_LITELLM_PORT, so that
+# mode is still not usable here. Passing CC_LLM_BASE_URL/CC_LLM_API_KEY as env
+# vars (DIRECT mode, which sources nothing) is what keeps it on our proxy, and
 # keeps the key out of argv.
 probe_alias() { # probe_alias <chat|structured|embed|speech|transcribe> <alias> [file]
   CC_LLM_BASE_URL="http://127.0.0.1:4000/v1" \

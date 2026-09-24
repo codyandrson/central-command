@@ -50,8 +50,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SINGLE_DIR = REPO_ROOT / "deploy" / "single"
 
 
-def _update_dir() -> Path:  # env seam so tests never touch the real tree
-    return Path(os.environ.get("CC_UPDATE_DIR", str(SINGLE_DIR / ".update")))
+def _update_dir() -> Path:
+    """The cockpit-driven updater's working dir: staged zip, runner copy, status.
+
+    In the STATE DIRECTORY since v2.42.0, never inside the checkout (design
+    record 2026-09-23, D7) — the old `deploy/single/.update/` was litter an
+    update had to merge around. CC_UPDATE_DIR stays the env seam, and it is
+    also what this module hands the detached runner, so both sides of an
+    in-flight update always address the same directory.
+    """
+    from central_command.config import settings
+
+    return Path(os.environ.get("CC_UPDATE_DIR", f"{settings.resolved_state_dir()}/update"))
 
 
 def _bash() -> str | None:
@@ -245,7 +255,7 @@ def _run_update_sh(*args: str) -> subprocess.CompletedProcess:
 
 def _protocol_failures(out: str) -> str:
     lines = [ln for ln in out.splitlines() if ln.startswith(("FAIL ", "USERACTION "))]
-    return " · ".join(lines) or "see deploy/single/setup-log.txt"
+    return " · ".join(lines) or "see <state-dir>/setup-log.txt (./setup.sh diagnose prints the path)"
 
 
 def _write_stage_record(state: str, target: str, error: str | None = None) -> None:
@@ -347,17 +357,20 @@ class ApplyRequest(BaseModel):
     target: str = ""
 
 
-def _spawn_detached(cmd: list[str]) -> None:
+def _spawn_detached(cmd: list[str], extra_env: dict[str, str] | None = None) -> None:
     devnull = subprocess.DEVNULL
+    env = {**os.environ, **(extra_env or {})} if extra_env else None
     if sys.platform == "win32":
         flags = (
             subprocess.DETACHED_PROCESS
             | subprocess.CREATE_NEW_PROCESS_GROUP
             | subprocess.CREATE_NO_WINDOW
         )
-        subprocess.Popen(cmd, stdin=devnull, stdout=devnull, stderr=devnull, creationflags=flags)
+        subprocess.Popen(cmd, stdin=devnull, stdout=devnull, stderr=devnull,
+                         creationflags=flags, env=env)
     else:
-        subprocess.Popen(cmd, stdin=devnull, stdout=devnull, stderr=devnull, start_new_session=True)
+        subprocess.Popen(cmd, stdin=devnull, stdout=devnull, stderr=devnull,
+                         start_new_session=True, env=env)
 
 
 @router.post("/update/apply")
@@ -400,7 +413,10 @@ async def update_apply(body: ApplyRequest) -> JSONResponse:
     tmp.replace(upd / "status.json")
 
     try:
-        _spawn_detached([_bash() or "bash", str(runner), staged, str(SINGLE_DIR)])
+        # CC_UPDATE_DIR travels explicitly: this process dies mid-run, so the
+        # runner must not have to re-derive the directory we are polling.
+        _spawn_detached([_bash() or "bash", str(runner), staged, str(SINGLE_DIR)],
+                        {"CC_UPDATE_DIR": str(upd)})
     except OSError as exc:
         return JSONResponse({"error": f"could not start the update runner: {exc}"}, status_code=500)
     return JSONResponse({"triggered": True, "target": staged}, status_code=202)

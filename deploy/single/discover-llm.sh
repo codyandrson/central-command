@@ -66,13 +66,17 @@ done
 # $PY may be multiple words (the uv fallback) — always invoke it unquoted: $PY -c ...
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+ENV_FILE="$REPO_ROOT/.env"
 
 PROXY=0
 [[ "${1:-}" == "--proxy" ]] && { PROXY=1; shift; }
 
-# .env holds the proxy's master key and port — nothing about the upstream.
+# The repo-root .env (THE answer file since v2.42.0) holds the proxy's admin
+# key and port — nothing about the upstream, which lives in the proxy's own
+# database.
 if (( PROXY )); then
-  [[ -f "$HERE/.env" ]] && { set -a; . "$HERE/.env"; set +a; }
+  [[ -f "$ENV_FILE" ]] && { set -a; . "$ENV_FILE"; set +a; }
 fi
 
 # --proxy: same probes, one endpoint — this stack's own LiteLLM, addressed by
@@ -80,12 +84,12 @@ fi
 # upstream lives in the proxy's per-alias api_base now, which is exactly what
 # these probes exist to prove.
 if (( PROXY )); then
-  [[ -n "${LITELLM_MASTER_KEY:-}" ]] || {
-    echo "FATAL: --proxy needs LITELLM_MASTER_KEY from $HERE/.env (run make-secrets.sh)" >&2
+  [[ -n "${CC_LLM_PROXY_ADMIN_KEY:-}" ]] || {
+    echo "FATAL: --proxy needs CC_LLM_PROXY_ADMIN_KEY from $ENV_FILE (run make-secrets.sh)" >&2
     exit 1
   }
   CC_LLM_BASE_URL="http://127.0.0.1:${CC_LITELLM_PORT:-4000}/v1"
-  CC_LLM_API_KEY="$LITELLM_MASTER_KEY"
+  CC_LLM_API_KEY="$CC_LLM_PROXY_ADMIN_KEY"
   CC_EMBED_BASE_URL="$CC_LLM_BASE_URL"
   CC_EMBED_API_KEY="$CC_LLM_API_KEY"
 fi

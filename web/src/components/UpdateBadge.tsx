@@ -31,7 +31,7 @@ interface UpdateProgress {
   /**
    * Which updater performs the apply: "systemd" = the k3s root helper
    * (journalctl is the log), "local" = the single-node detached runner
-   * (deploy/single/.update/apply.log is the log). Absent on older servers —
+   * (<state-dir>/update/apply.log is the log; ./setup.sh diagnose prints the state dir). Absent on older servers —
    * those are all k3s, so systemd is the default.
    */
   mode?: 'local' | 'systemd';
@@ -204,7 +204,7 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
   // reports nothing — fall back to the ungated button rather than hiding
   // apply forever.
   const local = progress?.mode === 'local';
-  const logRef = local ? 'deploy/single/.update/apply.log' : 'journalctl -u cc-update';
+  const logRef = local ? '<state-dir>/update/apply.log' : 'journalctl -u cc-update';
   const stage = progress?.stage;
   // The status record is DURABLE — it is the last run's, whichever target
   // that was. A success for the version already installed is not this
@@ -354,7 +354,7 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                   <div className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-500">
                     Preparation failed at <span className="font-mono">{stage?.status?.phase}</span>
                     {stage?.status?.error ? ` — ${stage.status.error}` : ''}.
-                    {' '}Details: <span className="font-mono">{local ? 'deploy/single/setup-log.txt' : 'journalctl -u cc-update-stage'}</span>
+                    {' '}Details: <span className="font-mono">{local ? '<state-dir>/setup-log.txt' : 'journalctl -u cc-update-stage'}</span>
                   </div>
                   {local ? (
                     <p className="text-xs text-muted-foreground">

@@ -11,7 +11,7 @@
 #
 # Mirror seams (2026-08-30): a build container sees none of the host's mirror
 # configuration, so each external source is a build-arg — blank = public. The
-# single-node driver passes them from deploy/single/.env; the k3s build script
+# single-node driver passes them from the repo-root .env; the k3s build script
 # passes nothing. See deploy/pi/graphiti/Dockerfile for why the apt file is
 # rewritten from /etc/os-release rather than sed'ed.
 ARG CC_REGISTRY_DOCKERIO=docker.io

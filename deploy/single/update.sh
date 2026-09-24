@@ -49,12 +49,18 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-ENV_FILE="$HERE/.env"
+# shellcheck source=../env-lib.sh
+. "$REPO_ROOT/deploy/env-lib.sh"
+# ONE answer file since v2.42.0 (2026-09-23 design record, D1): the repo-root
+# .env, app configuration and this profile's together.
+ENV_FILE="$REPO_ROOT/.env"
+STATE_DIR="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT")" || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # ── output protocol (setup.sh's, incl. the 2026-08-27 additions) ────────────
 # exit 3 = stopped for USER ACTION (deliberate gate, not an error).
 FAILS=0; WARNS=0; ACTIONS=0
-LOGFILE="$HERE/setup-log.txt"
+LOGFILE="$STATE_DIR/setup-log.txt"
 CURCMD="update"
 logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "$CURCMD" "$*" >>"$LOGFILE" 2>/dev/null || true; }
 pass() { printf 'PASS %s: %s\n' "$1" "$2"; logline "PASS $1: $2"; }
@@ -73,13 +79,21 @@ step() { # step <check-name> <success-message> <cmd...>
 
 G() { git -C "$REPO_ROOT" "$@"; }
 
-get_kv() { # get_kv <file> <key>   (dotenv read without sourcing)
-  local f="$1" k="$2" line out=""
-  [[ -f "$f" ]] || { printf ''; return 0; }
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ "$line" == "$k="* ]] && out="${line#*=}"
-  done <"$f"
-  printf '%s' "$out"
+get_kv() { cc_get_kv "$@"; }   # deploy/env-lib.sh — one reader, three scripts
+
+# MIGRATION off the retired config files, on the update path too: a deployment
+# installed before v2.42.0 has its answers in deploy/single/.env (plus web/.env
+# and deploy/discovery.conf), and `apply` reads ENV_FILE long before it calls
+# setup.sh. Idempotent, and a no-op once the old files are gone.
+migrate_env() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  local mig
+  if ! mig="$(cc_migrate_legacy_env "$ENV_FILE" "$REPO_ROOT" "$STATE_DIR")"; then
+    fail "env-migrate" "could not migrate the retired config files into $ENV_FILE — check the permissions on $STATE_DIR"
+    return 1
+  fi
+  [[ -n "$mig" ]] && pass "env-migrate" "$mig"
+  return 0
 }
 
 # ── shared guards ───────────────────────────────────────────────────────────
@@ -343,7 +357,7 @@ deploy_current_tree() {
   # Exit 3 from fetch is the operator's move, not a failure.
   "$HERE/setup.sh" fetch; local frc=$?
   if (( frc == 3 )); then
-    useraction "fetch" "dependencies could not all be acquired — fix the seam(s) named above (deploy/single/.env), then re-run ./update.sh apply"
+    useraction "fetch" "dependencies could not all be acquired — fix the seam(s) named above (the repo-root .env), then re-run ./update.sh apply"
     return 0
   fi
   (( frc == 1 )) && { fail "fetch" "./setup.sh fetch failed — see above"; return 1; }
@@ -457,7 +471,7 @@ cmd_run() {
     [[ "$yn" == [yY]* ]] || { useraction "apply" "declined — apply later with: ./update.sh apply"; return 0; }
     # The one gate apply cannot waive: nothing mutates under a live API. If
     # WE started it (setup.sh boot's pid file), offer the stop here.
-    if api_running && [[ -f "$HERE/uvicorn.pid" ]]; then
+    if api_running && [[ -f "$STATE_DIR/uvicorn.pid" ]]; then
       read -rp "The API is running (started by ./setup.sh boot). Stop it for the update? [y/N] " yn
       [[ "$yn" == [yY]* ]] && "$HERE/setup.sh" stop >&2
     fi
@@ -489,8 +503,8 @@ cmd_rollback() {
   # The cockpit's durable status record still says the rolled-back version
   # SUCCEEDED; when that version is offered again the dialog read it as
   # "Update Complete" and hid Apply (2026-09-19 Windows run).
-  if [[ -f "$HERE/.update/status.json" ]]; then
-    sed -i 's/"state":"success"/"state":"rolled_back"/' "$HERE/.update/status.json"
+  if [[ -f "$STATE_DIR/update/status.json" ]]; then
+    sed -i 's/"state":"success"/"state":"rolled_back"/' "$STATE_DIR/update/status.json"
   fi
   note "NOTE: schema changes already applied to Postgres are NOT undone — additive-only schema makes the restored code run fine against them."
   deploy_current_tree
@@ -525,6 +539,10 @@ main() {
   local cmd="${1:-}"
   CURCMD="update-${cmd:-help}"
   logline "run start: ./update.sh ${cmd:-<none>} ${2:-}"
+  case "$cmd" in
+    -h|--help|help|"") ;;
+    *) migrate_env || { logline "run end: ./update.sh $cmd -> exit 1"; exit 1; } ;;
+  esac
   case "$cmd" in
     init)     cmd_init ;;
     import)   cmd_import "${2:-}" ;;
