@@ -78,6 +78,20 @@ PROXY=0
 if (( PROXY )); then
   [[ -f "$ENV_FILE" ]] && { set -a; . "$ENV_FILE"; set +a; }
 fi
+# The two trust knobs, fanned out in ONE place (2026-09-23 design record, D4).
+# In --proxy mode every probe is loopback, but DIRECT mode dials the operator's
+# real endpoint, which is exactly where a corporate CA matters.
+if [[ -f "$REPO_ROOT/deploy/env-lib.sh" ]]; then
+  # shellcheck source=../env-lib.sh
+  . "$REPO_ROOT/deploy/env-lib.sh"
+  LLM_STATE="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT" 2>/dev/null)" || LLM_STATE=""
+  cc_export_tls_env "$LLM_STATE"
+fi
+CURL_TLS=()
+if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
+  CURL_TLS=(-k)
+  echo "WARN tls-insecure: TLS verification is OFF for this script's probes (curl)" >&2
+fi
 
 # --proxy: same probes, one endpoint — this stack's own LiteLLM, addressed by
 # ALIAS. Chat and embeddings collapse to the one base URL on purpose: the split
@@ -114,8 +128,8 @@ fi
 # backend queues requests behind whatever it is already serving, and a
 # 60-second ceiling read a busy llama-server as "the alias is wrong"
 # (2026-09-17 Windows run, three setup attempts).
-_api()  { printf 'Authorization: Bearer %s\n' "$CC_LLM_API_KEY"   | curl -sS --fail-with-body --max-time "${CC_PROBE_TIMEOUT:-300}" -H @- "$@"; }
-_eapi() { printf 'Authorization: Bearer %s\n' "$CC_EMBED_API_KEY" | curl -sS --fail-with-body --max-time "${CC_PROBE_TIMEOUT:-300}" -H @- "$@"; }
+_api()  { printf 'Authorization: Bearer %s\n' "$CC_LLM_API_KEY"   | curl -sS --fail-with-body --max-time "${CC_PROBE_TIMEOUT:-300}" "${CURL_TLS[@]}" -H @- "$@"; }
+_eapi() { printf 'Authorization: Bearer %s\n' "$CC_EMBED_API_KEY" | curl -sS --fail-with-body --max-time "${CC_PROBE_TIMEOUT:-300}" "${CURL_TLS[@]}" -H @- "$@"; }
 
 case "${1:-}" in
   models)

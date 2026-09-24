@@ -44,13 +44,54 @@
 # from the repo-root .env; the k3s build script passes nothing and gets the
 # defaults. Digest pinning of the base is done by the caller (setup.sh fetch
 # pulls images.txt's digest and tags it, so this FROM resolves locally).
+#
+# THE BASE REF COMES FROM THE MANIFEST (2026-09-23 design record, D2). The tag
+# used to live only here while images.txt carried a row nothing read, kept in
+# step by hand. Now `resolve-images.sh` resolves that row like any other and
+# `deploy/single/build-graphiti-image.sh` passes the result as
+# CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP — so a mirror that lacks the locked tag, or
+# one that re-namespaces the PATH, reaches the build too. The ARG default below
+# must equal images.txt's row (tests/test_single_airgap_seams.py fails the
+# suite otherwise), which is what keeps a bare `podman build` — and the k3s
+# build script, which passes no image arg — on the tested base.
 ARG CC_REGISTRY_DOCKERIO=docker.io
-FROM ${CC_REGISTRY_DOCKERIO}/zepai/knowledge-graph-mcp:1.1.0-standalone
+ARG CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP=${CC_REGISTRY_DOCKERIO}/zepai/knowledge-graph-mcp:1.1.0-standalone
+FROM ${CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP}
 ARG CC_APT_MIRROR=
 ARG CC_APT_SECURITY_MIRROR=
 # uv reads UV_DEFAULT_INDEX (UV_INDEX_URL is deprecated; PIP_* is ignored).
 # An empty value is "unset" to uv, so a blank build-arg is the public index.
 ARG UV_DEFAULT_INDEX=
+
+# ── trust inside the build: one CA knob, one insecure knob (D4) ─────────────
+# The CA travels as a BUILD SECRET, never in the build context and never a
+# build-arg — a build-arg is visible in `podman history`, and the context here
+# is the patches directory. `required=false` means a build that passes no
+# --secret (the k3s build scripts pass none) SKIPS the branch instead of
+# failing. Needs podman >= 3.3 (`podman build --secret`, RELEASE_NOTES) or
+# Docker with BuildKit; podman needs no `# syntax=` directive for
+# `RUN --mount`, and `required=` is parsed by buildah and by the Dockerfile
+# 1.4+ frontend. The secret lands at /run/secrets/<id> by default.
+ARG CC_TLS_INSECURE=0
+RUN --mount=type=secret,id=cc_ca,required=false set -e; \
+    if [ "$CC_TLS_INSECURE" = 1 ]; then \
+      printf 'Acquire::https::Verify-Peer "false";\n' >/etc/apt/apt.conf.d/99cc-insecure; \
+    fi; \
+    if [ -s /run/secrets/cc_ca ]; then \
+      if [ ! -f /etc/ssl/certs/ca-certificates.crt ]; then \
+        apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*; \
+      fi; \
+      mkdir -p /usr/local/share/ca-certificates; \
+      cp /run/secrets/cc_ca /usr/local/share/ca-certificates/cc-ca.crt; \
+      update-ca-certificates; \
+    fi
+# One path serves both cases, because a Dockerfile cannot make an ENV
+# conditional: `update-ca-certificates` APPENDS the corporate root to the
+# system bundle, so with a secret this file contains it and without one it is
+# the base image's own set — i.e. unchanged behaviour.
+ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    NPM_CONFIG_CAFILE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # Debian's slim images ship ONLY the deb822 /etc/apt/sources.list.d/debian.sources
 # (sources.list is deleted by the base build), and the security archive is a

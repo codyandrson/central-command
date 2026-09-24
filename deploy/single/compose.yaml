@@ -155,6 +155,25 @@ services:
       REDIS_HOST: litellm-redis
       REDIS_PORT: "6379"
       STORE_MODEL_IN_DB: "True"
+      # ── outbound TLS (2026-09-23 design record, D4) ──────────────────────
+      # LiteLLM is one of only two services here that dials an EXTERNAL
+      # endpoint (the enterprise LLM), so it is one of only two that needs the
+      # trust knobs. LiteLLM's documented precedence is
+      # parameter -> SSL_VERIFY -> litellm.ssl_verify -> SSL_CERT_FILE
+      # (docs.litellm.ai "SSL, HTTP Proxy Security Settings", read 2026-09-23),
+      # so SSL_VERIFY=True SHADOWS SSL_CERT_FILE if LiteLLM reads it as a bool.
+      # Deliberate: SSL_VERIFY carries only True/False and the CA travels in
+      # SSL_CERT_FILE. `litellm.ssl_verify` also accepts a PATH, so the CA could
+      # ride SSL_VERIFY instead — rejected, because a path coerced to a bool
+      # would read as FALSE and silently disable verification, whereas this way
+      # a CA that is not picked up is a LOUD certificate error at the llm
+      # phase's probe. If the testbed shows the CA is not honoured, the fix is
+      # putting the path in SSL_VERIFY — never relaxing anything.
+      # setup.sh DERIVES both values at load_env from CC_TLS_INSECURE and
+      # CC_CA_BUNDLE and exports them for compose; neither is written into .env
+      # (one fact, one key).
+      SSL_VERIFY: ${CC_LITELLM_SSL_VERIFY:-True}
+      SSL_CERT_FILE: ${CC_CA_BUNDLE_IN_CONTAINER:-}
       # !! ANTHROPIC_API_KEY IS DELIBERATELY ABSENT — DO NOT ADD IT !!
       # LiteLLM injects it as a last-resort fallback in two places that
       # silently bill a pay-per-token key: the /anthropic/* passthrough
@@ -164,6 +183,14 @@ services:
       - "127.0.0.1:${CC_LITELLM_PORT:-4000}:4000"
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro
+      # The corporate CA, read-only, at a fixed path. The SOURCE is derived by
+      # setup.sh: CC_CA_BUNDLE on bare Linux, and the copy the `machine` phase
+      # installed INSIDE the podman machine where there is one (a machine
+      # cannot see an arbitrary host path). With no CA configured the source is
+      # /dev/null — a bind mount of it is accepted and reads as empty, which is
+      # what keeps this a single unconditional volume line, and
+      # CC_CA_BUNDLE_IN_CONTAINER stays empty so nothing points at it.
+      - ${CC_CA_BUNDLE_MOUNT_SRC:-/dev/null}:/etc/cc/ca.pem:ro
     networks:
       default:
         aliases: [cc-litellm]
@@ -392,10 +419,20 @@ services:
     environment:
       HF_ENDPOINT: ${CC_HF_ENDPOINT:-https://huggingface.co}
       HF_HUB_CACHE: /home/ubuntu/.cache/huggingface/hub
+      # The second (and last) service that dials an external endpoint: the
+      # Hugging Face hub, on first boot, to fetch the two model snapshots. Its
+      # client is requests/httpx-based, so the CA seam is REQUESTS_CA_BUNDLE.
+      # There is no insecure switch to fan out here — huggingface_hub has none
+      # — so on a TLS-intercepted network the routes are CC_CA_BUNDLE, an
+      # HF mirror via CC_HF_ENDPOINT, pre-placed snapshots in the volume, or
+      # CC_ENABLE_SPEECH=0. CC_TLS_INSECURE does NOT cover this one, and the
+      # WARN setup.sh prints says so.
+      REQUESTS_CA_BUNDLE: ${CC_CA_BUNDLE_IN_CONTAINER:-}
     ports:
       - "127.0.0.1:${CC_SPEECH_PORT:-8093}:8000"
     volumes:
       - speech-models:/home/ubuntu/.cache/huggingface/hub
+      - ${CC_CA_BUNDLE_MOUNT_SRC:-/dev/null}:/etc/cc/ca.pem:ro
     mem_limit: 4g
     networks:
       default:

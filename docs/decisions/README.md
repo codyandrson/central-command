@@ -165,7 +165,7 @@ recorded in-repo." rather than inventing one.
 | DL-079 | Neo4j needs enableServiceLinks: false | active | undated | code structure only | [deploy.md](deploy.md) |
 | DL-080 | Use the fully-qualified image ref; podman's localhost/ tag is invisible to Kubernetes | active | 2026-08-01 | script: `grep -qx` | [deploy.md](deploy.md) |
 | DL-081 | ctr images ls piped into grep -q inverts under pipefail | active | undated | discipline only | [deploy.md](deploy.md) |
-| DL-082 | setup.sh runs ten deterministic phases with PASS/WARN/FAIL/USERACTION exit codes | active | undated | script: `deploy/single/setup.sh` | [deploy.md](deploy.md) |
+| DL-082 | setup.sh runs eleven deterministic phases with PASS/WARN/FAIL/USERACTION exit codes | active | undated | script: `deploy/single/setup.sh` | [deploy.md](deploy.md) |
 | DL-083 | The single-node install acquires before it deploys, and never falls back on its own | active | undated | test: `tests/test_single_airgap_seams.py::test_images_txt_is_well_formed` | [deploy.md](deploy.md) |
 | DL-084 | CC_REGISTRY became three vars: CC_REGISTRY_DOCKERIO / _GHCR / _MCR | active | 2026-08-30 | test: `tests/test_single_airgap_seams.py::test_images_txt_is_well_formed` | [deploy.md](deploy.md) |
 | DL-085 | An update waits for the agents to finish | active | 2026-09-13 | test: `tests/test_update_hold.py::test_engage_waits_while_runs_are_live_then_triggers_unforced` | [deploy.md](deploy.md) |

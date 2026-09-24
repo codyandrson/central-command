@@ -26,6 +26,25 @@
 #                          proven by probes, not by version strings.
 #     nothing fits         FAIL naming the constraint and what the mirror has.
 #
+#   AN OPERATOR PIN WINS (2026-09-23 design record, D2). A CC_IMG_<NAME> the
+#   operator set by hand is authoritative: it is the seam for a mirror that
+#   re-namespaces PATHS (only the host is a variable) and for "use this tag, I
+#   checked". The catch the design had to solve: this script writes that same
+#   key, so "present in .env" cannot tell a pin from the resolver's own last
+#   write. The manifest is what distinguishes them — it records the ref written
+#   per image, so a value in .env that DIFFERS from the recorded one (or has no
+#   record at all) is the operator's. A pin is VERIFIED to exist (a manifest
+#   HEAD by tag, or by digest when the ref carries @sha256:), parsed from the
+#   PINNED ref rather than images.txt (a re-namespacing mirror's path differs),
+#   reported as a WARN, recorded as `pinned`, and never rewritten. A pin that
+#   does not exist is a FAIL naming the key: the whole point is that a pin is
+#   checked, not trusted.
+#
+#   TLS: CC_CA_BUNDLE and CC_TLS_INSECURE are fanned out by
+#   deploy/env-lib.sh's cc_export_tls_env (which is what CURL_CA_BUNDLE /
+#   CURL_HOME come from); podman pulls take --tls-verify=false separately,
+#   because no exported variable reaches them.
+#
 #   Output: CC_IMG_<NAME>=<host/path:tag> written into the repo-root .env
 #   (compose.yaml reads them, via --env-file), plus
 #   $CC_STATE_DIR/installed.manifest — the provenance record, and phase 2's
@@ -92,6 +111,20 @@ set +a
 : "${CC_ENABLE_CRAWLER:=1}"
 : "${CC_ENABLE_SANDBOX:=1}"
 : "${CC_ENABLE_SPEECH:=1}"
+: "${CC_TLS_INSECURE:=0}"
+
+# The two trust knobs, fanned out in ONE place (design record D4). It also
+# writes the .curlrc that carries `insecure` for every curl below, so the
+# explicit flag further down is belt-and-braces rather than the only path.
+(( SELFTEST )) || cc_export_tls_env "${STATE_DIR:-}"
+CURL_TLS=()
+PULL_TLS=()
+if [[ "$CC_TLS_INSECURE" == "1" ]]; then
+  CURL_TLS=(-k)
+  PULL_TLS=(--tls-verify=false)
+  (( SELFTEST )) || warn "tls-insecure" \
+    "$(cc_tls_insecure_warn_text "this script's registry probes (curl) and its fallback podman pull")"
+fi
 
 # ── .env writers (copied verbatim from setup.sh: printf/read are BUILTINS, so
 # unlike `sed -i s|..|VALUE|` the value never appears in an argv) ────────────
@@ -156,7 +189,7 @@ reg_req() { # reg_req <method> <api-host> <url-path> [accept]
   [[ -n "$accept" ]] && args+=(-H "Accept: $accept")
   [[ "$method" == HEAD ]] && args+=(-I)
   hdr="$(mktemp)" || return 1
-  body="$(curl -sS --max-time 30 -D "$hdr" "${args[@]}" "$url" 2>"$hdr.err")"
+  body="$(curl -sS --max-time 30 "${CURL_TLS[@]}" -D "$hdr" "${args[@]}" "$url" 2>"$hdr.err")"
   LAST_CURL_ERR="$(head -c 200 "$hdr.err" 2>/dev/null)"; rm -f "$hdr.err"
   code="$(awk 'toupper($1) ~ /^HTTP/ {c=$2} END{print c}' "$hdr")"
   if [[ "$code" == "401" ]]; then
@@ -166,14 +199,14 @@ reg_req() { # reg_req <method> <api-host> <url-path> [accept]
     service="$(sed -n 's/.*service="\([^"]*\)".*/\1/p' <<<"$auth")"
     scope="$(sed -n 's/.*scope="\([^"]*\)".*/\1/p' <<<"$auth")"
     if [[ -n "$realm" ]]; then
-      tok="$(curl -sS --max-time 30 "${realm}?service=${service}&scope=${scope}" 2>/dev/null \
+      tok="$(curl -sS --max-time 30 "${CURL_TLS[@]}" "${realm}?service=${service}&scope=${scope}" 2>/dev/null \
              | $PY -c 'import json,sys; d=json.load(sys.stdin); print(d.get("token") or d.get("access_token") or "")' 2>/dev/null)"
       if [[ -n "$tok" ]]; then
         # Via `-H @-` (stdin), never an argv — the same discipline the master
         # key travels under in setup.sh. NOT `-H @<(...)`: native Windows curl
         # cannot open MSYS's /proc fd paths.
         body="$(printf 'Authorization: Bearer %s\n' "$tok" | \
-                curl -sS --max-time 30 -D "$hdr" -H @- "${args[@]}" "$url" 2>/dev/null)"
+                curl -sS --max-time 30 "${CURL_TLS[@]}" -D "$hdr" -H @- "${args[@]}" "$url" 2>/dev/null)"
         code="$(awk 'toupper($1) ~ /^HTTP/ {c=$2} END{print c}' "$hdr")"
       fi
     fi
@@ -218,6 +251,54 @@ flavour() { local t="${1#v}"; while [[ "$t" == [0-9.]* ]]; do t="${t#?}"; done; 
 fits() { # fits <tag> <constraint> <locked-tag>
   [[ ( "$1" == "$2" || "$1" == "$2"[!0-9]* ) && "$(flavour "$1")" == "$(flavour "$3")" ]]
 }
+# ── the operator pin (D2) ───────────────────────────────────────────────────
+# Split a pinned ref into host / path / reference, where the reference is a TAG
+# or a `sha256:...` digest. Parsed from the PIN, never from images.txt: a
+# re-namespacing mirror's path is exactly what differs, and that is the case
+# this seam exists for. A ref with no registry host cannot be verified against
+# a registry, so it is rejected rather than guessed at.
+#
+# Prints `<host> <path> <reference>`; returns 1 on a ref this cannot parse.
+pin_parts() { # pin_parts <ref>
+  local ref="$1" host rest path r
+  [[ "$ref" == */* ]] || return 1          # `postgres:16` — no registry to ask
+  host="${ref%%/*}"; rest="${ref#*/}"
+  [[ "$host" == *.* || "$host" == *:* || "$host" == localhost ]] || return 1
+  if [[ "$rest" == *@* ]]; then
+    path="${rest%%@*}"; r="${rest#*@}"
+  else
+    [[ "$rest" == *:* ]] || return 1       # no tag: nothing definite to verify
+    path="${rest%:*}"; r="${rest##*:}"
+  fi
+  [[ -n "$path" && -n "$r" ]] || return 1
+  printf '%s %s %s' "$host" "$path" "$r"
+}
+
+# Is the CC_IMG_* value in .env an OPERATOR PIN, and if so does it exist?
+# THE problem this solves: the resolver writes that key itself, so presence is
+# no signal. The manifest's recorded ref for the same image is — a value that
+# differs from it (or that has no record at all, including a first run) is the
+# operator's.
+#
+# Prints one word:
+#   resolve   no pin, or the value is this resolver's own last write
+#   honour    an operator pin, and the registry has it
+#   missing   an operator pin the registry does not have
+pin_decide() { # pin_decide <env-value> <manifest-ref> <exists:0|1>
+  local val="$1" prev="$2" exists="$3"
+  [[ -n "$val" ]] || { printf 'resolve'; return 0; }
+  [[ "$val" != "$prev" ]] || { printf 'resolve'; return 0; }
+  [[ "$exists" == 1 ]] && printf 'honour' || printf 'missing'
+}
+
+# The ref this script last wrote for <var>, out of the manifest. The var is the
+# manifest's FIRST column precisely so this lookup is unambiguous when a pin
+# renames the path — the images.txt row's identity is the variable, not the ref.
+manifest_ref_for() { # manifest_ref_for <var>
+  [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || { printf ''; return 0; }
+  awk -v v="$1" '$1 == v { r = $2 ":" $3 } END { print r }' "$MANIFEST" 2>/dev/null
+}
+
 self_test() {
   local ok=1
   t() { if fits "$1" "$2" "$3"; then [[ "$4" == yes ]] || { echo "FAIL fits $1 $2 $3 -> accepted"; ok=0; }
@@ -232,9 +313,58 @@ self_test() {
   t 1.1.1-standalone 1.1 1.1.0-standalone yes; t 1.1.1 1.1 1.1.0-standalone no; t 1.0.2-standalone 1.1 1.1.0-standalone no
   t main-stable main-stable main-stable yes; t main-stable-2 main-stable main-stable no
   (( ok )) && echo "self-test: fits ok"
-  (( ok ))
+
+  # ── the pin decision (D2). These four cases ARE the rule, and none of them
+  # needs a registry: the existence probe is injected as the third argument.
+  local okp=1
+  d() { # d <env-value> <manifest-ref> <exists> <expected>
+    local got; got="$(pin_decide "$1" "$2" "$3")"
+    [[ "$got" == "$4" ]] || { echo "FAIL pin_decide '$1' '$2' $3 -> $got, expected $4"; okp=0; }
+  }
+  # nothing set: normal resolution
+  d "" "" 0 resolve
+  d "" "mirror.corp/library/postgres:16" 0 resolve
+  # the resolver's own last write, present in .env: normal resolution
+  d "mirror.corp/library/postgres:16" "mirror.corp/library/postgres:16" 1 resolve
+  # an operator pin that exists: honoured
+  d "mirror.corp/library/postgres:16.9" "mirror.corp/library/postgres:16" 1 honour
+  # an operator pin that does NOT exist: named, never silently re-resolved
+  d "mirror.corp/library/postgres:16.9" "mirror.corp/library/postgres:16" 0 missing
+  # a PATH-RENAMED pin (the case only this seam can express), first run: no
+  # manifest row at all, so it is the operator's either way
+  d "mirror.corp/mirrored/dockerhub/library/postgres:16" "" 1 honour
+  d "mirror.corp/mirrored/dockerhub/library/postgres:16" "" 0 missing
+  (( okp )) && echo "self-test: pin_decide ok"
+
+  # ── parsing the pin, which must come from the PIN and not from images.txt
+  local okq=1
+  q() { # q <ref> <expected-output-or-"-">
+    local got rc=0; got="$(pin_parts "$1")" || rc=1
+    if [[ "$2" == "-" ]]; then
+      (( rc )) || { echo "FAIL pin_parts '$1' -> accepted ('$got'), expected a refusal"; okq=0; }
+    else
+      [[ "$got" == "$2" ]] || { echo "FAIL pin_parts '$1' -> '$got', expected '$2'"; okq=0; }
+    fi
+  }
+  q "docker.io/library/postgres:16" "docker.io library/postgres 16"
+  q "mirror.corp.example/mirrored/dockerhub/library/postgres:16.9" \
+    "mirror.corp.example mirrored/dockerhub/library/postgres 16.9"
+  q "mirror.corp.example:5000/library/neo4j:5.26.2" \
+    "mirror.corp.example:5000 library/neo4j 5.26.2"
+  q "mirror.corp.example/library/neo4j@sha256:099b9f74968c123209972835417985ed2a1cc19c0422c0753a313e26a736c365" \
+    "mirror.corp.example library/neo4j sha256:099b9f74968c123209972835417985ed2a1cc19c0422c0753a313e26a736c365"
+  q "postgres:16" -                    # no registry host: nothing to ask
+  q "mirror.corp.example/library/postgres" -   # no tag: nothing definite
+  (( okq )) && echo "self-test: pin_parts ok"
+
+  (( ok && okp && okq ))
 }
 (( SELFTEST )) && { self_test; exit $?; }
+
+# Every manifest media type a registry may answer a HEAD with — an index, a
+# manifest list, or a single-arch manifest. Module-level because BOTH the pin
+# probe and the locked-tag probe ask the same question.
+ACCEPT_MANIFEST='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'
 
 MANIFEST_ROWS=""
 resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-digest>
@@ -247,11 +377,46 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
   # playwright/python share that segment and would report as one check.
   check="image-${var#CC_IMG_}"; check="${check,,}"
 
+  # ── an operator pin wins, once it has been PROVEN to exist (D2) ───────────
+  # Read from the FILE rather than the environment: this script rewrites the
+  # key as it goes, and a sourced value from earlier in the same run would make
+  # a pin out of its own last write.
+  local pinval prev pexists=0 phost ppath pref parts decision
+  pinval="$(cc_get_kv "$ENV_FILE" "$var")"
+  prev="$(manifest_ref_for "$var")"
+  if [[ -n "$pinval" && "$pinval" != "$prev" ]]; then
+    if ! parts="$(pin_parts "$pinval")"; then
+      fail "$check" "$var is set to '${pinval}', which is not a ref this can verify — an operator pin must be FULLY QUALIFIED with a tag or a digest (<registry-host>/<path>:<tag>, or <registry-host>/<path>@sha256:...). Fix or unset $var in .env."
+      return 1
+    fi
+    read -r phost ppath pref <<<"$parts"
+    # `/v2/<path>/manifests/<tag-or-digest>` is the same endpoint either way —
+    # the registry accepts a digest in place of a tag, which is what makes a
+    # digest pin verifiable without a second code path.
+    if reg_req HEAD "$(api_host "$phost")" "/v2/${ppath}/manifests/${pref}" "$ACCEPT_MANIFEST" >/dev/null; then
+      pexists=1
+    fi
+    decision="$(pin_decide "$pinval" "$prev" "$pexists")"
+    case "$decision" in
+      honour)
+        warn "$check" "operator pin honoured — ${pinval} (not re-resolved; unset $var in .env to resolve against images.txt again)"
+        MANIFEST_ROWS="${MANIFEST_ROWS}${var} ${phost}/${ppath} ${pref} (pinned) pinned $(date -u +%FT%TZ)"$'\n'
+        (( DRY )) && note "    would leave ${var}=${pinval} alone (operator pin)"
+        return 0
+        ;;
+      missing)
+        fail "$check" "$var is set to ${pinval} but the registry has no such manifest — fix or unset it"
+        return 1
+        ;;
+    esac
+    # `resolve` cannot happen here (the guard above already excluded it), but
+    # falling through to normal resolution is the safe reading of it anyway.
+  fi
+
   # The locked tag is asked about DIRECTLY — a manifest HEAD is authoritative
   # and, unlike a tags list, has no pagination to get wrong. The full listing
   # is only needed when the lock is absent and something must be substituted.
-  local accept='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'
-  if dig="$(reg_req HEAD "$api" "/v2/${path}/manifests/${lock}" "$accept" \
+  if dig="$(reg_req HEAD "$api" "/v2/${path}/manifests/${lock}" "$ACCEPT_MANIFEST" \
             | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: *//p' | tail -1)" && [[ -n "$dig" ]]; then
     chosen="$lock"; mode=locked
     if [[ "$ldig" == "-" ]]; then
@@ -267,7 +432,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
     else
       pass "$check" "${host}/${path}:${lock} (locked tag, digest verified)"
     fi
-    MANIFEST_ROWS="${MANIFEST_ROWS}${host}/${path} ${chosen} ${dig} ${mode} $(date -u +%FT%TZ)"$'\n'
+    MANIFEST_ROWS="${MANIFEST_ROWS}${var} ${host}/${path} ${chosen} ${dig} ${mode} $(date -u +%FT%TZ)"$'\n'
     if (( DRY )); then note "    would set ${var}=${host}/${path}:${chosen}"
     else set_kv "$ENV_FILE" "$var" "${host}/${path}:${chosen}"; fi
     return 0
@@ -279,7 +444,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
     # A mirror may serve pulls and no tags-list API at all. Try the lock the
     # blind way — a successful pull is the only proof that matters — before
     # calling it a failure.
-    if command -v podman >/dev/null 2>&1 && podman pull -q "${host}/${path}:${lock}" >/dev/null 2>&1; then
+    if command -v podman >/dev/null 2>&1 && podman pull -q "${PULL_TLS[@]}" "${host}/${path}:${lock}" >/dev/null 2>&1; then
       warn "$check" "${host}/${path}: the registry answered no tag list${LAST_CURL_ERR:+ ($LAST_CURL_ERR)} — resolved BLIND to the locked tag ${lock}, which pulled (podman's own egress, which a proxy/CA seam on the HOST does not govern — see deploy/AIRGAP.md)"
       chosen="$lock"; mode=locked; dig="(blind)"
     else
@@ -311,7 +476,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
   fi
 
   local ref="${host}/${path}:${chosen}"
-  MANIFEST_ROWS="${MANIFEST_ROWS}${host}/${path} ${chosen} ${dig} ${mode} $(date -u +%FT%TZ)"$'\n'
+  MANIFEST_ROWS="${MANIFEST_ROWS}${var} ${host}/${path} ${chosen} ${dig} ${mode} $(date -u +%FT%TZ)"$'\n'
   if (( DRY )); then
     note "    would set ${var}=${ref}"
   else
@@ -338,14 +503,14 @@ if (( ! DRY )) && [[ -n "$MANIFEST_ROWS" ]]; then
   # a rollback restores. Rewritten each run; only the wanted components appear.
   {
     echo "# GENERATED by resolve-images.sh — what this install resolved."
-    echo "# <ref> <tag> <digest> <locked|substituted> <resolved-at>"
+    echo "# <CC_IMG_var> <ref> <tag> <digest> <locked|substituted|pinned> <resolved-at>"
     printf '%s' "$MANIFEST_ROWS"
   } >"$MANIFEST"
   pass "installed-manifest" "wrote $MANIFEST"
 fi
 
 if (( FAILS )); then
-  useraction "resolve-images" "$FAILS image(s) could not be resolved — fix the seam(s) named above in the repo-root .env and re-run: ./setup.sh fetch (deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams)"
+  useraction "resolve-images" "$FAILS image(s) could not be resolved — fix the seam(s) named above in the repo-root .env and re-run: ./setup.sh fetch. The seams are CC_REGISTRY_DOCKERIO/_GHCR/_MCR (the mirror HOST) and CC_IMG_<NAME> (an exact ref this resolver must use as-is, including a re-namespaced PATH). deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams."
 fi
 (( ACTIONS )) && exit 3
 (( FAILS )) && exit 1

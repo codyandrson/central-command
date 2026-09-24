@@ -48,12 +48,30 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 NAMESPACE = "cc-sandbox"
-IMAGE = "docker.io/library/cc-sandbox:1"
-# podman resolves a locally-built, never-pushed image only under `localhost/`
-# (the repo's convention — see deploy/single's build scripts). Same image, a
-# different name per backend: `docker.io/library/…` is what the kubelet looks
-# up, and feeding that ref to podman would send it to a registry.
-PODMAN_IMAGE = "localhost/cc-sandbox:1"
+# The image REFS are configuration, not code (2026-09-23 design record, D2):
+# they were literals here, which made a re-tagged or mirrored sandbox image an
+# edit to app source. Declared in central_command/config.py as
+# CC_SANDBOX_IMAGE_K8S / CC_SANDBOX_IMAGE and documented in .env.example; read
+# at CALL time from os.environ (config.py's load_dotenv mirrors .env into the
+# process environment), matching every other knob in this module — a systemd
+# unit's EnvironmentFile and a test must both be able to flip them without a
+# reimport.
+#
+# Same image, a different name per backend, and neither is a typo: the kubelet
+# normalises a bare name to docker.io/library and cannot see a `localhost/` ref
+# at all, while podman resolves `localhost/` out of local storage and would
+# SEARCH REGISTRIES for a bare name. The LOCAL TAGS the build scripts produce
+# are unchanged — do not rename them.
+_IMAGE_K8S_DEFAULT = "docker.io/library/cc-sandbox:1"
+_IMAGE_PODMAN_DEFAULT = "localhost/cc-sandbox:1"
+
+
+def _image_k8s() -> str:
+    return os.environ.get("CC_SANDBOX_IMAGE_K8S", "").strip() or _IMAGE_K8S_DEFAULT
+
+
+def _image_podman() -> str:
+    return os.environ.get("CC_SANDBOX_IMAGE", "").strip() or _IMAGE_PODMAN_DEFAULT
 # runner.py -> sandbox/ -> central_command/ -> repo root.
 _DEFAULT_COPY_ROOT = Path(__file__).resolve().parents[2]
 _OUTPUT_CAP = 20_000
@@ -214,7 +232,7 @@ def _job_manifest(name: str, agent_id: str) -> dict:
                     "containers": [
                         {
                             "name": "sandbox",
-                            "image": IMAGE,
+                            "image": _image_k8s(),
                             "imagePullPolicy": "IfNotPresent",
                             # Sleeps for the session's TTL; kubectl exec drives
                             # everything that actually happens inside it.
@@ -339,7 +357,7 @@ async def _create_session_podman(name: str, agent_id: str) -> dict:
             "run", "-d", "--name", name,
             "--label", "app=cc-sandbox", "--label", f"cc-agent={agent_id}",
             "--memory", "1g", "--cpus", "1",
-            PODMAN_IMAGE, "sleep", str(ttl),
+            _image_podman(), "sleep", str(ttl),
         ])
         if rc != 0:
             raise HTTPException(502, f"podman run failed: {err.strip()}")

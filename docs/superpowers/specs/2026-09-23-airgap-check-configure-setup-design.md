@@ -1,7 +1,8 @@
 # Air-gapped install: one answer file, a check that executes nothing, a setup that cannot surprise
 
-> **Status:** partial — P1 shipped (v2.42.0); P2–P5 not built
-> **As-built:** P1 only — `deploy/env-lib.sh`, `.env.example`, `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/single/resolve-images.sh`, `deploy/single/make-secrets.sh`, `deploy/discover.sh`, `central_command/config.py`, `central_command/api/update.py`, `tests/test_single_no_tree_writes.py`
+> **Status:** partial — P1+P2 shipped (v2.43.0); P3–P5 not built
+> **As-built:** P1 — `deploy/env-lib.sh`, `.env.example`, `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/single/resolve-images.sh`, `deploy/single/make-secrets.sh`, `deploy/discover.sh`, `central_command/config.py`, `central_command/api/update.py`, `tests/test_single_no_tree_writes.py`. P2 (v2.43.0, D2 + D4) — the same five scripts plus `deploy/single/machine-lib.sh` (new), `deploy/single/build-graphiti-image.sh`, `deploy/single/build-sandbox-image.sh`, `deploy/single/build-crawler-image.sh`, `deploy/single/verify.sh`, `deploy/single/discover-llm.sh`, `deploy/single/compose.yaml`, `deploy/single/images.txt`, `deploy/pi/graphiti/Dockerfile`, `deploy/k3s/sandbox.Dockerfile`, `central_command/crawler/Dockerfile`, `central_command/sandbox/runner.py`, `deploy/AIRGAP.md`, `deploy/single/README.md`, `.claude/rules/deploy-single.md`, `.claude/skills/setup/SKILL.md`, `tests/test_single_airgap_seams.py`, `tests/test_single_machine_lib.py` (new).
+>
 > **Scope:** the single-node profile (`deploy/single/`) on Windows Podman
 > Desktop (WSL2 podman machine) behind an enterprise mirror. The k3s
 > profile is explicitly OUT of scope for this record; D4 of
@@ -12,6 +13,22 @@
 > **Retires:** the "never disable TLS verification anywhere" rule in
 > `deploy/AIRGAP.md`; the discovery output tree as an input to setup; the
 > LiteLLM-UI pause in the `llm` phase as the ONLY way to enter a provider.
+>
+> **P2 deltas from the plan, decided while building:** the base-image variables
+> are the resolver's own PATH-derived names (`CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP`,
+> `CC_IMG_PYTHON`, `CC_IMG_PLAYWRIGHT_PYTHON`), not a second `*_BASE` naming
+> scheme, so one image has one variable everywhere. `installed.manifest` gained
+> a leading variable column: the pin/own-write comparison has to be keyed to the
+> `images.txt` ROW, which a renamed path would otherwise break. The machine
+> phase's dry run reports WARN, never USERACTION — `preflight` calls it, and
+> exit 3 there would abort the full run before the phase that fixes it. The CA
+> for LiteLLM travels in `SSL_CERT_FILE` only, with `SSL_VERIFY` carrying just
+> `True`/`False`: LiteLLM's documented precedence puts `SSL_VERIFY` ABOVE
+> `SSL_CERT_FILE`, and a path coerced to a bool would read as False and silently
+> disable verification, where this way an unread CA is a loud certificate error.
+> `deploy/discover.sh` keeps its explicit `--cacert`/`-k` flags rather than the
+> exported fan-out (it probes AS the tools would, so flags are the point) and
+> only adopts the shared WARN wording.
 
 **Date:** 2026-09-23 · **Research:** three-agent pass the same day — a repo
 audit of every pinned artifact, a doc-verified pass over podman machine /
@@ -86,7 +103,9 @@ Two verdicts from the research that shape the design:
   is authoritative. Per-registry `mirror` and `insecure = true` are
   `registries.conf` tables. A corporate CA is either
   `/etc/containers/certs.d/<host>/ca.crt` or the machine trust store; podman
-  ≥ 5.9 `podman machine set --import-native-ca` imports the HOST trust store
+  ≥ 6.0 (CORRECTED at P2 build time from the 5.9 recorded here: podman's
+  RELEASE_NOTES lists the flag under 6.0.0) `podman machine set
+  --import-native-ca` imports the HOST trust store
   into the machine at start (podman-machine-set docs; GA status of that flag
   in the Podman Desktop build at the site is UNVERIFIED). No proxy is passed
   through at `machine start`; proxy for pulls/builds is `containers.conf`
@@ -290,6 +309,14 @@ be made to lack a tag and to present a private CA; it is the acceptance
 environment, not the developer's Linux box.
 
 ## Open items (do not block P1)
+
+- The LiteLLM and speech containers get the CA and the insecure flag (P2)
+  but NOT `CC_PROXY`: the machine drop-in sets the ENGINE's proxy (pulls and
+  builds), and containers.conf's `[engine] env` is documented as not reaching
+  containers. If the site's LLM endpoint sits behind a proxy, add
+  `HTTP(S)_PROXY`/`NO_PROXY` to those two services from `CC_PROXY` — decide
+  on the testbed, where an empty-string proxy variable's effect on httpx can
+  be observed rather than assumed.
 
 - Podman version in the site's Podman Desktop build: decides whether
   `--import-native-ca` or the `certs.d` write is the primary CA path.

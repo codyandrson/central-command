@@ -42,6 +42,42 @@ BUILD_ARGS=(
   --build-arg "UV_DEFAULT_INDEX=${CC_PYPI_INDEX_URL:-}"
   --build-arg "NPM_CONFIG_REGISTRY=${CC_NPM_REGISTRY:-}"
 )
+
+# The BASE REF comes from the image manifest (2026-09-23 design record, D2):
+# resolve-images.sh resolves images.txt's `crawler-base` row against the (mirror)
+# registry and writes CC_IMG_PLAYWRIGHT_PYTHON, so a mirror that lacks the
+# locked tag — or re-namespaces the PATH, which no CC_REGISTRY_* host can
+# express — reaches this build too. Unset (a bare run, or the k3s build
+# script) falls back to the Dockerfile's ARG default, which is the same
+# locked ref by test.
+if [[ -n "${CC_IMG_PLAYWRIGHT_PYTHON:-}" ]]; then
+  BUILD_ARGS+=(--build-arg "CC_IMG_PLAYWRIGHT_PYTHON=${CC_IMG_PLAYWRIGHT_PYTHON}")
+fi
+
+# The two trust knobs (2026-09-23 design record, D4), fanned out in one place
+# for the host side and handed to the build separately: no exported variable
+# reaches a build container, and the CA must not enter the build CONTEXT.
+#   * --tls-verify=false when insecure, for the base-image pull this build does
+#   * --build-arg CC_TLS_INSECURE, which the Dockerfile uses for apt/pip/npm
+#   * --secret id=cc_ca, which the Dockerfile installs into the image's trust
+#     store — a SECRET, because a build-arg is visible in `podman history`
+# shellcheck source=../env-lib.sh
+. "$REPO_ROOT/deploy/env-lib.sh"
+STATE_DIR="$(cc_state_dir "$REPO_ROOT/.env" "$REPO_ROOT" 2>/dev/null)" || STATE_DIR=""
+cc_export_tls_env "$STATE_DIR"
+TLS_ARGS=()
+if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
+  TLS_ARGS+=(--tls-verify=false --build-arg "CC_TLS_INSECURE=1")
+  echo "WARN tls-insecure: $(cc_tls_insecure_warn_text "this build's base-image pull and the apt/pip/npm fetches inside it")"
+fi
+if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
+  if [[ -r "$CC_CA_BUNDLE" ]]; then
+    TLS_ARGS+=(--secret "id=cc_ca,src=$CC_CA_BUNDLE")
+  else
+    echo "FATAL: CC_CA_BUNDLE is set to $CC_CA_BUNDLE, which is not readable" >&2
+    exit 1
+  fi
+fi
 IMAGE_REF="localhost/cc-crawler:1"
 
 for f in "$CTX/Dockerfile" "$CTX/service.py"; do
@@ -49,7 +85,7 @@ for f in "$CTX/Dockerfile" "$CTX/service.py"; do
 done
 
 echo "==> building $IMAGE_REF from $CTX"
-podman build "${BUILD_ARGS[@]}" -t "$IMAGE_REF" -f "$CTX/Dockerfile" "$CTX"
+podman build "${BUILD_ARGS[@]}" "${TLS_ARGS[@]}" -t "$IMAGE_REF" -f "$CTX/Dockerfile" "$CTX"
 
 # Exact match, and CAPTURE BEFORE GREPPING — `podman images | grep -q` inverts
 # under `set -o pipefail` (grep exits first, podman takes SIGPIPE).

@@ -41,6 +41,30 @@
 #   `-` become `_`, a leading `LIBRARY_` is dropped. library/postgres →
 #   CC_IMG_POSTGRES, playwright/python → CC_IMG_PLAYWRIGHT_PYTHON.
 #
+#   THE THREE *-base ROWS REACH THE BUILDS (v2.43.0, design record
+#   2026-09-23 D2). They used to be listed here and read by nothing: each
+#   Dockerfile carried its own base TAG, kept in step by hand, so a mirror
+#   lacking the locked base tag — or re-namespacing its PATH — could not be
+#   accommodated without editing a Dockerfile. Now they resolve like any other
+#   row and `deploy/single/build-*-image.sh` passes the result as
+#   `--build-arg CC_IMG_<NAME>`:
+#     graphiti-base → CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP
+#     sandbox-base  → CC_IMG_PYTHON
+#     crawler-base  → CC_IMG_PLAYWRIGHT_PYTHON
+#   Each Dockerfile declares the same name as an ARG whose DEFAULT is this
+#   file's registry+path+locked tag, so a bare `podman build` and the k3s build
+#   scripts (which pass no image arg) stay on the tested base.
+#   `tests/test_single_airgap_seams.py` fails the suite if an ARG default and
+#   the row here drift apart.
+#
+#   AN OPERATOR PIN WINS. A CC_IMG_<NAME> set by hand in `.env` is
+#   authoritative: the resolver VERIFIES that exact ref exists (a manifest HEAD,
+#   by tag or by digest), WARNs that it honoured a pin, records it as `pinned`
+#   and never rewrites it — and a pin the registry does not have is a FAIL
+#   naming the key. That is the seam for a mirror that re-namespaces paths,
+#   which no host variable can express. Editing THIS file is still the way to
+#   make a change last across installs; a pin is one deployment's answer.
+#
 #   Bumping a lock is a deliberate act — a release — never a side effect of
 #   what the mirror happens to hold today. Resolve a new digest with:
 #     curl -sI -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \

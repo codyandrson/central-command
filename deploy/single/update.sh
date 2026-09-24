@@ -79,6 +79,24 @@ step() { # step <check-name> <success-message> <cmd...>
 
 G() { git -C "$REPO_ROOT" "$@"; }
 
+# ── the two trust knobs (2026-09-23 design record, D4) ──────────────────────
+# Fanned out by the ONE function every command in this profile calls, so the
+# list of names cannot drift per script. It matters here because `apply` drives
+# git, uv/pip and npm — and, through setup.sh, podman.
+tls_env_for_update() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+  cc_export_tls_env "$STATE_DIR"
+  if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
+    # Never silent, never a PASS.
+    warn "tls-insecure" "$(cc_tls_insecure_warn_text "git, uv, pip, npm, node and curl for this update, and the podman pulls/builds setup.sh performs from it")"
+  fi
+  return 0
+}
+
 get_kv() { cc_get_kv "$@"; }   # deploy/env-lib.sh — one reader, three scripts
 
 # MIGRATION off the retired config files, on the update path too: a deployment
@@ -541,7 +559,8 @@ main() {
   logline "run start: ./update.sh ${cmd:-<none>} ${2:-}"
   case "$cmd" in
     -h|--help|help|"") ;;
-    *) migrate_env || { logline "run end: ./update.sh $cmd -> exit 1"; exit 1; } ;;
+    *) migrate_env || { logline "run end: ./update.sh $cmd -> exit 1"; exit 1; }
+       tls_env_for_update ;;
   esac
   case "$cmd" in
     init)     cmd_init ;;

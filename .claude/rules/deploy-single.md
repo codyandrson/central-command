@@ -15,8 +15,8 @@ when a matching file is read.
 
 - **`deploy/single/`** — the single-node **Compose** profile (`compose.yaml`,
   run under `podman compose`).
-  `setup.sh` is a deterministic driver (validate / preflight / fetch / llm /
-  stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
+  `setup.sh` is a deterministic driver (validate / preflight / machine / fetch /
+  llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
   exit 0/1/2/3, `diagnose` support bundle); the
   /setup skill's job is elicitation and diagnosis only. `compose.yaml` is the
   whole deployment (readiness is healthchecks + depends_on, optionals are
@@ -45,8 +45,37 @@ when a matching file is read.
     the two in step). `tests/test_single_no_tree_writes.py` walks the scripts
     and fails a new in-tree write; the `.gitignore` entries that used to hide
     the litter are deliberately gone, so a regression is a dirty checkout.
-  * `CC_TLS_INSECURE=1` is a DIAGNOSTIC honoured by the prober only, and
-    every run that sees it prints a WARN. It is never a PASS and never a fix.
+- **TWO trust knobs, fanned out from ONE function** (v2.43.0, design record D4
+  — the operator DROPPED the "never disable verification" rule on 2026-09-23;
+  the site assumes security through isolation). `CC_CA_BUNDLE` and
+  `CC_TLS_INSECURE=0|1`, and no per-tool knobs — per-tool granularity is what
+  drifted. `deploy/env-lib.sh`'s `cc_export_tls_env` is the ONE fan-out and
+  every command in the profile calls it; a build gets the CA as
+  `podman build --secret id=cc_ca` (never a build-arg — those are visible in
+  `podman history`) and `--tls-verify=false`; the podman MACHINE gets it from
+  the `machine` phase. Every command that sees `CC_TLS_INSECURE=1` prints
+  exactly ONE `WARN tls-insecure:` line naming the consumers IT drives — never
+  a PASS, never silent. The one consumer with no insecure option is Hugging
+  Face (the speech engine); say so rather than pretending.
+  `tests/test_single_airgap_seams.py` walks the fan-out table.
+- **The `machine` phase WRITES another host, so it behaves like it.** Between
+  `preflight` and `fetch`; a no-op where there is no podman machine; DROP-INS
+  only (`registries.conf.d/`, `containers.conf.d/`) and never a main
+  containers configuration file; the diff is printed BEFORE each write and a
+  proxy VALUE is never printed; `--dry-run` reports and writes nothing (it is
+  what `preflight` calls, so preflight must never turn the diff into a
+  USERACTION — exit 3 there would abort the full run before the phase that
+  fixes it). Its pure functions live in `deploy/single/machine-lib.sh` because
+  a machine cannot exist on the developer's Linux box and the DECISIONS still
+  have to be tested (`tests/test_single_machine_lib.py`).
+- **An operator `CC_IMG_<NAME>` pin WINS, and is verified.** The resolver
+  writes that key itself, so presence proves nothing — `installed.manifest`
+  records what it wrote, and a value that differs from that record is the
+  operator's. A pin is checked against the registry (HEAD by tag or digest,
+  parsed from the PINNED ref so a re-namespaced PATH works), WARNed, recorded
+  as `pinned`, and never rewritten; a pin that does not exist is a FAIL naming
+  the key. The three `*-base` rows reach the builds through the same keys, and
+  each Dockerfile's `ARG CC_IMG_*` default must equal its `images.txt` row.
 - **The single-node install ACQUIRES before it deploys, and never falls back
   on its own.** `setup.sh fetch` is the one phase that touches the network;
   each failure names its `.env` seam and the phase exits 3; `deploy/discover.sh`

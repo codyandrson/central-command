@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into the ONE answer file, the repo-root .env, and runs the deterministic `./setup.sh` (ten phases: validate/preflight/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate, the agent's job is elicitation and diagnosis only: it writes answers into the ONE answer file, the repo-root .env, and runs the deterministic `./setup.sh` (eleven phases: validate/preflight/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator), reading `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDING ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -225,9 +225,14 @@ phase. Nothing else in the tree was touched — `git status` should be clean.
 ./setup.sh
 ```
 
-This runs all ten phases — `validate → preflight → fetch → llm → stack →
-app → verify → test → boot → demo` — in order, stopping at the first hard
-failure. Each line on stdout is
+This runs all eleven phases — `validate → preflight → machine → fetch → llm →
+stack → app → verify → test → boot → demo` — in order, stopping at the first
+hard failure. (`machine` is new in v2.43.0: it tells the podman MACHINE what
+`.env` says — the CA into its trust store, the registries mirror/insecure
+drop-in, the proxy drop-in — and is a no-op on bare Linux. It prints the diff
+before each write, and `./setup.sh machine --dry-run` reports without writing,
+which is what `preflight` calls. Never hand the operator the old
+`podman machine ssh …` instructions: the phase does it.) Each line on stdout is
 `PASS|WARN|FAIL|USERACTION <check-name>: <message>`; subprocess detail goes
 to stderr. Exit code **0** = clean, **1** = hard failure, **2** = completed
 with warnings, **3** = stopped for the operator's move. Read every line — a

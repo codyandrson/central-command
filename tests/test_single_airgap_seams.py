@@ -56,6 +56,7 @@ SCRIPTS = [
     SINGLE / "build-crawler-image.sh",
     SINGLE / "discover-llm.sh",
     SINGLE / "update-run.sh",
+    SINGLE / "machine-lib.sh",
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
 COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base", "speech"}
@@ -148,19 +149,65 @@ def _img_var(path: str) -> str:
     return "CC_IMG_" + name.removeprefix("LIBRARY_")
 
 
-def _dockerfile_bases() -> set[tuple[str, str]]:
+def _dockerfile_bases() -> set[tuple[str, str, str]]:
+    """Every build base, as (registry-key, path, tag), read off the ARG default.
+
+    Since v2.43.0 the base REF goes through the image manifest like any pulled
+    image (design record ``2026-09-23-airgap-check-configure-setup-design.md``
+    D2): ``FROM ${CC_IMG_<NAME>}``, with an ``ARG CC_IMG_<NAME>`` whose default
+    is ``${CC_REGISTRY_*}/<path>:<locked-tag>``. Both halves are load-bearing.
+    The variable is what ``resolve-images.sh`` writes and the build script
+    passes, so a mirror lacking the locked base tag — or re-namespacing its
+    path — reaches the build; the DEFAULT is what a bare ``podman build`` and
+    the k3s build scripts (which pass no image arg) use, so it must be the
+    tested base. The name must be the resolver's own derivation, or the build
+    script would be passing a variable the resolver never writes.
+    """
     bases = set()
     for df in DOCKERFILES:
         text = df.read_text(encoding="utf-8")
         froms = re.findall(r"^FROM\s+(\S+)", text, flags=re.M)
         assert froms, f"{df}: no FROM"
         for ref in froms:
-            m = re.fullmatch(r"\$\{(CC_REGISTRY_[A-Z]+)\}/(.+)", ref)
-            assert m, f"{df}: FROM {ref!r} must go through a ${{CC_REGISTRY_*}} build-arg"
-            assert re.search(rf"^ARG\s+{m.group(1)}=", text, flags=re.M), f"{df}: ARG {m.group(1)} must be declared before FROM"
-            path, _, tag = m.group(2).rpartition(":")
-            bases.add((REGISTRY_VAR[m.group(1)], path, tag))
+            m = re.fullmatch(r"\$\{(CC_IMG_[A-Z0-9_]+)\}", ref)
+            assert m, (
+                f"{df}: FROM {ref!r} must be ${{CC_IMG_<NAME>}} — the base ref comes "
+                "from images.txt through resolve-images.sh (design record 2026-09-23, D2)"
+            )
+            var = m.group(1)
+            dm = re.search(rf"^ARG\s+{var}=(\S+)\s*$", text, flags=re.M)
+            assert dm, f"{df}: ARG {var} must be declared, with a default, before FROM"
+            dflt = dm.group(1)
+            rm = re.fullmatch(r"\$\{(CC_REGISTRY_[A-Z]+)\}/(.+)", dflt)
+            assert rm, (
+                f"{df}: ARG {var}'s default {dflt!r} must be "
+                "${CC_REGISTRY_*}/<path>:<locked-tag> so the registry host stays a seam"
+            )
+            assert re.search(rf"^ARG\s+{rm.group(1)}=", text, flags=re.M), (
+                f"{df}: ARG {rm.group(1)} must be declared before {var} uses it"
+            )
+            path, _, tag = rm.group(2).rpartition(":")
+            assert var == _img_var(path), (
+                f"{df}: the base ARG is {var}, but resolve-images.sh writes "
+                f"{_img_var(path)} for {path} — the build script would pass a variable "
+                "nothing sets"
+            )
+            bases.add((REGISTRY_VAR[rm.group(1)], path, tag))
     return bases
+
+
+def test_each_build_script_passes_its_base_ref_through():
+    """The manifest only reaches a build if the script hands the variable over."""
+    for script, var in (
+        ("build-graphiti-image.sh", "CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP"),
+        ("build-sandbox-image.sh", "CC_IMG_PYTHON"),
+        ("build-crawler-image.sh", "CC_IMG_PLAYWRIGHT_PYTHON"),
+    ):
+        text = (SINGLE / script).read_text(encoding="utf-8")
+        assert f'--build-arg "{var}=' in text, (
+            f"{script} must pass --build-arg {var} — otherwise images.txt's base row "
+            "is read by nothing and the Dockerfile default is the only path"
+        )
 
 
 def test_every_pulled_image_is_pinned_in_images_txt():
@@ -206,6 +253,15 @@ def test_every_seam_the_scripts_read_is_declared_in_env_example():
 # documented line in .env.example — that is what makes the file the operator's
 # whole map.
 RUNTIME_ONLY = {
+    # DERIVED and exported for compose, never written into .env (v2.43.0, design
+    # record 2026-09-23 D4): each is composed from CC_CA_BUNDLE /
+    # CC_TLS_INSECURE, and the rule since v2.42.0 is that one fact has one key.
+    "CC_LITELLM_SSL_VERIFY", "CC_CA_BUNDLE_IN_CONTAINER", "CC_CA_BUNDLE_MOUNT_SRC",
+    # deploy/single/machine-lib.sh's own constants: the paths it writes inside
+    # the podman machine, and its source guard. Not answers — a machine's
+    # containers.conf path is not the operator's choice.
+    "CC_MACHINE_REGISTRIES_CONF", "CC_MACHINE_PROXY_CONF", "CC_MACHINE_CA_PEM",
+    "CC_MACHINE_LIB_LOADED",
     "CC_VERIFY_LIVE", "CC_VERIFY_MAX_WAIT",   # verify.sh: which checks to run
     "CC_PROBE_TIMEOUT",                        # a slow backend, for one run
     "CC_SKIP_DB_BACKUP", "CC_BACKUP_DIR",      # update.sh's deliberate opt-outs
@@ -283,8 +339,15 @@ def test_no_kube_play_path_survives():
 
 def test_fetch_phase_runs_before_anything_deploys():
     text = (SINGLE / "setup.sh").read_text(encoding="utf-8")
-    m = re.search(r"for p in (validate preflight fetch llm stack app verify test boot demo); do", text)
-    assert m, "setup.sh's full run must go validate -> preflight -> fetch -> llm -> ..."
+    # `machine` joined the order in v2.43.0, between preflight and fetch: the
+    # podman machine has to trust the mirror BEFORE anything is pulled.
+    m = re.search(
+        r"for p in (validate preflight machine fetch llm stack app verify test boot demo); do",
+        text,
+    )
+    assert m, (
+        "setup.sh's full run must go validate -> preflight -> machine -> fetch -> llm -> ..."
+    )
     assert "build_if_missing" not in text, "stack must ASSERT images (need_image), never build them mid-deploy"
 
 
@@ -299,3 +362,147 @@ def test_scripts_parse(script: pathlib.Path):
     # cwd= + basename, not the full path: on Windows the first `bash` on PATH
     # may be WSL's launcher, which cannot open a Windows path.
     subprocess.run(["bash", "-n", script.name], cwd=script.parent, check=True)
+
+
+# ── D4: the two trust knobs, and the fan-out that must reach every consumer ──
+# The design record's table is the contract. A consumer that loses its variable
+# here is a build that starts failing on a TLS-intercepted network months later,
+# with nothing in the diff that looks like trust — so the table is a test.
+ENV_LIB = ROOT / "deploy" / "env-lib.sh"
+MACHINE_LIB = SINGLE / "machine-lib.sh"
+
+# consumer -> (CA variable, insecure variable) as cc_export_tls_env must set them
+HOST_FANOUT = {
+    "curl": ("CURL_CA_BUNDLE", None),          # -k has no env var: the .curlrc
+    "openssl/uv/python": ("SSL_CERT_FILE", None),
+    "requests-based": ("REQUESTS_CA_BUNDLE", None),
+    "pip": ("PIP_CERT", "PIP_TRUSTED_HOST"),
+    "node": ("NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED"),
+    "npm": ("NPM_CONFIG_CAFILE", "NPM_CONFIG_STRICT_SSL"),
+    "git": ("GIT_SSL_CAINFO", "GIT_SSL_NO_VERIFY"),
+    "uv-insecure": (None, "UV_INSECURE_HOST"),
+}
+
+
+def _export_tls_env_body() -> str:
+    text = ENV_LIB.read_text(encoding="utf-8")
+    start = text.index("cc_export_tls_env() {")
+    end = text.index("\ncc__write_curlrc() {", start)
+    return text[start:end]
+
+
+def test_the_trust_fanout_reaches_every_consumer_in_the_table():
+    body = _export_tls_env_body()
+    for consumer, (ca_var, insecure_var) in HOST_FANOUT.items():
+        for var in (ca_var, insecure_var):
+            if var is None:
+                continue
+            assert re.search(rf"\bexport {var}=", body), (
+                f"deploy/env-lib.sh's cc_export_tls_env no longer exports {var} "
+                f"(the {consumer} seam in the D4 fan-out table)"
+            )
+    # curl's insecure flag is a generated .curlrc, not a variable, and CURL_HOME
+    # is how curl is told where to find it.
+    assert "insecure" in body and "export CURL_HOME=" in body, (
+        "curl's insecure seam is the generated .curlrc plus CURL_HOME"
+    )
+    # UV_NATIVE_TLS is deprecated in favour of UV_SYSTEM_CERTS — neither may
+    # reappear as the CA seam (SSL_CERT_FILE is what uv reads for a bundle).
+    for line in ENV_LIB.read_text(encoding="utf-8").splitlines():
+        code = line.split("#", 1)[0]
+        assert "UV_NATIVE_TLS" not in code, (
+            "UV_NATIVE_TLS is deprecated — uv's replacement is UV_SYSTEM_CERTS "
+            "(naming it in a COMMENT, as the thing not to use, is fine)"
+        )
+
+
+def test_every_command_in_the_profile_calls_the_one_fanout():
+    """One function, called everywhere — per-tool lists are what drifted."""
+    for script in (
+        SINGLE / "setup.sh", SINGLE / "update.sh", SINGLE / "verify.sh",
+        SINGLE / "make-secrets.sh", SINGLE / "resolve-images.sh",
+        SINGLE / "discover-llm.sh", SINGLE / "build-graphiti-image.sh",
+        SINGLE / "build-sandbox-image.sh", SINGLE / "build-crawler-image.sh",
+    ):
+        assert "cc_export_tls_env" in script.read_text(encoding="utf-8"), (
+            f"{script.name} reads .env but never calls cc_export_tls_env — the "
+            "CA and insecure knobs would not reach the tools it drives"
+        )
+
+
+def test_every_command_that_sees_the_insecure_knob_says_so():
+    """Never silent, never a PASS. One WARN line per run, naming consumers."""
+    for script in (
+        SINGLE / "setup.sh", SINGLE / "update.sh", SINGLE / "verify.sh",
+        SINGLE / "make-secrets.sh", SINGLE / "resolve-images.sh",
+        ROOT / "deploy" / "discover.sh",
+        SINGLE / "build-graphiti-image.sh", SINGLE / "build-sandbox-image.sh",
+        SINGLE / "build-crawler-image.sh",
+    ):
+        text = script.read_text(encoding="utf-8")
+        assert "tls-insecure" in text, f"{script.name}: no tls-insecure line"
+        assert "cc_tls_insecure_warn_text" in text or "TLS verification is OFF" in text, (
+            f"{script.name}: the insecure notice must use the shared wording"
+        )
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            assert 'pass "tls-insecure"' not in code, (
+                f"{script.name}: CC_TLS_INSECURE=1 is never a PASS"
+            )
+
+
+def test_the_builds_carry_the_knobs_into_the_image():
+    """A build container inherits no variable: it needs flags and a secret."""
+    for script in ("build-graphiti-image.sh", "build-sandbox-image.sh",
+                   "build-crawler-image.sh"):
+        text = (SINGLE / script).read_text(encoding="utf-8")
+        assert "--tls-verify=false" in text, f"{script}: no --tls-verify=false path"
+        assert 'CC_TLS_INSECURE=1' in text, f"{script}: the insecure build-arg is missing"
+        assert "id=cc_ca,src=" in text, (
+            f"{script}: the CA must travel as --secret id=cc_ca (a build-arg is "
+            "visible in `podman history`, and the context must not carry it)"
+        )
+    for df in DOCKERFILES:
+        text = df.read_text(encoding="utf-8")
+        assert "--mount=type=secret,id=cc_ca,required=false" in text, (
+            f"{df.name}: the CA secret mount must be optional — the k3s build "
+            "scripts pass no secret and must still build"
+        )
+        assert "update-ca-certificates" in text, f"{df.name}: the secret is never installed"
+        assert 'Acquire::https::Verify-Peer "false"' in text, (
+            f"{df.name}: apt has no insecure path"
+        )
+        assert "$CC_CA_BUNDLE" not in text, (
+            f"{df.name}: the CA path must not reach a build-arg or the context"
+        )
+
+
+def test_only_the_two_outbound_containers_get_the_trust_env():
+    """Only LiteLLM and the speech engine dial outward, so only they need it."""
+    text = COMPOSE.read_text(encoding="utf-8")
+    assert "SSL_VERIFY: ${CC_LITELLM_SSL_VERIFY:-True}" in text
+    assert "SSL_CERT_FILE: ${CC_CA_BUNDLE_IN_CONTAINER:-}" in text
+    assert "REQUESTS_CA_BUNDLE: ${CC_CA_BUNDLE_IN_CONTAINER:-}" in text
+    # Two mounts, one per outbound service, with the neutral /dev/null default
+    # so the volume list needs no conditional.
+    assert text.count("${CC_CA_BUNDLE_MOUNT_SRC:-/dev/null}:/etc/cc/ca.pem:ro") == 2
+
+
+def test_the_machine_phase_is_in_the_order_and_the_docs():
+    """`machine` runs between preflight and fetch, and takes --dry-run."""
+    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    m = re.search(r"for p in ((?:\w+\s+)+\w+); do", setup)
+    assert m, "the all-phases loop is gone"
+    phases = m.group(1).split()
+    assert phases[:4] == ["validate", "preflight", "machine", "fetch"], phases
+    assert "phase_machine --dry-run" in setup, (
+        "preflight must REPORT the machine diff rather than hand out instructions"
+    )
+    # The writer only ever writes drop-ins.
+    lib = MACHINE_LIB.read_text(encoding="utf-8")
+    assert "registries.conf.d/cc-central-command.conf" in lib
+    assert "containers.conf.d/cc-proxy.conf" in lib
+    for main_file in ("/etc/containers/registries.conf\"", "/etc/containers/containers.conf\""):
+        assert main_file not in setup, (
+            "the machine phase must never write a MAIN containers configuration file"
+        )

@@ -100,11 +100,11 @@ the entry format and how to add one.
 - **Enforced:** discipline only — script-level fix only, no pytest guard
 - **Source:** .claude/rules/deploy-k3s.md
 
-### DL-082 — setup.sh runs ten deterministic phases with PASS/WARN/FAIL/USERACTION exit codes
+### DL-082 — setup.sh runs eleven deterministic phases with PASS/WARN/FAIL/USERACTION exit codes
 
 - **Status:** active
 - **Date:** undated
-- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`setup.sh` is a deterministic driver (validate / preflight / fetch / llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION, exit 0/1/2/3, `diagnose` support bundle)"
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`setup.sh` is a deterministic driver (validate / preflight / machine / fetch / llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION, exit 0/1/2/3, `diagnose` support bundle)"
 - **Why:** Not recorded beyond the stated mechanism: a deterministic,
   resumable driver protocol lets the /setup skill's job stay elicitation and
   diagnosis only, never freehand fixes.

@@ -111,7 +111,7 @@ to find, so a hand-run `podman compose` needs that flag too.
 cp .env.example .env   # AT THE REPO ROOT — then fill it in, see below
 chmod 600 .env
 cd deploy/single
-./setup.sh             # validate -> preflight -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
+./setup.sh             # validate -> preflight -> machine -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
 ```
 
 Everything this install GENERATES — `setup-log.txt`, `setup-diagnostics.txt`,
@@ -179,11 +179,22 @@ never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `re
 The resolved refs are written to `.env` as `CC_IMG_*` (compose.yaml reads
 them) and recorded in `$CC_STATE_DIR/installed.manifest`. **A `WARN`-level substitution plus
 a green `./setup.sh verify` is a supported install** — capability is proven by
-probes, not by version strings. One limit worth knowing: the three locally
-built images pin their base tag in the Dockerfile, so a substituted *base*
-image is not what the build uses — if resolution substitutes a `*-base`
-component, the build will fail loudly on the missing tag and the fix is to
-mirror the tested tag or bump the lock.
+probes, not by version strings. Since v2.43.0 the three locally BUILT images resolve their base
+through the same manifest: the resolver writes
+`CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP`, `CC_IMG_PYTHON` and
+`CC_IMG_PLAYWRIGHT_PYTHON`, and each `build-*-image.sh` passes its one as a
+`--build-arg`, so a substituted or re-namespaced base reaches the build instead
+of failing it. The Dockerfile `ARG` default is the locked ref, which is what a
+bare `podman build` (and the k3s build scripts) use — a test fails the suite if
+the default and `images.txt` ever drift.
+
+**An operator pin wins.** Set a `CC_IMG_<NAME>` in `.env` yourself and the
+resolver verifies that exact ref exists (a manifest HEAD by tag, or by digest
+for a `…@sha256:…` ref, parsed from YOUR ref — so a mirror that re-namespaces
+the PATH works), `WARN`s that it honoured a pin, records it as `pinned`, and
+never rewrites it. A pin the registry does not have is a `FAIL` naming the key.
+Unset it to resolve against `images.txt` again. It tells your pin from its own
+last write by comparing against what `installed.manifest` records.
 
 On a restricted network, run `deploy/discover.sh` first: it probes every
 external source this profile touches, diagnoses each failure mode, and its
@@ -219,6 +230,11 @@ step inside it is idempotent, so **resume is just re-run**:
 ```bash
 ./setup.sh validate    # offline check of .env; no side effects
 ./setup.sh preflight   # podman/tooling/RAM/disk/linger checks; no side effects
+./setup.sh machine     # write the podman MACHINE from .env: the CA into its trust
+                       #   store, the registries mirror/insecure drop-in, the proxy
+                       #   drop-in. A no-op on bare Linux; idempotent; prints the
+                       #   diff before each write. `machine --dry-run` reports only
+                       #   (which is what preflight calls). deploy/AIRGAP.md
 ./setup.sh fetch       # acquire every external artifact up front (the one network phase)
 ./setup.sh llm         # secrets + LiteLLM (+speech) up + probe its aliases + measure CC_EMBED_DIM
 ./setup.sh stack       # assert the local images, then `compose up -d --wait` (+crawler, +n8n)
@@ -231,13 +247,27 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh stop        # stops the API that `boot` started
 ```
 
+### Trust: two knobs (v2.43.0)
+
+`CC_CA_BUNDLE` (a PEM the whole deployment trusts) and `CC_TLS_INSECURE=0|1`
+(verification off). Two keys, not twelve — per-tool knobs are what drift. One
+function fans the CA out to every host-side tool
+(`deploy/env-lib.sh`'s `cc_export_tls_env`), the builds take it as a
+`podman build --secret` (never a build-arg — those show in `podman history`),
+`./setup.sh machine` installs it in the podman machine, and LiteLLM and the
+speech engine get it mounted read-only at `/etc/cc/ca.pem`. Prefer the CA; the
+insecure knob is supported for a site that relies on isolation instead, and
+every command that sees it prints one `WARN tls-insecure:` line naming what it
+covers — never a PASS. The full table, including the one consumer with no
+insecure option (Hugging Face), is in `deploy/AIRGAP.md`.
+
 `compose up -d` converges: a service whose definition is unchanged is left
 alone, a changed one is recreated. Re-running a phase after a config change is
 the supported way to apply it.
 
 ### First boot and the demo (the last three phases, 2026-08-28)
 
-A bare `./setup.sh` runs all ten phases — **zero to a working, human-approved
+A bare `./setup.sh` runs all eleven phases — **zero to a working, human-approved
 demo in one command.** The late phases skip by probing reality, never a state
 file: a healthy API skips `test` and `boot`, a decided proposal in the event
 log skips `demo`. Only two moments are yours, and on a terminal the script

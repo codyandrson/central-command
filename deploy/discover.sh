@@ -46,13 +46,18 @@
 #     CC_PROXY=http://host:port            --proxy on every probe
 #     CC_NETRC=1                           --netrc (credentials stay in
 #                                          ~/.netrc, never in .env)
-#     CC_TLS_INSECURE=1                    -k on every probe. DIAGNOSTIC ONLY —
-#                                          it tells you whether TLS
-#                                          interception is the cause, and every
-#                                          run that sees it prints a WARN. It is
-#                                          never the fix, and standardizing on
-#                                          it trades a broken build for an
-#                                          unverifiable supply chain.
+#     CC_TLS_INSECURE=1                    -k on every probe. Since v2.43.0
+#                                          this is the deployment's REAL
+#                                          insecure knob, not a probe-only
+#                                          diagnostic (2026-09-23 design record,
+#                                          D4): the same key turns verification
+#                                          off for the acquisition toolchain,
+#                                          podman pulls and builds, and
+#                                          LiteLLM. Prefer CC_CA_BUNDLE, which
+#                                          keeps the chain verifiable; every run
+#                                          that sees this prints one WARN naming
+#                                          what it covers, and it is never a
+#                                          PASS.
 #     the mirror seams                     CC_PYPI_INDEX_URL, CC_NPM_REGISTRY,
 #                                          CC_REGISTRY_DOCKERIO/_GHCR/_MCR,
 #                                          CC_APT_MIRROR,
@@ -169,7 +174,7 @@ move_for() { # move_for <class> <KEYVAR>
   case "$c" in
     dns) printf 'internal DNS does not resolve public names — if a mirror exists for this resource, set %s in .env and re-run' "$(seam_for_var "$k")" ;;
     refused|timeout) printf 'egress to this host is blocked — ask for the sanctioned mirror/proxy; set %s or CC_PROXY in .env and re-run' "$(seam_for_var "$k")" ;;
-    tls-intercept) printf 'TLS is intercepted by %s — export the corporate root CA and set CC_CA_BUNDLE in .env; do NOT standardize on disabling verification' "${TLS_ISSUER_HINT:-the corporate proxy}" ;;
+    tls-intercept) printf 'TLS is intercepted by %s — export the corporate root CA and set CC_CA_BUNDLE in .env. CC_TLS_INSECURE=1 is the other supported answer (one documented switch across the whole install) and it trades a verifiable supply chain for a working one' "${TLS_ISSUER_HINT:-the corporate proxy}" ;;
     # One text for both surfaces of the same fact: a 407 on a plain-HTTP
     # request, and a refused CONNECT tunnel (exit 56) on an HTTPS one.
     proxy-auth) printf 'the proxy wants credentials or refused the CONNECT tunnel (auth required or policy block) — set CC_PROXY with credentials or use CC_NETRC=1 with a ~/.netrc entry, and re-run' ;;
@@ -264,7 +269,7 @@ load_conf() {
   if [[ "${DISCO_INSECURE:-0}" == 1 ]]; then
     CURL_FLAGS+=(-k)
     # Never silent, never a PASS (2026-09-23 design record, D4).
-    warn "tls-insecure" "CC_TLS_INSECURE=1 — every probe below ran with TLS verification OFF. That is a DIAGNOSTIC: it tells you whether interception is the cause. The FIX is exporting the corporate root CA into CC_CA_BUNDLE; leaving this on trades a broken build for an unverifiable supply chain."
+    warn "tls-insecure" "$(cc_tls_insecure_warn_text "every probe below (curl -k). The same key turns it off for the install's acquisition toolchain, podman pulls/builds and LiteLLM — see .env.example's fan-out table. CC_CA_BUNDLE is the alternative that keeps the chain verifiable")"
   fi
   return 0
 }
@@ -979,7 +984,7 @@ write_nuances_section() {
     if [[ -f "$OUT/raw/tls-inspection.result" ]]; then
       printf 'Note that **every probe still passed** — the corporate root is already in this host'"'"'s trust store, so the breakage will land on whatever brings its OWN root pool (Go binaries, pinned clients, a container that does not mount the host bundle) rather than on curl. '
     fi
-    printf 'Export that root CA to a PEM file, set `CC_CA_BUNDLE` in the repo-root `.env`, and configure each toolchain (see below). Do NOT standardize on disabling verification — it converts one broken build into an unverifiable supply chain.\n'
+    printf 'Export that root CA to a PEM file and set `CC_CA_BUNDLE` in the repo-root `.env` — one key, fanned out to every toolchain by the install (see `.env.example`'"'"'s fan-out table). The other supported answer is `CC_TLS_INSECURE=1`, which turns verification off across the install and trades a verifiable supply chain for a working one; it is one switch rather than six, and every run that sees it says so.\n'
   else
     printf -- '- **TLS interception:** none detected — no probe recovered under `-k` after a certificate failure, and no inspection-appliance issuer was seen on the hosts that succeeded.\n'
   fi

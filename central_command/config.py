@@ -549,6 +549,18 @@ class Settings(BaseSettings):
     sandbox_runner_token: str = ""  # shared bearer token; runner enforces when set
     sandbox_session_ttl_seconds: int = 3600
     sandbox_exec_timeout_seconds: int = 120
+    # The sandbox IMAGE, per backend. These were literals in runner.py until
+    # v2.43.0, which made a re-tagged or mirrored image an edit to app source
+    # (2026-09-23 design record, D2: the image manifest reaches every image).
+    # The runner reads them from os.environ at call time — load_dotenv above
+    # mirrors .env into the process environment — so these fields are the
+    # DECLARATION (and .env.example's documentation), not a second reader.
+    # Same image, a different ref form per backend on purpose: the kubelet
+    # normalises a bare name to docker.io/library and cannot see `localhost/`,
+    # podman resolves `localhost/` locally and would search registries for a
+    # bare name. The local tags the build scripts produce are unchanged.
+    sandbox_image: str = "localhost/cc-sandbox:1"          # rootless-podman backend
+    sandbox_image_k8s: str = "docker.io/library/cc-sandbox:1"  # kubectl backend
 
     # Sandbox slice 2 (mcp.sync_source): the one gated exit from a sandbox into
     # servers/<id>/ in this repo. Cap is on TOTAL captured bytes across every

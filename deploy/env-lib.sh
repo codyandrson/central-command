@@ -282,3 +282,104 @@ cc_migrate_legacy_env() { # cc_migrate_legacy_env <env-file> <repo-root> <state-
 
   printf '%s' "$msg"
 }
+
+# ── the two trust knobs, fanned out (D4) ────────────────────────────────────
+# ONE place, called by every command that makes a TLS connection or drives a
+# tool that does: deploy/single/{setup,update,verify,make-secrets,resolve-images,
+# discover-llm,build-*}.sh and deploy/discover.sh. Per-tool knobs are not
+# exposed — per-tool granularity is exactly what drifted before.
+#
+#   CC_CA_BUNDLE      a PEM the whole toolchain should trust
+#   CC_TLS_INSECURE   1 = verification OFF for everything this fan-out reaches
+#
+# The operator DROPPED the "never disable verification" rule on 2026-09-23:
+# the site assumes security through isolation. The trade is stated once, by the
+# caller, as a WARN naming the consumers it drives — never a PASS, never
+# silent. This function does not print: the consumer LIST differs per command,
+# and the output protocol belongs to the caller.
+#
+# Every name below is the one the tool actually reads (checked 2026-09-23):
+# uv reads UV_SYSTEM_CERTS (UV_NATIVE_TLS is DEPRECATED) and UV_INSECURE_HOST;
+# pip reads PIP_CERT / PIP_TRUSTED_HOST; npm reads any npm_config_* case-
+# insensitively; node reads NODE_EXTRA_CA_CERTS / NODE_TLS_REJECT_UNAUTHORIZED;
+# git reads GIT_SSL_CAINFO / GIT_SSL_NO_VERIFY.
+#
+# podman is NOT here. Its pulls and builds verify inside the podman MACHINE (or
+# against the host trust store on bare Linux), which no exported variable
+# reaches — that is the `machine` phase's job and `--tls-verify=false`'s.
+cc_export_tls_env() { # cc_export_tls_env <state-dir>
+  local state="${1:-}"
+
+  if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
+    export CURL_CA_BUNDLE="$CC_CA_BUNDLE"      # curl (host)
+    export SSL_CERT_FILE="$CC_CA_BUNDLE"       # openssl, uv, python
+    export REQUESTS_CA_BUNDLE="$CC_CA_BUNDLE"  # requests/httpx-based tools
+    export PIP_CERT="$CC_CA_BUNDLE"            # pip
+    export NODE_EXTRA_CA_CERTS="$CC_CA_BUNDLE" # node
+    export NPM_CONFIG_CAFILE="$CC_CA_BUNDLE"   # npm
+    export GIT_SSL_CAINFO="$CC_CA_BUNDLE"      # git over https
+  fi
+
+  # The hosts an index knob points at — pip and uv take HOSTS, not URLs.
+  local ihosts="" u h
+  for u in "${CC_PYPI_INDEX_URL:-}" "${CC_PYTHON_MIRROR:-}"; do
+    [[ -n "$u" ]] || continue
+    h="$(cc__host_only "$u")"
+    [[ -n "$h" ]] || continue
+    [[ " $ihosts " == *" $h "* ]] || ihosts="${ihosts:+$ihosts }$h"
+  done
+
+  if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
+    # curl has no environment variable for -k, so it travels in a config file
+    # this install owns. CURL_HOME is how curl finds a .curlrc that is not in
+    # $HOME, and the file is REWRITTEN each run rather than appended to, so a
+    # knob turned back off does not leave a stale `insecure` line behind.
+    if [[ -n "$state" ]] && mkdir -p "$state/curl" 2>/dev/null; then
+      cc__write_curlrc "$state/curl/.curlrc" insecure
+      export CURL_HOME="$state/curl"
+    fi
+    # Space-separated: pip documents multi-value environment options that way,
+    # and uv's list-valued environment variables follow the same convention
+    # (UV_INSECURE_HOST is the documented env form of --allow-insecure-host —
+    # verified in `uv pip install --help` on 2026-09-23; the SEPARATOR is uv's
+    # documented convention, not something this host could prove).
+    if [[ -n "$ihosts" ]]; then
+      export PIP_TRUSTED_HOST="$ihosts"
+      export UV_INSECURE_HOST="$ihosts"
+    fi
+    export NPM_CONFIG_STRICT_SSL=false
+    export NODE_TLS_REJECT_UNAUTHORIZED=0
+    export GIT_SSL_NO_VERIFY=1
+  elif [[ -n "$state" ]]; then
+    cc__write_curlrc "$state/curl/.curlrc"
+    [[ -f "$state/curl/.curlrc" ]] && export CURL_HOME="$state/curl"
+  fi
+  return 0
+}
+
+# The setup-owned .curlrc. Git for Windows' curl is schannel-ONLY: it ignores
+# CURL_CA_BUNDLE (the CA must be in the Windows Root store) and it checks
+# revocation, which an intercepting proxy cannot answer
+# (CRYPT_E_REVOCATION_OFFLINE, 2026-09-18 Windows run) — so that line is
+# written on Windows unconditionally. Extra lines come from the caller.
+# Rewritten, never appended: the file is generated state, not a record.
+cc__write_curlrc() { # cc__write_curlrc <path> [extra-line ...]
+  local f="$1"; shift
+  local lines="" l
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) lines="ssl-revoke-best-effort"$'\n' ;;
+  esac
+  for l in "$@"; do lines="${lines}${l}"$'\n'; done
+  if [[ -z "$lines" ]]; then
+    rm -f "$f" 2>/dev/null
+    return 0
+  fi
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
+  printf '%s' "$lines" >"$f"
+}
+
+# The consumer list a WARN names, per command. Kept here so the phrasing is
+# one fact: a command passes what it actually drives.
+cc_tls_insecure_warn_text() { # cc_tls_insecure_warn_text <consumers>
+  printf 'CC_TLS_INSECURE=1 — TLS verification is OFF for %s' "$1"
+}

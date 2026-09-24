@@ -4,6 +4,88 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-23 — v2.43.0: a seam only reaches what it is plumbed into
+
+v2.42.0 gave the install one answer file. This is the other half of the same
+complaint: several facts in that file reached only *some* of the places that
+needed them. The image manifest listed the three build BASES in rows nothing
+read, so a mirror lacking a base tag — or re-namespacing its path — meant
+editing a Dockerfile. The corporate CA reached the host's curl and nothing
+inside a build, nothing in the podman machine, nothing in the two containers
+that dial outward. And the podman machine, which on Windows is a second host
+with its own trust store and its own registries file, was configured by the
+operator typing commands preflight printed. P2 of
+`docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md` —
+D2 and D4.
+
+- **The image manifest reaches every image, and an operator pin wins.**
+  `images.txt`'s `graphiti-base` / `sandbox-base` / `crawler-base` rows resolve
+  like any other row; each `build-*-image.sh` passes the result as
+  `--build-arg CC_IMG_<NAME>`, and each Dockerfile's `FROM` is that variable
+  with the locked ref as the `ARG` default — so a bare `podman build` and the
+  k3s build scripts stay on the tested base, and a test fails the suite if a
+  default and its `images.txt` row ever drift. A `CC_IMG_<NAME>` the operator
+  sets by hand is now AUTHORITATIVE: the resolver verifies that exact ref exists
+  (a manifest HEAD by tag, or by digest for a `…@sha256:…` ref, parsed from the
+  PINNED ref so a re-namespaced path works), WARNs that it honoured a pin,
+  records it as `pinned` in `installed.manifest`, and never rewrites it; a pin
+  the registry does not have is a FAIL naming the key. Since the resolver writes
+  that key itself, what distinguishes a pin from its own last write is the
+  manifest's record — which gained a leading variable column for exactly that.
+  That is the seam for a path-renaming mirror, which no host variable can
+  express.
+- **The sandbox image name is configuration, not app code.** It was a literal
+  in `central_command/sandbox/runner.py`, so a re-tagged or mirrored sandbox
+  image meant editing Python. `CC_SANDBOX_IMAGE` / `CC_SANDBOX_IMAGE_K8S`, with
+  the previous literals as defaults; the local tags the build scripts produce
+  are unchanged.
+- **Two trust knobs, fanned out everywhere, from one function.** `CC_CA_BUNDLE`
+  and `CC_TLS_INSECURE=0|1` — exactly two, because per-tool knobs are what
+  drifted. `deploy/env-lib.sh`'s new `cc_export_tls_env` is the ONE fan-out
+  (curl's generated `.curlrc`, `SSL_CERT_FILE`, `PIP_CERT`/`PIP_TRUSTED_HOST`,
+  `UV_INSECURE_HOST`, `NPM_CONFIG_CAFILE`/`NPM_CONFIG_STRICT_SSL`,
+  `NODE_EXTRA_CA_CERTS`/`NODE_TLS_REJECT_UNAUTHORIZED`,
+  `GIT_SSL_CAINFO`/`GIT_SSL_NO_VERIFY`) and every command in the profile calls
+  it. The builds take the CA as `podman build --secret id=cc_ca` — never a
+  build-arg, which `podman history` shows, and never in the build context — and
+  install it into the image's trust store from an optional
+  `RUN --mount=type=secret`, so the k3s build scripts, which pass no secret,
+  still build. `--tls-verify=false` and a `CC_TLS_INSECURE` build-arg carry the
+  other knob into pulls, apt, pip and npm. LiteLLM gets `SSL_VERIFY` /
+  `SSL_CERT_FILE` and the speech engine `REQUESTS_CA_BUNDLE`, from a CA mounted
+  read-only at `/etc/cc/ca.pem` — those are the only two containers that dial
+  outward, and Hugging Face has no insecure switch at all, which the WARN says
+  rather than implying otherwise.
+- **The "never disable verification" rule is retired, by the operator's
+  decision (2026-09-23).** The site assumes security through isolation, and the
+  honest answer to that is one documented switch rather than six undocumented
+  ones. `CC_TLS_INSECURE=1` is a supported configuration now instead of a
+  prober-only diagnostic — and it is never silent: every command that sees it
+  prints exactly one `WARN tls-insecure:` line naming the consumers that
+  command drives, and it is never a PASS.
+- **A new `machine` phase writes the podman machine.** Between `preflight` and
+  `fetch`; a no-op on bare Linux. Where a machine exists it applies, over
+  `podman machine ssh`, idempotently, printing the diff before each write: the
+  CA into the machine's trust store (plus
+  `podman machine set --import-native-ca` where podman supports it — it arrived
+  in 6.0), a `registries.conf.d` drop-in with a mirror per configured
+  `CC_REGISTRY_*` and `insecure = true` where asked (including the host of every
+  `CC_IMG_*` pin), and a `containers.conf.d` drop-in carrying `CC_PROXY` as the
+  engine's environment. Drop-ins only — the main files are never touched — and a
+  proxy VALUE is never printed, only its key name. The CA is then VERIFIED by a
+  live `curl` from inside the machine rather than by reading a settings file,
+  because Podman Desktop's CA propagation is a known rough edge.
+  `./setup.sh machine --dry-run` reports the diff and writes nothing, which is
+  what `preflight` calls — so preflight REPORTS machine state and stops handing
+  out instructions for what the phase now does. The renderers are pure functions
+  in `deploy/single/machine-lib.sh` and unit-tested on Linux, where no machine
+  can exist.
+
+Docs: `deploy/AIRGAP.md`'s trust section is rewritten around the two knobs with
+the full fan-out table and a section on what the `machine` phase writes;
+`images.txt`'s header, `.env.example`, `deploy/single/README.md`, the
+`deploy-single` rule file and the `/setup` skill follow.
+
 ## 2026-09-23 — v2.42.0: one answer file, and nothing written inside the checkout
 
 The air-gapped installs did not fail on reachability — the site has mirrors and

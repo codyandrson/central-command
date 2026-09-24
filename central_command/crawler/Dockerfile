@@ -13,10 +13,44 @@
 # external sources are the registry (the base) and PyPI. The playwright
 # PACKAGE version MUST equal the image tag: the baked browsers are the build
 # that version expects, and a mismatch downloads (or fails to) at runtime.
+# The base REF comes from the manifest (2026-09-23 design record, D2):
+# resolve-images.sh resolves images.txt's `crawler-base` row and the single-node
+# build script passes it as CC_IMG_PLAYWRIGHT_PYTHON, so a mirror that lacks the
+# locked tag or re-namespaces the path reaches this build too. The ARG default
+# must equal images.txt's row — tests/test_single_airgap_seams.py fails the
+# suite if they drift, and the playwright PACKAGE version below must equal the
+# tag either way.
 ARG CC_REGISTRY_MCR=mcr.microsoft.com
-FROM ${CC_REGISTRY_MCR}/playwright/python:v1.62.0-noble
+ARG CC_IMG_PLAYWRIGHT_PYTHON=${CC_REGISTRY_MCR}/playwright/python:v1.62.0-noble
+FROM ${CC_IMG_PLAYWRIGHT_PYTHON}
 # pip honours PIP_INDEX_URL from the environment; blank = PyPI.
 ARG PIP_INDEX_URL=
+
+# ── trust inside the build: one CA knob, one insecure knob (D4) ─────────────
+# The CA is a BUILD SECRET, never the context and never a build-arg (a
+# build-arg is visible in `podman history`). `required=false` lets a build that
+# passes no --secret — the k3s build script — skip the branch instead of
+# failing. podman >= 3.3 for `--secret`; no `# syntax=` directive needed with
+# podman/buildah; the secret lands at /run/secrets/<id>.
+ARG CC_TLS_INSECURE=0
+RUN --mount=type=secret,id=cc_ca,required=false set -e; \
+    if [ "$CC_TLS_INSECURE" = 1 ]; then \
+      printf 'Acquire::https::Verify-Peer "false";\n' >/etc/apt/apt.conf.d/99cc-insecure; \
+    fi; \
+    if [ -s /run/secrets/cc_ca ]; then \
+      if [ ! -f /etc/ssl/certs/ca-certificates.crt ]; then \
+        apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*; \
+      fi; \
+      mkdir -p /usr/local/share/ca-certificates; \
+      cp /run/secrets/cc_ca /usr/local/share/ca-certificates/cc-ca.crt; \
+      update-ca-certificates; \
+    fi
+# One static path, because a Dockerfile cannot make an ENV conditional:
+# `update-ca-certificates` appends the corporate root to the SYSTEM bundle, so
+# with a secret this file holds it and without one it is the base's own set.
+ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    NPM_CONFIG_CAFILE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -27,7 +61,14 @@ ENV PYTHONUNBUFFERED=1 \
 # features this service does not use. httpx is listed explicitly (crawl4ai
 # pulls it in anyway) because the service imports it directly. Ubuntu's
 # python is PEP 668 "externally managed"; this container IS the environment.
-RUN pip install --no-cache-dir --break-system-packages \
+# With verification off, pip needs the INDEX HOST named (PIP_TRUSTED_HOST takes
+# hosts, not URLs) — derived from PIP_INDEX_URL in the same RUN rather than a
+# second seam to keep in step. Credentials in the URL are stripped with the
+# scheme.
+RUN if [ "$CC_TLS_INSECURE" = 1 ] && [ -n "$PIP_INDEX_URL" ]; then \
+      h="${PIP_INDEX_URL#*://}"; h="${h##*@}"; export PIP_TRUSTED_HOST="${h%%/*}"; \
+    fi; \
+    pip install --no-cache-dir --break-system-packages \
         playwright==1.62.0 crawl4ai==0.9.2 fastapi==0.141.1 uvicorn==0.52.4 httpx==0.28.1
 
 # crawl4ai's post-install creates its home dir and, unless CRAWL4AI_MODE=api,

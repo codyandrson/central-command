@@ -23,6 +23,11 @@
 #     validate    offline check of .env (the repo-root one — THE answer file
 #                 since v2.42.0; deploy/single/.env is retired). No side effects.
 #     preflight   named environment checks. No side effects.
+#     machine     write the podman MACHINE from .env — the CA into its trust
+#                 store, the registries mirror/insecure drop-in, the proxy
+#                 drop-in. A no-op where there is no machine (bare Linux).
+#                 `./setup.sh machine --dry-run` reports the diff instead, and
+#                 that is what preflight calls.
 #     fetch       acquire every dependency (public or mirror) — the only phase
 #                 that needs the network; stops for the operator per artifact.
 #     llm         secrets + LiteLLM up + probe its aliases + MEASURE the
@@ -41,7 +46,7 @@
 #     status      re-run postconditions only, nothing mutating
 #     diagnose    write <state>/setup-diagnostics.txt for pasting to Claude
 #
-#   No argument = ALL TEN phases in order — zero to a working, human-approved
+#   No argument = ALL ELEVEN phases in order — zero to a working, human-approved
 #   demo in one command (2026-08-28), stopping at the first hard failure or
 #   gate. There is no state file: every step is idempotent and the late phases
 #   probe REALITY to skip (a healthy API skips test+boot; a decided proposal
@@ -76,6 +81,11 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
 # shellcheck source=../env-lib.sh
 . "$REPO_ROOT/deploy/env-lib.sh"
+# The podman MACHINE's configuration, rendered as text. Pure functions, so the
+# decisions are unit-tested on Linux even though the writer can only run where
+# a machine exists (Windows/macOS) — design record D4.
+# shellcheck source=machine-lib.sh
+. "$HERE/machine-lib.sh"
 # Python on Windows encodes a PIPED stdout in the ANSI code page, so the em
 # dashes in register-models.py's operator banner reached the log as cp1252
 # bytes inside otherwise-UTF-8 output (2026-09-03 Windows run: `�`).
@@ -146,11 +156,48 @@ init_state() {
   LOGFILE="$STATE_DIR/setup-log.txt"
 }
 
+# ── the podman machine, if there is one ─────────────────────────────────────
+# On bare Linux there is none and every machine-aware check below is a no-op.
+# Resolved once: `podman machine list` is a subprocess and load_env runs per
+# phase. An empty answer is cached as the single space, so "asked and there is
+# none" is distinguishable from "not asked yet" under set -u.
+MACHINE_NAME=""
+machine_name() {
+  if [[ -z "$MACHINE_NAME" ]]; then
+    MACHINE_NAME=" "
+    if command -v podman >/dev/null 2>&1; then
+      local n; n="$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 | tr -d '\r')"
+      [[ -n "$n" ]] && MACHINE_NAME="$n"
+    fi
+  fi
+  [[ "$MACHINE_NAME" == " " ]] || printf '%s' "$MACHINE_NAME"
+}
+
+# One command inside the machine. `podman machine ssh <name> -- <cmd>` is
+# non-interactive when a command is given (podman-machine-ssh(1): an
+# interactive session is established only when NO command is provided).
+# </dev/null on every call: an ssh that inherits this script's stdin eats the
+# manifest a caller is reading from.
+machine_sh() { # machine_sh <shell-command>
+  local m; m="$(machine_name)"
+  [[ -n "$m" ]] || return 1
+  podman machine ssh "$m" -- "$1" </dev/null 2>/dev/null
+}
+# Same, with stdin piped in — how a file gets INTO the machine without a share.
+machine_sh_stdin() { # machine_sh_stdin <shell-command> < file
+  local m; m="$(machine_name)"
+  [[ -n "$m" ]] || return 1
+  podman machine ssh "$m" -- "$1" 2>/dev/null
+}
+
 # ── the compose provider ────────────────────────────────────────────────────
 # `podman compose` on the targets; `docker compose` is the dev-box fallback.
 # Detected once, by RUNNING it (the same reason $PY is probed by running):
 # `podman compose` exists as a subcommand even when no provider is installed
 # behind it, and answers with an error only when actually invoked.
+# podman's insecure flag set, resolved by load_env (see cc_export_tls_env).
+PULL_TLS=()
+
 COMPOSE_BIN=()
 compose_detect() {
   (( ${#COMPOSE_BIN[@]} )) && return 0
@@ -239,10 +286,6 @@ load_env() {
   : "${CC_ENABLE_SPEECH:=1}"
   : "${CC_AIRGAP:=0}"
   : "${CC_TLS_INSECURE:=0}"
-  # Never silent, never a PASS (2026-09-23 design record, D4). Today only
-  # deploy/discover.sh acts on it; every run that SEES it says so.
-  [[ "$CC_TLS_INSECURE" == "1" ]] && \
-    warn "tls-insecure" "CC_TLS_INSECURE=1 — TLS verification is disabled for deploy/discover.sh's probes. That is a DIAGNOSTIC, never a fix: trust the corporate CA through CC_CA_BUNDLE instead."
   # Tool-facing exports. uv reads no PIP_* variable (and UV_INDEX_URL is
   # deprecated), npm reads npm_config_* case-insensitively — so one seam each,
   # fanned out here to every name the tools actually look at.
@@ -251,20 +294,46 @@ load_env() {
   fi
   if [[ -n "${CC_PYTHON_MIRROR:-}" ]]; then export UV_PYTHON_INSTALL_MIRROR="$CC_PYTHON_MIRROR"; fi
   if [[ -n "${CC_NPM_REGISTRY:-}" ]]; then export NPM_CONFIG_REGISTRY="$CC_NPM_REGISTRY"; fi
-  # Trust + proxy seams, same fan-out pattern: one .env fact, exported under
-  # every name the acquisition tools actually read. podman pulls consult the
-  # HOST trust store instead (deploy/AIRGAP.md).
+  # ── the two trust knobs (2026-09-23 design record, D4) ────────────────────
+  # CC_CA_BUNDLE and CC_TLS_INSECURE, fanned out by deploy/env-lib.sh's
+  # cc_export_tls_env to every name the host-side toolchain reads (curl, uv,
+  # pip, npm, node, git) plus the generated .curlrc in the state dir. ONE
+  # function, called by every command in this profile, so the list cannot drift
+  # per script. podman is not reachable that way at all — its pulls and builds
+  # verify inside the MACHINE, which is what the `machine` phase writes and
+  # what --tls-verify=false covers.
+  cc_export_tls_env "$STATE_DIR"
+  # The one flag set podman takes for it (no variable reaches a pull or build).
+  PULL_TLS=()
+  [[ "$CC_TLS_INSECURE" == "1" ]] && PULL_TLS=(--tls-verify=false)
+  # Never silent, never a PASS. The operator dropped the "never disable
+  # verification" rule on 2026-09-23 (the site assumes security through
+  # isolation), so this is the trade stated once per run — not a lecture, and
+  # not a refusal.
+  if [[ "$CC_TLS_INSECURE" == "1" ]]; then
+    warn "tls-insecure" "$(cc_tls_insecure_warn_text "curl, uv, pip, npm, node and git on this host; podman pulls and the three image builds (--tls-verify=false); the podman machine's registries drop-in; LiteLLM's outbound calls (SSL_VERIFY=False). NOT the speech engine — Hugging Face's client has no insecure switch, so that one needs CC_CA_BUNDLE or pre-placed snapshots")"
+  fi
+  # ── the CA, for the two containers that talk upstream ─────────────────────
+  # DERIVED, exported for compose, and never written into .env: they are
+  # composed from CC_CA_BUNDLE and CC_TLS_INSECURE, and v2.42.0's rule is that
+  # one fact has one key. Only LiteLLM (the enterprise LLM endpoint) and the
+  # optional speech engine (Hugging Face) make outbound TLS connections.
+  #
+  # The mount SOURCE must be a path the container runtime can see: on a
+  # podman-machine host that is the copy the `machine` phase installed INSIDE
+  # the machine, not the host path. /dev/null is the neutral source when no CA
+  # is configured — a bind mount of it is accepted and reads as empty, so
+  # compose needs no conditional volume list.
+  export CC_LITELLM_SSL_VERIFY=True
+  export CC_CA_BUNDLE_IN_CONTAINER=""
+  export CC_CA_BUNDLE_MOUNT_SRC="/dev/null"
+  [[ "$CC_TLS_INSECURE" == "1" ]] && export CC_LITELLM_SSL_VERIFY=False
   if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
-    export CURL_CA_BUNDLE="$CC_CA_BUNDLE" SSL_CERT_FILE="$CC_CA_BUNDLE" \
-           REQUESTS_CA_BUNDLE="$CC_CA_BUNDLE" NODE_EXTRA_CA_CERTS="$CC_CA_BUNDLE" \
-           NPM_CONFIG_CAFILE="$CC_CA_BUNDLE"
-    # Git for Windows' curl is schannel-ONLY: it ignores CURL_CA_BUNDLE (the
-    # CA must be in the Windows Root store — preflight checks) and it checks
-    # revocation, which an intercepting proxy cannot answer
-    # (CRYPT_E_REVOCATION_OFFLINE, 2026-09-18 Windows run). A setup-owned
-    # .curlrc relaxes that to best-effort for every curl this driver spawns.
-    if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
-      mkdir -p "$STATE_DIR/curl" && printf 'ssl-revoke-best-effort\n' >"$STATE_DIR/curl/.curlrc" && export CURL_HOME="$STATE_DIR/curl"
+    export CC_CA_BUNDLE_IN_CONTAINER="/etc/cc/ca.pem"
+    if [[ -n "$(machine_name)" ]]; then
+      export CC_CA_BUNDLE_MOUNT_SRC="$CC_MACHINE_CA_PEM"
+    else
+      export CC_CA_BUNDLE_MOUNT_SRC="$CC_CA_BUNDLE"
     fi
   fi
   if [[ -n "${CC_PROXY:-}" ]]; then
@@ -472,25 +541,24 @@ phase_preflight() {
   fi
 
   # A podman MACHINE (Windows/macOS) has its own egress: the host's CC_PROXY /
-  # CC_CA_BUNDLE never reach a pull unless the VM carries them. podman passes
-  # the host's HTTP(S)_PROXY into the VM at START, and `--import-native-ca`
-  # imports the host's trusted CAs at every boot (podman ≥ 5.5). With a dead
-  # proxy on the host, pulls went DIRECT and fetch passed (2026-09-18) — so
-  # check the machine, and name the two commands when it is not configured.
-  if [[ -n "${CC_PROXY:-}${CC_CA_BUNDLE:-}" ]] && [[ -n "$(podman machine list --format '{{.Name}}' 2>/dev/null)" ]]; then
-    local mproxy; mproxy="$(podman machine ssh -- 'printenv HTTPS_PROXY https_proxy 2>/dev/null | head -1' </dev/null 2>/dev/null | tr -d '\r')"
-    if [[ -n "${CC_PROXY:-}" && "$mproxy" != "$CC_PROXY" ]]; then
-      useraction "machine-egress" "the podman machine has no proxy (host CC_PROXY=$CC_PROXY, machine '${mproxy:-none}') — pulls would go direct or fail; run: podman machine stop && HTTPS_PROXY=$CC_PROXY HTTP_PROXY=$CC_PROXY podman machine start"
-    else
-      pass "machine-egress" "the podman machine carries the host proxy (${mproxy:-no proxy configured})"
-    fi
-    if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
-      if podman machine ssh -- 'test -s /etc/pki/ca-trust/source/anchors/*.pem -o -s /etc/pki/ca-trust/source/anchors/*.crt 2>/dev/null || grep -qs . /etc/pki/ca-trust/source/anchors/ 2>/dev/null' </dev/null >/dev/null 2>&1; then
-        pass "machine-ca" "the podman machine has CA anchors installed"
+  # CC_CA_BUNDLE never reach a pull unless the VM carries them. Since v2.43.0
+  # the `machine` phase APPLIES the CA and the registry/proxy drop-ins, so
+  # preflight only REPORTS current state and what that phase would change — no
+  # hand-instructions for what a phase now does. The machine's own egress for
+  # pulls is still set at `podman machine start` from the host environment
+  # (doc-verified; writing systemd drop-ins inside the machine is not, and is
+  # an open item in the design record), so THAT one keeps its USERACTION.
+  if [[ -n "$(machine_name)" ]]; then
+    if [[ -n "${CC_PROXY:-}" ]]; then
+      local mproxy; mproxy="$(machine_sh 'printenv HTTPS_PROXY https_proxy 2>/dev/null | head -1' | tr -d '\r')"
+      if [[ "$mproxy" != "$CC_PROXY" ]]; then
+        useraction "machine-egress" "the podman machine's own environment carries no proxy while CC_PROXY is set — a pull would go direct or fail. podman takes the proxy from the HOST environment at machine start, so: podman machine stop && HTTPS_PROXY=\"\$CC_PROXY\" HTTP_PROXY=\"\$CC_PROXY\" podman machine start (the value is in .env — not printed here). The 'machine' phase writes the containers.conf proxy drop-in, which covers pulls and BUILDS but not the VM's own environment."
       else
-        useraction "machine-ca" "the podman machine trusts no extra CA — install it in the VM: podman machine ssh -- sudo tee /etc/pki/ca-trust/source/anchors/cc-ca.pem < \"$CC_CA_BUNDLE\" && podman machine ssh -- sudo update-ca-trust (podman ≥ 5.9 can instead import the host store at every boot: podman machine set --import-native-ca; 5.8 has no such flag)"
+        pass "machine-egress" "the podman machine carries the host proxy"
       fi
     fi
+    # Both of these are now REPORTS plus the diff the machine phase will apply.
+    phase_machine --dry-run
   fi
 
   # 127.0.0.1, never localhost: Windows resolves localhost to ::1 first and the
@@ -551,8 +619,195 @@ phase_preflight() {
   # configured as a registries.conf mirror OR as a CC_REGISTRY_* prefix.
   if command -v podman >/dev/null 2>&1; then
     local regs; regs="$(podman info --format '{{range .Registries}}{{.}} {{end}}' 2>/dev/null | tr -s ' ')"
-    pass "podman-registries" "podman sees: ${regs:-no registries.conf entries (fully-qualified refs only)}"
+    pass "podman-registries" "podman sees: ${regs:-no registries.conf entries (fully-qualified refs only)} (the 'machine' phase owns the drop-in that puts entries there — ./setup.sh machine --dry-run reports the diff)"
   fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE: machine — tell the podman MACHINE what .env says. Idempotent.
+# ─────────────────────────────────────────────────────────────────────────────
+# Windows and macOS run podman inside a VM, and that VM is a SECOND HOST: the
+# operator's CC_CA_BUNDLE, CC_REGISTRY_* and CC_PROXY do not reach a pull or a
+# build unless the machine itself carries them, and the Windows-side
+# registries.conf is parsed but NOT honoured for a machine-backed connection
+# (podman#16532). Until v2.43.0 preflight printed instructions and the operator
+# typed them; the operator authorised setup writing the machine on 2026-09-23.
+#
+# THE RULES THIS PHASE FOLLOWS, because it writes another host:
+#   * a no-op where there is no machine (bare Linux) — never a FAIL;
+#   * DROP-INS only, never the main registries.conf / containers.conf
+#     (containers-registries.conf.d(5): drop-ins load after the main file, in
+#     alpha-numerical order, and merge rather than replace);
+#   * the DIFF is printed BEFORE each write, and a proxy VALUE is never printed;
+#   * `--dry-run` reports and writes nothing — that is what preflight calls;
+#   * one PASS/FAIL per item, and a live PROBE for the CA rather than a
+#     settings read (Podman Desktop's CA propagation is a known rough edge,
+#     podman-desktop#3821).
+MACHINE_CHANGED=()
+
+# Show what a write would change, without ever printing a proxy value.
+machine_diff() { # machine_diff <label> <remote-path> <desired-text>
+  local label="$1" path="$2" desired="$3" current
+  current="$(machine_sh "cat '$path' 2>/dev/null")"
+  if [[ "$current" == "$desired" ]]; then
+    return 1   # nothing to do
+  fi
+  note ""
+  note "---- $label: $path"
+  if [[ -z "$current" ]]; then
+    note "     (absent in the machine; would be created)"
+  else
+    note "     (present and DIFFERENT; would be replaced)"
+  fi
+  note "$(cc_redact_proxy "$desired" | sed 's/^/     + /')"
+  return 0
+}
+
+# Write a file inside the machine, as root, via stdin — the content never
+# appears in an argv and needs no share between host and VM.
+machine_put() { # machine_put <remote-path> <text>
+  local path="$1"
+  printf '%s' "$2" | machine_sh_stdin "sudo mkdir -p '$(dirname "$path")' && sudo tee '$path' >/dev/null" >/dev/null
+}
+
+phase_machine() {
+  local dry=0
+  [[ "${1:-}" == "--dry-run" ]] && dry=1
+  MACHINE_CHANGED=()
+  load_env || return 1
+
+  local m; m="$(machine_name)"
+  if [[ -z "$m" ]]; then
+    pass "machine" "no podman machine on this host — nothing to configure (bare Linux runs containers directly)"
+    return 0
+  fi
+  if ! machine_sh 'true' >/dev/null; then
+    fail "machine" "podman machine '$m' exists but does not answer 'podman machine ssh' — start it: podman machine start"
+    return 1
+  fi
+  pass "machine" "podman machine '$m' answers ssh$( (( dry )) && echo ' (--dry-run: reporting only, nothing written)')"
+
+  # ── the CA ────────────────────────────────────────────────────────────────
+  # Two paths, both wanted where available. --import-native-ca brings the
+  # WINDOWS trust store in (which is where an enterprise CA usually already is,
+  # by policy) and is podman >= 6.0 — so it is probed, not assumed. Installing
+  # CC_CA_BUNDLE as an anchor covers the case the host store does not (a
+  # self-signed mirror CA the operator holds as a file).
+  if podman machine set --help 2>/dev/null | grep -q -- '--import-native-ca'; then
+    if (( dry )); then
+      note "     machine phase will apply: podman machine set --import-native-ca=true"
+      pass "machine-native-ca" "podman supports --import-native-ca (the host trust store would be imported at the machine's next start)"
+    elif [[ -f "$STATE_DIR/machine.import-native-ca" ]]; then
+      pass "machine-native-ca" "podman machine set --import-native-ca=true was applied on $(cat "$STATE_DIR/machine.import-native-ca") (the host trust store is imported at every start)"
+    elif podman machine set --import-native-ca=true >/dev/null 2>&1; then
+      # Recorded in the state dir so a re-run neither re-applies it nor demands
+      # another restart: `podman machine inspect` has no documented field for
+      # it, and the setting only takes effect at the machine's next start.
+      date -u +%Y-%m-%dT%H:%M:%SZ >"$STATE_DIR/machine.import-native-ca"
+      pass "machine-native-ca" "podman machine set --import-native-ca=true applied (the host trust store is imported at every start)"
+      MACHINE_CHANGED+=(import-native-ca)
+    else
+      warn "machine-native-ca" "podman machine set --import-native-ca=true was rejected — the CA anchor below is then the only path"
+    fi
+  else
+    pass "machine-native-ca" "this podman has no --import-native-ca (it arrived in podman 6.0) — the CA anchor below is the path"
+  fi
+
+  if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
+    if [[ ! -r "$CC_CA_BUNDLE" ]]; then
+      fail "machine-ca" "CC_CA_BUNDLE is set to $CC_CA_BUNDLE, which this host cannot read"
+    else
+      local want cur
+      want="$(cat "$CC_CA_BUNDLE")"
+      cur="$(machine_sh "cat '$CC_MACHINE_CA_PEM' 2>/dev/null")"
+      if [[ "$cur" == "$want" ]]; then
+        pass "machine-ca" "CC_CA_BUNDLE is already installed in the machine at $CC_MACHINE_CA_PEM"
+      elif (( dry )); then
+        note ""
+        note "---- CA anchor: $CC_MACHINE_CA_PEM"
+        note "     ($( [[ -z "$cur" ]] && echo absent || echo 'present and DIFFERENT' ); would install CC_CA_BUNDLE, then update-ca-trust)"
+        warn "machine-ca" "the machine does not trust CC_CA_BUNDLE — machine phase will apply: install CC_CA_BUNDLE at $CC_MACHINE_CA_PEM, then update-ca-trust (the full run does this in the next phase; on its own: ./setup.sh machine)"
+      else
+        # The machine image is Fedora CoreOS (podman-machine-init(1)), so
+        # ca-trust is the framework; the Debian/Ubuntu pair is the fallback for
+        # a custom machine image.
+        local rc=0
+        if machine_sh 'command -v update-ca-trust >/dev/null 2>&1'; then
+          machine_put "$CC_MACHINE_CA_PEM" "$want" || rc=1
+          machine_sh 'sudo update-ca-trust' >/dev/null || rc=1
+        else
+          machine_put "/usr/local/share/ca-certificates/cc-ca.crt" "$want" || rc=1
+          machine_sh 'sudo update-ca-certificates' >/dev/null || rc=1
+        fi
+        if (( rc )); then
+          fail "machine-ca" "could not install CC_CA_BUNDLE into the machine — check that 'podman machine ssh $m -- sudo true' works"
+        else
+          pass "machine-ca" "CC_CA_BUNDLE installed in the machine and the trust store rebuilt"
+          MACHINE_CHANGED+=(ca)
+        fi
+      fi
+    fi
+    # The VERIFY is a live probe from INSIDE the machine, not a settings read:
+    # a present anchor file proves nothing about what a pull will accept. exit
+    # 60 is curl's certificate failure, which is the answer this asks for.
+    if (( ! dry )); then
+      local probe_host rc2=0
+      probe_host="$(cc__mhost "${CC_REGISTRY_DOCKERIO:-}")"
+      [[ -n "$probe_host" ]] || probe_host="registry-1.docker.io"
+      machine_sh "curl -fsSI --max-time 15 https://${probe_host}/v2/ >/dev/null" || rc2=$?
+      if (( rc2 == 60 )); then
+        fail "machine-ca-probe" "from inside the machine, https://${probe_host}/v2/ fails with a CERTIFICATE error (curl exit 60) — the CA is still not trusted there"
+      elif (( rc2 == 0 )); then
+        pass "machine-ca-probe" "from inside the machine, https://${probe_host}/v2/ answers with no certificate error"
+      else
+        warn "machine-ca-probe" "from inside the machine, https://${probe_host}/v2/ did not answer (curl exit $rc2) — not a certificate failure (60), so this is reachability, not trust"
+      fi
+    fi
+  fi
+
+  # ── the registries drop-in ────────────────────────────────────────────────
+  local regconf; regconf="$(cc_render_registries_conf)"
+  if [[ -z "$regconf" ]]; then
+    pass "machine-registries" "no mirror or insecure host to declare (CC_REGISTRY_* unset and CC_TLS_INSECURE=0)"
+  elif machine_diff "registries drop-in" "$CC_MACHINE_REGISTRIES_CONF" "$regconf"; then
+    if (( dry )); then
+      warn "machine-registries" "the machine's registries drop-in does not match .env — machine phase will apply: write $CC_MACHINE_REGISTRIES_CONF (diff above; the full run does this in the next phase)"
+    elif machine_put "$CC_MACHINE_REGISTRIES_CONF" "$regconf"; then
+      pass "machine-registries" "wrote $CC_MACHINE_REGISTRIES_CONF in the machine (podman re-reads its configuration per invocation — no restart)"
+      MACHINE_CHANGED+=(registries)
+    else
+      fail "machine-registries" "could not write $CC_MACHINE_REGISTRIES_CONF in the machine"
+    fi
+  else
+    pass "machine-registries" "$CC_MACHINE_REGISTRIES_CONF already matches .env"
+  fi
+
+  # ── the proxy drop-in ─────────────────────────────────────────────────────
+  # containers.conf(5) `[engine] env` is the podman/buildah PROCESS
+  # environment, which is what pulls and builds travel through. The value is
+  # never printed — only the key name.
+  local proxyconf; proxyconf="$(cc_render_proxy_conf)"
+  if [[ -z "$proxyconf" ]]; then
+    pass "machine-proxy" "CC_PROXY is unset — no proxy drop-in to write"
+  elif machine_diff "proxy drop-in (values redacted)" "$CC_MACHINE_PROXY_CONF" "$proxyconf"; then
+    if (( dry )); then
+      warn "machine-proxy" "the machine's containers.conf proxy drop-in does not match CC_PROXY — machine phase will apply: write $CC_MACHINE_PROXY_CONF (the value is never printed; the full run does this in the next phase)"
+    elif machine_put "$CC_MACHINE_PROXY_CONF" "$proxyconf"; then
+      pass "machine-proxy" "wrote $CC_MACHINE_PROXY_CONF in the machine from CC_PROXY (key names only — the value is not printed)"
+      MACHINE_CHANGED+=(proxy)
+    else
+      fail "machine-proxy" "could not write $CC_MACHINE_PROXY_CONF in the machine"
+    fi
+  else
+    pass "machine-proxy" "$CC_MACHINE_PROXY_CONF already matches CC_PROXY"
+  fi
+
+  # Restarting: only --import-native-ca needs one (it imports at START).
+  if (( ! dry )) && (( ${#MACHINE_CHANGED[@]} )); then
+    local r; r="$(cc_machine_restart_needed "${MACHINE_CHANGED[@]}")" \
+      && useraction "machine-restart" "$r"
+  fi
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -591,10 +846,12 @@ fetch_images() {
     ref="${!var:-}"; [[ -z "$ref" ]] && continue
     check="image-${var#CC_IMG_}"; check="${check,,}"
     if have_image "$ref"; then pass "$check" "$ref present"; continue; fi
-    if podman pull -q "$ref" >/dev/null 2>&1 </dev/null; then
+    # --tls-verify=false when the operator has turned verification off: no
+    # exported variable reaches a podman pull (D4).
+    if podman pull -q "${PULL_TLS[@]}" "$ref" >/dev/null 2>&1 </dev/null; then
       pass "$check" "$ref pulled"
     else
-      fail "$check" "$ref could not be pulled — seam: the CC_REGISTRY_* entry for its registry in .env (or a registries.conf mirror podman sees)"
+      fail "$check" "$ref could not be pulled — seams: the CC_REGISTRY_* entry for its registry in .env, $var itself (an exact ref the resolver must use as-is, including a re-namespaced PATH), or the registries drop-in ./setup.sh machine writes"
     fi
   done < <(compgen -A variable CC_IMG_ | sort)
 }
@@ -617,16 +874,16 @@ phase_fetch() {
   fetch_images
 
   fetch_local "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" \
-    "$HERE/build-graphiti-image.sh" "CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_PYPI_INDEX_URL"
+    "$HERE/build-graphiti-image.sh" "CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP (the base ref, resolved from images.txt), CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_PYPI_INDEX_URL, CC_CA_BUNDLE, CC_TLS_INSECURE"
   if [[ "$CC_ENABLE_SANDBOX" == 1 ]]; then
     fetch_local "image-sandbox" "localhost/cc-sandbox:1" \
-      "$HERE/build-sandbox-image.sh" "CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_NPM_REGISTRY"
+      "$HERE/build-sandbox-image.sh" "CC_IMG_PYTHON (the base ref, resolved from images.txt), CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_NPM_REGISTRY, CC_CA_BUNDLE, CC_TLS_INSECURE"
   else
     pass "image-sandbox" "skipped (CC_ENABLE_SANDBOX=0)"
   fi
   if [[ "$CC_ENABLE_CRAWLER" == 1 ]]; then
     fetch_local "image-crawler" "localhost/cc-crawler:1" \
-      "$HERE/build-crawler-image.sh" "CC_REGISTRY_MCR, CC_PYPI_INDEX_URL"
+      "$HERE/build-crawler-image.sh" "CC_IMG_PLAYWRIGHT_PYTHON (the base ref, resolved from images.txt), CC_REGISTRY_MCR, CC_PYPI_INDEX_URL, CC_CA_BUNDLE, CC_TLS_INSECURE"
   else
     pass "image-crawler" "skipped (CC_ENABLE_CRAWLER=0)"
   fi
@@ -1510,13 +1767,18 @@ pending_update() {
 
 usage() {
   cat >&2 <<USAGE
-usage: ./setup.sh [validate|preflight|fetch|llm|stack|app|verify|test|boot|
-                   demo|stop|status|diagnose]
+usage: ./setup.sh [validate|preflight|machine|fetch|llm|stack|app|verify|
+                   test|boot|demo|stop|status|diagnose]
+       ./setup.sh machine --dry-run    # report the diff, write nothing
 
-  no argument   runs validate -> preflight -> fetch -> llm -> stack -> app
-                -> verify -> test -> boot -> demo: zero to a working,
+  no argument   runs validate -> preflight -> machine -> fetch -> llm -> stack
+                -> app -> verify -> test -> boot -> demo: zero to a working,
                 human-approved demo in one command, stopping at the first
                 phase that hard-fails or needs you
+  machine       tells the podman MACHINE what .env says — the CA, the
+                registries mirror/insecure drop-in, the proxy drop-in. A no-op
+                on bare Linux (no machine); idempotent; prints the diff before
+                each write. --dry-run reports only.
   fetch         acquires EVERY dependency (images by digest, the local image
                 builds, the Python resolution, the cockpit's npm tree)
                 before anything is deployed; stops (exit 3) naming the .env
@@ -1538,6 +1800,17 @@ main() {
   init_state           # the log file lives in there — resolve before logging
   logline "run start: ./setup.sh $cmd"
   case "$cmd" in
+    machine)
+      # The one phase that takes a flag: --dry-run reports the diff and writes
+      # nothing (which is what preflight calls it as).
+      FAILS=0; WARNS=0; ACTIONS=0; CURPHASE=machine
+      note ""; note "======== phase: machine${2:+ $2}"
+      phase_machine "${2:-}"
+      local mrc=0
+      (( ACTIONS )) && mrc=3; (( FAILS )) && mrc=1; (( ! ACTIONS && ! FAILS && WARNS )) && mrc=2
+      logline "run end: ./setup.sh machine ${2:-} -> exit $mrc"
+      exit $mrc
+      ;;
     validate|preflight|fetch|llm|stack|app|verify|test|boot|demo|status|diagnose)
       run_phase "$cmd"; local prc=$?
       logline "run end: ./setup.sh $cmd -> exit $prc"
@@ -1557,7 +1830,7 @@ main() {
         exit 3
       fi
       local worst=0 rc p
-      for p in validate preflight fetch llm stack app verify test boot demo; do
+      for p in validate preflight machine fetch llm stack app verify test boot demo; do
         run_phase "$p"; rc=$?
         if (( rc == 1 )); then
           note ""

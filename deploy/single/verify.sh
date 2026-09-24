@@ -36,6 +36,18 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+# The two trust knobs, fanned out in ONE place (2026-09-23 design record, D4).
+# Every probe in THIS script is loopback HTTP, so nothing here changes — the
+# fan-out is called anyway so the list cannot drift per script, and the WARN is
+# printed so a verify run's output says what the install is configured for.
+# shellcheck source=../env-lib.sh
+. "$REPO_ROOT/deploy/env-lib.sh"
+VERIFY_STATE="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT" 2>/dev/null)" || VERIFY_STATE=""
+cc_export_tls_env "$VERIFY_STATE"
+if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
+  # Never silent, never a PASS.
+  echo "WARN tls-insecure: $(cc_tls_insecure_warn_text "nothing this script probes (all of its checks are loopback HTTP) — it is ON for the acquisition and container seams the install uses; see .env.example's fan-out table")"
+fi
 
 : "${CC_POD_PREFIX:=cc-}"
 : "${CC_PG_PORT:=5442}"
