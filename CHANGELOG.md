@@ -4,6 +4,16 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-24 — v2.45.3: v2.45.2 shipped an empty VERSION file
+
+A release-mechanics slip, not a product change: the v2.45.2 commit's `VERSION`
+file is empty (the bump truncated the file before reading it), so an updater
+that installed v2.45.2 would read no installed version at all. This release
+carries the same tree with `VERSION` restored. Do not install v2.45.2.
+`tests/test_version_file.py` caught it; the release went out because the
+pipeline that ran the test masked its exit code. Lesson recorded: run the
+gate with `pipefail`.
+
 ## 2026-09-24 — v2.45.2: the install gate was red on Windows, in test code alone
 
 `./setup.sh test` is the install gate, and on the Windows testbed it failed —
