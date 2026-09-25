@@ -81,7 +81,7 @@ PY=""
 for c in python3 python; do
   command -v "$c" >/dev/null 2>&1 && "$c" -c '' 2>/dev/null && { PY="$c"; break; }
 done
-[[ -n "$PY" ]] || PY="uv run --python 3.12 python"
+[[ -n "$PY" ]] || PY="uv run --no-project --python 3.12 python"
 
 DRY=0
 [[ "${1:-}" == "--dry-run" ]] && DRY=1
@@ -195,6 +195,12 @@ api_host() { [[ "$1" == "docker.io" || "$1" == "index.docker.io" ]] && echo regi
 # are also left in $LAST_HEADERS — a FILE, not a variable, because callers
 # invoke reg_req inside $(...) and a variable set there dies with the subshell
 # (tag listing needs the Link header afterwards).
+#
+# --connect-timeout 5 as well as --max-time 30: in the air gap with the
+# CC_REGISTRY_* seams unset, every request here is a TCP connect to a public
+# registry that will never answer, and each one burned the full 30s — the
+# work site's dry run timed out at 120s before it could report a single row
+# (2026-09-25). A connect that has not landed in 5s is not going to.
 LAST_CURL_ERR=""
 LAST_HEADERS="$(mktemp)"; trap 'rm -f "$LAST_HEADERS"' EXIT
 reg_req() { # reg_req <method> <api-host> <url-path> [accept]
@@ -203,7 +209,7 @@ reg_req() { # reg_req <method> <api-host> <url-path> [accept]
   [[ -n "$accept" ]] && args+=(-H "Accept: $accept")
   [[ "$method" == HEAD ]] && args+=(-I)
   hdr="$(mktemp)" || return 1
-  body="$(curl -sS --max-time 30 "${CURL_TLS[@]}" -D "$hdr" "${args[@]}" "$url" 2>"$hdr.err")"
+  body="$(curl -sS --connect-timeout 5 --max-time 30 "${CURL_TLS[@]}" -D "$hdr" "${args[@]}" "$url" 2>"$hdr.err")"
   LAST_CURL_ERR="$(head -c 200 "$hdr.err" 2>/dev/null)"; rm -f "$hdr.err"
   code="$(awk 'toupper($1) ~ /^HTTP/ {c=$2} END{print c}' "$hdr")"
   if [[ "$code" == "401" ]]; then
@@ -213,14 +219,14 @@ reg_req() { # reg_req <method> <api-host> <url-path> [accept]
     service="$(sed -n 's/.*service="\([^"]*\)".*/\1/p' <<<"$auth")"
     scope="$(sed -n 's/.*scope="\([^"]*\)".*/\1/p' <<<"$auth")"
     if [[ -n "$realm" ]]; then
-      tok="$(curl -sS --max-time 30 "${CURL_TLS[@]}" "${realm}?service=${service}&scope=${scope}" 2>/dev/null \
+      tok="$(curl -sS --connect-timeout 5 --max-time 30 "${CURL_TLS[@]}" "${realm}?service=${service}&scope=${scope}" 2>/dev/null \
              | $PY -c 'import json,sys; d=json.load(sys.stdin); print(d.get("token") or d.get("access_token") or "")' 2>/dev/null)"
       if [[ -n "$tok" ]]; then
         # Via `-H @-` (stdin), never an argv — the same discipline the master
         # key travels under in setup.sh. NOT `-H @<(...)`: native Windows curl
         # cannot open MSYS's /proc fd paths.
         body="$(printf 'Authorization: Bearer %s\n' "$tok" | \
-                curl -sS --max-time 30 "${CURL_TLS[@]}" -D "$hdr" -H @- "${args[@]}" "$url" 2>/dev/null)"
+                curl -sS --connect-timeout 5 --max-time 30 "${CURL_TLS[@]}" -D "$hdr" -H @- "${args[@]}" "$url" 2>/dev/null)"
         code="$(awk 'toupper($1) ~ /^HTTP/ {c=$2} END{print c}' "$hdr")"
       fi
     fi

@@ -23,7 +23,7 @@ PY=""
 for c in python3 python; do
   command -v "$c" >/dev/null 2>&1 && "$c" -c '' 2>/dev/null && { PY="$c"; break; }
 done
-[[ -n "$PY" ]] || PY="uv run --python 3.12 python"
+[[ -n "$PY" ]] || PY="uv run --no-project --python 3.12 python"
 # $PY may be multiple words (the uv fallback) — always invoke it unquoted: $PY -c ...
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

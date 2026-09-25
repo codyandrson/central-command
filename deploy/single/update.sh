@@ -474,7 +474,10 @@ deploy_current_tree() {
   if [[ "${CC_UPDATE_DRIVEN:-0}" == "1" ]]; then
     pass "restart" "update applied — the driving runner restarts the API"
   else
-    useraction "restart" "update applied — start your uvicorn API (and the sandbox runner, if you run one), then confirm with: ./setup.sh status"
+    # Name the COMMAND, not the component: the work site read "start your
+    # uvicorn API" and did not know that `./setup.sh boot` is what does it
+    # (2026-09-25).
+    useraction "restart" "update applied — start the API with \`./setup.sh boot\` (or your own uvicorn + sandbox runner), then confirm with: ./setup.sh status"
   fi
 }
 

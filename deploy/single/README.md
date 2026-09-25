@@ -83,6 +83,18 @@ permanent.
   `curl`, `openssl`, `git`, and `uv` (which supplies CPython 3.12). Node ≥ 22
   is optional — without it the cockpit is not built and the API still runs.
   `./setup.sh preflight` checks all of these by name.
+- **podman-compose ≥ 1.6.0** — a floor, not a preference (`docker compose` has
+  none). `up --wait`, which is how the deploy phases wait on `compose.yaml`'s
+  healthchecks, arrived in 1.6.0, and so did the config-hash change that made a
+  second `up -d` idempotent; on 1.5.0 a re-run dies with `container name ... is
+  already in use`. The `compose-version` check line reports it; upgrade with
+  `uv tool install podman-compose==1.6.0` (or `pip install
+  podman-compose==1.6.0`).
+- **CPython 3.12 on the host, or `CC_PYTHON_MIRROR`** — uv builds the venv with
+  `uv venv --python 3.12` and downloads an interpreter from
+  python-build-standalone (github.com) when the host has none. With
+  `CC_AIRGAP=1` that download is impossible, so `check` FAILs rather than
+  warning.
 - Windows: **podman CLI** (a podman machine on WSL2; Podman Desktop is
   optional — a GUI over the same machine) plus **Git Bash** for the `.sh`
   scripts (ships `openssl`, `curl`). Windows has no real

@@ -119,6 +119,27 @@ Every key above is also a ROW in `deploy/single/questions.tsv`, which is what
 lets `configure` ask for it and `check` validate it. Adding a seam means adding
 that row (`tests/test_single_questions_schema.py` fails otherwise).
 
+## Two host prerequisites the air gap cannot download for you
+
+Both are HOST tools, so no `.env` seam fixes them — they have to be installed
+before the install, and `check` now says so instead of finding out later.
+
+* **podman-compose ≥ 1.6.0** (released 2026-06-03; `docker compose` has no
+  floor). Below it the profile does not work: `up --wait` — how the deploy
+  phases wait on `compose.yaml`'s healthchecks — arrived in 1.6.0, and so did
+  the config-hash change that made a second `up -d` idempotent, without which
+  every re-run fails with `container name ... is already in use`. The work
+  site ran 1.5.0 (2026-09-25). `check`'s `compose-version` line is the gate;
+  the fix is `uv tool install podman-compose==1.6.0` or
+  `pip install podman-compose==1.6.0` from the PyPI mirror
+  (`CC_PYPI_INDEX_URL`).
+* **CPython 3.12 on the host**, or `CC_PYTHON_MIRROR`. The venv is built with
+  `uv venv --python 3.12`, and with neither of those uv DOWNLOADS an
+  interpreter from python-build-standalone on github.com. With `CC_AIRGAP=1`
+  that download cannot happen, so `check`'s `python-3.12` line is a **FAIL**
+  there rather than a warning (a host with only Python 3.14 is the case that
+  produced it).
+
 ## The loop — `configure` → `check` → triage → `check` → `all`
 
 ```
@@ -299,7 +320,7 @@ are reachable and which mirrors can stand in.
 | registry.npmjs.org | `CC_NPM_REGISTRY` at the npm mirror (the lockfile's `resolved` URLs are rewritten automatically). |
 | PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror; the pip installs inside the graphiti/crawler builds ride the same seam as build-args. |
 | A container registry | `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` at the registry mirror. A mirror that renames PATHS, or one tag that is simply absent: `CC_IMG_<NAME>`. |
-| python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. |
+| python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. Under `CC_AIRGAP=1` neither being true is a `check` FAIL, not a warning — the download is known to be impossible. |
 | huggingface.co | Speech: `CC_HF_ENDPOINT` at an HF mirror, or pre-place the two hub snapshots in the `speech-models` volume, or `CC_ENABLE_SPEECH=0` and register `cc-tts`/`cc-stt` at engines you already have. Cockpit-local Whisper (k3s only): pre-place `ggml-*.bin` in `config.whisperModelDir`, or set `WHISPER_MODELS_BASE_URL`. |
 
 ## Versions: a constraint, a lock, a resolution

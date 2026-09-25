@@ -1,10 +1,16 @@
-# Frozen from the live, suite-tested .venv on 2026-08-25 (Python 3.12.12).
-# This is the air-gap reproducibility pin: pyproject.toml's loose >= bounds
-# resolve to WHATEVER a mirror serves; this file resolves to the exact
-# graph the offline suite passed against. Install with:
+# requirements.lock — the air-gap reproducibility pin: pyproject.toml's loose
+# >= bounds resolve to WHATEVER a mirror serves; this file resolves to the
+# exact graph the offline suite passed against.
+#
+# UNIVERSAL since v2.46.0 (2026-09-25): `uv pip compile --universal`, so a
+# pin that only applies on one platform carries its marker (uvloop is not
+# for win32; magika 0.6.3 caps onnxruntime at 1.20.1 on win32 only). Before
+# that it was a Linux `pip freeze` and `CC_AIRGAP=1` could not install on
+# Windows at all. `tests/test_requirements_lock.py` pins the markers.
+#
+# Install with:
 #   uv pip install -r requirements.lock && uv pip install -e . --no-deps
-# Regenerate (deliberately, after a suite-green upgrade):
-#   uv pip freeze --python .venv/bin/python | grep -v '^central_command' > requirements.lock  (keep this header)
+# Regenerate with:  scripts/regen_lock.sh   (a deliberate act — see AGENTS.md)
 aiofile==3.12.3
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -20,10 +26,12 @@ beautifulsoup4==4.15.0
 cachetools==7.1.7
 caio==0.12.2
 certifi==2026.7.22
-cffi==2.1.1
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
 charset-normalizer==3.5.1
 click==8.4.2
 cobble==0.1.4
+colorama==0.4.6 ; sys_platform == 'win32'
+coloredlogs==15.0.1 ; sys_platform == 'win32'
 courlan==1.4.0
 croniter==6.2.4
 cryptography==50.0.0
@@ -48,18 +56,20 @@ griffelib==2.2.0
 h11==0.16.0
 htmldate==1.10.0
 httpcore==1.0.9
-httpcore2==2.12.0
+httpcore2==2.12.0 ; sys_platform != 'emscripten'
 httptools==0.8.0
 httpx==0.28.1
 httpx-sse==0.4.3
 httpx2==2.12.0
+httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+humanfriendly==10.0 ; sys_platform == 'win32'
 idna==3.19
 iniconfig==2.3.0
 inscriptis==2.7.4
 jaraco-classes==3.4.0
 jaraco-context==6.1.2
 jaraco-functools==4.6.0
-jeepney==0.9.0
+jeepney==0.9.0 ; sys_platform == 'linux'
 jiter==0.16.0
 joserfc==1.7.4
 jsonschema==4.26.0
@@ -78,9 +88,11 @@ markitdown==0.1.7
 mcp==1.29.0
 mdurl==0.1.2
 more-itertools==11.1.0
+mpmath==1.3.0 ; sys_platform == 'win32'
 neo4j==6.2.0
 numpy==2.5.2
-onnxruntime==1.29.0
+onnxruntime==1.20.1 ; sys_platform == 'win32'
+onnxruntime==1.29.0 ; sys_platform != 'win32'
 openai==3.3.1
 openpyxl==3.1.5
 opentelemetry-api==1.44.0
@@ -104,7 +116,7 @@ protobuf==7.36.0
 py-key-value-aio==0.4.5
 pyasn1==0.6.4
 pyasn1-modules==0.4.2
-pycparser==3.0
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
 pydantic==2.13.4
 pydantic-ai==2.18.0
 pydantic-ai-slim==2.18.0
@@ -117,14 +129,18 @@ pyjwt==2.13.0
 pynacl==1.6.2
 pypdfium2==5.13.0
 pyperclip==1.11.0
+pyreadline3==3.5.6 ; sys_platform == 'win32'
 pytest==9.1.1
 pytest-asyncio==1.4.0
+pytest-timeout==2.4.0
 pytest-xdist==3.8.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
 python-multipart==0.0.32
 python-pptx==1.0.2
 pytz==2026.3.post1
+pywin32==312 ; sys_platform == 'win32'
+pywin32-ctypes==0.2.3 ; sys_platform == 'win32'
 pyyaml==6.0.3
 referencing==0.37.0
 regex==2026.7.19
@@ -132,23 +148,25 @@ requests==2.34.2
 rich==15.0.0
 rpds-py==2026.6.3
 ruff==0.16.4
-secretstorage==3.5.0
+secretstorage==3.5.0 ; sys_platform == 'linux'
 six==1.17.0
 sniffio==1.3.1
 soupsieve==2.9.2
 sse-starlette==3.4.8
 starlette==1.6.0
+sympy==1.14.0 ; sys_platform == 'win32'
 tenacity==9.1.4
 tiktoken==0.14.0
 tld==0.13.2
 trafilatura==2.2.0
-truststore==0.10.4
+truststore==0.10.4 ; sys_platform != 'emscripten'
 typing-extensions==4.16.0
 typing-inspection==0.4.4
+tzdata==2026.4 ; sys_platform == 'emscripten' or sys_platform == 'win32'
 tzlocal==5.4.4
 urllib3==2.7.0
 uvicorn==0.52.4
-uvloop==0.22.1
+uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
 watchfiles==1.2.0
 wcwidth==0.8.2
 websockets==16.1.1

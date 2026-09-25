@@ -140,7 +140,14 @@ PY=""
 for c in python3 python; do
   command -v "$c" >/dev/null 2>&1 && "$c" -c '' 2>/dev/null && { PY="$c"; break; }
 done
-[[ -n "$PY" ]] || PY="uv run --python 3.12 python"
+# --no-project is load-bearing: without it `uv run` DISCOVERS pyproject.toml
+# from the cwd (these scripts run inside the checkout), SYNCS the project —
+# a universal resolution of every platform, which a Windows mirror holding
+# only Windows wheels cannot satisfy — and writes uv.lock into the tree. On
+# the Windows testbed (2026-09-25, CC_AIRGAP=1 against a local mirror) every
+# `$PY` call in the llm section died with "No solution found ... uvloop" and
+# the endpoint looked empty. The fallback is an INTERPRETER, not a project.
+[[ -n "$PY" ]] || PY="uv run --no-project --python 3.12 python"
 # $PY may be multiple words (the uv fallback) — always invoke it unquoted.
 
 # ── output protocol ─────────────────────────────────────────────────────────
@@ -261,6 +268,63 @@ compose_detect() {
   done
   return 1
 }
+
+# ── the compose FLOOR (2026-09-25) ──────────────────────────────────────────
+# Detecting a provider is not enough: this profile needs podman-compose 1.6.0
+# or newer, and the work site ran 1.5.0. Two things setup.sh relies on landed
+# in exactly that release (2026-06-03): `up --wait` (the deploy phases wait on
+# compose.yaml's healthchecks rather than polling) and the config-hash change
+# that made a re-run of `up -d` idempotent — under 1.5.0 the second run dies
+# with `container name ... is already in use`, so every re-run of the install
+# failed. docker compose has no floor: its `--wait` predates v2 and it has
+# always reconciled an existing container.
+#
+# Numeric dotted compare, a >= b. Non-numeric suffixes (rc1, -dev) are cut off
+# the component, so 1.6.0rc1 reads as 1.6.0 — a floor is not a release gate.
+version_ge() { # version_ge <a> <b>  -> 0 when a >= b
+  local a="$1" b="$2" ia=() ib=() i x y
+  IFS=. read -r -a ia <<<"$a"
+  IFS=. read -r -a ib <<<"$b"
+  for (( i = 0; i < ${#ia[@]} || i < ${#ib[@]}; i++ )); do
+    x="${ia[i]:-0}"; y="${ib[i]:-0}"
+    x="${x%%[!0-9]*}"; y="${y%%[!0-9]*}"
+    x="${x:-0}"; y="${y:-0}"
+    (( 10#$x > 10#$y )) && return 0
+    (( 10#$x < 10#$y )) && return 1
+  done
+  return 0
+}
+# PURE: prints nothing, returns 0 (ok) / 1 (too old) / 2 (unparseable), and
+# reports WHAT it read in two globals so the caller can name it.
+#
+# The text it parses is a whole `<provider> compose version` output, which on
+# podman is THREE lines — the external-provider banner, `podman version 5.8.3`,
+# then `podman-compose version 1.6.0`. So: never `head -1` (that is the
+# banner), and match the PRODUCT name, not the first number on the page.
+COMPOSE_VERSION=""
+COMPOSE_FLAVOUR=""
+COMPOSE_FLOOR_PODMAN="1.6.0"
+compose_version_floor_ok() { # compose_version_floor_ok <provider> <version-output>
+  local provider="$1" out="$2" v
+  COMPOSE_VERSION=""; COMPOSE_FLAVOUR=""
+  # podman-compose FIRST: `podman compose version` prints a `podman version`
+  # line too, and podman can also drive docker-compose as its external
+  # provider (then there is no podman-compose line at all and no floor).
+  v="$(printf '%s\n' "$out" | sed -n 's/.*podman-compose version[: ]*v*\([0-9][0-9.]*\).*/\1/p' | tail -1)"
+  if [[ -n "$v" ]]; then
+    COMPOSE_FLAVOUR="podman-compose"; COMPOSE_VERSION="$v"
+    version_ge "$v" "$COMPOSE_FLOOR_PODMAN" && return 0
+    return 1
+  fi
+  v="$(printf '%s\n' "$out" | sed -n 's/.*[Dd]ocker [Cc]ompose version[: ]*v*\([0-9][0-9.]*\).*/\1/p' | tail -1)"
+  if [[ -n "$v" ]]; then
+    COMPOSE_FLAVOUR="docker-compose"; COMPOSE_VERSION="$v"
+    return 0
+  fi
+  COMPOSE_FLAVOUR="$provider"
+  return 2
+}
+
 # Every compose call goes through here: one file, one answer file, one profile
 # set, one place to get the flags right.
 #
@@ -932,9 +996,29 @@ preflight_host() {
   # is the dev-box fallback. Neither answering is a hard stop — nothing after
   # fetch can run without one.
   if compose_detect; then
-    pass "compose-provider" "$(printf '%s ' "${COMPOSE_BIN[@]}")($("${COMPOSE_BIN[@]}" version 2>/dev/null | head -1))"
+    local cver; cver="$("${COMPOSE_BIN[@]}" version 2>/dev/null)"
+    pass "compose-provider" "$(printf '%s ' "${COMPOSE_BIN[@]}")($(printf '%s\n' "$cver" | head -1))"
+    # ...and the VERSION, separately: a provider that answers can still be too
+    # old to run this profile (the work site's podman-compose 1.5.0, 2026-09-25).
+    local frc=0; compose_version_floor_ok "${COMPOSE_BIN[0]}" "$cver" || frc=$?
+    case "$frc" in
+      0)
+        if [[ "$COMPOSE_FLAVOUR" == "podman-compose" ]]; then
+          pass "compose-version" "${COMPOSE_FLAVOUR} ${COMPOSE_VERSION} (floor ${COMPOSE_FLOOR_PODMAN})"
+        else
+          pass "compose-version" "${COMPOSE_FLAVOUR} ${COMPOSE_VERSION} (no floor)"
+        fi
+        ;;
+      1)
+        fail "compose-version" "podman-compose ${COMPOSE_VERSION} is older than ${COMPOSE_FLOOR_PODMAN} — "'this profile needs `up --wait`, added in 1.6.0 (the deploy phases wait on compose.yaml healthchecks), AND the 1.6.0 config-hash fix, without which a SECOND `up -d` dies with "container name ... is already in use". Upgrade it: `uv tool install podman-compose==1.6.0`, or `pip install podman-compose==1.6.0` from your CC_PYPI_INDEX_URL mirror in the air gap'
+        ;;
+      *)
+        warn "compose-version" "could not read a version from \`${COMPOSE_BIN[*]} version\` — saw: $(printf '%s\n' "$cver" | tr '\n' '|' | cut -c1-160). podman-compose must be ${COMPOSE_FLOOR_PODMAN} or newer; check it by hand"
+        ;;
+    esac
   else
     fail "compose-provider" "neither 'podman compose' nor 'docker compose' answers — install podman-compose (or Podman Desktop's compose support)"
+    fail "compose-version" "no compose provider to read a version from — podman-compose must be ${COMPOSE_FLOOR_PODMAN} or newer"
   fi
 
   local t
@@ -1532,6 +1616,11 @@ check_indexes() {
     pass "python-3.12" "uv finds a CPython 3.12 here — no interpreter download needed"
   elif [[ -n "${CC_PYTHON_MIRROR:-}" ]]; then
     probe_http "python-3.12" "$CC_PYTHON_MIRROR" "the python-build-standalone mirror (uv must DOWNLOAD a CPython 3.12: none was found here)" "CC_PYTHON_MIRROR" HEAD
+  elif [[ "$CC_AIRGAP" == "1" ]]; then
+    # In the air gap that download CANNOT happen, so a WARN here is a lie the
+    # operator only finds out about in the app phase, after everything else
+    # installed. The work site had Python 3.14 only (2026-09-25).
+    fail "python-3.12" "no CPython 3.12 on this host and CC_AIRGAP=1, so \`uv venv --python 3.12\` would have to download one from python-build-standalone (github.com) — unreachable here. Two ways out: install CPython 3.12 on this host, or set CC_PYTHON_MIRROR to a mirror of the python-build-standalone releases"
   else
     warn "python-3.12" "no CPython 3.12 on this host, so uv must download one from python-build-standalone (github.com), and CC_PYTHON_MIRROR is unset — set it, or install CPython 3.12"
   fi

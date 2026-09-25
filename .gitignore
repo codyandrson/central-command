@@ -44,7 +44,7 @@ deploy/k3s/setup-log.txt
 deploy/k3s/setup-diagnostics.txt
 CLAUDE.local.md
 
-# Windows: `uv run` at the root writes uv.lock; podman hands Git's MSYS ssh
+# Windows: `uv run` at the root writes uv.lock (the scripts pass --no-project since v2.47.0); podman hands Git's MSYS ssh
 # `UserKnownHostsFile=NUL`, which creates a literal file named NUL.
 uv.lock
 NUL

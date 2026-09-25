@@ -90,6 +90,23 @@ when a matching file is read.
   as `pinned`, and never rewritten; a pin that does not exist is a FAIL naming
   the key. The three `*-base` rows reach the builds through the same keys, and
   each Dockerfile's `ARG CC_IMG_*` default must equal its `images.txt` row.
+- **A provider that ANSWERS can still be too old — podman-compose 1.6.0 is a
+  FLOOR** (v2.47.0). The work site ran 1.5.0 and `check` said PASS, because
+  `compose-provider` only ever asked whether something answered. Two things
+  this profile depends on first shipped in 1.6.0 (2026-06-03): `up --wait` (the
+  deploy phases wait on `compose.yaml`'s healthchecks instead of polling) and
+  the config-hash change that made a second `up -d` idempotent — under 1.5.0
+  every re-run of the install died with `container name … is already in use`.
+  So there is a separate `compose-version` line, deciding through the pure
+  `compose_version_floor_ok` (prints nothing, 0 ok / 1 too old / 2
+  unparseable; `tests/test_single_compose_floor.py` lifts it out of setup.sh
+  and runs it). Parse the PRODUCT, never `head -1`: `podman compose version`
+  prints the external-provider banner first and `podman version 5.8.3` second.
+  `docker compose` carries NO floor — do not invent one. The same run taught
+  the other half: an air-gapped host with no CPython 3.12 and no
+  `CC_PYTHON_MIRROR` is a **FAIL**, not a WARN — the interpreter download is
+  known to be impossible there, and a warning only defers the failure to the
+  `app` phase.
 - **`check` EXECUTES nothing, and it is the GATE** (v2.44.0, design record D5).
   Eight dry sections (`./setup.sh check --list`), one table, the same protocol
   and exit taxonomy as a phase; the full run is `check` then the nine phases

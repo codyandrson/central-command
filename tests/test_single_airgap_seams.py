@@ -107,6 +107,28 @@ def test_resolver_tag_matcher_self_test():
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_every_registry_curl_has_a_connect_timeout():
+    """A registry that will never answer must cost 5 seconds, not 30.
+
+    In the air gap with the ``CC_REGISTRY_*`` seams unset, every request
+    ``reg_req`` makes is a TCP connect to a public registry that nothing can
+    reach. ``--max-time 30`` alone means each one burns the full 30s: the work
+    site's resolver dry run timed out at 120s before it could report a single
+    row (2026-09-25). ``--connect-timeout`` is the seam — a source walk,
+    because there is no unreachable registry to dial from a test.
+    """
+    text = (SINGLE / "resolve-images.sh").read_text(encoding="utf-8")
+    start = text.index("reg_req() {")
+    end = text.index("\nreg_tags() {", start)
+    curls = [line for line in text[start:end].splitlines() if "curl " in line]
+    assert curls, "reg_req no longer runs curl — this walk needs rewriting"
+    for line in curls:
+        assert "--connect-timeout" in line, (
+            "every curl in reg_req needs --connect-timeout (an unreachable "
+            f"registry otherwise costs the whole --max-time):\n  {line.strip()}"
+        )
+
+
 def test_an_honoured_pin_stays_invisible_to_the_self_write_check(tmp_path):
     """An operator pin must be honoured EVERY run, not just the first.
 
@@ -1148,3 +1170,16 @@ def test_every_tls_insecure_warn_site_routes_through_the_shared_gate():
                 "through cc_tls_insecure_warn_once (F25) — a run that touches this "
                 "script and another tls-insecure consumer would double-print"
             )
+
+
+def test_the_uv_python_fallback_never_syncs_the_project():
+    """`uv run` inside the checkout discovers pyproject.toml and SYNCS the
+    project — a universal resolution a Windows mirror holding only Windows
+    wheels cannot satisfy (2026-09-25 testbed: every `$PY` call in the llm
+    section died on uvloop) — and it writes uv.lock into the tree. The
+    fallback is an interpreter, so every script passes --no-project."""
+    for name in ("setup.sh", "discover-llm.sh", "resolve-images.sh", "verify.sh"):
+        src = (SINGLE / name).read_text(encoding="utf-8")
+        for line in src.splitlines():
+            if 'PY="uv run' in line:
+                assert "--no-project" in line, f"{name}: {line.strip()}"
