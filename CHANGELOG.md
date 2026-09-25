@@ -150,7 +150,10 @@ the drop-in marks the public registries insecure too.
 A release-mechanics slip, not a product change: the v2.45.2 commit's `VERSION`
 file is empty (the bump truncated the file before reading it), so an updater
 that installed v2.45.2 would read no installed version at all. This release
-carries the same tree with `VERSION` restored. Do not install v2.45.2.
+carries the same tree with `VERSION` restored. **The `v2.45.2` tag was deleted
+from origin on 2026-09-25** (the commit stays in history as v2.45.3's parent),
+so no updater can offer it; a clone that fetched it earlier still holds the
+stale local tag until `git fetch --prune --prune-tags`.
 `tests/test_version_file.py` caught it; the release went out because the
 pipeline that ran the test masked its exit code. Lesson recorded: run the
 gate with `pipefail`.
