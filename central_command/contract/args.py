@@ -92,6 +92,14 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # be present, the Executor says it must be the message's own.
     "mail.report_spam": ArgSpec(required=("provider_uuid",)),
     "mail.unsubscribe": ArgSpec(required=("provider_uuid", "url")),
+    # mail.send / mail.move (Exchange native client design, 2026-09-25): both
+    # handlers subscript these. `to` is a LIST of addresses and the Executor
+    # sends to exactly what is pinned — an empty one is a proposal that would
+    # execute into nothing. `reply_to_ref` is optional and is a provider uuid,
+    # not a message id an agent wrote: the Executor re-reads the threading
+    # headers from that message, the same rule mail.unsubscribe's url follows.
+    "mail.send": ArgSpec(required=("to", "subject", "body")),
+    "mail.move": ArgSpec(required=("provider_uuid", "folder")),
     # mail.create_rule (2026-09-22): the handler subscripts all three; the
     # criteria's own validity (at least one field, no bare public domain) is
     # `mail_rules.validate`, run again by the Executor — shape here, meaning

@@ -164,9 +164,44 @@ async def _calendar_delete_event(args: dict, approver: str, proposer: str | None
 
 async def _mail_report_spam(args: dict, approver: str, proposer: str | None) -> str:
     out = await email_facade.report_spam(args["provider_uuid"])
-    labels = ", ".join(out.get("label_ids") or []) or "unknown"
+    # Gmail answers with the message's new label set, Exchange with the folder
+    # it landed in. Report whichever the provider gave rather than asserting a
+    # shape — the result line is the record of what actually happened.
+    where = ", ".join(out.get("label_ids") or []) or out.get("folder") or "unknown"
     return (f"reported as spam: {args.get('sender') or '?'} — "
-            f"{args.get('subject') or '?'} (labels now {labels})")
+            f"{args.get('subject') or '?'} (now in {where})")
+
+
+async def _mail_send(args: dict, approver: str, proposer: str | None) -> str:
+    # The proposal pinned every recipient and the whole body; this sends
+    # exactly that. The ONE thing not taken from the arguments is the threading
+    # header pair — `reply_to_ref` names a MESSAGE and the client reads
+    # In-Reply-To/References from that message's own headers, so an agent
+    # cannot thread a reply into a conversation it never read.
+    recipients = [a for a in (args.get("to") or []) if isinstance(a, str) and a.strip()]
+    if not recipients:
+        raise ExecutorError("mail.send: no recipient address survived validation")
+    out = await email_facade.send(
+        recipients,
+        args["subject"],
+        args["body"],
+        cc=args.get("cc") or [],
+        reply_to_ref=(args.get("reply_to_ref") or "") or None,
+    )
+    threaded = out.get("in_reply_to")
+    return (f"mail sent to {', '.join(recipients)}"
+            + (f" (cc {', '.join(args.get('cc') or [])})" if args.get("cc") else "")
+            + f" — subject {args['subject']!r}"
+            + (f", in reply to {threaded}" if threaded else ""))
+
+
+async def _mail_move(args: dict, approver: str, proposer: str | None) -> str:
+    # The folder is re-resolved from the mailbox rather than trusted as
+    # written: a proposal can arrive by API naming a folder that does not
+    # exist, and the client refuses with the list of what does.
+    out = await email_facade.move(args["provider_uuid"], args["folder"])
+    return (f"filed {args.get('sender') or '?'} — {args.get('subject') or '?'} "
+            f"into {out.get('folder') or args['folder']}")
 
 
 async def _mail_unsubscribe(args: dict, approver: str, proposer: str | None) -> str:
@@ -2203,6 +2238,8 @@ HANDLERS = {
     "work.bulk_dismiss": _work_bulk_dismiss,
     "mail.report_spam": _mail_report_spam,
     "mail.unsubscribe": _mail_unsubscribe,
+    "mail.send": _mail_send,
+    "mail.move": _mail_move,
     "mail.create_rule": _mail_create_rule,
     "catalog.tag": _catalog_tag,
     "skill.create": _skill_create,

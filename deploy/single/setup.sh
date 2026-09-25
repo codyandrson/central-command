@@ -2131,21 +2131,19 @@ phase_llm() {
   local rrc=0
   CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
   LITELLM_MASTER_KEY="${CC_LLM_PROXY_ADMIN_KEY:-}" \
-    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" >&2 || rrc=$?
+    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" \
+      --require "$(cc_required_aliases)" >&2 || rrc=$?
+  # --require is what makes exit 3 mean "a REQUIRED alias is not filled in":
+  # cc-tts/cc-stt with CC_ENABLE_SPEECH=0 are created as skeletons and
+  # reported `optional`, never a pause. Before it, a catalog filled in through
+  # the UI still paused here whenever .env did not ALSO declare the alias —
+  # the Windows testbed (2026-09-25) sat at this gate with every required row
+  # `ok` and two speech skeletons nothing on that install would ever call.
   case "$rrc" in
-    0) pass "catalog" "every required alias is registered, filled in and consistent" ;;
+    0) pass "catalog" "every required alias ($(cc_required_aliases)) is registered, filled in and consistent" ;;
     3)
-      if [[ -z "$undeclared" ]]; then
-        # Every alias THESE flags require is declared, so whatever
-        # register-models.py is waiting on is not something .env can answer (an
-        # alias this deployment does not require — cc-tts/cc-stt with
-        # CC_ENABLE_SPEECH=0 — or a row the operator edited). Report it and let
-        # the probes, which are the real proof, decide.
-        warn "catalog" "register-models.py wants attention on an alias that .env does not declare (see its lines above); every alias these feature flags require IS declared, so the probes below decide"
-      else
-        llm_gate "the model catalog needs your provider details (see the alias list above). Declaring them in .env instead removes this pause entirely: $undeclared"
-        return 3
-      fi
+      llm_gate "the model catalog needs your provider details for a required alias (see the list above)${undeclared:+. Declaring them in .env instead removes this pause entirely: $undeclared}"
+      return 3
       ;;
     *) fail "catalog" "register-models.py failed (exit $rrc) — run: ./setup.sh diagnose"; return 1 ;;
   esac
@@ -2189,19 +2187,29 @@ phase_llm() {
         || { fail "speech-model" "could not install ${m} — CC_HF_ENDPOINT reachable? run: ./setup.sh diagnose"; return 1; }
     done
   fi
-  # A .mp3 suffix so the file's name agrees with its bytes on the far side.
-  local mp3; mp3="$(mktemp --suffix=.mp3)"
-  if ! step "probe-tts" "cc-tts synthesised speech" \
-    "$HERE/discover-llm.sh" --proxy speech cc-tts "$mp3"; then
-    rm -f "$mp3"; llm_gate "the cc-tts alias did not return audio"
-    return 3
+  # The speech pair is probed only when this deployment REQUIRES it
+  # (cc_required_aliases, i.e. CC_ENABLE_SPEECH=1). With speech off the two
+  # aliases are skeletons by design and probing them was a guaranteed gate —
+  # the Windows testbed (2026-09-25) cleared the catalog and then stopped
+  # here on "cc-tts did not return audio" for an engine it had not installed.
+  if [[ "${CC_ENABLE_SPEECH:-1}" == "1" ]]; then
+    # A .mp3 suffix so the file's name agrees with its bytes on the far side.
+    local mp3; mp3="$(mktemp --suffix=.mp3)"
+    if ! step "probe-tts" "cc-tts synthesised speech" \
+      "$HERE/discover-llm.sh" --proxy speech cc-tts "$mp3"; then
+      rm -f "$mp3"; llm_gate "the cc-tts alias did not return audio"
+      return 3
+    fi
+    if ! step "probe-stt" "cc-stt transcribed what cc-tts said" \
+      "$HERE/discover-llm.sh" --proxy transcribe cc-stt "$mp3"; then
+      rm -f "$mp3"; llm_gate "the cc-stt alias did not return a transcription"
+      return 3
+    fi
+    rm -f "$mp3"
+  else
+    pass "probe-tts" "skipped (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt are not required here)"
+    pass "probe-stt" "skipped (CC_ENABLE_SPEECH=0)"
   fi
-  if ! step "probe-stt" "cc-stt transcribed what cc-tts said" \
-    "$HERE/discover-llm.sh" --proxy transcribe cc-stt "$mp3"; then
-    rm -f "$mp3"; llm_gate "the cc-stt alias did not return a transcription"
-    return 3
-  fi
-  rm -f "$mp3"
 
   # THE measurement. Never a model card: a mis-sized vector corrupts the Neo4j
   # index instead of erroring, and the dimension is permanent once it exists.
@@ -2379,6 +2387,18 @@ phase_app() {
   # generates the CC_ names directly and the llm phase writes CC_EMBED_DIM
   # where the app already reads it. What is left is genuinely COMPOSED from
   # other keys in this same file.
+  # The app dials the proxy THIS profile deployed. .env.example carries the
+  # default, but since v2.45.0 `configure` writes only what it asks (a
+  # preseed stays byte-identical), so a configure-born .env had NO
+  # CC_LLM_BASE_URL and the API answered every live model resolve with
+  # `LLMProviderNotConfigured` — the Windows testbed's demo feed was a 500
+  # (2026-09-25). Composed from the port answer, like the two below.
+  set_kv_if_unset "$ENV_FILE" CC_LLM_BASE_URL "http://127.0.0.1:${CC_LITELLM_PORT}" "app-llm-base-url"
+  # …and WHICH model the agents run on: this profile's proxy carries the
+  # cc-default alias, and the code default (an Anthropic model id) is what a
+  # bare .env falls back to — the testbed's first live triage was a 403 from
+  # the minted key, which can only reach the aliases (2026-09-25).
+  set_kv_if_unset "$ENV_FILE" CC_DEFAULT_MODEL "openai:cc-default" "app-default-model"
   set_kv_if_unset "$ENV_FILE" CC_EMBED_ALIAS "cc-embedding" "app-embed-alias"
   set_kv_if_unset "$ENV_FILE" CC_LITELLM_DB_URL \
     "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD:-}@127.0.0.1:${CC_LITELLM_DB_PORT}/litellm" \
@@ -2761,7 +2781,7 @@ phase_status() {
 
   if venv_python >/dev/null; then pass "venv" ".venv present"; else fail "venv" ".venv missing — run: ./setup.sh app"; fi
   local k
-  for k in CC_LLM_API_KEY CC_EMBED_DIM CC_NEO4J_PASSWORD CC_LITELLM_SALT_KEY; do
+  for k in CC_LLM_BASE_URL CC_DEFAULT_MODEL CC_LLM_API_KEY CC_EMBED_DIM CC_NEO4J_PASSWORD CC_LITELLM_SALT_KEY; do
     if is_placeholder "$(get_kv "$ENV_FILE" "$k")"; then
       fail "app-${k}" "$k is unset in the app's .env — run: ./setup.sh app"
     else

@@ -2,6 +2,7 @@
 paths:
   - "deploy/n8n/**"
   - "central_command/integrations/jira.py"
+  - "central_command/integrations/exchange.py"
   - "central_command/integrations/n8n_facade.py"
   - "central_command/contract/mail.py"
   - "central_command/ingest/**"
@@ -33,6 +34,27 @@ when a matching file is read.
   `scripts/atlassian_probe.py` is the on-site verification: nothing about DC
   can be proven from this deployment, so the DC shapes are coded to
   Atlassian's published reference until that probe has run.
+- **On Exchange the EWS ItemId is a HANDLE, never the identity.** An `ItemId`
+  CHANGES when a message moves folder — filing a mail mints a new one — so it
+  cannot be the ledger's idempotency key the way Gmail's immutable message id
+  is. `integrations/exchange.py` returns BOTH: `uuid` is the ItemId (what
+  `get_message` and `move` need right now) and `message_id` is the RFC 822
+  `InternetMessageId`, kept byte-for-byte as the server gave it.
+  `ledger.ref_message_id` prefers the supplied one and only synthesises the
+  `<gmail-msg-…>` form when the provider has none, so a message filed
+  mid-sweep is still the same work item instead of a second enrollment. In
+  exchangelib the header is spelled `Message.message_id`, not
+  `internet_message_id` (`items/message.py`) — the two names are one letter of
+  carelessness apart and the wrong one silently yields `None`.
+- **Trust for an integration client comes from the GLOBAL knobs, never a
+  per-integration one.** `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and
+  `CC_TLS_INSECURE` are one surface an operator configures once
+  (`integrations/http.py:client_kwargs()`); the Exchange client injects them
+  into exchangelib through an `HTTPAdapter` subclass rather than growing
+  `CC_EXCHANGE_CERT_PATH`/`CC_EXCHANGE_VERIFY_TLS` of its own, which is what
+  the site's own notes proposed. A second knob for the same fact is a second
+  place to be wrong about it, and the operator decided (2026-09-23) there is
+  exactly one.
 - **A Jira gadget's config keys are declared BY THE GADGET — read its XML,
   never a table.** A gadget silently ignores any pref it does not declare, so
   a wrong key is a 200 with no binding and no error.

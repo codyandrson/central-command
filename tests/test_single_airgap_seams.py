@@ -32,6 +32,15 @@ import subprocess
 
 import pytest
 
+# The bash that can run this repo's shell scripts. On Windows a bare "bash" is
+# System32's WSL launcher (its error reads "The RPC call contains a handle
+# that differs from the declared handle type") — 26 tests failed that way on
+# the 2026-09-25 testbed run, all of them in files that shelled out with the
+# bare name. `update._bash()` resolves Git Bash from git's own install.
+from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+BASH = _resolve_bash() or "bash"
+
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SINGLE = ROOT / "deploy" / "single"
 IMAGES_TXT = SINGLE / "images.txt"
@@ -101,7 +110,7 @@ def test_resolver_tag_matcher_self_test():
     # cwd= + basename, not the full path: on Windows the first `bash` on PATH
     # may be WSL's launcher, which cannot open a Windows path.
     r = subprocess.run(
-        ["bash", "resolve-images.sh", "--self-test"],
+        [BASH, "resolve-images.sh", "--self-test"],
         cwd=SINGLE, capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
@@ -157,7 +166,7 @@ def test_an_honoured_pin_stays_invisible_to_the_self_write_check(tmp_path):
 
     def ref_for(var: str) -> str:
         r = subprocess.run(
-            ["bash", "-c",
+            [BASH, "-c",
              f'MANIFEST="{manifest.as_posix()}"; '
              + _manifest_ref_for_body() + f'; manifest_ref_for {var}'],
             capture_output=True, text=True,
@@ -506,7 +515,7 @@ def test_airgap_env_example_teaches_the_live_uv_variable():
 def test_scripts_parse(script: pathlib.Path):
     # cwd= + basename, not the full path: on Windows the first `bash` on PATH
     # may be WSL's launcher, which cannot open a Windows path.
-    subprocess.run(["bash", "-n", script.name], cwd=script.parent, check=True)
+    subprocess.run([BASH, "-n", script.name], cwd=script.parent, check=True)
 
 
 # ── D4: the two trust knobs, and the fan-out that must reach every consumer ──
@@ -560,7 +569,7 @@ def test_the_host_curl_gets_the_ca_as_an_OPTION_not_only_an_env_var(tmp_path):
     def curlrc(**env) -> str:
         state = tmp_path / ("-".join(sorted(env)) or "none")
         r = subprocess.run(
-            ["bash", "-c",
+            [BASH, "-c",
              f'. "{ENV_LIB.as_posix()}"; cc_export_tls_env "{state.as_posix()}"; '
              'printf "CURL_HOME=%s\n" "${CURL_HOME:-unset}"; '
              f'cat "{(state / "curl" / ".curlrc").as_posix()}" 2>/dev/null'],
@@ -767,7 +776,7 @@ def _build_dry_run(script: str, tmp_path: pathlib.Path, ca: pathlib.Path | None)
     }
     if ca is not None:
         env["CC_CA_BUNDLE"] = str(ca)
-    r = subprocess.run(["bash", str(SINGLE / script)], capture_output=True,
+    r = subprocess.run([BASH, str(SINGLE / script)], capture_output=True,
                        text=True, env=env, cwd=str(tmp_path))
     assert r.returncode == 0, r.stdout + r.stderr
     return r.stdout
@@ -784,6 +793,24 @@ def test_the_resolved_build_command_uses_the_staged_context(script, dockerfile, 
     ``CC_BUILD_DRY_RUN=1`` prints the resolved command and touches nothing, which
     is the only way to pin this on a host with no podman.
     """
+    # The staged path is deterministic (<state>/build/<image>), so snapshot it
+    # BEFORE the dry run: on a host that carries a real install (the Windows
+    # testbed, 2026-09-25) the directory already exists from `fetch`, and
+    # "must not exist afterwards" was asserting about the install, not the
+    # dry run. What the dry run must not do is ADD or CHANGE anything there.
+    image = script.replace("build-", "cc-").replace("-image.sh", "")
+    state = subprocess.run(
+        [BASH, "-c", f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"; '
+                     f'cc_state_dir "{(ROOT / ".env").as_posix()}" "{ROOT.as_posix()}"'],
+        capture_output=True, text=True).stdout.strip()
+    staged = pathlib.Path(state) / "build" / image if state else None
+
+    def snapshot():
+        if staged is None or not staged.exists():
+            return None
+        return sorted((p.name, p.stat().st_mtime_ns, p.stat().st_size) for p in staged.iterdir())
+
+    before = snapshot()
     out = _build_dry_run(script, tmp_path, None)
     line = next(l for l in out.splitlines() if l.startswith("DRY-RUN build:"))
     argv = line.split(": ", 1)[1].split(" ")
@@ -798,9 +825,10 @@ def test_the_resolved_build_command_uses_the_staged_context(script, dockerfile, 
     )
     assert argv[argv.index("-f") + 1] == f"{ctx}/{dockerfile}", argv
     assert "--secret" not in argv, argv
-    # A dry run touches nothing: it must not have staged the context it printed.
-    assert not pathlib.Path(ctx).exists() or any(pathlib.Path(ctx).iterdir()) is False, (
-        f"CC_BUILD_DRY_RUN=1 staged {ctx} — it must only print"
+    # A dry run touches nothing: whatever was staged before is exactly what is
+    # staged after, and nothing appeared where nothing was.
+    assert snapshot() == before, (
+        f"CC_BUILD_DRY_RUN=1 changed {ctx} — it must only print"
     )
 
 
@@ -833,7 +861,7 @@ def test_staging_replaces_the_context_and_never_keeps_a_stale_ca(tmp_path):
 
     def run(with_ca: bool):
         r = subprocess.run(
-            ["bash", "-c",
+            [BASH, "-c",
              f'. "{lib}"; cc_stage_build_context "{staged}" '
              f'"{ca if with_ca else ""}" "{src}"'],
             capture_output=True, text=True)
@@ -900,8 +928,14 @@ BUILD_BASE = "python:3.12-slim-bookworm"   # ships ca-certificates + openssl
 
 def _docker() -> str | None:
     for exe in ("docker", "podman"):
-        r = subprocess.run([exe, "image", "inspect", BUILD_BASE],
-                           capture_output=True, text=True)
+        try:
+            r = subprocess.run([exe, "image", "inspect", BUILD_BASE],
+                               capture_output=True, text=True)
+        except FileNotFoundError:
+            # Not installed at all (the Windows testbed has podman only, and
+            # `docker` raised WinError 2 here, 2026-09-25) — that is "not on
+            # this host", which the caller turns into a skip.
+            continue
         if r.returncode == 0:
             return exe
     return None
@@ -930,15 +964,34 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path):
         return subprocess.run([exe, "build", "-t", tag, str(ctx)],
                               capture_output=True, text=True)
 
-    # 1. NO cc-ca.crt in the context — what a k3s build from the repo context is.
+    # 1. No CA. Under docker/BuildKit that is a context with NO cc-ca.crt at
+    #    all — what a k3s build from the repo context is, and a zero-match glob
+    #    COPY is a no-op there. Under podman/buildah a zero-match glob is an
+    #    ERROR (containers/podman#25229 — the very reason every build script
+    #    stages an EMPTY cc-ca.crt), so there the production case is the empty
+    #    file, and the `-s` guard in the step must leave the bundle alone.
+    #    Asserting the BuildKit behaviour against buildah failed the Windows
+    #    testbed's test phase three times over (2026-09-25).
+    if exe == "podman":
+        (ctx / "cc-ca.crt").write_text("", encoding="utf-8")
     r = build("cc-trust-step-noca")
     assert r.returncode == 0, (
-        "a zero-match `COPY cc-ca.cr[t]` must be a no-op:\n" + r.stdout + r.stderr
+        ("an EMPTY cc-ca.crt must build and install nothing:\n" if exe == "podman"
+         else "a zero-match `COPY cc-ca.cr[t]` must be a no-op:\n") + r.stdout + r.stderr
     )
     r = subprocess.run([exe, "run", "--rm", "cc-trust-step-noca",
                         "sh", "-c", "ls /usr/local/share/ca-certificates/"],
                        capture_output=True, text=True)
-    assert "cc-ca.crt" not in r.stdout, "no CA was given, yet one is installed"
+    if exe == "podman":
+        # The empty file is copied (the step keeps it as a marker) but the `-s`
+        # guard must not have installed it into the system bundle: nothing
+        # under /etc/ssl/certs mentions the marker name.
+        r2 = subprocess.run([exe, "run", "--rm", "cc-trust-step-noca", "sh", "-c",
+                             "ls /etc/ssl/certs/ | grep -c cc-ca || true"],
+                            capture_output=True, text=True)
+        assert r2.stdout.strip() == "0", "an EMPTY CA file was installed into the bundle"
+    else:
+        assert "cc-ca.crt" not in r.stdout, "no CA was given, yet one is installed"
 
     # 2. A real (self-signed) CA in the context: it must reach the SYSTEM bundle,
     #    which is the file every ENV in these Dockerfiles points at.
@@ -990,7 +1043,7 @@ pass() {{ printf 'PASS %s: %s\\n' "$1" "$2"; }}
 {body}
 check_ca_bundle_covers_everything
 """
-    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    r = subprocess.run([BASH, "-c", script], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     return r.stdout
 
@@ -1065,7 +1118,7 @@ printf 'LH=[%s]\\n' "${{lh:-}}"
 }}
 run_check
 """
-    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    r = subprocess.run([BASH, "-c", script], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     return r.stdout
 
@@ -1112,7 +1165,7 @@ def test_tls_insecure_warn_once_prints_exactly_one_line_per_run():
     (F25, 2026-09-24 Windows testbed run). `cc_tls_insecure_warn_once` is the
     one gate: exactly one WARN per run, never zero when the knob is on."""
     r = subprocess.run(
-        ["bash", "-c",
+        [BASH, "-c",
          f'. "{ENV_LIB.as_posix()}"; '
          'cc_tls_insecure_warn_once x; '
          'cc_tls_insecure_warn_once y || true'],
@@ -1134,7 +1187,7 @@ set -uo pipefail
 cc_tls_insecure_warn_once "parent"
 bash -c '. "{ENV_LIB.as_posix()}"; cc_tls_insecure_warn_once "child"' || true
 """
-    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    r = subprocess.run([BASH, "-c", script], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     lines = [l for l in r.stdout.splitlines() if l.startswith("WARN tls-insecure")]
     assert len(lines) == 1, r.stdout
@@ -1145,7 +1198,7 @@ def test_a_standalone_script_still_warns_once():
     """Nothing upstream has warned yet: the FIRST call still prints — this is a
     print-ONCE gate, never a suppress-always one."""
     r = subprocess.run(
-        ["bash", "-c", f'. "{ENV_LIB.as_posix()}"; cc_tls_insecure_warn_once solo'],
+        [BASH, "-c", f'. "{ENV_LIB.as_posix()}"; cc_tls_insecure_warn_once solo'],
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
@@ -1183,3 +1236,16 @@ def test_the_uv_python_fallback_never_syncs_the_project():
         for line in src.splitlines():
             if 'PY="uv run' in line:
                 assert "--no-project" in line, f"{name}: {line.strip()}"
+
+
+def test_the_app_phase_derives_the_proxy_url_the_app_dials():
+    """`configure` writes only what it asks, so CC_LLM_BASE_URL — the app's
+    address for the proxy this profile deploys — must be COMPOSED by the app
+    phase from the port answer. A configure-born .env without it made every
+    live model resolve raise LLMProviderNotConfigured (Windows testbed,
+    2026-09-25: the demo feed was a 500)."""
+    src = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    assert re.search(r'set_kv_if_unset "\$ENV_FILE" CC_LLM_BASE_URL "http://127\.0\.0\.1:\$\{CC_LITELLM_PORT\}"', src), (
+        "the app phase must derive CC_LLM_BASE_URL from CC_LITELLM_PORT"
+    )
+    assert "for k in CC_LLM_BASE_URL CC_DEFAULT_MODEL CC_LLM_API_KEY" in src, "status must check CC_LLM_BASE_URL and CC_DEFAULT_MODEL too"

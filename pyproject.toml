@@ -31,6 +31,14 @@ dependencies = [
     # (integrations/litellm_credstore.py): pynacl for its default SecretBox
     # scheme (still the default in 1.94.1), cryptography for the opt-in
     # AES-GCM "v2:gcm:" scheme.
+    # On-premises Microsoft Exchange over EWS (integrations/exchange.py). CORE,
+    # not an extra: the mail FEED and the Executor both reach it on a site
+    # whose only mailbox is Exchange, so an install missing it has no mail at
+    # all. It brings NTLM (requests-ntlm/pyspnego), the SOAP layer (lxml,
+    # defusedxml, isodate) and the Windows→IANA time-zone map this codebase
+    # otherwise lacks — 1,000 lines of hand-rolled SOAP is the wrong trade for
+    # one dependency. Capped below 6 because the majors move the Account API.
+    "exchangelib>=5.6,<6",
     "pynacl>=1.5",
     "cryptography>=42",
 ]

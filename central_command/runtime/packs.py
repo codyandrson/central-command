@@ -60,6 +60,14 @@ class GatedCapability:
     # Data Center equivalent is WITHHELD there — never offered-to-fail — by
     # `_offered()` below, which every agent-facing view goes through.
     flavors: tuple[str, ...] = ("cloud", "server")
+    # The MAIL providers this capability exists on (Exchange native client
+    # design, decision 6). Default: both. Generalises the Jira-flavor
+    # mechanism above for the same reason it exists — `mail.send`/`mail.move`
+    # have no Gmail-façade mode and `mail.unsubscribe` reads a DKIM verdict
+    # only Gmail supplies, so offering either on the wrong provider is
+    # offering a guaranteed failure, and an agent handed one reasons about
+    # the mailbox instead of about the tool.
+    providers: tuple[str, ...] = ("gmail", "exchange")
 
 
 @dataclass(frozen=True)
@@ -985,9 +993,18 @@ PACKS: dict[str, Pack] = {
             "Search the mailbox with a Gmail query and read any mail record in "
             "the queue: the message as fed, its state, who decided it and why."
         ),
-        tool_names=("mail_search", "mail_read"),
+        tool_names=("mail_search", "mail_read", "mail_list_folders"),
         guidance=(
-            "READING MAIL: `mail_search(query)` runs a Gmail search and shows "
+            "MAIL QUERY SYNTAX: the query language is Gmail's — `from:`, "
+            "`subject:`, `after:`/`before:` as YYYY/MM/DD, `newer_than:Nd`, "
+            "`in:<folder or label>`, and anything else as free text. On an "
+            "Exchange mailbox those same tokens are TRANSLATED at the seam and "
+            "the free text goes to the server as an AQS search, so one dialect "
+            "is correct everywhere; Gmail's `-` negation is the exception and "
+            "becomes a search term rather than an exclusion. Folder names are "
+            "never guessed: `mail_list_folders()` is what says which exist "
+            "here, and on Gmail it says that folders are labels. "
+            "READING MAIL: `mail_search(query)` runs that search and shows "
             "what the QUEUE knows about each match — work-item id, state, "
             "sender, subject, the session that handled it and the recorded "
             "dismissal reason; `mail_read(ref)` opens one record with the full "
@@ -1047,12 +1064,80 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="mail.unsubscribe",
+                providers=("gmail",),
                 arguments=("{'provider_uuid': '<pinned>', 'url': '<pinned from "
                            "List-Unsubscribe>', 'sender': '<pinned>', "
                            "'subject': '<pinned>'}"),
                 notes=("You do not write these arguments. target_ref = "
                        "{'system': 'mailbox', 'id': '<uuid>'}, reversibility = "
                        "'irreversible'."),
+            ),
+        ),
+    ),
+    # mail-send-propose / mail-file-propose (Exchange native client design,
+    # 2026-09-25, decision 6): the first mail capabilities that CREATE or MOVE
+    # mail rather than classify it. Two packs, not one, for the bulk-dismiss
+    # reason again — a filing is undone from the mailbox and a sent message
+    # never is, so holding either is a grant someone makes on purpose. Both
+    # are withheld on Gmail: the n8n façade has no send or move mode, and an
+    # agent offered a verb its mailbox cannot answer reasons about the mailbox.
+    "mail-send-propose": Pack(
+        name="mail-send-propose",
+        description="Propose sending one email as the operator (Exchange mailboxes only).",
+        tool_names=("propose_mail_send",),
+        guidance=(
+            "SENDING MAIL: `propose_mail_send(to, subject, body, rationale)` "
+            "asks the operator to send one email AS THEM — `cc` and "
+            "`reply_to_ref` are optional, and a reply is threaded from the "
+            "referenced message's own headers, never from anything you write. "
+            "What you pin is what goes out: the recipients, the subject and "
+            "the whole body, unedited, in the operator's voice. IRREVERSIBLE "
+            "and external — a sent mail cannot be recalled and the reader takes "
+            "it as the operator's own words. Propose it only where they would "
+            "obviously send it themselves; otherwise draft the text in plain "
+            "prose and let them decide."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="mail.send",
+                providers=("exchange",),
+                arguments=("{'to': ['<address>'], 'cc': ['<address>'], "
+                           "'subject': '<subject>', 'body': '<the whole "
+                           "message>', 'reply_to_ref': '<pinned by the tool>'}"),
+                notes=("target_ref = {'system': 'mailbox', 'id': '<the "
+                       "recipients>', 'read_version': 'unknown'}, "
+                       "reversibility = 'irreversible'. You write `to`, "
+                       "`subject`, `body` and optionally `cc`; the tool "
+                       "resolves `reply_to_ref` to a message and the Executor "
+                       "takes In-Reply-To/References from that message's own "
+                       "headers."),
+            ),
+        ),
+    ),
+    "mail-file-propose": Pack(
+        name="mail-file-propose",
+        description="Propose filing one email into a mailbox folder (Exchange mailboxes only).",
+        tool_names=("propose_mail_move",),
+        guidance=(
+            "FILING MAIL: `propose_mail_move(message_ref, folder, rationale)` "
+            "asks the operator to move one email into a folder. Read "
+            "`mail_list_folders()` first and use the address it shows — a "
+            "folder name is an argument, and this is the tool that can answer "
+            "which ones exist, so never guess one. Reversible: the operator "
+            "can move it back. But mail filed out of the inbox stops being in "
+            "front of them, so file what is genuinely done and dismiss in plain "
+            "text what merely needs no action."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="mail.move",
+                providers=("exchange",),
+                arguments=("{'provider_uuid': '<pinned by the tool>', "
+                           "'folder': '<a folder mail_list_folders showed>', "
+                           "'sender': '<pinned>', 'subject': '<pinned>'}"),
+                notes=("You do not write the uuid: the tool resolves the email "
+                       "and pins it. target_ref = {'system': 'mailbox', 'id': "
+                       "'<uuid>'}, reversibility = 'reversible'."),
             ),
         ),
     ),
@@ -1626,10 +1711,30 @@ TOOL_FLAVORS: dict[str, tuple[str, ...]] = {
     "jira_list_gadgets": ("cloud",),
 }
 
+# The mail-provider twin of TOOL_FLAVORS (Exchange native client design,
+# decision 6). `propose_unsubscribe`'s whole safety rule is Gmail's DKIM
+# verdict in `authentication_results`; Exchange can expose the same header but
+# nothing verifies it yet, so the tool is withheld there rather than offered
+# to produce an unchecked one-click POST. `propose_mail_send`/`_move` are the
+# mirror image: the n8n Gmail façade has no send or move mode at all.
+TOOL_PROVIDERS: dict[str, tuple[str, ...]] = {
+    "propose_unsubscribe": ("gmail",),
+    "propose_mail_send": ("exchange",),
+    "propose_mail_move": ("exchange",),
+}
+
+
+def _provider() -> str:
+    """Which mailbox this deployment has — "exchange" when the native EWS
+    client is configured, else "gmail"."""
+    from central_command.integrations import exchange
+
+    return "exchange" if exchange.configured() else "gmail"
+
 
 def _offered(pack: Pack) -> tuple[tuple[str, ...], tuple[GatedCapability, ...]]:
     """What this pack offers ON THIS DEPLOYMENT — its tools and capabilities
-    minus whatever the configured Jira flavor cannot do.
+    minus whatever the configured Jira flavor and mail provider cannot do.
 
     The ONE filter every agent-facing view goes through (`toolset_for`,
     `charter_section`, `granted_capability_names`, `advisory_packs`,
@@ -1643,9 +1748,12 @@ def _offered(pack: Pack) -> tuple[tuple[str, ...], tuple[GatedCapability, ...]]:
     validity check must keep telling those two apart.
     """
     flavor = _settings.jira_api_flavor or "cloud"
+    provider = _provider()
     tools = tuple(t for t in pack.tool_names
-                  if flavor in TOOL_FLAVORS.get(t, ("cloud", "server")))
-    caps = tuple(c for c in pack.capabilities if flavor in c.flavors)
+                  if flavor in TOOL_FLAVORS.get(t, ("cloud", "server"))
+                  and provider in TOOL_PROVIDERS.get(t, ("gmail", "exchange")))
+    caps = tuple(c for c in pack.capabilities
+                 if flavor in c.flavors and provider in c.providers)
     return tools, caps
 
 
@@ -1735,6 +1843,14 @@ NON_ADVISORY_TOOLS = frozenset({
     # the mailbox is inbox-triage's own surface exactly as the queue is.
     "propose_report_spam",
     "propose_unsubscribe",
+    # Sending and filing (2026-09-25) are the same surface and the same
+    # default: `propose_mail_move` acts on "the email this run is handling"
+    # unless told otherwise, and a consulted specialist has no `deps.item_id`
+    # to mean. Sending rides along because a specialist drafting mail AS THE
+    # OPERATOR mid-answer is a deliberate grant, not a side effect of being
+    # asked a question.
+    "propose_mail_send",
+    "propose_mail_move",
 })
 
 # The deferral tools a consultation CAN drive — an explicit allowlist, never

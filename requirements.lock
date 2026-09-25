@@ -23,6 +23,7 @@ authlib==1.7.2
 babel==2.18.0
 beartype==0.22.9
 beautifulsoup4==4.15.0
+cached-property==2.0.1
 cachetools==7.1.7
 caio==0.12.2
 certifi==2026.7.22
@@ -43,6 +44,7 @@ docstring-parser==0.18.0
 email-validator==2.3.0
 et-xmlfile==2.0.0
 exceptiongroup==1.3.1
+exchangelib==5.6.0
 execnet==2.1.2
 executing==2.2.1
 fastapi==0.141.1
@@ -66,6 +68,7 @@ humanfriendly==10.0 ; sys_platform == 'win32'
 idna==3.19
 iniconfig==2.3.0
 inscriptis==2.7.4
+isodate==0.7.2
 jaraco-classes==3.4.0
 jaraco-context==6.1.2
 jaraco-functools==4.6.0
@@ -91,6 +94,7 @@ more-itertools==11.1.0
 mpmath==1.3.0 ; sys_platform == 'win32'
 neo4j==6.2.0
 numpy==2.5.2
+oauthlib==3.3.1
 onnxruntime==1.20.1 ; sys_platform == 'win32'
 onnxruntime==1.29.0 ; sys_platform != 'win32'
 openai==3.3.1
@@ -130,6 +134,7 @@ pynacl==1.6.2
 pypdfium2==5.13.0
 pyperclip==1.11.0
 pyreadline3==3.5.6 ; sys_platform == 'win32'
+pyspnego==0.12.2
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-timeout==2.4.0
@@ -145,6 +150,8 @@ pyyaml==6.0.3
 referencing==0.37.0
 regex==2026.7.19
 requests==2.34.2
+requests-ntlm==1.3.0
+requests-oauthlib==2.0.0
 rich==15.0.0
 rpds-py==2026.6.3
 ruff==0.16.4
@@ -153,6 +160,7 @@ six==1.17.0
 sniffio==1.3.1
 soupsieve==2.9.2
 sse-starlette==3.4.8
+sspilib==0.6.0 ; sys_platform == 'win32'
 starlette==1.6.0
 sympy==1.14.0 ; sys_platform == 'win32'
 tenacity==9.1.4
@@ -162,7 +170,7 @@ trafilatura==2.2.0
 truststore==0.10.4 ; sys_platform != 'emscripten'
 typing-extensions==4.16.0
 typing-inspection==0.4.4
-tzdata==2026.4 ; sys_platform == 'emscripten' or sys_platform == 'win32'
+tzdata==2026.4
 tzlocal==5.4.4
 urllib3==2.7.0
 uvicorn==0.52.4

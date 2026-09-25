@@ -228,3 +228,26 @@ def test_a_row_the_operator_edited_is_never_touched(rm, monkeypatch, capsys):
     assert proxy.calls == [], f"a filled-in row was written to: {proxy.calls}"
     # ...and the masked api_key LiteLLM returns is not read as drift.
     assert "drift" not in out.lower()
+
+
+def test_require_makes_non_required_skeletons_optional(rm, monkeypatch, capsys):
+    """CC_ENABLE_SPEECH=0: the four core aliases are filled in (by the UI),
+    cc-tts/cc-stt are placeholder skeletons. Without --require that was exit 3
+    — the Windows testbed (2026-09-25) sat at the llm pause for two aliases
+    nothing on the install would call. With --require naming the four, the
+    skeletons are `optional` and the phase proceeds."""
+    filled = {a: _live(a, model="openai/qwen", api_base="http://up:1/v1", api_key="k")
+              for a in ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano")}
+    live = list(filled.values()) + [
+        _live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
+        _live("cc-stt", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
+    ]
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=live, env={},
+                          argv=("--policy", str(SINGLE / "models.json"),
+                                "--require", "cc-default graphiti-llm cc-embedding gpt-4.1-nano"))
+    assert rc == 0, out
+    assert "optional cc-tts" in out and "optional cc-stt" in out
+    assert not [p for p, _ in proxy.calls if p.endswith("/model/update")]
+    # and the same catalog WITHOUT --require still pauses: k3s parity
+    rc2, out2, _ = _run(rm, monkeypatch, capsys, live=live, env={})
+    assert rc2 == rm.EXIT_ACTION, out2

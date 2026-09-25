@@ -272,11 +272,48 @@ async def enroll_fixture_dir(path: str | Path, *, feed: str = "backlog") -> dict
 
 # --- the real provider feed (M12) ----------------------------------------------
 
+def provider_source() -> str:
+    """`work_item.source` for mail arriving through the provider feed —
+    "exchange" when this deployment has a native Exchange mailbox, else
+    "gmail". ONE function so the feed's event payload, `enroll_provider_message`
+    and `enroll_provider_ref` can never disagree about what a row came from."""
+    from central_command.integrations import exchange
+
+    return "exchange" if exchange.configured() else "gmail"
+
+
 def provider_message_id(uuid: str) -> str:
-    """Stable ledger identity for a provider message. Gmail's immutable message
-    id is the strongest identity we have on this path (no raw RFC-822 headers
-    cross the façade), so idempotent enrollment keys on it."""
+    """Stable ledger identity for a provider message MINTED FROM ITS UUID —
+    the Gmail form. Gmail's message id is immutable and is the strongest
+    identity that path has (no raw RFC-822 headers cross the façade), so
+    enrollment keys on it there.
+
+    It is deliberately NOT the general answer. THE ID RULE (Exchange native
+    client design, D4): EWS's `ItemId` CHANGES when a message moves folder, so
+    on Exchange it cannot be the idempotency key — the RFC 822
+    `InternetMessageId` is, and the client returns it as `message_id`.
+    `ref_message_id` below is what every caller that holds a provider record
+    should ask; this function is the fallback inside it."""
     return f"<gmail-msg-{uuid}@central_command.feed>"
+
+
+def ref_message_id(msg: dict) -> str:
+    """The ledger identity for one provider record or reference — the
+    provider's OWN RFC 822 Message-ID when it supplies one (Exchange), else the
+    Gmail form synthesised from the uuid.
+
+    The one place that choice is made. `feed.poll_once`, the backlog sweeper,
+    `bulk_dismiss` and `mail_search` all key the ledger on this, so a message
+    that moves folder mid-sweep is still the same work item."""
+    supplied = (msg.get("message_id") or "").strip()
+    return supplied or provider_message_id(msg["uuid"])
+
+
+def provider_thread_id(msg: dict) -> str:
+    """The thread identity for one provider record. Provider-neutral in
+    NAMING only — the shape is unchanged, so no existing row moves: the
+    conversation id still lands in the same slot the Gmail path put it in."""
+    return f"<gmail-thread-{msg['conversation_id']}@central_command.feed>"
 
 
 def provider_uuid(message_id: str) -> str | None:
@@ -298,8 +335,11 @@ def provider_body(msg: dict) -> str:
 def _provider_parsed(msg: dict) -> dict:
     """A normalized façade message → the parsed dict the ledger/prompt paths use."""
     parsed = {
-        "message_id": provider_message_id(msg["uuid"]),
-        "thread_id": f"<gmail-thread-{msg['conversation_id']}@central_command.feed>",
+        # The provider's own RFC 822 id wins when it has one — kept EXACTLY as
+        # the provider gave it (D4). Only Gmail's uuid-derived form is
+        # synthesised here.
+        "message_id": ref_message_id(msg),
+        "thread_id": provider_thread_id(msg),
         "subject": (msg.get("subject") or "").strip() or None,
         "from": (msg.get("from") or "").strip() or None,
         "received_at": None,
@@ -315,8 +355,9 @@ def _provider_parsed(msg: dict) -> dict:
 
 async def enroll_provider_message(msg: dict) -> dict:
     """Enroll one normalized façade message into the ledger (feed='live',
-    source='gmail'). The provider's conversation_id becomes the thread id, so
-    M9 thread folding works on real mail unchanged."""
+    source=`provider_source()` — 'gmail' or 'exchange'). The provider's
+    conversation_id becomes the thread id, so M9 thread folding works on real
+    mail unchanged."""
     parsed = _provider_parsed(msg)
     item_id = "wi_" + uuid.uuid4().hex[:12]
     created = await repo.enroll_work_item(
@@ -325,7 +366,7 @@ async def enroll_provider_message(msg: dict) -> dict:
         {"text": agent_input(parsed), "from": parsed["from"], "provider_uuid": msg["uuid"]},
         thread_id=parsed["thread_id"],
         feed="live",
-        source="gmail",
+        source=provider_source(),
         subject=parsed["subject"],
         received_at=parsed["received_at"],
     )
@@ -343,14 +384,17 @@ async def enroll_provider_ref(ref: dict) -> dict:
     claim time (`hydrate_work_item`), so provider reads happen at processing
     pace, governed by the dispatcher's valves."""
     item_id = "wi_" + uuid.uuid4().hex[:12]
-    message_id = provider_message_id(ref["uuid"])
+    # A REFERENCE carries the provider's own Message-ID too where the provider
+    # has one (D4) — deriving it from the uuid on Exchange would mint a second
+    # identity for a message the live feed already knows under its real one.
+    message_id = ref_message_id(ref)
     created = await repo.enroll_work_item(
         item_id,
         message_id,
         {"provider_uuid": ref["uuid"], "deferred_fetch": True},
-        thread_id=f"<gmail-thread-{ref['conversation_id']}@central_command.feed>",
+        thread_id=provider_thread_id(ref),
         feed="backlog",
-        source="gmail",
+        source=provider_source(),
         subject=None,
         received_at=None,
     )

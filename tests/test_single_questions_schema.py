@@ -28,9 +28,19 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+# The bash that can run this repo's shell scripts. On Windows a bare "bash" is
+# System32's WSL launcher (its error reads "The RPC call contains a handle
+# that differs from the declared handle type") — 26 tests failed that way on
+# the 2026-09-25 testbed run, all of them in files that shelled out with the
+# bare name. `update._bash()` resolves Git Bash from git's own install.
+from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+BASH = _resolve_bash() or "bash"
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
@@ -229,9 +239,15 @@ def test_the_speech_rows_are_gated_on_the_speech_flag():
         )
 
 
-def test_the_api_key_is_the_only_secret():
+def test_the_secret_rows_are_exactly_the_credentials():
+    """Every row whose answer is a CREDENTIAL is marked secret, and nothing
+    else is. `secret=y` costs something real — the answer is read with no echo,
+    so the operator cannot see their own typo, and the diff prints
+    `(secret, not printed)` instead of the value — so it is spent on values
+    that must never reach a terminal scrollback or a log, and on nothing else.
+    Adding a credential question means adding it here in the same commit."""
     secrets = {r["key"] for r in ROWS if r["secret"] == "y"}
-    assert secrets == {"CC_LLM_UPSTREAM_API_KEY"}, (
+    assert secrets == {"CC_LLM_UPSTREAM_API_KEY", "CC_EXCHANGE_PASSWORD"}, (
         "a secret answer is read with no echo and printed as "
         f"`(secret, not printed)` in the diff — that set is: {sorted(secrets)}"
     )
@@ -277,7 +293,7 @@ def _bash(snippet: str, *, bindir: Path, ostype: str, stub_root: str = "") -> su
         f'. "{QUESTIONS_LIB}"\n'
         f'{snippet}\n'
     )
-    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    return subprocess.run([BASH, "-c", script], capture_output=True, text=True)
 
 
 @pytest.fixture
@@ -290,6 +306,10 @@ def cygpath_bin(tmp_path: Path) -> Path:
     return bindir
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=(
+    "the stub cygpath is shadowed by the real one under Git Bash, and a Windows "
+    "tmp path does not survive an f-string into `bash -c` (2026-09-25 testbed); "
+    "the rewrite itself is exercised by every `configure` run there"))
 def test_a_path_answer_is_rewritten_on_msys_and_untouched_elsewhere(cygpath_bin):
     r = _bash("q_norm_path_answer /c/Users/me/ca.pem", bindir=cygpath_bin, ostype="msys")
     assert r.returncode == 0, r.stderr
@@ -306,6 +326,10 @@ def test_a_path_answer_is_rewritten_on_msys_and_untouched_elsewhere(cygpath_bin)
     assert r.stdout == "", r.stdout
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=(
+    "the stub cygpath is shadowed by the real one under Git Bash, and a Windows "
+    "tmp path does not survive an f-string into `bash -c` (2026-09-25 testbed); "
+    "the rewrite itself is exercised by every `configure` run there"))
 def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
     """v_path_readable used to accept the MSYS spelling and store it."""
     real = tmp_path / "corp-ca.pem"

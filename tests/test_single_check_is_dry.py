@@ -31,6 +31,15 @@ import re
 import subprocess
 from pathlib import Path
 
+# The bash that can run this repo's shell scripts. On Windows a bare "bash" is
+# System32's WSL launcher (its error reads "The RPC call contains a handle
+# that differs from the declared handle type") — 26 tests failed that way on
+# the 2026-09-25 testbed run, all of them in files that shelled out with the
+# bare name. `update._bash()` resolves Git Bash from git's own install.
+from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+BASH = _resolve_bash() or "bash"
+
+
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
 SETUP = SINGLE / "setup.sh"
@@ -129,7 +138,7 @@ def test_nothing_check_can_reach_mutates_anything():
 def _list_rows() -> list[tuple[str, str]]:
     # cwd= + basename, not the full path: on Windows the first `bash` on PATH
     # may be WSL's launcher, which cannot open a Windows path.
-    r = subprocess.run(["bash", "setup.sh", "check", "--list"],
+    r = subprocess.run([BASH, "setup.sh", "check", "--list"],
                        cwd=SINGLE, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     rows = []

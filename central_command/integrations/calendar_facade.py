@@ -13,6 +13,17 @@ the agents live) must never reach these.
 
 Calendar content passes through here as data; the callers (the EA's brief, the
 `read_calendar` tool) own the data-not-commands discipline.
+
+**Two providers behind one signature (Exchange native client design,
+2026-09-25, D1).** Every function here first asks
+`integrations/exchange.py:configured()` and routes to the native EWS client
+when this deployment's calendar is on-premises Microsoft Exchange; otherwise it
+calls the n8n webhook exactly as before. The n8n path below is byte-for-byte
+what it always was, and the routing lives INSIDE each function so a test that
+patches `calendar_facade.list_events` still patches the whole thing. The
+normalised event shape is identical on both providers — a caller must not be
+able to tell which one answered — and `ExchangeError` is mapped to
+`CalendarFacadeError` at the seam.
 """
 
 from __future__ import annotations
@@ -24,6 +35,14 @@ from central_command.config import settings
 
 class CalendarFacadeError(Exception):
     pass
+
+
+def _exchange():
+    """The native Exchange client when this deployment has one, else None. The
+    import is deferred so a Google install never imports exchangelib."""
+    from central_command.integrations import exchange
+
+    return exchange if exchange.configured() else None
 
 
 async def _call(payload: dict, timeout: float = 60.0) -> dict:
@@ -55,8 +74,15 @@ async def list_events(
     fact about the read that the caller must be able to state honestly — a
     brief that silently drops events is worse than one that says it was cut.
     Each event is already normalised by the n8n lib (start, end, all_day,
-    summary, location, attendee_count, organizer_is_self, has_agenda, declined).
+    summary, location, attendee_count, organizer_is_self, has_agenda, declined) —
+    and `integrations/exchange.py` builds the same shape in Python.
     """
+    provider = _exchange()
+    if provider is not None:
+        try:
+            return await provider.list_events(time_min, time_max, calendar_id)
+        except provider.ExchangeError as e:
+            raise CalendarFacadeError(str(e)) from e
     out = await _call({
         "mode": "list",
         "time_min": time_min,
@@ -81,6 +107,14 @@ async def create_event(
     calendar_id: str = "primary",
 ) -> dict:
     """Create an event. `start`/`end` are RFC3339 with an explicit offset or Z."""
+    provider = _exchange()
+    if provider is not None:
+        try:
+            return await provider.create_event(
+                title, start, end, description=description, attendees=attendees,
+                calendar_id=calendar_id)
+        except provider.ExchangeError as e:
+            raise CalendarFacadeError(str(e)) from e
     out = await _call({
         "mode": "create_event",
         "title": title,
@@ -104,6 +138,15 @@ async def update_event(
 ) -> dict:
     """Patch an existing event. Only the fields supplied are sent, and the façade
     PATCHes — an omitted field keeps its current value rather than being cleared."""
+    provider = _exchange()
+    if provider is not None:
+        try:
+            return await provider.update_event(
+                event_id, title=title, start=start, end=end,
+                description=description, attendees=attendees,
+                calendar_id=calendar_id)
+        except provider.ExchangeError as e:
+            raise CalendarFacadeError(str(e)) from e
     payload = {"mode": "update_event", "event_id": event_id, "calendar_id": calendar_id}
     for key, value in (("title", title), ("start", start), ("end", end),
                        ("description", description), ("attendees", attendees)):
@@ -117,6 +160,12 @@ async def delete_event(event_id: str, calendar_id: str = "primary") -> str:
     """Cancel/delete an event. Google notifies the attendees; there is no undo
     that restores their acceptances, which is why the registry calls this
     irreversible and the proposal must carry a reason."""
+    provider = _exchange()
+    if provider is not None:
+        try:
+            return await provider.delete_event(event_id, calendar_id=calendar_id)
+        except provider.ExchangeError as e:
+            raise CalendarFacadeError(str(e)) from e
     out = await _call({
         "mode": "delete_event",
         "event_id": event_id,

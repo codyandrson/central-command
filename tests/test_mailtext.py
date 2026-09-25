@@ -102,7 +102,14 @@ def test_nothing_reads_a_mail_body_except_through_the_converter():
     import re
 
     root = pathlib.Path(dispatcher.__file__).resolve().parents[1]
-    allowed = {"ingest/ledger.py", "ingest/mailtext.py", "integrations/email_facade.py"}
+    # `integrations/exchange.py` joins the allowlist for exactly the reason
+    # `email_facade.py` is on it: it is a PROVIDER, the module that produces
+    # the raw `body_html`/`body_text` pair from an EWS message. It never reads
+    # them for a model — the record goes to `ledger.provider_body`, which is
+    # `mailtext.body_text`, the one converter (Exchange native client design,
+    # 2026-09-25).
+    allowed = {"ingest/ledger.py", "ingest/mailtext.py", "integrations/email_facade.py",
+               "integrations/exchange.py"}
     # `.as_posix()`, not `str()`: on Windows `str(relative_to(...))` is
     # `ingest\ledger.py`, which matches nothing in `allowed`, so the allowlist
     # empties and every legitimate reader is reported as an offender. The

@@ -170,6 +170,13 @@ CALENDAR_WRITE_HELPERS = ("create_event", "update_event", "delete_event")
 CALENDAR_WRITE_CALLERS = {
     "integrations/calendar_facade.py",
     "gateway/executor.py",
+    # The second provider (Exchange native client design, 2026-09-25, D1).
+    # `integrations/exchange.py` DEFINES create_event/update_event/delete_event
+    # — it is the other side of the façade, not a caller of it, and
+    # `calendar_facade` reaches it only from the same three functions this
+    # guard already allows. The boundary is unchanged: nothing in runtime/ may
+    # name any of the six.
+    "integrations/exchange.py",
 }
 
 

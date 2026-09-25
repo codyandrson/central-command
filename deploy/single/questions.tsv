@@ -44,6 +44,10 @@ CC_ENABLE_N8N	features	Install n8n? It is needed only by an n8n-backed integrati
 CC_ENABLE_CRAWLER	features	Install the browser-rendering crawl service? Its image is built locally and is large (Chromium); plain HTTP fetch still works without it (1/0)	1	n	v_bool01	-	n
 CC_ENABLE_SANDBOX	features	Install the agent sandbox? On this profile its backend is rootless podman, which is weaker isolation than the k3s profile's gVisor (1/0)	1	n	v_bool01	-	n
 CC_ENABLE_SPEECH	features	Install the bundled speech engine behind cc-tts/cc-stt? 0 means you point both aliases at engines of your own instead (1/0)	1	n	v_bool01	-	n
+CC_EXCHANGE_URL	features	EWS endpoint of an on-premises Microsoft Exchange mailbox, as a full URL like https://mail.corp.example/ews/exchange.asmx — setting it (with the username and password below) routes mail and calendar to Exchange instead of the n8n Gmail façade; blank = no Exchange	-	n	v_url	-	n
+CC_EXCHANGE_USERNAME	features	The Exchange login for NTLM, as DOMAIN\\user or a UPN like user@corp.example; blank = no Exchange	-	n	-	-	n
+CC_EXCHANGE_PASSWORD	features	Its password, never printed and never logged; blank = no Exchange	-	n	v_nonempty	-	y
+CC_EXCHANGE_EMAIL	features	The mailbox's primary SMTP address — needed only when the username above is DOMAIN\\user rather than a UPN; blank = use the username	-	n	-	-	n
 
 CC_AIRGAP	network	Is no public package index reachable at all? 1 makes the app phase install from requirements.lock instead of resolving (1/0)	0	n	v_bool01	-	n
 CC_PROXY	network	Mandatory egress proxy for host-side downloads, as a full URL like http://proxy.corp.example:8080 — blank if there is none, and credentials belong in ~/.netrc	-	n	v_url	-	n

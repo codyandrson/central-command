@@ -17,7 +17,7 @@ import hashlib
 
 from central_command import events
 from central_command.db import repo
-from central_command.ingest.ledger import provider_message_id
+from central_command.ingest.ledger import ref_message_id
 from central_command.integrations import email_facade
 
 # ponytail: Gmail's list mode caps at ~2,500 refs/query. feed.py's backlog
@@ -41,7 +41,7 @@ async def resolve_query(query: str) -> dict:
     except email_facade.EmailFacadeError as e:
         raise ValueError(f"{_OVER_CAP_HINT}: {e}") from e
 
-    uuid_by_message_id = {provider_message_id(r["uuid"]): r["uuid"] for r in refs}
+    uuid_by_message_id = {ref_message_id(r): r["uuid"] for r in refs}
     rows = await repo.unprocessed_items_for_message_ids(list(uuid_by_message_id))
     message_ids = sorted(r["message_id"] for r in rows)
     return {

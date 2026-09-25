@@ -32,7 +32,7 @@ async def poll_once() -> dict:
     """One sweep: list refs → skip already-enrolled → fetch + enroll the rest.
     Returns {refs, new, enrolled} counts."""
     refs = await email_facade.list_refs(settings.feed_query)
-    by_ledger_id = {ledger.provider_message_id(r["uuid"]): r for r in refs}
+    by_ledger_id = {ledger.ref_message_id(r): r for r in refs}
     known = await repo.existing_message_ids(list(by_ledger_id))
     fresh = [r for mid, r in by_ledger_id.items() if mid not in known]
 
@@ -45,7 +45,7 @@ async def poll_once() -> dict:
             await events.emit(
                 "work.enrolled",
                 ref_id=result["message_id"],
-                payload={"feed": "live", "source": "gmail",
+                payload={"feed": "live", "source": ledger.provider_source(),
                          "subject": (msg.get("subject") or "")[:120]},
                 actor="feed",
             )
@@ -242,7 +242,7 @@ class BacklogSweeper:
                 )
                 return  # stop; a restart resumes from the cursor
 
-            by_id = {ledger.provider_message_id(r["uuid"]): r for r in refs}
+            by_id = {ledger.ref_message_id(r): r for r in refs}
             known = await repo.existing_message_ids(list(by_id))
             enrolled = 0
             for mid, ref in by_id.items():

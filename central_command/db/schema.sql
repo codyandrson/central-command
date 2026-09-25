@@ -188,7 +188,7 @@ create table if not exists work_item (
     message_id   text not null unique,     -- idempotent enrollment key
     thread_id    text,                     -- per-thread serialization (M9)
     feed         text not null,            -- live | backlog
-    source       text not null,            -- fixture | api | n8n-email-provider
+    source       text not null,            -- fixture | api | gmail | exchange
     subject      text,
     payload      jsonb not null,           -- the raw email as fed to the agent
     received_at  timestamptz,              -- from the source; drives oldest-first

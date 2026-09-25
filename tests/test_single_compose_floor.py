@@ -26,6 +26,15 @@ import subprocess
 
 import pytest
 
+# The bash that can run this repo's shell scripts. On Windows a bare "bash" is
+# System32's WSL launcher (its error reads "The RPC call contains a handle
+# that differs from the declared handle type") — 26 tests failed that way on
+# the 2026-09-25 testbed run, all of them in files that shelled out with the
+# bare name. `update._bash()` resolves Git Bash from git's own install.
+from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+BASH = _resolve_bash() or "bash"
+
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SETUP = ROOT / "deploy" / "single" / "setup.sh"
 
@@ -56,7 +65,7 @@ set -uo pipefail
 compose_version_floor_ok "$1" "$2"; rc=$?
 printf '%s|%s|%s\\n' "$rc" "$COMPOSE_FLAVOUR" "$COMPOSE_VERSION"
 """
-    r = subprocess.run(["bash", "-c", script, "_", provider, output],
+    r = subprocess.run([BASH, "-c", script, "_", provider, output],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     # PURE: the function itself prints nothing — only the harness's one line.
@@ -106,7 +115,7 @@ set -uo pipefail
 {_floor_block()}
 version_ge "$1" "$2"
 """
-    r = subprocess.run(["bash", "-c", script, "_", a, b], capture_output=True, text=True)
+    r = subprocess.run([BASH, "-c", script, "_", a, b], capture_output=True, text=True)
     assert r.stdout == "", r.stdout
     assert r.returncode == expected, f"version_ge {a} {b} -> {r.returncode}"
 

@@ -689,7 +689,7 @@ REGISTRY: list[Capability] = [
             "any invited attendee has already been notified"
         ),
         holder="Executor",
-        route="integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode create_event (Google OAuth stays in n8n)",
+        route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode create_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
         arguments=["title", "start", "end", "description?", "attendees?", "calendar_id?"],
         description=(
             "Put a new event on the operator's calendar. start/end are RFC3339 "
@@ -707,7 +707,7 @@ REGISTRY: list[Capability] = [
             "and a wrong change can be changed back; attendees are re-notified"
         ),
         holder="Executor",
-        route="integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode update_event (Google OAuth stays in n8n)",
+        route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode update_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
         arguments=["event_id", "title?", "start?", "end?", "description?", "attendees?", "calendar_id?"],
         description=(
             "Change an existing event, addressed by the event_id from a read. "
@@ -727,7 +727,7 @@ REGISTRY: list[Capability] = [
             "calendar surface"
         ),
         holder="Executor",
-        route="integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode delete_event (Google OAuth stays in n8n)",
+        route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode delete_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
         arguments=["event_id", "reason", "calendar_id?"],
         description=(
             "Cancel an event, addressed by the event_id from a read. `reason` is "
@@ -893,7 +893,7 @@ REGISTRY: list[Capability] = [
         route=(
             "integrations/email_facade.py → n8n cc-email-facade webhook, mode "
             "report_spam → Gmail messages.modify (+SPAM −INBOX); the OAuth stays "
-            "in n8n"
+            f"in n8n or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set, where it is a move to the Junk folder"
         ),
         arguments=["provider_uuid", "sender?", "subject?"],
         description=(
@@ -928,6 +928,64 @@ REGISTRY: list[Capability] = [
             "message's own is refused. Mailto-only and web-page unsubscribes "
             "are deliberately not offered; the operator handles those with "
             "Gmail's own button."
+        ),
+    ),
+    # --- mail send / file (Exchange native client design, 2026-09-25): the
+    # first mail capabilities that CREATE or MOVE mail rather than classify it.
+    # Withheld on Gmail by `packs._offered()` — the n8n façade has neither mode.
+    Capability(
+        name="mail.send",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "external and IRREVERSIBLE — a sent message cannot be recalled, it "
+            "reaches a real person, and it arrives AS THE OPERATOR: a wrong "
+            "one costs their credibility, not a queue row. The proposal pins "
+            "every recipient and the whole body and the Executor sends exactly "
+            "that, unedited"
+        ),
+        holder="Executor",
+        route=(
+            "integrations/email_facade.py → integrations/exchange.py (EWS "
+            "CreateItem with SendAndSaveCopy, a copy landing in Sent); there "
+            "is no n8n route — the Gmail façade has no send mode"
+        ),
+        arguments=["to", "subject", "body", "cc?", "reply_to_ref?"],
+        description=(
+            "Send one plain-text email as the operator's mailbox. `to`/`cc` are "
+            "address lists, `subject` and `body` are the whole message as the "
+            "proposal pinned it. `reply_to_ref` is a provider uuid resolved by "
+            "propose_mail_send; the Executor sets In-Reply-To and References "
+            "from THAT MESSAGE'S OWN headers, never from the proposal — the "
+            "same rule mail.unsubscribe's url follows, and for the same reason: "
+            "a proposal can arrive by API with any value."
+        ),
+    ),
+    Capability(
+        name="mail.move",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "external but reversible — the message changes folder and the "
+            "operator can move it back from their mail client; nothing is "
+            "deleted. The real cost of a wrong one is that mail filed out of "
+            "the inbox stops being in front of them"
+        ),
+        holder="Executor",
+        route=(
+            "integrations/email_facade.py → integrations/exchange.py (EWS "
+            "MoveItem); there is no n8n route — the Gmail façade has no move "
+            "mode, and a Gmail label is not a folder"
+        ),
+        arguments=["provider_uuid", "folder", "sender?", "subject?"],
+        description=(
+            "File one message into a mailbox folder named by display name, "
+            "path or distinguished name (inbox/junkemail/deleteditems/drafts/"
+            "sentitems/archive), case-insensitively. `provider_uuid` is pinned "
+            "by propose_mail_move; the folder is re-resolved by the Executor "
+            "and an unknown name is refused with the list of what exists. "
+            "Moving MINTS A NEW EWS ItemId, which is exactly why the ledger "
+            "keys on the RFC 822 Message-ID and not on the uuid."
         ),
     ),
     Capability(
@@ -1010,7 +1068,8 @@ REGISTRY: list[Capability] = [
         gate="ungated read",
         risk="none to the world — a list; changing the calendar is a separate, gated capability",
         holder="agent (read_calendar tool) + control plane (the EA's brief block)",
-        route="n8n cc-calendar-facade webhook (Google OAuth stays in n8n)",
+        route=("n8n cc-calendar-facade webhook (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set — "
+               "a CalendarView there, which expands recurrences"),
         arguments=["time_min", "time_max", "calendar_id?"],
         description=(
             "The operator's calendar over an RFC3339 window, normalised and "
@@ -1297,9 +1356,14 @@ REGISTRY: list[Capability] = [
         gate="ungated read",
         risk="none to the world — read-only by construction",
         holder="feed poller / backlog sweeper",
-        route="n8n façade cc-email-facade → lib-email-provider",
+        route=f"n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
         arguments=["scope_query"],
-        description="List message references matching a Gmail query (ids only, no bodies).",
+        description=(
+            "List message references matching a Gmail query (ids only, no "
+            "bodies). On Exchange the same query is translated to EWS filters "
+            "plus an AQS search (exchange.translate_query) and each reference "
+            "also carries the RFC 822 Message-ID the ledger keys on."
+        ),
     ),
     Capability(
         name="web.fetch",
@@ -1329,7 +1393,7 @@ REGISTRY: list[Capability] = [
         gate="ungated read",
         risk="none to the world — the façade refuses attachments (D13: text only)",
         holder="dispatcher (hydrate at claim)",
-        route="n8n façade cc-email-facade → lib-email-provider",
+        route=f"n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
         arguments=["uuid"],
         description="Fetch one email's content, at claim time, inside the retry machinery.",
     ),

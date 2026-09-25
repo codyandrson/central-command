@@ -77,9 +77,21 @@ READ_ALLOWLIST: dict[str, set[str]] = {
         "get_group_episodes", "known_groups", "search_facts", "search_nodes",
         "steward_map",
     },
-    # `report_spam` is the mailbox write and is absent. EmailFacadeError is the
-    # exception type the tools catch.
-    "email_facade": {"EmailFacadeError", "get_message", "list_refs"},
+    # `report_spam` is the mailbox write and is absent — and so are `send` and
+    # `move` (Exchange native client design, 2026-09-25): the runtime reaches
+    # all three only as proposals the Executor performs. `list_folders` IS a
+    # read — it lists names and counts and changes nothing — and `mail_list_
+    # folders` is the tool that answers "which folders exist", the AGENTS.md
+    # "never guess X" rule. EmailFacadeError is the exception type the tools
+    # catch.
+    "email_facade": {"EmailFacadeError", "get_message", "list_refs",
+                     "list_folders"},
+    # The native Exchange client. The runtime reaches EXACTLY one name on it:
+    # `configured()`, a settings predicate that opens no connection — it is how
+    # `packs._offered` withholds the pack members the configured mailbox cannot
+    # answer. Every actual mailbox call in runtime/ goes through the façade
+    # above, so nothing else here may ever be added.
+    "exchange": {"configured"},
     # Reads of the proxy's own configuration plus two POSTs that ask rather
     # than change: `probe_model` sends a chat/embedding/rerank request, and
     # `provider_catalog` fetches the vendor's model list. Everything under

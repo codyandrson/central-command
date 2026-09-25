@@ -4,6 +4,151 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-25 — v2.48.0: a native Exchange mailbox, behind the seams that already exist
+
+The second Central Command deployment lives on an air-gapped Windows network
+whose mail is on-premises Microsoft Exchange: EWS SOAP at
+`https://<host>/ews/exchange.asmx`, a PKI client certificate for the TLS
+handshake and NTLM at the application layer, a server certificate signed by an
+internal CA, and no Microsoft Graph and no OAuth to fall back on. Until this
+release the only mail path was the n8n façade holding a Gmail OAuth credential
+— `integrations/email_facade.py` was a Gmail-shaped client, `mail_search` and
+`mail_read` spoke Gmail query syntax, and the feed's default `CC_FEED_QUERY` was
+`in:inbox newer_than:1d`. There was no provider abstraction and no Exchange,
+EWS, NTLM or IMAP code anywhere. The site's own working tooling established the
+facts a client has to meet, and each was checked against Microsoft's
+documentation and the library sources before any of this was written; the design
+record is `docs/superpowers/specs/2026-09-25-exchange-native-client-design.md`.
+
+- **A native client, cut over by configuration** (D1). `integrations/exchange.py`
+  is new and `integrations/email_facade.py` / `integrations/calendar_facade.py`
+  keep their signatures and every one of their callers: each function asks
+  `exchange.configured()` — all of `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`,
+  `CC_EXCHANGE_PASSWORD` — and routes, else calls the n8n webhook exactly as
+  before. Unset the three keys and the Gmail path is back; that is the whole
+  rollback, and no code path is lost either way. `ExchangeError` is mapped to
+  `EmailFacadeError` / `CalendarFacadeError` at the seam, so every existing
+  `except` in the tree covers both providers, and the routing lives INSIDE each
+  function so tests that patch `email_facade.list_refs` still patch the whole
+  thing. This is the Jira rule applied a second time: n8n earns its place where
+  it already solved a hard integration problem, and a plain credentialed API is
+  better served by a native client that lives in git.
+- **exchangelib, not hand-rolled SOAP** (D2). `exchangelib>=5.6,<6` joins the
+  CORE dependencies in `pyproject.toml` — the feed and the Executor both reach
+  it on a site whose only mailbox is Exchange. It already implements every
+  mechanism the site's notes describe: NTLM, certificate auth, automatic
+  `ErrorServerBusy` back-off honouring `BackOffMilliseconds` (the site's
+  throttling arrives inside the SOAP body, never as HTTP 429), AQS query
+  strings, indexed paging, `CalendarView`, and the Windows-to-IANA time-zone map
+  this codebase lacks. It is synchronous, so every call runs in
+  `asyncio.to_thread`, and one `Account` is built lazily per process under a
+  lock and rebuilt when its settings change.
+- **Three keys, and trust from the global knobs** (D3). `config.py` and
+  `.env.example` gain `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`,
+  `CC_EXCHANGE_PASSWORD` and the optional `CC_EXCHANGE_EMAIL`, with four rows in
+  `deploy/single/questions.tsv` (the password `secret=y`) and one row in
+  `deploy/AIRGAP.md`'s source table. Nothing about TLS is configured there, on
+  purpose: the site's notes proposed `CC_EXCHANGE_CERT_PATH` and
+  `CC_EXCHANGE_VERIFY_TLS`, and the operator's recorded decision is ONE trust
+  surface. The client reads `integrations/http.py:client_kwargs()` —
+  `CC_CA_BUNDLE`, `CC_CLIENT_CERT`, `CC_CLIENT_KEY` — through an `HTTPAdapter`
+  subclass installed as `BaseProtocol.HTTP_ADAPTER_CLS`, and honours
+  `CC_TLS_INSECURE=1` with the same single WARN every other consumer prints.
+- **The EWS ItemId is a handle, never the identity** (D4). An `ItemId` CHANGES
+  when a message moves folder, so it cannot be the ledger's idempotency key the
+  way Gmail's immutable message id is. The client returns both — `uuid` is the
+  ItemId, `message_id` is the RFC 822 `InternetMessageId` kept byte-for-byte —
+  and `ingest/ledger.py` grows `ref_message_id()` (prefers the provider's own
+  id, synthesises the `<gmail-msg-…>` form only when there is none),
+  `provider_source()` and `provider_thread_id()`. `ingest/feed.py` and
+  `ingest/bulk_dismiss.py` key on the new helper, so a message filed mid-sweep
+  is still the same work item instead of a second enrollment; `work_item.source`
+  takes the value `exchange` (`db/schema.sql`).
+- **One query language, translated at the seam** (D5). `exchange.translate_query`
+  is a pure function turning the tokens agents are taught — `from:`, `to:`,
+  `subject:`, `after:`/`before:` as YYYY/MM/DD *or* the backlog sweeper's epoch
+  seconds, `newer_than:Nd`, `older_than:Nd`, `in:<folder>` — into exchangelib
+  filters, and handing the leftover free text to EWS as an AQS query string. An
+  unrecognised token becomes free text rather than vanishing: a dropped token
+  widens the set a bulk dismissal pins, a search term narrows it, and narrowing
+  is the safe direction. The default feed query works unchanged. `mail_list_folders`
+  is a new read tool because a folder name is an argument and the "never guess X"
+  rule wants something that can answer it; on Gmail it says that folders are
+  labels and lists the scoping vocabulary `list_refs` actually accepts.
+- **Two new capabilities, three routed, two withheld** (D6). `mail.send`
+  (`to[]`, `subject`, `body`, `cc[]?`, `reply_to_ref?`) and `mail.move`
+  (`provider_uuid`, `folder`) are `kind="write"`, `gate="human approval"`,
+  Executor-only, with `ARG_SPECS` rows in `contract/args.py`, handlers in
+  `gateway/executor.py`, registry rows in `gateway/capabilities.py`, the
+  `propose_mail_send` / `propose_mail_move` tools in `runtime/tools.py` and the
+  `mail-send-propose` / `mail-file-propose` packs. Sending is external and
+  irreversible, so the proposal pins every recipient and the whole body and the
+  Executor sends exactly that; `reply_to_ref` makes the Executor take
+  In-Reply-To and References from the referenced message's OWN headers, never
+  from the proposal — the same rule `mail.unsubscribe`'s URL follows. The three
+  calendar writes, `calendar.list_events` and `mail.report_spam` (a move to Junk)
+  route through the façade cutover. Withholding generalises the Jira-flavor
+  mechanism: `GatedCapability.providers` and `TOOL_PROVIDERS` join `flavors` in
+  `packs._offered()`, so `mail.unsubscribe`/`propose_unsubscribe` are Gmail-only
+  (its safety rule reads Gmail's DKIM verdict, which nothing verifies on
+  Exchange yet) and `mail.send`/`mail.move` are Exchange-only — and the toolset,
+  the generated charter and the gateway's granted-capability check agree, while
+  `known_capability_names()` still tells "withheld" apart from "invented".
+- **Also from the same testbed run: the llm phase paused for aliases the
+  install did not need.** With `CC_ENABLE_SPEECH=0` and the four core rows
+  filled in through the LiteLLM UI, `./setup.sh all` still stopped at the llm
+  gate — `register-models.py` counted the cc-tts/cc-stt skeletons as
+  operator action, and the phase treated any alias not ALSO declared in
+  `.env` as a reason to pause. `register-models.py` takes `--require` (the
+  single-node profile passes `cc_required_aliases`, which drops the speech
+  pair when speech is off); a placeholder in an alias that is not required is
+  reported `optional` and never counts toward exit 3, every declared alias is
+  still created as a skeleton (k3s parity, and a later flag flip), and the
+  phase's exit 3 now means exactly "a required alias is not filled in".
+  The same phase then probed cc-tts/cc-stt unconditionally and gated on the
+  answer; with speech off the two probes are now skipped PASS lines.
+- **A configure-born `.env` had no `CC_LLM_BASE_URL`, so the API could not
+  resolve any live model.** `.env.example` carries the default, but since
+  v2.45.0 `configure` writes only what it asks and a preseed stays
+  byte-identical — so the first demo feed on the testbed was a 500
+  (`LLMProviderNotConfigured … missing: CC_LLM_BASE_URL`) on an install every
+  earlier phase had passed. The app phase now composes it from the port
+  answer (`http://127.0.0.1:${CC_LITELLM_PORT}`) beside `CC_EMBED_ALIAS` and
+  `CC_LITELLM_DB_URL`, and `status` checks it.
+  The same gap hid `CC_DEFAULT_MODEL`: with `.env.example`'s
+  `openai:cc-default` never written, the roster ran on the code default (an
+  Anthropic model id) and the first live triage was a 403 from the minted
+  key, which reaches only the proxy's aliases. The app phase derives that too,
+  and `tests/test_single_configure_preseed.py` now walks `.env.example`: every
+  value the code does not default to must be asked, derived or generated.
+- **Seven more Windows test failures were the tests' own isolation:** the
+  dry-run staging assertion looked at the real state directory an install had
+  already populated (it now snapshots before and after); the trust-step build
+  test crashed when `docker` was absent instead of skipping, and then asserted
+  BuildKit's zero-match-glob no-op against podman/buildah, where that is an
+  error by design (it now builds the empty-file case production stages); the two stubbed
+  `cygpath` tests are skipped on Windows, where the real one shadows the stub.
+- **The Windows `test` phase failed 26 tests that shell out to bare `bash`.**
+  On Windows that name is System32's WSL launcher ("The RPC call contains a
+  handle that differs from the declared handle type"), not Git Bash. The four
+  test files that still used it now resolve the shell through
+  `api/update._bash()`, as the rest of the suite already did.
+- **Classification filtering is deferred** (D7), by operator decision, until
+  real fixtures exist. It belongs in the ingest path ahead of `mailtext.body_text`
+  — the one seam a body reaches a model through — and nothing here forecloses it.
+- **Proven by fixtures here, by a smoke script there** (D8). `tests/test_exchange.py`
+  and `tests/test_exchange_cutover.py` drive the client and the switch through a
+  fake exchangelib — the translator, the id rules, the record shape, the folder
+  resolution, the reply threading, the adapter's cert/verify injection, the
+  per-provider withholding — with no network path imported at all.
+  `scripts/exchange_smoke.py` is what the site runs: read-only, PASS/FAIL lines
+  for config, TLS handshake (naming which of CA bundle / client certificate /
+  insecure is in effect), NTLM, the inbox and its counts, one `newer_than:1d`
+  search through the real translator, one 7-day calendar window, the server
+  build, and whether the newest message exposes `InternetMessageId` and an
+  `Authentication-Results` header — the two facts the design record could not
+  settle from the documentation. It never prints the password and never writes.
+
 ## 2026-09-25 — v2.47.0: Windows air gap — the lock, the compose floor
 
 An operator at an air-gapped Windows site sent a page of notes from an install

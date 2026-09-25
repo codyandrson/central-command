@@ -1734,18 +1734,18 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     Read-only: nothing here changes any message or any queue row.
     """
     from central_command.db import repo
-    from central_command.ingest.ledger import provider_message_id
+    from central_command.ingest.ledger import ref_message_id
     from central_command.integrations import email_facade
 
     query = (query or "").strip()
     if not query:
-        return "give a Gmail query, e.g. from:someone@example.com"
+        return "give a mail query, e.g. from:someone@example.com"
     try:
         refs = await email_facade.list_refs(query)
     except email_facade.EmailFacadeError as e:
         return (f"mail search failed ({e}). If the query matched too many "
                 "messages, narrow it with an explicit after:/before: window.")
-    ids = [provider_message_id(r["uuid"]) for r in refs]
+    ids = [ref_message_id(r) for r in refs]
     rows = await repo.mail_items_for_message_ids(ids)
     by_state: dict[str, int] = {}
     for r in rows:
@@ -2139,6 +2139,142 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
         expected_effect=(f"one HTTPS POST (List-Unsubscribe=One-Click) to the sender's "
                          f"unsubscribe endpoint; {sender} stops sending to the operator"),
     )
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
+async def mail_list_folders(ctx: RunContext) -> str:
+    """List the mailbox's folders with their item counts, so a folder you name
+    in `propose_mail_move` is one that exists. Never guess a folder name: read
+    it here.
+
+    On an Exchange mailbox this is the real folder tree — display name, full
+    path, total and unread counts — and any of the name, the path or a
+    distinguished name (inbox, junkemail, deleteditems, drafts, sentitems,
+    archive) addresses a folder.
+
+    On Gmail there are no folders: mail carries LABELS and a message can hold
+    several at once, so what this lists is the scoping vocabulary `mail_search`
+    and `propose_bulk_dismiss` accept (`in:inbox`, `category:promotions`, …)
+    rather than a tree. Counts are blank there because the façade does not
+    report them — blank means "not reported", never zero. Read-only.
+    """
+    from central_command.integrations import email_facade
+
+    try:
+        folders = await email_facade.list_folders()
+    except email_facade.EmailFacadeError as e:
+        return f"could not list the mailbox's folders ({e})"
+    if not folders:
+        return "the mailbox reports no folders"
+    lines = []
+    for folder in folders:
+        counts = ""
+        if folder.get("total") is not None:
+            counts = f" — {folder['total']} item(s), {folder.get('unread') or 0} unread"
+        path = folder.get("path") or folder.get("name") or ""
+        lines.append(f"- {folder.get('name') or path} (address it as {path}){counts}")
+    return _clip("\n".join([f"{len(folders)} folder(s):", *lines]))
+
+
+async def propose_mail_send(ctx: RunContext, to: list[str], subject: str, body: str,
+                            rationale: str, cc: list[str] | None = None,
+                            reply_to_ref: str = "") -> str:
+    """Propose sending one email as the operator. Once approved, the control
+    plane sends EXACTLY the recipients, subject and body pinned here — you never
+    touch the mailbox yourself, and nothing is edited between approval and
+    sending.
+
+    `to` and `cc` are email addresses; `subject` and `body` are the whole
+    message, in plain text, written as the operator would sign it. `rationale`
+    is one sentence for the operator: why this mail should go out at all.
+    `reply_to_ref` names an email to reply to (work-item id `wi_…`, Message-ID,
+    or the provider uuid mail_read shows) and threads the reply from THAT
+    MESSAGE'S OWN headers — you do not write message ids.
+
+    IRREVERSIBLE and EXTERNAL: a sent mail cannot be recalled, and the person
+    who receives it reads it as the operator's own words. Propose it only when
+    the operator would obviously send it themselves; when in doubt, draft the
+    text in plain prose and let them decide.
+    """
+    recipients = [a.strip() for a in (to or []) if isinstance(a, str) and a.strip()]
+    if not recipients:
+        raise ModelRetry("name at least one recipient address in `to`.")
+    if not (subject or "").strip():
+        raise ModelRetry("give the message a subject — an empty one reads as spam.")
+    if not (body or "").strip():
+        raise ModelRetry("write the whole message body; nothing is added after approval.")
+    copies = [a.strip() for a in (cc or []) if isinstance(a, str) and a.strip()]
+
+    in_reply_to = ""
+    if (reply_to_ref or "").strip():
+        # Resolve the ref the same way every other mail tool does, so the
+        # proposal pins a provider uuid the Executor can actually read the
+        # threading headers from.
+        in_reply_to, parent_sender, parent_subject = await _mail_target(ctx, reply_to_ref)
+
+    proposal = Proposal(
+        intent=rationale,
+        actions=[Action(
+            capability="mail.send@v1",
+            arguments={"to": recipients, "cc": copies, "subject": subject,
+                       "body": body, "reply_to_ref": in_reply_to},
+            target_ref={"system": "mailbox", "id": ", ".join(recipients),
+                        "read_version": "unknown"},
+            reversibility=Reversibility.irreversible,
+        )],
+        evidence=[Evidence(
+            kind="email",
+            source_ref=in_reply_to or ", ".join(recipients),
+            locator=("the message being replied to, as read from the mailbox"
+                     if in_reply_to else "the message text pinned in this proposal"),
+            claim=(f"reply to {parent_sender}: {parent_subject}"
+                   if in_reply_to else f"to {', '.join(recipients)}: {subject}"),
+        )],
+        expected_effect=(f"one email goes out to {', '.join(recipients)}"
+                         + (f" (cc {', '.join(copies)})" if copies else "")
+                         + f" with the subject {subject!r}"),
+    )
+    await _validate_proposal(ctx, proposal)
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
+async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str,
+                            rationale: str) -> str:
+    """Propose filing one email into a mailbox folder. Once approved, the
+    control plane moves it out of its current folder and into `folder`.
+
+    `message_ref` names the email (work-item id `wi_…`, Message-ID, or the
+    provider uuid mail_read shows). `folder` must be a folder that EXISTS —
+    read `mail_list_folders` first and use the address it shows; never invent
+    one. `rationale` is one sentence: why this belongs there.
+
+    Reversible — the operator can move it back — but a message filed out of the
+    inbox stops being in front of them, so file mail that is genuinely done,
+    not mail you would rather not decide about.
+    """
+    if not (folder or "").strip():
+        raise ModelRetry(
+            "name the destination folder exactly as `mail_list_folders` shows it."
+        )
+    uuid, sender, subject = await _mail_target(ctx, message_ref)
+    proposal = Proposal(
+        intent=rationale,
+        actions=[Action(
+            capability="mail.move@v1",
+            arguments={"provider_uuid": uuid, "folder": folder.strip(),
+                       "sender": sender, "subject": subject},
+            target_ref={"system": "mailbox", "id": uuid, "read_version": "unknown"},
+            reversibility=Reversibility.reversible,
+        )],
+        evidence=[Evidence(
+            kind="email", source_ref=uuid,
+            locator="the message itself, as read from the mailbox",
+            claim=f"from {sender}: {subject}",
+        )],
+        expected_effect=(f"the message from {sender} ({subject!r}) moves to the "
+                         f"{folder.strip()} folder"),
+    )
+    await _validate_proposal(ctx, proposal)
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 

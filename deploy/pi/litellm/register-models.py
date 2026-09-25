@@ -314,7 +314,18 @@ def main() -> int:
                     help="print what would be created; write nothing; exit 0")
     ap.add_argument("--policy", type=Path, default=POLICY_PATH,
                     help=f"the declaration (.yaml or .json; default {POLICY_PATH})")
+    # WHICH aliases this deployment actually needs (space-separated) — the
+    # single-node profile passes `cc_required_aliases` (deploy/env-lib.sh),
+    # which drops cc-tts/cc-stt when CC_ENABLE_SPEECH=0. Every declared alias
+    # is still CREATED as a skeleton (the k3s profile and a later flag flip
+    # depend on that), but a placeholder left in an alias this deployment does
+    # not require is reported as `optional` and never counts toward exit 3:
+    # the Windows testbed (2026-09-25, speech off) sat at the llm pause for two
+    # aliases nothing on that install would ever call. Default: all of them.
+    ap.add_argument("--require", default="",
+                    help="space-separated aliases that must be filled in; the rest are optional")
     args = ap.parse_args()
+    required = set(args.require.split()) if args.require.strip() else None
 
     policy = load_declaration(args.policy)
     # The DECLARATION's own patterns — what an existing row is judged against,
@@ -362,7 +373,10 @@ def main() -> int:
                                          "updated_by": "register-models.py", "updated_at": stamp}})
                 created += 1
             if not real:
-                action_needed.append((alias, ["created as a skeleton — fill in model, api_base and the key/credential"]))
+                if required is not None and alias not in required:
+                    print(f"  optional {alias}  skeleton left for you (not required by this deployment's flags)")
+                else:
+                    action_needed.append((alias, ["created as a skeleton — fill in model, api_base and the key/credential"]))
         elif status == "update":
             # Only ever a PLACEHOLDER row -> the values .env declares. `id` is
             # how /model/update addresses an existing deployment.
@@ -377,6 +391,9 @@ def main() -> int:
                                          "updated_by": "register-models.py",
                                          "updated_at": stamp}})
                 updated += 1
+        elif required is not None and alias not in required:
+            print(f"  optional {alias}  " + "; ".join(problems)
+                  + "  (not required by this deployment's flags — left alone)")
         else:
             print(f"  {status.upper():8} {alias}  " + "; ".join(problems))
             action_needed.append((alias, problems))

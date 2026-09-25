@@ -215,6 +215,22 @@ class Settings(BaseSettings):
     calendar_facade_url: str = "http://127.0.0.1:5678/webhook/cc-calendar-facade"
     calendar_facade_token: str = ""
 
+    # Native Exchange client (Exchange native client design, 2026-09-25) — an
+    # on-premises Microsoft Exchange mailbox over EWS, the second deployment's
+    # only mail path (no Gmail, no Graph, no OAuth there). Setting url +
+    # username + password is the whole cutover: `integrations/exchange.py`
+    # answers `configured()` true and the email and calendar façades route to
+    # it instead of the n8n webhooks; unset them and the Gmail path is back.
+    # The username is `DOMAIN\\user` or a UPN; `exchange_email` is the mailbox's
+    # primary SMTP address and is only needed when the username is not a UPN.
+    # NOTHING about TLS lives here on purpose (design decision 3): trust is the
+    # global CC_CA_BUNDLE / CC_CLIENT_CERT / CC_CLIENT_KEY / CC_TLS_INSECURE
+    # surface every integration client already reads, never a per-tool knob.
+    exchange_url: str = ""        # the EWS endpoint, e.g. https://mail.corp.example/ews/exchange.asmx
+    exchange_username: str = ""   # DOMAIN\\user or user@corp.example
+    exchange_password: str = ""
+    exchange_email: str = ""      # primary SMTP address; defaults to the username when it is a UPN
+
     # Web fetch (D-web-read): an ungated read, granted only via the `web-read`
     # pack. The cert/key/CA-bundle settings configure ONE outbound identity for
     # every fetch this process makes — never a per-call agent argument (see the
