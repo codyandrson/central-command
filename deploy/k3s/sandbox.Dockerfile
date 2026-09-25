@@ -30,27 +30,42 @@ ARG CC_APT_SECURITY_MIRROR=
 ARG NPM_CONFIG_REGISTRY=
 
 # ── trust inside the build: one CA knob, one insecure knob (D4) ─────────────
-# The CA is a BUILD SECRET (never the context, never a build-arg — a build-arg
-# shows in `podman history`); `required=false` lets a build that passes no
-# --secret skip the branch rather than fail, which is what the k3s build script
-# does. podman >= 3.3 for `--secret`; no `# syntax=` directive is needed with
-# podman/buildah. Default mount point is /run/secrets/<id>.
+# The CA arrives as a FILE IN THE BUILD CONTEXT — `cc-ca.crt` — and this layer
+# copies it into the image's trust store. It used to be a BUILD SECRET
+# (`--mount=type=secret,id=cc_ca`); that is broken on Windows against a podman
+# machine (podman joins a Windows separator into the Linux-side temp path:
+# `open /mnt/c/.../tmp.X\podman-build-secret-N: The system cannot find the path
+# specified`, measured 2026-09-24), so with CC_CA_BUNDLE set none of the three
+# local images could build there. A CA certificate is PUBLIC material — the
+# private key is the secret, and no build ever saw one — so the secret mechanism
+# bought nothing but that failure. `deploy/single/build-*.sh` STAGES the context
+# outside the checkout and puts the CA in it; the k3s build scripts build from
+# the repo context, which has no cc-ca.crt.
+#
+# `cc-ca.cr[t]` is a GLOB, which is what makes the file optional: zero matches is
+# a silent no-op under BuildKit (verified with docker 29.8.1) — but an ERROR
+# under buildah, i.e. `podman build` (containers/podman#25229,
+# containers/buildah#3284). So every script that builds this with PODMAN puts a
+# cc-ca.crt in the context even when there is no CA: an EMPTY one, which the
+# `-s` test below reads exactly as the old `[ -s /run/secrets/cc_ca ]` did, and
+# which is removed again rather than left in the trust directory.
 ARG CC_TLS_INSECURE=0
-RUN --mount=type=secret,id=cc_ca,required=false set -e; \
+COPY cc-ca.cr[t] /usr/local/share/ca-certificates/
+RUN set -e; \
     if [ "$CC_TLS_INSECURE" = 1 ]; then \
       printf 'Acquire::https::Verify-Peer "false";\n' >/etc/apt/apt.conf.d/99cc-insecure; \
     fi; \
-    if [ -s /run/secrets/cc_ca ]; then \
+    if [ -s /usr/local/share/ca-certificates/cc-ca.crt ]; then \
       if [ ! -f /etc/ssl/certs/ca-certificates.crt ]; then \
         apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*; \
       fi; \
-      mkdir -p /usr/local/share/ca-certificates; \
-      cp /run/secrets/cc_ca /usr/local/share/ca-certificates/cc-ca.crt; \
       update-ca-certificates; \
+    else \
+      rm -f /usr/local/share/ca-certificates/cc-ca.crt; \
     fi
 # `update-ca-certificates` appends the corporate root to the SYSTEM bundle, so
-# one static path is right in both cases: with a secret it holds the CA, without
-# one it is the base image's own set. A Dockerfile cannot make an ENV
+# one static path is right in both cases: with a CA in the context it holds the
+# CA, without one it is the base image's own set. A Dockerfile cannot make an ENV
 # conditional, which is why it is the bundle and not the installed copy.
 ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
     NPM_CONFIG_CAFILE=/etc/ssl/certs/ca-certificates.crt \

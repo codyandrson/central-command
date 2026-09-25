@@ -332,12 +332,14 @@ step inside it is idempotent, so **resume is just re-run**:
 
 ### Trust: two knobs (v2.43.0)
 
-`CC_CA_BUNDLE` (a PEM the whole deployment trusts) and `CC_TLS_INSECURE=0|1`
-(verification off). Two keys, not twelve — per-tool knobs are what drift. One
+`CC_CA_BUNDLE` (a PEM the whole deployment trusts *instead of* the system trust
+store, so it must carry every CA the install meets — see `deploy/AIRGAP.md` for
+the combined-bundle recipe) and `CC_TLS_INSECURE=0|1` (verification off). Two keys, not twelve — per-tool knobs are what drift. One
 function fans the CA out to every host-side tool
-(`deploy/env-lib.sh`'s `cc_export_tls_env`), the builds take it as a
-`podman build --secret` (never a build-arg — those show in `podman history`),
-`./setup.sh machine` installs it in the podman machine, and LiteLLM and the
+(`deploy/env-lib.sh`'s `cc_export_tls_env`), the builds take it as `cc-ca.crt` in
+a STAGED build context under `<state>/build/<image>/` (a `--secret` is broken on
+a Windows podman machine, and a CA is public material anyway — the private key
+is what would be secret), `./setup.sh machine` installs it in the podman machine, and LiteLLM and the
 speech engine get it mounted read-only at `/etc/cc/ca.pem`. Prefer the CA; the
 insecure knob is supported for a site that relies on isolation instead, and
 every command that sees it prints one `WARN tls-insecure:` line naming what it

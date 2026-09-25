@@ -47,7 +47,7 @@ CC_ENABLE_SPEECH	features	Install the bundled speech engine behind cc-tts/cc-stt
 
 CC_AIRGAP	network	Is no public package index reachable at all? 1 makes the app phase install from requirements.lock instead of resolving (1/0)	0	n	v_bool01	-	n
 CC_PROXY	network	Mandatory egress proxy for host-side downloads, as a full URL like http://proxy.corp.example:8080 — blank if there is none, and credentials belong in ~/.netrc	-	n	v_url	-	n
-CC_CA_BUNDLE	network	Path to a private or corporate CA in PEM form, which the whole install will trust — blank if the public CAs are enough	-	n	v_path_readable	-	n
+CC_CA_BUNDLE	network	Path to a PEM bundle this install trusts INSTEAD of the system trust store, so it must contain EVERY CA the install will meet — your corporate root, plus the public roots when any mirror below is left blank (Linux: cat corporate.pem /etc/ssl/certs/ca-certificates.crt > bundle.pem); blank if the public CAs are enough	-	n	v_path_readable	-	n
 CC_TLS_INSECURE	network	Turn TLS verification OFF everywhere this install reaches? Prefer the CA above; every command then prints one WARN naming what it covers (1/0)	0	n	v_bool01	-	n
 
 CC_REGISTRY_DOCKERIO	mirrors	Mirror HOST for docker.io images — a host or host:port with no scheme and no path, like registry.corp.example; blank = docker.io	-	n	v_host	-	n

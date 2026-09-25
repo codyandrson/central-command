@@ -556,6 +556,13 @@ q_ask() { # q_ask <prompt> <default-display> <default-value> <secret> <validator
       read -rp "$prompt [$disp]: " reply || return 1
     fi
     [[ -n "$reply" ]] || reply="$defv"
+    # F33 — a PATH answer is normalised before it is validated or stored. On
+    # MSYS (Git Bash) `/c/Users/me/ca.pem` is what tab completion produces and
+    # what bash reads, and it is REJECTED by every native Windows tool the
+    # install drives (curl.exe, podman.exe, the podman machine). cygpath -m
+    # gives `C:/Users/me/ca.pem`, which bash, Python and both .exe accept.
+    # Identity on Linux; see questions-lib.sh's q_norm_path_answer.
+    [[ "$validator" == v_path* ]] && reply="$(q_norm_path_answer "$reply")"
     if [[ -z "$reply" ]]; then
       if [[ "$req" == y ]]; then note "  a value is required here."; continue; fi
       return 0   # blank IS an answer for an optional key
@@ -1349,6 +1356,44 @@ probe_http() { # probe_http <check> <url> <what> <seam> [HEAD]
 CC_GENERATED_KEYS=(CC_LLM_PROXY_ADMIN_KEY CC_LITELLM_SALT_KEY LITELLM_POSTGRES_PASSWORD
                    CC_NEO4J_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD)
 
+# The seams whose BLANK value means "the public host is contacted". If every one
+# of these names a mirror, a one-certificate bundle is complete by construction:
+# nothing public is dialled. One blank is enough to need the public roots too.
+PUBLIC_SOURCE_SEAMS=(CC_REGISTRY_DOCKERIO CC_REGISTRY_GHCR CC_REGISTRY_MCR
+                        CC_PYPI_INDEX_URL CC_PYTHON_MIRROR CC_NPM_REGISTRY
+                        CC_APT_MIRROR CC_HF_ENDPOINT)
+
+# CC_CA_BUNDLE REPLACES the trust store — it does not add to it. That is the
+# correct `cacert` semantics for curl, and the same for pip's PIP_CERT, npm's
+# cafile, node's NODE_EXTRA_CA_CERTS, git and the copy installed inside a build.
+# So an operator who answers with ONLY the corporate root loses pypi.org,
+# registry.npmjs.org and deb.debian.org — curl exit 60, which reads like a
+# broken mirror rather than a bundle that is missing the public roots. This is a
+# WARN, not a FAIL: a site whose every seam is a mirror is right to carry one
+# certificate, and only the operator knows which it is.
+#
+# The count is `BEGIN CERTIFICATE` occurrences — no openssl needed, and it reads
+# the file without executing anything (check executes nothing).
+check_ca_bundle_covers_everything() {
+  local ca; ca="$(q_unquote "$(get_kv "$ENV_FILE" CC_CA_BUNDLE)")"
+  [[ -n "$ca" ]] || return 0
+  # Unreadable is already the schema validator's FAIL; nothing to add here.
+  [[ -r "$ca" ]] || return 0
+  local n; n="$(grep -c 'BEGIN CERTIFICATE' "$ca" 2>/dev/null)" || n=0
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  local blank="" k
+  for k in "${PUBLIC_SOURCE_SEAMS[@]}"; do
+    is_placeholder "$(q_unquote "$(get_kv "$ENV_FILE" "$k")")" && blank="${blank:+$blank }$k"
+  done
+  if (( n <= 1 )) && [[ -n "$blank" ]]; then
+    warn "answers-ca-bundle" "CC_CA_BUNDLE holds $n certificate(s), and it REPLACES the trust store rather than adding to it — while these seams are blank, so PUBLIC hosts will be contacted: $blank. A bundle with only your corporate root then fails those with curl exit 60. Make a COMBINED bundle: on Linux, cat corporate.pem /etc/ssl/certs/ca-certificates.crt > bundle.pem; on Windows, append the corporate root to a copy of curl's cacert.pem from https://curl.se/docs/caextract.html — or point every seam listed above at a mirror"
+  elif (( n <= 1 )); then
+    pass "answers-ca-bundle" "CC_CA_BUNDLE holds $n certificate(s) and every public source seam names a mirror, so nothing public is dialled — the bundle does not need the public roots"
+  else
+    pass "answers-ca-bundle" "CC_CA_BUNDLE holds $n certificates (it REPLACES the trust store, so it must carry every CA this install meets)"
+  fi
+}
+
 check_required_keys() {
   local k blank=""
   for k in "${CC_GENERATED_KEYS[@]}"; do
@@ -1359,6 +1404,8 @@ check_required_keys() {
   else
     pass "answers-secrets" "every credential make-secrets.sh owns is set"
   fi
+
+  check_ca_bundle_covers_everything
 
   # Everything else an answer file must carry is the SCHEMA's business now
   # (v2.45.0, design record D6): questions.tsv is the one list, so a key that

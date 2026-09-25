@@ -53,6 +53,10 @@ CTR_NS=k8s.io
 BUILD_ONLY="${CC_BUILD_ONLY:-0}"
 
 echo "==> [1/2] arm64 on the Pi (docker)"
+# The repo context carries no cc-ca.crt, and the Dockerfile's optional-CA step
+# is a glob COPY that matches nothing here — a silent no-op under BuildKit
+# (verified with docker 29.8.1). Only buildah errors on a zero-match glob,
+# which is why the podman builds below are handed an empty file instead.
 docker build --platform linux/arm64 -t "$IMAGE_REF" -t "$IMAGE" "$CTX"
 if [[ "$BUILD_ONLY" != 1 ]]; then
   TMP_ARM=$(mktemp /tmp/cc-graphiti-arm64.XXXXXX.tar)
@@ -72,6 +76,13 @@ tar -C "$CTX" -cf - . | ssh "$CHROMEBOX" 'tar -C ~/cc-graphiti-build -xf -'
 ssh "$CHROMEBOX" bash -se <<REMOTE
 set -euo pipefail
 cd ~/cc-graphiti-build
+# An EMPTY cc-ca.crt, because the Dockerfile's optional-CA step is a GLOB COPY
+# (`cc-ca.cr[t]`) and zero matches is an ERROR under buildah — which is what
+# `podman build` is (containers/podman#25229, containers/buildah#3284), even
+# though BuildKit treats it as a no-op. The k3s profile has no CC_CA_BUNDLE seam,
+# so the file is always empty here and the Dockerfile's `-s` test reads that as
+# "no CA" and removes it again. The single-node profile stages a real one.
+: >cc-ca.crt
 # Fully-qualified tag, or podman writes localhost/<name> — see the note above.
 podman build --platform linux/amd64 -t "$IMAGE_REF" .
 if [[ "$BUILD_ONLY" != 1 ]]; then

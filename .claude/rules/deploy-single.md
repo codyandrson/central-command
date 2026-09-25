@@ -51,12 +51,25 @@ when a matching file is read.
   the site assumes security through isolation). `CC_CA_BUNDLE` and
   `CC_TLS_INSECURE=0|1`, and no per-tool knobs — per-tool granularity is what
   drifted. `deploy/env-lib.sh`'s `cc_export_tls_env` is the ONE fan-out and
-  every command in the profile calls it; a build gets the CA as
-  `podman build --secret id=cc_ca` (never a build-arg — those are visible in
-  `podman history`) and `--tls-verify=false`; the podman MACHINE gets it from
-  the `machine` phase. Every command that sees `CC_TLS_INSECURE=1` prints
-  exactly ONE `WARN tls-insecure:` line naming the consumers IT drives — never
-  a PASS, never silent. The one consumer with no insecure option is Hugging
+  every command in the profile calls it; a build gets the CA as **`cc-ca.crt`
+  in a STAGED build context** (`cc_stage_build_context` →
+  `<state>/build/<image>/`, regenerated every run) plus `--tls-verify=false`;
+  the podman MACHINE gets it from the `machine` phase. **Never go back to
+  `podman build --secret`**: on Windows podman joins a Windows separator into
+  the machine's Linux temp path
+  (`open /mnt/c/…/tmp.X\podman-build-secret-N`) and NO local image can build
+  while `CC_CA_BUNDLE` is set (measured 2026-09-24). A CA is public material —
+  the private key is what would be secret — so the secret bought nothing but
+  that failure. The Dockerfiles take it with the optional-file glob
+  `COPY cc-ca.cr[t] …` guarded by an `-s` test, and every script that builds
+  them with PODMAN puts a cc-ca.crt in the context even with no CA (an EMPTY
+  one): a zero-match glob is a no-op under BuildKit but an ERROR under buildah
+  (containers/podman#25229). **`CC_CA_BUNDLE` REPLACES the trust store**, so a
+  bundle carrying only the corporate root loses pypi/npm/deb with curl 60 —
+  `check` WARNs on one certificate while a public source seam is blank.
+  Every command that sees `CC_TLS_INSECURE=1` prints exactly ONE
+  `WARN tls-insecure:` line naming the consumers IT drives — never a PASS,
+  never silent. The one consumer with no insecure option is Hugging
   Face (the speech engine); say so rather than pretending.
   `tests/test_single_airgap_seams.py` walks the fan-out table.
 - **The `machine` phase WRITES another host, so it behaves like it.** Between

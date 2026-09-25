@@ -29,6 +29,35 @@ Trust is exactly **two** keys, because per-tool granularity is what drifted
 * **`CC_CA_BUNDLE`** — a PEM the whole deployment should trust.
 * **`CC_TLS_INSECURE=1`** — TLS verification off, everywhere the fan-out reaches.
 
+### `CC_CA_BUNDLE` REPLACES the trust store — it must be COMPLETE
+
+Every consumer in the table below takes the bundle as *the* CA file (curl's
+`cacert`, `PIP_CERT`, npm's `cafile`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`,
+and the copy installed inside a build). Nothing appends it to the public roots.
+So a bundle holding only the corporate root works for the corporate mirror and
+breaks every PUBLIC host the install still contacts — pypi.org,
+registry.npmjs.org, deb.debian.org — with **curl exit 60**, which reads like a
+broken mirror rather than an incomplete bundle.
+
+The bundle must contain **every CA this install meets**: the corporate root, plus
+the public roots whenever any mirror seam is left blank. Combine them:
+
+```bash
+# Linux
+cat corporate.pem /etc/ssl/certs/ca-certificates.crt > bundle.pem
+```
+
+On **Windows** there is no system PEM to concatenate: take a copy of curl's own
+`cacert.pem` from <https://curl.se/docs/caextract.html> and append the corporate
+root to it. (`curl --ca-native`, which would use the Windows store instead, is
+deliberately not used here: the same bundle has to serve uv, pip, npm, node, git
+and the image builds, none of which read the Windows store.)
+
+A site where EVERY mirror seam names a mirror is right to carry one certificate —
+nothing public is dialled. `./setup.sh check` tells the two cases apart: it WARNs
+when the bundle holds exactly one certificate while a public source seam is still
+blank, and names the seams.
+
 Prefer the CA: it keeps the supply chain verifiable. `CC_TLS_INSECURE=1` is a
 supported answer for a site that relies on isolation instead — a decision the
 operator is entitled to make, and one this document will not relitigate. It is
@@ -44,8 +73,8 @@ never silent and never a PASS: every command that sees it prints one
 | node | `NODE_EXTRA_CA_CERTS` | `NODE_TLS_REJECT_UNAUTHORIZED=0` |
 | git | `GIT_SSL_CAINFO` | `GIT_SSL_NO_VERIFY=1` |
 | podman pulls | installed into the podman machine's trust store by `./setup.sh machine` (plus `podman machine set --import-native-ca` where podman ≥ 6.0 has the flag) | `insecure = true` per `[[registry]]` in the machine's `registries.conf` drop-in, also written by `./setup.sh machine` |
-| the three image builds | `podman build --secret id=cc_ca,src=$CC_CA_BUNDLE`; the Dockerfiles install it into the image trust store | `--tls-verify=false` + `--build-arg CC_TLS_INSECURE=1` |
-| apt inside a build | the same build secret | `Acquire::https::Verify-Peer "false"` in `/etc/apt/apt.conf.d/99cc-insecure` |
+| the three image builds | copied into a STAGED build context as `cc-ca.crt` (`<state>/build/<image>/`); the Dockerfiles install it into the image trust store. **Not** a `--secret` — that is broken on a Windows podman machine, see below | `--tls-verify=false` + `--build-arg CC_TLS_INSECURE=1` |
+| apt inside a build | the same staged CA | `Acquire::https::Verify-Peer "false"` in `/etc/apt/apt.conf.d/99cc-insecure` |
 | pip / npm inside a build | `PIP_CERT` / `NPM_CONFIG_CAFILE`, set by the build's trust step | `PIP_TRUSTED_HOST` (from the index host), `NPM_CONFIG_STRICT_SSL=false` |
 | LiteLLM (the LLM endpoint) | `SSL_CERT_FILE`, from the CA mounted read-only at `/etc/cc/ca.pem` | `SSL_VERIFY=False` |
 | the speech engine (Hugging Face) | `REQUESTS_CA_BUNDLE`, same mount | **none exists** — `huggingface_hub` has no insecure switch. Use the CA, an HF mirror (`CC_HF_ENDPOINT`), pre-placed snapshots, or `CC_ENABLE_SPEECH=0` |

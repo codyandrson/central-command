@@ -31,10 +31,40 @@
 #     q_groups <file>               the group names, in first-appearance order
 #     q_group_blurb <group>         the one-line explanation a header prints
 #     q_when_holds <expr> <getter>  the tiny `when` expression language
+#     q_norm_path_answer <value>    an MSYS path answer in the spelling every
+#                                   consumer accepts (F33)
 # ============================================================================
 
 [[ -n "${CC_QUESTIONS_LIB_LOADED:-}" ]] && return 0
 CC_QUESTIONS_LIB_LOADED=1
+
+# ── a path ANSWER, in the one spelling every consumer accepts (F33) ─────────
+# On MSYS/Cygwin (Git Bash, which is how this profile is driven on Windows) tab
+# completion and habit produce `/c/Users/me/ca.pem`. Bash reads it fine, so it
+# validated and was stored verbatim — and then every NATIVE Windows tool the
+# install drives rejected it: curl.exe, podman.exe and the podman machine all
+# want a Windows path. `cygpath -m` gives `C:/Users/me/ca.pem`, which bash,
+# Python, curl.exe and podman.exe ALL accept, so it is the one spelling to store.
+# Measured on the 2026-09-24 Windows Podman Desktop run.
+#
+# Identity everywhere else: the rewrite is gated on the platform (OSTYPE, else
+# `uname -o`) as well as on cygpath existing, because a Linux box with cygpath
+# installed must not have its answers rewritten. `deploy/env-lib.sh`'s
+# cc_norm_path does the same thing for the STATE DIR, where the caller is always
+# the bash side of a Windows install and the guard is unnecessary.
+q__is_msys() {
+  case "${OSTYPE:-}" in msys*|cygwin*) return 0 ;; esac
+  case "$(uname -o 2>/dev/null)" in Msys|MSYS*|Cygwin*) return 0 ;; esac
+  return 1
+}
+
+q_norm_path_answer() { # q_norm_path_answer <value>
+  local v="$1" out
+  if [[ -n "$v" ]] && q__is_msys && command -v cygpath >/dev/null 2>&1; then
+    out="$(cygpath -m "$v" 2>/dev/null)" && [[ -n "$out" ]] && v="$out"
+  fi
+  printf '%s' "$v"
+}
 
 # ── validators ──────────────────────────────────────────────────────────────
 
@@ -74,23 +104,29 @@ v_host() { # v_host <value>
   return 1
 }
 
+# NORMALISED FIRST (F33): on MSYS an answer may be `/c/Users/me/ca.pem`, which
+# bash resolves and curl.exe/podman.exe reject — q_norm_path_answer rewrites it
+# to `C:/Users/me/ca.pem`, the spelling every consumer accepts, and `configure`
+# stores that form. Both spellings validate; only one is stored.
 v_path_readable() { # v_path_readable <value>
-  [[ -f "$1" && -r "$1" ]] && return 0
-  [[ -e "$1" ]] && { printf 'exists but is not a readable file: %s\n' "$1"; return 1; }
-  printf 'no such file: %s\n' "$1"
+  local p; p="$(q_norm_path_answer "$1")"
+  [[ -f "$p" && -r "$p" ]] && return 0
+  [[ -e "$p" ]] && { printf 'exists but is not a readable file: %s\n' "$p"; return 1; }
+  printf 'no such file: %s\n' "$p"
   return 1
 }
 
 # An existing directory, or one whose PARENT exists and is writable. It never
 # creates anything: the caller may be `check`, which executes nothing.
 v_path_dir_or_creatable() { # v_path_dir_or_creatable <value>
-  if [[ -d "$1" ]]; then
-    [[ -w "$1" ]] && return 0
-    printf 'directory exists but is not writable: %s\n' "$1"
+  local p; p="$(q_norm_path_answer "$1")"   # F33 — see v_path_readable
+  if [[ -d "$p" ]]; then
+    [[ -w "$p" ]] && return 0
+    printf 'directory exists but is not writable: %s\n' "$p"
     return 1
   fi
-  [[ -e "$1" ]] && { printf 'exists and is not a directory: %s\n' "$1"; return 1; }
-  local parent; parent="$(dirname "$1")"
+  [[ -e "$p" ]] && { printf 'exists and is not a directory: %s\n' "$p"; return 1; }
+  local parent; parent="$(dirname "$p")"
   [[ -d "$parent" && -w "$parent" ]] && return 0
   printf 'cannot be created: %s does not exist or is not writable\n' "$parent"
   return 1

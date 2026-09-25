@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -247,3 +248,101 @@ def test_check_and_configure_both_read_the_schema():
         "check's answers section must WALK the schema, not carry its own "
         "required-key list (that list is what v2.45.0 replaced)"
     )
+
+
+# ── F33: a PATH answer is stored in the spelling every consumer accepts ──────
+# `/c/Users/me/ca.pem` is what Git Bash tab completion produces. Bash reads it,
+# so it validated and was stored verbatim — and then curl.exe, podman.exe and the
+# podman machine all rejected it. On MSYS/Cygwin the answer is rewritten with
+# `cygpath -m` BEFORE it is validated or stored, so `.env` carries
+# `C:/Users/me/ca.pem`, which bash, Python and both .exe accept.
+#
+# There is no cygpath on a Linux test host, so the test brings its own on PATH:
+# a two-line stand-in doing exactly what `cygpath -m` does to these inputs. That
+# is also what makes the second half meaningful — with cygpath present and the
+# platform NOT MSYS, the answer must come back untouched.
+CYGPATH_STUB = """#!/usr/bin/env bash
+# Stand-in for `cygpath -m`: /c/X -> C:/X, and a /msysroot prefix -> $STUB_ROOT,
+# which is how the validator can be shown resolving the REWRITTEN path.
+[ "$1" = "-m" ] && shift
+printf '%s' "$1" | sed -E "s|^/msysroot|${STUB_ROOT:-/msysroot}|; s|^/([a-zA-Z])/|\\U\\1:/|"
+"""
+
+
+def _bash(snippet: str, *, bindir: Path, ostype: str, stub_root: str = "") -> subprocess.CompletedProcess:
+    script = (
+        f'OSTYPE={ostype}\n'
+        f'export PATH="{bindir}:$PATH"\n'
+        f'export STUB_ROOT="{stub_root}"\n'
+        f'. "{QUESTIONS_LIB}"\n'
+        f'{snippet}\n'
+    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
+@pytest.fixture
+def cygpath_bin(tmp_path: Path) -> Path:
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    stub = bindir / "cygpath"
+    stub.write_text(CYGPATH_STUB, encoding="utf-8")
+    stub.chmod(0o755)
+    return bindir
+
+
+def test_a_path_answer_is_rewritten_on_msys_and_untouched_elsewhere(cygpath_bin):
+    r = _bash("q_norm_path_answer /c/Users/me/ca.pem", bindir=cygpath_bin, ostype="msys")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "C:/Users/me/ca.pem", r.stdout
+
+    # Same cygpath on PATH, a Linux OSTYPE: a Linux box with cygpath installed
+    # must not have its answers rewritten.
+    r = _bash("q_norm_path_answer /c/Users/me/ca.pem", bindir=cygpath_bin,
+              ostype="linux-gnu")
+    assert r.stdout == "/c/Users/me/ca.pem", r.stdout
+
+    # And a blank answer stays blank — blank is a valid answer for these keys.
+    r = _bash('q_norm_path_answer ""', bindir=cygpath_bin, ostype="cygwin")
+    assert r.stdout == "", r.stdout
+
+
+def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
+    """v_path_readable used to accept the MSYS spelling and store it."""
+    real = tmp_path / "corp-ca.pem"
+    real.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+
+    # The stub maps /msysroot/<x> onto tmp_path/<x>, so this answer names a file
+    # that exists only under its REWRITTEN spelling.
+    r = _bash("v_path_readable /msysroot/corp-ca.pem", bindir=cygpath_bin,
+              ostype="msys", stub_root=str(tmp_path))
+    assert r.returncode == 0, (
+        "the validator must resolve the path cygpath -m produces, not the raw "
+        f"answer: {r.stdout}{r.stderr}"
+    )
+
+    # A missing file still fails, and the REASON names the rewritten spelling —
+    # the one the operator's other tools will use.
+    r = _bash("v_path_readable /msysroot/nope.pem", bindir=cygpath_bin,
+              ostype="msys", stub_root=str(tmp_path))
+    assert r.returncode == 1
+    assert f"no such file: {tmp_path}/nope.pem" in r.stdout, r.stdout
+
+    # The directory validator shares the normalisation.
+    r = _bash("v_path_dir_or_creatable /msysroot/state", bindir=cygpath_bin,
+              ostype="msys", stub_root=str(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_configure_normalises_before_it_validates_or_stores():
+    """The rewrite has to happen in q_ask, or an invalid spelling gets written."""
+    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    start = setup.index("q_ask() {")
+    body = setup[start:setup.index("\ncmd_configure()", start)]
+    assert "q_norm_path_answer" in body, (
+        "configure must normalise a path ANSWER before validating/storing it "
+        "(F33) — otherwise .env keeps the MSYS spelling native tools reject"
+    )
+    assert body.index("q_norm_path_answer") < body.index('"$validator" "$reply"'), (
+        "normalise BEFORE the validator runs"
+    )
+

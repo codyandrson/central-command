@@ -4,6 +4,53 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-24 — v2.45.5: a CA is not a secret, and a pin is honoured every run
+
+Scenario B of the Windows testbed run proved the CA route end to end on a real
+podman machine: the host's curl trusted the private-CA mirror through the
+generated `.curlrc`, the `machine` phase installed the anchor and the
+in-machine probe passed with verification ON, the drop-in carried no insecure
+line, and `fetch` pulled everything over verified TLS. It also answered an
+owed unknown with a no:
+
+- **`podman build --secret` is broken on Windows against a podman machine**
+  (a Windows separator joined into a Linux temp path; reproduced with a
+  trivial Dockerfile, gone the moment the flag is removed). With
+  `CC_CA_BUNDLE` set, none of the three local images could build there. A CA
+  certificate is public material, so the secret bought nothing but that
+  failure. Each `build-*-image.sh` now stages its Dockerfile's context into
+  `<state>/build/<image>/` (regenerable, outside the checkout) with a
+  `cc-ca.crt` beside it — the real CA when set, an EMPTY file when not — and
+  the Dockerfiles `COPY` it and install it when non-empty. The empty file is
+  deliberate: a bare glob `COPY` with zero matches is a silent no-op under
+  BuildKit but an error under buildah, which is what `podman build` is
+  (containers/buildah#3284). The k3s build scripts stage the same empty file.
+  `CC_BUILD_DRY_RUN=1` prints the resolved command and touches nothing.
+- **An operator `CC_IMG_*` pin was honoured exactly once.** The honoured pin
+  was recorded verbatim, so the next run mistook it for the resolver's own
+  write and silently re-resolved the row — on a path-renaming mirror the
+  second run would have FAILed. The manifest lookup now ignores rows recorded
+  `pinned`; verified live.
+- **`CC_CA_BUNDLE` REPLACES the trust store** (correct `cacert` semantics for
+  every consumer), but the prompt read as additive, and a bundle holding only
+  the mirror's CA lost pypi, npm and deb with curl 60. The prompt,
+  `.env.example` and `AIRGAP.md` now say the bundle must be COMPLETE, with a
+  recipe for a combined bundle; `check` WARNs when the bundle holds one
+  certificate while any public source seam is blank.
+- **An MSYS path answer (`/c/Users/…`) passed the validator and then failed
+  in native curl and podman.** On MSYS/Cygwin, path answers are normalised
+  with `cygpath -m` before validation and storage.
+- `pytest-timeout` is declared in the dev extras: every gate this week ran
+  with `--timeout=120` against a venv that carried it undeclared, while a fresh
+  install rejected the flag.
+
+Still open from the testbed: the `test` phase emits no progress and has no
+timeout, and the by-hand Windows suite ran an order of magnitude slower in
+aggregate than in slices (database latency and the CA bundle both measured
+and excluded; cause not found). The `tls-insecure` WARN prints once per
+command; the loopback rule WARNs on a machine-local `localhost:5000` mirror;
+the registries drop-in marks the public registries insecure too.
+
 ## 2026-09-24 — v2.45.4: pointing podman at a mirror had never worked on a real machine
 
 Scenario A of the Windows testbed run — a self-signed registry inside the

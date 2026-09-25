@@ -279,8 +279,8 @@ key, so the merge is plumbing, not a redesign.
   | node | `NODE_EXTRA_CA_CERTS` | `NODE_TLS_REJECT_UNAUTHORIZED=0` |
   | git | `GIT_SSL_CAINFO` | `GIT_SSL_NO_VERIFY=1` |
   | podman pulls (machine) | `certs.d/<registry>/ca.crt` or `--import-native-ca` | `insecure = true` per `[[registry]]` in the machine's `registries.conf` |
-  | podman build | `--cert-dir` (WSL2 machines only) | `--tls-verify=false` |
-  | apt (builds) | CA copied in via build context | `Acquire::https::Verify-Peer "false"` as a build arg |
+  | podman build | `cc-ca.crt` copied into a STAGED build context (**amended 2026-09-24** — it was `--secret id=cc_ca`; see below) | `--tls-verify=false` |
+  | apt (builds) | the same staged CA | `Acquire::https::Verify-Peer "false"` as a build arg |
   | LiteLLM container | `SSL_CERT_FILE` | `SSL_VERIFY=False` |
   | Hugging Face (speech) | `REQUESTS_CA_BUNDLE` (inherited) | **none exists** — CA route or pre-placed snapshots only; `check` says so |
 
@@ -294,6 +294,66 @@ key, so the merge is plumbing, not a redesign.
   machine state and the diff setup would apply; `setup` applies it. The
   operator authorised this on 2026-09-23. The Windows-host registries file
   is never written — it is not honoured.
+
+**AMENDMENT, 2026-09-24 (Windows Podman Desktop testbed, F34): the CA reaches a
+build through a STAGED CONTEXT, not a build secret.**
+`podman build --secret id=cc_ca,src=<pem>` is BROKEN on Windows against a podman
+machine: podman joins a Windows separator into the machine-side temp path and
+the build dies before the first instruction —
+
+```
+open /mnt/c/.../tmp.X\podman-build-secret-N: The system cannot find the path specified
+```
+
+reproduced with a trivial Dockerfile and every spelling of the context path; the
+same build without `--secret` succeeds. So with `CC_CA_BUNDLE` set, NONE of the
+three local images could build on the one platform this record scopes.
+
+The verdict: **a CA certificate is public material.** The private key is what
+would be secret, and no build ever saw one — `podman history` exposure was never
+a real risk, so the secret mechanism bought nothing but that failure. Each build
+script now COPIES its Dockerfile's context into `<state>/build/<image>/`
+(`cc_stage_build_context` in `deploy/env-lib.sh`; `cp -R`, because the contexts
+are 56K/32K/one file), adds `cc-ca.crt` there when `CC_CA_BUNDLE` is set, and
+builds with that directory as the context and `-f` inside it. Nothing is written
+inside the checkout (D7 holds). `build/` is regenerable: it is deleted and
+rebuilt on every run, so a CA from a previous run cannot linger.
+
+The Dockerfiles take the file with the optional-file glob
+`COPY cc-ca.cr[t] /usr/local/share/ca-certificates/` and the same
+`update-ca-certificates` step behind an `-s` test, keeping v2.43.0's
+apt-insecure-fragment ordering. One measured wrinkle: a zero-match glob is a
+silent no-op under BuildKit (verified with docker 29.8.1) but an **ERROR under
+buildah**, i.e. `podman build` (containers/podman#25229,
+containers/buildah#3284). Every script that builds these with podman therefore
+puts a `cc-ca.crt` in the context even when there is no CA — an EMPTY one, which
+the `-s` test reads exactly as the old `[ -s /run/secrets/cc_ca ]` did and which
+the layer removes again. That includes the three k3s build scripts, whose
+chromebox builds are podman; the Pi's `docker build` from the repo context is the
+one genuine zero-match case and BuildKit tolerates it.
+
+**AMENDMENT, 2026-09-24 (F32): `CC_CA_BUNDLE` REPLACES the trust store, so the
+answer must be COMPLETE.** Every consumer in the table takes it as *the* CA file,
+which is the correct `cacert` semantics and is not additive. An operator who
+answers with only the mirror's root then loses every PUBLIC host the install
+still contacts (pypi.org, registry.npmjs.org, deb.debian.org) with curl exit 60,
+which reads like a broken mirror. The prompt, `.env.example` and
+`deploy/AIRGAP.md` now say so and carry the combined-bundle recipe (Linux:
+`cat corporate.pem /etc/ssl/certs/ca-certificates.crt > bundle.pem`; Windows:
+append the corporate root to a copy of curl's `cacert.pem` from
+<https://curl.se/docs/caextract.html>), and `check`'s answers section WARNs when
+the bundle holds exactly one certificate while a public source seam is still
+blank — naming the seams. It stays a WARN: a site whose every seam is a mirror is
+right to carry one certificate.
+
+**AMENDMENT, 2026-09-24 (F33): a path ANSWER is normalised to the spelling every
+consumer accepts.** `v_path_readable` accepted `/c/Users/me/ca.pem`, which bash
+reads and native Windows tools (curl.exe, podman.exe, the podman machine) reject.
+On MSYS/Cygwin `configure` now rewrites a path answer with `cygpath -m` before
+validating or storing it, so `.env` carries `C:/Users/me/ca.pem` — accepted by
+bash, Python and both `.exe`. Identity on Linux
+(`questions-lib.sh`'s `q_norm_path_answer`; `deploy/env-lib.sh`'s `cc_norm_path`
+does the same for the state dir).
 
 ### D5 — `check`: everything dry, one table, exit codes as today
 

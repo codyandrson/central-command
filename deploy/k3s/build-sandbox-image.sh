@@ -41,6 +41,13 @@ scp -q "$DOCKERFILE" "$CHROMEBOX:~/cc-sandbox-build/Dockerfile"
 ssh "$CHROMEBOX" bash -se <<REMOTE
 set -euo pipefail
 cd ~/cc-sandbox-build
+# An EMPTY cc-ca.crt, because the Dockerfile's optional-CA step is a GLOB COPY
+# (`cc-ca.cr[t]`) and zero matches is an ERROR under buildah — which is what
+# `podman build` is (containers/podman#25229, containers/buildah#3284), even
+# though BuildKit treats it as a no-op. The k3s profile has no CC_CA_BUNDLE seam,
+# so the file is always empty here and the Dockerfile's `-s` test reads that as
+# "no CA" and removes it again. The single-node profile stages a real one.
+: >cc-ca.crt
 # Fully-qualified tag, or podman writes localhost/<name> — see the note above.
 podman build --platform linux/amd64 -t "$IMAGE_REF" -f Dockerfile .
 if [[ "${CC_BUILD_ONLY:-0}" != 1 ]]; then

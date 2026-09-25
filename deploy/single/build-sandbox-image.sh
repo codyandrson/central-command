@@ -14,8 +14,10 @@
 #   Containment trade, stated plainly: the container this image runs in is
 #   rootless podman, NOT gVisor. Weaker isolation than the k3s profile.
 #
-#   The Dockerfile COPYs nothing, so it is built against an EMPTY context —
-#   nothing of the repo is sent to the build.
+#   The context is STAGED (D4 amendment, 2026-09-24): this Dockerfile is copied
+#   into `<state>/build/cc-sandbox/` beside a `cc-ca.crt` — the corporate CA when
+#   CC_CA_BUNDLE is set, an EMPTY file when it is not — and that directory is the
+#   build context. Nothing else of the repo is sent to the build.
 #
 #   Usage:  ./build-sandbox-image.sh
 # ============================================================================
@@ -57,13 +59,26 @@ if [[ -n "${CC_IMG_PYTHON:-}" ]]; then
   BUILD_ARGS+=(--build-arg "CC_IMG_PYTHON=${CC_IMG_PYTHON}")
 fi
 
-# The two trust knobs (2026-09-23 design record, D4), fanned out in one place
-# for the host side and handed to the build separately: no exported variable
-# reaches a build container, and the CA must not enter the build CONTEXT.
+# The two trust knobs (2026-09-23 design record, D4, AMENDED 2026-09-24), fanned
+# out in one place for the host side and handed to the build separately: no
+# exported variable reaches a build container.
 #   * --tls-verify=false when insecure, for the base-image pull this build does
 #   * --build-arg CC_TLS_INSECURE, which the Dockerfile uses for apt/pip/npm
-#   * --secret id=cc_ca, which the Dockerfile installs into the image's trust
-#     store — a SECRET, because a build-arg is visible in `podman history`
+#   * the CA as a FILE in a STAGED build context (cc-ca.crt), which the
+#     Dockerfile copies into the image's trust store
+#
+# The CA used to travel as `podman build --secret id=cc_ca,src=$CC_CA_BUNDLE`.
+# That is BROKEN on Windows against a podman machine — podman joins a Windows
+# separator into the Linux-side temp path:
+#   open /mnt/c/.../tmp.X\podman-build-secret-N: The system cannot find the path
+#   specified
+# (measured on the 2026-09-24 Windows Podman Desktop run, reproduced with a
+# trivial Dockerfile and every spelling of the context path; the same build
+# without --secret succeeds). So with CC_CA_BUNDLE set, none of the three local
+# images could build on the one platform this profile targets. The amendment:
+# a CA certificate is PUBLIC material — it is the private key that is secret,
+# and we never had one — so it is just a file in the context, and the context is
+# STAGED outside the checkout because nothing here may write inside it (D7).
 # shellcheck source=../env-lib.sh
 . "$REPO_ROOT/deploy/env-lib.sh"
 STATE_DIR="$(cc_state_dir "$REPO_ROOT/.env" "$REPO_ROOT" 2>/dev/null)" || STATE_DIR=""
@@ -73,9 +88,10 @@ if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
   TLS_ARGS+=(--tls-verify=false --build-arg "CC_TLS_INSECURE=1")
   echo "WARN tls-insecure: $(cc_tls_insecure_warn_text "this build's base-image pull and the apt/pip/npm fetches inside it")"
 fi
+CA_SRC=""
 if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
   if [[ -r "$CC_CA_BUNDLE" ]]; then
-    TLS_ARGS+=(--secret "id=cc_ca,src=$CC_CA_BUNDLE")
+    CA_SRC="$CC_CA_BUNDLE"
   else
     echo "FATAL: CC_CA_BUNDLE is set to $CC_CA_BUNDLE, which is not readable" >&2
     exit 1
@@ -85,11 +101,37 @@ IMAGE_REF="localhost/cc-sandbox:1"
 
 [[ -f "$DOCKERFILE" ]] || { echo "FATAL: $DOCKERFILE not found" >&2; exit 1; }
 
-CTX="$(mktemp -d)"
-trap 'rm -rf "$CTX"' EXIT
+# The STAGED BUILD CONTEXT (D4 amendment, 2026-09-24). `build/` under the state
+# directory is REGENERABLE — deleted and rebuilt on every run — so a CA from a
+# previous run can never linger in it and the tree is safe to delete at any time.
+# Nothing is written inside the checkout (tests/test_single_no_tree_writes.py).
+if [[ -n "$STATE_DIR" ]]; then
+  STAGED="$STATE_DIR/build/cc-sandbox"
+else
+  STAGED="$(mktemp -d)"
+  trap 'rm -rf "$STAGED"' EXIT
+fi
+BUILD_CMD=(podman build "${BUILD_ARGS[@]}" "${TLS_ARGS[@]}"
+           -t "$IMAGE_REF" -f "$STAGED/sandbox.Dockerfile" "$STAGED")
 
-echo "==> building $IMAGE_REF from $DOCKERFILE (empty context)"
-podman build "${BUILD_ARGS[@]}" "${TLS_ARGS[@]}" -t "$IMAGE_REF" -f "$DOCKERFILE" "$CTX"
+# CC_BUILD_DRY_RUN=1 prints what WOULD run and touches nothing — no staging, no
+# build, no podman. It is how tests pin the resolved command and the context
+# path on a host with no podman.
+if [[ "${CC_BUILD_DRY_RUN:-0}" == "1" ]]; then
+  echo "DRY-RUN context: $STAGED (staged from $DOCKERFILE)"
+  if [[ -n "$CA_SRC" ]]; then
+    echo "DRY-RUN ca: $STAGED/cc-ca.crt <- $CA_SRC"
+  else
+    echo "DRY-RUN ca: $STAGED/cc-ca.crt EMPTY (no CC_CA_BUNDLE — the Dockerfile's -s test reads an empty file as 'no CA')"
+  fi
+  printf 'DRY-RUN build:'; printf ' %s' "${BUILD_CMD[@]}"; printf '\n'
+  exit 0
+fi
+
+cc_stage_build_context "$STAGED" "$CA_SRC" "$DOCKERFILE" >/dev/null
+
+echo "==> building $IMAGE_REF from $STAGED (staged from $DOCKERFILE)"
+"${BUILD_CMD[@]}"
 
 # Exact match, not a substring: the point is to catch a near-miss like a bare
 # `cc-sandbox:1`, which a fuzzy grep would happily pass.

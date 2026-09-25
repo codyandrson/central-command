@@ -302,12 +302,27 @@ pin_decide() { # pin_decide <env-value> <manifest-ref> <exists:0|1>
   [[ "$exists" == 1 ]] && printf 'honour' || printf 'missing'
 }
 
-# The ref this script last wrote for <var>, out of the manifest. The var is the
-# manifest's FIRST column precisely so this lookup is unambiguous when a pin
-# renames the path — the images.txt row's identity is the variable, not the ref.
+# The ref this script last wrote for <var> AS ITS OWN RESOLUTION, out of the
+# manifest. The var is the manifest's FIRST column precisely so this lookup is
+# unambiguous when a pin renames the path — the images.txt row's identity is the
+# variable, not the ref.
+#
+# A row recorded `pinned` is deliberately INVISIBLE here. The caller's test for
+# "is this the operator's pin?" is `.env value != what I last wrote`, and an
+# honoured pin is recorded verbatim (`<var> <host>/<path> <tag> (pinned)
+# pinned`) — so counting it as a self-write made `pinval == prev` on the very
+# next run and the pin was silently re-resolved away. An operator pin was
+# therefore honoured EXACTLY ONCE: measured on the 2026-09-24 Windows run, where
+# `CC_IMG_REDIS=localhost:5000/mirror/redis:7-alpine` survived the first fetch
+# and was then quietly replaced by `localhost:5000/library/redis:7-alpine` on
+# the next check. That only looked harmless because the test mirror happened to
+# hold the canonical path too; on a real path-RENAMING mirror — the case D2
+# created the pin for — the second run would FAIL the row instead. The mode
+# column already carried the fact; it just was not read.
 manifest_ref_for() { # manifest_ref_for <var>
   [[ -n "$MANIFEST" && -f "$MANIFEST" ]] || { printf ''; return 0; }
-  awk -v v="$1" '$1 == v { r = $2 ":" $3 } END { print r }' "$MANIFEST" 2>/dev/null
+  awk -v v="$1" '$1 == v && $5 != "pinned" { r = $2 ":" $3 } END { print r }' \
+    "$MANIFEST" 2>/dev/null
 }
 
 self_test() {

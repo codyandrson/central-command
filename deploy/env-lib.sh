@@ -32,6 +32,7 @@
 #                                         fold the retired files into .env
 #     cc_alias_env_key <alias>            the CC_LLM_UPSTREAM_MODEL_* key name
 #     cc_required_aliases                 the LiteLLM aliases THESE flags need
+#     cc_stage_build_context <dir> <ca> <src>...  a build context outside the tree
 # ============================================================================
 
 [[ -n "${CC_ENV_LIB_LOADED:-}" ]] && return 0
@@ -402,6 +403,64 @@ cc__write_curlrc() { # cc__write_curlrc <path> [extra-line ...]
   fi
   mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
   printf '%s' "$lines" >"$f"
+}
+
+# ── the CA reaches a BUILD through a STAGED CONTEXT (D4, amended 2026-09-24) ─
+# It used to travel as `podman build --secret id=cc_ca,src=$CC_CA_BUNDLE`. That
+# is BROKEN on Windows against a podman machine: podman joins a Windows path
+# separator into the Linux-side temp path and the build dies before the first
+# instruction —
+#   open /mnt/c/.../tmp.X\podman-build-secret-N: The system cannot find the path
+#   specified
+# reproduced on the 2026-09-24 Windows Podman Desktop run with a trivial
+# Dockerfile and every spelling of the context path; the same build without
+# --secret succeeds. So with CC_CA_BUNDLE set, NONE of the three local images
+# could build on Windows — the one platform this profile targets.
+#
+# The amendment: a CA certificate is PUBLIC material. It is the private key that
+# is secret, and we never had one. The secret mechanism bought nothing but that
+# failure, so the CA is simply a file in the build context now — a context this
+# function STAGES outside the checkout, because nothing in the profile may write
+# inside it (D7).
+#
+# WHY THE STAGED CONTEXT ALWAYS CONTAINS cc-ca.crt, empty when there is no CA:
+# `COPY cc-ca.cr[t] <dir>/` with ZERO matches is a silent no-op under BuildKit
+# (verified here with docker 29.8.1) but an ERROR under buildah, which is what
+# `podman build` is (containers/podman#25229, containers/buildah#3284: "COPY
+# with wildcard fails when no matching files found"). The Dockerfiles keep the
+# glob so a bare `docker build` from the repo context still works, and every
+# podman build gets a file to match — empty, which the Dockerfile's `-s` test
+# reads exactly as "no CA", the same semantics `[ -s /run/secrets/cc_ca ]` had.
+#
+# The staged tree is REGENERABLE: it is deleted and rebuilt on every build, so a
+# CA from a previous run can never linger and the directory is safe to delete.
+# Contexts are small by design (deploy/pi/graphiti 56K including patches/ and
+# config.yaml, central_command/crawler 32K, the sandbox Dockerfile alone), so
+# `cp -R` is enough and rsync is not a dependency.
+#
+# Prints the staged directory on stdout.
+cc_stage_build_context() { # cc_stage_build_context <staged-dir> <ca-bundle|''> <source>...
+  local staged="$1" ca="$2"; shift 2
+  local src
+  rm -rf "$staged" || return 1
+  mkdir -p "$staged" || return 1
+  for src in "$@"; do
+    if [[ -d "$src" ]]; then
+      cp -R "$src/." "$staged/" || return 1
+    elif [[ -f "$src" ]]; then
+      cp "$src" "$staged/" || return 1
+    else
+      printf 'FATAL: build-context source not found: %s\n' "$src" >&2
+      return 1
+    fi
+  done
+  if [[ -n "$ca" ]]; then
+    cp "$ca" "$staged/cc-ca.crt" || return 1
+  else
+    : >"$staged/cc-ca.crt" || return 1
+  fi
+  chmod 644 "$staged/cc-ca.crt" 2>/dev/null || true
+  printf '%s' "$staged"
 }
 
 # The consumer list a WARN names, per command. Kept here so the phrasing is
