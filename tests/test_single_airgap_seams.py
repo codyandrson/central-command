@@ -326,6 +326,10 @@ RUNTIME_ONLY = {
     "CC_UPDATE_DIR",                           # api/update.py hands it to the runner
     "CC_ENV_LIB_LOADED",                       # env-lib.sh's own source guard
     "CC_QUESTIONS_LIB_LOADED",                 # questions-lib.sh's own source guard
+    # F25's print-once marker for the tls-insecure WARN: EXPORTED by
+    # cc_tls_insecure_warn_once once it has fired, read by every child process
+    # this run execs. A per-run fact, never an operator answer.
+    "CC_TLS_INSECURE_WARNED",
     # setup.sh's own LISTS, not answers: which keys are ports and which
     # credentials make-secrets.sh owns (v2.44.0's `check` reads both).
     "CC_PORT_KEYS", "CC_GENERATED_KEYS",
@@ -607,9 +611,15 @@ def test_every_command_that_sees_the_insecure_knob_says_so():
     ):
         text = script.read_text(encoding="utf-8")
         assert "tls-insecure" in text, f"{script.name}: no tls-insecure line"
-        assert "cc_tls_insecure_warn_text" in text or "TLS verification is OFF" in text, (
-            f"{script.name}: the insecure notice must use the shared wording"
-        )
+        # F25: the actual print moved behind cc_tls_insecure_warn_once (which
+        # builds the line from cc_tls_insecure_warn_text internally), so a
+        # caller may carry either name — or the literal wording, for the one
+        # site (discover-llm.sh) that keeps a hand-written fallback.
+        assert (
+            "cc_tls_insecure_warn_text" in text
+            or "cc_tls_insecure_warn_once" in text
+            or "TLS verification is OFF" in text
+        ), f"{script.name}: the insecure notice must use the shared wording"
         for line in text.splitlines():
             code = line.split("#", 1)[0]
             assert 'pass "tls-insecure"' not in code, (
@@ -1005,3 +1015,132 @@ def test_a_single_certificate_bundle_warns_while_a_public_source_is_reachable(tm
     # No bundle at all: the check has nothing to say.
     env.write_text("CC_CA_BUNDLE=\n")
     assert _check_ca_bundle_harness(env) == ""
+
+
+# ── F26: the loopback rule exempts registry mirrors and image pins ──────────
+def _loopback_check_harness(env_file: pathlib.Path) -> str:
+    """Run setup.sh's `loopback-addressing` check against one answer file.
+
+    setup.sh ends in `main "$@"`, so the check is lifted out by anchor and run
+    stand-alone, the same technique as `_check_ca_bundle_harness` above.
+    """
+    text = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    start = text.index("# 127.0.0.1, never localhost")
+    end = text.index("# schema.sql is bind-mounted", start)
+    body = text[start:end]
+    script = f"""
+set -uo pipefail
+ENV_FILE="{env_file}"
+pass() {{ printf 'PASS %s: %s\\n' "$1" "$2"; }}
+warn() {{ printf 'WARN %s: %s\\n' "$1" "$2"; }}
+run_check() {{
+{body}
+printf 'LH=[%s]\\n' "${{lh:-}}"
+}}
+run_check
+"""
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r.stdout
+
+
+def test_loopback_check_exempts_registry_mirror_and_image_pin_keys(tmp_path):
+    """A registry mirror published by the podman machine is addressed as
+    `localhost:5000` on purpose — the one spelling that reaches it from both
+    the Windows host and inside the machine (measured on the 2026-09-24
+    testbed; `127.0.0.1` does not). The loopback rule is about the APP's own
+    URLs, so CC_REGISTRY_*/CC_IMG_* must not trip it while an app key still
+    does."""
+    env = tmp_path / ".env"
+    env.write_text(
+        "CC_REGISTRY_DOCKERIO=localhost:5000\n"
+        "CC_REGISTRY_GHCR=localhost:5000\n"
+        "CC_REGISTRY_MCR=localhost:5000\n"
+        "CC_IMG_POSTGRES=localhost:5000/library/postgres:16\n"
+        "CC_API_HOST_URL=http://localhost:8080\n",
+        encoding="utf-8",
+    )
+    out = _loopback_check_harness(env)
+    assert "WARN loopback-addressing" in out, out
+    lh_line = next(l for l in out.splitlines() if l.startswith("LH="))
+    assert "CC_API_HOST_URL" in lh_line, lh_line
+    for exempt in ("CC_REGISTRY_DOCKERIO", "CC_REGISTRY_GHCR", "CC_REGISTRY_MCR", "CC_IMG_POSTGRES"):
+        assert exempt not in lh_line, f"{exempt} should be exempt from the loopback check: {lh_line}"
+
+    # No app key mentions localhost: PASS, even with every registry seam set.
+    env.write_text(
+        "CC_REGISTRY_DOCKERIO=localhost:5000\n"
+        "CC_IMG_POSTGRES=localhost:5000/library/postgres:16\n",
+        encoding="utf-8",
+    )
+    out = _loopback_check_harness(env)
+    assert "PASS loopback-addressing" in out, out
+    assert "WARN loopback-addressing" not in out, out
+
+
+# ── F25: a single run WARNs "tls-insecure" exactly once ─────────────────────
+def test_tls_insecure_warn_once_prints_exactly_one_line_per_run():
+    """A single `./setup.sh check` used to call `load_env` several times and
+    exec resolve-images.sh, the build scripts' dry runs and discover-llm.sh —
+    each printing its own `WARN tls-insecure` line, up to five for one fact
+    (F25, 2026-09-24 Windows testbed run). `cc_tls_insecure_warn_once` is the
+    one gate: exactly one WARN per run, never zero when the knob is on."""
+    r = subprocess.run(
+        ["bash", "-c",
+         f'. "{ENV_LIB.as_posix()}"; '
+         'cc_tls_insecure_warn_once x; '
+         'cc_tls_insecure_warn_once y || true'],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = [l for l in r.stdout.splitlines() if l.startswith("WARN tls-insecure")]
+    assert len(lines) == 1, r.stdout
+    assert "x" in lines[0] and "y" not in lines[0], lines[0]
+
+
+def test_tls_insecure_warn_once_is_inherited_by_a_child_process():
+    """The dedup has to reach across process boundaries: setup.sh execs
+    resolve-images.sh, the build scripts and discover-llm.sh as SEPARATE
+    processes, so the marker must be an EXPORTED variable, not a local one."""
+    script = f"""
+set -uo pipefail
+. "{ENV_LIB.as_posix()}"
+cc_tls_insecure_warn_once "parent"
+bash -c '. "{ENV_LIB.as_posix()}"; cc_tls_insecure_warn_once "child"' || true
+"""
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = [l for l in r.stdout.splitlines() if l.startswith("WARN tls-insecure")]
+    assert len(lines) == 1, r.stdout
+    assert "parent" in lines[0], lines[0]
+
+
+def test_a_standalone_script_still_warns_once():
+    """Nothing upstream has warned yet: the FIRST call still prints — this is a
+    print-ONCE gate, never a suppress-always one."""
+    r = subprocess.run(
+        ["bash", "-c", f'. "{ENV_LIB.as_posix()}"; cc_tls_insecure_warn_once solo'],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.count("WARN tls-insecure") == 1, r.stdout
+
+
+def test_every_tls_insecure_warn_site_routes_through_the_shared_gate():
+    """A new call site that prints its own `WARN tls-insecure` line instead of
+    going through `cc_tls_insecure_warn_once` reintroduces F25. Only
+    env-lib.sh's own definition, and discover-llm.sh's defensive fallback for
+    when env-lib.sh failed to source, may construct the line by hand."""
+    allowed_bare = {ROOT / "deploy" / "env-lib.sh", SINGLE / "discover-llm.sh"}
+    pattern = re.compile(r'(?:warn\s+"tls-insecure"|echo\s+"WARN tls-insecure)')
+    for script in SCRIPTS:
+        if script in allowed_bare:
+            continue
+        text = script.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            assert not pattern.search(code), (
+                f"{script.name}: prints its own tls-insecure WARN instead of routing "
+                "through cc_tls_insecure_warn_once (F25) — a run that touches this "
+                "script and another tls-insecure consumer would double-print"
+            )

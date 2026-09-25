@@ -47,7 +47,9 @@ set +a
 SECRETS_STATE_DIR="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT" 2>/dev/null)" || SECRETS_STATE_DIR=""
 cc_export_tls_env "$SECRETS_STATE_DIR"
 if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
-  echo "WARN tls-insecure: $(cc_tls_insecure_warn_text "openssl and any tool this script drives (it makes no network call of its own)")"
+  # The tls-insecure WARN is gated through cc_tls_insecure_warn_once (F25) — a
+  # run whose `setup.sh` invocation already warned prints nothing here.
+  cc_tls_insecure_warn_once "openssl and any tool this script drives (it makes no network call of its own)" || true
 fi
 
 # Set a variable in .env only if it is currently empty, generating a value.

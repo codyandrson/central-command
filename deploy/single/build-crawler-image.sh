@@ -81,7 +81,10 @@ cc_export_tls_env "$STATE_DIR"
 TLS_ARGS=()
 if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
   TLS_ARGS+=(--tls-verify=false --build-arg "CC_TLS_INSECURE=1")
-  echo "WARN tls-insecure: $(cc_tls_insecure_warn_text "this build's base-image pull and the apt/pip/npm fetches inside it")"
+  # The tls-insecure WARN is gated through cc_tls_insecure_warn_once (F25);
+  # `|| true` because this script runs under `set -e` and a suppressed
+  # (already-warned) run must not abort on the gate's 1.
+  cc_tls_insecure_warn_once "this build's base-image pull and the apt/pip/npm fetches inside it" || true
 fi
 CA_SRC=""
 if [[ -n "${CC_CA_BUNDLE:-}" ]]; then

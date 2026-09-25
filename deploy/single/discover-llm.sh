@@ -90,7 +90,14 @@ fi
 CURL_TLS=()
 if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
   CURL_TLS=(-k)
-  echo "WARN tls-insecure: TLS verification is OFF for this script's probes (curl)" >&2
+  # Gated through cc_tls_insecure_warn_once (F25) so a run whose setup.sh
+  # already warned doesn't print this a second time; `|| true` because this
+  # script runs under `set -e` and the gate's "already warned" return is 1.
+  if declare -F cc_tls_insecure_warn_once >/dev/null 2>&1; then
+    cc_tls_insecure_warn_once "this script's probes (curl)" >&2 || true
+  else
+    echo "WARN tls-insecure: TLS verification is OFF for this script's probes (curl)" >&2
+  fi
 fi
 
 # --proxy: same probes, one endpoint — this stack's own LiteLLM, addressed by

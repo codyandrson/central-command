@@ -91,8 +91,11 @@ tls_env_for_update() {
   set +a
   cc_export_tls_env "$STATE_DIR"
   if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
-    # Never silent, never a PASS.
-    warn "tls-insecure" "$(cc_tls_insecure_warn_text "git, uv, pip, npm, node and curl for this update, and the podman pulls/builds setup.sh performs from it")"
+    # Never silent, never a PASS. Gated through cc_tls_insecure_warn_once (F25)
+    # so this and the setup.sh run it triggers don't each print their own line.
+    local tls_consumers="git, uv, pip, npm, node and curl for this update, and the podman pulls/builds setup.sh performs from it"
+    logline "WARN tls-insecure: $(cc_tls_insecure_warn_text "$tls_consumers")"
+    cc_tls_insecure_warn_once "$tls_consumers" && WARNS=$((WARNS+1))
   fi
   return 0
 }

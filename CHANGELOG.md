@@ -4,6 +4,27 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-25 — v2.45.6: one warning per run, and the mirror is the only insecure thing
+
+Three cosmetic findings from the Windows testbed run, fixed:
+
+- **The `tls-insecure` WARN printed once per COMMAND** — five times in one
+  `check`, since every child script warned on its own. The rule stands
+  (with `CC_TLS_INSECURE=1` every run prints exactly one, never zero): the
+  first script to warn exports `CC_TLS_INSECURE_WARNED=1` through
+  `cc_tls_insecure_warn_once`, and every later script in the same run is
+  silent; a script run standalone still warns exactly once. Log files keep
+  every line.
+- **The loopback rule flagged a machine-local mirror.** `localhost:5000` is
+  the one spelling of a registry published by the podman machine that works
+  from both the Windows host and inside the machine, so `CC_REGISTRY_*` and
+  operator `CC_IMG_*` pins are exempt from the rule that keeps the app's own
+  URLs on `127.0.0.1`.
+- **The registries drop-in marked the PUBLIC registries insecure too.** With
+  the knob on, `insecure = true` now lands only on the mirror sub-table and
+  the direct mirror-host and pin-host blocks; the canonical prefix block keeps
+  its `location` (the v2.45.4 fix) and nothing else.
+
 ## 2026-09-24 — v2.45.5: a CA is not a secret, and a pin is honoured every run
 
 Scenario B of the Windows testbed run proved the CA route end to end on a real

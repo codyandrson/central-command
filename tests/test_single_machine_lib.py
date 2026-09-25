@@ -146,11 +146,17 @@ def test_a_url_shaped_seam_is_reduced_to_a_host():
     assert "https://" not in out
 
 
-def test_insecure_marks_the_prefix_the_mirror_and_the_mirror_host_directly():
+def test_insecure_marks_the_mirror_and_the_mirror_host_directly_not_the_canonical():
+    """F27 (2026-09-24 Windows testbed run): only the MIRROR needs
+    `insecure = true` — the canonical `[[registry]]` (docker.io etc) block
+    keeps `location` (F29's fix) but must not be marked insecure, or the
+    public registry loses verification along with the mirror the operator
+    actually chose to trust unverified."""
     out = run("cc_render_registries_conf",
               {"CC_REGISTRY_DOCKERIO": "mirror.corp.example", "CC_TLS_INSECURE": "1"})
-    assert out.count("insecure = true") == 3, out
-    # The third block is the one that actually matters: CC_REGISTRY_* rewrites
+    assert out.count("insecure = true") == 2, out
+    assert 'prefix = "docker.io"\nlocation = "docker.io"\n\n[[registry.mirror]]' in out
+    # The direct block is the one that actually matters: CC_REGISTRY_* rewrites
     # every ref to <mirror>/<path>, so the pull never goes through docker.io.
     assert '[[registry]]\nlocation = "mirror.corp.example"\ninsecure = true' in out
 

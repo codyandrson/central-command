@@ -45,8 +45,10 @@ set +a
 VERIFY_STATE="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT" 2>/dev/null)" || VERIFY_STATE=""
 cc_export_tls_env "$VERIFY_STATE"
 if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
-  # Never silent, never a PASS.
-  echo "WARN tls-insecure: $(cc_tls_insecure_warn_text "nothing this script probes (all of its checks are loopback HTTP) — it is ON for the acquisition and container seams the install uses; see .env.example's fan-out table")"
+  # Never silent, never a PASS. The tls-insecure WARN is gated through
+  # cc_tls_insecure_warn_once (F25) so a run whose setup.sh already warned
+  # prints nothing here.
+  cc_tls_insecure_warn_once "nothing this script probes (all of its checks are loopback HTTP) — it is ON for the acquisition and container seams the install uses; see .env.example's fan-out table"
 fi
 
 : "${CC_POD_PREFIX:=cc-}"

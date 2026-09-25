@@ -386,7 +386,13 @@ load_env() {
   # isolation), so this is the trade stated once per run — not a lecture, and
   # not a refusal.
   if [[ "$CC_TLS_INSECURE" == "1" ]]; then
-    warn "tls-insecure" "$(cc_tls_insecure_warn_text "curl, uv, pip, npm, node and git on this host; podman pulls and the three image builds (--tls-verify=false); the podman machine's registries drop-in; LiteLLM's outbound calls (SSL_VERIFY=False). NOT the speech engine — Hugging Face's client has no insecure switch, so that one needs CC_CA_BUNDLE or pre-placed snapshots")"
+    local tls_consumers="curl, uv, pip, npm, node and git on this host; podman pulls and the three image builds (--tls-verify=false); the podman machine's registries drop-in; LiteLLM's outbound calls (SSL_VERIFY=False). NOT the speech engine — Hugging Face's client has no insecure switch, so that one needs CC_CA_BUNDLE or pre-placed snapshots"
+    # load_env runs once per PHASE, so this fires on every one of them without
+    # the once-gate — that repetition (up to five WARN lines per `check`) is
+    # F25. cc_tls_insecure_warn_once prints (and logs) it exactly once per run,
+    # here and in every child script this run execs (deploy/env-lib.sh).
+    logline "WARN tls-insecure: $(cc_tls_insecure_warn_text "$tls_consumers")"
+    cc_tls_insecure_warn_once "$tls_consumers" && WARNS=$((WARNS+1))
   fi
   # ── the CA, for the two containers that talk upstream ─────────────────────
   # DERIVED, exported for compose, and never written into .env: they are
@@ -802,7 +808,16 @@ validate_answers() {
   # podman machine publishes IPv4-only. A fact about the ANSWER FILE's content,
   # so it lives with the other offline .env checks (it was in preflight until
   # v2.44.0, where `check`'s answers section is its home).
-  local lh; lh="$(grep -n 'localhost' "$ENV_FILE" | grep -v '^[0-9]*:#')"
+  #
+  # EXEMPT: CC_REGISTRY_DOCKERIO/_GHCR/_MCR and operator CC_IMG_* pins (F26,
+  # 2026-09-24 Windows testbed run). Those name a registry MIRROR — typically
+  # the one the podman machine itself publishes — and `localhost:5000` is the
+  # ONE spelling that reaches it from BOTH the Windows host and inside the
+  # machine; `127.0.0.1` does not reach the machine's published port the same
+  # way from inside it (measured on the testbed). The loopback rule is about
+  # the APP's own URLs, which this key never carries.
+  local lh; lh="$(grep -n 'localhost' "$ENV_FILE" | grep -v '^[0-9]*:#' \
+    | grep -vE '^[0-9]+:(CC_REGISTRY_(DOCKERIO|GHCR|MCR)|CC_IMG_[A-Za-z0-9_]+)=')"
   [[ -z "$lh" ]] \
     && pass "loopback-addressing" ".env uses 127.0.0.1 throughout" \
     || warn "loopback-addressing" ".env mentions localhost — use 127.0.0.1 (Windows resolves localhost to ::1 first)"

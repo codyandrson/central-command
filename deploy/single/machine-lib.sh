@@ -112,8 +112,15 @@ cc_render_registries_conf() {
     # accepts it. For a mirror, location == prefix: the canonical name is where
     # the ref would have gone, and [[registry.mirror]] below is where it goes
     # instead.
+    #
+    # `insecure` does NOT belong on this block (F27, 2026-09-24 Windows
+    # testbed run): this is the CANONICAL registry (docker.io etc), which
+    # still gets pulled from directly whenever the mirror is unreachable or a
+    # ref bypasses it — marking it insecure turns verification off for the
+    # PUBLIC registry too, not just the mirror this operator actually chose to
+    # trust unverified. Only the `[[registry.mirror]]` sub-table below (and the
+    # direct mirror-host / pin-host blocks further down) carry it.
     body="${body}location = \"${canon}\""$'\n'
-    (( insecure )) && body="${body}insecure = true"$'\n'
     body="${body}"$'\n'
     body="${body}[[registry.mirror]]"$'\n'
     body="${body}location = \"${host}\""$'\n'

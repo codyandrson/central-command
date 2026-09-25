@@ -124,8 +124,11 @@ PULL_TLS=()
 if [[ "$CC_TLS_INSECURE" == "1" ]]; then
   CURL_TLS=(-k)
   PULL_TLS=(--tls-verify=false)
-  (( SELFTEST )) || warn "tls-insecure" \
-    "$(cc_tls_insecure_warn_text "this script's registry probes (curl) and its fallback podman pull")"
+  if (( ! SELFTEST )); then
+    tls_consumers="this script's registry probes (curl) and its fallback podman pull"
+    logline "WARN tls-insecure: $(cc_tls_insecure_warn_text "$tls_consumers")"
+    cc_tls_insecure_warn_once "$tls_consumers" && WARNS=$((WARNS+1))
+  fi
 fi
 
 # ── .env writers (copied verbatim from setup.sh: printf/read are BUILTINS, so

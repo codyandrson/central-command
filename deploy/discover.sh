@@ -268,8 +268,10 @@ load_conf() {
   [[ "${DISCO_NETRC:-0}" == 1 ]] && CURL_FLAGS+=(--netrc)
   if [[ "${DISCO_INSECURE:-0}" == 1 ]]; then
     CURL_FLAGS+=(-k)
-    # Never silent, never a PASS (2026-09-23 design record, D4).
-    warn "tls-insecure" "$(cc_tls_insecure_warn_text "every probe below (curl -k). The same key turns it off for the install's acquisition toolchain, podman pulls/builds and LiteLLM — see .env.example's fan-out table. CC_CA_BUNDLE is the alternative that keeps the chain verifiable")"
+    # Never silent, never a PASS (2026-09-23 design record, D4). The
+    # tls-insecure WARN is gated through cc_tls_insecure_warn_once (F25) so a
+    # run that also touches setup.sh doesn't print the same fact twice.
+    cc_tls_insecure_warn_once "every probe below (curl -k). The same key turns it off for the install's acquisition toolchain, podman pulls/builds and LiteLLM — see .env.example's fan-out table. CC_CA_BUNDLE is the alternative that keeps the chain verifiable" && WARNS=$((WARNS+1))
   fi
   return 0
 }

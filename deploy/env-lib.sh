@@ -469,6 +469,29 @@ cc_tls_insecure_warn_text() { # cc_tls_insecure_warn_text <consumers>
   printf 'CC_TLS_INSECURE=1 — TLS verification is OFF for %s' "$1"
 }
 
+# The ONE gate a tls-insecure WARN passes through (F25, 2026-09-24 Windows
+# testbed run — a single `./setup.sh check` calls `load_env` several times and
+# execs resolve-images.sh, the three build scripts' dry runs and
+# discover-llm.sh, each printing its own WARN: up to five identical lines for
+# one fact). CC_TLS_INSECURE_WARNED is EXPORTED once printed, so it is
+# inherited by every child process this run execs — the fix reaches across
+# process boundaries for free — while a script run STANDALONE (nothing has
+# warned yet) still gets its one warning.
+#
+# Prints "WARN tls-insecure: <text>" on stdout — the same shape every caller
+# already produced via its own `warn "tls-insecure" "$(cc_tls_insecure_warn_text
+# ...)"` or `echo "WARN tls-insecure: ..."` — so a caller that greps its own
+# output or a log file for that line sees it unchanged. Returns 0 when it
+# printed (a caller that keeps its own WARNS counter for the exit-code
+# protocol should bump it then), 1 when a WARN already fired this run (nothing
+# printed, counter left alone).
+cc_tls_insecure_warn_once() { # cc_tls_insecure_warn_once <consumers>
+  [[ "${CC_TLS_INSECURE_WARNED:-0}" == "1" ]] && return 1
+  printf 'WARN tls-insecure: %s\n' "$(cc_tls_insecure_warn_text "$1")"
+  export CC_TLS_INSECURE_WARNED=1
+  return 0
+}
+
 # ── the LLM catalog, declared in .env (D3) ──────────────────────────────────
 # Until v2.44.0 every LiteLLM alias was created as a PLACEHOLDER row and the
 # operator filled provider, model id and key in the proxy's web UI while setup
