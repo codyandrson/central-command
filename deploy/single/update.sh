@@ -271,7 +271,69 @@ cmd_import() {
   # of scope (found by the one-command-path test, 2026-08-28).
   trap 'git -C "$REPO_ROOT" worktree remove --force "${tmp:-/nonexistent}/wt" >/dev/null 2>&1; git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1; rm -rf "${tmp:-/nonexistent}"; trap - RETURN' RETURN
 
-  step "unzip" "archive unpacked" unzip -q "$zip" -d "$tmp/x" || return 1
+  # ── docs/vendor: skipped when it has not changed (ledger F19) ─────────────
+  # `docs/vendor/` is 47,225 of the repo's 48,420 tracked files (~553 MB) and it
+  # MUST stay inside the release zip — on the air-gapped target it is the only
+  # offline reference there will ever be (docs/vendor/README.md). Almost no
+  # release changes it, and unpacking + `git rm` + tar-copying + re-adding it
+  # took over 70 minutes on NTFS with Defender (Windows testbed, 2026-09-24) for
+  # a tree `git clone` writes in four.
+  #
+  # So the subtree carries its own fingerprint, `docs/vendor/MANIFEST`
+  # (scripts/vendor_manifest.sh), and this import skips the whole subtree when
+  # the zip's fingerprint equals the deployed one. WHY THAT IS SOUND: the
+  # manifest is a sha256 over the BLOB HASH of every tracked path under
+  # docs/vendor, so equal manifests mean identical trees — there is no third
+  # state. And a zip built from a tree whose MANIFEST was stale never ships:
+  # `tests/test_vendor_manifest.py` fails the suite before it can be released.
+  # A missing manifest on either side (a pre-F19 release, either direction) is
+  # the full path, with a WARN.
+  #
+  # The zip's wrapper directory is derived from an entry we KNOW the name of,
+  # never from "the first entry" — a zip listing starts wherever its author's
+  # tool started. Not every unzip carries zipinfo (`-Z1`): busybox's does not, so
+  # `-l` is the fallback and an archive neither can list falls through to the
+  # full path rather than failing — the shape check after unpacking is the gate.
+  local zip_prefix zip_sch vend_deployed vend_zip
+  zip_sch="$(unzip -Z1 "$zip" '*central_command/db/schema.sql' 2>/dev/null | head -1 | tr -d '\r')"
+  [[ -n "$zip_sch" ]] || zip_sch="$(unzip -l "$zip" 2>/dev/null | awk '{print $NF}' \
+      | grep -m1 'central_command/db/schema\.sql$' | tr -d '\r')"
+
+  local -a unzip_x=() vendor_keep=()
+  if [[ -z "$zip_sch" ]]; then
+    warn "vendor-docs" "cannot list this archive's entries — full sync"
+  else
+    zip_prefix="${zip_sch%central_command/db/schema.sql}"   # "" or "<repo>-<ref>/"
+    vend_deployed="$(G show "upstream:docs/vendor/MANIFEST" 2>/dev/null | tr -d ' \t\r\n')"
+    vend_zip="$(unzip -p "$zip" "${zip_prefix}docs/vendor/MANIFEST" 2>/dev/null | tr -d ' \t\r\n')"
+    if [[ -z "$vend_deployed" || -z "$vend_zip" ]]; then
+      warn "vendor-docs" "no manifest on one side — full sync"
+    elif [[ "$vend_deployed" == "$vend_zip" ]]; then
+      # Keep MANIFEST itself out of the unzip too: it is equal by definition.
+      unzip_x=(-x "${zip_prefix}docs/vendor/*")
+      vendor_keep=(':!docs/vendor')
+      pass "vendor-docs" "unchanged since the deployed release (manifest match) — $(G ls-files -- docs/vendor | grep -c .) files skipped"
+    else
+      pass "vendor-docs" "changed — full sync"
+    fi
+  fi
+
+  # ── unzip, with its stderr treated as failure (ledger F20) ────────────────
+  # `unzip` printed `symlink error: No such file or directory` and exited 0 on
+  # the 2026-09-24 Windows run, so an imported tree could silently lose a link —
+  # and docs/vendor really does carry symlink entries (git mode 120000). A
+  # warning here means the tree on disk is not the tree in the archive, which is
+  # exactly what an import may not guess about: stop, and let the operator
+  # re-fetch the zip.
+  local uz_err="$tmp/unzip.err" urc=0
+  note "--> unzip -q $zip ${unzip_x[*]:-} -d $tmp/x"
+  unzip -q "$zip" ${unzip_x[@]+"${unzip_x[@]}"} -d "$tmp/x" 2>"$uz_err"; urc=$?
+  if (( urc != 0 )) || [[ -s "$uz_err" ]]; then
+    local uz_msg; uz_msg="$(head -1 "$uz_err" 2>/dev/null)"
+    fail "unzip" "${uz_msg:-unzip exited $urc with no message} — the archive did not unpack cleanly (unzip reports a bad entry and still exits 0), so the tree on disk is not the release; re-download the source zip and re-run"
+    return 1
+  fi
+  pass "unzip" "archive unpacked"
 
   # GitHub zips wrap everything in a single `<repo>-<ref>/` directory.
   local src="$tmp/x" entries=()
@@ -283,10 +345,12 @@ cmd_import() {
   G worktree prune >/dev/null 2>&1   # a crashed prior import leaves a stale registration behind
   step "worktree" "pristine \`upstream\` checked out aside" G worktree add -q "$tmp/wt" upstream || return 1
   # Wipe tracked files FIRST so files the new release deleted actually go
-  # away — unpacking on top would silently keep them alive forever.
-  git -C "$tmp/wt" rm -rfq -- . >/dev/null 2>&1 || true
+  # away — unpacking on top would silently keep them alive forever. The
+  # `:!docs/vendor` pathspec is present only when the manifests matched.
+  git -C "$tmp/wt" rm -rfq -- . ${vendor_keep[@]+"${vendor_keep[@]}"} >/dev/null 2>&1 || true
   step "unpack" "new tree staged over \`upstream\`" \
-    bash -c '(cd "$1" && tar cf - .) | (cd "$2" && tar xf -)' _ "$src" "$tmp/wt" || return 1
+    bash -c '(cd "$1" && tar cf - ${3:+--exclude="$3"} .) | (cd "$2" && tar xf -)' \
+      _ "$src" "$tmp/wt" "${vendor_keep[0]:+./docs/vendor}" || return 1
   git -C "$tmp/wt" add -A
   if [[ -z "$(git -C "$tmp/wt" status --porcelain)" ]]; then
     pass "import" "no changes — \`upstream\` already matches $(basename "$zip")"

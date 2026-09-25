@@ -248,6 +248,7 @@ def _graphiti_up() -> bool:
         return False
 
 
+@pytest.mark.graph_live
 @pytest.mark.skipif(not _graphiti_up(), reason="cc-graphiti not reachable")
 async def test_live_fact_search_round_trips_and_is_well_shaped():
     # A broken transport raises GraphitiError; an empty corpus returns []. Both

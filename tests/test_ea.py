@@ -221,6 +221,7 @@ async def test_an_empty_window_says_so_rather_than_reaching_further_back():
 # --- the attention loop, end to end -------------------------------------------
 
 
+@pytest.mark.graph_live
 async def test_fire_to_lane_to_conclude_to_resume_to_gated_proposal(monkeypatch):
     """The whole slice, on demo models, through the shared machinery only."""
     from central_command.api import nerve_gateway
@@ -306,6 +307,7 @@ async def test_fire_to_lane_to_conclude_to_resume_to_gated_proposal(monkeypatch)
     )
 
 
+@pytest.mark.graph_live
 async def test_proposing_before_concluding_leaves_a_recoverable_lane(monkeypatch):
     """CONCLUDE BEFORE PROPOSE is charter doctrine with NO mechanism behind it,
     so this test documents the seam rather than asserting a guard exists.

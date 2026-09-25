@@ -319,6 +319,10 @@ RUNTIME_ONLY = {
     # containers.conf path is not the operator's choice.
     "CC_MACHINE_REGISTRIES_CONF", "CC_MACHINE_PROXY_CONF", "CC_MACHINE_CA_PEM",
     "CC_MACHINE_LIB_LOADED",
+    # ...and the memory bar its verdict judges against (ledger F6). A threshold
+    # the product decided, not a question: raising it would change what `check`
+    # PASSES, which is a release decision rather than a site's answer.
+    "CC_MEM_WANT_GB", "CC_MEM_BAR_MIB",
     "CC_VERIFY_LIVE", "CC_VERIFY_MAX_WAIT",   # verify.sh: which checks to run
     "CC_PROBE_TIMEOUT",                        # a slow backend, for one run
     "CC_SKIP_DB_BACKUP", "CC_BACKUP_DIR",      # update.sh's deliberate opt-outs

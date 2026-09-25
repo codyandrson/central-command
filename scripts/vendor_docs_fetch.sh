@@ -56,3 +56,12 @@ subpaths: [${subpaths[*]}]
 EOF
 
 echo "Vendored into $dest"
+
+# The fingerprint `update.sh import` compares to decide whether it can skip
+# this 47k-file subtree entirely (ledger F19). Regenerating it here is what
+# keeps the committed MANIFEST honest; tests/test_vendor_manifest.py fails the
+# suite if a fetch ever lands without it. The digest is computed from the INDEX
+# (blob hashes git already has), so what this fetch just wrote has to be staged
+# first — an explicit path, never `git add -A`.
+git -C "$root" add -- "docs/vendor/$name"
+"$root/scripts/vendor_manifest.sh"

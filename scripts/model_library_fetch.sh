@@ -157,3 +157,9 @@ EOF
 
 echo "Model library fetched into $dest"
 du -sh "$dest"
+
+# Same fingerprint the docs fetcher regenerates — see scripts/vendor_manifest.sh
+# (ledger F19: the importer skips docs/vendor when it has not changed). Computed
+# from the index, so stage this directory first — an explicit path, never -A.
+git -C "$root" add -- "docs/vendor/model-library"
+"$root/scripts/vendor_manifest.sh"

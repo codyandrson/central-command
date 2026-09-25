@@ -961,15 +961,27 @@ preflight_host() {
     warn "node-version" "node not found — the cockpit build will be skipped (the API still runs)"
   fi
 
-  # RAM/disk: informational on anything that is not Linux (podman machine's
-  # reported memory is meaningless on WSL2 — 2026-08-21 W-notes).
+  # RAM: on a machine-backed podman the number that matters is the MACHINE's,
+  # not this host's — every container runs inside it, so /proc/meminfo answers
+  # about the wrong computer and a 16 GB laptop with the default 2 GiB machine
+  # passed a check it should have failed (ledger F6, Windows testbed
+  # 2026-09-24). The host figure stays, as a note. The verdict itself lives in
+  # machine-lib.sh so it can be unit-tested where no machine exists.
+  local host_gb="" mach_mib="" mem_verdict
   if [[ -r /proc/meminfo ]]; then
-    local kb gb; kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"; gb=$(( kb / 1024 / 1024 ))
-    (( gb >= 4 )) && pass "memory" "${gb} GB total" \
-      || warn "memory" "${gb} GB total — the stack wants ~3 GB plus your own workload"
-  else
-    warn "memory" "cannot read total memory here — need ~3 GB for the stack"
+    local kb; kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"
+    [[ "$kb" =~ ^[0-9]+$ ]] && host_gb=$(( kb / 1024 / 1024 ))
   fi
+  local mmem_machine; mmem_machine="$(machine_name)"
+  if [[ -n "$mmem_machine" ]]; then
+    # Read-only (check EXECUTES nothing). MiB — see cc_memory_verdict's header.
+    mach_mib="$(podman machine inspect --format '{{.Resources.Memory}}' "$mmem_machine" 2>/dev/null | head -1 | tr -d ' \r')"
+  fi
+  mem_verdict="$(cc_memory_verdict "$host_gb" "$mach_mib")"
+  case "$mem_verdict" in
+    PASS\ *) pass "memory" "${mem_verdict#PASS }" ;;
+    *)       warn "memory" "${mem_verdict#WARN }" ;;
+  esac
   local freegb
   freegb="$(df -Pk "$REPO_ROOT" 2>/dev/null | awk 'NR==2{print int($4/1024/1024)}')"
   if [[ "$freegb" =~ ^[0-9]+$ ]] && (( freegb >= 20 )); then

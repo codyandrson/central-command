@@ -236,6 +236,7 @@ def stub_task(monkeypatch):
     return seen
 
 
+@pytest.mark.graph_live
 @needs_pg
 async def test_the_digest_asks_for_tomorrow_and_the_check_in_for_today(
     monkeypatch, stub_task
@@ -254,6 +255,7 @@ async def test_the_digest_asks_for_tomorrow_and_the_check_in_for_today(
     )
 
 
+@pytest.mark.graph_live
 @needs_pg
 async def test_the_brief_carries_the_calendar_and_says_it_is_read_only(
     monkeypatch, stub_task
@@ -271,6 +273,7 @@ async def test_the_brief_carries_the_calendar_and_says_it_is_read_only(
     assert block["calendar"]["event_count"] == 1
 
 
+@pytest.mark.graph_live
 @needs_pg
 async def test_an_unconfigured_calendar_leaves_the_brief_alone(
     monkeypatch, stub_task
@@ -286,6 +289,7 @@ async def test_an_unconfigured_calendar_leaves_the_brief_alone(
     assert "REAL calendar" not in brief
 
 
+@pytest.mark.graph_live
 @needs_pg
 async def test_a_calendar_outage_degrades_the_contact_but_never_cancels_it(
     monkeypatch, stub_task

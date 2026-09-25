@@ -645,6 +645,7 @@ async def ea_stubs(monkeypatch):
     yield calls
 
 
+@pytest.mark.graph_live
 @needs_pg
 async def test_ea_contact_hands_the_agent_a_fenced_data_block(monkeypatch, ea_stubs):
     """Zero tool calls to produce the numbers: the snapshot rides the brief."""
@@ -665,6 +666,7 @@ async def test_ea_contact_hands_the_agent_a_fenced_data_block(monkeypatch, ea_st
     assert delivered and delivered[0]["payload"]["kind"] == "digest"
 
 
+@pytest.mark.graph_live
 @needs_pg
 async def test_the_window_anchors_on_delivery_not_on_last_fired(monkeypatch, ea_stubs):
     """`engine.fire` stamps `last_fired_at` BEFORE the action, so the schedule

@@ -147,3 +147,159 @@ def test_unhealthy_restart_is_a_loud_failure(rig, tmp_path):
     assert proc.returncode == 1
     assert status["state"] == "failed"
     assert status["phase"] == "restart"
+
+
+# ── `update.sh import`: the docs/vendor skip (F19) and unzip's silent warning
+# (F20) ─────────────────────────────────────────────────────────────────────
+#
+# `docs/vendor/` is 47k of the repo's 48k tracked files and MUST ship inside the
+# zip (it is the air-gapped box's only offline reference), yet almost no release
+# changes it — unpacking, `git rm`-ing, tar-copying and re-adding it took over
+# 1.5 h on NTFS with Defender (Windows testbed, 2026-09-24). The importer now
+# compares `docs/vendor/MANIFEST` and skips the subtree when it matches.
+#
+# These run the REAL deploy/single/update.sh against a tiny fake repo built here
+# — a handful of files, not the actual 553 MB tree.
+
+UPDATE_SRC = Path(__file__).resolve().parents[1] / "deploy" / "single" / "update.sh"
+ENV_LIB_SRC = Path(__file__).resolve().parents[1] / "deploy" / "env-lib.sh"
+
+
+def _make_zip(tmp_path, name: str, *, manifest: str | None, extra: dict[str, str]) -> Path:
+    """A GitHub-shaped source zip (`<repo>-<ref>/` wrapper) with a tiny tree."""
+    import zipfile
+
+    files = {
+        "central_command/db/schema.sql": "-- schema\n",
+        "VERSION": "version=2.0.0\n",
+        "docs/vendor/big.txt": "vendored\n",
+        **extra,
+    }
+    if manifest is not None:
+        files["docs/vendor/MANIFEST"] = manifest
+    zp = tmp_path / name
+    with zipfile.ZipFile(zp, "w") as z:
+        for rel, body in files.items():
+            z.writestr(f"central-command-v2/{rel}", body)
+    return zp
+
+
+@pytest.fixture()
+def deployment(tmp_path):
+    """A fake zip-installed deployment: the two branches update.sh expects."""
+    repo = tmp_path / "dep"
+    (repo / "central_command" / "db").mkdir(parents=True)
+    (repo / "docs" / "vendor").mkdir(parents=True)
+    (repo / "deploy" / "single").mkdir(parents=True)
+    (repo / "central_command" / "db" / "schema.sql").write_text("-- schema\n")
+    (repo / "VERSION").write_text("version=1.0.0\n")
+    (repo / "docs" / "vendor" / "big.txt").write_text("vendored\n")
+    (repo / "docs" / "vendor" / "MANIFEST").write_text("sha256:" + "a" * 64 + "\n")
+    (repo / ".env").write_text(f"CC_STATE_DIR={tmp_path / 'state'}\n")
+    shutil.copyfile(UPDATE_SRC, repo / "deploy" / "single" / "update.sh")
+    shutil.copyfile(ENV_LIB_SRC, repo / "deploy" / "env-lib.sh")
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                              check=True)
+
+    git("init", "-q", ".")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    git("checkout", "-qb", "local")
+    git("add", "-A")
+    git("commit", "-qm", "baseline")
+    git("branch", "upstream")
+    return repo
+
+
+def _import(repo: Path, zip_path: Path, extra_path: str | None = None):
+    from central_command.api.update import _bash
+
+    env = {"PATH": os.pathsep.join([p for p in ([extra_path] if extra_path else [])
+                                   + ["/usr/bin", "/bin"]]),
+           "HOME": str(repo.parent)}
+    return subprocess.run(
+        [_bash() or "bash", str(repo / "deploy" / "single" / "update.sh"), "import", str(zip_path)],
+        capture_output=True, text=True, timeout=120, env=env, cwd=str(repo),
+    )
+
+
+def _tracked(repo: Path, ref: str) -> list[str]:
+    out = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", "--name-only", ref],
+                         capture_output=True, text=True, check=True)
+    return sorted(out.stdout.split())
+
+
+def test_an_equal_manifest_skips_the_vendor_subtree(deployment, tmp_path):
+    """The zip deliberately carries an EXTRA vendored file under a MANIFEST that
+    still matches the deployed one — a lie no real release can tell (the guard
+    test tests/test_vendor_manifest.py fails the suite before such a zip could be
+    built). It is the only way to OBSERVE the skip from outside: if the importer
+    unpacked docs/vendor, that file would land on `upstream`."""
+    zp = _make_zip(tmp_path, "equal.zip",
+                   manifest="sha256:" + "a" * 64 + "\n",
+                   extra={"docs/vendor/sneaked.txt": "must not arrive\n",
+                          "NEWFILE.txt": "a real change\n"})
+    proc = _import(deployment, zp)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PASS vendor-docs: unchanged since the deployed release (manifest match)" in proc.stdout
+    tracked = _tracked(deployment, "upstream")
+    assert "NEWFILE.txt" in tracked, "the rest of the release must still import"
+    assert "docs/vendor/sneaked.txt" not in tracked, (
+        "docs/vendor was unpacked/synced even though the manifests matched"
+    )
+    # ...and the deployed copy is untouched, byte for byte.
+    assert "docs/vendor/big.txt" in tracked and "docs/vendor/MANIFEST" in tracked
+
+
+def test_a_different_manifest_syncs_the_whole_subtree(deployment, tmp_path):
+    zp = _make_zip(tmp_path, "changed.zip",
+                   manifest="sha256:" + "b" * 64 + "\n",
+                   extra={"docs/vendor/added.txt": "a refetched doc\n"})
+    proc = _import(deployment, zp)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PASS vendor-docs: changed — full sync" in proc.stdout
+    assert "docs/vendor/added.txt" in _tracked(deployment, "upstream")
+
+
+def test_no_manifest_on_one_side_warns_and_syncs(deployment, tmp_path):
+    """A pre-F19 release, either direction: the fast path is not available and
+    saying so is the point — a silent skip there would be a wrong tree."""
+    zp = _make_zip(tmp_path, "old.zip", manifest=None,
+                   extra={"docs/vendor/added.txt": "a refetched doc\n"})
+    proc = _import(deployment, zp)
+    assert proc.returncode == 2, proc.stdout + proc.stderr   # WARN -> exit 2
+    assert "WARN vendor-docs: no manifest on one side — full sync" in proc.stdout
+    assert "docs/vendor/added.txt" in _tracked(deployment, "upstream")
+
+
+def test_an_unzip_warning_fails_the_import_even_at_exit_zero(deployment, tmp_path):
+    """F20: unzip printed `symlink error: No such file or directory` and exited 0
+    on the 2026-09-24 run, so an imported tree could silently lose a link — and
+    docs/vendor really does carry symlink entries. A stub stands in for it,
+    because this host's unzip does not warn about a dangling link (and a warning
+    we cannot reproduce is still one an import must never swallow)."""
+    real = shutil.which("unzip")
+    assert real, "needs a real unzip to stand behind the stub"
+    stub_bin = tmp_path / "stub"
+    stub_bin.mkdir()
+    # The listing/read invocations (-Z1, -p) must keep working: the manifest
+    # comparison happens BEFORE the unpack, and stubbing it out would test
+    # nothing. Only the extraction is replaced.
+    (stub_bin / "unzip").write_text(
+        "#!/usr/bin/env bash\n"
+        'for a in "$@"; do case "$a" in -Z1|-p) exec ' + real + ' "$@" ;; esac; done\n'
+        'echo "   skipping: link1  symlink error: No such file or directory" >&2\n'
+        "exit 0\n"
+    )
+    (stub_bin / "unzip").chmod(0o755)
+    zp = _make_zip(tmp_path, "sym.zip", manifest="sha256:" + "b" * 64 + "\n", extra={})
+    proc = _import(deployment, zp, extra_path=str(stub_bin))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "FAIL unzip: " in proc.stdout
+    assert "symlink error" in proc.stdout
+    # Nothing was committed: `upstream` still holds the deployed tree.
+    assert "docs/vendor/big.txt" in _tracked(deployment, "upstream")
+    assert subprocess.run(["git", "-C", str(deployment), "log", "-1", "--format=%s", "upstream"],
+                          capture_output=True, text=True).stdout.strip() == "baseline"

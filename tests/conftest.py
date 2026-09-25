@@ -140,6 +140,57 @@ def no_live_graph_writes():
         neo4j_writer._write = real_write
 
 
+# ── the live-graph preflight (ledger F40) ───────────────────────────────────
+# The graph guard above deliberately lets live READS run: a fake proves nothing
+# about whether the SSE envelope parses and the result decodes. But every one of
+# those reads embeds its query through LiteLLM to an external backend, and when
+# that backend is off they do not fail — they HANG. Measured 2026-09-24: nine
+# tests sat at the 90 s ceiling with `--timeout`, and without one they wait for
+# hours. The Windows testbed's "11-hour suite" was almost certainly this.
+#
+# So the read path is probed ONCE per session, with a hard 10 s budget, and every
+# test marked `graph_live` is SKIPPED when it does not answer. A skip is the
+# honest outcome — it shows in the summary, so the releaser reads "the backend
+# was down", not "the graph tests passed". `timeout = 120` in pyproject.toml is
+# the backstop for everything this marker does not know about.
+#
+# The probe is the cheapest call the marked tests themselves make (the same
+# `search_facts` round-trip as tests/test_graph.py's live fact search), because a
+# cheaper probe would answer for the wrong component: `get_status` returns fine
+# with the embedder dead, which is exactly the state that hangs.
+GRAPH_PREFLIGHT_SECS = 10.0
+GRAPH_DOWN_REASON = (
+    "graph backend did not answer within 10 s (embedder/LLM offline?) "
+    "— live graph reads skipped"
+)
+
+
+def _graph_read_ok() -> bool:
+    async def probe() -> bool:
+        try:
+            await asyncio.wait_for(
+                graphiti.search_facts("preflight", max_facts=1), GRAPH_PREFLIGHT_SECS
+            )
+            return True
+        except Exception:  # noqa: BLE001 — timeout, connect error, no Postgres for the scope read
+            return False
+
+    try:
+        return asyncio.run(probe())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+    """Probe the live graph read path once, and only if something needs it."""
+    live = [item for item in items if item.get_closest_marker("graph_live")]
+    if not live or _graph_read_ok():
+        return
+    skip = pytest.mark.skip(reason=GRAPH_DOWN_REASON)
+    for item in live:
+        item.add_marker(skip)
+
+
 def _switch_to_test_database() -> None:
     """Point the whole suite at a dedicated database, creating it if needed.
 

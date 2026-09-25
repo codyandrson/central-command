@@ -20,7 +20,7 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 - `master` is the only branch — no `main`. A feature branch is a deliberate choice to raise with the operator, not a default.
 - A release is three things: a CHANGELOG entry, a `VERSION` bump, a tag. The updaters read `VERSION` as the installed version — not git, not the tag; `tests/test_version_file.py` pins it to the newest CHANGELOG heading.
 - Never change `LITELLM_SALT_KEY` or `N8N_ENCRYPTION_KEY`; they encrypt the stored LiteLLM virtual keys and the Gmail OAuth credential, and a restore under a different key leaves the rows present but undecryptable.
-- Never edit `docs/vendor/` (refetch via `scripts/vendor_docs_fetch.sh`) or hand-create anything in `servers/` (it arrives only through an approved `mcp.sync_source`). Regenerating `requirements.lock` is a deliberate act.
+- Never edit `docs/vendor/` (refetch via `scripts/vendor_docs_fetch.sh`, which regenerates the `docs/vendor/MANIFEST` fingerprint `update.sh import` reads to skip those 47k files — `scripts/vendor_manifest.sh`, guarded by `tests/test_vendor_manifest.py`) or hand-create anything in `servers/` (it arrives only through an approved `mcp.sync_source`). Regenerating `requirements.lock` is a deliberate act.
 
 ## Where things are
 

@@ -246,9 +246,14 @@ async def update_status() -> JSONResponse:
 def _run_update_sh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [_bash() or "bash", str(SINGLE_DIR / "update.sh"), *args],
-        # 600 s killed a stage mid-plan on a Windows box where import alone is
-        # ~13 min (unzip + tar of docs/vendor, 2026-09-18). The script's own
-        # gates bound the work; this is a last-resort ceiling, not a budget.
+        # 600 s killed a stage mid-plan on a Windows box where import alone was
+        # ~13 min (2026-09-18), and over 1.5 h on the 2026-09-24 run — all of it
+        # unzip + `git rm` + tar of docs/vendor's 47k files. Since the F19 fix the
+        # importer SKIPS that subtree when its MANIFEST matches the deployed one
+        # (ledger F19), so a typical import is now the ~1k files that actually
+        # changed; the hour-plus case is a release that really did refetch the
+        # vendored docs. The ceiling stays generous for exactly that case: the
+        # script's own gates bound the work, this is a last resort, not a budget.
         capture_output=True, text=True, cwd=str(SINGLE_DIR), timeout=3600,
     )
 

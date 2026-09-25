@@ -233,6 +233,64 @@ def test_the_libraries_parse(script: pathlib.Path):
     subprocess.run([bash(), "-n", script.name], cwd=script.parent, check=True)
 
 
+# ── the memory verdict (ledger F6) ──────────────────────────────────────────
+# `check` used to judge /proc/meminfo, which on a machine-backed podman is the
+# HOST's RAM — the wrong computer: the containers live inside the podman machine.
+# A 16 GB laptop with podman's default 2 GiB machine therefore PASSed a check it
+# should have failed (Windows testbed, 2026-09-24). No podman machine can exist
+# on this Linux box, so the DECISION is what gets tested, with the two numbers
+# stubbed in.
+
+
+def verdict(host_gb: str, machine_mib: str) -> str:
+    r = subprocess.run(
+        [bash(), "-c", f'. ./machine-lib.sh; cc_memory_verdict "{host_gb}" "{machine_mib}"'],
+        cwd=LIB.parent, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r.stdout.strip()
+
+
+def test_a_small_machine_warns_even_on_a_large_host():
+    out = verdict("16", "2048")
+    assert out.startswith("WARN ")
+    assert "podman machine has 2 GiB" in out
+    # The fix has to be in the line — `podman machine set` is not guessable.
+    assert "podman machine set --memory 4096" in out
+    assert "needs a machine restart" in out
+    # ...and the host figure survives as a NOTE, never as the verdict.
+    assert "16 GB" in out
+
+
+def test_a_big_enough_machine_passes_and_still_names_the_host():
+    out = verdict("16", "6144")
+    assert out.startswith("PASS ")
+    assert "6 GiB" in out and "16 GB" in out
+
+
+def test_no_machine_falls_back_to_the_hosts_own_memory():
+    """Bare Linux: the host IS the substrate, so /proc/meminfo is the right
+    number and the old rule stands unchanged."""
+    assert verdict("16", "") == "PASS 16 GB total"
+    out = verdict("2", "")
+    assert out.startswith("WARN 2 GB total")
+
+
+def test_neither_number_is_a_warn_not_a_pass():
+    out = verdict("", "")
+    assert out.startswith("WARN cannot read total memory")
+
+
+def test_the_machine_figure_is_read_in_mib_from_inspect():
+    """podman-machine-inspect(1) prints `Resources.Memory` in MiB (its own
+    example shows 6144 for a 6 GiB machine; podman-machine-set(1) documents
+    `--memory` as MB). If setup.sh ever divides it as bytes, every machine looks
+    like 0 GiB and the WARN becomes permanent."""
+    src = SETUP.read_text(encoding="utf-8")
+    assert "podman machine inspect --format '{{.Resources.Memory}}'" in src
+    assert "cc_memory_verdict" in src, "setup.sh must delegate the decision to machine-lib.sh"
+
+
 # ── two Windows-only seams, guarded by a source walk ────────────────────────
 # Both were found on the 2026-09-24 Windows testbed run, and neither can be
 # exercised on Linux: one needs `podman machine`, the other needs MSYS. The

@@ -94,6 +94,16 @@ testpaths = ["tests"]
 # test leaking state into its neighbour. `-n 4` (~2 min) passes cleanly —
 # conftest.py gives every xdist worker its own database — and is the quick
 # pass, opted into per run rather than made the default.
+#
+# The per-test ceiling is CONFIGURATION, not a flag somebody has to remember
+# (ledger F40): the suite's live graph reads embed through LiteLLM to an external
+# backend, and with that backend off they do not fail — they hang. The Windows
+# testbed's "11-hour suite" was almost certainly this. 120 s is far above the
+# slowest honest test and far below "nobody is watching any more".
+timeout = 120
+markers = [
+    "graph_live: performs a LIVE knowledge-graph read (embedder/LLM must answer). conftest's session preflight skips these when the backend does not answer within 10 s.",
+]
 
 [tool.ruff]
 line-length = 100

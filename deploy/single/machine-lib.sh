@@ -203,3 +203,54 @@ cc_machine_restart_needed() { # cc_machine_restart_needed <changed-item ...>
   (( need )) || return 1
   printf '%s' "podman machine set --import-native-ca takes effect at the machine's NEXT START (podman-machine-set(1): the host certificates are imported during machine startup) — run: podman machine stop && podman machine start"
 }
+
+# ── how much memory the STACK will actually get (ledger F6) ─────────────────
+# `check`'s memory probe read /proc/meminfo, which on a machine-backed podman
+# is the HOST's RAM — a fact about the wrong computer. Every container runs
+# inside the podman machine, so a 16 GB laptop with the default 2 GiB machine
+# passed a check it should have failed (Windows testbed, 2026-09-24).
+#
+# The machine figure comes from `podman machine inspect --format
+# '{{.Resources.Memory}}'` (podman-machine-inspect(1), verified 2026-09-25:
+# `Resources` holds `CPUs`, `DiskSize`, `Memory`, `USBs`). Its UNIT is MiB, not
+# bytes: podman-machine-set(1) documents `--memory` as "Memory (in MB)" and the
+# inspect example prints `Memory: 6144` for a 6 GiB machine — the word "bytes"
+# in that example's own format string is a documentation slip, and 6144 bytes is
+# not a machine anyone ran.
+#
+# Pure text, so it is testable where no podman machine can exist
+# (tests/test_single_machine_lib.py). Prints "<PASS|WARN> <message>".
+CC_MEM_WANT_GB=3        # what the stack wants for itself
+CC_MEM_BAR_MIB=4096     # ...and the bar, leaving room for the operator's own work
+
+cc_memory_verdict() { # cc_memory_verdict <host-gb|""> <machine-mib|"">
+  local host_gb="${1:-}" mach_mib="${2:-}" host_short="" host_long=""
+  if [[ "$host_gb" =~ ^[0-9]+$ ]]; then
+    host_short=" (host: ${host_gb} GB)"
+    host_long=" — note: the host itself has ${host_gb} GB, which is not what the containers get"
+  fi
+
+  if [[ "$mach_mib" =~ ^[0-9]+$ ]] && (( mach_mib > 0 )); then
+    local gib; gib="$(awk -v m="$mach_mib" 'BEGIN{g=m/1024; printf (g==int(g) ? "%d" : "%.1f"), g}')"
+    if (( mach_mib >= CC_MEM_BAR_MIB )); then
+      printf 'PASS the podman machine has %s GiB%s\n' "$gib" "$host_short"
+    else
+      printf 'WARN the podman machine has %s GiB — the stack wants ~%s GB; raise it with: podman machine set --memory %s (needs a machine restart)%s\n' \
+        "$gib" "$CC_MEM_WANT_GB" "$CC_MEM_BAR_MIB" "$host_long"
+    fi
+    return 0
+  fi
+
+  # No machine (bare Linux): the host IS the substrate, so /proc/meminfo is the
+  # right number — today's rule, unchanged.
+  if [[ "$host_gb" =~ ^[0-9]+$ ]]; then
+    if (( host_gb >= 4 )); then
+      printf 'PASS %s GB total\n' "$host_gb"
+    else
+      printf 'WARN %s GB total — the stack wants ~%s GB plus your own workload\n' "$host_gb" "$CC_MEM_WANT_GB"
+    fi
+    return 0
+  fi
+
+  printf 'WARN cannot read total memory here — need ~%s GB for the stack\n' "$CC_MEM_WANT_GB"
+}
