@@ -1054,7 +1054,14 @@ def pricing_from_catalog(entry: dict | None) -> dict:
     floats — `{}` when the catalog carries no pricing (OpenAI's and
     Anthropic's /v1/models do not; LiteLLM's cost map covers those via
     `base_model`). Pure. A zero is kept: a free model's price is 0, and
-    declaring it beats the cost map's guess."""
+    declaring it beats the cost map's guess.
+
+    A NEGATIVE price is not a price (2026-09-26): a gateway publishes `-1`
+    for a router whose cost depends on the model it picks (Kilo's
+    `kilo-auto/*`), and copied verbatim LiteLLM books minus one dollar per
+    token — three auto routers accumulated -$5,036 of spend from 42 probe
+    calls. Unknown pricing is an ABSENCE: leave the field out and let the
+    cost map (or nothing) decide."""
     pricing = (entry or {}).get("pricing")
     if not isinstance(pricing, dict):
         return {}
@@ -1064,9 +1071,12 @@ def pricing_from_catalog(entry: dict | None) -> dict:
         if raw is None or raw == "":
             continue
         try:
-            out[field] = float(raw)
+            price = float(raw)
         except (TypeError, ValueError):
             continue
+        if price < 0:
+            continue
+        out[field] = price
     return out
 
 

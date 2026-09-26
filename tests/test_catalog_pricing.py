@@ -46,6 +46,23 @@ def test_pricing_from_catalog_maps_openrouter_shape_to_litellm_fields():
     assert litellm_client.pricing_from_catalog({"pricing": {"prompt": "n/a"}}) == {}
 
 
+def test_a_negative_catalog_price_is_an_absence_not_a_price():
+    # Kilo publishes -1 for its auto routers (cost depends on the model the
+    # router picks); copied verbatim, LiteLLM booked -$1 per token
+    # (2026-09-26: -$5,036 across 42 probe calls). Drop it, keep the rest.
+    assert litellm_client.pricing_from_catalog({
+        "pricing": {"prompt": "-1", "completion": -1.0, "input_cache_read": "0.00000002"},
+    }) == {"cache_read_input_token_cost": 2e-8}
+    # The contract refuses the same sentinel on a hand-written draft.
+    bad = validate_action_args("litellm.add_model", {
+        "model_name": "auto", "model": "openai/kilo-auto/frontier",
+        "model_info": {"input_cost_per_token": -1, "output_cost_per_token": "-1.0"},
+    })
+    assert len(bad) == 2 and all("negative" in p for p in bad)
+    assert validate_action_args("litellm.update_model", {
+        "model_id": "x", "litellm_params": {"input_cost_per_token": -1}})
+
+
 def test_a_per_million_price_typed_as_per_token_is_refused_at_the_contract():
     bad = validate_action_args("litellm.add_model", {
         "model_name": "mercury-2.5", "model": "openai/inception/mercury-2.5",

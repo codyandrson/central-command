@@ -170,4 +170,11 @@ def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
                 f"TOKEN, not per million (a $2.00/1M card price is 2e-06). Leave cost "
                 f"fields out: the Executor copies them from the credential's catalog."
             )
+        elif number < 0:
+            # A gateway's "-1 = variable" sentinel is not a price: LiteLLM
+            # multiplies it by tokens and books negative spend (2026-09-26).
+            problems.append(
+                f"{capability}: {path}={value!r} is negative — an unknown price is an "
+                f"absence, not a sentinel. Leave the field out."
+            )
     return problems

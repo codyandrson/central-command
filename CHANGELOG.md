@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-26 — v2.48.1: a negative catalog price is an absence, not a price
+
+Three LiteLLM deployments carried `input_cost_per_token: -1.0` and
+`output_cost_per_token: -1.0`, and 42 capability-probe calls against them
+booked -$5,036 of spend — visible as a negative user total and negative rows in
+every daily spend table. The price came from the credential's catalog: a
+gateway publishes `-1` for a router whose cost depends on the model it picks
+(the `kilo-auto/*` routers), and `pricing_from_catalog()` copied any
+parseable number verbatim. The v2.33.0 ceiling guard only looked upward, at
+the per-million-typed-as-per-token mistake.
+
+- `integrations/litellm.pricing_from_catalog()` drops a negative price and
+  leaves that field undeclared — an unknown price is an absence LiteLLM's
+  cost map may fill, never a sentinel to multiply by tokens. A zero is still
+  kept (a free model's price is 0).
+- The contract's cost-field check refuses a negative value on a hand-written
+  `litellm.add_model` / `litellm.update_model` draft with the same message
+  shape the ceiling uses, so the model gets the problem back in one retry.
+- `tests/test_catalog_pricing.py` pins both layers.
+
+Repairing the rows already booked is operator data work, not code: zero the
+negative `LiteLLM_SpendLogs` and `LiteLLM_Daily{User,Team,Tag}Spend` rows and
+recompute the user total from the logs. No schema change.
+
 ## 2026-09-25 — v2.48.0: a native Exchange mailbox, behind the seams that already exist
 
 The second Central Command deployment lives on an air-gapped Windows network
