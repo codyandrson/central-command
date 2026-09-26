@@ -1,0 +1,101 @@
+{
+  "id": "gMh57mcPQJ2gfLa7",
+  "name": "cc-calendar-facade",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## cc-calendar-facade — the Central Command entry point\nMirrors `cc-email-facade` exactly: POST webhook → hardcoded token check on header `x-cc-token` → call the credential-holding lib. **No credentials live on this canvas.**\n\n### ✅ NO MANUAL STEPS — wired and active\n- Token is set in **Auth + unwrap** and matches `CC_CALENDAR_FACADE_TOKEN` in the repo-root `.env`.\n- **Call lib-google-calendar** is bound by id to `lib-google-calendar` (`GSyOmRlOCoyc9Nrh`).\n\nURL: `http://localhost:5678/webhook/cc-calendar-facade`\n\nthis façade serves list (ungated read) plus create_event / update_event / delete_event, which the Central Command Executor calls ONLY after the operator approved the proposal that named them. Nothing agent-side can reach this webhook.",
+        "height": 468,
+        "width": 732
+      },
+      "id": "note",
+      "name": "note_setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cc-calendar-facade",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ],
+      "webhookId": "b4493c91-4fbe-47ae-a1e3-4c721cad3673"
+    },
+    {
+      "parameters": {
+        "jsCode": "const TOKEN = '__CC_CALENDAR_FACADE_TOKEN__';\nconst item = $input.first().json;\nconst hdr = item.headers || {};\nconst supplied = hdr['x-cc-token'];\nif (supplied !== TOKEN) { throw new Error('cc-calendar-facade - unauthorized'); }\nconst body = item.body || {};\nif (!body || !body.mode) { throw new Error('cc-calendar-facade - missing mode'); }\n// Mode allowlist, never `!== ''`. The credential behind the lib is full-scope, so\n// this check is the boundary, not the OAuth scope. The three write modes are\n// reachable ONLY from Central Command's Executor, i.e. only after the operator\n// approved the proposal that named them. Adding a mode here widens that surface.\nconst MODES = ['list', 'create_event', 'update_event', 'delete_event'];\nif (!MODES.includes(body.mode)) { throw new Error('cc-calendar-facade - unsupported mode'); }\nreturn [{ json: body }];\n"
+      },
+      "id": "auth",
+      "name": "Auth + unwrap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "GSyOmRlOCoyc9Nrh",
+          "cachedResultName": "lib-google-calendar"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "call",
+      "name": "Call lib-google-calendar",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        80,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Auth + unwrap": {
+      "main": [
+        [
+          {
+            "node": "Call lib-google-calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Auth + unwrap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

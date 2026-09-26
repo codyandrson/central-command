@@ -251,3 +251,47 @@ def test_require_makes_non_required_skeletons_optional(rm, monkeypatch, capsys):
     # and the same catalog WITHOUT --require still pauses: k3s parity
     rc2, out2, _ = _run(rm, monkeypatch, capsys, live=live, env={})
     assert rc2 == rm.EXIT_ACTION, out2
+
+
+# ── extra_params (v2.49.0) ────────────────────────────────────────────────────
+# graphiti-llm's thinking-off switch lived only on the live row and was lost on
+# every re-creation; declared, it rides the skeleton and is checked afterwards.
+
+def _policy_with_extra():
+    return {"models": {}, "registration_only": {
+        "graphiti-llm": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "timeout": 300},
+                         "extra_params": {"chat_template_kwargs": {"enable_thinking": False}}},
+        "cc-embedding": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "timeout": 60}},
+    }}
+
+
+def test_extra_params_ride_the_skeleton_and_only_where_declared(rm):
+    want = rm.declared(_policy_with_extra())
+    assert want["graphiti-llm"]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert want["graphiti-llm"]["timeout"] == 300
+    assert "chat_template_kwargs" not in want["cc-embedding"]
+
+
+def test_a_filled_row_missing_a_declared_extra_param_is_drift_with_the_value_to_enter(rm):
+    want = rm.declared(_policy_with_extra())
+    live_ok = _live("graphiti-llm", model="openai/qwen", api_base="http://llm.example:8081/v1",
+                    timeout=300, chat_template_kwargs={"enable_thinking": False})
+    live_bare = _live("graphiti-llm", model="openai/qwen", api_base="http://llm.example:8081/v1", timeout=300)
+    assert rm.plan({"graphiti-llm": want["graphiti-llm"]}, [live_ok])[0][0] == "ok"
+    status, alias, problems = rm.plan({"graphiti-llm": want["graphiti-llm"]}, [live_bare])[0]
+    assert (status, alias) == ("drift", "graphiti-llm")
+    assert any("chat_template_kwargs" in p and "extra_params" in p for p in problems)
+
+
+def test_extra_params_may_not_redeclare_an_owned_field(rm):
+    bad = {"models": {}, "registration_only": {
+        "x": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "timeout": 1},
+              "extra_params": {"timeout": 5}}}}
+    with pytest.raises(SystemExit):
+        rm.declared(bad)
+
+
+def test_the_k3s_declaration_pins_graphiti_llm_thinking_off(rm):
+    import yaml
+    policy = yaml.safe_load((ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml").read_text(encoding="utf-8"))
+    assert rm.declared(policy)["graphiti-llm"]["chat_template_kwargs"] == {"enable_thinking": False}

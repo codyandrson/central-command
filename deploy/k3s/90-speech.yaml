@@ -3,7 +3,8 @@
 # TTS) behind the two speech aliases the cockpit's voice features address
 # through LiteLLM: cc-tts (/v1/audio/speech) and cc-stt
 # (/v1/audio/transcriptions). LiteLLM dials it in-cluster
-# (http://cc-speech:8000/v1); either alias may point elsewhere instead — an
+# (http://cc-speech:8093/v1 — the Service port below; 8000 is the container's
+# port and unreachable by that name); either alias may point elsewhere — an
 # operator with hosted Whisper-convention models registers cc-stt at those.
 #
 #   PINNED to the compute node, REQUIRED nodeAffinity — the same call as

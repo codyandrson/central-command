@@ -4,6 +4,63 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-26 — v2.49.0: what a clean re-deploy could not rebuild from the repo
+
+The reference deployment was torn down and re-deployed fresh at v2.48.0 on
+2026-09-26 — namespaces deleted, `deploy/k3s/setup.sh` end to end, LiteLLM
+and n8n restored from dumps, the graph and ledger deliberately scrapped. Four
+things the repo did not carry came out of that run.
+
+- **The speech aliases were documented on the wrong port.** `setup.sh`'s
+  catalog pause, the declaration's comment and `90-speech.yaml`'s own header
+  all told the operator to enter `http://cc-speech:8000/v1` — the CONTAINER
+  port. The Service maps **8093** to it, LiteLLM cannot reach `cc-speech:8000`,
+  and the TTS probe timed out for 300 s twice (the first time it read like
+  the first-boot model download racing the probe). All three now say 8093,
+  and `tests/test_speech_service_port.py` checks every `cc-speech:<port>`
+  mention against the manifest's Service port.
+- **`extra_params:` in the model declaration** (`register-models.py`). Some
+  litellm_params are neither provider identity nor policy but the alias does
+  not work without them; the one that made this exist is `graphiti-llm`'s
+  `chat_template_kwargs: {enable_thinking: false}` (thinking off for a
+  hybrid-thinking local model on every structured extraction call). It had
+  been hand-set on the row since 2026-09-20, was lost on every re-creation,
+  and a partial `/model/update` dropped it again during the rebuild. Declared,
+  it is written into the skeleton at CREATE and a filled row that lacks it is
+  reported as DRIFT with the value to enter (an existing row is still never
+  overwritten). `deploy/pi/litellm/model-preferences.yaml` declares it for
+  `graphiti-llm`, with the note that a cloud model behind that alias rejects
+  the field and must delete the block.
+- **The calendar façade is now in the repo.** `cc-calendar-facade` and
+  `lib-google-calendar` (the EA's `list` and the Executor's
+  `create_event` / `update_event` / `delete_event`) had lived only on the
+  live canvas since 2026-08-07; a rebuild from the repo would have had no
+  calendar path. Shipped under `deploy/n8n/workflows/` in the email pair's
+  idiom — stable ids, `__CC_CALENDAR_FACADE_TOKEN__` placeholder, the
+  `Google Calendar account` credential resolved by name — and OPTIONAL:
+  `apply-workflows.sh` renders and imports them only when
+  `CC_CALENDAR_FACADE_TOKEN` is set, so an Exchange-calendar deployment ships
+  no dead webhook. The credential report now names any unresolved credential,
+  not just Gmail's. Tests pin the modes (validated == routed == the four),
+  the three gated writes, and that no shipped file binds a credential by id.
+- **`policy.py --apply` refuses a row that is not the local fleet.** Policy
+  is keyed by alias NAME, and on 2026-09-17 autodiscovery registered Kilo.ai
+  models under the names of two retired local aliases; for four days every
+  updater run wrote the local declaration (cost 0, 6000 s timeouts) onto the
+  paid rows. `row_is_ours` now refuses a credential-backed row, a row with no
+  `api_base`, and — when `CC_LLM_UPSTREAM_BASE_URL` is declared — a row
+  dialing another host; the run continues for the other aliases and exits
+  non-zero naming the refused ones.
+
+Also: `verify.sh` §D exempts `CC_DB_UI_URL`, `CC_SANDBOX_DOCS_URL` and
+`CC_CRAWLER_DOCS_URL` (v2.18.3 browser links in the same class as the
+`*_UI_URL` exemptions — the one FAIL that had kept a healthy k3s stack off
+zero-failure since); and an optional k3s server drop-in,
+`deploy/k3s/host/20-disable-traefik.yaml`, for the deployment whose cockpit is
+`tailscale serve`d on 443 — k3s's bundled Traefik takes hostPorts 80/443 on
+every node through ServiceLB, ahead of tailscaled, and the cockpit URL answers
+"404 page not found" under a `TRAEFIK DEFAULT CERT` (nothing here uses an
+Ingress). Runbook §6 documents the symptom and the drop-in.
 ## 2026-09-26 — v2.48.1: a negative catalog price is an absence, not a price
 
 Three LiteLLM deployments carried `input_cost_per_token: -1.0` and

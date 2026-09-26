@@ -422,3 +422,33 @@ def test_registration_only_models_carry_no_routing_policy(policy):
     for alias, spec in (policy.get("registration_only") or {}).items():
         for key in ("quality_tier", "strengths", "input_cost_per_token"):
             assert key not in spec, f"{alias}: {key} belongs under `models:`, not here"
+
+
+# ── the alias-name-is-not-an-identity guard (v2.49.0) ─────────────────────────
+# 2026-09-17..22: autodiscovery registered Kilo.ai models under two retired
+# local alias names and policy.py --apply wrote the LOCAL declaration onto the
+# PAID rows for four days. `row_is_ours` is what refuses that now.
+
+def test_a_credential_backed_row_is_never_ours(policy_mod):
+    why = policy_mod.row_is_ours({"model": "openai/qwen3.8-27b", "api_base": "https://api.example/v1",
+                                  "litellm_credential_name": "Kilo.ai"})
+    assert why and "credential-backed" in why
+
+
+def test_a_row_with_no_api_base_is_a_providers_own_endpoint(policy_mod):
+    assert policy_mod.row_is_ours({"model": "anthropic/claude-sonnet-5"})
+
+
+def test_a_local_row_is_ours_and_the_declared_upstream_host_is_enforced_only_when_known(policy_mod):
+    local = {"model": "openai/qwen3.8-27b", "api_base": "http://100.64.0.9:8081/v1", "timeout": 6000}
+    assert policy_mod.row_is_ours(local) is None
+    assert policy_mod.row_is_ours(local, upstream_host="100.64.0.9:8081") is None
+    why = policy_mod.row_is_ours(local, upstream_host="llm.corp.example")
+    assert why and "declared upstream" in why
+
+
+def test_host_parsing_strips_scheme_path_and_userinfo(policy_mod):
+    assert policy_mod._host("http://user:pw@10.0.0.5:8081/v1") == "10.0.0.5:8081"
+    assert policy_mod._host("HTTPS://LLM.Corp.Example/v1/") == "llm.corp.example"
+    assert policy_mod._host("not a url") == ""
+    assert policy_mod._host(None) == ""

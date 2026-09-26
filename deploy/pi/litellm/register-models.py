@@ -199,6 +199,29 @@ def load_declaration(path: Path) -> dict:
     return yaml.safe_load(text)
 
 
+def extra_params(spec: dict) -> dict:
+    """The declaration's `extra_params:` block — litellm_params that are neither
+    provider identity (model / api_base / key) nor policy (cost / timeout), but
+    that the alias does not work without. The one that made this exist:
+    `graphiti-llm` needs `chat_template_kwargs: {enable_thinking: false}` on the
+    ROW (LiteLLM forwards it as extra body to llama.cpp; graphiti-core only sends
+    reasoning controls for gpt-5/o-series names), and the value was hand-set in
+    the UI, lost every time the alias was re-created, and found again each time
+    as unbounded extraction turns (2026-08-20, 2026-09-20; a partial
+    /model/update dropped it once more on 2026-09-26). Declared here it is
+    written into the skeleton at CREATE and checked as an invariant afterwards.
+    Keys are forwarded verbatim; a value is compared exactly (no PLACEHOLDER
+    patterns) and an existing row is still never overwritten — a missing key is
+    reported as DRIFT with the value to enter."""
+    extra = spec.get("extra_params") or {}
+    if not isinstance(extra, dict):
+        raise SystemExit(f"extra_params must be a mapping, got {type(extra).__name__}")
+    clash = sorted(set(extra) & set(OWNED))
+    if clash:
+        raise SystemExit(f"extra_params may not redeclare owned fields {clash}")
+    return dict(extra)
+
+
 def declared(policy: dict, upstream: dict[str, dict] | None = None) -> dict[str, dict]:
     """alias -> the litellm_params to register, from BOTH declaration blocks.
 
@@ -215,10 +238,11 @@ def declared(policy: dict, upstream: dict[str, dict] | None = None) -> dict[str,
         params = {k: v for k, v in reg.items() if k in OWNED and k != "timeout"}
         if spec.get("timeout") is not None:
             params["timeout"] = spec["timeout"]
+        params.update(extra_params(spec))
         out[alias] = params
     for alias, spec in (policy.get("registration_only") or {}).items():
         reg = spec.get("registration") or {}
-        out[alias] = {k: v for k, v in reg.items() if k in OWNED}
+        out[alias] = {**{k: v for k, v in reg.items() if k in OWNED}, **extra_params(spec)}
     for alias, real in (upstream or {}).items():
         if alias in out:
             out[alias] = {**out[alias], **real}
@@ -289,6 +313,13 @@ def plan(want: dict[str, dict], live_models: list[dict],
                     # api_key is never compared: LiteLLM masks it in /model/info,
                     # so a comparison would report permanent drift.
                     if k in OWNED and not matches(v, live_params.get(k))]
+        # `extra_params:` keys sit outside OWNED and carry no PLACEHOLDER
+        # patterns — exact comparison, absent counts as drift (the row was
+        # re-created or edited without the value the alias needs).
+        problems += [f"{k}: {live_params.get(k)!r} does not match declared {v!r} "
+                     f"(extra_params — enter it on the row in the LiteLLM UI)"
+                     for k, v in (invariants.get(alias) or {}).items()
+                     if k not in OWNED and k != "api_key" and _norm(live_params.get(k)) != _norm(v)]
         # graphiti-llm-specific invariant: the Responses->chat bridge prefix is
         # no longer wanted (2026-09-21) — Graphiti's MCP server uses upstream's
         # stock chat-completions client now, and a bridged model 404s against

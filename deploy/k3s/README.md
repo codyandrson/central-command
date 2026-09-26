@@ -353,7 +353,12 @@ early under the rehearsal persona. It stays dropped.)
 - **cc-nerve** — serves `web/server-dist` on 127.0.0.1:3080, proxying to the
   backend via `web/.env`'s `GATEWAY_URL` (above). Tailnet exposure is
   `tailscale serve --bg http://127.0.0.1:3080`, which persists in tailscaled
-  state on its own.
+  state on its own. **k3s's bundled Traefik captures port 443 on every node**
+  (ServiceLB hostPort DNAT, ahead of tailscaled) — the symptom is a
+  "404 page not found" under a `TRAEFIK DEFAULT CERT` on the cockpit URL while
+  the other served ports work. Nothing here uses Traefik; disable it with the
+  optional drop-in `deploy/k3s/host/20-disable-traefik.yaml` (instructions in
+  the file; anchor-node k3s restart).
 - **cc-graph-bolt** — loopback-only `socat` relay of `svc/neo4j` 7687/7474
   (by ClusterIP) for the cockpit's Graph panel. Keeps neo4j ClusterIP-only.
   Needs `apt install socat` on the anchor node (preflight checks). Not

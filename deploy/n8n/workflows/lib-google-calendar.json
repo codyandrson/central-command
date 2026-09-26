@@ -1,0 +1,473 @@
+{
+  "id": "GSyOmRlOCoyc9Nrh",
+  "name": "lib-google-calendar",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## lib-google-calendar — CONTRACT (EA calendar slice)\nTHE credential-holding Google Calendar access point for the EA slice. It runs on the shared full-scope **`Google Calendar account`** credential (operator decision — one credential, not a second read-only one).\n\n**WRITES EXIST HERE (create/update/delete) AND ARE NOT UNGATED.** The only caller is `cc-calendar-facade`, whose only caller is Central Command's Executor, which runs a capability only after the operator approved the proposal naming it. Agents hold `propose_calendar_change` and nothing else; `runtime/` cannot even import the tier that calls this. What must never be added here is a mode that some *other* client could drive, or a second webhook onto this lib.\n\n**INPUT** (single item, from `cc-calendar-facade`):\n- `{ mode:'list', time_min, time_max, calendar_id?, max_results? }` → `{ ok:true, events:[…], truncated }`\n  Each event: `{ start, end, all_day, summary, location, attendee_count, organizer_is_self, has_agenda, declined }`\n- `{ mode:'create_event', title, start, end, description?, attendees?, calendar_id? }` → `{ ok:true, event:{ event_id, html_link, summary, start, end } }`\n- `{ mode:'update_event', event_id, calendar_id?, …any of title|start|end|description|attendees }` → same event shape. **PATCH**: only the keys present change. At least one must be present.\n- `{ mode:'delete_event', event_id, calendar_id? }` → `{ ok:true, deleted:event_id }`. A 410 (already gone) is success — the desired state holds.\n\n`start`/`end`/`time_*` are RFC3339 with an explicit offset or `Z`, sent as `{dateTime}` with **no `timeZone` key** (a second source of truth for the instant is how a meeting lands an hour off). `calendar_id` defaults to `primary`. All three writes carry **`sendUpdates=all`** — change it in all three URLs together, and say so here.\n\n**FAILURES**: one `fail()` helper per Return node. n8n splits a Code-node error message on the LAST `': '` and surfaces only the tail — so `fail()` neutralises every colon in the body and raw provider text goes to `console.log` only, never into a thrown message (a leak class an earlier provider workflow had).",
+        "height": 712,
+        "width": 976
+      },
+      "id": "note1",
+      "name": "note_contract",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### ✅ NO MANUAL STEPS\nThe credential is already bound on all four provider nodes: **Google Calendar account**\n(`googleCalendarOAuth2Api`, resolved by NAME at import). Nothing on this canvas needs editing.\n\nWhat bounds this lib is the mode allowlist in **Validate request** plus the fact\nthat its only caller is `cc-calendar-facade` (→ Central Command's Executor, post-approval),\nnot the credential's scopes.\n\n**Why raw `httpRequest` and not the `googleCalendar` node:** that node's\nCalendar field validates the id against an EMAIL regex, so the literal\n`primary` can never be addressed through it. It also surfaces no HTTP\nstatus, which left the 401/403/404/410/429 classification in the Return nodes\nunreachable. `fullResponse` + `neverError` + `onError:continueRegularOutput` are\nwhat make that classification possible — do not simplify them away.",
+        "height": 452,
+        "width": 588
+      },
+      "id": "note2",
+      "name": "note_setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        192,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trigger",
+      "name": "When Called (mode + window)",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -624,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// lib-google-calendar — validate the request. Reject, don't coerce.\n// n8n surfacing gotcha: a Code-node error message is SPLIT on the LAST ': ' and\n// only the tail becomes the surfaced .message. fail() neutralises every colon in\n// the body so our sentence always survives and provider text can never take over.\nfunction fail(body) {\n  throw new Error('lib-google-calendar: ' + String(body).replace(/:\\s/g, ' - ').replace(/:/g, '-'));\n}\nfunction s(v, max = 120) {\n  return String(v).replace(/:\\s/g, ' - ').replace(/:/g, '-').replace(/[\\r\\n\\t]+/g, ' ').slice(0, max);\n}\n\nconst items = $input.all();\nif (items.length > 1) fail('expects exactly one input item, got ' + items.length);\nconst inp = (items[0] && items[0].json) || {};\n\n// The credential is full-scope; THIS allowlist (not the OAuth scope) is what bounds\n// the lib. The three write modes are reachable only from cc-calendar-facade, whose\n// only caller is Central Command's Executor, after an operator approval.\nconst MODES = ['list', 'create_event', 'update_event', 'delete_event'];\nif (!MODES.includes(inp.mode)) fail(`bad or missing mode '${s(inp.mode)}' (this lib serves list, create_event, update_event, delete_event)`);\n\n// RFC3339 with an EXPLICIT offset or Z. Google renders stored datetimes in the\n// calendar's default timezone, so callers must compare INSTANTS, never strings.\nconst ISO = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/;\nconst isoBad = (v) => typeof v !== 'string' || !ISO.test(v) || !Number.isFinite(Date.parse(v));\n\n// Calendar ids are email-shaped or the literal 'primary'. Keep the charset tight:\n// this value reaches a URL path segment. Checked for EVERY mode.\nconst calendar_id = inp.calendar_id === undefined || inp.calendar_id === null || inp.calendar_id === '' ? 'primary' : inp.calendar_id;\nif (typeof calendar_id !== 'string' || calendar_id.length > 200 || !/^[A-Za-z0-9._%+@#-]+$/.test(calendar_id)) {\n  fail(`'calendar_id' is not a valid calendar id, got '${s(calendar_id)}'`);\n}\n\nif (inp.mode === 'list') {\n  for (const f of ['time_min', 'time_max']) {\n    const v = inp[f];\n    if (typeof v !== 'string' || !ISO.test(v)) fail(`'${f}' must be RFC3339 with an explicit offset or Z, got '${s(v)}'`);\n    if (!Number.isFinite(Date.parse(v))) fail(`'${f}' is not a real datetime, got '${s(v)}'`);\n  }\n  if (Date.parse(inp.time_max) <= Date.parse(inp.time_min)) fail('time_max must be after time_min');\n\n  // ponytail: hard ceiling of 250 events per window instead of full pagination.\n  // A day/week EA window is nowhere near it, and `truncated` tells the caller when\n  // the ceiling was actually hit. Add pageToken paging only if truncated fires.\n  let max_results = inp.max_results === undefined || inp.max_results === null ? 250 : Number(inp.max_results);\n  if (!Number.isInteger(max_results) || max_results < 1) fail(`'max_results' must be an integer >= 1, got '${s(inp.max_results)}'`);\n  if (max_results > 250) max_results = 250;\n\n  return [{ json: { mode: 'list', time_min: inp.time_min, time_max: inp.time_max, calendar_id, max_results } }];\n}\n\n// ── writes ──────────────────────────────────────────────────────────────────\nconst EVENT_ID = /^[A-Za-z0-9_@.-]{1,1024}$/;\nconst EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\\.[A-Za-z]{2,24}$/;\nconst has = (k) => inp[k] !== undefined && inp[k] !== null;\n\nfunction eventId() {\n  if (typeof inp.event_id !== 'string' || !EVENT_ID.test(inp.event_id)) fail(`'event_id' is not a valid event id, got '${s(inp.event_id)}'`);\n  return inp.event_id;\n}\nfunction title() {\n  if (typeof inp.title !== 'string' || inp.title.trim() === '' || inp.title.length > 300) fail(`'title' must be a non-empty string of at most 300 chars, got '${s(inp.title)}'`);\n  return inp.title;\n}\nfunction description() {\n  if (typeof inp.description !== 'string') fail(`'description' must be a string, got '${s(inp.description)}'`);\n  return inp.description;\n}\nfunction attendees() {\n  const a = inp.attendees;\n  if (!Array.isArray(a)) fail(`'attendees' must be an array of email addresses, got '${s(a)}'`);\n  if (a.length > 50) fail(`'attendees' has ${a.length} entries, the ceiling here is 50`);\n  for (const e of a) {\n    if (typeof e !== 'string' || !EMAIL.test(e)) fail(`'attendees' holds something that is not an email address, got '${s(e)}'`);\n  }\n  return a.map((e) => ({ email: e }));\n}\nfunction when(f) {\n  if (isoBad(inp[f])) fail(`'${f}' must be RFC3339 with an explicit offset or Z, got '${s(inp[f])}'`);\n  // No timeZone key: the string carries an explicit offset, and a second source of\n  // truth for the instant is how a meeting lands an hour off.\n  return { dateTime: inp[f] };\n}\n\nif (inp.mode === 'create_event') {\n  const body = { summary: title(), start: when('start'), end: when('end') };\n  if (Date.parse(inp.end) <= Date.parse(inp.start)) fail('end must be after start');\n  body.description = has('description') ? description() : '';\n  body.attendees = has('attendees') ? attendees() : [];\n  return [{ json: { mode: 'create_event', calendar_id, __body: body } }];\n}\n\nif (inp.mode === 'update_event') {\n  const event_id = eventId();\n  const fields = ['title', 'start', 'end', 'description', 'attendees'].filter(has);\n  if (fields.length === 0) fail(\"'update_event' needs at least one of title, start, end, description, attendees - a no-op write is a bug, not a success\");\n  // PATCH merges, so only what is present is sent; omitted keys keep their value.\n  const body = {};\n  if (has('title')) body.summary = title();\n  if (has('start')) body.start = when('start');\n  if (has('end')) body.end = when('end');\n  if (has('start') && has('end') && Date.parse(inp.end) <= Date.parse(inp.start)) fail('end must be after start');\n  if (has('description')) body.description = description();\n  if (has('attendees')) body.attendees = attendees();\n  return [{ json: { mode: 'update_event', calendar_id, event_id, __body: body } }];\n}\n\n// delete_event - `reason` is deliberately not sent to Google; it lives on the\n// Central Command proposal the operator approved.\nreturn [{ json: { mode: 'delete_event', calendar_id, event_id: eventId() } }];\n"
+      },
+      "id": "validate",
+      "name": "Validate request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "list",
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "create_event",
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "create_event",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create_event"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "update_event",
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "update_event",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "update_event"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "delete_event",
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "delete_event",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "delete_event"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route",
+      "name": "Route (mode)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -160,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($json.calendar_id) + '/events' + '?timeMin=' + encodeURIComponent($json.time_min) + '&timeMax=' + encodeURIComponent($json.time_max) + '&maxResults=' + $json.max_results + '&singleEvents=true&orderBy=startTime&showDeleted=false' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "gcal",
+      "name": "List events (GCal REST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        352
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": null,
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return: list — normalise Google's event shape into the EA slice's flat contract.\n// The HTTP node runs fullResponse + neverError, so a non-2xx from Google arrives\n// HERE as data ({statusCode, body}) and is classified in code with a REAL status\n// rather than swallowed. onError:continueRegularOutput additionally catches the\n// transport-level failures (timeout, DNS), which arrive as {error: …} with no\n// statusCode. Raw provider text goes to the worker log only, never into the thrown\n// message (it would take the message over — see fail()).\nfunction fail(body) {\n  throw new Error('lib-google-calendar: ' + String(body).replace(/:\\s/g, ' - ').replace(/:/g, '-'));\n}\nfunction s(v, max = 120) {\n  return String(v).replace(/:\\s/g, ' - ').replace(/:/g, '-').replace(/[\\r\\n\\t]+/g, ' ').slice(0, max);\n}\n\nconst req = $('Validate request').first().json;\nconst res = $input.first().json || {};\nconst status = Number(res.statusCode);\n\n// ── provider failure classification ────────────────────────────────────────────\nif (!Number.isFinite(status)) {\n  const detail = res.error ? (res.error.message || JSON.stringify(res.error)) : JSON.stringify(res);\n  console.log(`lib-google-calendar provider detail [list ${s(req.calendar_id, 64)}] status=none :: ${String(detail).slice(0, 300)}`);\n  fail('list - provider call failed with no HTTP status - outcome unknown, see the worker log');\n}\nif (status < 200 || status >= 300) {\n  const body = res.body || {};\n  const e = body.error || {};\n  const detail = e.message || (typeof body === 'string' ? body : JSON.stringify(body).slice(0, 300));\n  console.log(`lib-google-calendar provider detail [list ${s(req.calendar_id, 64)}] status=${status} :: ${String(detail).slice(0, 300)}`);\n  if (status === 401 || status === 403) fail(`list - provider auth failed (${status}) - re-connect the 'Google Calendar account' credential in n8n, its stored OAuth tokens look stale`);\n  if (status === 404) fail(`list - calendar not found for ${s(req.calendar_id, 64)}`);\n  if (status === 429) fail('list - provider rate limit hit - retry later');\n  fail(`list - provider call failed (${status}) - see the worker log for the provider detail`);\n}\n\nconst body = res.body || {};\nconst raw = Array.isArray(body.items) ? body.items : [];\n\nconst events = raw.map((ev) => {\n  const st = ev.start || {};\n  const en = ev.end || {};\n  const all_day = !st.dateTime && !!st.date;\n  const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];\n  const me = attendees.find((a) => a && a.self === true);\n  return {\n    start: st.dateTime || st.date || null,\n    end: en.dateTime || en.date || null,\n    all_day,\n    summary: ev.summary || '',\n    location: ev.location || '',\n    attendee_count: attendees.length,\n    organizer_is_self: !!(ev.organizer && ev.organizer.self) || !!(ev.creator && ev.creator.self && !ev.organizer),\n    // \"has_agenda\" = the invite carries something to prepare from: a description\n    // body or an attached doc. A bare hangout link is not an agenda.\n    has_agenda: !!(ev.description && String(ev.description).trim().length > 0) || (Array.isArray(ev.attachments) && ev.attachments.length > 0),\n    declined: (me && me.responseStatus === 'declined') || ev.status === 'cancelled',\n  };\n});\n\n// truncated: Google says there is another page, or we hit our own ceiling. A caller\n// answering an availability question MUST honor this rather than assume the list is\n// the whole window.\nreturn [{ json: { ok: true, events, truncated: !!body.nextPageToken || events.length >= req.max_results } }];\n"
+      },
+      "id": "normalise",
+      "name": "Return: list",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($json.calendar_id) + '/events' + '?sendUpdates=all' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__body) }}"
+      },
+      "id": "h-create",
+      "name": "Create event (GCal REST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        560
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": null,
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return: create — the HTTP node runs fullResponse + neverError, so a non-2xx from\n// Google arrives HERE as data ({statusCode, body}) and is classified in code with a\n// REAL status rather than swallowed. onError:continueRegularOutput additionally\n// catches the transport-level failures (timeout, DNS), which arrive as {error: …}\n// with no statusCode. Raw provider text goes to the worker log only, never into the\n// thrown message (it would take the message over — see fail()).\nfunction fail(body) {\n  throw new Error('lib-google-calendar: ' + String(body).replace(/:\\s/g, ' - ').replace(/:/g, '-'));\n}\nfunction s(v, max = 120) {\n  return String(v).replace(/:\\s/g, ' - ').replace(/:/g, '-').replace(/[\\r\\n\\t]+/g, ' ').slice(0, max);\n}\n\nconst req = $('Validate request').first().json;\nconst res = $input.first().json || {};\nconst status = Number(res.statusCode);\n\n// ── provider failure classification ─────────────────────────────────────────────\nif (!Number.isFinite(status)) {\n  const detail = res.error ? (res.error.message || JSON.stringify(res.error)) : JSON.stringify(res);\n  console.log(`lib-google-calendar provider detail [create ${s(req.calendar_id, 64)}] status=none :: ${String(detail).slice(0, 300)}`);\n  fail('create - provider call failed with no HTTP status - outcome unknown, see the worker log');\n}\nif (status < 200 || status >= 300) {\n  const body = res.body || {};\n  const e = body.error || {};\n  const detail = e.message || (typeof body === 'string' ? body : JSON.stringify(body).slice(0, 300));\n  console.log(`lib-google-calendar provider detail [create ${s(req.calendar_id, 64)}] status=${status} :: ${String(detail).slice(0, 300)}`);\n  if (status === 401 || status === 403) fail(`create - provider auth failed (${status}) - re-connect the 'Google Calendar account' credential in n8n, its stored OAuth tokens look stale`);\n  if (status === 404) fail(`create - calendar or event not found for ${s(req.calendar_id, 64)}`);\n  if (status === 429) fail('create - provider rate limit hit - retry later');\n  fail(`create - provider call failed (${status}) - see the worker log for the provider detail`);\n}\n\nconst ev = res.body || {};\nreturn [{ json: { ok: true, event: {\n  event_id: ev.id, html_link: ev.htmlLink || '', summary: ev.summary || '',\n  start: (ev.start && (ev.start.dateTime || ev.start.date)) || null,\n  end:   (ev.end   && (ev.end.dateTime   || ev.end.date))   || null,\n} } }];\n\n"
+      },
+      "id": "ret-create",
+      "name": "Return: create_event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($json.calendar_id) + '/events' + '/' + encodeURIComponent($json.event_id) + '?sendUpdates=all' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__body) }}"
+      },
+      "id": "h-update",
+      "name": "Update event (GCal REST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        768
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": null,
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return: update — the HTTP node runs fullResponse + neverError, so a non-2xx from\n// Google arrives HERE as data ({statusCode, body}) and is classified in code with a\n// REAL status rather than swallowed. onError:continueRegularOutput additionally\n// catches the transport-level failures (timeout, DNS), which arrive as {error: …}\n// with no statusCode. Raw provider text goes to the worker log only, never into the\n// thrown message (it would take the message over — see fail()).\nfunction fail(body) {\n  throw new Error('lib-google-calendar: ' + String(body).replace(/:\\s/g, ' - ').replace(/:/g, '-'));\n}\nfunction s(v, max = 120) {\n  return String(v).replace(/:\\s/g, ' - ').replace(/:/g, '-').replace(/[\\r\\n\\t]+/g, ' ').slice(0, max);\n}\n\nconst req = $('Validate request').first().json;\nconst res = $input.first().json || {};\nconst status = Number(res.statusCode);\n\n// ── provider failure classification ─────────────────────────────────────────────\nif (!Number.isFinite(status)) {\n  const detail = res.error ? (res.error.message || JSON.stringify(res.error)) : JSON.stringify(res);\n  console.log(`lib-google-calendar provider detail [update ${s(req.calendar_id, 64)}] status=none :: ${String(detail).slice(0, 300)}`);\n  fail('update - provider call failed with no HTTP status - outcome unknown, see the worker log');\n}\nif (status < 200 || status >= 300) {\n  const body = res.body || {};\n  const e = body.error || {};\n  const detail = e.message || (typeof body === 'string' ? body : JSON.stringify(body).slice(0, 300));\n  console.log(`lib-google-calendar provider detail [update ${s(req.calendar_id, 64)}] status=${status} :: ${String(detail).slice(0, 300)}`);\n  if (status === 401 || status === 403) fail(`update - provider auth failed (${status}) - re-connect the 'Google Calendar account' credential in n8n, its stored OAuth tokens look stale`);\n  if (status === 404) fail(`update - calendar or event not found for ${s(req.calendar_id, 64)}`);\n  if (status === 429) fail('update - provider rate limit hit - retry later');\n  fail(`update - provider call failed (${status}) - see the worker log for the provider detail`);\n}\n\nconst ev = res.body || {};\nreturn [{ json: { ok: true, event: {\n  event_id: ev.id, html_link: ev.htmlLink || '', summary: ev.summary || '',\n  start: (ev.start && (ev.start.dateTime || ev.start.date)) || null,\n  end:   (ev.end   && (ev.end.dateTime   || ev.end.date))   || null,\n} } }];\n\n"
+      },
+      "id": "ret-update",
+      "name": "Return: update_event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($json.calendar_id) + '/events' + '/' + encodeURIComponent($json.event_id) + '?sendUpdates=all' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "h-delete",
+      "name": "Delete event (GCal REST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        976
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": null,
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return: delete — the HTTP node runs fullResponse + neverError, so a non-2xx from\n// Google arrives HERE as data ({statusCode, body}) and is classified in code with a\n// REAL status rather than swallowed. onError:continueRegularOutput additionally\n// catches the transport-level failures (timeout, DNS), which arrive as {error: …}\n// with no statusCode. Raw provider text goes to the worker log only, never into the\n// thrown message (it would take the message over — see fail()).\nfunction fail(body) {\n  throw new Error('lib-google-calendar: ' + String(body).replace(/:\\s/g, ' - ').replace(/:/g, '-'));\n}\nfunction s(v, max = 120) {\n  return String(v).replace(/:\\s/g, ' - ').replace(/:/g, '-').replace(/[\\r\\n\\t]+/g, ' ').slice(0, max);\n}\n\nconst req = $('Validate request').first().json;\nconst res = $input.first().json || {};\nconst status = Number(res.statusCode);\n\n// ── provider failure classification ─────────────────────────────────────────────\nif (!Number.isFinite(status)) {\n  const detail = res.error ? (res.error.message || JSON.stringify(res.error)) : JSON.stringify(res);\n  console.log(`lib-google-calendar provider detail [delete ${s(req.calendar_id, 64)}] status=none :: ${String(detail).slice(0, 300)}`);\n  fail('delete - provider call failed with no HTTP status - outcome unknown, see the worker log');\n}\n// 410 Gone = already deleted. The desired state holds, so this is success by other\n// means - failing an approved proposal because the outcome was already achieved\n// teaches the operator to distrust real failures. MUST come before the generic\n// non-2xx branch below.\nif (status === 410) {\n  return [{ json: { ok: true, deleted: req.event_id } }];\n}\nif (status < 200 || status >= 300) {\n  const body = res.body || {};\n  const e = body.error || {};\n  const detail = e.message || (typeof body === 'string' ? body : JSON.stringify(body).slice(0, 300));\n  console.log(`lib-google-calendar provider detail [delete ${s(req.calendar_id, 64)}] status=${status} :: ${String(detail).slice(0, 300)}`);\n  if (status === 401 || status === 403) fail(`delete - provider auth failed (${status}) - re-connect the 'Google Calendar account' credential in n8n, its stored OAuth tokens look stale`);\n  if (status === 404) fail(`delete - calendar or event not found for ${s(req.calendar_id, 64)}`);\n  if (status === 429) fail('delete - provider rate limit hit - retry later');\n  fail(`delete - provider call failed (${status}) - see the worker log for the provider detail`);\n}\n\n// 204 No Content, empty body.\nreturn [{ json: { ok: true, deleted: req.event_id } }];\n\n"
+      },
+      "id": "ret-delete",
+      "name": "Return: delete_event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        976
+      ]
+    }
+  ],
+  "connections": {
+    "When Called (mode + window)": {
+      "main": [
+        [
+          {
+            "node": "Validate request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate request": {
+      "main": [
+        [
+          {
+            "node": "Route (mode)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route (mode)": {
+      "main": [
+        [
+          {
+            "node": "List events (GCal REST)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create event (GCal REST)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update event (GCal REST)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delete event (GCal REST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List events (GCal REST)": {
+      "main": [
+        [
+          {
+            "node": "Return: list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create event (GCal REST)": {
+      "main": [
+        [
+          {
+            "node": "Return: create_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update event (GCal REST)": {
+      "main": [
+        [
+          {
+            "node": "Return: update_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete event (GCal REST)": {
+      "main": [
+        [
+          {
+            "node": "Return: delete_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

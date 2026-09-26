@@ -1,0 +1,24 @@
+# ============================================================================
+# k3s SERVER drop-in (OPTIONAL): remove the bundled Traefik ingress controller.
+#
+# Central Command uses no Ingress: every service is reached by ServiceLB
+# (LoadBalancer) or loopback, and the cockpit is published by `tailscale serve`
+# on the anchor node's tailnet address, port 443. k3s installs Traefik by
+# default, and ServiceLB gives its Service hostPorts 80 and 443 on EVERY node —
+# an iptables DNAT that captures port 443 on the tailnet address too, before
+# tailscaled sees it. Symptom (found 2026-09-26): https://<anchor>.ts.net/
+# answers "404 page not found" under a "TRAEFIK DEFAULT CERT" while the other
+# `tailscale serve` ports work. Install this drop-in ONLY if nothing in your
+# cluster uses Traefik (`kubectl get ingress,ingressroute -A` is empty):
+#
+#   sudo cp deploy/k3s/host/20-disable-traefik.yaml /etc/rancher/k3s/config.yaml.d/
+#   sudo systemctl restart k3s      # anchor node only; cc-uvicorn follows it
+#
+# k3s uninstalls a disabled packaged component on the next start and deletes
+# its manifest ("Disabled AddOns are actively uninstalled from the cluster" —
+# docs.k3s.io/installation/packaged-components); the svclb-traefik pods and
+# their hostPorts go with the Service. `servicelb` itself stays enabled — do
+# NOT add it to this list, every cc-* LoadBalancer depends on it.
+# ============================================================================
+disable:
+  - traefik

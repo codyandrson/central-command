@@ -79,18 +79,31 @@ DB_NAME="$(get_kv "$DB_ENV" N8N_DB_NAME)"; DB_NAME="${DB_NAME:-n8n}"
 
 present || { note "apply-workflows: n8n is not deployed here — nothing to apply"; exit 0; }
 
-# ── 1. render the token ──────────────────────────────────────────────────────
+# ── 1. render the tokens ──────────────────────────────────────────────────────
 TOKEN="$(get_kv "$ENV_FILE" CC_EMAIL_FACADE_TOKEN)"
 [[ -n "$TOKEN" ]] || die "CC_EMAIL_FACADE_TOKEN is empty in $ENV_FILE — the façade would accept nobody"
 # It lands inside a JS string literal inside a JSON string: keep it to
 # characters that need no escaping in either, or refuse rather than corrupt.
 [[ "$TOKEN" =~ ^[A-Za-z0-9_.:+=-]+$ ]] || die "CC_EMAIL_FACADE_TOKEN has characters outside [A-Za-z0-9_.:+=-]; re-mint it"
+# The calendar façade (v2.49.0) is OPTIONAL: a deployment whose calendar is
+# not Google (the Exchange site) leaves CC_CALENDAR_FACADE_TOKEN empty and the
+# two calendar workflows are simply not shipped — importing a webhook that
+# accepts nobody would only add a dead route.
+CAL_TOKEN="$(get_kv "$ENV_FILE" CC_CALENDAR_FACADE_TOKEN)"
+if [[ -n "$CAL_TOKEN" ]]; then
+  [[ "$CAL_TOKEN" =~ ^[A-Za-z0-9_.:+=-]+$ ]] || die "CC_CALENDAR_FACADE_TOKEN has characters outside [A-Za-z0-9_.:+=-]; re-mint it"
+else
+  note "apply-workflows: CC_CALENDAR_FACADE_TOKEN is empty — the calendar façade (cc-calendar-facade, lib-google-calendar) is not applied"
+fi
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 chmod 700 "$STAGE"
 for f in "$WF_DIR"/*.json; do
-  sed "s/__CC_EMAIL_FACADE_TOKEN__/$TOKEN/g" "$f" >"$STAGE/$(basename "$f")"
+  case "$(basename "$f")" in
+    cc-calendar-facade.json|lib-google-calendar.json) [[ -n "$CAL_TOKEN" ]] || continue ;;
+  esac
+  sed -e "s/__CC_EMAIL_FACADE_TOKEN__/$TOKEN/g" -e "s/__CC_CALENDAR_FACADE_TOKEN__/${CAL_TOKEN:-__CC_CALENDAR_FACADE_TOKEN__}/g" "$f" >"$STAGE/$(basename "$f")"
 done
-IDS="$(sed -n 's/^  "id": "\([A-Za-z0-9]*\)",$/\1/p' "$WF_DIR"/*.json | tr '\n' ' ')"
+IDS="$(sed -n 's/^  "id": "\([A-Za-z0-9]*\)",$/\1/p' "$STAGE"/*.json | tr '\n' ' ')"
 [[ -n "$IDS" ]] || die "no workflow ids found under $WF_DIR"
 
 # ── 2. copy in, verify bytes ─────────────────────────────────────────────────
@@ -112,9 +125,12 @@ n8n_exec sh -c "rm -rf $IN"
 in_list="$(printf "'%s'," $IDS)"; in_list="${in_list%,}"
 n8n_psql -c "update workflow_entity set active = true, \"activeVersionId\" = \"versionId\" where id in ($in_list);" >/dev/null \
   || die "activation UPDATE failed"
-missing_cred="$(n8n_psql -c "select count(*) from workflow_entity we, jsonb_array_elements(we.nodes::jsonb) n where we.id in ($in_list) and n->'credentials' is not null and (n->'credentials'->'gmailOAuth2'->>'id') is null;")"
-if [[ "${missing_cred:-0}" != 0 ]]; then
-  note "USERACTION n8n: $missing_cred node(s) found no credential named \"Gmail account\" (type Gmail OAuth2 API) — create it in the n8n UI with that exact name, then re-run this script"
+# Every credential in the shipped files is {"id": null, "name": …}; the import
+# resolves the name against credentials_entity and leaves id null when nothing
+# matched. Report each unresolved NAME, whichever façade it belongs to.
+missing_cred="$(n8n_psql -c "select string_agg(distinct c.value->>'name', ', ') from workflow_entity we, jsonb_array_elements(we.nodes::jsonb) n, jsonb_each(n->'credentials') c where we.id in ($in_list) and (c.value->>'id') is null;")"
+if [[ -n "${missing_cred:-}" ]]; then
+  note "USERACTION n8n: no credential found named ${missing_cred} — create it in the n8n UI with that exact name (Gmail OAuth2 API for \"Gmail account\", Google Calendar OAuth2 API for \"Google Calendar account\"), then re-run this script"
 fi
 
 # ── 5. restart and prove the webhook answers ─────────────────────────────────

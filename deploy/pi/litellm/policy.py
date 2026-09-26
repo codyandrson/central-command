@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -197,9 +198,55 @@ def build_patch_body(spec: dict, now_iso: str | None = None) -> dict:
     }
 
 
+def _host(url) -> str:
+    """`http://100.64.0.9:8081/v1` -> `100.64.0.9:8081`; '' when unparsable."""
+    if not isinstance(url, str):
+        return ""
+    m = re.match(r"^\w+://(?:[^@/]*@)?([^/]+)", url.strip())
+    return m.group(1).lower() if m else ""
+
+
+def row_is_ours(live_params: dict, upstream_host: str = "") -> str | None:
+    """Why a live row must NOT be patched with the local declaration, or None
+    when it may. Policy is keyed by ALIAS NAME, and an alias name is not an
+    identity: on 2026-09-17 autodiscovery registered Kilo.ai models under the
+    same names as two retired local aliases (`qwen3.8-27b`, `gpt-oss-20b`), and
+    for four days every updater run wrote the LOCAL declaration onto PAID rows
+    (input cost 0, 6000 s timeouts). Two facts tell a local row from a hosted
+    one: a credential-backed row (`litellm_credential_name`) is the operator's
+    provider registration, never ours; and when .env declares the upstream
+    (`CC_LLM_UPSTREAM_BASE_URL`), a row dialing another host is not the fleet
+    this file describes. A row with no api_base at all is a provider's own
+    endpoint (anthropic/, openai/ …) — also not ours."""
+    params = live_params or {}
+    if params.get("litellm_credential_name"):
+        return f"credential-backed row ({params['litellm_credential_name']!r}) — a provider registration, not the local fleet"
+    base = params.get("api_base")
+    if not base:
+        return "no api_base — a provider's own endpoint, not the local fleet"
+    if upstream_host and _host(base) != upstream_host:
+        return f"api_base host {_host(base)!r} is not the declared upstream {upstream_host!r}"
+    return None
+
+
+def _declared_upstream_host() -> str:
+    """The host of CC_LLM_UPSTREAM_BASE_URL (env, then deploy/pi/.env) — '' when
+    the deployment declares no upstream, in which case only the two intrinsic
+    tests in row_is_ours apply."""
+    url = os.environ.get("CC_LLM_UPSTREAM_BASE_URL", "")
+    if not url and ENV_PATH.exists():
+        for line in ENV_PATH.read_text().splitlines():
+            if line.startswith("CC_LLM_UPSTREAM_BASE_URL="):
+                url = line.split("=", 1)[1].strip().strip('"').strip("'")
+                break
+    return _host(url)
+
+
 def apply_policy(declared: dict) -> None:
     live_models, _ = fetch_live()
     by_alias = {m.get("model_name"): m for m in live_models if m.get("model_name")}
+    upstream_host = _declared_upstream_host()
+    refused: list[str] = []
 
     for alias, spec in (declared.get("models") or {}).items():
         live = by_alias.get(alias)
@@ -208,6 +255,15 @@ def apply_policy(declared: dict) -> None:
         model_id = (live.get("model_info") or {}).get("id")
         if not model_id:
             sys.exit(f"{alias}: proxy returned no model_info.id")
+        why = row_is_ours(live.get("litellm_params") or {}, upstream_host)
+        if why:
+            # Loud and non-fatal for the OTHER aliases: the fleet's remaining
+            # rows still get their policy, and the exit code below makes the
+            # updater's WARNING line name this alias instead of hiding it.
+            print(f"  REFUSED  {alias}: {why} — not patching it; re-create the local alias "
+                  "(register-models.py) or rename the hosted row")
+            refused.append(alias)
+            continue
 
         # PATCH /model/{id}/update, NOT POST /model/update. Both routes exist on
         # 1.93.0, but the POST one answers every well-formed payload with
@@ -234,6 +290,9 @@ def apply_policy(declared: dict) -> None:
         "      (router.py:_create_adaptive_router). Restart the proxy, or POST\n"
         "      /config/reload, before /adaptive_router/state reflects this."
     )
+    if refused:
+        sys.exit(f"policy NOT applied to {len(refused)} alias(es) whose live row is not the "
+                 f"local fleet: {', '.join(refused)}")
 
 
 def main() -> int:

@@ -282,6 +282,21 @@ registration_only:
       model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
       timeout: 300
+    # THINKING OFF, ON THE ROW (declared 2026-09-26; hand-set since 2026-09-20).
+    # A hybrid-thinking local model reasons before every structured extraction
+    # call unless told not to, and graphiti-core only sends reasoning controls
+    # for gpt-5/o-series names — so the switch has to be a litellm_param on
+    # THIS alias, forwarded by LiteLLM as extra body to llama.cpp (measured
+    # 2026-09-20: 60 output tokens with a reasoning item -> 7 without; llama.cpp
+    # does not enforce the json_schema grammar while the model thinks). It was
+    # lost every time the alias was re-created, and a partial /model/update
+    # drops it too. register-models.py writes it into the skeleton and reports
+    # DRIFT when a row lacks it. A CLOUD model behind this alias rejects the
+    # parameter (it is not an OpenAI API field): delete this block in that
+    # deployment's copy, and set thinking off however that provider does it.
+    extra_params:
+      chat_template_kwargs:
+        enable_thinking: false
 
   # Named for graphiti's cross-encoder config, pointed at the local Qwen. It is
   # in RERANKER_API_KEY's model scope alongside cc-default; the name is a
@@ -335,7 +350,9 @@ registration_only:
   # THE SPEECH ROLES — what the cockpit's read-aloud and voice input address
   # (web/.env OPENAI_TTS_MODEL / OPENAI_STT_MODEL, api/speech.py). cc-speech
   # (deploy/k3s/90-speech.yaml) answers both: model openai/<the id setup
-  # installs into it>, api_base http://cc-speech:8000/v1, key `none`. Either
+  # installs into it>, api_base http://cc-speech:8093/v1 — the SERVICE port
+  # (90-speech.yaml maps 8093 -> the container's 8000; `:8000` by that name is
+  # unreachable and the TTS probe times out), key `none`. Either
   # may point elsewhere — hosted Whisper-convention models for cc-stt is the
   # expected case. The mode is LiteLLM's audio mode, an invariant.
   cc-tts:
