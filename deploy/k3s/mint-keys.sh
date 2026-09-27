@@ -65,23 +65,54 @@ set_var() {  # set_var <file> <name> <value>
   fi
 }
 
-mint() {  # mint <alias> <json-array-of-models> -> prints the key on stdout
-  local alias="$1" models="$2" out
-  out="$(curl -fsS -X POST "$BASE_URL/key/generate" \
+generate() {  # generate <alias> <json-array-of-models> -> raw response body; non-zero on HTTP error
+  curl -sS -f -X POST "$BASE_URL/key/generate" \
     -H "Authorization: Bearer $MASTER" -H 'Content-Type: application/json' \
-    -d "{\"key_alias\": \"$alias\", \"models\": $models}")" \
-    || { echo "FATAL: /key/generate failed for $alias" >&2; exit 1; }
+    -d "{\"key_alias\": \"$1\", \"models\": $2}" 2>/dev/null
+}
+mint() {  # mint <alias> <json-array-of-models> -> prints the key on stdout; non-zero on failure
+  local alias="$1" models="$2" out
+  if ! out="$(generate "$alias" "$models")"; then
+    # LiteLLM requires key aliases to be unique across all keys. The alias
+    # already existing while OUR slot is empty means a previous instance minted
+    # it and its value is gone with that instance's .env (the 2026-09-26
+    # re-deploy that kept the LiteLLM database — README §8 item 4 — hit this:
+    # /key/generate 400'd, the failure was swallowed inside a command
+    # substitution, and an EMPTY CC_LLM_API_KEY was written and reported as
+    # minted). A key nothing holds is a key to revoke: delete BY ALIAS and mint
+    # again. A key that IS held stays "kept" above and never reaches here.
+    local probe
+    probe="$(curl -sS -X POST "$BASE_URL/key/generate" \
+      -H "Authorization: Bearer $MASTER" -H 'Content-Type: application/json' \
+      -d "{\"key_alias\": \"$alias\", \"models\": $models}" 2>/dev/null || true)"
+    if [[ "$probe" == *"already exists"* ]]; then
+      echo "  revoke  alias $alias (exists on the proxy, but no file holds its key)" >&2
+      curl -sS -f -X POST "$BASE_URL/key/delete" \
+        -H "Authorization: Bearer $MASTER" -H 'Content-Type: application/json' \
+        -d "{\"key_aliases\": [\"$alias\"]}" >/dev/null 2>&1 \
+        || { echo "FATAL: /key/delete by alias failed for $alias" >&2; return 1; }
+      out="$(generate "$alias" "$models")" \
+        || { echo "FATAL: /key/generate still failing for $alias after revoking the stale alias" >&2; return 1; }
+    else
+      echo "FATAL: /key/generate failed for $alias: ${probe:0:200}" >&2
+      return 1
+    fi
+  fi
   python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])' <<<"$out"
 }
-
 ensure_key() {  # ensure_key <file> <var> <alias> <models-json>
-  local f="$1" var="$2" alias="$3" models="$4" cur
+  local f="$1" var="$2" alias="$3" models="$4" cur key
   cur="$(current "$f" "$var")"
   if [[ -n "$cur" && "$cur" != PENDING && "${FORCE:-}" != 1 ]]; then
     echo "  kept    $var (already set; FORCE=1 to re-mint)"
     return
   fi
-  set_var "$f" "$var" "$(mint "$alias" "$models")"
+  # Capture FIRST, then write: `set_var … "$(mint …)"` let a failed mint write
+  # an empty value under `set -e` (a substitution inside an argument does not
+  # trip it), and setup reported the step green. An empty key is never written.
+  key="$(mint "$alias" "$models")" || exit 1
+  [[ -n "$key" && "$key" == sk-* ]] || { echo "FATAL: minted value for $var is not a key" >&2; exit 1; }
+  set_var "$f" "$var" "$key"
   echo "  minted  $var -> alias $alias, models $models"
 }
 

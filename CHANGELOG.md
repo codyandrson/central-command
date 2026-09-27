@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-26 — v2.51.1: a minted key is a key, and a slow image pull is not a failed sandbox
+
+Found by the first phases of the reference deployment's clean-slate rebuild
+(LiteLLM and n8n databases kept, everything else fresh — README §8 item 4's
+documented case).
+
+- **`mint-keys.sh` wrote an empty `CC_LLM_API_KEY` and setup called the step
+  green.** The fresh `.env` had an empty slot; LiteLLM refused `/key/generate`
+  because the `cc-spine` alias already existed in the kept database; the
+  script's `exit 1` ran inside a command substitution, so it killed only the
+  subshell and `set_var` wrote the empty result. The API could not start. Now
+  the key is captured before anything is written, a value that is not
+  `sk-…` is fatal, and an alias that exists on the proxy while no file holds
+  its key is treated as what it is — a key nothing can use — revoked by alias
+  (`/key/delete {"key_aliases": […]}`) and minted again. A held key is still
+  "kept", untouched.
+- **The gVisor end-to-end proof waited 120 s** and, on a namespace that had
+  just been recreated, the busybox pull alone took longer: the proof pod
+  Succeeded with the gVisor banner a few seconds after the check had failed
+  the `stack` phase. 300 s now, and a timeout prints the pod's phase and
+  events.
+
+`tests/test_mint_keys_script.py` pins both.
+
 ## 2026-09-26 — v2.51.0: a fresh database carries the whole first run
 
 Re-deploying the reference deployment as a stranger would (2026-09-26) found

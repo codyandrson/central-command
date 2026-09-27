@@ -116,12 +116,19 @@ spec:
       image: docker.io/library/busybox:1.36
       command: ["sh", "-c", "dmesg"]
 POD
+  # 300 s, not 120: on a namespace that was just (re)created the busybox image
+  # is pulled first, and the 2026-09-26 re-deploy's proof pod Succeeded WITH
+  # the banner a few seconds after the old 120 s wait had already declared it
+  # a failure. A timeout prints the pod's phase and events, so the next reader
+  # can tell a slow pull from a runtime that did not engage.
   if sudo k3s kubectl -n cc-sandbox wait --for=jsonpath='{.status.phase}'=Succeeded \
-       pod/gvisor-proof --timeout=120s >/dev/null 2>&1 \
+       pod/gvisor-proof --timeout=300s >/dev/null 2>&1 \
      && sudo k3s kubectl -n cc-sandbox logs gvisor-proof | grep -qi 'gVisor'; then
     say "ok: pod ran INSIDE gVisor (dmesg shows the gVisor kernel banner)"
   else
-    say "FAIL: pod did not run under gVisor — describe pod/gvisor-proof in cc-sandbox"
+    say "FAIL: pod did not run under gVisor (or did not finish in 300 s) — phase: $(sudo k3s kubectl -n cc-sandbox get pod gvisor-proof -o jsonpath='{.status.phase}' 2>/dev/null)"
+    sudo k3s kubectl -n cc-sandbox get events --field-selector involvedObject.name=gvisor-proof \
+      --sort-by=.lastTimestamp 2>/dev/null | tail -5 >&2 || true
     exit 1
   fi
   sudo k3s kubectl -n cc-sandbox delete pod gvisor-proof --wait=false >/dev/null 2>&1
