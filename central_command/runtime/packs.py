@@ -1643,7 +1643,10 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
                      "consult", "task-propose", "ask-operator",
                      "bulk-dismiss-propose", "mail-read",
                      "mail-spam-propose", "mail-unsubscribe-propose",
-                     "mail-rule-propose"),
+                     "mail-rule-propose",
+                     # v2.51.0: the working set the charter assumes (seeded too)
+                     "web-read", "web-search", "calendar-read",
+                     "catalog-read", "catalog-propose", "confluence-read"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "graph-read", "graph-propose",
                     "consult", "task-propose", "ask-operator", "web-read",

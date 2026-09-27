@@ -78,6 +78,11 @@ ensure LITELLM_POSTGRES_PASSWORD
 ensure CC_NEO4J_PASSWORD
 ensure N8N_ENCRYPTION_KEY
 ensure N8N_DB_PASSWORD
+# The n8n façade tokens (v2.51.0): what the control plane sends and what the
+# shipped webhooks check; apply-workflows.sh renders them into the workflow
+# files. Blank ones made a fresh install die at the first import.
+ensure CC_EMAIL_FACADE_TOKEN
+ensure CC_CALENDAR_FACADE_TOKEN
 
 # Graphiti's three credentials SHOULD be LiteLLM virtual keys scoped to one
 # model group each. Until the installer mints them they fall back to the

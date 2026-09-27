@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-26 — v2.51.0: a fresh database carries the whole first run
+
+Re-deploying the reference deployment as a stranger would (2026-09-26) found
+that a fresh install stalls before onboarding starts. Three seeds and one
+generation step close that; all four are idempotent on an existing database.
+
+- **The team tour is seeded.** The onboarding design (2026-08-23) said
+  "setup's last act creates a DISABLED schedule and fires it once through the
+  run-now button", and no installer ever created it — the reference
+  deployment's row was made by hand on 2026-08-29. A fresh install therefore
+  had no tour and no EA (the tour's first run is what hires the EA).
+  `schema.sql` now seeds `team-tour` like every founding schedule: disabled,
+  `at` a date in the past, one-shot through **Crons → Run now**. The k3s
+  runbook's §9 and the app phase's closing note describe the two-step
+  onboarding: the cockpit's name prompt, then the tour.
+- **The façade tokens are generated.** `CC_EMAIL_FACADE_TOKEN` and
+  `CC_CALENDAR_FACADE_TOKEN` were blank in a fresh `.env` and nothing filled
+  them, so `apply-workflows.sh` died on the first. The k3s `app` phase now
+  generates both (hex, inside the render alphabet; never over an existing
+  value) and then runs `apply-workflows.sh --k3s` itself — a missing Gmail or
+  Google Calendar credential is the script's own USERACTION line, not a
+  reason to skip the import (WARN, never FAIL). The single-node
+  `make-secrets.sh` generates the same two.
+- **inbox-triage's working set is seeded.** Six packs the reference
+  deployment had granted by hand and its charter assumes — `web-read`,
+  `web-search`, `calendar-read`, `catalog-read`, `catalog-propose`,
+  `confluence-read` — join the schema seeds and `DEFAULT_PACKS` together
+  (`test_packs` pins the two to each other). A fresh database gave the agent
+  a narrower tool surface than the one its charter was written against.
+
+`tests/test_onboarding_seeds.py` reads the schema and the k3s driver and pins
+all three.
+
 ## 2026-09-26 — v2.50.0: Jira is a native client, with no webhook to fall back to
 
 The n8n Jira façade (`cc-jira-facade` → `lib-jira`) predates the native

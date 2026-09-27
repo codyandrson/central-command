@@ -1465,7 +1465,8 @@ probe_http() { # probe_http <check> <url> <what> <seam> [HEAD]
 # the command that fills it — and since v2.45.0 `./setup.sh configure` runs that
 # command itself, so the WARN is what a run that SKIPPED configure looks like.
 CC_GENERATED_KEYS=(CC_LLM_PROXY_ADMIN_KEY CC_LITELLM_SALT_KEY LITELLM_POSTGRES_PASSWORD
-                   CC_NEO4J_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD)
+                   CC_NEO4J_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD
+                   CC_EMAIL_FACADE_TOKEN CC_CALENDAR_FACADE_TOKEN)
 
 # The seams whose BLANK value means "the public host is contacted". If every one
 # of these names a mirror, a one-certificate bundle is complete by construction:

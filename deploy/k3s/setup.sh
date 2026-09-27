@@ -713,6 +713,22 @@ phase_app() {
   set_kv_if_unset "$APP_ENV" CC_LITELLM_KUBECONFIG     "/home/codyslab/.cc-litellm-operator.kubeconfig"   "app-litellm-kubeconfig"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_LOG_KUBECONFIG "/home/codyslab/.cc-litellm-logreader.kubeconfig"  "app-litellm-log-kubeconfig"
 
+  # The façade tokens (v2.51.0). What the control plane sends and what the
+  # n8n webhooks check — apply-workflows.sh renders them into the workflow
+  # files. No installer generated them before; a fresh .env carried two empty
+  # values and apply-workflows died on the first. hex keeps them inside the
+  # alphabet the render step accepts ([A-Za-z0-9_.:+=-]); an existing value is
+  # never overwritten (the live workflows were rendered from it).
+  local tokvar
+  for tokvar in CC_EMAIL_FACADE_TOKEN CC_CALENDAR_FACADE_TOKEN; do
+    if is_placeholder "$(get_kv "$APP_ENV" "$tokvar")"; then
+      set_kv "$APP_ENV" "$tokvar" "$(openssl rand -hex 24)" \
+        && pass "app-${tokvar,,}" "$tokvar generated (rendered into the façade workflows below)"
+    else
+      pass "app-${tokvar,,}" "$tokvar already set — left alone"
+    fi
+  done
+
   # THE measurement. Never a model card: nothing schema-side enforces the
   # width (no Neo4j vector index exists — similarity is per-row cosine), so a
   # mis-sized vector silently breaks search instead of erroring, and the
@@ -800,11 +816,23 @@ phase_app() {
   # tour asks the rest. The unit's ExecStartPre waits on 127.0.0.1:5442.
   step "enable-units" "cc-uvicorn, cc-nerve, cc-sandbox-runner, cc-graph-bolt, the backup timer and the update watcher enabled and started" \
     sudo systemctl enable --now cc-uvicorn cc-nerve cc-sandbox-runner cc-graph-bolt cc-backup.timer cc-update.path || return 1
+
+  # The n8n façades (v2.51.0): render the tokens into the shipped workflows
+  # and import them. Before this the runbook told the operator to run the
+  # script by hand after creating the Gmail credential; a missing credential
+  # is now the script's own USERACTION line, not a reason to skip the import.
+  # WARN, never FAIL: n8n is one integration, not the install.
+  if bash "$HERE/../n8n/apply-workflows.sh" --k3s; then
+    pass "n8n-workflows" "façade workflows applied into n8n (deploy/n8n/apply-workflows.sh)"
+  else
+    warn "n8n-workflows" "apply-workflows.sh did not finish — usual cause: no credential named \"Gmail account\" / \"Google Calendar account\" in n8n yet (README §8). Create it, then: ./deploy/n8n/apply-workflows.sh --k3s"
+  fi
   note ""
   note "First boot hires the roster. Next: ./deploy/k3s/setup.sh verify --clean-install,"
   note "then README.md phase 8: INSTANCE DATA — what a clean install does NOT"
   note "restore (the n8n Gmail credential above all). Decide each deliberately."
-  note "Open the cockpit: it asks your name, and your EA runs the team tour."
+  note "Open the cockpit: it asks your name. Then Crons -> 'Team tour (onboarding)'"
+  note "-> Run now: your EA hires itself and hosts the tour."
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -416,7 +416,8 @@ async def _retry_sweep(schedule_id: str, params: dict) -> dict:
 # setup asked for this contact — deferring it would be the control plane
 # protecting them from a thing they requested). It is a CONTACT kind and not a
 # setup script so the tour is giftable, re-runnable, and independent of Claude
-# Code. Nothing schedules it: setup creates a DISABLED schedule and fires it
+# Code. Nothing schedules it: schema.sql seeds a DISABLED `team-tour` row
+# (v2.51.0 — no installer ever created it before) and the operator fires it
 # once through the run-now button.
 EA_CONTACT_KINDS: tuple[str, ...] = (
     "digest", "check_in", "morning_report", "week_ahead", "onboarding_tour",

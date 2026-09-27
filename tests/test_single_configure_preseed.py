@@ -65,6 +65,9 @@ GENERATED = {
     "CC_NEO4J_PASSWORD": "aaa4",
     "N8N_ENCRYPTION_KEY": "aaa5",
     "N8N_DB_PASSWORD": "aaa6",
+    # v2.51.0: the two façade tokens joined make-secrets.sh's generated set
+    "CC_EMAIL_FACADE_TOKEN": "aaa7",
+    "CC_CALENDAR_FACADE_TOKEN": "aaa8",
 }
 
 

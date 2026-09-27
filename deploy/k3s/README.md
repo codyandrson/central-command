@@ -405,10 +405,11 @@ repo). Full commands are in the **RESTORE section at the bottom of
    `n8n_<stamp>.sql.gz` into `cc-n8n-db` (scale `cc-n8n` to 0 first; it holds
    workflow rows open), or set it up fresh: open the n8n UI
    (`tailscale serve --bg --https=8443 http://127.0.0.1:5678`), create the
-   Gmail OAuth2 credential named exactly **`Gmail account`**, then apply the
-   shipped façade workflows with `./deploy/n8n/apply-workflows.sh --k3s`
-   (`deploy/n8n/README.md`; the updater re-applies them on every release that
-   changes them). The restore only works if
+   Gmail OAuth2 credential named exactly **`Gmail account`** (and **`Google
+   Calendar account`** for the calendar façade), then apply the shipped façade
+   workflows with `./deploy/n8n/apply-workflows.sh --k3s` (`deploy/n8n/README.md`;
+   the `app` phase runs it once with freshly generated façade tokens, v2.51.0,
+   and the updater re-applies them on every release that changes them). The restore only works if
    `N8N_ENCRYPTION_KEY` in `deploy/pi/.env` is the value the dump was taken
    under; otherwise the rows are there and undecryptable — pair the dump with
    its **same-stamp `keys_<stamp>.env`**, not with whatever is in `.env` now.
@@ -472,7 +473,10 @@ answers):
 
 The API is already up — §6 both enabled and started `cc-uvicorn` (its
 `ExecStartPre` waits on 127.0.0.1:5442), and there is no onboarding to land
-before it reads its env: the cockpit asks the operator's name on first run. So
+before it reads its env. Onboarding happens in the cockpit, in two steps:
+the first-run prompt bar asks the operator's name, then **Crons → "Team tour
+(onboarding)" → Run now** — the schedule is seeded disabled by `schema.sql`
+(v2.51.0), its first run hires the EA, and the EA hosts the introductions. So
 this section is verification only:
 
 ```bash

@@ -1322,3 +1322,34 @@ create index if not exists mail_rule_active_idx on mail_rule (position) where re
 insert into agent_grant (agent_id, pack, granted_by) values
     ('inbox-triage', 'mail-rule-propose', 'seed:2026-09-22')
 on conflict (agent_id, pack) do nothing;
+
+-- The rest of inbox-triage's working set (2026-09-26, v2.51.0). Six packs the
+-- reference deployment had granted by hand over two months and its charter v2
+-- assumes: `web-read`/`web-search` (verify a sender or a claim before deciding),
+-- `calendar-read` (an invitation against the real calendar), `catalog-read`/
+-- `catalog-propose` (documents that arrive as attachments), `confluence-read`
+-- (the wiki a mail cites). Found by the 2026-09-26 clean re-deploy: a fresh
+-- database gave the agent a narrower tool surface than the one its charter was
+-- written against. Seeds and DEFAULT_PACKS move together (test_packs pins it).
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('inbox-triage', 'web-read',         'seed:2026-09-26'),
+    ('inbox-triage', 'web-search',       'seed:2026-09-26'),
+    ('inbox-triage', 'calendar-read',    'seed:2026-09-26'),
+    ('inbox-triage', 'catalog-read',     'seed:2026-09-26'),
+    ('inbox-triage', 'catalog-propose',  'seed:2026-09-26'),
+    ('inbox-triage', 'confluence-read',  'seed:2026-09-26')
+on conflict (agent_id, pack) do nothing;
+
+-- The team tour (2026-09-26, v2.51.0). The onboarding design (2026-08-23) said
+-- "setup's last act creates a DISABLED schedule and fires it once through the
+-- run-now button" — and no installer ever did; the reference deployment's row
+-- was created by hand on 2026-08-29 and a fresh install had no tour and no EA
+-- (the EA is hired by this contact's first run). Seeded like every founding
+-- schedule: disabled, `at` a date in the past so the engine never fires it on
+-- its own, one-shot through "Run now" in the Crons tab. Re-runnable, giftable.
+insert into heartbeat_schedule
+    (id, name, schedule_kind, schedule, action_kind, action_params, created_by) values
+    ('team-tour', 'Team tour (onboarding)', 'at',
+     '{"at": "2000-01-01T00:00:00+00:00"}', 'ea.contact',
+     '{"kind": "onboarding_tour"}', 'seed:heartbeat')
+on conflict (id) do nothing;
