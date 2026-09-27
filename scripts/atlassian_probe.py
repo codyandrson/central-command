@@ -1,12 +1,19 @@
 """Read-only connectivity probe for Jira and Confluence (Jira Data Center
 flavor design, 2026-09-23, decision 4).
 
-    python scripts/atlassian_probe.py
+    python scripts/atlassian_probe.py [--quiet] [--jira-only|--confluence-only]
 
 Walks every endpoint the configured flavors actually use and prints one line
 per check:
 
     PASS|FAIL|SKIP <product> <METHOD> <path> — <status> <first ~120 chars>
+
+`--quiet` prints the FAIL lines and the final counts line only — that is the
+shape an installer's report wants (`deploy/single/setup.sh check`'s
+`integrations` section and both profiles' `verify.sh` reprint those FAIL lines
+verbatim, which is safe because every line goes through `_scrub`). The exit
+code is the same either way. `--jira-only` / `--confluence-only` narrow the
+walk to one product; the other one's checks are not counted at all.
 
 It reads `.env` through `central_command.config.settings`, makes only GETs and
 the two POSTs that ask a question (JQL search, CQL search), and never prints a
@@ -52,6 +59,16 @@ _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 _failures = 0
 _checks = 0
+# --quiet: FAIL lines and the counts line only. A flag rather than a logging
+# level because every line this script prints is built by the three functions
+# below — there is nowhere else for output to leak from.
+QUIET = False
+
+
+def _emit(line: str, *, is_failure: bool) -> None:
+    if QUIET and not is_failure:
+        return
+    print(line, flush=True)
 
 
 def _secrets() -> list[str]:
@@ -72,13 +89,13 @@ def _snippet(text: str) -> str:
 
 
 def info(message: str) -> None:
-    print(f"INFO {message}", flush=True)
+    _emit(f"INFO {message}", is_failure=False)
 
 
 def skip(product: str, what: str, why: str) -> None:
     global _checks
     _checks += 1
-    print(f"SKIP {product} {what} — {why}", flush=True)
+    _emit(f"SKIP {product} {what} — {why}", is_failure=False)
 
 
 def report(product: str, method: str, path: str, resp: httpx.Response | None,
@@ -88,7 +105,7 @@ def report(product: str, method: str, path: str, resp: httpx.Response | None,
     _checks += 1
     if resp is None:
         _failures += 1
-        print(f"FAIL {product} {method} {path} — no response {note}", flush=True)
+        _emit(f"FAIL {product} {method} {path} — no response {note}", is_failure=True)
         return
     good = (200 <= resp.status_code < 300) if ok is None else ok
     if not good:
@@ -96,8 +113,8 @@ def report(product: str, method: str, path: str, resp: httpx.Response | None,
     tail = _snippet(resp.text)
     if note:
         tail = f"{note} | {tail}"
-    print(f"{'PASS' if good else 'FAIL'} {product} {method} {path} — "
-          f"{resp.status_code} {tail}", flush=True)
+    _emit(f"{'PASS' if good else 'FAIL'} {product} {method} {path} — "
+          f"{resp.status_code} {tail}", is_failure=not good)
 
 
 async def _get(base: str, path: str, auth: dict,
@@ -109,8 +126,8 @@ async def _get(base: str, path: str, auth: dict,
         ) as client:
             return await client.request(method, url, json=body)
     except Exception as exc:  # noqa: BLE001 — a probe reports, never raises
-        print(f"FAIL transport {method} {path} — {type(exc).__name__}: "
-              f"{_snippet(str(exc))}", flush=True)
+        _emit(f"FAIL transport {method} {path} — {type(exc).__name__}: "
+              f"{_snippet(str(exc))}", is_failure=True)
         return None
 
 
@@ -295,16 +312,42 @@ async def probe_confluence() -> None:
     resp = await _get(base, path, auth)
     body = _json(resp) or {}
     storage = confluence._storage_value(body) if isinstance(body, dict) else None
-    note = (f"body.storage present, {len(storage)} chars" if storage
-            else "NO body.storage in the response")
+    # PRESENT, not TRUTHY (fixed 2026-09-27): a page whose storage body is
+    # legitimately empty answers 200 with `body.storage.value == ""`, and the
+    # truthiness test called that "NO body.storage in the response" — a FAIL
+    # against a perfectly healthy Confluence (measured on the reference
+    # deployment's own "Test page 1"). The question this check asks is whether
+    # the storage representation came back at all, which is `is not None`.
+    if storage is None:
+        note = "NO body.storage in the response"
+    elif storage == "":
+        note = "body.storage present, empty body (0 chars — a legitimately empty page)"
+    else:
+        note = f"body.storage present, {len(storage)} chars"
     report("confluence", "GET", path, resp,
-           ok=bool(resp and 200 <= resp.status_code < 300 and storage),
+           ok=bool(resp and 200 <= resp.status_code < 300 and storage is not None),
            note=note)
 
 
-async def main() -> int:
-    await probe_jira()
-    await probe_confluence()
+async def main(argv: list[str] | None = None) -> int:
+    global QUIET
+    args = list(sys.argv[1:] if argv is None else argv)
+    only = ""
+    for arg in args:
+        if arg == "--quiet":
+            QUIET = True
+        elif arg in ("--jira-only", "--confluence-only"):
+            only = arg
+        else:
+            print(f"usage: atlassian_probe.py [--quiet] "
+                  f"[--jira-only|--confluence-only] (got {arg!r})", flush=True)
+            return 2
+    if only != "--confluence-only":
+        await probe_jira()
+    if only != "--jira-only":
+        await probe_confluence()
+    # The counts line is printed in EVERY mode, quiet included: it is the one
+    # line a caller parses.
     print(f"\n{_checks} checks, {_failures} failed", flush=True)
     return 1 if _failures else 0
 

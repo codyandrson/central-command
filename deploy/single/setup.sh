@@ -33,7 +33,8 @@
 #                 indexes, the UPSTREAM LLM probed from here WHEN .env declares
 #                 it (otherwise the catalog is the LiteLLM UI's and the llm
 #                 phase pauses for it), the compose
-#                 render, the speech models' source. Eight sections, one table,
+#                 render, Jira/Confluence probed from here when .env configures
+#                 them, the speech models' source. Nine sections, one table,
 #                 `./setup.sh check --list` names them. It is the GATE: the
 #                 full run starts with it and refuses to go on past a FAIL or a
 #                 USERACTION (WARN needs --accept-warnings or an interactive
@@ -1402,6 +1403,7 @@ CHECK_SECTIONS=(
   "images|every images.txt row resolves against its registry, including the three build bases and operator pins"
   "indexes|PyPI, npm, the Python resolution, the apt archive, the CPython download mirror"
   "llm|the upstream endpoint FROM THIS HOST — the model list, one chat, one structured, one embedding — ONLY when .env declares it; with the catalog left to the LiteLLM UI this section says so and probes nothing"
+  "integrations|Jira and Confluence FROM THIS HOST — scripts/atlassian_probe.py against the configured credentials, ONLY when .env sets CC_JIRA_BASE_URL; blank says so and probes nothing"
   "compose|compose.yaml renders with this .env, with no variable it requires left unset"
   "models|the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model"
 )
@@ -1782,6 +1784,71 @@ print("\n".join(str(m.get("id","")) for m in (d.get("data") or [])))' "$out" 2>/
   done
 }
 
+# ── section: integrations ───────────────────────────────────────────────────
+# Jira and Confluence, PROVEN FROM THIS HOST before the UI exists (v2.53.0).
+# Until this section existed, nothing in the installers or the onboarding ever
+# asked for these credentials or tested them: the operator of the reference
+# deployment discovered mid-tour that the team had no Jira configured, against a
+# Confluence token nobody had ever exercised. The answers now come from
+# questions.tsv and the proof comes from scripts/atlassian_probe.py, which is the
+# one walk of every endpoint each flavor uses — never a second probe here.
+#
+# It EXECUTES a read-only probe, which is what the llm section does too: check
+# proves INPUTS, and a credential's only proof is a round trip. It writes one
+# file, into the state dir.
+check_integrations() {
+  if [[ -z "${CC_JIRA_BASE_URL:-}" ]]; then
+    pass "integrations" "no Jira configured (CC_JIRA_BASE_URL is blank) — that is a valid answer, and the consequence is stated rather than probed: agents holding a jira or confluence capability FAIL at execution with \"Jira is not configured\", and the jira-expert's and confluence-expert's introductions fail with them. To enable it, set CC_JIRA_BASE_URL + CC_JIRA_EMAIL + CC_JIRA_API_TOKEN (and the CC_CONFLUENCE_* set for the wiki), then re-run this check"
+    return 0
+  fi
+  if [[ -z "${CC_JIRA_API_TOKEN:-}" ]]; then
+    fail "integrations-answers" "CC_JIRA_BASE_URL is set but CC_JIRA_API_TOKEN is not — every Jira read needs the token (Cloud: an API token from id.atlassian.com; Data Center: a personal access token). Clear CC_JIRA_BASE_URL to go back to no Jira"
+    return 0
+  fi
+  if [[ -z "${CC_JIRA_EMAIL:-}" && "${CC_JIRA_API_FLAVOR:-cloud}" == "cloud" \
+        && "${CC_JIRA_AUTH_MODE:-}" != "bearer" ]]; then
+    fail "integrations-answers" "CC_JIRA_EMAIL is blank under flavor cloud — Cloud authenticates with Basic (email + API token). Set the email, or set CC_JIRA_API_FLAVOR=server / CC_JIRA_AUTH_MODE=bearer if the token is a Data Center PAT"
+    return 0
+  fi
+
+  # The probe imports central_command and httpx, so on a FRESH host — where the
+  # venv does not exist yet and $PY is the bare interpreter or the uv fallback —
+  # it cannot run. That is not a failure of the ANSWERS: the verify phase probes
+  # the same credentials once the app phase has built the venv.
+  if ! ( cd "$REPO_ROOT" && $PY -c 'import httpx, central_command.config' ) >/dev/null 2>&1; then
+    warn "integrations-probe" "the live Jira/Confluence probe is DEFERRED to the verify phase: this host's python ($PY) cannot import httpx + central_command yet, which is normal before the app phase builds .venv. The answers are present; nothing about them is proven here"
+    return 0
+  fi
+
+  local out="$STATE_DIR/check-atlassian.txt" rc=0
+  note "--> scripts/atlassian_probe.py --quiet (read-only, against CC_JIRA_BASE_URL)"
+  ( cd "$REPO_ROOT" && $PY scripts/atlassian_probe.py --quiet ) >"$out" 2>&1 || rc=$?
+  local counts line
+  counts="$(grep -E '^[0-9]+ checks, [0-9]+ failed' "$out" | tail -1)"
+  if (( rc == 0 )); then
+    pass "integrations-probe" "${counts:-the probe passed} — every endpoint the configured flavors use answered (full output: $out)"
+    return 0
+  fi
+  # The FAIL lines are reprinted VERBATIM: the probe scrubs every token and
+  # every email address out of its own output by construction, so its reasons
+  # are the reasons, and paraphrasing them would lose the status code. BOUNDED at
+  # six: an unreachable host fails every endpoint (a transport line plus a
+  # no-response line each), and eighteen identical DNS errors bury the rest of
+  # the report instead of explaining it. The file has all of them.
+  local shown=0 total
+  total="$(grep -c '^FAIL ' "$out")"
+  while IFS= read -r line; do
+    (( shown < 6 )) || break
+    shown=$((shown+1))
+    fail "integrations-probe" "$line"
+  done < <(grep '^FAIL ' "$out")
+  (( total > shown )) && fail "integrations-probe" "...and $(( total - shown )) more FAIL line(s) — the whole report is in $out"
+  grep -q '^FAIL ' "$out" || fail "integrations-probe" "scripts/atlassian_probe.py exited $rc with no FAIL line — see $out"
+  note "${counts:-}"
+  note "seams: CC_JIRA_BASE_URL, CC_JIRA_EMAIL, CC_JIRA_API_TOKEN, CC_JIRA_API_FLAVOR, CC_JIRA_AUTH_MODE, the CC_CONFLUENCE_* set, CC_PROXY, CC_CA_BUNDLE"
+  return 0
+}
+
 # ── section: models ─────────────────────────────────────────────────────────
 check_models() {
   if [[ "$CC_ENABLE_SPEECH" != "1" ]]; then
@@ -1847,6 +1914,9 @@ phase_check() {
 
   check_section llm
   check_llm
+
+  check_section integrations
+  check_integrations
 
   check_section compose
   validate_compose_config
@@ -2954,8 +3024,9 @@ usage: ./setup.sh [configure|check|validate|preflight|machine|fetch|llm|stack|
                 guessing, and exits 3 listing any REQUIRED key still blank
                 (no question is required today — every one has a working
                 default or a documented blank meaning)
-  check         the pre-deployment gate: eight dry sections (answers, host,
-                machine, images, indexes, llm, compose, models) in one table,
+  check         the pre-deployment gate: nine dry sections (answers, host,
+                machine, images, indexes, llm, integrations, compose, models)
+                in one table,
                 ending in a CHECK: summary line. It changes nothing but
                 CC_STATE_DIR / CC_EMBED_DIM in .env, so the loop is: edit
                 .env -> check -> triage -> check -> ... -> ./setup.sh

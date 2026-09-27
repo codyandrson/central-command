@@ -169,7 +169,7 @@ there: `CC_STATE_DIR` and `CC_EMBED_DIM` (measured, see below). An
 `answers-<KEY>` USERACTION means a key nobody has answered — that is
 `configure`'s question, and the line names it.
 
-Eight sections, in order — `./setup.sh check --list` prints this table:
+Nine sections, in order — `./setup.sh check --list` prints this table:
 
 | section | what it checks |
 |---|---|
@@ -179,6 +179,7 @@ Eight sections, in order — `./setup.sh check --list` prints this table:
 | `images` | every images.txt row resolves against its registry, including the three build bases and operator pins |
 | `indexes` | PyPI, npm, the Python resolution, the apt archive, the CPython download mirror |
 | `llm` | the upstream endpoint FROM THIS HOST — the model list, one chat, one structured, one embedding — ONLY when .env declares it; with the catalog left to the LiteLLM UI this section says so and probes nothing |
+| `integrations` | Jira and Confluence FROM THIS HOST — scripts/atlassian_probe.py against the configured credentials, ONLY when .env sets CC_JIRA_BASE_URL; blank says so and probes nothing |
 | `compose` | compose.yaml renders with this .env, with no variable it requires left unset |
 | `models` | the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model |
 
@@ -437,11 +438,33 @@ filter-search, dashboard or gadget endpoints at all. Set
 `CC_JIRA_API_FLAVOR=server` / `CC_CONFLUENCE_API_FLAVOR=server` for Data
 Center; the auth mode follows the flavor unless you name one.
 
+**`configure` asks for these, and `check` probes them (v2.53.0).** Nothing used
+to: the keys existed in `.env.example` and nowhere else, so an install reached
+the cockpit with no Jira and nobody noticed until an agent tried to work (the
+reference deployment found out mid-tour, against a Confluence token nobody had
+ever exercised). The rows are `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`,
+`CC_JIRA_API_TOKEN` in the `features` group — the last two asked only when the
+base URL is answered — then `CC_CONFLUENCE_BASE_URL` and its pair, and the two
+`*_API_FLAVOR` rows under `advanced` (default `cloud`). **Blank is a valid
+answer and means NO Jira / NO Confluence**, including a blank
+`CC_CONFLUENCE_BASE_URL` on a Cloud site where Jira is configured — it is not
+inferred from Jira's. What blank costs is stated by `check` rather than
+discovered later: an agent holding a `jira` or `confluence` capability fails at
+execution with "Jira is not configured". A Cloud API token is
+**account-scoped**, not per-product, so the same token serves both keys on the
+same site.
+
 Prove it against your instance before trusting it:
 
 ```bash
-python scripts/atlassian_probe.py
+python scripts/atlassian_probe.py           # every check, one line each
+python scripts/atlassian_probe.py --quiet   # the FAIL lines and the counts only
 ```
+
+The `integrations` section of `check` and `verify.sh` both run it (`--quiet`)
+and reprint its FAIL lines verbatim. Before the `app` phase has built `.venv`
+there is nothing that can import `httpx`, so `check` WARNs that the live probe
+is deferred to `verify` instead of failing on it.
 
 Read-only. It walks every endpoint each configured flavor uses and prints one
 `PASS|FAIL|SKIP <product> <METHOD> <path> — <status> <body>` line per check,

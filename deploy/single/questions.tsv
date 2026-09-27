@@ -48,6 +48,12 @@ CC_EXCHANGE_URL	features	EWS endpoint of an on-premises Microsoft Exchange mailb
 CC_EXCHANGE_USERNAME	features	The Exchange login for NTLM, as DOMAIN\\user or a UPN like user@corp.example; blank = no Exchange	-	n	-	-	n
 CC_EXCHANGE_PASSWORD	features	Its password, never printed and never logged; blank = no Exchange	-	n	v_nonempty	-	y
 CC_EXCHANGE_EMAIL	features	The mailbox's primary SMTP address — needed only when the username above is DOMAIN\\user rather than a UPN; blank = use the username	-	n	-	-	n
+CC_JIRA_BASE_URL	features	Your Jira site as a full URL like https://jira.example.com or https://your-org.atlassian.net — setting it (with the email and token below) turns on the native Jira client; blank = no Jira, and an agent holding a jira or confluence capability then fails at execution with "Jira is not configured"	-	n	v_url	-	n
+CC_JIRA_EMAIL	features	The Atlassian account the token belongs to, for Basic auth on Cloud — leave it blank on Data Center/Server, where the token is a PAT sent as a bearer and the email is ignored	-	n	-	CC_JIRA_BASE_URL!=	n
+CC_JIRA_API_TOKEN	features	The Jira API token (Cloud: id.atlassian.com -> Security -> API tokens) or the Data Center personal access token, never printed and never logged	-	n	v_nonempty	CC_JIRA_BASE_URL!=	y
+CC_CONFLUENCE_BASE_URL	features	Your Confluence site as a full URL — on Atlassian Cloud it is usually the same host as Jira but can be a separate site (the client adds /wiki itself); blank = no Confluence, and a confluence capability then fails at execution	-	n	v_url	CC_JIRA_BASE_URL!=	n
+CC_CONFLUENCE_EMAIL	features	The Atlassian account for Confluence Basic auth — normally the same address as CC_JIRA_EMAIL; blank on Data Center/Server, where the token is a bearer PAT	-	n	-	CC_CONFLUENCE_BASE_URL!=	n
+CC_CONFLUENCE_API_TOKEN	features	The Confluence token — an Atlassian CLOUD API token is ACCOUNT-scoped, not per-product, so the Jira token above works here whenever it is the same Atlassian account, even on a different site; never printed and never logged	-	n	v_nonempty	CC_CONFLUENCE_BASE_URL!=	y
 
 CC_AIRGAP	network	Is no public package index reachable at all? 1 makes the app phase install from requirements.lock instead of resolving (1/0)	0	n	v_bool01	-	n
 CC_PROXY	network	Mandatory egress proxy for host-side downloads, as a full URL like http://proxy.corp.example:8080 — blank if there is none, and credentials belong in ~/.netrc	-	n	v_url	-	n
@@ -86,3 +92,5 @@ CC_NEO4J_HTTP_PORT	advanced	Loopback port for Neo4j's HTTP browser	7474	n	v_port
 CC_N8N_PORT	advanced	Loopback port for n8n, used only with the n8n profile on	5678	n	v_port	-	n
 CC_CRAWLER_PORT	advanced	Loopback port for the crawl service	8091	n	v_port	-	n
 CC_SPEECH_PORT	advanced	Loopback port for the speech engine	8093	n	v_port	-	n
+CC_JIRA_API_FLAVOR	advanced	Which Jira this is: cloud (REST API v3, ADF rich text, cursor search) or server (Data Center/Server — REST API v2 only, wiki markup, and no filter-search/dashboard/gadget endpoints at all)	cloud	n	v_atlassian_flavor	CC_JIRA_BASE_URL!=	n
+CC_CONFLUENCE_API_FLAVOR	advanced	Which Confluence this is: cloud (REST API v2 plus v1 search) or server (Data Center 9.x — REST API v1 throughout)	cloud	n	v_atlassian_flavor	CC_CONFLUENCE_BASE_URL!=	n

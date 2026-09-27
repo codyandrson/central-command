@@ -358,6 +358,28 @@ phase_validate() {
     warn "app-env" "the repo-root .env is missing — the llm phase creates it (or: cp .env.example .env && chmod 600 .env)"
   fi
 
+  # Jira/Confluence ANSWERS, shape only (v2.53.0). Until this existed nothing in
+  # either installer asked for them, and the reference deployment discovered
+  # mid-tour that the team had no Jira. This phase REPORTS ONLY — the live probe
+  # belongs to the verify phase, which runs scripts/atlassian_probe.py against
+  # the same keys. Blank is a PASS with the consequence stated, never a
+  # USERACTION: validate is the first phase of the `all` chain and exit 3 there
+  # would make a deliberately Jira-less install impossible to finish in one
+  # command (the single profile's v2.45.1 rule for the LLM catalog).
+  if [[ -f "$APP_ENV" ]]; then
+    local jbase jmail jtoken
+    jbase="$(get_kv "$APP_ENV" CC_JIRA_BASE_URL)"
+    jmail="$(get_kv "$APP_ENV" CC_JIRA_EMAIL)"
+    jtoken="$(get_kv "$APP_ENV" CC_JIRA_API_TOKEN)"
+    if [[ -z "$jbase" ]]; then
+      pass "jira" "CC_JIRA_BASE_URL is blank in the app's .env — this deployment has no Jira. That is a valid answer, not a gate: any agent holding a jira or confluence capability then fails at execution with \"Jira is not configured\", the jira-expert's introduction included. To enable it, fill CC_JIRA_BASE_URL, CC_JIRA_EMAIL and CC_JIRA_API_TOKEN (plus the CC_CONFLUENCE_* set for the wiki) and re-run validate"
+    elif [[ -z "$jtoken" || -z "$jmail" ]]; then
+      fail "jira" "CC_JIRA_BASE_URL is set but the credentials are incomplete in the app's .env (CC_JIRA_EMAIL$([[ -z "$jmail" ]] && echo ' MISSING'), CC_JIRA_API_TOKEN$([[ -z "$jtoken" ]] && echo ' MISSING')) — every Jira read needs the token, and Cloud needs the email for Basic auth (a Data Center PAT instead: CC_JIRA_API_FLAVOR=server, CC_JIRA_AUTH_MODE=bearer)"
+    else
+      pass "jira" "jira answers present (CC_JIRA_BASE_URL + CC_JIRA_EMAIL + CC_JIRA_API_TOKEN) — probed live in the verify phase"
+    fi
+  fi
+
   [[ -f "$REPO_ROOT/central_command/db/schema.sql" ]] \
     && pass "repo-layout" "schema.sql found — running inside the repo" \
     || fail "repo-layout" "central_command/db/schema.sql not found — is this the Central Command repo?"

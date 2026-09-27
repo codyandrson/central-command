@@ -108,7 +108,7 @@ when a matching file is read.
   known to be impossible there, and a warning only defers the failure to the
   `app` phase.
 - **`check` EXECUTES nothing, and it is the GATE** (v2.44.0, design record D5).
-  Eight dry sections (`./setup.sh check --list`), one table, the same protocol
+  Nine dry sections (`./setup.sh check --list`), one table, the same protocol
   and exit taxonomy as a phase; the full run is `check` then the nine phases
   that change something, and it refuses to continue past a FAIL or a
   USERACTION — a WARN-only check needs `--accept-warnings` or an interactive
@@ -121,7 +121,10 @@ when a matching file is read.
   `tests/test_single_check_is_dry.py` walks every function check can reach and
   fails the suite on a `podman pull|build|run`, a `compose … up`, an install
   or a `make-secrets` call. Its ceiling is PRINTED, not implied: check proves
-  inputs, not builds.
+  inputs, not builds. "Executes nothing" means CHANGES nothing — the `llm` and
+  `integrations` sections make READ-ONLY round trips (a completion, and
+  `scripts/atlassian_probe.py` against Jira/Confluence), because a credential's
+  only proof is a round trip; the guard test's list is what "mutating" means.
 - **A new seam is a ROW, and the schema is the one list** (v2.45.0, design
   record D6). `deploy/single/questions.tsv` declares every question once — key,
   group, prompt, default, required, validator, `when` guard, secret — and TWO

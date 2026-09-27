@@ -155,7 +155,8 @@ def test_check_list_needs_no_answer_file():
     print it (and printing it must not create a state directory)."""
     rows = _list_rows()
     assert [s for s, _ in rows] == ["answers", "host", "machine", "images",
-                                    "indexes", "llm", "compose", "models"], rows
+                                    "indexes", "llm", "integrations", "compose",
+                                    "models"], rows
 
 
 def test_check_list_matches_the_table_in_the_readme():

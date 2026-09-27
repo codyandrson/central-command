@@ -4,6 +4,66 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-27 — v2.53.0: Jira and Confluence are asked for and probed at setup, not discovered in the tour
+
+Found mid-tour on the reference deployment, the day after its clean-slate
+rebuild: the EA was asking the operator about "their Jira" while the deployment
+had none configured — and the Confluence token in the old `.env` had never been
+exercised by anything. Nothing in either installer, and nothing in onboarding,
+had ever ASKED for `CC_JIRA_BASE_URL`/`CC_JIRA_EMAIL`/`CC_JIRA_API_TOKEN` or the
+`CC_CONFLUENCE_*` set, and nothing had ever tested them; they were lines in
+`.env.example` and a hand-run probe. So a whole capability surface — the
+jira-expert, the confluence-expert, every `jira` and `confluence` grant — could
+be dead on arrival and the only report was an agent failing at execution with
+"Jira is not configured".
+
+- **The credentials are QUESTIONS now** (`deploy/single/questions.tsv`):
+  `CC_JIRA_BASE_URL` in the `features` group, with `CC_JIRA_EMAIL`,
+  `CC_JIRA_API_TOKEN` (secret), `CC_CONFLUENCE_BASE_URL` and — under that —
+  `CC_CONFLUENCE_EMAIL` and `CC_CONFLUENCE_API_TOKEN` (secret) asked only when
+  the URL above them is answered, plus `CC_JIRA_API_FLAVOR` and
+  `CC_CONFLUENCE_API_FLAVOR` under `advanced` (default `cloud`, validated by the
+  new `v_atlassian_flavor` — the flavor selects the REST PATHS, so anything else
+  404s every read rather than degrading). **Blank stays a valid answer** and the
+  prompts say what it costs; a blank `CC_CONFLUENCE_BASE_URL` means NO
+  Confluence, never "the same site as Jira", because that is what
+  `confluence.configured()` actually does. The Confluence token's prompt names
+  the footgun the stale token came from: an Atlassian **Cloud** API token is
+  ACCOUNT-scoped, not per-product, so the Jira token serves Confluence on the
+  same account.
+- **`./setup.sh check` gained a ninth section, `integrations`** — the answers'
+  shape, then `scripts/atlassian_probe.py --quiet` from this host, its FAIL lines
+  reprinted verbatim (the probe scrubs every token and email address itself) and
+  its output kept in the state dir. A blank `CC_JIRA_BASE_URL` is a PASS stating
+  the consequence, never a USERACTION: no Jira is a deployment's choice, and the
+  full run's gate would refuse to continue past it. Before the `app` phase has
+  built `.venv` there is no interpreter that can import `httpx`, so the live
+  probe is a WARN deferring to the verify phase rather than a failure.
+- **Both profiles' `verify.sh` probe the same credentials** (`deploy/single`,
+  `deploy/k3s`) — one check, "jira/confluence reachable with the configured
+  credentials", skipped with its reason when the base URL is blank. On k3s it is
+  the only off-box dependency the script asserts, and it runs against the app's
+  `.env` from the repo root with the checkout's own `.venv`.
+- **`deploy/k3s/setup.sh validate` reports the answers' shape** before anything
+  is deployed: a blank base URL is a PASS stating the consequence (no Jira is
+  a valid answer, and validate is the first phase of the `all` chain — an exit 3
+  there would make a deliberately Jira-less install impossible to finish in one
+  command), an incomplete credential set is a FAIL, and a complete one passes
+  with "probed in the verify phase". The phase still mutates nothing.
+- **The probe stopped failing on an empty page.** `scripts/atlassian_probe.py`
+  tested the storage body for TRUTHINESS, so a page whose body is legitimately
+  empty (`body.storage.value == ""`, HTTP 200) printed "NO body.storage in the
+  response" and failed the run — measured against the reference deployment's own
+  empty test page. The question is presence, so it is `is not None`, with "empty
+  body" in the note. It also gained `--quiet` (FAIL lines and the counts line
+  only, same exit code) and `--jira-only`/`--confluence-only`.
+- **The tour's step 1b states the live answer** instead of assuming one
+  (`central_command/runtime/tour.py`): with Jira configured it names the Jira
+  host and whether Confluence is configured, and with no Jira it tells the EA to
+  say so plainly and NOT to propose the jira-expert's or confluence-expert's
+  introductions until the keys are filled and the API restarted — an introduction
+  that fails at execution is worse than one deferred.
+
 ## 2026-09-27 — v2.52.0: the Systems page's links are derived, not typed
 
 Found the morning after the reference deployment's clean-slate rebuild: the

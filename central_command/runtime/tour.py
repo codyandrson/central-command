@@ -148,6 +148,41 @@ async def arc() -> list[dict]:
     return out
 
 
+def _atlassian_sentence() -> str:
+    """What step 1b must say about Jira and Confluence, read from the LIVE
+    configuration rather than asked about.
+
+    The tour used to treat "their Jira" as world knowledge only, and on the
+    reference deployment the operator discovered mid-tour (2026-09-27) that the
+    deployment had no Jira configured at all — against a Confluence token nobody
+    had tested. The installers now ASK for these keys and PROBE them
+    (`deploy/single/setup.sh check`'s integrations section, both profiles'
+    verify.sh), and the host says out loud which state it is in, because the
+    consequence lands on the arc: a jira-expert introduction in an unconfigured
+    deployment fails at execution.
+    """
+    from central_command.config import settings
+
+    def _host(url: str) -> str:
+        return url.split("://", 1)[-1].strip("/") or url
+
+    if settings.jira_base_url:
+        wiki = (f"Confluence is configured at {_host(settings.confluence_base_url)}"
+                if settings.confluence_base_url else "Confluence is not configured")
+        return (f"THIS DEPLOYMENT'S SYSTEMS, as configured: Jira is configured at "
+                f"{_host(settings.jira_base_url)} and {wiki} — so ask about how "
+                f"they USE those, not whether they have them.")
+    return (
+        "THIS DEPLOYMENT'S SYSTEMS, as configured: Jira and Confluence are NOT "
+        "configured in this deployment. Tell the operator that plainly, in step "
+        "1b, and say that the jira-expert's and confluence-expert's "
+        "introductions will FAIL at execution until CC_JIRA_BASE_URL, "
+        "CC_JIRA_EMAIL and CC_JIRA_API_TOKEN (and the CC_CONFLUENCE_* set for "
+        "the wiki) are filled in the repo-root .env and the API is restarted. "
+        "Do not propose those introductions until then."
+    )
+
+
 _WORLD_EPISODES = (
     "RECORD AS THEY ANSWER: one `graph.add_episode` proposal per environment "
     "topic ('Work environment: <topic>'), one per person ('Team: <full "
@@ -236,6 +271,8 @@ async def brief() -> str:
         "PREFERENCES — what they want to review versus delegate as trust "
         "builds, communication style, quiet hours, pet peeves. If they "
         "decline a section, say so in the closing episode and move on.",
+        "",
+        "   " + _atlassian_sentence(),
         "",
         "   " + (_WORLD_EPISODES if await can_propose_episode("ea")
                  else _WORLD_NO_EPISODES),

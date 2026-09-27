@@ -111,13 +111,17 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 | huggingface.co | Whisper STT for the cockpit's *local* engine (k3s Node server only) | `WHISPER_MODELS_BASE_URL`, or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file first; unused once `cc-stt` is registered |
 | the upstream LLM endpoint | LiteLLM — and `check`, directly from the host | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0. One base, one key, one upstream model id per alias (the alias upper-cased, every non-alphanumeric `_`). `cc_required_aliases` in `deploy/env-lib.sh` decides which aliases this deployment needs — the four core ones always, `cc-tts`/`cc-stt` only with `CC_ENABLE_SPEECH=1`. **All three families are OPTIONAL** (v2.45.1): blank is the normal case and means the catalog is entered in the LiteLLM UI at the `llm` phase's deliberate pause; see below |
 | an on-premises Exchange server (EWS) | the mail feed, the ledger's hydration, the mail tools and the Executor's mail/calendar writes, via `integrations/exchange.py` | `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`, `CC_EXCHANGE_PASSWORD`, `CC_EXCHANGE_EMAIL` | INTERNAL — there is no mirror seam and nothing to stage: it is a service on the site's own network, reached at install time and at run time alike. Trust rides the rows below: the internal CA in `CC_CA_BUNDLE`, the PKI client certificate in `CC_CLIENT_CERT`/`CC_CLIENT_KEY`, `CC_TLS_INSECURE=1` as the other answer. Blank everywhere = no Exchange, and the n8n Gmail façade is the mail path. Prove it with `python scripts/exchange_smoke.py` |
+| a Jira / Confluence site (Cloud or Data Center) | every Jira and Confluence read and the Executor's Jira writes, via `integrations/jira.py` and `integrations/confluence.py` | `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`, `CC_JIRA_API_TOKEN`, `CC_JIRA_API_FLAVOR`, `CC_JIRA_AUTH_MODE`, `CC_CONFLUENCE_BASE_URL`, `CC_CONFLUENCE_EMAIL`, `CC_CONFLUENCE_API_TOKEN`, `CC_CONFLUENCE_API_FLAVOR`, `CC_CONFLUENCE_AUTH_MODE`, `CC_CONFLUENCE_PROFILE` | v2.53.0 — ASKED at `configure` and PROBED by `check`'s `integrations` section and by both profiles' `verify.sh` (`python scripts/atlassian_probe.py --quiet`), so a stale token is found before the UI rather than mid-tour. No mirror seam and nothing to stage: on an internal Data Center it is a service on the site's own network, and trust rides the CA/insecure rows below. Blank `CC_JIRA_BASE_URL` = NO Jira, and an agent holding a `jira`/`confluence` capability then fails at execution with "Jira is not configured"; blank `CC_CONFLUENCE_BASE_URL` = no Confluence, never "the same site as Jira". A CLOUD API token is ACCOUNT-scoped, so one token serves both products on one site |
 | a private/corporate CA (TLS interception, a self-signed mirror) | everything: host acquisition, the three builds, podman pulls, LiteLLM, the speech engine | `CC_CA_BUNDLE` | one key, fanned out — the table above |
 | a mandatory egress proxy | every host-side acquisition, and (inside a podman machine) pulls and builds | `CC_PROXY` | fanned out to `http(s)_proxy` in both cases, `no_proxy` pinned to loopback; `./setup.sh machine` writes the machine's `containers.conf` `[engine] env` drop-in |
 | — (verification off) | everything the CA row covers, except the speech engine | `CC_TLS_INSECURE=1` | the other supported answer to interception |
 | — (credentials) | `deploy/discover.sh`'s probes | `CC_NETRC=1` | `--netrc`, so credentials stay in `~/.netrc` and never in `.env` |
 
 Every key above is also a ROW in `deploy/single/questions.tsv`, which is what
-lets `configure` ask for it and `check` validate it. Adding a seam means adding
+lets `configure` ask for it and `check` validate it — except the three Atlassian
+keys that are not questions on purpose (`CC_JIRA_AUTH_MODE` and
+`CC_CONFLUENCE_AUTH_MODE` DERIVE from their flavor, and `CC_CONFLUENCE_PROFILE`
+is informational), which stay `.env.example` lines. Adding a seam means adding
 that row (`tests/test_single_questions_schema.py` fails otherwise).
 
 ## Two host prerequisites the air gap cannot download for you
@@ -169,8 +173,8 @@ for every row and asks nothing. (Under Git Bash, a non-TTY stdin is usually the
 **`./setup.sh check`** (v2.44.0, D5) runs every check that can be made
 **without changing anything** and prints one table, ending in
 `CHECK: <n> pass, <n> warn, <n> fail, <n> action` and the state-dir path.
-`./setup.sh check --list` names its eight sections: `answers`, `host`,
-`machine`, `images`, `indexes`, `llm`, `compose`, `models`.
+`./setup.sh check --list` names its nine sections: `answers`, `host`,
+`machine`, `images`, `indexes`, `llm`, `integrations`, `compose`, `models`.
 
 Two properties make the loop worth running:
 

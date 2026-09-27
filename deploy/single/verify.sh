@@ -212,6 +212,35 @@ else
   ok "graphiti log is clean of connection/auth errors"
 fi
 
+# Jira/Confluence — the one OFF-BOX dependency this script probes, and the only
+# check here that spends a network round trip outside loopback (v2.53.0). It is
+# asserted because a wrong or expired Atlassian token is invisible until an agent
+# tries to work: the reference deployment ran for weeks on a Confluence token
+# nobody had exercised. scripts/atlassian_probe.py is the ONE walk of those
+# endpoints; this is a call to it, never a second probe.
+echo
+echo "== jira / confluence (optional)"
+if [[ -n "${CC_JIRA_BASE_URL:-}" ]]; then
+  probe_out="${VERIFY_STATE:-${TMPDIR:-/tmp}}/verify-atlassian.txt"
+  # The app's OWN interpreter first: the probe imports central_command and httpx,
+  # which live in the venv the app phase built — $PY is a bare interpreter that
+  # may have neither. Windows keeps its python under .venv/Scripts/.
+  PROBE_PY="$PY"
+  for candidate in "$REPO_ROOT/.venv/bin/python" "$REPO_ROOT/.venv/Scripts/python.exe"; do
+    [[ -x "$candidate" ]] && { PROBE_PY="$candidate"; break; }
+  done
+  if ( cd "$REPO_ROOT" && $PROBE_PY scripts/atlassian_probe.py --quiet ) >"$probe_out" 2>&1; then
+    ok "jira/confluence reachable with the configured credentials ($(grep -E '^[0-9]+ checks' "$probe_out" | tail -1))"
+  else
+    bad "jira/confluence reachable with the configured credentials — scripts/atlassian_probe.py reports:"
+    # Reprinted verbatim: the probe scrubs every token and email out of its own
+    # output by construction.
+    sed -n 's/^/        /p' "$probe_out"
+  fi
+else
+  skip "jira/confluence not configured (CC_JIRA_BASE_URL is blank — a valid answer meaning no Jira; agents holding a jira or confluence capability fail at execution until CC_JIRA_BASE_URL + CC_JIRA_EMAIL + CC_JIRA_API_TOKEN are set)"
+fi
+
 # n8n is optional — absent is not a failure, only broken-while-present is.
 echo
 echo "== n8n (optional)"

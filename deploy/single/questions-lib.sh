@@ -25,7 +25,8 @@
 #
 #   Functions:
 #     v_nonempty v_bool01 v_url v_host v_path_readable
-#     v_path_dir_or_creatable v_port v_model_id   the validators
+#     v_path_dir_or_creatable v_port v_model_id
+#     v_atlassian_flavor                          the validators
 #     q_rows <file>                 the schema's rows, one per line, tabs kept
 #     q_field <row> <n>             one column out of a row
 #     q_groups <file>               the group names, in first-appearance order
@@ -129,6 +130,16 @@ v_path_dir_or_creatable() { # v_path_dir_or_creatable <value>
   local parent; parent="$(dirname "$p")"
   [[ -d "$parent" && -w "$parent" ]] && return 0
   printf 'cannot be created: %s does not exist or is not writable\n' "$parent"
+  return 1
+}
+
+# The Atlassian API flavor: exactly `cloud` or `server`, because it selects the
+# REST PATHS and body shapes integrations/jira.py and integrations/confluence.py
+# use — a typo would not degrade, it would 404 every read. Lower case only: the
+# code compares the raw string, so "Cloud" would silently read as server.
+v_atlassian_flavor() { # v_atlassian_flavor <value>
+  [[ "$1" == cloud || "$1" == server ]] && return 0
+  printf 'must be exactly cloud or server, lower case (got %s) — it selects the REST paths, so anything else 404s every read\n' "$1"
   return 1
 }
 

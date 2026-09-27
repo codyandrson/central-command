@@ -226,3 +226,37 @@ async def test_firing_the_tour_contact_hands_the_ea_its_host_brief():
     assert task["agent_id"] == ea.AGENT_ID
     # It opened the tour lane, which is the whole delivery.
     assert result.get("discussion_session_id") or result.get("item_id")
+
+
+# --- step 1b says which systems this deployment actually has (v2.53.0) ---------
+# The tour used to treat "their Jira" as world knowledge only, and the reference
+# deployment's operator discovered MID-TOUR that nothing was configured — with a
+# stale Confluence token behind it. The installers ask and probe now; the host
+# brief states the live answer, because the consequence lands on the arc (a
+# jira-expert introduction in an unconfigured deployment fails at execution).
+
+
+async def test_step_1b_names_the_configured_jira_and_confluence(monkeypatch):
+    monkeypatch.setattr(settings, "jira_base_url", "https://acme.atlassian.net")
+    monkeypatch.setattr(settings, "confluence_base_url", "https://wiki.acme.example/wiki")
+    brief = await tour.brief()
+    assert "Jira is configured at acme.atlassian.net" in brief
+    assert "Confluence is configured at wiki.acme.example/wiki" in brief
+    assert "NOT configured in this deployment" not in brief
+
+    monkeypatch.setattr(settings, "confluence_base_url", "")
+    brief = await tour.brief()
+    assert "Jira is configured at acme.atlassian.net" in brief
+    assert "Confluence is not configured" in brief
+
+
+async def test_step_1b_says_plainly_when_there_is_no_jira(monkeypatch):
+    monkeypatch.setattr(settings, "jira_base_url", "")
+    monkeypatch.setattr(settings, "confluence_base_url", "")
+    brief = await tour.brief()
+    assert "Jira and Confluence are NOT configured in this deployment" in brief
+    # The three keys, named, so the operator can act without asking.
+    for key in ("CC_JIRA_BASE_URL", "CC_JIRA_EMAIL", "CC_JIRA_API_TOKEN",
+                "CC_CONFLUENCE_"):
+        assert key in brief
+    assert "Do not propose those introductions until then" in brief

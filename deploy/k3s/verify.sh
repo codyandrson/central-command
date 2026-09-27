@@ -88,6 +88,31 @@ check "nerve cockpit      127.0.0.1:3080" "curl -fsS -o /dev/null http://127.0.0
 check "neo4j              ClusterIP (in-cluster only)" \
   "${K[*]} exec deploy/cc-neo4j -- wget -qO- http://localhost:7474"
 
+# Jira / Confluence — OFF-BOX by design, and the one dependency here whose
+# failure is invisible until an agent tries to work (v2.53.0): a wrong or expired
+# Atlassian token looks exactly like a healthy deployment. The credentials live
+# in the APP's .env (the repo-root one, not deploy/pi/.env), which is what
+# central_command.config.settings reads, so the probe runs with the repo root as
+# its cwd. scripts/atlassian_probe.py is the ONE walk of those endpoints — never
+# a second probe here. The venv's python, because the probe imports httpx and
+# central_command.
+JIRA_BASE="$(sed -n 's/^CC_JIRA_BASE_URL=//p' .env 2>/dev/null | tail -1)"
+JIRA_BASE="${JIRA_BASE#\"}"; JIRA_BASE="${JIRA_BASE%\"}"
+if [[ -n "$JIRA_BASE" ]]; then
+  PROBE_PY=python3
+  [[ -x .venv/bin/python ]] && PROBE_PY=.venv/bin/python
+  PROBE_OUT="${TMPDIR:-/tmp}/cc-verify-atlassian.txt"
+  if "$PROBE_PY" scripts/atlassian_probe.py --quiet >"$PROBE_OUT" 2>&1; then
+    ok "jira/confluence reachable with the configured credentials ($(grep -E '^[0-9]+ checks' "$PROBE_OUT" | tail -1))"
+  else
+    bad "jira/confluence reachable with the configured credentials — scripts/atlassian_probe.py reports:"
+    # Verbatim: the probe scrubs every token and email out of its own output.
+    sed -n 's/^/        /p' "$PROBE_OUT"
+  fi
+else
+  skip "jira/confluence not configured (CC_JIRA_BASE_URL is blank in .env — a valid answer meaning no Jira; agents holding a jira or confluence capability fail at execution until CC_JIRA_BASE_URL + CC_JIRA_EMAIL + CC_JIRA_API_TOKEN are set)"
+fi
+
 echo
 if [[ "$CLEAN" == "1" ]]; then
   echo "== B. stores initialized (clean-install mode — no instance data asserted) =="

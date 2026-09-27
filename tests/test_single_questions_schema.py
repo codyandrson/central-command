@@ -247,7 +247,8 @@ def test_the_secret_rows_are_exactly_the_credentials():
     that must never reach a terminal scrollback or a log, and on nothing else.
     Adding a credential question means adding it here in the same commit."""
     secrets = {r["key"] for r in ROWS if r["secret"] == "y"}
-    assert secrets == {"CC_LLM_UPSTREAM_API_KEY", "CC_EXCHANGE_PASSWORD"}, (
+    assert secrets == {"CC_LLM_UPSTREAM_API_KEY", "CC_EXCHANGE_PASSWORD",
+                       "CC_JIRA_API_TOKEN", "CC_CONFLUENCE_API_TOKEN"}, (
         "a secret answer is read with no echo and printed as "
         f"`(secret, not printed)` in the diff — that set is: {sorted(secrets)}"
     )
@@ -264,6 +265,54 @@ def test_check_and_configure_both_read_the_schema():
         "check's answers section must WALK the schema, not carry its own "
         "required-key list (that list is what v2.45.0 replaced)"
     )
+
+
+def test_the_atlassian_rows_are_asked_and_gated():
+    """v2.53.0: the Jira/Confluence credentials are ASKED for at setup.
+
+    Nothing in either installer used to collect or test them, and the reference
+    deployment's operator found out mid-tour that the team had no Jira — with a
+    Confluence token nobody had exercised. So the keys the clients actually read
+    are rows, the two credentials are secrets (pinned above), and everything
+    after the base URL is gated on it: a deployment with no Jira is asked one
+    question, not six.
+    """
+    rows = {r["key"]: r for r in ROWS}
+    for key in ("CC_JIRA_BASE_URL", "CC_JIRA_EMAIL", "CC_JIRA_API_TOKEN",
+                "CC_CONFLUENCE_BASE_URL", "CC_CONFLUENCE_EMAIL",
+                "CC_CONFLUENCE_API_TOKEN", "CC_JIRA_API_FLAVOR",
+                "CC_CONFLUENCE_API_FLAVOR"):
+        assert key in rows, f"{key} is not asked for — it was the v2.53.0 whole point"
+
+    assert rows["CC_JIRA_BASE_URL"]["when"] == "-", "the first question is unconditional"
+    # Blank means NO Jira, and the prompt has to say what that costs.
+    assert "no Jira" in rows["CC_JIRA_BASE_URL"]["prompt"]
+    for key in ("CC_JIRA_EMAIL", "CC_JIRA_API_TOKEN", "CC_CONFLUENCE_BASE_URL",
+                "CC_JIRA_API_FLAVOR"):
+        assert rows[key]["when"] == "CC_JIRA_BASE_URL!=", rows[key]
+    for key in ("CC_CONFLUENCE_EMAIL", "CC_CONFLUENCE_API_TOKEN",
+                "CC_CONFLUENCE_API_FLAVOR"):
+        assert rows[key]["when"] == "CC_CONFLUENCE_BASE_URL!=", rows[key]
+    # Blank CC_CONFLUENCE_BASE_URL is OFF in the code (confluence.configured()),
+    # never "the same site as Jira" — the prompt may not promise otherwise.
+    assert "no Confluence" in rows["CC_CONFLUENCE_BASE_URL"]["prompt"]
+    # The footgun the stale token came from: a Cloud API token is ACCOUNT-scoped.
+    assert "ACCOUNT-scoped" in rows["CC_CONFLUENCE_API_TOKEN"]["prompt"]
+    for key in ("CC_JIRA_API_FLAVOR", "CC_CONFLUENCE_API_FLAVOR"):
+        assert rows[key]["default"] == "cloud"
+        assert rows[key]["validator"] == "v_atlassian_flavor"
+        assert rows[key]["group"] == "advanced"
+
+
+@pytest.mark.parametrize("value,rc", [("cloud", 0), ("server", 0), ("Cloud", 1),
+                                      ("datacenter", 1), ("", 1)])
+def test_v_atlassian_flavor_accepts_only_the_two_flavors(value, rc):
+    """It selects the REST PATHS, so a typo 404s every read instead of degrading.
+    One line of reason on failure, nothing on success, and it writes nothing."""
+    r = subprocess.run([BASH, "-c", f'. "{QUESTIONS_LIB}"; v_atlassian_flavor "{value}"'],
+                       capture_output=True, text=True)
+    assert r.returncode == rc, r.stdout + r.stderr
+    assert len(r.stdout.splitlines()) == (0 if rc == 0 else 1), r.stdout
 
 
 # ── F33: a PATH answer is stored in the spelling every consumer accepts ──────

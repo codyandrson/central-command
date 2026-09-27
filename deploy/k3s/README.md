@@ -495,6 +495,18 @@ Four sections: services answering, stores initialized, placement matching the
 design, and every `CC_*` endpoint in the root `.env` resolving to loopback.
 **0 failures is the gate — in `--clean-install` mode there is no expected red.**
 
+Section A also probes **Jira and Confluence** (v2.53.0) — the one off-box
+dependency it asserts, because a wrong or expired Atlassian token is invisible
+until an agent tries to work. It runs `scripts/atlassian_probe.py --quiet` with
+the checkout's `.venv` against the root `.env`'s `CC_JIRA_*` / `CC_CONFLUENCE_*`
+and reprints any FAIL line verbatim (the probe scrubs tokens and emails itself).
+A blank `CC_JIRA_BASE_URL` is a **skip**, not a failure: no Jira is a valid
+answer. `setup.sh validate` reports the same answers' SHAPE before anything is
+deployed — a blank base URL is a `PASS` that states the consequence (no Jira
+is a valid answer, and validate is the first phase of the `all` chain, so it
+must never stop there), an incomplete credential set is a `FAIL`. The phase
+mutates nothing; the live probe is verify's.
+
 The flag changes only section **B**: it asserts the stores are alive,
 authenticated and schema-loaded (roster seeded, event log queryable, neo4j
 answering cypher) instead of asserting *migrated instance data* (`audit_event >

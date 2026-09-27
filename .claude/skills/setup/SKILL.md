@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate the agent CONDUCTS A LOOP and never mutates anything itself: `./setup.sh configure` (run in the operator's own terminal — it asks the questions in deploy/single/questions.tsv and is the one command that creates the ONE answer file, the repo-root .env; with no TTY it asks nothing rather than guessing) → `./setup.sh check` (the dry pre-deployment gate, eight sections) → triage every FAIL/WARN/USERACTION against deploy/AIRGAP.md's seam table, editing ONLY .env → check again until exit 0 (or an exit 2 the operator accepts) → `./setup.sh` (or `--accept-warnings`), which runs nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator. It reads `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDS ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate the agent CONDUCTS A LOOP and never mutates anything itself: `./setup.sh configure` (run in the operator's own terminal — it asks the questions in deploy/single/questions.tsv and is the one command that creates the ONE answer file, the repo-root .env; with no TTY it asks nothing rather than guessing) → `./setup.sh check` (the dry pre-deployment gate, nine sections) → triage every FAIL/WARN/USERACTION against deploy/AIRGAP.md's seam table, editing ONLY .env → check again until exit 0 (or an exit 2 the operator accepts) → `./setup.sh` (or `--accept-warnings`), which runs nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator. It reads `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDS ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -215,6 +215,15 @@ credentials):
     bundle, or does plain HTTPS work? One shared seam
     (`integrations/http.py`). If yes, elicit `CC_CA_BUNDLE` and
     `CC_CLIENT_CERT`/`CC_CLIENT_KEY`.
+  - **Jira and Confluence are ASKED BY `configure` since v2.53.0** — the rows
+    are in `deploy/single/questions.tsv` (`CC_JIRA_BASE_URL` first, its
+    credentials only when it is answered, the two `*_API_FLAVOR` rows under
+    `--all`), and `check`'s `integrations` section runs
+    `scripts/atlassian_probe.py --quiet` against them from this host. So do not
+    collect these by hand on the podman substrate: let `configure` ask, then read
+    what `check` says. Blank is a valid answer meaning no Jira / no Confluence,
+    and `check` states the consequence (agents holding those grants fail at
+    execution). Everything below is the ELICITATION HELP for those questions.
   - **Jira** — Cloud or Server/Data Center. A real fork, and NOT just a
     login: DC serves REST v2 only, takes wiki markup where Cloud takes ADF,
     pages by offset, and has no filter-search/dashboard/gadget endpoints at
@@ -292,7 +301,7 @@ machine → fetch → llm → stack → app → verify → test → boot → dem
 stopping at the first hard failure. (`check` is a GATE: the run refuses to
 continue past a FAIL or a USERACTION, and a WARN-only check needs
 `--accept-warnings` or an interactive `y`. `./setup.sh check --list` names its
-eight sections.) (`machine` is new in v2.43.0: it tells the podman MACHINE what
+nine sections.) (`machine` is new in v2.43.0: it tells the podman MACHINE what
 `.env` says — the CA into its trust store, the registries mirror/insecure
 drop-in, the proxy drop-in — and is a no-op on bare Linux. It prints the diff
 before each write, and `./setup.sh machine --dry-run` reports without writing,
