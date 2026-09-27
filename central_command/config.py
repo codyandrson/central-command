@@ -189,12 +189,9 @@ class Settings(BaseSettings):
     # reflection entirely — trivial sessions were the bulk of the review load.
     reflection_min_transcript_chars: int = 2000
 
-    # n8n tool façade — the Jira provider, holding credentials inside n8n (M3).
-    n8n_jira_url: str = "http://127.0.0.1:5678/webhook/cc-jira-facade"
-    jira_facade_token: str = ""
-
-    # Native Jira client (D23) — set email + api token to cut over from the
-    # n8n façade; unset them to fall back. Base URL is the Cloud site.
+    # Native Jira client (D23; the n8n façade fallback was removed in v2.50.0 —
+    # an unconfigured client now raises instead of routing to a webhook).
+    # Base URL is the Cloud site.
     # No instance-specific default (2026-08-21, sibling of rehearsal finding
     # F11): a gift install must never point at the operator's Jira. Unset + jira packs
     # granted = reads fail loudly with a URL-shaped error, which is the honest

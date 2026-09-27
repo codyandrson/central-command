@@ -11,7 +11,7 @@ import json
 import pytest
 
 from central_command.config import settings
-from central_command.integrations import jira, n8n_facade
+from central_command.integrations import jira
 
 
 class FakeResponse:
@@ -313,17 +313,14 @@ def test_tool_results_are_truncated_honestly():
 # --- the cutover seam ---------------------------------------------------------
 
 
-async def test_unconfigured_client_falls_back_to_the_facade(monkeypatch):
+async def test_unconfigured_client_fails_loudly_instead_of_routing_anywhere(monkeypatch):
+    """v2.50.0: the n8n façade fallback is gone. No token = a JiraError that
+    names the settings, never a silent hop to a webhook."""
     monkeypatch.setattr(settings, "jira_api_token", "")
-    hit = []
-
-    async def facade_get_issue(issue_key):
-        hit.append(issue_key)
-        return {"ok": True, "via": "facade"}
-
-    monkeypatch.setattr(n8n_facade, "get_issue", facade_get_issue)
-    out = await jira.get_issue("TASKS-12")
-    assert out["via"] == "facade" and hit == ["TASKS-12"]
+    calls = _fake_call(monkeypatch, [])
+    with pytest.raises(jira.JiraError, match="not configured"):
+        await jira.get_issue("TASKS-12")
+    assert calls == []
 
 
 # --- createIssue (built after the charter-v2 incident) ------------------------
@@ -362,18 +359,12 @@ async def test_create_issue_posts_the_right_fields_and_envelope(monkeypatch):
     assert out["issue"]["issue_key"] == "TASKS-99"
 
 
-async def test_create_issue_falls_back_to_the_facade_unconfigured(monkeypatch):
+async def test_create_issue_unconfigured_under_basic_auth_needs_the_email(monkeypatch):
     monkeypatch.setattr(settings, "jira_email", None)
-    seen = {}
-
-    async def fake_facade(project_key, summary, description=None,
-                          issue_type="Task", due_date=None, labels=None):
-        seen.update(project_key=project_key, summary=summary)
-        return {"ok": True}
-
-    monkeypatch.setattr(n8n_facade, "create_issue", fake_facade)
-    out = await jira.create_issue("TASKS", "fallback path")
-    assert out == {"ok": True} and seen["project_key"] == "TASKS"
+    calls = _fake_call(monkeypatch, [])
+    with pytest.raises(jira.JiraError, match="CC_JIRA_EMAIL"):
+        await jira.create_issue("TASKS", "no fallback path")
+    assert calls == []
 
 
 # --- parent / hierarchy (widening) --------------------------------------------

@@ -98,8 +98,8 @@ async def _get_ok(url: str) -> bool:
 
 
 async def probe_n8n() -> bool:
-    """The n8n façade host (Jira writes and the email façade both ride it)."""
-    return await _get_ok(_root(settings.n8n_jira_url) + "/healthz")
+    """The n8n façade host (the email and calendar façades ride it)."""
+    return await _get_ok(_root(settings.email_facade_url) + "/healthz")
 
 
 async def probe_graphiti() -> bool:

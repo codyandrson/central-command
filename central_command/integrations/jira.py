@@ -38,7 +38,6 @@ import httpx
 
 from central_command.config import settings
 from central_command.integrations import http as http_client
-from central_command.integrations import n8n_facade
 
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}-[1-9][0-9]{0,9}$")
 PROJECT_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}$")
@@ -128,28 +127,33 @@ def auth_mode() -> str:
 
 
 def configured() -> bool:
-    """A bearer PAT needs no email — demanding one silently routed a
-    PAT-configured Data Center deployment back to the n8n façade."""
+    """A bearer PAT needs no email — demanding one once routed a
+    PAT-configured Data Center deployment to the (since removed) n8n façade."""
     if not settings.jira_api_token:
         return False
     return auth_mode() == "bearer" or bool(settings.jira_email)
 
 
-def _or_facade(facade_name: str):
-    """Route to the n8n façade until native credentials exist — the cutover is
-    a config change, never a deploy. Late-bound by NAME so the façade module
-    stays patchable (tests) and swappable."""
+def _requires_native(fn):
+    """Fail LOUDLY when the native client is unconfigured. Until v2.50.0 this
+    was the n8n fallback: an unconfigured client silently routed every call to
+    the `cc-jira-facade` webhook — a path from before the native client (D23,
+    2026-07) that no deployment had used since the cutover, whose n8n half
+    hard-coded one Cloud site, and whose one live effect was the 2026-09-23
+    incident where a PAT-configured Data Center install (no email) was quietly
+    sent to a webhook that did not exist. Jira is a native client; an
+    unconfigured one says so."""
 
-    def deco(fn):
-        @functools.wraps(fn)
-        async def wrapper(*args, **kwargs):
-            if not configured():
-                return await getattr(n8n_facade, facade_name)(*args, **kwargs)
-            return await fn(*args, **kwargs)
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        if not configured():
+            raise JiraError(
+                "Jira is not configured — set CC_JIRA_BASE_URL and CC_JIRA_API_TOKEN "
+                "(plus CC_JIRA_EMAIL under basic auth, the Cloud default)"
+            )
+        return await fn(*args, **kwargs)
 
-        return wrapper
-
-    return deco
+    return wrapper
 
 
 # --- validation (model-controlled strings stop here) --------------------------
@@ -522,7 +526,7 @@ async def _declared_or_note(op: str) -> tuple[list[dict], str | None]:
 # --- reads --------------------------------------------------------------------
 
 
-@_or_facade('get_issue')
+@_requires_native
 async def get_issue(issue_key: str) -> dict:
     key = _key(issue_key)
     declared, note = await _declared_or_note("getIssue")
@@ -564,7 +568,7 @@ async def get_issue(issue_key: str) -> dict:
     return {"ok": True, "kind": "jira", "operation": "getIssue", "issue": issue}
 
 
-@_or_facade('search_issues')
+@_requires_native
 async def search_issues(jql: str, limit: int | None = None) -> dict:
     if not isinstance(jql, str) or not jql.strip() or len(jql) > 2000:
         raise JiraError("searchIssues — jql must be a non-empty string under 2000 chars")
@@ -643,7 +647,7 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
             "truncated": bool(more) or len(issues) > len(out)}
 
 
-@_or_facade('get_transitions')
+@_requires_native
 async def get_transitions(issue_key: str) -> dict:
     key = _key(issue_key)
     resp = await _call("GET", _api(f"/issue/{key}/transitions"))
@@ -662,7 +666,7 @@ async def get_transitions(issue_key: str) -> dict:
 # --- writes (Executor only, post-approval) ------------------------------------
 
 
-@_or_facade('set_due_date')
+@_requires_native
 async def set_due_date(issue_key: str, due_date: str) -> dict:
     key = _key(issue_key)
     d = _date(due_date, "setDueDate", key)
@@ -672,7 +676,7 @@ async def set_due_date(issue_key: str, due_date: str) -> dict:
             "issue": {"issue_key": key, "due_date": d}}
 
 
-@_or_facade('create_issue')
+@_requires_native
 async def create_issue(
     project_key: str, summary: str, description: str | None = None,
     issue_type: str = "Task", due_date: str | None = None,
@@ -745,7 +749,7 @@ async def create_issue(
     }}
 
 
-@_or_facade('add_comment')
+@_requires_native
 async def add_comment(issue_key: str, body: str) -> dict:
     key = _key(issue_key)
     if not isinstance(body, str) or not body.strip():
@@ -757,7 +761,7 @@ async def add_comment(issue_key: str, body: str) -> dict:
             "comment": {"id": resp.json().get("id")}}
 
 
-@_or_facade('update_attributes')
+@_requires_native
 async def update_attributes(
     issue_key: str, priority: str, due_date: str | None, labels: list[str]
 ) -> dict:
@@ -774,7 +778,7 @@ async def update_attributes(
                       "due_date": due_date, "labels": labels}}
 
 
-@_or_facade('link_issues')
+@_requires_native
 async def link_issues(from_key: str, to_key: str, link_type: str) -> dict:
     """Typed link; from_key is the OUTWARD side (for Blocks: from BLOCKS to)."""
     fk, tk = _key(from_key, "from_key"), _key(to_key, "to_key")
@@ -792,7 +796,7 @@ async def link_issues(from_key: str, to_key: str, link_type: str) -> dict:
             "link": {"from_key": fk, "to_key": tk, "link_type": link_type}}
 
 
-@_or_facade('transition_issue')
+@_requires_native
 async def transition_issue(issue_key: str, transition: str) -> dict:
     """Move an issue by transition NAME, resolved against what is actually
     available from its current status — unavailable names fail loudly with the
@@ -818,7 +822,7 @@ async def transition_issue(issue_key: str, transition: str) -> dict:
 
 
 # --- custom fields, filters, dashboards & gadgets (native only) ---------------
-# lib-jira never grew these operations, so there is no `_or_facade` fallback:
+# Native-only from the start (the n8n path never grew these operations):
 # they simply refuse until native credentials exist.
 
 

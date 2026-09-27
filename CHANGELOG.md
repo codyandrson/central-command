@@ -4,6 +4,27 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-26 — v2.50.0: Jira is a native client, with no webhook to fall back to
+
+The n8n Jira façade (`cc-jira-facade` → `lib-jira`) predates the native
+client (D23, 2026-07): every Jira function in `integrations/jira.py` was
+wrapped in `_or_facade`, which routed the call to the webhook whenever the
+native credentials were absent. No deployment had used that path since the
+cutover; its n8n half hard-coded one Cloud site (so it could never ship in
+this repo); and its one live effect in two months was the 2026-09-23
+incident, where a PAT-configured Data Center install — no email, so
+`configured()` was false — was silently sent to a webhook that did not exist.
+
+Removed. An unconfigured client now raises `JiraError("Jira is not
+configured — set CC_JIRA_BASE_URL and CC_JIRA_API_TOKEN …")` before any
+request, from the same seam (`_requires_native`). Gone with it:
+`integrations/n8n_facade.py`, the `CC_N8N_JIRA_URL` / `CC_JIRA_FACADE_TOKEN`
+settings (a stale line in an existing `.env` is ignored), the live-facade
+test module, and the `.env.example` lines that called the fallback "still
+live". The n8n liveness probe now reads the email façade's host — the same
+n8n, named for the thing that still rides it. Operators who kept the two
+workflows on their canvas can delete them; nothing calls them.
+
 ## 2026-09-26 — v2.49.0: what a clean re-deploy could not rebuild from the repo
 
 The reference deployment was torn down and re-deployed fresh at v2.48.0 on
