@@ -171,6 +171,124 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
   fi
 }
 
+# ── Systems-page browser links (v2.52.0) ────────────────────────────────────
+# The cockpit's Systems view shows an "Open →" link per service only when its
+# CC_*_UI_URL / CC_*_DOCS_URL / CC_NEO4J_BROWSER_URL is set. Those are
+# DISPLAY values, so no phase had ever filled them: a fresh .env (the
+# 2026-09-26 clean slate) lost every link and nobody noticed until the page
+# was opened. On this profile each one is derivable — the browser host is the
+# node's tailnet name and the port is whatever `tailscale serve` already maps
+# onto the service's loopback port (README §6 has the operator add those
+# entries). LiteLLM needs no serve entry: ServiceLB binds :4000 on every
+# interface. Only llama-swap is NOT derivable — it runs on the compute host,
+# and nothing in either env file says where — so it stays a WARN with the
+# shape to type. Every write is set_kv_if_unset: an operator's own URL wins.
+
+# The node's tailnet DNS name, without the trailing dot — "" when tailscale
+# is not up (then every link is skipped with one WARN, not seven).
+tailnet_dns_name() {
+  command -v tailscale >/dev/null 2>&1 || return 0
+  tailscale status --self --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    print((json.load(sys.stdin).get("Self") or {}).get("DNSName", "").rstrip("."))
+except Exception:
+    pass'
+}
+
+# `tailscale serve status --json` reduced to "<loopback target port> <served
+# port>" lines: HTTPS handlers proxying to http://127.0.0.1:<target> and raw
+# TCP forwards to 127.0.0.1:<target> (Neo4j's bolt). One line per mapping.
+tailnet_serve_map() {
+  command -v tailscale >/dev/null 2>&1 || return 0
+  tailscale serve status --json 2>/dev/null | python3 -c '
+import json, sys
+from urllib.parse import urlsplit
+try:
+    st = json.load(sys.stdin) or {}
+except Exception:
+    sys.exit(0)
+for hostport, web in (st.get("Web") or {}).items():
+    served = hostport.rsplit(":", 1)[-1]
+    for path, h in (web.get("Handlers") or {}).items():
+        proxy = h.get("Proxy") or ""
+        u = urlsplit(proxy)
+        if path == "/" and u.hostname in ("127.0.0.1", "localhost") and u.port:
+            print(u.port, served)
+for served, tcp in (st.get("TCP") or {}).items():
+    fwd = tcp.get("TCPForward") or ""
+    if fwd.startswith(("127.0.0.1:", "localhost:")):
+        print(fwd.rsplit(":", 1)[-1], served)'
+}
+
+# served_port <map> <loopback target port> — the tailnet port fronting it, or "".
+served_port() {
+  local target="$2" line
+  while IFS= read -r line; do
+    [[ "${line%% *}" == "$target" ]] && { printf '%s' "${line#* }"; return 0; }
+  done <<<"$1"
+  printf ''
+}
+
+derive_systems_links() {
+  local host map
+  host="$(tailnet_dns_name)"
+  if [[ -z "$host" ]]; then
+    warn "app-links" "tailscale is not up, so the Systems-page links (CC_*_UI_URL, CC_*_DOCS_URL, CC_NEO4J_BROWSER_URL) were not derived — re-run: ./deploy/k3s/setup.sh app once it is"
+    return 0
+  fi
+  map="$(tailnet_serve_map)"
+
+  # LiteLLM: ServiceLB, plain http, every interface — no serve entry involved.
+  set_kv_if_unset "$APP_ENV" CC_LLM_PROXY_UI_URL "http://${host}:4000/ui/" "app-link-litellm"
+
+  # One row per tailscale-serve-fronted service: key, loopback port the
+  # service listens on, and the path the browser lands on.
+  local row key target path port
+  for row in \
+      "CC_N8N_UI_URL 5678 " \
+      "CC_VLOGS_UI_URL 9428 /select/vmui/" \
+      "CC_SANDBOX_DOCS_URL 8090 /docs" \
+      "CC_CRAWLER_DOCS_URL 8091 /docs" \
+      "CC_DB_UI_URL 8092 /"; do
+    read -r key target path <<<"$row"
+    if ! is_placeholder "$(get_kv "$APP_ENV" "$key")"; then
+      pass "app-link-${key,,}" "$key already set — left alone"; continue
+    fi
+    port="$(served_port "$map" "$target")"
+    if [[ -z "$port" ]]; then
+      warn "app-link-${key,,}" "$key not derived — no tailscale-serve entry fronts 127.0.0.1:${target}; add one (tailscale serve --bg --https=${target} http://127.0.0.1:${target}) and re-run: ./deploy/k3s/setup.sh app"
+      continue
+    fi
+    set_kv_if_unset "$APP_ENV" "$key" "https://${host}:${port}${path}" "app-link-${key,,}"
+  done
+
+  # Neo4j Browser: the HTTPS entry over 7474 plus, when the bolt TCP forward
+  # (7687, TLS-terminated by tailscale) is served too, a ?dbms= that lands
+  # the browser on the right database over bolt+s.
+  if is_placeholder "$(get_kv "$APP_ENV" CC_NEO4J_BROWSER_URL)"; then
+    local http_port bolt_port url
+    http_port="$(served_port "$map" 7474)"
+    bolt_port="$(served_port "$map" 7687)"
+    if [[ -z "$http_port" ]]; then
+      warn "app-link-cc_neo4j_browser_url" "CC_NEO4J_BROWSER_URL not derived — no tailscale-serve entry fronts 127.0.0.1:7474 (the cc-graph-bolt relay); add one (tailscale serve --bg --https=7474 http://127.0.0.1:7474) and re-run: ./deploy/k3s/setup.sh app"
+    else
+      url="https://${host}:${http_port}/browser/"
+      [[ -n "$bolt_port" ]] && url="${url}?dbms=bolt%2Bs%3A%2F%2F${host}%3A${bolt_port}"
+      set_kv_if_unset "$APP_ENV" CC_NEO4J_BROWSER_URL "$url" "app-link-cc_neo4j_browser_url"
+    fi
+  else
+    pass "app-link-cc_neo4j_browser_url" "CC_NEO4J_BROWSER_URL already set — left alone"
+  fi
+
+  # llama-swap lives on the compute host; nothing here knows its address.
+  if is_placeholder "$(get_kv "$APP_ENV" CC_LLAMA_SWAP_UI_URL)"; then
+    pass "app-link-cc_llama_swap_ui_url" "CC_LLAMA_SWAP_UI_URL is empty — not derivable (llama-swap runs on the compute host); if you run one, set it in the app's .env to http://<compute-host-tailnet-ip>:8081/ui for a Systems-page link + liveness probe"
+  else
+    pass "app-link-cc_llama_swap_ui_url" "CC_LLAMA_SWAP_UI_URL already set — left alone"
+  fi
+}
+
 # The app's .env must exist before mint-keys.sh runs — it writes CC_LLM_API_KEY
 # INTO it and FATALs if the file is absent (mint-keys.sh:42). That is why this
 # lives here and is called from the llm phase, not only from app.
@@ -712,6 +830,10 @@ phase_app() {
   set_kv_if_unset "$APP_ENV" CC_MCP_DEPLOY_KUBECONFIG  "/home/codyslab/.cc-mcp-deployer.kubeconfig"       "app-mcp-kubeconfig"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_KUBECONFIG     "/home/codyslab/.cc-litellm-operator.kubeconfig"   "app-litellm-kubeconfig"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_LOG_KUBECONFIG "/home/codyslab/.cc-litellm-logreader.kubeconfig"  "app-litellm-log-kubeconfig"
+
+  # The Systems page's "Open →" links, derived from tailscale (see
+  # derive_systems_links above). Display-only; a WARN, never a FAIL.
+  derive_systems_links
 
   # The façade tokens (v2.51.0). What the control plane sends and what the
   # n8n webhooks check — apply-workflows.sh renders them into the workflow

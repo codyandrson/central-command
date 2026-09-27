@@ -333,7 +333,7 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh fetch       # acquire every external artifact up front (the one network phase)
 ./setup.sh llm         # secrets + LiteLLM (+speech) up + probe its aliases + measure CC_EMBED_DIM
 ./setup.sh stack       # assert the local images, then `compose up -d --wait` (+crawler, +n8n)
-./setup.sh app         # venv, editable install, the derived .env values, mint the spine's virtual key, cockpit
+./setup.sh app         # venv, editable install, the derived .env values (incl. the Systems-page links), mint the spine's virtual key, cockpit
 ./setup.sh verify      # verify.sh, then live, then the capability manifest
 ./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
 ./setup.sh boot        # asks your name (once), starts the API detached, checks the roster

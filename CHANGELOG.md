@@ -4,6 +4,46 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-27 — v2.52.0: the Systems page's links are derived, not typed
+
+Found the morning after the reference deployment's clean-slate rebuild: the
+Systems page listed every service as up and offered no "Open →" link for any
+of them. The eight link settings (`CC_LLM_PROXY_UI_URL`, `CC_N8N_UI_URL`,
+`CC_VLOGS_UI_URL`, `CC_NEO4J_BROWSER_URL`, `CC_SANDBOX_DOCS_URL`,
+`CC_CRAWLER_DOCS_URL`, `CC_DB_UI_URL`, `CC_LLAMA_SWAP_UI_URL`) are
+display-only, so no installer phase had ever filled them; a `.env` recreated
+from `.env.example` simply carried eight blanks, and nothing warned.
+
+- **Both drivers now derive them in the `app` phase** (`deploy/k3s/setup.sh`,
+  `deploy/single/setup.sh`), through `set_kv_if_unset` like every other
+  composed value — a URL the operator typed (a reverse proxy, another
+  tailnet name) survives every re-run.
+  - **k3s:** the browser host is the node's tailnet DNS name (`tailscale
+    status --self`), and each port is whatever `tailscale serve status`
+    already maps onto the service's loopback port (n8n 5678, VictoriaLogs
+    9428, sandbox 8090, crawler 8091, pgweb 8092, Neo4j Browser 7474 with a
+    `?dbms=bolt+s://…` when the 7687 TCP forward is served too). LiteLLM
+    needs no serve entry (ServiceLB binds :4000 on every interface). A
+    service with no serve entry is a WARN naming the exact `tailscale serve`
+    command, and a re-run of `app` fills it. On the reference node the
+    derivation reproduces the pre-rebuild values byte for byte.
+  - **single (Linux and Windows):** the cockpit is browsed on the same
+    machine, so the link IS the loopback port this profile already answers
+    (`CC_LITELLM_PORT`, `CC_NEO4J_HTTP_PORT`/`_BOLT_PORT`, `CC_N8N_PORT`,
+    `CC_CRAWLER_PORT`, `CC_SANDBOX_RUNNER_URL`). Services switched off by
+    their `CC_ENABLE_*` flag get no link — an absent link means "not
+    installed", not "misconfigured". VictoriaLogs, pgweb and llama-swap are
+    not part of this profile and stay blank.
+  - `CC_LLAMA_SWAP_UI_URL` is the one hand-typed value on every profile:
+    llama-swap runs on a compute host neither installer can see. The k3s
+    driver says so in a PASS line with the shape to type.
+- **Guard:** `tests/test_systems_links_derived.py` reads the link settings
+  out of `api/systems.py` itself and fails if either driver stops deriving
+  one, if `.env.example` lacks its line, or if any link is written with a
+  bare `set_kv`.
+- `.env.example`, `deploy/k3s/README.md` and `deploy/single/README.md` say
+  where the values come from.
+
 ## 2026-09-26 — v2.51.1: a minted key is a key, and a slow image pull is not a failed sandbox
 
 Found by the first phases of the reference deployment's clean-slate rebuild

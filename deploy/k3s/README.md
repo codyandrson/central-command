@@ -359,6 +359,14 @@ early under the rehearsal persona. It stays dropped.)
   the other served ports work. Nothing here uses Traefik; disable it with the
   optional drop-in `deploy/k3s/host/20-disable-traefik.yaml` (instructions in
   the file; anchor-node k3s restart).
+  The `app` phase reads `tailscale serve status --json` and the node's
+  tailnet name to DERIVE the Systems page's "Open →" links (`CC_N8N_UI_URL`,
+  `CC_VLOGS_UI_URL`, `CC_NEO4J_BROWSER_URL`, `CC_SANDBOX_DOCS_URL`,
+  `CC_CRAWLER_DOCS_URL`, `CC_DB_UI_URL`; LiteLLM's needs no serve entry) into
+  the app's `.env` when they are blank (v2.52.0) — add the serve entries
+  first, or re-run `./deploy/k3s/setup.sh app` after adding one. A value you
+  typed is never overwritten. `CC_LLAMA_SWAP_UI_URL` stays hand-typed: the
+  compute host is not something this node can see.
 - **cc-graph-bolt** — loopback-only `socat` relay of `svc/neo4j` 7687/7474
   (by ClusterIP) for the cockpit's Graph panel. Keeps neo4j ClusterIP-only.
   Needs `apt install socat` on the anchor node (preflight checks). Not

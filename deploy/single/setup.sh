@@ -2405,6 +2405,30 @@ phase_app() {
     "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD:-}@127.0.0.1:${CC_LITELLM_DB_PORT}/litellm" \
     "app-litellm-db-url"
 
+  # The Systems page's "Open →" links (v2.52.0). Display-only, so no phase
+  # had ever filled them and a configure-born .env showed a Systems page with
+  # no links at all. On this profile every service sits on a loopback port
+  # this file already answers, and the cockpit is browsed on the same
+  # machine — so the link IS the port. Composed like the three above; an
+  # operator's own URL (a reverse proxy, a tailnet name) is never overwritten.
+  # Off-by-flag services get no link: an absent link is "not installed", not
+  # "misconfigured". VictoriaLogs, pgweb and llama-swap are not part of this
+  # profile, so their keys stay empty on purpose.
+  set_kv_if_unset "$ENV_FILE" CC_LLM_PROXY_UI_URL "http://127.0.0.1:${CC_LITELLM_PORT}/ui/" "app-link-litellm"
+  set_kv_if_unset "$ENV_FILE" CC_NEO4J_BROWSER_URL \
+    "http://127.0.0.1:${CC_NEO4J_HTTP_PORT:-7474}/browser/?dbms=bolt%3A%2F%2F127.0.0.1%3A${CC_NEO4J_BOLT_PORT:-7687}" \
+    "app-link-neo4j"
+  if [[ "${CC_ENABLE_N8N:-0}" == 1 ]]; then
+    set_kv_if_unset "$ENV_FILE" CC_N8N_UI_URL "http://127.0.0.1:${CC_N8N_PORT:-5678}" "app-link-n8n"
+  fi
+  if [[ "${CC_ENABLE_CRAWLER:-1}" == 1 ]]; then
+    set_kv_if_unset "$ENV_FILE" CC_CRAWLER_DOCS_URL "http://127.0.0.1:${CC_CRAWLER_PORT}/docs" "app-link-crawler"
+  fi
+  if [[ "${CC_ENABLE_SANDBOX:-1}" == 1 ]]; then
+    local sbx; sbx="$(get_kv "$ENV_FILE" CC_SANDBOX_RUNNER_URL)"
+    set_kv_if_unset "$ENV_FILE" CC_SANDBOX_DOCS_URL "${sbx:-http://127.0.0.1:8090}/docs" "app-link-sandbox"
+  fi
+
   # CC_EXECUTOR_MODE is left at .env.example's `live` (v2.37.0). A fresh
   # install used to be forced to dry_run — a global no-op on EVERY capability,
   # including the internal ones — and the operator forgot the flip more often
