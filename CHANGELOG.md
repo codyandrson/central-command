@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-27 — v2.53.1: `/health` reports the installed version
+
+`GET /health` answered `"version": "0.1.0"` on a v2.53.0 install. The package's
+`__version__` was a literal in `central_command/__init__.py` that no release had
+touched since the first commit, and it fed three surfaces: `/health`, the
+OpenAPI document's version, and the cockpit gateway's `server.version`. Now
+`__version__` is read from the `VERSION` file at import — the same line the
+updater reads for "current" — so a version check against any of those means
+what the updater means. `tests/test_version_file.py` pins the package and the
+health route to the file. (`pyproject.toml`'s `version` is still the static
+`0.1.0` packaging metadata; nothing reads it as the product version.)
+
 ## 2026-09-27 — v2.53.0: Jira and Confluence are asked for and probed at setup, not discovered in the tour
 
 Found mid-tour on the reference deployment, the day after its clean-slate

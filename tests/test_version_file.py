@@ -33,3 +33,16 @@ def test_version_file_matches_the_newest_changelog_release():
         "CHANGELOG.md announces a release VERSION does not carry — bump VERSION "
         "in the same commit (the updater reads VERSION, not the tag)"
     )
+
+
+def test_package_version_is_the_version_file():
+    """`/health` said 0.1.0 on a v2.53.0 install (2026-09-27): `__version__`
+    was a literal nothing bumped. The package reports the VERSION file, and
+    the health route reports the package."""
+    import asyncio
+
+    import central_command
+    from central_command.api.app import health
+
+    assert central_command.__version__ == _version_file()
+    assert asyncio.run(health())["version"] == _version_file()
