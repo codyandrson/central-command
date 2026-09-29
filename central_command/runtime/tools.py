@@ -750,6 +750,23 @@ async def jira_list_fields(ctx: RunContext) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+async def jira_find_users(ctx: RunContext, query: str, project_key: str = "") -> str:
+    """Find Jira users by a name or email fragment. Each row carries the
+    `user_id` that jira.assign_issue and jira.create_issue's `assignee` take —
+    read it here, never guess it: on Jira Cloud it is an opaque account id, on
+    Data Center a username, and a display name or email is neither. Pass
+    `project_key` to see only users who can be assigned issues there. An
+    empty result means no match for THOSE words — try a shorter fragment
+    before concluding the person has no account. Read-only.
+    """
+    try:
+        data = await _read_with_retry(
+            lambda: jira.find_users(query, project_key or None))
+    except Exception as e:  # noqa: BLE001
+        return _read_failed("jira user search", e)
+    return _clip(json.dumps(data, default=str))
+
+
 async def jira_get_transitions(ctx: RunContext, issue_key: str) -> str:
     """Read the legal next statuses for a Jira issue. Always check this before
     proposing a jira.transition_issue action — proposals must name a transition

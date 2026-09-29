@@ -47,6 +47,62 @@ def test_every_spec_names_a_real_gated_write():
     assert set(ARG_SPECS) <= gated_write_names()
 
 
+def _subscripted_keys(fn) -> set[str]:
+    """The `args["k"]` subscripts in a handler's CODE (docstring excluded) —
+    each one is a KeyError waiting for a draft that omits it."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    keys = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+                and node.value.id == "args" and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, str)):
+            keys.add(node.slice.value)
+    return keys
+
+
+def test_every_subscripted_argument_has_a_spec():
+    """Found live 2026-09-29: jira.update_attributes subscripted `priority`,
+    no Jira capability had a spec, so a draft without it passed BOTH tiers,
+    executed three creates, and died on a bare KeyError "'priority'" —
+    half-applied. A handler that subscripts a key must have a spec that
+    guarantees it: required (non-empty), or named in an any_present group
+    when an empty value is legitimate."""
+    unguarded = {}
+    for cap, fn in executor.HANDLERS.items():
+        keys = _subscripted_keys(fn)
+        if not keys:
+            continue
+        spec = ARG_SPECS.get(cap)
+        guaranteed = set(spec.required) if spec else set()
+        if spec:
+            guaranteed |= {g[0] for g in spec.any_present if len(g) == 1}
+        missing = keys - guaranteed
+        if missing:
+            unguarded[cap] = sorted(missing)
+    assert unguarded == {}, (
+        f"handlers subscript arguments no ARG_SPECS entry requires: {unguarded} "
+        "— add the spec (contract/args.py), or read the key with .get() if it "
+        "is genuinely optional"
+    )
+
+
+def test_update_attributes_is_a_partial_edit():
+    """The shape the 2026-09-29 draft had — date and labels, no priority —
+    is valid now; naming nothing is not; null/[] count as naming."""
+    assert validate_action_args("jira.update_attributes", {
+        "issue_key": "TASKS-21", "due_date": "2026-10-11", "labels": ["cayenne"]}) == []
+    assert validate_action_args("jira.update_attributes", {
+        "issue_key": "TASKS-21", "due_date": None}) == []
+    assert validate_action_args("jira.update_attributes", {
+        "issue_key": "TASKS-21", "labels": []}) == []
+    (problem,) = validate_action_args("jira.update_attributes", {"issue_key": "TASKS-21"})
+    assert "priority, labels, due_date" in problem
+
+
 def test_all_problems_are_reported_at_once():
     """One message per problem, all missing keys in one line — the one-field-
     per-round grind is what turned one bad draft into three failed approvals."""
@@ -57,7 +113,7 @@ def test_all_problems_are_reported_at_once():
     assert validate_action_args("graph.add_episode@v1", {"scope": "team", "name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z"}) == [
         "graph.add_episode@v1: scope='team' is not one of shared, private"
     ]
-    assert validate_action_args("jira.add_comment", {}) == []  # no spec = no guess
+    assert validate_action_args("no.such_capability", {}) == []  # no spec = no guess
 
 
 @needs_pg

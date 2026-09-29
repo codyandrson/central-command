@@ -4,6 +4,61 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-09-29 — v2.54.0: Jira writes that say what they do — on Cloud and Data Center
+
+Three Jira faults found on the reference deployment in one morning, and three
+capability gaps the jira-expert had declared. Every change below is coded and
+tested for BOTH Jira flavors (`CC_JIRA_API_FLAVOR=cloud` and `server`).
+
+- **`jira.update_attributes` is a partial edit.** A proposal to move two
+  issues' due date and set their labels was approved and died on a bare
+  `KeyError: 'priority'` — AFTER its three `create_issue` actions had run.
+  `priority` was required and all three attributes were always sent, so the
+  agent's redraft had to GUESS a priority (it happened to match). Now only the
+  attributes a proposal names are sent; at least one is required; `due_date:
+  null` and `labels: []` clear.
+- **`jira.link_issues` built every link backwards.** The create call names its
+  sides the opposite way round from the read — Data Center's REST reference:
+  the link runs "from the first issue [`inwardIssue`] … using the outward
+  description" — and the client sent `from_key` as `outwardIssue`, so
+  "TASKS-85 blocks TASKS-88" was stored as "TASKS-88 blocks TASKS-85". The
+  unit test pinned the request body, so it pinned the bug. Fixed, and the
+  Executor now READS THE LINK BACK: if Jira ever stores it inverted, the new
+  link is removed and the action fails rather than reporting a wrong
+  dependency as done. **Links created before this release are inverted** —
+  correct them with the new `jira.delete_link` plus `jira.link_issues`.
+- **Argument specs for every handler that subscripts one.** No Jira,
+  Confluence, calendar, mcp, charter or task capability had an `ARG_SPECS`
+  entry — 35 handlers could crash mid-proposal on a missing key. All have one
+  now, and `tests/test_proposal_args.py` walks the Executor so a new
+  subscripted key without a spec fails the suite. `ArgSpec.any_present` is the
+  new "must be named, may be empty" rule partial edits need.
+- **`jira.delete_issue`** (gap: the operator asked for obsolete issues to be
+  deleted and the agent could only close them). Irreversible on both products,
+  so it is its own pack, `jira-delete-propose`, held by jira-expert alone
+  (seeded on fresh databases). A `reason` is required; the Executor reads the
+  issue first and records a snapshot in the result, because nothing can read it
+  afterwards; an issue with subtasks is refused — each subtask is deleted by
+  its own named action.
+- **`jira.delete_link`** — addressed by `from_key`/`to_key`/`link_type` exactly
+  as the issue read shows it, never by id; only a link stored in that direction
+  matches.
+- **`jira.assign_issue`, an `assignee` on `jira.create_issue`, and the
+  `jira_find_users` read.** Cloud identifies users only by `accountId` and
+  searches with `query`; Data Center only by username (`name`) and searches
+  with `username`. `jira_find_users` returns whichever this deployment uses as
+  `user_id`, and the writes send it in the matching shape; `-1` (project
+  default) is refused, `null` unassigns.
+- **`scripts/atlassian_probe.py`** now checks what these writes depend on per
+  instance: the Blocks/Relates/Duplicate link types exist, the token's account
+  holds link/assign/delete permissions, and the assignable-user search answers
+  in the flavor's shape — run it on a Data Center instance before relying on
+  them.
+
+**Upgrading:** grant `jira-delete-propose` to jira-expert AFTER this release is
+running (a grant naming a pack the process does not know fails the agent's next
+run); a fresh database seeds it.
+
 ## 2026-09-27 — v2.53.1: `/health` reports the installed version
 
 `GET /health` answered `"version": "0.1.0"` on a v2.53.0 install. The package's

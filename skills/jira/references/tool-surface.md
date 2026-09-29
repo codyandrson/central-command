@@ -3,6 +3,13 @@
 Source of truth: `central_command/integrations/jira.py`. Every response is the same
 envelope: `{ok: true, kind: "jira", operation: "<name>", ...}`.
 
+Paths below are written as Jira **Cloud** serves them (`/rest/api/3`). On a Jira
+**Data Center / Server** deployment (`CC_JIRA_API_FLAVOR=server`) every one is
+`/rest/api/2`, rich text is wiki markup instead of ADF, and users are identified
+by **username** instead of account id — the client handles all of it; the
+arguments you propose are the same on both. Tools marked Cloud-only are simply
+not offered on Data Center.
+
 ## Reads (ungated — call them freely, before every proposal)
 
 ### `jira_get_issue(issue_key)` → `GET /rest/api/3/issue/{key}`
@@ -84,6 +91,16 @@ from an email, and a key that does not exist here fails the write. Never
 invent a plausible-sounding key — the real list is short and this tool is the
 only thing that knows it.
 
+### `jira_find_users(query, project_key="")` → `GET /rest/api/3/user/assignable/search`
+
+Users matching a name or email fragment: `{user_id, display_name, email, active}`.
+`user_id` is what `jira.assign_issue` and `jira.create_issue`'s `assignee` take —
+an opaque **account id** on Cloud, a **username** on Data Center — so it is read
+here, never typed from a display name or an email. With `project_key`, only users
+who can be assigned issues in that project (without it: `/user/search`). Cloud
+may hide `email`. An empty result means no match for those words; try a shorter
+fragment before concluding the person has no account.
+
 ### `jira_list_filters(query="")` → `GET /rest/api/3/filter/search`
 
 Saved filters: `{id, name, jql, description, owner}`. First page only. Call
@@ -106,12 +123,15 @@ an identifier that appears in this list. Never guess one.
 
 | capability | endpoint | notes |
 |---|---|---|
-| `jira.create_issue` | `POST /rest/api/3/issue` | `project_key` must match `[A-Z][A-Z0-9_]*`; `summary` non-empty and **< 255 chars**; `issue_type` is one of **Task, Bug, Story, Epic, Subtask** (`Sub-task` also accepted for company-managed projects — types are per-project, and Jira's own 400 is the final validator); optional `parent` (issue key — REQUIRED for Subtask, names the Epic for a Story/Task under one), `due_date`, `labels` |
+| `jira.create_issue` | `POST /rest/api/3/issue` | `project_key` must match `[A-Z][A-Z0-9_]*`; `summary` non-empty and **< 255 chars**; `issue_type` is one of **Task, Bug, Story, Epic, Subtask** (`Sub-task` also accepted for company-managed projects — types are per-project, and Jira's own 400 is the final validator); optional `parent` (issue key — REQUIRED for Subtask, names the Epic for a Story/Task under one), `due_date`, `labels`, `assignee` (a `user_id` from `jira_find_users` — on the create, because a follow-up action cannot name the new key) |
 | `jira.set_due_date` | `PUT /rest/api/3/issue/{key}` | sets `duedate` only |
-| `jira.update_attributes` | `PUT /rest/api/3/issue/{key}` | sets `priority`, `duedate`, `labels` together — **`labels` is the FULL replacement list, not a merge**; `due_date=None` clears it |
+| `jira.update_attributes` | `PUT /rest/api/3/issue/{key}` | a **partial** edit of `priority`, `due_date`, `labels` — name only what you mean to change (at least one); an attribute you leave out is untouched. **`labels` is the FULL replacement list, not a merge** (`[]` clears); `due_date: null` clears the date; priority can be changed, not cleared |
 | `jira.set_fields` | `PUT /rest/api/3/issue/{key}` | sets **custom** fields, given as `fields: {"<field name>": value}`. Names come from `jira_list_fields` or a read's `custom_fields` (matched case-insensitively) — **never a `customfield_NNNNN` id**, and never a name you have not seen there: an unknown name is refused here with the real list, because Jira answers an unknown field key with **200 and binds nothing**. The value shape follows the field's declared type: a string for text and rich text (wrapped into ADF for you), a number for numeric, `YYYY-MM-DD` for a date, the option name for a select, a list of names for a multi-select, `null` to clear. `writable: false` fields are refused. Priority, labels and due date are NOT here — those are `jira.update_attributes`. Native-only |
 | `jira.add_comment` | `POST /rest/api/3/issue/{key}/comment` | plain text is converted to ADF for you; body must be non-empty |
-| `jira.link_issues` | `POST /rest/api/3/issueLink` | `link_type` is one of **Blocks, Relates, Duplicate**; `from_key` is the **OUTWARD** side (for Blocks: from BLOCKS to); self-links are refused |
+| `jira.link_issues` | `POST /rest/api/3/issueLink` | `link_type` is one of **Blocks, Relates, Duplicate**; `from_key` is the **OUTWARD** side (for Blocks: from BLOCKS to — the prerequisite is `from_key`); self-links are refused. The Executor reads the stored link back and fails (removing it) if Jira stored it the other way round — links made before 2026-09-29 were all stored inverted |
+| `jira.delete_link` | `DELETE /rest/api/3/issueLink/{id}` | same three arguments as `link_issues`, naming the link **as you read it** on `from_key` (direction `outward`); only a link stored in that direction is removed — no link ids. Correct an inverted link with `delete_link` (as stored) + `link_issues` (as meant) in one proposal |
+| `jira.assign_issue` | `PUT /rest/api/3/issue/{key}/assignee` | `assignee` is a `user_id` from `jira_find_users`, or `null` to unassign; `-1` (project default) is refused |
+| `jira.delete_issue` | `DELETE /rest/api/3/issue/{key}` | **irreversible on Cloud and Data Center** — its own pack (`jira-delete-propose`), jira-expert only. Requires a `reason`; the result records a snapshot of the issue. An issue with subtasks is refused: delete each subtask by its own action first. Finished work is **transitioned**, not deleted |
 | `jira.transition_issue` | `POST /rest/api/3/issue/{key}/transitions` | takes a transition **NAME**, case-insensitive; the client resolves it against `get_transitions` first and fails with the available set if it does not match — it never guesses an id |
 | `jira.create_filter` | `POST /rest/api/3/filter` | `name` non-empty < 255 chars; `jql` non-empty under 2000 chars; optional `description`. Native-only — no façade counterpart |
 | `jira.create_dashboard` | `POST /rest/api/3/dashboard` + `POST .../gadget` per gadget | creates a **private** dashboard (empty share/edit permissions), then adds up to **10** gadgets. Each gadget spec: exactly one of `uri`/`module_key` (from `jira_list_gadgets`), optional `title`, `color`, `position {row, column}`, and `config`. A gadget's failure does not undo the dashboard or earlier gadgets — per-gadget outcomes come back in the result. To bind a saved filter to a gadget, set `config: {"filterId": "filter-<id>"}` — **string values, `filter-` prefix** — or `config: {"filterName": "<exact name>"}` when the filter is created in the same proposal (the name is resolved to the real id at execution time; exactly-one match required, and the whole write fails before anything is created if it cannot resolve). Give exactly ONE filter key. **You do not need to know which pref the gadget binds under** — the client reads the gadget's own XML and rewrites your binding to `filterId` or `projectOrFilterId`, whichever that gadget declares, and sets `isConfigured` for you. Every OTHER key in `config` must be a pref that gadget declares, or the whole write is refused with the accepted list (a gadget silently ignores prefs it does not declare, which is how four gadgets came back reading "hasn't been configured yet"). A placeholder filterId is refused outright. Native-only |
@@ -138,10 +158,8 @@ label, `inlineCard` renders as its URL. So a description you read may be a
 lossy view of rich content — quote it as text, but do not claim formatting
 fidelity.
 
-## The cutover you may be running under
+## When Jira is not configured
 
-While `CC_JIRA_EMAIL` / `CC_JIRA_API_TOKEN` are unset, **every call marked
-otherwise falls through to the n8n façade** (`_or_facade`) — the ones marked
-native-only above simply refuse. The envelope is
-identical by design, so you cannot tell from the response which path served it —
-and you do not need to. Do not reason about "which backend answered".
+There is no fallback path any more (the n8n façade was removed in v2.50.0): with
+no native credentials every Jira tool fails with "Jira is not configured". Say
+so; do not reason about the instance's contents from that error.

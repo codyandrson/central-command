@@ -29,6 +29,10 @@ class ArgSpec:
     enums: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Groups of keys of which AT LEAST ONE must be present and non-empty.
     any_of: tuple[tuple[str, ...], ...] = ()
+    # Groups of keys of which at least one must be PRESENT — any value,
+    # including null and [] ("clear it"). For partial edits, where naming a
+    # key IS the instruction and an empty value is a legitimate one.
+    any_present: tuple[tuple[str, ...], ...] = ()
     # Dotted path → inclusive maximum. A value present at that path must be a
     # number no greater than the ceiling; absent passes.
     ceilings: dict[str, float] = field(default_factory=dict)
@@ -117,6 +121,63 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "litellm.add_model": ArgSpec(required=("model_name", "model"), ceilings=_COST_CEILINGS),
     "litellm.update_model": ArgSpec(required=("model_id",), ceilings=_COST_CEILINGS),
     "litellm.delete_model": ArgSpec(required=("model_id",)),
+    # Every other handler that SUBSCRIPTS an argument (2026-09-29). Found live:
+    # a jira.update_attributes draft without `priority` passed both tiers —
+    # no Jira capability had a spec — executed three creates, then died on a
+    # bare KeyError "'priority'", leaving the proposal half-applied.
+    # `tests/test_proposal_args.py` now walks the Executor's handlers so a
+    # subscripted key without a spec fails the suite, not the operator.
+    "jira.set_due_date": ArgSpec(required=("issue_key", "due_date")),
+    "jira.create_issue": ArgSpec(required=("project_key", "summary")),
+    "jira.create_project": ArgSpec(required=("key", "name")),
+    "jira.add_comment": ArgSpec(required=("issue_key", "body")),
+    # A PARTIAL edit: only the attributes named are changed. Presence is the
+    # instruction, so `due_date: null` (clear) and `labels: []` (clear) count.
+    "jira.update_attributes": ArgSpec(
+        required=("issue_key",),
+        any_present=(("priority", "labels", "due_date"),),
+    ),
+    "jira.set_fields": ArgSpec(required=("issue_key", "fields")),
+    "jira.link_issues": ArgSpec(
+        required=("from_key", "to_key", "link_type"),
+        enums={"link_type": ("Blocks", "Relates", "Duplicate")},
+    ),
+    "jira.delete_link": ArgSpec(
+        required=("from_key", "to_key", "link_type"),
+        enums={"link_type": ("Blocks", "Relates", "Duplicate")},
+    ),
+    # `assignee` must be PRESENT — null is the spelling for "unassign".
+    "jira.assign_issue": ArgSpec(required=("issue_key",), any_present=(("assignee",),)),
+    "jira.delete_issue": ArgSpec(required=("issue_key", "reason")),
+    "jira.transition_issue": ArgSpec(required=("issue_key", "transition")),
+    "jira.create_filter": ArgSpec(required=("name", "jql")),
+    "jira.create_dashboard": ArgSpec(required=("name",)),
+    "confluence.create_page": ArgSpec(required=("space_id_or_key", "title", "body_storage")),
+    "confluence.update_page": ArgSpec(
+        required=("page_id", "title", "body_storage", "expected_version")),
+    "confluence.move_page": ArgSpec(required=("page_id", "new_parent_id")),
+    "confluence.trash_page": ArgSpec(required=("page_id",)),
+    "confluence.upload_attachment": ArgSpec(required=("page_id", "filename", "content")),
+    "confluence.set_labels": ArgSpec(required=("page_id", "labels")),
+    "confluence.create_space": ArgSpec(required=("key", "name")),
+    "calendar.create_event": ArgSpec(required=("title", "start", "end")),
+    "calendar.update_event": ArgSpec(required=("event_id",)),
+    "calendar.delete_event": ArgSpec(required=("event_id", "reason")),
+    "charter.update": ArgSpec(required=("agent_id", "content")),
+    "skill.doc_add": ArgSpec(required=("skill_id",)),
+    "task.create": ArgSpec(required=("agent_id", "instructions")),
+    "litellm.create_key": ArgSpec(required=("key_alias",)),
+    "litellm.update_key": ArgSpec(required=("key",)),
+    "litellm.set_fallbacks": ArgSpec(required=("model", "fallback_models")),
+    "litellm.delete_fallbacks": ArgSpec(required=("model",)),
+    "litellm.create_team": ArgSpec(required=("team_alias",)),
+    "litellm.delete_team": ArgSpec(required=("team_id",)),
+    "litellm.register_mcp_server": ArgSpec(required=("server_id",)),
+    "mcp.sync_source": ArgSpec(required=("server_id", "files")),
+    "mcp.build_image": ArgSpec(required=("server_id",)),
+    "mcp.server_deploy": ArgSpec(required=("server_id",)),
+    "mcp.server_remove": ArgSpec(required=("server_id",)),
+    "mcp.tool_call": ArgSpec(required=("server_id", "tool_name")),
 }
 
 
@@ -148,6 +209,12 @@ def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
         if not any(args.get(k) for k in group):
             problems.append(
                 f"{capability}: at least one of {', '.join(group)} is required "
+                f"(present: {', '.join(sorted(args)) or 'none'})"
+            )
+    for group in spec.any_present:
+        if not any(k in args for k in group):
+            problems.append(
+                f"{capability}: name at least one of {', '.join(group)} to change "
                 f"(present: {', '.join(sorted(args)) or 'none'})"
             )
     for key, allowed in spec.enums.items():

@@ -499,7 +499,9 @@ async def test_the_propose_tool_defers_instead_of_writing():
 
     proposal = Proposal(
         intent="create the event", expected_effect="event exists", evidence=[],
-        actions=[Action(capability="calendar.create_event", arguments={},
+        actions=[Action(capability="calendar.create_event",
+                        arguments={"title": "Standup", "start": "2026-10-01T09:00:00Z",
+                                   "end": "2026-10-01T09:15:00Z"},
                         target_ref={"system": "calendar", "id": "new"},
                         reversibility=Reversibility.reversible)],
     )

@@ -103,12 +103,138 @@ async def test_unavailable_transition_fails_with_the_available_set(monkeypatch):
         await jira.transition_issue("TASKS-12", "Ship It")
 
 
-async def test_link_direction_maps_from_to_outward(monkeypatch):
-    calls = _fake_call(monkeypatch, [FakeResponse(201, {})])
-    await jira.link_issues("TASKS-12", "TASKS-14", "Blocks")
-    body = calls[0][2]
-    assert body["outwardIssue"] == {"key": "TASKS-12"}
-    assert body["inwardIssue"] == {"key": "TASKS-14"}
+def _links_body(*links):
+    """A GET issue?fields=issuelinks body — the READ shape, which is
+    unambiguous: `outwardIssue` = the viewed issue <outward phrase> it."""
+    return {"fields": {"issuelinks": [
+        {"id": lid, "type": {"name": t, "inward": "is blocked by", "outward": "blocks"},
+         side: {"key": other}} for lid, t, side, other in links]}}
+
+
+@pytest.fixture(params=["cloud", "server"])
+def flavor(request, monkeypatch):
+    """Every Jira write whose REQUEST shape the two products might disagree
+    on runs under both — the work deployment is Data Center."""
+    monkeypatch.setattr(settings, "jira_api_flavor", request.param)
+    return request.param
+
+
+async def test_link_create_puts_the_blocker_in_inward_issue_and_reads_it_back(monkeypatch, flavor):
+    """2026-09-29, measured on Cloud: sending outwardIssue=TASKS-85,
+    inwardIssue=TASKS-88 stored "TASKS-88 blocks TASKS-85" — the create call
+    names its sides the opposite way from the read (Data Center's REST
+    reference: "from the first issue [inwardIssue] … using the outward
+    description"). The old test pinned the request body and so pinned the
+    bug; this one ends on what Jira STORED."""
+    calls = _fake_call(monkeypatch, [
+        FakeResponse(200, _links_body()),                                       # before
+        FakeResponse(201, {}),
+        FakeResponse(200, _links_body(("901", "Blocks", "outwardIssue", "TASKS-88"))),
+    ])
+    out = await jira.link_issues("TASKS-85", "TASKS-88", "Blocks")
+    body = calls[1][2]
+    assert body["inwardIssue"] == {"key": "TASKS-85"}
+    assert body["outwardIssue"] == {"key": "TASKS-88"}
+    assert calls[1][1] == ("/rest/api/2/issueLink" if flavor == "server"
+                           else "/rest/api/3/issueLink")
+    assert out["link"]["direction_verified"] is True
+
+
+async def test_a_link_stored_inverted_is_removed_and_the_action_fails(monkeypatch):
+    """If any instance maps the create call the other way round, the wrong
+    dependency must not stand, and must not be reported as done."""
+    calls = _fake_call(monkeypatch, [
+        FakeResponse(200, _links_body(("5", "Relates", "outwardIssue", "TASKS-1"))),
+        FakeResponse(201, {}),
+        FakeResponse(200, _links_body(("5", "Relates", "outwardIssue", "TASKS-1"),
+                                      ("902", "Blocks", "inwardIssue", "TASKS-88"))),
+        FakeResponse(204, {}),
+    ])
+    with pytest.raises(jira.JiraError, match="INVERTED"):
+        await jira.link_issues("TASKS-85", "TASKS-88", "Blocks")
+    assert calls[3][:2] == ("DELETE", "/rest/api/3/issueLink/902")  # only the new one
+
+
+async def test_delete_link_matches_only_the_named_direction(monkeypatch, flavor):
+    """Removing "88 blocks 85" when asked for "85 blocks 88" would be the
+    inversion bug again — the stored direction must match exactly."""
+    stored = _links_body(("7", "Blocks", "outwardIssue", "TASKS-85"))   # 88 blocks 85
+    _fake_call(monkeypatch, [FakeResponse(200, stored)])
+    with pytest.raises(jira.JiraError, match="no Blocks link to TASKS-88 in that direction"):
+        await jira.delete_link("TASKS-85", "TASKS-88", "Blocks")
+    calls = _fake_call(monkeypatch, [FakeResponse(200, stored), FakeResponse(204, {})])
+    out = await jira.delete_link("TASKS-88", "TASKS-85", "Blocks")
+    v = "2" if flavor == "server" else "3"
+    assert calls[1][:2] == ("DELETE", f"/rest/api/{v}/issueLink/7")
+    assert out["link"]["removed"] == 1
+
+
+async def test_update_attributes_sends_only_what_it_is_given(monkeypatch, flavor):
+    """The 2026-09-29 draft: date and labels, no priority. Priority must not
+    be sent at all — not as null, not as a guess."""
+    calls = _fake_call(monkeypatch, [FakeResponse(204, {})])
+    await jira.update_attributes("TASKS-21", due_date="2026-10-11", labels=["cayenne"])
+    assert calls[0][2] == {"fields": {"duedate": "2026-10-11", "labels": ["cayenne"]}}
+    calls = _fake_call(monkeypatch, [FakeResponse(204, {})])
+    await jira.update_attributes("TASKS-21", due_date=None)
+    assert calls[0][2] == {"fields": {"duedate": None}}
+    with pytest.raises(jira.JiraError, match="name at least one"):
+        await jira.update_attributes("TASKS-21")
+    with pytest.raises(jira.JiraError, match="priority NAME"):
+        await jira.update_attributes("TASKS-21", priority=None)
+
+
+async def test_delete_issue_snapshots_first_and_refuses_unnamed_subtasks(monkeypatch, flavor):
+    v = "2" if flavor == "server" else "3"
+    issue = {"fields": {"summary": "Old task", "status": {"name": "To Do"},
+                        "issuetype": {"name": "Task"}, "labels": ["solar"],
+                        "subtasks": []}}
+    calls = _fake_call(monkeypatch, [FakeResponse(200, issue), FakeResponse(204, {})])
+    out = await jira.delete_issue("TASKS-9")
+    assert calls[1][:2] == ("DELETE", f"/rest/api/{v}/issue/TASKS-9?deleteSubtasks=false")
+    assert out["issue"]["summary"] == "Old task" and out["issue"]["labels"] == ["solar"]
+
+    issue["fields"]["subtasks"] = [{"key": "TASKS-10"}]
+    calls = _fake_call(monkeypatch, [FakeResponse(200, issue)])
+    with pytest.raises(jira.JiraError, match="TASKS-10"):
+        await jira.delete_issue("TASKS-9")
+    assert [m for m, _, _ in calls] == ["GET"]  # nothing deleted
+
+
+async def test_assignee_is_an_account_id_on_cloud_and_a_username_on_data_center(monkeypatch, flavor):
+    calls = _fake_call(monkeypatch, [FakeResponse(204, {})])
+    await jira.assign_issue("TASKS-9", "jdoe")
+    v, key = ("2", "name") if flavor == "server" else ("3", "accountId")
+    assert calls[0] == ("PUT", f"/rest/api/{v}/issue/TASKS-9/assignee", {key: "jdoe"})
+    calls = _fake_call(monkeypatch, [FakeResponse(204, {})])
+    await jira.assign_issue("TASKS-9", None)
+    assert calls[0][2] == {key: None}  # null unassigns on both
+    with pytest.raises(jira.JiraError, match="jira_find_users"):
+        await jira.assign_issue("TASKS-9", "-1")  # "default assignee" is nobody named
+
+    calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-11"})])
+    await jira.create_issue("TASKS", "New", assignee="jdoe")
+    assert calls[0][2]["fields"]["assignee"] == {key: "jdoe"}
+
+
+async def test_find_users_speaks_each_products_parameter_and_id(monkeypatch, flavor):
+    if flavor == "server":
+        rows = [{"name": "jdoe", "key": "JIRAUSER1", "displayName": "Jane Doe",
+                 "emailAddress": "jane@example.com", "active": True}]
+    else:
+        rows = [{"accountId": "5b10ac8d82e05b22cc7d4ef5", "displayName": "Jane Doe",
+                 "active": True}]
+    calls = _fake_call(monkeypatch, [FakeResponse(200, rows)])
+    out = await jira.find_users("jane", "TASKS")
+    path = calls[0][1]
+    if flavor == "server":
+        assert path.startswith("/rest/api/2/user/assignable/search?username=jane")
+        assert out["users"][0]["user_id"] == "jdoe"
+    else:
+        assert path.startswith("/rest/api/3/user/assignable/search?query=jane")
+        assert out["users"][0]["user_id"] == "5b10ac8d82e05b22cc7d4ef5"
+        assert out["users"][0]["email"] is None  # Cloud may hide it
+    assert "project=TASKS" in path
 
 
 async def test_provider_errors_classify(monkeypatch):

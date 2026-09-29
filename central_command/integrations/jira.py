@@ -33,6 +33,7 @@ import functools
 import re
 import time
 from datetime import date
+from urllib.parse import urlencode
 
 import httpx
 
@@ -681,7 +682,7 @@ async def create_issue(
     project_key: str, summary: str, description: str | None = None,
     issue_type: str = "Task", due_date: str | None = None,
     labels: list[str] | None = None, parent: str | None = None,
-    custom_fields: dict | None = None,
+    custom_fields: dict | None = None, assignee: str | None = None,
 ) -> dict:
     """Create a new issue — the capability the 2026-07-20 charter-v2 incident
     demanded (the coached charter told the agent to propose it before it
@@ -733,6 +734,10 @@ async def create_issue(
         fields["labels"] = labels
     if parent:
         fields["parent"] = {"key": parent}
+    if assignee is not None:
+        # On the create, because the executor passes no values between a
+        # proposal's actions — a follow-up assign could never name this key.
+        fields["assignee"] = _user_ref(assignee)
     fields.update(custom_payload)
     resp = await _call("POST", _api("/issue"), {"fields": fields})
     _check(resp, "createIssue", project_key)
@@ -744,6 +749,7 @@ async def create_issue(
         "due_date": due_date,
         "labels": labels or [],
         "parent": parent,
+        **({"assignee": assignee} if assignee is not None else {}),
         "url": settings.jira_base_url.rstrip("/") + "/browse/" + str(key),
         **({"custom_fields": custom_applied} if custom_applied else {}),
     }}
@@ -761,39 +767,270 @@ async def add_comment(issue_key: str, body: str) -> dict:
             "comment": {"id": resp.json().get("id")}}
 
 
+_UNSET = object()
+
+
 @_requires_native
 async def update_attributes(
-    issue_key: str, priority: str, due_date: str | None, labels: list[str]
+    issue_key: str, priority=_UNSET, due_date=_UNSET, labels=_UNSET,
 ) -> dict:
+    """A PARTIAL edit of the three built-in attributes: only what is passed is
+    sent, so an attribute the proposal does not name is left exactly as it is.
+
+    Until 2026-09-29 all three were sent every time and `priority` was
+    required — so a draft that only meant to move a date and add labels either
+    crashed the Executor (KeyError) or, redrafted, made the agent GUESS a
+    priority and overwrite the real one. `due_date=None` clears the date and
+    `labels=[]` clears the labels; priority cannot be cleared (Jira's own
+    rule), only set. A partial `fields` PUT behaves the same on Cloud (v3) and
+    Data Center (v2)."""
     key = _key(issue_key)
-    if due_date is not None:
-        due_date = _date(due_date, "updateAttributes", key)
-    if not isinstance(labels, list):
-        raise JiraError(f"updateAttributes for {key} — labels must be the full replacement list")
-    resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": {
-        "priority": {"name": priority}, "duedate": due_date, "labels": labels}})
+    fields: dict = {}
+    if priority is not _UNSET:
+        if not isinstance(priority, str) or not priority.strip():
+            raise JiraError(f"updateAttributes for {key} — priority must be a priority NAME "
+                            "(it can be changed, not cleared)")
+        fields["priority"] = {"name": priority.strip()}
+    if due_date is not _UNSET:
+        fields["duedate"] = (None if due_date is None
+                             else _date(due_date, "updateAttributes", key))
+    if labels is not _UNSET:
+        if not isinstance(labels, list) or not all(isinstance(x, str) for x in labels):
+            raise JiraError(f"updateAttributes for {key} — labels must be the full "
+                            "replacement list of strings ([] clears them)")
+        fields["labels"] = labels
+    if not fields:
+        raise JiraError(f"updateAttributes for {key} — name at least one of priority, "
+                        "due_date, labels")
+    resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": fields})
     _check(resp, "updateAttributes", key)
+    changed = {"priority": priority, "due_date": due_date, "labels": labels}
     return {"ok": True, "kind": "jira", "operation": "updateAttributes",
-            "issue": {"issue_key": key, "priority": priority,
-                      "due_date": due_date, "labels": labels}}
+            "issue": {"issue_key": key,
+                      **{k: v for k, v in changed.items() if v is not _UNSET}}}
+
+
+def _user_ref(user_id: str | None) -> dict | None:
+    """The assignee body each product accepts: Cloud identifies a user ONLY by
+    `accountId` (names were removed by the user-privacy migration); Data
+    Center only by `name` (the username). The id an agent passes is the
+    `user_id` jira_find_users returned on THIS deployment, so it is already
+    the right kind. None = unassigned on both."""
+    if user_id is None:
+        return None
+    if not isinstance(user_id, str) or not user_id.strip() or user_id.strip() == "-1":
+        # "-1" means "the project's default assignee" on both products — a
+        # person nobody named. Assign someone found with jira_find_users.
+        raise JiraError(f"bad assignee {user_id!r} — use a user_id from "
+                        "jira_find_users, or null to unassign")
+    uid = user_id.strip()
+    return {"name": uid} if _flavor() == "server" else {"accountId": uid}
+
+
+@_requires_native
+async def find_users(query: str, project_key: str | None = None) -> dict:
+    """Users matching `query`, with the `user_id` the assign writes take.
+
+    With a project, the ASSIGNABLE search (only users who can hold issues
+    there); without, the general user search. Cloud matches `query` against
+    display name and email and returns `accountId`; Data Center's parameter
+    is `username` (it matches username, name and email) and returns `name` —
+    the two products share no user identifier, so `user_id` is whichever the
+    configured flavor uses and must never be carried across deployments."""
+    if not isinstance(query, str) or not query.strip():
+        raise JiraError("findUsers — query must be a non-empty name or email fragment")
+    q = query.strip()
+    param = "username" if _flavor() == "server" else "query"
+    params = {param: q, "maxResults": 20}
+    if project_key:
+        if not PROJECT_RE.match(project_key):
+            raise JiraError(f"findUsers — bad project_key {project_key!r}")
+        params["project"] = project_key
+        path = _api("/user/assignable/search?" + urlencode(params))
+    else:
+        path = _api("/user/search?" + urlencode(params))
+    resp = await _call("GET", path)
+    _check(resp, "findUsers")
+    body = resp.json()
+    users = []
+    for u in body if isinstance(body, list) else []:
+        if not isinstance(u, dict):
+            continue
+        uid = u.get("name") if _flavor() == "server" else u.get("accountId")
+        if not uid:
+            continue
+        users.append({"user_id": uid, "display_name": u.get("displayName"),
+                      "email": u.get("emailAddress") or None,  # Cloud may hide it
+                      "active": u.get("active")})
+    return {"ok": True, "kind": "jira", "operation": "findUsers",
+            "query": q, "project_key": project_key, "users": users}
+
+
+@_requires_native
+async def assign_issue(issue_key: str, assignee: str | None) -> dict:
+    """Assign an issue to one user (a `user_id` from find_users), or
+    unassign it with None. Same endpoint on both products; the body differs
+    (see `_user_ref`)."""
+    key = _key(issue_key)
+    ref = _user_ref(assignee)
+    body = ref if ref is not None else (
+        {"name": None} if _flavor() == "server" else {"accountId": None})
+    resp = await _call("PUT", _api(f"/issue/{key}/assignee"), body)
+    _check(resp, "assignIssue", key)
+    return {"ok": True, "kind": "jira", "operation": "assignIssue",
+            "issue": {"issue_key": key, "assignee": assignee}}
+
+
+async def _stored_links(key: str) -> list[dict]:
+    """`key`'s links as JIRA STORED THEM, seen from `key`: {id, type,
+    direction, other}. `direction` "outward" means `key` <outward phrase>
+    `other` (for Blocks: key BLOCKS other). The GET shape is unambiguous on
+    both products; it is the POST that is not (see link_issues)."""
+    resp = await _call("GET", _api(f"/issue/{key}?fields=issuelinks"))
+    _check(resp, "getLinks", key)
+    out = []
+    for link in (resp.json().get("fields") or {}).get("issuelinks") or []:
+        if not isinstance(link, dict):
+            continue
+        t = link.get("type") if isinstance(link.get("type"), dict) else {}
+        for side, direction in (("outwardIssue", "outward"), ("inwardIssue", "inward")):
+            other = link.get(side)
+            if isinstance(other, dict) and other.get("key"):
+                out.append({"id": str(link.get("id")), "type": t.get("name"),
+                            "direction": direction, "other": other["key"]})
+                break
+    return out
+
+
+def _link_type(link_type: str, op: str) -> str:
+    if link_type not in LINK_TYPES:
+        raise JiraError(
+            f"{op} — bad link_type {link_type!r} (must be one of {', '.join(LINK_TYPES)})"
+        )
+    return link_type
 
 
 @_requires_native
 async def link_issues(from_key: str, to_key: str, link_type: str) -> dict:
-    """Typed link; from_key is the OUTWARD side (for Blocks: from BLOCKS to)."""
+    """Typed link: from_key <outward phrase> to_key — for Blocks, from_key
+    BLOCKS to_key and to_key shows "is blocked by".
+
+    **The POST body names the sides the opposite way round from the read.**
+    Until 2026-09-29 this sent `outwardIssue: from_key`, and Jira Cloud stored
+    TASKS-88 "blocks" the three prerequisites that were meant to block it —
+    the unit test pinned the request body, so it passed. In the create call
+    the issue that carries the OUTWARD phrase goes in `inwardIssue` — Data
+    Center's REST reference says it outright: the call "will create a link
+    from the first issue to the second issue using the outward description",
+    the first issue being `inwardIssue`; Cloud behaves the same (measured).
+    And because the pinned body proved nothing, the stored link is now READ
+    BACK from from_key: if an instance ever stores it inverted, the link this
+    call just made is removed and the action FAILS, so a wrong dependency is
+    never reported as done."""
     fk, tk = _key(from_key, "from_key"), _key(to_key, "to_key")
     if fk == tk:
         raise JiraError(f"linkIssues — from_key and to_key are the same issue {fk!r}")
-    if link_type not in LINK_TYPES:
-        raise JiraError(
-            f"linkIssues — bad link_type {link_type!r} (must be one of {', '.join(LINK_TYPES)})"
-        )
+    _link_type(link_type, "linkIssues")
+    before = {lk["id"] for lk in await _stored_links(fk)}
     resp = await _call("POST", _api("/issueLink"), {
         "type": {"name": link_type},
-        "outwardIssue": {"key": fk}, "inwardIssue": {"key": tk}})
+        "inwardIssue": {"key": fk}, "outwardIssue": {"key": tk}})
     _check(resp, "linkIssues", fk)
+    made = [lk for lk in await _stored_links(fk)
+            if lk["id"] not in before and lk["other"] == tk and lk["type"] == link_type]
+    if any(lk["direction"] == "outward" for lk in made):
+        verified = True
+    elif made:
+        for lk in made:
+            await _call("DELETE", _api(f"/issueLink/{lk['id']}"))
+        raise JiraError(
+            f"linkIssues — Jira stored the link INVERTED ({tk} {link_type} {fk}, "
+            f"not {fk} {link_type} {tk}); the inverted link was removed. This "
+            "instance maps the create call's sides the other way round — "
+            "report it; do not work around it by swapping from_key/to_key."
+        )
+    else:
+        # Relates is symmetric in meaning but still stored with a side; a link
+        # we cannot find again was still created — say so, never claim more.
+        verified = False
     return {"ok": True, "kind": "jira", "operation": "linkIssues",
-            "link": {"from_key": fk, "to_key": tk, "link_type": link_type}}
+            "link": {"from_key": fk, "to_key": tk, "link_type": link_type,
+                     "direction_verified": verified}}
+
+
+@_requires_native
+async def delete_link(from_key: str, to_key: str, link_type: str) -> dict:
+    """Remove the link that reads "from_key <outward phrase> to_key" — the
+    same addressing link_issues and the read tools use, so an agent names the
+    link it SAW (jira_get_issue on from_key shows it with direction
+    "outward") and never handles a link id. Only a link stored in exactly that
+    direction matches: removing "B blocks A" when asked to remove "A blocks
+    B" would be the inversion bug again. Same endpoint on Cloud and Data
+    Center (DELETE issueLink/{id})."""
+    fk, tk = _key(from_key, "from_key"), _key(to_key, "to_key")
+    _link_type(link_type, "deleteLink")
+    stored = await _stored_links(fk)
+    match = [lk for lk in stored if lk["other"] == tk and lk["type"] == link_type
+             and lk["direction"] == "outward"]
+    if not match:
+        seen = ", ".join(
+            f"{fk} {'→' if lk['direction'] == 'outward' else '←'} {lk['other']} ({lk['type']})"
+            for lk in stored) or "none"
+        raise JiraError(
+            f"deleteLink — {fk} has no {link_type} link to {tk} in that direction "
+            f"(links on {fk}: {seen}; → means {fk} is the outward side)"
+        )
+    for lk in match:
+        resp = await _call("DELETE", _api(f"/issueLink/{lk['id']}"))
+        _check(resp, "deleteLink", fk)
+    return {"ok": True, "kind": "jira", "operation": "deleteLink",
+            "link": {"from_key": fk, "to_key": tk, "link_type": link_type,
+                     "removed": len(match)}}
+
+
+@_requires_native
+async def delete_issue(issue_key: str) -> dict:
+    """PERMANENTLY delete one issue, returning a snapshot of what it was.
+
+    Refuses an issue that has subtasks rather than sending
+    `deleteSubtasks=true`: every issue a proposal destroys must be NAMED in
+    it, so subtasks are deleted by their own actions first (actions run in
+    order, so one proposal can do both). The snapshot is read BEFORE the
+    delete because afterwards nothing can read it — the Executor's result
+    line is the only record of the issue left in this system. Same endpoint
+    on Cloud and Data Center."""
+    key = _key(issue_key)
+    resp = await _call("GET", _api(
+        f"/issue/{key}?fields=summary,status,issuetype,labels,duedate,"
+        "assignee,priority,subtasks,parent,description"))
+    _check(resp, "deleteIssue", key)
+    f = resp.json().get("fields") or {}
+    subtasks = [st.get("key") for st in (f.get("subtasks") or []) if isinstance(st, dict)]
+    if subtasks:
+        raise JiraError(
+            f"deleteIssue for {key} — it has subtasks ({', '.join(subtasks)}); "
+            "delete each subtask by its own jira.delete_issue action first, in "
+            "the same proposal if you like — nothing is deleted that the "
+            "proposal does not name"
+        )
+    desc = f.get("description")
+    if isinstance(desc, dict):
+        desc = _adf_to_text(desc)
+    snapshot = {
+        "issue_key": key,
+        "summary": f.get("summary"),
+        "issue_type": (f.get("issuetype") or {}).get("name"),
+        "status": (f.get("status") or {}).get("name"),
+        "priority": (f.get("priority") or {}).get("name"),
+        "labels": f.get("labels") or [],
+        "due_date": f.get("duedate"),
+        "assignee": _assignee(f),
+        "parent": (_parent(f) or {}).get("issue_key"),
+        "description": (desc or "").strip()[:500] or None,
+    }
+    resp = await _call("DELETE", _api(f"/issue/{key}?deleteSubtasks=false"))
+    _check(resp, "deleteIssue", key)
+    return {"ok": True, "kind": "jira", "operation": "deleteIssue", "issue": snapshot}
 
 
 @_requires_native

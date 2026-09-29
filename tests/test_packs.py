@@ -87,7 +87,7 @@ def test_toolset_assembly_dedupes_and_fails_loud():
                      "jira_search_issues", "jira_get_transitions",
                      "jira_list_projects", "jira_list_fields",
                      "jira_list_filters", "jira_list_dashboards",
-                     "jira_list_gadgets"}
+                     "jira_list_gadgets", "jira_find_users"}
     with pytest.raises(ValueError, match="unknown capability pack"):
         packs.toolset_for(["jira-read", "no-such-pack"])
     with pytest.raises(ValueError, match="unknown capability pack"):
@@ -163,7 +163,11 @@ async def test_invented_capability_is_rejected_in_run():
             await tools_mod._validate_proposal(ctx, prop("jira.dismiss"))
     finally:
         events.emit = real
-    await tools_mod._validate_proposal(ctx, prop("jira.add_comment@v2"))
+    # A real name passes the NAME check; the arguments are the shape check's
+    # business, so give it a well-formed draft.
+    ok = prop("jira.add_comment@v2")
+    ok.actions[0].arguments.update({"issue_key": "T-1", "body": "b"})
+    await tools_mod._validate_proposal(ctx, ok)
 
 
 def test_granted_capability_names_union():

@@ -48,7 +48,7 @@ REGISTRY: list[Capability] = [
         risk="external, reversible — a wrongly created issue can be closed or deleted in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST createIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
-        arguments=["project_key", "summary", "description?", "issue_type? (Task|Bug|Story|Epic|Subtask)", "parent?", "due_date?", "labels?", "custom_fields?"],
+        arguments=["project_key", "summary", "description?", "issue_type? (Task|Bug|Story|Epic|Subtask)", "parent?", "due_date?", "labels?", "custom_fields?", "assignee? (user_id from jira.find_users)"],
         description=(
             "Create a new Jira issue for not-yet-tracked work. Built after the "
             "2026-07-20 charter-v2 incident: the coached charter instructed the "
@@ -73,8 +73,14 @@ REGISTRY: list[Capability] = [
         risk="external, reversible — priority/labels/due date can be restored",
         holder="Executor",
         route="integrations/jira.py → Jira REST updateAttributes (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
-        arguments=["issue_key", "priority", "due_date?", "labels"],
-        description="Update a Jira issue's priority, labels, and optionally due date.",
+        arguments=["issue_key", "priority?", "due_date? (null clears)", "labels? ([] clears)"],
+        description=(
+            "Change a Jira issue's priority, due date and/or labels — a PARTIAL "
+            "edit: only the attributes named are changed, at least one must be. "
+            "Until 2026-09-29 priority was required and all three were always "
+            "sent, so a date-and-labels change either crashed the Executor or "
+            "made the agent guess a priority."
+        ),
     ),
     Capability(
         name="jira.set_fields",
@@ -223,14 +229,74 @@ REGISTRY: list[Capability] = [
         name="jira.link_issues",
         kind="write",
         gate="human approval",
-        risk="external, reversible — a wrong link can be deleted in the Jira UI",
+        risk="external, reversible — a wrong link is removed with jira.delete_link",
         holder="Executor",
-        route="integrations/jira.py → Jira REST linkIssues (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST linkIssues, then a read-back of the stored direction (native, Cloud v3 + Data Center v2)",
         arguments=["from_key", "to_key", "link_type (Blocks|Relates|Duplicate)"],
         description=(
             "Create a typed dependency link between two issues. Direction: "
             "from_key is the OUTWARD side — for Blocks, from_key BLOCKS to_key. "
-            "Links express dependencies, never hierarchy (charter rule)."
+            "Links express dependencies, never hierarchy (charter rule). "
+            "Until 2026-09-29 every link was stored INVERTED (the create call "
+            "names its sides the opposite way round from the read); the "
+            "Executor now reads the link back and fails, removing it, if Jira "
+            "stored it the wrong way round."
+        ),
+    ),
+    Capability(
+        name="jira.delete_link",
+        kind="write",
+        gate="human approval",
+        risk="external, reversible — a removed link can be created again",
+        holder="Executor",
+        route="integrations/jira.py → Jira REST issueLink DELETE, the link resolved from from_key's stored links (native, Cloud v3 + Data Center v2)",
+        arguments=["from_key", "to_key", "link_type (Blocks|Relates|Duplicate)"],
+        description=(
+            "Remove the link that reads 'from_key <outward phrase> to_key' — "
+            "addressed exactly as jira.link_issues creates it and as the issue "
+            "read shows it, never by link id; only a link stored in that "
+            "direction matches. Built 2026-09-29 for gap #221 (three inverted "
+            "Blocks links that a new link could not correct)."
+        ),
+    ),
+    Capability(
+        name="jira.assign_issue",
+        kind="write",
+        gate="human approval",
+        risk="external, reversible — reassign or unassign; the assignee is notified",
+        holder="Executor",
+        route="integrations/jira.py → Jira REST issue/{key}/assignee PUT — accountId on Cloud, username on Data Center (native)",
+        arguments=["issue_key", "assignee (user_id from jira.find_users, or null to unassign)"],
+        description=(
+            "Assign an issue to a user, or unassign it. The user_id comes from "
+            "jira.find_users on THIS deployment — Cloud identifies users by "
+            "accountId, Data Center by username, and neither accepts the "
+            "other's. Built 2026-09-29 for gap #202; jira.create_issue takes "
+            "the same `assignee` so a new issue is assigned in one approval."
+        ),
+    ),
+    Capability(
+        name="jira.delete_issue",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "external, IRREVERSIBLE — neither Jira Cloud nor Data Center can "
+            "restore a deleted issue (Data Center's restore is for ARCHIVED "
+            "issues); its comments, history and links go with it"
+        ),
+        holder="Executor",
+        route="integrations/jira.py → Jira REST issue DELETE with deleteSubtasks=false, after a snapshot read (native, Cloud v3 + Data Center v2)",
+        arguments=["issue_key", "reason"],
+        description=(
+            "Permanently delete one issue. `reason` is required and recorded; "
+            "the result line carries a snapshot of the issue (summary, status, "
+            "type, labels, dates, assignee, description head) because nothing "
+            "can read it afterwards. An issue with subtasks is refused — each "
+            "subtask is deleted by its own action, so nothing is destroyed "
+            "that the proposal does not name. Its own pack "
+            "(jira-delete-propose), held by jira-expert alone. Built "
+            "2026-09-29 for gap #170: the operator asked for obsolete issues "
+            "to be deleted and the agent could only transition them to Done."
         ),
     ),
     Capability(
@@ -1109,6 +1175,20 @@ REGISTRY: list[Capability] = [
             "updated, parent and a link_count — deliberately a COUNT, not the "
             "links themselves, so a board-wide sweep stays within budget; open "
             "a specific issue with jira.get_issue for its dependencies."
+        ),
+    ),
+    Capability(
+        name="jira.find_users",
+        kind="read",
+        gate="ungated read",
+        risk="none to the world",
+        holder="agents (jira_find_users tool)",
+        route="integrations/jira.py → Jira REST user/assignable/search (with a project) or user/search — `query` on Cloud, `username` on Data Center",
+        arguments=["query", "project_key?"],
+        description=(
+            "Find users by name or email fragment and return the user_id the "
+            "assign writes take — the read that keeps an assignee from being "
+            "guessed. With a project, only users who can be assigned there."
         ),
     ),
     Capability(

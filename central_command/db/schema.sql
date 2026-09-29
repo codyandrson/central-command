@@ -928,6 +928,17 @@ insert into agent_grant (agent_id, pack, granted_by) values
     ('jira-expert', 'jira-project-propose', 'seed:2026-08-13')
 on conflict (agent_id, pack) do nothing;
 
+-- jira.delete_issue (2026-09-29, gap #170): the operator asked for obsolete
+-- issues to be deleted and jira-expert could only transition them to Done.
+-- Deletion is one-way on Cloud and Data Center alike, so it is its own pack —
+-- inbox-triage holds jira-propose and must not gain it. Held ONLY by
+-- jira-expert. An existing deployment grants it by hand AFTER the release
+-- that defines the pack is running (a grant naming a pack the process has
+-- never heard of fails the agent's next run).
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('jira-expert', 'jira-delete-propose', 'seed:2026-09-29')
+on conflict (agent_id, pack) do nothing;
+
 -- work.bulk_dismiss (2026-08-17 design, slice 2): the 105k-ref backlog is
 -- mostly bulk mail that deserves one decision per PATTERN, not per message, so
 -- inbox-triage — the only agent that reads the queue — gains

@@ -56,7 +56,7 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # All GET /rest/api/3/... reads; `search_issues` POSTs to /search/jql,
     # which is Jira's own spelling of a query.
     "jira": {
-        "get_issue", "get_transitions", "list_dashboards", "list_fields",
+        "find_users", "get_issue", "get_transitions", "list_dashboards", "list_fields",
         "list_filters", "list_gadgets", "list_projects", "search_issues",
     },
     # Reads only; create_page/update_page/move_page/trash_page/set_labels/

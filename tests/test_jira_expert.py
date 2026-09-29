@@ -122,7 +122,7 @@ async def test_link_and_transition_handlers_call_the_facade(monkeypatch):
 
     async def fake_link(from_key, to_key, link_type):
         calls.append(("link", from_key, to_key, link_type))
-        return {"ok": True}
+        return {"ok": True, "link": {"direction_verified": True}}
 
     async def fake_transition(issue_key, transition):
         calls.append(("transition", issue_key, transition))
@@ -175,3 +175,57 @@ async def test_dry_run_never_touches_link_or_transition(monkeypatch):
         approver="human:lee", source_refs=[],
     )
     assert "[dry-run]" in out.result_text
+
+
+async def test_the_2026_09_29_draft_executes_without_a_priority(monkeypatch):
+    """prop_16267d0321d7's update actions — due_date + labels, no priority —
+    crashed the Executor with KeyError 'priority'. Now they execute, and
+    priority is not passed at all (an absent attribute is left alone)."""
+    from central_command.contract import Action
+    from central_command.gateway import executor
+
+    seen = []
+
+    async def fake_update(issue_key, **named):
+        seen.append((issue_key, named))
+        return {"ok": True}
+
+    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(executor.jira, "update_attributes", fake_update)
+    out = await executor.execute(
+        [Action(capability="jira.update_attributes",
+                arguments={"issue_key": "TASKS-21", "due_date": "2026-10-11",
+                           "labels": ["vehicle", "cayenne"]},
+                target_ref={"system": "jira", "id": "TASKS-21", "read_version": "unknown"},
+                reversibility="reversible")],
+        approver="human:lee", source_refs=[],
+    )
+    assert seen == [("TASKS-21", {"due_date": "2026-10-11", "labels": ["vehicle", "cayenne"]})]
+    assert "due_date, labels" in out.result_text
+
+
+async def test_delete_issue_needs_a_reason_and_records_what_was_deleted(monkeypatch):
+    from central_command.contract import Action
+    from central_command.gateway import executor
+
+    async def fake_delete(issue_key):
+        return {"issue": {"issue_key": issue_key, "summary": "Tri Peaks quote",
+                          "status": "To Do", "labels": [], "due_date": None}}
+
+    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(executor.jira, "delete_issue", fake_delete)
+
+    def act(args):
+        return Action(capability="jira.delete_issue", arguments=args,
+                      target_ref={"system": "jira", "id": "TASKS-5", "read_version": "unknown"},
+                      reversibility="irreversible")
+
+    with pytest.raises(executor.ExecutionFailed, match="reason"):
+        await executor.execute([act({"issue_key": "TASKS-5"})],
+                               approver="human:lee", source_refs=[])
+    out = await executor.execute(
+        [act({"issue_key": "TASKS-5", "reason": "operator asked; replaced by TASKS-80"})],
+        approver="human:lee", source_refs=[])
+    assert "TASKS-5 DELETED" in out.result_text
+    assert "replaced by TASKS-80" in out.result_text
+    assert "Tri Peaks quote" in out.result_text  # the snapshot is the record

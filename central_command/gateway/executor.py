@@ -70,10 +70,11 @@ async def _jira_create_issue(args: dict, approver: str, proposer: str | None) ->
         args["project_key"], args["summary"], args.get("description"),
         args.get("issue_type", "Task"), args.get("due_date"),
         args.get("labels") or [], parent=args.get("parent"),
-        custom_fields=args.get("custom_fields"),
+        custom_fields=args.get("custom_fields"), assignee=args.get("assignee"),
     )
     key = (out.get("issue") or {}).get("issue_key")
-    return f"{key} created: {args['summary']}"
+    who = f" (assigned {args.get('assignee')})" if args.get("assignee") else ""
+    return f"{key} created: {args['summary']}{who}"
 
 
 async def _jira_create_filter(args: dict, approver: str, proposer: str | None) -> str:
@@ -111,10 +112,11 @@ async def _jira_add_comment(args: dict, approver: str, proposer: str | None) -> 
 
 
 async def _jira_update_attributes(args: dict, approver: str, proposer: str | None) -> str:
-    await jira.update_attributes(
-        args["issue_key"], args["priority"], args.get("due_date"), args["labels"]
-    )
-    return f"{args['issue_key']} attributes updated"
+    # Only the attributes the proposal NAMES are passed — an absent key means
+    # "leave it", never "clear it" (see jira.update_attributes).
+    named = {k: args[k] for k in ("priority", "due_date", "labels") if k in args}
+    await jira.update_attributes(args["issue_key"], **named)
+    return f"{args['issue_key']} attributes updated ({', '.join(sorted(named))})"
 
 
 async def _jira_set_fields(args: dict, approver: str, proposer: str | None) -> str:
@@ -956,8 +958,37 @@ async def _task_create(args: dict, approver: str, proposer: str | None) -> str:
 
 
 async def _jira_link_issues(args: dict, approver: str, proposer: str | None) -> str:
-    await jira.link_issues(args["from_key"], args["to_key"], args["link_type"])
-    return f"{args['from_key']} {args['link_type']} {args['to_key']} (link created)"
+    out = await jira.link_issues(args["from_key"], args["to_key"], args["link_type"])
+    checked = ("direction verified" if out["link"]["direction_verified"]
+               else "created; direction NOT read back")
+    return f"{args['from_key']} {args['link_type']} {args['to_key']} (link {checked})"
+
+
+async def _jira_delete_link(args: dict, approver: str, proposer: str | None) -> str:
+    out = await jira.delete_link(args["from_key"], args["to_key"], args["link_type"])
+    return (f"link removed: {args['from_key']} {args['link_type']} {args['to_key']}"
+            + (f" ({out['link']['removed']} matching)" if out["link"]["removed"] > 1 else ""))
+
+
+async def _jira_assign_issue(args: dict, approver: str, proposer: str | None) -> str:
+    await jira.assign_issue(args["issue_key"], args["assignee"])
+    return (f"{args['issue_key']} assigned to {args['assignee']}" if args["assignee"]
+            else f"{args['issue_key']} unassigned")
+
+
+async def _jira_delete_issue(args: dict, approver: str, proposer: str | None) -> str:
+    # One-way on both Cloud and Data Center — neither can restore a deleted
+    # issue (Data Center's issue "restore" is for ARCHIVED issues). So the
+    # reason is required here too, like calendar.delete_event, and the result
+    # line carries the snapshot jira.delete_issue read before deleting: after
+    # this, it is the only record of the issue left in this system.
+    reason = (args.get("reason") or "").strip()
+    if not reason:
+        raise ExecutorError("jira.delete_issue: a reason is required")
+    snap = (await jira.delete_issue(args["issue_key"]))["issue"]
+    facts = "; ".join(f"{k}={v!r}" for k, v in snap.items()
+                      if k != "issue_key" and v not in (None, [], ""))
+    return f"{snap['issue_key']} DELETED — reason: {reason} — was: {facts}"
 
 
 async def _jira_transition_issue(args: dict, approver: str, proposer: str | None) -> str:
@@ -2217,6 +2248,9 @@ HANDLERS = {
     "jira.update_attributes": _jira_update_attributes,
     "jira.set_fields": _jira_set_fields,
     "jira.link_issues": _jira_link_issues,
+    "jira.delete_link": _jira_delete_link,
+    "jira.assign_issue": _jira_assign_issue,
+    "jira.delete_issue": _jira_delete_issue,
     "jira.transition_issue": _jira_transition_issue,
     "jira.create_filter": _jira_create_filter,
     "jira.create_dashboard": _jira_create_dashboard,

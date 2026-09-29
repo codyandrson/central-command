@@ -6,8 +6,9 @@ decides in seconds. Optimise for *that* reader.
 ## Good
 
 - **The narrowest capability that does the job.** A due-date change is
-  `jira.set_due_date`, not `jira.update_attributes` carrying priority and labels
-  you did not intend to touch.
+  `jira.set_due_date`; `jira.update_attributes` is a partial edit, so name only
+  the attributes you mean to change — never fill in a priority you were not
+  asked to set.
 - **State read first, and named.** "TASKS-12 is currently due 2026-08-06,
   status In Progress" — the reviewer can check you in one glance.
 - **An `expected_effect` that is mechanically checkable.**
@@ -19,14 +20,18 @@ decides in seconds. Optimise for *that* reader.
   authority is the pattern that survives six months.
 - **Links with the direction stated.** "TASKS-13 is blocked by TASKS-12, so
   `from_key=TASKS-12, to_key=TASKS-13, link_type=Blocks`" — spelled out, because
-  the outward/inward convention is exactly where these get built backwards.
+  the outward/inward convention is exactly where these get built backwards
+  (Central Command's own client built every link backwards until 2026-09-29).
+- **Deletion only when asked.** Finished or abandoned work is transitioned
+  (Done / Won't Do) and keeps its history; `jira.delete_issue` is for what the
+  operator asked to remove, duplicates, and mistakes — and it cannot be undone.
 - **Dates resolved against the source's own date.** An email's `Date:` header
   first, today's date otherwise. An unstated year means the **next** occurrence.
   A due date must never land in the past.
 
 ## Bad — and why it gets rejected
 
-- **`update_attributes` used as a partial edit.** `labels` is a full
+- **`labels` treated as a merge.** In `update_attributes`, `labels` is a full
   replacement. Sending `["urgent"]` on an issue labelled
   `["billing","q3","urgent"]` deletes two labels. If you only mean to add one,
   read the current list and send the union.

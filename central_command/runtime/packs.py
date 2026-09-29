@@ -86,10 +86,11 @@ PACKS: dict[str, Pack] = {
     "jira-read": Pack(
         name="jira-read",
         description=("Read live Jira state: projects, one issue, JQL search, "
-                     "legal transitions, custom fields (filters, dashboards, "
+                     "legal transitions, custom fields, users (filters, dashboards, "
                      "gadgets on Cloud)."),
         tool_names=("jira_get_issue", "jira_search_issues", "jira_get_transitions",
-                    "jira_list_projects", "jira_list_fields", "jira_list_filters",
+                    "jira_list_projects", "jira_list_fields", "jira_find_users",
+                    "jira_list_filters",
                     "jira_list_dashboards", "jira_list_gadgets"),
     ),
     "jira-propose": Pack(
@@ -113,7 +114,8 @@ PACKS: dict[str, Pack] = {
                            "'issue_type'?: 'Task|Bug|Story|Epic|Subtask', "
                            "'parent'?: '<KEY>', "
                            "'due_date'?: 'YYYY-MM-DD', 'labels'?: [...], "
-                           "'custom_fields'?: {'<field name>': <value>, ...}}"),
+                           "'custom_fields'?: {'<field name>': <value>, ...}, "
+                           "'assignee'?: '<user_id from jira_find_users>'}"),
                 notes=("Only for genuinely not-yet-tracked work — search for an "
                        "existing issue first when you hold a read tool. "
                        "'project_key' MUST be a key you have seen in "
@@ -130,7 +132,8 @@ PACKS: dict[str, Pack] = {
                        "is created COMPLETE in one approval — the executor "
                        "passes no values between actions, so a follow-up "
                        "set_fields can never name the key this create "
-                       "produces."),
+                       "produces — the same reason 'assignee' rides the "
+                       "create rather than a follow-up jira.assign_issue."),
             ),
             GatedCapability(
                 name="jira.add_comment",
@@ -140,8 +143,15 @@ PACKS: dict[str, Pack] = {
             ),
             GatedCapability(
                 name="jira.update_attributes",
-                arguments=("{'issue_key': '<KEY>', 'priority': '<name>', "
-                           "'due_date'?: 'YYYY-MM-DD', 'labels': [...]}"),
+                arguments=("{'issue_key': '<KEY>', 'priority'?: '<name>', "
+                           "'due_date'?: 'YYYY-MM-DD' | null, 'labels'?: [...]}"),
+                notes=("A PARTIAL edit: name ONLY the attributes you mean to "
+                       "change (at least one) — an attribute you leave out is "
+                       "left exactly as it is, so never fill one in to satisfy "
+                       "the shape. `labels` is the FULL replacement list (read "
+                       "the issue's current labels first; [] clears them); "
+                       "`due_date: null` clears the date; priority can be "
+                       "changed but not cleared."),
             ),
             GatedCapability(
                 name="jira.set_fields",
@@ -165,7 +175,29 @@ PACKS: dict[str, Pack] = {
                 arguments="{'from_key': '<KEY>', 'to_key': '<KEY>', 'link_type': 'Blocks|Relates|Duplicate'}",
                 notes=("DIRECTION MATTERS: from_key is the OUTWARD side — for "
                        "Blocks, from_key BLOCKS to_key (to_key shows 'is blocked "
-                       "by'). Links express dependencies, never hierarchy."),
+                       "by'). The prerequisite is from_key; the work that waits "
+                       "is to_key. Links express dependencies, never hierarchy. "
+                       "The Executor reads the stored link back and fails if "
+                       "Jira stored it the other way round — never 'fix' a "
+                       "direction by swapping the keys."),
+            ),
+            GatedCapability(
+                name="jira.delete_link",
+                arguments="{'from_key': '<KEY>', 'to_key': '<KEY>', 'link_type': 'Blocks|Relates|Duplicate'}",
+                notes=("Names the link exactly as you READ it: jira_get_issue "
+                       "on from_key shows it with direction 'outward' and "
+                       "issue_key = to_key. Only a link stored in that direction "
+                       "is removed. To correct an inverted link, propose "
+                       "delete_link for the link as it is stored AND "
+                       "link_issues for the one you mean, in one proposal."),
+            ),
+            GatedCapability(
+                name="jira.assign_issue",
+                arguments="{'issue_key': '<KEY>', 'assignee': '<user_id>' | null}",
+                notes=("The user_id MUST come from jira_find_users on this "
+                       "deployment (an account id on Jira Cloud, a username on "
+                       "Data Center) — never a display name, an email, or an id "
+                       "you reasoned your way to. null unassigns."),
             ),
             GatedCapability(
                 name="jira.transition_issue",
@@ -235,6 +267,40 @@ PACKS: dict[str, Pack] = {
                        "carry create_project followed by create_issue in ONE "
                        "actions list — the executor runs actions in order, so "
                        "the project exists by the time the issue is created."),
+            ),
+        ),
+    ),
+    "jira-delete-propose": Pack(
+        name="jira-delete-propose",
+        description=(
+            "Propose PERMANENTLY deleting a Jira issue — its own pack "
+            "(2026-09-29, gap #170) so inbox-triage, which holds jira-propose, "
+            "never gains a one-way door; held by jira-expert alone, on the "
+            "jira-project-propose precedent."
+        ),
+        tool_names=("propose_action",),
+        # NOT _JIRA_TARGET, for the reason jira-project-propose gives: that
+        # template says 'reversible', and a charter that contradicts itself
+        # about reversibility gets whichever line the model read last.
+        guidance=(
+            "Issue deletion: target_ref = {'system': 'jira', 'id': '<the issue "
+            "key>', 'read_version': 'unknown'}, reversibility = 'irreversible' "
+            "— neither Jira Cloud nor Data Center can restore a deleted issue. "
+            "You never write to Jira directly — you only propose; a human "
+            "approves and the change is executed for you."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="jira.delete_issue",
+                arguments="{'issue_key': '<KEY>', 'reason': '<why it should not exist>'}",
+                notes=("Propose this ONLY when the operator asked for the issue "
+                       "to be deleted, or it is a duplicate or was created in "
+                       "error — finished or abandoned work is TRANSITIONED "
+                       "(Done / Won't Do), which keeps its history. Read the "
+                       "issue first and say in the intent what it is. One "
+                       "action per issue: an issue with subtasks is refused, "
+                       "so list each subtask's delete before its parent's. "
+                       "reversibility = 'irreversible'."),
             ),
         ),
     ),
@@ -1648,6 +1714,7 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
                      "web-read", "web-search", "calendar-read",
                      "catalog-read", "catalog-propose", "confluence-read"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
+                    "jira-delete-propose",
                     "graph-read", "graph-propose",
                     "consult", "task-propose", "ask-operator", "web-read",
                     "loe-read"),

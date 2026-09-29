@@ -25,7 +25,11 @@ coded to Atlassian's published Data Center REST reference. This script is how
 an operator proves them against a real instance — and it also reports the two
 things the design record could NOT settle from the docs: the shape of
 `description` on a real issue (ADF document vs wiki-markup string), and
-whether epics surface as `parent` or as an "Epic Link" custom field.
+whether epics surface as `parent` or as an "Epic Link" custom field. Since
+2026-09-29 it also checks what the gated Jira writes depend on per instance:
+the link types they name exist, the token's account holds the permissions
+(link, assign, delete), and the assignable-user search answers in the
+flavor's shape (accountId on Cloud, username on Data Center).
 
 Deliberately NOT routed through `jira._call`: that triggers the once-per-process
 auth check, which is one of the things being probed. It uses the same auth and
@@ -246,6 +250,57 @@ async def probe_jira() -> None:
         report("jira", "GET", path, resp, note=note)
     else:
         skip("jira", "GET .../transitions", "no issue to read transitions for")
+
+    # The link TYPES the link capabilities name (2026-09-29). Types are
+    # per-instance — an admin can rename "Blocks" — and a missing one is a
+    # 400 on every jira.link_issues/delete_link naming it.
+    path = jira._api("/issueLinkType")
+    resp = await _get(base, path, auth)
+    body = _json(resp) or {}
+    names = {str(t.get("name")) for t in (body.get("issueLinkTypes") or [])
+             if isinstance(t, dict)} if isinstance(body, dict) else set()
+    missing = [t for t in jira.LINK_TYPES if t not in names]
+    report("jira", "GET", path, resp, ok=bool(resp is not None and names and not missing),
+           note=(f"all of {', '.join(jira.LINK_TYPES)} present" if names and not missing
+                 else f"MISSING link type(s): {', '.join(missing) or '(none read)'}"))
+
+    # Does the token's account hold the permissions the gated writes need?
+    # A missing one is not a connectivity failure, so it is reported, not
+    # failed — the write it gates will say 403 loudly.
+    project = issue_key.rsplit("-", 1)[0] if issue_key else None
+    if project:
+        perms = "BROWSE_PROJECTS,CREATE_ISSUES,EDIT_ISSUES,LINK_ISSUES,ASSIGN_ISSUES,DELETE_ISSUES"
+        path = jira._api(f"/mypermissions?{urlencode({'projectKey': project, 'permissions': perms})}")
+        resp = await _get(base, path, auth)
+        body = _json(resp) or {}
+        held = (body.get("permissions") or {}) if isinstance(body, dict) else {}
+        note = f"project {project}: " + ", ".join(
+            f"{k}={'yes' if (held.get(k) or {}).get('havePermission') else 'NO'}"
+            for k in perms.split(","))
+        report("jira", "GET", path, resp, note=note)
+
+        # Assignee identity is the one Cloud/Data Center split the writes
+        # depend on: accountId + `query` on Cloud, username + `username` on
+        # Data Center. Search for the token's own account by display name.
+        me = _json(await _get(base, jira._myself_path(), auth)) or {}
+        fragment = str(me.get("displayName") or "").split(" ")[0] if isinstance(me, dict) else ""
+        if fragment:
+            param = "username" if flavor == "server" else "query"
+            path = jira._api("/user/assignable/search?" + urlencode(
+                {param: fragment, "project": project, "maxResults": 5}))
+            resp = await _get(base, path, auth)
+            rows = _json(resp)
+            idf = "name" if flavor == "server" else "accountId"
+            ok = isinstance(rows, list) and bool(rows) and all(
+                isinstance(r, dict) and r.get(idf) for r in rows)
+            report("jira", "GET", path.split("?")[0] + f"?{param}=…", resp, ok=ok,
+                   note=(f"{len(rows)} assignable user(s), each with '{idf}'" if ok
+                         else f"no rows carrying '{idf}' — jira_find_users would find nobody"))
+        else:
+            skip("jira", "GET .../user/assignable/search", "no displayName on /myself to search for")
+    else:
+        skip("jira", "GET .../mypermissions, .../user/assignable/search",
+             "no issue sampled, so no project to ask about")
 
     if flavor == "server":
         # Data Center has no filter SEARCH and no dashboard search/gadget
