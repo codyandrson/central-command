@@ -323,3 +323,117 @@ when a matching file is read.
   still the last line: a value that survives refuses the report, and a
   missing or key-less `redact.tsv` refuses it outright. A new credential
   shape is a ROW; never weaken the scan to get a report out.
+- **`boot` starts three host processes, `stop` stops three, and the PORT is
+  the proof** (v2.57.0, design record D6). The API, the sandbox runner (when
+  `CC_ENABLE_SANDBOX=1`) and the cockpit server each have a pid file and a
+  log in the state dir. On Linux with a `systemd --user` instance they run
+  THROUGH units — `cc-<install-id>-{api,sandbox,cockpit}.service`, rendered
+  by the pure functions in `deploy/single/supervise-lib.sh` into
+  `<state>/systemd/`, enabled, and started with `systemctl --user restart` —
+  one supervisor, never a `nohup` beside an enabled unit, and `stop` goes
+  through systemd too or `Restart=on-failure` revives what it killed. With
+  no user manager the start is detached and a WARN says nothing restarts
+  them. `loginctl enable-linger` off is a **FAIL** (`check/linger`): without
+  it the user's units die with the login session. The detached start must
+  record the SERVER's pid: `( cd X && nohup cmd & echo $! )` backgrounds the
+  whole list, so `$!` was a wrapper shell — `stop` signalled the shell, the
+  server kept its port, and that is the 2026-09-18 and 2026-09-25 "stop left
+  uvicorn listening" finding. `stop` proves each port has NO listener (not
+  "no HTTP 200": a token-protected runner answers 401 to everything) and
+  FAILS when it cannot load `.env` — it never reports green on ports it could
+  not read. The API unit alone is `KillMode=process`: the API spawns the
+  detached updater, which stops the API mid-update, and the default kill
+  mode would take the updater with it.
+- **The Windows logon entry runs `./setup.sh`, in a retry loop — never
+  `boot` alone** (v2.57.0, D6). `cc-boot.cmd` hands off to
+  `<state>/boot-at-logon.sh`, which runs `./setup.sh --accept-warnings` up to
+  ten times a minute apart: with no terminal a WARN-only `check` stops the
+  run without that flag, and at logon the podman machine and its containers
+  may not be up yet. Exit 0/2 ends it, exit 3 ends it (it is waiting on the
+  operator; retrying cannot help), exit 1 retries. So a reboot and an
+  install that never finished are ONE code path, and either leaves ledger
+  rows in `boot-at-logon.log` instead of silence. The run lock's stale
+  reclaim is what makes this safe after a power cut.
+- **The sandbox runner's token is generated, and the runner and the API read
+  the same one** (v2.57.0, D6). `make-secrets.sh` generates
+  `CC_SANDBOX_RUNNER_TOKEN` with the other credentials (never overwriting a
+  set one); before this the shipped posture was an unauthenticated runner.
+  The token reaches the runner only through `.env` (`EnvironmentFile=` or
+  the sourced environment) — never a unit file, never an argv.
+- **Importing the bundled skills is a step, and it is CREATE-ONLY** (v2.57.0,
+  D7). `boot/skills-imported`, after the roster: each `skills/<id>/` is
+  `POST`ed to `/api/skills/import` only when `GET /api/skills` does not
+  already hold that id (retired ones included — a skill the operator retired
+  is never resurrected), and a skill the library holds is never overwritten
+  even when the release changed the bundled copy. The row's `reads` carries
+  `@skills`: a TREE input — a content hash of that directory, CR-insensitive,
+  no git — so the row re-runs when a bundled folder changes or is added.
+  `@<dir>` in `reads` is the only non-`.env` input the manifest knows.
+- **The updater ACQUIRES before it merges, from a staged copy of the new
+  release** (v2.57.0, D5). `update.sh apply` checks `upstream` out SPARSELY
+  (`STAGE_PATHS` — never `docs/vendor`: 47k files and MAX_PATH on Windows)
+  into `<state>/stage/tree` and runs THAT release's `setup.sh acquire` with
+  `CC_STAGED_FOR` naming the deployment: its fetch phase plus a probe that
+  the running catalog answers the aliases it requires. A staged run reads
+  the deployment's `.env` and state dir, nests under the run lock, writes NO
+  ledger row and resolves image refs into COPIES — the install's `.env` and
+  `installed.manifest` do not move before the merge — and builds the local
+  images under an ASIDE tag (`<ref>-staged`, `cc_staged_image_ref`), because
+  building under the live tag would hand the running deployment's next
+  sandbox session the new release's image before anything was merged. A stop there is exit 1
+  or 3 with the tree, branch, database and containers untouched. After the
+  fast-forward the order is schema → fetch → llm → stack → app → n8n →
+  verify, each a ledgered phase, and an exit 3 from any of them STOPS there (the old code
+  `return 0`ed past `app` and `verify`). `acquire` + `CC_STAGED_FOR` + the
+  output protocol are an INTERFACE BETWEEN RELEASES — the installed
+  `update.sh` runs the next release's `setup.sh` — so they do not change
+  shape. `update-run.sh` rolls back only when HEAD actually moved: a stop
+  before the merge used to "roll back" to an EARLIER update's tag, which was
+  a downgrade.
+- **A deployment that predates the ledger is ADOPTED by `./setup.sh`, and an
+  update never fails it into a rollback** (v2.57.0). Its ledger is empty, so
+  the first post-merge phase would be refused. `update.sh` asks
+  `cc_ledger_blocked` before each phase and stops with ONE USERACTION
+  (`ledger-adopt`, exit 3): run `./setup.sh` once — every phase is
+  idempotent, so it walks the running deployment and records it. For an
+  OLDER updater driving the new `setup.sh`, `phase_ledger_gate` gives the
+  same answer when `CC_UPDATE_DRIVEN=1` and the ledger has no rows; by hand
+  it stays the FAIL that names `./setup.sh`.
+- **The suite runs once per release, by the ledger** (v2.57.0, D5).
+  `phase_test` no longer skips itself when the API is up; a `done`
+  `test/test` row at this version is what skips it in the full run. A `step`
+  whose body is `A || B; C` hides A's failure behind C's exit status — split
+  it (the cockpit's `npm ci` then `npm run build` was one), and a `bash -c`
+  pipe needs its own `set -o pipefail`.
+- **A locally built image carries the hash of what it was built from, and
+  "the tag exists" is not "done"** (v2.57.0). The three local tags are fixed
+  (`cc-sandbox:1`, `cc-crawler:1`, `cc-graphiti:<tag>`), `fetch_local`
+  skipped the build whenever the tag existed, and so a release that changed
+  a Dockerfile never rebuilt on update. Each build script computes
+  `cc_build_inputs_hash` — the Dockerfile, every file of the build context,
+  the build args that change the result, the staged CA's content; CR-stripped
+  so a CRLF checkout hashes the same; never a timestamp or a temp path — and
+  stamps it as the label `cc.build-inputs`. `--inputs-hash` prints it and
+  touches nothing. `local_image_state` compares; `fetch_local` builds when the
+  image is absent, unlabelled or stale; the image probes and `stack`'s
+  `need_image` are true only when the label matches. A new build input goes
+  INTO the hash in the build script, or the image silently stops tracking it.
+- **A container must be running the image its ref resolves to NOW** (v2.57.0).
+  podman-compose 1.6.0 recreates a container only when the service's config
+  hash changes, and that hash holds the image REF, not its ID — so a rebuilt
+  or re-pulled tag left the old container running, and `update.sh` never ran
+  `stack` at all: a release that changed `compose.yaml` or an image was
+  reported applied over the old containers. `catch_up_images` (after `compose
+  up` in `llm` and `stack`) recreates exactly the services whose container's
+  image ID differs from what the ref resolves to, and `p_up_stack` /
+  `p_up_litellm` read false on that drift. A STATEFUL service is recreated
+  only when `compose.yaml` still shows its data path on a NAMED volume
+  (`stack_data_on_volume`); otherwise it is a FAIL naming the path, never a
+  recreate. A new stateful service joins `STACK_STATEFUL` with its data path.
+- **The resolver carries a row forward whenever it did not resolve an image**
+  (v2.57.0). `installed.manifest` is how `resolve-images.sh` recognises its
+  own earlier write; a `.env` value with no matching row reads as an operator
+  PIN. It used to rewrite the manifest from this run's successes only, so an
+  image whose registry failed once — or whose component was switched off and
+  later back on — came back as a "pin" stuck at the old tag with only a WARN.
+  A failed or skipped image keeps its previous row.

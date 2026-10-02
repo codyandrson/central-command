@@ -396,12 +396,13 @@ def test_mark_started_writes_every_row_of_the_phase_and_nothing_else(tmp_path):
       cc_ledger_write "{p}" app/install done   2.55.0 t0 none ""
       cc_ledger_write "{p}" boot/boot-api failed 2.55.0 t0 old "it never answered"
       cc_ledger_mark_started "{p}" boot 2.56.0 2026-10-02T00:00:00Z "{env.as_posix()}" || exit 1
-      cc_fingerprint "{env.as_posix()}" CC_API_PORT,CC_DATABASE_URL
+      cc_fingerprint "{env.as_posix()}" CC_API_PORT,CC_DATABASE_URL,CC_CA_BUNDLE,CC_TLS_INSECURE,CC_PROXY
     """)
     rows = {l.split("\t")[0]: l.split("\t") for l in ok(f'cc_ledger_read "{p}"').splitlines()}
     boot = [k for k in rows if k.startswith("boot/")]
-    assert boot == ["boot/boot-api", "boot/operator-name", "boot/boot-roster",
-                    "boot/boot-cockpit", "boot/boot-at-logon"], boot
+    assert boot == ["boot/boot-api", "boot/operator-name", "boot/boot-sandbox",
+                    "boot/boot-roster", "boot/skills-imported", "boot/boot-cockpit",
+                    "boot/boot-at-logon"], boot
     for k in boot:
         assert rows[k][1:4] == ["started", "2.56.0", "2026-10-02T00:00:00Z"], rows[k]
         assert rows[k][5] == "", rows[k]

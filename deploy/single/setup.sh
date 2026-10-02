@@ -64,15 +64,20 @@
 #                 spine's virtual key, cockpit build
 #     verify      verify.sh (deployed) then live, then the capability manifest
 #     test        the pytest gate, via the venv (no activation stumbles)
-#     boot        elicit the operator's name (once), start the API detached,
-#                 assert the roster hired          (counterpart: ./setup.sh stop)
+#     boot        elicit the operator's name (once), start the API, the sandbox
+#                 runner and the cockpit server — through systemd --user units
+#                 where a user manager answers (D6) — assert the roster hired,
+#                 import the bundled skills  (counterpart: ./setup.sh stop)
 #     demo        fixture email -> triage -> YOUR approval in the cockpit ->
 #                 a real execution + provenance verified on the event log
 #
-#     stop        stop the API that `boot` started
+#     stop        stop the three processes `boot` started, and prove each port free
 #     status      the LEDGER table plus the postconditions. Nothing mutating
 #     report      write <state>/report-<stamp>.txt — the one file a repository
 #                 DEFECT travels in (`diagnose` is an alias for it)
+#     acquire     INTERNAL to `update.sh apply`, never an operator command: the
+#                 NEW release's fetch + a catalog probe, run from a staged
+#                 worktree BEFORE the merge (CC_STAGED_FOR; see main)
 #
 #   THE LEDGER (2026-10-01 design record, D1/D2/D3). `deploy/single/steps.tsv`
 #   declares every step of the install ONCE, in run order, with the .env keys
@@ -133,7 +138,25 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # app's configuration AND this profile's. deploy/single/.env is retired and is
 # migrated into it by load_env below. compose is always invoked with
 # --env-file "$ENV_FILE" — it has no .env of its own to find any more.
-ENV_FILE="$REPO_ROOT/.env"
+#
+# THE INSTALL this run acts on, decided in this ONE place: normally the checkout
+# this script sits in. The exception is the STAGED ACQUISITION (2026-10-01
+# design record, D5): `update.sh apply` checks the NEW release out into a
+# worktree under the state dir and runs THAT release's `setup.sh acquire`
+# BEFORE it merges, with CC_STAGED_FOR naming the deployment's root. Such a run
+# reads the DEPLOYMENT's answer file and state dir (the staged tree has no .env,
+# and must not grow one), writes no ledger row (the staged tree is not the
+# install, and its rows would carry the new version before the merge), is not
+# held to the ledger's order (acquisition deploys nothing), and refuses every
+# command but `acquire`. CC_STAGED_FOR is internal plumbing handed from
+# update.sh to this one child, like CC_RUN_LOCK_PID — never an answer.
+INSTALL_ROOT="$REPO_ROOT"
+STAGED=0
+if [[ -n "${CC_STAGED_FOR:-}" ]]; then
+  INSTALL_ROOT="$CC_STAGED_FOR"
+  STAGED=1
+fi
+ENV_FILE="$INSTALL_ROOT/.env"
 # The template `configure` copies when there is no answer file yet. It is the
 # ONE place .env is created (v2.45.0): check and the full run say "run
 # configure" instead, because a command that silently invents an answer file is
@@ -160,6 +183,12 @@ QUESTIONS="$HERE/questions.tsv"
 # shellcheck source=ledger-lib.sh
 . "$HERE/ledger-lib.sh"
 STEPS="$HERE/steps.tsv"
+# What `boot` writes to keep its three host processes running (2026-10-01
+# design record, D6) — the systemd --user units and the Windows logon wrapper,
+# rendered as text by pure functions so the text is tested where neither a
+# user manager nor cmd.exe may be touched.
+# shellcheck source=supervise-lib.sh
+. "$HERE/supervise-lib.sh"
 # Python on Windows encodes a PIPED stdout in the ANSI code page, so the em
 # dashes in register-models.py's operator banner reached the log as cp1252
 # bytes inside otherwise-UTF-8 output (2026-09-03 Windows run: `�`).
@@ -248,15 +277,20 @@ wait_http() { # wait_http <url> <seconds>
 # disagree about the spelling of a Windows path.
 init_state() {
   [[ -n "$STATE_DIR" ]] && return 0
-  STATE_DIR="$(cc_state_dir "$ENV_FILE" "$REPO_ROOT")" \
+  # INSTALL_ROOT, not REPO_ROOT: the state dir's default name hashes the
+  # install's path, and a STAGED run must land in the deployment's (the run
+  # lock it nests under lives there) rather than one named after the worktree.
+  STATE_DIR="$(cc_state_dir "$ENV_FILE" "$INSTALL_ROOT")" \
     || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   LOGFILE="$STATE_DIR/setup-log.txt"
   # THE LEDGER (D2), created EMPTY by every command — configure and check
   # included. Its existence is what says "this tree is a deployment", so it may
-  # not wait for the first mutating phase to appear.
+  # not wait for the first mutating phase to appear. A STAGED run never creates
+  # it: it leaves the deployment's ledger exactly as it found it, absence
+  # included (a pre-ledger install's has none yet).
   LEDGER="$STATE_DIR/ledger.tsv"
-  if [[ ! -f "$LEDGER" ]]; then
+  if (( ! STAGED )) && [[ ! -f "$LEDGER" ]]; then
     printf '%s\n' "$LEDGER_HEADER" >"$LEDGER" 2>/dev/null || true
     chmod 600 "$LEDGER" 2>/dev/null || true
   fi
@@ -314,16 +348,47 @@ machine_name() {
 # interactive session is established only when NO command is provided).
 # </dev/null on every call: an ssh that inherits this script's stdin eats the
 # manifest a caller is reading from.
+#
+# Its STDERR goes to the LOG, never to the terminal and never away (2026-10-01
+# design record, D5): it used to be discarded, so a write into the machine that
+# failed — `sudo tee` refused, an update-ca-trust that errored — left no trace
+# anywhere, and the phase's FAIL line had nothing behind it. stdout is still the
+# caller's (several read a file's content back through it). What can reach the
+# log, checked against every caller: the commands carry paths, a registry HOST
+# and fixed tool invocations, and no credential; the one PROXY VALUE that
+# travels into the machine (the containers.conf drop-in) goes on machine_sh_stdin's
+# STDIN, never in a command. machine_sh_log still strips CC_PROXY's value — and
+# its host, which a curl connect error names — and any URL userinfo, because a
+# tool inside the machine may print what its own environment holds.
+machine_sh_log() { # machine_sh_log <command> <exit-code> <stderr-text>
+  local err="$3" px="${CC_PROXY:-}" pxh
+  [[ -n "${err//[[:space:]]/}" ]] || return 0
+  if [[ -n "$px" ]]; then
+    err="${err//"$px"/[REDACTED:CC_PROXY]}"
+    pxh="${px#*://}"; pxh="${pxh#*@}"; pxh="${pxh%%/*}"
+    [[ -n "$pxh" ]] && err="${err//"$pxh"/[REDACTED:CC_PROXY]}"
+    pxh="${pxh%%:*}"
+    [[ -n "$pxh" ]] && err="${err//"$pxh"/[REDACTED:CC_PROXY]}"
+  fi
+  err="$(printf '%s' "$err" | sed -E 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]]+@#\1[REDACTED:url-userinfo]@#g' | tr '\r\n' '  ')"
+  logline "machine-ssh: \`$1\` exited $2; its stderr: $err"
+}
+
 machine_sh() { # machine_sh <shell-command>
-  local m; m="$(machine_name)"
+  local m err rc=0; m="$(machine_name)"
   [[ -n "$m" ]] || return 1
-  podman machine ssh "$m" -- "$1" </dev/null 2>/dev/null
+  # stderr into $err, stdout to fd 3 = this function's own stdout.
+  { err="$(podman machine ssh "$m" -- "$1" </dev/null 2>&1 1>&3 3>&-)" || rc=$?; } 3>&1
+  machine_sh_log "$1" "$rc" "$err"
+  return "$rc"
 }
 # Same, with stdin piped in — how a file gets INTO the machine without a share.
 machine_sh_stdin() { # machine_sh_stdin <shell-command> < file
-  local m; m="$(machine_name)"
+  local m err rc=0; m="$(machine_name)"
   [[ -n "$m" ]] || return 1
-  podman machine ssh "$m" -- "$1" 2>/dev/null
+  { err="$(podman machine ssh "$m" -- "$1" 2>&1 1>&3 3>&-)" || rc=$?; } 3>&1
+  machine_sh_log "$1" "$rc" "$err"
+  return "$rc"
 }
 
 # ── the compose provider ────────────────────────────────────────────────────
@@ -438,10 +503,13 @@ compose() { # compose <args...>
 # the image.
 PROFILE_FLAGS=()
 compose_profile_flags() {
+  local prof
   PROFILE_FLAGS=()
-  [[ "${CC_ENABLE_N8N:-0}" == 1 ]] && PROFILE_FLAGS+=(--profile n8n)
-  [[ "${CC_ENABLE_CRAWLER:-1}" == 1 ]] && PROFILE_FLAGS+=(--profile crawler)
-  [[ "${CC_ENABLE_SPEECH:-1}" == 1 ]] && PROFILE_FLAGS+=(--profile speech)
+  # compose_profile_on is the ONE flag->profile mapping: the image catch-up
+  # asks it which services are enabled, so the two cannot disagree.
+  for prof in n8n crawler speech; do
+    compose_profile_on "$prof" && PROFILE_FLAGS+=(--profile "$prof")
+  done
   return 0
 }
 
@@ -452,8 +520,11 @@ load_env() {
   # configures through .env and never rewrites any part of Central Command, so
   # a tree that differs from the release it claims to be does not get to
   # mutate anything. There is no bypass variable for this one —
-  # CC_SETUP_UNLEDGERED (D3) does not cover it.
-  if (( MUTATING )) && ! p_tree_pristine; then
+  # CC_SETUP_UNLEDGERED (D3) does not cover it. A STAGED run is exempt, and
+  # not by accident: its tree is a sparse worktree of `upstream` that mutates no
+  # install, and the DEPLOYMENT's tree was put through this same test
+  # (cc_tree_diff) by update.sh's own gate before anything was staged.
+  if (( MUTATING && ! STAGED )) && ! p_tree_pristine; then
     fail "tree-pristine" "this deployment DIFFERS from the release it claims to be, so the $CURPHASE phase will not run: $TREE_DIFF_PATHS. An install configures through .env and never rewrites any part of Central Command (2026-10-01 design record, D10) — restore those paths (git restore -- <path>), and carry the change back to a development session as a finding: ./setup.sh report writes one"
     return 1
   fi
@@ -1185,14 +1256,17 @@ preflight_host() {
 
   # Rootless podman without lingering dies with your last login session and
   # takes every container with it. Hit for real over SSH during validation.
-  if command -v loginctl >/dev/null 2>&1; then
-    local linger; linger="$(loginctl show-user "${USER:-$(id -un)}" --property=Linger 2>/dev/null)"
-    [[ "$linger" == "Linger=yes" ]] \
-      && pass "linger" "lingering enabled" \
-      || warn "linger" "run 'loginctl enable-linger ${USER:-$(id -un)}' or containers die with your login session"
-  else
-    pass "linger" "no logind here — not applicable"
-  fi
+  # A FAIL since v2.57.0 (2026-10-01 record, D6): `boot` now supervises the
+  # API, the cockpit and the sandbox runner as systemd --user units, and
+  # without lingering those die with the session too — the install would be
+  # "supervised" only while somebody is logged in. The verdict is
+  # supervise-lib.sh's (pure, tested); the row is check/linger.
+  local lv; lv="$(linger_verdict)"
+  case "$lv" in
+    PASS\ *) pass "linger" "${lv#PASS }" ;;
+    FAIL\ *) fail "linger" "${lv#FAIL }" ;;
+    *)       pass "linger" "${lv#NA }" ;;
+  esac
 
   # On Windows the OS trust store is what schannel curl and podman.exe
   # consult — CC_CA_BUNDLE alone never reaches them. Usually the corporate CA
@@ -1576,7 +1650,8 @@ probe_http() { # probe_http <check> <url> <what> <seam> [HEAD]
 # command itself, so the WARN is what a run that SKIPPED configure looks like.
 CC_GENERATED_KEYS=(CC_LLM_PROXY_ADMIN_KEY CC_LITELLM_SALT_KEY LITELLM_POSTGRES_PASSWORD
                    CC_NEO4J_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD
-                   CC_EMAIL_FACADE_TOKEN CC_CALENDAR_FACADE_TOKEN)
+                   CC_EMAIL_FACADE_TOKEN CC_CALENDAR_FACADE_TOKEN
+                   CC_SANDBOX_RUNNER_TOKEN)
 
 # The seams whose BLANK value means "the public host is contacted". If every one
 # of these names a mirror, a one-certificate bundle is complete by construction:
@@ -2052,6 +2127,41 @@ phase_check() {
 # failure on success).
 have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)"; grep -qx "$1" <<<"$imgs"; }
 
+# A LOCALLY BUILT image against the tree that is checked out NOW (v2.57.0).
+# Its tag is fixed, so presence alone said nothing about a release that changed
+# a Dockerfile or its context: the old image kept running. Each build writes
+# the hash of its inputs as a label (deploy/env-lib.sh's cc_build_inputs_hash);
+# the script itself answers what the hash SHOULD be (`--inputs-hash`, which
+# writes nothing and calls no podman), so the inputs have one definition — the
+# build script — and this compares. ONE `podman image inspect`, which fails
+# when the tag is absent and prints the label otherwise; nothing is mutated,
+# because the fetch/stack probes call this, and every run's PLAN evaluates
+# them. Prints one word:
+#   current     tag present, label equals this tree's inputs hash
+#   absent      no such tag in local storage
+#   unlabelled  tag present, no label — built by a release before v2.57.0
+#   stale       tag present, label differs — a changed Dockerfile/context/arg
+#               (or a ROLLBACK: the old tree's hash differs from the new image)
+#   unknown     the inputs hash could not be computed (an unreadable CA, a
+#               missing context) — never "current"; the build names the cause
+local_image_state() { # local_image_state <ref> <build-script>
+  local have want
+  if ! have="$(podman image inspect --format "{{index .Config.Labels \"$(cc_build_inputs_label)\"}}" "$1" 2>/dev/null </dev/null)"; then
+    printf 'absent'; return 0
+  fi
+  have="${have//$'\r'/}"; have="${have%%$'\n'*}"
+  # A missing key prints the template's zero value; some podman versions spell
+  # a nil map's as `<no value>`.
+  [[ "$have" == "<no value>" ]] && have=""
+  want="$("$2" --inputs-hash 2>/dev/null </dev/null)" || want=""
+  want="${want//$'\r'/}"
+  if [[ -z "$want" ]]; then printf 'unknown'
+  elif [[ -z "$have" ]]; then printf 'unlabelled'
+  elif [[ "$have" == "$want" ]]; then printf 'current'
+  else printf 'stale'
+  fi
+}
+
 # Pull every ref resolve-images.sh wrote into .env. The refs are TAGGED, not
 # digest-pinned: the lock's digest is verified at resolution time against the
 # registry, and a substituted tag is deliberately trusted from the mirror.
@@ -2060,8 +2170,39 @@ have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Ta
 # this script can do about either), 1 for anything else. D5: a failure is never
 # reported as "stopped for your action".
 fetch_images() {
-  local rc=0
-  "$HERE/resolve-images.sh" || rc=$?
+  local rc=0 sd=""
+  local -a rargs=()
+  # A STAGED run (update.sh apply's acquisition, D5) resolves the NEW release's
+  # images.txt into COPIES, never into the deployment's .env and
+  # installed.manifest. Two reasons, both read off this resolver:
+  #   * the tree is still the OLD release until the merge, and an apply that
+  #     stops before it (a catalog pause, a refused fast-forward) must leave
+  #     what compose reads exactly as it was;
+  #   * on a PARTIAL failure — the very case staging exists for, a mirror
+  #     lacking one tag — the resolver has already rewritten the keys it could
+  #     resolve, so the real .env would hold half a new release. (It used to
+  #     rewrite the manifest WITHOUT the one it could not, too, which turned
+  #     that image's old value into an OPERATOR PIN for good; since v2.57.0 it
+  #     carries the failed image's previous row forward — carry_forward.)
+  # The copies are seeded from the real ones — every CC_IMG_* line (an operator
+  # pin included) and the manifest — so the pin-versus-own-write judgement is
+  # the same one the real run will make. Only CC_IMG_* and CC_STATE_DIR are
+  # copied: the resolver reads every other answer from the environment load_env
+  # exported, so no credential is duplicated. The post-merge `./setup.sh fetch`
+  # then writes the real ones, with every artifact already present.
+  if (( STAGED )); then
+    sd="$(cc_stage_dir "$STATE_DIR")/acquire"
+    mkdir -p "$sd" || { fail "resolve-images" "could not create $sd for the staged resolution"; return 1; }
+    { grep -E '^(CC_IMG_[A-Z0-9_]+|CC_STATE_DIR)=' "$ENV_FILE" || true; } >"$sd/answers.env"
+    chmod 600 "$sd/answers.env" 2>/dev/null || true
+    rm -f "$sd/installed.manifest"
+    if [[ -f "$STATE_DIR/installed.manifest" ]]; then
+      cp "$STATE_DIR/installed.manifest" "$sd/installed.manifest" \
+        || { fail "resolve-images" "could not copy installed.manifest into $sd"; return 1; }
+    fi
+    rargs=(--env-file "$sd/answers.env" --manifest "$sd/installed.manifest")
+  fi
+  "$HERE/resolve-images.sh" ${rargs[@]+"${rargs[@]}"} || rc=$?
   case "$rc" in
     0) pass "resolve-images" "every image resolved to its locked tag" ;;
     2) pass "resolve-images" "resolved, with substitutions — see the WARN lines above and $STATE_DIR/installed.manifest" ;;
@@ -2070,7 +2211,16 @@ fetch_images() {
     *) fail "resolve-images" "image resolution failed (exit $rc) — the FAIL lines above name the seam per image"; return 1 ;;
   esac
   # resolve-images.sh writes CC_IMG_* into .env; re-read so this shell has them.
-  load_env || return 1
+  # Staged, it wrote them into the copy: source THAT, so what is pulled below is
+  # the NEW release's refs (the build scripts inherit them from here too).
+  if (( STAGED )); then
+    set -a
+    # shellcheck disable=SC1090,SC1091
+    . "$sd/answers.env"
+    set +a
+  else
+    load_env || return 1
+  fi
 
   local var ref check
   while IFS= read -r var; do
@@ -2087,14 +2237,67 @@ fetch_images() {
   done < <(compgen -A variable CC_IMG_ | sort)
 }
 
+# Build when the image is absent OR was built from other inputs (v2.57.0): an
+# unlabelled image (an earlier release built it) counts as different and is
+# rebuilt once. podman's layer cache makes a rebuild of an unchanged layer
+# cheap; a changed one is exactly what must be rebuilt.
+#
+# A STAGED run (D5) builds ASIDE: the build script itself tags
+# cc_staged_image_ref's `-staged` form when CC_STAGED_FOR is set, so this asks
+# about — and names — that ref. The live tag the running deployment uses does
+# not move before the merge; the post-merge fetch builds it, from the cache the
+# staged build warmed, and its label is what local_image_state reads.
 fetch_local() { # fetch_local <check> <ref> <build-script> <seams>
-  local check="$1" ref="$2" script="$3" seams="$4"
-  if have_image "$ref"; then pass "$check" "$ref present"; return 0; fi
+  local check="$1" ref="$2" script="$3" seams="$4" said aside=""
+  if (( STAGED )); then
+    # The new release did not change this image's inputs: the LIVE image is
+    # already the one it needs, so there is nothing to prove and nothing to
+    # build aside.
+    if [[ "$(local_image_state "$ref" "$script")" == current ]]; then
+      pass "$check" "$ref present and built from this release's inputs already"
+      return 0
+    fi
+    ref="$(cc_staged_image_ref "$ref")"
+    aside=" (aside — the running deployment's tag does not move before the merge)"
+  fi
+  case "$(local_image_state "$ref" "$script")" in
+    current)    pass "$check" "$ref present and built from these inputs${aside}"
+                (( STAGED )) || drop_staged_tag "$ref"
+                return 0 ;;
+    stale)      said="rebuilt — build inputs changed since the image was made" ;;
+    unlabelled) said="rebuilt — build inputs changed since the image was made (it carried no $(cc_build_inputs_label) label: an earlier release built it)" ;;
+    *)          said="built" ;;
+  esac
   if "$script" >&2; then
-    pass "$check" "$ref built"
+    pass "$check" "$ref ${said}${aside}"
+    (( STAGED )) || drop_staged_tag "$ref"
   else
     fail "$check" "$ref failed to build against your sources — seams: $seams (see .env.example's deployment section)"
   fi
+}
+
+# Once the LIVE tag is built from these inputs, the aside tag a staged
+# acquisition left (see fetch_local) has done its job. `podman untag <img>
+# <name>` removes exactly that NAME: never an image, never a layer — so it
+# cannot evict the cache the live build was just served from, which is why this
+# is `untag` and not `rmi` (podman's rmi also prunes dangling parents unless
+# told not to, and when the aside image is not the live one that is the warm
+# cache). If the two tags named different images, the aside one is left
+# dangling like the image any rebuild replaces; `podman image prune` is the
+# operator's. The NAME is passed explicitly: `untag` with no name strips EVERY
+# name of the image, the live tag included. Absent (a fresh install, an update
+# that built nothing new) is the common case and says nothing. Never from a
+# probe: this mutates.
+drop_staged_tag() { # drop_staged_tag <live-ref>
+  local aside
+  aside="$(cc_staged_image_ref "$1")"
+  have_image "$aside" || return 0
+  if podman untag "$aside" "$aside" >/dev/null 2>&1 </dev/null; then
+    note "    untagged $aside — the staged acquisition's build, now that $1 is built"
+  else
+    note "    could not untag $aside (harmless: no container uses it) — podman untag $aside $aside"
+  fi
+  return 0
 }
 
 # The Python graph, RESOLVED — `uv pip install --dry-run`, which installs
@@ -2174,7 +2377,7 @@ phase_fetch() {
     # build read as "stopped for your action" (D5).
     note ""
     note "$FAILS artifact(s) could not be acquired. Fix the seam(s) named above in the"
-    note "repo-root .env and re-run ./setup.sh (acquired ones fast-forward);"
+    note "repo-root .env and re-run $( (( STAGED )) && printf './update.sh apply — nothing has been merged' || printf './setup.sh') (acquired ones fast-forward);"
     note "deploy/discover.sh maps what this network can reach, deploy/AIRGAP.md the seams."
     return 1
   fi
@@ -2281,6 +2484,10 @@ phase_llm() {
   # compose brings each service's healthy dependencies up with it.
   step "up-litellm" "litellm + its database and redis are up and healthy" \
     compose up -d --wait litellm || return 1
+  # ...and on the image their refs resolve to NOW: `up` leaves a running
+  # container alone when only the image behind its ref changed (a re-pulled
+  # main-stable, a new postgres:16 digest). See image_drift.
+  catch_up_images "up-litellm" litellm-db litellm-redis litellm || return 1
 
   # LiteLLM runs its Prisma migrations at boot; 5 minutes is the honest budget.
   if wait_http "http://127.0.0.1:${CC_LITELLM_PORT}/health/liveliness" 300; then
@@ -2436,13 +2643,315 @@ phase_llm() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Does every container run the image its ref names NOW? (v2.57.0)
+# ─────────────────────────────────────────────────────────────────────────────
+# `compose up -d` converges on the SERVICE DEFINITION, not on the image behind
+# it. podman-compose 1.6.0 — this profile's floor — recreates an existing
+# container only when the sha256 of its service dict differs from the
+# `io.podman.compose.config-hash` label it was created with (podman_compose.py,
+# compose_up, read at the v1.6.0 tag on 2026-10-02). The image REF string is in
+# that dict; the image ID behind it is not. So since this release made a
+# changed Dockerfile REBUILD `localhost/cc-graphiti:<tag>` under the same tag —
+# and equally when a third-party tag such as `postgres:16` is re-pulled to a new
+# digest — `up` left the OLD container running and reported it healthy.
+# (podman-compose's main branch has since added an image-ID comparison, still
+# unreleased as 1.6.0, so the floor may not assume it. docker compose compares
+# its `com.docker.compose.image` digest label already — mustRecreate in
+# pkg/compose/convergence.go — and against it this pass simply finds nothing.)
+#
+# So after `up`, the stack and llm phases compare, per service, the image ID its
+# container was created from with the ID its configured ref resolves to in
+# local storage NOW, and recreate exactly the services that differ. The probes
+# ask the same question, so the PLAN says the phase will run and a `done` row
+# cannot hide a stale container.
+#
+# compose.yaml is the one list of services: this reads it — a fixed shape, the
+# two-space service keys under `services:` and their four-space `image:`,
+# `profiles:` and `volumes:` — rather than carrying a second table that could
+# drift from it, and expands its `${VAR:-default}` refs the way compose does:
+# this shell, then .env, then the default (p_flag). Read-only, and TWO podman
+# calls per question however many services: one `ps` (every container of the
+# project, its compose service label and the ID of the image it was created
+# from) and one `images` (every local ref with its ID). The probes that call this
+# run in the plan and again in the loop, on a Windows client that pays a round
+# trip into the machine per call. podman CLI only — container storage is
+# never read directly (it lives inside the machine on Windows).
+STACK_LOADED=0
+STACK_PROJECT=""
+STACK_SVCS=()
+declare -A STACK_PROFILE=() STACK_IMAGE=() STACK_VOLS=() STACK_NAMED_VOL=()
+stack_load() {
+  (( STACK_LOADED )) && return 0
+  local f="$HERE/compose.yaml" kind a b c d
+  [[ -f "$f" ]] || return 1
+  STACK_PROJECT="$(sed -n 's/^name:[[:space:]]*//p' "$f" | head -1 | tr -d "\r\"'")"
+  [[ -n "$STACK_PROJECT" ]] || return 1
+  while IFS=$'\t' read -r kind a b c d; do
+    case "$kind" in
+      S) STACK_SVCS+=("$a"); STACK_PROFILE["$a"]="$b"; STACK_IMAGE["$a"]="$c"; STACK_VOLS["$a"]="$d" ;;
+      V) STACK_NAMED_VOL["$a"]=1 ;;
+    esac
+  done < <(awk '
+    function flush() {
+      if (svc != "") printf "S\t%s\t%s\t%s\t%s\n", svc, prof, img, (vols == "" ? "-" : vols)
+      svc = ""
+    }
+    { sub(/\r$/, "") }
+    /^[^ #]/ { flush(); sect = $0; sub(/:.*/, "", sect); next }
+    sect == "volumes" && /^  [A-Za-z0-9][A-Za-z0-9_.-]*:/ {
+      v = $0; sub(/^  /, "", v); sub(/:.*/, "", v); printf "V\t%s\n", v; next
+    }
+    sect == "services" && /^  [A-Za-z0-9][A-Za-z0-9_.-]*:[[:space:]]*$/ {
+      flush(); svc = $0; sub(/^  /, "", svc); sub(/:.*/, "", svc)
+      prof = "-"; img = "-"; vols = ""; invol = 0; next
+    }
+    svc == "" { next }
+    /^    image:/ {
+      v = $0; sub(/^    image:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*/, "", v)
+      gsub(/^["\047]|["\047]$/, "", v); img = v; invol = 0; next
+    }
+    /^    profiles:/ {
+      v = $0; sub(/^    profiles:[[:space:]]*\[/, "", v); sub(/\].*/, "", v)
+      gsub(/[[:space:]"\047]/, "", v); prof = (v == "" ? "-" : v); invol = 0; next
+    }
+    /^    volumes:/ { invol = 1; next }
+    invol && /^      - / {
+      v = $0; sub(/^      - [[:space:]]*/, "", v); sub(/[[:space:]]+#.*/, "", v)
+      gsub(/^["\047]|["\047]$/, "", v); vols = vols (vols == "" ? "" : " ") v; next
+    }
+    /^    [^ #]/ { invol = 0 }
+    END { flush() }
+  ' "$f")
+  (( ${#STACK_SVCS[@]} )) || return 1
+  STACK_LOADED=1
+}
+
+# compose's interpolation for the one form compose.yaml's image lines use:
+# `${NAME}` and `${NAME:-default}`, no nesting. A value comes from this shell,
+# else .env, else the default — p_flag's order, which is what compose sees
+# through `--env-file` in a phase that has sourced .env.
+compose_expand() { # compose_expand <text>
+  local s="$1" out="" re='\$\{([A-Za-z_][A-Za-z0-9_]*)(:?-([^}]*))?\}'
+  while [[ "$s" =~ $re ]]; do
+    out+="${s%%"${BASH_REMATCH[0]}"*}"
+    out+="$(p_flag "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}")"
+    s="${s#*"${BASH_REMATCH[0]}"}"
+  done
+  printf '%s%s' "$out" "$s"
+}
+
+# Is a compose profile (or any of a service's comma-separated profiles) on for
+# these flags? `-` is a service with no profile: always on. The ONE mapping of
+# CC_ENABLE_* onto profiles — compose_profile_flags is built from it too.
+compose_profile_on() { # compose_profile_on <profile[,profile...]|->
+  local prof
+  [[ -z "$1" || "$1" == "-" ]] && return 0
+  for prof in ${1//,/ }; do
+    case "$prof" in
+      n8n)     [[ "$(p_flag CC_ENABLE_N8N 0)" == 1 ]] && return 0 ;;
+      crawler) [[ "$(p_flag CC_ENABLE_CRAWLER 1)" == 1 ]] && return 0 ;;
+      speech)  [[ "$(p_flag CC_ENABLE_SPEECH 1)" == 1 ]] && return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# THE QUESTION, for the named services (none = every service these flags
+# enable). Prints nothing. -> 0 every one runs what its ref resolves to now;
+# 1 at least one does not — DRIFT lists them, DRIFT_KIND says how:
+#   differs      the container's image ID is not the ref's ID now
+#   noimage      the ref is not in local storage at all
+#   absent       no container for the service
+#   undeclared   not a service compose.yaml defines
+# with DRIFT_REF / DRIFT_HAVE / DRIFT_WANT for the sentence; 2 = podman could
+# not be asked (never read as "current"). IDs compare with any `sha256:` prefix
+# dropped and as a prefix of each other, so a truncated and a full spelling of
+# one ID agree.
+DRIFT=()
+declare -A DRIFT_KIND=() DRIFT_REF=() DRIFT_HAVE=() DRIFT_WANT=()
+image_drift() { # image_drift [service...]
+  local svc ref ps imgs name id rt dg have want kind
+  local -a svcs=("$@")
+  local -A cid=() iid=()
+  DRIFT=(); DRIFT_KIND=(); DRIFT_REF=(); DRIFT_HAVE=(); DRIFT_WANT=()
+  stack_load || return 2
+  if (( ! ${#svcs[@]} )); then
+    for svc in "${STACK_SVCS[@]}"; do
+      compose_profile_on "${STACK_PROFILE[$svc]}" && svcs+=("$svc")
+    done
+  fi
+  # The service LABEL, not the container name: both providers set
+  # com.docker.compose.project/.service (podman-compose alongside its own
+  # io.podman.compose.* pair), so this needs no knowledge of container_name.
+  ps="$(podman ps -a --filter "label=com.docker.compose.project=${STACK_PROJECT}" \
+          --format '{{index .Labels "com.docker.compose.service"}} {{.ImageID}}' 2>/dev/null </dev/null)" \
+    || return 2
+  imgs="$(podman images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.Digest}} {{.ID}}' 2>/dev/null </dev/null)" \
+    || return 2
+  while read -r name id; do
+    [[ -n "$name" && -n "$id" ]] && cid["$name"]="${id#sha256:}"
+  done <<<"${ps//$'\r'/}"
+  while read -r rt dg id; do
+    [[ -n "$rt" && -n "$id" ]] || continue
+    iid["$rt"]="${id#sha256:}"
+    # A digest-pinned ref (an operator's CC_IMG_<NAME>=host/path@sha256:...).
+    [[ "$dg" == sha256:* ]] && iid["${rt%:*}@${dg}"]="${id#sha256:}"
+  done <<<"${imgs//$'\r'/}"
+  for svc in "${svcs[@]}"; do
+    ref=""; have=""; want=""
+    if [[ -z "${STACK_IMAGE[$svc]:-}" ]]; then
+      kind=undeclared
+    else
+      ref="$(compose_expand "${STACK_IMAGE[$svc]}")"
+      have="${cid[$svc]:-}"; want="${iid[$ref]:-}"
+      if [[ -z "$have" ]]; then kind=absent
+      elif [[ -z "$want" ]]; then kind=noimage
+      elif [[ "$have" == "$want"* || "$want" == "$have"* ]]; then continue
+      else kind=differs
+      fi
+    fi
+    DRIFT+=("$svc")
+    DRIFT_KIND["$svc"]="$kind"; DRIFT_REF["$svc"]="$ref"
+    DRIFT_HAVE["$svc"]="$have"; DRIFT_WANT["$svc"]="$want"
+  done
+  (( ${#DRIFT[@]} )) && return 1
+  return 0
+}
+
+# THE STATEFUL SERVICES, and where each one's IMAGE keeps its data (the image's
+# contract, not ours — which is why this is a table and compose.yaml is not
+# asked). A recreate replaces the container; it is safe for these only because
+# that path is a NAMED volume, which `down`/recreate never removes (podman-
+# compose's recreate tears down with volumes=False; docker compose keeps named
+# volumes by design). stack_data_on_volume CHECKS that against compose.yaml on
+# every recreate rather than trusting this comment, and
+# tests/test_single_stack_catch_up.py pins both directions: every service with a
+# named volume is listed here, and every one listed has its path on one.
+#   postgres, litellm-db, n8n-db  PGDATA is a subdirectory of this mount
+#   litellm-redis                 `--appendonly yes` writes here
+#   neo4j                         the graph (the image's /logs is NOT data, and
+#                                 an anonymous volume: a recreate starts it empty)
+#   n8n                           its own state (the Gmail credential is in n8n-db)
+#   speech                        the model snapshots — a download, or pre-placed
+#                                 by hand on an air-gapped site
+STACK_STATEFUL=(
+  "postgres /var/lib/postgresql/data"
+  "litellm-db /var/lib/postgresql/data"
+  "n8n-db /var/lib/postgresql/data"
+  "litellm-redis /data"
+  "neo4j /data"
+  "n8n /home/node/.n8n"
+  "speech /home/ubuntu/.cache/huggingface/hub"
+)
+stack_data_path() { # stack_data_path <service>  -> prints the path, or nothing (stateless)
+  local e
+  for e in "${STACK_STATEFUL[@]}"; do
+    [[ "${e%% *}" == "$1" ]] && { printf '%s' "${e#* }"; return 0; }
+  done
+  return 0
+}
+
+# 0 = recreating <service> loses nothing: it keeps no data, or compose.yaml
+# mounts a NAMED volume (one the top-level `volumes:` declares) at its data
+# path. A bind mount, an anonymous volume, or no mount at all is a 1.
+stack_data_on_volume() { # stack_data_on_volume <service>
+  local path v src dst
+  local -a vols=()
+  path="$(stack_data_path "$1")"
+  [[ -n "$path" ]] || return 0
+  stack_load || return 1
+  read -r -a vols <<<"${STACK_VOLS[$1]:--}"
+  for v in "${vols[@]}"; do
+    [[ "$v" == "-" ]] && continue
+    src="${v%%:*}"; dst="${v#*:}"; dst="${dst%%:*}"
+    [[ "$dst" == "$path" && -n "${STACK_NAMED_VOL[$src]:-}" ]] && return 0
+  done
+  return 1
+}
+
+# THE CATCH-UP, after a phase's `compose up`: every drifted service whose data
+# is safe is recreated in ONE call — compose's own force-recreate, scoped to
+# those services (--no-deps: their dependencies are already up and are not
+# touched; podman-compose additionally recreates a recreated service's RUNNING
+# DEPENDENTS, its `down` having removed them — graphiti after neo4j, litellm
+# after its database — all of them stateless or volume-backed), waiting on
+# compose.yaml's healthchecks exactly as `up --wait` does. Then it asks again:
+# a recreate that did not land is a FAIL, never a PASS. Every verdict is printed
+# under the CALLER's check-name, so a failure here fails that ledger row.
+catch_up_images() { # catch_up_images <check-name> [service...]
+  local check="$1" rc=0 svc bad=0
+  shift
+  local -a redo=()
+  local -A old=() new=() ref=()
+  image_drift "$@" || rc=$?
+  case "$rc" in
+    0) pass "$check" "every container runs the image its ref resolves to now (${*:-every service these flags enable})"
+       return 0 ;;
+    2) fail "$check" "could not compare the containers' images with their refs — podman ps / podman images did not answer; run: ./setup.sh report"
+       return 1 ;;
+  esac
+  for svc in "${DRIFT[@]}"; do
+    case "${DRIFT_KIND[$svc]}" in
+      differs)
+        if stack_data_on_volume "$svc"; then
+          redo+=("$svc")
+          old["$svc"]="${DRIFT_HAVE[$svc]}"; new["$svc"]="${DRIFT_WANT[$svc]}"; ref["$svc"]="${DRIFT_REF[$svc]}"
+          continue
+        fi
+        fail "$check" "$svc runs image ${DRIFT_HAVE[$svc]:0:12}, but ${DRIFT_REF[$svc]} now resolves to ${DRIFT_WANT[$svc]:0:12} — and it is NOT recreated: it keeps its data at $(stack_data_path "$svc"), which compose.yaml does not mount from a named volume, so a new container would start without it. The running container is left as it is; carry this back as a finding: ./setup.sh report" ;;
+      noimage)
+        fail "$check" "$svc's image ${DRIFT_REF[$svc]} is not in local storage, so its container cannot be brought onto it — run: ./setup.sh fetch" ;;
+      absent)
+        fail "$check" "$svc has no container after compose up — run: ./setup.sh report" ;;
+      *)
+        fail "$check" "$svc is not a service compose.yaml defines — this release's setup.sh and compose.yaml disagree; run: ./setup.sh report" ;;
+    esac
+    bad=1
+  done
+  if (( ${#redo[@]} )); then
+    compose_profile_flags
+    note "--> compose up -d --force-recreate --no-deps --wait ${redo[*]}   (their images changed behind unchanged refs)"
+    if ! compose "${PROFILE_FLAGS[@]}" up -d --force-recreate --no-deps --wait "${redo[@]}" >&2; then
+      fail "$check" "could not recreate ${redo[*]} on the image(s) their refs now resolve to — the provider's own error is on stderr above; re-run ./setup.sh (a container it stopped is started again by the next compose up)"
+      return 1
+    fi
+    rc=0
+    image_drift "${redo[@]}" || rc=$?
+    if (( rc == 2 )); then
+      fail "$check" "recreated ${redo[*]}, but could not ask podman whether they now run the right image — run: ./setup.sh report"
+      return 1
+    fi
+    for svc in "${redo[@]}"; do
+      if [[ " ${DRIFT[*]-} " == *" $svc "* ]]; then
+        fail "$check" "$svc was recreated and still does not run ${ref[$svc]}'s image (${DRIFT_KIND[$svc]}) — run: ./setup.sh report"
+        bad=1
+      else
+        pass "$check" "$svc recreated — its container ran image ${old[$svc]:0:12}, and ${ref[$svc]} now resolves to ${new[$svc]:0:12} (compose up leaves a running container alone when only the image behind its ref changed)"
+      fi
+    done
+  fi
+  (( bad )) && return 1
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PHASE: stack — assert the local images, then bring the whole stack up.
 # ─────────────────────────────────────────────────────────────────────────────
 # Images are the fetch phase's job; here they are only ASSERTED, so a missing
 # one is a clear "run fetch" and never a surprise build (or pull) mid-deploy.
-need_image() { # need_image <check-name> <image-ref>
-  have_image "$2" && { pass "$1" "$2 present"; return 0; }
-  fail "$1" "$2 is not in local storage — run: ./setup.sh fetch"
+# "In local storage" means AS FETCH LEAVES IT (v2.57.0): the tag present AND
+# its build-inputs label equal to this tree's. The stack rows' probes are the
+# same p_image_* functions fetch's rows use, which compare the label — so a
+# need_image that passed on the tag alone would PASS here and then have its
+# own row FAIL on the probe after the phase. A stale image (a release changed
+# its Dockerfile and fetch has not run since, or failed to rebuild) is the same
+# clear "run fetch", never a build here.
+need_image() { # need_image <check-name> <image-ref> <build-script>
+  case "$(local_image_state "$2" "$3")" in
+    current) pass "$1" "$2 present and built from this tree's build inputs"; return 0 ;;
+    absent)  fail "$1" "$2 is not in local storage — run: ./setup.sh fetch" ;;
+    *)       fail "$1" "$2 is in local storage but was not built from this tree's build inputs (its $(cc_build_inputs_label) label differs or is missing) — run: ./setup.sh fetch, which rebuilds it" ;;
+  esac
   return 1
 }
 
@@ -2450,14 +2959,14 @@ phase_stack() {
   load_env || return 1
   : "${CC_GRAPHITI_TAG:=1.0.2-anthropic}"
 
-  need_image "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" || return 1
+  need_image "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" "$HERE/build-graphiti-image.sh" || return 1
   if [[ "$CC_ENABLE_SANDBOX" == "1" ]]; then
-    need_image "image-sandbox" "localhost/cc-sandbox:1" || return 1
+    need_image "image-sandbox" "localhost/cc-sandbox:1" "$HERE/build-sandbox-image.sh" || return 1
   else
     pass "image-sandbox" "skipped (CC_ENABLE_SANDBOX=0)"
   fi
   if [[ "$CC_ENABLE_CRAWLER" == "1" ]]; then
-    need_image "image-crawler" "localhost/cc-crawler:1" || return 1
+    need_image "image-crawler" "localhost/cc-crawler:1" "$HERE/build-crawler-image.sh" || return 1
   else
     pass "image-crawler" "skipped (CC_ENABLE_CRAWLER=0)"
   fi
@@ -2477,6 +2986,12 @@ phase_stack() {
   compose_profile_flags
   step "up-stack" "the stack is up and healthy (${PROFILE_FLAGS[*]:-no optional profiles})" \
     compose "${PROFILE_FLAGS[@]}" up -d --wait || return 1
+  # `up` converged the DEFINITIONS; this converges the IMAGES (v2.57.0). A
+  # release that rebuilt graphiti or the crawler under its fixed tag, or a
+  # re-pulled third-party tag, leaves the old container running through `up`
+  # — every enabled service whose container is not on the image its ref
+  # resolves to now is recreated here, by name, and said so (image_drift).
+  catch_up_images "up-stack" || return 1
 
   # `restart: always` is honoured by podman-restart.service, which a podman
   # MACHINE (Windows/macOS) ships disabled: after a host reboot every
@@ -2767,8 +3282,18 @@ phase_app() {
     local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
     if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
       # fetch already ran `npm ci`; only a tree it did not leave gets one here.
+      # TWO steps, never one `A || B; C` body (2026-10-01 design record, D5):
+      # `[[ -d node_modules ]] || npm ci; npm run build` handed the step the
+      # BUILD's exit status, so a failed `npm ci` followed by a build that
+      # happened to succeed against a stale tree was a PASS. Both carry the
+      # check-name `cockpit`, so a failed install is what app/cockpit's ledger
+      # row records, whatever its probe would read.
+      if [[ ! -d "$REPO_ROOT/web/node_modules" ]]; then
+        step "cockpit" "cockpit npm tree installed (fetch had not left one)" \
+          in_web npm ci || return 1
+      fi
       step "cockpit" "cockpit built (web/)" \
-        in_web bash -c '[[ -d node_modules ]] || npm ci; npm run build' || return 1
+        in_web npm run build || return 1
     else
       warn "cockpit" "node v$nv is older than 22 — cockpit not built; the API runs without it"
     fi
@@ -2917,8 +3442,14 @@ phase_verify() {
 # myself seems relatively pointless"). Deterministic like everything above;
 # the two genuinely-human moments (naming the operator, approving the demo
 # proposal) are IN-PROCESS gates on a terminal, exit-3 gates otherwise.
-# Idempotency probes REALITY, never a state file: a healthy API skips
-# test+boot, a decided proposal in the event log skips demo.
+# WHAT MAKES EACH RUN ONCE is the LEDGER (2026-10-01 design record, D2/D5), not
+# a guess from the running system: `test`'s row is `done` per release, so the
+# full run skips the suite at a version it already passed at and runs it again
+# after an update, and `./setup.sh test` by name always runs it. A healthy API
+# used to skip test too — which meant an update applied under a running API
+# never ran the suite for the new code at all. `boot` still leaves an API that
+# answers alone (it will not start a second one), and demo's probe reads the
+# event log, so a decided proposal is never enrolled twice.
 # ─────────────────────────────────────────────────────────────────────────────
 is_tty() { [[ -t 0 ]]; }
 
@@ -2949,20 +3480,487 @@ poll_until() { # poll_until <seconds> <interval> <cmd...> — true once cmd succ
 
 phase_test() {
   load_env || return 1
-  if api_up; then
-    pass "test" "skipped — the API is already up and healthy; to re-gate by hand: .venv python -m pytest -q"
-    return 0
-  fi
+  # No `api_up` skip (D5): see the block comment above — the ledger row is what
+  # makes this once per release.
   local py; py="$(venv_python)" || { fail "test" ".venv missing — run: ./setup.sh app"; return 1; }
   note "the offline suite is SEQUENTIAL and takes ~10 minutes — this is the gate, not a formality"
   step "test" "the offline suite is green" in_repo "$py" -m pytest -q || return 1
 }
 
+# ── the three host processes, and who keeps them running (D6) ───────────────
+# 2026-10-01 design record, D6: "everything the install starts, it
+# supervises". `boot` starts exactly three HOST processes — the API, the
+# cockpit server and the sandbox runner (v2.57.0: until then the operator
+# started the runner by hand, from the README) — and `stop` stops exactly
+# those three. Each has a pid file and a log in the state dir:
+# uvicorn.pid/.log, cockpit.pid/.log, sandbox.pid/.log.
+#
+# WHO KEEPS THEM RUNNING is decided once per run, by boot_supervisor:
+#   systemd   Linux with a reachable user manager (`systemctl --user`
+#             answers): boot writes one unit per process into
+#             <state>/systemd/ (never the checkout), enables it, and starts
+#             the process THROUGH it. One supervisor, never a nohup beside an
+#             enabled unit — or a crash is restarted by systemd while `stop`
+#             signals a pid systemd never owned, and Restart= revives what
+#             `stop` killed;
+#   windows   Git Bash: a detached start, and the logon entry (the
+#             boot-at-logon row) runs ./setup.sh after a reboot;
+#   detached  anything else (a container, WSL without systemd): a detached
+#             start, and a WARN saying nothing restarts the processes after a
+#             crash or a reboot — ./setup.sh is what brings them back.
+SUP_MODE=""
+SUP_ID=""
+
+boot_supervisor() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'windows'; return 0 ;;
+    Linux) ;;
+    *) printf 'detached'; return 0 ;;
+  esac
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+    printf 'systemd'
+  else
+    printf 'detached'
+  fi
+}
+
+# A unit's name for <kind> (api | cockpit | sandbox), from the install id —
+# the identity the state dir is named by — so two installs on one host never
+# collide (supervise-lib.sh's cc_sup_unit_name).
+sup_unit() { # sup_unit <kind>
+  [[ -n "$SUP_ID" ]] || SUP_ID="$(cc_install_id "$(cc_norm_path "$REPO_ROOT")")"
+  cc_sup_unit_name "$SUP_ID" "$1"
+}
+sup_unit_file() { # sup_unit_file <kind>
+  printf '%s/systemd/%s' "$STATE_DIR" "$(sup_unit "$1")"
+}
+
+boot_api_port() {
+  local p; p="$(get_kv "$ENV_FILE" CC_API_PORT)"; printf '%s' "${p:-8080}"
+}
+cockpit_port() {
+  p_flag CC_COCKPIT_PORT 3080
+}
+# The runner listens on CC_SANDBOX_RUNNER_URL's port — the URL the API dials is
+# the one fact, and the port boot binds is read out of it, never a second key.
+sandbox_port() {
+  local u; u="$(q_unquote "$(get_kv "$ENV_FILE" CC_SANDBOX_RUNNER_URL)")"
+  [[ -n "$u" ]] || u="http://127.0.0.1:8090"
+  u="${u#*://}"; u="${u%%/*}"
+  if [[ "$u" =~ :([0-9]+)$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; else printf '8090'; fi
+}
+
+# The HTTP status the runner gives THIS install's token, on a path it does not
+# serve: 404 = it answered and took the token (or enforces none), 401 = a
+# runner is listening that will refuse every request the API sends (started by
+# hand without it, or before .env's token changed), 000 = nothing answered.
+# The token travels on stdin (`-H @-`), never in an argv.
+sandbox_auth_code() {
+  local tok code url
+  url="http://127.0.0.1:$(sandbox_port)/"
+  tok="$(q_unquote "$(get_kv "$ENV_FILE" CC_SANDBOX_RUNNER_TOKEN)")"
+  if [[ -n "$tok" ]]; then
+    code="$(printf 'Authorization: Bearer %s\n' "$tok" \
+      | curl -sS -m 5 -o /dev/null -w '%{http_code}' -H @- "$url" 2>/dev/null)"
+  else
+    code="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"
+  fi
+  printf '%s' "${code:-000}"
+}
+
+# Is <kind> up and answering as THIS install needs it to?
+proc_ready() { # proc_ready <kind>
+  local c
+  case "$1" in
+    api)     api_up ;;
+    cockpit) curl -fsS -m 5 -o /dev/null "http://127.0.0.1:$(cockpit_port)/" 2>/dev/null ;;
+    sandbox) c="$(sandbox_auth_code)"; [[ "$c" != 000 && "$c" != 401 ]] ;;
+    *)       return 1 ;;
+  esac
+}
+
+# Everything about one process, into PROC_* — the SAME command line and
+# environment whichever supervisor runs it ("the units run the same commands
+# boot runs by hand", D6). Returns 1 with PROC_WHY when it cannot be started
+# at all on this host.
+#
+# The environment: the process reads .env as before (exported by load_env's
+# `set -a` for a hand start; EnvironmentFile= for a unit) — which is how
+# CC_SANDBOX_RUNNER_TOKEN reaches the runner, the value the API sends. On top
+# of it, PROC_ENV: what boot sets per process, and the derived trust/proxy
+# variables load_env exported (cc_sup_passthrough_names), which a unit would
+# otherwise not have.
+proc_spec() { # proc_spec <api|cockpit|sandbox>
+  PROC_ENV=(); PROC_CMD=(); PROC_WHY=""; PROC_AFTER="-"; PROC_KILL="-"
+  local n uv node
+  while IFS= read -r n; do
+    [[ -n "${!n:-}" ]] && PROC_ENV+=("$n=${!n}")
+  done < <(cc_sup_passthrough_names)
+  case "$1" in
+    api)
+      PROC_CHECK=boot-api; PROC_WHAT="the API"; PROC_TITLE="API"
+      PROC_PIDFILE="$STATE_DIR/uvicorn.pid"; PROC_LOG="$STATE_DIR/uvicorn.log"
+      PROC_PORT="$(boot_api_port)"; PROC_URL="$(api_url)"; PROC_DIR="$REPO_ROOT"; PROC_WAIT=90
+      # The API spawns the cockpit-driven updater, which STOPS the API and must
+      # outlive it — see cc_render_unit's KillMode note.
+      PROC_KILL=process
+      uv="$(venv_uvicorn)" || { PROC_WHY="uvicorn not in .venv — run: ./setup.sh app"; return 1; }
+      PROC_CMD=("$uv" central_command.api.app:app --host 127.0.0.1 --port "$PROC_PORT")
+      ;;
+    sandbox)
+      PROC_CHECK=boot-sandbox; PROC_WHAT="the sandbox runner"; PROC_TITLE="sandbox runner"
+      PROC_PIDFILE="$STATE_DIR/sandbox.pid"; PROC_LOG="$STATE_DIR/sandbox.log"
+      PROC_PORT="$(sandbox_port)"; PROC_URL="http://127.0.0.1:$PROC_PORT"; PROC_DIR="$REPO_ROOT"; PROC_WAIT=60
+      # This profile's backend is rootless podman (README, "Starting the
+      # sandbox runner"); kubectl is the k3s profile's.
+      PROC_ENV+=("CC_SANDBOX_BACKEND=podman")
+      uv="$(venv_uvicorn)" || { PROC_WHY="uvicorn not in .venv — run: ./setup.sh app"; return 1; }
+      PROC_CMD=("$uv" central_command.sandbox.runner:app --host 127.0.0.1 --port "$PROC_PORT")
+      ;;
+    cockpit)
+      PROC_CHECK=boot-cockpit; PROC_WHAT="the cockpit server"; PROC_TITLE="cockpit server"
+      PROC_PIDFILE="$STATE_DIR/cockpit.pid"; PROC_LOG="$STATE_DIR/cockpit.log"
+      PROC_PORT="$(cockpit_port)"; PROC_URL="http://127.0.0.1:$PROC_PORT"; PROC_DIR="$REPO_ROOT/web"; PROC_WAIT=60
+      PROC_AFTER="$(sup_unit api)"
+      node="$(command -v node)" || { PROC_WHY="node is not on PATH, so the cockpit server cannot start (the API runs without it)"; return 1; }
+      # web/.env is RETIRED on this profile (v2.42.0): the server's
+      # `dotenv/config` loads that file from cwd and does NOT override variables
+      # already present in the environment, so SETTING these is exactly
+      # equivalent and keeps the checkout clean. CC_UPDATE_BACKEND=api: the API
+      # owns the update routes on this profile and the Node server only
+      # proxies them.
+      PROC_ENV+=("PORT=$PROC_PORT" "GATEWAY_URL=$(api_url)" "CC_UPDATE_BACKEND=api")
+      PROC_CMD=("$node" server-dist/index.js)
+      ;;
+    *) PROC_WHY="no such host process: $1"; return 1 ;;
+  esac
+}
+
+# Write, enable and reload the units for <kind>... — into <state>/systemd/,
+# 0600 (an Environment= line can carry CC_PROXY's userinfo). `enable <path>`
+# LINKS a unit that lives outside the search path and enables it in one step.
+sup_install_units() { # sup_install_units <kind>...
+  local dir="$STATE_DIR/systemd" kind unit file text paths=() names=()
+  mkdir -p "$dir" 2>/dev/null || { fail "boot-supervisor" "could not create $dir"; return 1; }
+  chmod 700 "$dir" 2>/dev/null || true
+  for kind in "$@"; do
+    proc_spec "$kind" || { fail "$PROC_CHECK" "$PROC_WHY"; return 1; }
+    unit="$(sup_unit "$kind")"; file="$dir/$unit"
+    text="$(cc_render_unit "$unit" "Central Command $PROC_TITLE, 127.0.0.1:$PROC_PORT (install $SUP_ID)" \
+      "$PROC_DIR" "$ENV_FILE" "$PROC_LOG" "$PROC_AFTER" "$PROC_KILL" \
+      -- ${PROC_ENV[@]+"${PROC_ENV[@]}"} -- "${PROC_CMD[@]}")" \
+      || { fail "boot-supervisor" "could not render $unit (the reason is on stderr)"; return 1; }
+    if ! { printf '%s\n' "$text" >"$file.tmp" && { chmod 600 "$file.tmp" 2>/dev/null || true; } && mv -f "$file.tmp" "$file"; }; then
+      rm -f "$file.tmp"
+      fail "boot-supervisor" "could not write $file"
+      return 1
+    fi
+    paths+=("$file"); names+=("$unit")
+  done
+  note "--> systemctl --user enable ${paths[*]} && systemctl --user daemon-reload"
+  if ! systemctl --user enable "${paths[@]}" >&2; then
+    fail "boot-supervisor" "systemctl --user enable refused the units in $dir (its own words are on stderr) — nothing was started"
+    return 1
+  fi
+  if ! systemctl --user daemon-reload >&2; then
+    fail "boot-supervisor" "systemctl --user daemon-reload failed (its own words are on stderr) — nothing was started"
+    return 1
+  fi
+  pass "boot-supervisor" "systemd --user units ${names[*]} written to $dir and enabled: systemd restarts each on failure and starts it at boot (with lingering on — check/linger)"
+}
+
+# A flag turned a process off (CC_ENABLE_SANDBOX=0) after a boot that ran it:
+# its unit would still start at the next boot, so it is disabled, stopped and
+# removed. A unit that was never written is nothing to do.
+sup_retire_unit() { # sup_retire_unit <kind>
+  local unit file
+  unit="$(sup_unit "$1")"; file="$STATE_DIR/systemd/$unit"
+  [[ -f "$file" ]] || return 0
+  note "--> systemctl --user disable --now $unit (its flag is off now)"
+  systemctl --user disable --now "$unit" >&2 || true
+  rm -f "$file"
+  systemctl --user daemon-reload >&2 || true
+  rm -f "$STATE_DIR/$1.pid"
+}
+
+# A detached start, from PROC_*. `setsid` (where it exists — not Git Bash) puts
+# the process in a session and process group of its own, so `stop` can signal
+# the whole group: a server that forks a worker, or a wrapper that spawns the
+# real interpreter, is stopped with it. nohup: it outlives the terminal.
+proc_start_detached() {
+  local pre=()
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) command -v setsid >/dev/null 2>&1 && pre=(setsid) ;;
+  esac
+  # The `cd` is its OWN statement, and the backgrounded thing is ONE simple
+  # command. `( cd X && cmd & echo $! )` — the shape boot used until v2.57.0 —
+  # backgrounds the whole `cd && cmd` LIST: a bash subshell that forks cmd and
+  # waits for it, still holding the caller's stdout/stderr. So $! (the pid
+  # file) named that wrapper bash, not the server — `stop` signalled a shell
+  # and the server kept listening — and anything capturing setup.sh's output
+  # waited forever on a pipe the wrapper never closed. A simple command is
+  # forked and exec'd directly (env -> nohup -> setsid -> the server, one pid).
+  ( cd "$PROC_DIR" || exit 1
+    env ${PROC_ENV[@]+"${PROC_ENV[@]}"} nohup ${pre[@]+"${pre[@]}"} "${PROC_CMD[@]}" \
+      >>"$PROC_LOG" 2>&1 </dev/null &
+    echo $! >"$PROC_PIDFILE" )
+}
+
+# Under systemd the pid file holds the unit's MainPID: check's port test and
+# `report` read the pid files to tell this install's listeners from foreign ones.
+proc_record_pid() { # proc_record_pid <unit|''>
+  [[ -n "$1" ]] || return 0
+  local mp; mp="$(systemctl --user show -p MainPID --value "$1" 2>/dev/null)"
+  [[ "$mp" =~ ^[1-9][0-9]*$ ]] && printf '%s\n' "$mp" >"$PROC_PIDFILE"
+  return 0
+}
+
+# Start <kind> unless it already answers as this install needs it to. The
+# cases, in order:
+#   answers, and (no unit, or the unit is active)  -> PASS, left alone
+#   answers, unit NOT active, but a pid file       -> an earlier boot's
+#        detached start (a pre-v2.57.0 install): stopped, then started
+#        THROUGH the unit, so there is one supervisor
+#   answers, unit not active, no pid file          -> WARN: not ours to stop,
+#        and nothing supervises it
+#   the port is held but it does not answer as ours would (a runner refusing
+#        this install's token) -> ours (unit or pid file): restarted; not
+#        ours: FAIL naming the port
+#   nothing there -> start: `systemctl --user restart` under systemd (restart,
+#        not start: a unit that is active but not answering on THIS port —
+#        CC_API_PORT changed — must pick up the rewritten unit), detached
+#        otherwise; then wait for it.
+proc_boot() { # proc_boot <kind>
+  local kind="$1" unit="" active=0 how
+  proc_spec "$kind" || { fail "$PROC_CHECK" "$PROC_WHY"; return 1; }
+  if [[ "$SUP_MODE" == systemd ]]; then
+    unit="$(sup_unit "$kind")"
+    systemctl --user is-active --quiet "$unit" 2>/dev/null && active=1
+  fi
+  if proc_ready "$kind"; then
+    if [[ -z "$unit" ]] || (( active )); then
+      proc_record_pid "$unit"
+      pass "$PROC_CHECK" "$PROC_WHAT already answers at $PROC_URL${unit:+ under $unit} — not starting a second one"
+      return 0
+    fi
+    if [[ ! -f "$PROC_PIDFILE" ]]; then
+      warn "$PROC_CHECK" "$PROC_WHAT already answers at $PROC_URL, but not through $unit and not from a start this install recorded — left alone, and NOTHING restarts it after a crash or a reboot. To hand it to systemd: stop whatever holds port $PROC_PORT, then run ./setup.sh"
+      return 0
+    fi
+    note "$PROC_WHAT answers from an earlier detached start — handing it to $unit"
+    if ! proc_halt "$PROC_PIDFILE" "$PROC_PORT" "$unit"; then
+      fail "$PROC_CHECK" "$PROC_WHAT (an earlier detached start) still listens on 127.0.0.1:$PROC_PORT after ${HALT_HOW:-TERM} — run ./setup.sh stop, then ./setup.sh"
+      return 1
+    fi
+  elif port_listener "$PROC_PORT"; then
+    if (( active )) || [[ -f "$PROC_PIDFILE" ]]; then
+      note "$PROC_WHAT holds 127.0.0.1:$PROC_PORT but does not answer as this install needs — restarting it"
+      if ! proc_halt "$PROC_PIDFILE" "$PROC_PORT" "$unit"; then
+        fail "$PROC_CHECK" "$PROC_WHAT on 127.0.0.1:$PROC_PORT does not answer as it should and would not stop (${HALT_HOW:-no signal could be sent}) — run ./setup.sh stop, then ./setup.sh"
+        return 1
+      fi
+    elif [[ "$kind" == sandbox && "$(sandbox_auth_code)" == 401 ]]; then
+      fail "$PROC_CHECK" "a sandbox runner this install did not start holds 127.0.0.1:$PROC_PORT and REFUSES this install's CC_SANDBOX_RUNNER_TOKEN (401), so every sandbox request the API makes would fail — stop the runner you started by hand (boot starts it now), then run ./setup.sh"
+      return 1
+    else
+      fail "$PROC_CHECK" "port $PROC_PORT is held by something this install did not start, and it does not answer as $PROC_WHAT — stop it, or change the port in .env"
+      return 1
+    fi
+  fi
+  if [[ -n "$unit" ]]; then
+    note "--> systemctl --user restart $unit (log: $PROC_LOG · stop: ./setup.sh stop)"
+    if ! systemctl --user restart "$unit" >&2; then
+      fail "$PROC_CHECK" "systemctl --user restart $unit failed — read: systemctl --user status $unit, and $PROC_LOG"
+      return 1
+    fi
+    how="under $unit"
+  else
+    note "--> starting $PROC_WHAT detached (log: $PROC_LOG · stop: ./setup.sh stop)"
+    proc_start_detached
+    how="detached, pid file $PROC_PIDFILE"
+  fi
+  if ! poll_until "$PROC_WAIT" 2 proc_ready "$kind"; then
+    if [[ "$kind" == sandbox && "$(sandbox_auth_code)" == 401 ]]; then
+      fail "$PROC_CHECK" "$PROC_WHAT answers on 127.0.0.1:$PROC_PORT but refuses this install's CC_SANDBOX_RUNNER_TOKEN — read $PROC_LOG"
+    else
+      fail "$PROC_CHECK" "$PROC_WHAT never answered at $PROC_URL within ${PROC_WAIT}s — read $PROC_LOG${unit:+ and: systemctl --user status $unit}"
+    fi
+    return 1
+  fi
+  proc_record_pid "$unit"
+  case "$kind" in
+    api) pass "$PROC_CHECK" "API answering at $PROC_URL ($how; first boot hires the roster)" ;;
+    *)   pass "$PROC_CHECK" "$PROC_WHAT answering at $PROC_URL ($how)" ;;
+  esac
+}
+
+# Stop what this install started on <port>, and PROVE the port is free — the
+# port is the proof, never the signal: under Git Bash `kill` reported success
+# against a native Windows process it never signalled (2026-09-17: "sent
+# TERM", the API still answering), and `stop` left node/uvicorn/python
+# listening (2026-09-18, 2026-09-25). In order:
+#   1. this install's UNIT, through systemd — otherwise Restart= revives what a
+#      signal killed (a TERM is a clean exit, so on-failure would not, but the
+#      unit's own stop is the honest one);
+#   2. the PID FILE: its whole process group where it leads one (a detached
+#      start is `setsid`'d — a wrapper's children go with it), and on Windows
+#      the native process TREE (`taskkill /T`: uvicorn.exe is a shim that
+#      spawns the python that actually listens);
+#   3. wait for the port, then on Windows the listener netstat names.
+# A pid file whose pid is now some unrelated program (pid reuse) is not
+# signalled. Nothing is ever killed by PORT on Linux: what holds a port this
+# install has no record of starting is reported, not shot.
+# Returns 0 when nothing listens on the port; HALT_HOW says what was done.
+proc_halt() { # proc_halt <pidfile> <port> <unit|''>
+  local pidf="$1" port="$2" unit="$3" pid="" winpid="" i
+  HALT_HOW=""
+  if [[ -n "$unit" && -f "$STATE_DIR/systemd/$unit" ]] && command -v systemctl >/dev/null 2>&1; then
+    if systemctl --user stop "$unit" >&2; then
+      HALT_HOW="systemctl --user stop $unit"
+    else
+      note "systemctl --user stop $unit failed — falling back to the pid file"
+    fi
+  fi
+  if [[ -f "$pidf" ]]; then
+    pid="$(tr -cd '0-9' <"$pidf" 2>/dev/null)"
+    [[ -n "$pid" ]] && winpid="$(tr -cd '0-9' <"/proc/$pid/winpid" 2>/dev/null)"
+    if [[ -n "$pid" && -z "$HALT_HOW" ]] && proc_pid_is_ours "$pid"; then
+      proc_signal "$pid"
+      HALT_HOW="TERM to pid $pid"
+    fi
+    rm -f "$pidf"
+  fi
+  if [[ -z "$HALT_HOW" ]]; then
+    port_listener "$port" || return 0
+  else
+    for i in $(seq 1 20); do
+      port_listener "$port" || return 0
+      sleep 1
+    done
+  fi
+  if command -v taskkill >/dev/null 2>&1; then
+    if [[ -n "$winpid" ]]; then
+      taskkill //T //F //PID "$winpid" >/dev/null 2>&1
+      HALT_HOW="${HALT_HOW:+$HALT_HOW, then }taskkill /T of Windows pid $winpid"
+      sleep 1
+      port_listener "$port" || return 0
+    fi
+    pid="$(netstat -ano 2>/dev/null | grep LISTENING | grep ":${port} " | awk '{print $NF}' | head -1)"
+    if [[ -n "$pid" ]]; then
+      taskkill //T //F //PID "$pid" >/dev/null 2>&1
+      HALT_HOW="${HALT_HOW:+$HALT_HOW, then }taskkill /T of the listener, Windows pid $pid"
+      sleep 1
+    fi
+    port_listener "$port" || return 0
+  fi
+  return 1
+}
+
+# A recorded pid is signalled only while it is still one of OUR programs —
+# after a reboot a pid file can name anything. Where /proc cannot say (the
+# process is gone, or this is not Linux), the kill is harmless or the only
+# evidence there is.
+proc_pid_is_ours() { # proc_pid_is_ours <pid>
+  local cl
+  [[ -r "/proc/$1/cmdline" ]] || return 0
+  cl="$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)"
+  [[ -z "$cl" || "$cl" == *uvicorn* || "$cl" == *node* || "$cl" == *central_command* ]]
+}
+
+# TERM to the pid's whole process group when it leads one (a detached start
+# runs under setsid), else to the pid alone.
+proc_signal() { # proc_signal <pid>
+  local pg
+  pg="$(ps -o pgid= -p "$1" 2>/dev/null | tr -d ' ')"
+  if [[ "$pg" == "$1" ]] && kill -TERM -- "-$1" 2>/dev/null; then
+    return 0
+  fi
+  kill -TERM "$1" 2>/dev/null || true
+}
+
+# ── the bundled skills (D7) ─────────────────────────────────────────────────
+# Every skills/<id>/SKILL.md folder this release ships: "<id>\t<abs dir>" per
+# line. The id is the FOLDER name, and it is passed to the importer explicitly:
+# tests/test_single_boot_supervision.py proves each folder name equals the id
+# the importer would derive from its SKILL.md, so a skill an operator imported
+# by hand from the same folder is recognised as the same skill.
+bundled_skill_dirs() {
+  local d
+  for d in "$REPO_ROOT"/skills/*/; do
+    [[ -f "${d}SKILL.md" ]] || continue
+    d="${d%/}"
+    printf '%s\t%s\n' "${d##*/}" "$d"
+  done
+  return 0
+}
+
+# The ids the library holds, one per line — RETIRED ones included (GET
+# /api/skills includes them by default): a bundled skill the operator retired
+# is still "held", and re-importing it would be undoing their decision.
+# 1 = the API did not answer, which is not the same as an empty library.
+skills_library_ids() {
+  local out
+  out="$(curl -fsS -m 15 "$(api_url)/api/skills" 2>/dev/null)" || return 1
+  printf '%s' "$out" | $PY -c 'import json,sys; [print(s.get("id","")) for s in json.load(sys.stdin).get("skills",[])]' 2>/dev/null
+}
+
+# boot/skills-imported (2026-10-01 record, D7). The importer is the API's own
+# `POST /api/skills/import` — body {"path": <a SKILL.md + references/ folder on
+# this host>, "skill_id": <id>}, 200 with {"skill_id", "guidance",
+# "references"}, 422 with {"detail"} for a folder it cannot read — which reads
+# the folder from disk, so it needs neither the cockpit nor node. CREATE-ONLY,
+# like register-models.py: a skill the library already holds is never
+# re-imported, even when this release changed the bundled copy — the
+# operator's library is theirs once a skill is in it. The row's fingerprint
+# reads `@skills`, so a release that ADDS a bundled skill re-runs the row and
+# imports exactly that one.
+boot_skills_import() {
+  local have id d body resp code why="" added=() kept=() failed=()
+  if ! have="$(skills_library_ids)"; then
+    fail "skills-imported" "GET $(api_url)/api/skills did not answer, so the bundled skills were not imported — read $STATE_DIR/uvicorn.log"
+    return 1
+  fi
+  while IFS=$'\t' read -r id d; do
+    [[ -n "$id" ]] || continue
+    if [[ $'\n'"$have"$'\n' == *$'\n'"$id"$'\n'* ]]; then
+      kept+=("$id")
+      continue
+    fi
+    # A path the API's Python can open: on Git Bash that is C:/… (cc_norm_path),
+    # never /c/….
+    body="$($PY -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "skill_id": sys.argv[2]}))' "$(cc_norm_path "$d")" "$id")"
+    note "--> POST $(api_url)/api/skills/import  {skill_id: $id}"
+    resp="$(printf '%s' "$body" | curl -sS -m 120 -X POST -H 'content-type: application/json' \
+      -w '\n%{http_code}' -d @- "$(api_url)/api/skills/import" 2>&1)"
+    code="${resp##*$'\n'}"
+    if [[ "$code" == 200 ]]; then
+      added+=("$id")
+    else
+      failed+=("$id")
+      why="${resp%$'\n'*}"; why="${why//$'\n'/ }"; why="${why:0:240}"
+    fi
+  done < <(bundled_skill_dirs)
+  if (( ${#failed[@]} )); then
+    fail "skills-imported" "could not import ${failed[*]} through POST $(api_url)/api/skills/import: ${why:-no answer} — read $STATE_DIR/uvicorn.log"
+    return 1
+  fi
+  if (( ${#added[@]} + ${#kept[@]} == 0 )); then
+    pass "skills-imported" "this release bundles no skills (no skills/*/SKILL.md) — nothing to import"
+    return 0
+  fi
+  local msg=""
+  (( ${#added[@]} )) && msg="imported ${#added[@]} bundled skill(s): ${added[*]}"
+  if (( ${#kept[@]} )); then
+    msg="${msg:+$msg; }${#kept[@]} already in the library and LEFT AS THEY ARE: ${kept[*]}"
+  fi
+  pass "skills-imported" "$msg — create-only: a skill the library holds is never overwritten, even when this release changed the bundled copy (re-import one on purpose with POST /api/skills/import and its skill_id)"
+}
+
 phase_boot() {
   load_env || return 1
-  if api_up; then
-    pass "boot-api" "API already answering at $(api_url) — not starting a second one"
-  else
+  SUP_MODE="$(boot_supervisor)"
+  if ! api_up; then
     # CC_OPERATOR_NAME is the one value only a human can supply. On a
     # terminal, ask it here (elicitation IS allowed to be a prompt — it is
     # the script asking, deterministically); headless, the cockpit asks.
@@ -2985,18 +3983,35 @@ phase_boot() {
     else
       pass "operator-name" "CC_OPERATOR_NAME already set — left alone"
     fi
+  fi
 
-    local uv_bin; uv_bin="$(venv_uvicorn)" || { fail "boot-api" "uvicorn not in .venv — run: ./setup.sh app"; return 1; }
-    note "--> starting uvicorn detached (log: $STATE_DIR/uvicorn.log · stop: ./setup.sh stop)"
-    ( cd "$REPO_ROOT" && nohup "$uv_bin" central_command.api.app:app --host 127.0.0.1 \
-        --port "$(api_url | sed 's/.*://')" >>"$STATE_DIR/uvicorn.log" 2>&1 &
-      echo $! >"$STATE_DIR/uvicorn.pid" )
-    if wait_http "$(api_url)/health" 90; then
-      pass "boot-api" "API answering at $(api_url) (first boot hires the roster)"
-    else
-      fail "boot-api" "API never answered /health — read $STATE_DIR/uvicorn.log"
-      return 1
+  # Which of the three this install runs. The runner only when
+  # CC_ENABLE_SANDBOX=1 — off, its row is not applicable (done) and nothing is
+  # started. The cockpit only when its server was built: node absent at build
+  # time is a WARN, and the API runs without it.
+  local kinds=(api) sandbox_on=0 cockpit_on=0
+  if [[ "$(p_flag CC_ENABLE_SANDBOX 1)" == 1 ]]; then sandbox_on=1; kinds+=(sandbox); fi
+  if [[ -f "$REPO_ROOT/web/server-dist/index.js" ]]; then cockpit_on=1; kinds+=(cockpit); fi
+
+  case "$SUP_MODE" in
+    systemd)
+      sup_install_units "${kinds[@]}" || return 1
+      (( sandbox_on )) || sup_retire_unit sandbox
+      ;;
+    detached)
+      warn "boot-supervisor" "no systemd user manager answers here (a container, or WSL without systemd), so the API, the cockpit and the sandbox runner are started DETACHED and nothing restarts them after a crash or a reboot — run ./setup.sh again after a reboot: it starts whatever is not running"
+      ;;
+  esac
+
+  proc_boot api || return 1
+
+  if (( sandbox_on )); then
+    if is_placeholder "$(get_kv "$ENV_FILE" CC_SANDBOX_RUNNER_TOKEN)"; then
+      warn "boot-sandbox" "CC_SANDBOX_RUNNER_TOKEN is blank, so the runner accepts ANY local caller — deploy/single/make-secrets.sh generates it (the llm phase runs it)"
     fi
+    proc_boot sandbox || return 1
+  else
+    pass "boot-sandbox" "CC_ENABLE_SANDBOX is not 1 — the sandbox runner is not applicable on this install, and nothing was started"
   fi
 
   # The roster is hired AFTER startup completes; one read right after /health
@@ -3013,59 +4028,49 @@ phase_boot() {
     return 1
   fi
 
+  boot_skills_import || return 1
+
   # The cockpit is the Node server in web/ (server-dist), NOT the SPA uvicorn
   # serves from web/dist: every panel is a route or a WebSocket proxy that
   # server owns, so the SPA alone sits at CONNECTING with 404s (2026-09-17
-  # Windows run). On k3s it is the cc-nerve unit; here it is a second
-  # detached process.
-  #
-  # web/.env is RETIRED on this profile (v2.42.0): the server's `dotenv/config`
-  # loads that file from cwd and does NOT override variables already present in
-  # the environment, so EXPORTING the three settings is exactly equivalent and
-  # keeps the checkout clean. The k3s profile still writes web/.env — there the
-  # file is cc-nerve's, not ours.
-  local cport="${CC_COCKPIT_PORT:-3080}" curl_ok
-  if [[ ! -f "$REPO_ROOT/web/server-dist/index.js" ]]; then
+  # Windows run). On k3s it is the cc-nerve unit; here it is the third host
+  # process (proc_spec says how it is started).
+  local cport; cport="$(cockpit_port)"
+  if (( ! cockpit_on )); then
     warn "boot-cockpit" "web/server-dist is missing (node absent at build time?) — the API runs, the cockpit does not"
-  elif curl -fsS -m 5 "http://127.0.0.1:${cport}/" >/dev/null 2>&1; then
-    pass "boot-cockpit" "cockpit already answering at http://127.0.0.1:${cport} — not starting a second one"
   else
-    note "--> starting the cockpit server detached (log: $STATE_DIR/cockpit.log · stop: ./setup.sh stop)"
-    # CC_UPDATE_BACKEND=api: the API owns the update routes on this profile and
-    # the Node server only proxies them.
-    ( cd "$REPO_ROOT/web" && PORT="$cport" GATEWAY_URL="$(api_url)" CC_UPDATE_BACKEND=api \
-        nohup node server-dist/index.js >>"$STATE_DIR/cockpit.log" 2>&1 &
-      echo $! >"$STATE_DIR/cockpit.pid" )
-    if wait_http "http://127.0.0.1:${cport}/" 60; then
-      pass "boot-cockpit" "cockpit answering at http://127.0.0.1:${cport} (proxies to $(api_url))"
-    else
-      fail "boot-cockpit" "the cockpit server never answered — read $STATE_DIR/cockpit.log"
-      return 1
-    fi
+    proc_boot cockpit || return 1
   fi
-  # The API and the cockpit are host processes, not containers: podman-restart
-  # brings the containers back after a reboot, nothing brings these two. On
-  # Windows a logon-triggered scheduled task re-runs this phase (idempotent —
-  # a process that answers is left alone), the same mechanism the podman
-  # machine itself starts with. Linux hosts have systemd units for this.
+
+  # Windows: the three are host processes, not containers — podman-restart
+  # brings the containers back after a reboot, nothing brings these. A
+  # logon-triggered scheduled task runs the RESUME command (D6: `./setup.sh`,
+  # not `boot` — so an install that never completed leaves a ledger row in
+  # boot-at-logon.log rather than silence), retrying while the podman machine
+  # starts. The wrapper is tiny; the loop is a bash script beside it
+  # (supervise-lib.sh renders both). Linux has the units above instead.
   if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && command -v schtasks >/dev/null 2>&1; then
-    local wrapper="$STATE_DIR/cc-boot.cmd" bashw
+    local wrapper="$STATE_DIR/cc-boot.cmd" retry="$STATE_DIR/boot-at-logon.sh" bashw
     bashw="$(cygpath -w "$(command -v bash)")"
-    # The wrapper and its log live in the state dir with everything else
-    # generated; the `cd` is still the checkout, because that is where
-    # setup.sh is.
-    printf '@echo off\r\n"%s" -lc "cd '\''%s'\'' && ./setup.sh boot >> '\''%s/boot-at-logon.log'\'' 2>&1"\r\n' \
-      "$bashw" "$HERE" "$STATE_DIR" >"$wrapper"
-    # An onlogon task needs an elevated shell ("Access is denied" otherwise,
-    # 2026-09-18); the user's Startup folder needs nothing — same moment, a
-    # console window while boot runs. Task first, Startup folder as the fallback.
-    local startup="$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup"
-    if schtasks //create //f //tn cc-boot //sc onlogon //tr "$(cygpath -w "$wrapper")" >/dev/null 2>&1; then
-      pass "boot-at-logon" "scheduled task cc-boot re-runs ./setup.sh boot at every logon (log: $STATE_DIR/boot-at-logon.log)"
-    elif [[ -d "$startup" ]] && cp "$wrapper" "$startup/cc-boot.cmd" 2>/dev/null; then
-      pass "boot-at-logon" "Startup-folder entry cc-boot.cmd re-runs ./setup.sh boot at every logon (no elevation; an elevated shell can instead: schtasks /create /f /tn cc-boot /sc onlogon /tr \"$(cygpath -w "$wrapper")\")"
+    # The wrapper, the loop and their log live in the state dir with everything
+    # else generated; the loop's `cd` is still the checkout, because that is
+    # where setup.sh is.
+    if ! cc_render_logon_retry "$HERE" "$STATE_DIR/boot-at-logon.log" >"$retry" \
+       || ! cc_render_logon_cmd "$bashw" "$retry" >"$wrapper"; then
+      warn "boot-at-logon" "could not write $wrapper / $retry — after a reboot, run: ./setup.sh"
     else
-      warn "boot-at-logon" "could not register a logon entry — after a reboot, run: ./setup.sh boot"
+      # An onlogon task needs an elevated shell ("Access is denied" otherwise,
+      # 2026-09-18); the user's Startup folder needs nothing — same moment, a
+      # console window while the run goes. Task first, Startup folder as the
+      # fallback.
+      local startup="$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup"
+      if schtasks //create //f //tn cc-boot //sc onlogon //tr "$(cygpath -w "$wrapper")" >/dev/null 2>&1; then
+        pass "boot-at-logon" "scheduled task cc-boot runs ./setup.sh (the resume command) at every logon, retrying while the podman machine starts (log: $STATE_DIR/boot-at-logon.log)"
+      elif [[ -d "$startup" ]] && cp "$wrapper" "$startup/cc-boot.cmd" 2>/dev/null; then
+        pass "boot-at-logon" "Startup-folder entry cc-boot.cmd runs ./setup.sh (the resume command) at every logon, retrying while the podman machine starts (no elevation; an elevated shell can instead: schtasks /create /f /tn cc-boot /sc onlogon /tr \"$(cygpath -w "$wrapper")\")"
+      else
+        warn "boot-at-logon" "could not register a logon entry — after a reboot, run: ./setup.sh"
+      fi
     fi
   fi
   note "cockpit: http://127.0.0.1:${cport}  (the feed, the drain and every schedule are OFF until you turn them on)"
@@ -3096,8 +4101,11 @@ phase_demo() {
     # used to make that free.)
     local eml="$REPO_ROOT/fixtures/emails/007-ownership-change.eml"
     [[ -f "$eml" ]] || { fail "demo-feed" "$eml missing"; return 1; }
+    # pipefail INSIDE the body (D5): a `bash -c` child does not inherit this
+    # script's, so a python that failed to read the fixture handed curl an empty
+    # body and the step's status was curl's alone.
     step "demo-feed" "fixture email enrolled (a repeat Message-ID is a no-op by design)" \
-      bash -c "$PY -c 'import json,sys,pathlib;print(json.dumps({\"text\":pathlib.Path(sys.argv[1]).read_text()}))' '$eml' \
+      bash -c "set -o pipefail; $PY -c'import json,sys,pathlib;print(json.dumps({\"text\":pathlib.Path(sys.argv[1]).read_text()}))' '$eml' \
         | curl -fsS -X POST -H 'content-type: application/json' -d @- '$(api_url)/api/emails'" || return 1
 
     # Fire the dispatcher only when nothing is already working the queue.
@@ -3169,39 +4177,40 @@ phase_demo() {
   note "cockpit asks your name, then the team tour asks about your world."
 }
 
-# Stop one detached server: TERM its pid file, then PROVE the port is free.
-# Under Git Bash `kill` reports success against a native Windows process it
-# never signalled (2026-09-17: "sent TERM", API still answering, boot then
-# "already answering" on the stale process) — so the listener on the port is
-# what gets killed when the signal did not land.
-stop_listener() { # stop_listener <name> <pidfile> <port> <probe-path>
-  local name="$1" pidf="$2" port="$3" path="$4" pid
-  if [[ -f "$pidf" ]]; then
-    pid="$(cat "$pidf")"; kill "$pid" 2>/dev/null || true; rm -f "$pidf"
+# Stop one of the three and PROVE its port is free (proc_halt above says how).
+stop_listener() { # stop_listener <name> <pidfile> <port> <kind>
+  local name="$1" pidf="$2" port="$3" kind="$4"
+  if proc_halt "$pidf" "$port" "$(sup_unit "$kind")"; then
+    pass "stop-$name" "nothing listens on 127.0.0.1:${port}${HALT_HOW:+ ($HALT_HOW)}"
+    return 0
   fi
-  local i; for i in 1 2 3 4 5; do
-    curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${port}${path}" 2>/dev/null || break
-    sleep 1
-  done
-  if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${port}${path}" 2>/dev/null; then
-    if command -v taskkill >/dev/null 2>&1; then
-      pid="$(netstat -ano 2>/dev/null | grep LISTENING | grep ":${port} " | awk '{print $NF}' | head -1)"
-      [[ -n "$pid" ]] && taskkill //F //PID "$pid" >/dev/null 2>&1
-      sleep 1
-    fi
-    if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${port}${path}" 2>/dev/null; then
-      fail "stop-$name" "$name still answers on 127.0.0.1:${port} after TERM — stop it where you started it"
-      return 1
-    fi
+  if [[ -z "$HALT_HOW" ]]; then
+    fail "stop-$name" "something listens on 127.0.0.1:${port} that this install has no record of starting (no pid file, no unit) — stop it where it was started; stop proves the port, and it is not free"
+  else
+    fail "stop-$name" "$name still LISTENS on 127.0.0.1:${port} after $HALT_HOW — stop proves the port, not the signal (a Windows kill can report a success it never delivered). Stop it where it was started, then re-run ./setup.sh stop"
   fi
-  pass "stop-$name" "$name is down on 127.0.0.1:${port}"
+  return 1
 }
 
+# The counterpart of `boot`: all three, through their units where boot wrote
+# them. The cockpit first and the API last — the API is what the cockpit
+# proxies to, and it is the process a cockpit-driven update is running under.
 cmd_stop() {
   CURPHASE=stop
-  load_env >/dev/null 2>&1 || true
-  stop_listener cockpit "$STATE_DIR/cockpit.pid" "${CC_COCKPIT_PORT:-3080}" /
-  stop_listener uvicorn "$STATE_DIR/uvicorn.pid" "$(api_url | sed 's/.*://')" /health
+  # D5: `stop` used to run `load_env >/dev/null 2>&1 || true` and then probe
+  # the DEFAULT ports, so a stop that could not read .env reported green about
+  # ports this install may not even use. It says so now, and fails.
+  if ! load_env; then
+    fail "stop" "could not load $ENV_FILE (the line above says why), so this install's ports are unknown — nothing was stopped, and nothing is proven down"
+    return 1
+  fi
+  stop_listener cockpit "$STATE_DIR/cockpit.pid" "$(cockpit_port)" cockpit
+  if [[ "$(p_flag CC_ENABLE_SANDBOX 1)" == 1 || -f "$STATE_DIR/sandbox.pid" || -f "$(sup_unit_file sandbox)" ]]; then
+    stop_listener sandbox "$STATE_DIR/sandbox.pid" "$(sandbox_port)" sandbox
+  else
+    pass "stop-sandbox" "CC_ENABLE_SANDBOX is not 1 and this install never started a runner — nothing to stop"
+  fi
+  stop_listener uvicorn "$STATE_DIR/uvicorn.pid" "$(boot_api_port)" api
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3685,6 +4694,24 @@ p_cockpit_build() {
   [[ -d "$REPO_ROOT/web/dist" ]]
 }
 
+# check/linger (D6). What `loginctl show-user` says, judged by supervise-lib.sh's
+# cc_linger_verdict (PASS / FAIL / NA, pure and tested). Read-only: `show-user`
+# changes nothing — `enable-linger` is the operator's command, named in the FAIL.
+linger_verdict() {
+  local user out rc=0
+  user="${USER:-$(id -un 2>/dev/null)}"
+  if ! command -v loginctl >/dev/null 2>&1; then
+    printf 'NA no loginctl here (no logind) — not applicable'
+    return 0
+  fi
+  out="$(loginctl show-user "$user" --property=Linger 2>&1)" || rc=$?
+  cc_linger_verdict "$rc" "$out" "$user"
+}
+
+p_linger() {
+  [[ "$(linger_verdict)" != FAIL\ * ]]
+}
+
 # ── machine ─────────────────────────────────────────────────────────────────
 p_machine() {
   [[ -n "$(machine_name)" ]] || return 0
@@ -3826,18 +4853,22 @@ p_image_speaches_ai_speaches() {
   p_img CC_IMG_SPEACHES_AI_SPEACHES
 }
 
+# The three LOCAL images: done means the tag is present AND its build-inputs
+# label equals this tree's (v2.57.0, local_image_state). That comparison is
+# what re-runs these rows when a release changes a Dockerfile or its context —
+# their `reads` name only .env keys, and a file is not one.
 p_image_graphiti() {
-  have_image "localhost/cc-graphiti:$(p_flag CC_GRAPHITI_TAG 1.0.2-anthropic)"
+  [[ "$(local_image_state "localhost/cc-graphiti:$(p_flag CC_GRAPHITI_TAG 1.0.2-anthropic)" "$HERE/build-graphiti-image.sh")" == current ]]
 }
 
 p_image_sandbox() {
   p_off CC_ENABLE_SANDBOX 1 1 && return 0
-  have_image "localhost/cc-sandbox:1"
+  [[ "$(local_image_state "localhost/cc-sandbox:1" "$HERE/build-sandbox-image.sh")" == current ]]
 }
 
 p_image_crawler() {
   p_off CC_ENABLE_CRAWLER 1 1 && return 0
-  have_image "localhost/cc-crawler:1"
+  [[ "$(local_image_state "localhost/cc-crawler:1" "$HERE/build-crawler-image.sh")" == current ]]
 }
 
 # ── llm ─────────────────────────────────────────────────────────────────────
@@ -3852,6 +4883,14 @@ p_secrets() {
 p_litellm_live() {
   curl -fsS -m 5 -o /dev/null \
     "http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/health/liveliness" 2>/dev/null
+}
+
+# llm/up-litellm: the proxy answers AND the trio runs the images their refs
+# resolve to now — the same question the stack row asks, for the three services
+# this phase brings up (catch_up_images there).
+p_up_litellm() {
+  p_litellm_live || return 1
+  image_drift litellm-db litellm-redis litellm
 }
 
 p_speech_up() {
@@ -3936,6 +4975,11 @@ p_up_stack() {
   # health page — a listener is the honest evidence for both.
   port_listener "$(p_flag CC_PG_PORT 5442)" || return 1
   port_listener "$gp" || return 1
+  # Up is not enough: every enabled service's container must run the image its
+  # ref resolves to NOW (v2.57.0), or the row is not done — a rebuilt local
+  # image or a re-pulled tag otherwise hides behind a healthy old container.
+  # Two read-only podman calls (image_drift).
+  image_drift || return 1
   return 0
 }
 
@@ -4063,12 +5107,32 @@ p_boot_cockpit() {
     "http://127.0.0.1:$(p_flag CC_COCKPIT_PORT 3080)/" 2>/dev/null
 }
 
+# boot/boot-sandbox: off is done; on, the runner answers on its port AND takes
+# this install's token (a 401 is a runner every API request would fail
+# against, which is not "running" in any sense that matters).
+p_boot_sandbox() {
+  p_off CC_ENABLE_SANDBOX 1 1 && return 0
+  proc_ready sandbox
+}
+
+# boot/skills-imported: every bundled skill id is in GET /api/skills (one GET;
+# the API is up by the time this row runs).
+p_skills_imported() {
+  local have id d
+  have="$(skills_library_ids)" || return 1
+  while IFS=$'\t' read -r id d; do
+    [[ -n "$id" ]] || continue
+    [[ $'\n'"$have"$'\n' == *$'\n'"$id"$'\n'* ]] || return 1
+  done < <(bundled_skill_dirs)
+  return 0
+}
+
 p_boot_at_logon() {
   case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*) ;;
     *) return 0 ;;
   esac
-  [[ -f "$STATE_DIR/cc-boot.cmd" ]]
+  [[ -f "$STATE_DIR/cc-boot.cmd" && -f "$STATE_DIR/boot-at-logon.sh" ]]
 }
 
 # ── demo ────────────────────────────────────────────────────────────────────
@@ -4331,6 +5395,23 @@ phase_ledger_gate() { # phase_ledger_gate <phase>
       warn "$1" "CC_SETUP_UNLEDGERED=1 — running out of order on purpose (${blocked%% *} is ${blocked#* })"
       return 0
     fi
+    # THE PRE-LEDGER INSTALL, driven by an OLDER release's updater. A
+    # deployment installed before v2.55.0 has no ledger rows at all, and the
+    # update that brings the ledger in is run by the updater it already has —
+    # which merges first and then calls THIS script's phases. Under the
+    # cockpit's runner (CC_UPDATE_DRIVEN=1) a FAIL here is exit 1, and every
+    # runner before v2.57.0 answers exit 1 with a ROLLBACK to a tree that can
+    # never write a ledger: such an install could not be updated at all. So,
+    # for exactly that caller and exactly an EMPTY ledger, the refusal is the
+    # operator's move (exit 3, which every runner treats as a pause): the
+    # update is merged, and ./setup.sh adopts the running deployment. From
+    # v2.57.0 on update.sh asks this itself before it calls a phase
+    # (ledger_adoption_gate); this is the same answer for the releases that
+    # cannot.
+    if [[ "${CC_UPDATE_DRIVEN:-0}" == "1" && -z "$(cc_ledger_read "$LEDGER")" ]]; then
+      useraction "ledger-adopt" "the update is merged and this deployment predates the install ledger: run ./setup.sh once — it adopts the running deployment phase by phase (every phase is idempotent) and records it"
+      return 1
+    fi
     fail "$1" "requires ${blocked%% *}, which is $(ledger_status_words "${blocked#* }") — run ./setup.sh (it resumes in order)"
     return 1
   fi
@@ -4346,6 +5427,15 @@ run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user
   [[ "$MUTATING_PHASES" == *" $1 "* ]] && MUTATING=1
   note ""
   note "======== phase: $1"
+  # A STAGED run (update.sh apply's acquisition, D5) is neither held to the
+  # ledger nor recorded in it: it runs the NEW release's fetch from a worktree
+  # that is not the install, deploys nothing, and its rows would carry the new
+  # version before anything was merged. The deployment's ledger is left
+  # exactly as it was; the post-merge `./setup.sh fetch` records the real rows.
+  if (( STAGED )); then
+    "phase_$1"
+    return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
+  fi
   phase_ledger_gate "$1" || return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
   # Past the gate and about to run: every row of the phase reads `started`
   # until ledger_record overwrites it with the outcome (D11).
@@ -4360,6 +5450,61 @@ run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user
   # outranks a FAIL — that ranking is how phase_fetch became a phase that
   # could never return 1.
   return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
+}
+
+# ── the STAGED ACQUISITION: `./setup.sh acquire` (2026-10-01 record, D5) ────
+# INTERNAL to `update.sh apply`, which runs it from a sparse worktree of
+# `upstream` — this file as the NEW release ships it — with CC_STAGED_FOR
+# naming the deployment, BEFORE the merge. It answers the two questions whose
+# "no" used to arrive after the merge, when the tree, the venv and the
+# containers had already moved: can every artifact the new release needs be
+# acquired from here (the `fetch` phase, run for real — images pulled, builds
+# built, the Python graph resolved, the npm tree installed, so the image store
+# and the package caches are WARM for the post-merge fetch), and does the
+# running proxy's catalog answer every alias the new release requires?
+#
+# It is an interface BETWEEN RELEASES: the update.sh that calls it is the one
+# already installed, the setup.sh that answers is the one being installed. So
+# its contract is small and stays put — `acquire`, CC_STAGED_FOR, the output
+# protocol, exit 0/1/2/3 — and update.sh reads nothing else from it.
+
+# The catalog half. The VERDICT is p_catalog_aliases — the very probe the llm
+# phase's `catalog-filled` gate asks, over the new release's
+# cc_required_aliases — so this cannot disagree with the pause the merge would
+# have run into. The loop after it only NAMES what is missing, and separates
+# the aliases .env DECLARES (CC_LLM_UPSTREAM_BASE_URL + _API_KEY + the alias's
+# own CC_LLM_UPSTREAM_MODEL_<A>): register-models.py creates those rows itself
+# in the post-merge llm phase, so a release that ADDS an alias can still be
+# applied by a declared-catalog install. Counting them missing would have made
+# such an update impossible — the row only appears after the merge this probe
+# would be refusing. A UI-catalog install adds the new alias's row in the
+# LiteLLM UI, which works on the running proxy before the update.
+acquire_catalog() {
+  local listed a key missing="" declared=""
+  load_env || return 1
+  if p_catalog_aliases; then
+    pass "catalog-probe" "the running proxy's catalog answers every alias this release requires ($(cc_required_aliases | tr -d '\n'))"
+    return 0
+  fi
+  if ! listed="$(p_models_json)"; then
+    fail "catalog-probe" "the running proxy did not answer GET /v1/models on 127.0.0.1:$(p_flag CC_LITELLM_PORT 4000) under CC_LLM_PROXY_ADMIN_KEY, so whether its catalog holds every alias this release requires cannot be proven — is the stack up? (./setup.sh status). Nothing has been merged"
+    return 1
+  fi
+  for a in $(cc_required_aliases); do
+    [[ "$listed" == *"\"$a\""* ]] && continue
+    key="$(cc_alias_env_key "$a")"
+    if [[ -n "${CC_LLM_UPSTREAM_BASE_URL:-}" && -n "${CC_LLM_UPSTREAM_API_KEY:-}" && -n "${!key:-}" ]]; then
+      declared="${declared:+$declared }$a"
+    else
+      missing="${missing:+$missing }$a"
+    fi
+  done
+  if [[ -n "$missing" ]]; then
+    useraction "catalog-probe" "the running proxy's catalog has no row for ${missing}, which this release requires — add each in the LiteLLM UI at http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/ui (Models), or declare CC_LLM_UPSTREAM_BASE_URL, CC_LLM_UPSTREAM_API_KEY and $(for a in $missing; do printf '%s ' "$(cc_alias_env_key "$a")"; done)in .env so the update registers it, then re-run ./update.sh apply. Nothing has been merged"
+    return 3
+  fi
+  pass "catalog-probe" "every alias this release requires answers in the running proxy's catalog, except ${declared}, which .env declares — the post-merge llm phase registers it"
+  return 0
 }
 
 # An initialized update.sh repo with unmerged imports means this tree is an
@@ -4517,6 +5662,20 @@ main() {
   # empty ledger into the state dir and armed the install-tree hook (2026-10-01).
   case "$cmd" in -h|--help|help) usage; exit 0 ;; esac
   init_state           # the log file (and the ledger) live in there
+  # A STAGED tree is not an install: under CC_STAGED_FOR the one command is
+  # `acquire`, and without it `acquire` is refused (it belongs to update.sh). A
+  # staged `llm` or `stack` would deploy the NEW release's compose file from a
+  # worktree that is about to be deleted, beside the old release's containers.
+  if (( STAGED )) && [[ "$cmd" != acquire ]]; then
+    CURPHASE=staged
+    fail "staged" "CC_STAGED_FOR is set, which makes this a STAGED run of a release that is not installed — the only command it runs is \`acquire\` (update.sh apply's); refusing \`$cmd\`"
+    exit 1
+  fi
+  if (( ! STAGED )) && [[ "$cmd" == acquire ]]; then
+    CURPHASE=acquire
+    fail "acquire" "\`acquire\` is internal to ./update.sh apply, which runs it from a staged copy of the release it is about to merge — on an install, ./setup.sh fetch is the acquisition"
+    exit 1
+  fi
   # THE MANIFEST, before anything can consult the ledger. A manifest this
   # cannot parse is release content that failed to ship, so it is a hard stop
   # rather than something to run around.
@@ -4537,7 +5696,7 @@ main() {
   # the plan, before any `started` row, before any phase.
   local lockcmd=""
   case "$cmd" in
-    all|configure|check|fetch|llm|stack|app|verify|test|boot|demo|stop)
+    all|configure|check|fetch|llm|stack|app|verify|test|boot|demo|stop|acquire)
       lockcmd="./setup.sh ${*:-all}" ;;
     machine)
       [[ "${2:-}" == "--dry-run" ]] || lockcmd="./setup.sh $*" ;;
@@ -4607,6 +5766,23 @@ main() {
       (( prc )) && [[ "$cmd" != status ]] && ledger_table
       logline "run end: ./setup.sh $cmd -> exit $prc"
       exit $prc
+      ;;
+    acquire)
+      # STAGED only (refused above otherwise), and NESTED under update.sh's run
+      # lock. No plan and no ledger table: this tree has no ledger of its own,
+      # and the deployment's is not what this run is about. Both halves always
+      # run, so one pass names every seam the merge would have hit; the exit
+      # code is the ONE rule over both (FAIL > USERACTION > WARN).
+      note ""
+      note "======== staged acquisition: release $(installed_version), for the deployment at $INSTALL_ROOT"
+      run_phase fetch
+      CURPHASE=catalog-probe
+      note ""
+      note "======== catalog probe: the running proxy, against this release's aliases"
+      acquire_catalog
+      local arc; arc="$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
+      logline "run end: ./setup.sh acquire (staged) -> exit $arc"
+      exit "$arc"
       ;;
     stop)
       cmd_stop

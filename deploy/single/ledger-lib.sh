@@ -17,7 +17,8 @@
 #   ledger it is handed.
 #
 #   SOURCE deploy/env-lib.sh FIRST: cc_fingerprint reads .env values through
-#   cc_get_kv, and that is the one reader this profile has.
+#   cc_get_kv, and that is the one reader this profile has; it and
+#   cc_tree_hash hash through cc_sha256_stdin, the one hasher.
 #
 #   THE MANIFEST (deploy/single/steps.tsv) — eight tab-separated columns,
 #   `-` where empty: phase, step, kind, requires, reads, writes, probe, doc.
@@ -57,6 +58,8 @@
 #     cc_step_field <phase> <step> <name>  one column of one row
 #     cc_steps_requires <phase> <step>     its requires, space-separated
 #     cc_fingerprint <env-file> <reads>    sha256 over the step's input VALUES
+#                                          (and a tree input's content, `@dir`)
+#     cc_tree_hash <root> <dir>            a repo-relative directory's content hash
 #     cc_ledger_write <ledger> <step> <status> <version> <at> <fp> <reason>
 #     cc_ledger_write_batch <ledger> [<step> <status> <version> <at> <fp> <reason>]...
 #                                          many rows, ONE atomic rewrite
@@ -145,6 +148,20 @@ cc_steps_load() { # cc_steps_load <steps.tsv>
     # keys it would match), so the manifest spells every input out. Globs are
     # for `writes`, where the family is the fact (CC_IMG_*).
     [[ "$reads" == *'*'* ]] && { printf 'steps: %s/%s reads a GLOB (%s) — a fingerprint needs named keys\n' "$phase" "$step" "$reads" >&2; return 1; }
+    # A TREE input (`@<dir>`, v2.57.0) names a directory INSIDE the release, by
+    # a repo-relative path: no leading `/`, no `..`, nothing that could make a
+    # fingerprint read outside the checkout it describes.
+    local _r
+    local _oldifs="$IFS"; IFS=','
+    for _r in $reads; do
+      IFS="$_oldifs"
+      [[ "$_r" == @* ]] || continue
+      if [[ "$_r" == "@" || "$_r" == @/* || "$_r" == *..* ]]; then
+        printf 'steps: %s/%s reads %s — a tree input is @<repo-relative directory>, with no leading / and no ..\n' "$phase" "$step" "$_r" >&2
+        return 1
+      fi
+    done
+    IFS="$_oldifs"
     key="$phase/$step"
     [[ -n "${STEPS_ROW[$key]:-}" ]] && { printf 'steps: %s appears twice — the ledger keys on it\n' "$key" >&2; return 1; }
     STEPS_ROW["$key"]="$line"
@@ -208,24 +225,13 @@ cc__step_split() { # cc__step_split <phase> <step>
 # inputs it changed, which is the whole mechanism behind "resume is one
 # command".
 #
-# The three-way fallback mirrors cc_install_id's: sha256sum (coreutils),
-# shasum (macOS), openssl. A host with none of them gets `nohash`, which
-# compares equal to itself and simply makes the fingerprint gate a no-op
-# rather than a crash.
-cc__sha256() { # cc__sha256 <text>
-  local h=""
-  if command -v sha256sum >/dev/null 2>&1; then
-    h="$(printf '%s' "$1" | sha256sum 2>/dev/null | cut -d' ' -f1)"
-  elif command -v shasum >/dev/null 2>&1; then
-    h="$(printf '%s' "$1" | shasum -a 256 2>/dev/null | cut -d' ' -f1)"
-  elif command -v openssl >/dev/null 2>&1; then
-    h="$(printf '%s' "$1" | openssl dgst -sha256 2>/dev/null | sed 's/.*= *//')"
-  fi
-  printf '%s' "${h:-nohash}"
-}
-
+# Hashed by deploy/env-lib.sh's cc_sha256_stdin — the ONE text hasher of this
+# profile (sha256sum, shasum or openssl; a host with none of them gets
+# `nohash`, which compares equal to itself and simply makes the fingerprint gate
+# a no-op rather than a crash). This file carried a second copy of that
+# fallback until v2.57.0; env-lib.sh is sourced first, as the header says.
 cc_fingerprint() { # cc_fingerprint <env-file> <reads-csv>
-  local f="$1" csv="$2" payload="" key
+  local f="$1" csv="$2" payload="" key root
   [[ -z "$csv" || "$csv" == "-" ]] && { printf 'none'; return 0; }
   # Comma-split without touching the caller's IFS for anything else.
   local oldifs="$IFS"
@@ -234,9 +240,62 @@ cc_fingerprint() { # cc_fingerprint <env-file> <reads-csv>
   IFS="$oldifs"
   for key in ${keys[@]+"${keys[@]}"}; do
     [[ -n "$key" ]] || continue
+    if [[ "$key" == @* ]]; then
+      # A TREE input: the directory's content hash stands where a value would.
+      # The tree is the release beside the answer file — the checkout whose
+      # .env this is — unless LEDGER_TREE_ROOT says otherwise (a test, or a
+      # caller fingerprinting a staged tree). Not CC_-prefixed: it is not an
+      # operator answer (see STEPS_ROW above).
+      root="${LEDGER_TREE_ROOT:-}"
+      [[ -n "$root" ]] || root="$(cd "$(dirname "$f")" 2>/dev/null && pwd)"
+      payload="${payload}${key}=$(cc_tree_hash "$root" "${key#@}")"$'\n'
+      continue
+    fi
     payload="${payload}${key}=$(cc_get_kv "$f" "$key")"$'\n'
   done
-  cc__sha256 "$payload"
+  printf '%s' "$payload" | cc_sha256_stdin
+}
+
+# ── a TREE input (v2.57.0) ──────────────────────────────────────────────────
+# `reads` was .env keys only, and one step's input is not an answer at all:
+# boot/skills-imported imports the bundled skills/*/ folders, so the release's
+# skills/ directory is what shaped it (2026-10-01 record, D7: "the ledger row's
+# fingerprint includes the folder's tree hash"). `@skills` in a `reads` column
+# means "the content of the repo-relative directory skills/", and this is its
+# digest:
+#
+#   sha256 over, for every regular file under the directory in byte order of
+#   its repo-relative path:  "<path>\001\n" + its content with every line's
+#   trailing CR dropped + "\001\n"   (\001, not NUL: bash strings hold no NUL)
+#
+# No git: a zip install has none until `./update.sh init`, and the fingerprint
+# must mean the same thing on both. CRLF-INSENSITIVE, because a Windows
+# checkout with core.autocrlf rewrites every line ending and that is not the
+# release changing. The read is bash's own `read` — no fork per file, which on
+# Git Bash is the difference between instant and seconds, and this digest is
+# taken several times per run (the plan, `started`, the record). Its one
+# blindness: a final line with or without its newline hashes the same, which
+# is a difference no importer can see either. A directory that is not there
+# hashes to `absent`, so it still compares equal to itself.
+cc_tree_hash() { # cc_tree_hash <root> <repo-relative dir>
+  local root="$1" rel="${2%/}" payload
+  [[ -d "$root/$rel" ]] || { printf 'absent'; return 0; }
+  payload="$(
+    cd "$root" || exit 1
+    # Byte order, not the locale's collation: the digest is a property of the
+    # tree, never of the machine reading it.
+    LC_ALL=C
+    shopt -s globstar nullglob dotglob
+    for p in "$rel"/**; do
+      [[ -f "$p" ]] || continue
+      printf '%s\001\n' "$p"
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        printf '%s\n' "${line%$'\r'}"
+      done <"$p"
+      printf '\001\n'
+    done
+  )" || { printf 'unreadable'; return 0; }
+  printf '%s' "$payload" | cc_sha256_stdin
 }
 
 # ── the ledger ──────────────────────────────────────────────────────────────
@@ -479,6 +538,22 @@ cc_phase_decide() { # cc_phase_decide <ledger> <phase> <version> <env-file>
   return 0
 }
 
+# A `reads` column in words, for the plan: .env key NAMES as they are, and a
+# tree input `@skills` as "the files under skills/" — which is what changed
+# when a release (or a hand edit the tree-pristine row will refuse) touched it.
+cc__reads_words() { # cc__reads_words <reads-csv>
+  local out="" r
+  local oldifs="$IFS"; IFS=','
+  for r in $1; do
+    IFS="$oldifs"
+    [[ -n "$r" ]] || continue
+    [[ "$r" == @* ]] && r="the files under ${r#@}/"
+    out="${out:+$out, }$r"
+  done
+  IFS="$oldifs"
+  printf '%s' "$out"
+}
+
 # One plan sentence for the phase cc_phase_decide just judged, WITHOUT the
 # `PLAN ` prefix (the caller owns the output protocol). Key NAMES only: an
 # `inputs` line names the row's `reads` keys and says "one of", because a
@@ -510,7 +585,7 @@ cc_phase_plan_text() { # cc_phase_plan_text <phase> <version>
     started) printf 'the last run was interrupted here: %s was started at %s and never finished%s' "$PHASE_STEP" "$PHASE_DETAIL" "$more" ;;
     gate)    printf 'waiting on you: %s%s%s' "$PHASE_STEP" "${PHASE_DETAIL:+ — \"$PHASE_DETAIL\"}" "$more" ;;
     version) printf 'version changed, %s: %s%s' "$PHASE_DETAIL" "$PHASE_STEP" "$more" ;;
-    inputs)  printf 'inputs changed: %s reads one of %s%s' "$PHASE_STEP" "${PHASE_READS//,/, }" "$more" ;;
+    inputs)  printf 'inputs changed: %s reads one of %s%s' "$PHASE_STEP" "$(cc__reads_words "$PHASE_READS")" "$more" ;;
     drift)   printf 'effect absent: %s is recorded done but its probe %s reads false now (drift)' "$PHASE_STEP" "$PHASE_PROBE" ;;
     norows)  printf 'the manifest declares no rows for it, so there is nothing to skip on' ;;
     *)       printf '%s: %s' "$PHASE_CODE" "$PHASE_STEP" ;;

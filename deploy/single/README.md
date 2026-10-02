@@ -348,7 +348,7 @@ never here — and it is itself refused when `.env` carries
                        #   (which is what preflight calls). deploy/AIRGAP.md
 ./setup.sh fetch       # acquire every external artifact up front (the one network phase)
 ./setup.sh llm         # secrets + LiteLLM (+speech) up + probe its aliases + measure CC_EMBED_DIM
-./setup.sh stack       # assert the local images, then `compose up -d --wait` (+crawler, +n8n)
+./setup.sh stack       # assert the local images, `compose up -d --wait` (+crawler, +n8n), then recreate any container whose image changed behind its ref
 ./setup.sh app         # venv, editable install, the derived .env values (incl. the Systems-page links), mint the spine's virtual key, cockpit
 ./setup.sh verify      # verify.sh, then live, then the capability manifest
 ./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
@@ -378,14 +378,25 @@ insecure option (Hugging Face), is in `deploy/AIRGAP.md`.
 `compose up -d` converges: a service whose definition is unchanged is left
 alone, a changed one is recreated. Running `./setup.sh` again after a
 config change is the supported way to apply it — the ledger re-runs only
-the steps whose `.env` inputs changed.
+the steps whose `.env` inputs changed. What `up` does NOT notice is a NEW
+image behind an UNCHANGED ref — a local image a release rebuilt under its
+fixed tag, a re-pulled `postgres:16` — because podman-compose 1.6.0 compares
+the service definition, not the image ID (docker compose does compare it). So
+`stack` (and `llm`, for LiteLLM and its database and redis) then compares each
+container's image ID with the ID its ref resolves to now and recreates exactly
+the ones that differ, one `PASS up-stack: <service> recreated …` line each. The
+stateful services keep their data in named volumes, which a recreate never
+touches; one whose data path were not on a named volume would be left running
+and reported, never recreated. The `stack/up-stack` row's probe asks the same
+question, so a stale container shows in the plan as `stack: WILL RUN`.
 
 ### First boot and the demo (the last three phases, 2026-08-28)
 
 A bare `./setup.sh` runs all eleven phases — **zero to a working, human-approved
-demo in one command.** The late phases skip by probing reality, never a state
-file: a healthy API skips `test` and `boot`, a decided proposal in the event
-log skips `demo`. Only two moments are yours, and on a terminal the script
+demo in one command.** The ledger is what makes each of the late phases run
+once: `test`'s row is done per release (an update runs the suite again for the
+new code), `boot` never starts a second API beside one that answers, and a
+decided proposal in the event log is what `demo`'s row reads. Only two moments are yours, and on a terminal the script
 waits in place for both:
 
 1. **Your name** (`boot`) — becomes `CC_OPERATOR_NAME` and the provenance
@@ -431,12 +442,22 @@ at least once after an update that adds routes.
 ### Starting the sandbox runner
 
 The sandbox runner is a **host process**, not a pod — it creates sandbox
-containers on demand. Start it from the repo venv alongside the API:
+containers on demand. **`./setup.sh` starts it** (v2.57.0, the `boot/boot-sandbox`
+row, when `CC_ENABLE_SANDBOX=1`) beside the API and the cockpit server, on the
+port of `CC_SANDBOX_RUNNER_URL`, with the `CC_SANDBOX_RUNNER_TOKEN` that
+`make-secrets.sh` generates and the API sends — and `./setup.sh stop` stops all
+three and proves each port free. Do not start a second one by hand: a runner
+holding the port that refuses this install's token is a FAIL naming it.
 
-```bash
-CC_SANDBOX_BACKEND=podman uvicorn central_command.sandbox.runner:app \
-  --host 127.0.0.1 --port 8090
-```
+Who keeps the three running: on Linux with a systemd user manager, `boot`
+writes `cc-<install-id>-{api,sandbox,cockpit}.service` into
+`<state>/systemd/`, enables them and starts the processes through them
+(`Restart=on-failure`, `WantedBy=default.target`; lingering is a `check` row —
+`loginctl enable-linger <you>`). Without a user manager (a container, WSL
+without systemd) they are started detached with a WARN that nothing restarts
+them after a reboot — run `./setup.sh` again. On Windows the logon entry runs
+`./setup.sh` (the resume command), retrying while the podman machine starts;
+its log is `<state>/boot-at-logon.log`.
 
 **Containment trade, stated plainly: on this profile the sandbox is rootless
 podman, not gVisor — weaker isolation than the k3s deployment.** The
@@ -561,8 +582,10 @@ granular or agent-conducted flows:
 ```bash
 ./update.sh init            # ONE-TIME: turn the unzipped tree into that repo
 ./update.sh import <zip>    # each update: commit the new zip
-./update.sh plan            # dry-run: diff, flags, predicted conflicts — mutates nothing
-./update.sh apply           # merge, then: schema -> ./setup.sh app -> ./setup.sh verify
+./update.sh plan            # dry-run: diff, flags, can it fast-forward — mutates nothing
+./update.sh apply           # acquire the new release from a staged copy (nothing moves
+                            # if it cannot), then merge -> schema -> ./setup.sh fetch
+                            # -> llm -> stack -> app -> n8n -> verify, stopping at any pause
 ./update.sh rollback        # reset to the pre-update tag and re-deploy that tree
 ```
 
@@ -577,12 +600,18 @@ and `WARN … no manifest on one side — full sync` are the honest slow paths.
 `unzip` warning about anything at all is a `FAIL` — re-download the zip; a
 truncated or link-less tree is not the release.
 
-What `apply` does, in load-bearing order: re-run `schema.sql` against the live
-spine **before** the code goes live (the schema is additive-only and fully
-idempotent, so old code tolerates new columns — a failed migration stops the
-update with the old code still running), then `./setup.sh app` (deps from
-`requirements.lock`, honoring `CC_AIRGAP`; cockpit rebuild), then
-`./setup.sh verify`. It always ends with a `USERACTION restart` (exit 3): a
+What `apply` does, in load-bearing order: ACQUIRE the new release from a
+staged copy before anything moves (its local images are built under an aside
+`<ref>-staged` tag there, so a stop leaves even the live image tags alone),
+re-run `schema.sql` against the live spine **before** the code goes live (the
+schema is additive-only and fully idempotent, so old code tolerates new
+columns — a failed migration stops the update with the old code still
+running), then `./setup.sh fetch` (the real refs into `.env`, the local images
+under their live tags, from the warm cache), `./setup.sh llm`, `./setup.sh
+stack` (so a changed `compose.yaml`, a new third-party ref or a rebuilt local
+image is actually DEPLOYED — the containers that need it are recreated, named),
+`./setup.sh app` (deps from `requirements.lock`, honoring `CC_AIRGAP`; cockpit
+rebuild), the n8n workflows, then `./setup.sh verify`. It always ends with a `USERACTION restart` (exit 3): a
 merged change is not live until you restart your uvicorn API (and the sandbox
 runner, if you run one). The one exception is the cockpit's detached runner
 (`CC_UPDATE_DRIVEN=1`), which owns the restart itself.

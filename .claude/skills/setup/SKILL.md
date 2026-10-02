@@ -85,8 +85,10 @@ Rules that hold for the whole run:
   counterpart) and `demo` (fixture email → the operator approves in the
   cockpit → the real execution and its provenance verified).** Do not hand-conduct those steps
   on the podman substrate any more — run `./setup.sh` and interpret. The
-  late phases skip by probing reality (healthy API skips test+boot; a
-  decided proposal skips demo), so re-runs converge. A red `test` phase is
+  late phases skip by the LEDGER (the suite runs once per release — a `done`
+  `test/test` row at this version is skipped, a healthy API no longer skips
+  it; `boot` starts whichever of the API, the sandbox runner and the cockpit
+  is not answering; a decided proposal skips demo), so re-runs converge. A red `test` phase is
   a real defect — diagnose it, don't wave it through.
 - **You do not interview anybody (2026-09-18).** The podman `boot` phase still
   asks for the operator's name on a terminal (it lands as `CC_OPERATOR_NAME`,

@@ -33,6 +33,11 @@
 #     cc_alias_env_key <alias>            the CC_LLM_UPSTREAM_MODEL_* key name
 #     cc_required_aliases                 the LiteLLM aliases THESE flags need
 #     cc_stage_build_context <dir> <ca> <src>...  a build context outside the tree
+#     cc_build_inputs_hash <ca> <args> <src>...   what a local image is built FROM
+#     cc_build_arg_values <podman-argv>...        the --build-arg values in an argv
+#     cc_build_inputs_label               the image LABEL that carries the hash
+#     cc_staged_image_ref <live-ref>      where a STAGED build tags its image
+#     cc_sha256_stdin                     sha256 hex of stdin, three-way fallback
 #     cc_exit_code <fails> <warns> <actions>      the ONE exit-code rule
 #     cc_tree_diff <repo-root>            is this tree still the release it claims
 #   The run lock (2026-10-01 design record, D11 — one run at a time):
@@ -474,6 +479,142 @@ cc_stage_build_context() { # cc_stage_build_context <staged-dir> <ca-bundle|''> 
   printf '%s' "$staged"
 }
 
+# ── what a LOCAL image was built from (v2.57.0) ─────────────────────────────
+# The three locally built images carry FIXED tags (localhost/cc-sandbox:1,
+# cc-crawler:1, cc-graphiti:<CC_GRAPHITI_TAG>), and the fetch phase used to
+# read "tag present" as done — so a release that changed a Dockerfile, a patch
+# under deploy/pi/graphiti/patches/ or the crawler's service.py never rebuilt
+# on update, and the OLD image kept running under the new release. "Our own
+# images stay exact — the release is one tested unit" (deploy-single.md) was
+# false the moment a tag outlived its inputs. So every build records a HASH of
+# its inputs on the image as a LABEL, and fetch and the probes compare it with
+# the hash of the inputs the tree holds NOW: a different (or missing) label is
+# a rebuild, which is also what makes a rollback rebuild the old image.
+#
+# What goes in is what can change the result, read off the build scripts:
+#   * every file of the build context exactly as cc_stage_build_context lays it
+#     out — a source DIRECTORY contributes each file under it by its path
+#     relative to that directory, a source FILE by its basename — keyed by
+#     that staged name, so enumeration order and source order are irrelevant
+#     (the listing is sorted, C locale);
+#   * the CA as the staged cc-ca.crt's CONTENT: no CA and an empty one stage the
+#     same empty file and hash the same, a CA with content (or a renewed one)
+#     does not;
+#   * every --build-arg VALUE the build passes (the resolved base ref CC_IMG_*,
+#     the registry/apt/pypi/npm seams, CC_TLS_INSECURE=1), sorted.
+# What deliberately does NOT: timestamps, modes, the staged directory's path
+# (it differs per state dir), the CA's PATH, --tls-verify (it changes how the
+# base is fetched, not what is built), and Python bytecode (__pycache__/,
+# *.pyc) — a deployment that imports central_command.crawler grows a
+# __pycache__ inside the crawler context, which no Dockerfile COPYs and which
+# would otherwise rebuild that image on every run.
+#
+# Line endings are NORMALISED (every CR dropped) before a file is hashed: a
+# Windows checkout or a re-extracted zip may hold the same release in CRLF, and
+# the same release must be the same hash on both sides of an update.
+#
+# Pure: reads files, writes nothing, calls no podman. The first payload line
+# names the recipe version, so a future change to WHAT is hashed retires every
+# old label deliberately (bump it) rather than by accident.
+# Returns 1 when a source or the CA cannot be read — the caller treats an
+# unknowable hash as "rebuild", never as "current".
+cc_build_inputs_hash() { # cc_build_inputs_hash <ca-file|''> <build-arg-values, one per line> <source>...
+  local ca="$1" args="$2"; shift 2
+  local src f rel listing="" payload line
+  for src in "$@"; do
+    src="${src%/}"
+    if [[ -d "$src" ]]; then
+      while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        rel="${f#"$src"/}"
+        case "/$rel/" in */__pycache__/*) continue ;; esac
+        # cc_stage_build_context writes the CA over a context file of this
+        # name, so the context's own copy never reaches the build.
+        [[ "$rel" == *.pyc || "$rel" == cc-ca.crt ]] && continue
+        [[ -r "$f" ]] || return 1
+        listing+="file ${rel} $(tr -d '\r' <"$f" | cc_sha256_stdin)"$'\n'
+      done < <(find "$src" -type f 2>/dev/null)
+    elif [[ -f "$src" && -r "$src" ]]; then
+      listing+="file ${src##*/} $(tr -d '\r' <"$src" | cc_sha256_stdin)"$'\n'
+    else
+      return 1
+    fi
+  done
+  if [[ -n "$ca" ]]; then
+    [[ -r "$ca" ]] || return 1
+    listing+="file cc-ca.crt $(tr -d '\r' <"$ca" | cc_sha256_stdin)"$'\n'
+  else
+    listing+="file cc-ca.crt $(printf '' | cc_sha256_stdin)"$'\n'
+  fi
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    [[ -n "$line" ]] && listing+="arg ${line}"$'\n'
+  done <<<"$args"
+  payload="cc-build-inputs/1"$'\n'"$(LC_ALL=C sort <<<"${listing%$'\n'}")"
+  printf '%s' "$payload" | cc_sha256_stdin
+}
+
+# The VALUE of every `--build-arg <K=V>` (or `--build-arg=<K=V>`) in a podman
+# build argv, one per line — so a build script hashes exactly the arguments it
+# then passes, out of the one array it passes them in.
+cc_build_arg_values() { # cc_build_arg_values <argv>...
+  while (( $# )); do
+    case "$1" in
+      --build-arg) (( $# >= 2 )) && { printf '%s\n' "$2"; shift; } ;;
+      --build-arg=*) printf '%s\n' "${1#--build-arg=}" ;;
+    esac
+    shift
+  done
+  return 0
+}
+
+# The label's NAME — one definition for the build scripts (which write it) and
+# setup.sh (which reads it).
+cc_build_inputs_label() { printf 'cc.build-inputs'; }
+
+# WHERE A STAGED BUILD PUTS ITS IMAGE (v2.57.0, 2026-10-01 design record D5).
+# `update.sh apply` runs the NEW release's fetch from a staged tree BEFORE the
+# merge, and promises that a stop there leaves the tree, the branch, the
+# database and the containers as they were. The three local images have FIXED
+# tags, so a staged build under the live tag would break that promise the moment
+# it finished: new sandbox sessions on the OLD code would start from the NEW
+# image, and any recreation of graphiti or the crawler would pick it up. So a
+# staged build is tagged ASIDE — the live ref with `-staged` appended to its
+# tag. It proves the build and warms the layer cache; the post-merge fetch then
+# builds under the live tag (fast: every layer is cached) and that image's label
+# is the one local_image_state reads.
+# The form: still a valid reference on podman and docker (a tag is
+# [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}; the longest live tag, CC_GRAPHITI_TAG's
+# default, stays far below 128), still under `localhost/` so podman never asks a
+# registry for it, and it cannot be a release tag — ours are `1` and the
+# Graphiti tag, and no release names one `-staged`.
+# ONE definition: the build scripts tag with it and setup.sh reads and later
+# untags with it, and both decide "staged" from CC_STAGED_FOR.
+cc_staged_image_ref() { # cc_staged_image_ref <live-ref>
+  printf '%s-staged' "$1"
+}
+
+# sha256 hex of stdin. The same three-way fallback cc_install_id (above) uses —
+# sha256sum (coreutils, Git Bash), shasum (macOS), openssl — and the ONE hasher
+# of a text: ledger-lib.sh's fingerprints pipe through it too (it is sourced
+# after this file). Defined HERE because the build scripts source this library
+# and nothing else (ledger-lib.sh is setup.sh's). A host with none of the three
+# gets `nohash`, which compares equal to itself: the label check then degrades
+# to the old "tag present" rule rather than rebuilding on every run.
+cc_sha256_stdin() {
+  local h=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    h="$(sha256sum 2>/dev/null | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    h="$(shasum -a 256 2>/dev/null | cut -d' ' -f1)"
+  elif command -v openssl >/dev/null 2>&1; then
+    h="$(openssl dgst -sha256 2>/dev/null | sed 's/.*= *//')"
+  else
+    cat >/dev/null
+  fi
+  printf '%s' "${h:-nohash}"
+}
+
 # The consumer list a WARN names, per command. Kept here so the phrasing is
 # one fact: a command passes what it actually drives.
 cc_tls_insecure_warn_text() { # cc_tls_insecure_warn_text <consumers>
@@ -605,6 +746,22 @@ cc_tree_diff() { # cc_tree_diff <repo-root>
   git -C "$root" merge-base --is-ancestor HEAD upstream 2>/dev/null && return 0
   TREE_DIFF_PATHS="HEAD ($(git -C "$root" rev-parse --short HEAD 2>/dev/null)) carries commits that are not on \`upstream\`"
   return 1
+}
+
+# ── the STAGED ACQUISITION's scratch (2026-10-01 design record, D5) ─────────
+# `update.sh apply` proves the NEW release's artifacts available BEFORE it
+# merges, by running that release's own `setup.sh acquire` from a git worktree
+# of `upstream`. Everything that run needs lives under this one directory of
+# the STATE dir — never inside the checkout (2026-09-23 D7) — and the whole
+# directory is removed when the apply finishes, on every exit path:
+#   <stage>/tree/      update.sh's sparse worktree of `upstream`
+#   <stage>/acquire/   the staged run's own copies: the CC_IMG_* answers and the
+#                      image manifest the staged resolver rewrites, so the
+#                      deployment's .env and installed.manifest are untouched
+# ONE definition, because two scripts of two different releases agree on it:
+# the update.sh that is running and the setup.sh it staged.
+cc_stage_dir() { # cc_stage_dir <state-dir>
+  printf '%s/stage' "$1"
 }
 
 # ── one run at a time: the run lock (2026-10-01 design record, D11) ─────────

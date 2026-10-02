@@ -4,6 +4,84 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-02 — v2.57.0: everything the install starts it supervises, and an update acquires before it merges
+
+P3 of `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+(D6, D7, the rest of D5), plus four defects the build exposed in what an
+update actually deploys. **The work site still holds at its current release
+until P5 tags.**
+
+- **`boot` starts three host processes and `stop` stops three.** The API, the
+  cockpit server and — new — the sandbox runner, which the operator used to
+  start by hand and nothing restarted. Each has a pid file and a log in the
+  state dir. `stop` proves each PORT has no listener rather than trusting a
+  pid, and FAILS when it cannot read `.env` instead of reporting green.
+  Root cause of the two earlier "stop left uvicorn listening" findings, fixed
+  here: the detached start recorded a wrapper shell's pid, not the server's.
+- **Linux: `systemd --user` units.** `boot` renders
+  `cc-<install-id>-{api,sandbox,cockpit}.service` into `<state>/systemd/`,
+  enables them and starts the processes through them, so they come back
+  after a reboot or a crash; with no user manager it falls back to a detached
+  start and says nothing will restart them. `loginctl enable-linger` being off
+  is now a FAIL naming the command (a new `check/linger` row). Proven by
+  stub-driven execution tests and `systemd-analyze` on the rendered units —
+  not yet by a real Linux install.
+- **Windows: the logon entry runs `./setup.sh`, not `boot`.** A reboot and an
+  install that never finished are one code path now. The wrapper passes
+  `--accept-warnings` (a headless WARN-only check otherwise stops) and
+  retries a failed attempt up to ten times a minute apart, because at logon
+  the podman machine may not be up yet; every attempt is in
+  `<state>/boot-at-logon.log`.
+- **The sandbox runner's token is generated.** `make-secrets.sh` writes
+  `CC_SANDBOX_RUNNER_TOKEN` with the other credentials; the shipped posture
+  until now was an unauthenticated runner.
+- **The bundled skills are imported.** A new step, `boot/skills-imported`:
+  each `skills/<id>/` folder is imported when the library does not already
+  hold that id. Create-only — a skill that exists is never overwritten, a
+  retired one never resurrected. The row re-runs when the folders change
+  (`@skills`, a tree input: the manifest's `reads` can now name a directory).
+- **`update.sh apply` acquires before it merges.** The new release is checked
+  out sparsely into the state dir and its own `setup.sh acquire` runs from
+  there — its fetch phase, and a probe that the running catalog answers the
+  aliases it requires — before the backup, the checkpoint or the merge. A
+  mirror missing one tag now stops the update with the tree, the branch,
+  `.env`, the ledger, the database and the containers untouched. After the
+  merge the order is schema → fetch → llm → stack → app → n8n workflows →
+  verify, and a pause in any of them stops the update there instead of being
+  reported past.
+- **An install older than the ledger can be updated.** Its ledger is empty,
+  so the update stops after the merge with one instruction: run `./setup.sh`
+  once, which adopts the running deployment phase by phase. The cockpit's
+  runner treats that as "needs the operator", not a failure.
+- **Fixed: the cockpit updater "rolled back" a stop that happened before the
+  merge** — to an EARLIER update's tag, i.e. a downgrade. It rolls back only
+  when the tree actually moved. A post-merge phase that merely WARNed (node
+  older than 22) no longer rolls the update back either.
+- **Fixed: an update did not deploy what it acquired.** Three parts. Local
+  image builds were skipped whenever the tag existed, and the tags are fixed,
+  so a changed Dockerfile never rebuilt: images now carry a `cc.build-inputs`
+  label and rebuild when it differs. The updater never ran `stack`, and
+  podman-compose leaves a container alone when only the image behind its tag
+  changed: `stack` is in the post-merge order and it (and `llm`) recreate a
+  service whose container is not running the image its ref resolves to — a
+  stateful service only while its data is on a named volume. And the staged
+  acquisition builds under an aside tag, so it cannot hand the running
+  deployment a new image before the merge.
+- **Fixed: an image whose registry failed once, or whose component was
+  switched off and back on, became a permanent "operator pin"** at its old
+  tag. The resolver keeps the manifest row of an image it did not resolve.
+- **The suite runs once per release, by the ledger.** `test` no longer skips
+  itself when the API is up. A failed `npm ci` now fails the cockpit step
+  (its exit status was hidden behind the build's); the podman machine's
+  stderr is kept in the log.
+
+Known and left open: after an update, the next `./setup.sh` (the logon run
+included) re-runs `machine` and the test suite before `boot`, because the
+update records only the phases it ran. Not yet run on a real host: the Linux
+units, the Windows logon loop, and the `podman` calls behind the image
+catch-up (checked read-only against podman 4.9) — P5's laptop run is where
+they are measured.
+
 ## 2026-10-02 — v2.56.0: the install proves itself as the app, and the ledger learns its precedents
 
 P2 of `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

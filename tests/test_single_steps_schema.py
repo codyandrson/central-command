@@ -102,6 +102,18 @@ def test_every_row_is_well_formed():
             f"{qual}: `reads` is fingerprinted in order, so it may not carry a glob"
         )
         for key in _cells(row, "reads"):
+            if key.startswith("@"):
+                # A TREE input (v2.57.0): `@<dir>` is the content hash of a
+                # repo-relative directory of the release — a PATH, which must
+                # exist and stay inside the checkout, never an .env key.
+                rel = key[1:]
+                assert rel and not rel.startswith("/") and ".." not in rel, (
+                    f"{qual}: tree input {key!r} must be @<repo-relative dir>"
+                )
+                assert (ROOT / rel).is_dir(), (
+                    f"{qual}: reads {key!r}, but {rel}/ is not a directory of this release"
+                )
+                continue
             assert re.fullmatch(r"[A-Z][A-Z0-9_]*", key), f"{qual}: reads {key!r}"
 
 

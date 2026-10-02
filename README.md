@@ -98,7 +98,7 @@ flows:
 ./update.sh init            # one-time, on an existing deployment
 ./update.sh import <zip>    # commit the newly downloaded zip
 ./update.sh plan            # dry-run: what changes, what will run, conflicts
-./update.sh apply           # merge -> schema -> deps/cockpit -> verify
+./update.sh apply           # acquire (staged) -> merge -> schema -> fetch -> llm -> stack -> app -> verify
 ./update.sh rollback        # if needed: back to the pre-update tag
 ```
 

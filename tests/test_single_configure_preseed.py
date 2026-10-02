@@ -68,6 +68,9 @@ GENERATED = {
     # v2.51.0: the two façade tokens joined make-secrets.sh's generated set
     "CC_EMAIL_FACADE_TOKEN": "aaa7",
     "CC_CALENDAR_FACADE_TOKEN": "aaa8",
+    # v2.57.0: the sandbox runner's bearer token (2026-10-01 record, D6) — the
+    # shipped posture was an unauthenticated runner because nothing generated it
+    "CC_SANDBOX_RUNNER_TOKEN": "aaa9",
 }
 
 

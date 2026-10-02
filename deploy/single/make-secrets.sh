@@ -83,6 +83,13 @@ ensure N8N_DB_PASSWORD
 # files. Blank ones made a fresh install die at the first import.
 ensure CC_EMAIL_FACADE_TOKEN
 ensure CC_CALENDAR_FACADE_TOKEN
+# The sandbox runner's bearer token (v2.57.0, 2026-10-01 design record D6).
+# runner.py enforces it whenever it is set and is OPEN when it is blank, and
+# nothing generated it — so the shipped posture was an unauthenticated runner
+# on a loopback port every local process can reach. `boot` starts the runner
+# with .env exported (or its unit's EnvironmentFile=.env), so the runner and
+# the API read this one value from the one file.
+ensure CC_SANDBOX_RUNNER_TOKEN
 
 # Graphiti's three credentials SHOULD be LiteLLM virtual keys scoped to one
 # model group each. Until the installer mints them they fall back to the

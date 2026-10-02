@@ -20,11 +20,23 @@
 #   directory is in the STATE DIR, never inside the checkout (design record
 #   2026-09-23, D7).
 #
-#   Failure contract: apply exit 1 -> automatic ./update.sh rollback (state
-#   "rolled_back"), matching the k3s helper. Apply exit 3 (a fetch/llm pause
-#   — the operator's move) -> restart the OLD-or-merged tree so the cockpit
-#   is reachable again, state "failed" with the pause's USERACTION text and
-#   the CLI command that finishes the job.
+#   Failure contract (since v2.57.0 it reads WHERE the apply stopped, because
+#   `update.sh apply` now acquires the new release BEFORE it merges — 2026-10-01
+#   design record, D5 — so a stop no longer implies a moved tree):
+#     * apply exit 1 AFTER the merge (HEAD moved) -> automatic ./update.sh
+#       rollback (state "rolled_back"), matching the k3s helper;
+#     * apply exit 1 BEFORE the merge (HEAD where it was: the staged
+#       acquisition, the version gate, the backup) -> NO rollback. There is
+#       nothing to roll back, and `rollback` resets to the NEWEST pre-update-*
+#       tag — an EARLIER update's, i.e. it would have DOWNGRADED a deployment
+#       this run never touched. Restart, state "failed" naming the line;
+#     * apply exit 3 (the operator's move) -> state "failed", phase
+#       "operator-action" — what the dialog shows as "needs the operator" —
+#       with the pause's own USERACTION sentence and the command that finishes
+#       the job. The API is restarted so the cockpit is reachable again, EXCEPT
+#       for the pre-ledger adoption pause (USERACTION ledger-adopt): its merged
+#       tree's `setup.sh boot` is refused by the very ledger it asks the
+#       operator to build, so the sentence says `./setup.sh` brings it back.
 # ============================================================================
 set -uo pipefail
 
@@ -68,6 +80,19 @@ write_status() { # write_status <state> <phase> [error]
 # sentence worth surfacing in the dialog.
 last_protocol_line() { grep -E '^(USERACTION|FAIL) ' "$LOG" 2>/dev/null | tail -1; }
 
+# The same, from THIS apply's lines only and skipping update.sh's `acquire`
+# summary: for a stop before the merge the line worth showing is the one that
+# names the seam or the alias (resolve-images, catalog-probe, …), and the
+# summary only says "the line(s) above" — which a dialog does not have.
+seam_line() {
+  tail -n +"$(( LOG_AT_APPLY + 1 ))" "$LOG" 2>/dev/null \
+    | grep -E '^(USERACTION|FAIL) ' | grep -vE '^(USERACTION|FAIL) acquire: ' | tail -1
+}
+
+# Where `local` points. Empty when it cannot be read — then the stop is treated
+# as AFTER the merge (the pre-v2.57.0 contract), never as "nothing changed".
+head_rev() { git -C "$REPO_ROOT" rev-parse -q --verify HEAD 2>/dev/null; }
+
 api_port() { local p; p="$(sed -n 's/^CC_API_PORT=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1)"; printf '%s' "${p:-8080}"; }
 api_up() { curl -fsS -m 3 "http://127.0.0.1:$(api_port)/health" >/dev/null 2>&1; }
 
@@ -91,8 +116,26 @@ if api_up; then
 fi
 
 write_status running "apply"
+HEAD_BEFORE="$(head_rev)"
+LOG_AT_APPLY="$(wc -l <"$LOG" 2>/dev/null | tr -d ' ')"; LOG_AT_APPLY="${LOG_AT_APPLY:-0}"
 CC_UPDATE_DRIVEN=1 "$SINGLE/update.sh" apply
 rc=$?
+HEAD_AFTER="$(head_rev)"
+# Nothing moved: the apply stopped BEFORE the merge (D5's staged acquisition,
+# the version gate, the spine backup). Provable only when both reads succeeded.
+UNMOVED=0
+[[ -n "$HEAD_BEFORE" && "$HEAD_BEFORE" == "$HEAD_AFTER" ]] && UNMOVED=1
+
+if (( UNMOVED )) && (( rc == 1 || rc == 3 )); then
+  why="$(seam_line)"
+  restart_api || true
+  if (( rc == 3 )); then
+    write_status failed "operator-action" "${why:-the update paused for your action before anything was changed} — NOTHING was changed (still v$(current_version)): fix what it names, then apply the update again (here, or: cd deploy/single && ./update.sh apply)"
+    exit 3
+  fi
+  write_status failed "apply" "${why:-the update stopped before anything was changed} — NOTHING was changed and nothing was rolled back (still v$(current_version)): fix what it names, then apply the update again. Details: $LOG"
+  exit 1
+fi
 
 if (( rc == 1 )); then
   apply_err="$(last_protocol_line)"
@@ -106,9 +149,21 @@ if (( rc == 1 )); then
 fi
 
 if (( rc == 3 )); then
-  # A deliberate pause (fetch seam, LiteLLM catalog) — the operator's move.
-  # Bring the API back up so the cockpit showing this status is reachable.
+  # A deliberate pause AFTER the merge — the operator's move. Same state the
+  # fetch/llm pauses always used ("failed" + "operator-action", which the
+  # dialog renders as needing the operator): no new state, so every cockpit
+  # that reads status.json already understands it.
   pause_line="$(last_protocol_line)"
+  if [[ "$pause_line" == "USERACTION ledger-adopt: "* ]]; then
+    # The PRE-LEDGER install (update.sh's ledger_adoption_gate). NOT rolled
+    # back — the tree it would restore can never write a ledger, so it could
+    # never update — and NOT restarted: `./setup.sh boot` on the merged tree is
+    # refused until the ledger is built, which is the sentence's whole point.
+    # ./setup.sh's own boot phase brings the API back.
+    write_status failed "operator-action" "${pause_line#USERACTION ledger-adopt: } — the API stays stopped until then; in a terminal: cd deploy/single && ./setup.sh (its boot phase starts the API again)"
+    exit 3
+  fi
+  # Bring the API back up so the cockpit showing this status is reachable.
   restart_api || true
   write_status failed "operator-action" "${pause_line:-the update paused for your action} — finish in a terminal: cd deploy/single && ./update.sh apply, then ./setup.sh boot"
   exit 3

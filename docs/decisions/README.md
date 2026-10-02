@@ -198,3 +198,9 @@ recorded in-repo." rather than inventing one.
 | DL-112 | One run at a time, and the resume command is what clears a stale lock | active | 2026-10-02 | test: `tests/test_single_run_lock.py` | [process.md](process.md) |
 | DL-113 | The self-check proves the install as the app; it is readiness, never liveness, and its result is cached | active | 2026-10-02 | test: `tests/test_single_selfcheck_row.py` | [process.md](process.md) |
 | DL-114 | A report redacts as it collects, from a declared list, and the scan stays as the guard | active | 2026-10-02 | test: `tests/test_single_report_redacts.py` | [process.md](process.md) |
+| DL-115 | `boot` supervises three host processes, and a free port is the only proof of `stop` | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py` | [process.md](process.md) |
+| DL-116 | The Windows logon entry runs the resume command, in a retry loop | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py` | [process.md](process.md) |
+| DL-117 | The updater acquires before it merges, from a staged copy of the new release | active | 2026-10-02 | test: `tests/test_single_update_acquire.py` | [process.md](process.md) |
+| DL-118 | A deployment that predates the ledger is adopted by `./setup.sh`, never failed into a rollback | active | 2026-10-02 | test: `tests/test_single_update_acquire.py` | [process.md](process.md) |
+| DL-119 | Importing the bundled skills is a create-only step | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py` | [process.md](process.md) |
+| DL-120 | An update deploys what it acquired: images carry their inputs' hash, and a container runs the image its ref resolves to | active | 2026-10-02 | test: `tests/test_single_stack_catch_up.py` | [process.md](process.md) |

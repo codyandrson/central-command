@@ -31,19 +31,45 @@
 #     init            one-time: turn the unzipped tree into the git repo above
 #     import <zip>    commit a newly downloaded source zip onto `upstream`
 #     plan            what an apply would do: version gate, diff summary,
-#                     migration/deps/cockpit flags, predicted merge conflicts.
-#                     Mutates nothing.
-#     apply           gate (API stopped? no downgrade/out-of-order version?)
+#                     migration/deps/cockpit flags, whether `local` can
+#                     fast-forward. Mutates nothing.
+#     apply           gate (tree pristine? API stopped? no downgrade or
+#                     out-of-order version?)
+#                     -> ACQUIRE, BEFORE anything moves (2026-10-01 record, D5):
+#                        `upstream` is checked out SPARSELY into a worktree in
+#                        the state dir and ITS OWN `setup.sh acquire` runs —
+#                        the new release's fetch phase (every image, local
+#                        build, Python resolution and npm tree) and a probe
+#                        that the running proxy's catalog answers every alias
+#                        the new release requires. A FAIL or USERACTION there
+#                        stops the update with the tree, the branch, the .env,
+#                        the ledger, the database and the containers exactly
+#                        as they were — the staged builds are tagged ASIDE
+#                        (`-staged`), so not even a local image's live tag
+#                        moves; the worktree is removed either way
 #                     -> spine DB backup (default ON; CC_SKIP_DB_BACKUP=1 to
-#                     opt out) -> merge upstream into local -> deploy:
-#                     schema -> ./setup.sh llm -> ./setup.sh app -> ./setup.sh verify
+#                        opt out) -> checkpoint tag -> FAST-FORWARD `local`
+#                     -> deploy, every step a ledger-recorded phase:
+#                        schema -> ./setup.sh fetch (fast: everything is
+#                        present; it writes the real CC_IMG_* refs and the
+#                        ledger rows, and builds the local images under their
+#                        LIVE tags) -> ./setup.sh llm -> ./setup.sh stack
+#                        (compose.yaml's changes, and every container whose
+#                        image changed behind its ref, recreated) ->
+#                        ./setup.sh app -> n8n workflows -> ./setup.sh verify
+#                        (the self-check included). An exit 3 from ANY of them
+#                        stops right there, exit 3, the ledger it printed
+#                        showing where; an exit 1 is a FAIL
 #                     -> USERACTION: restart is the operator's
+#                     A deployment whose ledger cannot carry the update (one
+#                     installed before the ledger existed, v2.55.0) stops after
+#                     the schema with ONE USERACTION: run ./setup.sh once
 #     rollback        reset `local` to the last pre-update tag and re-deploy
-#                     the restored tree through the same idempotent steps
+#                     the restored tree through the same post-merge sequence
 #
-#   Output protocol matches setup.sh: `PASS|WARN|FAIL <check>: <msg>` on
-#   stdout, everything else on stderr, exit 0 clean / 1 hard failure /
-#   2 completed with warnings.
+#   Output protocol matches setup.sh: `PASS|WARN|FAIL|USERACTION <check>: <msg>`
+#   on stdout, everything else on stderr, exit 0 clean / 1 hard failure /
+#   2 completed with warnings / 3 stopped for the operator.
 #
 #   What rollback does NOT undo: schema statements already applied to the
 #   live Postgres. That is safe BY DESIGN — the schema discipline is
@@ -58,6 +84,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=../env-lib.sh
 . "$REPO_ROOT/deploy/env-lib.sh"
+# The ledger's reader (2026-10-01 design record, D2) — pure functions. apply
+# asks it ONE question after the merge, through its own cc_ledger_blocked:
+# can the deployment's ledger carry the phases this update runs? Sourced now,
+# while this release's copy is on disk; it reads the merged tree's steps.tsv.
+# shellcheck source=ledger-lib.sh
+[[ -f "$HERE/ledger-lib.sh" ]] && . "$HERE/ledger-lib.sh"
 # ONE answer file since v2.42.0 (2026-09-23 design record, D1): the repo-root
 # .env, app configuration and this profile's together.
 ENV_FILE="$REPO_ROOT/.env"
@@ -376,8 +408,12 @@ cmd_import() {
   # away — unpacking on top would silently keep them alive forever. The
   # `:!docs/vendor` pathspec is present only when the manifests matched.
   git -C "$tmp/wt" rm -rfq -- . ${vendor_keep[@]+"${vendor_keep[@]}"} >/dev/null 2>&1 || true
+  # pipefail INSIDE the body (2026-10-01 design record, D5): a `bash -c` child
+  # does not inherit this script's, so a `tar cf` that died half-way handed the
+  # step the EXTRACTING tar's status — a truncated archive extracts "cleanly",
+  # and the import committed a partial tree.
   step "unpack" "new tree staged over \`upstream\`" \
-    bash -c '(cd "$1" && tar cf - ${3:+--exclude="$3"} .) | (cd "$2" && tar xf -)' \
+    bash -c 'set -o pipefail; (cd "$1" && tar cf - ${3:+--exclude="$3"} .) | (cd "$2" && tar xf -)' \
       _ "$src" "$tmp/wt" "${vendor_keep[0]:+./docs/vendor}" || return 1
   git -C "$tmp/wt" add -A
   if [[ -z "$(git -C "$tmp/wt" status --porcelain)" ]]; then
@@ -425,12 +461,12 @@ cmd_plan() {
   grep -q '^web/' <<<"$names" \
     && pass "flag-cockpit" "web/ changed — apply will rebuild the cockpit (needs node >= 22, else skipped with a WARN)" \
     || pass "flag-cockpit" "no cockpit change"
-  # Anything the fetch phase acquires: apply runs `setup.sh fetch` first, so
-  # a mirror that cannot serve the new pins stops the update BEFORE the merge
-  # touches the live tree.
+  # Anything the fetch phase acquires: apply runs the NEW release's fetch from
+  # a staged worktree BEFORE the merge (D5), so a mirror that cannot serve the
+  # new pins stops the update with the live tree untouched.
   grep -qE '^(deploy/single/images\.txt|deploy/pi/graphiti/|deploy/k3s/sandbox\.Dockerfile|central_command/crawler/Dockerfile|requirements\.lock|web/package(-lock)?\.json)' <<<"$names" \
-    && pass "flag-fetch" "dependency inputs changed — apply will re-run ./setup.sh fetch (images by digest, local builds, python, cockpit) before deploying" \
-    || pass "flag-fetch" "no dependency input change — apply still runs ./setup.sh fetch (fast-forwards over what is present)"
+    && pass "flag-fetch" "dependency inputs changed — apply acquires them (images, local builds, python, cockpit) from a staged copy of upstream BEFORE the merge, and stops with nothing changed if one cannot be had" \
+    || pass "flag-fetch" "no dependency input change — apply still proves the acquisition from a staged copy before the merge (fast-forwards over what is present)"
 
   # Can `local` fast-forward (D10)? There is nothing to three-way any more, so
   # the only question is whether this deployment carries commits of its own.
@@ -460,39 +496,207 @@ apply_schema() {
       _ "$ctr" "$REPO_ROOT/central_command/db/schema.sql"
 }
 
-deploy_current_tree() {
-  # Acquire BEFORE mutating: every image/build/wheel/npm tree the new release
-  # needs is fetched before the schema or the code moves, so "the mirror
-  # lacks X" stops the update with nothing changed.
-  # Exit 3 from fetch is the operator's move, not a failure.
-  "$HERE/setup.sh" fetch; local frc=$?
-  if (( frc == 3 )); then
-    useraction "fetch" "dependencies could not all be acquired — fix the seam(s) named above (the repo-root .env), then re-run ./update.sh apply"
-    return 0
+# ── acquire BEFORE the merge (2026-10-01 design record, D5) ─────────────────
+# The comment that used to open deploy_current_tree said "acquire BEFORE
+# mutating", and the code ran `./setup.sh fetch` AFTER the fast-forward: a
+# mirror lacking one image left a merged tree over the old venv and the old
+# containers, reported as exit 3. Now the NEW release proves it can be acquired
+# while nothing has moved. `upstream` is checked out into a git worktree under
+# the STATE dir (cc_stage_dir — never inside the checkout, D7) and that
+# release's own `setup.sh acquire` runs from it with CC_STAGED_FOR naming this
+# deployment: the real fetch phase (images pulled, local images built, the
+# Python graph resolved, the npm tree installed — so the image store and the
+# uv/npm caches are WARM for the post-merge fetch) and a probe that the running
+# proxy's catalog answers every alias the new release requires. It reads this
+# deployment's .env and state dir, nests under this run's lock, writes no ledger
+# row, and resolves image refs into COPIES of the CC_IMG_* answers and the
+# manifest (setup.sh's fetch_images says why the real ones must not move yet).
+# The same goes for the image store: the three LOCAL images have fixed tags the
+# running deployment uses, so the staged run builds them under an ASIDE tag
+# (env-lib.sh's cc_staged_image_ref, `<live-ref>-staged`) — a stop before the
+# merge leaves every live tag on the image the old containers and the old
+# sandbox runner use; the post-merge fetch builds the live tags from the warm
+# cache and untags the aside ones. (Pulled third-party refs need no such care:
+# fetch pulls only a ref that is ABSENT from local storage (have_image), so a
+# pull adds an image and never moves a tag a container was created from; and a
+# running container keeps the image ID it was created from until something
+# recreates it — which only the post-merge llm and stack phases do.) The venv
+# and node_modules it creates inside the worktree go with it.
+#
+# SPARSE, because the staged tree must hold only what that run READS:
+# docs/vendor alone is 47k files — minutes on NTFS with Defender — and paths
+# deep enough to pass Windows' MAX_PATH. The list below is that set, read off
+# the code it runs; a path a release no longer ships is skipped, not an error.
+STAGE_PATHS=(
+  deploy             # setup.sh and its libraries/manifests (env-lib, ledger-lib,
+                     # questions, machine-lib, steps.tsv, images.txt), the
+                     # resolver, the build scripts and two build contexts:
+                     # deploy/pi/graphiti/ and deploy/k3s/sandbox.Dockerfile
+  central_command    # what `uv pip install --dry-run -e .` builds metadata from
+                     # (hatchling: packages = ["central_command"]), and
+                     # central_command/crawler/, the crawler image's context
+  pyproject.toml     # the Python graph fetch resolves...
+  requirements.lock  # ...or, with CC_AIRGAP=1, the frozen one it installs
+  VERSION            # which release the staged run names in its output
+  web/package.json   # what `npm ci` installs, exactly
+  web/package-lock.json
+)
+STAGE_DIR=""
+
+# Remove the worktree, its registration and the scratch, whatever state they
+# are in. Idempotent and silent: it runs at the end of acquire_staged AND from
+# the EXIT/INT/TERM traps, so a killed apply leaves nothing behind either (and
+# the next apply clears what a SIGKILL left, before it stages).
+stage_cleanup() {
+  [[ -n "$STAGE_DIR" ]] || return 0
+  G worktree remove --force "$STAGE_DIR/tree" >/dev/null 2>&1
+  rm -rf "$STAGE_DIR" 2>/dev/null
+  G worktree prune >/dev/null 2>&1
+  return 0
+}
+
+# -> 0 acquired · 1 a FAIL · 3 stopped for the operator. Every verdict line is
+# printed here; nothing outside the state dir has changed on any of them.
+acquire_staged() {
+  local wt p rc=0
+  local -a have=()
+  STAGE_DIR="$(cc_stage_dir "$STATE_DIR")"
+  wt="$STAGE_DIR/tree"
+  # FIRST in each trap, so the worktree is gone before the run lock is
+  # released — the next run must not find another's half-removed stage.
+  cc__trap_add EXIT stage_cleanup first
+  cc__trap_add INT stage_cleanup first
+  cc__trap_add TERM stage_cleanup first
+  stage_cleanup                       # what a killed earlier apply left
+  mkdir -p "$STAGE_DIR" 2>/dev/null \
+    || { fail "stage" "could not create $STAGE_DIR — check the permissions on the state dir"; return 1; }
+  for p in "${STAGE_PATHS[@]}"; do
+    G cat-file -e "upstream:$p" 2>/dev/null && have+=("$p")
+  done
+  # Never an empty pathspec: `git checkout upstream --` with no paths is a FULL
+  # checkout — exactly the 47k files this list exists to avoid.
+  [[ " ${have[*]-} " == *" deploy "* ]] \
+    || { fail "stage" "\`upstream\` has no deploy/ directory — this is not a Central Command release (re-import the source zip)"; return 1; }
+  step "stage" "\`upstream\` checked out aside at $wt (sparse: ${have[*]})" \
+    G worktree add -q --no-checkout --detach "$wt" upstream || return 1
+  step "stage-files" "the staged release's acquisition inputs are in place" \
+    git -C "$wt" checkout -q upstream -- "${have[@]}" || return 1
+  note "--> CC_STAGED_FOR=$REPO_ROOT $wt/deploy/single/setup.sh acquire"
+  CC_STAGED_FOR="$REPO_ROOT" "$wt/deploy/single/setup.sh" acquire; rc=$?
+  stage_cleanup
+  case "$rc" in
+    0) pass "acquire" "every artifact the new release needs was acquired from a staged copy, and the running catalog answers its aliases — nothing has moved yet" ;;
+    2) warn "acquire" "the new release was acquired from a staged copy, with warnings — the WARN lines above say what (a substituted image tag is one); nothing has moved yet" ;;
+    3) useraction "acquire" "the new release cannot be installed from here yet — the USERACTION line(s) above name the seam (the repo-root .env) or the alias (the LiteLLM UI). NOTHING was changed: the tree, the branch, the database and the containers are as they were. Fix it, then re-run ./update.sh apply"
+       return 3 ;;
+    *) fail "acquire" "the new release could not be acquired — the FAIL line(s) above name the seam per artifact. NOTHING was changed: the tree, the branch, the database and the containers are as they were. Fix it, then re-run ./update.sh apply"
+       return 1 ;;
+  esac
+  return 0
+}
+
+# ── after the merge: one ledger-recorded phase at a time ────────────────────
+# What the pause sentences tell the operator to re-run: apply, or rollback.
+RERUN="./update.sh apply"
+
+# THE PRE-LEDGER INSTALL (2026-10-01 design record, D2). A deployment installed
+# before v2.55.0 has an EMPTY ledger, so after the merge `./setup.sh fetch`
+# would be REFUSED by the ledger gate ("requires machine/…, which is pending")
+# — an exit 1, which under the cockpit's update-run.sh means an automatic
+# ROLLBACK to a tree that can never write a ledger: such an install could never
+# update. So before each post-merge phase, the ledger is asked the gate's own
+# question — cc_ledger_blocked, the library's definition of "done", not a second
+# one — and a "no" is ONE USERACTION, exit 3, which update-run.sh treats as a
+# pause. `./setup.sh` (the full run) is the adoption: every phase is
+# idempotent, so it walks the running deployment phase by phase and records
+# each. Asked per phase rather than once up front because this sequence
+# satisfies its own later requires as it goes (a fetch that failed in an
+# earlier apply is not a reason to stop: this run re-runs fetch first).
+LEDGER_STEPS=0
+ledger_adoption_gate() { # ledger_adoption_gate <phase>  -> 0 go on · 1 stopped (printed)
+  local ledger="$STATE_DIR/ledger.tsv" blocked tail=""
+  (( LEDGER_STEPS )) || return 0
+  blocked="$(cc_ledger_blocked "$ledger" "$1")" || return 0
+  # n8n's façade workflows are the one step this script runs that ./setup.sh
+  # does not, so an install with n8n comes back here once more afterwards.
+  [[ "$(get_kv "$ENV_FILE" CC_ENABLE_N8N)" == "1" ]] \
+    && tail=". Then stop the API and run ${RERUN} once more: it finishes the one step ./setup.sh does not run (the n8n façade workflows)"
+  if [[ -z "$(cc_ledger_read "$ledger")" ]]; then
+    useraction "ledger-adopt" "the update is merged and this deployment predates the install ledger: run ./setup.sh once — it adopts the running deployment phase by phase (every phase is idempotent) and records it${tail}"
+  else
+    useraction "ledger-adopt" "the update is merged, but ./setup.sh $1 would be refused: it requires ${blocked%% *}, which the ledger records as ${blocked#* }, and this update does not run that phase. Run ./setup.sh once — it resumes in order, phase by phase (every phase is idempotent), and records it${tail}"
   fi
-  (( frc == 1 )) && { fail "fetch" "./setup.sh fetch failed — see above"; return 1; }
+  return 1
+}
+
+# One post-merge phase. setup.sh prints its own ledger table on any stop, so
+# "where did it stop" is answered there. -> 0 go on · 1 stopped (printed). An
+# exit 2 is a WARN and the sequence goes on; before v2.57.0 `step` read it as
+# a FAIL, so an `app` that only WARNed (node older than 22) rolled the whole
+# update back.
+deploy_phase() { # deploy_phase <phase> <what the operator does at a pause>
+  local p="$1" rc=0
+  ledger_adoption_gate "$p" || return 1
+  "$HERE/setup.sh" "$p"; rc=$?
+  case "$rc" in
+    0) pass "$p" "./setup.sh $p completed" ;;
+    2) warn "$p" "./setup.sh $p completed with warnings — the WARN lines above say what" ;;
+    3) useraction "$p" "$2"; return 1 ;;
+    *) fail "$p" "./setup.sh $p failed (exit $rc) — the FAIL line above names the key or the seam, and the ledger it printed shows the step"; return 1 ;;
+  esac
+  return 0
+}
+
+deploy_current_tree() {
   # Ordering is load-bearing: schema BEFORE the code goes live. Additive-only
   # schema means old code tolerates the new columns, so a failed migration
-  # leaves the old code running unharmed and the update simply stops here.
+  # leaves the old code running unharmed and the update simply stops here. It
+  # is also the one step ./setup.sh never runs against an existing database
+  # (schema.sql auto-loads on a FRESH one only), which is why it comes before
+  # the ledger is consulted: a pre-ledger install sent to `./setup.sh` must
+  # already have the new columns.
   apply_schema || return 1
-  # The LLM half is part of the release surface too (a new alias, a new pod
-  # played in that phase — v2.21.0's speech engine). Idempotent: --replace
-  # converges the pods and the catalog step is create-only. Exit 3 is the
-  # catalog pause — the operator's move, same as fetch.
-  "$HERE/setup.sh" llm; local lrc=$?
-  if (( lrc == 3 )); then
-    useraction "llm" "the model catalog needs your attention (see above) — fill in the LiteLLM UI, then re-run ./update.sh apply"
-    return 0
+  # The manifest of the tree that is NOW checked out — the merged one, or the
+  # restored one on a rollback. A tree with none (a rollback onto a pre-ledger
+  # release) has no ledger gate for its phases to be refused by.
+  LEDGER_STEPS=0
+  if [[ -f "$HERE/steps.tsv" ]] && declare -F cc_steps_load >/dev/null \
+     && cc_steps_load "$HERE/steps.tsv" 2>/dev/null; then
+    LEDGER_STEPS=1
   fi
-  (( lrc == 1 )) && { fail "llm" "./setup.sh llm failed — see above"; return 1; }
-  step "app" "venv/deps/cockpit reconciled (./setup.sh app)" "$HERE/setup.sh" app || return 1
+  # fetch AGAIN, for real: the staged run proved every artifact and warmed the
+  # caches but wrote nothing of the install's, so this is the pass that writes
+  # the CC_IMG_* refs into .env and installed.manifest, builds the local images
+  # under their LIVE tags (the staged builds were tagged aside), installs the
+  # npm tree into web/, and records fetch's rows at the new version. Fast:
+  # every image is present, every build layer cached.
+  deploy_phase fetch "dependencies could not all be acquired — fix the seam(s) named above (the repo-root .env), then re-run ${RERUN}" || return 1
+  # The LLM half is part of the release surface too (a new alias, a new pod
+  # played in that phase — v2.21.0's speech engine). Idempotent: compose
+  # converges the containers (and the phase recreates any of the LiteLLM trio
+  # whose image changed behind its ref) and the catalog step is create-only.
+  # Exit 3 is the catalog pause — the operator's move.
+  deploy_phase llm "the model catalog needs your attention (see above) — fill it in the LiteLLM UI, then re-run ${RERUN}" || return 1
+  # stack, so the update DEPLOYS what it acquired (v2.57.0). Without it a
+  # release that changed compose.yaml, a third-party ref, or a locally built
+  # image (fetch rebuilds those under their fixed tags) was merged, verified
+  # and reported applied while the OLD containers kept running. The phase
+  # recreates what compose's own convergence misses — a container whose image
+  # changed behind an unchanged ref (setup.sh's image_drift) — named, one PASS
+  # line per service; stateful services keep their data in named volumes.
+  # Before app, because app's derived links and verify's checks are about the
+  # stack as this release defines it.
+  deploy_phase stack "./setup.sh stack stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
+  deploy_phase app "./setup.sh app stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
   # The n8n façades are code (deploy/n8n/); idempotent, and a no-op when the
   # n8n profile is off. The script's own USERACTION names a missing credential.
   if [[ "$(get_kv "$ENV_FILE" CC_ENABLE_N8N)" == "1" ]]; then
     step "n8n" "façade workflows applied into n8n (deploy/n8n/apply-workflows.sh)" \
       bash "$REPO_ROOT/deploy/n8n/apply-workflows.sh" --podman || return 1
   fi
-  step "verify" "deployed + live verification passed (./setup.sh verify)" "$HERE/setup.sh" verify || return 1
+  # verify includes the application's own self-check (verify/selfcheck) since
+  # v2.56.0 — the update is proven as the app, not only as a deployment.
+  deploy_phase verify "./setup.sh verify stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
   # CC_UPDATE_DRIVEN=1 is update-run.sh (the cockpit's detached runner): it
   # owns the restart, so the operator gate would turn its clean exit into an
   # ambiguous 3 — the same code the fetch/llm pauses use.
@@ -502,7 +706,7 @@ deploy_current_tree() {
     # Name the COMMAND, not the component: the work site read "start your
     # uvicorn API" and did not know that `./setup.sh boot` is what does it
     # (2026-09-25).
-    useraction "restart" "update applied — start the API with \`./setup.sh boot\` (or your own uvicorn + sandbox runner), then confirm with: ./setup.sh status"
+    useraction "restart" "update applied — start the API, the cockpit and the sandbox runner with \`./setup.sh\` (it resumes at boot), then confirm with: ./setup.sh status"
   fi
 }
 
@@ -530,6 +734,10 @@ cmd_apply() {
     pass "merge" "\`local\` already contains \`upstream\` — continuing with the deploy steps"
   else
     version_gate || return 1
+    # ACQUIRE BEFORE ANYTHING MOVES (D5) — before the backup, the checkpoint
+    # and the merge. A stop here is exit 3 or 1 with nothing changed, and
+    # update-run.sh, seeing HEAD where it was, does not roll anything back.
+    acquire_staged || return 1
     backup_spine || return 1
     local tag; tag="pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
     step "checkpoint" "rollback point tagged: $tag" G tag "$tag" || return 1
@@ -622,6 +830,8 @@ cmd_rollback() {
     sed -i 's/"state":"success"/"state":"rolled_back"/' "$STATE_DIR/update/status.json"
   fi
   note "NOTE: schema changes already applied to Postgres are NOT undone — additive-only schema makes the restored code run fine against them."
+  # The same post-merge sequence as apply; its pauses say to re-run rollback.
+  RERUN="./update.sh rollback"
   deploy_current_tree
 }
 
@@ -640,13 +850,22 @@ usage: ./update.sh <downloaded-source-zip>
                   upload route drives this; apply stays its own step
   plan            dry-run report: version gate, diff, migration/deps/cockpit
                   flags, whether \`local\` can fast-forward. Mutates nothing.
-  apply           gate (tree pristine? API stopped? version ok?) -> spine DB
-                  backup -> FAST-FORWARD \`local\` to \`upstream\` -> schema ->
-                  ./setup.sh llm -> ./setup.sh app -> ./setup.sh verify.
+  apply           gate (tree pristine? API stopped? version ok?) -> ACQUIRE
+                  the new release from a staged copy BEFORE anything moves (its
+                  own fetch, plus the running catalog against its aliases; a
+                  stop there changes nothing) -> spine DB backup -> FAST-FORWARD
+                  \`local\` to \`upstream\` -> schema -> ./setup.sh fetch ->
+                  ./setup.sh llm -> ./setup.sh stack -> ./setup.sh app ->
+                  n8n workflows -> ./setup.sh verify. Any of those stopping
+                  for you stops the update right there (exit 3; re-run apply
+                  to go on).
                   A deployment carries no local patches: a tree that differs
                   from its release, or cannot fast-forward, is refused and the
-                  paths are named (design record 2026-10-01, D10)
+                  paths are named (design record 2026-10-01, D10). An install
+                  older than the ledger (v2.55.0) is asked to run ./setup.sh
+                  once after the merge, which adopts it
   rollback        reset \`local\` to the last pre-update tag and re-deploy
+                  through the same sequence
 
   exit codes      0 clean · 1 hard failure · 2 completed with warnings
                   3 stopped for USER ACTION (stop the API / restart it after —

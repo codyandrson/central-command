@@ -342,3 +342,93 @@ hygiene, and how the test suite itself must be written. See
   is the one check that does not trust the redactor.
 - **Enforced:** test: `tests/test_single_report_redacts.py`; script: `deploy/single/redact.tsv`
 - **Source:** CHANGELOG v2.56.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-115 — `boot` supervises three host processes, and a free port is the only proof of `stop`
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`boot` starts three host processes, `stop` stops three, and the PORT is the proof"
+- **Why:** The sandbox runner was a process the operator started by hand and
+  nothing restarted; on Linux nothing brought the API or the cockpit back
+  after a reboot either. And `stop` reported green twice (2026-09-18,
+  2026-09-25) with the servers still listening — traced while building this
+  to the detached start itself: `( cd X && nohup cmd & echo $! )` records a
+  wrapper shell's pid, so `stop` signalled the shell. One supervisor per
+  platform (systemd user units on Linux), the server's own pid, and a port
+  with no listener as the proof.
+- **Enforced:** test: `tests/test_single_boot_supervision.py::test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_boot_again`, `::test_stop_fails_when_a_port_still_answers`, `::test_stop_fails_loudly_when_the_answer_file_cannot_be_loaded`, `::test_lingering_off_is_a_fail_naming_loginctl_enable_linger`
+- **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-116 — The Windows logon entry runs the resume command, in a retry loop
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The Windows logon entry runs `./setup.sh`, in a retry loop — never `boot` alone"
+- **Why:** The logon task re-ran `boot` alone, so an install that never
+  finished came back from a reboot half-built and silent. The record (D6)
+  makes it the resume command. Two things the record did not spell out were
+  decided while building: with no terminal a WARN-only `check` stops the run,
+  so the wrapper passes `--accept-warnings`; and at logon the podman machine
+  may not be up yet, so a failed attempt is retried (ten times, a minute
+  apart) rather than left as the day's result.
+- **Enforced:** test: `tests/test_single_boot_supervision.py::test_the_retry_script_runs_the_resume_command_until_it_can_stop`, `::test_the_windows_wrapper_is_tiny_and_hands_one_path_to_bash`
+- **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-117 — The updater acquires before it merges, from a staged copy of the new release
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The updater ACQUIRES before it merges, from a staged copy of the new release"
+- **Why:** `update.sh apply` merged the new code and THEN ran `fetch`, under a
+  comment that said "acquire BEFORE mutating": a mirror lacking one image
+  left a merged tree over the old venv and containers, reported as exit 3,
+  and a fetch or catalog pause `return 0`ed past `app` and `verify`. The new
+  release's own fetch now runs from a sparse worktree before anything moves.
+  Found alongside: the cockpit runner rolled back on ANY exit 1, including a
+  stop before the merge, which reset the tree to an earlier update's tag.
+- **Enforced:** test: `tests/test_single_update_acquire.py::test_a_mirror_missing_one_tag_stops_before_the_merge_with_nothing_changed`, `::test_a_pause_after_the_merge_stops_there_and_app_and_verify_do_not_run`, `::test_update_run_does_not_roll_back_a_stop_before_the_merge`
+- **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-118 — A deployment that predates the ledger is adopted by `./setup.sh`, never failed into a rollback
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "A deployment that predates the ledger is ADOPTED by `./setup.sh`, and an update never fails it into a rollback"
+- **Why:** Every deployment in the field was installed before v2.55.0 and has
+  an empty ledger. The first ledgered phase an update calls would be refused,
+  and the cockpit's runner answers a refusal with a rollback to a tree that
+  can never write a ledger — such an install could never update. Adoption is
+  the full run: every phase is idempotent, so `./setup.sh` walks the running
+  deployment and records it.
+- **Enforced:** test: `tests/test_single_update_acquire.py::test_a_pre_ledger_install_is_asked_to_run_setup_once`, `::test_update_run_does_not_roll_back_the_adoption_pause`; test: `tests/test_single_driver_ledger.py::test_an_older_updater_on_a_pre_ledger_install_gets_a_pause_not_a_failure`
+- **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-119 — Importing the bundled skills is a create-only step
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "Importing the bundled skills is a step, and it is CREATE-ONLY"
+- **Why:** The seven agent skills ship in `skills/` and nothing imported
+  them: a fresh install's Skills page was empty by design and the operator
+  was expected to know to import seven folders by hand (2026-10-01 work-site
+  report). Create-only, like `register-models.py`: the library is the
+  operator's and the coach's to edit, so a bundled copy never overwrites a
+  skill that exists, and a retired one is never resurrected.
+- **Enforced:** test: `tests/test_single_boot_supervision.py::test_skills_are_create_only_and_a_new_bundled_folder_is_imported`, `::test_a_tree_input_moves_the_fingerprint_only_when_the_tree_moves`
+- **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-120 — An update deploys what it acquired: images carry their inputs' hash, and a container runs the image its ref resolves to
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "A container must be running the image its ref resolves to NOW"
+- **Why:** Found while building acquire-before-merge: the local image tags
+  are fixed and `fetch` skipped a build whenever the tag existed, so a
+  release that changed a Dockerfile never rebuilt; and the updater never ran
+  `stack`, while podman-compose 1.6.0 recreates a container only on a config
+  hash that holds the image ref, not its ID — so even a rebuilt image would
+  not have run. A release was "applied" and verified over the old
+  containers. The same pass found the resolver turning a once-failed or
+  switched-off image into a permanent "operator pin".
+- **Enforced:** test: `tests/test_single_local_image_label.py`; test: `tests/test_single_stack_catch_up.py`; test: `tests/test_single_resolve_carry_forward.py`
+- **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

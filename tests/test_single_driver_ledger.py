@@ -180,6 +180,25 @@ def test_boot_on_an_empty_ledger_refuses_and_names_the_step(tree: Path):
     assert "LEDGER " in r.stdout
 
 
+def test_an_older_updater_on_a_pre_ledger_install_gets_a_pause_not_a_failure(tree: Path):
+    """A deployment installed before the ledger existed is updated by the
+    updater it already has, which merges first and then calls this script's
+    phases. Under the cockpit's runner an exit 1 there is a ROLLBACK (every
+    runner before v2.57.0), to a tree that can never write a ledger. So an
+    EMPTY ledger under CC_UPDATE_DRIVEN=1 is the operator's move — exit 3 and
+    the adoption sentence — and without that variable the same refusal is
+    still the FAIL the developer form has always given."""
+    driven = _run(tree, "fetch", env_extra={"CC_UPDATE_DRIVEN": "1"})
+    assert driven.returncode == 3, driven.stdout + driven.stderr
+    assert "USERACTION ledger-adopt:" in driven.stdout, driven.stdout
+    assert "run ./setup.sh once" in driven.stdout
+    assert "FAIL fetch:" not in driven.stdout
+
+    by_hand = _run(tree, "fetch")
+    assert by_hand.returncode == 1, by_hand.stdout + by_hand.stderr
+    assert "FAIL fetch: requires" in by_hand.stdout, by_hand.stdout
+
+
 def test_the_developer_bypass_is_refused_on_a_live_deployment(tree: Path):
     """D3: `CC_SETUP_UNLEDGERED=1` is the only bypass there is, it is
     documented nowhere an operator reads, and it does not apply when the
@@ -459,7 +478,7 @@ def test_the_plan_skips_an_all_done_phase_and_names_a_changed_input(tree: Path):
     plan = _plan(again.stdout)
     for p in _STUB_PHASES[1:]:
         assert f"PLAN {p}: WILL SKIP" in plan[p], plan[p]
-    assert "all 5 rows are done at" in plan["boot"], plan["boot"]
+    assert "all 7 rows are done at" in plan["boot"], plan["boot"]
     assert "(last done 20" in plan["boot"], plan["boot"]
     # ...and the run did what the plan said: nothing but check ran.
     ran = [l for l in again.stdout.splitlines() if l.endswith("-stub: ran")]
@@ -552,7 +571,8 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
         f'[[ -f "{flags.as_posix()}/python-go" ]] && exit 0\n'
         "sleep 120\n", encoding="utf-8")
     py.chmod(0o755)
-    # Nothing may answer the API port, or `test` skips its suite as "API up".
+    # A free API port: nothing of the host's may answer this temp install (and
+    # until v2.57.0 a healthy API made `test` skip its suite).
     _set(tree / ".env", {"CC_API_PORT": str(_free_port()), "CC_EXECUTOR_MODE": "dry_run"})
     extra = {"CC_SETUP_UNLEDGERED": "1"}
 

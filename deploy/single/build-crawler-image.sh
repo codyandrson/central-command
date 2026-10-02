@@ -15,6 +15,7 @@
 #   Takes a while: the layer installs Chromium and its Debian dependencies.
 #
 #   Usage:  ./build-crawler-image.sh
+#           ./build-crawler-image.sh --inputs-hash   # print the build-inputs hash, touch nothing
 # ============================================================================
 set -euo pipefail
 
@@ -76,15 +77,9 @@ fi
 # STAGED outside the checkout because nothing here may write inside it (D7).
 # shellcheck source=../env-lib.sh
 . "$REPO_ROOT/deploy/env-lib.sh"
-STATE_DIR="$(cc_state_dir "$REPO_ROOT/.env" "$REPO_ROOT" 2>/dev/null)" || STATE_DIR=""
-cc_export_tls_env "$STATE_DIR"
 TLS_ARGS=()
 if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
   TLS_ARGS+=(--tls-verify=false --build-arg "CC_TLS_INSECURE=1")
-  # The tls-insecure WARN is gated through cc_tls_insecure_warn_once (F25);
-  # `|| true` because this script runs under `set -e` and a suppressed
-  # (already-warned) run must not abort on the gate's 1.
-  cc_tls_insecure_warn_once "this build's base-image pull and the apt/pip/npm fetches inside it" || true
 fi
 CA_SRC=""
 if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
@@ -96,10 +91,42 @@ if [[ -n "${CC_CA_BUNDLE:-}" ]]; then
   fi
 fi
 IMAGE_REF="localhost/cc-crawler:1"
+# A STAGED run (update.sh apply's acquisition, 2026-10-01 design record D5 —
+# CC_STAGED_FOR names the deployment) builds ASIDE, under
+# cc_staged_image_ref's `-staged` tag: the running deployment's tag must not
+# move before the merge. The inputs hash below does not include the tag, so the
+# post-merge build under the live tag is the same hash, from a warm cache.
+[[ -n "${CC_STAGED_FOR:-}" ]] && IMAGE_REF="$(cc_staged_image_ref "$IMAGE_REF")"
 
 for f in "$CTX/Dockerfile" "$CTX/service.py"; do
   [[ -f "$f" ]] || { echo "FATAL: $f not found" >&2; exit 1; }
 done
+
+# THE INPUTS HASH (v2.57.0). The tag is fixed, so "the tag exists" cannot say
+# whether the image was built from THIS tree: a release that changed the
+# Dockerfile or service.py used to keep running the old image. The hash covers
+# exactly what this build reads — the staged context's files, line endings
+# normalised, the CA's content, and every --build-arg value it passes — and is
+# written onto the image as a LABEL (deploy/env-lib.sh's cc_build_inputs_hash
+# says what is in and what is not). `--inputs-hash` prints it and exits BEFORE
+# anything below can write (no state dir, no .curlrc, no staging, no podman):
+# setup.sh's fetch phase and its probes ask THIS script, so the definition of
+# the inputs is this one file.
+INPUTS_HASH="$(cc_build_inputs_hash "$CA_SRC" "$(cc_build_arg_values "${BUILD_ARGS[@]}" "${TLS_ARGS[@]}")" "$CTX")" \
+  || { echo "FATAL: could not read the build inputs under $CTX to hash them" >&2; exit 1; }
+if [[ "${1:-}" == "--inputs-hash" ]]; then
+  printf '%s\n' "$INPUTS_HASH"
+  exit 0
+fi
+
+STATE_DIR="$(cc_state_dir "$REPO_ROOT/.env" "$REPO_ROOT" 2>/dev/null)" || STATE_DIR=""
+cc_export_tls_env "$STATE_DIR"
+if [[ "${CC_TLS_INSECURE:-0}" == "1" ]]; then
+  # The tls-insecure WARN is gated through cc_tls_insecure_warn_once (F25);
+  # `|| true` because this script runs under `set -e` and a suppressed
+  # (already-warned) run must not abort on the gate's 1.
+  cc_tls_insecure_warn_once "this build's base-image pull and the apt/pip/npm fetches inside it" || true
+fi
 
 # The STAGED BUILD CONTEXT (D4 amendment, 2026-09-24). `build/` under the state
 # directory is REGENERABLE — deleted and rebuilt on every run — so a CA from a
@@ -112,6 +139,7 @@ else
   trap 'rm -rf "$STAGED"' EXIT
 fi
 BUILD_CMD=(podman build "${BUILD_ARGS[@]}" "${TLS_ARGS[@]}"
+           --label "$(cc_build_inputs_label)=$INPUTS_HASH"
            -t "$IMAGE_REF" -f "$STAGED/Dockerfile" "$STAGED")
 
 # CC_BUILD_DRY_RUN=1 prints what WOULD run and touches nothing — no staging, no

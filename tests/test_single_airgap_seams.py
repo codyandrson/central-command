@@ -362,6 +362,7 @@ RUNTIME_ONLY = {
     "CC_ENV_LIB_LOADED",                       # env-lib.sh's own source guard
     "CC_QUESTIONS_LIB_LOADED",                 # questions-lib.sh's own source guard
     "CC_LEDGER_LIB_LOADED",                    # ledger-lib.sh's own source guard
+    "CC_SUPERVISE_LIB_LOADED",                 # supervise-lib.sh's own source guard
     # The DEVELOPER bypass for the ledger's order (2026-10-01 design record,
     # D3): it runs a phase ahead of its prerequisites, it is documented only in
     # .claude/rules/deploy-single.md, and it is REFUSED when .env carries
@@ -378,6 +379,11 @@ RUNTIME_ONLY = {
     # update.sh runs under it so they neither deadlock on nor release their
     # parent's lock. A per-run fact handed from parent to child, never an answer.
     "CC_RUN_LOCK_PID",
+    # update.sh apply's STAGED ACQUISITION marker (2026-10-01 design record,
+    # D5): set by update.sh on the one `setup.sh acquire` it runs from a staged
+    # worktree of `upstream`, naming the deployment whose .env and state dir
+    # that run reads. A parent-to-child per-run fact, never an answer.
+    "CC_STAGED_FOR",
     # setup.sh's own LISTS, not answers: which keys are ports and which
     # credentials make-secrets.sh owns (v2.44.0's `check` reads both).
     "CC_PORT_KEYS", "CC_GENERATED_KEYS",
