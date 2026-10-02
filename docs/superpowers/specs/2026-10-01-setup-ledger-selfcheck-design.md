@@ -1,15 +1,24 @@
 # The install remembers what it did, proves it as the app, and has one definition
 
 > **Status:** partial — P1 shipped in v2.55.0 (D1, D2, D3, D5's exit-code rule and
-> `fetch` fix, D10); P2–P5 (D4, D6, D7, D8, D9, D11, the rest of D5) are open. Decisions
-> D1–D10 taken with the operator on 2026-10-01; D11 (precedents, seven adoptions)
-> approved 2026-10-02.
+> `fetch` fix, D10); P2 shipped in v2.56.0 (D4, and from D11 the `started`
+> status, the run lock, the plan, in-process redaction and the readiness-only
+> rule); P3–P5 (D6, D7, D8, D9, the rest of D5, D11's driver split) are open.
+> Decisions D1–D10 taken with the operator on 2026-10-01; D11 (precedents,
+> seven adoptions) approved 2026-10-02.
 > **As-built:** P1 — `deploy/single/steps.tsv` (new), `deploy/single/ledger-lib.sh`
 > (new), `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/env-lib.sh`,
 > `.claude/settings.json` (new), `.claude/hooks/guard-install-tree.sh` (new),
 > `tests/test_single_steps_schema.py`, `tests/test_single_ledger_lib.py`,
 > `tests/test_single_driver_ledger.py`, `tests/test_single_report_redacts.py`,
-> `tests/test_install_tree_hook.py` (all new).
+> `tests/test_install_tree_hook.py` (all new). P2 — `central_command/selfcheck.py`,
+> `central_command/api/selfcheck.py`, `deploy/single/redact.tsv`,
+> `tests/test_selfcheck.py`, `tests/test_selfcheck_api.py`,
+> `tests/test_single_selfcheck_row.py`, `tests/test_single_run_lock.py`,
+> `tests/test_single_mint_key_scope.py` (all new); `deploy/single/setup.sh`,
+> `deploy/single/ledger-lib.sh`, `deploy/single/steps.tsv`,
+> `deploy/single/update.sh`, `deploy/env-lib.sh`,
+> `web/src/features/systems/SystemsView.tsx`, `web/server/routes/cc-systems.ts`.
 > **Scope:** the single-node profile (`deploy/single/`), Linux and Windows
 > Podman Desktop. The k3s profile is OUT of scope for this record and gets a
 > follow-on record once P1–P4 are proven; nothing here changes
@@ -149,7 +158,10 @@ One row per step, rewritten atomically after every step:
 step  status  version  at  fingerprint  reason
 ```
 
-`status` is `done | failed | pending | gate`. `version` is `VERSION` at the
+`status` is `done | failed | pending | gate`, and since P2 `started` (D11):
+every row of a phase is written `started` before the phase function runs, so
+a run that is killed leaves "started, not finished" behind instead of rows
+that look as if nothing had been tried. `version` is `VERSION` at the
 time. `fingerprint` is sha256 over the step's `reads` keys' VALUES (the
 operator's answers that shaped it) and, for `fetch` rows, the resolved
 image digests. `reason` is the last FAIL/USERACTION message, verbatim.
@@ -228,12 +240,30 @@ two in the whole install that prove what the agents will experience.
 `verify.sh` stays as the deployment's own proof under the admin key; the two
 are different questions and both are asked.
 
-Known consequence, to be measured in P2: the minted spine key is scoped to
-`cc-default`, `cc-tts`, `cc-stt` (`setup.sh` mint-key), and the graph writer
-embeds through `CC_EMBED_ALIAS` — if it does so with the spine key, the
-self-check will FAIL `embedding-as-app` on every fresh install. That is a
-real finding, not a false alarm; the fix (scope the minted key to the
-aliases the app uses, from `cc_required_aliases`) ships in P2 with the check.
+Known consequence, MEASURED in P2 (2026-10-02) and not what this paragraph
+first guessed: the minted spine key was scoped to `cc-default`, `cc-tts`,
+`cc-stt` (`setup.sh` mint-key), and the graph writer embeds through
+`CC_EMBED_ALIAS` — but it does so with `CC_LLM_PROXY_ADMIN_KEY`
+(`integrations/neo4j_writer.py`'s `embed()`), not the spine key, so
+`embedding-as-app` asks with the admin key because that is the credential
+the writer holds, and the narrow scope never broke embedding. The scope fix
+ships in P2 anyway, for the reason that survives the measurement: the
+hard-coded three-alias list was a second copy of `cc_required_aliases` that
+had already drifted from it. The key is minted over that ONE list, and an
+existing key gains the aliases it lacks in place — never re-minted, and
+never narrowed.
+
+Two things the operator decided on 2026-10-02 that the table above does not
+say. **The API's result is CACHED**: `GET /api/selfcheck` returns the last
+run and spends nothing; a run happens once at API start and when someone
+asks for one (`POST /api/selfcheck/run`, the Systems page's button). The
+completion and embedding checks each spend a model request and, on a
+single-slot local backend, queue behind running sessions — a check that runs
+on every page view would make looking at the Systems page a cost.
+**The installer's run is `--pre-boot`**: `verify` comes before `boot`, so the
+two checks whose subject `boot` starts (the cockpit, the sandbox runner)
+report "not checked before boot" there and are asserted by `./setup.sh
+status`, which runs the whole table.
 
 ### D5 — One exit-code rule, no swallowed failure, acquire before merge
 
@@ -409,7 +439,7 @@ the next reader rederive them:
 | `report` (D10) | Replicated troubleshoot.sh: collectors, redactors, analyzers, redaction in process with a default set | redaction happens in process as each section is collected, from a declared default list; the marker test stays as the guard nobody else has |
 | the pristine tree (D10) | Sentry's commit check (HEAD equals upstream, opt-out); GitLab, Discourse, Coolify regenerate artifacts on every converge | nothing: ours is stricter than any found, and justified because our tree is code, not generated output |
 | one 3,800-line driver | Sentry's installer: a thin orchestrator sourcing step files in order | the driver splits into `deploy/single/phases/<phase>.sh`, one file per manifest phase, when P4 lines the docs up with the manifest |
-| one run at a time | Kamal's atomic lock directory for the duration of a deploy | a run lock in the state dir, taken by every mutating command and by `update.sh`; a stale lock names the pid and the command that releases it |
+| one run at a time | Kamal's atomic lock directory for the duration of a deploy | a run lock in the state dir, taken by every mutating command and by `update.sh`; a lock held by a live run is a FAIL naming its pid and command. As built (P2), a STALE lock — its holder provably gone — is reclaimed by the next run with a WARN naming the dead pid and what it was running, rather than waiting on a release command as Kamal's does: the agent's contract is three verbs (D10.4) and the recovery is one command (D3), so the command that releases a stale lock has to be `./setup.sh` itself, and a logon-time run after a power cut must not sit behind a lock nothing holds |
 
 Two pieces have no precedent in self-hosted installers and are kept on a
 stated justification: the per-step resume ledger (the products examined

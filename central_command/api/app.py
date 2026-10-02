@@ -200,6 +200,15 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(auditor.audit_sweep())
     except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
         pass
+    # The application self-check (central_command/selfcheck.py): one READINESS
+    # run in the background so the Systems page has a result. It spends one
+    # completion and one embedding, so it is a switch — and start_on_boot
+    # also refuses under the test suite and in demo mode. Never re-run on a
+    # timer, and nothing acts on its result.
+    if settings.selfcheck_on_start:
+        from central_command.api import selfcheck as selfcheck_api
+
+        selfcheck_api.start_on_boot()
     yield
     # Detach BEFORE closing the log: a record logged during teardown must not
     # race a loop that is about to stop taking work.
@@ -269,6 +278,11 @@ app.include_router(nerve_gateway_router)
 from central_command.api.systems import router as systems_router  # noqa: E402
 
 app.include_router(systems_router)
+
+# The application self-check (/api/selfcheck): its own module/router too.
+from central_command.api.selfcheck import router as selfcheck_router  # noqa: E402
+
+app.include_router(selfcheck_router)
 
 # Speech (single-server mode): /api/tts + /api/transcribe forwarded to the
 # cc-tts / cc-stt LiteLLM aliases — the Node cockpit server owns these routes

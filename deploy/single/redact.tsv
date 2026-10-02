@@ -1,0 +1,50 @@
+# redact.tsv — what `./setup.sh report` REDACTS, declared once, as data.
+#
+#   Design record: docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md,
+#   D10.3 (`./setup.sh report` is how a defect travels) and D11 (the `report`
+#   row, from Replicated troubleshoot.sh's redactors: redaction happens IN
+#   PROCESS, as each section is collected, from a declared default list).
+#
+#   WHY IT IS A FILE. The report is built to be pasted into a chat, and until
+#   P2 its only protection was a scan that REFUSED the whole report when a
+#   credential value appeared in it — so a single value turning up in a
+#   container log cost the operator the entire report, at exactly the moment
+#   they needed it. Now every section is piped through one filter that replaces
+#   what this file declares, and the scan stays behind it as the last line of
+#   defence (the guard nobody else has). The filter and the scan read THIS
+#   list — plus questions.tsv's `secret` column — so they cannot disagree about
+#   what a secret is. A missing or key-less copy of this file makes the report
+#   REFUSE rather than run unredacted: it is release content.
+#
+#   COLUMNS, tab-separated, `-` where a field is empty:
+#     kind       key   = `pattern` is a bash GLOB over .env KEY NAMES. The VALUE
+#                        of every matching key is replaced, wherever it appears,
+#                        with [REDACTED:<KEY NAME>] — by bash's own substitution
+#                        inside a read loop, so a value never reaches an argv
+#                        (`ps` shows argv). Values shorter than eight characters
+#                        are skipped: `none`, `0` and `1` are legitimate answers
+#                        and a substring of half the English language
+#                shape = `pattern` is an EXTENDED regular expression (sed -E)
+#                        for a credential SHAPE, redacted whether or not .env
+#                        knows the value. Static release content, so it may sit
+#                        in sed's argv. Applied AFTER the key rows, so a value
+#                        .env knows keeps its more useful key-name label
+#     pattern    the glob (key) or the ERE (shape). A shape may not contain a
+#                tab or the \001 byte (the filter's sed delimiter)
+#     replace    shape rows only: the sed -E replacement (\1 = the first group).
+#                `-` for key rows, whose replacement is always [REDACTED:<KEY>]
+#     doc        one plain sentence: what the row catches, and why
+#
+#   tests/test_single_report_redacts.py parses this file and plants a value of
+#   every kind in the report's sources.
+#
+# kind	pattern	replace	doc
+key	*_PASSWORD	-	Every password .env holds — the databases', Neo4j's, Exchange's — named by the shape make-secrets.sh and questions.tsv give them.
+key	*_TOKEN	-	Every token: the Jira/Confluence API tokens, the façade and sandbox-runner tokens.
+key	*_KEY	-	Every key: the proxy's admin key, LiteLLM's salt key, n8n's encryption key, the upstream LLM key, the spine's own virtual key.
+key	*_SECRET	-	Any client secret an integration adds, so a new one is covered before anybody remembers to list it.
+key	CC_LLM_API_KEY	-	The spine's minted LiteLLM virtual key — named on its own because it is the credential the three historic leaks were.
+key	CC_LLM_PROXY_ADMIN_KEY	-	The proxy's master key, which can reconfigure the proxy — named on its own for the same reason.
+shape	([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]:]+:[^/@[:space:][]+@	\1[REDACTED:url-userinfo]@	A user:password@ in any URL — a database connection string echoed into a log carries one.
+shape	([Bb]earer[[:space:]]+)[A-Za-z0-9._~+/=-]+	\1[REDACTED:bearer-token]	An HTTP bearer token, as a request log or a curl -v trace prints it.
+shape	(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{16,}	\1[REDACTED:sk-key]	A LiteLLM (or OpenAI-style) virtual key's sk-... shape, from a proxy or container log that names one .env never held.

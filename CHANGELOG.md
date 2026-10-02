@@ -4,6 +4,85 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-02 — v2.56.0: the install proves itself as the app, and the ledger learns its precedents
+
+P2 of `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+(D4, and five of D11's seven adoptions). v2.55.0 gave the install a memory;
+this release gives it a check that acts as the application, and closes a hole
+in that memory found while building it. **The work site still holds at its
+current release until P5 tags.**
+
+- **A self-check that is the application.** `central_command/selfcheck.py`,
+  one implementation run two ways: `python -m central_command.selfcheck` from
+  the install's venv, and `GET /api/selfcheck` inside the running API. Eleven
+  checks, each with the setting the app actually uses and the credential it
+  actually holds — `spine`, `proxy-as-app` (the agents' own key against
+  `/v1/models`), `completion-as-app` (one request through
+  `runtime.models.resolve_model`, the seam a real run takes),
+  `embedding-as-app` (the graph writer's own request, dimension checked
+  against `CC_EMBED_DIM`), `graph`, `sandbox`, `crawler`, `mail`,
+  `integrations`, `cockpit`, `links`. Every FAIL names the `.env` key or the
+  command; no message carries a value. `verify.sh` stays: it proves the
+  deployment under the admin key, which is a different question.
+- **`boot` requires it.** A new manifest row, `verify/selfcheck`, runs the
+  module after `verify.sh` (with `--pre-boot`: the cockpit and the sandbox
+  runner are not started yet) and `boot/boot-api` and `demo/demo-feed`
+  require it — an `.env` with an empty `CC_LLM_API_KEY` can no longer reach
+  `boot`, which is the 2026-10-01 work-site state. `./setup.sh status` runs
+  the whole table; `./setup.sh report` carries its lines.
+- **Readiness, never liveness — and cached.** The self-check gates use and
+  restarts nothing; the module's docstring quotes the Kubernetes
+  documentation on why the two must not be conflated. Two of its checks
+  spend one model request each, so the API serves the LAST result: a run
+  happens once at start (`CC_SELFCHECK_ON_START`, default on; never under
+  the test suite or in demo mode) and when asked (`POST /api/selfcheck/run`).
+  The Systems page shows each check beside the system it belongs to, the
+  time of the last run in local time, and a "Run self-check" button; opening
+  the page spends nothing. `CC_SELFCHECK_COMPLETION_TIMEOUT` (default 300 s)
+  is how long the completion check waits on a busy single-slot backend.
+- **Fixed: a step that FAILED could be recorded `done`.** v2.55.0's ledger
+  trusted a row's probe over the phase's own verdict, so a `verify-live` that
+  failed with the stack still up was written `done` and the next
+  `./setup.sh` skipped the verify phase. A step that printed FAIL is now
+  `failed`, and one that printed USERACTION is `gate`, whatever its probe
+  reads.
+- **`started`.** Every row of a phase is written `started` before the phase
+  runs (dpkg's half-configured), so a run that is killed leaves "started, not
+  finished" rather than rows that look untried; the refusal and the plan say
+  the earlier run was interrupted.
+- **One run at a time.** `<state>/run.lock/`, taken by every command that
+  writes the ledger or changes the host and by `update.sh`. A second run
+  while one is live is `FAIL run-lock:` naming the pid, the command and when
+  it started. A lock whose holder is gone is reclaimed by the next
+  `./setup.sh` with a `WARN run-lock:` naming the dead run — there is no
+  separate unlock command, because the recovery is one command.
+- **A plan before every run.** `PLAN <phase>: WILL RUN | WILL SKIP — <why>`
+  for each phase before anything executes: never run, failed (with the
+  recorded reason), interrupted, waiting on the operator, version changed,
+  inputs changed (naming the keys the row reads), or the effect is absent.
+  The plan and the run share one decision function.
+- **The report redacts as it collects.** `deploy/single/redact.tsv` declares
+  what a secret is (key-name globs whose values are replaced with
+  `[REDACTED:<KEY>]`, and credential shapes — URL userinfo, `Bearer` tokens,
+  `sk-` keys); every section passes through it. A credential echoed into a
+  log no longer costs the whole report. The final scan stays and still
+  refuses a report a value survived into.
+- **The spine key is scoped from the one alias list.** The mint used a
+  hard-coded `cc-default`/`cc-tts`/`cc-stt`; it now uses
+  `cc_required_aliases`. A key that is already set is never re-minted or
+  narrowed: a scope missing a required alias gains exactly the missing ones.
+  (Measured while doing this: the graph writer embeds with the admin key, so
+  the narrow scope was drift, not the cause of an embedding failure — the
+  design record's guess is corrected.)
+- `tests/test_install_tree_hook.py` no longer fails when run from a session
+  that exports `CC_DEV_SESSION=1`, which the hook's own rule tells every
+  development session to do.
+
+Not yet proven on a real host: the `/key/update` call that widens an
+existing key (exercised against a stub only; the vendored LiteLLM docs do
+not show `models` on that endpoint), and everything Windows — P5's laptop
+run is where both are measured.
+
 ## 2026-10-01 — v2.55.0: the install remembers what it did, and the tree stays pristine
 
 On 2026-10-01 the operator asked why every deployment "comes off the rails,

@@ -106,7 +106,7 @@ stack	restart-on-boot	run	stack/up-stack	-	-	p_restart_on_boot	Make the containe
 app	venv	run	fetch/venv	CC_PYTHON_MIRROR,CC_AIRGAP	-	p_venv	Assert the virtual environment the app runs in.
 app	install	run	app/venv	CC_AIRGAP,CC_PYPI_INDEX_URL	-	p_install	Install central_command editable into that environment.
 app	app-env	run	-	-	-	p_env_file	Assert the one answer file and its mode (0600 where the filesystem honours it).
-app	mint-key	run	llm/secrets,llm/litellm-live	CC_LITELLM_PORT,CC_LLM_PROXY_ADMIN_KEY	CC_LLM_API_KEY	p_mint_key	Mint the spine's OWN LiteLLM virtual key, so a leak of the agents' credential cannot reconfigure the proxy.
+app	mint-key	run	llm/secrets,llm/litellm-live	CC_LITELLM_PORT,CC_LLM_PROXY_ADMIN_KEY,CC_ENABLE_SPEECH	CC_LLM_API_KEY	p_mint_key	Mint the spine's OWN LiteLLM virtual key, scoped to the aliases this deployment requires, or widen an existing key's scope to cover them, so a leak of the agents' credential cannot reconfigure the proxy.
 app	app-llm-base-url	run	-	CC_LITELLM_PORT	CC_LLM_BASE_URL	p_llm_base_url	Derive the proxy URL the app dials.
 app	app-default-model	run	-	-	CC_DEFAULT_MODEL	p_default_model	Derive which model the agents run on (this profile's proxy carries cc-default).
 app	app-embed-alias	run	-	-	CC_EMBED_ALIAS	p_embed_alias	Derive the alias the graph writer embeds through.
@@ -119,13 +119,14 @@ app	app-link-sandbox	run	-	CC_ENABLE_SANDBOX,CC_SANDBOX_RUNNER_URL	CC_SANDBOX_DO
 app	cockpit	run	fetch/cockpit	CC_NPM_REGISTRY	web/dist,web/server-dist	p_cockpit_build	Build the cockpit — both the SPA and the Node server every panel routes through.
 verify	verify-deployed	run	stack/up-stack	CC_LITELLM_PORT,CC_GRAPHITI_PORT,CC_NEO4J_HTTP_PORT	-	p_verify_deployed	Assert every deployment and configuration fact verify.sh knows, under the admin key.
 verify	verify-live	run	app/mint-key	CC_LLM_API_KEY,CC_LLM_BASE_URL,CC_DEFAULT_MODEL,CC_EMBED_DIM,CC_LITELLM_PORT	-	p_verify_live	Assert the same deployment LIVE: a real completion and the embedding dimension.
+verify	selfcheck	run	verify/verify-live	CC_LLM_API_KEY,CC_LLM_BASE_URL,CC_DEFAULT_MODEL,CC_EMBED_ALIAS,CC_EMBED_DIM,CC_DATABASE_URL,CC_GRAPHITI_MCP_URL,CC_ENABLE_SANDBOX,CC_SANDBOX_RUNNER_URL,CC_ENABLE_CRAWLER,CC_CRAWLER_URL,CC_ENABLE_N8N,CC_EMAIL_FACADE_URL	-	p_selfcheck	Run the application's own self-check, with the settings and the credential the agents will use, before anything is booted.
 test	test	run	app/install	-	-	p_always	Run the offline suite — the gate, once per release.
 boot	operator-name	human	-	-	CC_OPERATOR_NAME	p_operator_name	YOUR MOVE: tell the agents what to call you — setup asks on a terminal, the cockpit asks on first run otherwise.
-boot	boot-api	run	app/install,app/mint-key	CC_API_PORT,CC_DATABASE_URL	uvicorn.pid	p_boot_api	Start the API detached and wait for /health.
+boot	boot-api	run	app/install,app/mint-key,verify/selfcheck	CC_API_PORT,CC_DATABASE_URL	uvicorn.pid	p_boot_api	Start the API detached and wait for /health.
 boot	boot-roster	run	boot/boot-api	CC_API_PORT,CC_DATABASE_URL	-	p_boot_roster	Assert first boot hired the founding roster.
 boot	boot-cockpit	run	app/cockpit	CC_COCKPIT_PORT,CC_API_PORT	cockpit.pid	p_boot_cockpit	Start the cockpit server detached and wait for it to answer.
 boot	boot-at-logon	run	boot/boot-api	-	cc-boot.cmd	p_boot_at_logon	Register the logon entry that brings the two host processes back after a reboot (Windows only).
-demo	demo-feed	run	boot/boot-api	CC_API_PORT	-	p_demo_fed	Enrol the fixture email (a repeat Message-ID is a no-op by design).
+demo	demo-feed	run	boot/boot-api,verify/selfcheck	CC_API_PORT	-	p_demo_fed	Enrol the fixture email (a repeat Message-ID is a no-op by design).
 demo	demo-dispatch	run	demo/demo-feed	CC_API_PORT,CC_DEFAULT_MODEL	-	p_demo_fed	Let the dispatcher claim it and run a real triage against your endpoint.
 demo	demo-approve	gate	demo/demo-dispatch	CC_COCKPIT_PORT	-	p_demo_decided	YOUR MOVE: open the cockpit's Decisions Inbox, read the proposal and its evidence, and decide.
 demo	demo-decided	run	demo/demo-approve	CC_API_PORT	-	p_demo_decided	Assert the decision reached the event log.

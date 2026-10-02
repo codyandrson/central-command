@@ -665,6 +665,28 @@ class Settings(BaseSettings):
     # — display-only, for the Systems view. Unset = no link.
     db_ui_url: str = ""
 
+    # The application self-check (central_command/selfcheck.py; design record
+    # 2026-10-01, D4): the same checks the installer's `verify` phase runs, as
+    # the app, from inside the API. READINESS only — a failed check changes
+    # nothing, it is shown (see the module docstring for why that line holds).
+    #   selfcheck_on_start            -> one run in the background at API
+    #                                    start, so the Systems page has a
+    #                                    result without anyone asking. Never
+    #                                    under the test suite or in demo mode
+    #                                    (api/selfcheck.py:start_on_boot).
+    #                                    Two checks spend one model request
+    #                                    each, which is why it is a switch.
+    #   selfcheck_completion_timeout  -> seconds `completion-as-app` waits for
+    #                                    its one-token reply. GENEROUS on
+    #                                    purpose: a local single-slot backend
+    #                                    queues requests FIFO (see
+    #                                    model_concurrency), so the check can
+    #                                    wait behind a whole agent turn and
+    #                                    still be healthy. The CLI's
+    #                                    `--timeout` overrides it for one run.
+    selfcheck_on_start: bool = True
+    selfcheck_completion_timeout: float = 300.0
+
     # Where everything a deploy command GENERATES lives — logs, diagnostics,
     # the installed manifest, pid files, the cockpit-driven updater's working
     # dir, discovery evidence (design record 2026-09-23, D7). Nothing under

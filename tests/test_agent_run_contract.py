@@ -48,6 +48,9 @@ NOT_AN_AGENT = {
     "handler": "ingest/dispatcher.py's _KindHandler — its `.run` is the per-kind entrypoint",
     "spec": "heartbeat/actions.py's ActionSpec — its `.run` is the action body",
     "event_bridge": "the cockpit event bridge's drain loop",
+    "asyncio": "the stdlib event-loop runner (selfcheck.py's CLI entrypoint)",
+    "selfcheck": "central_command/selfcheck.py's check runner (api/selfcheck.py) — "
+                 "its one model request goes through pydantic_ai.direct, not an Agent",
 }
 
 # Agent runs that legitimately pass no deps, each with the reason it needs

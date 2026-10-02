@@ -247,3 +247,79 @@ when a matching file is read.
   gets a ledger there too** (the hook keys off `ledger.tsv`'s presence, not
   off "is this the real deployment") and must set `CC_DEV_SESSION=1` before
   the next edit to that tree.
+- **A step that printed FAIL is never `done`, and a phase that began reads
+  `started`** (v2.56.0, design record D2/D11). `ledger_record` used to mark a
+  row `done` whenever its probe passed — so a `verify-live` that FAILED with
+  the stack still up was recorded done and the next `./setup.sh` SKIPPED
+  verify. The phase's own word now outranks the probe: `fail` and
+  `useraction` record what was said per check-name (`STEP_SAID`), a FAIL is
+  `failed`, a USERACTION is `gate`, whatever the probe reads. And every row
+  of a phase is written `started` (one atomic rewrite,
+  `cc_ledger_mark_started`) BEFORE the phase function runs, so a killed run
+  leaves "started, not finished" (dpkg's half-configured) instead of rows
+  that look untried. `started` blocks like any other not-done status. Never
+  let a probe upgrade a row the phase itself said failed.
+- **One run at a time, and `./setup.sh` is what clears a stale lock**
+  (v2.56.0, D11). `<state>/run.lock/` (a `mkdir` — atomic on NTFS, where
+  `flock` does not exist) holds `pid`, `command`, `started`; the functions
+  are `cc_lock_*` in `deploy/env-lib.sh`. Taken by every command that writes
+  the ledger or changes the host and by `update.sh` (not by `status`,
+  `report`, `check --list`, `machine --dry-run`, `update.sh plan`). A lock
+  held by a LIVE run is `FAIL run-lock:` naming pid, command and start, and
+  nothing else happens. A lock whose holder is provably gone (`kill -0`
+  fails, or the pid is alive but `/proc/<pid>/cmdline` is not one of our
+  scripts) is RECLAIMED with a `WARN run-lock:` naming the dead run — there
+  is deliberately NO `unlock` command: the agent's contract is three verbs
+  and the recovery is one command, and a logon-time run after a power cut
+  must not sit behind a lock nothing holds. The WARN is printed and logged
+  but not COUNTED, or a headless run would stop at the check gate on it. A
+  child of the holder (`update.sh` → `setup.sh <phase>`) recognises its
+  parent through `CC_RUN_LOCK_PID` and neither waits nor releases; `setup.sh`
+  un-exports it before `boot` starts the API, or a cockpit-driven update
+  would run "nested" beside a live install.
+- **Every run prints its PLAN first, and the plan and the loop are ONE
+  decision** (v2.56.0, D11 — `terraform plan`). `PLAN <phase>: WILL RUN|WILL
+  SKIP — <why>` per phase, before anything executes: never run, failed
+  (quoting the reason), interrupted, waiting on the operator, version
+  changed, inputs changed (the row's `reads` key NAMES — a fingerprint
+  cannot say which one), effect absent (drift). `cc_row_decide` /
+  `cc_phase_decide` in `ledger-lib.sh` are that decision, and
+  `phase_is_done` calls the same functions, so the plan cannot disagree with
+  what the loop then does. A probe is evaluated only for a row that is
+  otherwise skippable, so a fresh install's plan costs none. It is a
+  PREDICTION and says so. `PLAN` lines are not protocol lines and move no
+  counter.
+- **`verify/selfcheck` is the application proving itself, and it is
+  READINESS, never liveness** (v2.56.0, D4/D11). After `verify.sh` (the
+  deployment, under the ADMIN key) the `verify` phase runs `python -m
+  central_command.selfcheck --pre-boot` from the install's venv — the app's
+  own `Settings`, the same `.env`, the credential the app holds, a completion
+  through `resolve_model` — and re-emits its `selfcheck-<name>` lines through
+  the driver's own `pass`/`warn`/`fail`. `boot/boot-api` and `demo/demo-feed`
+  REQUIRE the row, which is how an empty `CC_LLM_API_KEY` stops reaching
+  `boot`. `--pre-boot` skips only what `boot` starts (cockpit, sandbox
+  runner); `./setup.sh status` runs the whole table and so spends two small
+  model requests — which is why the API CACHES (`GET /api/selfcheck` spends
+  nothing; a run is at API start or on `POST /api/selfcheck/run`). Nothing
+  may ever restart, stop or reconfigure anything because a check failed, and
+  never put it on a timer.
+- **The spine key's scope is `cc_required_aliases`, never a second list**
+  (v2.56.0). The mint used a hard-coded three-alias list that had already
+  drifted from the ONE list. `mint_spine_key` builds the scope from
+  `cc_required_aliases`; a key that is already set is never re-minted and
+  never narrowed — a non-empty scope missing a required alias gains exactly
+  the missing ones through `/key/update` (an EMPTY list is LiteLLM's "all
+  models" and is left alone), and a proxy that cannot be asked is a WARN.
+  Both keys travel in a curl config on STDIN (`curl -K -`), never an argv.
+  Measured, and not what the record first guessed: the graph writer embeds
+  with the ADMIN key, so the narrow scope never broke embedding.
+- **The report redacts as it collects, from `redact.tsv`, and the scan
+  stays** (v2.56.0, D11 — Replicated's redactors). `deploy/single/redact.tsv`
+  declares `key` rows (globs over `.env` key NAMES whose VALUES become
+  `[REDACTED:<KEY>]`) and `shape` rows (URL userinfo, `Bearer`, `sk-…`);
+  every section goes through `report_redact`, with known values replaced by
+  bash substitution so a value never reaches an argv. `report_secret_values`
+  is the one list both the filter and the final leak scan read. The scan is
+  still the last line: a value that survives refuses the report, and a
+  missing or key-less `redact.tsv` refuses it outright. A new credential
+  shape is a ROW; never weaken the scan to get a report out.

@@ -373,6 +373,11 @@ RUNTIME_ONLY = {
     # cc_tls_insecure_warn_once once it has fired, read by every child process
     # this run execs. A per-run fact, never an operator answer.
     "CC_TLS_INSECURE_WARNED",
+    # The run lock's NESTING marker (2026-10-01 design record, D11): EXPORTED
+    # by the process that took <state>/run.lock, read by the setup.sh phases
+    # update.sh runs under it so they neither deadlock on nor release their
+    # parent's lock. A per-run fact handed from parent to child, never an answer.
+    "CC_RUN_LOCK_PID",
     # setup.sh's own LISTS, not answers: which keys are ports and which
     # credentials make-secrets.sh owns (v2.44.0's `check` reads both).
     "CC_PORT_KEYS", "CC_GENERATED_KEYS",

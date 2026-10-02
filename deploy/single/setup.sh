@@ -200,12 +200,21 @@ LEDGER=""
 # because the protocol functions are the one place every message passes
 # through. Safe to record: by the same protocol a message refers to a key by
 # NAME and never carries its value.
+#
+# STEP_SAID says WHICH of the two it was (v2.56.0): a row whose own check-name
+# printed a FAIL in this run is recorded `failed`, and one that printed a
+# USERACTION `gate`, WHATEVER its probe reads — a probe is a cheap read of one
+# effect, and `verify-live` FAILing inside verify.sh while its probe (the spine
+# key answers /v1/models) held is how a failed verify was written down `done`
+# and the next ./setup.sh skipped it. FAIL outranks USERACTION here exactly as
+# it does in the exit code (D5): a later USERACTION never overwrites a FAIL.
 declare -A STEP_MSG=()
+declare -A STEP_SAID=()
 logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "${CURPHASE:-run}" "$*" >>"$LOGFILE" 2>/dev/null || true; }
 pass() { printf 'PASS %s: %s\n' "$1" "$2"; PASSES=$((PASSES+1)); logline "PASS $1: $2"; }
 warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
-fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); STEP_MSG["$1"]="$2"; logline "FAIL $1: $2"; }
-useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); STEP_MSG["$1"]="$2"; logline "USERACTION $1: $2"; }
+fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); STEP_MSG["$1"]="$2"; STEP_SAID["$1"]=FAIL; logline "FAIL $1: $2"; }
+useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); [[ "${STEP_SAID[$1]:-}" == FAIL ]] || { STEP_MSG["$1"]="$2"; STEP_SAID["$1"]=USERACTION; }; logline "USERACTION $1: $2"; }
 note() { printf '%s\n' "$*" >&2; }
 
 # Run a step, sending all of its chatter to stderr. PASS on success, FAIL on
@@ -2506,6 +2515,154 @@ venv_python() {
   return 1
 }
 
+# ── the spine's own LiteLLM key, and its SCOPE (2026-10-01 record, D4/P2) ────
+# The key used to be minted with a hard-coded ["cc-default", "cc-tts",
+# "cc-stt"] — a SECOND hand-kept alias list beside cc_required_aliases (the ONE
+# list, deploy/env-lib.sh), and it had already drifted: graphiti-llm,
+# cc-embedding and gpt-4.1-nano were never in it. MEASURED before this fix:
+# that is NOT what breaks graph embedding — the graph writer embeds with the
+# ADMIN key, not this one — but the record's fix stands on its own: a scope is
+# a list, a list has one definition, so the key is scoped to exactly the
+# aliases this deployment requires and nothing else.
+#
+# LiteLLM endpoint shapes, from the vendored docs (never a live write to check
+# them): docs/vendor/litellm/docs/proxy/virtual_keys.md — POST /key/generate
+# takes {"models": [...], "metadata": {...}} and answers {"key": "sk-..."};
+# GET /key/info?key=<key> under the master key answers {"key": ..., "info":
+# {"models": [...]}}; POST /key/update takes {"key": <key>, <field>: ...}.
+# docs/vendor/litellm/docs/proxy/key_auth_arch.md: "The empty list and the
+# literal `*` both mean 'all models on the proxy'" — which is why an empty
+# scope is LEFT ALONE below rather than "fixed" into a narrower one.
+
+# The required aliases as a JSON array, built from cc_required_aliases — never
+# a second list.
+spine_aliases_json() {
+  local a out=""
+  for a in $(cc_required_aliases); do out="${out:+$out, }\"$a\""; done
+  printf '[%s]' "$out"
+}
+
+# One string made safe inside a double-quoted curl-config value (and, the same
+# two escapes, inside a JSON string): backslash and double quote.
+cfg_quote() { # cfg_quote <text>
+  local s="${1//\\/\\\\}"
+  printf '%s' "${s//\"/\\\"}"
+}
+
+# Percent-encoding for a query value, in bash builtins only: the value is a
+# credential, and a credential may not reach an argv (`ps` shows argv).
+url_encode() { # url_encode <text>
+  local s="$1" out="" c i
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      [A-Za-z0-9._~-]) out+="$c" ;;
+      *) printf -v c '%%%02X' "'$c"; out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# A request to the proxy's management API as a curl CONFIG, printed for curl to
+# read from STDIN (`curl -K -`). Both secrets — the admin key in the header and,
+# for /key/info and /key/update, the spine key in the URL or the body — travel
+# that way, so neither is ever in an argv. NOT a temp file and NOT `-K <(...)`:
+# nothing may be written inside the checkout, and native Windows curl cannot
+# open MSYS's /proc fd paths (found live 2026-08-28) — stdin is the one channel
+# that works on every host this profile runs on.
+proxy_cfg() { # proxy_cfg <path-and-query> [json-body]
+  printf 'url = "%s"\n' "$(cfg_quote "http://127.0.0.1:${CC_LITELLM_PORT}/$1")"
+  printf 'header = "%s"\n' "$(cfg_quote "Authorization: Bearer ${CC_LLM_PROXY_ADMIN_KEY:-}")"
+  if [[ -n "${2:-}" ]]; then
+    printf 'header = "Content-Type: application/json"\n'
+    printf 'data = "%s"\n' "$(cfg_quote "$2")"
+  fi
+}
+
+mint_spine_key() {
+  local cur_key models
+  cur_key="$(get_kv "$ENV_FILE" CC_LLM_API_KEY)"
+  models="$(spine_aliases_json)"
+  if is_placeholder "$cur_key"; then
+    [[ -n "${CC_LLM_PROXY_ADMIN_KEY:-}" ]] || { fail "mint-key" "CC_LLM_PROXY_ADMIN_KEY is missing from .env — run the llm phase first (make-secrets.sh generates it)"; return 1; }
+    local body minted
+    # The master key travels via `-H @-` (stdin), so it is not visible in `ps`
+    # while the request runs; the body carries no secret, so it may sit in the
+    # argv. No `tags` field: tags are an Enterprise feature and their presence
+    # 403s a community proxy.
+    body="$(printf 'Authorization: Bearer %s\n' "$CC_LLM_PROXY_ADMIN_KEY" | \
+      curl -sS --fail-with-body -m 60 \
+      -H @- \
+      -H 'Content-Type: application/json' \
+      -d "{\"models\": $models, \"metadata\": {\"cc\": \"spine\"}}" \
+      "http://127.0.0.1:${CC_LITELLM_PORT}/key/generate" 2>&1)"
+    minted="$($PY -c 'import json,sys; print(json.load(sys.stdin).get("key",""))' <<<"$body" 2>/dev/null)"
+    if [[ -z "$minted" ]]; then
+      fail "mint-key" "/key/generate did not return a key — is the proxy up? (the response is NOT echoed; run ./setup.sh report)"
+      return 1
+    fi
+    set_kv "$ENV_FILE" CC_LLM_API_KEY "$minted"
+    local list; list="$(cc_required_aliases)"
+    pass "mint-key" "minted a LiteLLM virtual key scoped to ${list// / + } (cc_required_aliases) and stored it as CC_LLM_API_KEY"
+    return 0
+  fi
+
+  # ALREADY SET: never re-mint, never change the value — an operator (or an
+  # earlier release) put it there and the app is running on it. What CAN have
+  # drifted is its SCOPE: a key minted before this fix lacks four aliases, and
+  # CC_ENABLE_SPEECH turning on adds two. So the scope is READ and, when it is
+  # a non-empty list missing a required alias, the missing ones are ADDED —
+  # a union: a model an operator added is never removed. A failure to ask is a
+  # WARN, not a FAIL: this step proves nothing about the key working, the
+  # self-check (verify/selfcheck) does.
+  if [[ -z "${CC_LLM_PROXY_ADMIN_KEY:-}" ]]; then
+    warn "mint-key" "CC_LLM_API_KEY already set; its scope was NOT checked against cc_required_aliases because CC_LLM_PROXY_ADMIN_KEY is empty in .env (the self-check proves whether the key reaches the aliases)"
+    return 0
+  fi
+  local info plan state missing union
+  info="$(proxy_cfg "key/info?key=$(url_encode "$cur_key")" | curl -sS --fail-with-body -m 30 -K - 2>/dev/null)" || info=""
+  # One python pass, the JSON on STDIN and only alias NAMES in the argv:
+  #   line 1  empty | covered | missing   (anything else = could not read it)
+  #   line 2  the missing aliases, space-separated
+  #   line 3  the UNION as a JSON array, current order first
+  plan="$($PY -c '
+import json, sys
+try:
+    m = (json.load(sys.stdin).get("info") or {})["models"]
+    assert isinstance(m, list)
+except Exception:
+    sys.exit(0)
+want = sys.argv[1:]
+gone = [a for a in want if a not in m]
+print("empty" if not m else ("missing" if gone else "covered"))
+print(" ".join(gone))
+print(json.dumps(m + gone))
+' $(cc_required_aliases) <<<"$info" 2>/dev/null)" || plan=""
+  state="$(sed -n 1p <<<"$plan")"
+  missing="$(sed -n 2p <<<"$plan")"
+  union="$(sed -n 3p <<<"$plan")"
+  case "$state" in
+    empty)
+      pass "mint-key" "CC_LLM_API_KEY already set; its model list is EMPTY, which LiteLLM reads as every model on the proxy — left alone (not minting a second key)"
+      ;;
+    covered)
+      pass "mint-key" "CC_LLM_API_KEY already set; its scope already covers every alias this deployment requires ($(cc_required_aliases)) — not minting a second key"
+      ;;
+    missing)
+      if proxy_cfg "key/update" "{\"key\": \"$(cfg_quote "$cur_key")\", \"models\": $union}" \
+           | curl -sS --fail-with-body -m 30 -K - >/dev/null 2>&1; then
+        pass "mint-key" "CC_LLM_API_KEY already set; ADDED $missing to its scope (every model it already had is kept, and the key's value is unchanged)"
+      else
+        warn "mint-key" "CC_LLM_API_KEY already set and its scope lacks $missing, but /key/update did not succeed — add them to the key in the LiteLLM UI (the self-check names the alias the app cannot reach)"
+      fi
+      ;;
+    *)
+      warn "mint-key" "CC_LLM_API_KEY already set; could not read its scope from the proxy's /key/info under CC_LLM_PROXY_ADMIN_KEY (is the proxy up on CC_LITELLM_PORT?) — not checked against cc_required_aliases. The self-check proves whether the key reaches the aliases"
+      ;;
+  esac
+  return 0
+}
+
 phase_app() {
   load_env || return 1
 
@@ -2545,30 +2702,7 @@ phase_app() {
 
   # The spine gets its OWN LiteLLM virtual key, never the master key: a leak of
   # the agents' credential must not be able to reconfigure the proxy.
-  local cur_key; cur_key="$(get_kv "$ENV_FILE" CC_LLM_API_KEY)"
-  if is_placeholder "$cur_key"; then
-    [[ -n "${CC_LLM_PROXY_ADMIN_KEY:-}" ]] || { fail "mint-key" "CC_LLM_PROXY_ADMIN_KEY is missing from .env — run the llm phase first (make-secrets.sh generates it)"; return 1; }
-    local body minted
-    # The master key travels via `-H @-` (stdin), so it is not visible in `ps`
-    # while the request runs. NOT `-H @<(...)`: native Windows curl cannot
-    # open MSYS's /proc fd paths (found live 2026-08-28). No `tags` field:
-    # tags are an Enterprise feature and their presence 403s a community proxy.
-    body="$(printf 'Authorization: Bearer %s\n' "$CC_LLM_PROXY_ADMIN_KEY" | \
-      curl -sS --fail-with-body -m 60 \
-      -H @- \
-      -H 'Content-Type: application/json' \
-      -d '{"models": ["cc-default", "cc-tts", "cc-stt"], "metadata": {"cc": "spine"}}' \
-      "http://127.0.0.1:${CC_LITELLM_PORT}/key/generate" 2>&1)"
-    minted="$($PY -c 'import json,sys; print(json.load(sys.stdin).get("key",""))' <<<"$body" 2>/dev/null)"
-    if [[ -z "$minted" ]]; then
-      fail "mint-key" "/key/generate did not return a key — is the proxy up? (the response is NOT echoed; run ./setup.sh diagnose)"
-      return 1
-    fi
-    set_kv "$ENV_FILE" CC_LLM_API_KEY "$minted"
-    pass "mint-key" "minted a LiteLLM virtual key scoped to cc-default + cc-tts + cc-stt and stored it as CC_LLM_API_KEY"
-  else
-    pass "mint-key" "CC_LLM_API_KEY already set — not minting a second key (a key minted before v2.21.0 lacks cc-tts/cc-stt: add them to it in the proxy UI, or clear CC_LLM_API_KEY to re-mint)"
-  fi
+  mint_spine_key || return 1
 
   # DERIVED values — the last two things in .env nobody should have to type.
   # Until v2.42.0 this block COPIED five values out of deploy/single/.env into
@@ -2684,12 +2818,96 @@ capability_manifest() {
   return 0
 }
 
+# ── the self-check: the APPLICATION proving itself (2026-10-01 record, D4) ───
+# verify.sh asks "is the deployment what it should be?" under the ADMIN key.
+# The self-check asks the other question: "will the AGENTS work?" — the app's
+# own Settings, the same .env, the credential the app actually holds, through
+# the seam a real run takes. The two are different questions and both are
+# asked. It exists because every check the install made could be green while
+# the app could not do its job (2026-10-01 work site: an empty CC_LLM_API_KEY,
+# eight blank Systems links, a green verify).
+#
+# The module is central_command/selfcheck.py, run from the install's venv with
+# the repo root as cwd. Its contract: one protocol line per check on stdout,
+# `PASS|WARN|FAIL selfcheck-<name>: <message>`, the message naming .env keys
+# and never values; exit 1 on any FAIL, else 2 on any WARN, else 0.
+# `--pre-boot` is the installer's mode: before `boot` the cockpit and the
+# sandbox runner are not started yet, so those two are reported as not checked.
+#
+# It is READINESS-shaped (D11, goss): it GATES use — boot and demo require
+# verify/selfcheck — and it restarts nothing.
+SC_OUT=""; SC_RC=0; SC_WHY=""
+selfcheck_exec() { # selfcheck_exec <module-args...>  -> 1 = it could not be started at all (SC_WHY says why)
+  local py
+  SC_OUT=""; SC_RC=0; SC_WHY=""
+  if ! py="$(venv_python)"; then
+    SC_WHY="the install's .venv has no python, so python -m central_command.selfcheck cannot run — run ./setup.sh (the fetch and app phases create it)"
+    return 1
+  fi
+  # Its stderr is the module's own detail (an import error, a traceback) and
+  # goes where the protocol says detail goes.
+  SC_OUT="$(cd "$REPO_ROOT" && "$py" -m central_command.selfcheck "$@")" || SC_RC=$?
+  return 0
+}
+
+# Re-emit the module's lines through THIS script's pass/warn/fail, under their
+# own `selfcheck-<name>` names — so they are counted into the phase's verdict,
+# logged, and carried into the ledger's reason like any other line — then the
+# row's own `selfcheck` line. 0 = no FAIL (WARN-only is not a failure of the
+# row), 1 = a check failed or the module could not run.
+selfcheck_emit() { # selfcheck_emit <module-args...>
+  local line verb name msg nfail=0 nwarn=0 npass=0 failed=""
+  local re='^(PASS|WARN|FAIL) (selfcheck-[A-Za-z0-9_-]+): ?(.*)$'
+  if ! selfcheck_exec "$@"; then
+    fail "selfcheck" "$SC_WHY"
+    return 1
+  fi
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    if [[ "$line" =~ $re ]]; then
+      verb="${BASH_REMATCH[1]}"; name="${BASH_REMATCH[2]}"; msg="${BASH_REMATCH[3]}"
+      case "$verb" in
+        PASS) pass "$name" "$msg"; npass=$((npass+1)) ;;
+        WARN) warn "$name" "$msg"; nwarn=$((nwarn+1)) ;;
+        FAIL) fail "$name" "$msg"; nfail=$((nfail+1)); failed="${failed:+$failed, }$name" ;;
+      esac
+    elif [[ -n "${line//[[:space:]]/}" ]]; then
+      note "$line"
+    fi
+  done <<<"$SC_OUT"
+  if (( nfail )); then
+    fail "selfcheck" "$nfail check(s) failed ($failed) — each line above names the .env key or the command"
+    return 1
+  fi
+  if (( npass + nwarn == 0 )); then
+    fail "selfcheck" "python -m central_command.selfcheck printed no check line (exit $SC_RC) — the module could not run; its own error is on stderr above"
+    return 1
+  fi
+  if (( SC_RC != 0 && SC_RC != 2 )); then
+    fail "selfcheck" "python -m central_command.selfcheck exited $SC_RC without a FAIL line — it stopped part-way; its own error is on stderr above"
+    return 1
+  fi
+  if (( nwarn )); then
+    pass "selfcheck" "the application's own self-check passed: $npass check(s) passed, $nwarn warned (each WARN above names what to look at)"
+  else
+    pass "selfcheck" "the application's own self-check passed: $npass check(s), with the settings and the credential the agents will use"
+  fi
+  return 0
+}
+
 phase_verify() {
   load_env || return 1
   step "verify-deployed" "every deployment/configuration assertion passed" \
     "$HERE/verify.sh" || return 1
   step "verify-live" "a real completion and the embedding dimension both check out" \
     env CC_VERIFY_LIVE=1 "$HERE/verify.sh" || return 1
+  # AFTER verify.sh, as the record orders it, and with --pre-boot: the host
+  # processes boot starts are not running yet. Its two model requests are the
+  # only two in the whole install that prove what the agents will experience.
+  # A FAIL here leaves verify/selfcheck not done, and boot/boot-api and
+  # demo/demo-feed REQUIRE it — which is how an .env with an empty
+  # CC_LLM_API_KEY stops reaching boot (P2's acceptance criterion).
+  selfcheck_emit --pre-boot || return 1
   capability_manifest
 }
 
@@ -3009,6 +3227,13 @@ phase_status() {
     fi
   done
   step "verify-deployed" "every deployment/configuration assertion passed" "$HERE/verify.sh" || true
+  # "status prints the ledger AND the self-check" (D3). WITHOUT --pre-boot:
+  # after boot the cockpit and the sandbox runner are part of what the agents
+  # rely on, so they are checked too. Read-only, but NOT free — it spends two
+  # small model requests (one max_tokens=1 completion, one embedding), which is
+  # exactly why the Systems page serves a CACHED result instead of running it
+  # on every page load.
+  selfcheck_emit || true
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3021,9 +3246,19 @@ phase_status() {
 # enough.
 #
 # NAMES of keys, never values — and since that is a claim rather than a
-# mechanism, the report is written to a temp file, SCANNED for every credential
-# value .env actually holds, and REFUSED (FAIL, nothing written) if one
-# appears. Belt and braces, per the record.
+# mechanism, TWO mechanisms hold it (P2, D11's `report` row, from Replicated
+# troubleshoot.sh's redactors):
+#   1. IN PROCESS: every section is piped through report_redact AS IT IS
+#      COLLECTED, which replaces what deploy/single/redact.tsv declares — the
+#      value of every matching .env key, and credential SHAPES .env never knew.
+#      A value that turns up in a log is replaced, rather than costing the
+#      operator the whole report;
+#   2. THE GUARD: the result is still written to a temp file, SCANNED for every
+#      credential value .env actually holds, and REFUSED (FAIL, nothing
+#      written) if one appears. Unchanged, and kept as the last line of
+#      defence — tests/test_single_report_redacts.py keeps its refusal path
+#      alive. Both read the SAME list (report_secret_values), so the redactor
+#      and the guard cannot disagree about what a secret is.
 #
 # `diagnose` is an alias for it: the bundle it used to write had a `tail -40`
 # window that cut off above wherever the run stopped, which is the one thing a
@@ -3075,36 +3310,156 @@ last_run_log() {
   return 0
 }
 
-# Every credential VALUE this .env actually holds, as `KEY<TAB>VALUE`, so the
-# written report can be scanned for them. The sources are questions.tsv's own
-# `secret` column plus the shapes a credential takes in this file — the schema
-# is the list, and the patterns catch what make-secrets.sh and the app phase
-# generate (which questions.tsv never asks).
+# The declared default redaction list (D11): data, read by the filter AND by
+# the guard below. Same conventions as questions.tsv/steps.tsv.
+REDACT_FILE="$HERE/redact.tsv"
+
+# The `key` rows' globs, one per line. q_rows is questions.tsv's reader
+# (comments and blank lines dropped, CRLF-tolerant), reused rather than copied.
+report_redact_globs() {
+  local row
+  [[ -f "$REDACT_FILE" ]] || return 0
+  while IFS= read -r row; do
+    [[ "$(q_field "$row" 1)" == key ]] || continue
+    printf '%s\n' "$(q_field "$row" 2)"
+  done < <(q_rows "$REDACT_FILE")
+  return 0
+}
+
+# Every credential VALUE this .env actually holds, as `KEY<TAB>VALUE` — THE
+# list, read by both the in-process filter (report_redact) and the scan that
+# refuses a leaking report (report_leaking_keys), so the two cannot disagree
+# about what a secret is. The sources are redact.tsv's `key` rows (globs over
+# key NAMES: the shapes a credential takes in this file, which catch what
+# make-secrets.sh and the app phase generate) plus questions.tsv's own
+# `secret` column (what configure asks for without echo).
 #
 # Values shorter than eight characters are skipped on purpose: `none`, `0` and
 # `1` are legitimate answers and a substring of half the English language, and
 # a refusal on one would make `report` unusable exactly when it is needed.
 report_secret_values() {
-  local row k v line secret_keys=""
+  local row k v line g matched globs=()
+  while IFS= read -r g; do
+    [[ -n "$g" && "$g" != "-" ]] && globs+=("$g")
+  done < <(report_redact_globs)
   if [[ -f "$QUESTIONS" ]]; then
     while IFS= read -r row; do
       [[ "$(q_field "$row" 8)" == y ]] || continue
-      secret_keys="${secret_keys:+$secret_keys }$(q_field "$row" 1)"
+      globs+=("$(q_field "$row" 1)")
     done < <(q_rows "$QUESTIONS")
   fi
-  secret_keys="${secret_keys:+$secret_keys }CC_LLM_API_KEY CC_LLM_PROXY_ADMIN_KEY"
   [[ -f "$ENV_FILE" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
     [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
     k="${line%%=*}"; v="$(q_unquote "${line#*=}")"
-    case "$k" in
-      *_PASSWORD|*_TOKEN|*_KEY) ;;
-      *) [[ " $secret_keys " == *" $k "* ]] || continue ;;
-    esac
+    matched=0
+    for g in ${globs[@]+"${globs[@]}"}; do
+      # Unquoted on the right on purpose: a GLOB match, not a string compare.
+      # shellcheck disable=SC2053
+      [[ "$k" == $g ]] && { matched=1; break; }
+    done
+    (( matched )) || continue
     (( ${#v} >= 8 )) || continue
     printf '%s\t%s\n' "$k" "$v"
   done <"$ENV_FILE"
+  return 0
+}
+
+# ── the in-process redactor (D11, Replicated's redactors) ───────────────────
+# Loaded ONCE per report: the values (longest first, so a secret that contains
+# another is replaced whole rather than leaving a remnant), and the `shape`
+# rows as sed -E expressions. Returns 1 — and the report REFUSES — when
+# redact.tsv is missing or declares no `key` row: it is release content, and a
+# report that cannot redact is not one to write (steps.tsv's rule, same reason).
+REDACT_K=(); REDACT_V=(); REDACT_SED=(); REDACT_WHY=""
+report_redact_load() {
+  local row kind pat rep nkeys=0 len k v d=$'\001'
+  REDACT_K=(); REDACT_V=(); REDACT_SED=(); REDACT_WHY=""
+  if [[ ! -f "$REDACT_FILE" ]]; then
+    REDACT_WHY="$REDACT_FILE is missing"
+    return 1
+  fi
+  while IFS= read -r row; do
+    kind="$(q_field "$row" 1)"; pat="$(q_field "$row" 2)"; rep="$(q_field "$row" 3)"
+    case "$kind" in
+      key)   nkeys=$((nkeys+1)) ;;
+      shape) [[ "$rep" == "-" ]] && rep=""
+             REDACT_SED+=(-e "s${d}${pat}${d}${rep}${d}g") ;;
+    esac
+  done < <(q_rows "$REDACT_FILE")
+  if (( nkeys == 0 )); then
+    REDACT_WHY="$REDACT_FILE declares no \`key\` row"
+    return 1
+  fi
+  # The length prefix travels through sort's STDIN, never its argv.
+  while IFS=$'\t' read -r len k v; do
+    [[ -n "$v" ]] || continue
+    REDACT_K+=("$k"); REDACT_V+=("$v")
+  done < <(report_secret_values | while IFS= read -r row; do
+             v="${row#*$'\t'}"
+             printf '%s\t%s\n' "${#v}" "$row"
+           done | sort -t$'\t' -k1,1nr)
+  return 0
+}
+
+# THE FILTER every report section is piped through as it is collected. A known
+# value becomes [REDACTED:<KEY NAME>] by bash's own substitution — builtins
+# only, so a value never reaches an argv (no `sed "s/$value/…"`, no `grep
+# "$value"`: `ps` shows argv). The replacement is QUOTED: bash 5.2's
+# patsub_replacement would otherwise read an `&` in it as the match. Then the
+# shapes, through sed -E — static release content, safe in an argv — applied
+# AFTER the values, so a value .env knows keeps its key-name label (the shape
+# patterns stop at the `[` of a label already there).
+report_redact() {
+  local line i
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    for (( i = 0; i < ${#REDACT_V[@]}; i++ )); do
+      [[ "$line" == *"${REDACT_V[i]}"* ]] || continue
+      line="${line//"${REDACT_V[i]}"/"[REDACTED:${REDACT_K[i]}]"}"
+    done
+    printf '%s\n' "$line"
+  done | if (( ${#REDACT_SED[@]} )); then LC_ALL=C sed -E "${REDACT_SED[@]}"; else cat; fi
+}
+
+# One report section: its heading, then whatever <cmd...> prints — stderr too,
+# a section's errors are part of the evidence — THROUGH the filter.
+report_section() { # report_section <heading> <cmd...>
+  printf '%s\n' "$1"; shift
+  "$@" 2>&1 | report_redact
+  echo
+}
+
+# The self-check's lines (D10.3), without --pre-boot: a report is about the
+# install as it stands. A SHORT timeout, because a report is collected FROM a
+# broken install and must not hang on it; and a module that is absent, cannot
+# import, or fails is PRINTED — it never aborts the report.
+report_selfcheck() {
+  local py rc=0
+  if ! py="$(venv_python)"; then
+    echo "  (no .venv python on this install — the self-check cannot run yet; the fetch and app phases create it)"
+    return 0
+  fi
+  ( cd "$REPO_ROOT" && "$py" -m central_command.selfcheck --timeout 10 ) 2>&1 || rc=$?
+  echo "  (exit $rc — 0 all passed · 1 a check failed · 2 warnings only; anything else, or no check line above, means the module could not run)"
+  return 0
+}
+
+report_manifest() {
+  cat "$STATE_DIR/installed.manifest" 2>/dev/null || echo "  (no manifest — the fetch phase writes it)"
+  return 0
+}
+
+report_process_logs() {
+  local t
+  for t in uvicorn cockpit sandbox; do
+    if [[ -f "$STATE_DIR/$t.log" ]]; then
+      echo "---- $t.log"
+      tail -100 "$STATE_DIR/$t.log" 2>&1
+    else
+      echo "---- $t.log (not present)"
+    fi
+  done
   return 0
 }
 
@@ -3122,14 +3477,15 @@ report_leaking_keys() { # report_leaking_keys <file>
   return 0
 }
 
-# Every `failed` or `gate` row, with its reason and the NAMES of the .env keys
-# that shaped it — which is what turns "a row is red" into "change one of
-# these keys, or report the row".
+# Every `failed`, `gate` or `started` row, with its reason and the NAMES of the
+# .env keys that shaped it — which is what turns "a row is red" into "change
+# one of these keys, or report the row". `started` (D11) belongs here: a run
+# that was interrupted inside a phase is exactly what a report is asked about.
 report_open_rows() {
   local line step st reason qual phase name reads any=0
   while IFS= read -r line; do
     IFS=$'\t' read -r step st _ _ _ reason <<<"$line"
-    [[ "$st" == failed || "$st" == gate ]] || continue
+    [[ "$st" == failed || "$st" == gate || "$st" == started ]] || continue
     any=1
     qual="$step"; phase="${qual%%/*}"; name="${qual#*/}"
     reads="$(cc_step_field "$phase" "$name" reads)" || reads=""
@@ -3189,55 +3545,47 @@ cmd_report() {
   # Quietly: the report's own protocol line is the one this command prints.
   load_env >/dev/null 2>&1 || true
   : "${CC_POD_PREFIX:=cc-}"
-  local out tmp t
+  local out tmp
   out="$STATE_DIR/report-$(date -u +%Y%m%dT%H%M%SZ).txt"
   tmp="$out.partial"
+  # The redaction list FIRST: without it nothing below can be redacted, and a
+  # report that cannot redact is not written at all.
+  if ! report_redact_load; then
+    fail "report" "REFUSING to write the report: $REDACT_WHY — it is release content (re-extract the release), and without it nothing in the report can be redacted. Nothing was written"
+    return 1
+  fi
+  : >"$tmp" && chmod 600 "$tmp" 2>/dev/null
+  # Every section through report_redact AS IT IS COLLECTED (D11) — the
+  # headings are this script's own text and carry nothing to redact.
   {
     echo "Central Command single-node install report — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    echo "Built to be pasted into a DEVELOPMENT session. It carries key NAMES only,"
-    echo "never a value; a scan refuses to write it if one got in."
+    echo "Built to be pasted into a DEVELOPMENT session. Values were REDACTED IN PROCESS"
+    echo "(deploy/single/redact.tsv); a scan for every .env credential is the second check."
     echo "The log section below is the WHOLE last run, not a window."
     echo
-    echo "== state directory (everything this install GENERATES is in here;"
-    echo "   nothing is written inside the checkout)"
-    echo "  $STATE_DIR"
-    echo
-    echo "== the ledger — what completed, at which release, with which inputs"
-    ledger_table
-    echo
-    echo "== every failed or waiting row, with its reason and its inputs"
-    report_open_rows
-    echo
-    echo "== the whole log of the last run"
-    last_run_log
-    echo
-    echo "== .env — the one answer file (names only)"
-    env_key_names "$ENV_FILE"
-    echo
-    echo "== VERSION (what the updaters read as the installed version)"
-    cat "$REPO_ROOT/VERSION" 2>&1
-    echo
-    echo "== tool versions"
-    report_tool_versions
-    echo
-    echo "== installed.manifest (what resolve-images.sh actually wrote)"
-    cat "$STATE_DIR/installed.manifest" 2>/dev/null || echo "  (no manifest — the fetch phase writes it)"
-    echo
-    echo "== the processes this install starts (last 100 lines each)"
-    for t in uvicorn cockpit sandbox; do
-      if [[ -f "$STATE_DIR/$t.log" ]]; then
-        echo "---- $t.log"
-        tail -100 "$STATE_DIR/$t.log" 2>&1
-      else
-        echo "---- $t.log (not present)"
-      fi
-    done
-    echo
-    diagnose_sections
-  } >"$tmp"
-  chmod 600 "$tmp" 2>/dev/null
-  # Belt and braces (D10.3): every function above prints names, and this is the
-  # check that they did. A leak is a FAIL and nothing is written.
+    report_section "== state directory (everything this install GENERATES is in here;
+   nothing is written inside the checkout)" echo "  $STATE_DIR"
+    report_section "== the ledger — what completed, at which release, with which inputs" \
+      ledger_table
+    report_section "== every failed or waiting row, with its reason and its inputs" \
+      report_open_rows
+    report_section "== the self-check (python -m central_command.selfcheck, short timeout)" \
+      report_selfcheck
+    report_section "== the whole log of the last run" last_run_log
+    report_section "== .env — the one answer file (names only)" env_key_names "$ENV_FILE"
+    report_section "== VERSION (what the updaters read as the installed version)" \
+      cat "$REPO_ROOT/VERSION"
+    report_section "== tool versions" report_tool_versions
+    report_section "== installed.manifest (what resolve-images.sh actually wrote)" \
+      report_manifest
+    report_section "== the processes this install starts (last 100 lines each)" \
+      report_process_logs
+    # Container logs are the likeliest place for a credential of all.
+    diagnose_sections 2>&1 | report_redact
+  } >>"$tmp"
+  # Belt and braces (D10.3): the redactor above replaced what redact.tsv
+  # declares, and this is the check that it did — the SAME list, scanned for
+  # verbatim. A leak is a FAIL and nothing is written.
   local leaked; leaked="$(report_leaking_keys "$tmp")"
   if [[ -n "$leaked" ]]; then
     rm -f "$tmp"
@@ -3669,6 +4017,23 @@ p_verify_live() {
     | curl -fsS -m 15 -o /dev/null -H @- "${base%/}/v1/models" 2>/dev/null
 }
 
+# verify/selfcheck. The self-check itself spends two model requests, so it is
+# never a probe; what this reads is the cheapest evidence that it COULD still
+# pass: the three app-facing keys it cannot pass without are set, and the
+# spine key — the app's own credential, never the admin key — still answers
+# /v1/models. An empty CC_LLM_API_KEY is false here, and stays false however
+# the ledger row got written, which is what keeps it from reaching boot.
+p_selfcheck() {
+  local k base key
+  for k in CC_LLM_API_KEY CC_LLM_BASE_URL CC_DEFAULT_MODEL; do
+    is_placeholder "$(get_kv "$ENV_FILE" "$k")" && return 1
+  done
+  base="$(get_kv "$ENV_FILE" CC_LLM_BASE_URL)"
+  key="$(get_kv "$ENV_FILE" CC_LLM_API_KEY)"
+  printf 'Authorization: Bearer %s\n' "$key" \
+    | curl -fsS -m 15 -o /dev/null -H @- "${base%/}/v1/models" 2>/dev/null
+}
+
 # ── boot ────────────────────────────────────────────────────────────────────
 p_operator_name() {
   is_placeholder "$(q_unquote "$(get_kv "$ENV_FILE" CC_OPERATOR_NAME)")" || return 0
@@ -3732,6 +4097,16 @@ installed_version() {
 ledger_table() {
   local line step st ver at fp reason
   printf 'LEDGER %s\n' "$LEDGER"
+  # A run in progress is part of "where does this install stand" — `status`
+  # and `report` never take the lock, so they are how somebody waiting on one
+  # learns whose it is. Not printed for this run's own lock, nor for the
+  # update.sh this run is nested under.
+  if cc__lock_read "$STATE_DIR" && [[ -z "$RUN_LOCK_HOLDER_PID" \
+     || ( "$RUN_LOCK_HOLDER_PID" != "$$" && "$RUN_LOCK_HOLDER_PID" != "${CC_RUN_LOCK_PID:-}" ) ]]; then
+    printf 'RUN-LOCK held by pid %s running "%s" since %s (%s)\n' \
+      "${RUN_LOCK_HOLDER_PID:--}" "${RUN_LOCK_HOLDER_CMD:--}" "${RUN_LOCK_HOLDER_AT:--}" \
+      "$(cc_lock_pid_is_run "$RUN_LOCK_HOLDER_PID" && printf 'alive' || printf 'gone — the next ./setup.sh reclaims it')"
+  fi
   printf '%-34s %-7s %-9s %-21s %s\n' "step" "status" "version" "at" "reason"
   while IFS= read -r line; do
     IFS=$'\t' read -r step st ver at fp reason <<<"$line"
@@ -3740,24 +4115,48 @@ ledger_table() {
   return 0
 }
 
+# D11's `started` (dpkg's half-configured): every row of the phase, in ONE
+# atomic rewrite, immediately before the phase function runs. Called only
+# once the phase has passed its ledger gate — a REFUSED phase did not start,
+# and a phase skipped as done is not run at all.
+ledger_mark_started() { # ledger_mark_started <phase>
+  cc_ledger_mark_started "$LEDGER" "$1" "$(installed_version)" "$(date -u +%FT%TZ)" "$ENV_FILE" \
+    || warn "ledger" "could not mark $1's rows started in $LEDGER — if this run is interrupted the ledger will not say where"
+  return 0
+}
+
 # After the phase function returns: record EVERY row of the phase from the
-# reality its probe reads, never from what the phase said it did.
+# reality its probe reads, never from what the phase said it did — except that
+# a row that SAID it failed failed (STEP_SAID above).
 #
 # `<phase-reported-success>` is "no FAIL and no USERACTION" — and a row probing
 # false after that is the defect this whole mechanism exists for: the step after
 # the one that failed never ran, and nothing said so. It becomes a line.
+#
+# All of the phase's rows are written in ONE rewrite, overwriting the
+# `started` mark ledger_mark_started left on each.
 ledger_record() { # ledger_record <phase> <phase-reported-success:0|1>
-  local phase="$1" ok="$2" step kind reads probe qual fp st now ver reason
+  local phase="$1" ok="$2" step kind probe qual fp st now ver reason said
+  local rows=()
   now="$(date -u +%FT%TZ)"
   ver="$(installed_version)"
   while IFS= read -r step; do
-    kind="$(cc_step_field "$phase" "$step" kind)"
-    reads="$(cc_step_field "$phase" "$step" reads)"
-    probe="$(cc_step_field "$phase" "$step" probe)"
+    [[ -n "$step" ]] || continue
+    cc__step_split "$phase" "$step" || continue
+    kind="$ROWDEF_KIND"; probe="$ROWDEF_PROBE"
     qual="$phase/$step"
-    fp="$(cc_fingerprint "$ENV_FILE" "$reads")"
+    fp="$(cc_fingerprint "$ENV_FILE" "$ROWDEF_READS")"
     reason="${STEP_MSG[$step]:-}"
-    if "$probe" >/dev/null 2>&1; then
+    said="${STEP_SAID[$step]:-}"
+    if [[ "$said" == FAIL ]]; then
+      # It printed FAIL <step> in this run: failed, with that message, however
+      # true its probe reads. The probe proves an effect EXISTS; it cannot
+      # unsay a step that reported it did not do its job.
+      st=failed
+    elif [[ "$said" == USERACTION ]]; then
+      # ...and a USERACTION is the operator's move: waiting, not broken.
+      st=gate
+    elif "$probe" >/dev/null 2>&1; then
       st=done; reason=""
       # A row whose ONLY evidence is the phase's own verdict — `p_always`: the
       # suite's green, the catalog line that is a PASS either way — may not be
@@ -3780,9 +4179,11 @@ ledger_record() { # ledger_record <phase> <phase-reported-success:0|1>
       st=failed
       reason="${STEP_MSG[$step]:-}"
     fi
-    cc_ledger_write "$LEDGER" "$qual" "$st" "$ver" "$now" "$fp" "$reason" \
-      || warn "ledger" "could not write $LEDGER — this phase will simply run again"
+    rows+=("$qual" "$st" "$ver" "$now" "$fp" "$reason")
   done < <(cc_steps_for_phase "$phase")
+  (( ${#rows[@]} )) || return 0
+  cc_ledger_write_batch "$LEDGER" "${rows[@]}" \
+    || warn "ledger" "could not write $LEDGER — this phase will simply run again"
   return 0
 }
 
@@ -3790,20 +4191,14 @@ ledger_record() { # ledger_record <phase> <phase-reported-success:0|1>
 # input fingerprint, and every probe still true (D2's rule 2)? Prints one
 # "<step>\t<at>" line per row when it is, so the caller can report what it
 # skipped rather than skipping silently.
+#
+# The judgement is cc_phase_decide's (ledger-lib.sh) — the SAME function the
+# plan prints from, so the plan and this skip cannot disagree about a ledger
+# (only about a world a phase that ran in between has changed).
 phase_is_done() { # phase_is_done <phase>
-  local phase="$1" step qual ver lines="" at
-  ver="$(installed_version)"
-  while IFS= read -r step; do
-    qual="$phase/$step"
-    [[ "$(cc_ledger_status "$LEDGER" "$qual")" == done ]] || return 1
-    [[ "$(cc_ledger_field "$LEDGER" "$qual" 3)" == "$ver" ]] || return 1
-    [[ "$(cc_ledger_field "$LEDGER" "$qual" 5)" \
-       == "$(cc_fingerprint "$ENV_FILE" "$(cc_step_field "$phase" "$step" reads)")" ]] || return 1
-    "$(cc_step_field "$phase" "$step" probe)" >/dev/null 2>&1 || return 1
-    at="$(cc_ledger_field "$LEDGER" "$qual" 4)"
-    lines="${lines}${step}"$'\t'"${at}"$'\n'
-  done < <(cc_steps_for_phase "$phase")
-  printf '%s' "$lines"
+  cc_phase_decide "$LEDGER" "$1" "$(installed_version)" "$ENV_FILE"
+  [[ "$PHASE_VERDICT" == skip ]] || return 1
+  printf '%s' "$PHASE_DONE_LINES"
   return 0
 }
 
@@ -3812,13 +4207,112 @@ phase_is_done() { # phase_is_done <phase>
 # on 2026-10-01 that the escape hatch is the defect. It is REFUSED outright on
 # an installation whose Executor is live, because running a phase ahead of its
 # prerequisites there means proposing against half a deployment.
+#
+# unledgered_permitted is the silent half, which the plan asks; the gate asks
+# unledgered_allowed, which also says why when it refuses.
+unledgered_permitted() {
+  [[ "${CC_SETUP_UNLEDGERED:-0}" == "1" ]] || return 1
+  [[ "$(get_kv "$ENV_FILE" CC_EXECUTOR_MODE)" != "live" ]]
+}
+
 unledgered_allowed() {
   [[ "${CC_SETUP_UNLEDGERED:-0}" == "1" ]] || return 1
-  if [[ "$(get_kv "$ENV_FILE" CC_EXECUTOR_MODE)" == "live" ]]; then
+  if ! unledgered_permitted; then
     fail "unledgered" "CC_SETUP_UNLEDGERED=1 is REFUSED while .env carries CC_EXECUTOR_MODE=live — out-of-order phases on a live deployment is the failure mode the ledger exists to end. Run ./setup.sh (it resumes in order)"
     return 1
   fi
   return 0
+}
+
+# What a `requires` row's status MEANS, in a refusal. `started` is the one that
+# needs saying: the ledger is not merely incomplete there, a run was killed or
+# lost inside that phase.
+ledger_status_words() { # ledger_status_words <status>
+  case "$1" in
+    started) printf 'started — an earlier run was interrupted inside that phase before it finished' ;;
+    *)       printf '%s' "$1" ;;
+  esac
+}
+
+# ── the plan (D11, Terraform's `plan`) ──────────────────────────────────────
+# Printed at the start of every run that will run phases — after the lock is
+# taken and the manifest loaded, before anything executes: which phases WILL
+# RUN and which WILL SKIP, and why, in terms of their rows. It changes nothing
+# and counts nothing (not a PASS/WARN/FAIL line: `PLAN ` on stdout, and in the
+# log). Every verdict comes from cc_phase_decide, the function the full run's
+# skip asks too; a probe is evaluated only for a row the ledger would otherwise
+# skip, so a fresh install's plan reads no probe at all. Key NAMES only.
+plan_line() { # plan_line <text>
+  printf 'PLAN %s\n' "$1"
+  logline "PLAN $1"
+}
+
+ledger_plan() { # ledger_plan all | ledger_plan <phase>
+  local ver p blocked text
+  ver="$(installed_version)"
+  plan_line "./setup.sh ${1} at ${ver} — a PREDICTION made before anything runs: a phase that runs can change what a later phase finds (fetch rewrites image refs, llm measures CC_EMBED_DIM), so each phase is judged again when the run reaches it"
+  if [[ "$1" == all ]]; then
+    for p in $(cc_steps_phases); do
+      if [[ "$p" == check ]]; then
+        plan_line "check: WILL RUN — always: the dry gate proves every input before anything changes"
+        continue
+      fi
+      cc_phase_decide "$LEDGER" "$p" "$ver" "$ENV_FILE"
+      plan_line "$(cc_phase_plan_text "$p" "$ver")"
+    done
+    return 0
+  fi
+  # A phase named on the command line (the DEVELOPER form) is never skipped as
+  # done — it is the ledger GATE that decides whether it runs at all.
+  p="$1"
+  if blocked="$(cc_ledger_blocked "$LEDGER" "$p")" && ! unledgered_permitted; then
+    plan_line "$p: WILL NOT RUN — it requires ${blocked%% *}, which is $(ledger_status_words "${blocked#* }"); the ledger refuses a phase whose prerequisites are not done"
+    return 0
+  fi
+  if [[ "$p" == check ]]; then
+    text="check: WILL RUN — always: it is the dry gate"
+  else
+    cc_phase_decide "$LEDGER" "$p" "$ver" "$ENV_FILE"
+    if [[ "$PHASE_VERDICT" == skip ]]; then
+      text="$p: WILL RUN — asked for by name, though all $PHASE_NROWS of its rows are done at $ver with the same inputs and every effect still reads present (last done ${PHASE_LAST_AT:--}): a named phase runs regardless"
+    else
+      text="$(cc_phase_plan_text "$p" "$ver")"
+    fi
+  fi
+  [[ -n "$blocked" ]] && text="$text — OUT OF ORDER under CC_SETUP_UNLEDGERED=1 (${blocked%% *} is ${blocked#* })"
+  plan_line "$text"
+  return 0
+}
+
+# ── one run at a time (D11, Kamal's lock directory) ─────────────────────────
+# The lock functions are deploy/env-lib.sh's (update.sh takes the same lock).
+# Returns 0 to go on, 1 when another LIVE run holds it — after a FAIL line and
+# before anything else has happened: no plan, no `started` row, no phase.
+#
+# A STALE lock (its holder provably gone) is reclaimed with a WARN that is
+# printed and logged but NOT counted: a reclaim is the recovery working, and
+# counted it would turn check's verdict into a WARN-only gate — a logon-time
+# ./setup.sh after a power cut, with no terminal to say `y`, would then stop
+# behind the very lock it just cleared.
+run_lock_take() { # run_lock_take <command-text>
+  if cc_lock_acquire "$STATE_DIR" "$1"; then
+    case "$RUN_LOCK_RESULT" in
+      acquired)  cc_lock_trap "$STATE_DIR" ;;
+      reclaimed) cc_lock_trap "$STATE_DIR"
+                 printf 'WARN run-lock: %s\n' "$(cc_lock_reclaim_text "$STATE_DIR")"
+                 logline "WARN run-lock: $(cc_lock_reclaim_text "$STATE_DIR")" ;;
+      nested)    : ;;   # our parent's lock (update.sh): neither take nor release it
+    esac
+    # setup.sh never runs a nested setup.sh or update.sh, but `boot` starts
+    # LONG-LIVED processes (the API, the cockpit) and they would inherit the
+    # nesting marker. The API spawns update-run.sh -> update.sh apply, which,
+    # if this run were still alive, would read that marker as "my parent holds
+    # the lock" and run beside it. So the marker stops at this process.
+    export -n CC_RUN_LOCK_PID 2>/dev/null || true
+    return 0
+  fi
+  fail "run-lock" "$(cc_lock_refusal_text "$STATE_DIR")"
+  return 1
 }
 
 # THE LEDGER'S FIRST RULE (D2): never run ahead. A phase whose requires are
@@ -3837,7 +4331,7 @@ phase_ledger_gate() { # phase_ledger_gate <phase>
       warn "$1" "CC_SETUP_UNLEDGERED=1 — running out of order on purpose (${blocked%% *} is ${blocked#* })"
       return 0
     fi
-    fail "$1" "requires ${blocked%% *}, which is ${blocked#* } — run ./setup.sh (it resumes in order)"
+    fail "$1" "requires ${blocked%% *}, which is $(ledger_status_words "${blocked#* }") — run ./setup.sh (it resumes in order)"
     return 1
   fi
   return 0
@@ -3846,13 +4340,16 @@ phase_ledger_gate() { # phase_ledger_gate <phase>
 # ─────────────────────────────────────────────────────────────────────────────
 run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user action
   FAILS=0; WARNS=0; ACTIONS=0; PASSES=0
-  STEP_MSG=()
+  STEP_MSG=(); STEP_SAID=()
   CURPHASE="$1"
   MUTATING=0
   [[ "$MUTATING_PHASES" == *" $1 "* ]] && MUTATING=1
   note ""
   note "======== phase: $1"
   phase_ledger_gate "$1" || return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
+  # Past the gate and about to run: every row of the phase reads `started`
+  # until ledger_record overwrites it with the outcome (D11).
+  ledger_mark_started "$1"
   "phase_$1"
   # The phase's own verdict, BEFORE the probes add to it: "reported success" is
   # no FAIL and no USERACTION.
@@ -3894,7 +4391,18 @@ usage: ./setup.sh                      # THE command: it resumes from the ledger
                 and run ./setup.sh again — it skips what is still true and
                 resumes at the first step that is not. A phase whose
                 prerequisites are not done is REFUSED and names the first one;
-                there is no --force, because the escape hatch is the defect
+                there is no --force, because the escape hatch is the defect.
+                A row reads done, failed, pending, gate (waiting on you) or
+                started — a run began that phase and never finished (it was
+                interrupted); ./setup.sh runs it again
+  THE PLAN      every run that runs phases first prints PLAN lines: which
+                phases WILL RUN and which WILL SKIP, and why — a prediction
+                made before the run, from the same rule the run skips by
+  ONE AT A TIME every command that changes something takes <state>/run.lock;
+                a second one while it is held is refused and names the pid,
+                the command and when it started. A lock whose process is gone
+                (a power cut, a killed terminal) is reclaimed by the next
+                ./setup.sh with a WARN. status and report never wait on it
   no argument   runs check -> machine -> fetch -> llm -> stack -> app -> verify
                 -> test -> boot -> demo: zero to a working, human-approved demo
                 in one command, stopping at the first phase that hard-fails or
@@ -3935,8 +4443,10 @@ usage: ./setup.sh                      # THE command: it resumes from the ledger
   report        writes <state>/report-<stamp>.txt — the ledger, every failed or
                 waiting row with its reason and its inputs, the WHOLE log of
                 the last run, .env key NAMES, versions, the image manifest and
-                the process logs. Never a secret VALUE: it scans its own output
-                and refuses to write if one got in. This is how a REPOSITORY
+                the process logs. Never a secret VALUE: each section is
+                redacted as it is collected, from the list in redact.tsv, and
+                the finished file is then scanned and refused if a value still
+                got in. This is how a REPOSITORY
                 DEFECT travels — an install configures through .env and never
                 rewrites any part of Central Command, so anything else it needs
                 is a finding. \`diagnose\` is an alias for it
@@ -4019,6 +4529,23 @@ main() {
   LOG_BEFORE=0
   [[ -f "$LOGFILE" ]] && LOG_BEFORE="$(wc -l <"$LOGFILE" 2>/dev/null | tr -d ' ')"
   logline "run start: ./setup.sh $cmd"
+  # ONE RUN AT A TIME (D11, Kamal's lock directory): every command that writes
+  # the ledger or changes the host takes <state>/run.lock first; the read-only
+  # ones (status, report/diagnose, validate, preflight, check --list, machine
+  # --dry-run, --help) never do, so they answer while a run is in progress —
+  # which is when somebody is most likely to ask. A refusal happens HERE, before
+  # the plan, before any `started` row, before any phase.
+  local lockcmd=""
+  case "$cmd" in
+    all|configure|check|fetch|llm|stack|app|verify|test|boot|demo|stop)
+      lockcmd="./setup.sh ${*:-all}" ;;
+    machine)
+      [[ "${2:-}" == "--dry-run" ]] || lockcmd="./setup.sh $*" ;;
+  esac
+  if [[ -n "$lockcmd" ]] && ! run_lock_take "$lockcmd"; then
+    logline "run end: ./setup.sh $cmd -> exit 1 (run lock)"
+    exit 1
+  fi
   case "$cmd" in
     configure)
       # Not a phase: it is the command BEFORE the gate, it takes its own flags,
@@ -4035,19 +4562,21 @@ main() {
       # The one phase that takes a flag: --dry-run reports the diff and writes
       # nothing (which is what preflight calls it as).
       FAILS=0; WARNS=0; ACTIONS=0; CURPHASE=machine; MUTATING=1
-      STEP_MSG=()
-      note ""; note "======== phase: machine${2:+ $2}"
+      STEP_MSG=(); STEP_SAID=()
       # --dry-run writes nothing, so it is neither held to the ledger's order
       # nor recorded in it: it is a REPORT. (preflight reaches it through
       # phase_machine directly, not through this branch.)
       local mdry=0
       [[ "${2:-}" == "--dry-run" ]] && { mdry=1; MUTATING=0; }
+      (( mdry )) || ledger_plan machine
+      note ""; note "======== phase: machine${2:+ $2}"
       if (( ! mdry )) && ! phase_ledger_gate machine; then
         local grc0; grc0="$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
         ledger_table
         logline "run end: ./setup.sh machine ${2:-} -> exit $grc0"
         exit "$grc0"
       fi
+      (( mdry )) || ledger_mark_started machine
       phase_machine "${2:-}"
       local mok=0
       (( FAILS == 0 && ACTIONS == 0 )) && mok=1
@@ -4068,6 +4597,9 @@ main() {
       exit "$rrc"
       ;;
     check|validate|preflight|fetch|llm|stack|app|verify|test|boot|demo|status)
+      # The plan, for the phases the manifest declares (validate, preflight and
+      # status have no rows and change nothing — there is nothing to predict).
+      case "$cmd" in validate|preflight|status) ;; *) ledger_plan "$cmd" ;; esac
       run_phase "$cmd"; local prc=$?
       # The ledger is the answer to "where did this stop?", so it is printed on
       # any stop — not only at the end of a full run. (`status` leads with it
@@ -4089,6 +4621,9 @@ main() {
         logline "run end: ./setup.sh all -> exit 3"
         exit 3
       fi
+      # The PLAN (D11): every phase in run order, WILL RUN or WILL SKIP and why
+      # — from the same cc_phase_decide the loop below skips on.
+      ledger_plan all
       # THE GATE comes first (design record D5): every input is proven before
       # anything is changed, so a mutating phase never discovers a
       # configuration problem the check could have named.

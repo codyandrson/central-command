@@ -194,3 +194,7 @@ recorded in-repo." rather than inventing one.
 | DL-108 | One exit-code rule, FAIL over USERACTION over WARN, everywhere | active | 2026-10-01 | script: `deploy/env-lib.sh` | [process.md](process.md) |
 | DL-109 | A deployment carries no local patches; a defect travels back as a report | active | 2026-10-01 | test: `tests/test_single_report_redacts.py` | [process.md](process.md) |
 | DL-110 | A PreToolUse hook, not a sentence, holds a session to `.env` | active | 2026-10-01 | test: `tests/test_install_tree_hook.py` | [process.md](process.md) |
+| DL-111 | A step that printed FAIL is never recorded done, and a phase that began reads `started` | active | 2026-10-02 | test: `tests/test_single_driver_ledger.py` | [process.md](process.md) |
+| DL-112 | One run at a time, and the resume command is what clears a stale lock | active | 2026-10-02 | test: `tests/test_single_run_lock.py` | [process.md](process.md) |
+| DL-113 | The self-check proves the install as the app; it is readiness, never liveness, and its result is cached | active | 2026-10-02 | test: `tests/test_single_selfcheck_row.py` | [process.md](process.md) |
+| DL-114 | A report redacts as it collects, from a declared list, and the scan stays as the guard | active | 2026-10-02 | test: `tests/test_single_report_redacts.py` | [process.md](process.md) |

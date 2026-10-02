@@ -279,3 +279,66 @@ hygiene, and how the test suite itself must be written. See
   bypassed deliberately with `CC_DEV_SESSION=1` rather than accidentally.
 - **Enforced:** test: `tests/test_install_tree_hook.py`; script: `.claude/hooks/guard-install-tree.sh`
 - **Source:** CHANGELOG v2.55.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-111 — A step that printed FAIL is never recorded done, and a phase that began reads `started`
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "A step that printed FAIL is never `done`, and a phase that began reads `started`"
+- **Why:** Found while building P2: the v2.55.0 ledger recorded a row `done`
+  whenever its probe passed, so a `verify-live` that FAILED with the stack
+  still up was written `done` and the next `./setup.sh` skipped the verify
+  phase — the ledger reproducing the very class it exists to end ("a phase
+  passed green but had not done its job"). And a run killed mid-phase left
+  rows that read as never tried. dpkg's `half-configured` is the precedent
+  for the second half (design record D11).
+- **Enforced:** test: `tests/test_single_driver_ledger.py::test_a_step_that_failed_is_never_recorded_done_even_when_its_probe_holds`, `::test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes`
+- **Source:** CHANGELOG v2.56.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-112 — One run at a time, and the resume command is what clears a stale lock
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "One run at a time, and `./setup.sh` is what clears a stale lock"
+- **Why:** The ledger is read-modify-write, so two concurrent runs lose each
+  other's rows; Kamal's lock directory is the precedent (design record D11).
+  The record first said a stale lock "names the pid and the command that
+  releases it". As built it is RECLAIMED by the next run instead, because a
+  separate release command contradicts two earlier decisions — the agent's
+  contract is three verbs (D10.4) and the recovery is one command (D3) — and
+  because a logon-time `./setup.sh` after a power cut would otherwise sit
+  behind a lock no process holds. A lock held by a live run is still a hard
+  FAIL.
+- **Enforced:** test: `tests/test_single_run_lock.py::test_a_live_holder_refuses_and_names_pid_command_and_start`, `::test_a_dead_holder_is_reclaimed_with_the_warning_text`, `::test_the_child_of_the_holder_proceeds_and_does_not_release`
+- **Source:** CHANGELOG v2.56.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-113 — The self-check proves the install as the app; it is readiness, never liveness, and its result is cached
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "`verify/selfcheck` is the application proving itself, and it is READINESS, never liveness"
+- **Why:** `verify.sh` proves the deployment under the admin key and never
+  read the spine key, the default model, the app's base URL or database URL;
+  the spine key went missing three times by three mechanisms behind a green
+  verify. The self-check asks with the app's own settings and credential and
+  `boot` requires it. It gates use and restarts nothing — the Kubernetes
+  documentation's warning about conflating readiness with liveness is quoted
+  in the module. The operator decided on 2026-10-02 that the API serves a
+  CACHED result (a run at start and on request): two checks spend a model
+  request each and queue behind running sessions on a single-slot backend.
+- **Enforced:** test: `tests/test_single_selfcheck_row.py::test_an_empty_spine_key_cannot_reach_boot`, `::test_boot_and_demo_require_the_selfcheck_row`; test: `tests/test_selfcheck.py`; test: `tests/test_selfcheck_api.py`
+- **Source:** CHANGELOG v2.56.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-114 — A report redacts as it collects, from a declared list, and the scan stays as the guard
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The report redacts as it collects, from `redact.tsv`, and the scan stays"
+- **Why:** v2.55.0's report scanned its finished output and REFUSED to write
+  if a credential value appeared — safe, but one key echoed into a container
+  log cost the operator the whole report, exactly when it was needed.
+  Replicated's troubleshoot redactors are the precedent (design record D11):
+  redact in process from a declared default list. The scan stays because it
+  is the one check that does not trust the redactor.
+- **Enforced:** test: `tests/test_single_report_redacts.py`; script: `deploy/single/redact.tsv`
+- **Source:** CHANGELOG v2.56.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

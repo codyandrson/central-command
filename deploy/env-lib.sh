@@ -35,6 +35,15 @@
 #     cc_stage_build_context <dir> <ca> <src>...  a build context outside the tree
 #     cc_exit_code <fails> <warns> <actions>      the ONE exit-code rule
 #     cc_tree_diff <repo-root>            is this tree still the release it claims
+#   The run lock (2026-10-01 design record, D11 — one run at a time):
+#     cc_lock_acquire <state-dir> <command-text>  take it, nest under it, or
+#                                         reclaim a stale one (RUN_LOCK_* globals)
+#     cc_lock_release <state-dir>         drop it — only the process that took it
+#     cc_lock_holder <state-dir>          "<pid>\t<command>\t<started>" of the lock
+#     cc_lock_pid_is_run <pid>            is that pid alive AND still one of ours
+#     cc_lock_trap <state-dir>            release on EXIT/INT/TERM, composed with
+#                                         whatever traps the caller already has
+#     cc_lock_refusal_text / cc_lock_reclaim_text   the FAIL/WARN sentences
 # ============================================================================
 
 [[ -n "${CC_ENV_LIB_LOADED:-}" ]] && return 0
@@ -596,4 +605,262 @@ cc_tree_diff() { # cc_tree_diff <repo-root>
   git -C "$root" merge-base --is-ancestor HEAD upstream 2>/dev/null && return 0
   TREE_DIFF_PATHS="HEAD ($(git -C "$root" rev-parse --short HEAD 2>/dev/null)) carries commits that are not on \`upstream\`"
   return 1
+}
+
+# ── one run at a time: the run lock (2026-10-01 design record, D11) ─────────
+# Kamal's lock directory, for the duration of a run. `mkdir` is the lock
+# because it is ATOMIC on every filesystem this profile runs on, NTFS under Git
+# Bash included — `flock` is not available there, and a lock FILE written with
+# `>` is a check-then-act race.
+#
+#   <state>/run.lock/          the lock itself: whoever's mkdir succeeded holds it
+#     command                  what the holder is running ("./setup.sh all")
+#     started                  when it took the lock, UTC
+#     pid                      the holder's pid — written LAST, via a rename, so
+#                              a lock WITH a pid file is a complete lock
+#
+# It lives in the STATE directory, never in the checkout (2026-09-23 D7;
+# tests/test_single_no_tree_writes.py).
+#
+# NESTING. update.sh runs `setup.sh fetch|llm|app|verify|stop` while it holds
+# the lock, so a child must neither deadlock on its parent's lock nor release
+# it on its way out. The holder EXPORTS CC_RUN_LOCK_PID=<its pid>; a child that
+# inherits it, finds the lock's recorded pid equal to it AND that pid alive and
+# one of ours, proceeds as `nested` and touches nothing. Anything else — the
+# variable naming some other pid, a long-lived process (the API `boot` started)
+# that inherited a pid which has since exited — is "not mine" and goes through
+# the ordinary rules below. It is internal plumbing, never an answer, so it is
+# in tests/test_single_airgap_seams.py's RUNTIME_ONLY and not in .env.example.
+#
+# STALE. The holder is PROVABLY GONE when `kill -0 <pid>` fails, or when the
+# pid is alive but /proc/<pid>/cmdline is readable and names none of setup.sh,
+# update.sh, update-run.sh — a pid reused after a reboot. Where /proc cannot be
+# read, `kill -0` alone decides. A stale lock is RECLAIMED by the run that
+# finds it, with a WARN naming the dead holder, rather than refused. That is
+# deliberate: the operator-side agent may run exactly three commands
+# (`./setup.sh`, `./setup.sh status`, `./setup.sh report`) and the design
+# promises ONE recovery command, so the command that clears a stale lock has
+# to be `./setup.sh` itself; and a logon-time `./setup.sh` after a power cut
+# must not sit behind a lock no process holds. A lock with NO pid file is a
+# run caught between its mkdir and its pid write: younger than
+# RUN_LOCK_YOUNG_SECONDS it is "another run is starting", older it is stale.
+#
+# The two callers own their output protocol, so these functions PRINT nothing
+# (cc_lock_holder aside, which is a reader); cc_lock_refusal_text and
+# cc_lock_reclaim_text are the shared sentences.
+#
+# Globals (not CC_-prefixed — they are results, not answers):
+#   RUN_LOCK_RESULT       acquired | nested | reclaimed | held | starting | error
+#   RUN_LOCK_HOLDER_PID / _CMD / _AT   the holder found (for `reclaimed`, the
+#                         DEAD one this run replaced)
+#   RUN_LOCK_AGE          seconds, for a pid-less lock
+RUN_LOCK_YOUNG_SECONDS=10
+RUN_LOCK_RESULT=""; RUN_LOCK_HOLDER_PID=""; RUN_LOCK_HOLDER_CMD=""; RUN_LOCK_HOLDER_AT=""; RUN_LOCK_AGE=""
+
+# Read the lock's three files into RUN_LOCK_HOLDER_*. Returns 1 when there is
+# no lock. A half-written lock reads with empty fields — never an error.
+cc__lock_read() { # cc__lock_read <state-dir>
+  local lock="$1/run.lock" v
+  RUN_LOCK_HOLDER_PID=""; RUN_LOCK_HOLDER_CMD=""; RUN_LOCK_HOLDER_AT=""
+  [[ -d "$lock" ]] || return 1
+  if [[ -f "$lock/pid" ]]; then
+    IFS= read -r v <"$lock/pid" 2>/dev/null || true
+    v="${v%$'\r'}"
+    [[ "$v" =~ ^[0-9]+$ ]] && RUN_LOCK_HOLDER_PID="$v"
+  fi
+  if [[ -f "$lock/command" ]]; then
+    IFS= read -r v <"$lock/command" 2>/dev/null || true
+    RUN_LOCK_HOLDER_CMD="${v%$'\r'}"
+  fi
+  if [[ -f "$lock/started" ]]; then
+    IFS= read -r v <"$lock/started" 2>/dev/null || true
+    RUN_LOCK_HOLDER_AT="${v%$'\r'}"
+  fi
+  return 0
+}
+
+cc_lock_holder() { # cc_lock_holder <state-dir>
+  cc__lock_read "$1" || return 1
+  printf '%s\t%s\t%s\n' "$RUN_LOCK_HOLDER_PID" "$RUN_LOCK_HOLDER_CMD" "$RUN_LOCK_HOLDER_AT"
+}
+
+# Is <pid> a live run of OURS? 0 yes, 1 provably not (see STALE above).
+cc_lock_pid_is_run() { # cc_lock_pid_is_run <pid>
+  local pid="$1" f cmd=""
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  f="/proc/$pid/cmdline"
+  [[ -r "$f" ]] || return 0
+  cmd="$(tr '\0' ' ' <"$f" 2>/dev/null)" || return 0
+  # Empty: a zombie or a process /proc will not describe — nothing provable
+  # beyond kill -0, which said alive.
+  [[ -n "$cmd" ]] || return 0
+  case "$cmd" in
+    *setup.sh*|*update.sh*|*update-run.sh*) return 0 ;;
+  esac
+  return 1
+}
+
+# The lock directory's age in seconds, or empty when this host cannot say
+# (GNU stat, then BSD stat; no third fallback — an unknown age is judged OLD,
+# because "a run is starting" is only ever true for a few seconds).
+cc__lock_age() { # cc__lock_age <lock-dir>
+  local m now
+  m="$(stat -c %Y "$1" 2>/dev/null)" || m="$(stat -f %m "$1" 2>/dev/null)" || m=""
+  [[ "$m" =~ ^[0-9]+$ ]] || { printf ''; return 0; }
+  now="$(date +%s)"
+  printf '%s' "$(( now - m ))"
+}
+
+# Fill a lock this process just created. pid LAST, by rename, so a reader that
+# sees a pid sees the whole lock.
+cc__lock_fill() { # cc__lock_fill <lock-dir> <command-text>
+  local lock="$1"
+  printf '%s\n' "$2" >"$lock/command" || return 1
+  printf '%s\n' "$(date -u +%FT%TZ)" >"$lock/started" || return 1
+  printf '%s\n' "$$" >"$lock/pid.tmp" || return 1
+  mv -f "$lock/pid.tmp" "$lock/pid"
+}
+
+cc_lock_acquire() { # cc_lock_acquire <state-dir> <command-text>
+  local state="$1" what="$2" lock="$1/run.lock" attempt aside age
+  local reclaimed=0 dead_pid="" dead_cmd="" dead_at="" seen_pid
+  RUN_LOCK_RESULT=""; RUN_LOCK_AGE=""
+  mkdir -p "$state" 2>/dev/null || true
+  for attempt in 1 2 3; do
+    if mkdir "$lock" 2>/dev/null; then
+      if ! cc__lock_fill "$lock" "$what"; then
+        rm -rf "$lock" 2>/dev/null
+        RUN_LOCK_RESULT=error
+        return 1
+      fi
+      export CC_RUN_LOCK_PID="$$"
+      if (( reclaimed )); then
+        RUN_LOCK_RESULT=reclaimed
+        RUN_LOCK_HOLDER_PID="$dead_pid"; RUN_LOCK_HOLDER_CMD="$dead_cmd"; RUN_LOCK_HOLDER_AT="$dead_at"
+      else
+        RUN_LOCK_RESULT=acquired
+        RUN_LOCK_HOLDER_PID="$$"; RUN_LOCK_HOLDER_CMD="$what"; RUN_LOCK_HOLDER_AT=""
+      fi
+      return 0
+    fi
+    # It exists. Whose is it?
+    if ! cc__lock_read "$state"; then
+      [[ -e "$lock" ]] || continue        # released between our mkdir and read
+      RUN_LOCK_RESULT=error               # a FILE named run.lock: not ours to touch
+      return 1
+    fi
+    if [[ -n "$RUN_LOCK_HOLDER_PID" ]]; then
+      if cc_lock_pid_is_run "$RUN_LOCK_HOLDER_PID"; then
+        if [[ "${CC_RUN_LOCK_PID:-}" == "$RUN_LOCK_HOLDER_PID" ]]; then
+          RUN_LOCK_RESULT=nested
+          return 0
+        fi
+        RUN_LOCK_RESULT=held
+        return 1
+      fi
+    else
+      age="$(cc__lock_age "$lock")"
+      RUN_LOCK_AGE="$age"
+      if [[ -n "$age" ]] && (( age < RUN_LOCK_YOUNG_SECONDS )); then
+        RUN_LOCK_RESULT=starting
+        return 1
+      fi
+    fi
+    # STALE. Rename it aside (atomic — of two runs reclaiming at once, one
+    # rename wins and the other fails), then re-check that what moved is the
+    # lock that was judged: if another reclaimer got there first and has
+    # already taken a FRESH lock, put that one back and judge again.
+    dead_pid="$RUN_LOCK_HOLDER_PID"; dead_cmd="$RUN_LOCK_HOLDER_CMD"; dead_at="$RUN_LOCK_HOLDER_AT"
+    aside="$state/run.lock.stale.$$"
+    rm -rf "$aside" 2>/dev/null
+    if mv "$lock" "$aside" 2>/dev/null; then
+      seen_pid=""
+      [[ -f "$aside/pid" ]] && { IFS= read -r seen_pid <"$aside/pid" || true; seen_pid="${seen_pid%$'\r'}"; }
+      if [[ "$seen_pid" != "$dead_pid" ]]; then
+        # Never delete what moved here: it is somebody's live lock. Put it
+        # back if its place is still free; otherwise it stays aside as
+        # harmless debris (a race of THREE runs in the same instant).
+        [[ -e "$lock" ]] || mv "$aside" "$lock" 2>/dev/null
+        continue
+      fi
+      rm -rf "$aside" 2>/dev/null
+      reclaimed=1
+    fi
+  done
+  RUN_LOCK_RESULT=error
+  return 1
+}
+
+# Only the process that TOOK the lock releases it: the recorded pid must be
+# this shell's, and this must be that shell itself rather than a subshell of
+# it ($BASHPID differs from $$ in a subshell) — so a nested child, or a `$(…)`
+# that somehow ran an EXIT trap, can never drop its parent's lock.
+cc_lock_release() { # cc_lock_release <state-dir>
+  local lock="$1/run.lock" pid=""
+  [[ "${BASHPID:-$$}" == "$$" ]] || return 0
+  [[ -f "$lock/pid" ]] || return 0
+  IFS= read -r pid <"$lock/pid" 2>/dev/null || true
+  [[ "${pid%$'\r'}" == "$$" ]] || return 0
+  rm -rf "$lock" 2>/dev/null
+  return 0
+}
+
+# Append <action> to <signal>'s existing trap rather than replacing it. `trap
+# -p` prints the action in re-readable quoting, and `eval set --` is the one
+# way to read it back verbatim. INT/TERM put the release FIRST, then whatever
+# was there, then the conventional exit status — a caller's own INT trap may
+# `exit` before an appended release would run.
+cc__trap_add() { # cc__trap_add <signal> <action> [first]
+  local sig="$1" add="$2" first="${3:-}" prev
+  prev="$(trap -p "$sig")"
+  if [[ -z "$prev" ]]; then
+    trap -- "$add" "$sig"
+    return 0
+  fi
+  eval "set -- ${prev#trap -- }"
+  if [[ -n "$first" ]]; then
+    trap -- "$add"$'\n'"$1" "$sig"
+  else
+    trap -- "$1"$'\n'"$add" "$sig"
+  fi
+}
+
+cc_lock_trap() { # cc_lock_trap <state-dir>
+  local q; q="$(printf '%q' "$1")"
+  local had_int had_term
+  had_int="$(trap -p INT)"; had_term="$(trap -p TERM)"
+  cc__trap_add EXIT "cc_lock_release $q"
+  if [[ -n "$had_int" ]]; then cc__trap_add INT "cc_lock_release $q" first
+  else trap -- "cc_lock_release $q; exit 130" INT; fi
+  if [[ -n "$had_term" ]]; then cc__trap_add TERM "cc_lock_release $q" first
+  else trap -- "cc_lock_release $q; exit 143" TERM; fi
+  return 0
+}
+
+# The sentences, so setup.sh and update.sh say the same thing. Called right
+# after a failed / reclaiming cc_lock_acquire, from RUN_LOCK_*.
+cc_lock_refusal_text() { # cc_lock_refusal_text <state-dir>
+  local lock="$1/run.lock"
+  case "$RUN_LOCK_RESULT" in
+    held)
+      printf 'another run holds %s: pid %s is running "%s", started %s. That process is alive, so the lock is NOT stale — wait for it to finish (./setup.sh status shows where it stands), then run this again' \
+        "$lock" "$RUN_LOCK_HOLDER_PID" "${RUN_LOCK_HOLDER_CMD:-an unrecorded command}" "${RUN_LOCK_HOLDER_AT:-at an unrecorded time}" ;;
+    starting)
+      printf 'another run is starting: %s was created %ss ago and has not recorded its pid yet — wait a moment, then run this again' \
+        "$lock" "${RUN_LOCK_AGE:-?}" ;;
+    *)
+      printf 'could not take %s (it exists and is not a lock directory, or %s is not writable) — check that path and the permissions on the state directory' \
+        "$lock" "$1" ;;
+  esac
+}
+
+cc_lock_reclaim_text() { # cc_lock_reclaim_text <state-dir>
+  if [[ -n "$RUN_LOCK_HOLDER_PID" ]]; then
+    printf 'reclaimed a STALE lock in %s: pid %s, which was running "%s" (started %s), is gone — it did not finish, so the rows it was running read `started` in the ledger, and this run picks them up' \
+      "$1" "$RUN_LOCK_HOLDER_PID" "${RUN_LOCK_HOLDER_CMD:-an unrecorded command}" "${RUN_LOCK_HOLDER_AT:-at an unrecorded time}"
+  else
+    printf 'reclaimed a STALE lock in %s: a half-written lock with no pid (%s, %s old) — the run that created it died before it recorded itself, so any rows it reached read `started` in the ledger, and this run picks them up' \
+      "$1" "${RUN_LOCK_HOLDER_CMD:-no command recorded}" "${RUN_LOCK_AGE:+${RUN_LOCK_AGE}s}"
+  fi
 }

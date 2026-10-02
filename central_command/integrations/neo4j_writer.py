@@ -90,20 +90,30 @@ async def _write(query: str, **params) -> list[dict]:
         return [record.data() async for record in result]
 
 
+async def request_embedding(text: str, timeout: float = 60.0) -> list[float]:
+    """The embedder round trip itself — URL, key, alias — RAISING on any
+    failure and checking no width. `embed()` below wraps it in the degrade-
+    don't-fail policy; the application self-check (`central_command/
+    selfcheck.py`, `embedding-as-app`) calls it bare, so the check proves the
+    writer's own request rather than a copy of it, and can say WHY it failed
+    where `embed()` can only log."""
+    async with httpx.AsyncClient(timeout=timeout, **http_client.client_kwargs()) as client:
+        res = await client.post(
+            f"{settings.llm_proxy_base_url}/v1/embeddings",
+            headers={"Authorization": f"Bearer {settings.llm_proxy_admin_key}"},
+            json={"model": _EMBED_MODEL, "input": text},
+        )
+        res.raise_for_status()
+        return res.json()["data"][0]["embedding"]
+
+
 async def embed(text: str) -> list[float] | None:
     """Vector for `text` from the same embedder Graphiti uses, or None if the
     workstation is unreachable. None is a degraded write, never a failed one."""
     if not text.strip():
         return None
     try:
-        async with httpx.AsyncClient(timeout=60.0, **http_client.client_kwargs()) as client:
-            res = await client.post(
-                f"{settings.llm_proxy_base_url}/v1/embeddings",
-                headers={"Authorization": f"Bearer {settings.llm_proxy_admin_key}"},
-                json={"model": _EMBED_MODEL, "input": text},
-            )
-            res.raise_for_status()
-            vector = res.json()["data"][0]["embedding"]
+        vector = await request_embedding(text)
     except Exception as exc:
         # Degrading silently to the CALLER is deliberate (see docstring) — but
         # a persistently-misconfigured alias looks identical to a transiently

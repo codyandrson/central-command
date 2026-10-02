@@ -363,3 +363,249 @@ def test_no_git_baseline_is_a_useraction_naming_update_init(tree: Path):
     assert lines, r.stdout
     assert lines[0].startswith("USERACTION tree-pristine:"), lines[0]
     assert "./update.sh init" in lines[0]
+
+
+# ── v2.56.0 (P2): `started`, the plan, and a FAIL is never `done` ───────────
+#
+# These drive the REAL driver too, but some of them need a phase to FAIL, to
+# succeed or to block on command, and no real phase does that in a temp tree
+# without podman. So the temp COPY's setup.sh is given stub phase functions and
+# stub probes, defined just before its final `main "$@"` — later definitions
+# win in bash, so everything ELSE (main, run_phase, the gate, ledger_record,
+# the plan, the lock) is the shipped code. The checkout's own setup.sh is never
+# touched; the copy has no git, so the tree-pristine guard has nothing to say.
+
+import signal  # noqa: E402
+import socket  # noqa: E402
+import time  # noqa: E402
+
+_STUB_PHASES = ("check", "machine", "fetch", "llm", "stack", "app",
+                "verify", "test", "boot", "demo")
+
+
+def _stub_driver(repo: Path) -> Path:
+    """Every phase_<p> PASSes `<p>-stub` — unless `<flags>/fail-<p>` names a
+    step, which it then FAILs (`ua-<p>`: a USERACTION) and returns non-zero.
+    Every probe `p_*` reads TRUE: the rows these tests care about are the ones
+    whose probe holds while their step reports it did not do its job."""
+    flags = repo.parent / "flags"
+    flags.mkdir(exist_ok=True)
+    setup = repo / "deploy" / "single" / "setup.sh"
+    text = setup.read_text(encoding="utf-8")
+    tail = 'main "$@"'
+    assert text.rstrip().endswith(tail), "setup.sh no longer ends in main \"$@\""
+    stub = [
+        'for __f in $(compgen -A function p_); do eval "$__f() { return 0; }"; done',
+        f'STUB_FLAGS="{flags.as_posix()}"',
+    ]
+    for p in _STUB_PHASES:
+        stub.append(
+            f'phase_{p}() {{\n'
+            f'  if [[ -f "$STUB_FLAGS/fail-{p}" ]]; then fail "$(cat "$STUB_FLAGS/fail-{p}")" "stub: told to fail"; return 1; fi\n'
+            f'  if [[ -f "$STUB_FLAGS/ua-{p}" ]]; then useraction "$(cat "$STUB_FLAGS/ua-{p}")" "stub: waiting on you"; return 3; fi\n'
+            f'  pass "{p}-stub" "ran"\n'
+            f'}}'
+        )
+    head = text.rstrip()[: -len(tail)]
+    setup.write_text(head + "\n".join(stub) + "\n" + tail + "\n", encoding="utf-8")
+    return flags
+
+
+def _plan(out: str) -> dict[str, str]:
+    """phase -> its PLAN line (the heading is keyed '')."""
+    lines = {}
+    for l in out.splitlines():
+        if l.startswith("PLAN "):
+            body = l[len("PLAN "):]
+            head, sep, _ = body.partition(": WILL")
+            lines[head if sep else ""] = l
+    return lines
+
+
+def _ledger_rows(repo: Path) -> dict[str, list[str]]:
+    led = (_state_dir(repo) / "ledger.tsv").read_text(encoding="utf-8")
+    return {l.split("\t")[0]: l.split("\t") for l in led.splitlines()
+            if l and not l.startswith("#")}
+
+
+def test_the_plan_on_an_empty_ledger_says_every_phase_runs_and_why(tree: Path):
+    _stub_driver(tree)
+    r = _run(tree)
+    plan = _plan(r.stdout)
+    # One heading, stated ONCE: it is a prediction, and a phase that runs can
+    # change what a later phase finds.
+    assert "PREDICTION" in plan[""] and "can change what a later phase finds" in plan[""], plan
+    assert list(plan)[1:] == list(_STUB_PHASES), list(plan)
+    assert "check: WILL RUN — always" in plan["check"]
+    for p in _STUB_PHASES[1:]:
+        assert f"PLAN {p}: WILL RUN — never run: {p}/" in plan[p], plan[p]
+    # It is printed BEFORE anything executes.
+    first_plan = r.stdout.index("PLAN ")
+    first_pass = r.stdout.index("PASS check-stub")
+    assert first_plan < first_pass
+    # Not a protocol line: it changes no counter (a clean stub run is exit 0)
+    # and it reaches the log.
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = (_state_dir(tree) / "setup-log.txt").read_text(encoding="utf-8")
+    assert "PLAN machine: WILL RUN" in log
+
+
+def test_the_plan_skips_an_all_done_phase_and_names_a_changed_input(tree: Path):
+    _stub_driver(tree)
+    first = _run(tree)
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    again = _run(tree)
+    plan = _plan(again.stdout)
+    for p in _STUB_PHASES[1:]:
+        assert f"PLAN {p}: WILL SKIP" in plan[p], plan[p]
+    assert "all 5 rows are done at" in plan["boot"], plan["boot"]
+    assert "(last done 20" in plan["boot"], plan["boot"]
+    # ...and the run did what the plan said: nothing but check ran.
+    ran = [l for l in again.stdout.splitlines() if l.endswith("-stub: ran")]
+    assert ran == ["PASS check-stub: ran"], ran
+
+    # An input the boot rows READ changes. The plan names the row and the KEY
+    # NAMES it reads ("one of" — a fingerprint cannot say which), never a value.
+    _set(tree / ".env", {"CC_API_PORT": "59871"})
+    changed = _run(tree)
+    plan = _plan(changed.stdout)
+    assert ("PLAN boot: WILL RUN — inputs changed: boot/boot-api reads one of "
+            "CC_API_PORT, CC_DATABASE_URL") in plan["boot"], plan["boot"]
+    assert "PLAN app: WILL SKIP" in plan["app"], plan["app"]
+    assert not any("59871" in l for l in plan.values()), plan
+    assert "PASS boot-stub: ran" in changed.stdout
+    assert "PASS app-stub: ran" not in changed.stdout
+
+
+def test_a_step_that_failed_is_never_recorded_done_even_when_its_probe_holds(tree: Path):
+    """The defect P2 found: `verify-live` FAILed inside verify.sh while its
+    probe (the spine key answers /v1/models) held, so the row was written
+    `done` and the next ./setup.sh SKIPPED verify. A row whose own check-name
+    printed FAIL is `failed`, with that message as its reason, whatever the
+    probe says — and the next full run runs the phase again."""
+    flags = _stub_driver(tree)
+    assert _run(tree).returncode == 0       # everything done, every probe true
+
+    (flags / "fail-verify").write_text("verify-live", encoding="utf-8")
+    r = _run(tree, "verify")
+    assert r.returncode == 1, r.stdout + r.stderr
+    rows = _ledger_rows(tree)
+    assert rows["verify/verify-live"][1] == "failed", rows["verify/verify-live"]
+    assert rows["verify/verify-live"][5] == "stub: told to fail"
+    # The row that printed nothing is recorded from its probe, as before.
+    assert rows["verify/verify-deployed"][1] == "done"
+    # A failed run releases the lock like any other.
+    assert not (_state_dir(tree) / "run.lock").exists()
+
+    (flags / "fail-verify").unlink()
+    nxt = _run(tree)
+    plan = _plan(nxt.stdout)
+    assert 'PLAN verify: WILL RUN — failed last time: verify/verify-live — "stub: told to fail"' \
+        in plan["verify"], plan["verify"]
+    assert "PASS verify-stub: ran" in nxt.stdout, nxt.stdout
+    assert _ledger_rows(tree)["verify/verify-live"][1] == "done"
+
+
+def test_a_step_that_stopped_for_the_operator_is_a_gate_even_when_its_probe_holds(tree: Path):
+    flags = _stub_driver(tree)
+    assert _run(tree).returncode == 0
+    (flags / "ua-test").write_text("test", encoding="utf-8")
+    r = _run(tree, "test")
+    assert r.returncode == 3, r.stdout + r.stderr
+    row = _ledger_rows(tree)["test/test"]
+    assert row[1] == "gate" and row[5] == "stub: waiting on you", row
+
+
+def _free_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _wait_for(path: Path, seconds: float = 60) -> None:
+    deadline = time.monotonic() + seconds
+    while not path.exists():
+        if time.monotonic() > deadline:
+            raise AssertionError(f"{path} never appeared")
+        time.sleep(0.1)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGKILL of a process group is POSIX")
+def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes(tree: Path):
+    """The record's P2 acceptance criterion: "a phase killed mid-run leaves its
+    rows `started`". The REAL `test` phase, whose suite is a fake
+    `.venv/bin/python` that blocks until told otherwise; the driver is
+    SIGKILLed while it waits — no trap runs, exactly a power cut's shape. The
+    next run must reclaim the dead run's lock (with the WARN naming it) and run
+    the phase again; the ledger must say `started` in between, never `pending`
+    and never the `done` a previous run might have left."""
+    flags = tree.parent / "flags"
+    flags.mkdir()
+    py = tree / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text(
+        "#!/usr/bin/env bash\n"
+        f'touch "{flags.as_posix()}/python-started"\n'
+        f'[[ -f "{flags.as_posix()}/python-go" ]] && exit 0\n'
+        "sleep 120\n", encoding="utf-8")
+    py.chmod(0o755)
+    # Nothing may answer the API port, or `test` skips its suite as "API up".
+    _set(tree / ".env", {"CC_API_PORT": str(_free_port()), "CC_EXECUTOR_MODE": "dry_run"})
+    extra = {"CC_SETUP_UNLEDGERED": "1"}
+
+    env = dict(os.environ)
+    home = tree.parent / "home"
+    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1", **extra)
+    for stale in ("CC_STATE_DIR", "CC_RUN_LOCK_PID"):
+        env.pop(stale, None)
+    proc = subprocess.Popen([_bash_exe(), "setup.sh", "test"], cwd=tree / "deploy" / "single",
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdin=subprocess.DEVNULL, env=env, start_new_session=True)
+    try:
+        _wait_for(flags / "python-started")
+        row = _ledger_rows(tree)["test/test"]
+        assert row[1] == "started", row
+        lock = _state_dir(tree) / "run.lock"
+        assert (lock / "pid").read_text().strip() == str(proc.pid)
+    finally:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=30)
+
+    # Killed: no trap ran, so the row still reads `started` and the lock is
+    # still on disk, naming a pid that no longer exists.
+    assert _ledger_rows(tree)["test/test"][1] == "started"
+    assert (_state_dir(tree) / "run.lock" / "pid").exists()
+
+    (flags / "python-go").touch()
+    r = _run(tree, "test", env_extra=extra)
+    warn = [l for l in r.stdout.splitlines() if l.startswith("WARN run-lock:")]
+    assert warn, r.stdout + r.stderr
+    assert f"pid {proc.pid}" in warn[0] and '"./setup.sh test"' in warn[0], warn[0]
+    assert "`started`" in warn[0], warn[0]
+    plan = _plan(r.stdout)
+    assert "PLAN test: WILL RUN — the last run was interrupted here: test/test was started at" \
+        in plan["test"], plan["test"]
+    assert "PASS test: the offline suite is green" in r.stdout, r.stdout
+    assert _ledger_rows(tree)["test/test"][1] == "done"
+    assert not (_state_dir(tree) / "run.lock").exists()
+
+
+def test_a_started_requirement_refuses_and_says_the_run_was_interrupted(tree: Path):
+    _write_ledger(tree, [
+        ("check/tree-pristine", "done"),
+        ("machine/machine", "done"),
+        ("fetch/resolve-images", "done"),
+        ("llm/embed-dimension", "done"),
+        ("stack/embed-dimension", "done"),
+        ("stack/up-stack", "started"),
+    ])
+    r = _run(tree, "verify")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "FAIL verify: requires stack/up-stack, which is started — an earlier run was interrupted" \
+        in r.stdout, r.stdout
+    # The plan said so first, and the refused phase was NOT marked started.
+    assert "PLAN verify: WILL NOT RUN — it requires stack/up-stack, which is started" in r.stdout
+    assert "verify/verify-deployed" not in _ledger_rows(tree)

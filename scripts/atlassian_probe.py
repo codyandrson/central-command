@@ -67,9 +67,17 @@ _checks = 0
 # level because every line this script prints is built by the three functions
 # below — there is nowhere else for output to leak from.
 QUIET = False
+# Set by `run_checks()` for the duration of one walk: lines are collected here
+# instead of printed. The application self-check (central_command/selfcheck.py,
+# its `integrations` row) runs the walk IN its own process — inside the API it
+# must not write to the server's stdout — and needs the FAIL lines as data.
+_sink: list[tuple[bool, str]] | None = None
 
 
 def _emit(line: str, *, is_failure: bool) -> None:
+    if _sink is not None:
+        _sink.append((is_failure, line))
+        return
     if QUIET and not is_failure:
         return
     print(line, flush=True)
@@ -382,6 +390,25 @@ async def probe_confluence() -> None:
     report("confluence", "GET", path, resp,
            ok=bool(resp and 200 <= resp.status_code < 300 and storage is not None),
            note=note)
+
+
+async def run_checks(*, jira_on: bool = True, confluence_on: bool = True) -> dict:
+    """The same walk `main()` makes, COLLECTED rather than printed:
+    `{"checks", "failures", "fail_lines"}`. Every line still goes through the
+    builders above, so `_scrub` has already run on each one. The counters are
+    module globals, so callers run one walk at a time — the self-check's
+    single-flight run guarantees that inside the API."""
+    global _sink, _checks, _failures
+    _sink, _checks, _failures = [], 0, 0
+    try:
+        if jira_on:
+            await probe_jira()
+        if confluence_on:
+            await probe_confluence()
+        return {"checks": _checks, "failures": _failures,
+                "fail_lines": [line for failed, line in _sink if failed]}
+    finally:
+        _sink = None
 
 
 async def main(argv: list[str] | None = None) -> int:

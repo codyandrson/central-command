@@ -77,6 +77,17 @@ def deployment(tmp_path: Path):
     return repo, state
 
 
+@pytest.fixture(autouse=True)
+def _not_a_dev_session(monkeypatch):
+    """Every test here builds the hook's environment from `os.environ`, and the
+    rule this hook ships with tells every DEVELOPMENT session to export
+    `CC_DEV_SESSION=1` — the variable that makes the hook stand aside. Run
+    from such a session, the deny tests saw an allow (found 2026-10-02, the
+    day after the variable was set). The suite must not depend on who runs it:
+    the one test that wants the variable passes it explicitly."""
+    monkeypatch.delenv("CC_DEV_SESSION", raising=False)
+
+
 def run_hook(payload: dict, cwd: Path, extra_env: dict | None = None, path: str | None = None):
     """Run the real hook with `payload` as its stdin JSON."""
     env = dict(os.environ)

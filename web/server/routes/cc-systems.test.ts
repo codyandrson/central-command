@@ -1,6 +1,7 @@
 /**
  * cc-systems adapter — proxies GET /api/systems and maps snake_case wire
- * fields to camelCase, same pattern as cc-tokens.test.ts.
+ * fields to camelCase, same pattern as cc-tokens.test.ts. Also covers the
+ * self-check proxy (GET the last result, POST to start a run).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Hono } from 'hono';
@@ -76,5 +77,65 @@ describe('cc-systems adapter', () => {
     expect(res.status).toBe(502);
     const body = await res.json() as { error: string };
     expect(body.error).toBe('boom');
+  });
+
+  describe('self-check proxy', () => {
+    const DOC = {
+      status: 'warn', running: false, ran_at: '2026-10-02T15:04:05Z', duration_ms: 1234,
+      version: '2.56.0', mode: 'cli',
+      checks: [
+        { name: 'spine', status: 'pass', message: 'ok', remedy: null, system: 'postgres', duration_ms: 12 },
+        { name: 'links', status: 'warn', message: '2 blank', remedy: 'set CC_LINK_X', system: null, duration_ms: 1 },
+      ],
+    };
+
+    it('GET maps the document to camelCase and does not POST', async () => {
+      const app = await buildApp();
+      fetchMock.mockImplementation(async () => respond(DOC));
+
+      const res = await app.request('/api/selfcheck');
+      expect(res.status).toBe(200);
+      const body = await res.json() as Record<string, unknown>;
+      expect(body).toMatchObject({ status: 'warn', running: false, ranAt: '2026-10-02T15:04:05Z', durationMs: 1234, mode: 'cli' });
+      expect((body.checks as Array<Record<string, unknown>>)[0]).toEqual({
+        name: 'spine', status: 'pass', message: 'ok', remedy: null, system: 'postgres', durationMs: 12,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe('http://cc.test/api/selfcheck');
+      expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined();
+    });
+
+    it('POST /run is forwarded upstream as a POST and relays the 202 document', async () => {
+      const app = await buildApp();
+      fetchMock.mockImplementation(async () => respond({ ...DOC, running: true }, 202));
+
+      const res = await app.request('/api/selfcheck/run', { method: 'POST' });
+      expect(res.status).toBe(202);
+      expect((await res.json() as { running: boolean }).running).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe('http://cc.test/api/selfcheck/run');
+      expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    });
+
+    it('relays an upstream error as 502 on both routes', async () => {
+      const app = await buildApp();
+      fetchMock.mockImplementation(async () => respond({ detail: 'boom' }, 500));
+
+      const get = await app.request('/api/selfcheck');
+      expect(get.status).toBe(502);
+      expect((await get.json() as { error: string }).error).toBe('boom');
+      const post = await app.request('/api/selfcheck/run', { method: 'POST' });
+      expect(post.status).toBe(502);
+      expect((await post.json() as { error: string }).error).toBe('boom');
+    });
+
+    it('reports an unreachable gateway as 502', async () => {
+      const app = await buildApp();
+      fetchMock.mockImplementation(async () => { throw new Error('connect ECONNREFUSED'); });
+
+      const res = await app.request('/api/selfcheck');
+      expect(res.status).toBe(502);
+      expect((await res.json() as { error: string }).error).toContain('ECONNREFUSED');
+    });
   });
 });

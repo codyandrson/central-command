@@ -658,6 +658,34 @@ main() {
   local cmd="${1:-}"
   CURCMD="update-${cmd:-help}"
   logline "run start: ./update.sh ${cmd:-<none>} ${2:-}"
+  # ONE RUN AT A TIME (2026-10-01 design record, D11): the same <state>/run.lock
+  # setup.sh takes (deploy/env-lib.sh's cc_lock_*), taken BEFORE the migration
+  # writes .env. Every command that moves a branch or deploys takes it; `plan`
+  # mutates nothing and never waits on it. The `setup.sh` phases apply runs
+  # inherit CC_RUN_LOCK_PID and run NESTED under this lock rather than
+  # deadlocking on it, and only this process releases it (EXIT/INT/TERM trap).
+  # A stale lock — its holder provably gone — is reclaimed with a WARN that is
+  # printed but not counted, as in setup.sh: the reclaim is the recovery.
+  local takes_lock=0
+  case "$cmd" in
+    init|import|stage|apply|rollback) takes_lock=1 ;;
+    -h|--help|help|""|plan) ;;
+    *) [[ -f "$cmd" ]] && takes_lock=1 ;;
+  esac
+  if (( takes_lock )); then
+    if cc_lock_acquire "$STATE_DIR" "./update.sh $*"; then
+      case "$RUN_LOCK_RESULT" in
+        acquired)  cc_lock_trap "$STATE_DIR" ;;
+        reclaimed) cc_lock_trap "$STATE_DIR"
+                   printf 'WARN run-lock: %s\n' "$(cc_lock_reclaim_text "$STATE_DIR")"
+                   logline "WARN run-lock: $(cc_lock_reclaim_text "$STATE_DIR")" ;;
+      esac
+    else
+      fail "run-lock" "$(cc_lock_refusal_text "$STATE_DIR")"
+      logline "run end: ./update.sh $cmd -> exit 1 (run lock)"
+      exit 1
+    fi
+  fi
   case "$cmd" in
     -h|--help|help|"") ;;
     *) migrate_env || { logline "run end: ./update.sh $cmd -> exit 1"; exit 1; }
