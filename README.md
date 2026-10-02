@@ -48,12 +48,13 @@ one question schema (v2.45.0) — and then the
 deterministic driver `./setup.sh` runs a dry pre-deployment CHECK and nine
 idempotent phases
 (`check → machine → fetch → llm → stack → app → verify → test
-→ boot → demo`), each re-runnable on its own, every check one
+→ boot → demo`), recorded in a ledger as each completes, every check one
 `PASS|WARN|FAIL|USERACTION` line (exit 0/1/2/3 — 3 means the run paused
-for your move). A failure tells you which
-phase to re-run; `./setup.sh diagnose` writes a support bundle to paste back
-to Claude. Nothing is guessed: the agent reads the results and diagnoses —
-the script does all the mutating.
+for your move). A failure names the `.env` key to fix; running `./setup.sh`
+again resumes from the ledger exactly where it stopped — `./setup.sh status`
+prints the ledger without changing anything, and `./setup.sh report` writes
+a redacted bundle to paste back to Claude. Nothing is guessed: the agent
+reads the results and diagnoses — the script does all the mutating.
 
 ### 4. Onboarding
 
@@ -87,9 +88,11 @@ cd deploy/single
 That imports the zip, shows the version gate + plan, pauses for your explicit
 yes, and applies. Under the hood `update.sh` turns the deployment into a
 two-branch git repo (`upstream` = pristine imports, `local` = yours) so each
-update is compare-then-merge, with your local modifications preserved by
-three-way merge and a tagged rollback point. The named subcommands remain for
-granular or agent-conducted flows:
+update is compare-then-merge — **fast-forward only** (v2.55.0): the tree must
+already be pristine (no tracked file may differ from the installed release),
+or the run refuses and names what differs, with a tagged rollback point
+either way. The named subcommands remain for granular or agent-conducted
+flows:
 
 ```bash
 ./update.sh init            # one-time, on an existing deployment

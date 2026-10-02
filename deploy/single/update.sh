@@ -9,11 +9,18 @@
 #   place — a locally-initialized repo carries two branches:
 #
 #     upstream   pristine imports, one commit per downloaded zip
-#     local      the deployment: upstream + your local modifications
+#     local      the deployment — WHICH IS UPSTREAM, and nothing else
 #
-#   Three-way merge is what preserves local changes across updates, and it
-#   only sees changes that are COMMITTED — hand-edits left uncommitted on
-#   `local` are invisible to it (plan/apply refuse until they are committed).
+#   A DEPLOYMENT CARRIES NO LOCAL PATCHES (2026-10-01 design record, D10).
+#   `apply` FAST-FORWARDS `local` to `upstream`; a tree that cannot
+#   fast-forward, or that differs from its HEAD outside gitignored paths, is a
+#   FAIL naming the paths. The three-way merge that used to preserve local
+#   modifications is gone: the operator decided (2026-10-01) that a deployment
+#   with a patch is a deployment that has deviated, and the patch belongs in
+#   the repository or nowhere. An install configures through `.env` and the
+#   environment; anything else it needs is a FINDING, carried back to a
+#   development session with `./setup.sh report`, fixed properly, released.
+#   (`local` stays as the name the updater moves.)
 #
 #   Subcommands (each idempotent — resume is re-run, setup.sh's shape):
 #
@@ -139,9 +146,27 @@ need_initialized() {
   return 1
 }
 
-# Uncommitted changes to TRACKED files are invisible to a three-way merge and
-# would be clobbered by reset — both plan and apply care.
+# Uncommitted changes to TRACKED files would be clobbered by rollback's reset,
+# which is the one place this still speaks for itself. `apply`'s gate is
+# cc_tree_diff (D10) — the same test setup.sh's check/tree-pristine row runs —
+# because a deployment that differs from its release is refused for the
+# difference itself, not for the fact that it is uncommitted.
 dirty_tracked() { [[ -n "$(G status --porcelain --untracked-files=no)" ]]; }
+
+# D10, at the top of `apply`, before anything: is this tree still the release
+# it claims to be? cc_tree_diff lives in deploy/env-lib.sh so setup.sh and
+# this script run the one test rather than two copies of it.
+tree_pristine_gate() {
+  local rc=0
+  cc_tree_diff "$REPO_ROOT" || rc=$?
+  case "$rc" in
+    0) pass "tree-pristine" "the working tree and HEAD carry no difference from the installed release" ;;
+    1) fail "tree-pristine" "this deployment DIFFERS from the release it claims to be, so it will not be updated: $TREE_DIFF_PATHS. A deployment carries no local patches (2026-10-01 design record, D10) — restore those paths (git restore -- <path>) and carry the change back to a development session as a finding: ./setup.sh report writes one. There is no flag past this line"
+       return 1 ;;
+    *) pass "tree-pristine" "no git baseline to compare against yet (a fresh zip install) — ./update.sh init is what creates one" ;;
+  esac
+  return 0
+}
 
 on_local_branch() { [[ "$(G rev-parse --abbrev-ref HEAD 2>/dev/null)" == "local" ]]; }
 
@@ -251,7 +276,10 @@ cmd_init() {
   step "baseline" "deployed tree committed as the baseline (respects .gitignore — .env/.venv/secrets stay out)" \
     bash -c 'git -C "$1" add -A && git -C "$1" commit -qm "baseline: deployed tree at init"' _ "$REPO_ROOT" || return 1
   G branch upstream
-  pass "init" "branches \`upstream\` (imports) and \`local\` (deployment) created — commit any local file tweaks to \`local\` as you make them"
+  # No "commit any local file tweaks" any more (D10): a deployment carries no
+  # local patches, and an invitation to make some was the prose half of the
+  # rule the three-way merge enforced.
+  pass "init" "branches \`upstream\` (imports) and \`local\` (deployment) created — this tree is now provably the release it claims to be, which is what ./setup.sh check's tree-pristine row reads"
 }
 
 # ── import <zip> ────────────────────────────────────────────────────────────
@@ -370,7 +398,9 @@ cmd_plan() {
   need_initialized || return 1
 
   if dirty_tracked; then
-    warn "dirty" "uncommitted changes to tracked files — commit them to \`local\` before apply, or the merge cannot see (and preserve) them"
+    # NOT "commit them" any more (D10): a deployment carries no local patches,
+    # so the move is to restore the paths and report the change as a finding.
+    warn "dirty" "this tree differs from the release it claims to be, and \`apply\` will REFUSE it (design record 2026-10-01, D10) — restore the paths below (git restore -- <path>) and carry the change back to a development session: ./setup.sh report"
     G status --porcelain --untracked-files=no >&2
   fi
   if merged_already; then
@@ -402,17 +432,12 @@ cmd_plan() {
     && pass "flag-fetch" "dependency inputs changed — apply will re-run ./setup.sh fetch (images by digest, local builds, python, cockpit) before deploying" \
     || pass "flag-fetch" "no dependency input change — apply still runs ./setup.sh fetch (fast-forwards over what is present)"
 
-  # Predict conflicts without touching the working tree (git >= 2.38).
-  if G merge-tree --write-tree local upstream >/dev/null 2>&1; then
-    pass "conflicts" "merge is clean — no conflicts predicted"
+  # Can `local` fast-forward (D10)? There is nothing to three-way any more, so
+  # the only question is whether this deployment carries commits of its own.
+  if G merge-base --is-ancestor local upstream 2>/dev/null; then
+    pass "fast-forward" "\`local\` is an ancestor of \`upstream\` — apply fast-forwards, with nothing to merge"
   else
-    local rc=$?
-    if (( rc == 1 )); then
-      warn "conflicts" "merge WILL conflict — apply will stop for you to resolve; files:"
-      G merge-tree --write-tree --name-only local upstream 2>/dev/null | sed -n '2,$p' >&2
-    else
-      warn "conflicts" "this git cannot predict conflicts (needs >= 2.38) — apply will surface them the normal way"
-    fi
+    warn "fast-forward" "\`local\` carries commits that are not on \`upstream\`, so apply will REFUSE it: a deployment carries no local patches (design record 2026-10-01, D10). Carry the change back to a development session (./setup.sh report), then: git reset --hard upstream"
   fi
   note ""
   note "next: ./update.sh apply"
@@ -484,15 +509,13 @@ deploy_current_tree() {
 # ── apply ───────────────────────────────────────────────────────────────────
 cmd_apply() {
   need_git || return 1
+  # D10 FIRST, before anything: a tree that is not the release it claims to be
+  # does not get updated, and the difference is named rather than merged around.
+  tree_pristine_gate || return 1
   need_initialized || return 1
   on_local_branch || { fail "branch" "HEAD is on \`$(G rev-parse --abbrev-ref HEAD)\` — apply runs on the deployment branch: git checkout local"; return 1; }
   if [[ -e "$REPO_ROOT/.git/MERGE_HEAD" ]]; then
     fail "merge-in-progress" "resolve the in-progress merge first: fix conflicts, \`git add\` them, \`git commit\` — then re-run ./update.sh apply (or back out with: git merge --abort)"
-    return 1
-  fi
-  if dirty_tracked; then
-    fail "dirty" "uncommitted changes to tracked files — commit them to \`local\` first (they are invisible to the merge and would be lost):"
-    G status --porcelain --untracked-files=no >&2
     return 1
   fi
 
@@ -510,12 +533,16 @@ cmd_apply() {
     backup_spine || return 1
     local tag; tag="pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
     step "checkpoint" "rollback point tagged: $tag" G tag "$tag" || return 1
-    note "--> git merge --no-edit upstream"
-    if ! G merge --no-edit upstream >&2; then
-      fail "merge" "conflicts between your local changes and the update — resolve them (git status), \`git add\` each, \`git commit\`, then RE-RUN ./update.sh apply; every later step is idempotent and picks up where this stopped. To back out instead: git merge --abort"
+    # FAST-FORWARD ONLY (D10). There is nothing to three-way: `local` is
+    # `upstream` plus nothing, so a merge that cannot fast-forward means this
+    # deployment carries commits of its own — the same FAIL as a dirty tree,
+    # for the same reason.
+    note "--> git merge --ff-only upstream"
+    if ! G merge --ff-only upstream >&2; then
+      fail "merge" "\`local\` cannot FAST-FORWARD to \`upstream\`, which means this deployment carries commits of its own. A deployment carries no local patches (2026-10-01 design record, D10): carry the change back to a development session as a finding (./setup.sh report writes one), then reset the deployment onto the release — git reset --hard upstream — and re-run ./update.sh apply"
       return 1
     fi
-    pass "merge" "upstream merged into local (your committed changes preserved by three-way merge)"
+    pass "merge" "\`local\` fast-forwarded to \`upstream\` — the deployment IS the release"
   fi
 
   deploy_current_tree
@@ -612,9 +639,13 @@ usage: ./update.sh <downloaded-source-zip>
   stage <zip>     init if needed + import + plan, no prompts — the cockpit's
                   upload route drives this; apply stays its own step
   plan            dry-run report: version gate, diff, migration/deps/cockpit
-                  flags, predicted conflicts. Mutates nothing; re-runnable.
-  apply           gate (API stopped? version ok?) -> spine DB backup -> merge
-                  -> schema -> ./setup.sh llm -> ./setup.sh app -> ./setup.sh verify
+                  flags, whether \`local\` can fast-forward. Mutates nothing.
+  apply           gate (tree pristine? API stopped? version ok?) -> spine DB
+                  backup -> FAST-FORWARD \`local\` to \`upstream\` -> schema ->
+                  ./setup.sh llm -> ./setup.sh app -> ./setup.sh verify.
+                  A deployment carries no local patches: a tree that differs
+                  from its release, or cannot fast-forward, is refused and the
+                  paths are named (design record 2026-10-01, D10)
   rollback        reset \`local\` to the last pre-update tag and re-deploy
 
   exit codes      0 clean · 1 hard failure · 2 completed with warnings
@@ -650,10 +681,10 @@ main() {
       fi
       ;;
   esac
-  local rc=0
-  (( WARNS ))   && rc=2
-  (( ACTIONS )) && rc=3
-  (( FAILS ))   && rc=1
+  # The ONE exit-code rule (2026-10-01 design record, D5): FAIL > USERACTION >
+  # WARN, from the one function every command in this profile calls. This
+  # script carried the third copy of that precedence.
+  local rc; rc="$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
   logline "run end: ./update.sh $cmd -> exit $rc"
   exit "$rc"
 }

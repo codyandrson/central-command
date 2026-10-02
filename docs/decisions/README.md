@@ -190,3 +190,7 @@ recorded in-repo." rather than inventing one.
 | DL-104 | Graphiti's LLM client is upstream's; graphiti-llm is a plain alias and the built-in docstrings are the guidance | active | 2026-09-21 | test: `tests/test_graphiti_image_patches.py::test_the_responses_client_pin_is_retired` | [process.md](process.md) |
 | DL-105 | `setup.sh check` executes nothing, and it is the gate | active | 2026-09-23 | test: `tests/test_single_check_is_dry.py::test_nothing_check_can_reach_mutates_anything` | [process.md](process.md) |
 | DL-106 | The LLM catalog is entered in the LiteLLM UI; `.env` may declare it; register-models.py stays create-only | active | 2026-09-24 | test: `tests/test_register_models_upstream.py::test_a_row_the_operator_edited_is_never_touched` | [process.md](process.md) |
+| DL-107 | Every `.env` writer is a row in steps.tsv, and a phase's probe is what "done" means | active | 2026-10-01 | test: `tests/test_single_steps_schema.py` | [process.md](process.md) |
+| DL-108 | One exit-code rule, FAIL over USERACTION over WARN, everywhere | active | 2026-10-01 | script: `deploy/env-lib.sh` | [process.md](process.md) |
+| DL-109 | A deployment carries no local patches; a defect travels back as a report | active | 2026-10-01 | test: `tests/test_single_report_redacts.py` | [process.md](process.md) |
+| DL-110 | A PreToolUse hook, not a sentence, holds a session to `.env` | active | 2026-10-01 | test: `tests/test_install_tree_hook.py` | [process.md](process.md) |

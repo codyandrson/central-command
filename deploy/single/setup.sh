@@ -70,20 +70,42 @@
 #                 a real execution + provenance verified on the event log
 #
 #     stop        stop the API that `boot` started
-#     status      re-run postconditions only, nothing mutating
-#     diagnose    write <state>/setup-diagnostics.txt for pasting to Claude
+#     status      the LEDGER table plus the postconditions. Nothing mutating
+#     report      write <state>/report-<stamp>.txt — the one file a repository
+#                 DEFECT travels in (`diagnose` is an alias for it)
+#
+#   THE LEDGER (2026-10-01 design record, D1/D2/D3). `deploy/single/steps.tsv`
+#   declares every step of the install ONCE, in run order, with the .env keys
+#   that shape it and a `probe` that reads whether its effect is present.
+#   `<state>/ledger.tsv` records which steps are done, at which release, with
+#   which input fingerprint. Three consequences, and they are the whole point:
+#     * a phase whose prerequisites are not `done` is REFUSED without running,
+#       naming the first one — `./setup.sh boot` after a failed `app` was
+#       accepted until now, which is exactly the 2026-10-01 work-site state (an
+#       empty CC_LLM_API_KEY, eight blank Systems links, a green `verify`);
+#     * a phase that returns 0 while one of its rows probes false is a FAIL
+#       naming the row — that is "the step after the one that failed never ran"
+#       turning from invisible into a line;
+#     * `./setup.sh` with no argument is THE command and the only recovery
+#       there is: it skips what is still true and resumes at the first step
+#       that is not. `<phase>` stays as a DEVELOPER form that refuses out of
+#       order; there is no --force, because the escape hatch is the defect.
 #
 #   THE LOOP the operator runs: `configure` -> `check` -> triage (edit .env) ->
 #   `check` -> ... -> `all`. configure asks, check proves, and the only file
-#   either of them writes is the answer file.
+#   either of them writes is the answer file. `./setup.sh` is then the one
+#   command the operator runs, and runs again.
 #
-#   No argument = check, then the nine phases that CHANGE something, in order —
+#   No argument = check, then the phases that CHANGE something, in order —
 #   zero to a working, human-approved demo in one command (2026-08-28), stopping
 #   at the first hard failure or gate. `validate` and `preflight` stay callable
 #   on their own; the full run reaches them through `check`, which composes them
-#   and adds what they never covered (design record 2026-09-23, D5). There is no state file: every step is idempotent and the late phases
-#   probe REALITY to skip (a healthy API skips test+boot; a decided proposal
-#   skips demo), so RESUME IS RE-RUN.
+#   and adds what they never covered (design record 2026-09-23, D5). Every step
+#   is still idempotent and every row still probes REALITY — but "there is no
+#   state file" is RETIRED (2026-10-01): three reality probes and a handful of
+#   `.env` placeholder tests were the whole record of what had completed, so a
+#   mid-function abort abandoned every later step in its phase silently. The
+#   ledger is that record now, and RESUME IS STILL RE-RUN — of the one command.
 #
 #   OUTPUT PROTOCOL (cloud-init's exit taxonomy, Replicated's check lines):
 #     stdout   one line per check: `PASS|WARN|FAIL|USERACTION <check>: <message>`
@@ -130,6 +152,14 @@ QUESTIONS="$HERE/questions.tsv"
 # a machine exists (Windows/macOS) — design record D4.
 # shellcheck source=machine-lib.sh
 . "$HERE/machine-lib.sh"
+# THE PROCESS, as data (2026-10-01 design record, D1). steps.tsv declares every
+# step of the install once, in run order; ledger-lib.sh is the code that reads
+# it, fingerprints a step's inputs and keeps the ledger. Same split as
+# questions.tsv/questions-lib.sh, and for the same reason: a process defined in
+# one place cannot drift from the process that runs.
+# shellcheck source=ledger-lib.sh
+. "$HERE/ledger-lib.sh"
+STEPS="$HERE/steps.tsv"
 # Python on Windows encodes a PIPED stdout in the ANSI code page, so the em
 # dashes in register-models.py's operator banner reached the log as cp1252
 # bytes inside otherwise-UTF-8 output (2026-09-03 Windows run: `�`).
@@ -163,11 +193,19 @@ CURPHASE=""
 # until .env has been consulted for CC_STATE_DIR.
 STATE_DIR=""
 LOGFILE=""
+LEDGER=""
+# The last FAIL/USERACTION message per CHECK-NAME, which is the ledger's
+# `reason` column (2026-10-01 design record, D2: "the last FAIL/USERACTION
+# message, verbatim"). Collected here rather than parsed back out of the log,
+# because the protocol functions are the one place every message passes
+# through. Safe to record: by the same protocol a message refers to a key by
+# NAME and never carries its value.
+declare -A STEP_MSG=()
 logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "${CURPHASE:-run}" "$*" >>"$LOGFILE" 2>/dev/null || true; }
 pass() { printf 'PASS %s: %s\n' "$1" "$2"; PASSES=$((PASSES+1)); logline "PASS $1: $2"; }
 warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
-fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); logline "FAIL $1: $2"; }
-useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); logline "USERACTION $1: $2"; }
+fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); STEP_MSG["$1"]="$2"; logline "FAIL $1: $2"; }
+useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); STEP_MSG["$1"]="$2"; logline "USERACTION $1: $2"; }
 note() { printf '%s\n' "$*" >&2; }
 
 # Run a step, sending all of its chatter to stderr. PASS on success, FAIL on
@@ -205,7 +243,35 @@ init_state() {
     || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   LOGFILE="$STATE_DIR/setup-log.txt"
+  # THE LEDGER (D2), created EMPTY by every command — configure and check
+  # included. Its existence is what says "this tree is a deployment", so it may
+  # not wait for the first mutating phase to appear.
+  LEDGER="$STATE_DIR/ledger.tsv"
+  if [[ ! -f "$LEDGER" ]]; then
+    printf '%s\n' "$LEDGER_HEADER" >"$LEDGER" 2>/dev/null || true
+    chmod 600 "$LEDGER" 2>/dev/null || true
+  fi
 }
+
+# ── the tree is pristine, or the driver refuses (D10) ───────────────────────
+# The PROBE for check/tree-pristine, and the guard load_env runs at the top of
+# every MUTATING phase. A tree with no git baseline passes here and is reported
+# ONCE, by check's own row, as the USERACTION that names ./update.sh init —
+# otherwise a fresh zip install would be unable to run a single phase before
+# somebody had created a baseline it has no way to create itself.
+p_tree_pristine() {
+  local rc=0
+  cc_tree_diff "$REPO_ROOT" || rc=$?
+  (( rc == 1 )) && return 1
+  return 0
+}
+
+# Which phases CHANGE something. Each re-tests the tree before it reads .env,
+# so a modified release never reaches a mutation (and `check`, `validate`,
+# `status` and `report` stay readable on a tree somebody is mid-way through
+# repairing).
+MUTATING_PHASES=" machine fetch llm stack app verify test boot demo "
+MUTATING=0
 
 # ── the podman machine, if there is one ─────────────────────────────────────
 # On bare Linux there is none and every machine-aware check below is a no-op.
@@ -373,6 +439,15 @@ compose_profile_flags() {
 # ── .env helpers ────────────────────────────────────────────────────────────
 load_env() {
   init_state
+  # D10, before a mutating phase reads a single answer: this deployment
+  # configures through .env and never rewrites any part of Central Command, so
+  # a tree that differs from the release it claims to be does not get to
+  # mutate anything. There is no bypass variable for this one —
+  # CC_SETUP_UNLEDGERED (D3) does not cover it.
+  if (( MUTATING )) && ! p_tree_pristine; then
+    fail "tree-pristine" "this deployment DIFFERS from the release it claims to be, so the $CURPHASE phase will not run: $TREE_DIFF_PATHS. An install configures through .env and never rewrites any part of Central Command (2026-10-01 design record, D10) — restore those paths (git restore -- <path>), and carry the change back to a development session as a finding: ./setup.sh report writes one"
+    return 1
+  fi
   # USERACTION, not FAIL: "run configure" is the operator's move, which is what
   # exit 3 means in this protocol — and it is exactly the case `check_gate`'s
   # exit-3 text already talks the operator through. Reporting it as a hard
@@ -970,9 +1045,33 @@ phase_preflight() {
   machine_report
 }
 
+# ── the tree is the release, or nothing runs (2026-10-01 design record, D10) ─
+# The operator's rule: an install configures through .env and the environment,
+# and never rewrites any part of Central Command; anything else it needs is a
+# FINDING, carried back to a development session, fixed properly, and released.
+# It was prose in the skill until now ("never a script, a Dockerfile,
+# images.txt") and the 2026-09-24 work-site session regenerated the npm lock,
+# hand-edited images.txt and commented out lock pins anyway — each a defect
+# later blamed on something else.
+#
+# So this row, plus the same test at the top of load_env for every mutating
+# phase and at the top of update.sh's apply. There is no flag past it; the
+# developer bypass CC_SETUP_UNLEDGERED does NOT cover it.
+check_tree_pristine() {
+  local rc=0
+  cc_tree_diff "$REPO_ROOT" || rc=$?
+  case "$rc" in
+    0) pass "tree-pristine" "the working tree and HEAD carry no difference from the installed release — this deployment is the release it claims to be" ;;
+    1) fail "tree-pristine" "this deployment DIFFERS from the release it claims to be: $TREE_DIFF_PATHS. An install configures through .env and never rewrites any part of Central Command (2026-10-01 design record, D10) — restore those paths (git restore -- <path>) and carry the change back to a development session as a finding: ./setup.sh report writes one. There is no flag past this line" ;;
+    *) useraction "tree-pristine" "this tree has no git baseline, so nothing can prove it still matches the release it claims to be. Run ./update.sh init ONCE (it snapshots the unzipped tree and creates the \`upstream\`/\`local\` branches), then re-run — it is also what makes this deployment updatable" ;;
+  esac
+  return 0
+}
+
 # Everything about THIS host. `check`'s host section is exactly this function.
 preflight_host() {
   load_env || return 1
+  check_tree_pristine
 
   if command -v podman >/dev/null 2>&1; then
     local pv major minor
@@ -1947,13 +2046,19 @@ have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Ta
 # Pull every ref resolve-images.sh wrote into .env. The refs are TAGGED, not
 # digest-pinned: the lock's digest is verified at resolution time against the
 # registry, and a substituted tag is deliberately trusted from the mirror.
+# Returns 3 for the ONE seam the operator must fill (resolve-images.sh exits 3
+# when a mirror cannot serve a tag or an operator pin does not exist — nothing
+# this script can do about either), 1 for anything else. D5: a failure is never
+# reported as "stopped for your action".
 fetch_images() {
   local rc=0
   "$HERE/resolve-images.sh" || rc=$?
   case "$rc" in
     0) pass "resolve-images" "every image resolved to its locked tag" ;;
     2) pass "resolve-images" "resolved, with substitutions — see the WARN lines above and $STATE_DIR/installed.manifest" ;;
-    *) fail "resolve-images" "image resolution failed (exit $rc) — the FAIL/USERACTION lines above name the seam"; return 1 ;;
+    3) useraction "resolve-images" "image resolution stopped for you — the USERACTION line above names the seam (CC_REGISTRY_* for the mirror HOST, CC_IMG_<NAME> for an exact ref this resolver must use as-is). Nothing was deployed; fix the seam in the repo-root .env and re-run"
+       return 3 ;;
+    *) fail "resolve-images" "image resolution failed (exit $rc) — the FAIL lines above name the seam per image"; return 1 ;;
   esac
   # resolve-images.sh writes CC_IMG_* into .env; re-read so this shell has them.
   load_env || return 1
@@ -2005,7 +2110,14 @@ phase_fetch() {
   : "${CC_GRAPHITI_TAG:=1.0.2-anthropic}"
   [[ -f "$HERE/images.txt" ]] || { fail "images-txt" "$HERE/images.txt missing"; return 1; }
 
-  fetch_images
+  # The ONE deliberate pause this phase keeps (D5): an unresolvable pin or a
+  # mirror that lacks a tag is a seam only the operator can fill. Everything
+  # else — a pull of a RESOLVED ref, a local build — is a FAIL, and this phase
+  # returns 1 for it. Until 2026-10-01 it could not: its only FAIL path ended
+  # in a USERACTION summary, the phase runner ranked USERACTION above FAIL, and
+  # `update.sh apply` merged the new code straight past a failed build.
+  local frc=0
+  fetch_images || frc=$?
 
   fetch_local "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" \
     "$HERE/build-graphiti-image.sh" "CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP (the base ref, resolved from images.txt), CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_PYPI_INDEX_URL, CC_CA_BUNDLE, CC_TLS_INSECURE"
@@ -2049,8 +2161,16 @@ phase_fetch() {
   fi
 
   if (( FAILS )); then
-    useraction "fetch" "$FAILS artifact(s) could not be acquired — fix the seam(s) named above in the repo-root .env and re-run ./setup.sh fetch (acquired ones fast-forward); deploy/discover.sh maps what this network can reach, deploy/AIRGAP.md maps the seams"
+    # The guidance survives; the USERACTION does not. It was what made a failed
+    # build read as "stopped for your action" (D5).
+    note ""
+    note "$FAILS artifact(s) could not be acquired. Fix the seam(s) named above in the"
+    note "repo-root .env and re-run ./setup.sh (acquired ones fast-forward);"
+    note "deploy/discover.sh maps what this network can reach, deploy/AIRGAP.md the seams."
+    return 1
   fi
+  (( frc == 3 )) && return 3
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2870,6 +2990,11 @@ cmd_stop() {
 # status — postconditions only. Mutates nothing.
 # ─────────────────────────────────────────────────────────────────────────────
 phase_status() {
+  init_state
+  # THE LEDGER FIRST (D3): where this install stands is the question `status`
+  # is asked, and the table is the answer. The six-key check below stays — it
+  # is the cheap cross-check that the ledger's `done` rows are still true.
+  ledger_table
   phase_validate || true
   load_env || return 1
   pass "state-dir" "$STATE_DIR (logs, diagnostics, installed.manifest, pids — nothing inside the checkout)"
@@ -2886,9 +3011,23 @@ phase_status() {
   step "verify-deployed" "every deployment/configuration assertion passed" "$HERE/verify.sh" || true
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# diagnose — the support bundle. NAMES of keys, never values.
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# report — HOW A DEFECT TRAVELS (2026-10-01 design record, D10.3)
+# ═════════════════════════════════════════════════════════════════════════════
+# One file, built to be pasted into a development session. The rule it serves:
+# a deployment never fixes Central Command on site — it reports. So the skill's
+# whole instruction on a repository defect is one line (run ./setup.sh report,
+# hand over the path, end the turn), and this is the file that makes that
+# enough.
+#
+# NAMES of keys, never values — and since that is a claim rather than a
+# mechanism, the report is written to a temp file, SCANNED for every credential
+# value .env actually holds, and REFUSED (FAIL, nothing written) if one
+# appears. Belt and braces, per the record.
+#
+# `diagnose` is an alias for it: the bundle it used to write had a `tail -40`
+# window that cut off above wherever the run stopped, which is the one thing a
+# support bundle may not do.
 env_key_names() { # env_key_names <file>
   local line k v
   [[ -f "$1" ]] || { echo "  (file not present: $1)"; return 0; }
@@ -2899,42 +3038,113 @@ env_key_names() { # env_key_names <file>
   done <"$1"
 }
 
-phase_diagnose() {
-  init_state
-  local out="$STATE_DIR/setup-diagnostics.txt"
-  load_env || true
-  : "${CC_POD_PREFIX:=cc-}"
-  {
-    echo "Central Command single-node setup diagnostics — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    echo "Paste this whole file to Claude. It contains key NAMES only, never values."
-    echo
-    echo "== state directory (everything this install GENERATES is in here;"
-    echo "   nothing is written inside the checkout)"
-    echo "  $STATE_DIR"
-    echo
+# The tool versions, as their own section (the report prints them where D10.3
+# asks for them, and diagnose_sections no longer repeats them).
+report_tool_versions() {
+  local t
+  for t in podman uv node npm git curl openssl; do
+    printf '%s: ' "$t"
+    if command -v "$t" >/dev/null 2>&1; then
+      # openssl has no --version; everything else here does.
+      case "$t" in
+        openssl) openssl version 2>&1 | head -1 ;;
+        *)       { "$t" --version 2>&1 || true; } | head -1 ;;
+      esac
+    else
+      echo "(not found)"
+    fi
+  done
+  printf 'python: '; $PY -V 2>&1 | head -1
+  return 0
+}
+
+# THE WHOLE LOG OF THE LAST RUN — from its last `run start:` line, not a
+# `tail -40` window. The 40-line window is what cut off above wherever a run
+# stopped, which is the one thing a support bundle may not do. LOG_BEFORE is
+# the log's length BEFORE this very run appended its own `run start:`, so
+# "the last run" means the one being reported on, never the report itself.
+LOG_BEFORE=0
+last_run_log() {
+  local n total="${LOG_BEFORE:-0}"
+  [[ -f "$LOGFILE" ]] || { echo "  (no log yet)"; return 0; }
+  [[ "$total" =~ ^[0-9]+$ ]] || total=0
+  (( total > 0 )) || { echo "  (no earlier run in the log)"; return 0; }
+  n="$(head -n "$total" "$LOGFILE" | grep -n 'run start:' | tail -1 | cut -d: -f1)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=1
+  head -n "$total" "$LOGFILE" | tail -n +"$n"
+  return 0
+}
+
+# Every credential VALUE this .env actually holds, as `KEY<TAB>VALUE`, so the
+# written report can be scanned for them. The sources are questions.tsv's own
+# `secret` column plus the shapes a credential takes in this file — the schema
+# is the list, and the patterns catch what make-secrets.sh and the app phase
+# generate (which questions.tsv never asks).
+#
+# Values shorter than eight characters are skipped on purpose: `none`, `0` and
+# `1` are legitimate answers and a substring of half the English language, and
+# a refusal on one would make `report` unusable exactly when it is needed.
+report_secret_values() {
+  local row k v line secret_keys=""
+  if [[ -f "$QUESTIONS" ]]; then
+    while IFS= read -r row; do
+      [[ "$(q_field "$row" 8)" == y ]] || continue
+      secret_keys="${secret_keys:+$secret_keys }$(q_field "$row" 1)"
+    done < <(q_rows "$QUESTIONS")
+  fi
+  secret_keys="${secret_keys:+$secret_keys }CC_LLM_API_KEY CC_LLM_PROXY_ADMIN_KEY"
+  [[ -f "$ENV_FILE" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    k="${line%%=*}"; v="$(q_unquote "${line#*=}")"
+    case "$k" in
+      *_PASSWORD|*_TOKEN|*_KEY) ;;
+      *) [[ " $secret_keys " == *" $k "* ]] || continue ;;
+    esac
+    (( ${#v} >= 8 )) || continue
+    printf '%s\t%s\n' "$k" "$v"
+  done <"$ENV_FILE"
+  return 0
+}
+
+# The KEY NAMES whose value appears in <file>. A bash substring test, never a
+# `grep <value>`: a value in an argv is a value in `ps`.
+report_leaking_keys() { # report_leaking_keys <file>
+  local blob row k v out=""
+  blob="$(cat "$1" 2>/dev/null)" || return 0
+  while IFS= read -r row; do
+    k="${row%%$'\t'*}"; v="${row#*$'\t'}"
+    [[ -n "$v" ]] || continue
+    [[ "$blob" == *"$v"* ]] && out="${out:+$out }$k"
+  done < <(report_secret_values)
+  printf '%s' "$out"
+  return 0
+}
+
+# Every `failed` or `gate` row, with its reason and the NAMES of the .env keys
+# that shaped it — which is what turns "a row is red" into "change one of
+# these keys, or report the row".
+report_open_rows() {
+  local line step st reason qual phase name reads any=0
+  while IFS= read -r line; do
+    IFS=$'\t' read -r step st _ _ _ reason <<<"$line"
+    [[ "$st" == failed || "$st" == gate ]] || continue
+    any=1
+    qual="$step"; phase="${qual%%/*}"; name="${qual#*/}"
+    reads="$(cc_step_field "$phase" "$name" reads)" || reads=""
+    echo "  $qual [$st]"
+    echo "      reason: ${reason:-(none recorded)}"
+    echo "      inputs: ${reads:-(none)}"
+  done < <(cc_ledger_read "$LEDGER")
+  (( any )) || echo "  (no failed or waiting row)"
+  return 0
+}
+
+diagnose_sections() {
+  local ctrs c
     echo "== host"
     uname -a 2>&1
-    echo
-    echo "== tool versions"
-    for t in podman uv node npm git curl openssl; do
-      printf '%s: ' "$t"
-      if command -v "$t" >/dev/null 2>&1; then
-        # openssl has no --version; everything else here does.
-        case "$t" in
-          openssl) openssl version 2>&1 | head -1 ;;
-          *)       { "$t" --version 2>&1 || true; } | head -1 ;;
-        esac
-      else
-        echo "(not found)"
-      fi
-    done
-    printf 'python: '; $PY -V 2>&1 | head -1
-    echo
-    echo "== setup-log.txt (last 40 lines — WHERE the run stopped)"
-    tail -40 "$LOGFILE" 2>/dev/null || echo "  (no log yet)"
-    echo
-    echo "== .env — the one answer file (names only)"
-    env_key_names "$ENV_FILE"
     echo
     echo "== discovery (classes only — the REPORT names internal hosts, so it is"
     echo "   pointed to, never inlined here)"
@@ -2967,26 +3177,692 @@ phase_diagnose() {
     echo
     echo "== verify.sh (short poll budget — a bundle is collected FROM a broken"
     echo "   stack, where the patient answer costs a quarter of an hour)"
-    CC_VERIFY_MAX_WAIT=15 "$HERE/verify.sh" 2>&1
-  } >"$out"
+    # A DEFAULT, not an override: 15s is the right budget for a bundle, and a
+    # caller that has already said how long it is willing to wait meant it.
+    CC_VERIFY_MAX_WAIT="${CC_VERIFY_MAX_WAIT:-15}" "$HERE/verify.sh" 2>&1
+  return 0
+}
+
+cmd_report() {
+  CURPHASE=report
+  init_state
+  # Quietly: the report's own protocol line is the one this command prints.
+  load_env >/dev/null 2>&1 || true
+  : "${CC_POD_PREFIX:=cc-}"
+  local out tmp t
+  out="$STATE_DIR/report-$(date -u +%Y%m%dT%H%M%SZ).txt"
+  tmp="$out.partial"
+  {
+    echo "Central Command single-node install report — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "Built to be pasted into a DEVELOPMENT session. It carries key NAMES only,"
+    echo "never a value; a scan refuses to write it if one got in."
+    echo "The log section below is the WHOLE last run, not a window."
+    echo
+    echo "== state directory (everything this install GENERATES is in here;"
+    echo "   nothing is written inside the checkout)"
+    echo "  $STATE_DIR"
+    echo
+    echo "== the ledger — what completed, at which release, with which inputs"
+    ledger_table
+    echo
+    echo "== every failed or waiting row, with its reason and its inputs"
+    report_open_rows
+    echo
+    echo "== the whole log of the last run"
+    last_run_log
+    echo
+    echo "== .env — the one answer file (names only)"
+    env_key_names "$ENV_FILE"
+    echo
+    echo "== VERSION (what the updaters read as the installed version)"
+    cat "$REPO_ROOT/VERSION" 2>&1
+    echo
+    echo "== tool versions"
+    report_tool_versions
+    echo
+    echo "== installed.manifest (what resolve-images.sh actually wrote)"
+    cat "$STATE_DIR/installed.manifest" 2>/dev/null || echo "  (no manifest — the fetch phase writes it)"
+    echo
+    echo "== the processes this install starts (last 100 lines each)"
+    for t in uvicorn cockpit sandbox; do
+      if [[ -f "$STATE_DIR/$t.log" ]]; then
+        echo "---- $t.log"
+        tail -100 "$STATE_DIR/$t.log" 2>&1
+      else
+        echo "---- $t.log (not present)"
+      fi
+    done
+    echo
+    diagnose_sections
+  } >"$tmp"
+  chmod 600 "$tmp" 2>/dev/null
+  # Belt and braces (D10.3): every function above prints names, and this is the
+  # check that they did. A leak is a FAIL and nothing is written.
+  local leaked; leaked="$(report_leaking_keys "$tmp")"
+  if [[ -n "$leaked" ]]; then
+    rm -f "$tmp"
+    fail "report" "REFUSING to write the report: the VALUE of $leaked appeared in it, and this file is meant to be pasted into a chat. Nothing was written. That is a defect in the report itself — report it with the ledger from ./setup.sh status instead"
+    return 1
+  fi
+  mv -f "$tmp" "$out" || { rm -f "$tmp"; fail "report" "could not write $out — check the permissions on $STATE_DIR"; return 1; }
   chmod 600 "$out" 2>/dev/null
-  pass "diagnostics" "state dir is $STATE_DIR; wrote $out — paste it to Claude"
+  pass "report" "state dir is $STATE_DIR; wrote $out — hand that path to a development session (key NAMES only, never a value)"
+  return 0
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE PROBES — one per steps.tsv row: "is this step's effect present NOW?"
+# ═════════════════════════════════════════════════════════════════════════════
+# 2026-10-01 design record, D1/D2. Three rules every function below lives
+# under, because a probe is the one thing the driver trusts:
+#
+#   * it MUTATES NOTHING. tests/test_single_steps_schema.py runs the same
+#     source walk over every probe that keeps `check` dry — a pull, a build, a
+#     `compose up`, an install or a make-secrets call fails the suite;
+#   * it is CHEAP. No probe spends a token and none waits on a deadline: the
+#     llm round-trip rows read the proxy's catalog rather than asking for
+#     another completion, and what records that the real round trip was made
+#     is the ledger row's VERSION + FINGERPRINT. (The two requests that do
+#     prove what an agent will experience are P2's self-check, by design — see
+#     D4.);
+#   * "NOT APPLICABLE is DONE". A step a flag turns off returns 0, because a
+#     component this install does not have is not an unfinished step. That is
+#     what keeps a speech-less or n8n-less deployment from blocking on rows it
+#     will never perform.
+#
+# A credential is read with get_kv and, where one must travel, goes through
+# `-H @-` (stdin) so it is never in an argv for `ps` to show.
+
+# A flag's effective value: this shell's (load_env has sourced .env), else the
+# answer file's, else the default load_env would have applied.
+p_flag() { # p_flag <key> <default>
+  local v="${!1:-}"
+  [[ -n "$v" ]] || v="$(q_unquote "$(get_kv "$ENV_FILE" "$1")")"
+  printf '%s' "${v:-$2}"
+}
+
+# 0 = this step does NOT apply (the flag is not at its on-value), so the caller
+# returns done. Reads as `p_off CC_ENABLE_N8N 0 1 && return 0`.
+p_off() { # p_off <flag-key> <default> <on-value>
+  [[ "$(p_flag "$1" "$2")" == "$3" ]] && return 1
+  return 0
+}
+
+# A derived, minted or generated .env key carries a real value.
+p_kv_set() { # p_kv_set <key>
+  is_placeholder "$(get_kv "$ENV_FILE" "$1")" && return 1
+  return 0
+}
+
+p_always() {
+  # For a step with no artifact to read — the suite's green, the catalog line
+  # that is a PASS either way. The ledger's version+fingerprint is the whole
+  # record, which is exactly how `test` becomes "once per release" without the
+  # api_up proxy it used to skip on.
+  return 0
+}
+
+p_env_file() {
+  [[ -f "$ENV_FILE" ]]
+}
+
+p_venv() {
+  venv_python >/dev/null
+}
+
+p_install() {
+  local py
+  py="$(venv_python)" || return 1
+  ( cd "$REPO_ROOT" && "$py" -c 'import central_command' ) >/dev/null 2>&1
+}
+
+# node >= 22, i.e. is the cockpit in scope on this host at all? The phases WARN
+# and carry on without it, so every cockpit row probes 0 when it is absent.
+p_node_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  local nv
+  nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
+  [[ "${nv%%.*}" =~ ^[0-9]+$ ]] || return 1
+  (( ${nv%%.*} >= 22 ))
+}
+
+p_cockpit_npm() {
+  p_node_ok || return 0
+  [[ -d "$REPO_ROOT/web/node_modules" ]]
+}
+
+p_cockpit_build() {
+  p_node_ok || return 0
+  [[ -f "$REPO_ROOT/web/server-dist/index.js" ]] || return 1
+  [[ -d "$REPO_ROOT/web/dist" ]]
+}
+
+# ── machine ─────────────────────────────────────────────────────────────────
+p_machine() {
+  [[ -n "$(machine_name)" ]] || return 0
+  machine_sh 'true' >/dev/null 2>&1
+}
+
+p_machine_native_ca() {
+  [[ -n "$(machine_name)" ]] || return 0
+  podman machine set --help 2>/dev/null | grep -q -- '--import-native-ca' || return 0
+  [[ -f "$STATE_DIR/machine.import-native-ca" ]]
+}
+
+p_machine_ca() {
+  [[ -n "$(machine_name)" ]] || return 0
+  local ca want cur
+  ca="$(q_unquote "$(get_kv "$ENV_FILE" CC_CA_BUNDLE)")"
+  [[ -n "$ca" ]] || return 0
+  [[ -r "$ca" ]] || return 1
+  want="$(cat "$ca")"
+  cur="$(machine_sh "cat '$CC_MACHINE_CA_PEM' 2>/dev/null")"
+  [[ "$cur" == "$want" ]]
+}
+
+p_machine_ca_probe() {
+  [[ -n "$(machine_name)" ]] || return 0
+  [[ -n "$(q_unquote "$(get_kv "$ENV_FILE" CC_CA_BUNDLE)")" ]] || return 0
+  local host rc=0
+  host="$(cc__mhost "$(q_unquote "$(get_kv "$ENV_FILE" CC_REGISTRY_DOCKERIO)")")"
+  [[ -n "$host" ]] || host="registry-1.docker.io"
+  machine_sh "curl -fsSI --max-time 15 https://${host}/v2/ >/dev/null" || rc=$?
+  # Only curl 60 is a TRUST verdict. Anything else is reachability, which the
+  # phase itself reports as a WARN — a probe that read it as failure would turn
+  # an air-gapped machine into a permanently blocked install.
+  (( rc != 60 ))
+}
+
+p_machine_registries() {
+  [[ -n "$(machine_name)" ]] || return 0
+  local want cur
+  want="$(cc_render_registries_conf)"
+  [[ -n "$want" ]] || return 0
+  cur="$(machine_sh "cat '$CC_MACHINE_REGISTRIES_CONF' 2>/dev/null")"
+  [[ "$cur" == "$want" ]]
+}
+
+p_machine_proxy() {
+  [[ -n "$(machine_name)" ]] || return 0
+  local want cur
+  want="$(cc_render_proxy_conf)"
+  [[ -n "$want" ]] || return 0
+  cur="$(machine_sh "cat '$CC_MACHINE_PROXY_CONF' 2>/dev/null")"
+  [[ "$cur" == "$want" ]]
+}
+
+# ── fetch ───────────────────────────────────────────────────────────────────
+# The CC_IMG_* names images.txt implies FOR THESE FLAGS — the resolver's own
+# derivation (its `img_var`), mirrored here so a probe needs no second list of
+# images and a disabled component's image is never demanded.
+p_image_vars() {
+  local line path comp n
+  [[ -f "$HERE/images.txt" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line%%#*}"
+    [[ -n "${line//[[:space:]]/}" ]] || continue
+    # shellcheck disable=SC2086
+    set -- $line
+    (( $# == 6 )) || continue
+    path="$2"; comp="$6"
+    case "$comp" in
+      n8n)          p_off CC_ENABLE_N8N 0 1 && continue ;;
+      speech)       p_off CC_ENABLE_SPEECH 1 1 && continue ;;
+      sandbox-base) p_off CC_ENABLE_SANDBOX 1 1 && continue ;;
+      crawler-base) p_off CC_ENABLE_CRAWLER 1 1 && continue ;;
+    esac
+    n="${path^^}"; n="${n//[\/-]/_}"
+    printf 'CC_IMG_%s\n' "${n#LIBRARY_}"
+  done <"$HERE/images.txt"
+  return 0
+}
+
+p_resolve_images() {
+  [[ -f "$STATE_DIR/installed.manifest" ]] || return 1
+  # The manifest records what the resolver DID; .env is what the deploy READS,
+  # and compose interpolates from there. A manifest without the keys is the
+  # v2.48.0 shape of defect, so both halves are probed.
+  local var
+  while IFS= read -r var; do
+    [[ -n "$var" ]] || continue
+    [[ -n "$(get_kv "$ENV_FILE" "$var")" ]] || return 1
+  done < <(p_image_vars)
+  return 0
+}
+
+p_img() { # p_img <CC_IMG_var>
+  local ref
+  ref="$(get_kv "$ENV_FILE" "$1")"
+  [[ -n "$ref" ]] || return 1
+  have_image "$ref"
+}
+
+p_image_postgres() {
+  p_img CC_IMG_POSTGRES
+}
+
+p_image_neo4j() {
+  p_img CC_IMG_NEO4J
+}
+
+p_image_redis() {
+  p_img CC_IMG_REDIS
+}
+
+p_image_berriai_litellm_database() {
+  p_img CC_IMG_BERRIAI_LITELLM_DATABASE
+}
+
+p_image_n8nio_n8n() {
+  p_off CC_ENABLE_N8N 0 1 && return 0
+  p_img CC_IMG_N8NIO_N8N
+}
+
+p_image_zepai_knowledge_graph_mcp() {
+  p_img CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP
+}
+
+p_image_python() {
+  p_off CC_ENABLE_SANDBOX 1 1 && return 0
+  p_img CC_IMG_PYTHON
+}
+
+p_image_playwright_python() {
+  p_off CC_ENABLE_CRAWLER 1 1 && return 0
+  p_img CC_IMG_PLAYWRIGHT_PYTHON
+}
+
+p_image_speaches_ai_speaches() {
+  p_off CC_ENABLE_SPEECH 1 1 && return 0
+  p_img CC_IMG_SPEACHES_AI_SPEACHES
+}
+
+p_image_graphiti() {
+  have_image "localhost/cc-graphiti:$(p_flag CC_GRAPHITI_TAG 1.0.2-anthropic)"
+}
+
+p_image_sandbox() {
+  p_off CC_ENABLE_SANDBOX 1 1 && return 0
+  have_image "localhost/cc-sandbox:1"
+}
+
+p_image_crawler() {
+  p_off CC_ENABLE_CRAWLER 1 1 && return 0
+  have_image "localhost/cc-crawler:1"
+}
+
+# ── llm ─────────────────────────────────────────────────────────────────────
+p_secrets() {
+  local k
+  for k in "${CC_GENERATED_KEYS[@]}"; do
+    is_placeholder "$(get_kv "$ENV_FILE" "$k")" && return 1
+  done
+  return 0
+}
+
+p_litellm_live() {
+  curl -fsS -m 5 -o /dev/null \
+    "http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/health/liveliness" 2>/dev/null
+}
+
+p_speech_up() {
+  p_off CC_ENABLE_SPEECH 1 1 && return 0
+  curl -fsS -m 5 -o /dev/null \
+    "http://127.0.0.1:$(p_flag CC_SPEECH_PORT 8093)/health" 2>/dev/null
+}
+
+p_speech_models() {
+  p_off CC_ENABLE_SPEECH 1 1 && return 0
+  local listed m
+  listed="$(curl -fsS -m 15 "http://127.0.0.1:$(p_flag CC_SPEECH_PORT 8093)/v1/models" 2>/dev/null)" || return 1
+  for m in "$(p_flag CC_SPEECH_TTS_MODEL speaches-ai/Kokoro-82M-v1.0-ONNX)" \
+           "$(p_flag CC_SPEECH_STT_MODEL Systran/faster-whisper-small)"; do
+    [[ "$listed" == *"$m"* ]] || return 1
+  done
+  return 0
+}
+
+# The proxy's catalog, read under the ADMIN key. One GET, no tokens.
+p_models_json() {
+  local key
+  key="$(get_kv "$ENV_FILE" CC_LLM_PROXY_ADMIN_KEY)"
+  [[ -n "$key" ]] || return 1
+  printf 'Authorization: Bearer %s\n' "$key" \
+    | curl -fsS -m 15 -H @- "http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/v1/models" 2>/dev/null
+}
+
+p_alias() { # p_alias <alias>
+  local listed
+  listed="$(p_models_json)" || return 1
+  [[ "$listed" == *"\"$1\""* ]]
+}
+
+# The gate's probe (llm/catalog-filled): every alias THIS deployment requires
+# answers /v1/models through the admin key. cc_required_aliases is the ONE list.
+p_catalog_aliases() {
+  local listed a
+  listed="$(p_models_json)" || return 1
+  for a in $(cc_required_aliases); do
+    [[ "$listed" == *"\"$a\""* ]] || return 1
+  done
+  return 0
+}
+
+p_alias_cc_default() {
+  p_alias cc-default
+}
+
+p_alias_graphiti_llm() {
+  p_alias graphiti-llm
+}
+
+p_alias_gpt_4_1_nano() {
+  p_alias gpt-4.1-nano
+}
+
+p_alias_cc_embedding() {
+  p_alias cc-embedding
+}
+
+p_alias_cc_tts() {
+  p_off CC_ENABLE_SPEECH 1 1 && return 0
+  p_alias cc-tts
+}
+
+p_alias_cc_stt() {
+  p_off CC_ENABLE_SPEECH 1 1 && return 0
+  p_alias cc-stt
+}
+
+p_embed_dim() {
+  p_kv_set CC_EMBED_DIM
+}
+
+# ── stack ───────────────────────────────────────────────────────────────────
+p_up_stack() {
+  local gp
+  gp="$(p_flag CC_GRAPHITI_PORT 8000)"
+  p_litellm_live || return 1
+  # The spine's Postgres speaks no HTTP, and Graphiti's MCP root is not a
+  # health page — a listener is the honest evidence for both.
+  port_listener "$(p_flag CC_PG_PORT 5442)" || return 1
+  port_listener "$gp" || return 1
+  return 0
+}
+
+p_restart_on_boot() {
+  local out
+  [[ -n "$(podman machine list --format '{{.Name}}' 2>/dev/null)" ]] || return 0
+  out="$(podman machine ssh -- 'systemctl --global is-enabled podman-restart.service 2>/dev/null || true' </dev/null 2>/dev/null | tr -d ' \r')"
+  # An answer this cannot read is not evidence of absence: the phase WARNs when
+  # the enable fails, and a probe inventing a FAIL out of silence would stop an
+  # install over a unit query.
+  [[ -z "$out" ]] && return 0
+  [[ "$out" == enabled* ]]
+}
+
+# ── app ─────────────────────────────────────────────────────────────────────
+p_mint_key() {
+  p_kv_set CC_LLM_API_KEY
+}
+
+p_llm_base_url() {
+  p_kv_set CC_LLM_BASE_URL
+}
+
+p_default_model() {
+  p_kv_set CC_DEFAULT_MODEL
+}
+
+p_embed_alias() {
+  p_kv_set CC_EMBED_ALIAS
+}
+
+p_litellm_db_url() {
+  p_kv_set CC_LITELLM_DB_URL
+}
+
+p_link_litellm() {
+  p_kv_set CC_LLM_PROXY_UI_URL
+}
+
+p_link_neo4j() {
+  p_kv_set CC_NEO4J_BROWSER_URL
+}
+
+p_link_n8n() {
+  p_off CC_ENABLE_N8N 0 1 && return 0
+  p_kv_set CC_N8N_UI_URL
+}
+
+p_link_crawler() {
+  p_off CC_ENABLE_CRAWLER 1 1 && return 0
+  p_kv_set CC_CRAWLER_DOCS_URL
+}
+
+p_link_sandbox() {
+  p_off CC_ENABLE_SANDBOX 1 1 && return 0
+  p_kv_set CC_SANDBOX_DOCS_URL
+}
+
+# ── verify ──────────────────────────────────────────────────────────────────
+# verify.sh itself polls for a quarter of an hour on a broken stack and its
+# live half spends a token, so neither is a probe. What these read is the
+# cheapest evidence that the SUBJECT of each assertion still exists; that the
+# assertions passed is recorded by the row's version + fingerprint.
+p_verify_deployed() {
+  p_up_stack
+}
+
+p_verify_live() {
+  local base key
+  base="$(get_kv "$ENV_FILE" CC_LLM_BASE_URL)"
+  [[ -n "$base" ]] || return 1
+  key="$(get_kv "$ENV_FILE" CC_LLM_API_KEY)"
+  [[ -n "$key" ]] || return 1
+  p_kv_set CC_EMBED_DIM || return 1
+  # The APP's own credential, not the admin key — the spine key has gone
+  # missing three times by three mechanisms, and this is the cheap half of
+  # catching it. The real proof is P2's self-check.
+  printf 'Authorization: Bearer %s\n' "$key" \
+    | curl -fsS -m 15 -o /dev/null -H @- "${base%/}/v1/models" 2>/dev/null
+}
+
+# ── boot ────────────────────────────────────────────────────────────────────
+p_operator_name() {
+  is_placeholder "$(q_unquote "$(get_kv "$ENV_FILE" CC_OPERATOR_NAME)")" || return 0
+  # Headless, the cockpit asks on first run (v2.37.0) — gating here is what
+  # made that prompt unreachable on this profile, so a nameless headless
+  # install is complete and the row is done.
+  is_tty && return 1
+  return 0
+}
+
+p_boot_api() {
+  api_up
+}
+
+p_boot_roster() {
+  local n
+  n="$(api_json "$(api_url)/api/agents" 'len(d.get("agents", d if isinstance(d, list) else []))')"
+  [[ "$n" =~ ^[0-9]+$ ]] || return 1
+  (( n > 0 ))
+}
+
+p_boot_cockpit() {
+  # No server build means no cockpit on this host; the phase WARNs and the API
+  # runs without it.
+  [[ -f "$REPO_ROOT/web/server-dist/index.js" ]] || return 0
+  curl -fsS -m 5 -o /dev/null \
+    "http://127.0.0.1:$(p_flag CC_COCKPIT_PORT 3080)/" 2>/dev/null
+}
+
+p_boot_at_logon() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*) ;;
+    *) return 0 ;;
+  esac
+  [[ -f "$STATE_DIR/cc-boot.cmd" ]]
+}
+
+# ── demo ────────────────────────────────────────────────────────────────────
+p_demo_fed() {
+  demo_decided && return 0
+  demo_awaiting
+}
+
+p_demo_decided() {
+  demo_decided
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE LEDGER — what completed, at which version, with which inputs (D2)
+# ═════════════════════════════════════════════════════════════════════════════
+# The updaters read VERSION as the installed version — not git, not the tag.
+installed_version() {
+  local v
+  v="$(sed -n 's/^version=//p' "$REPO_ROOT/VERSION" 2>/dev/null | head -1 | tr -d ' \r')"
+  printf '%s' "${v:-unknown}"
+}
+
+# The whole ledger, as a table. On stdout, because it is the answer to
+# `./setup.sh status` and the first section of a report — the one thing an
+# operator (or a reviewing agent) reads to know where an install stands.
+ledger_table() {
+  local line step st ver at fp reason
+  printf 'LEDGER %s\n' "$LEDGER"
+  printf '%-34s %-7s %-9s %-21s %s\n' "step" "status" "version" "at" "reason"
+  while IFS= read -r line; do
+    IFS=$'\t' read -r step st ver at fp reason <<<"$line"
+    printf '%-34s %-7s %-9s %-21s %s\n' "$step" "$st" "$ver" "$at" "${reason:--}"
+  done < <(cc_ledger_read "$LEDGER")
+  return 0
+}
+
+# After the phase function returns: record EVERY row of the phase from the
+# reality its probe reads, never from what the phase said it did.
+#
+# `<phase-reported-success>` is "no FAIL and no USERACTION" — and a row probing
+# false after that is the defect this whole mechanism exists for: the step after
+# the one that failed never ran, and nothing said so. It becomes a line.
+ledger_record() { # ledger_record <phase> <phase-reported-success:0|1>
+  local phase="$1" ok="$2" step kind reads probe qual fp st now ver reason
+  now="$(date -u +%FT%TZ)"
+  ver="$(installed_version)"
+  while IFS= read -r step; do
+    kind="$(cc_step_field "$phase" "$step" kind)"
+    reads="$(cc_step_field "$phase" "$step" reads)"
+    probe="$(cc_step_field "$phase" "$step" probe)"
+    qual="$phase/$step"
+    fp="$(cc_fingerprint "$ENV_FILE" "$reads")"
+    reason="${STEP_MSG[$step]:-}"
+    if "$probe" >/dev/null 2>&1; then
+      st=done; reason=""
+      # A row whose ONLY evidence is the phase's own verdict — `p_always`: the
+      # suite's green, the catalog line that is a PASS either way — may not be
+      # recorded done on a phase that did not report success. Otherwise a RED
+      # suite, or a phase refused by the tree-pristine guard before it did
+      # anything, would write itself into the ledger as finished, which is the
+      # exact class of defect the ledger exists to end.
+      if [[ "$probe" == "p_always" ]] && (( ! ok )); then
+        st=failed
+        reason="${STEP_MSG[$step]:-the phase did not report success, and this step has no artifact of its own to read}"
+      fi
+    elif [[ "$kind" == gate || "$kind" == human ]]; then
+      # The llm catalog pause and the demo approval: not broken, waiting.
+      st=gate
+    else
+      st=failed
+    fi
+    if [[ "$st" != done ]] && (( ok )); then
+      fail "$step" "phase reported success but $qual's effect is absent ($probe returned non-zero) — this is the step nobody told you about"
+      st=failed
+      reason="${STEP_MSG[$step]:-}"
+    fi
+    cc_ledger_write "$LEDGER" "$qual" "$st" "$ver" "$now" "$fp" "$reason" \
+      || warn "ledger" "could not write $LEDGER — this phase will simply run again"
+  done < <(cc_steps_for_phase "$phase")
+  return 0
+}
+
+# Is this phase already DONE — every row `done`, at THIS version, with the same
+# input fingerprint, and every probe still true (D2's rule 2)? Prints one
+# "<step>\t<at>" line per row when it is, so the caller can report what it
+# skipped rather than skipping silently.
+phase_is_done() { # phase_is_done <phase>
+  local phase="$1" step qual ver lines="" at
+  ver="$(installed_version)"
+  while IFS= read -r step; do
+    qual="$phase/$step"
+    [[ "$(cc_ledger_status "$LEDGER" "$qual")" == done ]] || return 1
+    [[ "$(cc_ledger_field "$LEDGER" "$qual" 3)" == "$ver" ]] || return 1
+    [[ "$(cc_ledger_field "$LEDGER" "$qual" 5)" \
+       == "$(cc_fingerprint "$ENV_FILE" "$(cc_step_field "$phase" "$step" reads)")" ]] || return 1
+    "$(cc_step_field "$phase" "$step" probe)" >/dev/null 2>&1 || return 1
+    at="$(cc_ledger_field "$LEDGER" "$qual" 4)"
+    lines="${lines}${step}"$'\t'"${at}"$'\n'
+  done < <(cc_steps_for_phase "$phase")
+  printf '%s' "$lines"
+  return 0
+}
+
+# The DEVELOPER bypass (D3), documented only in .claude/rules/deploy-single.md
+# and never in an operator document. There is no --force: the operator decided
+# on 2026-10-01 that the escape hatch is the defect. It is REFUSED outright on
+# an installation whose Executor is live, because running a phase ahead of its
+# prerequisites there means proposing against half a deployment.
+unledgered_allowed() {
+  [[ "${CC_SETUP_UNLEDGERED:-0}" == "1" ]] || return 1
+  if [[ "$(get_kv "$ENV_FILE" CC_EXECUTOR_MODE)" == "live" ]]; then
+    fail "unledgered" "CC_SETUP_UNLEDGERED=1 is REFUSED while .env carries CC_EXECUTOR_MODE=live — out-of-order phases on a live deployment is the failure mode the ledger exists to end. Run ./setup.sh (it resumes in order)"
+    return 1
+  fi
+  return 0
+}
+
+# THE LEDGER'S FIRST RULE (D2): never run ahead. A phase whose requires are
+# not all `done` is refused WITHOUT running — which is what `./setup.sh boot`
+# after a failed `app` used to be allowed to do, and is exactly the 2026-10-01
+# work-site state (an empty CC_LLM_API_KEY, eight blank Systems links, a green
+# `verify`). Returns 0 to continue, 1 to refuse (the FAIL is already printed).
+#
+# Shared with the `machine` branch of main(), which takes a flag of its own and
+# so cannot go through run_phase: one gate, or `./setup.sh machine` would be
+# the hole in a rule with no other hole in it.
+phase_ledger_gate() { # phase_ledger_gate <phase>
+  local blocked
+  if blocked="$(cc_ledger_blocked "$LEDGER" "$1")"; then
+    if unledgered_allowed; then
+      warn "$1" "CC_SETUP_UNLEDGERED=1 — running out of order on purpose (${blocked%% *} is ${blocked#* })"
+      return 0
+    fi
+    fail "$1" "requires ${blocked%% *}, which is ${blocked#* } — run ./setup.sh (it resumes in order)"
+    return 1
+  fi
+  return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user action
   FAILS=0; WARNS=0; ACTIONS=0; PASSES=0
+  STEP_MSG=()
   CURPHASE="$1"
+  MUTATING=0
+  [[ "$MUTATING_PHASES" == *" $1 "* ]] && MUTATING=1
   note ""
   note "======== phase: $1"
+  phase_ledger_gate "$1" || return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
   "phase_$1"
-  # A gate outranks a FAIL: the same event often prints both (the probe FAILs,
-  # then the gate says whose move it is), and the exit code must say "stopped
-  # for you", not "broken".
-  (( ACTIONS )) && return 3
-  (( FAILS )) && return 1
-  (( WARNS )) && return 2
-  return 0
+  # The phase's own verdict, BEFORE the probes add to it: "reported success" is
+  # no FAIL and no USERACTION.
+  local ok=0
+  (( FAILS == 0 && ACTIONS == 0 )) && ok=1
+  ledger_record "$1" "$ok"
+  # ONE exit-code rule (D5): FAIL > USERACTION > WARN. A gate no longer
+  # outranks a FAIL — that ranking is how phase_fetch became a phase that
+  # could never return 1.
+  return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
 }
 
 # An initialized update.sh repo with unmerged imports means this tree is an
@@ -3000,14 +3876,25 @@ pending_update() {
 
 usage() {
   cat >&2 <<USAGE
-usage: ./setup.sh [configure|check|validate|preflight|machine|fetch|llm|stack|
-                   app|verify|test|boot|demo|stop|status|diagnose]
+usage: ./setup.sh                      # THE command: it resumes from the ledger
        ./setup.sh configure [--all] [--non-interactive]   # ask what is missing
        ./setup.sh check [--list]       # everything dry; --list names the sections
+       ./setup.sh status               # the ledger + the postconditions. Writes nothing
+       ./setup.sh report               # one file to hand a development session
+       ./setup.sh stop                 # stop what boot started
        ./setup.sh machine --dry-run    # report the diff, write nothing
        ./setup.sh [all] --accept-warnings   # let a WARN-only check through
+       ./setup.sh <phase>              # DEVELOPER form, refused out of order
 
   THE LOOP      configure -> check -> (triage: edit .env) -> check -> ... -> all
+  THE LEDGER    deploy/single/steps.tsv declares every step of the install
+                once, in run order; <state>/ledger.tsv records which ones are
+                done, at which release, with which .env inputs. So there is one
+                recovery from anything: change the .env key the FAIL line names
+                and run ./setup.sh again — it skips what is still true and
+                resumes at the first step that is not. A phase whose
+                prerequisites are not done is REFUSED and names the first one;
+                there is no --force, because the escape hatch is the defect
   no argument   runs check -> machine -> fetch -> llm -> stack -> app -> verify
                 -> test -> boot -> demo: zero to a working, human-approved demo
                 in one command, stopping at the first phase that hard-fails or
@@ -3043,10 +3930,24 @@ usage: ./setup.sh [configure|check|validate|preflight|machine|fetch|llm|stack|
   demo          feeds a fixture email, waits for YOUR approval in the
                 cockpit, verifies the execution + provenance
   stop          stops the API this script started (boot's counterpart)
+  status        prints the ledger table and re-checks the postconditions.
+                Mutates nothing
+  report        writes <state>/report-<stamp>.txt — the ledger, every failed or
+                waiting row with its reason and its inputs, the WHOLE log of
+                the last run, .env key NAMES, versions, the image manifest and
+                the process logs. Never a secret VALUE: it scans its own output
+                and refuses to write if one got in. This is how a REPOSITORY
+                DEFECT travels — an install configures through .env and never
+                rewrites any part of Central Command, so anything else it needs
+                is a finding. \`diagnose\` is an alias for it
+  <phase>       the DEVELOPER form. It is refused (exit 1) when the phase's
+                prerequisites are not done in the ledger, and names the first
+                one. There is no --force
   exit codes    0 clean · 1 hard failure · 2 completed with warnings
                 3 stopped for USER ACTION (see the last USERACTION line)
+                precedence is FAIL > USERACTION > WARN, everywhere
   status log    every check is appended to <state>/setup-log.txt, outside the
-                checkout (./setup.sh diagnose prints the state dir first)
+                checkout (./setup.sh report prints the state dir first)
 USAGE
 }
 
@@ -3102,7 +4003,21 @@ main() {
   [[ "$cmd" == --accept-warnings ]] && cmd=all
   # --list must work on a machine with no .env at all: it is documentation.
   if [[ "$cmd" == check && "${2:-}" == --list ]]; then check_list; exit 0; fi
-  init_state           # the log file lives in there — resolve before logging
+  # Usage creates nothing either: a bare --help from a dev checkout wrote an
+  # empty ledger into the state dir and armed the install-tree hook (2026-10-01).
+  case "$cmd" in -h|--help|help) usage; exit 0 ;; esac
+  init_state           # the log file (and the ledger) live in there
+  # THE MANIFEST, before anything can consult the ledger. A manifest this
+  # cannot parse is release content that failed to ship, so it is a hard stop
+  # rather than something to run around.
+  if ! cc_steps_load "$STEPS"; then
+    fail "steps" "$STEPS could not be read (the reason is on stderr) — it is release content, so re-extract the release"
+    exit 1
+  fi
+  # How long the log was BEFORE this run appended to it, so `report` can print
+  # the whole of the LAST run rather than the report's own.
+  LOG_BEFORE=0
+  [[ -f "$LOGFILE" ]] && LOG_BEFORE="$(wc -l <"$LOGFILE" 2>/dev/null | tr -d ' ')"
   logline "run start: ./setup.sh $cmd"
   case "$cmd" in
     configure)
@@ -3119,24 +4034,53 @@ main() {
     machine)
       # The one phase that takes a flag: --dry-run reports the diff and writes
       # nothing (which is what preflight calls it as).
-      FAILS=0; WARNS=0; ACTIONS=0; CURPHASE=machine
+      FAILS=0; WARNS=0; ACTIONS=0; CURPHASE=machine; MUTATING=1
+      STEP_MSG=()
       note ""; note "======== phase: machine${2:+ $2}"
+      # --dry-run writes nothing, so it is neither held to the ledger's order
+      # nor recorded in it: it is a REPORT. (preflight reaches it through
+      # phase_machine directly, not through this branch.)
+      local mdry=0
+      [[ "${2:-}" == "--dry-run" ]] && { mdry=1; MUTATING=0; }
+      if (( ! mdry )) && ! phase_ledger_gate machine; then
+        local grc0; grc0="$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
+        ledger_table
+        logline "run end: ./setup.sh machine ${2:-} -> exit $grc0"
+        exit "$grc0"
+      fi
       phase_machine "${2:-}"
-      local mrc=0
-      (( ACTIONS )) && mrc=3; (( FAILS )) && mrc=1; (( ! ACTIONS && ! FAILS && WARNS )) && mrc=2
+      local mok=0
+      (( FAILS == 0 && ACTIONS == 0 )) && mok=1
+      (( mdry )) || ledger_record machine "$mok"
+      # The ONE exit-code rule (D5), here too: this branch used to carry its
+      # own third copy of the precedence, and it ranked a gate above a FAIL.
+      local mrc; mrc="$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
       logline "run end: ./setup.sh machine ${2:-} -> exit $mrc"
-      exit $mrc
+      exit "$mrc"
       ;;
-    check|validate|preflight|fetch|llm|stack|app|verify|test|boot|demo|status|diagnose)
+    report|diagnose)
+      # `diagnose` is an alias (D10.3): one bundle, one shape, and no `tail -40`
+      # window cutting off above wherever the run stopped.
+      FAILS=0; WARNS=0; ACTIONS=0; PASSES=0
+      cmd_report
+      local rrc; rrc="$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
+      logline "run end: ./setup.sh $cmd -> exit $rrc"
+      exit "$rrc"
+      ;;
+    check|validate|preflight|fetch|llm|stack|app|verify|test|boot|demo|status)
       run_phase "$cmd"; local prc=$?
+      # The ledger is the answer to "where did this stop?", so it is printed on
+      # any stop — not only at the end of a full run. (`status` leads with it
+      # already; printing it twice would just be noise.)
+      (( prc )) && [[ "$cmd" != status ]] && ledger_table
       logline "run end: ./setup.sh $cmd -> exit $prc"
       exit $prc
       ;;
     stop)
       cmd_stop
-      local src=0; (( WARNS )) && src=2; (( FAILS )) && src=1
+      local src; src="$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
       logline "run end: ./setup.sh stop -> exit $src"
-      exit $src
+      exit "$src"
       ;;
     all)
       if pending_update; then
@@ -3154,18 +4098,36 @@ main() {
       local grc=0
       check_gate "$crc" || grc=$?
       if (( grc )); then
+        ledger_table
         logline "run end: ./setup.sh all -> exit $grc (check gate)"
         exit $grc
       fi
-      local worst=0 rc p
+      local worst=0 rc p donelines s a
       (( crc == 2 )) && worst=2
       for p in machine fetch llm stack app verify test boot demo; do
+        # D2's rule 2: a phase every one of whose rows is `done` AT THIS
+        # RELEASE, with the same input fingerprint, and whose probes are all
+        # still true, is SKIPPED — and says which rows it skipped and when.
+        # Anything else runs: a release bump re-runs everything (the inner
+        # idempotency — have_image, api_up, set_kv_if_unset — keeps that
+        # cheap), and an .env edit re-runs exactly the rows it changed.
+        if donelines="$(phase_is_done "$p")"; then
+          FAILS=0; WARNS=0; ACTIONS=0; PASSES=0; CURPHASE="$p"
+          note ""
+          note "======== phase: $p — already done at $(installed_version), skipping"
+          while IFS=$'\t' read -r s a; do
+            [[ -n "$s" ]] && pass "$s" "done ($a)"
+          done <<<"$donelines"
+          continue
+        fi
         run_phase "$p"; rc=$?
         if (( rc == 1 )); then
           note ""
-          note "phase '$p' failed. Fix the FAIL line above, then re-run just that phase:"
-          note "    ./setup.sh $p"
-          note "If the cause is not obvious: ./setup.sh diagnose  (then paste the file to Claude)"
+          note "phase '$p' failed. Fix the FAIL line above — it names the .env key or the"
+          note "seam — then re-run:  ./setup.sh   (it resumes at the first step that is"
+          note "not done; the ledger below says which that is)"
+          note "If the cause is not obvious: ./setup.sh report  (hand that file over)"
+          ledger_table
           logline "run end: ./setup.sh all -> exit 1 (phase $p)"
           exit 1
         fi
@@ -3173,6 +4135,7 @@ main() {
           note ""
           note "phase '$p' stopped for YOUR action — see the USERACTION line above."
           note "When done, re-run:  ./setup.sh   (idempotent — it fast-forwards to here)"
+          ledger_table
           logline "run end: ./setup.sh all -> exit 3 (phase $p)"
           exit 3
         fi
@@ -3183,6 +4146,7 @@ main() {
       if ! git -C "$REPO_ROOT" rev-parse --verify -q upstream >/dev/null 2>&1; then
         note "make this deployment updatable (one-time): ./update.sh init"
       fi
+      ledger_table
       logline "run end: ./setup.sh all -> exit $worst"
       exit "$worst"
       ;;

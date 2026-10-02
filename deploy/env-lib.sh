@@ -33,6 +33,8 @@
 #     cc_alias_env_key <alias>            the CC_LLM_UPSTREAM_MODEL_* key name
 #     cc_required_aliases                 the LiteLLM aliases THESE flags need
 #     cc_stage_build_context <dir> <ca> <src>...  a build context outside the tree
+#     cc_exit_code <fails> <warns> <actions>      the ONE exit-code rule
+#     cc_tree_diff <repo-root>            is this tree still the release it claims
 # ============================================================================
 
 [[ -n "${CC_ENV_LIB_LOADED:-}" ]] && return 0
@@ -526,4 +528,72 @@ cc_required_aliases() {
   printf 'cc-default graphiti-llm cc-embedding gpt-4.1-nano'
   [[ "${CC_ENABLE_SPEECH:-1}" == "1" ]] && printf ' cc-tts cc-stt'
   printf '\n'
+}
+
+# ── ONE exit-code rule (2026-10-01 design record, D5) ───────────────────────
+# Prints the code; the caller exits with it. Precedence is
+# FAIL > USERACTION > WARN, everywhere: setup.sh's run_phase, its `machine`
+# branch, update.sh's main and update-run.sh all call this one function.
+#
+# The rule it REPLACES ranked a gate above a FAIL ("the same event often prints
+# both"), and that is how `phase_fetch` became a phase that could never return
+# 1: its only FAIL path was followed by a USERACTION summary, so an install
+# whose image build had failed reported "stopped for your action" and
+# update.sh's apply merged straight past it. A FAIL is never reported as the
+# operator's move. The one case where a USERACTION should win — the llm
+# catalog gate — prints no FAIL at all, so nothing is lost.
+cc_exit_code() { # cc_exit_code <fails> <warns> <actions>
+  local f="${1:-0}" w="${2:-0}" a="${3:-0}"
+  [[ "$f" =~ ^[0-9]+$ ]] || f=0
+  [[ "$w" =~ ^[0-9]+$ ]] || w=0
+  [[ "$a" =~ ^[0-9]+$ ]] || a=0
+  if   (( f )); then printf '1'
+  elif (( a )); then printf '3'
+  elif (( w )); then printf '2'
+  else               printf '0'
+  fi
+}
+
+# ── a deployment carries no local patches (2026-10-01 design record, D10) ───
+# The operator's rule: an install configures through .env and the environment,
+# and never rewrites any part of Central Command; anything else it needs is a
+# FINDING, carried back to a development session and released. It was prose
+# until now, and the 2026-09-24 work-site session regenerated the npm lock,
+# hand-edited images.txt and commented out lock pins anyway — each a defect
+# later blamed on something else.
+#
+# So: is this tree still the release it claims to be?
+#   0  yes — no difference outside gitignored paths
+#   1  no  — TREE_DIFF_PATHS names what differs (NAMES only; a diff carries
+#            content, and content can carry a secret)
+#   2  there is no git baseline here to compare against, so nothing can be
+#      proven either way (a fresh zip install, before ./update.sh init)
+#
+# `$root/.git` is tested DIRECTLY rather than asking git: `git -C` walks UP the
+# directory tree, so a checkout unpacked inside somebody else's repository
+# would otherwise be judged against that repository's index.
+#
+# TREE_DIFF_PATHS is not CC_-prefixed: every CC_* name a deploy script reads
+# must be declared in .env.example, and this is an output variable, not an
+# answer.
+TREE_DIFF_PATHS=""
+cc_tree_diff() { # cc_tree_diff <repo-root>
+  local root="$1" dirty
+  TREE_DIFF_PATHS=""
+  command -v git >/dev/null 2>&1 || return 2
+  [[ -d "$root/.git" ]] || return 2
+  dirty="$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null)"
+  if [[ -n "$dirty" ]]; then
+    # $NF is the path a porcelain line ends with, including a rename's
+    # destination (`R  old -> new`).
+    TREE_DIFF_PATHS="$(printf '%s\n' "$dirty" | awk '{ print $NF }' | tr '\n' ' ')"
+    return 1
+  fi
+  # An updated install carries `upstream` (the pristine imports). After a
+  # fast-forward apply, HEAD IS upstream — and an equal commit is its own
+  # ancestor, so this passes. A commit of its own on top is a local patch.
+  git -C "$root" rev-parse --verify -q upstream >/dev/null 2>&1 || return 0
+  git -C "$root" merge-base --is-ancestor HEAD upstream 2>/dev/null && return 0
+  TREE_DIFF_PATHS="HEAD ($(git -C "$root" rev-parse --short HEAD 2>/dev/null)) carries commits that are not on \`upstream\`"
+  return 1
 }

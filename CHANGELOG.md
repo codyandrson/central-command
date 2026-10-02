@@ -4,6 +4,85 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-01 — v2.55.0: the install remembers what it did, and the tree stays pristine
+
+On 2026-10-01 the operator asked why every deployment "comes off the rails,
+some step was missed, something wasn't done in order" and why it is not
+deterministic. The investigation read the installer in full and catalogued
+49 journal incidents, 68 testbed-ledger findings and 52 install-related
+releases since 2026-08-31: platform differences (22), a phase that passed
+green without having done its job (11), `.env` drift (9), a missing
+checklist or doc (5), and steps run out of order or skipped and never
+re-run (7). The measured case: the 2026-10-01 work site's own `.env` carried
+an empty `CC_LLM_API_KEY` and eight blank Systems-page links behind a green
+`verify` — traced to the `app` phase aborting at its mint-key step with
+nothing anywhere recording that the phase had not finished. Full counts and
+the class table are in the design record this release starts,
+`docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md` — this
+is its first phase, P1 (manifest, ledger, one command, pristine tree); P2–P5
+(the self-check, supervision and skills, one definition, the laptop
+acceptance run) follow as their own releases. **Until P5 tags, the work
+site should hold at this release rather than chase each phase in.**
+
+- **The process is one data file.** `deploy/single/steps.tsv` declares every
+  step of the install once, in run order — phase, step, kind
+  (`run`/`gate`/`human`), `requires`, the `.env` keys it `reads` and
+  `writes`, its `probe`, a doc sentence. A phase's function still runs as it
+  does today, but the phase is DONE only when every one of its rows' probes
+  passes afterward — a mid-function `return` that used to abandon later
+  steps silently is now a FAIL naming the row. A new `.env` writer is a row
+  in `writes` or `tests/test_single_steps_schema.py` fails the suite.
+- **`<state>/ledger.tsv` is the record of what completed.** One row per
+  step — status, version, timestamp, a fingerprint over the `reads` keys'
+  values, and the last FAIL/USERACTION reason — rewritten atomically after
+  every step. An `.env` edit re-runs exactly the steps whose inputs changed;
+  a release bump re-runs every step; a failed step leaves everything
+  downstream of it `pending`.
+- **One command.** `./setup.sh` with no argument runs the dry `check`, then
+  resumes the nine ledgered phases from wherever they stopped, and prints
+  the ledger table at the end. `./setup.sh status` prints the ledger and
+  changes nothing. `./setup.sh <phase>` is now a DEVELOPER form only — it
+  REFUSES (exit 1) when that phase's prerequisites are not recorded done,
+  with no operator override; the developer bypass is
+  `CC_SETUP_UNLEDGERED=1`, itself refused when `.env` carries
+  `CC_EXECUTOR_MODE=live`. `tests/test_single_driver_ledger.py` runs the real
+  `./setup.sh` in a temporary copy of the tree and proves both the resume
+  and the refusal.
+- **One exit-code rule.** `cc_exit_code` in `deploy/env-lib.sh` ranks
+  `FAIL` over `USERACTION` over `WARN` everywhere a phase, `update.sh`, and
+  the `machine` subcommand report an outcome — a FAIL can no longer be
+  reported as "stopped for your action." `phase_fetch` now returns 1 on a
+  FAIL instead of always falling through to a USERACTION ahead of it.
+- **A deployment carries no local patches.** A `check` row,
+  `tree-pristine`, in the host section — repeated at the top of every
+  mutating phase and of `update.sh apply`: the tracked tree is clean and
+  `HEAD` is an ancestor of `upstream` when that ref exists. A difference is
+  a FAIL naming the files; no git is a USERACTION naming `./update.sh
+  init` — so on a tree unpacked from a zip, the first `./setup.sh` stops
+  once at the check gate until that command has recorded the release
+  baseline; one extra step, named by the line. `update.sh apply` is fast-forward only now — the three-way merge
+  of local commits, and the advice to commit local file tweaks to `local`,
+  are retired.
+- **The agent is held to `.env` by a hook, not a sentence.** `.claude/settings.json`
+  ships `PreToolUse` hooks (`Edit`/`Write`/`NotebookEdit` and `Bash`)
+  running `.claude/hooks/guard-install-tree.sh`: active only on a
+  deployment tree (one whose state dir already holds `ledger.tsv`), it
+  denies an edit to a tracked file and a shell command that writes into the
+  tree, naming this record and `./setup.sh report` in its own denial text.
+  A session that must edit the tree sets `CC_DEV_SESSION=1` and the hook
+  stands aside for it — on a development machine, set it in
+  `~/.claude/settings.json`'s `env` once, because a dev checkout that has
+  ever run `./setup.sh` holds a ledger too. `tests/test_install_tree_hook.py` is the
+  allow/deny table.
+- **`./setup.sh report` is how a defect travels.** One file,
+  `<state>/report-<stamp>.txt` — the ledger, every failed row's `reason`
+  and its `reads` keys' NAMES, the whole last run's log, `.env` key NAMES
+  only (never values), tool versions, the image manifest — built to paste into a
+  development session. `diagnose` is now an alias of it, and
+  `setup-diagnostics.txt` is no longer written.
+  `tests/test_single_report_redacts.py` feeds it an `.env` of marker
+  secrets and greps the output for them.
+
 ## 2026-09-29 — v2.54.0: Jira writes that say what they do — on Cloud and Data Center
 
 Three Jira faults found on the reference deployment in one morning, and three

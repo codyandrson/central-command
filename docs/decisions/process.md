@@ -222,3 +222,60 @@ hygiene, and how the test suite itself must be written. See
   permanent drift.
 - **Enforced:** test: `tests/test_register_models_upstream.py::test_a_row_the_operator_edited_is_never_touched`, `::test_declared_keys_create_real_rows`, `::test_no_keys_creates_placeholder_skeletons`
 - **Source:** CHANGELOG v2.44.0; docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md D3
+
+### DL-107 — Every `.env` writer is a row in steps.tsv, and a phase's probe is what "done" means
+
+- **Status:** active
+- **Date:** 2026-10-01
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "A new `.env` writer is a ROW, not a line of bash, and a phase's `probe` is what "done" MEANS"
+- **Why:** `phase_app` has 14 steps; a mid-function `return 1` at its
+  mint-key step silently skipped nine `.env` writes and the cockpit build,
+  and nothing recorded that the phase had not finished — `./setup.sh boot`
+  was accepted anyway, which is the 2026-10-01 work-site state the design
+  record measures (empty `CC_LLM_API_KEY`, eight blank Systems links, a
+  green `verify`).
+- **Enforced:** test: `tests/test_single_steps_schema.py`; script: `deploy/single/steps.tsv`, `<state>/ledger.tsv`
+- **Source:** CHANGELOG v2.55.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-108 — One exit-code rule, FAIL over USERACTION over WARN, everywhere
+
+- **Status:** active
+- **Date:** 2026-10-01
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "One exit-code rule, everywhere"
+- **Why:** `phase_fetch` could never return 1 — its only FAIL path was
+  always followed by a USERACTION, and the exit-code precedence ranked
+  USERACTION above FAIL — so a hard failure in the one network phase
+  reported as "stopped for your action" instead of "broken." The precedence
+  also differed between the phase runner, the `machine` subcommand and
+  `update.sh` before this release.
+- **Enforced:** script: `deploy/env-lib.sh` (`cc_exit_code`)
+- **Source:** CHANGELOG v2.55.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-109 — A deployment carries no local patches; a defect travels back as a report
+
+- **Status:** active
+- **Date:** 2026-10-01
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The tree is pristine, or the driver refuses — there is no flag past it"
+- **Why:** The operator's rule, 2026-10-01: an install configures through
+  `.env` and the environment and never rewrites any part of Central
+  Command; a prior work-site session regenerated the npm lock, hand-edited
+  `images.txt` and commented out lock pins anyway, each later blamed on
+  something else. `update.sh apply` is fast-forward only now — the
+  three-way merge of local commits is retired — and `./setup.sh report`
+  (`diagnose` is an alias) is the one way a finding travels back to a
+  development session instead of being patched on the box.
+- **Enforced:** test: `tests/test_single_report_redacts.py`; script: `deploy/single/update.sh`, `deploy/single/setup.sh` (`tree-pristine`)
+- **Source:** CHANGELOG v2.55.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-110 — A PreToolUse hook, not a sentence, holds a session to `.env`
+
+- **Status:** active
+- **Date:** 2026-10-01
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The hook holds the agent to `.env`, not the prompt"
+- **Why:** The skill's "never a script, a Dockerfile, `images.txt`"
+  instruction was prose a session could and did ignore. `.claude/settings.json`'s
+  `PreToolUse` hooks make the same rule mechanical — active only on a
+  deployment tree (one whose state dir already holds `ledger.tsv`) — and
+  bypassed deliberately with `CC_DEV_SESSION=1` rather than accidentally.
+- **Enforced:** test: `tests/test_install_tree_hook.py`; script: `.claude/hooks/guard-install-tree.sh`
+- **Source:** CHANGELOG v2.55.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

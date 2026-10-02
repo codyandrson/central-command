@@ -64,9 +64,9 @@ The proxy's model catalog is **DB-stored** (`store_model_in_db`, as on k3s) and
 **yours to fill in**: the `llm` phase creates the required aliases
 (`models.json`, via `deploy/pi/litellm/register-models.py` — create-only) as
 skeletons and **pauses** for you to enter the provider, model ids and key in
-the LiteLLM UI; re-running `./setup.sh llm` validates each alias with a real
-request and continues. Nothing you enter or later change in the UI is ever
-overwritten by setup.
+the LiteLLM UI; running `./setup.sh` again resumes from the ledger at `llm`,
+validates each alias with a real request, and continues. Nothing you enter
+or later change in the UI is ever overwritten by setup.
 
 `CC_EMBED_DIM` is measured, not declared, and the `stack` phase refuses to run
 without it: it is written into the Neo4j vector index and is effectively
@@ -197,7 +197,7 @@ generates a secret; `configure` and the `llm` phase do), and compose therefore
 reports them unset. `--accept-warnings` is then how you say "yes, generate
 them".
 
-Everything this install GENERATES — `setup-log.txt`, `setup-diagnostics.txt`,
+Everything this install GENERATES — `setup-log.txt`, the ledger, `report-<stamp>.txt`,
 `installed.manifest`, the API and cockpit logs and pid files, the updater's
 working directory, discovery's report — lives in the **state directory**,
 outside the checkout (`CC_STATE_DIR`; default
@@ -224,7 +224,8 @@ stops (exit 3) once the proxy is up, with the aliases created as skeletons and
 the URL/login printed;
 fill in model ids, `api_base` (what the container dials —
 `host.containers.internal`, never `127.0.0.1`, for a server on this machine)
-and the key, then re-run `./setup.sh llm`. A `127.0.0.1` upstream in `.env` is
+and the key, then run `./setup.sh` again — it resumes from the ledger at
+`llm`. A `127.0.0.1` upstream in `.env` is
 rewritten to `host.containers.internal` for the row, with a WARN saying so. To see what a server names its
 models before you fill the rows in:
 
@@ -247,8 +248,9 @@ in as build-args, resolves the Python dependencies, and runs the cockpit's
 `npm ci`. Each artifact it cannot get is a `FAIL` naming the `.env` seam that
 governs it (`CC_REGISTRY_*`, `CC_APT_MIRROR`, `CC_PYPI_INDEX_URL`,
 `CC_NPM_REGISTRY`, …), and the phase ends with `USERACTION` / exit 3. Fix the
-mirror and re-run `./setup.sh fetch` — acquired artifacts fast-forward.
-Nothing falls back on its own; the choice lives in `.env` so an update makes
+mirror and run `./setup.sh` again — it resumes from the ledger at `fetch`,
+and acquired artifacts fast-forward. Nothing falls back on its own; the
+choice lives in `.env` so an update makes
 the same one.
 
 **Image versions are a constraint, a lock, and a resolution** (2026-09-03),
@@ -302,23 +304,36 @@ subprocess output, progress, detail — is stderr. Exit codes follow
 cloud-init, plus a gate code: **0** clean, **1** hard failure, **2** finished
 with warnings, **3** stopped for the operator's move (the last USERACTION
 line names it). The full run stops at the first phase that hard-fails and
-tells you which phase to re-run.
+names the `.env` key to fix; re-running `./setup.sh` resumes from the ledger
+(see **Resuming** below) rather than repeating what already succeeded.
 
 ### When something fails
 
 ```bash
-./setup.sh diagnose        # writes <state>/setup-diagnostics.txt (and prints the state dir first)
+./setup.sh report          # writes <state>/report-<stamp>.txt (and prints the state dir first); `diagnose` is an alias
 ```
 
-Paste that file to Claude. It carries pod/container states, the last 100 log
-lines per container, `verify.sh`'s output, tool versions — and **key NAMES only,
-never values**. Claude interprets it and tells you which phase to re-run; it
-does not freehand replacement commands.
+Paste that file to Claude. It carries the ledger, every failed row's reason
+and its `reads` keys' names, the whole last run's log, tool versions — and
+**key NAMES only, never values**. Claude interprets it and tells you what
+to fix in `.env`; it does not freehand replacement commands.
 
-### Re-running one phase
+### Resuming
 
-Each phase is a subcommand of the same code path as the full run, and every
-step inside it is idempotent, so **resume is just re-run**:
+**Resume is `./setup.sh`, with no argument** (v2.55.0, design record
+`docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md` D2/D3).
+`<state>/ledger.tsv` records every step's status, so a bare re-run reads it
+and continues exactly where the last one stopped — a changed `.env` key
+re-runs only the steps that read it; a release bump re-runs everything.
+`./setup.sh status` prints the same ledger and changes nothing.
+
+Each phase below is still a subcommand of the same code path, kept for
+development — but it is no longer an operator move: **`./setup.sh <phase>`
+REFUSES (exit 1) when that phase's prerequisites are not recorded `done` in
+the ledger**, with no `--force`. (The developer bypass,
+`CC_SETUP_UNLEDGERED=1`, is documented in `.claude/rules/deploy-single.md`,
+never here — and it is itself refused when `.env` carries
+`CC_EXECUTOR_MODE=live`.) What each one does, for reference:
 
 ```bash
 ./setup.sh configure   # ASK what .env does not answer yet (the one command that creates it);
@@ -339,7 +354,8 @@ step inside it is idempotent, so **resume is just re-run**:
 ./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
 ./setup.sh boot        # asks your name (once), starts the API detached, checks the roster
 ./setup.sh demo        # fixture email -> triage -> YOUR approval -> a real graph write, provenance stamped
-./setup.sh status      # postconditions only, mutates nothing
+./setup.sh status      # the ledger, postconditions only — mutates nothing
+./setup.sh report      # <state>/report-<stamp>.txt for a development session; `diagnose` is now an alias
 ./setup.sh stop        # stops the API that `boot` started
 ```
 
@@ -360,8 +376,9 @@ covers — never a PASS. The full table, including the one consumer with no
 insecure option (Hugging Face), is in `deploy/AIRGAP.md`.
 
 `compose up -d` converges: a service whose definition is unchanged is left
-alone, a changed one is recreated. Re-running a phase after a config change is
-the supported way to apply it.
+alone, a changed one is recreated. Running `./setup.sh` again after a
+config change is the supported way to apply it — the ledger re-runs only
+the steps whose `.env` inputs changed.
 
 ### First boot and the demo (the last three phases, 2026-08-28)
 
@@ -506,8 +523,11 @@ is re-run.
 
 It works by making the deployment tree a git repo with two branches:
 `upstream` holds pristine imports (one commit per downloaded zip), `local` is
-what actually runs — upstream plus your local modifications. A three-way merge
-is what carries your changes across updates.
+the branch `apply` moves forward. **`apply` is fast-forward only** (v2.55.0,
+design record `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+D10): the tree must already be pristine, or the run refuses and names what
+differs — there is no three-way merge of local changes any more, and no flag
+past it.
 
 **The human path is one command** (2026-08-28 — terraform's own lesson:
 separate plan/apply is for automation; the human command shows the plan and
@@ -569,16 +589,14 @@ runner, if you run one). The one exception is the cockpit's detached runner
 
 Rules that will save you:
 
-- **Commit your local file tweaks to `local` as you make them.** An
-  uncommitted edit is invisible to the merge; `plan` warns about it and
-  `apply` refuses until it is committed. (`.env` is gitignored and `.venv`
-  too; everything generated is outside the tree entirely — none of it is ever
-  part of a merge.)
-- **Conflicts are a stop, not a failure.** If your local change and the update
-  touch the same lines, `apply` stops with git's normal conflict markers:
-  resolve, `git add`, `git commit`, and **re-run `./update.sh apply`** — every
-  later step is idempotent and picks up where it stopped. To back out instead:
-  `git merge --abort`.
+- **The tree must already be pristine, or `apply` refuses.** A tracked file
+  that differs from the installed release — or a `local` that cannot
+  fast-forward to `upstream` — is a `FAIL` naming the files; there is no
+  flag past it, and there is no merge conflict to resolve by hand any more
+  (`.env` is gitignored and `.venv` too; everything generated lives outside
+  the tree). A deployment carries no local patches: a fix the box needs
+  belongs in the repository, filed back as a finding — run `./setup.sh
+  report` and hand the operator the path.
 - **Rollback restores code, not the database.** Schema statements already
   applied stay applied; the additive-only discipline is what makes the
   restored code run fine against them. `rollback` refuses over uncommitted

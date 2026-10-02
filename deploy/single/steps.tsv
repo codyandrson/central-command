@@ -1,0 +1,132 @@
+# steps.tsv — THE process of installing this profile, declared ONCE, in run order.
+#
+#   Design record: docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md,
+#   D1. The precedent is questions.tsv (2026-09-23, D6): a seam is a ROW, and
+#   more than one command reads the same rows. Here the fact being declared is
+#   not a question but a STEP, and the reason it had to become data is measured:
+#   a phase was one linear bash function, a mid-function `return 1` abandoned
+#   every later step in it, and NOTHING wrote that down. `app` has fourteen
+#   steps; its mint-key step returned on failure and silently skipped nine .env
+#   writes and the cockpit build, and `./setup.sh boot` after it was accepted.
+#
+#   The phase FUNCTIONS stay. This file does not turn 3,200 lines of bash into a
+#   step interpreter — it makes the existing phases ACCOUNTABLE: the driver runs
+#   phase_<name> as before, then runs every row's `probe`. A phase is DONE only
+#   when every one of its rows probes true, and a phase that returns 0 with a row
+#   probing false is a FAIL naming the row. That is what turns "the step after
+#   the one that failed never ran" from invisible into a line.
+#
+#   COLUMNS, tab-separated, `-` where a field is empty:
+#     phase      check | machine | fetch | llm | stack | app | verify | test |
+#                boot | demo — the driver's order, and the only phases there are
+#                (tests/test_setup_phase_docs.py pins the list to setup.sh)
+#     step       the step's name, which is the PASS/FAIL check-name the phase
+#                already prints. The ledger keys on `<phase>/<step>`, so the
+#                same name may appear in two phases (venv, cockpit,
+#                image-sandbox, embed-dimension each do) without colliding
+#     kind       run    = the phase function executes it
+#                gate   = the driver STOPS here until a human has acted (exit
+#                         3); the row's `probe` is how it knows they have
+#                human  = never executed by the driver; a thing the operator
+#                         does in a UI, recorded once its probe passes
+#     requires   comma-separated `<phase>/<step>` that must be DONE first.
+#                Backward-only and acyclic — an earlier phase, or an earlier row
+#                of this one. The driver refuses a phase whose requires are not
+#                done and names the first one (D2's rule 1)
+#     reads      the .env keys whose VALUES are this step's inputs. They are
+#                FINGERPRINTED (sha256 over KEY=VALUE in this order), so an
+#                .env edit re-runs exactly the steps it changed and nothing
+#                else. Named keys only — never a glob, which has no stable order
+#     writes     every .env key and state artifact this step is the ONLY writer
+#                of. A key written outside this column is the v2.52.0 "eight
+#                blank Systems links nobody types" bug, and v2.48.0's missing
+#                CC_LLM_BASE_URL before it, so the rule is enforced:
+#                tests/test_single_steps_schema.py fails the suite when a
+#                set_kv / set_kv_if_unset target in deploy/single/*.sh is absent
+#                here, or appears twice. `CC_IMG_*` is the one family (the
+#                resolver writes one line per image); lower-case entries are
+#                state-dir or build artifacts, not answers
+#     probe      a bash function in setup.sh: exit 0 = the step's effect is
+#                PRESENT NOW. Three rules it lives under — it may not mutate
+#                anything (the same walker that keeps `check` dry is run over
+#                every probe), it may not spend a token or a minute (the ledger's
+#                version + fingerprint is what records that the real round trip
+#                was made, which is why probe-chat reads the catalog rather than
+#                asking for another completion), and a step that cannot apply is
+#                DONE — an off flag returns 0, because "not applicable" is not
+#                "not finished"
+#     doc        one plain sentence, for the generated checklist (D8, P4)
+#
+#   Rows are in RUN order, and the driver walks them in it.
+#
+# phase	step	kind	requires	reads	writes	probe	doc
+check	tree-pristine	run	-	-	-	p_tree_pristine	Prove this deployment still matches the release it claims to be, before anything is changed.
+machine	machine	run	check/tree-pristine	-	-	p_machine	Reach the podman machine over ssh (a no-op on bare Linux, where there is none).
+machine	machine-native-ca	run	machine/machine	-	machine.import-native-ca	p_machine_native_ca	Have the machine import this host's trust store at every start.
+machine	machine-ca	run	machine/machine	CC_CA_BUNDLE	-	p_machine_ca	Install CC_CA_BUNDLE as a trust anchor inside the machine and rebuild its trust store.
+machine	machine-ca-probe	run	machine/machine-ca	CC_CA_BUNDLE,CC_REGISTRY_DOCKERIO	-	p_machine_ca_probe	Prove from INSIDE the machine that a registry's certificate now verifies.
+machine	machine-registries	run	machine/machine	CC_REGISTRY_DOCKERIO,CC_REGISTRY_GHCR,CC_REGISTRY_MCR,CC_TLS_INSECURE	-	p_machine_registries	Write the machine's registries drop-in from the mirror seams.
+machine	machine-proxy	run	machine/machine	CC_PROXY	-	p_machine_proxy	Write the machine's containers.conf proxy drop-in from CC_PROXY.
+fetch	resolve-images	run	machine/machine-registries	CC_REGISTRY_DOCKERIO,CC_REGISTRY_GHCR,CC_REGISTRY_MCR,CC_ENABLE_N8N,CC_ENABLE_SPEECH,CC_ENABLE_CRAWLER,CC_ENABLE_SANDBOX,CC_TLS_INSECURE	CC_IMG_*,installed.manifest	p_resolve_images	Resolve every images.txt row against the registry that will serve it and write the refs into .env.
+fetch	image-postgres	run	fetch/resolve-images	CC_IMG_POSTGRES,CC_TLS_INSECURE	-	p_image_postgres	Pull the spine's Postgres image.
+fetch	image-neo4j	run	fetch/resolve-images	CC_IMG_NEO4J,CC_TLS_INSECURE	-	p_image_neo4j	Pull the knowledge graph's Neo4j image.
+fetch	image-redis	run	fetch/resolve-images	CC_IMG_REDIS,CC_TLS_INSECURE	-	p_image_redis	Pull the Redis image LiteLLM caches through.
+fetch	image-berriai_litellm_database	run	fetch/resolve-images	CC_IMG_BERRIAI_LITELLM_DATABASE,CC_TLS_INSECURE	-	p_image_berriai_litellm_database	Pull the LiteLLM proxy image.
+fetch	image-n8nio_n8n	run	fetch/resolve-images	CC_IMG_N8NIO_N8N,CC_ENABLE_N8N,CC_TLS_INSECURE	-	p_image_n8nio_n8n	Pull the n8n image, when CC_ENABLE_N8N=1.
+fetch	image-zepai_knowledge_graph_mcp	run	fetch/resolve-images	CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP,CC_TLS_INSECURE	-	p_image_zepai_knowledge_graph_mcp	Pull the base image the Graphiti MCP image is built from.
+fetch	image-python	run	fetch/resolve-images	CC_IMG_PYTHON,CC_ENABLE_SANDBOX,CC_TLS_INSECURE	-	p_image_python	Pull the base image the sandbox image is built from, when CC_ENABLE_SANDBOX=1.
+fetch	image-playwright_python	run	fetch/resolve-images	CC_IMG_PLAYWRIGHT_PYTHON,CC_ENABLE_CRAWLER,CC_TLS_INSECURE	-	p_image_playwright_python	Pull the base image the crawler image is built from, when CC_ENABLE_CRAWLER=1.
+fetch	image-speaches_ai_speaches	run	fetch/resolve-images	CC_IMG_SPEACHES_AI_SPEACHES,CC_ENABLE_SPEECH,CC_TLS_INSECURE	-	p_image_speaches_ai_speaches	Pull the bundled speech engine's image, when CC_ENABLE_SPEECH=1.
+fetch	image-graphiti	run	fetch/image-zepai_knowledge_graph_mcp	CC_GRAPHITI_TAG,CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP,CC_APT_MIRROR,CC_APT_SECURITY_MIRROR,CC_PYPI_INDEX_URL,CC_CA_BUNDLE,CC_TLS_INSECURE	-	p_image_graphiti	Build the Graphiti MCP image against your sources.
+fetch	image-sandbox	run	fetch/image-python	CC_ENABLE_SANDBOX,CC_IMG_PYTHON,CC_APT_MIRROR,CC_NPM_REGISTRY,CC_CA_BUNDLE,CC_TLS_INSECURE	-	p_image_sandbox	Build the agent sandbox image, when CC_ENABLE_SANDBOX=1.
+fetch	image-crawler	run	fetch/image-playwright_python	CC_ENABLE_CRAWLER,CC_IMG_PLAYWRIGHT_PYTHON,CC_PYPI_INDEX_URL,CC_CA_BUNDLE,CC_TLS_INSECURE	-	p_image_crawler	Build the browser-rendering crawl image, when CC_ENABLE_CRAWLER=1.
+fetch	venv	run	-	CC_PYTHON_MIRROR,CC_PYPI_INDEX_URL,CC_AIRGAP	.venv	p_venv	Create the install's CPython 3.12 virtual environment and resolve the Python graph.
+fetch	cockpit	run	-	CC_NPM_REGISTRY,CC_CA_BUNDLE,CC_TLS_INSECURE	web/node_modules	p_cockpit_npm	Install the cockpit's npm tree from the configured registry.
+llm	secrets	run	-	-	CC_LLM_PROXY_ADMIN_KEY,CC_LITELLM_SALT_KEY,LITELLM_POSTGRES_PASSWORD,CC_NEO4J_PASSWORD,N8N_ENCRYPTION_KEY,N8N_DB_PASSWORD,CC_EMAIL_FACADE_TOKEN,CC_CALENDAR_FACADE_TOKEN	p_secrets	Generate every credential .env still leaves blank (it never overwrites one that is set).
+llm	up-litellm	run	llm/secrets,fetch/image-berriai_litellm_database,fetch/image-postgres,fetch/image-redis	CC_LITELLM_PORT,CC_LITELLM_DB_PORT,CC_IMG_BERRIAI_LITELLM_DATABASE,CC_CA_BUNDLE,CC_TLS_INSECURE	-	p_litellm_live	Bring the LiteLLM proxy up with its own database and redis.
+llm	litellm-live	run	llm/up-litellm	CC_LITELLM_PORT	-	p_litellm_live	Wait for the proxy to finish its first-boot migrations and answer /health/liveliness.
+llm	up-speech	run	llm/secrets	CC_ENABLE_SPEECH,CC_SPEECH_PORT,CC_IMG_SPEACHES_AI_SPEACHES	-	p_speech_up	Start the bundled speech engine, when CC_ENABLE_SPEECH=1.
+llm	catalog-declared	run	llm/litellm-live	CC_LLM_UPSTREAM_BASE_URL,CC_LLM_UPSTREAM_API_KEY	-	p_always	Say which way this install answers the LLM question: declared in .env, or entered in the LiteLLM UI.
+llm	catalog	run	llm/litellm-live	CC_LITELLM_PORT,CC_ENABLE_SPEECH,CC_LLM_UPSTREAM_BASE_URL,CC_LLM_UPSTREAM_MODEL_CC_DEFAULT,CC_LLM_UPSTREAM_MODEL_GRAPHITI_LLM,CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING,CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO,CC_LLM_UPSTREAM_MODEL_CC_TTS,CC_LLM_UPSTREAM_MODEL_CC_STT	-	p_catalog_aliases	Register every alias this deployment requires, as a real row or as a skeleton.
+llm	catalog-filled	gate	llm/catalog	CC_LITELLM_PORT,CC_ENABLE_SPEECH	-	p_catalog_aliases	YOUR MOVE, unless .env declared the upstream: fill in each alias's provider in the LiteLLM UI at http://127.0.0.1:<CC_LITELLM_PORT>/ui.
+llm	probe-chat	run	llm/catalog-filled	CC_LITELLM_PORT	-	p_alias_cc_default	Get a real completion back through the cc-default alias — the one the agents address.
+llm	probe-structured	run	llm/catalog-filled	CC_LITELLM_PORT	-	p_alias_graphiti_llm	Get schema-constrained JSON back through graphiti-llm, which is what graph extraction needs.
+llm	probe-rerank-model	run	llm/catalog-filled	CC_LITELLM_PORT	-	p_alias_gpt_4_1_nano	Get a completion back through gpt-4.1-nano, the alias graphiti_core addresses by that literal name.
+llm	speech-live	run	llm/up-speech	CC_ENABLE_SPEECH,CC_SPEECH_PORT	-	p_speech_up	Wait for the speech engine to answer /health, when CC_ENABLE_SPEECH=1.
+llm	speech-model	run	llm/speech-live	CC_ENABLE_SPEECH,CC_SPEECH_PORT,CC_SPEECH_TTS_MODEL,CC_SPEECH_STT_MODEL,CC_HF_ENDPOINT	-	p_speech_models	Install the TTS and STT model snapshots into the engine's volume (the first call downloads them).
+llm	probe-tts	run	llm/catalog-filled	CC_ENABLE_SPEECH,CC_LITELLM_PORT	-	p_alias_cc_tts	Synthesise speech through the cc-tts alias, when CC_ENABLE_SPEECH=1.
+llm	probe-stt	run	llm/probe-tts	CC_ENABLE_SPEECH,CC_LITELLM_PORT	-	p_alias_cc_stt	Transcribe what cc-tts just said through the cc-stt alias, when CC_ENABLE_SPEECH=1.
+llm	probe-embed	run	llm/catalog-filled	CC_LITELLM_PORT	-	p_alias_cc_embedding	Get a vector back through the cc-embedding alias.
+llm	embed-dimension	run	llm/probe-embed	CC_LITELLM_PORT	CC_EMBED_DIM	p_embed_dim	Record the MEASURED embedding dimension in .env — it is permanent once the graph index exists.
+stack	image-sandbox	run	fetch/image-sandbox	CC_ENABLE_SANDBOX	-	p_image_sandbox	Assert the sandbox image is in local storage rather than building one mid-deploy.
+stack	image-crawler	run	fetch/image-crawler	CC_ENABLE_CRAWLER	-	p_image_crawler	Assert the crawler image is in local storage rather than building one mid-deploy.
+stack	embed-dimension	run	llm/embed-dimension	CC_EMBED_DIM	-	p_embed_dim	Refuse to create the graph before the embedding dimension has been measured.
+stack	up-stack	run	stack/embed-dimension,fetch/image-graphiti	CC_PG_PORT,CC_GRAPHITI_PORT,CC_NEO4J_BOLT_PORT,CC_NEO4J_HTTP_PORT,CC_N8N_PORT,CC_CRAWLER_PORT,CC_ENABLE_N8N,CC_ENABLE_CRAWLER,CC_ENABLE_SPEECH,CC_EMBED_DIM,CC_NEO4J_PASSWORD	-	p_up_stack	Bring the whole stack up and wait on compose.yaml's healthchecks.
+stack	restart-on-boot	run	stack/up-stack	-	-	p_restart_on_boot	Make the containers come back after a host reboot (podman-restart inside the machine).
+app	venv	run	fetch/venv	CC_PYTHON_MIRROR,CC_AIRGAP	-	p_venv	Assert the virtual environment the app runs in.
+app	install	run	app/venv	CC_AIRGAP,CC_PYPI_INDEX_URL	-	p_install	Install central_command editable into that environment.
+app	app-env	run	-	-	-	p_env_file	Assert the one answer file and its mode (0600 where the filesystem honours it).
+app	mint-key	run	llm/secrets,llm/litellm-live	CC_LITELLM_PORT,CC_LLM_PROXY_ADMIN_KEY	CC_LLM_API_KEY	p_mint_key	Mint the spine's OWN LiteLLM virtual key, so a leak of the agents' credential cannot reconfigure the proxy.
+app	app-llm-base-url	run	-	CC_LITELLM_PORT	CC_LLM_BASE_URL	p_llm_base_url	Derive the proxy URL the app dials.
+app	app-default-model	run	-	-	CC_DEFAULT_MODEL	p_default_model	Derive which model the agents run on (this profile's proxy carries cc-default).
+app	app-embed-alias	run	-	-	CC_EMBED_ALIAS	p_embed_alias	Derive the alias the graph writer embeds through.
+app	app-litellm-db-url	run	-	CC_LITELLM_DB_PORT,LITELLM_POSTGRES_PASSWORD	CC_LITELLM_DB_URL	p_litellm_db_url	Derive the connection string for LiteLLM's own database.
+app	app-link-litellm	run	-	CC_LITELLM_PORT	CC_LLM_PROXY_UI_URL	p_link_litellm	Derive the Systems page's link to the proxy UI.
+app	app-link-neo4j	run	-	CC_NEO4J_HTTP_PORT,CC_NEO4J_BOLT_PORT	CC_NEO4J_BROWSER_URL	p_link_neo4j	Derive the Systems page's link to the Neo4j browser.
+app	app-link-n8n	run	-	CC_ENABLE_N8N,CC_N8N_PORT	CC_N8N_UI_URL	p_link_n8n	Derive the Systems page's link to n8n, when CC_ENABLE_N8N=1.
+app	app-link-crawler	run	-	CC_ENABLE_CRAWLER,CC_CRAWLER_PORT	CC_CRAWLER_DOCS_URL	p_link_crawler	Derive the Systems page's link to the crawl service, when CC_ENABLE_CRAWLER=1.
+app	app-link-sandbox	run	-	CC_ENABLE_SANDBOX,CC_SANDBOX_RUNNER_URL	CC_SANDBOX_DOCS_URL	p_link_sandbox	Derive the Systems page's link to the sandbox runner, when CC_ENABLE_SANDBOX=1.
+app	cockpit	run	fetch/cockpit	CC_NPM_REGISTRY	web/dist,web/server-dist	p_cockpit_build	Build the cockpit — both the SPA and the Node server every panel routes through.
+verify	verify-deployed	run	stack/up-stack	CC_LITELLM_PORT,CC_GRAPHITI_PORT,CC_NEO4J_HTTP_PORT	-	p_verify_deployed	Assert every deployment and configuration fact verify.sh knows, under the admin key.
+verify	verify-live	run	app/mint-key	CC_LLM_API_KEY,CC_LLM_BASE_URL,CC_DEFAULT_MODEL,CC_EMBED_DIM,CC_LITELLM_PORT	-	p_verify_live	Assert the same deployment LIVE: a real completion and the embedding dimension.
+test	test	run	app/install	-	-	p_always	Run the offline suite — the gate, once per release.
+boot	operator-name	human	-	-	CC_OPERATOR_NAME	p_operator_name	YOUR MOVE: tell the agents what to call you — setup asks on a terminal, the cockpit asks on first run otherwise.
+boot	boot-api	run	app/install,app/mint-key	CC_API_PORT,CC_DATABASE_URL	uvicorn.pid	p_boot_api	Start the API detached and wait for /health.
+boot	boot-roster	run	boot/boot-api	CC_API_PORT,CC_DATABASE_URL	-	p_boot_roster	Assert first boot hired the founding roster.
+boot	boot-cockpit	run	app/cockpit	CC_COCKPIT_PORT,CC_API_PORT	cockpit.pid	p_boot_cockpit	Start the cockpit server detached and wait for it to answer.
+boot	boot-at-logon	run	boot/boot-api	-	cc-boot.cmd	p_boot_at_logon	Register the logon entry that brings the two host processes back after a reboot (Windows only).
+demo	demo-feed	run	boot/boot-api	CC_API_PORT	-	p_demo_fed	Enrol the fixture email (a repeat Message-ID is a no-op by design).
+demo	demo-dispatch	run	demo/demo-feed	CC_API_PORT,CC_DEFAULT_MODEL	-	p_demo_fed	Let the dispatcher claim it and run a real triage against your endpoint.
+demo	demo-approve	gate	demo/demo-dispatch	CC_COCKPIT_PORT	-	p_demo_decided	YOUR MOVE: open the cockpit's Decisions Inbox, read the proposal and its evidence, and decide.
+demo	demo-decided	run	demo/demo-approve	CC_API_PORT	-	p_demo_decided	Assert the decision reached the event log.
+demo	demo-executed	run	demo/demo-decided	CC_API_PORT	-	p_demo_decided	Assert the Executor performed the approved action and stamped provenance.

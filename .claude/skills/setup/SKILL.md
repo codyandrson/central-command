@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate the agent CONDUCTS A LOOP and never mutates anything itself: `./setup.sh configure` (run in the operator's own terminal — it asks the questions in deploy/single/questions.tsv and is the one command that creates the ONE answer file, the repo-root .env; with no TTY it asks nothing rather than guessing) → `./setup.sh check` (the dry pre-deployment gate, nine sections) → triage every FAIL/WARN/USERACTION against deploy/AIRGAP.md's seam table, editing ONLY .env → check again until exit 0 (or an exit 2 the operator accepts) → `./setup.sh` (or `--accept-warnings`), which runs nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator. It reads `./setup.sh diagnose`'s bundle on failure rather than freehanding fixes, and ENDS ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
+description: Install Central Command from scratch on this machine — the guided, nothing-skipped setup for a user who has an LLM API key and nothing else. On the podman substrate the agent CONDUCTS A LOOP and never mutates anything itself: `./setup.sh configure` (run in the operator's own terminal — it asks the questions in deploy/single/questions.tsv and is the one command that creates the ONE answer file, the repo-root .env; with no TTY it asks nothing rather than guessing) → `./setup.sh check` (the dry pre-deployment gate, nine sections) → triage every FAIL/WARN/USERACTION against deploy/AIRGAP.md's seam table, editing ONLY .env → check again until exit 0 (or an exit 2 the operator accepts) → `./setup.sh` (or `--accept-warnings`), which runs nine mutating phases: check/machine/fetch/llm/stack/app/verify/test/boot/demo, PASS/WARN/FAIL/USERACTION output, exit 0/1/2/3 — 3 means the run stopped for the operator. It reads `./setup.sh report`'s bundle on failure rather than freehanding fixes, and ENDS ITS TURN on any non-zero exit after surfacing the outcome. Detects an existing installation and routes updates through `./update.sh` (import/plan/apply, with version gate, automatic DB backup and stop/restart gates) instead of re-installing. The single-node profile now includes the sandbox (rootless-podman backend) and crawler alongside postgres/LiteLLM/Neo4j/Graphiti/optional n8n. The multi-node k3s substrate has its own sibling driver, `./deploy/k3s/setup.sh`, with the same output protocol and exit taxonomy but six phases — no test/boot/demo; the agent conducts those steps there. Either way it ends with a working demo and hands off to the cockpit, which asks the operator's name on first run and lets the EA-hosted team tour ask the rest. Use when the user says "/setup", "install Central Command", "set this up", or "get me up and running".
 ---
 
 # Central Command setup — zero to functioning
@@ -14,7 +14,7 @@ triage → `check` → … → `all` — namely: (a) have the operator run
 it could not ask (see Phase 0), writing answers into the ONE answer file, the
 repo-root `.env`, (b) run `./setup.sh check`, then `./setup.sh`, and read the
 PASS/WARN/FAIL/USERACTION lines and exit code, (c) on failure, run
-`./setup.sh diagnose` and reason over the `setup-diagnostics.txt` it names
+`./setup.sh report` and reason over the `report-<stamp>.txt` it names
 (in the state dir, whose path it prints first), then name the fix — never
 freehand a replacement command, (d) hand off to the cockpit (Phase 2),
 (e) verify integrations and walk the go-live checklist
@@ -30,7 +30,7 @@ Rules that hold for the whole run:
   `setup.sh` or `update.sh` — 1 (failure), 2 (warnings), or 3 (user action)
   — you STOP AND END YOUR TURN after surfacing exactly what happened: quote
   the FAIL/WARN/USERACTION lines, say what they mean, and (for failures) what
-  you propose. You may run the read-only rungs first (`./setup.sh diagnose`,
+  you propose. You may run the read-only rungs first (`./setup.sh report`,
   read `setup-log.txt`, read the bundle) — but the decision about what
   happens next is the operator's, made in conversation, before anything is
   re-run or changed. Autonomous continuation is for exit 0 only.
@@ -40,12 +40,12 @@ Rules that hold for the whole run:
   llm gate that includes the UI URL, where the credential lives (by NAME:
   CC_LLM_PROXY_ADMIN_KEY in the repo-root .env — never print the value, or
   UI_USERNAME/UI_PASSWORD if the operator set them), and the
-  expected alias list. When the operator says they've acted, re-run the same
-  phase; it is idempotent and verifies.
+  expected alias list. When the operator says they've acted, run `./setup.sh`
+  again — it resumes from the ledger and reverifies the row.
 - **Discovery evidence, if it exists, is part of your briefing.** Before
   Phase 0, check for `<state>/discovery/discovery-report.md` — /discover's
   converged environment map, in the STATE DIRECTORY since v2.42.0 and never in
-  the checkout (`./setup.sh diagnose` prints the path; it names internal hosts,
+  the checkout (`./setup.sh report` prints the path; it names internal hosts,
   so its contents stay in this conversation, never in tracked files). If
   present, read it (and `discovery/discovery.env`, the machine-readable
   classifications) BEFORE eliciting: a discovery-verified mirror pre-fills
@@ -59,7 +59,7 @@ Rules that hold for the whole run:
 - **Existing install?** Before Phase 0, check: if the repo has an `upstream`
   branch (update.sh-initialized) — this is a deployment, not a fresh target.
   Read the tail of `<state>/setup-log.txt` for where it last stopped
-  (`./setup.sh diagnose` prints the state dir first).
+  (`./setup.sh report` prints the state dir first).
   A new release zip goes through `./update.sh import <zip>` → `plan` (show
   the operator the plan output and version gate) → on their explicit
   approval → `apply` — never through a fresh install, and never by
@@ -68,10 +68,16 @@ Rules that hold for the whole run:
 - **Phased with gates — now enforced by `setup.sh` itself.** The full run
   stops at the first phase that hard-fails; don't skip ahead of it, and don't
   re-derive what a failed phase already told you to fix.
-- **Resumable = re-run.** Every phase is idempotent (`./setup.sh <phase>`
-  re-runs just that one); there is no state file and none is needed.
+- **Resumable = run `./setup.sh` again (v2.55.0, design record
+  `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md` D2/D3).**
+  `<state>/ledger.tsv` records every step's status, so `./setup.sh` with no
+  argument resumes exactly where the last run stopped — a changed `.env` key
+  re-runs only the steps that read it. `./setup.sh <phase>` is a DEVELOPER
+  form now, not an operator one: it REFUSES (exit 1) when that phase's
+  prerequisites are not recorded done in the ledger, with no override. Tell
+  the operator to run `./setup.sh`, never a phase by name.
 - **Never print secret values.** `.env` contents stay out
-  of your output, and so does `setup-diagnostics.txt`'s content beyond what
+  of your output, and so does `report-<stamp>.txt`'s content beyond what
   it already redacts (it records key NAMES only) — refer to keys by name.
 - **`setup.sh` now runs the whole ride (2026-08-28): ten phases, ending in
   `test` (the pytest gate, via the venv), `boot` (elicits the operator name
@@ -296,6 +302,16 @@ clean.
   operator accept them explicitly, and only then run `./setup.sh
   --accept-warnings`. Never pass that flag to get past a WARN they have not read.
 
+**The whole operator-side contract is three verbs (v2.55.0, design record
+`docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md` D10).**
+You may change `.env`. You may run `./setup.sh`, `./setup.sh status` and
+`./setup.sh report`. Everything else — a script, a Dockerfile, `images.txt`,
+a file inside the podman machine, a hand-run `podman`/`curl`/`git` command
+that writes into the tree — is a finding to report, never a fix. On a
+repository defect (the triage rules above don't resolve it, or the finding
+is in the install's own code rather than an `.env` seam): run `./setup.sh
+report`, hand the operator the path it prints, and end the turn.
+
 `./setup.sh` then runs the dry `check` and the nine mutating phases — `check →
 machine → fetch → llm → stack → app → verify → test → boot → demo` — in order,
 stopping at the first hard failure. (`check` is a GATE: the run refuses to
@@ -330,8 +346,8 @@ output; interpret it the same way.
 
 **On any non-zero exit — stop. This is the contract, not advice:**
 
-1. Optionally run the read-only rungs: `./setup.sh diagnose` (writes
-   `<state>/setup-diagnostics.txt` — the state dir path first, then
+1. Optionally run the read-only rungs: `./setup.sh report` (writes
+   `<state>/report-<stamp>.txt` — the state dir path first, then
    pod/container states, last 100 log lines per pod, `verify.sh` output, tool
    versions, `.env` key NAMES only) and read
    the tail of `<state>/setup-log.txt`. For a network-shaped failure (fetch
@@ -344,12 +360,13 @@ output; interpret it the same way.
 2. Surface the outcome to the operator: the exact FAIL/WARN/USERACTION
    lines, what they mean, and — for a failure — your proposed cause and fix.
 3. **End your turn.** The operator decides what happens next. Only after
-   they respond do you correct `.env` and/or re-run `./setup.sh <phase>`.
+   they respond do you correct `.env` and/or run `./setup.sh` again.
 
 Never compose a replacement command for whatever `setup.sh` was doing — if
 the fix is a real command (e.g. `loginctl enable-linger`), it's one the
 script already named in its WARN/FAIL line; otherwise the fix is almost
-always "re-run `./setup.sh <phase>`" after correcting `.env`.
+always "run `./setup.sh`" after correcting `.env` — it resumes from the
+ledger, never a phase name you pick.
 
 **Exit 3 in the `llm` phase (the model gate) is EXPECTED on every fresh
 install** — it is the pause where the operator enters the provider into
@@ -361,7 +378,8 @@ already printed the full hand-off: the UI URL (`http://127.0.0.1:4000/ui`),
 the credential's location by name, the alias table with what each needs,
 and the direct-vs-proxy discrimination command (direct success + proxy
 failure = the alias row is wrong; direct failure = wrong URL/key). Relay
-it, let the OPERATOR do it, then re-run `./setup.sh llm`. You never
+it, let the OPERATOR do it, then run `./setup.sh` — it resumes from the
+ledger at `llm`. You never
 register, edit, or delete a model — not via curl, not via the UI, not at
 all.
 

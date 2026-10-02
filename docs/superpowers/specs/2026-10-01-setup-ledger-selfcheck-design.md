@@ -1,7 +1,14 @@
 # The install remembers what it did, proves it as the app, and has one definition
 
-> **Status:** proposed — decisions D1–D9 taken with the operator on 2026-10-01;
-> no phase shipped yet.
+> **Status:** partial — P1 shipped in v2.55.0 (D1, D2, D3, D5's exit-code rule and
+> `fetch` fix, D10); P2–P5 (D4, D6, D7, D8, D9, the rest of D5) are open. Decisions
+> D1–D10 taken with the operator on 2026-10-01.
+> **As-built:** P1 — `deploy/single/steps.tsv` (new), `deploy/single/ledger-lib.sh`
+> (new), `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/env-lib.sh`,
+> `.claude/settings.json` (new), `.claude/hooks/guard-install-tree.sh` (new),
+> `tests/test_single_steps_schema.py`, `tests/test_single_ledger_lib.py`,
+> `tests/test_single_driver_ledger.py`, `tests/test_single_report_redacts.py`,
+> `tests/test_install_tree_hook.py` (all new).
 > **Scope:** the single-node profile (`deploy/single/`), Linux and Windows
 > Podman Desktop. The k3s profile is OUT of scope for this record and gets a
 > follow-on record once P1–P4 are proven; nothing here changes
@@ -14,8 +21,10 @@
 > "skipped — the API is up" branch; the Windows logon task's `boot`-only
 > wrapper; the `tail -40` diagnose window; the three exit-code precedence
 > rules; `update.sh`'s "your committed changes preserved by three-way merge"
-> allowance and `update.sh init`'s `git add -A` (D10 — a deployment carries
-> no local patches).
+> allowance (D10 — a deployment carries no local patches). `update.sh init`'s
+> `git add -A`, which snapshots a freshly unzipped tree with no history as
+> its baseline, STAYS — that snapshot is what makes the first `apply` a
+> clean fast-forward instead of a local patch.
 
 ## The problem, measured
 
@@ -334,9 +343,12 @@ blamed on something else. The rule becomes four mechanisms:
    `CC_SETUP_UNLEDGERED=1` (D3) does not cover it. The one tracked file an
    operator may differ on is none: `.env` is gitignored, and everything
    generated lives in the state dir (2026-09-23 D7). `update.sh` loses its
-   three-way-merge allowance and its `git add -A`: `apply` fast-forwards
-   `local` to `upstream`, and a tree that cannot fast-forward is the same
-   FAIL. (The `local` branch stays as the name the updater moves.)
+   three-way-merge allowance: `apply` fast-forwards `local` to `upstream`,
+   and a tree that cannot fast-forward is the same FAIL. (The `local` branch
+   stays as the name the updater moves.) `update.sh init`'s `git add -A` —
+   its baseline snapshot of a freshly unzipped tree with no history — STAYS:
+   that commit is what gives a fresh install a pristine starting point to
+   fast-forward from, not a local patch to retire.
 2. **The agent is held to `.env` by a hook, not a sentence.** The repo
    ships `.claude/settings.json` with two PreToolUse hooks under
    `.claude/hooks/`, so they apply to any Claude Code session opened in a

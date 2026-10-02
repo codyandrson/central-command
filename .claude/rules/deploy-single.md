@@ -187,3 +187,63 @@ when a matching file is read.
   the locked tag, a same-series substitution is a WARN the operator lives
   with, and our own (locally built) images stay exact — the release is one
   tested unit.
+- **A new `.env` writer is a ROW, not a line of bash, and a phase's `probe`
+  is what "done" MEANS** (v2.55.0, design record
+  `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md` D1).
+  `deploy/single/steps.tsv` declares every step of the install once — phase,
+  step, kind (`run`/`gate`/`human`), `requires`, the `.env` keys it `reads`
+  and `writes`, its `probe`, a doc sentence — and `tests/test_single_steps_schema.py`
+  fails the suite when a `set_kv`/`set_kv_if_unset` target in
+  `deploy/single/*.sh` is not exactly one row's `writes`. The phase functions
+  still run exactly as before; what changed is that a phase is DONE only when
+  every one of its rows' probes passes AFTER the function returns — a phase
+  that `return 0`s with a row's probe false is a FAIL naming the row, which is
+  what turns "the step after the one that failed never ran" from invisible
+  into a line. `<state>/ledger.tsv` is the one record of what completed (one
+  row per step: status, version, timestamp, a fingerprint over the `reads`
+  keys' values, the last FAIL/USERACTION reason), and `./setup.sh` with no
+  argument is the only resume command — it reads the ledger and continues
+  from wherever the last run stopped. `./setup.sh <phase>` is a DEVELOPER
+  form, never an operator one: it REFUSES (exit 1) when that phase's
+  `requires` are not recorded `done`, with no `--force`; the bypass,
+  `CC_SETUP_UNLEDGERED=1`, is documented ONLY here and is itself refused when
+  `.env` carries `CC_EXECUTOR_MODE=live`.
+- **One exit-code rule, everywhere** (v2.55.0, D5). `cc_exit_code <fails>
+  <warns> <actions>` in `deploy/env-lib.sh`, precedence `FAIL > USERACTION >
+  WARN` — `run_phase`, the `machine` subcommand and both `update.sh` entry
+  points call it, so a FAIL is never reported as "stopped for your action."
+  `phase_fetch` returns 1 on a FAIL now; `USERACTION` is reserved for a seam
+  only the operator can fill.
+- **The tree is pristine, or the driver refuses — there is no flag past it**
+  (v2.55.0, D10). A `check` row, `tree-pristine`, repeated at the top of
+  every mutating phase and of `update.sh apply`: the tracked tree is clean
+  and `HEAD` is an ancestor of `upstream` when that ref exists. A difference
+  is a FAIL naming the files; no git is a USERACTION naming `./update.sh
+  init`; `CC_SETUP_UNLEDGERED=1` does NOT cover it. `update.sh apply` is
+  fast-forward only now — the three-way merge of local commits and the
+  advice to commit local tweaks to `local` are retired. `update.sh init`'s
+  baseline `git add -A` on a freshly unzipped tree with no history STAYS —
+  that snapshot is what makes the FIRST `apply` a clean fast-forward instead
+  of a local patch.
+- **`./setup.sh report`, never a freehand bundle.** One file,
+  `<state>/report-<stamp>.txt` — the ledger, every failed row's `reason`
+  and its `reads` keys' NAMES, the whole last run's log, `.env` key NAMES
+  only, tool versions, the image manifest — built to paste into a development
+  session. `diagnose` is an alias of it now.
+  `tests/test_single_report_redacts.py` feeds it marker secret values and
+  greps the output; never weaken the redaction to make a report "more
+  useful."
+- **The hook holds the agent to `.env`, not the prompt** (v2.55.0, D10).
+  `.claude/settings.json`'s `PreToolUse` hooks run
+  `.claude/hooks/guard-install-tree.sh` on `Edit`/`Write`/`NotebookEdit` and
+  `Bash`. It is ACTIVE only on a DEPLOYMENT tree — one whose state dir
+  already holds `ledger.tsv`, which every `./setup.sh`/`configure`/`check`
+  run creates — and denies an edit to a tracked file or a shell command that
+  writes into the tree, naming D10 and `./setup.sh report` in its own
+  denial. A DEVELOPMENT session (this checkout, a worktree, a feature
+  branch) sets `CC_DEV_SESSION=1` and the hook stands aside — set it in `~/.claude/settings.json`'s `env` so every dev session
+  carries it, not per-command. `tests/test_install_tree_hook.py` is the
+  allow/deny table. **A developer who runs `./setup.sh` in a dev checkout
+  gets a ledger there too** (the hook keys off `ledger.tsv`'s presence, not
+  off "is this the real deployment") and must set `CC_DEV_SESSION=1` before
+  the next edit to that tree.

@@ -361,6 +361,14 @@ RUNTIME_ONLY = {
     "CC_UPDATE_DIR",                           # api/update.py hands it to the runner
     "CC_ENV_LIB_LOADED",                       # env-lib.sh's own source guard
     "CC_QUESTIONS_LIB_LOADED",                 # questions-lib.sh's own source guard
+    "CC_LEDGER_LIB_LOADED",                    # ledger-lib.sh's own source guard
+    # The DEVELOPER bypass for the ledger's order (2026-10-01 design record,
+    # D3): it runs a phase ahead of its prerequisites, it is documented only in
+    # .claude/rules/deploy-single.md, and it is REFUSED when .env carries
+    # CC_EXECUTOR_MODE=live. A line in .env.example would make it an operator
+    # answer, which is exactly what it must never be — the operator decided
+    # that the escape hatch is the defect, and there is no --force.
+    "CC_SETUP_UNLEDGERED",
     # F25's print-once marker for the tls-insecure WARN: EXPORTED by
     # cc_tls_insecure_warn_once once it has fired, read by every child process
     # this run execs. A per-run fact, never an operator answer.
