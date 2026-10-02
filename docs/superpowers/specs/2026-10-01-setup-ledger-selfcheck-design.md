@@ -3,8 +3,9 @@
 > **Status:** partial — P1 shipped in v2.55.0 (D1, D2, D3, D5's exit-code rule and
 > `fetch` fix, D10); P2 shipped in v2.56.0 (D4, and from D11 the `started`
 > status, the run lock, the plan, in-process redaction and the readiness-only
-> rule); P3 shipped in v2.57.0 (D6, D7, the rest of D5); P4–P5 (D8, D9, D11's
-> driver split) are open.
+> rule); P3 shipped in v2.57.0 (D6, D7, the rest of D5); P4 shipped in v2.58.0
+> (D8, the two remaining `human` rows, D11's driver split); P5 (D9's
+> acceptance run on the laptop) is open and gates the final tag.
 > Decisions D1–D10 taken with the operator on 2026-10-01; D11 (precedents,
 > seven adoptions) approved 2026-10-02.
 > **As-built:** P1 — `deploy/single/steps.tsv` (new), `deploy/single/ledger-lib.sh`
@@ -25,6 +26,12 @@
 > `deploy/single/update.sh`, `deploy/single/update-run.sh`,
 > `deploy/single/steps.tsv`, `deploy/single/ledger-lib.sh`,
 > `deploy/single/make-secrets.sh`, `deploy/single/resolve-images.sh`.
+> P4 — `deploy/single/phases/<phase>.sh` (ten, new), `deploy/single/CHECKLIST.md`,
+> `scripts/render_checklist.py`, `scripts/checklist_template.md`,
+> `tests/installer_source.py`, `tests/test_single_phase_files.py`,
+> `tests/test_single_checklist.py`, `tests/test_single_human_rows.py`,
+> `tests/test_single_n8n_workflows_row.py`, `tests/test_single_no_phase_hints.py`
+> (all new); `deploy/single/setup.sh`, `.claude/skills/setup/SKILL.md`, the READMEs.
 > **Scope:** the single-node profile (`deploy/single/`), Linux and Windows
 > Podman Desktop. The k3s profile is OUT of scope for this record and gets a
 > follow-on record once P1–P4 are proven; nothing here changes
@@ -313,7 +320,9 @@ neither rebuilt (the tag existed) nor restarted anything. Local images now
 carry a `cc.build-inputs` label and rebuild when it differs, `stack` and
 `llm` recreate a service whose container is not running the image its ref
 resolves to (a stateful one only while its data is on a named volume), and a
-staged build is tagged aside so that the acquisition moves no live tag. `acquire`,
+staged build is tagged aside so that the acquisition moves no live tag. (P4 moved the n8n façade workflows
+out of the updater's own sequence and into the `stack` phase as a manifest
+row, so the order reads schema → fetch → llm → stack → app → verify.) `acquire`,
 `CC_STAGED_FOR` and the output protocol are now an interface BETWEEN releases.
 Three things this record did not foresee were decided in the build. A
 deployment that predates the ledger has no rows, so the first post-merge
@@ -404,6 +413,23 @@ corrected in the same change.
 then the ENTIRE log of the last run (runs are delimited by their `run start`
 line, so no `tail -40`), then the tails of `uvicorn.log`, `cockpit.log` and
 `sandbox.log`, then everything it captures today.
+
+**As built (P4, v2.58.0).** The renderer and the stale-file test live in
+`scripts/render_checklist.py` and `tests/test_single_checklist.py`; the static
+prose around the steps is one template, `scripts/checklist_template.md`. The
+doc pin was INVERTED rather than extended: `tests/test_setup_phase_docs.py`
+used to require four documents to carry the phase list and now requires that
+they do not — they link to the checklist, and any phase sequence a document
+still names must be in manifest order. The skill is rewritten around the
+three verbs (D10.4's paragraph pinned verbatim) and gives `configure`,
+`update.sh` and `stop` to the operator. Two things this section did not list
+shipped with it because the checklist made them visible. The messages
+themselves still named phases to run (`run: ./setup.sh app`) and `diagnose`;
+they say `./setup.sh` and `report` now, and a guard test walks them. And the
+n8n façade workflows were applied only by `update.sh`, so a fresh install
+with `CC_ENABLE_N8N=1` had none: `stack/n8n-workflows` is a manifest row
+after the credential gate, and the gate asks for every credential the import
+binds by name.
 
 ### D9 — Proof: execution tests on Linux, a laptop run before the tag
 

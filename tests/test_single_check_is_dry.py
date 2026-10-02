@@ -10,7 +10,9 @@ before the install.
 So this is a source walk with two jobs:
 
 * **dryness.** Start at `phase_check`, walk every function it calls (and every
-  function THOSE call) within `setup.sh`, and fail on a mutating construct:
+  function THOSE call) within the installer — `setup.sh` and, since v2.58.0,
+  the phase files it sources (`tests/installer_source.py`) — and fail on a
+  mutating construct:
   `podman pull` / `build` / `run`, `compose … up`, `npm ci|install`,
   `pip install`, `uv pip install` without `--dry-run`, or a `make-secrets` call.
   The walk is transitive on purpose: the point of composing `validate`,
@@ -37,6 +39,7 @@ from pathlib import Path
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
 from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+from tests.installer_source import installer_functions  # noqa: E402
 BASH = _resolve_bash() or "bash"
 
 
@@ -62,24 +65,13 @@ FORBIDDEN = {
 
 
 def _functions() -> dict[str, str]:
-    """name -> body, for every function defined in setup.sh."""
-    text = SETUP.read_text(encoding="utf-8")
-    out: dict[str, str] = {}
-    name = None
-    body: list[str] = []
-    for line in text.splitlines():
-        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{", line)
-        if m and name is None:
-            name = m.group(1)
-            body = []
-            continue
-        if name is not None:
-            if line == "}":
-                out[name] = "\n".join(body)
-                name = None
-                continue
-            body.append(line)
-    return out
+    """name -> body, for every function the installer defines: setup.sh AND
+    deploy/single/phases/*.sh (v2.58.0 moved check's own code into
+    phases/check.sh — reading setup.sh alone would walk almost nothing). The
+    parser is the strict one, per file: the line-oriented one this used to
+    carry let a one-line function swallow its neighbours, which made the walk
+    depend on which file a neighbour lived in."""
+    return installer_functions()
 
 
 def _code(body: str) -> str:
@@ -98,7 +90,7 @@ def _code(body: str) -> str:
 
 def _reachable() -> set[str]:
     funcs = _functions()
-    assert "phase_check" in funcs, "setup.sh has no phase_check"
+    assert "phase_check" in funcs, "the installer has no phase_check"
     seen: set[str] = set()
     queue = ["phase_check"]
     while queue:

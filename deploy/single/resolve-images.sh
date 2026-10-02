@@ -559,7 +559,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
     fi
     mode=substituted
     dig="(substituted)"
-    warn "$check" "${host}/${path}: locked tag ${lock} is ABSENT — substituting ${chosen} (satisfies '${cons}'). Untested combination: a green ./setup.sh verify is what makes it supported."
+    warn "$check" "${host}/${path}: locked tag ${lock} is ABSENT — substituting ${chosen} (satisfies '${cons}'). Untested combination: a green verify phase is what makes it supported."
   fi
 
   local ref="${host}/${path}:${chosen}"
@@ -613,7 +613,7 @@ if (( ! DRY )) && [[ -n "$MANIFEST_ROWS" ]]; then
 fi
 
 if (( FAILS )); then
-  useraction "resolve-images" "$FAILS image(s) could not be resolved — fix the seam(s) named above in the repo-root .env and re-run: ./setup.sh fetch. The seams are CC_REGISTRY_DOCKERIO/_GHCR/_MCR (the mirror HOST) and CC_IMG_<NAME> (an exact ref this resolver must use as-is, including a re-namespaced PATH). deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams."
+  useraction "resolve-images" "$FAILS image(s) could not be resolved — fix the seam(s) named above in the repo-root .env and re-run: ./setup.sh (it resumes at fetch). The seams are CC_REGISTRY_DOCKERIO/_GHCR/_MCR (the mirror HOST) and CC_IMG_<NAME> (an exact ref this resolver must use as-is, including a re-namespaced PATH). deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams."
 fi
 (( ACTIONS )) && exit 3
 (( FAILS )) && exit 1

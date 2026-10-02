@@ -143,7 +143,7 @@ if (( rc == 1 )); then
   if CC_UPDATE_DRIVEN=1 "$SINGLE/update.sh" rollback && restart_api; then
     write_status rolled_back "rollback" "apply failed and was rolled back — ${apply_err:-see $LOG}"
   else
-    write_status failed "rollback" "apply failed AND rollback did not come back healthy — read $LOG, then: ./update.sh rollback && ./setup.sh boot"
+    write_status failed "rollback" "apply failed AND rollback did not come back healthy — read $LOG, then: ./update.sh rollback, then ./setup.sh (it resumes in order and starts the API)"
   fi
   exit 1
 fi
@@ -165,7 +165,7 @@ if (( rc == 3 )); then
   fi
   # Bring the API back up so the cockpit showing this status is reachable.
   restart_api || true
-  write_status failed "operator-action" "${pause_line:-the update paused for your action} — finish in a terminal: cd deploy/single && ./update.sh apply, then ./setup.sh boot"
+  write_status failed "operator-action" "${pause_line:-the update paused for your action} — finish in a terminal: cd deploy/single && ./update.sh apply, then ./setup.sh (it resumes at boot, which starts the API)"
   exit 3
 fi
 
@@ -174,6 +174,6 @@ if restart_api; then
   write_status success "done"
   echo "== update-run finished: healthy on v$(current_version) =="
 else
-  write_status failed "restart" "the updated API never answered /health — read the uvicorn.log beside $LOG's directory (./setup.sh diagnose prints the state dir); roll back with: ./update.sh rollback && ./setup.sh boot"
+  write_status failed "restart" "the updated API never answered /health — read the uvicorn.log beside $LOG's directory (./setup.sh report prints the state dir); roll back with: ./update.sh rollback, then ./setup.sh (it resumes in order and starts the API)"
   exit 1
 fi

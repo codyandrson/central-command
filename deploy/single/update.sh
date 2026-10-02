@@ -55,9 +55,10 @@
 #                        ledger rows, and builds the local images under their
 #                        LIVE tags) -> ./setup.sh llm -> ./setup.sh stack
 #                        (compose.yaml's changes, and every container whose
-#                        image changed behind its ref, recreated) ->
-#                        ./setup.sh app -> n8n workflows -> ./setup.sh verify
-#                        (the self-check included). An exit 3 from ANY of them
+#                        image changed behind its ref, recreated; with n8n,
+#                        the façade workflows applied — stack/n8n-workflows)
+#                        -> ./setup.sh app -> ./setup.sh verify (the
+#                        self-check included). An exit 3 from ANY of them
 #                        stops right there, exit 3, the ledger it printed
 #                        showing where; an exit 1 is a FAIL
 #                     -> USERACTION: restart is the operator's
@@ -485,7 +486,7 @@ apply_schema() {
   pfx="$(get_kv "$ENV_FILE" CC_POD_PREFIX)"; pfx="${pfx:-cc-}"
   ctr="${pfx}postgres-postgres"
   if ! podman container exists "$ctr" 2>/dev/null; then
-    fail "schema" "spine postgres container '$ctr' not found — is the stack up? (./setup.sh stack)"
+    fail "schema" "spine postgres container '$ctr' not found — is the stack up? (./setup.sh status shows it)"
     return 1
   fi
   # The whole file is re-executable by design: `if not exists` everywhere,
@@ -614,17 +615,17 @@ RERUN="./update.sh apply"
 # earlier apply is not a reason to stop: this run re-runs fetch first).
 LEDGER_STEPS=0
 ledger_adoption_gate() { # ledger_adoption_gate <phase>  -> 0 go on · 1 stopped (printed)
-  local ledger="$STATE_DIR/ledger.tsv" blocked tail=""
+  local ledger="$STATE_DIR/ledger.tsv" blocked
   (( LEDGER_STEPS )) || return 0
   blocked="$(cc_ledger_blocked "$ledger" "$1")" || return 0
-  # n8n's façade workflows are the one step this script runs that ./setup.sh
-  # does not, so an install with n8n comes back here once more afterwards.
-  [[ "$(get_kv "$ENV_FILE" CC_ENABLE_N8N)" == "1" ]] \
-    && tail=". Then stop the API and run ${RERUN} once more: it finishes the one step ./setup.sh does not run (the n8n façade workflows)"
+  # One command, and no "then run the update once more" tail: the n8n façade
+  # workflows were the one step this script ran that ./setup.sh did not, and
+  # since v2.58.0 they are a row of the stack phase (stack/n8n-workflows),
+  # which the adopting ./setup.sh runs like every other.
   if [[ -z "$(cc_ledger_read "$ledger")" ]]; then
-    useraction "ledger-adopt" "the update is merged and this deployment predates the install ledger: run ./setup.sh once — it adopts the running deployment phase by phase (every phase is idempotent) and records it${tail}"
+    useraction "ledger-adopt" "the update is merged and this deployment predates the install ledger: run ./setup.sh once — it adopts the running deployment phase by phase (every phase is idempotent) and records it"
   else
-    useraction "ledger-adopt" "the update is merged, but ./setup.sh $1 would be refused: it requires ${blocked%% *}, which the ledger records as ${blocked#* }, and this update does not run that phase. Run ./setup.sh once — it resumes in order, phase by phase (every phase is idempotent), and records it${tail}"
+    useraction "ledger-adopt" "the update is merged, but ./setup.sh $1 would be refused: it requires ${blocked%% *}, which the ledger records as ${blocked#* }, and this update does not run that phase. Run ./setup.sh once — it resumes in order, phase by phase (every phase is idempotent), and records it"
   fi
   return 1
 }
@@ -685,18 +686,16 @@ deploy_current_tree() {
   # changed behind an unchanged ref (setup.sh's image_drift) — named, one PASS
   # line per service; stateful services keep their data in named volumes.
   # Before app, because app's derived links and verify's checks are about the
-  # stack as this release defines it.
-  deploy_phase stack "./setup.sh stack stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
-  deploy_phase app "./setup.sh app stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
-  # The n8n façades are code (deploy/n8n/); idempotent, and a no-op when the
-  # n8n profile is off. The script's own USERACTION names a missing credential.
-  if [[ "$(get_kv "$ENV_FILE" CC_ENABLE_N8N)" == "1" ]]; then
-    step "n8n" "façade workflows applied into n8n (deploy/n8n/apply-workflows.sh)" \
-      bash "$REPO_ROOT/deploy/n8n/apply-workflows.sh" --podman || return 1
-  fi
+  # stack as this release defines it. With CC_ENABLE_N8N=1 the phase also
+  # applies the n8n façade workflows (stack/n8n-workflows, through
+  # deploy/n8n/apply-workflows.sh — idempotent, it restarts n8n); that used to
+  # be a separate step here, after app, which a fresh install never ran. Its
+  # @deploy/n8n tree input re-runs it when a release changes a workflow.
+  deploy_phase stack "the stack phase stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
+  deploy_phase app "the app phase stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
   # verify includes the application's own self-check (verify/selfcheck) since
   # v2.56.0 — the update is proven as the app, not only as a deployment.
-  deploy_phase verify "./setup.sh verify stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
+  deploy_phase verify "the verify phase stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
   # CC_UPDATE_DRIVEN=1 is update-run.sh (the cockpit's detached runner): it
   # owns the restart, so the operator gate would turn its clean exit into an
   # ambiguous 3 — the same code the fetch/llm pauses use.
@@ -795,7 +794,7 @@ cmd_run() {
     # The one gate apply cannot waive: nothing mutates under a live API. If
     # WE started it (setup.sh boot's pid file), offer the stop here.
     if api_running && [[ -f "$STATE_DIR/uvicorn.pid" ]]; then
-      read -rp "The API is running (started by ./setup.sh boot). Stop it for the update? [y/N] " yn
+      read -rp "The API is running (started by ./setup.sh). Stop it for the update? [y/N] " yn
       [[ "$yn" == [yY]* ]] && "$HERE/setup.sh" stop >&2
     fi
   else
@@ -855,8 +854,9 @@ usage: ./update.sh <downloaded-source-zip>
                   own fetch, plus the running catalog against its aliases; a
                   stop there changes nothing) -> spine DB backup -> FAST-FORWARD
                   \`local\` to \`upstream\` -> schema -> ./setup.sh fetch ->
-                  ./setup.sh llm -> ./setup.sh stack -> ./setup.sh app ->
-                  n8n workflows -> ./setup.sh verify. Any of those stopping
+                  ./setup.sh llm -> ./setup.sh stack (with n8n, the façade
+                  workflows too) -> ./setup.sh app -> ./setup.sh verify.
+                  Any of those stopping
                   for you stops the update right there (exit 3; re-run apply
                   to go on).
                   A deployment carries no local patches: a tree that differs

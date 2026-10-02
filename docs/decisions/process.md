@@ -432,3 +432,46 @@ hygiene, and how the test suite itself must be written. See
   switched-off image into a permanent "operator pin".
 - **Enforced:** test: `tests/test_single_local_image_label.py`; test: `tests/test_single_stack_catch_up.py`; test: `tests/test_single_resolve_carry_forward.py`
 - **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-121 — The operator's procedure is generated from the manifest, and documents link to it
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The operator's procedure is GENERATED, and documents link to it"
+- **Why:** The process was defined in code once and described in prose six
+  times, one of them wrongly; no operator-facing document was a numbered
+  checklist, and fourteen required steps were commands in no sequence at all
+  (2026-10-01 investigation). The prose copies drifted again during this very
+  record's build — the READMEs still said `fetch` ends in exit 3 and that the
+  operator starts the sandbox runner by hand. One data file, one render, and
+  a test that fails when they differ.
+- **Enforced:** test: `tests/test_single_checklist.py`; test: `tests/test_setup_phase_docs.py`; script: `scripts/render_checklist.py`
+- **Source:** CHANGELOG v2.58.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-122 — One file per manifest phase, and one helper that defines "the installer's source"
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "One file per phase, and the tests read the installer through ONE helper"
+- **Why:** The driver had grown to 5,900 lines in one file. Sentry's
+  self-hosted installer is the precedent (design record D11): a thin
+  orchestrator sourcing step files in order. The risk in such a move is not
+  the code but the guards — a dozen tests read `setup.sh`'s SOURCE, and one
+  that keeps globbing the old file passes while checking nothing — so the
+  split shipped with one shared definition of the source and a planted
+  violation per guard.
+- **Enforced:** test: `tests/test_single_phase_files.py`; script: `tests/installer_source.py`
+- **Source:** CHANGELOG v2.58.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-123 — No operator-facing line names a phase to run
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "No operator-facing line names a phase to run"
+- **Why:** The skill pins the agent to three verbs and the record promises
+  one recovery command, but some twenty FAIL and USERACTION lines still said
+  `run: ./setup.sh app` or `./setup.sh diagnose`. An agent follows the line
+  it is given: the messages were the last place the old phase-by-phase
+  procedure survived.
+- **Enforced:** test: `tests/test_single_no_phase_hints.py`
+- **Source:** CHANGELOG v2.58.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

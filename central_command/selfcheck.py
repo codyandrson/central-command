@@ -537,7 +537,7 @@ async def check_sandbox(ctx: Context) -> Outcome:
                           headers=headers)
     except Exception as exc:  # noqa: BLE001
         return fail(f"the sandbox runner does not answer at CC_SANDBOX_RUNNER_URL "
-                    f"({_describe(exc)}) — ./setup.sh boot starts it", "CC_SANDBOX_RUNNER_URL")
+                    f"({_describe(exc)}) — ./setup.sh starts it (its boot phase)", "CC_SANDBOX_RUNNER_URL")
     if resp.status_code == 401:
         return fail("the sandbox runner refused CC_SANDBOX_RUNNER_TOKEN (HTTP 401) — the "
                     "runner and the API must read the same value", "CC_SANDBOX_RUNNER_TOKEN")
@@ -678,7 +678,7 @@ async def check_cockpit(ctx: Context) -> Outcome:
         resp = await _get(f"http://127.0.0.1:{port}/")
     except Exception as exc:  # noqa: BLE001
         return fail(f"nothing answers on the cockpit port (CC_COCKPIT_PORT={port}: "
-                    f"{_describe(exc)}) — ./setup.sh boot starts the cockpit", "CC_COCKPIT_PORT")
+                    f"{_describe(exc)}) — ./setup.sh starts the cockpit (its boot phase)", "CC_COCKPIT_PORT")
     if resp.status_code >= 500:
         return fail(f"the cockpit answers HTTP {resp.status_code} on CC_COCKPIT_PORT={port}",
                     "CC_COCKPIT_PORT")

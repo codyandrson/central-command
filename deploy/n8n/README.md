@@ -18,9 +18,12 @@ touches them. Edit the JSON, not the canvas.
 copies the files into the n8n container (sha-checked), runs
 `n8n import:workflow` (upsert by id, credentials resolved **by name**),
 activates the workflows in the n8n database (the CLI cannot activate outside
-queue mode), restarts n8n and polls the webhook until it answers. Both
-updaters call it when a release changes this directory; the setup runbooks
-call it once on a fresh install.
+queue mode), restarts n8n and polls the webhook until it answers. On the
+single-node profile it is a step of `./setup.sh` — the `stack` phase's
+`n8n-workflows` row, on a fresh install and, because `update.sh` deploys
+through that phase, on every update that changes this directory; a credential
+it cannot resolve stops the run as that row's `USERACTION`. The k3s driver and
+updater run it with `--k3s`.
 
 ## What a deployment has to provide
 

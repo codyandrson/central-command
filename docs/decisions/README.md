@@ -204,3 +204,6 @@ recorded in-repo." rather than inventing one.
 | DL-118 | A deployment that predates the ledger is adopted by `./setup.sh`, never failed into a rollback | active | 2026-10-02 | test: `tests/test_single_update_acquire.py` | [process.md](process.md) |
 | DL-119 | Importing the bundled skills is a create-only step | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py` | [process.md](process.md) |
 | DL-120 | An update deploys what it acquired: images carry their inputs' hash, and a container runs the image its ref resolves to | active | 2026-10-02 | test: `tests/test_single_stack_catch_up.py` | [process.md](process.md) |
+| DL-121 | The operator's procedure is generated from the manifest, and documents link to it | active | 2026-10-02 | test: `tests/test_single_checklist.py` | [process.md](process.md) |
+| DL-122 | One file per manifest phase, and one helper that defines "the installer's source" | active | 2026-10-02 | test: `tests/test_single_phase_files.py` | [process.md](process.md) |
+| DL-123 | No operator-facing line names a phase to run | active | 2026-10-02 | test: `tests/test_single_no_phase_hints.py` | [process.md](process.md) |

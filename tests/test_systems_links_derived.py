@@ -17,6 +17,8 @@ see), plus the two services the single profile does not deploy.
 import re
 from pathlib import Path
 
+from tests.installer_source import installer_source
+
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEMS = ROOT / "central_command/api/systems.py"
 K3S = ROOT / "deploy/k3s/setup.sh"
@@ -51,7 +53,7 @@ def test_k3s_driver_derives_every_link():
 
 
 def test_single_driver_derives_every_link_it_deploys():
-    src = SINGLE.read_text()
+    src = installer_source()   # setup.sh + phases/*.sh — phase_app is in phases/app.sh
     for key in sorted(link_settings() - NOT_DERIVABLE - NOT_ON_SINGLE):
         assert re.search(rf'set_kv_if_unset\s+"\$ENV_FILE"\s+{key}\b', src), (
             f"deploy/single/setup.sh never derives {key}"
@@ -62,6 +64,6 @@ def test_links_never_overwrite_an_operator_value():
     """Every link write goes through set_kv_if_unset — a URL the operator typed
     (a reverse proxy, a different tailnet name) survives every app re-run."""
     pattern = re.compile(r'^\s*set_kv\s+"\$(?:APP_ENV|ENV_FILE)"\s+(CC_\w+_(?:UI|DOCS|BROWSER)_URL)\b', re.M)
-    for path in (K3S, SINGLE):
-        hits = pattern.findall(path.read_text())
+    for path, src in ((K3S, K3S.read_text()), (SINGLE, installer_source())):
+        hits = pattern.findall(src)
         assert not hits, f"{path.relative_to(ROOT)} overwrites {hits} with a bare set_kv"

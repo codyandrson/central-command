@@ -35,6 +35,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.installer_source import installer_source
+
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
 COMPOSE = SINGLE / "compose.yaml"
@@ -409,7 +411,7 @@ def test_steps_tsv_names_the_drift_aware_probes():
             if l and not l.startswith("#")}
     assert rows[("llm", "up-litellm")][6] == "p_up_litellm"
     assert rows[("stack", "up-stack")][6] == "p_up_stack"
-    src = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    src = installer_source()
     body = src[src.index("\np_up_stack() {"):]
     body = body[: body.index("\n}\n")]
     assert "image_drift" in body
@@ -492,7 +494,7 @@ def test_absent_and_unfetched_are_fails_that_name_the_move(stack: Stack):
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 1
     assert any("crawler's image localhost/cc-crawler:1 is not in local storage" in l
-               and "./setup.sh fetch" in l for l in _lines(r.stdout, "FAIL up-stack:")), r.stdout
+               and "./setup.sh (it resumes at fetch" in l for l in _lines(r.stdout, "FAIL up-stack:")), r.stdout
     assert any("neo4j has no container" in l for l in _lines(r.stdout, "FAIL up-stack:")), r.stdout
     assert stack.recreates() == []
 
@@ -521,7 +523,7 @@ def test_podman_that_cannot_be_asked_fails_the_catch_up(stack: Stack):
 
 
 def _body(name: str) -> str:
-    src = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    src = installer_source()
     start = src.index(f"\n{name}() {{")
     return src[start: src.index("\n}\n", start)]
 

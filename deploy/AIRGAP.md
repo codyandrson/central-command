@@ -147,6 +147,12 @@ before the install, and `check` now says so instead of finding out later.
 
 ## The loop — `configure` → `check` → triage → `check` → `all`
 
+The install procedure itself — what the host must already have, every step in
+the order `./setup.sh` runs it, and what each stop means — is
+[`deploy/single/CHECKLIST.md`](single/CHECKLIST.md), generated from the
+installer's manifest. This section is the configuration loop that comes before
+it on a mirrored or no-egress site.
+
 ```
 ./setup.sh configure   ->  ./setup.sh check  ->  triage: edit .env  ->  ./setup.sh check
                                                                     ...until green
@@ -197,7 +203,7 @@ report and evidence go to `$CC_STATE_DIR/discovery/` (outside the checkout:
 they name internal hosts), and each finding's USERACTION names the `.env` key
 that answers it — the same keys as the table above, plus
 `CC_DISCO_MIRROR_<KEY>` for a resource with no seam of its own.
-`./deploy/single/setup.sh diagnose` prints the state dir's path.
+`./deploy/single/setup.sh report` prints the state dir's path.
 
 ## What `check` cannot prove
 

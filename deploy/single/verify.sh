@@ -291,11 +291,11 @@ if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
       if curl -fsS "http://127.0.0.1:${CC_SPEECH_PORT}/v1/models/${m}" >/dev/null 2>&1; then
         ok "speech model ${m} installed"
       else
-        bad "speech model ${m} installed (./setup.sh llm installs it)"
+        bad "speech model ${m} installed (the llm phase of ./setup.sh installs it)"
       fi
     done
   else
-    bad "container ${CC_POD_PREFIX}speech exists (started by ./setup.sh llm)"
+    bad "container ${CC_POD_PREFIX}speech exists (started by the llm phase of ./setup.sh)"
   fi
 else
   skip "speech not started (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt are yours)"

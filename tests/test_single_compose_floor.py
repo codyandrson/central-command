@@ -11,8 +11,9 @@ substrate that could not run the install.
 The decision is ``compose_version_floor_ok``: pure, prints nothing, returns
 0 (ok) / 1 (too old) / 2 (unparseable) and leaves what it read in
 ``COMPOSE_FLAVOUR`` / ``COMPOSE_VERSION``. ``setup.sh`` ends in ``main "$@"``
-so it cannot be sourced — the block is lifted out and run, the same way the CA
-check is exercised in ``tests/test_single_airgap_seams.py``.
+so it cannot be sourced — the block is lifted out of the installer's source
+(since v2.58.0 it lives in ``deploy/single/phases/check.sh``) and run, the same
+way the CA check is exercised in ``tests/test_single_airgap_seams.py``.
 
 The parsing trap this pins: ``podman compose version`` prints THREE lines (the
 external-provider banner, ``podman version``, then ``podman-compose version``),
@@ -38,6 +39,8 @@ BASH = _resolve_bash() or "bash"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SETUP = ROOT / "deploy" / "single" / "setup.sh"
 
+from tests.installer_source import installer_source  # noqa: E402
+
 # The real outputs, as measured on the work site's podman 5.8.3 (2026-09-25).
 PODMAN_THREE_LINE = (
     ">>>> Executing external compose provider "
@@ -51,9 +54,13 @@ DOCKER = "Docker Compose version v2.39.1\n"
 
 
 def _floor_block() -> str:
-    text = SETUP.read_text(encoding="utf-8")
+    # The installer's source, not setup.sh alone: since v2.58.0 the floor lives
+    # with the check that asks it, in deploy/single/phases/check.sh. The block
+    # runs from its header through the end of compose_version_floor_ok — the
+    # comparison, the three globals and the function, nothing else.
+    text = installer_source()
     start = text.index("# ── the compose FLOOR")
-    end = text.index("\n# Every compose call goes through here", start)
+    end = text.index("\n}\n", text.index("\ncompose_version_floor_ok() {", start)) + 3
     return text[start:end]
 
 
@@ -123,7 +130,7 @@ version_ge "$1" "$2"
 def test_the_host_section_reports_the_floor_as_its_own_check_line():
     """One provider line and one VERSION line: an operator who reads
     `compose-provider: podman compose` learns nothing about 1.5.0."""
-    text = SETUP.read_text(encoding="utf-8")
+    text = installer_source()
     assert 'pass "compose-version"' in text
     assert 'fail "compose-version"' in text
     assert 'warn "compose-version"' in text

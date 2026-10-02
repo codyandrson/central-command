@@ -3,8 +3,11 @@
 #
 # The files under deploy/n8n/workflows/ are the SOURCE OF TRUTH for the n8n
 # façades Central Command calls; the canvas in n8n is a rendering of them.
-# Both updaters run this when a release touches deploy/n8n/, and a fresh
-# install runs it once. Idempotent: import UPSERTS by workflow id (the ids in
+# The single-node install runs this as a ledgered step, stack/n8n-workflows
+# (deploy/single/phases/stack.sh) — on a fresh install and on every update,
+# since update.sh deploys through that phase. That row reads this script's
+# exit code and its `USERACTION n8n:` line, so both are an interface; the k3s
+# driver and updater run it with --k3s. Idempotent: import UPSERTS by workflow id (the ids in
 # the files are stable on purpose), so re-running converges — and a hand edit
 # on the canvas is overwritten by the next release, which is the point.
 #
@@ -74,6 +77,14 @@ else
   present() { podman container exists "$C_N8N" 2>/dev/null; }
   port="$(get_kv "$ENV_FILE" CC_N8N_PORT)"; FACADE_URL="http://127.0.0.1:${port:-5678}/webhook/cc-email-facade"
 fi
+# What the operator re-runs after acting on the USERACTION below. On the
+# single-node profile this script is a step of ./setup.sh, and the one command
+# resumes there — the operator never runs this script, or a phase, by name.
+if [[ $RT == k3s ]]; then
+  RERUN_HINT="re-run this script"
+else
+  RERUN_HINT="re-run ./setup.sh (it resumes at the stack phase, which applies the workflows again)"
+fi
 DB_USER="$(get_kv "$DB_ENV" N8N_DB_USER)"; DB_USER="${DB_USER:-n8n}"
 DB_NAME="$(get_kv "$DB_ENV" N8N_DB_NAME)"; DB_NAME="${DB_NAME:-n8n}"
 
@@ -130,7 +141,7 @@ n8n_psql -c "update workflow_entity set active = true, \"activeVersionId\" = \"v
 # matched. Report each unresolved NAME, whichever façade it belongs to.
 missing_cred="$(n8n_psql -c "select string_agg(distinct c.value->>'name', ', ') from workflow_entity we, jsonb_array_elements(we.nodes::jsonb) n, jsonb_each(n->'credentials') c where we.id in ($in_list) and (c.value->>'id') is null;")"
 if [[ -n "${missing_cred:-}" ]]; then
-  note "USERACTION n8n: no credential found named ${missing_cred} — create it in the n8n UI with that exact name (Gmail OAuth2 API for \"Gmail account\", Google Calendar OAuth2 API for \"Google Calendar account\"), then re-run this script"
+  note "USERACTION n8n: no credential found named ${missing_cred} — create it in the n8n UI with that exact name (Gmail OAuth2 API for \"Gmail account\", Google Calendar OAuth2 API for \"Google Calendar account\"), then ${RERUN_HINT}"
 fi
 
 # ── 5. restart and prove the webhook answers ─────────────────────────────────

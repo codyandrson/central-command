@@ -260,7 +260,7 @@ def _run_update_sh(*args: str) -> subprocess.CompletedProcess:
 
 def _protocol_failures(out: str) -> str:
     lines = [ln for ln in out.splitlines() if ln.startswith(("FAIL ", "USERACTION "))]
-    return " · ".join(lines) or "see <state-dir>/setup-log.txt (./setup.sh diagnose prints the path)"
+    return " · ".join(lines) or "see <state-dir>/setup-log.txt (./setup.sh report prints the path)"
 
 
 def _write_stage_record(state: str, target: str, error: str | None = None) -> None:

@@ -9,6 +9,14 @@ k3s cluster stays what it is; everything homelab-specific — two-node
 placement, Tailscale, the workstation llama fleet, the sandbox, the crawler,
 the log console — is factored out here.
 
+**The install procedure is [`CHECKLIST.md`](CHECKLIST.md)** — what the host
+must already have, every step in the order `./setup.sh` runs it, the rows that
+are yours, and what to do when a run stops. It is GENERATED from
+[`steps.tsv`](steps.tsv), the one declaration of the install's steps
+(`scripts/render_checklist.py`), so it cannot drift from what actually runs.
+This file is the reference beside it: what the profile contains, the seams, and
+why things are the way they are.
+
 ## What runs
 
 One file: **`compose.yaml`**. It replaced `render.sh` + five envsubst
@@ -23,10 +31,15 @@ templates + `podman kube play` on 2026-09-03 (design record
 
 - `n8n` — n8n + its postgres. Only needed by an n8n-backed integration
   (today: Gmail). Off by default; skip it and the install is two containers
-  lighter. With it on: create a Gmail OAuth2 credential named exactly
-  `Gmail account` in the n8n UI, then `./deploy/n8n/apply-workflows.sh
-  --podman` installs the shipped façade workflows (`deploy/n8n/README.md`);
-  `update.sh apply` re-applies them on every release that changes them.
+  lighter. With it on: when the `stack` phase stops for it, create in the n8n UI
+  the credentials the façade workflows bind by name — a Gmail OAuth2
+  credential named exactly `Gmail account`, and a Google Calendar OAuth2
+  credential named exactly `Google Calendar account` when
+  `CC_CALENDAR_FACADE_TOKEN` is set (the stop names the ones still missing) —
+  then re-run `./setup.sh` — the same phase applies the shipped façade workflows
+  (`stack/n8n-workflows`, through `deploy/n8n/apply-workflows.sh`;
+  `deploy/n8n/README.md`), and `update.sh apply` re-applies them through that
+  phase on every release that changes them.
 - `crawler` — cc-crawler, the browser-rendering crawl service (rung 2 of docs
   ingestion). On by default. Its image is built locally and is large
   (Chromium); rung 1, a plain HTTP fetch, keeps working without it.
@@ -56,7 +69,7 @@ spends up to half an hour downloading ~1GB of models.
 Services find each other by **compose service name** (`neo4j`, `litellm`,
 `speech`) on the project's own network — the old pod-name/`CC_POD_PREFIX` DNS
 convention is gone. `CC_POD_PREFIX` still prefixes `container_name`, which is
-how `verify.sh`, `./setup.sh diagnose` and `update.sh` address containers. Host
+how `verify.sh`, `./setup.sh report` and `update.sh` address containers. Host
 access is loopback-published ports at the same numbers the app's `.env` already
 assumes (postgres 5442, litellm 4000, graphiti 8000, bolt 7687).
 
@@ -74,15 +87,14 @@ permanent.
 
 ## Prerequisites
 
+The list is [`CHECKLIST.md`](CHECKLIST.md#before-you-start)'s **Before you
+start**, and `check`'s `host` section verifies each item by name. What the list
+does not say:
+
 - **Claude Code CLI** — a hard prerequisite: it conducts the install. There is
   no no-Claude-Code install path. Onboarding is not part of it (2026-09-18):
   the cockpit asks your name and the EA tour asks the rest, after the install
   ends.
-- podman ≥ 4.9 (validated on 4.9.3) **with compose support** (`podman compose`
-  must answer; `docker compose` is accepted as a dev-box fallback), plus
-  `curl`, `openssl`, `git`, and `uv` (which supplies CPython 3.12). Node ≥ 22
-  is optional — without it the cockpit is not built and the API still runs.
-  `./setup.sh preflight` checks all of these by name.
 - **podman-compose ≥ 1.6.0** — a floor, not a preference (`docker compose` has
   none). `up --wait`, which is how the deploy phases wait on `compose.yaml`'s
   healthchecks, arrived in 1.6.0, and so did the config-hash change that made a
@@ -95,15 +107,12 @@ permanent.
   python-build-standalone (github.com) when the host has none. With
   `CC_AIRGAP=1` that download is impossible, so `check` FAILs rather than
   warning.
-- Windows: **podman CLI** (a podman machine on WSL2; Podman Desktop is
-  optional — a GUI over the same machine) plus **Git Bash** for the `.sh`
-  scripts (ships `openssl`, `curl`). Windows has no real
-  `python3`; the scripts fall back to uv's (already required).
+- Windows has no real `python3`; the scripts fall back to uv's (already
+  required). Git Bash ships `openssl` and `curl`.
 - An OpenAI-compatible endpoint: base URL, API key, and a model id per alias
   (chat, graph extraction, embedding, reranker, and the speech pair if you keep
-  the bundled engine). `./setup.sh configure` asks for exactly these, and they
-  are the ONLY answers it treats as required.
-- ~3 GB RAM for the stack, plus image pulls.
+  the bundled engine) — declared in `.env`, or entered in the LiteLLM UI when
+  the run stops for the catalog. No `configure` question is required.
 - **A terminal, for `configure`.** It is the one interactive step; with no TTY it
   refuses to guess and tells you which keys to fill in instead (see the loop).
 
@@ -126,9 +135,11 @@ to find, so a hand-run `podman compose` needs that flag too.
 ```bash
 cd deploy/single
 ./setup.sh configure   # asks what .env does not answer yet; creates it if absent
-./setup.sh check       # everything dry, one table — the loop below
-./setup.sh             # check -> machine -> fetch -> llm -> stack -> app -> verify -> test -> boot -> demo
+./setup.sh             # THE command: runs the dry check, then every step of CHECKLIST.md
 ```
+
+The order of the steps, which of them are yours, and what each stop means are
+[`CHECKLIST.md`](CHECKLIST.md)'s job; this section explains the pieces.
 
 You do not copy `.env.example` by hand any more: `configure` is the ONE command
 that creates the answer file, and `chmod 600` is its job too.
@@ -154,8 +165,9 @@ for nothing: it lists every unanswered REQUIRED key as a `USERACTION` and exits
 3. An installer that cannot ask does not guess (rustup's rule). That is also
 what makes `.env` a preseed file — fill it in on a connected machine, carry it
 across with the zip, and `configure` reports `keep` for every row and asks
-nothing. Only the upstream LLM keys are required; `CC_OPERATOR_NAME` is not (the
-cockpit asks on first run).
+nothing. No question is required (v2.45.1): every one has a working default or a
+documented blank meaning, and `CC_OPERATOR_NAME` is not needed (the cockpit asks
+on first run).
 
 **`./setup.sh check`** (v2.44.0, design record D5) runs every check that can be made
 **without changing anything** and prints one table. It is the gate: the full run
@@ -202,7 +214,7 @@ Everything this install GENERATES — `setup-log.txt`, the ledger, `report-<stam
 working directory, discovery's report — lives in the **state directory**,
 outside the checkout (`CC_STATE_DIR`; default
 `${XDG_STATE_HOME:-~/.local/state}/central-command/<dir>-<hash>`, resolved and
-written back into `.env` on the first run). `./setup.sh diagnose` prints the
+written back into `.env` on the first run). `./setup.sh report` prints the
 path first and `./setup.sh status` shows it. `git status` is clean after every
 command.
 
@@ -247,8 +259,8 @@ the three local images (graphiti, sandbox, crawler) with your mirrors passed
 in as build-args, resolves the Python dependencies, and runs the cockpit's
 `npm ci`. Each artifact it cannot get is a `FAIL` naming the `.env` seam that
 governs it (`CC_REGISTRY_*`, `CC_APT_MIRROR`, `CC_PYPI_INDEX_URL`,
-`CC_NPM_REGISTRY`, …), and the phase ends with `USERACTION` / exit 3. Fix the
-mirror and run `./setup.sh` again — it resumes from the ledger at `fetch`,
+`CC_NPM_REGISTRY`, …), and the phase exits 1 (v2.55.0 — a `USERACTION` is
+reserved for a seam only you can fill). Fix the mirror and run `./setup.sh` again — it resumes from the ledger at `fetch`,
 and acquired artifacts fast-forward. Nothing falls back on its own; the
 choice lives in `.env` so an update makes
 the same one.
@@ -273,7 +285,7 @@ never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `re
 
 The resolved refs are written to `.env` as `CC_IMG_*` (compose.yaml reads
 them) and recorded in `$CC_STATE_DIR/installed.manifest`. **A `WARN`-level substitution plus
-a green `./setup.sh verify` is a supported install** — capability is proven by
+a green `verify` phase is a supported install** — capability is proven by
 probes, not by version strings. Since v2.43.0 the three locally BUILT images resolve their base
 through the same manifest: the resolver writes
 `CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP`, `CC_IMG_PYTHON` and
@@ -327,36 +339,26 @@ and continues exactly where the last one stopped — a changed `.env` key
 re-runs only the steps that read it; a release bump re-runs everything.
 `./setup.sh status` prints the same ledger and changes nothing.
 
-Each phase below is still a subcommand of the same code path, kept for
-development — but it is no longer an operator move: **`./setup.sh <phase>`
+The phases are still subcommands of the same code path, kept for
+development — but they are no longer operator moves: **`./setup.sh <phase>`
 REFUSES (exit 1) when that phase's prerequisites are not recorded `done` in
 the ledger**, with no `--force`. (The developer bypass,
 `CC_SETUP_UNLEDGERED=1`, is documented in `.claude/rules/deploy-single.md`,
 never here — and it is itself refused when `.env` carries
-`CC_EXECUTOR_MODE=live`.) What each one does, for reference:
+`CC_EXECUTOR_MODE=live`.) The phases and their steps are declared in
+[`steps.tsv`](steps.tsv) and listed in [`CHECKLIST.md`](CHECKLIST.md). The
+commands an operator uses:
 
 ```bash
-./setup.sh configure   # ASK what .env does not answer yet (the one command that creates it);
-                       #   --all also asks the ports, --non-interactive never prompts
-./setup.sh check       # ALL of the below that changes nothing, in one table (--list names the sections)
-./setup.sh validate    # offline check of .env; no side effects
-./setup.sh preflight   # podman/tooling/RAM/disk/linger checks; no side effects
-./setup.sh machine     # write the podman MACHINE from .env: the CA into its trust
-                       #   store, the registries mirror/insecure drop-in, the proxy
-                       #   drop-in. A no-op on bare Linux; idempotent; prints the
-                       #   diff before each write. `machine --dry-run` reports only
-                       #   (which is what preflight calls). deploy/AIRGAP.md
-./setup.sh fetch       # acquire every external artifact up front (the one network phase)
-./setup.sh llm         # secrets + LiteLLM (+speech) up + probe its aliases + measure CC_EMBED_DIM
-./setup.sh stack       # assert the local images, `compose up -d --wait` (+crawler, +n8n), then recreate any container whose image changed behind its ref
-./setup.sh app         # venv, editable install, the derived .env values (incl. the Systems-page links), mint the spine's virtual key, cockpit
-./setup.sh verify      # verify.sh, then live, then the capability manifest
-./setup.sh test        # the pytest gate, via the venv (~10 min, sequential)
-./setup.sh boot        # asks your name (once), starts the API detached, checks the roster
-./setup.sh demo        # fixture email -> triage -> YOUR approval -> a real graph write, provenance stamped
-./setup.sh status      # the ledger, postconditions only — mutates nothing
-./setup.sh report      # <state>/report-<stamp>.txt for a development session; `diagnose` is now an alias
-./setup.sh stop        # stops the API that `boot` started
+./setup.sh                    # THE command: resumes from the ledger
+./setup.sh --accept-warnings  # the same, letting a WARN-only check through
+./setup.sh configure          # ASK what .env does not answer yet (the one command that creates it);
+                              #   --all also asks the ports, --non-interactive never prompts
+./setup.sh check              # the dry gate alone: everything that changes nothing, in one table
+./setup.sh check --list       # name its nine sections
+./setup.sh status             # the ledger, the postconditions and the self-check — changes nothing
+./setup.sh report             # <state>/report-<stamp>.txt for a development session; `diagnose` is an alias
+./setup.sh stop               # stops the API, the cockpit server and the sandbox runner `./setup.sh` started
 ```
 
 ### Trust: two knobs (v2.43.0)
@@ -368,7 +370,7 @@ function fans the CA out to every host-side tool
 (`deploy/env-lib.sh`'s `cc_export_tls_env`), the builds take it as `cc-ca.crt` in
 a STAGED build context under `<state>/build/<image>/` (a `--secret` is broken on
 a Windows podman machine, and a CA is public material anyway — the private key
-is what would be secret), `./setup.sh machine` installs it in the podman machine, and LiteLLM and the
+is what would be secret), the `machine` phase installs it in the podman machine, and LiteLLM and the
 speech engine get it mounted read-only at `/etc/cc/ca.pem`. Prefer the CA; the
 insecure knob is supported for a site that relies on isolation instead, and
 every command that sees it prints one `WARN tls-insecure:` line naming what it
@@ -390,29 +392,27 @@ touches; one whose data path were not on a named volume would be left running
 and reported, never recreated. The `stack/up-stack` row's probe asks the same
 question, so a stale container shows in the plan as `stack: WILL RUN`.
 
-### First boot and the demo (the last three phases, 2026-08-28)
+### First boot and the demo
 
-A bare `./setup.sh` runs all eleven phases — **zero to a working, human-approved
-demo in one command.** The ledger is what makes each of the late phases run
-once: `test`'s row is done per release (an update runs the suite again for the
-new code), `boot` never starts a second API beside one that answers, and a
-decided proposal in the event log is what `demo`'s row reads. Only two moments are yours, and on a terminal the script
-waits in place for both:
+A bare `./setup.sh` goes from zero to a working, human-approved demo. The ledger
+is what makes each of the late steps run once: `test`'s row is done per release
+(an update runs the suite again for the new code), `boot` starts whichever of
+its three processes is not answering, and a decided proposal in the event log
+is what `demo`'s rows read. Your two moments there — your name, and the demo
+approval — are bold rows in [`CHECKLIST.md`](CHECKLIST.md), with where you act.
+On a terminal the script waits in place for both; a headless run does not ask
+your name (the cockpit does, on first run) and stops with exit 3 at the
+approval.
 
-1. **Your name** (`boot`) — becomes `CC_OPERATOR_NAME` and the provenance
-   actor on your decisions. A headless run does not ask: the cockpit does, on
-   first run.
-2. **The demo approval** (`demo`) — the script feeds
-   `fixtures/emails/007-ownership-change.eml`, steps the dispatcher (a real
-   inference against your endpoint — commonly a few minutes), and then waits
-   while you open the cockpit at http://127.0.0.1:3080, read the proposal in
-   the **Decisions Inbox**, and decide. That gate is the product; the script
-   never decides for you. It then verifies the decision and the execution
-   landed on the event log — and fails honestly on a `work.failed` event
-   rather than reporting a failed execution as a rejection. The fixture is
-   knowledge-only on purpose: triage proposes a graph episode, which the
-   Executor performs **for real** against your local graph, so the demo needs
-   no Jira and proves the whole spine.
+The demo feeds `fixtures/emails/007-ownership-change.eml`, steps the
+dispatcher (a real inference against your endpoint — commonly a few minutes),
+and waits for your decision in the cockpit's **Decisions Inbox**. That gate is
+the product; the script never decides for you. It then verifies the decision
+and the execution landed on the event log — and fails honestly on a
+`work.failed` event rather than reporting a failed execution as a rejection.
+The fixture is knowledge-only on purpose: triage proposes a graph episode,
+which the Executor performs **for real** against your local graph, so the demo
+needs no Jira and proves the whole spine.
 
 The API runs detached afterward (log: `$CC_STATE_DIR/uvicorn.log`), and so
 does the **cockpit server** — `web/server-dist`, the same Node process the k3s
@@ -424,17 +424,17 @@ its environment — and leaves the checkout clean. (The k3s profile still writes
 `web/.env`; there the file is `cc-nerve`'s.) The SPA
 uvicorn serves on 8080 is NOT the cockpit: every panel is a route or a
 WebSocket proxy the Node server owns, so 8080 alone sits at CONNECTING with
-404s (2026-09-17 Windows run). `./setup.sh stop` stops both and PROVES the
-ports are free — under Git Bash `kill` reports success against a native
+404s (2026-09-17 Windows run). `./setup.sh stop` stops them and the sandbox
+runner, and PROVES the ports are free — under Git Bash `kill` reports success against a native
 Windows process it never signalled. **Deliberately still OFF after the demo, each one an
 explicit flip when you decide:** the mail feed and dispatch drain
 (`CC_FEED_ENABLED` / `CC_DISPATCH_ENABLED` + their schedules in the cockpit's
-Crons tab), every recurring schedule (seeded disabled), and the sandbox runner
-(below). The executor is NOT one of them — it runs `live` from the first
+Crons tab) and every recurring schedule (seeded disabled). The executor is NOT one of them — it runs `live` from the first
 approval (2026-09-18); the gate is the safety, and `dry_run` no-ops every
 capability including the internal ones. Onboarding waits for you in the
-cockpit: a first-run prompt bar asks your name, and the EA's team tour asks
-the rest and records it in the knowledge graph through the normal gate. Two demo traps worth knowing: re-POSTing the same email is a silent
+cockpit: a first-run prompt bar asks your name, and the EA's team tour (the
+seeded `team-tour` schedule — **Run now** in the Crons tab) asks the rest and
+records it in the knowledge graph through the normal gate. Two demo traps worth knowing: re-POSTing the same email is a silent
 no-op (repeat Message-IDs are terminal by design — recover a stuck item with
 `POST /api/work/<id>/requeue`), and the model pickers need the API restarted
 at least once after an update that adds routes.
@@ -515,11 +515,11 @@ bare 404.
 
 ### What this profile does NOT install
 
-`./setup.sh verify` ends by printing the capability manifest; the one
+The `verify` phase ends by printing the capability manifest; the one
 deliberate omission is the **vlogs log console**. Fluent Bit's container input
 tails CRI-format `/var/log/containers/*.log`, which podman does not produce, so
 the collector would need a redesign rather than a port. Use `podman compose -f
-deploy/single/compose.yaml logs <service>` and `./setup.sh diagnose` instead.
+deploy/single/compose.yaml logs <service>` and `./setup.sh report` instead.
 
 **When a `--proxy` probe fails, re-run it direct** (`./discover-llm.sh chat
 <upstream-model-id>`): a bad upstream URL/key and a broken
@@ -534,6 +534,9 @@ real completion and checks that the embedding endpoint actually returns
 `CC_EMBED_DIM` values.
 
 ## Updating an existing deployment
+
+The procedure is [`CHECKLIST.md`](CHECKLIST.md#updating)'s **Updating**
+section; this is the reference for the machinery behind it.
 
 `update.sh` is the update driver, built for the air-gapped case where the only
 transport in is a **source zip downloaded from the public repo** (Code →
@@ -560,8 +563,8 @@ cd deploy/single
 ```
 
 That inits the repo on first use, imports the zip, shows the version gate +
-plan, pauses for your explicit yes, and applies — offering to stop a
-`./setup.sh boot`-started API first.
+plan, pauses for your explicit yes, and applies — offering to stop an API
+that `./setup.sh` started first.
 
 **The cockpit path (2026-09-03)** drives the same machinery without a
 terminal: Settings › Updates has **Update from file** — pick the downloaded
@@ -585,7 +588,7 @@ granular or agent-conducted flows:
 ./update.sh plan            # dry-run: diff, flags, can it fast-forward — mutates nothing
 ./update.sh apply           # acquire the new release from a staged copy (nothing moves
                             # if it cannot), then merge -> schema -> ./setup.sh fetch
-                            # -> llm -> stack -> app -> n8n -> verify, stopping at any pause
+                            # -> llm -> stack (+ n8n workflows) -> app -> verify, stopping at any pause
 ./update.sh rollback        # reset to the pre-update tag and re-deploy that tree
 ```
 
@@ -609,12 +612,16 @@ columns — a failed migration stops the update with the old code still
 running), then `./setup.sh fetch` (the real refs into `.env`, the local images
 under their live tags, from the warm cache), `./setup.sh llm`, `./setup.sh
 stack` (so a changed `compose.yaml`, a new third-party ref or a rebuilt local
-image is actually DEPLOYED — the containers that need it are recreated, named),
+image is actually DEPLOYED — the containers that need it are recreated, named —
+and, with `CC_ENABLE_N8N=1`, the n8n façade workflows applied),
 `./setup.sh app` (deps from `requirements.lock`, honoring `CC_AIRGAP`; cockpit
-rebuild), the n8n workflows, then `./setup.sh verify`. It always ends with a `USERACTION restart` (exit 3): a
-merged change is not live until you restart your uvicorn API (and the sandbox
-runner, if you run one). The one exception is the cockpit's detached runner
-(`CC_UPDATE_DRIVEN=1`), which owns the restart itself.
+rebuild), then `./setup.sh verify`. It always ends with a `USERACTION restart` (exit 3): a
+merged change is not live until the API, the cockpit and the sandbox runner
+start again on it — run `./setup.sh`, which resumes at `boot`, then confirm with
+`./setup.sh status`. The one exception is the cockpit's detached runner
+(`CC_UPDATE_DRIVEN=1`), which owns the restart itself. A deployment installed
+before the ledger (v2.55.0) stops after the merge with `USERACTION
+ledger-adopt`: run `./setup.sh` once, which adopts it.
 
 Rules that will save you:
 

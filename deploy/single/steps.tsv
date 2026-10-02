@@ -43,17 +43,23 @@
 #                CRLF-insensitive, no git), for a step whose input is release
 #                content rather than an answer. boot/skills-imported reads
 #                `@skills`, so a release that adds a bundled skill re-runs it
-#                (2026-10-01 record, D7)
+#                (2026-10-01 record, D7); stack/n8n-workflows reads
+#                `@deploy/n8n`, so a release that changes a façade workflow (or
+#                the script that applies them) applies them again (v2.58.0)
 #     writes     every .env key and state artifact this step is the ONLY writer
 #                of. A key written outside this column is the v2.52.0 "eight
 #                blank Systems links nobody types" bug, and v2.48.0's missing
 #                CC_LLM_BASE_URL before it, so the rule is enforced:
 #                tests/test_single_steps_schema.py fails the suite when a
-#                set_kv / set_kv_if_unset target in deploy/single/*.sh is absent
-#                here, or appears twice. `CC_IMG_*` is the one family (the
-#                resolver writes one line per image); lower-case entries are
-#                state-dir or build artifacts, not answers
-#     probe      a bash function in setup.sh: exit 0 = the step's effect is
+#                set_kv / set_kv_if_unset target in deploy/single/*.sh or
+#                deploy/single/phases/*.sh is absent here, or appears twice.
+#                `CC_IMG_*` is the one family (the resolver writes one line per
+#                image); lower-case entries are state-dir or build artifacts,
+#                not answers
+#     probe      a bash function — in deploy/single/phases/<phase>.sh beside
+#                the phase that owns the row, or in setup.sh when more than
+#                one phase (or the driver) reads it (v2.58.0, D11; pinned by
+#                tests/test_single_phase_files.py): exit 0 = the step's effect is
 #                PRESENT NOW. Three rules it lives under — it may not mutate
 #                anything (the same walker that keeps `check` dry is run over
 #                every probe), it may not spend a token or a minute (the ledger's
@@ -68,10 +74,11 @@
 #
 # phase	step	kind	requires	reads	writes	probe	doc
 check	tree-pristine	run	-	-	-	p_tree_pristine	Prove this deployment still matches the release it claims to be, before anything is changed.
+check	ca-bundle	human	-	CC_CA_BUNDLE	-	p_ca_bundle	YOUR MOVE: when CC_CA_BUNDLE is set, place that PEM bundle at the path it names on this host — a readable, non-empty file; nothing in setup can fetch it for you, and every TLS call after this point trusts it instead of the system store.
 check	linger	run	-	-	-	p_linger	Have systemd keep this user's services and containers running with nobody logged in (loginctl enable-linger), wherever logind exists.
 machine	machine	run	check/tree-pristine	-	-	p_machine	Reach the podman machine over ssh (a no-op on bare Linux, where there is none).
 machine	machine-native-ca	run	machine/machine	-	machine.import-native-ca	p_machine_native_ca	Have the machine import this host's trust store at every start.
-machine	machine-ca	run	machine/machine	CC_CA_BUNDLE	-	p_machine_ca	Install CC_CA_BUNDLE as a trust anchor inside the machine and rebuild its trust store.
+machine	machine-ca	run	machine/machine,check/ca-bundle	CC_CA_BUNDLE	-	p_machine_ca	Install CC_CA_BUNDLE as a trust anchor inside the machine and rebuild its trust store.
 machine	machine-ca-probe	run	machine/machine-ca	CC_CA_BUNDLE,CC_REGISTRY_DOCKERIO	-	p_machine_ca_probe	Prove from INSIDE the machine that a registry's certificate now verifies.
 machine	machine-registries	run	machine/machine	CC_REGISTRY_DOCKERIO,CC_REGISTRY_GHCR,CC_REGISTRY_MCR,CC_TLS_INSECURE	-	p_machine_registries	Write the machine's registries drop-in from the mirror seams.
 machine	machine-proxy	run	machine/machine	CC_PROXY	-	p_machine_proxy	Write the machine's containers.conf proxy drop-in from CC_PROXY.
@@ -111,6 +118,8 @@ stack	image-crawler	run	fetch/image-crawler	CC_ENABLE_CRAWLER	-	p_image_crawler	
 stack	embed-dimension	run	llm/embed-dimension	CC_EMBED_DIM	-	p_embed_dim	Refuse to create the graph before the embedding dimension has been measured.
 stack	up-stack	run	stack/embed-dimension,fetch/image-graphiti	CC_PG_PORT,CC_GRAPHITI_PORT,CC_NEO4J_BOLT_PORT,CC_NEO4J_HTTP_PORT,CC_N8N_PORT,CC_CRAWLER_PORT,CC_ENABLE_N8N,CC_ENABLE_CRAWLER,CC_ENABLE_SPEECH,CC_EMBED_DIM,CC_NEO4J_PASSWORD	-	p_up_stack	Bring the whole stack up, wait on compose.yaml's healthchecks, and recreate any container that is not on the image its ref resolves to now (a rebuilt local image, a re-pulled tag).
 stack	restart-on-boot	run	stack/up-stack	-	-	p_restart_on_boot	Make the containers come back after a host reboot (podman-restart inside the machine).
+stack	n8n-credential	human	stack/up-stack	CC_ENABLE_N8N,CC_N8N_PORT,CC_CALENDAR_FACADE_TOKEN,@deploy/n8n/workflows	-	p_n8n_credential	YOUR MOVE: when CC_ENABLE_N8N=1, create in the n8n UI at http://127.0.0.1:<CC_N8N_PORT>/ every credential the façade workflows about to be imported reference by name, and complete each Google sign-in — "Gmail account" (Gmail OAuth2 API) always, and "Google Calendar account" (Google Calendar OAuth2 API) when CC_CALENDAR_FACADE_TOKEN is set; the run names exactly the ones still missing.
+stack	n8n-workflows	run	stack/n8n-credential	CC_ENABLE_N8N,CC_N8N_PORT,CC_POD_PREFIX,N8N_DB_USER,N8N_DB_NAME,CC_EMAIL_FACADE_TOKEN,CC_CALENDAR_FACADE_TOKEN,@deploy/n8n	-	p_n8n_workflows	Apply the n8n façade workflows this release ships (deploy/n8n/workflows/) — import, activate, restart n8n, wait for the email webhook — when CC_ENABLE_N8N=1; the calendar pair only when CC_CALENDAR_FACADE_TOKEN is set, and a credential the import cannot find by name stops the run for you.
 app	venv	run	fetch/venv	CC_PYTHON_MIRROR,CC_AIRGAP	-	p_venv	Assert the virtual environment the app runs in.
 app	install	run	app/venv	CC_AIRGAP,CC_PYPI_INDEX_URL	-	p_install	Install central_command editable into that environment.
 app	app-env	run	-	-	-	p_env_file	Assert the one answer file and its mode (0600 where the filesystem honours it).

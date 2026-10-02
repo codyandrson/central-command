@@ -21,8 +21,9 @@ podman, no network, nothing started:
   the scripts to the same rule);
 * **every `probe` names a function that exists and that mutates nothing.** The
   construct list is `tests/test_single_check_is_dry.py`'s, imported rather than
-  copied; the function extractor here is a STRICTER version of that file's (it
-  understands a one-line `f() { ...; }`, which the other one swallows), so a
+  copied; the functions are the whole installer's — setup.sh and the phase
+  files it sources — through the one strict extractor in
+  `tests/installer_source.py` (it understands a one-line `f() { ...; }`), so a
   probe is held to the same standard `check` is;
 * **`requires` is acyclic and never points forward** — an earlier phase, or an
   earlier row of this one;
@@ -30,7 +31,7 @@ podman, no network, nothing started:
   `tests/test_setup_phase_docs.py` pins the prose copies with.
 
 To see the writes rule fail: add a `set_kv_if_unset "$ENV_FILE" CC_SOMETHING`
-to the app phase and leave `steps.tsv` alone.
+to the app phase (deploy/single/phases/app.sh) and leave `steps.tsv` alone.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ import re
 from pathlib import Path
 
 from tests.test_setup_phase_docs import canonical_phases
+from tests.installer_source import installer_functions, single_scripts
 from tests.test_single_check_is_dry import FORBIDDEN, _code
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -198,7 +200,9 @@ SET_KV = re.compile(
 
 def _set_kv_targets() -> set[str]:
     out: set[str] = set()
-    for script in sorted(SINGLE.glob("*.sh")):
+    # deploy/single/*.sh AND deploy/single/phases/*.sh: the derived-key writes
+    # (set_kv_if_unset in phase_app) moved into phases/app.sh in v2.58.0.
+    for script in single_scripts():
         text = script.read_text(encoding="utf-8")
         # Comments mention these calls by name (and so does this profile's
         # prose); only code counts.
@@ -223,7 +227,7 @@ def test_every_env_key_the_profile_writes_is_in_exactly_one_rows_writes():
 
     missing = sorted(k for k in _set_kv_targets() if k not in written)
     assert not missing, (
-        "these keys are written by deploy/single/*.sh and declared by no row "
+        "these keys are written by deploy/single/*.sh (or phases/*.sh) and declared by no row "
         "in steps.tsv — which is the v2.52.0 'eight blank Systems links nobody "
         f"types' shape of defect: {missing}"
     )
@@ -235,36 +239,12 @@ def test_every_env_key_the_profile_writes_is_in_exactly_one_rows_writes():
 
 
 # ── the probes ──────────────────────────────────────────────────────────────
-# A STRICTER extractor than test_single_check_is_dry's: that one only closes a
-# function on a line that is exactly `}`, so a one-line `f() { ...; }` swallows
-# everything after it into f's body and the functions it swallowed go missing
-# from the map. Every probe is multi-line for exactly that reason, but the
-# helpers they call (have_image, api_up, demo_decided) are one-liners, and a
-# probe's dryness has to cover what it calls.
-
-
-def _functions_strict(text: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines):
-        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{(.*)$", lines[i])
-        if not m:
-            i += 1
-            continue
-        name, rest = m.group(1), m.group(2)
-        if rest.rstrip().endswith("}"):
-            out[name] = rest.rstrip()[:-1]
-            i += 1
-            continue
-        body: list[str] = []
-        i += 1
-        while i < len(lines) and lines[i] != "}":
-            body.append(lines[i])
-            i += 1
-        out[name] = "\n".join(body)
-        i += 1
-    return out
+# The installer's functions, from tests/installer_source.py: setup.sh AND the
+# phase files it sources (v2.58.0 — a phase's own probes live in
+# deploy/single/phases/<phase>.sh). Its STRICT extractor was this file's: a
+# one-line `f() { ...; }` closes on its own line, so the helpers the probes call
+# (have_image, api_up, demo_decided — one-liners) stay in the map, and a
+# probe's dryness covers what it calls.
 
 
 def _reachable_from(funcs: dict[str, str], roots: list[str]) -> set[str]:
@@ -281,10 +261,10 @@ def _reachable_from(funcs: dict[str, str], roots: list[str]) -> set[str]:
     return seen
 
 
-def test_every_probe_exists_in_setup_sh():
-    funcs = _functions_strict(SETUP.read_text(encoding="utf-8"))
+def test_every_probe_exists_in_the_installer():
+    funcs = installer_functions()
     missing = sorted({row["probe"] for row in _rows() if row["probe"] not in funcs})
-    assert not missing, f"steps.tsv names probes setup.sh does not define: {missing}"
+    assert not missing, f"steps.tsv names probes the installer (setup.sh + phases/*.sh) does not define: {missing}"
 
 
 def test_no_probe_can_mutate_anything():
@@ -293,7 +273,7 @@ def test_no_probe_can_mutate_anything():
     decide whether the phase can be skipped. A probe that pulled, built,
     started or installed something would make every run of `./setup.sh` a
     deployment."""
-    funcs = _functions_strict(SETUP.read_text(encoding="utf-8"))
+    funcs = installer_functions()
     probes = sorted({row["probe"] for row in _rows()})
     offenders = []
     for probe in probes:
@@ -317,7 +297,7 @@ def test_a_flag_gated_step_probes_zero_when_the_flag_is_off():
     claim: `stack/up-stack` reads three of them to pick compose PROFILES and
     comes up either way.)
     """
-    funcs = _functions_strict(SETUP.read_text(encoding="utf-8"))
+    funcs = installer_functions()
     bad = []
     for row in _rows():
         flags = set(re.findall(r"when (CC_ENABLE_[A-Z0-9_]+)=", row["doc"]))

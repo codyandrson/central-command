@@ -382,11 +382,11 @@ def test_need_image_compares_the_label_and_never_builds(tree: Tree):
     """stack's assertion keeps its meaning — never a build mid-deploy — and
     agrees with the stack rows' probe, which is the same p_image_* function."""
     r = tree.call("need_image", "image-sandbox", SANDBOX, tree.script)
-    assert r.returncode == 1 and "is not in local storage — run: ./setup.sh fetch" in r.stdout, r.stdout
+    assert r.returncode == 1 and "is not in local storage — run: ./setup.sh (it resumes at fetch)" in r.stdout, r.stdout
     tree.seed(SANDBOX, "f" * 64)
     r = tree.call("need_image", "image-sandbox", SANDBOX, tree.script)
     assert r.returncode == 1, r.stdout
-    assert "was not built from this tree's build inputs" in r.stdout and "./setup.sh fetch" in r.stdout
+    assert "was not built from this tree's build inputs" in r.stdout and "./setup.sh, which resumes at fetch" in r.stdout
     assert tree.builds() == [], "need_image built an image"
     tree.seed(SANDBOX, tree.inputs_hash())
     r = tree.call("need_image", "image-sandbox", SANDBOX, tree.script)

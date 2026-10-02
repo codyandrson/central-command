@@ -25,6 +25,8 @@ import sys
 
 import pytest
 
+from tests.installer_source import installer_source
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LIB = ROOT / "deploy" / "single" / "machine-lib.sh"
 ENV_LIB = ROOT / "deploy" / "env-lib.sh"
@@ -286,7 +288,7 @@ def test_the_machine_figure_is_read_in_mib_from_inspect():
     example shows 6144 for a 6 GiB machine; podman-machine-set(1) documents
     `--memory` as MB). If setup.sh ever divides it as bytes, every machine looks
     like 0 GiB and the WARN becomes permanent."""
-    src = SETUP.read_text(encoding="utf-8")
+    src = installer_source()
     assert "podman machine inspect --format '{{.Resources.Memory}}'" in src
     assert "cc_memory_verdict" in src, "setup.sh must delegate the decision to machine-lib.sh"
 
@@ -294,7 +296,8 @@ def test_the_machine_figure_is_read_in_mib_from_inspect():
 # ── two Windows-only seams, guarded by a source walk ────────────────────────
 # Both were found on the 2026-09-24 Windows testbed run, and neither can be
 # exercised on Linux: one needs `podman machine`, the other needs MSYS. The
-# guard is a walk over `setup.sh` — narrow, and pinned to the exact reason.
+# guard is a walk over the installer's source (setup.sh and, since v2.58.0, the
+# phase files it sources) — narrow, and pinned to the exact reason.
 
 SETUP = ROOT / "deploy" / "single" / "setup.sh"
 
@@ -308,7 +311,7 @@ def test_the_machine_name_strips_podmans_default_marker():
     Measured on podman 5.8.3, where it FAILed check's whole machine section —
     and the default machine is the normal case on Windows and macOS.
     """
-    src = SETUP.read_text(encoding="utf-8")
+    src = installer_source()
     body = src[src.index("machine_name() {"):]
     body = body[: body.index("\n}\n")]
     assert "podman machine list --format '{{.Name}}'" in body
@@ -328,7 +331,7 @@ def test_compose_is_invoked_with_msys_path_conversion_disabled():
     the same rewrite would have put a Windows path into SSL_CERT_FILE inside a
     Linux container). `MSYS2_ENV_CONV_EXCL` is the documented opt-out.
     """
-    src = SETUP.read_text(encoding="utf-8")
+    src = installer_source()
     assert "MSYS2_ENV_CONV_EXCL" in src, (
         "every compose invocation must exclude the container-side POSIX paths "
         "from MSYS path conversion"

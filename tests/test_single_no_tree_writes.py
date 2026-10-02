@@ -26,8 +26,12 @@ import re
 
 import pytest
 
+from tests.installer_source import installer_source, single_scripts
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SCRIPTS = sorted((ROOT / "deploy" / "single").glob("*.sh")) + [
+# deploy/single/*.sh AND the phase files setup.sh sources (v2.58.0): a write
+# moved into deploy/single/phases/ is still a write by the installer.
+SCRIPTS = single_scripts() + [
     ROOT / "deploy" / "discover.sh",
     ROOT / "deploy" / "env-lib.sh",
 ]
@@ -79,7 +83,7 @@ def _code_lines(path: pathlib.Path) -> list[tuple[int, str]]:
     return out
 
 
-@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.relative_to(ROOT).as_posix())
 def test_nothing_is_written_inside_the_checkout(script: pathlib.Path):
     offenders = []
     for n, line in _code_lines(script):
@@ -98,7 +102,7 @@ def test_nothing_is_written_inside_the_checkout(script: pathlib.Path):
 
 def test_the_state_dir_is_where_the_generated_files_went():
     """Each retired litter path is addressed through the state dir now."""
-    setup = (ROOT / "deploy" / "single" / "setup.sh").read_text(encoding="utf-8")
+    setup = installer_source()
     for name in ("setup-log.txt", "setup-diagnostics.txt", "uvicorn.log",
                  "uvicorn.pid", "cockpit.log", "cockpit.pid", "cc-boot.cmd",
                  "boot-at-logon.log"):

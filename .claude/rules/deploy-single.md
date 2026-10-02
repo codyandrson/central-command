@@ -18,7 +18,10 @@ when a matching file is read.
   `setup.sh` is a deterministic driver (configure, then check / machine / fetch /
   llm / stack / app / verify / test / boot / demo, PASS/WARN/FAIL/USERACTION,
   exit 0/1/2/3, `diagnose` support bundle — `validate` and `preflight` stay
-  callable on their own and `check` composes them); the
+  callable on their own and `check` composes them); the phases and
+  their steps are declared ONCE, in `steps.tsv`, and the operator's
+  `CHECKLIST.md` is rendered from it by `scripts/render_checklist.py` — edit
+  the manifest, never a prose copy; the
   /setup skill's job is conducting the loop, elicitation and diagnosis only. `compose.yaml` is the
   whole deployment (readiness is healthchecks + depends_on, optionals are
   profiles); `images.txt` holds a constraint, a locked tag and a locked digest
@@ -382,8 +385,8 @@ when a matching file is read.
   building under the live tag would hand the running deployment's next
   sandbox session the new release's image before anything was merged. A stop there is exit 1
   or 3 with the tree, branch, database and containers untouched. After the
-  fast-forward the order is schema → fetch → llm → stack → app → n8n →
-  verify, each a ledgered phase, and an exit 3 from any of them STOPS there (the old code
+  fast-forward the order is schema → fetch → llm → stack (n8n's façade
+  workflows are its `n8n-workflows` row) → app → verify, each a ledgered phase, and an exit 3 from any of them STOPS there (the old code
   `return 0`ed past `app` and `verify`). `acquire` + `CC_STAGED_FOR` + the
   output protocol are an INTERFACE BETWEEN RELEASES — the installed
   `update.sh` runs the next release's `setup.sh` — so they do not change
@@ -437,3 +440,41 @@ when a matching file is read.
   image whose registry failed once — or whose component was switched off and
   later back on — came back as a "pin" stuck at the old tag with only a WARN.
   A failed or skipped image keeps its previous row.
+- **One file per phase, and the tests read the installer through ONE helper**
+  (v2.58.0, design record D11 — Sentry's installer). `setup.sh` is the
+  orchestrator: the protocol, `load_env`, `configure`/`status`/`stop`/
+  `report`, the ledger, the plan, the run lock, `acquire`, `main`, and the
+  helpers and probes more than one phase uses. Each manifest phase has
+  exactly one `deploy/single/phases/<phase>.sh` holding `phase_<name>`, the
+  helpers only it uses and its rows' probes — sourced, never executed, safe
+  to source twice, no top-level side effects. `tests/installer_source.py` is
+  the one definition of "the installer's source" (`setup.sh` plus the phase
+  files): a source-reading test that globs `setup.sh` alone has silently
+  stopped looking at most of the code. `tests/test_single_phase_files.py`
+  pins the layout — the files equal the manifest's phases, no function
+  defined twice, sourced in manifest order before `main`.
+- **The operator's procedure is GENERATED, and documents link to it**
+  (v2.58.0, D8). `deploy/single/CHECKLIST.md` is rendered from `steps.tsv`
+  (and the prose in `scripts/checklist_template.md`) by
+  `scripts/render_checklist.py`; `tests/test_single_checklist.py` fails when
+  the committed file differs from a fresh render, and requires a WHERE for
+  every `human`/`gate` row. The READMEs, `AIRGAP.md`, `ARCHITECTURE.md` and
+  the `/setup` skill link to it and carry no phase list of their own
+  (`tests/test_setup_phase_docs.py`). Change the process by changing the
+  manifest and re-rendering — never by editing a prose copy.
+- **No operator-facing line names a phase to run** (v2.58.0, D3). The
+  contract is one command, and `./setup.sh <phase>` is a developer form that
+  is refused out of order — so a FAIL that says `run: ./setup.sh app` sends
+  an agent off the contract and an operator into a refusal. Every message
+  says `./setup.sh` ("it resumes at <phase>" where that helps) and `report`,
+  never `diagnose`. `tests/test_single_no_phase_hints.py` walks the
+  installer's messages and fails on a new one.
+- **A `human` row is a gate that says WHERE, and it asks for everything the
+  next step will demand** (v2.58.0, D1). `check/ca-bundle` (the PEM file
+  `CC_CA_BUNDLE` names must be on disk — `check` stops there rather than
+  failing every later section against a missing trust file) and
+  `stack/n8n-credential` (the n8n credentials the façade workflows bind by
+  name), each exit 3 with a USERACTION naming the place. `stack/n8n-workflows`
+  then applies the façade workflows through `deploy/n8n/apply-workflows.sh`
+  — a fresh install used to have none until its first update, because only
+  `update.sh` ran that script.

@@ -6,9 +6,13 @@
 
 ## Getting started
 
-The path from zero to a running, onboarded system is four steps. The
-authoritative step-by-step reference for the deployment itself is
-[`deploy/single/README.md`](deploy/single/README.md); this section is the map.
+The install procedure is one generated checklist,
+[`deploy/single/CHECKLIST.md`](deploy/single/CHECKLIST.md): what the host must
+already have, every step in the order the installer runs it, and what to do
+when it stops. It is rendered from the installer's own manifest
+(`deploy/single/steps.tsv`), so it cannot drift from what actually runs. This
+section is the map; [`deploy/single/README.md`](deploy/single/README.md) is the
+reference for what the profile contains and why.
 
 ### 1. Get the code
 
@@ -20,20 +24,23 @@ cd central-command
 No git, or an air-gapped target? Download the source zip instead —
 **Code → Download ZIP** on the repo page (or
 `https://github.com/codyandrson/central-command/archive/refs/heads/master.zip`)
-— carry it across, and unzip it where the deployment will live. A
-zip-installed deployment updates cleanly later (see **Updating** below); for
-mirror/no-egress installs read [`deploy/AIRGAP.md`](deploy/AIRGAP.md) first.
+— carry it across, and unzip it where the deployment will live; the checklist's
+first one-time step (`./update.sh init`) gives the unzipped tree the baseline
+that proves it is the release it claims to be and that later updates build on.
+For mirror/no-egress installs read [`deploy/AIRGAP.md`](deploy/AIRGAP.md) first.
 
 ### 2. Prerequisites
 
-- **[Claude Code](https://claude.com/claude-code)** — it conducts the install;
-  there is no by-hand path. Onboarding is not its job any more (2026-09-18):
-  that happens in the cockpit, after the install ends.
-- **podman ≥ 4.9**, plus `git`, `curl`, `openssl`, `envsubst` (gettext), and
-  `uv`. Node ≥ 22 is optional (without it the cockpit UI is not built; the
-  API still runs). `./setup.sh preflight` checks every one by name.
+The checklist's **Before you start** is the list — podman with a compose
+provider, `curl`/`openssl`/`git`/`uv`, CPython 3.12 (or a mirror for it),
+Node ≥ 22, Git Bash on Windows — and the installer's `check` phase verifies
+each one by name. Beyond the host:
+
+- **[Claude Code](https://claude.com/claude-code)** — it conducts the install
+  through the `/setup` skill. Onboarding is not its job (2026-09-18): that
+  happens in the cockpit, after the install ends.
 - **An OpenAI-compatible LLM endpoint**: base URL, API key, a chat model id,
-  and an embedding model id. ~3 GB RAM for the stack.
+  and an embedding model id.
 
 ### 3. Install
 
@@ -41,20 +48,16 @@ mirror/no-egress installs read [`deploy/AIRGAP.md`](deploy/AIRGAP.md) first.
 claude        # from the repo root, then type:  /setup
 ```
 
-`/setup` conducts the loop *configure → check → triage (edit `.env`) → check →
-… → all*: `./setup.sh configure` ASKS for every answer the repo-root `.env`
-does not carry yet — one answer file for the app and the deployment (v2.42.0),
-one question schema (v2.45.0) — and then the
-deterministic driver `./setup.sh` runs a dry pre-deployment CHECK and nine
-idempotent phases
-(`check → machine → fetch → llm → stack → app → verify → test
-→ boot → demo`), recorded in a ledger as each completes, every check one
-`PASS|WARN|FAIL|USERACTION` line (exit 0/1/2/3 — 3 means the run paused
-for your move). A failure names the `.env` key to fix; running `./setup.sh`
-again resumes from the ledger exactly where it stopped — `./setup.sh status`
-prints the ledger without changing anything, and `./setup.sh report` writes
-a redacted bundle to paste back to Claude. Nothing is guessed: the agent
-reads the results and diagnoses — the script does all the mutating.
+`/setup` conducts one loop: the operator answers the questions once
+(`./setup.sh configure`, which creates the one answer file, the repo-root
+`.env`), then `./setup.sh` runs, records every step in a ledger as it
+completes, and prints one `PASS|WARN|FAIL|USERACTION` line per check (exit
+0/1/2/3 — 3 means the run paused for your move). A failure names the `.env`
+key to fix, and running `./setup.sh` again resumes exactly where it stopped.
+`./setup.sh status` prints the ledger without changing anything, and
+`./setup.sh report` writes a redacted file for a development session when the
+cause is a defect rather than a setting. The agent may change `.env` and run
+those three commands; the script does all the mutating.
 
 ### 4. Onboarding
 
@@ -86,24 +89,16 @@ cd deploy/single
 ```
 
 That imports the zip, shows the version gate + plan, pauses for your explicit
-yes, and applies. Under the hood `update.sh` turns the deployment into a
-two-branch git repo (`upstream` = pristine imports, `local` = yours) so each
-update is compare-then-merge — **fast-forward only** (v2.55.0): the tree must
-already be pristine (no tracked file may differ from the installed release),
-or the run refuses and names what differs, with a tagged rollback point
-either way. The named subcommands remain for granular or agent-conducted
-flows:
-
-```bash
-./update.sh init            # one-time, on an existing deployment
-./update.sh import <zip>    # commit the newly downloaded zip
-./update.sh plan            # dry-run: what changes, what will run, conflicts
-./update.sh apply           # acquire (staged) -> merge -> schema -> fetch -> llm -> stack -> app -> verify
-./update.sh rollback        # if needed: back to the pre-update tag
-```
-
-Full semantics — conflict handling, what rollback does and does not undo —
-in [`deploy/single/README.md`](deploy/single/README.md#updating-an-existing-deployment).
+yes, and applies: it acquires the new release's dependencies from a staged copy
+BEFORE anything moves, then fast-forwards the deployment onto the release
+(v2.55.0: the tree must already be pristine — no tracked file may differ from
+the installed release — or the run refuses and names what differs), with a
+tagged rollback point either way. The checklist's **Updating** section is the
+procedure, including the one-time `./setup.sh` that adopts a deployment
+installed before the ledger existed (v2.55.0); the named subcommands
+(`init`, `import`, `plan`, `apply`, `rollback`) and what rollback does and does
+not undo are in
+[`deploy/single/README.md`](deploy/single/README.md#updating-an-existing-deployment).
 
 **Nothing changes the world without passing an approval gate.** Single-operator,
 self-hosted on a Linux homelab (podman). The primary risk model is *error, not
@@ -153,7 +148,8 @@ approval and survive a restart.
 in Claude Code from the repo root — Claude Code is a hard prerequisite of
 setup — and it takes you from zero to a verified system and a watched demo,
 then hands off to the cockpit for onboarding
-(`.claude/skills/setup/`, deployment profile `deploy/single/`).
+(`.claude/skills/setup/`, deployment profile `deploy/single/`, procedure
+[`deploy/single/CHECKLIST.md`](deploy/single/CHECKLIST.md)).
 
 Dev checkout:
 

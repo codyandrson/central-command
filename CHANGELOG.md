@@ -4,6 +4,58 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-02 — v2.58.0: one definition of the install, and every document follows it
+
+P4 of `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+(D8, the remaining `human` rows of D1, D11's driver split). No change to what
+a completed install does; this release is about the process having one
+definition. **The work site still holds at its current release until P5 —
+the acceptance run on a rebuilt Windows laptop — tags.**
+
+- **`deploy/single/CHECKLIST.md` is THE install procedure, and it is
+  generated.** `scripts/render_checklist.py` renders it from `steps.tsv`:
+  what the host must have before you start (including `./update.sh init` for
+  a zip download, and accepting the workspace-trust dialog when a Claude Code
+  session conducts the install), every step in order, the rows that are the
+  operator's in bold with WHERE to act, what a stop means and the one
+  recovery, what happens after a reboot, and how an update goes. A test fails
+  when the committed file differs from a fresh render.
+- **The documents link to it instead of restating it.** `README.md`,
+  `deploy/single/README.md`, `deploy/AIRGAP.md` and `docs/ARCHITECTURE.md`
+  no longer carry a phase list of their own; the pin that used to REQUIRE
+  four copies of the list now requires there be none. Stale statements the
+  copies had accumulated went with them (that `fetch` ends in exit 3, that
+  the operator starts the sandbox runner by hand, that `stop` stops two
+  processes).
+- **The `/setup` skill is three verbs.** On the single-node profile an agent
+  may change `.env` and run `./setup.sh`, `./setup.sh status` and
+  `./setup.sh report`; everything else is a finding. The skill no longer
+  hand-conducts phases, and it leaves `configure`, `update.sh` and `stop` to
+  the operator.
+- **No message names a phase to run.** Some twenty FAIL and USERACTION lines
+  still said `run: ./setup.sh app` or `./setup.sh diagnose`. They say
+  `./setup.sh` (and where it will resume) and `report`; a guard test keeps it
+  that way.
+- **The driver is one file per phase.** `setup.sh` (5,900 lines) is now an
+  orchestrator plus `deploy/single/phases/<phase>.sh` for each of the ten
+  manifest phases — a move with no behaviour change, verified line for line.
+  The tests that read the installer's source do so through one helper, and
+  each was proven against a planted violation after the move.
+- **Two more steps that are the operator's are on the list.** `check/ca-bundle`:
+  when `CC_CA_BUNDLE` is set, the file must be on disk — `check` stops there
+  (exit 3, naming the path) instead of failing every later section against a
+  missing trust file. `stack/n8n-credential`: with `CC_ENABLE_N8N=1`, the
+  credentials the façade workflows bind by name must exist in the n8n UI
+  before the run goes on.
+- **Fixed: a fresh install with n8n enabled had no façade workflows** until
+  its first update — only `update.sh` applied them. `stack/n8n-workflows`
+  applies them after the credential gate, and the updater's separate step is
+  gone (the post-merge order is schema → fetch → llm → stack → app → verify).
+- **Fixed: `./setup.sh` could not repair a venv that had `central_command`
+  but no `uvicorn`** — the `app` phase read as done and `boot` then failed.
+- `./setup.sh report` states its bound: the log section is the whole last
+  run, capped at that run, and says which line it starts at.
+
 ## 2026-10-02 — v2.57.0: everything the install starts it supervises, and an update acquires before it merges
 
 P3 of `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

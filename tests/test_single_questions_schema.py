@@ -39,6 +39,7 @@ import pytest
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
 from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+from tests.installer_source import installer_source  # noqa: E402
 BASH = _resolve_bash() or "bash"
 
 
@@ -200,7 +201,7 @@ def test_check_reports_a_blank_catalog_as_a_pass_not_a_useraction():
     """The `all` gate refuses to continue past a USERACTION, so a blank catalog
     reported as one would make the NORMAL install impossible to run in one
     command. It is a PASS naming the pause instead (v2.45.1)."""
-    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    setup = installer_source()
     body = setup[setup.index("check_llm() {"):]
     body = body[: body.index("\n}\n")]
     blank = body[: body.index("CC_LLM_UPSTREAM_API_KEY:-")]
@@ -257,7 +258,7 @@ def test_the_secret_rows_are_exactly_the_credentials():
 def test_check_and_configure_both_read_the_schema():
     """The whole point of a data schema is that neither command owns it. If one
     of these two stops reading `questions.tsv`, the other's list is a copy."""
-    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    setup = installer_source()
     assert "check_schema_answers" in setup and "cmd_configure" in setup
     body = setup[setup.index("check_schema_answers() {"):]
     body = body[: body.index("\n}\n")]
@@ -408,7 +409,7 @@ def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
 
 def test_configure_normalises_before_it_validates_or_stores():
     """The rewrite has to happen in q_ask, or an invalid spelling gets written."""
-    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    setup = installer_source()
     start = setup.index("q_ask() {")
     body = setup[start:setup.index("\ncmd_configure()", start)]
     assert "q_norm_path_answer" in body, (

@@ -38,6 +38,7 @@ import pytest
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
 from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+from tests.installer_source import installer_source, phase_files, single_scripts  # noqa: E402
 BASH = _resolve_bash() or "bash"
 
 
@@ -67,6 +68,9 @@ SCRIPTS = [
     SINGLE / "update-run.sh",
     SINGLE / "machine-lib.sh",
     SINGLE / "questions-lib.sh",
+    # The phase files setup.sh sources (v2.58.0): the code that moved there
+    # is held to every rule setup.sh was.
+    *phase_files(),
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
 COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base", "speech"}
@@ -363,6 +367,8 @@ RUNTIME_ONLY = {
     "CC_QUESTIONS_LIB_LOADED",                 # questions-lib.sh's own source guard
     "CC_LEDGER_LIB_LOADED",                    # ledger-lib.sh's own source guard
     "CC_SUPERVISE_LIB_LOADED",                 # supervise-lib.sh's own source guard
+    # ...and each phase file's (deploy/single/phases/<phase>.sh, v2.58.0).
+    *(f"CC_PHASE_{p.stem.upper()}_LOADED" for p in phase_files()),
     # The DEVELOPER bypass for the ledger's order (2026-10-01 design record,
     # D3): it runs a phase ahead of its prerequisites, it is documented only in
     # .claude/rules/deploy-single.md, and it is REFUSED when .env carries
@@ -409,7 +415,7 @@ def test_env_example_declares_every_key_the_deployment_interpolates():
     and the per-run overrides above.
     """
     declared = _declared()
-    sources = sorted(SINGLE.glob("*.sh")) + [
+    sources = single_scripts() + [
         COMPOSE, ROOT / "deploy" / "discover.sh", ROOT / "deploy" / "env-lib.sh",
     ]
     missing: dict[str, set[str]] = {}
@@ -460,7 +466,7 @@ def test_the_required_alias_list_is_one_function():
     """bash decides it; setup.sh and `check` both ask that one function."""
     lib = (ROOT / "deploy" / "env-lib.sh").read_text(encoding="utf-8")
     assert "cc_required_aliases()" in lib and "cc_alias_env_key()" in lib
-    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    setup = installer_source()
     for fn in ("cc_required_aliases", "cc_alias_env_key"):
         assert fn in setup, f"setup.sh must derive the keys through {fn}, never by hand"
     # ...and the KEY derivation exists in python too (register-models.py turns
@@ -485,7 +491,7 @@ def test_the_answer_file_is_one_file():
             )
     # ...and compose can no longer find an .env beside itself, so every
     # invocation must name one.
-    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    setup = installer_source()
     assert '--env-file "$ENV_FILE" -f "$HERE/compose.yaml"' in setup, (
         "the compose wrapper must pass --env-file: there is no .env beside compose.yaml"
     )
@@ -506,7 +512,7 @@ def test_no_kube_play_path_survives():
 
 
 def test_fetch_phase_runs_before_anything_deploys():
-    text = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    text = installer_source()
     # `machine` joined the order in v2.43.0, between preflight and fetch: the
     # podman machine has to trust the mirror BEFORE anything is pulled. In
     # v2.44.0 validate+preflight left the loop and became sections of the dry
@@ -914,7 +920,7 @@ def test_only_the_two_outbound_containers_get_the_trust_env():
 
 def test_the_machine_phase_is_in_the_order_and_the_docs():
     """`machine` runs between preflight and fetch, and takes --dry-run."""
-    setup = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    setup = installer_source()
     m = re.search(r"for p in ((?:\w+\s+)+\w+); do", setup)
     assert m, "the all-phases loop is gone"
     phases = m.group(1).split()
@@ -1046,7 +1052,7 @@ def _check_ca_bundle_harness(env_file: pathlib.Path) -> str:
     seam list are lifted out and run against the real env-lib helpers, the same
     way the resolver's manifest lookup is tested above.
     """
-    text = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    text = installer_source()
     start = text.index("PUBLIC_SOURCE_SEAMS=(")
     end = text.index("\ncheck_required_keys() {", start)
     body = text[start:end]
@@ -1122,7 +1128,7 @@ def _loopback_check_harness(env_file: pathlib.Path) -> str:
     setup.sh ends in `main "$@"`, so the check is lifted out by anchor and run
     stand-alone, the same technique as `_check_ca_bundle_harness` above.
     """
-    text = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    text = installer_source()
     start = text.index("# 127.0.0.1, never localhost")
     end = text.index("# schema.sql is bind-mounted", start)
     body = text[start:end]
@@ -1263,7 +1269,7 @@ def test_the_app_phase_derives_the_proxy_url_the_app_dials():
     phase from the port answer. A configure-born .env without it made every
     live model resolve raise LLMProviderNotConfigured (Windows testbed,
     2026-09-25: the demo feed was a 500)."""
-    src = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    src = installer_source()
     assert re.search(r'set_kv_if_unset "\$ENV_FILE" CC_LLM_BASE_URL "http://127\.0\.0\.1:\$\{CC_LITELLM_PORT\}"', src), (
         "the app phase must derive CC_LLM_BASE_URL from CC_LITELLM_PORT"
     )

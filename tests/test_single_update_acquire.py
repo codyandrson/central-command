@@ -34,6 +34,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import installer_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = [
@@ -454,6 +456,39 @@ def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_o
     assert any("/stage/tree/web" in l for l in stage_cmd), stage_cmd
 
 
+def test_with_n8n_the_facade_workflows_are_the_stack_phases_not_a_step_of_their_own(dep: Dep):
+    """v2.58.0: the post-merge order is schema → fetch → llm → stack → app →
+    verify even with CC_ENABLE_N8N=1. The n8n façade workflows used to be a
+    separate `step "n8n"` here, after app, that ran apply-workflows.sh itself —
+    the one step ./setup.sh did not, so a fresh install had no workflows until
+    its first update. They are the stack phase's `n8n-workflows` row now (its
+    harness is tests/test_single_n8n_workflows_row.py); update.sh only runs
+    the phase, which is stubbed here — so the script never runs at all."""
+    _set(dep.repo / ".env", {"CC_ENABLE_N8N": "1"})
+    dep.fill_ledger()
+    r = dep.update("apply", CC_UPDATE_DRIVEN="1")
+
+    assert r.returncode in (0, 2), r.stdout + r.stderr
+    assert dep.called() == ["staged-fetch", "schema", "fetch", "llm", "stack", "app", "verify"], \
+        dep.called()
+    assert not any(l.startswith(("PASS n8n:", "FAIL n8n:")) for l in r.stdout.splitlines()), r.stdout
+    podman = dep.log.read_text()
+    assert "import:workflow" not in podman and "container exists cc-n8n" not in podman, podman
+
+
+def test_the_adoption_pause_is_one_command_even_with_n8n(dep: Dep):
+    """The ledger-adopt USERACTION used to add "then stop the API and run
+    ./update.sh apply once more" for an n8n install, because ./setup.sh did not
+    apply the workflows. It does now, so the sentence names ONE command."""
+    _set(dep.repo / ".env", {"CC_ENABLE_N8N": "1"})
+    r = dep.update("apply", CC_UPDATE_DRIVEN="1")
+
+    assert r.returncode == 3, r.stdout + r.stderr
+    ua = [l for l in r.stdout.splitlines() if l.startswith("USERACTION ledger-adopt:")]
+    assert len(ua) == 1 and "./setup.sh once" in ua[0], r.stdout
+    assert "once more" not in ua[0] and "update.sh" not in ua[0], ua[0]
+
+
 GRAPHITI = "localhost/cc-graphiti:1.0.2-anthropic"
 ASIDE = GRAPHITI + "-staged"
 
@@ -527,7 +562,7 @@ def test_the_staged_checkout_is_sparse(dep: Dep, tmp_path: Path):
     seen = tmp_path / "seen.txt"
     text = setup.read_text().replace(
         'phase_fetch() { if (( STAGED ));',
-        f'phase_fetch() {{ (( STAGED )) && ls -A "$REPO_ROOT" "$REPO_ROOT/docs" > "{seen}" 2>&1; if (( STAGED ));')
+        f'phase_fetch() {{ (( STAGED )) && ls -A "$REPO_ROOT" "$REPO_ROOT/docs" "$HERE/phases" > "{seen}" 2>&1; if (( STAGED ));')
     setup.write_text(text)
     subprocess.run(["git", "-C", str(dep.repo), "commit", "-qam", "probe"], check=True)
     subprocess.run(["git", "-C", str(dep.repo), "branch", "-qf", "upstream", "local"], check=True)
@@ -542,6 +577,10 @@ def test_the_staged_checkout_is_sparse(dep: Dep, tmp_path: Path):
     listing = seen.read_text()
     assert "deploy" in listing and "central_command" in listing and "VERSION" in listing, listing
     assert "No such file" in listing, f"docs/ was checked out into the stage:\n{listing}"
+    # The phase files the staged setup.sh sources (v2.58.0) come along with
+    # deploy/ — the sparse list needs no entry of its own for them, and the
+    # staged run above could not have reached its fetch phase without them.
+    assert "fetch.sh" in listing and "check.sh" in listing, listing
 
 
 def test_a_pause_after_the_merge_stops_there_and_app_and_verify_do_not_run(dep: Dep):
@@ -792,7 +831,7 @@ exit 0
 
 def _lift(name: str) -> str:
     """One function's source, out of setup.sh (the compose-floor test's way)."""
-    src = (ROOT / "deploy" / "single" / "setup.sh").read_text(encoding="utf-8")
+    src = installer_source()
     start = src.index(f"\n{name}() {{") + 1
     end = src.index("\n}\n", start) + 3
     return src[start:end]

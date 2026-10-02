@@ -34,6 +34,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import installer_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 _DEBRIS = shutil.ignore_patterns(
@@ -243,7 +245,7 @@ def test_a_fresh_mint_is_scoped_to_exactly_the_required_aliases(tree: Path, spee
 def test_the_mint_body_is_built_from_the_one_list_not_typed():
     """The source keeps no second alias list: the mint's models come from
     cc_required_aliases (through spine_aliases_json)."""
-    src = (ROOT / "deploy" / "single" / "setup.sh").read_text(encoding="utf-8")
+    src = installer_source()
     assert '"cc-default", "cc-tts", "cc-stt"' not in src
     body = src.split("spine_aliases_json() {", 1)[1].split("\n}", 1)[0]
     assert "cc_required_aliases" in body

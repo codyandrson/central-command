@@ -24,7 +24,7 @@
 #       validator's business.
 #
 #   Functions:
-#     v_nonempty v_bool01 v_url v_host v_path_readable
+#     v_nonempty v_bool01 v_url v_host v_path v_path_readable
 #     v_path_dir_or_creatable v_port v_model_id
 #     v_atlassian_flavor                          the validators
 #     q_rows <file>                 the schema's rows, one per line, tabs kept
@@ -103,6 +103,23 @@ v_host() { # v_host <value>
   [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?(:[0-9]{1,5})?$ ]] && return 0
   printf 'not a hostname or host:port (got %s)\n' "$1"
   return 1
+}
+
+# A path the OPERATOR fills separately from answering it (v2.58.0): only the
+# ANSWER's shape is judged here — a path on this host, not a URL — and never
+# whether anything is there yet. That is a STEP of the install, with its own
+# row: CC_CA_BUNDLE's file is steps.tsv's `check/ca-bundle`, a `human` row
+# whose probe applies v_path_readable below, so `configure` records the path
+# before the file arrives and `check` stops for the operator (USERACTION,
+# exit 3) instead of failing the answer. Normalised (F33) like every v_path*:
+# `configure` rewrites the answer for any validator whose name starts so.
+v_path() { # v_path <value>
+  local p; p="$(q_norm_path_answer "$1")"
+  if [[ "$p" == *://* ]]; then
+    printf 'a path on this host, not a URL: %s\n' "$p"
+    return 1
+  fi
+  return 0
 }
 
 # NORMALISED FIRST (F33): on MSYS an answer may be `/c/Users/me/ca.pem`, which

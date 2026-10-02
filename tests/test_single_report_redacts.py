@@ -40,6 +40,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import installer_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 _DEBRIS = shutil.ignore_patterns(
@@ -202,6 +204,10 @@ def test_a_value_in_the_logs_is_redacted_in_process_and_the_report_is_written(tr
     # The header says how the file was made safe, and in which order.
     head = "\n".join(body.splitlines()[:4])
     assert "REDACTED IN PROCESS" in head and "second check" in head, head
+    # ...and states its own BOUND (D8): capped at the last run, naming that
+    # run's `run start:` line — its stamp and its command.
+    assert ("CAPPED AT THE LAST RUN" in body.splitlines()[3]
+            and '"2026-10-01T00:00:00Z run run start: ./setup.sh llm"' in body.splitlines()[4]), body[:600]
 
 
 def test_credential_shapes_are_redacted_whether_or_not_env_knows_them(tree: Path):
@@ -350,7 +356,7 @@ def test_the_filter_and_the_guard_read_one_list():
     """report_secret_values is THE list; the filter loads from it and the guard
     scans with it, so they cannot disagree about what a secret is — and no
     second hard-coded glob survives in the code."""
-    src = (ROOT / "deploy" / "single" / "setup.sh").read_text(encoding="utf-8")
+    src = installer_source()
     load = src.split("report_redact_load() {", 1)[1].split("\n}", 1)[0]
     guard = src.split("report_leaking_keys() {", 1)[1].split("\n}", 1)[0]
     assert "report_secret_values" in load and "report_secret_values" in guard

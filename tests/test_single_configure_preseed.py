@@ -40,6 +40,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import installer_source
+
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
 
@@ -313,7 +315,7 @@ def test_every_example_value_the_code_does_not_default_is_asked_derived_or_gener
 
     fields = cfg.Settings.model_fields
     example = _example_values()
-    setup_src = (SINGLE / "setup.sh").read_text(encoding="utf-8")
+    setup_src = installer_source()
     secrets_src = (SINGLE / "make-secrets.sh").read_text(encoding="utf-8")
     asked = {l.split("\t", 1)[0] for l in (SINGLE / "questions.tsv").read_text(encoding="utf-8").splitlines()
              if l and not l.startswith("#")}
