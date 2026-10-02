@@ -1,8 +1,9 @@
 # The install remembers what it did, proves it as the app, and has one definition
 
 > **Status:** partial — P1 shipped in v2.55.0 (D1, D2, D3, D5's exit-code rule and
-> `fetch` fix, D10); P2–P5 (D4, D6, D7, D8, D9, the rest of D5) are open. Decisions
-> D1–D10 taken with the operator on 2026-10-01.
+> `fetch` fix, D10); P2–P5 (D4, D6, D7, D8, D9, D11, the rest of D5) are open. Decisions
+> D1–D10 taken with the operator on 2026-10-01; D11 (precedents, seven adoptions)
+> approved 2026-10-02.
 > **As-built:** P1 — `deploy/single/steps.tsv` (new), `deploy/single/ledger-lib.sh`
 > (new), `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/env-lib.sh`,
 > `.claude/settings.json` (new), `.claude/hooks/guard-install-tree.sh` (new),
@@ -388,6 +389,37 @@ operator decided (2026-10-01) that a deployment with a patch is a
 deployment that has deviated, and the patch belongs in the repository or
 nowhere.
 
+### D11 — Precedents: the names of the wheels, and seven rules adopted from them
+
+Asked on 2026-10-01 whether this record reinvents the wheel, two research
+passes (sources fetched that day; the private instance memory keeps the
+list) mapped every piece to an established pattern. The record now says
+which wheel each piece is, because a design that hides its precedents makes
+the next reader rederive them:
+
+| piece | established pattern | rule adopted |
+|---|---|---|
+| `probe` + "done only if the probe holds" (D1) | Microsoft DSC v3's Test/Set contract ("verify desired state before enforcing"); Terraform's refresh before diff | the probe IS the refresh: a `done` row whose probe fails is drift and runs again, never a skip |
+| the ledger (D2) | Terraform state; dpkg's package states, where `half-configured` is a state of its own and `dpkg --configure -a` is the resume | a `started` status, written BEFORE a phase runs, so an interrupted run reads "started, not finished" rather than "pending" |
+| the resume driver (D2, D3) | a level-triggered reconciler over an ordered step list (Kubernetes controllers) | the name, in the driver's header |
+| `questions.tsv` + `.env` (2026-09-23 D6) | debconf's question database and preseeding | nothing new now; debconf's priority dial is noted as the shape a future "only stop me where there is no safe default" would take |
+| `check` (2026-09-23 D5) | Replicated's preflight; Sentry's minimum-requirements step | a PLAN, printed at the start of every run: which rows will run, which will skip and why (Terraform `plan`, Ansible `--diff`) |
+| PASS/WARN/FAIL/USERACTION with a remedy (2026-08-25) | the "doctor" convention (brew, flutter, npm — recalled, not fetched) | unchanged; a FAIL line names the key or the command, which is already the rule |
+| the self-check (D4) | goss, "serve the checks as a health endpoint"; Kubernetes readiness vs liveness | the self-check is READINESS-shaped: it gates use. It is never liveness-shaped: it restarts nothing, and the Kubernetes docs' warning about conflating the two is quoted in its docstring |
+| `report` (D10) | Replicated troubleshoot.sh: collectors, redactors, analyzers, redaction in process with a default set | redaction happens in process as each section is collected, from a declared default list; the marker test stays as the guard nobody else has |
+| the pristine tree (D10) | Sentry's commit check (HEAD equals upstream, opt-out); GitLab, Discourse, Coolify regenerate artifacts on every converge | nothing: ours is stricter than any found, and justified because our tree is code, not generated output |
+| one 3,800-line driver | Sentry's installer: a thin orchestrator sourcing step files in order | the driver splits into `deploy/single/phases/<phase>.sh`, one file per manifest phase, when P4 lines the docs up with the manifest |
+| one run at a time | Kamal's atomic lock directory for the duration of a deploy | a run lock in the state dir, taken by every mutating command and by `update.sh`; a stale lock names the pid and the command that releases it |
+
+Two pieces have no precedent in self-hosted installers and are kept on a
+stated justification: the per-step resume ledger (the products examined
+either reconverge because a full rerun is cheap, or fail hard; ours is not
+cheap — image builds, paid model round trips, a ten-minute suite and human
+gates) and the agent-conducted loop with hooks (uncharted, not under-built).
+Adopting any of the tools stays rejected for the 2026-09-23 reason: every
+real convergence runtime assumes an interpreter an air-gapped Windows box
+with Git Bash does not guarantee.
+
 ## Phasing (each a release; P5 gates the tag of the whole)
 
 1. **P1 — manifest, ledger, one command, pristine tree.** D1, D2, D3,
@@ -398,15 +430,25 @@ nowhere.
    with one tracked file modified refuses every command and names the
    file; the hook denies an `Edit` of `deploy/single/images.txt` and
    allows one of `.env`.
-2. **P2 — the self-check.** D4, the `verify/selfcheck` row, `/api/selfcheck`,
-   the Systems page column, the spine-key scope fix. Acceptance: an `.env`
-   with an empty `CC_LLM_API_KEY` cannot reach `boot`.
+2. **P2 — the self-check, and the ledger's precedents.** D4, the
+   `verify/selfcheck` row, `/api/selfcheck`, the Systems page column, the
+   spine-key scope fix; from D11: the `started` ledger status, the run lock,
+   the plan printed at the start of every run, in-process report redaction
+   from a declared default list, the readiness-only rule in the self-check's
+   docstring. Acceptance: an `.env` with an empty `CC_LLM_API_KEY` cannot
+   reach `boot`; a phase killed mid-run leaves its rows `started`; a second
+   `./setup.sh` while one runs refuses and names the lock.
 3. **P3 — supervision and skills.** D6, D7, the runner token, `update.sh`'s
    acquire-before-merge (rest of D5). Acceptance: on Linux, `stop` then
    `boot` leaves three listeners and a non-empty skills library.
-4. **P4 — one definition.** D8: `CHECKLIST.md`, the doc pins, the skill
-   rewrite, the diagnose bundle. Acceptance: `test_setup_phase_docs.py`
-   passes with the READMEs no longer carrying a phase list of their own.
+4. **P4 — one definition.** D8: `CHECKLIST.md` (carrying the one-time
+   workspace-trust dialog and, for a zip install, `./update.sh init` as the
+   baseline step), the doc pins, the skill rewrite, the diagnose bundle, the
+   `human` rows D1 names that P1 left out (the n8n credential, the CA on
+   disk); from D11: the driver split into `deploy/single/phases/<phase>.sh`.
+   Acceptance: `test_setup_phase_docs.py` passes with the READMEs no longer
+   carrying a phase list of their own; every manifest phase has exactly one
+   phase file.
 5. **P5 — the laptop.** D9's acceptance run. Any Windows defect it finds is
    fixed and the run repeated before the tag.
 
