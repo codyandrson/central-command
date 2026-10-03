@@ -361,11 +361,18 @@ early under the rehearsal persona. It stays dropped.)
   the file; anchor-node k3s restart).
   The `app` phase reads `tailscale serve status --json` and the node's
   tailnet name to DERIVE the Systems page's "Open →" links (`CC_N8N_UI_URL`,
-  `CC_VLOGS_UI_URL`, `CC_NEO4J_BROWSER_URL`, `CC_SANDBOX_DOCS_URL`,
-  `CC_CRAWLER_DOCS_URL`, `CC_DB_UI_URL`; LiteLLM's needs no serve entry) into
+  `CC_NEO4J_BROWSER_URL`, `CC_SANDBOX_DOCS_URL`, `CC_DB_UI_URL`) into
   the app's `.env` when they are blank (v2.52.0) — add the serve entries
   first, or re-run `./deploy/k3s/setup.sh app` after adding one. A value you
-  typed is never overwritten. `CC_LLAMA_SWAP_UI_URL` stays hand-typed: the
+  typed is never overwritten. **The three ServiceLB services need no serve
+  entry and must not get one** — LiteLLM (4000), VictoriaLogs (9428) and the
+  crawler (8091) are derived as plain `http://<tailnet name>:<port>`. Never
+  `tailscale serve` a port a `type: LoadBalancer` Service owns: ServiceLB
+  takes the connection first and answers the TLS handshake in plain http
+  (`SSL wrong version number` in curl, a dead link in the browser) — the
+  Traefik collision above, on another port. A link already set to
+  `https://…:8091` or `https://…:9428` fails the self-check's `links` row;
+  change it to `http://`, or blank it and re-run the `app` phase. `CC_LLAMA_SWAP_UI_URL` stays hand-typed: the
   compute host is not something this node can see.
 - **cc-graph-bolt** — loopback-only `socat` relay of `svc/neo4j` 7687/7474
   (by ClusterIP) for the cockpit's Graph panel. Keeps neo4j ClusterIP-only.

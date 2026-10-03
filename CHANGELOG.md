@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-02 — v2.58.1: a ServiceLB port is linked in plain http, never through `tailscale serve`
+
+Found by v2.56.0's `links` self-check on its first run against the k3s
+reference deployment: two Systems-page links had been dead since they were
+derived.
+
+- **The k3s installer derives the VictoriaLogs and crawler links as plain
+  `http://<tailnet name>:<port>`, like LiteLLM's.** Both are
+  `type: LoadBalancer` Services (they float, and ServiceLB is what keeps
+  their endpoints loopback on the anchor node), so ServiceLB binds 9428 and
+  8091 on every interface. `derive_systems_links` had them in the
+  tailscale-serve-fronted table instead, and its hint told the operator to
+  add `tailscale serve --https=8091` — an entry that can never answer:
+  ServiceLB's hostPort DNAT takes the connection ahead of tailscaled and
+  replies to the TLS handshake in plain http (`SSL wrong version number`),
+  from every tailnet client. It is the Traefik-on-443 collision on another
+  port. Serve now fronts only what is loopback-only on the host (n8n, the
+  sandbox runner, pgweb, the Neo4j relay).
+- **A guard test reads the manifests.** `tests/test_systems_links_derived.py`
+  collects every port a `type: LoadBalancer` Service under `deploy/k3s/`
+  declares and fails if a serve-fronted link row uses one, or if a
+  plain-http row names a port no such Service declares — so the next floated
+  service cannot repeat this.
+- **An existing install is not rewritten** (a set link is the operator's).
+  If `CC_VLOGS_UI_URL` or `CC_CRAWLER_DOCS_URL` is `https://…`, the `links`
+  self-check row fails and names it: change the scheme to `http://` (or
+  blank it and re-run `./deploy/k3s/setup.sh app`), and remove the two
+  serve entries (`tailscale serve --https=8091 off`, `--https=9428 off`).
+  `deploy/k3s/README.md` §6 and the k3s rules file carry the rule.
+
 ## 2026-10-02 — v2.58.0: one definition of the install, and every document follows it
 
 P4 of `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

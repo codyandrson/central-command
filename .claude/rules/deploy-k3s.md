@@ -54,3 +54,9 @@ when a matching file is read.
 - **`ctr images ls | grep -q` inverts under `set -o pipefail`.** `grep -q`
   exits at the first match, the producer takes SIGPIPE, and the pipeline
   reports FAILURE on success. Capture into a variable first, then grep.
+- **Never `tailscale serve` a port a `type: LoadBalancer` Service owns.**
+  ServiceLB's hostPort DNAT takes the connection ahead of tailscaled and
+  answers the TLS handshake in plain http — a link that is dead from the
+  day it is set, on every tailnet client. A ServiceLB service is linked as
+  plain `http://<tailnet name>:<port>`; serve fronts only what is
+  loopback-only on the host. `tests/test_systems_links_derived.py` pins it.

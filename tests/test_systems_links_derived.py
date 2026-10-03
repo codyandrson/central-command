@@ -67,3 +67,45 @@ def test_links_never_overwrite_an_operator_value():
     for path, src in ((K3S, K3S.read_text()), (SINGLE, installer_source())):
         hits = pattern.findall(src)
         assert not hits, f"{path.relative_to(ROOT)} overwrites {hits} with a bare set_kv"
+
+
+def _loadbalancer_ports() -> set[int]:
+    """Every port a `type: LoadBalancer` Service in deploy/k3s/ declares —
+    the ports ServiceLB binds on every interface of every node."""
+    import yaml
+
+    ports: set[int] = set()
+    for path in sorted((ROOT / "deploy/k3s").glob("*.yaml")):
+        for doc in yaml.safe_load_all(path.read_text()):
+            if isinstance(doc, dict) and doc.get("kind") == "Service" \
+                    and (doc.get("spec") or {}).get("type") == "LoadBalancer":
+                ports.update(int(p["port"]) for p in doc["spec"]["ports"])
+    assert ports, "no LoadBalancer Service found under deploy/k3s/"
+    return ports
+
+
+def _k3s_link_rows() -> tuple[dict[str, int], dict[str, int]]:
+    """(plain-http ServiceLB rows, tailscale-serve-fronted rows) of
+    derive_systems_links, each as {key: port}."""
+    body = K3S.read_text().split("derive_systems_links() {", 1)[1].split("\n}\n", 1)[0]
+    loops = re.findall(r"for row in(.*?); do", body, flags=re.S)
+    assert len(loops) == 2, "derive_systems_links no longer has its two row tables"
+    tables = [{k: int(p) for k, p in re.findall(r'"(CC_\w+) (\d+) ', rows)} for rows in loops]
+    assert all(tables), "a link row table parsed empty"
+    return tables[0], tables[1]
+
+
+def test_k3s_never_fronts_a_loadbalancer_port_with_tailscale_serve():
+    """2026-10-02: the crawler and VictoriaLogs links were derived as
+    https://<host>:8091 and :9428 through `tailscale serve` entries on the
+    very ports their LoadBalancer Services own. ServiceLB's hostPort DNAT
+    takes the connection ahead of tailscaled and answers the TLS handshake in
+    plain http, so both links were dead from the day they were set. A
+    ServiceLB port is linked as plain http, like LiteLLM's; serve fronts only
+    what is loopback-only on the host."""
+    lb = _loadbalancer_ports()
+    plain, served = _k3s_link_rows()
+    clash = {k: p for k, p in served.items() if p in lb}
+    assert not clash, f"serve-fronted link rows on LoadBalancer ports: {clash}"
+    stray = {k: p for k, p in plain.items() if p not in lb}
+    assert not stray, f"plain-http link rows whose port no LoadBalancer Service declares: {stray}"

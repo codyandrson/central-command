@@ -179,8 +179,9 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
 # was opened. On this profile each one is derivable — the browser host is the
 # node's tailnet name and the port is whatever `tailscale serve` already maps
 # onto the service's loopback port (README §6 has the operator add those
-# entries). LiteLLM needs no serve entry: ServiceLB binds :4000 on every
-# interface. Only llama-swap is NOT derivable — it runs on the compute host,
+# entries). A ServiceLB service (LiteLLM, VictoriaLogs, the crawler) needs no
+# serve entry and must not get one: ServiceLB binds its port on every
+# interface, so the link is plain http on that port. Only llama-swap is NOT derivable — it runs on the compute host,
 # and nothing in either env file says where — so it stays a WARN with the
 # shape to type. Every write is set_kv_if_unset: an operator's own URL wins.
 
@@ -239,17 +240,27 @@ derive_systems_links() {
   fi
   map="$(tailnet_serve_map)"
 
-  # LiteLLM: ServiceLB, plain http, every interface — no serve entry involved.
-  set_kv_if_unset "$APP_ENV" CC_LLM_PROXY_UI_URL "http://${host}:4000/ui/" "app-link-litellm"
-
-  # One row per tailscale-serve-fronted service: key, loopback port the
-  # service listens on, and the path the browser lands on.
+  # One row per ServiceLB (type: LoadBalancer) service: key, service port,
+  # path. Plain http on every interface, no serve entry involved — and a
+  # serve entry on the same port can never answer: ServiceLB's hostPort DNAT
+  # takes the connection ahead of tailscaled and replies in plain http to the
+  # TLS handshake (the Traefik-on-443 collision, README §6, on another port).
+  # tests/test_systems_links_derived.py pins these rows to the manifests.
   local row key target path port
   for row in \
-      "CC_N8N_UI_URL 5678 " \
+      "CC_LLM_PROXY_UI_URL 4000 /ui/" \
       "CC_VLOGS_UI_URL 9428 /select/vmui/" \
+      "CC_CRAWLER_DOCS_URL 8091 /docs"; do
+    read -r key port path <<<"$row"
+    set_kv_if_unset "$APP_ENV" "$key" "http://${host}:${port}${path}" "app-link-${key,,}"
+  done
+
+  # One row per tailscale-serve-fronted service (loopback-only on the host,
+  # so serve is the only way a browser reaches it): key, loopback port the
+  # service listens on, and the path the browser lands on.
+  for row in \
+      "CC_N8N_UI_URL 5678 " \
       "CC_SANDBOX_DOCS_URL 8090 /docs" \
-      "CC_CRAWLER_DOCS_URL 8091 /docs" \
       "CC_DB_UI_URL 8092 /"; do
     read -r key target path <<<"$row"
     if ! is_placeholder "$(get_kv "$APP_ENV" "$key")"; then
