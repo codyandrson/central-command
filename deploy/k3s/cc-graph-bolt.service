@@ -25,9 +25,20 @@
 #   sudo apt install socat
 #   sudo cp deploy/k3s/cc-graph-bolt.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now cc-graph-bolt
+#
+# Wants=, not Requires= (v2.58.3). Requires= makes this unit's start job
+# depend on k3s's start job SUCCEEDING: when k3s loses its first attempt at
+# boot (its network not up yet) systemd cancels this unit's start with
+# "Dependency failed" — once. k3s retries on its own Restart= and is up a
+# minute later; nothing re-queues a cancelled dependent, and Restart=always
+# only applies to a unit that has run. The unit then stays dead until someone
+# starts it by hand. Wants= + After= still starts k3s with this unit and
+# still orders it first, but starts this unit either way —
+# the ClusterIP lookup below exits 1 until the API server answers, and
+# Restart=always retries it every 5s.
 [Unit]
 Description=Central Command loopback bolt relay to cc-neo4j (read path for the Graph panel)
-Requires=k3s.service
+Wants=k3s.service
 After=k3s.service
 
 [Service]

@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-03 — v2.58.3: a late k3s no longer leaves the control plane dead
+
+- **The three long-running k3s host units `Want` k3s instead of `Require`
+  it.** `cc-uvicorn`, `cc-sandbox-runner` and `cc-graph-bolt` declared
+  `Requires=k3s.service`. On a boot where k3s failed its first start attempt
+  (its network was not up yet), systemd cancelled their start jobs with
+  "Dependency failed"; k3s's own retry had the cluster up ninety seconds
+  later, and nothing re-queued them — `Restart=always` only applies to a
+  unit that has run. Every pod was healthy and the control plane stayed down
+  until the operator ran `systemctl start` by hand. With `Wants=` + `After=`
+  the units still start k3s and still order after it, but start either way
+  and retry on their own until the cluster answers (cc-uvicorn's readiness
+  wait on 5442, cc-graph-bolt's ClusterIP lookup, each under
+  `Restart=always`).
+- **Behaviour change:** an explicit `systemctl stop k3s` or `restart k3s` no
+  longer stops or restarts these three units with it. They keep running and
+  reconnect when the cluster is back. The updater never relied on that — it
+  stops and starts the app units by name. `cc-backup.service` keeps
+  `Requires=`: a timer-fired one-shot should fail when k3s is down.
+- **Applying it:** the updater installs the changed unit files and reloads
+  systemd; nothing to do by hand. `tests/test_k3s_units_boot.py` pins the
+  three units (and fails if a new always-on unit ordered after k3s is not
+  added to its list).
+
 ## 2026-10-02 — v2.58.2: what the first laptop run found
 
 The design record's P5 is a fresh install on a Windows laptop, driven from

@@ -347,9 +347,19 @@ nothing to write into the env before the API reads it. (`cc-nerve.service`'s
 mattered: `Wants=` is a START dependency and it brought the API up 40 minutes
 early under the rehearsal persona. It stays dropped.)
 
-- **cc-uvicorn** — `Requires=k3s.service`. Its `ExecStartPre` is a *readiness
+- **cc-uvicorn** — `Wants=k3s.service` + `After=`. Its `ExecStartPre` is a *readiness
   wait* on 127.0.0.1:5442 (120s ceiling), not a bring-up: Kubernetes is
   declarative, there is nothing to start, only something to wait for.
+  **`Wants=`, never `Requires=`, on the three long-running units**
+  (`cc-uvicorn`, `cc-sandbox-runner`, `cc-graph-bolt`): with `Requires=`, a
+  boot where k3s fails its FIRST start attempt (its network not up yet)
+  cancels their start jobs with "Dependency failed", and nothing re-queues
+  them when k3s's own retry succeeds a minute later — the cluster is healthy
+  and the control plane is dead until someone runs `systemctl start`. Each
+  unit retries on its own (`Restart=always`) until the cluster answers. The
+  trade: an explicit `systemctl stop k3s` / `restart k3s` no longer stops
+  them; they keep running and reconnect. `cc-backup.service` keeps
+  `Requires=` — a timer-fired one-shot SHOULD fail when k3s is down.
 - **cc-nerve** — serves `web/server-dist` on 127.0.0.1:3080, proxying to the
   backend via `web/.env`'s `GATEWAY_URL` (above). Tailnet exposure is
   `tailscale serve --bg http://127.0.0.1:3080`, which persists in tailscaled

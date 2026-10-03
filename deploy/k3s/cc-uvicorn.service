@@ -21,11 +21,22 @@
 # CC_FEED_*, CC_AUDITOR_*, CC_LLM_PROXY_* all live there); only the run-mode
 # flags are pinned here, matching the documented recipe.
 
+# Wants=, not Requires= (v2.58.3). Requires= makes this unit's start job
+# depend on k3s's start job SUCCEEDING: when k3s loses its first attempt at
+# boot (its network not up yet) systemd cancels this unit's start with
+# "Dependency failed" — once. k3s retries on its own Restart= and is up a
+# minute later; nothing re-queues a cancelled dependent, and Restart=always
+# only applies to a unit that has run. The unit then stays dead until someone
+# starts it by hand. Wants= + After= still starts k3s with this unit and
+# still orders it first, but starts this unit either way —
+# the readiness wait and Restart=always below are what bridge the gap. The
+# cost: an explicit `systemctl stop|restart k3s` no longer stops this unit
+# with it; it keeps running and reconnects when the spine answers again.
+
 [Unit]
 Description=Central Command control plane (uvicorn on 127.0.0.1:8080)
 After=network-online.target k3s.service
-Wants=network-online.target
-Requires=k3s.service
+Wants=network-online.target k3s.service
 
 [Service]
 User=codyslab

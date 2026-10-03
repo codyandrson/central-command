@@ -60,3 +60,11 @@ when a matching file is read.
   day it is set, on every tailnet client. A ServiceLB service is linked as
   plain `http://<tailnet name>:<port>`; serve fronts only what is
   loopback-only on the host. `tests/test_systems_links_derived.py` pins it.
+- **A long-running host unit `Wants=k3s.service`, never `Requires=` it.**
+  `Requires=` ties the unit's start job to k3s's FIRST start attempt: when
+  that fails at boot, systemd cancels the dependent once ("Dependency
+  failed"), k3s's own retry succeeds a minute later, and nothing re-queues
+  the dependent — `Restart=always` never applies to a unit that has not run.
+  `Wants=` + `After=` + `Restart=always` starts it either way and lets it
+  retry. `tests/test_k3s_units_boot.py` pins it; a timer-fired one-shot
+  (`cc-backup`) is the exception.

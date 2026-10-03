@@ -12,15 +12,25 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now cc-sandbox-runner
 #
-# Modeled on deploy/k3s/cc-uvicorn.service: Requires=k3s.service (this talks
-# to the cluster on every request, not just at startup, so it genuinely
-# cannot do anything useful without k3s up).
+# Modeled on deploy/k3s/cc-uvicorn.service. This talks to the cluster on
+# every request, not just at startup, so it can do nothing useful without k3s
+# up — but that is a per-request failure it reports, not a reason to stay
+# down:
+#
+# Wants=, not Requires= (v2.58.3). Requires= makes this unit's start job
+# depend on k3s's start job SUCCEEDING: when k3s loses its first attempt at
+# boot (its network not up yet) systemd cancels this unit's start with
+# "Dependency failed" — once. k3s retries on its own Restart= and is up a
+# minute later; nothing re-queues a cancelled dependent, and Restart=always
+# only applies to a unit that has run. The unit then stays dead until someone
+# starts it by hand. Wants= + After= still starts k3s with this unit and
+# still orders it first, but starts this unit either way —
+# a request made before the cluster answers fails and the next one works.
 
 [Unit]
 Description=Central Command sandbox-runner (uvicorn on 127.0.0.1:8090)
 After=network-online.target k3s.service
-Wants=network-online.target
-Requires=k3s.service
+Wants=network-online.target k3s.service
 
 [Service]
 User=codyslab
