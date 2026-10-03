@@ -478,3 +478,132 @@ when a matching file is read.
   then applies the façade workflows through `deploy/n8n/apply-workflows.sh`
   — a fresh install used to have none until its first update, because only
   `update.sh` ran that script.
+- **A row the phase never reached is `pending`, and a pause is `gate`**
+  (v2.58.2, measured on the 2026-10-02 laptop run). `ledger_record` used to
+  judge every row of a phase by its probe, so after `FAIL mint-key` the later
+  `app` rows read `done` (the configure-born `.env` already had the value) or
+  `failed` with no reason, and after the llm pause `catalog-filled` read
+  `done` while `gate` appeared nowhere. The rule now, in manifest order: a
+  row that printed FAIL is `failed`, USERACTION is `gate`, PASS/WARN is
+  `done` if its probe holds; a row that printed NOTHING after an earlier row
+  of this pass stopped is `pending` — never probed, no reason. Every
+  `fail`/`useraction`/`step` in a phase file names a ROW of that phase
+  (`tests/test_single_reporter_rows.py`; `llm_gate` printed `llm-models`,
+  which was no row, and the gate was never marked). `catalog-filled`'s probe
+  is `p_catalog_filled` — a required alias is unfilled while any of its rows
+  is still a PLACEHOLDER skeleton (`/model/info`, the same call
+  `register-models.py` judges by); `catalog`'s probe stays "listed", because
+  creating the skeletons IS that step's effect.
+- **`update.sh apply` with nothing to apply does nothing** (v2.58.2). With
+  `local` already containing `upstream`, apply resumes the post-merge phases
+  only when the tree moved under the ledger (a row carries another version)
+  and a post-merge row is not `done` at the tree's version, or the ledger is
+  empty (the adoption pause). Otherwise one PASS and exit 0 — it used to
+  redeploy the installed release by name for eight minutes after a failed
+  import, and ask the operator to stop the API first.
+- **The import unpacks with Python, never `unzip`** (v2.58.2). Git for
+  Windows' UnZip 6.00 does not let `*` cross `/`, so `unzip -x
+  <prefix>docs/vendor/*` excluded 3 of 49,809 entries, the whole vendor tree
+  was extracted, and its four symlink members made EVERY release zip fail to
+  import on Windows — GitHub's own included. `deploy/single/release-zip.py`
+  (run by `cc_resolve_py`, the ONE interpreter resolution `setup.sh` and
+  `update.sh` share) decides every entry before writing one: `docs/vendor/`
+  is a path-prefix skip, modes come from `external_attr`, an escaping name
+  is a refusal naming the entry, and a symlink is never written to disk — it
+  is recorded into the import commit's index as a 120000 entry, so
+  `upstream` carries the release's links on every host.
+- **The cockpit rebuilds only when its inputs changed** (v2.58.2). Every
+  re-run spent ~70 s on `npm ci` and ~66 s on `npm run build` with nothing in
+  `web/` changed. `<state>/cockpit.npm-inputs` (the lockfile + node's major)
+  and `<state>/cockpit.build-inputs` (the files and trees `npm run build`
+  reads, CR-stripped) are written after success and deleted before the
+  command runs; `cc_cockpit_current` is the one question the two steps and
+  their probes ask. A staged run never reads or writes the deployment's
+  records.
+- **The mail self-check applies when something in the app READS mail — never
+  on the n8n flag or the façade token** (v2.58.2, finding F4 of the
+  2026-10-02 laptop run). `make-secrets.sh` generates `CC_EMAIL_FACADE_TOKEN`
+  on every install, and the k3s profile's `.env` says `CC_ENABLE_N8N=0` while
+  its façade is in daily use, so neither can say whether mail is configured.
+  `check_mail` asks what the app does: Exchange configured → checked (a
+  half-configured Exchange is a FAIL); else `CC_FEED_ENABLED=1` or an enabled
+  heartbeat `feed.poll` row → the façade is checked; else not applicable.
+  Before this every default install FAILed `verify/selfcheck` and `boot` was
+  unreachable.
+- **A tag the mirror lacks is the operator's seam: USERACTION, exit 3 — a
+  registry that is unreachable, a pin that does not exist, a build that
+  fails: FAIL** (v2.58.2). D5's two sentences both hold because the resolver
+  prints no FAIL for the seam case; `cc_exit_code` then ranks correctly
+  everywhere, and the logon runner stops on exit 3 instead of retrying ten
+  times.
+- **The driver's hot paths start no program** (v2.58.2, finding F10). On
+  Windows every `./setup.sh` invocation spent ~21 s before its first line and
+  ~60 s on the plan, because a fork under MSYS costs 10–50 ms and the ledger
+  code forked `cut` per manifest field, `sha256sum` per row, `date` per log
+  line and re-read `.env` per key — a thousand processes to print a refusal.
+  Now: rows are split by parameter expansion (`cc__tsv_split`), `.env` is
+  read through a self-checking per-run cache (`cc_get_kv_cached`), fingerprints
+  are hashed in one batch (`cc_fingerprint_prime`) with their VALUES
+  unchanged, the ledger readers work in-process, and a probe's verdict is
+  memoized for the run (`cc_probe_memo`, dropped after any phase but `check`
+  runs). `tests/test_single_driver_forks.py` holds each helper against the
+  old code and runs the hot paths with an EMPTY `PATH`. New code in the
+  ledger, plan, lock or logging path does not use `$(cut …)`, `$(sed …)`,
+  `$(date …)` or `$(cat …)` — a helper that forks there is a regression the
+  empty-PATH tests catch.
+- **`stop` kills by port only what it has a record of** (v2.58.2). The
+  Windows fallback — `taskkill` the listener `netstat` names, because a
+  Git Bash `kill` can report a success it never delivered — runs only when a
+  unit or a pid file says this install started something on that port. With
+  no record the listener is somebody else's and is reported, never shot: a
+  `stop` in a second tree on the default ports would otherwise have killed a
+  live API.
+- **A probe runs BEFORE `.env` is exported, and Windows Python ends its lines
+  with `\r`** (v2.58.2, second laptop pass). Two defects with one symptom —
+  `llm` re-ran on every `./setup.sh`. The plan asks the probes before
+  `load_env` has sourced `.env`, and `cc_required_aliases` read
+  `CC_ENABLE_SPEECH` from the environment only (default ON), so with speech
+  off the plan demanded `cc-tts`/`cc-stt` and read the catalog as unfilled; a
+  probe reads a flag through the probes' own reader (process value, else
+  `.env` — `catalog_required_aliases`, `p_flag`), never straight from the
+  environment. And a MULTI-line capture of `$PY` output carries a `\r` on
+  every line but the last under Git Bash (`$(...)` strips only the final
+  newline; `sed`/`grep` read past a `\r`, bash `read` and `[[ == ]]` do not):
+  strip it where the lines are compared (`skills_library_ids`, the
+  resolver's tag list, `catalog_unfilled`). A third trap of the same family:
+  on Git Bash 5.3 a `$'\r'` written INSIDE the text of a `$( … )` becomes
+  empty, so a CR-strip coded there silently does nothing — put it in a
+  function (`cc__tree_payload`); `tests/test_single_ledger_lib.py` scans for
+  the pattern.
+- **A reachability probe asks; it does not download the index** (v2.58.2).
+  `check`'s host section fetched the whole PyPI simple index — 46.7 MB —
+  under a 10 s limit and WARNed "unreachable" on a slow evening while the
+  index answered. `index_reachable` asks with HEAD and falls back to GET only
+  when HEAD is refused, and a warning names only the index that failed.
+- **A logon-time run is HEADLESS by definition, and "done" is what the driver
+  logged — never an exit code alone** (v2.58.2, second laptop pass). The
+  logon entry runs in an interactive console, so `./setup.sh`'s stdin was a
+  terminal and `boot/operator-name` prompted — and waited forever in a locked
+  session on every install whose operator gave their name in the cockpit
+  rather than in `.env`. `cc_render_logon_retry` runs the driver with
+  `</dev/null`; every prompt in the driver is keyed on `[[ -t 0 ]]`, so each
+  takes its headless branch. And a `setup.sh` killed from outside can return
+  exit 0 on Windows: an attempt counts as finished only when the state dir's
+  log gained the driver's own `run end: ./setup.sh all -> exit <rc>` line
+  during it; otherwise the loop retries. Exactly ONE logon entry exists after
+  any sequence of elevated and non-elevated runs (`cc_logon_entry_plan`: an
+  existing `cc-boot` task is kept, a Startup entry beside a task is removed,
+  and the Startup entry is a one-line `call` into the state dir's wrapper,
+  never a copy).
+- **`./setup.sh` runs the INSTALLED release while an imported update waits**
+  (v2.58.2). An update that is imported but not merged leaves the tree
+  exactly the installed release; refusing to run it (`existing-install … use
+  ./update.sh plan`) protected nothing and kept the install DOWN after an
+  acquisition that stopped, because the update flow had already stopped the
+  API. It prints one note naming `./update.sh apply` and goes on. What is
+  refused is a merge left half-way (`MERGE_HEAD`).
+- **`boot` starts the sandbox runner BEFORE the API** (v2.58.2). The API runs
+  its self-check once at start; with the runner started after it, the cached
+  result showed the runner's link failing until someone pressed Run. The
+  runner depends on nothing, so it goes first (manifest order, `phase_boot`,
+  and `After=` on the API unit).

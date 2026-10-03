@@ -26,9 +26,10 @@ To see it fail: add a row for `CC_NOPE` and re-run.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ import pytest
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
 from central_command.api.update import _bash as _resolve_bash  # noqa: E402
-from tests.installer_source import installer_source  # noqa: E402
+from tests.installer_source import drives_installer, installer_source, run_driver, write_lf  # noqa: E402
 BASH = _resolve_bash() or "bash"
 
 
@@ -336,30 +337,40 @@ printf '%s' "$1" | sed -E "s|^/msysroot|${STUB_ROOT:-/msysroot}|; s|^/([a-zA-Z])
 
 
 def _bash(snippet: str, *, bindir: Path, ostype: str, stub_root: str = "") -> subprocess.CompletedProcess:
+    # Every path in the spelling bash resolves (as_posix), and the stub
+    # directory put FIRST from inside the script — after Git Bash's launcher
+    # has prepended its own /usr/bin, whose real cygpath would otherwise win.
+    # A PATH entry cannot carry `C:`'s colon, so on MSYS it goes in as
+    # `cygpath -u` spells it (resolved BEFORE the stub shadows cygpath).
+    b = bindir.as_posix()
     script = (
+        f'__b="$(cygpath -u \'{b}\' 2>/dev/null || printf %s \'{b}\')"\n'
+        'export PATH="$__b:$PATH"\n'
         f'OSTYPE={ostype}\n'
-        f'export PATH="{bindir}:$PATH"\n'
         f'export STUB_ROOT="{stub_root}"\n'
-        f'. "{QUESTIONS_LIB}"\n'
+        f'. "{QUESTIONS_LIB.as_posix()}"\n'
         f'{snippet}\n'
     )
-    return subprocess.run([BASH, "-c", script], capture_output=True, text=True)
+    return subprocess.run([BASH, "-c", script], capture_output=True, text=True, check=False)
+
+
+# q__is_msys asks OSTYPE first and `uname -o` second, so a Linux box is
+# simulated on Windows too: the stub uname answers what a Linux one does (on a
+# Linux host it is what the real one says anyway).
+UNAME_STUB = """#!/usr/bin/env bash
+case "${1:-}" in -o) echo GNU/Linux ;; *) echo Linux ;; esac
+"""
 
 
 @pytest.fixture
 def cygpath_bin(tmp_path: Path) -> Path:
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    stub = bindir / "cygpath"
-    stub.write_text(CYGPATH_STUB, encoding="utf-8")
-    stub.chmod(0o755)
+    write_lf(bindir / "cygpath", CYGPATH_STUB, mode=0o755)
+    write_lf(bindir / "uname", UNAME_STUB, mode=0o755)
     return bindir
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason=(
-    "the stub cygpath is shadowed by the real one under Git Bash, and a Windows "
-    "tmp path does not survive an f-string into `bash -c` (2026-09-25 testbed); "
-    "the rewrite itself is exercised by every `configure` run there"))
 def test_a_path_answer_is_rewritten_on_msys_and_untouched_elsewhere(cygpath_bin):
     r = _bash("q_norm_path_answer /c/Users/me/ca.pem", bindir=cygpath_bin, ostype="msys")
     assert r.returncode == 0, r.stderr
@@ -376,10 +387,6 @@ def test_a_path_answer_is_rewritten_on_msys_and_untouched_elsewhere(cygpath_bin)
     assert r.stdout == "", r.stdout
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason=(
-    "the stub cygpath is shadowed by the real one under Git Bash, and a Windows "
-    "tmp path does not survive an f-string into `bash -c` (2026-09-25 testbed); "
-    "the rewrite itself is exercised by every `configure` run there"))
 def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
     """v_path_readable used to accept the MSYS spelling and store it."""
     real = tmp_path / "corp-ca.pem"
@@ -388,7 +395,7 @@ def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
     # The stub maps /msysroot/<x> onto tmp_path/<x>, so this answer names a file
     # that exists only under its REWRITTEN spelling.
     r = _bash("v_path_readable /msysroot/corp-ca.pem", bindir=cygpath_bin,
-              ostype="msys", stub_root=str(tmp_path))
+              ostype="msys", stub_root=tmp_path.as_posix())
     assert r.returncode == 0, (
         "the validator must resolve the path cygpath -m produces, not the raw "
         f"answer: {r.stdout}{r.stderr}"
@@ -397,13 +404,13 @@ def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
     # A missing file still fails, and the REASON names the rewritten spelling —
     # the one the operator's other tools will use.
     r = _bash("v_path_readable /msysroot/nope.pem", bindir=cygpath_bin,
-              ostype="msys", stub_root=str(tmp_path))
+              ostype="msys", stub_root=tmp_path.as_posix())
     assert r.returncode == 1
-    assert f"no such file: {tmp_path}/nope.pem" in r.stdout, r.stdout
+    assert f"no such file: {tmp_path.as_posix()}/nope.pem" in r.stdout, r.stdout
 
     # The directory validator shares the normalisation.
     r = _bash("v_path_dir_or_creatable /msysroot/state", bindir=cygpath_bin,
-              ostype="msys", stub_root=str(tmp_path))
+              ostype="msys", stub_root=tmp_path.as_posix())
     assert r.returncode == 0, r.stdout + r.stderr
 
 
@@ -420,3 +427,73 @@ def test_configure_normalises_before_it_validates_or_stores():
         "normalise BEFORE the validator runs"
     )
 
+
+
+# ── a BACKSLASH path answer is refused, by every v_path* ────────────────────
+# `.env` is SOURCED by setup.sh, and bash drops the backslashes of an unquoted
+# `C:\Users\me\state`, while update.sh reads the text as written — the two
+# disagreed about the state dir (2026-10-02 testbed run, second pass). The
+# validators are the one definition of "a path answer", so the refusal lives
+# there, on the answer AS WRITTEN (before any cygpath rewrite).
+
+
+@pytest.mark.parametrize("validator", ["v_path", "v_path_readable", "v_path_dir_or_creatable"])
+def test_every_path_validator_refuses_a_backslash_and_names_the_forward_spelling(validator, tmp_path):
+    target = tmp_path / ("state" if validator == "v_path_dir_or_creatable" else "f.pem")
+    if validator == "v_path_dir_or_creatable":
+        target.mkdir()
+    else:
+        target.write_text("x\n", encoding="utf-8")
+    good = target.as_posix()
+    bad = good.replace("/", "\\")
+    r = subprocess.run([BASH, "-c", f'. "{QUESTIONS_LIB.as_posix()}"; {validator} "$1"', "_", bad],
+                       capture_output=True, text=True, check=False)
+    assert r.returncode == 1, (r.stdout, r.stderr)
+    assert "backslashes" in r.stdout and f"write it with forward slashes: {good}" in r.stdout, r.stdout
+    r = subprocess.run([BASH, "-c", f'. "{QUESTIONS_LIB.as_posix()}"; {validator} "$1"', "_", good],
+                       capture_output=True, text=True, check=False)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+
+
+@drives_installer
+def test_check_fails_a_backslash_state_dir_naming_the_key_and_the_spelling(tmp_path):
+    """check's answers section, the real check_schema_answers over the real
+    schema: a hand-edited CC_STATE_DIR with backslashes is a FAIL naming the
+    key and the forward-slash spelling — and the same path written with
+    forward slashes passes."""
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT / "deploy", repo / "deploy",
+                    ignore=shutil.ignore_patterns(".env", ".env.*", "__pycache__", "NUL", "nul"))
+    for f in (".env.example", "VERSION"):
+        shutil.copy2(ROOT / f, repo / f)
+    setup = repo / "deploy" / "single" / "setup.sh"
+    text = setup.read_text(encoding="utf-8")
+    tail = 'main "$@"'
+    assert text.rstrip().endswith(tail)
+    hook = 'if [[ -n "${__CALL:-}" ]]; then "$@"; exit $?; fi\n'
+    write_lf(setup, text.rstrip()[: -len(tail)] + hook + tail + "\n")
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "home").mkdir()
+    example = ENV_EXAMPLE.read_text(encoding="utf-8")
+
+    def answers(state_dir: str) -> str:
+        write_lf(repo / ".env", example + f"\nCC_STATE_DIR={state_dir}\n")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CC_")}
+        # The hook runs the one function, so init_state — which would act on
+        # the answer (mkdir) before check judged it — never runs.
+        env.update(__CALL="1", HOME=str(tmp_path / "home"),
+                   XDG_STATE_HOME=str(tmp_path / "home" / "state"))
+        r = run_driver([BASH, "setup.sh", "check_schema_answers"],
+                       cwd=repo / "deploy" / "single", env=env)
+        return r.stdout + r.stderr
+
+    bad = state.as_posix().replace("/", "\\")
+    out = answers(bad)
+    fails = [l for l in out.splitlines() if l.startswith("FAIL answers-CC_STATE_DIR:")]
+    assert len(fails) == 1, out
+    assert "backslashes" in fails[0] and f"forward slashes: {state.as_posix()}" in fails[0], fails[0]
+
+    out = answers(state.as_posix())
+    assert not [l for l in out.splitlines() if l.startswith("FAIL answers-CC_STATE_DIR:")], out
+    assert "PASS answers-schema:" in out, out

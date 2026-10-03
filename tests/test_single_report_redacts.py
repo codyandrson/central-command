@@ -40,7 +40,14 @@ from pathlib import Path
 
 import pytest
 
-from tests.installer_source import installer_source
+from tests.installer_source import (
+    drives_installer,
+    env_path,
+    installer_source,
+    run_driver,
+    with_stub_path,
+    write_lf,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,8 +97,7 @@ def _set(path: Path, values: dict[str, str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-@pytest.fixture
-def tree(tmp_path: Path) -> Path:
+def _make_tree(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     shutil.copytree(ROOT / "deploy", repo / "deploy", ignore=_DEBRIS)
@@ -104,8 +110,13 @@ def tree(tmp_path: Path) -> Path:
     (tmp_path / "home").mkdir()
     state = tmp_path / "state"
     state.mkdir()
-    _set(repo / ".env", {"CC_STATE_DIR": str(state), **MARKERS})
+    _set(repo / ".env", {"CC_STATE_DIR": env_path(state), **MARKERS})
     return repo
+
+
+@pytest.fixture
+def tree(tmp_path: Path) -> Path:
+    return _make_tree(tmp_path)
 
 
 def _run(repo: Path, *args: str, path_prefix: Path | None = None):
@@ -114,37 +125,76 @@ def _run(repo: Path, *args: str, path_prefix: Path | None = None):
                XDG_STATE_HOME=str(repo.parent / "home" / "state"),
                CC_VERIFY_MAX_WAIT="1")
     if path_prefix is not None:
-        env["PATH"] = f"{path_prefix}{os.pathsep}{env.get('PATH', '')}"
+        env = with_stub_path(env, path_prefix)
     for stale in ("CC_STATE_DIR", *MARKERS):
         env.pop(stale, None)
-    return subprocess.run(
-        [_bash_exe(), "setup.sh", *args],
-        cwd=repo / "deploy" / "single",
-        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300, env=env,
-    )
+    return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
 
 
 def _reports(repo: Path) -> list[Path]:
     return sorted((repo.parent / "state").glob("report-*.txt"))
 
 
-def test_the_report_carries_no_marker_value_and_leads_with_the_ledger(tree: Path):
-    state = tree.parent / "state"
-    (state / "ledger.tsv").write_text(
-        "# ledger.tsv\n"
-        "check/tree-pristine\tdone\t2.55.0\t2026-10-01T00:00:00Z\tnone\t\n"
-        "app/mint-key\tfailed\t2.55.0\t2026-10-01T00:00:01Z\tabc\t/key/generate did not return a key\n"
-        "llm/catalog-filled\tgate\t2.55.0\t2026-10-01T00:00:02Z\tdef\tthe catalog needs your provider details\n",
-        encoding="utf-8",
-    )
+# ── one report, every place a credential leaks in real life ─────────────────
+# The four tests below each planted one source and ran `./setup.sh report` on
+# their own — four ~50 s invocations on Windows for inputs that do not
+# interfere (2026-10-02 testbed run, F15). The sources are planted TOGETHER
+# here and the report is collected ONCE; each test still asserts its own
+# section. The stub `podman` also keeps the host's real containers out of it.
 
-    r = _run(tree, "report")
+_LEDGER = (
+    "# ledger.tsv\n"
+    "check/tree-pristine\tdone\t2.55.0\t2026-10-01T00:00:00Z\tnone\t\n"
+    "app/mint-key\tfailed\t2.55.0\t2026-10-01T00:00:01Z\tabc\t/key/generate did not return a key\n"
+    "llm/catalog-filled\tgate\t2.55.0\t2026-10-01T00:00:02Z\tdef\tthe catalog needs your provider details\n"
+)
+_SETUP_LOG = (
+    "2026-10-01T00:00:00Z run run start: ./setup.sh llm\n"
+    f"2026-10-01T00:00:01Z llm FAIL oops: {MARKERS['CC_LLM_API_KEY']}\n"
+)
+_UVICORN_LOG = (
+    f"INFO connecting to neo4j with {MARKERS['CC_NEO4J_PASSWORD']}\n"
+    "dsn postgresql://someone:Pl4ntedUserinfoPass@db.example.com:5432/x\n"
+    "request Authorization: Bearer Pl4ntedBearerToken.abc-123\n"
+    "litellm virtual key sk-Pl4ntedVirtualKey0123456789 rejected\n"
+    "harmless http://db.example.com/path@ref and disk-usage_report_nightly_x\n"
+)
+_PODMAN = (
+    "#!/usr/bin/env bash\n"
+    'case "$1" in\n'
+    "  ps) echo cc-litellm ;;\n"
+    f"  logs) echo 'litellm: master key {MARKERS['CC_LLM_PROXY_ADMIN_KEY']} loaded' ;;\n"
+    "esac\n"
+    "exit 0\n"
+)
+
+
+@pytest.fixture(scope="module")
+def planted(tmp_path_factory) -> tuple[Path, subprocess.CompletedProcess, str]:
+    """(tree, the report run, the report's text) — one run for the module."""
+    tree = _make_tree(tmp_path_factory.mktemp("planted"))
+    state = tree.parent / "state"
+    (state / "ledger.tsv").write_text(_LEDGER, encoding="utf-8")
+    (state / "setup-log.txt").write_text(_SETUP_LOG, encoding="utf-8")
+    (state / "uvicorn.log").write_text(_UVICORN_LOG, encoding="utf-8")
+    stub = tree.parent / "stub"
+    stub.mkdir()
+    write_lf(stub / "podman", _PODMAN, mode=0o755)
+
+    r = _run(tree, "report", path_prefix=stub)
 
     assert r.returncode == 0, r.stdout + r.stderr
     assert "PASS report:" in r.stdout, r.stdout
     written = _reports(tree)
+    body = written[0].read_text(encoding="utf-8", errors="replace") if written else ""
+    return tree, r, body
+
+
+@drives_installer
+def test_the_report_carries_no_marker_value_and_leads_with_the_ledger(planted):
+    tree, _r, body = planted
+    written = _reports(tree)
     assert len(written) == 1, written
-    body = written[0].read_text(encoding="utf-8", errors="replace")
 
     # THE assertion: not one value, from any of the three sources.
     for key, value in MARKERS.items():
@@ -175,27 +225,13 @@ def test_the_report_carries_no_marker_value_and_leads_with_the_ledger(tree: Path
         assert oct(written[0].stat().st_mode)[-3:] == "600"
 
 
-def test_a_value_in_the_logs_is_redacted_in_process_and_the_report_is_written(tree: Path):
+@drives_installer
+def test_a_value_in_the_logs_is_redacted_in_process_and_the_report_is_written(planted):
     """The P2 change, and the reason for it: a credential in the last run's
     log, or in a process log, used to make the whole report a FAIL — at
     exactly the moment the operator needed it. Now each is replaced as it is
     collected, labelled with the KEY NAME, and the report is written."""
-    state = tree.parent / "state"
-    (state / "setup-log.txt").write_text(
-        "2026-10-01T00:00:00Z run run start: ./setup.sh llm\n"
-        f"2026-10-01T00:00:01Z llm FAIL oops: {MARKERS['CC_LLM_API_KEY']}\n",
-        encoding="utf-8",
-    )
-    (state / "uvicorn.log").write_text(
-        f"INFO connecting to neo4j with {MARKERS['CC_NEO4J_PASSWORD']}\n",
-        encoding="utf-8",
-    )
-
-    r = _run(tree, "report")
-
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "PASS report:" in r.stdout, r.stdout
-    body = _reports(tree)[0].read_text(encoding="utf-8", errors="replace")
+    _tree, _r, body = planted
     assert "MARKER_SECRET" not in body
     log = body.split("== the whole log of the last run", 1)[1].split("\n== ", 1)[0]
     assert "llm FAIL oops: [REDACTED:CC_LLM_API_KEY]" in log, log
@@ -210,22 +246,11 @@ def test_a_value_in_the_logs_is_redacted_in_process_and_the_report_is_written(tr
             and '"2026-10-01T00:00:00Z run run start: ./setup.sh llm"' in body.splitlines()[4]), body[:600]
 
 
-def test_credential_shapes_are_redacted_whether_or_not_env_knows_them(tree: Path):
+@drives_installer
+def test_credential_shapes_are_redacted_whether_or_not_env_knows_them(planted):
     """A connection string with a password, a bearer token and an sk- key that
     no .env key holds — the shapes the declared list catches on their own."""
-    state = tree.parent / "state"
-    (state / "uvicorn.log").write_text(
-        "dsn postgresql://someone:Pl4ntedUserinfoPass@db.example.com:5432/x\n"
-        "request Authorization: Bearer Pl4ntedBearerToken.abc-123\n"
-        "litellm virtual key sk-Pl4ntedVirtualKey0123456789 rejected\n"
-        "harmless http://db.example.com/path@ref and disk-usage_report_nightly_x\n",
-        encoding="utf-8",
-    )
-
-    r = _run(tree, "report")
-
-    assert r.returncode == 0, r.stdout + r.stderr
-    body = _reports(tree)[0].read_text(encoding="utf-8", errors="replace")
+    _tree, _r, body = planted
     assert "Pl4nted" not in body, body.split("== the processes", 1)[1][:800]
     assert "postgresql://[REDACTED:url-userinfo]@db.example.com:5432/x" in body
     assert "Authorization: Bearer [REDACTED:bearer-token]" in body
@@ -234,32 +259,18 @@ def test_credential_shapes_are_redacted_whether_or_not_env_knows_them(tree: Path
     assert "harmless http://db.example.com/path@ref and disk-usage_report_nightly_x" in body
 
 
-def test_container_logs_go_through_the_filter_too(tree: Path):
+@drives_installer
+def test_container_logs_go_through_the_filter_too(planted):
     """diagnose_sections — the compose, podman and container-log half — is the
     likeliest place for a credential of all. A stub podman prints one."""
-    stub = tree.parent / "stub"
-    stub.mkdir()
-    (stub / "podman").write_text(
-        "#!/usr/bin/env bash\n"
-        'case "$1" in\n'
-        "  ps) echo cc-litellm ;;\n"
-        f"  logs) echo 'litellm: master key {MARKERS['CC_LLM_PROXY_ADMIN_KEY']} loaded' ;;\n"
-        "esac\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    (stub / "podman").chmod(0o755)
-
-    r = _run(tree, "report", path_prefix=stub)
-
-    assert r.returncode == 0, r.stdout + r.stderr
-    body = _reports(tree)[0].read_text(encoding="utf-8", errors="replace")
+    _tree, _r, body = planted
     assert "litellm: master key [REDACTED:CC_LLM_PROXY_ADMIN_KEY] loaded" in body, (
         body.split("== last 100 log lines", 1)[-1][:600]
     )
     assert "MARKER_SECRET" not in body
 
 
+@drives_installer
 def test_the_guard_still_refuses_when_the_filter_is_defeated(tree: Path):
     """Belt and braces (D10.3): the scan is the guard nobody else has, so it
     must stay alive behind the filter. Here the filter is DEFEATED on purpose —
@@ -289,6 +300,7 @@ def test_the_guard_still_refuses_when_the_filter_is_defeated(tree: Path):
     assert not list(state.glob("*.partial")), "no half-written report may survive"
 
 
+@drives_installer
 def test_an_emptied_redaction_list_refuses_rather_than_running_unredacted(tree: Path):
     """redact.tsv is release content. A copy with no `key` row would leave the
     filter AND the scan without the list they share, so the report refuses
@@ -320,7 +332,7 @@ def _redact_rows() -> list[list[str]]:
     return rows
 
 
-def test_redact_tsv_parses_and_every_row_is_well_formed():
+def test_redact_tsv_parses_and_every_row_is_well_formed(tmp_path: Path):
     rows = _redact_rows()
     assert rows, "redact.tsv declares no rows"
     for f in rows:
@@ -335,8 +347,14 @@ def test_redact_tsv_parses_and_every_row_is_well_formed():
             assert replace == "-", f"a key row's replacement is always [REDACTED:<KEY>]: {f!r}"
         else:
             assert replace not in ("", "-") and "[REDACTED:" in replace, f
-            # The pattern must compile as the ERE the filter hands sed -E.
-            r = subprocess.run(["sed", "-E", "-e", f"s\x01{pattern}\x01{replace}\x01g"],
+            # The pattern must compile as the ERE the filter hands sed -E. The
+            # program goes in a FILE: handed to an MSYS sed as an argv from
+            # Windows Python it is re-parsed and GLOBBED (`{16,}` brace-expands
+            # into two words, `\1` loses its backslash — 2026-10-02 testbed,
+            # F15), which the filter itself never meets: it runs sed from bash.
+            script = tmp_path / f"redact-{len(pattern)}.sed"
+            script.write_bytes(f"s\x01{pattern}\x01{replace}\x01g\n".encode())
+            r = subprocess.run(["sed", "-E", "-f", script.as_posix()],
                                input="probe\n", capture_output=True, text=True)
             assert r.returncode == 0, f"{pattern!r}: {r.stderr}"
 
@@ -364,6 +382,7 @@ def test_the_filter_and_the_guard_read_one_list():
     assert "*_PASSWORD|" not in values, "the globs are redact.tsv's, not the code's"
 
 
+@drives_installer
 def test_diagnose_is_an_alias_for_report(tree: Path):
     """D10.3 retires the old bundle: one shape, and no `tail -40` window
     cutting off above wherever the run stopped."""
@@ -377,6 +396,7 @@ def test_diagnose_is_an_alias_for_report(tree: Path):
     )
 
 
+@drives_installer
 def test_the_report_names_the_state_dir_first(tree: Path):
     """The record's cap on size is "the last run, and say so in the first
     line"; the first SECTION is the state dir, because every path the rest of
@@ -386,5 +406,5 @@ def test_the_report_names_the_state_dir_first(tree: Path):
     body = _reports(tree)[0].read_text(encoding="utf-8", errors="replace")
     head = body.split("== ", 2)
     assert "state directory" in head[1], body[:600]
-    assert str(tree.parent / "state") in head[1]
+    assert env_path(tree.parent / "state") in head[1]   # the spelling .env carries
     assert "WHOLE last run" in body.splitlines()[3], body[:400]

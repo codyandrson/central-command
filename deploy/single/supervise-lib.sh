@@ -177,57 +177,110 @@ cc_render_logon_cmd() { # cc_render_logon_cmd <bash.exe, Windows form> <retry-sc
   printf '@echo off\r\n"%s" -lc "bash '\''%s'\''"\r\n' "$bashw" "$script"
 }
 
+# The Startup-folder entry, when that is the logon entry: ONE line calling the
+# state dir's wrapper, never a copy of it — so `boot` refreshes the one
+# wrapper in place and both kinds of entry run the same script. `call`, so a
+# `%` in the path is doubled like the wrapper's own.
+cc_render_logon_startup() { # cc_render_logon_startup <wrapper, Windows form>
+  printf '@echo off\r\ncall "%s"\r\n' "${1//%/%%}"
+}
+
+# WHICH logon entry this install keeps — exactly ONE, whatever ran before
+# (the 2026-10-02 testbed run's second pass, F21: an elevated first `boot`
+# registered the scheduled task, a later non-elevated logon run could not
+# re-create it and ALSO wrote the Startup entry, and both fired). The rule:
+# the scheduled task wins whenever there is one — it already exists, or this
+# run could create it — and then a Startup entry is REMOVED; only with no task
+# and no way to create one is the Startup entry written (or refreshed). Pure:
+# the caller asks schtasks and the filesystem and acts on the answer.
+#   in:  <task exists 0|1> <startup entry exists 0|1> <task created now 0|1>
+#        (the third is only consulted when the first is 0)
+#   out: "<entry> <startup-action>": task-kept|task-created|startup  and
+#        remove|leave|write
+cc_logon_entry_plan() { # cc_logon_entry_plan <task> <startup> <created>
+  local task="$1" startup="$2" created="$3" entry
+  if (( task )); then entry=task-kept
+  elif (( created )); then entry=task-created
+  else printf 'startup write'; return 0
+  fi
+  if (( startup )); then printf '%s remove' "$entry"; else printf '%s leave' "$entry"; fi
+}
+
 # The retry loop the wrapper hands to bash — a bash script, so the loop is
 # written in a language that has one. D6: the logon entry runs `./setup.sh`,
 # THE resume command, not `boot` — so after a reboot "start whatever is not
 # running" and "an install that never completed" are one code path, and the
 # second leaves a ledger row in boot-at-logon.log instead of silence.
 #
-# Two things the record did not spell out, decided here:
+# Decided here, beyond the record:
 #   * `--accept-warnings`: there is no terminal at logon, and with no terminal
 #     a WARN-only `check` STOPS the run (rustup's rule) — so every logon would
 #     end at the gate on, say, a node-version warning;
+#   * stdin is /dev/null: a logon run is headless BY DEFINITION. The task runs
+#     this in an interactive console, so stdin WAS a terminal, and every prompt
+#     keyed on `[[ -t 0 ]]` asked a question nobody could answer in a locked
+#     session — `boot/operator-name` waited forever on an install whose
+#     operator had answered in the cockpit (the 2026-10-02 testbed run's
+#     second pass, F19). With /dev/null each takes its headless branch (the
+#     check gate's [y/N] is covered by --accept-warnings anyway);
 #   * the RETRY: at logon the podman machine and its containers may still be
 #     starting, and a run that starts too early fails (exit 1). So exit 1 is
-#     retried, <delay> seconds apart, at most <attempts> times. Exit 0 and 2
-#     are done; exit 3 is the operator's move (the LiteLLM catalog, the demo
-#     approval) and retrying cannot make it; any other code is not a failure
-#     this loop understands, so it stops and says so. A stale run lock from a
-#     power cut is the driver's to reclaim (D11), not this loop's.
+#     retried, <delay> seconds apart, at most <attempts> times. Exit 3 is the
+#     operator's move (the LiteLLM catalog, the demo approval) and retrying
+#     cannot make it; any other code is not a failure this loop understands,
+#     so it stops and says so. A stale run lock from a power cut is the
+#     driver's to reclaim (D11), not this loop's;
+#   * exit 0 and 2 are NOT trusted alone: a setup.sh killed from outside
+#     reported exit 0 to its MSYS parent on Windows, and the loop logged
+#     "done" with nothing started (F23). An attempt is finished only when the
+#     DRIVER said so — its own log (<driver-log>, the state dir's
+#     setup-log.txt, which logline appends to) gained a
+#     `run end: ./setup.sh all -> exit <0|2>` line DURING this attempt. If it
+#     did not, the attempt "ended without finishing" and is retried within the
+#     same budget. The size check costs this loop a `wc`; the driver nothing.
 # Every attempt appends a timestamped line, and the driver's own output, to
 # the log. Paths are written with printf %q, so a space or a quote in either
 # cannot break the script.
-cc_render_logon_retry() { # cc_render_logon_retry <setup-dir> <log> [attempts=10] [delay=60]
-  local dir log n="${3:-10}" d="${4:-60}"
+cc_render_logon_retry() { # cc_render_logon_retry <setup-dir> <log> <driver-log> [attempts=10] [delay=60]
+  local dir log slog n="${4:-10}" d="${5:-60}"
   printf -v dir '%q' "$1"
   printf -v log '%q' "$2"
+  printf -v slog '%q' "$3"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     '# boot-at-logon.sh — written by deploy/single/setup.sh `boot`, which rewrites it on' \
     '# every run; cc-boot.cmd runs it at logon. 2026-10-01 design record, D6: run the' \
-    '# RESUME command (./setup.sh), retry while the podman machine is still starting,' \
-    '# stop at once when the run is waiting on the operator.' \
+    '# RESUME command (./setup.sh), headless, retry while the podman machine is still' \
+    '# starting, stop at once when the run is waiting on the operator.' \
     "log=$log" \
+    "slog=$slog" \
     "attempts=$n" \
     "delay=$d" \
     'stamp() { date -u +%FT%TZ; }' \
+    'size() { local s; s="$(wc -c <"$slog" 2>/dev/null)" || s=0; s="${s//[!0-9]/}"; printf %s "${s:-0}"; }' \
     "cd $dir || { printf '%s cannot cd to %s\\n' \"\$(stamp)\" $dir >>\"\$log\"; exit 1; }" \
     'n=1' \
     'while :; do' \
     '  printf '\''%s attempt %s/%s: ./setup.sh --accept-warnings\n'\'' "$(stamp)" "$n" "$attempts" >>"$log"' \
-    '  ./setup.sh --accept-warnings >>"$log" 2>&1' \
+    '  before="$(size)"' \
+    '  ./setup.sh --accept-warnings </dev/null >>"$log" 2>&1' \
     '  rc=$?' \
     '  case "$rc" in' \
-    '    0|2) printf '\''%s attempt %s/%s: exit %s — done\n'\'' "$(stamp)" "$n" "$attempts" "$rc" >>"$log"; exit "$rc" ;;' \
+    '    0|2)' \
+    '      if tail -c +"$((before + 1))" "$slog" 2>/dev/null | grep -Eq "run end: \./setup\.sh all -> exit $rc( |\$)"; then' \
+    '        printf '\''%s attempt %s/%s: exit %s — done\n'\'' "$(stamp)" "$n" "$attempts" "$rc" >>"$log"; exit "$rc"' \
+    '      fi' \
+    '      printf '\''%s attempt %s/%s: exit %s, but the driver logged no run end — it ended without finishing (killed?)\n'\'' "$(stamp)" "$n" "$attempts" "$rc" >>"$log"' \
+    '      rc=1 ;;' \
     '    3)   printf '\''%s attempt %s/%s: exit 3 — waiting on the operator; not retrying (run ./setup.sh in a terminal)\n'\'' "$(stamp)" "$n" "$attempts" >>"$log"; exit 3 ;;' \
     '    1)   ;;' \
     '    *)   printf '\''%s attempt %s/%s: exit %s — not a failure this loop retries; stopping\n'\'' "$(stamp)" "$n" "$attempts" "$rc" >>"$log"; exit "$rc" ;;' \
     '  esac' \
     '  if (( n >= attempts )); then' \
-    '    printf '\''%s attempt %s/%s: exit 1 — giving up; run ./setup.sh in a terminal, or ./setup.sh report\n'\'' "$(stamp)" "$n" "$attempts" >>"$log"' \
+    '    printf '\''%s attempt %s/%s: giving up; run ./setup.sh in a terminal, or ./setup.sh report\n'\'' "$(stamp)" "$n" "$attempts" >>"$log"' \
     '    exit 1' \
     '  fi' \
-    '  printf '\''%s attempt %s/%s: exit 1 — retrying in %ss (the podman machine may still be starting)\n'\'' "$(stamp)" "$n" "$attempts" "$delay" >>"$log"' \
+    '  printf '\''%s attempt %s/%s: retrying in %ss (the podman machine may still be starting)\n'\'' "$(stamp)" "$n" "$attempts" "$delay" >>"$log"' \
     '  n=$((n + 1))' \
     '  sleep "$delay"' \
     'done'

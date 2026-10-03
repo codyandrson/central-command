@@ -61,10 +61,14 @@ have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Ta
 # Pull every ref resolve-images.sh wrote into .env. The refs are TAGGED, not
 # digest-pinned: the lock's digest is verified at resolution time against the
 # registry, and a substituted tag is deliberately trusted from the mirror.
-# Returns 3 for the ONE seam the operator must fill (resolve-images.sh exits 3
-# when a mirror cannot serve a tag or an operator pin does not exist — nothing
-# this script can do about either), 1 for anything else. D5: a failure is never
-# reported as "stopped for your action".
+# Returns 3 for the ONE seam the operator must fill: resolve-images.sh exits 3
+# when the configured registry answered and cannot serve an image's tested
+# artifact (the locked tag absent with no substitute, or another digest under
+# it) — a `USERACTION image-<name>` naming CC_REGISTRY_* / CC_IMG_*, nothing
+# this script can do about it. 1 for anything else, including the resolver's
+# exit 1: an unreachable registry, an operator pin that is malformed or does
+# not exist, a malformed images.txt row. D5: a failure is never reported as
+# "stopped for your action".
 fetch_images() {
   local rc=0 sd=""
   local -a rargs=()
@@ -102,7 +106,7 @@ fetch_images() {
   case "$rc" in
     0) pass "resolve-images" "every image resolved to its locked tag" ;;
     2) pass "resolve-images" "resolved, with substitutions — see the WARN lines above and $STATE_DIR/installed.manifest" ;;
-    3) useraction "resolve-images" "image resolution stopped for you — the USERACTION line above names the seam (CC_REGISTRY_* for the mirror HOST, CC_IMG_<NAME> for an exact ref this resolver must use as-is). Nothing was deployed; fix the seam in the repo-root .env and re-run"
+    3) useraction "resolve-images" "image resolution stopped for you — the USERACTION image-* line(s) above name the seam (CC_REGISTRY_* for the mirror HOST, CC_IMG_<NAME> for an exact ref this resolver must use as-is). Nothing was deployed; fix the seam in the repo-root .env and re-run"
        return 3 ;;
     *) fail "resolve-images" "image resolution failed (exit $rc) — the FAIL lines above name the seam per image"; return 1 ;;
   esac
@@ -238,18 +242,7 @@ phase_fetch() {
   fi
 
   # Cockpit: `npm ci` is the acquisition; the build itself is the app phase's.
-  if command -v node >/dev/null 2>&1; then
-    local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
-    if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
-      in_web npm ci >&2 \
-        && pass "cockpit" "npm tree installed from ${CC_NPM_REGISTRY:-registry.npmjs.org}" \
-        || fail "cockpit" "npm ci failed — seam: CC_NPM_REGISTRY"
-    else
-      warn "cockpit" "node v$nv is older than 22 — cockpit not fetched; the API runs without it"
-    fi
-  else
-    warn "cockpit" "node not found — cockpit not fetched; the API runs without it"
-  fi
+  fetch_cockpit
 
   if (( FAILS )); then
     # The guidance survives; the USERACTION does not. It was what made a failed
@@ -264,9 +257,51 @@ phase_fetch() {
   return 0
 }
 
+# The cockpit's acquisition: its npm tree, when node 22+ is there to use it.
+fetch_cockpit() {
+  if command -v node >/dev/null 2>&1; then
+    local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
+    if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
+      fetch_cockpit_npm
+    else
+      warn "cockpit" "node v$nv is older than 22 — cockpit not fetched; the API runs without it"
+    fi
+  else
+    warn "cockpit" "node not found — cockpit not fetched; the API runs without it"
+  fi
+}
+
+# `npm ci` only when the tree is not already the lockfile's (P5, F12): the
+# 2026-10-02 Windows run spent ~70 s reinstalling an unchanged tree on every
+# fetch, adoption included. CURRENT means web/node_modules is there AND
+# `<state>/cockpit.npm-inputs` equals the hash of the lockfile and node's major
+# version now (deploy/env-lib.sh's cc_cockpit_current — the same question
+# p_cockpit_npm asks, so the plan agrees). The record is dropped BEFORE
+# `npm ci` starts (it empties node_modules first, and a run killed half-way
+# must not read current) and written only after it succeeded. A STAGED run
+# (update.sh apply's acquisition) installs into a throwaway tree, so it never
+# skips on, and never writes, the deployment's record — the post-merge fetch
+# would otherwise skip an install the new lockfile needs.
+fetch_cockpit_npm() {
+  if (( ! STAGED )) && cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"; then
+    pass "cockpit" "npm tree current — web/node_modules was installed from this package-lock.json (and this node major), so npm ci was skipped"
+    return 0
+  fi
+  (( STAGED )) || cc_cockpit_forget "$STATE_DIR" npm
+  if in_web npm ci >&2; then
+    (( STAGED )) || cc_cockpit_record "$STATE_DIR" npm "$REPO_ROOT" \
+      || warn "cockpit" "could not record the npm tree's inputs in $(cc_cockpit_record_file "$STATE_DIR" npm) — the next run reinstalls it"
+    pass "cockpit" "npm tree installed from ${CC_NPM_REGISTRY:-registry.npmjs.org}"
+  else
+    fail "cockpit" "npm ci failed — seam: CC_NPM_REGISTRY"
+  fi
+}
+
+# Present AND installed from this lockfile: a changed package-lock.json (or a
+# new node major) reads false, so the plan says WILL RUN and the row re-runs.
 p_cockpit_npm() {
   p_node_ok || return 0
-  [[ -d "$REPO_ROOT/web/node_modules" ]]
+  cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"
 }
 
 # ── fetch ───────────────────────────────────────────────────────────────────

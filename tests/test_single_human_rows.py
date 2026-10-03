@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from tests.installer_source import drives_installer, with_stub_path, write_lf
 from tests.test_single_driver_ledger import (  # noqa: F401  (tree is a fixture)
     ROOT,
     _bash_exe,
@@ -125,6 +126,7 @@ def _check(repo: Path, ca: str | None):
     return _run(repo, "check")
 
 
+@drives_installer
 def test_ca_unset_is_done(tree: Path):
     r = _check(tree, None)
     assert r.returncode in (0, 2), r.stdout + r.stderr
@@ -132,6 +134,7 @@ def test_ca_unset_is_done(tree: Path):
     assert _ledger(tree)["check/ca-bundle"][1] == "done"
 
 
+@drives_installer
 def test_ca_set_and_absent_stops_for_the_operator_naming_the_key_and_the_path(tree: Path):
     missing = tree.parent / "corp" / "ca-bundle.pem"
     r = _check(tree, missing.as_posix())
@@ -147,6 +150,7 @@ def test_ca_set_and_absent_stops_for_the_operator_naming_the_key_and_the_path(tr
     assert row[1] == "gate" and "YOUR MOVE" in row[5], row
 
 
+@drives_installer
 def test_ca_set_and_empty_is_not_placed(tree: Path):
     empty = tree.parent / "empty.pem"
     empty.write_text("", encoding="utf-8")
@@ -157,6 +161,7 @@ def test_ca_set_and_empty_is_not_placed(tree: Path):
     assert _ledger(tree)["check/ca-bundle"][1] == "gate"
 
 
+@drives_installer
 def test_ca_placed_is_done_and_check_goes_on(tree: Path):
     pem = tree.parent / "corp-ca.pem"
     pem.write_text("-----BEGIN CERTIFICATE-----\nMIIBplaceholder\n-----END CERTIFICATE-----\n", encoding="utf-8")
@@ -230,10 +235,11 @@ def _stack(repo: Path, *, n8n: str, creds: tuple[str, ...] = (), calendar: str =
     stub.mkdir(exist_ok=True)
     bindir = repo.parent / "bin"
     bindir.mkdir(exist_ok=True)
-    (bindir / "podman").write_text(_PODMAN, encoding="utf-8")
-    (bindir / "podman").chmod(0o755)
+    write_lf(bindir / "podman", _PODMAN, mode=0o755)
     if creds:
-        (stub / "creds").write_text("".join(c + "\n" for c in creds), encoding="utf-8")
+        # LF on every OS: the stub's `read -r` keeps a CR, and "Gmail account\r"
+        # matches no name the probe asks for (F15, Windows).
+        write_lf(stub / "creds", "".join(c + "\n" for c in creds))
     if down:
         (stub / "n8n-down").write_text("", encoding="utf-8")
     _append_stubs(repo, _STACK_STUBS + _WORKFLOWS_STUB)
@@ -242,12 +248,13 @@ def _stack(repo: Path, *, n8n: str, creds: tuple[str, ...] = (), calendar: str =
     # Every row before stack is done at this release, so the ledger lets it run.
     phases_before = ("check", "machine", "fetch", "llm")
     _write_ledger(repo, [(f"{r[0]}/{r[1]}", "done") for r in _rows() if r[0] in phases_before])
-    r = _run(repo, "stack", env_extra={"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
-                                       "STUB": str(stub)})
+    stubbed = with_stub_path({"PATH": os.environ["PATH"]}, bindir)
+    r = _run(repo, "stack", env_extra={**stubbed, "STUB": stub.as_posix()})
     log = (stub / "log").read_text(encoding="utf-8") if (stub / "log").exists() else ""
     return r, log
 
 
+@drives_installer
 def test_n8n_off_is_done_and_n8n_is_never_asked(tree: Path):
     r, log = _stack(tree, n8n="0")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -256,6 +263,7 @@ def test_n8n_off_is_done_and_n8n_is_never_asked(tree: Path):
     assert _ledger(tree)["stack/n8n-credential"][1] == "done"
 
 
+@drives_installer
 def test_n8n_on_without_the_credential_stops_naming_it_and_the_ui(tree: Path):
     r, log = _stack(tree, n8n="1")
     assert r.returncode == 3, r.stdout + r.stderr
@@ -277,6 +285,7 @@ def test_n8n_on_without_the_credential_stops_naming_it_and_the_ui(tree: Path):
     assert not any(w in log.lower() for w in ("insert", "update ", "delete", "drop ")), log
 
 
+@drives_installer
 def test_n8n_on_with_the_credential_is_done(tree: Path):
     r, _ = _stack(tree, n8n="1", creds=(GMAIL,))
     assert r.returncode == 0, r.stdout + r.stderr
@@ -284,6 +293,7 @@ def test_n8n_on_with_the_credential_is_done(tree: Path):
     assert _ledger(tree)["stack/n8n-credential"][1] == "done"
 
 
+@drives_installer
 def test_calendar_token_and_only_gmail_stops_naming_exactly_the_calendar_credential(tree: Path):
     """make-secrets.sh generates CC_CALENDAR_FACADE_TOKEN, so the import will
     bring the calendar pair and its credential. The stop is HERE, on the
@@ -301,6 +311,7 @@ def test_calendar_token_and_only_gmail_stops_naming_exactly_the_calendar_credent
     assert any(f"name = '{CALENDAR}'" in l for l in asked), asked
 
 
+@drives_installer
 def test_calendar_token_and_both_credentials_is_done(tree: Path):
     r, log = _stack(tree, n8n="1", creds=(GMAIL, CALENDAR), calendar="cal-token")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -315,6 +326,7 @@ def test_calendar_token_and_both_credentials_is_done(tree: Path):
                for l in probe), probe
 
 
+@drives_installer
 def test_n8n_database_that_does_not_answer_is_a_fail_not_a_gate(tree: Path):
     """Waiting on the operator is exit 3; a database that cannot be asked is
     not the operator's move."""

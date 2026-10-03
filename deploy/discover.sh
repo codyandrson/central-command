@@ -242,7 +242,9 @@ load_conf() {
   DISCO_PROXY="${CC_PROXY:-}"
   DISCO_NETRC="${CC_NETRC:-0}"
   DISCO_INSECURE="${CC_TLS_INSECURE:-0}"
-  [[ -n "${CC_PYPI_INDEX_URL:-}" ]]      && DISCO_MIRROR_PYPI="$CC_PYPI_INDEX_URL"
+  # A simple index is probed at ONE PROJECT'S page, never its root (see the
+  # `pypi` catalog row): a mirror's root lists every project it holds.
+  [[ -n "${CC_PYPI_INDEX_URL:-}" ]]      && DISCO_MIRROR_PYPI="${CC_PYPI_INDEX_URL%/}/${PYPI_PROBE_PROJECT}/"
   [[ -n "${CC_NPM_REGISTRY:-}" ]]        && DISCO_MIRROR_NPM="$CC_NPM_REGISTRY"
   [[ -n "${CC_APT_MIRROR:-}" ]]          && DISCO_MIRROR_DEB_DEBIAN="$CC_APT_MIRROR"
   [[ -n "${CC_APT_SECURITY_MIRROR:-}" ]] && DISCO_MIRROR_DEB_SECURITY="$CC_APT_SECURITY_MIRROR"
@@ -440,6 +442,11 @@ record_note() { # record_note <key> <label> <group> <class> <detail> [extra k=v 
 # key|label|url|group. Fixed order — the report renders in catalog order, not
 # in whatever order the parallel jobs happened to finish.
 CATALOG=()
+# The PyPI project the `pypi` row (and a configured PyPI mirror) is asked for —
+# small, and in requirements.lock. deploy/single/phases/check.sh's
+# INDEX_PROBE_PYPI_PROJECT is the same name; tests/test_single_check_is_dry.py
+# holds the two together and to the lockfile.
+PYPI_PROBE_PROJECT=h11
 add() { CATALOG+=("$1|$2|$3|$4"); }
 
 build_catalog() {
@@ -450,8 +457,13 @@ build_catalog() {
   add http-egress   "plain HTTP egress"        "http://deb.debian.org"    net
   add https-egress  "HTTPS egress + TLS check" "https://pypi.org"         net
 
-  # python
-  add pypi          "PyPI simple index"        "https://pypi.org/simple/"      python
+  # python — the simple index at one project's page, not its root: the root
+  # lists every project on PyPI (46.7 MB measured 2026-10-02, 5-6.5 s on the
+  # testbed), which an 8 s probe timed out on with nothing wrong but the
+  # bandwidth. The project is one the install itself resolves
+  # (requirements.lock), so a mirror probed the same way holds it too; the
+  # same choice as `./setup.sh check`'s index-pypi row.
+  add pypi          "PyPI simple index"        "https://pypi.org/simple/${PYPI_PROBE_PROJECT}/" python
   add pythonhosted  "PyPI package files"       "https://files.pythonhosted.org" python
   local pipidx=""
   if command -v pip >/dev/null 2>&1; then

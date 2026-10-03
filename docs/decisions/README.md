@@ -207,3 +207,8 @@ recorded in-repo." rather than inventing one.
 | DL-121 | The operator's procedure is generated from the manifest, and documents link to it | active | 2026-10-02 | test: `tests/test_single_checklist.py` | [process.md](process.md) |
 | DL-122 | One file per manifest phase, and one helper that defines "the installer's source" | active | 2026-10-02 | test: `tests/test_single_phase_files.py` | [process.md](process.md) |
 | DL-123 | No operator-facing line names a phase to run | active | 2026-10-02 | test: `tests/test_single_no_phase_hints.py` | [process.md](process.md) |
+| DL-124 | The self-check's mail row asks what the app does, not what the installer generated | active | 2026-10-02 | test: `tests/test_selfcheck.py` | [process.md](process.md) |
+| DL-125 | A row the phase never reached is pending, a pause is a gate, and every reporter line names a row | active | 2026-10-02 | test: `tests/test_single_driver_ledger.py` | [process.md](process.md) |
+| DL-126 | The import unpacks with the install's own Python, never `unzip` | active | 2026-10-02 | test: `tests/test_single_release_zip.py` | [process.md](process.md) |
+| DL-127 | The driver's hot paths start no program | active | 2026-10-02 | test: `tests/test_single_driver_forks.py` | [process.md](process.md) |
+| DL-128 | A test that drives the real installer has its own ceiling and cannot end the session | active | 2026-10-02 | script: `tests/installer_source.py` | [process.md](process.md) |

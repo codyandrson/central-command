@@ -26,10 +26,11 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests.installer_source import drives_installer, env_path, run_driver, write_lf
 
 ROOT = Path(__file__).resolve().parents[1]
 STEPS = ROOT / "deploy" / "single" / "steps.tsv"
@@ -112,7 +113,7 @@ def tree(tmp_path: Path) -> Path:
     state = tmp_path / "state"
     state.mkdir()
     _set(repo / ".env", {
-        "CC_STATE_DIR": str(state),
+        "CC_STATE_DIR": env_path(state),
         "CC_LITELLM_PORT": NOWHERE_PORT,
         "CC_LLM_BASE_URL": f"http://127.0.0.1:{NOWHERE_PORT}",
         # P2's acceptance input: the spine key is EMPTY.
@@ -142,18 +143,23 @@ def _fake_module(repo: Path, stdout: str, rc: int, stderr: str = "") -> Path:
     log = work / "sc.calls"
     py = repo / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True, exist_ok=True)
-    py.write_text(
+    write_lf(
+        py,
         "#!/usr/bin/env bash\n"
-        f"printf '%s|%s\\n' \"$PWD\" \"$*\" >> '{log}'\n"
+        # The cwd in the spelling Python reads back: under Git Bash $PWD is
+        # `/tmp/…` or `/c/…`, which Windows Python resolves to `C:\\tmp\\…` —
+        # a different directory (F15). `cygpath -m` gives `C:/…`; elsewhere
+        # there is no cygpath and $PWD is already the path.
+        'cwd="$PWD"; command -v cygpath >/dev/null 2>&1 && cwd="$(cygpath -m "$PWD")"\n'
+        f"printf '%s|%s\\n' \"$cwd\" \"$*\" >> '{log.as_posix()}'\n"
         'if [ "$1" = "-m" ] && [ "$2" = "central_command.selfcheck" ]; then\n'
-        f"  cat '{work / 'sc.out'}'\n"
-        f"  cat '{work / 'sc.err'}' >&2\n"
-        f"  exit \"$(cat '{work / 'sc.rc'}')\"\n"
+        f"  cat '{(work / 'sc.out').as_posix()}'\n"
+        f"  cat '{(work / 'sc.err').as_posix()}' >&2\n"
+        f"  exit \"$(cat '{(work / 'sc.rc').as_posix()}')\"\n"
         "fi\n"
         "exit 0\n",
-        encoding="utf-8",
+        mode=0o755,
     )
-    py.chmod(0o755)
     return log
 
 
@@ -180,11 +186,7 @@ def _run(repo: Path, *args: str, env_extra: dict[str, str] | None = None):
                   "VIRTUAL_ENV"):
         env.pop(stale, None)
     env.update(env_extra or {})
-    return subprocess.run(
-        [_bash_exe(), "setup.sh", *args],
-        cwd=repo / "deploy" / "single",
-        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300, env=env,
-    )
+    return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
 
 
 def _write_ledger(repo: Path, rows: list[tuple[str, str]]) -> Path:
@@ -233,6 +235,7 @@ def test_boot_and_demo_require_the_selfcheck_row():
 # ── P2's acceptance: an empty spine key cannot reach boot ───────────────────
 
 
+@drives_installer
 def test_an_empty_spine_key_cannot_reach_boot(tree: Path):
     """Everything up to `verify` is recorded done — the exact 2026-10-01 shape,
     where the earlier rows were green and the key was empty — and `boot` is
@@ -247,6 +250,7 @@ def test_an_empty_spine_key_cannot_reach_boot(tree: Path):
     assert not (_state_dir(tree) / "uvicorn.pid").exists()
 
 
+@drives_installer
 def test_a_failing_selfcheck_leaves_the_row_not_done_and_boot_refused(tree: Path):
     _write_ledger(tree, _rows_through(BEFORE_VERIFY))
     _fake_module(
@@ -282,6 +286,7 @@ def test_a_failing_selfcheck_leaves_the_row_not_done_and_boot_refused(tree: Path
     assert "FAIL boot: requires verify/selfcheck, which is done" not in b.stdout
 
 
+@drives_installer
 def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
     """Under their OWN names, through this script's pass/warn/fail — so they
     land in the run's log (and in a report) like any other line. WARN-only is
@@ -320,6 +325,7 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
     assert _ledger_status(tree, "verify/selfcheck") != "done"
 
 
+@drives_installer
 def test_a_module_that_prints_nothing_is_a_fail(tree: Path):
     """An import error — the module absent from the install, a syntax error —
     is not "no checks failed"."""
@@ -336,6 +342,7 @@ def test_a_module_that_prints_nothing_is_a_fail(tree: Path):
     assert _ledger_status(tree, "verify/selfcheck") != "done"
 
 
+@drives_installer
 def test_a_module_that_crashes_part_way_is_a_fail(tree: Path):
     _write_ledger(tree, _rows_through(BEFORE_VERIFY))
     _fake_module(tree, "PASS selfcheck-spine: ok\n", rc=1, stderr="Traceback ...\n")
@@ -346,6 +353,7 @@ def test_a_module_that_crashes_part_way_is_a_fail(tree: Path):
     assert row and "exited 1 without a FAIL line" in row[0], r.stdout
 
 
+@drives_installer
 def test_no_venv_is_a_fail_naming_it(tree: Path):
     _write_ledger(tree, _rows_through(BEFORE_VERIFY))
 
@@ -359,6 +367,7 @@ def test_no_venv_is_a_fail_naming_it(tree: Path):
 # ── status runs it too, in full ─────────────────────────────────────────────
 
 
+@drives_installer
 def test_status_runs_the_module_without_pre_boot(tree: Path):
     """"status prints the ledger and the self-check" (D3) — after boot the
     cockpit and the sandbox are part of what the agents rely on, so status
@@ -390,6 +399,7 @@ def _reports(repo: Path) -> list[Path]:
     return sorted(_state_dir(repo).glob("report-*.txt"))
 
 
+@drives_installer
 def test_the_report_carries_the_selfcheck_lines(tree: Path):
     _fake_module(tree, "FAIL selfcheck-proxy-as-app: CC_LLM_API_KEY is empty\n", rc=1)
 
@@ -408,6 +418,7 @@ def test_the_report_carries_the_selfcheck_lines(tree: Path):
     assert body.index("== the ledger") < body.index("== the self-check") < body.index("== the whole log")
 
 
+@drives_installer
 def test_the_report_survives_an_absent_module(tree: Path):
     """A report is collected FROM a broken install: no venv, or a module that
     will not import, is printed — never a reason to abort the report."""

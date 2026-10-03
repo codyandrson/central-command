@@ -108,6 +108,20 @@ testpaths = ["tests"]
 # backend, and with that backend off they do not fail — they hang. The Windows
 # testbed's "11-hour suite" was almost certainly this. 120 s is far above the
 # slowest honest test and far below "nobody is watching any more".
+#
+# What a timeout DOES depends on the platform. With SIGALRM (Linux, macOS)
+# pytest-timeout's `signal` method fails THAT test and the session goes on.
+# Windows has no SIGALRM, so only the `thread` method exists there: it dumps
+# every stack and `os._exit`s the WHOLE pytest process — no summary, no list of
+# results (2026-10-02 testbed, F13: one 120 s overrun at ~79 % ended the
+# session). Neither `timeout_method` nor `timeout_func_only` changes that —
+# func_only only moves the clock off fixture setup/teardown. So a timeout on
+# Windows must never be reached by an honest test: every test that drives
+# the REAL ./setup.sh / ./update.sh (up to ~300 s each on Windows) carry
+# `@drives_installer` — tests/installer_source.py, ONE number for all of them —
+# and run the script through `run_driver`, which enforces its own per-run
+# limit, kills the invocation's process tree and fails that test itself, on
+# every platform, before this backstop could fire. Everything else keeps 120 s.
 timeout = 120
 markers = [
     "graph_live: performs a LIVE knowledge-graph read (embedder/LLM must answer). conftest's session preflight skips these when the backend does not answer within 10 s.",

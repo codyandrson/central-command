@@ -600,8 +600,11 @@ equals the deployed one the import skips the whole subtree: `PASS vendor-docs:
 unchanged since the deployed release (manifest match)`. That is the difference
 between a minute and over an hour on NTFS with Defender. `changed — full sync`
 and `WARN … no manifest on one side — full sync` are the honest slow paths.
-`unzip` warning about anything at all is a `FAIL` — re-download the zip; a
-truncated or link-less tree is not the release.
+The zip is read by `deploy/single/release-zip.py` with the Python the install
+already uses — no `unzip` on any host — and anything it cannot unpack exactly
+(a corrupt archive, an entry that would land outside the tree) is a `FAIL
+extract` naming the entry; the release's symlinks are recorded into the import
+commit as git links rather than written to disk.
 
 What `apply` does, in load-bearing order: ACQUIRE the new release from a
 staged copy before anything moves (its local images are built under an aside

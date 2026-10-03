@@ -132,7 +132,12 @@
 # exit. -u and pipefail still hold.
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# `dirname`'s answer by parameter expansion: no process for it (P5 — on Git
+# Bash a fork is the cost of every line before the first output).
+_cc_src="${BASH_SOURCE[0]}"
+case "$_cc_src" in */*) _cc_src="${_cc_src%/*}"; _cc_src="${_cc_src:-/}" ;; *) _cc_src="." ;; esac
+HERE="$(cd "$_cc_src" && pwd)"
+unset _cc_src
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # ONE answer file (2026-09-23 design record, D1): the repo-root .env holds the
 # app's configuration AND this profile's. deploy/single/.env is retired and is
@@ -219,20 +224,11 @@ unset _cc_phase
 # bytes inside otherwise-UTF-8 output (2026-09-03 Windows run: `�`).
 export PYTHONUTF8=1
 
-# Windows has no real python3: the WindowsApps stub answers `command -v` but
-# exits 49 (2026-08-21 Windows validation, W2) — so probe by RUNNING it.
-PY=""
-for c in python3 python; do
-  command -v "$c" >/dev/null 2>&1 && "$c" -c '' 2>/dev/null && { PY="$c"; break; }
-done
-# --no-project is load-bearing: without it `uv run` DISCOVERS pyproject.toml
-# from the cwd (these scripts run inside the checkout), SYNCS the project —
-# a universal resolution of every platform, which a Windows mirror holding
-# only Windows wheels cannot satisfy — and writes uv.lock into the tree. On
-# the Windows testbed (2026-09-25, CC_AIRGAP=1 against a local mirror) every
-# `$PY` call in the llm section died with "No solution found ... uvloop" and
-# the endpoint looked empty. The fallback is an INTERPRETER, not a project.
-[[ -n "$PY" ]] || PY="uv run --no-project --python 3.12 python"
+# The interpreter: a real python3/python probed by RUNNING it (the Windows
+# stub exits 49), else `uv run --no-project --python 3.12 python` — the
+# reasons for both live with the ONE definition, deploy/env-lib.sh's
+# cc_resolve_py, which update.sh's importer uses too.
+PY="$(cc_resolve_py)"
 # $PY may be multiple words (the uv fallback) — always invoke it unquoted.
 
 # ── output protocol ─────────────────────────────────────────────────────────
@@ -262,11 +258,20 @@ LEDGER=""
 # key answers /v1/models) held is how a failed verify was written down `done`
 # and the next ./setup.sh skipped it. FAIL outranks USERACTION here exactly as
 # it does in the exit code (D5): a later USERACTION never overwrites a FAIL.
+#
+# A PASS or a WARN is recorded too (P5, the first laptop acceptance run): it
+# says the step RAN, which is the one thing a probe cannot tell the ledger
+# about a row the phase never reached. Never over a FAIL or a USERACTION — the
+# word that stopped the step is the one that stands — and with no STEP_MSG,
+# because `reason` is the stop's message and a step that passed has none.
 declare -A STEP_MSG=()
 declare -A STEP_SAID=()
-logline() { printf '%s %s %s\n' "$(date -u +%FT%TZ)" "${CURPHASE:-run}" "$*" >>"$LOGFILE" 2>/dev/null || true; }
-pass() { printf 'PASS %s: %s\n' "$1" "$2"; PASSES=$((PASSES+1)); logline "PASS $1: $2"; }
-warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); logline "WARN $1: $2"; }
+# The stamp is cc_now_utc's (env-lib.sh): `date -u +%FT%TZ`'s text, with no
+# fork — every PASS/WARN/FAIL line is logged, and on Git Bash a `date` per line
+# was a visible share of a run's fixed cost (P5).
+logline() { cc_now_utc; printf '%s %s %s\n' "$NOW_UTC" "${CURPHASE:-run}" "$*" >>"$LOGFILE" 2>/dev/null || true; }
+pass() { printf 'PASS %s: %s\n' "$1" "$2"; PASSES=$((PASSES+1)); [[ -n "${STEP_SAID[$1]:-}" ]] || STEP_SAID["$1"]=PASS; logline "PASS $1: $2"; }
+warn() { printf 'WARN %s: %s\n' "$1" "$2"; WARNS=$((WARNS+1)); [[ -n "${STEP_SAID[$1]:-}" ]] || STEP_SAID["$1"]=WARN; logline "WARN $1: $2"; }
 fail() { printf 'FAIL %s: %s\n' "$1" "$2"; FAILS=$((FAILS+1)); STEP_MSG["$1"]="$2"; STEP_SAID["$1"]=FAIL; logline "FAIL $1: $2"; }
 useraction() { printf 'USERACTION %s: %s\n' "$1" "$2"; ACTIONS=$((ACTIONS+1)); [[ "${STEP_SAID[$1]:-}" == FAIL ]] || { STEP_MSG["$1"]="$2"; STEP_SAID["$1"]=USERACTION; }; logline "USERACTION $1: $2"; }
 note() { printf '%s\n' "$*" >&2; }
@@ -292,9 +297,12 @@ init_state() {
   # INSTALL_ROOT, not REPO_ROOT: the state dir's default name hashes the
   # install's path, and a STAGED run must land in the deployment's (the run
   # lock it nests under lives there) rather than one named after the worktree.
-  STATE_DIR="$(cc_state_dir "$ENV_FILE" "$INSTALL_ROOT")" \
-    || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
-  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  if cc__state_dir_into "$ENV_FILE" "$INSTALL_ROOT"; then
+    STATE_DIR="$STATE_DIR_OUT"
+  else
+    STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
+  fi
+  [[ -d "$STATE_DIR" ]] || mkdir -p "$STATE_DIR" 2>/dev/null || true
   LOGFILE="$STATE_DIR/setup-log.txt"
   # THE LEDGER (D2), created EMPTY by every command — configure and check
   # included. Its existence is what says "this tree is a deployment", so it may
@@ -314,10 +322,20 @@ init_state() {
 # ONCE, by check's own row, as the USERACTION that names ./update.sh init —
 # otherwise a fresh zip install would be unable to run a single phase before
 # somebody had created a baseline it has no way to create itself.
+#
+# A PASS is remembered for the rest of the run (P5): a full run asks this at
+# the top of every mutating phase and again as check's row's probe, and each
+# ask is a `git status` over the whole checkout — seconds on Git Bash. Nothing
+# the run does writes inside the checkout (D7, tests/test_single_no_tree_writes.py),
+# so the answer cannot change under it; a FAIL is never remembered, so the
+# refusal and its TREE_DIFF_PATHS are always taken fresh.
+TREE_PRISTINE_HELD=0
 p_tree_pristine() {
+  (( TREE_PRISTINE_HELD )) && return 0
   local rc=0
   cc_tree_diff "$REPO_ROOT" || rc=$?
   (( rc == 1 )) && return 1
+  TREE_PRISTINE_HELD=1
   return 0
 }
 
@@ -868,7 +886,10 @@ cmd_configure() { # cmd_configure <args...>
     rc=3
   fi
   note ""
-  note "next: ./setup.sh check"
+  # The checklist's next move is the one command: ./setup.sh runs the dry check
+  # first and stops there on anything it finds, so naming `check` here sent the
+  # operator (and an agent) to a second command for no gain (P5, F1).
+  note "next: ./setup.sh   (it runs the dry check first, then installs)"
   return $rc
 }
 # The credentials make-secrets.sh generates. check never generates one (that is
@@ -1381,8 +1402,14 @@ SUP_ID=""
 # the identity the state dir is named by — so two installs on one host never
 # collide (supervise-lib.sh's cc_sup_unit_name).
 sup_unit() { # sup_unit <kind>
-  [[ -n "$SUP_ID" ]] || SUP_ID="$(cc_install_id "$(cc_norm_path "$REPO_ROOT")")"
+  sup_id_load
   cc_sup_unit_name "$SUP_ID" "$1"
+}
+# SUP_ID in THIS shell. sup_unit is mostly called inside a `$(…)`, where the
+# value it caches dies with the subshell — so a command that names several
+# units (stop names three) loads it once first, and the subshells inherit it.
+sup_id_load() {
+  [[ -n "$SUP_ID" ]] || SUP_ID="$(cc_install_id "$(cc_norm_path "$REPO_ROOT")")"
 }
 sup_unit_file() { # sup_unit_file <kind>
   printf '%s/systemd/%s' "$STATE_DIR" "$(sup_unit "$1")"
@@ -1454,11 +1481,20 @@ proc_halt() { # proc_halt <pidfile> <port> <unit|''>
       sleep 1
       port_listener "$port" || return 0
     fi
-    pid="$(netstat -ano 2>/dev/null | grep LISTENING | grep ":${port} " | awk '{print $NF}' | head -1)"
-    if [[ -n "$pid" ]]; then
-      taskkill //T //F //PID "$pid" >/dev/null 2>&1
-      HALT_HOW="${HALT_HOW:+$HALT_HOW, then }taskkill /T of the listener, Windows pid $pid"
-      sleep 1
+    # The listener netstat names is killed ONLY when this install has a record
+    # of having started something on this port (a unit or a pid file, i.e.
+    # HALT_HOW is set). With no record, whatever holds the port is somebody
+    # else's — another install on the default ports, an unrelated program —
+    # and is reported, not shot: a temp-tree `stop` on a box with a live API
+    # on 8080 would otherwise have killed it (2026-10-02 review of the
+    # Windows run). Same rule as "nothing is ever killed by PORT on Linux".
+    if [[ -n "$HALT_HOW" ]]; then
+      pid="$(netstat -ano 2>/dev/null | grep LISTENING | grep ":${port} " | awk '{print $NF}' | head -1)"
+      if [[ -n "$pid" ]]; then
+        taskkill //T //F //PID "$pid" >/dev/null 2>&1
+        HALT_HOW="${HALT_HOW:+$HALT_HOW, then }taskkill /T of the listener, Windows pid $pid"
+        sleep 1
+      fi
     fi
     port_listener "$port" || return 0
   fi
@@ -1514,6 +1550,7 @@ cmd_stop() {
     fail "stop" "could not load $ENV_FILE (the line above says why), so this install's ports are unknown — nothing was stopped, and nothing is proven down"
     return 1
   fi
+  sup_id_load
   stop_listener cockpit "$STATE_DIR/cockpit.pid" "$(cockpit_port)" cockpit
   if [[ "$(p_flag CC_ENABLE_SANDBOX 1)" == 1 || -f "$STATE_DIR/sandbox.pid" || -f "$(sup_unit_file sandbox)" ]]; then
     stop_listener sandbox "$STATE_DIR/sandbox.pid" "$(sandbox_port)" sandbox
@@ -1967,7 +2004,7 @@ cmd_report() {
 # WHERE THEY LIVE (v2.58.0, D11): a probe one phase's rows read is defined in
 # that phase's file, deploy/single/phases/<phase>.sh. Defined HERE are the
 # helpers every probe uses and the probes more than one phase reads (or the
-# driver itself does: p_tree_pristine above, p_catalog_aliases for `acquire`).
+# driver itself does: p_tree_pristine above, p_catalog_filled for `acquire`).
 
 # A flag's effective value: this shell's (load_env has sourced .env), else the
 # answer file's, else the default load_env would have applied.
@@ -2040,15 +2077,83 @@ p_models_json() {
     | curl -fsS -m 15 -H @- "http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/v1/models" 2>/dev/null
 }
 
-# The gate's probe (llm/catalog-filled): every alias THIS deployment requires
-# answers /v1/models through the admin key. cc_required_aliases is the ONE list.
+# cc_required_aliases (the ONE list) with CC_ENABLE_SPEECH read the way every
+# probe reads a flag (p_flag): the process's value, else .env's. A probe is
+# asked by the PLAN before load_env has exported .env, and cc_required_aliases
+# reads only the environment, whose default is speech ON: a deployment with
+# CC_ENABLE_SPEECH=0 and the cc-tts/cc-stt skeletons left unfilled (the normal
+# case) was judged on six aliases there and on four by the phase — `llm` ran
+# again on every ./setup.sh as "catalog-filled ... reads false now (drift)",
+# and the probe memo carried the plan's false into the loop (the 2026-10-02
+# testbed run's second pass, F18). Once exported, no .env read and no fork.
+catalog_required_aliases() {
+  local speech="${CC_ENABLE_SPEECH:-}"
+  [[ -n "$speech" ]] || speech="$(p_flag CC_ENABLE_SPEECH 1)"
+  CC_ENABLE_SPEECH="$speech" cc_required_aliases
+}
+
+# llm/catalog's probe: every alias THIS deployment requires answers /v1/models
+# through the admin key — registered, as a real row or as a skeleton (a
+# skeleton IS the catalog step's effect; whether it is filled in is the next
+# row's question, p_catalog_filled). cc_required_aliases is the ONE list.
 p_catalog_aliases() {
   local listed a
   listed="$(p_models_json)" || return 1
-  for a in $(cc_required_aliases); do
+  for a in $(catalog_required_aliases); do
     [[ "$listed" == *"\"$a\""* ]] || return 1
   done
   return 0
+}
+
+# The required aliases the catalog does NOT hold FILLED IN, one per line —
+# absent, or still carrying register-models.py's PLACEHOLDER token in a
+# litellm_param it owns (model, api_base, timeout, mode: its OWNED tuple, and
+# the convention .claude/rules/deploy-single.md and models.json describe). Read
+# from GET /model/info under the ADMIN key — the call register-models.py itself
+# judges rows by; /v1/models lists a skeleton exactly like a real row, which is
+# why `catalog` (skeletons registered) and `catalog-filled` (the operator has
+# filled them) need two different questions. Every row of an alias counts: one
+# skeleton beside a real deployment still routes requests to PLACEHOLDER.
+# -> 0 and the list (empty = every required alias is filled) · 1 the proxy
+# could not be asked, or did not answer JSON.
+#
+# The list is CR-free on every host: Windows Python writes "\r\n" to a pipe,
+# and Git Bash's $(...) strips only the LAST line's — so a two-alias answer
+# read "cc-tts\r" and every consumer that derives a key from a name, or
+# compares one, got it wrong. Stripped here, in-process.
+catalog_unfilled() {
+  local key info out
+  key="$(get_kv "$ENV_FILE" CC_LLM_PROXY_ADMIN_KEY)"
+  [[ -n "$key" ]] || return 1
+  info="$(printf 'Authorization: Bearer %s\n' "$key" \
+    | curl -fsS -m 15 -H @- "http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/model/info" 2>/dev/null)" || return 1
+  # JSON on STDIN, alias NAMES in the argv — never the key.
+  out="$($PY -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin).get("data") or []
+except Exception:
+    sys.exit(1)
+OWNED = ("model", "api_base", "timeout", "mode")
+for alias in sys.argv[1:]:
+    mine = [r for r in rows if r.get("model_name") == alias]
+    if not mine or any(isinstance((r.get("litellm_params") or {}).get(k), str)
+                       and "PLACEHOLDER" in r["litellm_params"][k]
+                       for r in mine for k in OWNED):
+        print(alias)
+' $(catalog_required_aliases) <<<"$info" 2>/dev/null)" || return 1
+  [[ -z "$out" ]] || printf '%s\n' "${out//$'\r'/}"
+}
+
+# The gate's probe (llm/catalog-filled): every alias THIS deployment requires
+# is in the catalog AND filled in. False while any of them is still a skeleton
+# — which is the pause, so the plan and `status` say "waiting on you" there
+# instead of `done` (the first laptop run, P5, read `catalog-filled done` at
+# the very stop, because the probe only asked that each alias be LISTED).
+p_catalog_filled() {
+  local unfilled
+  unfilled="$(catalog_unfilled)" || return 1
+  [[ -z "$unfilled" ]]
 }
 
 p_embed_dim() {
@@ -2076,10 +2181,30 @@ p_up_stack() {
 # THE LEDGER — what completed, at which version, with which inputs (D2)
 # ═════════════════════════════════════════════════════════════════════════════
 # The updaters read VERSION as the installed version — not git, not the tag.
+#
+# Read ONCE per run (a release's VERSION does not change under the run that is
+# installing it) and without a pipeline: it was `sed | head | tr` per call, and
+# the plan, the `started` mark, every record and every skip ask for it. The
+# answer is the same: the first line starting `version=`, minus that prefix,
+# with every space and CR deleted; `unknown` when there is none.
+# installed_version_load sets INSTALLED_VERSION in this shell (the ledger's
+# callers use it, so even the `$(…)` is gone); installed_version prints it.
+INSTALLED_VERSION=""
+installed_version_load() {
+  [[ -n "$INSTALLED_VERSION" ]] && return 0
+  local line v=""
+  if [[ -f "$REPO_ROOT/VERSION" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" == version=* ]] || continue
+      v="${line#version=}"; v="${v//[ $'\r']/}"
+      break
+    done <"$REPO_ROOT/VERSION"
+  fi
+  INSTALLED_VERSION="${v:-unknown}"
+}
 installed_version() {
-  local v
-  v="$(sed -n 's/^version=//p' "$REPO_ROOT/VERSION" 2>/dev/null | head -1 | tr -d ' \r')"
-  printf '%s' "${v:-unknown}"
+  installed_version_load
+  printf '%s' "$INSTALLED_VERSION"
 }
 
 # The whole ledger, as a table. On stdout, because it is the answer to
@@ -2099,10 +2224,16 @@ ledger_table() {
       "$(cc_lock_pid_is_run "$RUN_LOCK_HOLDER_PID" && printf 'alive' || printf 'gone — the next ./setup.sh reclaims it')"
   fi
   printf '%-34s %-7s %-9s %-21s %s\n' "step" "status" "version" "at" "reason"
-  while IFS= read -r line; do
-    IFS=$'\t' read -r step st ver at fp reason <<<"$line"
-    printf '%-34s %-7s %-9s %-21s %s\n' "$step" "$st" "$ver" "$at" "${reason:--}"
-  done < <(cc_ledger_read "$LEDGER")
+  # cc_ledger_read's lines (CR dropped, blanks and comments skipped), read here
+  # rather than through its process substitution.
+  if [[ -f "$LEDGER" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      [[ -z "$line" || "$line" == '#'* ]] && continue
+      IFS=$'\t' read -r step st ver at fp reason <<<"$line"
+      printf '%-34s %-7s %-9s %-21s %s\n' "$step" "$st" "$ver" "$at" "${reason:--}"
+    done <"$LEDGER"
+  fi
   return 0
 }
 
@@ -2111,14 +2242,38 @@ ledger_table() {
 # once the phase has passed its ledger gate — a REFUSED phase did not start,
 # and a phase skipped as done is not run at all.
 ledger_mark_started() { # ledger_mark_started <phase>
-  cc_ledger_mark_started "$LEDGER" "$1" "$(installed_version)" "$(date -u +%FT%TZ)" "$ENV_FILE" \
+  cc_now_utc; installed_version_load
+  cc_ledger_mark_started "$LEDGER" "$1" "$INSTALLED_VERSION" "$NOW_UTC" "$ENV_FILE" \
     || warn "ledger" "could not mark $1's rows started in $LEDGER — if this run is interrupted the ledger will not say where"
   return 0
 }
 
-# After the phase function returns: record EVERY row of the phase from the
-# reality its probe reads, never from what the phase said it did — except that
-# a row that SAID it failed failed (STEP_SAID above).
+# After the phase function returns: record EVERY row of the phase, in manifest
+# order, from what the step SAID this run and — only where it said nothing and
+# nothing before it stopped — from the reality its probe reads:
+#
+#   printed FAIL        -> failed, reason = that message. The probe proves an
+#                          effect EXISTS; it cannot unsay a step that reported
+#                          it did not do its job (v2.56.0).
+#   printed USERACTION  -> gate, reason = that message: the operator's move.
+#   printed PASS/WARN   -> done if its probe holds; if not, a FAIL naming the
+#                          row — it said it did its job and the effect is not
+#                          there.
+#   printed NOTHING     -> if an EARLIER row of this phase is failed or gate
+#                          this run (and the phase did not report success), the
+#                          phase never reached it: `pending`, with no reason,
+#                          and its probe is never asked. A probe reads an
+#                          effect, and an effect left by an earlier run is not
+#                          this run's — the first laptop acceptance run (P5)
+#                          recorded the rows after a FAILed app/mint-key as
+#                          `done` where the configure-born .env already held
+#                          their key, and `failed` with an EMPTY reason where it
+#                          did not, and D9's own sentence is "every later app
+#                          row pending".
+#                          Otherwise (nothing earlier stopped; the row simply
+#                          prints no line of its own) the probe decides, as it
+#                          always has: done, or failed — or `gate` for a
+#                          `gate`/`human` row, which is waiting, not broken.
 #
 # `<phase-reported-success>` is "no FAIL and no USERACTION" — and a row probing
 # false after that is the defect this whole mechanism exists for: the step after
@@ -2127,51 +2282,76 @@ ledger_mark_started() { # ledger_mark_started <phase>
 # All of the phase's rows are written in ONE rewrite, overwriting the
 # `started` mark ledger_mark_started left on each.
 ledger_record() { # ledger_record <phase> <phase-reported-success:0|1>
-  local phase="$1" ok="$2" step kind probe qual fp st now ver reason said
+  local phase="$1" ok="$2" step kind probe qual fp st now ver reason said stopped=0
   local rows=()
-  now="$(date -u +%FT%TZ)"
-  ver="$(installed_version)"
-  while IFS= read -r step; do
+  cc_now_utc; now="$NOW_UTC"
+  installed_version_load; ver="$INSTALLED_VERSION"
+  # Every row's fingerprint in one hasher process (ledger-lib.sh).
+  cc_fingerprint_prime_rows "$ENV_FILE" "$phase"
+  # Every probe below runs with stdin from /dev/null: this loop used to READ
+  # the phase's step names from its stdin (a probe that read stdin swallowed
+  # the rest, and those rows kept their `started` mark), and a probe has no
+  # business with the caller's stdin either way.
+  cc__phase_steps "$phase"
+  for step in ${PHASE_STEPS[@]+"${PHASE_STEPS[@]}"}; do
     [[ -n "$step" ]] || continue
     cc__step_split "$phase" "$step" || continue
     kind="$ROWDEF_KIND"; probe="$ROWDEF_PROBE"
     qual="$phase/$step"
-    fp="$(cc_fingerprint "$ENV_FILE" "$ROWDEF_READS")"
+    cc__fingerprint_into "$ENV_FILE" "$ROWDEF_READS"; fp="$FP_OUT"
     reason="${STEP_MSG[$step]:-}"
     said="${STEP_SAID[$step]:-}"
-    if [[ "$said" == FAIL ]]; then
-      # It printed FAIL <step> in this run: failed, with that message, however
-      # true its probe reads. The probe proves an effect EXISTS; it cannot
-      # unsay a step that reported it did not do its job.
-      st=failed
-    elif [[ "$said" == USERACTION ]]; then
-      # ...and a USERACTION is the operator's move: waiting, not broken.
-      st=gate
-    elif "$probe" >/dev/null 2>&1; then
-      st=done; reason=""
-      # A row whose ONLY evidence is the phase's own verdict — `p_always`: the
-      # suite's green, the catalog line that is a PASS either way — may not be
-      # recorded done on a phase that did not report success. Otherwise a RED
-      # suite, or a phase refused by the tree-pristine guard before it did
-      # anything, would write itself into the ledger as finished, which is the
-      # exact class of defect the ledger exists to end.
-      if [[ "$probe" == "p_always" ]] && (( ! ok )); then
-        st=failed
-        reason="${STEP_MSG[$step]:-the phase did not report success, and this step has no artifact of its own to read}"
-      fi
-    elif [[ "$kind" == gate || "$kind" == human ]]; then
-      # The llm catalog pause and the demo approval: not broken, waiting.
-      st=gate
-    else
-      st=failed
-    fi
-    if [[ "$st" != done ]] && (( ok )); then
-      fail "$step" "phase reported success but $qual's effect is absent ($probe returned non-zero) — this is the step nobody told you about"
-      st=failed
-      reason="${STEP_MSG[$step]:-}"
-    fi
+    case "$said" in
+      FAIL)
+        st=failed ;;
+      USERACTION)
+        st=gate ;;
+      PASS|WARN)
+        if "$probe" </dev/null >/dev/null 2>&1; then
+          st=done; reason=""
+        else
+          if (( ok )); then
+            fail "$step" "phase reported success but $qual's effect is absent ($probe returned non-zero) — this is the step nobody told you about"
+          else
+            fail "$step" "$qual printed $said but its effect is absent ($probe returned non-zero) — the step said it did its job and the system does not show it"
+          fi
+          st=failed
+          reason="${STEP_MSG[$step]:-}"
+        fi ;;
+      *)
+        if (( stopped )); then
+          # Never reached: an earlier row of this phase stopped it this run.
+          st=pending; reason=""
+        elif "$probe" </dev/null >/dev/null 2>&1; then
+          st=done; reason=""
+          # A row whose ONLY evidence is the phase's own verdict — `p_always`: the
+          # suite's green, the catalog line that is a PASS either way — may not be
+          # recorded done on a phase that did not report success. Otherwise a RED
+          # suite, or a phase refused by the tree-pristine guard before it did
+          # anything, would write itself into the ledger as finished, which is the
+          # exact class of defect the ledger exists to end.
+          if [[ "$probe" == "p_always" ]] && (( ! ok )); then
+            st=failed
+            reason="${STEP_MSG[$step]:-the phase did not report success, and this step has no artifact of its own to read}"
+          fi
+        elif [[ "$kind" == gate || "$kind" == human ]]; then
+          # The llm catalog pause and the demo approval: not broken, waiting.
+          st=gate
+        else
+          st=failed
+        fi
+        if [[ "$st" != done ]] && (( ok )); then
+          fail "$step" "phase reported success but $qual's effect is absent ($probe returned non-zero) — this is the step nobody told you about"
+          st=failed
+          reason="${STEP_MSG[$step]:-}"
+        fi ;;
+    esac
+    # Only a STOP makes the rows after it unreached. On a phase that reported
+    # success nothing stopped it; a row failed here by its probe is a line of
+    # its own, and the rows after it did run.
+    if (( ! ok )) && [[ "$st" == failed || "$st" == gate ]]; then stopped=1; fi
     rows+=("$qual" "$st" "$ver" "$now" "$fp" "$reason")
-  done < <(cc_steps_for_phase "$phase")
+  done
   (( ${#rows[@]} )) || return 0
   cc_ledger_write_batch "$LEDGER" "${rows[@]}" \
     || warn "ledger" "could not write $LEDGER — this phase will simply run again"
@@ -2179,18 +2359,19 @@ ledger_record() { # ledger_record <phase> <phase-reported-success:0|1>
 }
 
 # Is this phase already DONE — every row `done`, at THIS version, with the same
-# input fingerprint, and every probe still true (D2's rule 2)? Prints one
-# "<step>\t<at>" line per row when it is, so the caller can report what it
-# skipped rather than skipping silently.
+# input fingerprint, and every probe still true (D2's rule 2)? Leaves one
+# "<step>\t<at>" line per row in PHASE_DONE_LINES when it is, so the caller can
+# report what it skipped rather than skipping silently. Called in THIS shell,
+# not a `$(…)`: the fingerprints and probe verdicts it takes are cached for the
+# rest of the run (ledger-lib.sh), and a subshell would throw them away.
 #
 # The judgement is cc_phase_decide's (ledger-lib.sh) — the SAME function the
 # plan prints from, so the plan and this skip cannot disagree about a ledger
 # (only about a world a phase that ran in between has changed).
 phase_is_done() { # phase_is_done <phase>
-  cc_phase_decide "$LEDGER" "$1" "$(installed_version)" "$ENV_FILE"
-  [[ "$PHASE_VERDICT" == skip ]] || return 1
-  printf '%s' "$PHASE_DONE_LINES"
-  return 0
+  installed_version_load
+  cc_phase_decide "$LEDGER" "$1" "$INSTALLED_VERSION" "$ENV_FILE"
+  [[ "$PHASE_VERDICT" == skip ]]
 }
 
 # The DEVELOPER bypass (D3), documented only in .claude/rules/deploy-single.md
@@ -2240,23 +2421,32 @@ plan_line() { # plan_line <text>
 
 ledger_plan() { # ledger_plan all | ledger_plan <phase>
   local ver p blocked text
-  ver="$(installed_version)"
+  installed_version_load; ver="$INSTALLED_VERSION"
   plan_line "./setup.sh ${1} at ${ver} — a PREDICTION made before anything runs: a phase that runs can change what a later phase finds (fetch rewrites image refs, llm measures CC_EMBED_DIM), so each phase is judged again when the run reaches it"
   if [[ "$1" == all ]]; then
-    for p in $(cc_steps_phases); do
+    # Every row's fingerprint in ONE hasher process, before the phases are
+    # judged (each would otherwise start one of its own).
+    cc_ledger_load "$LEDGER"
+    if [[ "${LEDGER_ROWS[*]-}" == *$'\t'done$'\t'"$ver"$'\t'* ]]; then
+      cc_fingerprint_prime_rows "$ENV_FILE"
+    fi
+    for p in $STEPS_PHASE_LIST; do
       if [[ "$p" == check ]]; then
         plan_line "check: WILL RUN — always: the dry gate proves every input before anything changes"
         continue
       fi
       cc_phase_decide "$LEDGER" "$p" "$ver" "$ENV_FILE"
-      plan_line "$(cc_phase_plan_text "$p" "$ver")"
+      cc__phase_plan_text_into "$p" "$ver"
+      plan_line "$PLAN_TEXT"
     done
     return 0
   fi
   # A phase named on the command line (the DEVELOPER form) is never skipped as
   # done — it is the ledger GATE that decides whether it runs at all.
   p="$1"
-  if blocked="$(cc_ledger_blocked "$LEDGER" "$p")" && ! unledgered_permitted; then
+  blocked=""
+  cc__ledger_blocked_into "$LEDGER" "$p" && blocked="$LEDGER_BLOCKED"
+  if [[ -n "$blocked" ]] && ! unledgered_permitted; then
     plan_line "$p: WILL NOT RUN — it requires ${blocked%% *}, which is $(ledger_status_words "${blocked#* }"); the ledger refuses a phase whose prerequisites are not done"
     return 0
   fi
@@ -2267,7 +2457,8 @@ ledger_plan() { # ledger_plan all | ledger_plan <phase>
     if [[ "$PHASE_VERDICT" == skip ]]; then
       text="$p: WILL RUN — asked for by name, though all $PHASE_NROWS of its rows are done at $ver with the same inputs and every effect still reads present (last done ${PHASE_LAST_AT:--}): a named phase runs regardless"
     else
-      text="$(cc_phase_plan_text "$p" "$ver")"
+      cc__phase_plan_text_into "$p" "$ver"
+      text="$PLAN_TEXT"
     fi
   fi
   [[ -n "$blocked" ]] && text="$text — OUT OF ORDER under CC_SETUP_UNLEDGERED=1 (${blocked%% *} is ${blocked#* })"
@@ -2317,7 +2508,8 @@ run_lock_take() { # run_lock_take <command-text>
 # the hole in a rule with no other hole in it.
 phase_ledger_gate() { # phase_ledger_gate <phase>
   local blocked
-  if blocked="$(cc_ledger_blocked "$LEDGER" "$1")"; then
+  if cc__ledger_blocked_into "$LEDGER" "$1"; then
+    blocked="$LEDGER_BLOCKED"
     if unledgered_allowed; then
       warn "$1" "CC_SETUP_UNLEDGERED=1 — running out of order on purpose (${blocked%% *} is ${blocked#* })"
       return 0
@@ -2361,6 +2553,7 @@ run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user
   # exactly as it was; the post-merge `./setup.sh fetch` records the real rows.
   if (( STAGED )); then
     "phase_$1"
+    cc_ledger_cache_drop
     return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
   fi
   phase_ledger_gate "$1" || return "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"
@@ -2368,6 +2561,11 @@ run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user
   # until ledger_record overwrites it with the outcome (D11).
   ledger_mark_started "$1"
   "phase_$1"
+  # A phase that ran may have changed what a probe reads, so the run's cached
+  # probe verdicts, fingerprints and tree hashes go (ledger-lib.sh) — except
+  # after `check`, the dry gate: it changes nothing a probe reads but .env, and
+  # every cached verdict is already keyed on .env's content.
+  [[ "$1" == check ]] || cc_ledger_cache_drop
   # The phase's own verdict, BEFORE the probes add to it: "reported success" is
   # no FAIL and no USERACTION.
   local ok=0
@@ -2395,30 +2593,31 @@ run_phase() { # run_phase <name>  -> 0 clean / 1 hard fail / 2 warnings / 3 user
 # its contract is small and stays put — `acquire`, CC_STAGED_FOR, the output
 # protocol, exit 0/1/2/3 — and update.sh reads nothing else from it.
 
-# The catalog half. The VERDICT is p_catalog_aliases — the very probe the llm
+# The catalog half. The VERDICT is p_catalog_filled — the very probe the llm
 # phase's `catalog-filled` gate asks, over the new release's
 # cc_required_aliases — so this cannot disagree with the pause the merge would
-# have run into. The loop after it only NAMES what is missing, and separates
-# the aliases .env DECLARES (CC_LLM_UPSTREAM_BASE_URL + _API_KEY + the alias's
-# own CC_LLM_UPSTREAM_MODEL_<A>): register-models.py creates those rows itself
-# in the post-merge llm phase, so a release that ADDS an alias can still be
-# applied by a declared-catalog install. Counting them missing would have made
-# such an update impossible — the row only appears after the merge this probe
-# would be refusing. A UI-catalog install adds the new alias's row in the
-# LiteLLM UI, which works on the running proxy before the update.
+# have run into: an alias that is absent, OR still a PLACEHOLDER skeleton, is
+# what that gate stops on. The loop after it only NAMES what is not filled, and
+# separates the aliases .env DECLARES (CC_LLM_UPSTREAM_BASE_URL + _API_KEY +
+# the alias's own CC_LLM_UPSTREAM_MODEL_<A>): register-models.py creates those
+# rows itself in the post-merge llm phase — and UPDATES a skeleton it finds —
+# so a release that ADDS an alias can still be applied by a declared-catalog
+# install. Counting them missing would have made such an update impossible —
+# the row only appears after the merge this probe would be refusing. A
+# UI-catalog install adds (or fills) the alias's row in the LiteLLM UI, which
+# works on the running proxy before the update.
 acquire_catalog() {
-  local listed a key missing="" declared=""
+  local unfilled a key missing="" declared=""
   load_env || return 1
-  if p_catalog_aliases; then
-    pass "catalog-probe" "the running proxy's catalog answers every alias this release requires ($(cc_required_aliases | tr -d '\n'))"
-    return 0
-  fi
-  if ! listed="$(p_models_json)"; then
-    fail "catalog-probe" "the running proxy did not answer GET /v1/models on 127.0.0.1:$(p_flag CC_LITELLM_PORT 4000) under CC_LLM_PROXY_ADMIN_KEY, so whether its catalog holds every alias this release requires cannot be proven — is the stack up? (./setup.sh status). Nothing has been merged"
+  if ! unfilled="$(catalog_unfilled)"; then
+    fail "catalog-probe" "the running proxy did not answer GET /model/info on 127.0.0.1:$(p_flag CC_LITELLM_PORT 4000) under CC_LLM_PROXY_ADMIN_KEY, so whether its catalog holds every alias this release requires, filled in, cannot be proven — is the stack up? (./setup.sh status). Nothing has been merged"
     return 1
   fi
-  for a in $(cc_required_aliases); do
-    [[ "$listed" == *"\"$a\""* ]] && continue
+  if [[ -z "$unfilled" ]]; then
+    pass "catalog-probe" "the running proxy's catalog answers every alias this release requires, filled in ($(cc_required_aliases | tr -d '\n'))"
+    return 0
+  fi
+  for a in $unfilled; do
     key="$(cc_alias_env_key "$a")"
     if [[ -n "${CC_LLM_UPSTREAM_BASE_URL:-}" && -n "${CC_LLM_UPSTREAM_API_KEY:-}" && -n "${!key:-}" ]]; then
       declared="${declared:+$declared }$a"
@@ -2427,20 +2626,33 @@ acquire_catalog() {
     fi
   done
   if [[ -n "$missing" ]]; then
-    useraction "catalog-probe" "the running proxy's catalog has no row for ${missing}, which this release requires — add each in the LiteLLM UI at http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/ui (Models), or declare CC_LLM_UPSTREAM_BASE_URL, CC_LLM_UPSTREAM_API_KEY and $(for a in $missing; do printf '%s ' "$(cc_alias_env_key "$a")"; done)in .env so the update registers it, then re-run ./update.sh apply. Nothing has been merged"
+    useraction "catalog-probe" "the running proxy's catalog has no filled-in row for ${missing}, which this release requires (absent, or still a PLACEHOLDER skeleton) — add or fill each in the LiteLLM UI at http://127.0.0.1:$(p_flag CC_LITELLM_PORT 4000)/ui (Models), or declare CC_LLM_UPSTREAM_BASE_URL, CC_LLM_UPSTREAM_API_KEY and $(for a in $missing; do printf '%s ' "$(cc_alias_env_key "$a")"; done)in .env so the update registers it, then re-run ./update.sh apply. Nothing has been merged"
     return 3
   fi
-  pass "catalog-probe" "every alias this release requires answers in the running proxy's catalog, except ${declared}, which .env declares — the post-merge llm phase registers it"
+  pass "catalog-probe" "every alias this release requires is filled in on the running proxy, except ${declared}, which .env declares — the post-merge llm phase registers it"
   return 0
 }
 
-# An initialized update.sh repo with unmerged imports means this tree is an
-# EXISTING deployment mid-update, not a fresh install — the full run must not
-# plow through it (same-tool-detects-mode, 2026-08-27 contract).
+# An initialized update.sh repo with an import `local` does not contain yet:
+# an update is WAITING. That leaves the tree exactly the installed release —
+# update.sh's apply merges only after the new release has been acquired — so
+# running it is safe, and `all` proceeds on it and says so in one line. It
+# used to REFUSE ("use ./update.sh plan"), and after an update whose
+# acquisition stopped (the checklist's flow had already stopped the API) that
+# kept the deployment DOWN until an acquirable release arrived (the
+# 2026-10-02 testbed run's second pass, F24).
 pending_update() {
   command -v git >/dev/null 2>&1 || return 1
   git -C "$REPO_ROOT" rev-parse --verify -q upstream >/dev/null 2>&1 || return 1
   ! git -C "$REPO_ROOT" merge-base --is-ancestor upstream local 2>/dev/null
+}
+
+# What IS unsafe to run: a merge left half-way (conflicts, or resolved and not
+# committed) — the tree is neither release. update.sh's apply refuses the same
+# state (`merge-in-progress`); an EDITED tree is check/tree-pristine's (D10).
+merge_in_progress() {
+  command -v git >/dev/null 2>&1 || return 1
+  git -C "$REPO_ROOT" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1
 }
 
 usage() {
@@ -2613,7 +2825,9 @@ main() {
   # How long the log was BEFORE this run appended to it, so `report` can print
   # the whole of the LAST run rather than the report's own.
   LOG_BEFORE=0
-  [[ -f "$LOGFILE" ]] && LOG_BEFORE="$(wc -l <"$LOGFILE" 2>/dev/null | tr -d ' ')"
+  if [[ -f "$LOGFILE" ]]; then
+    LOG_BEFORE="$(wc -l <"$LOGFILE" 2>/dev/null)"; LOG_BEFORE="${LOG_BEFORE// /}"
+  fi
   logline "run start: ./setup.sh $cmd"
   # ONE RUN AT A TIME (D11, Kamal's lock directory): every command that writes
   # the ledger or changes the host takes <state>/run.lock first; the read-only
@@ -2664,6 +2878,7 @@ main() {
       fi
       (( mdry )) || ledger_mark_started machine
       phase_machine "${2:-}"
+      cc_ledger_cache_drop
       local mok=0
       (( FAILS == 0 && ACTIONS == 0 )) && mok=1
       (( mdry )) || ledger_record machine "$mok"
@@ -2718,11 +2933,17 @@ main() {
       exit "$src"
       ;;
     all)
-      if pending_update; then
+      if merge_in_progress; then
         CURPHASE="dispatch"
-        useraction "existing-install" "this tree is an existing deployment with an unapplied update — use ./update.sh plan (then apply), not a fresh setup run"
-        logline "run end: ./setup.sh all -> exit 3"
-        exit 3
+        fail "merge-in-progress" "this tree is in the middle of a git merge, so it is neither the installed release nor the new one — resolve it (fix conflicts, git add, git commit) and run ./update.sh apply, or back out with: git merge --abort"
+        logline "run end: ./setup.sh all -> exit 1 (merge in progress)"
+        exit 1
+      fi
+      if pending_update; then
+        # A note, not a protocol line: it moves no counter, so it never turns
+        # the run into a stop.
+        note "an imported update is waiting (upstream $(git -C "$REPO_ROOT" show upstream:VERSION 2>/dev/null | sed -n 's/^version=//p' | head -1)): this run keeps the INSTALLED release running; ./update.sh apply installs the update when its acquisition can succeed"
+        logline "note: an imported update is waiting on upstream — running the installed release"
       fi
       # The PLAN (D11): every phase in run order, WILL RUN or WILL SKIP and why
       # — from the same cc_phase_decide the loop below skips on.
@@ -2749,10 +2970,11 @@ main() {
         # Anything else runs: a release bump re-runs everything (the inner
         # idempotency — have_image, api_up, set_kv_if_unset — keeps that
         # cheap), and an .env edit re-runs exactly the rows it changed.
-        if donelines="$(phase_is_done "$p")"; then
+        if phase_is_done "$p"; then
+          donelines="$PHASE_DONE_LINES"
           FAILS=0; WARNS=0; ACTIONS=0; PASSES=0; CURPHASE="$p"
           note ""
-          note "======== phase: $p — already done at $(installed_version), skipping"
+          note "======== phase: $p — already done at $INSTALLED_VERSION, skipping"
           while IFS=$'\t' read -r s a; do
             [[ -n "$s" ]] && pass "$s" "done ($a)"
           done <<<"$donelines"

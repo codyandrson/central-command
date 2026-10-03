@@ -440,6 +440,20 @@ self_test() {
 ACCEPT_MANIFEST='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'
 
 MANIFEST_ROWS=""
+UNRESOLVED=0
+# WHICH word an image that cannot be resolved gets (2026-10-01 design record,
+# D5 — both sentences: FAIL > USERACTION in the exit code, AND "useraction is
+# reserved for the seam the operator must fill (a mirror that lacks a tag)"):
+#   USERACTION image-<name>  the configured registry ANSWERED and cannot serve
+#                            the tested artifact: the locked tag is absent and
+#                            nothing satisfies the constraint, or (on the
+#                            public host) it serves another digest under the
+#                            locked tag. The move is the mirror seam in .env.
+#   FAIL image-<name>        something is BROKEN: the registry is unreachable /
+#                            refuses (no tag list and the lock will not pull),
+#                            an operator pin that is malformed or does not
+#                            exist (the rule names the key), or a malformed
+#                            images.txt row.
 resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-digest>
   local key="$1" path="$2" cons="$3" lock="$4" ldig="$5"
   local host api check var tags cand="" chosen="" mode="" dig=""
@@ -513,7 +527,13 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
         warn "$check" "${host}/${path}:${lock} digest differs from the lock — images.txt locks ${ldig}, the mirror serves ${dig}. A mirror seeded by push re-serialises manifests, so this is expected there; the tag is the pin. Recorded as locked-mirror."
         mode=locked-mirror
       else
-        fail "$check" "${host}/${path}:${lock} DIGEST MISMATCH — images.txt locks ${ldig}, the registry serves ${dig}. That tag has drifted or been poisoned; do not install it. Bump the lock deliberately (a release) or use a registry that serves the tested artifact."
+        # NOT the operator's seam: the PUBLIC registry serves the locked tag
+        # with a different digest than the release locked. A mirror seeded by
+        # push re-serialises manifests (the WARN above); the public host does
+        # not, so this is a tag that has moved upstream or a man in the middle
+        # — a FAIL (exit 1), never "your move": no .env key makes a poisoned
+        # tag right. Nothing is installed; the row is not resolved.
+        fail "$check" "${host}/${path}:${lock} DIGEST MISMATCH — images.txt locks ${ldig}, the registry serves ${dig}. That tag has drifted or been poisoned; do not install it. Seam: CC_REGISTRY_${key^^} in .env — a registry that serves the tested artifact (or CC_IMG_${var#CC_IMG_} for an exact ref); the other way out is a release that bumps the lock deliberately"
         return 1
       fi
     else
@@ -526,6 +546,10 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
   fi
 
   tags="$(reg_tags "$api" "$path")"
+  # One tag per line from $PY: on Windows "\r\n", and Git Bash's $(...) strips
+  # only the last. MSYS grep reads past the CR; bash does not — the `read`
+  # loop below would hand fits() `16.10\r`, which no constraint admits.
+  tags="${tags//$'\r'/}"
 
   if [[ -z "$tags" ]]; then
     # A mirror may serve pulls and no tags-list API at all. Try the lock the
@@ -554,7 +578,10 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
     chosen="$(sort -V <<<"${cand%$'\n'}" | tail -1)"
     if [[ -z "$chosen" ]]; then
       local sample; sample="$(sort -V <<<"$tags" | tail -8 | tr '\n' ' ')"
-      fail "$check" "${host}/${path}: nothing satisfies the constraint '${cons}' (locked tag ${lock} is absent). The registry offers, most recent last: ${sample}— seam: CC_REGISTRY_${key^^} in .env, or mirror the tested tag"
+      # The registry ANSWERED and does not hold the tag: a mirror that lacks
+      # it, which only the operator can fill — a USERACTION (D5), never a
+      # FAIL, so the stop is exit 3 and a retrying caller stops retrying.
+      useraction "$check" "${host}/${path}: nothing satisfies the constraint '${cons}' (locked tag ${lock} is absent). The registry offers, most recent last: ${sample}— seam: CC_REGISTRY_${key^^} in .env, or mirror the tested tag"
       return 1
     fi
     mode=substituted
@@ -593,9 +620,10 @@ while read -r key path cons lock ldig comp; do
   # that was never resolved has no row, and nothing is invented.
   component_wanted "$comp" || { carry_forward "$(img_var "$path")"; continue; }
   # </dev/null: curl and podman must not eat the manifest we are reading from.
-  # Every `return 1` of resolve_one is a FAIL row: keep the image's old record.
+  # Every `return 1` of resolve_one is an image NOT resolved (a FAIL or a
+  # USERACTION row): keep the image's old record.
   resolve_one "$key" "$path" "$cons" "$lock" "$ldig" </dev/null \
-    || carry_forward "$(img_var "$path")"
+    || { carry_forward "$(img_var "$path")"; UNRESOLVED=$((UNRESOLVED+1)); }
 done <"$IMAGES"
 
 if (( ! DRY )) && [[ -n "$MANIFEST_ROWS" ]]; then
@@ -612,10 +640,23 @@ if (( ! DRY )) && [[ -n "$MANIFEST_ROWS" ]]; then
   pass "installed-manifest" "wrote $MANIFEST"
 fi
 
-if (( FAILS )); then
-  useraction "resolve-images" "$FAILS image(s) could not be resolved — fix the seam(s) named above in the repo-root .env and re-run: ./setup.sh (it resumes at fetch). The seams are CC_REGISTRY_DOCKERIO/_GHCR/_MCR (the mirror HOST) and CC_IMG_<NAME> (an exact ref this resolver must use as-is, including a re-namespaced PATH). deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams."
+# What to run once the seam is fixed: ONE variable, because the same resolver
+# runs inside update.sh apply's STAGED acquisition (CC_STAGED_FOR names the
+# deployment), where the move is the update again — ./setup.sh there would
+# resume the INSTALLED release's fetch, which was never the one that stopped
+# (P5's laptop run printed exactly that).
+if [[ -n "${CC_STAGED_FOR:-}" ]]; then
+  RERUN="./update.sh apply (nothing has been merged)"
+else
+  RERUN="./setup.sh (it resumes at fetch)"
 fi
-(( ACTIONS )) && exit 3
-(( FAILS )) && exit 1
-(( WARNS )) && exit 2
-exit 0
+if (( UNRESOLVED )); then
+  useraction "resolve-images" "$UNRESOLVED image(s) could not be resolved — fix the seam(s) named above in the repo-root .env and re-run: ${RERUN}. The seams are CC_REGISTRY_DOCKERIO/_GHCR/_MCR (the mirror HOST) and CC_IMG_<NAME> (an exact ref this resolver must use as-is, including a re-namespaced PATH). deploy/discover.sh maps what this network can reach; deploy/AIRGAP.md maps the seams."
+fi
+# The ONE exit-code rule (2026-10-01 design record, D5): FAIL > USERACTION >
+# WARN. This script carried its own copy of the precedence with the gate
+# FIRST, and printed a mirror that lacks a tag as a FAIL — so a FAIL line came
+# out beside an exit 3 (P5, inside a staged acquisition). Now the seam is a
+# USERACTION and exits 3; a broken registry, pin or row is a FAIL and exits 1,
+# whatever else this run found.
+exit "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"

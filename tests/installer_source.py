@@ -14,8 +14,16 @@ Not a test module (no `test_` prefix): pytest does not collect it.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
@@ -102,3 +110,190 @@ def single_scripts() -> list[Path]:
     the phase files under deploy/single/phases/. What a `deploy/single/*.sh`
     glob meant before the split."""
     return sorted(SINGLE.glob("*.sh")) + phase_files()
+
+
+# ── running the installer for real ─────────────────────────────────────────
+# About 45 tests drive the REAL `./setup.sh` / `./update.sh` against a temp copy
+# of the tree. On Windows (Git Bash) each invocation costs ~20 s before its
+# first line and the slowest such test measured 304 s (2026-10-02 testbed run,
+# F13/F15) — far over the suite's 120 s per-test ceiling, which is right for
+# everything else. Worse, there pytest-timeout can only use its `thread`
+# method, which ends the WHOLE pytest process (`os._exit`) with no summary
+# when one test overruns. So the driving tests get two limits, one number each:
+#
+# * DRIVER_RUN_TIMEOUT — one invocation. `run_driver` enforces it ITSELF,
+#   kills the invocation's whole process TREE and fails THAT test, on every
+#   platform. It is what keeps a hung script from ever reaching the session
+#   killer.
+# * DRIVER_TEST_TIMEOUT — the pytest-timeout backstop for the whole test
+#   (`@drives_installer`), for a hang outside an invocation. `run_driver`
+#   shrinks its own limit to fit inside what is left of it, so the in-test
+#   timeout always fires first.
+#
+# `run_driver` refuses to run from a test that lacks the marker (the conftest
+# hook below hands it the running item), so a new driving test cannot
+# silently inherit the 120 s ceiling and take a Windows session down with it.
+
+DRIVER_RUN_TIMEOUT = 600
+DRIVER_TEST_TIMEOUT = 1500
+_MARGIN = 60  # seconds left for the kill and the report inside the backstop
+
+drives_installer = pytest.mark.timeout(DRIVER_TEST_TIMEOUT)
+
+# (item, monotonic start) of the test now running — set by tests/conftest.py's
+# pytest_runtest_protocol hook; None outside a test.
+CURRENT: tuple[object, float] | None = None
+
+
+def _marker_timeout(item) -> float | None:
+    mark = item.get_closest_marker("timeout")
+    if mark is None:
+        return None
+    value = mark.args[0] if mark.args else mark.kwargs.get("timeout")
+    return float(value) if value is not None else None
+
+
+def _budget(timeout: float) -> float:
+    if CURRENT is None:
+        return timeout
+    item, started = CURRENT
+    ceiling = _marker_timeout(item)
+    if ceiling is None or ceiling < DRIVER_TEST_TIMEOUT:
+        pytest.fail(
+            f"{getattr(item, 'nodeid', item)} runs the real installer but is not marked "
+            "@drives_installer (tests/installer_source.py): under the suite's 120 s "
+            "ceiling it would, on Windows, end the whole pytest session")
+    left = ceiling - (time.monotonic() - started) - _MARGIN
+    return max(1.0, min(timeout, left))
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """The invocation AND everything it started. Killing bash alone leaves its
+    children holding the output pipes, and reading them would then block
+    forever — the very hang this exists to end."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True, timeout=60, check=False)
+    else:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+    with contextlib.suppress(Exception):
+        proc.kill()
+
+
+def run_driver(argv: list[str], *, cwd: Path, env: dict[str, str] | None = None,
+               timeout: float = DRIVER_RUN_TIMEOUT,
+               input: str | None = None) -> subprocess.CompletedProcess:
+    """`subprocess.run(argv, capture_output=True, text=True)` for a real
+    installer invocation, with stdin closed (or fed `input`) — but a timeout
+    kills the process tree and FAILS the calling test instead of hanging it."""
+    limit = _budget(timeout)
+    proc = subprocess.Popen(
+        argv, cwd=cwd, env=env, text=True, encoding="utf-8", errors="replace",
+        stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        # Its own process group / session, so the tree can be killed as one.
+        **({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+           else {"start_new_session": True}),
+    )
+    try:
+        out, err = proc.communicate(input=input, timeout=limit)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            out, err = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            out, err = "", "(output not collected: the pipes stayed open after the kill)"
+        pytest.fail(
+            f"{' '.join(map(str, argv))} (in {cwd}) did not finish within {limit:.0f} s — "
+            f"killed with its children.\n--- stdout (tail)\n{(out or '')[-4000:]}"
+            f"\n--- stderr (tail)\n{(err or '')[-4000:]}")
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
+# ── stubs that win on PATH, on Linux AND under Git Bash ─────────────────────
+# Git for Windows' `bin\bash.exe` is a launcher that PREPENDS
+# `/mingw64/bin:/usr/bin` to whatever PATH it is handed — so a stub `curl`
+# placed first on the PATH a test passes in is shadowed by Git's own
+# `/mingw64/bin/curl` (2026-10-02 testbed run, F15: the mint-key stub's
+# argv.log was never written). A stub with no namesake there (`podman`, `uv`)
+# was found either way, which is why only some harnesses failed. BASH_ENV is
+# read by every non-interactive bash AFTER that launcher has set PATH, so the
+# file it names puts the stub directory back in front, in the POSIX spelling
+# bash resolves (cygpath on MSYS; identity elsewhere). Children inherit the
+# fixed PATH.
+#
+# "In front" means FIRST, not "present": the stub directory is already on the
+# PATH the launcher hands over — just behind its `/mingw64/bin:/usr/bin:~/bin`
+# prefix — so a guard that only asked "is it on PATH?" left it shadowed
+# (measured in the 2026-10-02 testbed run's second pass: PATH read
+# `/mingw64/bin:/usr/bin:/c/Users/<u>/bin:/tmp/<x>/stub:…`, and `type -a curl`
+# found `/mingw64/bin/curl` first). Every occurrence is removed and one is put
+# at the front, so a nested bash leaves it where it is.
+
+_BASH_ENV = r"""__cc_stub='@DIR@'
+if command -v cygpath >/dev/null 2>&1; then __cc_stub="$(cygpath -u "$__cc_stub")"; fi
+case "$PATH:" in
+  "$__cc_stub:"*) ;;
+  *) __cc_rest=":$PATH:"
+     while [[ "$__cc_rest" == *":$__cc_stub:"* ]]; do __cc_rest="${__cc_rest/":$__cc_stub:"/:}"; done
+     __cc_rest="${__cc_rest#:}"; __cc_rest="${__cc_rest%:}"
+     PATH="$__cc_stub${__cc_rest:+:$__cc_rest}"; export PATH; unset __cc_rest ;;
+esac
+unset __cc_stub
+"""
+
+
+def with_stub_path(env: dict[str, str], stub_dir: Path) -> dict[str, str]:
+    """`env` with `stub_dir` first on PATH — first for real, under Git Bash too.
+
+    A harness's MINIMAL env also needs SYSTEMROOT (and WINDIR) on Windows —
+    a no-op elsewhere: without it Winsock fails inside the bash that Python
+    starts, so `/dev/tcp` read "socket: Permission denied" and port_listener
+    saw no listener (the 2026-10-02 testbed run's second pass)."""
+    hook = stub_dir / ".bash_env.sh"
+    write_lf(hook, _BASH_ENV.replace("@DIR@", stub_dir.as_posix()))
+    out = dict(env)
+    out["PATH"] = f"{stub_dir}{os.pathsep}{env.get('PATH', '')}"
+    out["BASH_ENV"] = hook.as_posix()
+    if os.name == "nt":
+        for key in ("SYSTEMROOT", "WINDIR"):
+            if key not in out and os.environ.get(key):
+                out[key] = os.environ[key]
+    return out
+
+
+def python_shim(stub_dir: Path) -> Path:
+    """A `python3` in `stub_dir` that runs THIS interpreter. The installer's
+    `$PY` is the first `python3`/`python` that runs (cc_resolve_py), else
+    `uv run … python` — and on Windows the only `python3` on PATH is the
+    Microsoft Store alias, which exits 49, so `$PY` became `uv run`: in a
+    harness that stubs `uv`, every `$PY -c` then printed NOTHING (the
+    2026-10-02 testbed run's second pass: the mint-key harness read no key out
+    of the stub proxy's JSON, and no scope). With this shim first on PATH
+    (`with_stub_path`), `$PY` is a real interpreter on every host."""
+    return write_lf(stub_dir / "python3",
+                    f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+                    mode=0o755)
+
+
+def env_path(path: Path | str) -> str:
+    """A path as a temp `.env` must spell it: forward slashes on every host.
+    setup.sh SOURCES `.env`, so bash drops the backslashes of a Windows
+    `str(Path)` (it would read `C:Users…`), and check's answers section FAILs
+    a backslash path answer outright (v_path*, since the 2026-10-02 testbed
+    run's second pass) — a harness that wrote `str(state)` stopped its own
+    driver at `check` on Windows (F25). Every harness writes path VALUES into
+    an answer file through this."""
+    return Path(path).as_posix()
+
+
+def write_lf(path: Path, text: str, *, mode: int | None = None) -> Path:
+    """Write `text` with LF line endings on every OS. `Path.write_text` turns
+    each "\\n" into "\\r\\n" on Windows, and a stub's DATA read back by
+    `read -r` then carries a trailing CR that no comparison matches (F15: the
+    n8n credential names in human_rows' stub)."""
+    path.write_text(text, encoding="utf-8", newline="\n")
+    if mode is not None:
+        path.chmod(mode)
+    return path

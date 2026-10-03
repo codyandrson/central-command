@@ -28,23 +28,31 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 import threading
 from pathlib import Path
 
 import pytest
 
-from tests.installer_source import installer_source
+from tests.installer_source import (
+    drives_installer,
+    installer_source,
+    python_shim,
+    run_driver,
+    with_stub_path,
+    write_lf,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Skipped on Windows until the 2026-10-02 testbed run's second pass: Git Bash
+# prepends /mingw64/bin:/usr/bin to PATH and the real curl/podman won. The stub
+# directory now goes first through with_stub_path, every stub and data file is
+# written LF (write_lf), the paths the stubs write to are spelled the way bash
+# resolves them on every host (as_posix), and `python3` is this interpreter
+# (python_shim) — the registry stub is a Python script, and `$PY` must not be
+# the stub `uv`.
 pytestmark = [
     pytest.mark.skipif(shutil.which("git") is None, reason="needs git"),
-    pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="Git Bash prepends /mingw64/bin:/usr/bin to PATH; stub binaries cannot shadow "
-               "curl/podman (tests/test_update_runner.py's reason)",
-    ),
 ]
 
 OLD, NEW = "2.56.0", "2.57.0"
@@ -78,12 +86,11 @@ def _set(path: Path, values: dict[str, str]) -> None:
             lines[i] = f"{key}={values[key]}"
             seen.add(key)
     lines += [f"{k}={v}" for k, v in values.items() if k not in seen]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_lf(path, "\n".join(lines) + "\n")
 
 
 def _exe(path: Path, body: str) -> None:
-    path.write_text(body, encoding="utf-8")
-    path.chmod(0o755)
+    write_lf(path, body, mode=0o755)
 
 
 # ── the stubs ───────────────────────────────────────────────────────────────
@@ -111,6 +118,14 @@ if url is None: sys.exit(2)
 if url.startswith("http://127.0.0.1"):
     if url.endswith("/v1/models"):
         sys.stdout.write(json.dumps({"data": [{"id": m} for m in cfg["models"]]})); sys.exit(0)
+    if url.endswith("/model/info"):
+        # register-models.py's PLACEHOLDER convention: a skeleton is LISTED by
+        # /v1/models like any row, and only its litellm_params say it is empty.
+        sys.stdout.write(json.dumps({"data": [
+            {"model_name": m, "litellm_params": {
+                "model": "openai/PLACEHOLDER" if m in cfg.get("placeholders", []) else "openai/some-model",
+                "api_base": "PLACEHOLDER" if m in cfg.get("placeholders", []) else "http://llm.example.com/v1"}}
+            for m in cfg["models"]]})); sys.exit(0)
     sys.exit(7)                              # nothing else answers: the API is stopped
 m = re.match(r"https://[^/]+/v2/(.+)/(manifests|tags)/(.+)$", url)
 if not m: sys.exit(7)
@@ -130,7 +145,10 @@ sys.stdout.write(json.dumps({"tags": ["0.0.1-elsewhere"] if gone else [cfg["lock
 def _stub_bin(tmp: Path, log: Path, calls: Path) -> Path:
     b = tmp / "bin"
     b.mkdir()
+    python_shim(b)
     _exe(b / "curl", _CURL)
+    # Inside the bash stubs below, every path in the spelling bash resolves.
+    tmp_p, log, calls = tmp.as_posix(), log.as_posix(), calls.as_posix()
     # podman: no machine, every container exists, pulls succeed unless the
     # flag file names the ref. The three local images are already there, built
     # by an earlier release (present, no build-inputs label) unless the test
@@ -143,23 +161,23 @@ echo "podman $*" >> "{log}"
 key() {{ local k="${{1//\\//_}}"; printf '%s' "${{k//:/_}}"; }}
 case "$1" in
   images) printf 'localhost/cc-graphiti:1.0.2-anthropic\\nlocalhost/cc-sandbox:1\\nlocalhost/cc-crawler:1\\n'
-          cat "{tmp}/built" 2>/dev/null ;;
+          cat "{tmp_p}/built" 2>/dev/null ;;
   image)  [[ "${{2:-}}" == inspect ]] || exit 0
           ref="${{@: -1}}"
-          [[ -f "{tmp}/labels/$(key "$ref")" ]] && {{ cat "{tmp}/labels/$(key "$ref")"; exit 0; }}
+          [[ -f "{tmp_p}/labels/$(key "$ref")" ]] && {{ cat "{tmp_p}/labels/$(key "$ref")"; exit 0; }}
           case "$ref" in localhost/cc-graphiti:1.0.2-anthropic|localhost/cc-sandbox:1|localhost/cc-crawler:1) exit 0 ;; esac
-          grep -qxF -- "$ref" "{tmp}/built" 2>/dev/null && exit 0
+          grep -qxF -- "$ref" "{tmp_p}/built" 2>/dev/null && exit 0
           exit 125 ;;
   build)  label=""; ref=""; shift
           while (( $# )); do
             case "$1" in --label) label="${{2#*=}}"; shift ;; -t) ref="$2"; shift ;; esac
             shift
           done
-          printf '%s\\n' "$label" > "{tmp}/labels/$(key "$ref")"
-          grep -qxF -- "$ref" "{tmp}/built" 2>/dev/null || printf '%s\\n' "$ref" >> "{tmp}/built" ;;
-  untag)  grep -vxF -- "$3" "{tmp}/built" > "{tmp}/built.new" 2>/dev/null; mv "{tmp}/built.new" "{tmp}/built"
-          rm -f "{tmp}/labels/$(key "$3")" ;;
-  pull)   for a in "$@"; do grep -qxF -- "$a" "{tmp}/flags/pull-fails" 2>/dev/null && exit 125; done ;;
+          printf '%s\\n' "$label" > "{tmp_p}/labels/$(key "$ref")"
+          grep -qxF -- "$ref" "{tmp_p}/built" 2>/dev/null || printf '%s\\n' "$ref" >> "{tmp_p}/built" ;;
+  untag)  grep -vxF -- "$3" "{tmp_p}/built" > "{tmp_p}/built.new" 2>/dev/null; mv "{tmp_p}/built.new" "{tmp_p}/built"
+          rm -f "{tmp_p}/labels/$(key "$3")" ;;
+  pull)   for a in "$@"; do grep -qxF -- "$a" "{tmp_p}/flags/pull-fails" 2>/dev/null && exit 125; done ;;
   exec)   case "$*" in
             *pg_dump*) echo "-- a spine dump" ;;
             *psql*)    cat >/dev/null; echo schema >> "{calls}" ;;
@@ -188,13 +206,13 @@ exit 0
 # Appended to the copy's setup.sh before `main "$@"`: the phases that need a
 # running stack become stubs that record their name; `fetch` stays REAL and is
 # only wrapped, so the calls file says whether the staged run or the post-merge
-# one ran it. Probes read true — except the two the catalog probe IS.
+# one ran it. Probes read true — except the three the catalog probe IS (and p_flag, stubbed with the rest, which is why the stub curl matches URLs by suffix, port or none).
 def _stub_tail(calls: Path, flags: Path) -> str:
     phases = ["check", "machine", "stack", "llm", "app", "verify", "test", "boot", "demo"]
     out = [
-        f'__CALLS="{calls}"; __FLAGS="{flags}"',
+        f'__CALLS="{calls.as_posix()}"; __FLAGS="{flags.as_posix()}"',
         'for __f in $(compgen -A function p_); do',
-        '  case "$__f" in p_models_json|p_catalog_aliases) continue ;; esac',
+        '  case "$__f" in p_models_json|p_catalog_aliases|p_catalog_filled) continue ;; esac',
         '  eval "$__f() { return 0; }"',
         'done',
         'eval "$(declare -f phase_fetch | sed \'1s/^phase_fetch/__real_phase_fetch/\')"',
@@ -248,7 +266,8 @@ class Dep:
         return not (self.state / "stage").exists() and len(worktrees) == 1
 
     # ── acting ──
-    def configure(self, *, missing: tuple[str, ...] = (), models: tuple[str, ...] | None = None):
+    def configure(self, *, missing: tuple[str, ...] = (), models: tuple[str, ...] | None = None,
+                  placeholders: tuple[str, ...] = ()):
         locks, digests = {}, {}
         for line in (self.repo / "deploy" / "single" / "images.txt").read_text().splitlines():
             parts = line.split("#", 1)[0].split()
@@ -259,9 +278,9 @@ class Dep:
                     digests[f"{path}:{lock}"] = dig
         if models is None:
             models = ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano")
-        self.cfg.write_text(json.dumps({"log": str(self.log), "missing": list(missing),
+        write_lf(self.cfg, json.dumps({"log": str(self.log), "missing": list(missing),
                                         "models": list(models), "locks": locks,
-                                        "digests": digests}))
+                                        "digests": digests, "placeholders": list(placeholders)}))
 
     def env(self, **extra: str) -> dict[str, str]:
         e = {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
@@ -269,12 +288,11 @@ class Dep:
              "STUB_CFG": str(self.cfg), "CC_BACKUP_DIR": str(self.tmp / "backups"),
              "LANG": "C.UTF-8"}
         e.update(extra)
-        return e
+        return with_stub_path(e, self.tmp / "bin")
 
     def update(self, *args: str, **extra: str) -> subprocess.CompletedProcess:
-        return subprocess.run([_bash(), str(self.repo / "deploy" / "single" / "update.sh"), *args],
-                              cwd=self.repo / "deploy" / "single", capture_output=True, text=True,
-                              stdin=subprocess.DEVNULL, timeout=300, env=self.env(**extra))
+        return run_driver([_bash(), str(self.repo / "deploy" / "single" / "update.sh"), *args],
+                          cwd=self.repo / "deploy" / "single", env=self.env(**extra))
 
     def fill_ledger(self, version: str = OLD) -> None:
         """Every manifest row `done` at the installed release: an install that
@@ -284,7 +302,7 @@ class Dep:
             if line and not line.startswith("#"):
                 phase, step = line.split("\t")[:2]
                 rows.append(f"{phase}/{step}\tdone\t{version}\t2026-10-01T00:00:00Z\tnone\t")
-        self.ledger.write_text("\n".join(rows) + "\n")
+        write_lf(self.ledger, "\n".join(rows) + "\n")
 
 
 @pytest.fixture
@@ -299,26 +317,28 @@ def dep(tmp_path: Path) -> Dep:
     for f in (".env.example", ".gitignore", "pyproject.toml", "requirements.lock"):
         shutil.copy2(ROOT / f, repo / f)
     (repo / "central_command" / "db").mkdir(parents=True)
-    (repo / "central_command" / "__init__.py").write_text("")
+    write_lf(repo / "central_command" / "__init__.py", "")
     shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
                  repo / "central_command" / "db" / "schema.sql")
     (repo / "web").mkdir()
-    (repo / "web" / "package.json").write_text('{"name": "web", "version": "0.0.0"}\n')
-    (repo / "web" / "package-lock.json").write_text('{"name": "web", "lockfileVersion": 3}\n')
-    (repo / "VERSION").write_text(f"version={OLD}\nmin_upgrade_from=2.0.0\n")
+    write_lf(repo / "web" / "package.json", '{"name": "web", "version": "0.0.0"}\n')
+    write_lf(repo / "web" / "package-lock.json", '{"name": "web", "lockfileVersion": 3}\n')
+    write_lf(repo / "VERSION", f"version={OLD}\nmin_upgrade_from=2.0.0\n")
     # A tracked file the sparse stage must NOT check out: docs/vendor stands in
     # for the 47k files the list exists to keep off a Windows disk.
     (repo / "docs" / "vendor").mkdir(parents=True)
-    (repo / "docs" / "vendor" / "big.txt").write_text("vendored\n")
+    write_lf(repo / "docs" / "vendor" / "big.txt", "vendored\n")
     setup = repo / "deploy" / "single" / "setup.sh"
     text = setup.read_text(encoding="utf-8")
     tail = 'main "$@"'
     assert text.rstrip().endswith(tail)
-    setup.write_text(text.rstrip()[: -len(tail)] + _stub_tail(d.calls, d.flags) + tail + "\n",
-                     encoding="utf-8")
+    write_lf(setup, text.rstrip()[: -len(tail)] + _stub_tail(d.calls, d.flags) + tail + "\n")
     shutil.copy2(ROOT / ".env.example", repo / ".env")
     _set(repo / ".env", {
-        "CC_STATE_DIR": str(d.state), "CC_API_PORT": str(_free_port()),
+        # Forward slashes: setup.sh SOURCES .env, and bash drops every
+        # unquoted backslash of a Windows spelling — the phases would read
+        # `C:UsersCody…` while update.sh (which reads the key) used the real one.
+        "CC_STATE_DIR": d.state.as_posix(), "CC_API_PORT": str(_free_port()),
         "CC_ENABLE_SANDBOX": "0", "CC_ENABLE_CRAWLER": "0", "CC_ENABLE_SPEECH": "0",
         "CC_ENABLE_N8N": "0", "CC_LLM_PROXY_ADMIN_KEY": "sk-test-admin-0000000000",
     })
@@ -336,7 +356,7 @@ def dep(tmp_path: Path) -> Dep:
     git("commit", "-qm", "baseline")
     git("branch", "upstream")
     git("checkout", "-q", "upstream")
-    (repo / "VERSION").write_text(f"version={NEW}\nmin_upgrade_from=2.0.0\n")
+    write_lf(repo / "VERSION", f"version={NEW}\nmin_upgrade_from=2.0.0\n")
     git("commit", "-qam", f"import v{NEW}")
     git("checkout", "-q", "local")
     return d
@@ -359,6 +379,7 @@ def _untouched(d: Dep, head: str, env_bytes: bytes, ledger_bytes: bytes | None) 
 # ── before the merge ────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_a_mirror_missing_one_tag_stops_before_the_merge_with_nothing_changed(dep: Dep):
     """The record's acceptance scenario, verbatim."""
     dep.fill_ledger()
@@ -367,10 +388,21 @@ def test_a_mirror_missing_one_tag_stops_before_the_merge_with_nothing_changed(de
 
     r = dep.update("apply")
 
+    # The operator's seam, stopped for them (D5: "useraction is reserved for
+    # the seam the operator must fill (a mirror that lacks a tag)") — and with
+    # NO FAIL line beside it: the laptop's staged run printed `FAIL image-redis`
+    # and then reported the stop as exit 3, contradicting FAIL > USERACTION.
     assert r.returncode == 3, r.stdout + r.stderr
+    assert not any(l.startswith("FAIL ") for l in r.stdout.splitlines()), r.stdout
     # The seam is named — by the resolver, for the one image, and by the phase.
-    assert "FAIL image-neo4j:" in r.stdout and "CC_REGISTRY_DOCKERIO" in r.stdout, r.stdout
-    assert "USERACTION resolve-images:" in r.stdout, r.stdout
+    neo = [l for l in r.stdout.splitlines() if l.startswith("USERACTION image-neo4j:")]
+    assert neo and "CC_REGISTRY_DOCKERIO" in neo[0], r.stdout
+    resolver = [l for l in r.stdout.splitlines() if l.startswith("USERACTION resolve-images:")]
+    assert resolver, r.stdout
+    # ...and inside an update its move is the update again, not the install's
+    # resume (the laptop's said "re-run: ./setup.sh (it resumes at fetch)").
+    assert "re-run: ./update.sh apply" in resolver[0], resolver[0]
+    assert "./setup.sh (it resumes at fetch)" not in resolver[0], resolver[0]
     summary = [l for l in r.stdout.splitlines() if l.startswith("USERACTION acquire:")]
     assert summary and "NOTHING was changed" in summary[0], r.stdout
     assert dep.called() == ["staged-fetch"], dep.called()
@@ -380,9 +412,10 @@ def test_a_mirror_missing_one_tag_stops_before_the_merge_with_nothing_changed(de
     assert not (dep.state / "run.lock").exists()
 
 
+@drives_installer
 def test_a_failed_staged_artifact_is_a_fail_and_still_changes_nothing(dep: Dep):
     dep.fill_ledger()
-    (dep.flags / "pull-fails").write_text("docker.io/library/redis:7-alpine\n")
+    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7-alpine\n")
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
     r = dep.update("apply")
@@ -394,6 +427,7 @@ def test_a_failed_staged_artifact_is_a_fail_and_still_changes_nothing(dep: Dep):
     _untouched(dep, head, env, led)
 
 
+@drives_installer
 def test_a_missing_required_alias_is_a_useraction_with_the_tree_untouched(dep: Dep):
     dep.fill_ledger()
     dep.configure(models=("cc-default", "graphiti-llm", "cc-embedding"))
@@ -411,6 +445,26 @@ def test_a_missing_required_alias_is_a_useraction_with_the_tree_untouched(dep: D
     _untouched(dep, head, env, led)
 
 
+@drives_installer
+def test_a_placeholder_skeleton_is_not_a_filled_alias(dep: Dep):
+    """The catalog probe asks what llm/catalog-filled asks: FILLED, not merely
+    listed. A required alias still carrying register-models.py's PLACEHOLDER
+    is the pause the post-merge llm phase would stop at, so the update stops
+    here instead, before anything moves."""
+    dep.fill_ledger()
+    dep.configure(placeholders=("cc-embedding",))
+    head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
+
+    r = dep.update("apply")
+
+    assert r.returncode == 3, r.stdout + r.stderr
+    probe = [l for l in r.stdout.splitlines() if l.startswith("USERACTION catalog-probe:")]
+    assert probe and "cc-embedding" in probe[0] and "PLACEHOLDER" in probe[0], r.stdout
+    assert "gpt-4.1-nano" not in probe[0], probe[0]
+    _untouched(dep, head, env, led)
+
+
+@drives_installer
 def test_a_declared_missing_alias_does_not_stop_the_update(dep: Dep):
     """A release that ADDS an alias must stay appliable by a declared-catalog
     install: its row only appears when the post-merge llm phase registers it."""
@@ -431,6 +485,7 @@ def test_a_declared_missing_alias_does_not_stop_the_update(dep: Dep):
 # ── the merge and after ─────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_order(dep: Dep):
     dep.fill_ledger()
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
@@ -456,6 +511,7 @@ def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_o
     assert any("/stage/tree/web" in l for l in stage_cmd), stage_cmd
 
 
+@drives_installer
 def test_with_n8n_the_facade_workflows_are_the_stack_phases_not_a_step_of_their_own(dep: Dep):
     """v2.58.0: the post-merge order is schema → fetch → llm → stack → app →
     verify even with CC_ENABLE_N8N=1. The n8n façade workflows used to be a
@@ -476,6 +532,7 @@ def test_with_n8n_the_facade_workflows_are_the_stack_phases_not_a_step_of_their_
     assert "import:workflow" not in podman and "container exists cc-n8n" not in podman, podman
 
 
+@drives_installer
 def test_the_adoption_pause_is_one_command_even_with_n8n(dep: Dep):
     """The ledger-adopt USERACTION used to add "then stop the API and run
     ./update.sh apply once more" for an n8n install, because ./setup.sh did not
@@ -508,13 +565,14 @@ def _builds(dep: Dep) -> list[tuple[str, str]]:
     return out
 
 
+@drives_installer
 def test_a_stop_after_the_staged_build_leaves_the_live_image_tag_alone(dep: Dep):
     """D5's promise, for the image store: the running deployment's graphiti tag
     stays on the image its containers use when apply stops before the merge —
     here at the catalog probe, AFTER the staged fetch built the new image."""
     dep.fill_ledger()
     old = "0" * 64
-    _label_file(dep, GRAPHITI).write_text(old + "\n")      # the old release's build
+    write_lf(_label_file(dep, GRAPHITI), old + "\n")      # the old release's build
     dep.configure(models=("cc-default", "graphiti-llm", "cc-embedding"))
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
@@ -533,9 +591,10 @@ def test_a_stop_after_the_staged_build_leaves_the_live_image_tag_alone(dep: Dep)
     _untouched(dep, head, env, led)
 
 
+@drives_installer
 def test_the_post_merge_fetch_builds_the_live_tag_from_the_same_inputs_and_drops_the_aside(dep: Dep):
     dep.fill_ledger()
-    _label_file(dep, GRAPHITI).write_text("0" * 64 + "\n")
+    write_lf(_label_file(dep, GRAPHITI), "0" * 64 + "\n")
 
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
 
@@ -554,6 +613,7 @@ def test_the_post_merge_fetch_builds_the_live_tag_from_the_same_inputs_and_drops
     assert ASIDE not in (dep.tmp / "built").read_text().split()
 
 
+@drives_installer
 def test_the_staged_checkout_is_sparse(dep: Dep, tmp_path: Path):
     """Observed from inside the staged run: a probe in the stub tail records
     what the worktree holds while it exists."""
@@ -563,11 +623,11 @@ def test_the_staged_checkout_is_sparse(dep: Dep, tmp_path: Path):
     text = setup.read_text().replace(
         'phase_fetch() { if (( STAGED ));',
         f'phase_fetch() {{ (( STAGED )) && ls -A "$REPO_ROOT" "$REPO_ROOT/docs" "$HERE/phases" > "{seen}" 2>&1; if (( STAGED ));')
-    setup.write_text(text)
+    write_lf(setup, text)
     subprocess.run(["git", "-C", str(dep.repo), "commit", "-qam", "probe"], check=True)
     subprocess.run(["git", "-C", str(dep.repo), "branch", "-qf", "upstream", "local"], check=True)
     subprocess.run(["git", "-C", str(dep.repo), "checkout", "-q", "upstream"], check=True)
-    (dep.repo / "VERSION").write_text(f"version={NEW}\n")
+    write_lf(dep.repo / "VERSION", f"version={NEW}\n")
     subprocess.run(["git", "-C", str(dep.repo), "commit", "-qam", "bump"], check=True)
     subprocess.run(["git", "-C", str(dep.repo), "checkout", "-q", "local"], check=True)
     dep.configure(missing=("library/neo4j",))       # stop after the stage: quicker
@@ -583,9 +643,10 @@ def test_the_staged_checkout_is_sparse(dep: Dep, tmp_path: Path):
     assert "fetch.sh" in listing and "check.sh" in listing, listing
 
 
+@drives_installer
 def test_a_pause_after_the_merge_stops_there_and_app_and_verify_do_not_run(dep: Dep):
     dep.fill_ledger()
-    (dep.flags / "ua-llm").write_text("catalog-filled")
+    write_lf(dep.flags / "ua-llm", "catalog-filled")
 
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
 
@@ -599,18 +660,121 @@ def test_a_pause_after_the_merge_stops_there_and_app_and_verify_do_not_run(dep: 
     assert "LEDGER " in r.stdout
 
 
+@drives_installer
 def test_a_failed_phase_after_the_merge_is_a_fail(dep: Dep):
     dep.fill_ledger()
-    (dep.flags / "fail-app").write_text("install")
+    write_lf(dep.flags / "fail-app", "install")
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
     assert r.returncode == 1, r.stdout + r.stderr
     assert dep.called()[-1] == "app"
     assert any(l.startswith("FAIL app:") for l in r.stdout.splitlines()), r.stdout
 
 
+# ── apply with nothing to apply (P5, F7) ─────────────────────────────────────
+# The laptop ran `./update.sh apply` after an import that FAILED: `upstream`
+# was `local`, nothing was new, and apply printed "local already contains
+# upstream — continuing with the deploy steps" and re-ran every post-merge phase
+# over the installed release by name (498 s). It could not tell "resume an
+# update that stopped after its merge" from "nothing was ever imported". The
+# ledger can.
+
+
+def _nothing_imported(dep: Dep) -> None:
+    dep.git("branch", "-f", "upstream", "local")
+
+
+@drives_installer
+def test_apply_with_nothing_imported_and_a_complete_ledger_does_nothing(dep: Dep):
+    dep.fill_ledger(OLD)
+    _nothing_imported(dep)
+    head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
+
+    r = dep.update("apply")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    protocol = [l for l in r.stdout.splitlines() if l.startswith(("PASS ", "WARN ", "FAIL ", "USERACTION "))]
+    assert protocol[-1] == (f"PASS apply: nothing to apply: `local` is `upstream`, and the update's "
+                            f"phases (fetch, llm, stack, app, verify) are done at {OLD}"), protocol
+    assert dep.called() == [], dep.called()
+    _untouched(dep, head, env, led)
+
+
+@drives_installer
+def test_apply_with_nothing_imported_leaves_an_unfinished_install_to_setup(dep: Dep):
+    """The laptop's exact state: every row at the tree's release, one failed
+    (verify/selfcheck). No update moved this tree, so there is no update to
+    finish — the install's resume is ./setup.sh's, and apply says so instead
+    of redeploying."""
+    dep.fill_ledger(OLD)
+    text = dep.ledger.read_text().replace("verify/selfcheck\tdone", "verify/selfcheck\tfailed")
+    write_lf(dep.ledger, text)
+    _nothing_imported(dep)
+    head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
+
+    r = dep.update("apply")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    line = [l for l in r.stdout.splitlines() if l.startswith("PASS apply: nothing to apply")]
+    assert line and "verify/selfcheck is failed" in line[0] and "./setup.sh" in line[0], r.stdout
+    assert dep.called() == [], dep.called()
+    _untouched(dep, head, env, led)
+
+
+@drives_installer
+def test_apply_with_nothing_to_apply_names_an_open_row_outside_the_update(dep: Dep):
+    """F26 of the 2026-10-02 testbed run's second pass: apply said "the ledger
+    is complete" while test/test was failed. It says only what it checked —
+    the update's phases — and hands any other open row to ./setup.sh."""
+    dep.fill_ledger(OLD)
+    write_lf(dep.ledger, dep.ledger.read_text().replace("test/test\tdone", "test/test\tfailed"))
+    _nothing_imported(dep)
+
+    r = dep.update("apply")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    line = [l for l in r.stdout.splitlines() if l.startswith("PASS apply: nothing to apply")]
+    assert line, r.stdout
+    assert "the ledger is complete" not in line[0]
+    assert f"the update's phases (fetch, llm, stack, app, verify) are done at {OLD}" in line[0], line[0]
+    assert f"test/test is failed at {OLD}" in line[0] and "./setup.sh resumes them" in line[0], line[0]
+    assert dep.called() == [], dep.called()
+
+
+@drives_installer
+def test_apply_resumes_an_update_that_merged_and_stopped(dep: Dep):
+    """The other half: an update that merged, then paused in a post-merge
+    phase. Its rows are at the NEW release up to the stop and at the OLD one
+    after it — so the second apply (nothing new to merge) resumes the deploy
+    steps, and only those."""
+    # The state the first apply leaves when it pauses at the llm catalog,
+    # built directly (a real first apply costs a whole staged acquisition and
+    # doubles the run): merged, fetch recorded at the NEW release, the llm gate
+    # waiting, everything after it still at the OLD one.
+    dep.fill_ledger(OLD)
+    dep.git("merge", "-q", "--ff-only", "upstream")
+    rows = []
+    for line in dep.ledger.read_text().splitlines():
+        if line.startswith("fetch/"):
+            line = line.replace(f"\tdone\t{OLD}\t", f"\tdone\t{NEW}\t")
+        elif line.startswith("llm/catalog-filled\t"):
+            line = line.replace(f"\tdone\t{OLD}\t", f"\tgate\t{NEW}\t")
+        rows.append(line)
+    write_lf(dep.ledger, "\n".join(rows) + "\n")
+
+    r = dep.update("apply", CC_UPDATE_DRIVEN="1")
+
+    assert r.returncode in (0, 2), r.stdout + r.stderr
+    merge = [l for l in r.stdout.splitlines() if l.startswith("PASS merge:")]
+    assert merge and "stopped before it finished" in merge[0] and "llm/" in merge[0], r.stdout
+    assert dep.called() == ["schema", "fetch", "llm", "stack", "app", "verify"], dep.called()
+    assert "nothing to apply" not in r.stdout
+    assert "PASS restart:" in r.stdout
+
+
 # ── the pre-ledger install ──────────────────────────────────────────────────
 
 
+@drives_installer
 def test_a_pre_ledger_install_is_asked_to_run_setup_once(dep: Dep):
     """No ledger at all: a deployment installed before v2.55.0. After the merge
     and the schema, ONE USERACTION — never the ledger gate's exit 1."""
@@ -634,13 +798,13 @@ def _run_runner(dep: Dep) -> tuple[subprocess.CompletedProcess, dict]:
     shutil.copyfile(ROOT / "deploy" / "single" / "update-run.sh", runner)
     # The runner's own health waits are a minute and a half; nothing here may
     # wait on them (the API never answers in this rig).
-    runner.write_text(runner.read_text().replace("seq 1 90", "seq 1 1").replace("seq 1 30", "seq 1 1"))
-    r = subprocess.run([_bash(), str(runner), NEW, str(dep.repo / "deploy" / "single")],
-                       capture_output=True, text=True, timeout=300,
-                       env=dep.env(CC_UPDATE_DIR=str(upd)))
+    write_lf(runner, runner.read_text().replace("seq 1 90", "seq 1 1").replace("seq 1 30", "seq 1 1"))
+    r = run_driver([_bash(), str(runner), NEW, str(dep.repo / "deploy" / "single")],
+                   cwd=Path.cwd(), env=dep.env(CC_UPDATE_DIR=str(upd)))
     return r, json.loads((upd / "status.json").read_text())
 
 
+@drives_installer
 def test_update_run_does_not_roll_back_the_adoption_pause(dep: Dep):
     r, status = _run_runner(dep)
     assert r.returncode == 3, r.stdout + r.stderr
@@ -652,6 +816,7 @@ def test_update_run_does_not_roll_back_the_adoption_pause(dep: Dep):
     assert "update.sh rollback" not in log and "PASS reset:" not in log
 
 
+@drives_installer
 def test_update_run_does_not_roll_back_a_stop_before_the_merge(dep: Dep):
     """Before v2.57.0 any apply exit 1 ran `update.sh rollback`, which resets
     to the NEWEST pre-update-* tag — an EARLIER update's. A stop before the
@@ -660,7 +825,7 @@ def test_update_run_does_not_roll_back_a_stop_before_the_merge(dep: Dep):
     subprocess.run(["git", "-C", str(dep.repo), "tag", "pre-update-20200101T000000Z",
                     "local"], check=True)
     old_tags = dep.git("tag", "-l")
-    (dep.flags / "pull-fails").write_text("docker.io/library/redis:7-alpine\n")
+    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7-alpine\n")
     head = dep.head()
 
     r, status = _run_runner(dep)
@@ -672,6 +837,7 @@ def test_update_run_does_not_roll_back_a_stop_before_the_merge(dep: Dep):
     assert "NOTHING was changed" in status["error"] and "image-redis" in status["error"], status
 
 
+@drives_installer
 def test_update_run_reports_a_pre_merge_pause_as_needing_the_operator(dep: Dep):
     dep.fill_ledger()
     dep.configure(models=("cc-default",))
@@ -686,13 +852,12 @@ def test_update_run_reports_a_pre_merge_pause_as_needing_the_operator(dep: Dep):
 # ── setup.sh: `acquire` is staged-only, and a staged run does nothing else ──
 
 
+@drives_installer
 def test_acquire_is_refused_on_an_install_and_a_staged_run_refuses_everything_else(dep: Dep):
     single = dep.repo / "deploy" / "single"
-    a = subprocess.run([_bash(), "setup.sh", "acquire"], cwd=single, capture_output=True,
-                       text=True, timeout=120, env=dep.env())
+    a = run_driver([_bash(), "setup.sh", "acquire"], cwd=single, env=dep.env())
     assert a.returncode == 1 and "FAIL acquire:" in a.stdout, a.stdout + a.stderr
-    s = subprocess.run([_bash(), "setup.sh", "llm"], cwd=single, capture_output=True, text=True,
-                       timeout=120, env=dep.env(CC_STAGED_FOR=str(dep.repo)))
+    s = run_driver([_bash(), "setup.sh", "llm"], cwd=single, env=dep.env(CC_STAGED_FOR=str(dep.repo)))
     assert s.returncode == 1 and "FAIL staged:" in s.stdout, s.stdout + s.stderr
     assert "llm" not in dep.called()
 
@@ -732,7 +897,7 @@ def _plain_tree(tmp_path: Path) -> Path:
                  repo / "central_command" / "db" / "schema.sql")
     (tmp_path / "home").mkdir()
     (tmp_path / "state").mkdir()
-    _set(repo / ".env", {"CC_STATE_DIR": str(tmp_path / "state")})
+    _set(repo / ".env", {"CC_STATE_DIR": (tmp_path / "state").as_posix()})
     return repo
 
 
@@ -745,7 +910,7 @@ def _version() -> str:
 
 def _ledger(tmp_path: Path, steps: list[str]) -> None:
     rows = ["# prepared"] + [f"{s}\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t" for s in steps]
-    (tmp_path / "state" / "ledger.tsv").write_text("\n".join(rows) + "\n")
+    write_lf(tmp_path / "state" / "ledger.tsv", "\n".join(rows) + "\n")
 
 
 def _setup(repo: Path, *args: str, path_prefix: str | None = None):
@@ -757,9 +922,9 @@ def _setup(repo: Path, *args: str, path_prefix: str | None = None):
         env.pop(stale, None)
     if path_prefix:
         env["PATH"] = path_prefix + os.pathsep + env.get("PATH", "")
-    return subprocess.run([_bash(), "setup.sh", *args], cwd=repo / "deploy" / "single",
-                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300,
-                          env=env)
+        python_shim(Path(path_prefix))
+        env = with_stub_path(env, Path(path_prefix))
+    return run_driver([_bash(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
 
 
 def _rows(tmp_path: Path) -> dict[str, list[str]]:
@@ -767,6 +932,7 @@ def _rows(tmp_path: Path) -> dict[str, list[str]]:
     return {l.split("\t")[0]: l.split("\t") for l in led.splitlines() if l and not l.startswith("#")}
 
 
+@drives_installer
 def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
     repo = _plain_tree(tmp_path)
     _set(repo / ".env", {"CC_API_PORT": str(api_up)})
@@ -774,7 +940,8 @@ def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
     ran = tmp_path / "suite-ran"
     py = repo / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True)
-    _exe(py, f'#!/usr/bin/env bash\necho "$*" >> "{ran}"\nexit "$(cat "{tmp_path}/suite-rc" 2>/dev/null || echo 0)"\n')
+    _exe(py, f'#!/usr/bin/env bash\necho "$*" >> "{ran.as_posix()}"\n'
+             f'exit "$(cat "{tmp_path.as_posix()}/suite-rc" 2>/dev/null || echo 0)"\n')
 
     r = _setup(repo, "test")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -783,7 +950,7 @@ def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
     assert "skipped" not in r.stdout
     assert _rows(tmp_path)["test/test"][1] == "done"
 
-    (tmp_path / "suite-rc").write_text("1")
+    write_lf(tmp_path / "suite-rc", "1")
     red = _setup(repo, "test")
     assert red.returncode == 1, red.stdout + red.stderr
     assert "FAIL test:" in red.stdout
@@ -793,6 +960,7 @@ def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
 # ── phase_app: a failed `npm ci` is the cockpit step's FAIL ─────────────────
 
 
+@drives_installer
 def test_a_failing_npm_ci_fails_the_cockpit_step_even_when_the_build_would_succeed(tmp_path: Path):
     repo = _plain_tree(tmp_path)
     _set(repo / ".env", {"CC_LLM_API_KEY": "sk-already-minted-0000000000", "CC_LLM_PROXY_ADMIN_KEY": "",
@@ -810,7 +978,7 @@ def test_a_failing_npm_ci_fails_the_cockpit_step_even_when_the_build_would_succe
     _exe(b / "node", "#!/usr/bin/env bash\necho v22.11.0\n")
     # `npm ci` fails; `npm run build` would succeed and leave a complete build.
     _exe(b / "npm", f'''#!/usr/bin/env bash
-echo "npm $*" >> "{calls}"
+echo "npm $*" >> "{calls.as_posix()}"
 [[ "$1" == ci ]] && exit 1
 mkdir -p dist server-dist && touch server-dist/index.js
 exit 0
@@ -837,6 +1005,7 @@ def _lift(name: str) -> str:
     return src[start:end]
 
 
+@drives_installer
 def test_machine_sh_stderr_is_logged_with_the_proxy_value_removed(tmp_path: Path):
     """D5: a failed write into the podman machine used to leave no trace (its
     stderr went to /dev/null). It goes to the log now — and the one proxy

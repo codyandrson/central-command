@@ -266,6 +266,20 @@ async def _pg_connect(dsn: str):
     return await asyncpg.connect(dsn, timeout=_SHORT)
 
 
+async def _tcp_accepts(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Does anything accept a TCP connection at host:port? A DIAGNOSIS only,
+    asked once after the spine's connect timed out, so the FAIL can say
+    whether the port answered at all — it never changes the verdict."""
+    try:
+        _reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+    except Exception:  # noqa: BLE001
+        return False
+    writer.close()
+    with contextlib.suppress(Exception):
+        await writer.wait_closed()
+    return True
+
+
 def _flag(name: str, default: bool) -> bool:
     """A DEPLOYMENT knob (`CC_ENABLE_SANDBOX`, …) — read from the environment,
     not a Settings field, because that is where it lives: the installer
@@ -308,11 +322,40 @@ def _schema_tables() -> list[str]:
     return re.findall(r"create table if not exists (\w+)", text, flags=re.IGNORECASE)
 
 
+async def _spine_timed_out(elapsed: float) -> str:
+    """The message for a spine connect that TIMED OUT — kept apart from
+    "refused", because they are different faults (2026-10-02 Windows run, F5:
+    one `TimeoutError` while the same box connected in ~60 ms before and
+    after). asyncpg's limit covers the TCP connect AND the server's first
+    answer (its SSL negotiation), so one extra TCP probe says which half
+    stalled. One probe, no retry: the verdict stays FAIL either way."""
+    parts = urlsplit(settings.database_url)
+    try:
+        host, port = parts.hostname or "127.0.0.1", parts.port or 5432
+    except ValueError:
+        host, port = None, None
+    accepts = await _tcp_accepts(host, port) if host else False
+    where = ("the port ACCEPTS a TCP connection, so the server (or the port forwarder "
+             "in front of it) took the connection but did not answer in time"
+             if accepts else
+             "nothing accepted a TCP connection on its host:port in time either")
+    return (f"cannot connect with CC_DATABASE_URL: the connect TIMED OUT after "
+            f"{elapsed:.1f} s (limit {_SHORT:g} s) — {where}; re-run to see whether it "
+            "persists")
+
+
 async def check_spine(ctx: Context) -> Outcome:
     if not settings.database_url:
         return fail("CC_DATABASE_URL is empty — the app has no database", "CC_DATABASE_URL")
+    started = time.monotonic()
     try:
         conn = await _pg_connect(settings.database_url)
+    except TimeoutError:
+        return fail(await _spine_timed_out(time.monotonic() - started), "CC_DATABASE_URL")
+    except ConnectionRefusedError as exc:
+        return fail(f"cannot connect with CC_DATABASE_URL: connection REFUSED — nothing "
+                    f"listens on its host:port; is postgres running? ({_describe(exc)})",
+                    "CC_DATABASE_URL")
     except Exception as exc:  # noqa: BLE001 — every failure is reported, never raised
         return fail(f"cannot connect with CC_DATABASE_URL ({_describe(exc)})", "CC_DATABASE_URL")
     try:
@@ -576,6 +619,43 @@ async def _exchange_one_ref() -> int:
     return await exchange._thread(run)
 
 
+async def _heartbeat_polls_mail() -> bool:
+    """Is the heartbeat's `feed.poll` schedule (seeded `mail-poll`, DISABLED)
+    enabled in the spine? Only asked when CC_HEARTBEAT_ENABLED=1 — with the
+    tick loop off no schedule fires. A database that cannot answer reads as
+    "no": the spine check reports the database by name."""
+    try:
+        conn = await _pg_connect(settings.database_url)
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        return bool(await conn.fetchval(
+            "select exists(select 1 from heartbeat_schedule "
+            "where action_kind = 'feed.poll' and enabled)"))
+    except Exception:  # noqa: BLE001
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            await conn.close()
+
+
+async def _mail_reader() -> str | None:
+    """What in the app READS mail on its own, or None when nothing does
+    (2026-10-02 Windows run, F4). The mail check follows the application, not
+    a deployment flag: `CC_ENABLE_N8N` is the single-node installer's knob and
+    the k3s profile does not honour it, and `CC_EMAIL_FACADE_TOKEN` is
+    generated on every install, so neither says whether mail is read. Two
+    things poll the provider: the feed's own loop, autostarted with the API by
+    `CC_FEED_ENABLED` (`api/app.py` → `ingest/feed.py`), and the heartbeat's
+    `feed.poll` action (the same `poll_once`) when its schedule is enabled and
+    `CC_HEARTBEAT_ENABLED=1` starts the tick loop."""
+    if settings.feed_enabled:
+        return "the mail feed (CC_FEED_ENABLED=1)"
+    if settings.heartbeat_enabled and await _heartbeat_polls_mail():
+        return "the heartbeat's mail-poll schedule"
+    return None
+
+
 async def check_mail(ctx: Context) -> Outcome:
     from central_command.integrations import email_facade, exchange
 
@@ -598,23 +678,28 @@ async def check_mail(ctx: Context) -> Outcome:
         return at(fail(
             f"Exchange is half-configured: {', '.join(partial)} empty — mail routes to "
             "the n8n façade until all three are set", partial[0]), None)
-    n8n_on = _flag("CC_ENABLE_N8N", False)
-    if not (n8n_on or settings.email_facade_token):
-        return at(not_applicable("no mail provider configured (CC_EXCHANGE_* unset; the n8n "
-                                 "façade is off: CC_ENABLE_N8N=0 and CC_EMAIL_FACADE_TOKEN "
-                                 "empty)"), None)
+    reader = await _mail_reader()
+    if reader is None:
+        return at(not_applicable(
+            "the mail feed is off (CC_FEED_ENABLED=0, and no enabled heartbeat mail-poll "
+            "schedule) and Exchange is not configured, so nothing in the app reads mail; "
+            "turn the feed on and the self-check will prove the provider"), None)
     if not settings.email_facade_token:
-        return fail("CC_ENABLE_N8N=1 but CC_EMAIL_FACADE_TOKEN is empty — the façade "
-                    "refuses an unauthenticated call", "CC_EMAIL_FACADE_TOKEN")
+        return fail(f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_TOKEN "
+                    "is empty — the façade refuses an unauthenticated call",
+                    "CC_EMAIL_FACADE_TOKEN")
     if not settings.email_facade_url:
-        return fail("CC_EMAIL_FACADE_URL is empty", "CC_EMAIL_FACADE_URL")
+        return fail(f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_URL "
+                    "is empty", "CC_EMAIL_FACADE_URL")
     try:
         refs = await email_facade.list_refs(MAIL_PROBE_QUERY)
     except Exception as exc:  # noqa: BLE001
         described = _describe(exc)
         if "unreachable" in described:
-            return fail(f"the n8n mail façade is unreachable ({described}) — is n8n running? "
-                        "check CC_EMAIL_FACADE_URL", "CC_EMAIL_FACADE_URL")
+            return fail(f"the n8n mail façade is unreachable ({described}) — {reader} reads "
+                        "mail through it: run n8n (CC_ENABLE_N8N=1 on the single-node "
+                        "install), configure Exchange (CC_EXCHANGE_*), or turn the feed "
+                        "off; check CC_EMAIL_FACADE_URL", "CC_EMAIL_FACADE_URL")
         if re.search(r"HTTP 40[13]", described):
             return fail(f"the n8n mail façade refused CC_EMAIL_FACADE_TOKEN ({described})",
                         "CC_EMAIL_FACADE_TOKEN")
@@ -830,6 +915,34 @@ def never_run(mode: str = "api") -> dict:
             "version": __version__, "mode": mode, "checks": []}
 
 
+# The modules the checks import lazily. Importing one is SYNCHRONOUS and, on a
+# venv whose bytecode was never compiled (the first run after `app` installs
+# it — uv does not precompile) under a virus scanner, can block the event loop
+# for seconds — while every other check's clock is running. That is one
+# reading of F5 (2026-10-02, Windows: the spine's connect timed out in the
+# first self-check after `app`, inside asyncpg's wait for the server's first
+# byte, and never again once the bytecode existed). So they are imported
+# BEFORE any clock starts. An import that fails here is left for its own check
+# to report by name.
+_CHECK_IMPORTS = (
+    "asyncpg",
+    "pydantic_ai.direct",
+    "pydantic_ai.exceptions",
+    "pydantic_ai.messages",
+    "central_command.runtime.models",
+    "central_command.integrations.neo4j_writer",
+    "central_command.integrations.graphiti",
+    "central_command.integrations.email_facade",
+    "central_command.integrations.exchange",
+)
+
+
+def _warm_imports() -> None:
+    for name in _CHECK_IMPORTS:
+        with contextlib.suppress(Exception):
+            importlib.import_module(name)
+
+
 async def run(*, mode: str = "api", pre_boot: bool = False,
               completion_timeout: float | None = None) -> dict:
     """Run every check that applies to `mode` concurrently — each under its own
@@ -839,6 +952,7 @@ async def run(*, mode: str = "api", pre_boot: bool = False,
         mode=mode, pre_boot=pre_boot,
         completion_timeout=float(completion_timeout or settings.selfcheck_completion_timeout),
     )
+    _warm_imports()
     ran_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     started = time.monotonic()
     checks = list(await asyncio.gather(*[_run_one(c, ctx) for c in checks_for(mode)]))
@@ -864,6 +978,19 @@ def protocol_line(check: dict) -> str:
     return f"{word} selfcheck-{check['name']}: {check['message']}"
 
 
+def _utf8_output() -> None:
+    """Write UTF-8 whatever the console or pipe says. On Windows a redirected
+    stdout is the ANSI code page (cp1252) unless PYTHONUTF8 is set — setup.sh
+    exports it, but D4's by-hand form `python -m central_command.selfcheck`
+    printed `—` and `ç` as U+FFFD (2026-10-02 Windows run, F9). `errors=replace`
+    so a stream that cannot take a character degrades instead of raising."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m central_command.selfcheck",
@@ -880,6 +1007,7 @@ def main(argv: list[str] | None = None) -> int:
                              "CC_SELFCHECK_COMPLETION_TIMEOUT, "
                              f"{settings.selfcheck_completion_timeout:g} s)")
     args = parser.parse_args(argv)
+    _utf8_output()
     doc = asyncio.run(run(mode="cli", pre_boot=args.pre_boot, completion_timeout=args.timeout))
     if args.json:
         print(json.dumps(doc, indent=2), flush=True)

@@ -42,7 +42,10 @@ what is missing, but it cannot install them.
   github.com; with `CC_AIRGAP=1` that download is impossible and `check` FAILs.
 - **Node.js 22 or newer.** Without it `check` WARNs and the cockpit is not
   built — and the cockpit is where the demo is approved.
-- **On Windows: Git Bash**, which runs the `.sh` scripts.
+- **On Windows: Git Bash**, which runs the `.sh` scripts. `unzip` is not
+  needed: `./update.sh` reads a release zip with the same Python the install
+  runs on (`python3`/`python` on `PATH`, else `uv run --no-project --python
+  3.12 python`).
 - **On Linux: lingering** for the user the install runs as
   (`loginctl enable-linger <user>`), wherever logind answers. Without it
   `check` FAILs: the user units and the rootless containers would stop when the
@@ -52,7 +55,21 @@ what is missing, but it cannot install them.
   host — has less memory than the stack wants.
 - **An LLM endpoint** the proxy can reach. Either declare it in `.env`
   (`CC_LLM_UPSTREAM_*`) or enter it in the LiteLLM UI when the run stops at
-  `llm/catalog-filled` below.
+  `llm/catalog-filled` below. Two limits of the declaration:
+  - **`.env` declares ONE upstream** — one `CC_LLM_UPSTREAM_BASE_URL` and one
+    `CC_LLM_UPSTREAM_API_KEY` for every alias. A model served from another
+    host or port (typically the embedder) cannot be declared: leave its
+    `CC_LLM_UPSTREAM_MODEL_<ALIAS>` blank (`check` WARNs
+    `llm-declared-<alias>` for it) and enter that alias's row in the LiteLLM
+    UI when the run stops at `llm/catalog-filled`; the declared aliases are
+    registered from `.env` either way.
+  - **The key must be non-empty, even for a server that checks none.** With
+    the base URL set and `CC_LLM_UPSTREAM_API_KEY` blank, `check` FAILs
+    (`llm-upstream`) and nothing is registered from `.env` — the run then
+    waits at `llm/catalog-filled` for every alias. For a keyless server write
+    a placeholder, `CC_LLM_UPSTREAM_API_KEY=none`: LiteLLM sends it as the
+    bearer token and the server ignores it. The same holds for the key field
+    of a row entered in the LiteLLM UI.
 - **On a restricted network**, run `deploy/discover.sh` first and read
   `deploy/AIRGAP.md`: every mirror, CA and proxy is a key in `.env`.
 
@@ -171,13 +188,25 @@ Updates arrive the way the install did: as a downloaded source zip. From
 
 It runs `init` if this tree has never had it, imports the zip onto the
 `upstream` branch, shows the version gate and the plan, and asks for your
-explicit yes. The apply refuses a tree that differs from its release and
-refuses to run under a live API (it offers to stop one `./setup.sh` started).
+explicit yes. **With no terminal** (an agent, a scheduled task) it does not
+ask: it stops after the plan with `USERACTION apply` (exit 3), and the next
+move is `./update.sh apply`, which continues from there — after `./setup.sh
+stop` if the API is running, because only the terminal path offers to stop it
+(`apply` itself stops at `USERACTION api-stop`). The import needs no
+`unzip` on any host — it unpacks the zip with the Python the install already
+uses — and it skips `docs/vendor/` (about 47,000 of the release's files)
+whenever that subtree's `MANIFEST` matches the deployed one. The apply refuses
+a tree that differs from its release and refuses to run under a live API (on a
+terminal it offers to stop one `./setup.sh` started).
 Then it **acquires before it merges**: the new release's own fetch, and a probe
 that the running LiteLLM catalog answers the aliases the new release needs, run
 from a staged copy — a stop there (exit 1 or 3) leaves the tree, the branch,
-the database and the containers as they were. Only then does it back up the
-spine database, tag a rollback point and fast-forward `local` to `upstream`.
+the database and the containers as they were. **When the acquisition stops**,
+fix the seam its FAIL or USERACTION line names (the repo-root `.env`, or the
+LiteLLM UI for a catalog row) and run `./update.sh apply` again; meanwhile
+`./setup.sh` brings the installed release's processes back — the update stays
+imported and waiting, and `./setup.sh` says so in one line. Once the acquisition succeeds, it backs up the
+spine database, tags a rollback point and fast-forwards `local` to `upstream`.
 After the merge the order is schema → `fetch` → `llm` → `stack` (which, when
 `CC_ENABLE_N8N=1`, applies the n8n façade workflows) → `app` → `verify`; a stop at any of them ends
 the update there, and `./update.sh apply` continues it. A successful apply ends

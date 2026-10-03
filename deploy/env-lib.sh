@@ -22,6 +22,9 @@
 #
 #   Functions (all cc_-prefixed so a caller's own helpers never collide):
 #     cc_get_kv <file> <key>              read one dotenv value, no sourcing
+#     cc_get_kv_cached <file> <key>       the same answer into KV_OUT, no fork
+#     cc_now_utc                          `date -u +%FT%TZ` into NOW_UTC, no fork
+#     cc_uname_s                          `uname -s` into UNAME_S, once per process
 #     cc_set_kv <file> <key> <value>      write one, in place, mode preserved
 #     cc_is_placeholder <value>           empty or a *CHANGEME* marker
 #     cc_set_kv_if_unset <file> <k> <v>   write only over a placeholder
@@ -38,6 +41,11 @@
 #     cc_build_inputs_label               the image LABEL that carries the hash
 #     cc_staged_image_ref <live-ref>      where a STAGED build tags its image
 #     cc_sha256_stdin                     sha256 hex of stdin, three-way fallback
+#     cc_resolve_py                       the Python command the scripts' helpers run on
+#     cc_cockpit_npm_inputs / cc_cockpit_build_inputs <repo-root>
+#                                         what the cockpit's npm tree / build is made FROM
+#     cc_cockpit_current <state> <npm|build> <repo-root>   artifacts present + record equal
+#     cc_cockpit_record / cc_cockpit_forget                write / drop that record
 #     cc_exit_code <fails> <warns> <actions>      the ONE exit-code rule
 #     cc_tree_diff <repo-root>            is this tree still the release it claims
 #   The run lock (2026-10-01 design record, D11 — one run at a time):
@@ -64,6 +72,113 @@ cc_get_kv() { # cc_get_kv <file> <key>
     [[ "$line" == "$k="* ]] && out="${line#*=}"
   done <"$f"
   printf '%s' "$out"
+}
+
+# The SAME answer, from a per-run cache, into KV_OUT — no `$(...)`, so no fork.
+# For the readers that ask for many keys in a row: the ledger's fingerprints
+# read every `reads` key of every row the plan judges, and on Git Bash a
+# `$(cc_get_kv …)` per key is a fork per key (P5, the first laptop acceptance
+# run: ~21 s before the first line of every command, nearly all of it forks).
+#
+# SELF-VALIDATING, so no writer has to remember it: every call reads the file
+# whole (one builtin `read`, no fork) and compares it with the copy the cache
+# was built from; any difference — the driver's own cc_set_kv, make-secrets.sh,
+# resolve-images.sh, a `configure` that just created the file, an operator's
+# editor — rebuilds it. KVCACHE_GEN counts the rebuilds, which is how the
+# ledger's fingerprint cache knows its digests are still about THIS file.
+#
+# PARITY with cc_get_kv, line for line: CR stripped, last definition wins, the
+# value is everything after the first `=`, quotes kept as written, comments and
+# blank lines never match. A key that is not a plain identifier (a name the
+# cache's keying could read differently) and a missing file go to cc_get_kv
+# itself. tests/test_single_env_lib_cache.py holds the two side by side.
+# Not CC_-prefixed: results, not answers (tests/test_single_airgap_seams.py).
+declare -A KVCACHE=()
+KVCACHE_FILE=""
+KVCACHE_SNAP=""
+KVCACHE_GEN=0
+KV_OUT=""
+cc__kv_cache_sync() { # cc__kv_cache_sync <file>  -> 1 = no file (nothing cached)
+  local f="$1" snap="" line
+  if [[ ! -f "$f" ]]; then
+    # Gone (or never there): nothing cached, and a generation of its own, so a
+    # verdict taken while the file existed is not mistaken for one about this.
+    [[ "$KVCACHE_FILE" == "$f" && "$KVCACHE_SNAP" == $'\001absent' ]] && return 1
+    KVCACHE=(); KVCACHE_FILE="$f"; KVCACHE_SNAP=$'\001absent'
+    KVCACHE_GEN=$((KVCACHE_GEN + 1))
+    return 1
+  fi
+  # -d '' reads to EOF (the status is 1 there, which is the normal case).
+  IFS= read -r -d '' snap <"$f" || true
+  # `[ = ]`, not `[[ == ]]`: a plain string comparison. [[ ]] matches its
+  # right side as a (quoted) PATTERN, which costs ~3x as much on a 50 KB file.
+  [ "$KVCACHE_FILE" = "$f" ] && [ "$KVCACHE_SNAP" = "$snap" ] && return 0
+  KVCACHE=(); KVCACHE_FILE="$f"; KVCACHE_SNAP="$snap"
+  KVCACHE_GEN=$((KVCACHE_GEN + 1))
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "${line%%=*}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && "$line" == *=* ]] || continue
+    KVCACHE["${line%%=*}"]="${line#*=}"
+  done <"$f"
+  return 0
+}
+
+cc_get_kv_cached() { # cc_get_kv_cached <file> <key>  -> KV_OUT
+  KV_OUT=""
+  if [[ ! "$2" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || ! cc__kv_cache_sync "$1"; then
+    KV_OUT="$(cc_get_kv "$1" "$2")"
+    return 0
+  fi
+  KV_OUT="${KVCACHE[$2]:-}"
+  return 0
+}
+
+# Now, UTC, as `date -u +%FT%TZ` prints it, into NOW_UTC — without the
+# `date` process (P5: the driver stamps every log line, and on Git Bash each
+# stamp was a fork and an exec). bash 5's EPOCHSECONDS is the clock, and the
+# calendar is ARITHMETIC (cc__utc_from_epoch, Howard Hinnant's days-to-civil),
+# so no time zone database, TZ variable or strftime is involved at all — the
+# result cannot come out in local time with a `Z` on it. Older than bash 5, or
+# a clock that is not a number, falls back to `date` itself.
+NOW_UTC=""
+cc_now_utc() { # cc_now_utc  -> NOW_UTC
+  NOW_UTC=""
+  if [[ "${EPOCHSECONDS:-}" =~ ^[0-9]+$ ]]; then
+    cc__utc_from_epoch "$EPOCHSECONDS"
+  else
+    NOW_UTC="$(date -u +%FT%TZ)"
+  fi
+  return 0
+}
+
+# <epoch seconds> -> NOW_UTC as YYYY-MM-DDTHH:MM:SSZ (proleptic Gregorian, UTC).
+cc__utc_from_epoch() { # cc__utc_from_epoch <epoch>
+  local t="$1" days sod z era doe yoe y doy mp d m
+  days=$(( t / 86400 )); sod=$(( t % 86400 ))
+  z=$(( days + 719468 ))
+  era=$(( (z >= 0 ? z : z - 146096) / 146097 ))
+  doe=$(( z - era * 146097 ))
+  yoe=$(( (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 ))
+  y=$(( yoe + era * 400 ))
+  doy=$(( doe - (365 * yoe + yoe / 4 - yoe / 100) ))
+  mp=$(( (5 * doy + 2) / 153 ))
+  d=$(( doy - (153 * mp + 2) / 5 + 1 ))
+  m=$(( mp < 10 ? mp + 3 : mp - 9 ))
+  (( m <= 2 )) && y=$(( y + 1 ))
+  printf -v NOW_UTC '%04d-%02d-%02dT%02d:%02d:%02dZ' \
+    "$y" "$m" "$d" $(( sod / 3600 )) $(( sod % 3600 / 60 )) $(( sod % 60 ))
+}
+
+# `uname -s`, asked once per process into UNAME_S (P5): the kernel name does not
+# change under a run, and every caller that branches on Windows asked it again
+# — a fork and an exec each time on Git Bash, the one platform where that is
+# slow. Not CC_-prefixed: a fact of the host, not an answer.
+UNAME_S=""
+UNAME_S_KNOWN=0
+cc_uname_s() { # cc_uname_s  -> UNAME_S
+  (( UNAME_S_KNOWN )) && return 0
+  UNAME_S="$(uname -s 2>/dev/null)"
+  UNAME_S_KNOWN=1
 }
 
 # Set one key, in place, preserving the file's mode and every comment.
@@ -143,16 +258,22 @@ cc_norm_path() { # cc_norm_path <path>
 # EXACTLY in central_command/config.py (Settings.resolved_state_dir) — a second
 # checkout of the same release on one machine must not share a state dir, and
 # the two sides must agree on which one it is.
+#
+# The hash is cc_sha256_stdin's (the same three-way fallback) cut to 8
+# characters, and the basename is `basename`'s answer by parameter expansion —
+# no `cut`, no `basename` process (P5: forks are the cost on Git Bash). A
+# hasher that is missing or prints nothing still reads `nohash`.
 cc_install_id() { # cc_install_id <normalized-repo-root>
-  local norm="$1" h=""
-  if command -v sha256sum >/dev/null 2>&1; then
-    h="$(printf '%s' "$norm" | sha256sum 2>/dev/null | cut -c1-8)"
-  elif command -v shasum >/dev/null 2>&1; then
-    h="$(printf '%s' "$norm" | shasum -a 256 2>/dev/null | cut -c1-8)"
-  elif command -v openssl >/dev/null 2>&1; then
-    h="$(printf '%s' "$norm" | openssl dgst -sha256 2>/dev/null | sed 's/.*= *//' | cut -c1-8)"
-  fi
-  printf '%s-%s' "$(basename "$norm")" "${h:-nohash}"
+  local norm="$1" h="" b
+  h="$(printf '%s' "$norm" | cc_sha256_stdin)"
+  [[ "$h" == nohash ]] && h=""
+  h="${h:0:8}"
+  # basename: trailing slashes dropped (a path of only slashes is `/`), then
+  # everything up to the last slash.
+  b="$norm"
+  while [[ "$b" == */ && "$b" != / ]]; do b="${b%/}"; done
+  [[ "$b" == / ]] || b="${b##*/}"
+  printf '%s-%s' "$b" "${h:-nohash}"
 }
 
 # Echo the state dir, creating it 0700 (best effort — chmod is a silent no-op
@@ -160,20 +281,31 @@ cc_install_id() { # cc_install_id <normalized-repo-root>
 # run: that is the one .env write a read-only command is allowed to make, and
 # it is what keeps the Python side from having to guess a path spelling.
 cc_state_dir() { # cc_state_dir <env-file> <repo-root>
+  cc__state_dir_into "$1" "$2" || return 1
+  printf '%s' "$STATE_DIR_OUT"
+}
+
+# The same, into STATE_DIR_OUT, for a caller that wants it without the `$(…)`
+# (setup.sh's init_state, on every command). The common case — CC_STATE_DIR
+# answered, the directory there — costs one `chmod` and no fork.
+STATE_DIR_OUT=""
+cc__state_dir_into() { # cc__state_dir_into <env-file> <repo-root>  -> STATE_DIR_OUT
   local envf="$1" root="$2" sd base
+  STATE_DIR_OUT=""
   sd="${CC_STATE_DIR:-}"
-  [[ -n "$sd" ]] || sd="$(cc_get_kv "$envf" CC_STATE_DIR)"
+  [[ -n "$sd" ]] || { cc_get_kv_cached "$envf" CC_STATE_DIR; sd="$KV_OUT"; }
   if [[ -z "$sd" ]]; then
     base="${XDG_STATE_HOME:-$HOME/.local/state}"
     sd="$(cc_norm_path "$base")/central-command/$(cc_install_id "$(cc_norm_path "$root")")"
-    mkdir -p "$sd" || return 1
+    [[ -d "$sd" ]] || mkdir -p "$sd" || return 1
     chmod 700 "$sd" 2>/dev/null || true
     [[ -f "$envf" ]] && cc_set_kv "$envf" CC_STATE_DIR "$sd"
   else
-    mkdir -p "$sd" || return 1
+    [[ -d "$sd" ]] || mkdir -p "$sd" || return 1
     chmod 700 "$sd" 2>/dev/null || true
   fi
-  printf '%s' "$sd"
+  STATE_DIR_OUT="$sd"
+  return 0
 }
 
 # ── migration off the retired files (D1, the release path) ──────────────────
@@ -409,7 +541,8 @@ cc_export_tls_env() { # cc_export_tls_env <state-dir>
 cc__write_curlrc() { # cc__write_curlrc <path> [extra-line ...]
   local f="$1"; shift
   local lines="" l
-  case "$(uname -s 2>/dev/null)" in
+  cc_uname_s
+  case "$UNAME_S" in
     MINGW*|MSYS*|CYGWIN*) lines="ssl-revoke-best-effort"$'\n' ;;
   esac
   for l in "$@"; do lines="${lines}${l}"$'\n'; done
@@ -603,16 +736,167 @@ cc_staged_image_ref() { # cc_staged_image_ref <live-ref>
 # to the old "tag present" rule rather than rebuilding on every run.
 cc_sha256_stdin() {
   local h=""
+  # The first space-separated field, by parameter expansion — what `cut -d' '
+  # -f1` printed, without its process.
   if command -v sha256sum >/dev/null 2>&1; then
-    h="$(sha256sum 2>/dev/null | cut -d' ' -f1)"
+    h="$(sha256sum 2>/dev/null)"; h="${h%% *}"
   elif command -v shasum >/dev/null 2>&1; then
-    h="$(shasum -a 256 2>/dev/null | cut -d' ' -f1)"
+    h="$(shasum -a 256 2>/dev/null)"; h="${h%% *}"
   elif command -v openssl >/dev/null 2>&1; then
     h="$(openssl dgst -sha256 2>/dev/null | sed 's/.*= *//')"
   else
     cat >/dev/null
   fi
   printf '%s' "${h:-nohash}"
+}
+
+# The Python the scripts run their helpers with, printed as a COMMAND — it may
+# be several words (the uv fallback), so a caller invokes it UNQUOTED:
+# `PY="$(cc_resolve_py)"; $PY -c ...`. One definition for setup.sh and
+# update.sh (P5, 2026-10-02: the importer moved from unzip to Python's zipfile
+# and needed the same interpreter rather than a second copy of this logic).
+# Windows has no real python3: the WindowsApps stub answers `command -v` but
+# exits 49 (2026-08-21 Windows validation, W2) — so probe by RUNNING it.
+# --no-project is load-bearing: without it `uv run` DISCOVERS pyproject.toml
+# from the cwd (these scripts run inside the checkout), SYNCS the project —
+# a universal resolution of every platform, which a Windows mirror holding
+# only Windows wheels cannot satisfy — and writes uv.lock into the tree. On
+# the Windows testbed (2026-09-25, CC_AIRGAP=1 against a local mirror) every
+# `$PY` call in the llm section died with "No solution found ... uvloop" and
+# the endpoint looked empty. The fallback is an INTERPRETER, not a project.
+cc_resolve_py() {
+  local c
+  for c in python3 python; do
+    command -v "$c" >/dev/null 2>&1 && "$c" -c '' 2>/dev/null && { printf '%s' "$c"; return 0; }
+  done
+  printf '%s' "uv run --no-project --python 3.12 python"
+}
+
+# ── the cockpit: what its npm tree and its build were made FROM (P5, F12) ────
+# The 2026-10-02 Windows acceptance run measured every `fetch`/`app` re-run —
+# adoption included — spending ~70 s on `npm ci` and ~66 s on `npm run build`
+# with nothing in web/ changed: the largest part of an all-present walk. The
+# local images learned this rule in v2.57.0 (`cc.build-inputs`): record the
+# hash of what an artifact was built from, and rebuild only when it differs.
+# The cockpit's records are FILES IN THE STATE DIR — `<state>/cockpit.npm-inputs`
+# and `<state>/cockpit.build-inputs` — never inside web/ (nothing is written
+# inside the checkout, D7).
+#
+#   npm   the lockfile (CR-stripped) and node's MAJOR version: `npm ci` installs
+#         exactly the lockfile, and a new major is a new native-module ABI
+#         (the cockpit carries a native whisper addon), which only a reinstall
+#         rebuilds.
+#   build what `npm run build` reads — `tsc -b` (tsconfig.json and its four
+#         referenced projects: config/tsconfig.{app,node,server,scripts}.json
+#         over src/, vite.config.ts, server/ and scripts/), `vite build`
+#         (index.html, vite.config.ts, package.json's version, src/, public/)
+#         and `build:server` (config/tsconfig.server.json and
+#         config/tsconfig.bin.json over server/ and bin/) — plus the lockfile,
+#         because the installed dependencies are compiled in. The config FILES
+#         are named one by one rather than hashing config/: tsc writes its
+#         .tsbuildinfo beside a config, and a hash that the build itself
+#         changes would never let the build be skipped.
+# Directories go through ledger-lib.sh's cc_tree_hash (bash's own `read`, no
+# fork per file — the cockpit's ~540 source files would cost seconds of forks
+# on Git Bash otherwise), files through cc_sha256_stdin, CR-stripped: the same
+# two hashers the ledger and the image labels use, no third. No timestamps,
+# no temp paths. A hash that cannot be taken (an unreadable input, no
+# cc_tree_hash) is "unknown", and unknown always means "run it", never "skip".
+cc__cockpit_file_line() { # cc__cockpit_file_line <repo-root> <web-relative file>
+  local f="$1/web/$2"
+  if [[ -f "$f" ]]; then
+    [[ -r "$f" ]] || return 1
+    printf 'file web/%s %s\n' "$2" "$(tr -d '\r' <"$f" | cc_sha256_stdin)"
+  else
+    printf 'file web/%s absent\n' "$2"
+  fi
+}
+
+cc_cockpit_npm_inputs() { # cc_cockpit_npm_inputs <repo-root>  -> the hash; 1 = unknowable
+  local root="$1" nv line
+  [[ -f "$root/web/package-lock.json" ]] || return 1
+  nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
+  line="$(cc__cockpit_file_line "$root" package-lock.json)" || return 1
+  printf 'cc-cockpit-npm/1\nnode-major %s\n%s\n' "${nv%%.*}" "$line" | cc_sha256_stdin
+}
+
+cc_cockpit_build_inputs() { # cc_cockpit_build_inputs <repo-root>  -> the hash; 1 = unknowable
+  local root="$1" f d payload="cc-cockpit-build/1"$'\n' line
+  # The list above, as data — web-relative. A new build input goes HERE, or
+  # the cockpit silently stops rebuilding when it changes.
+  local -a files=(package.json package-lock.json index.html vite.config.ts tsconfig.json
+    config/tsconfig.app.json config/tsconfig.node.json config/tsconfig.server.json
+    config/tsconfig.scripts.json config/tsconfig.bin.json)
+  local -a dirs=(src server public bin scripts)
+  declare -F cc_tree_hash >/dev/null || return 1
+  for f in "${files[@]}"; do
+    line="$(cc__cockpit_file_line "$root" "$f")" || return 1
+    payload+="$line"$'\n'
+  done
+  for d in "${dirs[@]}"; do
+    line="$(cc_tree_hash "$root" "web/$d")"
+    [[ "$line" == unreadable ]] && return 1
+    payload+="tree web/$d $line"$'\n'
+  done
+  printf '%s' "$payload" | cc_sha256_stdin
+}
+
+cc_cockpit_record_file() { # cc_cockpit_record_file <state-dir> <npm|build>
+  printf '%s/cockpit.%s-inputs' "$1" "$2"
+}
+
+# One hash per kind and tree per PROCESS: the plan's probe, the phase's skip
+# decision, the probe after the phase and the record all ask the same
+# question, and nothing a run does between them changes the inputs (`npm ci`
+# writes node_modules, never the lockfile; the build writes dist/ and
+# server-dist/). Sets _CC_COCKPIT_HASH; returns 1 when the hash is unknowable.
+cc__cockpit_hash() { # cc__cockpit_hash <npm|build> <repo-root>
+  local h
+  case "$1" in
+    npm)   h="$(cc_cockpit_npm_inputs "$2")" || return 1 ;;
+    build)
+      if [[ -n "${_CC_COCKPIT_BUILD_MEMO:-}" && "${_CC_COCKPIT_BUILD_MEMO%%$'\t'*}" == "$2" ]]; then
+        h="${_CC_COCKPIT_BUILD_MEMO#*$'\t'}"
+      else
+        h="$(cc_cockpit_build_inputs "$2")" || return 1
+        _CC_COCKPIT_BUILD_MEMO="$2"$'\t'"$h"
+      fi ;;
+    *) return 1 ;;
+  esac
+  [[ -n "$h" && "$h" != nohash ]] || return 1
+  _CC_COCKPIT_HASH="$h"
+}
+
+# Is the cockpit's <kind> CURRENT: its artifacts present AND the record equal
+# to the hash of the tree now? The ONE question the skip, the probe and the
+# plan all ask. Writes nothing.
+cc_cockpit_current() { # cc_cockpit_current <state-dir> <npm|build> <repo-root>
+  local state="$1" kind="$2" root="$3" rec
+  case "$kind" in
+    npm)   [[ -d "$root/web/node_modules" ]] || return 1 ;;
+    build) [[ -f "$root/web/server-dist/index.js" && -d "$root/web/dist" ]] || return 1 ;;
+    *) return 1 ;;
+  esac
+  rec="$(cat "$(cc_cockpit_record_file "$state" "$kind")" 2>/dev/null)" || return 1
+  cc__cockpit_hash "$kind" "$root" || return 1
+  [[ -n "$rec" && "$rec" == "$_CC_COCKPIT_HASH" ]]
+}
+
+# Record what <kind> was just made from — atomically (a temp file beside the
+# record, then one mv), so a killed run never leaves half a hash.
+cc_cockpit_record() { # cc_cockpit_record <state-dir> <npm|build> <repo-root>
+  local state="$1" kind="$2" root="$3" f
+  f="$(cc_cockpit_record_file "$state" "$kind")"
+  cc__cockpit_hash "$kind" "$root" || { rm -f "$f"; return 1; }
+  printf '%s\n' "$_CC_COCKPIT_HASH" >"$f.tmp.$$" && mv -f "$f.tmp.$$" "$f"
+}
+
+# Forget the record BEFORE the work starts: `npm ci` deletes node_modules and
+# then fills it, and the build deletes server-dist first, so a run that dies
+# half-way leaves the artifact present but partial — and a record still
+# matching the inputs would then skip the repair forever.
+cc_cockpit_forget() { # cc_cockpit_forget <state-dir> <npm|build>
+  rm -f "$(cc_cockpit_record_file "$1" "$2")"
 }
 
 # The consumer list a WARN names, per command. Kept here so the phrasing is
@@ -874,7 +1158,8 @@ cc__lock_age() { # cc__lock_age <lock-dir>
 cc__lock_fill() { # cc__lock_fill <lock-dir> <command-text>
   local lock="$1"
   printf '%s\n' "$2" >"$lock/command" || return 1
-  printf '%s\n' "$(date -u +%FT%TZ)" >"$lock/started" || return 1
+  cc_now_utc
+  printf '%s\n' "$NOW_UTC" >"$lock/started" || return 1
   printf '%s\n' "$$" >"$lock/pid.tmp" || return 1
   mv -f "$lock/pid.tmp" "$lock/pid"
 }
@@ -883,7 +1168,7 @@ cc_lock_acquire() { # cc_lock_acquire <state-dir> <command-text>
   local state="$1" what="$2" lock="$1/run.lock" attempt aside age
   local reclaimed=0 dead_pid="" dead_cmd="" dead_at="" seen_pid
   RUN_LOCK_RESULT=""; RUN_LOCK_AGE=""
-  mkdir -p "$state" 2>/dev/null || true
+  [[ -d "$state" ]] || mkdir -p "$state" 2>/dev/null || true
   for attempt in 1 2 3; do
     if mkdir "$lock" 2>/dev/null; then
       if ! cc__lock_fill "$lock" "$what"; then
@@ -984,7 +1269,7 @@ cc__trap_add() { # cc__trap_add <signal> <action> [first]
 }
 
 cc_lock_trap() { # cc_lock_trap <state-dir>
-  local q; q="$(printf '%q' "$1")"
+  local q; printf -v q '%q' "$1"
   local had_int had_term
   had_int="$(trap -p INT)"; had_term="$(trap -p TERM)"
   cc__trap_add EXIT "cc_lock_release $q"

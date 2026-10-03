@@ -4,6 +4,145 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-02 — v2.58.2: what the first laptop run found
+
+The design record's P5 is a fresh install on a Windows laptop, driven from
+the checklist alone. The first pass (ledger in the private instance repo)
+stopped on three blocking findings and recorded a dozen more; this release
+is those fixes, and the ones from the second pass that followed. The third
+pass, on this release's tree, was clean: a fresh install to every ledger row
+done, an interrupted and resumed `app`, a killed run, the demo, a reboot with
+nobody at the keyboard, an update that could not be acquired, a clean
+update, a rollback, and the adoption of a deployment that predates the
+ledger. **This is the release the design record's P5 gates: the work site
+can update to it** — a deployment installed before v2.55.0 is asked, once,
+to run `./setup.sh`, which adopts it. What the run did not cover (a Linux
+host, n8n on this profile, a CA/proxy/mirror on this release) is listed in
+the design record.
+
+- **Fixed (blocked every default install): the mail self-check.** It read a
+  set `CC_EMAIL_FACADE_TOKEN` as "the n8n façade is configured" — and
+  `make-secrets.sh` generates that token on every install — so with n8n off
+  it dialled a façade that was not there, `verify/selfcheck` FAILed and
+  `boot` was unreachable. The check now asks what the app does: Exchange
+  configured → checked; otherwise only when something reads mail
+  (`CC_FEED_ENABLED=1`, or an enabled heartbeat `feed.poll` schedule); else
+  not applicable. `CC_ENABLE_N8N` is not the signal — the k3s profile does
+  not set it.
+- **Fixed (blocked every update on Windows): the import's unzip.** Git for
+  Windows' UnZip does not let `*` cross `/`, so the `docs/vendor/*` skip
+  excluded 3 of 49,809 entries and the vendor tree's four symlinks made every
+  release zip — GitHub's own included — fail to import. The import now
+  unpacks with the Python the install already uses (`release-zip.py`): the
+  vendor skip is a path prefix, modes are restored from the archive, a name
+  that escapes is refused, and a symlink is recorded into the import commit
+  rather than written to disk. `unzip` is no longer needed on any host.
+- **Fixed (blocked the test gate on Windows): one slow test killed the
+  suite.** pytest-timeout on Windows can only end the whole session when a
+  test passes the 120 s ceiling, with no summary. Every test that runs the
+  real installer is marked with its own ceiling and runs the driver through
+  a helper that kills the process tree and fails that one test. The 18 tests
+  that failed on Windows were harness defects (Git Bash's launcher prepends
+  `/mingw64/bin` to `PATH`, so a stub `curl` was shadowed; CRLF in stub data;
+  MSYS re-splitting a multi-line argument; brace expansion of an unquoted
+  sed program; MSYS vs Windows spellings of `$PWD`) and are fixed; the one
+  product defect among them is below. Twelve driver invocations were trimmed
+  from the slowest tests, and the trust-step tests remove the images they
+  build.
+- **Fixed: `v_path` let a URL through on Windows.** The validator normalised
+  the answer with `cygpath` before testing for `://`, which collapses the
+  `//`; `configure` then stored a mangled path that surfaced later as "no
+  such file".
+- **Fixed: the ledger misrecorded a stop.** Rows after a failed step were
+  judged by their probes (some `done`, some `failed` with no reason); the
+  llm pause recorded `catalog-filled` as `done` because its probe counted a
+  placeholder skeleton as registered and its USERACTION was printed under a
+  name that is no row. Now a row the phase never reached is `pending`, a
+  pause is `gate`, every reporter line in a phase file names a row of that
+  phase (guarded), and `catalog-filled` means filled.
+- **Fixed: `./update.sh apply` with nothing imported redeployed the installed
+  release** (eight minutes, every phase by name). It now resumes only an
+  update that merged and stopped, and otherwise says there is nothing to
+  apply.
+- **Fixed: the cockpit rebuilt on every re-run.** `npm ci` (~70 s) and
+  `npm run build` (~66 s) ran whenever the `fetch` or `app` phase did, with
+  nothing in `web/` changed. Both record their inputs' hash in the state dir
+  and skip when it matches.
+- **The driver starts a tenth of the processes.** On Windows every
+  `./setup.sh` command spent ~21 s before its first line and ~60 s on the
+  plan: the ledger code forked `cut` per manifest field, `sha256sum` per row
+  and `date` per log line, and a fork under MSYS costs 10–50 ms. Those paths
+  now run in-process (measured on Linux: `stop` 424 → 20 processes, the plan
+  571 → 26, a refused command 410 → 7), each probe is asked once per run
+  instead of twice, and every fingerprint value is unchanged, so an existing
+  ledger is judged exactly as before. The Windows figures are measured on the
+  repeat run.
+- **`stop` no longer kills a listener it has no record of.** The Windows
+  fallback that kills the process `netstat` names on the port now runs only
+  when a unit or a pid file says this install started it.
+- **Fixed: `llm` re-ran on every `./setup.sh` with the speech engine off.**
+  The plan asks the probes before `.env` is exported, and the list of
+  required aliases read `CC_ENABLE_SPEECH` from the environment only, so it
+  demanded `cc-tts`/`cc-stt` and read a filled catalog as unfilled. Probes
+  read flags from `.env` now. Found beside it and fixed: multi-line captures
+  of the interpreter's output kept a `\r` on Windows (the bundled skills
+  would have been re-imported on every boot; a registry tag never matched its
+  constraint), and a line-ending strip written inside a command substitution
+  did nothing on Git Bash, so a CRLF-only change moved a tree hash.
+- **Fixed: `check` WARNed that the package indexes were unreachable while
+  they answered.** It downloaded the whole PyPI simple index (46.7 MB) under
+  a 10 s limit; it asks with HEAD now. The indexes section and
+  `deploy/discover.sh` had the same shape (25.8 MB of npm metadata, where a
+  timeout was a FAIL): each now asks for one small project the install
+  itself resolves (`h11`, `picocolors` — taken from the lockfiles, so a
+  mirror seeded from them holds both, which the old `pip`/`npm` probes did
+  not guarantee).
+- **A path answer written with backslashes is refused by `check`.**
+  `setup.sh` sources `.env`, so bash drops the backslashes, while `update.sh`
+  reads the text as written — the two disagreed about the state dir. The
+  FAIL names the key and the forward-slash spelling.
+- The second laptop pass ran the fixes for real: the suite finishes there in
+  26–36 minutes (it was killed at 79 % before, and took 64 minutes by hand),
+  the first output line comes at about one second (it was 21), and the
+  installer tests that were skipped on Windows for PATH reasons now run and
+  pass there (779 passed, 58 skipped for POSIX-only mechanisms).
+- **Fixed: an unattended reboot hung at "What should the agents call you?"**
+  The logon entry runs in a console, so the resume run prompted and waited in
+  a locked session whenever the operator's name had been given in the
+  cockpit rather than in `.env`. The logon run takes its stdin from
+  `/dev/null` now. It also no longer trusts an exit code alone (a driver
+  killed from outside can return 0 on Windows): an attempt is finished only
+  when the driver logged its own `run end` line. And exactly one logon entry
+  is registered — a scheduled task created by an elevated run and a
+  Startup-folder copy from a later non-elevated run used to both fire.
+- **Fixed: `./setup.sh` refused to start the installed release while an
+  imported update was waiting** — after an acquisition that stopped, the
+  update flow had already stopped the API, so the install stayed down. It
+  runs the installed release and names `./update.sh apply`.
+- **`boot` starts the sandbox runner before the API**, so the API's start-up
+  self-check finds it; the Systems page no longer shows a stale failure after
+  every boot. `./update.sh apply` with nothing to apply says only what it
+  checked.
+- Known and left open: after `./update.sh rollback` the release rolled back
+  from is still imported, so the next run reports it as waiting and
+  `./update.sh apply` would install it again (import a fixed release
+  instead), and the rollback's last line still says "update applied"; the
+  suite takes about 44 minutes on a Windows laptop and, after an update,
+  runs before `boot`.
+- **A tag the mirror lacks is the operator's seam again** — USERACTION and
+  exit 3, so the logon runner stops instead of retrying; a registry that is
+  unreachable, a pin that does not exist, a public tag whose digest differs
+  from the lock, or a failed build stay FAIL.
+- The llm pause no longer tells the operator to edit `compose.yaml` for a
+  proxy (a deployment carries no local patches); it says plainly that this
+  release cannot reach an upstream that is only reachable through a proxy,
+  and a guard refuses any message that sends the reader to a tracked file.
+  `configure`'s last line and check's registries line no longer name a phase
+  to run. The checklist now says that `.env` declares ONE upstream (an
+  embedder on another host goes through the LiteLLM UI), that a keyless
+  upstream still needs a placeholder key (`none`), and how a headless
+  `./update.sh <zip>` proceeds. The self-check's by-hand output is UTF-8, and
+  a spine connect that times out says so and whether the port accepted.
 ## 2026-10-02 — v2.58.1: a ServiceLB port is linked in plain http, never through `tailscale serve`
 
 Found by v2.56.0's `links` self-check on its first run against the k3s

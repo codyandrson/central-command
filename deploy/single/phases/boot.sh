@@ -22,8 +22,8 @@
 #   ROWS (steps.tsv, phase `boot`) — step, kind, probe; a probe marked
 #   (setup.sh) is shared with another phase or the driver and lives there:
 #     operator-name                      human  p_operator_name
-#     boot-api                           run    p_boot_api
 #     boot-sandbox                       run    p_boot_sandbox
+#     boot-api                           run    p_boot_api
 #     boot-roster                        run    p_boot_roster
 #     skills-imported                    run    p_skills_imported
 #     boot-cockpit                       run    p_boot_cockpit
@@ -57,7 +57,8 @@ CC_PHASE_BOOT_LOADED=1
 SUP_MODE=""
 
 boot_supervisor() {
-  case "$(uname -s 2>/dev/null)" in
+  cc_uname_s
+  case "$UNAME_S" in
     MINGW*|MSYS*|CYGWIN*) printf 'windows'; return 0 ;;
     Linux) ;;
     *) printf 'detached'; return 0 ;;
@@ -123,6 +124,10 @@ proc_spec() { # proc_spec <api|cockpit|sandbox>
       # The API spawns the cockpit-driven updater, which STOPS the API and must
       # outlive it — see cc_render_unit's KillMode note.
       PROC_KILL=process
+      # After a reboot systemd starts the units together: order the API after
+      # the runner, as `boot` does (F20), so its start-up self-check is not
+      # taken before the runner was even started. Ordering only — no Wants=.
+      [[ "$(p_flag CC_ENABLE_SANDBOX 1)" == 1 ]] && PROC_AFTER="$(sup_unit sandbox)"
       uv="$(venv_uvicorn)" || { PROC_WHY="uvicorn not in .venv — run: ./setup.sh (it resumes at app, which installs it)"; return 1; }
       PROC_CMD=("$uv" central_command.api.app:app --host 127.0.0.1 --port "$PROC_PORT")
       ;;
@@ -158,9 +163,14 @@ proc_spec() { # proc_spec <api|cockpit|sandbox>
 # Write, enable and reload the units for <kind>... — into <state>/systemd/,
 # 0600 (an Environment= line can carry CC_PROXY's userinfo). `enable <path>`
 # LINKS a unit that lives outside the search path and enables it in one step.
+#
+# A failure here is reported under `boot-api`, the first row it stops — nothing
+# is started without the units — because a check-name that is no row marks no
+# row in the ledger (P5). The success line keeps its own name: a PASS needs no
+# row to stand on.
 sup_install_units() { # sup_install_units <kind>...
   local dir="$STATE_DIR/systemd" kind unit file text paths=() names=()
-  mkdir -p "$dir" 2>/dev/null || { fail "boot-supervisor" "could not create $dir"; return 1; }
+  mkdir -p "$dir" 2>/dev/null || { fail "boot-api" "the supervisor units could not be installed: could not create $dir"; return 1; }
   chmod 700 "$dir" 2>/dev/null || true
   for kind in "$@"; do
     proc_spec "$kind" || { fail "$PROC_CHECK" "$PROC_WHY"; return 1; }
@@ -168,21 +178,21 @@ sup_install_units() { # sup_install_units <kind>...
     text="$(cc_render_unit "$unit" "Central Command $PROC_TITLE, 127.0.0.1:$PROC_PORT (install $SUP_ID)" \
       "$PROC_DIR" "$ENV_FILE" "$PROC_LOG" "$PROC_AFTER" "$PROC_KILL" \
       -- ${PROC_ENV[@]+"${PROC_ENV[@]}"} -- "${PROC_CMD[@]}")" \
-      || { fail "boot-supervisor" "could not render $unit (the reason is on stderr)"; return 1; }
+      || { fail "boot-api" "the supervisor units could not be installed: could not render $unit (the reason is on stderr)"; return 1; }
     if ! { printf '%s\n' "$text" >"$file.tmp" && { chmod 600 "$file.tmp" 2>/dev/null || true; } && mv -f "$file.tmp" "$file"; }; then
       rm -f "$file.tmp"
-      fail "boot-supervisor" "could not write $file"
+      fail "boot-api" "the supervisor units could not be installed: could not write $file"
       return 1
     fi
     paths+=("$file"); names+=("$unit")
   done
   note "--> systemctl --user enable ${paths[*]} && systemctl --user daemon-reload"
   if ! systemctl --user enable "${paths[@]}" >&2; then
-    fail "boot-supervisor" "systemctl --user enable refused the units in $dir (its own words are on stderr) — nothing was started"
+    fail "boot-api" "systemctl --user enable refused the units in $dir (its own words are on stderr) — nothing was started"
     return 1
   fi
   if ! systemctl --user daemon-reload >&2; then
-    fail "boot-supervisor" "systemctl --user daemon-reload failed (its own words are on stderr) — nothing was started"
+    fail "boot-api" "systemctl --user daemon-reload failed (its own words are on stderr) — nothing was started"
     return 1
   fi
   pass "boot-supervisor" "systemd --user units ${names[*]} written to $dir and enabled: systemd restarts each on failure and starts it at boot (with lingering on — check/linger)"
@@ -208,7 +218,8 @@ sup_retire_unit() { # sup_retire_unit <kind>
 # real interpreter, is stopped with it. nohup: it outlives the terminal.
 proc_start_detached() {
   local pre=()
-  case "$(uname -s 2>/dev/null)" in
+  cc_uname_s
+  case "$UNAME_S" in
     MINGW*|MSYS*|CYGWIN*) ;;
     *) command -v setsid >/dev/null 2>&1 && pre=(setsid) ;;
   esac
@@ -334,10 +345,14 @@ bundled_skill_dirs() {
 # /api/skills includes them by default): a bundled skill the operator retired
 # is still "held", and re-importing it would be undoing their decision.
 # 1 = the API did not answer, which is not the same as an empty library.
+# CR-free: Windows Python ends each line "\r\n" on a pipe and Git Bash's $(...)
+# strips only the last, so every id but one would never match a bundled id —
+# the skills probe false forever and every bundled skill re-imported.
 skills_library_ids() {
-  local out
+  local out ids
   out="$(curl -fsS -m 15 "$(api_url)/api/skills" 2>/dev/null)" || return 1
-  printf '%s' "$out" | $PY -c 'import json,sys; [print(s.get("id","")) for s in json.load(sys.stdin).get("skills",[])]' 2>/dev/null
+  ids="$(printf '%s' "$out" | $PY -c 'import json,sys; [print(s.get("id","")) for s in json.load(sys.stdin).get("skills",[])]' 2>/dev/null)" || return 1
+  [[ -z "$ids" ]] || printf '%s\n' "${ids//$'\r'/}"
 }
 
 # boot/skills-imported (2026-10-01 record, D7). The importer is the API's own
@@ -438,8 +453,11 @@ phase_boot() {
       ;;
   esac
 
-  proc_boot api || return 1
-
+  # The sandbox runner FIRST: it depends on nothing the API provides, and the
+  # API runs (and caches) its self-check once at start — started second, that
+  # run found no runner and the Systems page read `links: fail ...
+  # CC_SANDBOX_DOCS_URL` until someone pressed Run (the 2026-10-02 testbed
+  # run's second pass, F20). proc_boot waits until the runner answers.
   if (( sandbox_on )); then
     if is_placeholder "$(get_kv "$ENV_FILE" CC_SANDBOX_RUNNER_TOKEN)"; then
       warn "boot-sandbox" "CC_SANDBOX_RUNNER_TOKEN is blank, so the runner accepts ANY local caller — deploy/single/make-secrets.sh generates it (the llm phase runs it)"
@@ -448,6 +466,8 @@ phase_boot() {
   else
     pass "boot-sandbox" "CC_ENABLE_SANDBOX is not 1 — the sandbox runner is not applicable on this install, and nothing was started"
   fi
+
+  proc_boot api || return 1
 
   # The roster is hired AFTER startup completes; one read right after /health
   # saw zero agents on 2026-09-18 (Windows, v2.36.4) — poll, do not sample.
@@ -484,28 +504,51 @@ phase_boot() {
   # boot-at-logon.log rather than silence), retrying while the podman machine
   # starts. The wrapper is tiny; the loop is a bash script beside it
   # (supervise-lib.sh renders both). Linux has the units above instead.
-  if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]] && command -v schtasks >/dev/null 2>&1; then
+  cc_uname_s
+  if [[ "$UNAME_S" == MINGW* || "$UNAME_S" == MSYS* ]] && command -v schtasks >/dev/null 2>&1; then
     local wrapper="$STATE_DIR/cc-boot.cmd" retry="$STATE_DIR/boot-at-logon.sh" bashw
     bashw="$(cygpath -w "$(command -v bash)")"
     # The wrapper, the loop and their log live in the state dir with everything
     # else generated; the loop's `cd` is still the checkout, because that is
     # where setup.sh is.
-    if ! cc_render_logon_retry "$HERE" "$STATE_DIR/boot-at-logon.log" >"$retry" \
+    if ! cc_render_logon_retry "$HERE" "$STATE_DIR/boot-at-logon.log" "$LOGFILE" >"$retry" \
        || ! cc_render_logon_cmd "$bashw" "$retry" >"$wrapper"; then
       warn "boot-at-logon" "could not write $wrapper / $retry — after a reboot, run: ./setup.sh"
     else
       # An onlogon task needs an elevated shell ("Access is denied" otherwise,
       # 2026-09-18); the user's Startup folder needs nothing — same moment, a
-      # console window while the run goes. Task first, Startup folder as the
-      # fallback.
-      local startup="$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup"
-      if schtasks //create //f //tn cc-boot //sc onlogon //tr "$(cygpath -w "$wrapper")" >/dev/null 2>&1; then
-        pass "boot-at-logon" "scheduled task cc-boot runs ./setup.sh (the resume command) at every logon, retrying while the podman machine starts (log: $STATE_DIR/boot-at-logon.log)"
-      elif [[ -d "$startup" ]] && cp "$wrapper" "$startup/cc-boot.cmd" 2>/dev/null; then
-        pass "boot-at-logon" "Startup-folder entry cc-boot.cmd runs ./setup.sh (the resume command) at every logon, retrying while the podman machine starts (no elevation; an elevated shell can instead: schtasks /create /f /tn cc-boot /sc onlogon /tr \"$(cygpath -w "$wrapper")\")"
-      else
-        warn "boot-at-logon" "could not register a logon entry — after a reboot, run: ./setup.sh"
+      # console window while the run goes. EXACTLY ONE entry is kept
+      # (cc_logon_entry_plan, F21): an existing task is left as it is (it runs
+      # the wrapper refreshed above), else one is created if this shell can,
+      # and only with neither is the Startup entry written — a one-line call
+      # into the same wrapper. A Startup entry beside a task is removed.
+      # Existence is decided by `schtasks /query`'s EXIT STATUS, never its
+      # output: from Git Bash over ssh it prints nothing (testbed, 2026-09-24).
+      local startup="$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup" wrapw
+      local task=0 created=0 has_startup=0 plan entry act
+      wrapw="$(cygpath -w "$wrapper")"
+      schtasks //query //tn cc-boot >/dev/null 2>&1 && task=1
+      if (( ! task )) && schtasks //create //f //tn cc-boot //sc onlogon //tr "$wrapw" >/dev/null 2>&1; then
+        created=1
       fi
+      [[ -f "$startup/cc-boot.cmd" ]] && has_startup=1
+      plan="$(cc_logon_entry_plan "$task" "$has_startup" "$created")"
+      entry="${plan%% *}"; act="${plan#* }"
+      if [[ "$act" == remove ]] && ! rm -f "$startup/cc-boot.cmd" 2>/dev/null; then
+        warn "boot-at-logon" "the scheduled task cc-boot is this install's logon entry, but the Startup-folder copy $startup/cc-boot.cmd could not be removed — delete it, or both run at every logon"
+      fi
+      case "$entry" in
+        task-kept)
+          pass "boot-at-logon" "scheduled task cc-boot (already registered) runs ./setup.sh (the resume command) at every logon, headless, retrying while the podman machine starts (log: $STATE_DIR/boot-at-logon.log)" ;;
+        task-created)
+          pass "boot-at-logon" "scheduled task cc-boot runs ./setup.sh (the resume command) at every logon, headless, retrying while the podman machine starts (log: $STATE_DIR/boot-at-logon.log)" ;;
+        startup)
+          if [[ -d "$startup" ]] && cc_render_logon_startup "$wrapw" >"$startup/cc-boot.cmd" 2>/dev/null; then
+            pass "boot-at-logon" "Startup-folder entry cc-boot.cmd runs ./setup.sh (the resume command) at every logon, headless, retrying while the podman machine starts (no elevation; an elevated shell can instead: schtasks /create /f /tn cc-boot /sc onlogon /tr \"$wrapw\" — the next ./setup.sh then removes the Startup entry)"
+          else
+            warn "boot-at-logon" "could not register a logon entry — after a reboot, run: ./setup.sh"
+          fi ;;
+      esac
     fi
   fi
   note "cockpit: http://127.0.0.1:${cport}  (the feed, the drain and every schedule are OFF until you turn them on)"
@@ -561,7 +604,8 @@ p_skills_imported() {
 }
 
 p_boot_at_logon() {
-  case "$(uname -s 2>/dev/null)" in
+  cc_uname_s
+  case "$UNAME_S" in
     MINGW*|MSYS*) ;;
     *) return 0 ;;
   esac

@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import importlib.util
+import io
 import json
 import re
+import sys
 from pathlib import Path
 
 import httpx
@@ -170,6 +173,10 @@ def fakes(monkeypatch):
         "exchange_url": "",
         "exchange_username": "",
         "exchange_password": "",
+        # The healthy install READS mail (the feed is on), so the mail check
+        # proves the provider; the heartbeat's loop is off.
+        "feed_enabled": True,
+        "heartbeat_enabled": False,
         "jira_base_url": "https://jira.example.com",
         "jira_email": "op@example.com",
         "jira_api_token": MARK_JIRA,
@@ -457,7 +464,7 @@ async def test_flags_off_and_unconfigured_integrations_are_not_applicable(fakes,
     monkeypatch.setenv("CC_ENABLE_SANDBOX", "0")
     monkeypatch.setenv("CC_ENABLE_CRAWLER", "0")
     monkeypatch.setenv("CC_ENABLE_N8N", "0")
-    monkeypatch.setattr(settings, "email_facade_token", "")
+    monkeypatch.setattr(settings, "feed_enabled", False)
     monkeypatch.setattr(settings, "exchange_password", "")
     monkeypatch.setattr(settings, "jira_base_url", "")
     monkeypatch.setattr(settings, "confluence_base_url", "")
@@ -570,6 +577,166 @@ def test_the_cli_timeout_flag_sets_the_completion_ceiling(fakes, monkeypatch, ca
     out = capsys.readouterr().out
     assert code == 1
     assert "FAIL selfcheck-completion-as-app: no answer within 0.05 s" in out
+
+
+# --- mail: checked when the app READS mail (2026-10-02 Windows run, F4) -------------
+
+
+def _default_install_mail(monkeypatch):
+    """What every single-node install looks like by default: make-secrets.sh
+    GENERATED a façade token, n8n is off, the feed is off, no Exchange — and
+    nothing listens at the façade URL."""
+    monkeypatch.setenv("CC_ENABLE_N8N", "0")
+    monkeypatch.setattr(settings, "feed_enabled", False)
+    monkeypatch.setattr(settings, "heartbeat_enabled", False)
+    monkeypatch.setattr(settings, "email_facade_token", MARK_MAIL)
+
+
+async def test_a_default_install_does_not_dial_a_facade_it_never_deployed(fakes, monkeypatch):
+    _default_install_mail(monkeypatch)
+    fakes.refs = email_facade.EmailFacadeError(
+        "email façade list unreachable at <url>: All connection attempts failed")
+    doc = await selfcheck.run(mode="cli", pre_boot=True)
+    mail = by_name(doc)["mail"]
+    assert mail["status"] == "skip", mail
+    assert selfcheck.protocol_line(mail).startswith("PASS selfcheck-mail: not applicable — ")
+    assert "CC_FEED_ENABLED=0" in mail["message"], mail["message"]
+    assert "turn the feed on" in mail["message"], mail["message"]
+    assert doc["status"] == "pass" and selfcheck.exit_code(doc) == 0
+
+
+async def test_n8n_on_alone_does_not_make_the_mail_check_apply(fakes, monkeypatch):
+    """CC_ENABLE_N8N is the single-node installer's knob — the k3s profile
+    does not honour it — so it is not what decides; the feed is."""
+    _default_install_mail(monkeypatch)
+    monkeypatch.setenv("CC_ENABLE_N8N", "1")
+    assert by_name(await selfcheck.run(mode="cli"))["mail"]["status"] == "skip"
+
+
+async def test_the_feed_on_with_the_facade_unreachable_fails_naming_its_url(fakes, monkeypatch):
+    _default_install_mail(monkeypatch)
+    monkeypatch.setattr(settings, "feed_enabled", True)
+    fakes.refs = email_facade.EmailFacadeError(
+        "email façade list unreachable at http://127.0.0.1:5678/x: All connection attempts failed")
+    mail = by_name(await selfcheck.run(mode="cli"))["mail"]
+    assert mail["status"] == "fail", mail
+    assert mail["remedy"] == "CC_EMAIL_FACADE_URL"
+    assert "CC_EMAIL_FACADE_URL" in mail["message"] and "CC_FEED_ENABLED=1" in mail["message"]
+    assert "http://127.0.0.1" not in mail["message"], "never a URL"
+    assert_no_marker(json.dumps(mail))
+
+
+async def test_the_feed_on_with_no_facade_token_fails_naming_the_token(fakes, monkeypatch):
+    _default_install_mail(monkeypatch)
+    monkeypatch.setattr(settings, "feed_enabled", True)
+    monkeypatch.setattr(settings, "email_facade_token", "")
+    mail = by_name(await selfcheck.run(mode="cli"))["mail"]
+    assert mail["status"] == "fail" and mail["remedy"] == "CC_EMAIL_FACADE_TOKEN", mail
+
+
+@pytest.mark.parametrize("schedule_on,expected", [(True, "pass"), (False, "skip")])
+async def test_the_heartbeat_mail_poll_counts_as_reading_mail(fakes, monkeypatch, schedule_on, expected):
+    """The heartbeat's feed.poll action runs the same poll_once — with its loop
+    on AND the mail-poll schedule enabled, the app reads mail with the feed's
+    own loop off."""
+    _default_install_mail(monkeypatch)
+    monkeypatch.setattr(settings, "heartbeat_enabled", True)
+
+    async def polls():
+        return schedule_on
+
+    monkeypatch.setattr(selfcheck, "_heartbeat_polls_mail", polls)
+    mail = by_name(await selfcheck.run(mode="cli"))["mail"]
+    assert mail["status"] == expected, mail
+    if schedule_on:
+        assert fakes.refs and "façade answers" in mail["message"]
+
+
+@pytest.mark.parametrize("feed", [True, False])
+async def test_exchange_configured_is_checked_whether_or_not_the_feed_is_on(fakes, monkeypatch, feed):
+    _default_install_mail(monkeypatch)
+    monkeypatch.setattr(settings, "feed_enabled", feed)
+    monkeypatch.setattr(exchange, "configured", lambda: True)
+    asked = []
+
+    async def one_ref():
+        asked.append(1)
+        return 1
+
+    monkeypatch.setattr(selfcheck, "_exchange_one_ref", one_ref)
+    mail = by_name(await selfcheck.run(mode="cli"))["mail"]
+    assert mail["status"] == "pass" and asked == [1], mail
+    assert "Exchange lists the inbox" in mail["message"]
+
+
+async def test_half_configured_exchange_fails_whether_or_not_the_feed_is_on(fakes, monkeypatch):
+    _default_install_mail(monkeypatch)
+    monkeypatch.setattr(settings, "exchange_url", "https://mail.example.com/ews/exchange.asmx")
+    mail = by_name(await selfcheck.run(mode="cli"))["mail"]
+    assert mail["status"] == "fail" and mail["remedy"] == "CC_EXCHANGE_USERNAME", mail
+    assert "half-configured" in mail["message"]
+
+
+# --- spine: a timeout is told apart from a refusal (2026-10-02 Windows run, F5) ------
+
+
+@pytest.mark.parametrize("accepts", [True, False])
+async def test_a_spine_connect_timeout_says_timed_out_and_which_half_stalled(fakes, monkeypatch, accepts):
+    fakes.pg_error = TimeoutError()
+    probed = []
+
+    async def tcp(host, port, timeout=2.0):
+        probed.append((host, port))
+        return accepts
+
+    monkeypatch.setattr(selfcheck, "_tcp_accepts", tcp)
+    spine = by_name(await selfcheck.run(mode="cli"))["spine"]
+    assert spine["status"] == "fail" and spine["remedy"] == "CC_DATABASE_URL", spine
+    assert "TIMED OUT after" in spine["message"], spine["message"]
+    assert "REFUSED" not in spine["message"]
+    assert ("ACCEPTS a TCP connection" in spine["message"]) is accepts, spine["message"]
+    assert probed == [("db.example.com", 5442)], "one diagnostic probe, never a retry loop"
+    assert_no_marker(json.dumps(spine))
+
+
+async def test_a_refused_spine_connect_says_refused(fakes, monkeypatch):
+    fakes.pg_error = ConnectionRefusedError(10061, "Connect call failed ('127.0.0.1', 5442)")
+    spine = by_name(await selfcheck.run(mode="cli"))["spine"]
+    assert spine["status"] == "fail" and "REFUSED" in spine["message"], spine
+    assert "TIMED OUT" not in spine["message"]
+
+
+def test_the_checks_imports_happen_before_any_clock_starts(monkeypatch):
+    """A synchronous first import inside one check blocks the loop while every
+    other check's timer runs (one reading of F5) — run() imports them first."""
+    order = []
+    monkeypatch.setattr(selfcheck, "_warm_imports", lambda: order.append("warm"))
+
+    async def one(check, ctx):
+        order.append(check.name)
+        return {"name": check.name, "status": "pass", "message": "", "remedy": None,
+                "system": None, "duration_ms": 0}
+
+    monkeypatch.setattr(selfcheck, "_run_one", one)
+    asyncio.run(selfcheck.run(mode="cli"))
+    assert order[0] == "warm" and len(order) == len(selfcheck.CHECKS) + 1, order
+    for name in selfcheck._CHECK_IMPORTS:
+        assert importlib.util.find_spec(name) is not None, name
+
+
+# --- the CLI writes UTF-8 whatever the stream's own encoding (F9) -------------------
+
+
+def test_the_cli_writes_utf8_to_a_cp1252_stream(fakes, monkeypatch):
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252", errors="replace", write_through=True)
+    monkeypatch.setattr(sys, "stdout", stream)
+    _default_install_mail(monkeypatch)  # a "not applicable — …" line carries an em dash
+    selfcheck.main(["--pre-boot"])
+    stream.flush()
+    text = raw.getvalue().decode("utf-8")  # raises if it was cp1252
+    assert "PASS selfcheck-mail: not applicable — " in text, text
+    assert "\ufffd" not in text
 
 
 # --- the real query against the suite's own disposable database ---------------------

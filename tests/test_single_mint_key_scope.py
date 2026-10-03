@@ -34,7 +34,15 @@ from pathlib import Path
 
 import pytest
 
-from tests.installer_source import installer_source
+from tests.installer_source import (
+    drives_installer,
+    env_path,
+    installer_source,
+    python_shim,
+    run_driver,
+    with_stub_path,
+    write_lf,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -141,7 +149,7 @@ def tree(tmp_path: Path) -> Path:
     state = tmp_path / "state"
     state.mkdir()
     _set(repo / ".env", {
-        "CC_STATE_DIR": str(state),
+        "CC_STATE_DIR": env_path(state),
         "CC_LLM_PROXY_ADMIN_KEY": ADMIN,
         "CC_LLM_API_KEY": "",
         "CC_ENABLE_SPEECH": "1",
@@ -149,17 +157,16 @@ def tree(tmp_path: Path) -> Path:
     # The install's venv: present, and anything asked of it succeeds.
     py = repo / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True)
-    py.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-    py.chmod(0o755)
+    write_lf(py, "#!/usr/bin/env bash\nexit 0\n", mode=0o755)
     # The stubs: curl (recording), uv (the install step), node (too old, so
     # the cockpit build is a WARN and nothing runs npm).
     stub = tmp_path / "stub"
     stub.mkdir()
-    (stub / "curl").write_text(CURL_STUB.replace("@DIR@", str(stub)), encoding="utf-8")
-    (stub / "uv").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-    (stub / "node").write_text("#!/usr/bin/env bash\necho v18.0.0\n", encoding="utf-8")
-    for f in stub.iterdir():
-        f.chmod(0o755)
+    write_lf(stub / "curl", CURL_STUB.replace("@DIR@", stub.as_posix()), mode=0o755)
+    write_lf(stub / "uv", "#!/usr/bin/env bash\nexit 0\n", mode=0o755)
+    write_lf(stub / "node", "#!/usr/bin/env bash\necho v18.0.0\n", mode=0o755)
+    # $PY must be a real interpreter, never the stub uv above (python_shim).
+    python_shim(stub)
     (stub / "minted").write_text(MINTED, encoding="utf-8")
     # app's cross-phase prerequisites, recorded done.
     led = state / "ledger.tsv"
@@ -178,17 +185,13 @@ def _stub(repo: Path) -> Path:
 def _run_app(repo: Path):
     env = dict(os.environ)
     home = repo.parent / "home"
-    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"),
-               PATH=f"{_stub(repo)}{os.pathsep}{env.get('PATH', '')}")
+    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"))
+    env = with_stub_path(env, _stub(repo))
     for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_SETUP_UNLEDGERED",
                   "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY", "CC_EXECUTOR_MODE",
                   "VIRTUAL_ENV"):
         env.pop(stale, None)
-    return subprocess.run(
-        [_bash_exe(), "setup.sh", "app"],
-        cwd=repo / "deploy" / "single",
-        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300, env=env,
-    )
+    return run_driver([_bash_exe(), "setup.sh", "app"], cwd=repo / "deploy" / "single", env=env)
 
 
 def _endpoints(repo: Path) -> list[str]:
@@ -223,6 +226,7 @@ def _cfg_data(cfg: str) -> dict:
 # ── a fresh mint ────────────────────────────────────────────────────────────
 
 
+@drives_installer
 @pytest.mark.parametrize("speech", ["1", "0"])
 def test_a_fresh_mint_is_scoped_to_exactly_the_required_aliases(tree: Path, speech: str):
     _set(tree / ".env", {"CC_ENABLE_SPEECH": speech})
@@ -254,6 +258,7 @@ def test_the_mint_body_is_built_from_the_one_list_not_typed():
 # ── an existing key ─────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_an_existing_narrow_key_gains_exactly_the_missing_aliases(tree: Path):
     """The pre-fix key (cc-default/cc-tts/cc-stt) plus a model the operator
     added by hand: the three missing aliases are ADDED, the operator's model
@@ -285,6 +290,7 @@ def test_an_existing_narrow_key_gains_exactly_the_missing_aliases(tree: Path):
     _assert_no_secret_in_argv(tree)
 
 
+@drives_installer
 def test_an_existing_key_that_covers_the_list_is_not_updated(tree: Path):
     _set(tree / ".env", {"CC_LLM_API_KEY": SPINE})
     (_stub(tree) / "info.json").write_text(json.dumps({
@@ -299,6 +305,7 @@ def test_an_existing_key_that_covers_the_list_is_not_updated(tree: Path):
     _assert_no_secret_in_argv(tree)
 
 
+@drives_installer
 def test_an_existing_key_with_an_empty_list_is_untouched(tree: Path):
     """An empty list means "every model on the proxy" in LiteLLM
     (docs/vendor/litellm/docs/proxy/key_auth_arch.md) — "fixing" it would
@@ -317,6 +324,7 @@ def test_an_existing_key_with_an_empty_list_is_untouched(tree: Path):
     _assert_no_secret_in_argv(tree)
 
 
+@drives_installer
 def test_an_unreachable_proxy_is_a_warn_not_a_fail(tree: Path):
     _set(tree / ".env", {"CC_LLM_API_KEY": SPINE})
     (_stub(tree) / "down").write_text("", encoding="utf-8")

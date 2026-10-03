@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import DRIVER_RUN_TIMEOUT, drives_installer, env_path, run_driver, write_lf
+
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
 
@@ -46,7 +48,11 @@ _DEBRIS = shutil.ignore_patterns(
     ".env", ".env.*", "__pycache__", "*.pyc",
 )
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="drives POSIX process groups and a Linux stub systemd")
+# Most of this file drives POSIX process groups and a Linux stub systemd. The
+# Windows logon entry's renderers and its retry loop are the exception: they
+# exist FOR Windows, so they run there too (the 2026-10-02 testbed run's
+# second pass, F19/F21/F23).
+posix_only = pytest.mark.skipif(os.name == "nt", reason="drives POSIX process groups and a Linux stub systemd")
 
 TOKEN = "MARKER_RUNNER_TOKEN_0123456789abcdef"
 
@@ -348,7 +354,7 @@ class Install:
         self.fake.mkdir()
         self.api, self.cockpit, self.runner = _free_port(), _free_port(), _free_port()
         _set(repo / ".env", {
-            "CC_STATE_DIR": str(self.state),
+            "CC_STATE_DIR": env_path(self.state),
             "CC_API_PORT": str(self.api),
             "CC_COCKPIT_PORT": str(self.cockpit),
             "CC_SANDBOX_RUNNER_URL": f"http://127.0.0.1:{self.runner}",
@@ -359,7 +365,7 @@ class Install:
         # Every cross-phase prerequisite of a boot row, recorded done.
         _write_ledger(repo, ["app/install", "app/mint-key", "verify/selfcheck", "app/cockpit"])
 
-    def run(self, *args: str, timeout: int = 300) -> subprocess.CompletedProcess:
+    def run(self, *args: str, timeout: int = DRIVER_RUN_TIMEOUT) -> subprocess.CompletedProcess:
         env = dict(os.environ)
         home = self.tmp / "home"
         env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"),
@@ -369,9 +375,8 @@ class Install:
                       "CC_COCKPIT_PORT", "CC_SANDBOX_RUNNER_URL", "CC_EXECUTOR_MODE",
                       "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
             env.pop(stale, None)
-        return subprocess.run([_bash_exe(), "setup.sh", *args], cwd=self.repo / "deploy" / "single",
-                              capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                              timeout=timeout, env=env)
+        return run_driver([_bash_exe(), "setup.sh", *args], cwd=self.repo / "deploy" / "single",
+                          env=env, timeout=timeout)
 
     def install_id(self) -> str:
         r = subprocess.run([_bash_exe(), "-c", '. ./deploy/env-lib.sh; cc_install_id "$(cc_norm_path "$PWD")"'],
@@ -427,6 +432,8 @@ def _bundled() -> list[str]:
 # ── the systemd path ────────────────────────────────────────────────────────
 
 
+@posix_only
+@drives_installer
 def test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_boot_again(inst: Install):
     r = inst.run("boot")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -450,6 +457,10 @@ def test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_b
     assert 'Environment="CC_SANDBOX_BACKEND=podman"' in sbx_text
     assert "central_command.sandbox.runner:app" in sbx_text
     assert TOKEN not in sbx_text, "the token reaches the runner through EnvironmentFile, never baked into a unit"
+    # After a reboot the manager starts the units together: the API is ordered
+    # after the runner (F20), the cockpit after the API.
+    assert f"After={sbx}" in api_text
+    assert "After=" not in sbx_text
     ckp_text = (units / ckp).read_text(encoding="utf-8")
     assert f"WorkingDirectory={inst.repo}/web" in ckp_text and f"After={api}" in ckp_text
     assert f'Environment="PORT={inst.cockpit}"' in ckp_text
@@ -457,14 +468,15 @@ def test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_b
     assert (units / api).stat().st_mode & 0o777 == 0o600
 
     # Linked/enabled, reloaded, then each STARTED THROUGH the (stub) manager,
-    # in order: api, sandbox, cockpit.
+    # in order: sandbox, api, cockpit — the runner first, so the API's
+    # start-up self-check finds it (the 2026-10-02 testbed run, F20).
     calls = inst.calls()
     enable = [c for c in calls if c.startswith("--user enable ")]
     assert enable and all(str(units / u) in enable[0] for u in (api, sbx, ckp)), calls
     assert calls.index(enable[0]) < calls.index("--user daemon-reload")
     restarts = [c for c in calls if c.startswith("--user restart ")]
-    assert restarts == [f"--user restart {api}", f"--user restart {sbx}", f"--user restart {ckp}"], calls
-    assert [role for role, _ in inst.starts()] == ["api", "runner", "cockpit"]
+    assert restarts == [f"--user restart {sbx}", f"--user restart {api}", f"--user restart {ckp}"], calls
+    assert [role for role, _ in inst.starts()] == ["runner", "api", "cockpit"]
     # ...and ONLY through it: every process that started is one the stub ran.
     stub_pids = {int(p.read_text()) for p in (inst.fake / "run").iterdir()}
     assert {pid for _, pid in inst.starts()} == stub_pids
@@ -504,6 +516,8 @@ def test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_b
     assert "already in the library and LEFT AS THEY ARE" in _line(b.stdout, "PASS skills-imported:")
 
 
+@posix_only
+@drives_installer
 def test_a_running_unit_is_left_alone_and_not_started_twice(inst: Install):
     assert inst.run("boot").returncode == 0
     before = len(inst.starts())
@@ -516,6 +530,8 @@ def test_a_running_unit_is_left_alone_and_not_started_twice(inst: Install):
 # ── no user manager: the detached fallback ──────────────────────────────────
 
 
+@posix_only
+@drives_installer
 def test_without_a_user_manager_boot_starts_detached_and_warns(inst: Install):
     (inst.fake / "no-systemd").touch()
     r = inst.run("boot")
@@ -526,7 +542,7 @@ def test_without_a_user_manager_boot_starts_detached_and_warns(inst: Install):
     # Nothing was enabled or started through systemd; no unit was written.
     assert not [c for c in inst.calls() if not c.endswith("show-environment")], inst.calls()
     assert not (inst.state / "systemd").exists()
-    assert [role for role, _ in inst.starts()] == ["api", "runner", "cockpit"]
+    assert [role for role, _ in inst.starts()] == ["runner", "api", "cockpit"]
     # The pid file names the SERVER itself — not a wrapper shell around it
     # (the pre-v2.57.0 `( cd X && cmd & )` shape recorded the wrapper, so
     # `stop` signalled a shell and the server kept listening).
@@ -545,6 +561,8 @@ def test_without_a_user_manager_boot_starts_detached_and_warns(inst: Install):
     assert not list(inst.state.glob("*.pid"))
 
 
+@posix_only
+@drives_installer
 def test_with_the_sandbox_off_the_runner_row_is_done_and_nothing_starts(inst: Install):
     """And with no cockpit build: the import route is the API's own, so the
     skills are imported without the cockpit, which is a WARN."""
@@ -569,6 +587,8 @@ def test_with_the_sandbox_off_the_runner_row_is_done_and_nothing_starts(inst: In
 # ── stop proves the port ────────────────────────────────────────────────────
 
 
+@posix_only
+@drives_installer
 def test_stop_fails_when_a_port_still_answers(inst: Install):
     """A listener on the API port that this install has no record of starting
     (no pid file, no unit): stop cannot claim the port is free, so it FAILS —
@@ -590,6 +610,8 @@ def test_stop_fails_when_a_port_still_answers(inst: Install):
         foreign.wait()
 
 
+@posix_only
+@drives_installer
 def test_stop_fails_loudly_when_the_answer_file_cannot_be_loaded(inst: Install):
     """D5: `stop` used to swallow a load_env failure and probe the DEFAULT
     ports — a green stop about ports this install may not use."""
@@ -610,6 +632,8 @@ def test_stop_fails_loudly_when_the_answer_file_cannot_be_loaded(inst: Install):
 # ── create-only skills, and a new bundled folder ────────────────────────────
 
 
+@posix_only
+@drives_installer
 def test_skills_are_create_only_and_a_new_bundled_folder_is_imported(inst: Install):
     (inst.fake / "no-systemd").touch()
     (inst.fake / "library.json").write_text(json.dumps(["jira"]))
@@ -632,6 +656,8 @@ def test_skills_are_create_only_and_a_new_bundled_folder_is_imported(inst: Insta
     assert inst.ledger()["boot/skills-imported"][1] == "done"
 
 
+@posix_only
+@drives_installer
 def test_a_failed_import_is_a_fail_naming_the_skill(inst: Install):
     """The API refusing one folder (422) is a FAIL that names it, and the row
     is recorded failed — never a PASS over a library missing a skill."""
@@ -649,6 +675,7 @@ def test_a_failed_import_is_a_fail_naming_the_skill(inst: Install):
     assert inst.ledger()["boot/skills-imported"][1] == "failed"
 
 
+@posix_only
 def test_every_bundled_folder_name_is_the_id_the_importer_would_derive():
     """boot passes the FOLDER name as skill_id. The importer derives an id from
     SKILL.md's `name:` when none is passed — so the two must agree, or a skill
@@ -664,6 +691,8 @@ def test_every_bundled_folder_name_is_the_id_the_importer_would_derive():
 # ── lingering is a FAIL that names the command ──────────────────────────────
 
 
+@posix_only
+@drives_installer
 @pytest.mark.parametrize("linger, verdict", [
     ("no", "FAIL linger:"),
     ("outside", "FAIL linger:"),
@@ -706,6 +735,8 @@ def _render_unit(tmp: Path, exe: str) -> str:
     ''')
 
 
+@posix_only
+@drives_installer
 def test_the_unit_renders_exactly(tmp_path: Path):
     text = _render_unit(tmp_path, "/opt/venv/bin/uvicorn")
     lines = text.splitlines()
@@ -736,12 +767,16 @@ def test_the_unit_renders_exactly(tmp_path: Path):
     assert lines.index(f"EnvironmentFile={tmp_path}/my repo/.env") < lines.index('Environment="PYTHONUTF8=1"')
 
 
+@posix_only
+@drives_installer
 def test_a_relative_executable_is_refused(tmp_path: Path):
     r = subprocess.run([_bash_exe(), "-c", ". ./supervise-lib.sh; cc_render_unit u d /w /e /l - - -- -- uvicorn x"],
                        cwd=SINGLE, capture_output=True, text=True)
     assert r.returncode == 1 and "absolute path" in r.stderr
 
 
+@posix_only
+@drives_installer
 @pytest.mark.skipif(shutil.which("systemd-analyze") is None, reason="systemd-analyze is not installed here")
 def test_systemd_analyze_verifies_the_rendered_units(tmp_path: Path):
     """READ-ONLY: `systemd-analyze --user verify` parses the files it is handed
@@ -767,11 +802,14 @@ def test_systemd_analyze_verifies_the_rendered_units(tmp_path: Path):
     assert not complaints, complaints
 
 
+@posix_only
+@drives_installer
 def test_unit_names_are_per_install_and_safe():
     out = _lib('cc_sup_unit_name "central-command-1a2b3c4d" api; echo; cc_sup_unit_name "my repo@x-99" cockpit')
     assert out.splitlines() == ["cc-central-command-1a2b3c4d-api.service", "cc-my_repo_x-99-cockpit.service"]
 
 
+@drives_installer
 def test_the_windows_wrapper_is_tiny_and_hands_one_path_to_bash():
     out = subprocess.run(
         [_bash_exe(), "-c", ". ./supervise-lib.sh; cc_render_logon_cmd 'C:\\Program Files\\Git\\bin\\bash.exe' "
@@ -787,51 +825,139 @@ def test_the_windows_wrapper_is_tiny_and_hands_one_path_to_bash():
     assert b"C:\\b%%x\\bash.exe" in pct and b"C:/s%%1/r.sh" in pct
 
 
+@drives_installer
+@pytest.mark.parametrize("task, startup, created, plan", [
+    # A task already there wins; a Startup entry beside it is removed (F21:
+    # the elevated first boot made the task, a non-elevated logon run ALSO
+    # wrote the Startup copy, and both fired).
+    (1, 0, 0, "task-kept leave"),
+    (1, 1, 0, "task-kept remove"),
+    (1, 1, 1, "task-kept remove"),     # `created` is not consulted when a task exists
+    # No task, and this shell could create one: the task, and no Startup entry.
+    (0, 0, 1, "task-created leave"),
+    (0, 1, 1, "task-created remove"),
+    # No task and no way to make one: the Startup entry, written or refreshed.
+    (0, 0, 0, "startup write"),
+    (0, 1, 0, "startup write"),
+])
+def test_exactly_one_logon_entry_whatever_ran_before(task, startup, created, plan):
+    assert _lib(f"cc_logon_entry_plan {task} {startup} {created}") == plan
+    entry, act = plan.split()
+    # Count what is left: one entry in every case.
+    tasks = 1 if entry.startswith("task") else 0
+    startups = 1 if (act == "write" or (startup and act == "leave")) else 0
+    assert tasks + startups == 1, plan
+
+
+@drives_installer
+def test_the_startup_entry_is_one_call_into_the_state_dirs_wrapper():
+    out = subprocess.run(
+        [_bash_exe(), "-c", ". ./supervise-lib.sh; cc_render_logon_startup "
+                            "'C:\\Users\\jdoe\\AppData\\Local\\central-command\\r-1%x\\cc-boot.cmd'"],
+        cwd=SINGLE, capture_output=True, check=False,
+    ).stdout
+    assert out == b'@echo off\r\ncall "C:\\Users\\jdoe\\AppData\\Local\\central-command\\r-1%%x\\cc-boot.cmd"\r\n'
+
+
+@drives_installer
 def test_the_retry_script_text():
-    text = _lib('cc_render_logon_retry "/c/Users/jdoe/my repo/deploy/single" "/c/state/boot-at-logon.log"')
+    text = _lib('cc_render_logon_retry "/c/Users/jdoe/my repo/deploy/single" "/c/state/boot-at-logon.log" '
+                '"/c/state/setup-log.txt"')
     lines = text.splitlines()
     assert lines[0] == "#!/usr/bin/env bash"
     assert "log=/c/state/boot-at-logon.log" in lines
+    assert "slog=/c/state/setup-log.txt" in lines
     assert "attempts=10" in lines and "delay=60" in lines
     assert any(l.startswith("cd /c/Users/jdoe/my\\ repo/deploy/single || ") for l in lines), text
-    assert "  ./setup.sh --accept-warnings >>\"$log\" 2>&1" in lines
+    # Headless by definition (F19): stdin is /dev/null, never the console.
+    assert "  ./setup.sh --accept-warnings </dev/null >>\"$log\" 2>&1" in lines
     assert "  sleep \"$delay\"" in lines
 
 
-@pytest.mark.parametrize("codes, attempts, final", [
-    ([0], 1, 0),
-    ([2], 1, 2),
-    ([3], 1, 3),                 # waiting on the operator: retrying cannot help
-    ([1, 1, 0], 3, 0),           # the podman machine came up on the third try
-    ([1] * 12, 10, 1),           # ten attempts, then it gives up
-    ([1, 5], 2, 5),              # a code it does not understand stops it
-])
-def test_the_retry_script_runs_the_resume_command_until_it_can_stop(tmp_path: Path, codes, attempts, final):
-    """The REAL rendered script, run against a fake ./setup.sh that exits with
-    the given codes in turn — with the delay rendered as 0."""
+def _retry_rig(tmp_path: Path, codes: list[int], ends: list[bool]) -> tuple[Path, Path, Path]:
+    """A fake ./setup.sh that exits with `codes` in turn and, when the matching
+    `ends` entry is true, appends the driver's own `run end` line to the state
+    dir's log first — the way logline writes it. It FAILS (exit 97/98) if its
+    stdin is a terminal or carries data: the logon run is headless (F19)."""
     single = tmp_path / "single"
     single.mkdir()
     seq = tmp_path / "codes"
-    seq.write_text("\n".join(str(c) for c in codes) + "\n")
-    _exe(single / "setup.sh",
-         "#!/usr/bin/env bash\n"
-         f'echo "args: $*"\n'
-         f'n=$(head -1 "{seq}"); sed -i 1d "{seq}"; exit "$n"\n')
+    write_lf(seq, "".join(f"{c} {int(e)}\n" for c, e in zip(codes, ends + [True] * len(codes))))
+    slog = tmp_path / "setup-log.txt"
+    write_lf(single / "setup.sh",
+             "#!/usr/bin/env bash\n"
+             '[[ -t 0 ]] && { echo "STDIN IS A TERMINAL"; exit 97; }\n'
+             'if IFS= read -r line; then echo "STDIN CARRIED: $line"; exit 98; fi\n'
+             'echo "args: $*"\n'
+             f'read -r n e < "{seq.as_posix()}"; sed -i 1d "{seq.as_posix()}"\n'
+             f'(( e )) && echo "2026-10-03T00:00:00Z boot run end: ./setup.sh all -> exit $n" >> "{slog.as_posix()}"\n'
+             'exit "$n"\n', mode=0o755)
     log = tmp_path / "boot-at-logon.log"
     script = tmp_path / "boot-at-logon.sh"
-    script.write_text(_lib(f'cc_render_logon_retry "{single}" "{log}" 10 0'))
-    r = subprocess.run([_bash_exe(), str(script)], capture_output=True, text=True, timeout=60)
-    assert r.returncode == final, log.read_text()
+    write_lf(script, _lib(f'cc_render_logon_retry "{single.as_posix()}" "{log.as_posix()}" '
+                          f'"{slog.as_posix()}" 10 0'))
+    return script, log, slog
+
+
+@drives_installer
+@pytest.mark.parametrize("codes, ends, attempts, final", [
+    ([0], [True], 1, 0),
+    ([2], [True], 1, 2),
+    ([3], [True], 1, 3),                 # waiting on the operator: retrying cannot help
+    ([1, 1, 0], [True] * 3, 3, 0),       # the podman machine came up on the third try
+    ([1] * 12, [True] * 12, 10, 1),      # ten attempts, then it gives up
+    ([1, 5], [True, True], 2, 5),        # a code it does not understand stops it
+    # F23: killed from outside, the driver reported exit 0 without ever logging
+    # its run end — not done; the next attempt finishes.
+    ([0, 0], [False, True], 2, 0),
+    ([2, 0], [False, True], 2, 0),
+    ([0] * 12, [False] * 12, 10, 1),     # never finishes: the same budget, then gives up
+])
+def test_the_retry_script_runs_the_resume_command_until_it_can_stop(tmp_path: Path, codes, ends,
+                                                                      attempts, final):
+    """The REAL rendered script, run against a fake ./setup.sh — with the
+    delay rendered as 0, and data waiting on the script's own stdin that the
+    driver must never see."""
+    script, log, _slog = _retry_rig(tmp_path, codes, ends)
+    r = subprocess.run([_bash_exe(), str(script)], capture_output=True, text=True, timeout=60,
+                       input="Jane Doe\n")
     text = log.read_text()
+    assert r.returncode == final, text
+    assert "STDIN" not in text, text
     assert text.count("args: --accept-warnings") == attempts, text
     assert text.count(": ./setup.sh --accept-warnings") == attempts
     assert f"attempt {attempts}/10" in text
     if final == 3:
         assert "waiting on the operator; not retrying" in text
-    if codes[:10] == [1] * 10:
+    if final == 1 and attempts == 10:
         assert "giving up" in text
+    if False in ends[:attempts]:
+        assert "the driver logged no run end — it ended without finishing" in text, text
+    if final in (0, 2):
+        assert text.rstrip().endswith(f"exit {final} — done"), text
 
 
+@drives_installer
+@pytest.mark.skipif(os.name == "nt", reason="a pseudo-terminal is POSIX (pty)")
+def test_the_logon_run_never_hands_the_driver_a_terminal(tmp_path: Path):
+    """F19 itself: the logon task's console is a TERMINAL on the script's
+    stdin, and the driver must still see /dev/null."""
+    import pty
+
+    script, log, _ = _retry_rig(tmp_path, [0], [True])
+    leader, follower = pty.openpty()
+    try:
+        r = subprocess.run([_bash_exe(), str(script)], stdin=follower, capture_output=True,
+                           text=True, timeout=60)
+    finally:
+        os.close(leader)
+        os.close(follower)
+    assert r.returncode == 0, log.read_text()
+    assert "STDIN IS A TERMINAL" not in log.read_text()
+
+
+@posix_only
+@drives_installer
 @pytest.mark.parametrize("rc, out, verdict", [
     (0, "Linger=yes", "PASS"),
     (0, "Linger=no", "FAIL"),
@@ -854,6 +980,8 @@ def _fp(root: Path, reads: str) -> str:
     return _lib(f'cc_fingerprint "{root}/.env" "{reads}"')
 
 
+@posix_only
+@drives_installer
 def test_a_tree_input_moves_the_fingerprint_only_when_the_tree_moves(tmp_path: Path):
     (tmp_path / ".env").write_text("CC_API_PORT=8080\n")
     skill = tmp_path / "skills" / "jira"
@@ -886,6 +1014,8 @@ def test_a_tree_input_moves_the_fingerprint_only_when_the_tree_moves(tmp_path: P
     assert _fp(tmp_path, "CC_API_PORT,@skills") not in (base, edited)
 
 
+@posix_only
+@drives_installer
 def test_a_tree_input_needs_no_git_and_an_absent_tree_is_stable(tmp_path: Path):
     (tmp_path / ".env").write_text("CC_API_PORT=8080\n")
     assert not (tmp_path / ".git").exists()
@@ -894,6 +1024,8 @@ def test_a_tree_input_needs_no_git_and_an_absent_tree_is_stable(tmp_path: Path):
     assert _lib(f'cc_tree_hash "{tmp_path}" skills') == "absent"
 
 
+@posix_only
+@drives_installer
 def test_the_manifest_refuses_a_tree_input_that_leaves_the_checkout(tmp_path: Path):
     for bad in ("@../etc", "@/etc", "@"):
         steps = tmp_path / "steps.tsv"
@@ -903,6 +1035,8 @@ def test_the_manifest_refuses_a_tree_input_that_leaves_the_checkout(tmp_path: Pa
         assert r.returncode == 1 and "tree input" in r.stderr, (bad, r.stderr)
 
 
+@posix_only
+@drives_installer
 def test_the_plan_names_a_tree_input_in_words():
     out = _lib('''
       PHASE_VERDICT=run PHASE_CODE=inputs PHASE_STEP=boot/skills-imported
@@ -913,6 +1047,7 @@ def test_the_plan_names_a_tree_input_in_words():
                    "CC_API_PORT, the files under skills/")
 
 
+@posix_only
 def test_the_skills_row_reads_the_tree():
     rows = [l.split("\t") for l in (SINGLE / "steps.tsv").read_text(encoding="utf-8").splitlines()
             if l.startswith("boot\tskills-imported\t")]
@@ -929,7 +1064,7 @@ def _secrets_tree(tmp_path: Path) -> Path:
     shutil.copy2(ROOT / "deploy" / "env-lib.sh", repo / "deploy" / "env-lib.sh")
     shutil.copy2(ROOT / ".env.example", repo / ".env")
     (tmp_path / "state").mkdir()
-    _set(repo / ".env", {"CC_STATE_DIR": str(tmp_path / "state")})
+    _set(repo / ".env", {"CC_STATE_DIR": env_path(tmp_path / "state")})
     return repo
 
 
@@ -948,6 +1083,8 @@ def _make_secrets(repo: Path) -> subprocess.CompletedProcess:
                           capture_output=True, text=True, env=env, timeout=60)
 
 
+@posix_only
+@drives_installer
 def test_make_secrets_generates_the_runner_token(tmp_path: Path):
     repo = _secrets_tree(tmp_path)
     assert _get(repo / ".env", "CC_SANDBOX_RUNNER_TOKEN") == ""
@@ -959,6 +1096,8 @@ def test_make_secrets_generates_the_runner_token(tmp_path: Path):
     assert tok not in r.stdout + r.stderr, "a generated value is never printed"
 
 
+@posix_only
+@drives_installer
 def test_make_secrets_never_overwrites_a_runner_token_that_is_set(tmp_path: Path):
     repo = _secrets_tree(tmp_path)
     _set(repo / ".env", {"CC_SANDBOX_RUNNER_TOKEN": "operator-chose-this"})
@@ -968,6 +1107,7 @@ def test_make_secrets_never_overwrites_a_runner_token_that_is_set(tmp_path: Path
     assert "generated CC_SANDBOX_RUNNER_TOKEN" not in r.stdout
 
 
+@posix_only
 def test_the_report_redacts_the_runner_token_by_its_glob():
     rows = [l.split("\t") for l in (SINGLE / "redact.tsv").read_text(encoding="utf-8").splitlines()
             if l.startswith("key\t")]

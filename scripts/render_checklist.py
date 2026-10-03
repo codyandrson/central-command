@@ -44,6 +44,18 @@ KIND_LABEL = {"gate": "gate — the run stops here", "human": "yours"}
 # Keyed `<phase>/<step>`. Values may use the same {placeholders} as
 # `derived_where` (see `_urls`).
 WHERE_BY_STEP = {
+    # Derivable (it reads CC_LITELLM_PORT and names the LiteLLM UI), but the
+    # place needs one more fact the row cannot carry: `.env` declares ONE
+    # upstream, so this gate is where every other endpoint goes (P5, 2026-10-02:
+    # the acceptance driver had to work that out for an embedder on its own port).
+    "llm/catalog-filled": (
+        "the LiteLLM UI, {litellm_ui} — log in as `admin` with `.env`'s "
+        "`CC_LLM_PROXY_ADMIN_KEY`. Every alias `.env` did not declare is entered "
+        "here — including one served from a different host or port than "
+        "`CC_LLM_UPSTREAM_BASE_URL` (typically the embedder), because `.env` "
+        "declares one upstream base URL and key for all of them; a server that "
+        "checks no key still needs a non-empty key field (`none`)"
+    ),
     "boot/operator-name": (
         "the terminal running `./setup.sh`, which asks once; with no terminal, "
         "the cockpit's first-run prompt bar at {cockpit}"

@@ -29,13 +29,19 @@ import re
 import shutil
 import socket
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
-from tests.installer_source import installer_source
+from tests.installer_source import (
+    drives_installer,
+    installer_source,
+    python_shim,
+    run_driver,
+    with_stub_path,
+    write_lf,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
@@ -106,7 +112,8 @@ class Stack:
         for f in (".env.example", "VERSION", ".gitignore"):
             shutil.copy2(ROOT / f, self.repo / f)
         self.env_lines = {
-            "CC_STATE_DIR": str(tmp / "state"),
+            # Forward slashes: setup.sh SOURCES .env (bash drops the backslashes).
+            "CC_STATE_DIR": (tmp / "state").as_posix(),
             "CC_ENABLE_N8N": "0", "CC_ENABLE_CRAWLER": "1", "CC_ENABLE_SPEECH": "0",
             "CC_ENABLE_SANDBOX": "0",
             "CC_IMG_POSTGRES": "docker.io/library/postgres:16",
@@ -125,14 +132,13 @@ class Stack:
                 'for s in "${DRIFT[@]-}"; do [[ -n "$s" ]] && echo "DRIFT $s ${DRIFT_KIND[$s]}"; done; '
                 'return $rc; }\n'
                 'if [[ -n "${__CALL:-}" ]]; then "$@"; exit $?; fi\n')
-        setup.write_text(text.rstrip()[: -len(tail)] + hook + tail + "\n", encoding="utf-8")
+        write_lf(setup, text.rstrip()[: -len(tail)] + hook + tail + "\n")
         b = tmp / "bin"
         b.mkdir()
-        (b / "podman").write_text(_PODMAN, encoding="utf-8")
-        (b / "podman").chmod(0o755)
+        write_lf(b / "podman", _PODMAN, mode=0o755)
+        python_shim(b)   # $PY must be a real interpreter (no python3 in Git's /usr/bin)
         # The proxy answers /health/liveliness: p_litellm_live is not under test.
-        (b / "curl").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-        (b / "curl").chmod(0o755)
+        write_lf(b / "curl", "#!/usr/bin/env bash\nexit 0\n", mode=0o755)
         # Every enabled service, on the image its ref names, everything current.
         self.refs = {
             "postgres": "docker.io/library/postgres:16",
@@ -150,13 +156,13 @@ class Stack:
     def write_env(self) -> None:
         env = (ROOT / ".env.example").read_text(encoding="utf-8")
         env += "\n" + "".join(f"{k}={v}\n" for k, v in self.env_lines.items())
-        (self.repo / ".env").write_text(env, encoding="utf-8")
+        write_lf(self.repo / ".env", env)
 
     def sync(self) -> None:
-        (self.stub / "containers").write_text(
-            "".join(f"{s} {i}\n" for s, i in self.containers.items()), encoding="utf-8")
-        (self.stub / "images").write_text(
-            "".join(f"{r} {d} {i}\n" for r, (d, i) in self.images.items()), encoding="utf-8")
+        write_lf(self.stub / "containers",
+                 "".join(f"{s} {i}\n" for s, i in self.containers.items()))
+        write_lf(self.stub / "images",
+                 "".join(f"{r} {d} {i}\n" for r, (d, i) in self.images.items()))
 
     def rebuild(self, ref: str, new: str = NEW) -> None:
         """A new image behind an UNCHANGED ref: a fetch rebuild, or a re-pull."""
@@ -165,7 +171,7 @@ class Stack:
         self.sync()
         for svc, r in self.refs.items():
             if r == ref:
-                (self.stub / "recreate" / svc).write_text(new)
+                write_lf(self.stub / "recreate" / svc, new)
 
     def container_ids(self) -> dict[str, str]:
         out = {}
@@ -187,12 +193,12 @@ class Stack:
         return out
 
     def call(self, *args: str, **extra: str) -> subprocess.CompletedProcess:
-        env = {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
-               "HOME": str(self.tmp / "home"), "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
-               "STUB": str(self.stub), "LANG": "C.UTF-8", "__CALL": "1", **extra}
-        return subprocess.run([_bash(), str(self.single / "setup.sh"), *args], cwd=self.single,
-                              capture_output=True, text=True, timeout=120,
-                              stdin=subprocess.DEVNULL, env=env)
+        env = with_stub_path(
+            {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
+             "HOME": str(self.tmp / "home"), "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
+             "STUB": self.stub.as_posix(), "LANG": "C.UTF-8", "__CALL": "1", **extra},
+            self.tmp / "bin")
+        return run_driver([_bash(), str(self.single / "setup.sh"), *args], cwd=self.single, env=env)
 
     def drift(self, *services: str) -> tuple[int, dict[str, str]]:
         r = self.call("__drift", *services)
@@ -200,10 +206,11 @@ class Stack:
         return r.returncode, kinds
 
 
+# Skipped on Windows until the 2026-10-02 testbed run's second pass ("Git Bash
+# prepends /usr/bin to PATH"): with_stub_path now puts the stub podman FIRST,
+# and the stubs and their data are written LF.
 @pytest.fixture
 def stack(tmp_path: Path) -> Stack:
-    if sys.platform == "win32":
-        pytest.skip("Git Bash prepends /usr/bin to PATH; a stub podman cannot shadow the real one")
     return Stack(tmp_path)
 
 
@@ -240,6 +247,7 @@ def _table(stack: Stack) -> dict[str, list[str]]:
     return out
 
 
+@drives_installer
 def test_the_reader_sees_what_compose_sees(stack: Stack):
     """A second table of services would drift from compose.yaml; this reader
     must agree with a real YAML parser on every service, image, profile and
@@ -261,6 +269,7 @@ def test_the_reader_sees_what_compose_sees(stack: Stack):
     assert sorted(t["vol"]) == sorted(y["volumes"])
 
 
+@drives_installer
 def test_a_crlf_checkout_reads_the_same(stack: Stack):
     """A Windows checkout may hold compose.yaml in CRLF; a stray CR in an image
     ref would make every service read `noimage` and the probe never pass."""
@@ -271,6 +280,7 @@ def test_a_crlf_checkout_reads_the_same(stack: Stack):
     assert stack.drift() == (0, {})
 
 
+@drives_installer
 def test_every_stateful_service_keeps_its_data_on_a_named_volume(stack: Stack):
     """The recreate is safe for a database ONLY because its data path is a named
     volume. Pinned both ways: every service that mounts a named volume is in
@@ -294,23 +304,32 @@ def test_every_stateful_service_keeps_its_data_on_a_named_volume(stack: Stack):
     assert stack.call("stack_data_on_volume", "graphiti").returncode == 0
 
 
+def _expand(stack: Stack, ref: str, **extra: str):
+    """compose_expand <ref>, the ref handed over in the ENVIRONMENT: the MSYS
+    runtime globs the argv a native parent passes, and an unquoted `${X:-y}`
+    reached bash as `$X:-y` (the 2026-10-02 testbed run's second pass)."""
+    return stack.call("eval", 'compose_expand "$__REF"', __REF=ref, **extra)
+
+
+@drives_installer
 def test_compose_expand_follows_compose_interpolation(stack: Stack):
-    r = stack.call("compose_expand", "${CC_IMG_POSTGRES:-docker.io/library/postgres:16}")
+    r = _expand(stack, "${CC_IMG_POSTGRES:-docker.io/library/postgres:16}")
     assert r.stdout == "docker.io/library/postgres:16"
     stack.env_lines["CC_IMG_POSTGRES"] = "mirror.example.com/library/postgres:16.9"
     stack.write_env()
-    r = stack.call("compose_expand", "${CC_IMG_POSTGRES:-docker.io/library/postgres:16}")
+    r = _expand(stack, "${CC_IMG_POSTGRES:-docker.io/library/postgres:16}")
     assert r.stdout == "mirror.example.com/library/postgres:16.9"
-    r = stack.call("compose_expand", "localhost/cc-graphiti:${CC_GRAPHITI_TAG:-1.0.2-anthropic}")
+    r = _expand(stack, "localhost/cc-graphiti:${CC_GRAPHITI_TAG:-1.0.2-anthropic}")
     assert r.stdout == "localhost/cc-graphiti:1.0.2-anthropic"
-    r = stack.call("compose_expand", "localhost/cc-graphiti:${CC_GRAPHITI_TAG:-1.0.2-anthropic}",
-                   CC_GRAPHITI_TAG="9.9-test")
+    r = _expand(stack, "localhost/cc-graphiti:${CC_GRAPHITI_TAG:-1.0.2-anthropic}",
+                CC_GRAPHITI_TAG="9.9-test")
     assert r.stdout == "localhost/cc-graphiti:9.9-test", "the shell's value wins, as in a phase"
 
 
 # ── the question ────────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_everything_current_is_no_drift_in_two_podman_calls(stack: Stack):
     rc, kinds = stack.drift()
     assert rc == 0 and kinds == {}
@@ -322,18 +341,21 @@ def test_everything_current_is_no_drift_in_two_podman_calls(stack: Stack):
     assert any(l.startswith("podman images --no-trunc") for l in calls)
 
 
+@drives_installer
 def test_a_rebuilt_local_image_behind_its_fixed_tag_is_drift(stack: Stack):
     stack.rebuild("localhost/cc-graphiti:1.0.2-anthropic")
     rc, kinds = stack.drift()
     assert rc == 1 and kinds == {"graphiti": "differs"}, kinds
 
 
+@drives_installer
 def test_a_re_pulled_third_party_tag_is_drift_for_every_service_on_it(stack: Stack):
     stack.rebuild("docker.io/library/postgres:16")
     rc, kinds = stack.drift()
     assert rc == 1 and kinds == {"postgres": "differs", "litellm-db": "differs"}, kinds
 
 
+@drives_installer
 def test_absent_container_absent_image_and_unknown_service(stack: Stack):
     del stack.containers["neo4j"]
     del stack.images["localhost/cc-crawler:1"]
@@ -344,6 +366,7 @@ def test_absent_container_absent_image_and_unknown_service(stack: Stack):
     assert rc == 1 and kinds == {"no-such-service": "undeclared"}
 
 
+@drives_installer
 def test_a_disabled_service_is_not_asked_about(stack: Stack):
     """speech and n8n are off here and have no containers; crawler goes off too."""
     del stack.containers["crawler"]
@@ -354,6 +377,7 @@ def test_a_disabled_service_is_not_asked_about(stack: Stack):
     assert stack.drift() == (0, {})
 
 
+@drives_installer
 def test_id_spellings_and_a_digest_pinned_ref_agree(stack: Stack):
     """docker's `sha256:`-prefixed IDs, podman's bare ones, a truncated one, and
     an operator pin by digest all resolve to the same answer."""
@@ -367,8 +391,9 @@ def test_id_spellings_and_a_digest_pinned_ref_agree(stack: Stack):
     assert stack.drift() == (0, {})
 
 
+@drives_installer
 def test_podman_that_cannot_be_asked_is_never_current(stack: Stack):
-    (stack.stub / "fail-ps").write_text("")
+    write_lf(stack.stub / "fail-ps", "")
     rc, _ = stack.drift()
     assert rc == 2
     assert stack.call("p_up_litellm").returncode != 0
@@ -377,6 +402,7 @@ def test_podman_that_cannot_be_asked_is_never_current(stack: Stack):
 # ── the probes ──────────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_the_up_litellm_probe_reads_false_on_a_stale_trio_member(stack: Stack):
     assert stack.call("p_up_litellm").returncode == 0
     stack.rebuild("docker.io/library/redis:7-alpine")
@@ -385,6 +411,7 @@ def test_the_up_litellm_probe_reads_false_on_a_stale_trio_member(stack: Stack):
     )
 
 
+@drives_installer
 def test_the_up_stack_probe_reads_false_on_any_stale_container(stack: Stack):
     """The whole p_up_stack: the proxy (stub curl), two listeners, and now the
     images. A stale graphiti behind healthy ports used to read done."""
@@ -420,6 +447,7 @@ def test_steps_tsv_names_the_drift_aware_probes():
 # ── the catch-up ────────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_nothing_stale_recreates_nothing(stack: Stack):
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -427,6 +455,7 @@ def test_nothing_stale_recreates_nothing(stack: Stack):
     assert stack.recreates() == []
 
 
+@drives_installer
 def test_a_stale_local_image_is_recreated_by_name_and_said_so(stack: Stack):
     stack.rebuild("localhost/cc-graphiti:1.0.2-anthropic")
 
@@ -447,6 +476,7 @@ def test_a_stale_local_image_is_recreated_by_name_and_said_so(stack: Stack):
     assert stack.drift() == (0, {})
 
 
+@drives_installer
 def test_stateful_services_on_named_volumes_are_recreated_in_one_call(stack: Stack):
     """A re-pulled postgres:16 moves the spine AND the LiteLLM database: both
     keep their data on named volumes, so both are recreated — together."""
@@ -458,6 +488,7 @@ def test_stateful_services_on_named_volumes_are_recreated_in_one_call(stack: Sta
     assert len(_lines(r.stdout, "PASS up-stack: litellm-db recreated")) == 1
 
 
+@drives_installer
 def test_the_llm_phase_catches_up_only_its_trio(stack: Stack):
     stack.rebuild("docker.io/library/postgres:16")
     r = stack.call("catch_up_images", "up-litellm", "litellm-db", "litellm-redis", "litellm")
@@ -469,12 +500,13 @@ def test_the_llm_phase_catches_up_only_its_trio(stack: Stack):
     assert stack.drift()[1] == {"postgres": "differs"}
 
 
+@drives_installer
 def test_a_stateful_service_without_a_named_volume_is_reported_never_recreated(stack: Stack):
     compose = stack.single / "compose.yaml"
     text = compose.read_text(encoding="utf-8")
     assert "      - pgdata:/var/lib/postgresql/data\n" in text
-    compose.write_text(text.replace("      - pgdata:/var/lib/postgresql/data\n",
-                                    "      - ./pgdata:/var/lib/postgresql/data\n"), encoding="utf-8")
+    write_lf(compose, text.replace("      - pgdata:/var/lib/postgresql/data\n",
+                                    "      - ./pgdata:/var/lib/postgresql/data\n"))
     stack.rebuild("docker.io/library/postgres:16")
 
     r = stack.call("catch_up_images", "up-stack")
@@ -487,6 +519,7 @@ def test_a_stateful_service_without_a_named_volume_is_reported_never_recreated(s
     assert stack.container_ids()["postgres"] == OLD
 
 
+@drives_installer
 def test_absent_and_unfetched_are_fails_that_name_the_move(stack: Stack):
     del stack.containers["neo4j"]
     del stack.images["localhost/cc-crawler:1"]
@@ -499,9 +532,10 @@ def test_absent_and_unfetched_are_fails_that_name_the_move(stack: Stack):
     assert stack.recreates() == []
 
 
+@drives_installer
 def test_a_failed_or_ineffective_recreate_is_a_fail_never_a_pass(stack: Stack):
     stack.rebuild("localhost/cc-graphiti:1.0.2-anthropic")
-    (stack.stub / "fail-recreate").write_text("")
+    write_lf(stack.stub / "fail-recreate", "")
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 1 and _lines(r.stdout, "FAIL up-stack: could not recreate graphiti"), r.stdout
     assert not _lines(r.stdout, "PASS up-stack: graphiti")
@@ -513,8 +547,9 @@ def test_a_failed_or_ineffective_recreate_is_a_fail_never_a_pass(stack: Stack):
     assert _lines(r.stdout, "FAIL up-stack: graphiti was recreated and still does not run"), r.stdout
 
 
+@drives_installer
 def test_podman_that_cannot_be_asked_fails_the_catch_up(stack: Stack):
-    (stack.stub / "fail-ps").write_text("")
+    write_lf(stack.stub / "fail-ps", "")
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 1 and _lines(r.stdout, "FAIL up-stack: could not compare"), r.stdout
 

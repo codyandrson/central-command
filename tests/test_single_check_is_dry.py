@@ -33,13 +33,16 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 # The bash that can run this repo's shell scripts. On Windows a bare "bash" is
 # System32's WSL launcher (its error reads "The RPC call contains a handle
 # that differs from the declared handle type") — 26 tests failed that way on
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
-from central_command.api.update import _bash as _resolve_bash  # noqa: E402
-from tests.installer_source import installer_functions  # noqa: E402
+from central_command.api.update import _bash as _resolve_bash
+from tests.installer_source import drives_installer, installer_functions, run_driver
+
 BASH = _resolve_bash() or "bash"
 
 
@@ -130,8 +133,7 @@ def test_nothing_check_can_reach_mutates_anything():
 def _list_rows() -> list[tuple[str, str]]:
     # cwd= + basename, not the full path: on Windows the first `bash` on PATH
     # may be WSL's launcher, which cannot open a Windows path.
-    r = subprocess.run([BASH, "setup.sh", "check", "--list"],
-                       cwd=SINGLE, capture_output=True, text=True)
+    r = run_driver([BASH, "setup.sh", "check", "--list"], cwd=SINGLE)
     assert r.returncode == 0, r.stdout + r.stderr
     rows = []
     for line in r.stdout.splitlines():
@@ -142,6 +144,7 @@ def _list_rows() -> list[tuple[str, str]]:
     return rows
 
 
+@drives_installer
 def test_check_list_needs_no_answer_file():
     """It is documentation: a machine with no `.env` must still be able to
     print it (and printing it must not create a state directory)."""
@@ -151,6 +154,7 @@ def test_check_list_needs_no_answer_file():
                                     "models"], rows
 
 
+@drives_installer
 def test_check_list_matches_the_table_in_the_readme():
     readme = README.read_text(encoding="utf-8")
     for section, desc in _list_rows():
@@ -159,3 +163,73 @@ def test_check_list_matches_the_table_in_the_readme():
             f"deploy/single/README.md is missing the `check` section row for "
             f"{section!r}. Expected the line:\n  {row}"
         )
+
+
+# ── the host section's index probe (F17 of the 2026-10-02 testbed run's
+# second pass) ──────────────────────────────────────────────────────────────
+# The public simple index's ROOT is the whole index (46.7 MB measured), so the
+# old GET under -m 10 timed out on a slow evening while `index-pypi` answered
+# 200 seconds later. index_reachable asks with HEAD; a server that refuses
+# HEAD (curl 22) still gets the GET; a connection that fails is asked once.
+
+@pytest.mark.parametrize("head_rc,get_rc,want_rc,want_calls", [
+    (0, 0, 0, ["HEAD"]),            # the normal case: no body is downloaded
+    (22, 0, 0, ["HEAD", "GET"]),    # a mirror that refuses HEAD still answers
+    (22, 22, 22, ["HEAD", "GET"]),
+    (28, 0, 28, ["HEAD"]),          # a timeout is not retried as a GET
+    (7, 0, 7, ["HEAD"]),
+])
+def test_an_index_is_asked_with_head_and_a_refused_head_falls_back_to_get(
+        head_rc, get_rc, want_rc, want_calls):
+    fns = installer_functions()
+    script = "\n".join([
+        "calls=()",
+        "curl() {",
+        '  local a m=GET; for a in "$@"; do [[ "$a" == -I ]] && m=HEAD; done',
+        '  calls+=("$m")',
+        f'  [[ "$m" == HEAD ]] && return {head_rc}',
+        f"  return {get_rc}",
+        "}",
+        "index_reachable() {" + fns["index_reachable"] + "\n}",
+        'index_reachable https://pypi.example.com/simple/; rc=$?',
+        'echo "rc=$rc calls=${calls[*]}"',
+    ])
+    r = subprocess.run([BASH, "-c", script], capture_output=True, text=True, timeout=60,
+                       check=False)
+    assert f"rc={want_rc} calls={' '.join(want_calls)}" in r.stdout, (r.stdout, r.stderr)
+
+
+# ── the indexes section asks for ONE SMALL PROJECT THE INSTALL NEEDS ─────────
+# `npm`'s packument is 25.8 MB and `pip`/`npm` are in neither lockfile, so the
+# old probes downloaded tens of megabytes under a 20 s FAIL cap and would 404 on
+# an offline mirror seeded from the lockfiles. The names below must stay in the
+# lockfiles (a mirror is only obliged to hold what the install resolves), and
+# discover.sh's PyPI row asks for the same project.
+def _shell_constant(path: Path, name: str) -> str:
+    m = re.search(rf"^{name}=([A-Za-z0-9._-]+)", path.read_text(encoding="utf-8"), re.MULTILINE)
+    assert m, f"{name} is gone from {path.relative_to(ROOT)}"
+    return m.group(1)
+
+
+def test_the_index_probes_ask_for_lockfile_projects_and_discover_agrees():
+    import json
+
+    check = SINGLE / "phases" / "check.sh"
+    pypi = _shell_constant(check, "INDEX_PROBE_PYPI_PROJECT")
+    npm = _shell_constant(check, "INDEX_PROBE_NPM_PACKAGE")
+    lock = (ROOT / "requirements.lock").read_text(encoding="utf-8")
+    norm = re.sub(r"[-_.]+", "-", pypi).lower()
+    assert re.search(rf"^{re.escape(norm)}==", lock, re.MULTILINE | re.IGNORECASE), (
+        f"{pypi} is no longer in requirements.lock — pick another small project the install resolves")
+    pkgs = json.loads((ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))["packages"]
+    assert f"node_modules/{npm}" in pkgs, (
+        f"{npm} is no longer in web/package-lock.json — pick another small package the cockpit installs")
+    body = check.read_text(encoding="utf-8")
+    assert '"${pypi%/}/${INDEX_PROBE_PYPI_PROJECT}/"' in body
+    assert '"${npm%/}/${INDEX_PROBE_NPM_PACKAGE}"' in body
+    assert "/pip/" not in body and '%/}/npm"' not in body, "an index probe went back to a package the lockfiles lack"
+    discover = ROOT / "deploy" / "discover.sh"
+    assert _shell_constant(discover, "PYPI_PROBE_PROJECT") == pypi
+    text = discover.read_text(encoding="utf-8")
+    assert '"https://pypi.org/simple/${PYPI_PROBE_PROJECT}/"' in text, "discover's pypi row probes the index ROOT again"
+    assert 'DISCO_MIRROR_PYPI="${CC_PYPI_INDEX_URL%/}/${PYPI_PROBE_PROJECT}/"' in text

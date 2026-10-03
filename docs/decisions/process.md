@@ -475,3 +475,73 @@ hygiene, and how the test suite itself must be written. See
   procedure survived.
 - **Enforced:** test: `tests/test_single_no_phase_hints.py`
 - **Source:** CHANGELOG v2.58.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-124 — The self-check's mail row asks what the app does, not what the installer generated
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The mail self-check applies when something in the app READS mail — never on the n8n flag or the façade token"
+- **Why:** The first laptop acceptance run stopped here: with n8n off — the
+  default — `verify/selfcheck` FAILed `mail` on every install, because the
+  check read a set façade token as "configured" and `make-secrets.sh` always
+  generates it; `boot` requires the row, so nothing after `verify` was
+  reachable. The n8n flag could not be the signal either: the k3s profile
+  leaves it at 0 while its façade is in use. What the app does with mail
+  (the feed, the heartbeat poll, Exchange) is true on both profiles.
+- **Enforced:** test: `tests/test_selfcheck.py`
+- **Source:** CHANGELOG v2.58.2 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-125 — A row the phase never reached is pending, a pause is a gate, and every reporter line names a row
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "A row the phase never reached is `pending`, and a pause is `gate`"
+- **Why:** The laptop run's ledger said two things at once: after `FAIL
+  mint-key` some later rows read `done` and some `failed` with no reason, and
+  after the llm pause the gate row read `done` and the status `gate` appeared
+  nowhere — the probes were judging rows the phase had never reached, and the
+  pause was printed under a name that was no row. The operator reviews an
+  install from the ledger alone (D9), so the ledger has to say what happened.
+- **Enforced:** test: `tests/test_single_driver_ledger.py::test_a_failed_mint_key_leaves_every_later_app_row_pending`, `::test_the_llm_catalog_pause_is_a_gate_and_the_rows_after_it_are_pending`; test: `tests/test_single_reporter_rows.py`
+- **Source:** CHANGELOG v2.58.2 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-126 — The import unpacks with the install's own Python, never `unzip`
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The import unpacks with Python, never `unzip`"
+- **Why:** Git for Windows' UnZip 6.00 does not let `*` cross `/`: the
+  `docs/vendor/*` skip excluded 3 of 49,809 entries, the vendor tree was
+  unpacked anyway, and its four symlink members failed the import of every
+  release zip on Windows, GitHub's own included. No update could be applied
+  on the platform the work site runs. A tool whose wildcard semantics differ
+  by build is not one a deterministic import can stand on.
+- **Enforced:** test: `tests/test_single_release_zip.py`; test: `tests/test_update_runner.py::test_the_skip_covers_a_nested_vendor_tree_and_its_symlinks_with_no_unzip`
+- **Source:** CHANGELOG v2.58.2 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-127 — The driver's hot paths start no program
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/deploy-single.md](../../.claude/rules/deploy-single.md) — "The driver's hot paths start no program"
+- **Why:** Measured on the laptop: ~21 s before any `./setup.sh` command
+  printed a line, ~60 s for the plan, 64 minutes for a suite that takes ten
+  on Linux. The cause was process creation — a thousand forks of `cut`,
+  `sha256sum` and `date` per invocation, each 10–50 ms under MSYS. The logon
+  entry runs the resume command at every boot, so that cost was paid before
+  the API came back. 424 → 20 execs for `stop`, 571 → 26 for the plan, with
+  every fingerprint value unchanged.
+- **Enforced:** test: `tests/test_single_driver_forks.py`
+- **Source:** CHANGELOG v2.58.2 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-128 — A test that drives the real installer has its own ceiling and cannot end the session
+
+- **Status:** active
+- **Date:** 2026-10-02
+- **Rule:** [.claude/rules/tests.md](../../.claude/rules/tests.md) — "A test that runs the real installer is marked `@drives_installer` and calls `run_driver`"
+- **Why:** On Windows pytest-timeout has only the thread method, which ends
+  the whole session with no summary when ONE test passes the ceiling. The
+  `test` phase is the on-site gate, and on the laptop it died at 79 % on a
+  `setup.sh`-driving test — a gate that cannot finish is not a gate.
+- **Enforced:** script: `tests/installer_source.py`; script: `tests/conftest.py`
+- **Source:** CHANGELOG v2.58.2 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`

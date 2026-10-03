@@ -27,7 +27,7 @@
 #     up-speech                          run    p_speech_up
 #     catalog-declared                   run    p_always  (setup.sh)
 #     catalog                            run    p_catalog_aliases  (setup.sh)
-#     catalog-filled                     gate   p_catalog_aliases  (setup.sh)
+#     catalog-filled                     gate   p_catalog_filled  (setup.sh)
 #     probe-chat                         run    p_alias_cc_default
 #     probe-structured                   run    p_alias_graphiti_llm
 #     probe-rerank-model                 run    p_alias_gpt_4_1_nano
@@ -61,8 +61,14 @@ wait_http() { # wait_http <url> <seconds>
 # The USER-ACTION gate for a probe failure. The proxy is alive at this point,
 # so the operator can act in its UI; this prints the where and the what.
 # Key VALUES are never printed — names only, per the output protocol.
+#
+# The line is printed under the ROW's name, `catalog-filled` — the manifest's
+# rule is that a step's name IS the check-name it prints, and the ledger marks
+# a row `gate` only when its own name said USERACTION. Until P5 this said
+# `llm-models`, which is no row: the pause was recorded by probes instead, and
+# the first laptop run's ledger read `catalog-filled done` at the very stop.
 llm_gate() { # llm_gate <what-failed>
-  useraction "llm-models" "$1 — operator action needed; see the instructions on stderr, then re-run: ./setup.sh (it resumes at llm)"
+  useraction "catalog-filled" "$1 — operator action needed; see the instructions on stderr, then re-run: ./setup.sh (it resumes at llm)"
   note ""
   note "== LiteLLM needs your attention =="
   note "The proxy is UP. Its model catalog lives in its database and is yours"
@@ -96,10 +102,12 @@ llm_gate() { # llm_gate <what-failed>
   note "  http://host.containers.internal:<port>/v1, never 127.0.0.1. A key the"
   note "  server ignores can be 'none', but the field must be non-empty."
   note ""
-  note "  Not sure what your server names its models? List them directly:"
-  note "    CC_LLM_BASE_URL=<url>/v1 CC_LLM_API_KEY=<key> ./discover-llm.sh models"
-  note "  A probe failed after you filled things in? Direct works + proxy fails ="
-  note "  the alias row is wrong; direct fails = the URL or key is wrong."
+  note "  Not sure what your server names its models? Its own list answers that"
+  note "  (GET <base url>/models). Declared in .env instead (below), every model"
+  note "  id is checked against that list by the dry check ./setup.sh runs first."
+  note "  A probe failed after you filled things in? The same upstream declared in"
+  note "  .env and passing that check, but failing here = the alias row is wrong;"
+  note "  failing the check too = the URL or key is wrong."
   note "  'curl: (28) Operation timed out' = the backend answered nothing within"
   note "  CC_PROBE_TIMEOUT seconds (default 300) — a shared or queued server may"
   note "  need longer:  CC_PROBE_TIMEOUT=900 ./setup.sh"
@@ -111,15 +119,17 @@ llm_gate() { # llm_gate <what-failed>
   note "    $(llm_undeclared_keys)"
   note "  (the model keys take the UPSTREAM model id; a 127.0.0.1 base URL is"
   note "  rewritten to host.containers.internal for the row, because the row is"
-  note "  dialled by a CONTAINER. ./setup.sh check probes them from THIS host"
-  note "  before any of this is deployed.)"
+  note "  dialled by a CONTAINER. The dry check ./setup.sh runs first probes them"
+  note "  from THIS host before any of this is deployed.)"
   note ""
-  note "  If the endpoint is only reachable through an egress PROXY: the CA and"
-  note "  the insecure knob reach the LiteLLM container (SSL_CERT_FILE /"
-  note "  SSL_VERIFY, via compose), but CC_PROXY does NOT — containers.conf's"
-  note "  [engine] env covers pulls and builds, not containers. That is an OPEN"
-  note "  item in the design record: add HTTP(S)_PROXY to the litellm service"
-  note "  by hand if you need it."
+  note "  If the endpoint is only reachable through an egress PROXY: this release"
+  note "  cannot reach it. CC_PROXY covers host-side downloads and the podman"
+  note "  machine's pulls and builds; CC_CA_BUNDLE and CC_TLS_INSECURE reach the"
+  note "  LiteLLM container (SSL_CERT_FILE / SSL_VERIFY) — but NO .env key gives"
+  note "  that container a proxy (an open item in the 2026-09-23 design record)."
+  note "  Do not add one to a tracked file: the install refuses a tree that differs"
+  note "  from its release. It is a finding — ./setup.sh report writes the file to"
+  note "  hand over."
   note ""
   note "When it looks right, re-run:  ./setup.sh   (it resumes at llm, validates every alias, then continues)"
 }

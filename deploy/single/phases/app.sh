@@ -318,12 +318,29 @@ phase_app() {
       # happened to succeed against a stale tree was a PASS. Both carry the
       # check-name `cockpit`, so a failed install is what app/cockpit's ledger
       # row records, whatever its probe would read.
-      if [[ ! -d "$REPO_ROOT/web/node_modules" ]]; then
-        step "cockpit" "cockpit npm tree installed (fetch had not left one)" \
+      #
+      # And neither runs when its record says the tree is already what it
+      # would produce (P5, F12 — deploy/env-lib.sh's cc_cockpit_current, the
+      # question p_cockpit_npm and p_cockpit_build ask too): the 2026-10-02
+      # Windows run spent ~66 s rebuilding an unchanged cockpit on every
+      # `app`. Each record is dropped before its command starts and written
+      # only after it succeeded.
+      if ! cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"; then
+        cc_cockpit_forget "$STATE_DIR" npm
+        step "cockpit" "cockpit npm tree installed (fetch had not left one from this lockfile)" \
           in_web npm ci || return 1
+        cc_cockpit_record "$STATE_DIR" npm "$REPO_ROOT" \
+          || warn "cockpit" "could not record the npm tree's inputs in $(cc_cockpit_record_file "$STATE_DIR" npm) — the next run reinstalls it"
       fi
-      step "cockpit" "cockpit built (web/)" \
-        in_web npm run build || return 1
+      if cc_cockpit_current "$STATE_DIR" build "$REPO_ROOT"; then
+        pass "cockpit" "cockpit build current — web/dist and web/server-dist were built from these inputs (web/src, web/server, the lockfile, the build configs), so npm run build was skipped"
+      else
+        cc_cockpit_forget "$STATE_DIR" build
+        step "cockpit" "cockpit built (web/) — its inputs recorded, so an unchanged tree skips the next build" \
+          in_web npm run build || return 1
+        cc_cockpit_record "$STATE_DIR" build "$REPO_ROOT" \
+          || warn "cockpit" "could not record the cockpit build's inputs in $(cc_cockpit_record_file "$STATE_DIR" build) — the next run rebuilds it"
+      fi
     else
       warn "cockpit" "node v$nv is older than 22 — cockpit not built; the API runs without it"
     fi
@@ -347,10 +364,12 @@ p_install() {
   ( cd "$REPO_ROOT" && "$py" -c 'import central_command' ) >/dev/null 2>&1
 }
 
+# Built AND built from this tree: web/server-dist/index.js and web/dist present,
+# and `<state>/cockpit.build-inputs` equal to the hash of the build's inputs
+# now — so a changed source file or lockfile reads false and the row re-runs.
 p_cockpit_build() {
   p_node_ok || return 0
-  [[ -f "$REPO_ROOT/web/server-dist/index.js" ]] || return 1
-  [[ -d "$REPO_ROOT/web/dist" ]]
+  cc_cockpit_current "$STATE_DIR" build "$REPO_ROOT"
 }
 
 # ── app ─────────────────────────────────────────────────────────────────────

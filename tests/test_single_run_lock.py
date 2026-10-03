@@ -40,6 +40,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import drives_installer, env_path, run_driver
+
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
 
@@ -288,7 +290,7 @@ def tree(tmp_path: Path) -> Path:
                  repo / "central_command" / "db" / "schema.sql")
     env = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
     env = [l for l in env if not l.startswith("CC_STATE_DIR=")]
-    env.append(f"CC_STATE_DIR={tmp_path / 'state'}")
+    env.append(f"CC_STATE_DIR={env_path(tmp_path / 'state')}")
     (repo / ".env").write_text("\n".join(env) + "\n", encoding="utf-8")
     (tmp_path / "home").mkdir()
     (tmp_path / "state").mkdir()
@@ -304,15 +306,14 @@ def _run(repo: Path, script: str, *args: str, env_extra: dict[str, str] | None =
                   "CC_EXECUTOR_MODE", "CC_RUN_LOCK_PID"):
         env.pop(stale, None)
     env.update(env_extra or {})
-    return subprocess.run([bash(), script, *args], cwd=repo / "deploy" / "single",
-                          capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                          timeout=300, env=env)
+    return run_driver([bash(), script, *args], cwd=repo / "deploy" / "single", env=env)
 
 
 def _state(repo: Path) -> Path:
     return repo.parent / "state"
 
 
+@drives_installer
 def test_a_phase_refuses_while_a_live_run_holds_the_lock_and_touches_nothing(tree: Path, holder):
     h = holder()
     write_lock(_state(tree), h.pid, "./setup.sh all", "2026-10-02T09:00:00Z")
@@ -333,6 +334,7 @@ def test_a_phase_refuses_while_a_live_run_holds_the_lock_and_touches_nothing(tre
     assert (_state(tree) / "run.lock" / "pid").read_text().strip() == str(h.pid)
 
 
+@drives_installer
 def test_the_full_run_refuses_too(tree: Path, holder):
     h = holder()
     write_lock(_state(tree), h.pid, "./update.sh apply")
@@ -342,6 +344,7 @@ def test_the_full_run_refuses_too(tree: Path, holder):
     assert '"./update.sh apply"' in r.stdout
 
 
+@drives_installer
 def test_status_and_report_answer_while_a_run_holds_the_lock(tree: Path, holder):
     h = holder()
     write_lock(_state(tree), h.pid, "./setup.sh all", "2026-10-02T09:00:00Z")
@@ -357,6 +360,7 @@ def test_status_and_report_answer_while_a_run_holds_the_lock(tree: Path, holder)
     assert (_state(tree) / "run.lock" / "pid").read_text().strip() == str(h.pid)
 
 
+@drives_installer
 def test_the_lock_is_gone_after_a_normal_run_and_after_a_failed_one(tree: Path):
     ok = _run(tree, "setup.sh", "stop")
     assert "FAIL run-lock" not in ok.stdout
@@ -367,6 +371,7 @@ def test_the_lock_is_gone_after_a_normal_run_and_after_a_failed_one(tree: Path):
     assert not (_state(tree) / "run.lock").exists(), failed.stdout
 
 
+@drives_installer
 def test_a_child_of_the_holder_runs_nested_and_leaves_the_lock_held(tree: Path, holder):
     """The real nested path: update.sh's child `setup.sh <phase>` inherits
     CC_RUN_LOCK_PID naming the live holder — it must run (here: the ledger
@@ -379,6 +384,7 @@ def test_a_child_of_the_holder_runs_nested_and_leaves_the_lock_held(tree: Path, 
     assert (_state(tree) / "run.lock" / "pid").read_text().strip() == str(h.pid)
 
 
+@drives_installer
 def test_update_takes_the_same_lock_and_plan_does_not(tree: Path, holder):
     h = holder()
     write_lock(_state(tree), h.pid, "./setup.sh all")
@@ -391,6 +397,7 @@ def test_update_takes_the_same_lock_and_plan_does_not(tree: Path, holder):
     assert (_state(tree) / "run.lock" / "pid").read_text().strip() == str(h.pid)
 
 
+@drives_installer
 def test_update_releases_its_lock_on_the_way_out_even_when_it_fails(tree: Path):
     r = _run(tree, "update.sh", "import", str(tree.parent / "no-such.zip"))
     assert r.returncode == 1, r.stdout + r.stderr

@@ -31,10 +31,17 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
+from tests.installer_source import (
+    drives_installer,
+    python_shim,
+    run_driver,
+    with_stub_path,
+    write_lf,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_LIB = ROOT / "deploy" / "env-lib.sh"
@@ -58,11 +65,19 @@ def _bash() -> str:
 # ── the hash, as a pure function ─────────────────────────────────────────────
 
 def _hash(ca: str, args: str, *sources: Path, cwd: Path) -> subprocess.CompletedProcess:
+    # The inputs travel in the ENVIRONMENT, never the argv: under Git Bash an
+    # argv from Windows Python is re-parsed by the MSYS runtime, which splits
+    # the multi-line build-args value at its newline and drops the empty CA
+    # argument's place — the helper then got a source named `PIP_INDEX_URL=`
+    # and exited 1 with nothing on stdout or stderr (2026-10-02 testbed, F15).
+    # A real build script calls it from bash, where no such re-parse happens.
     script = (f'. "{ENV_LIB.as_posix()}"; '
-              'cc_build_inputs_hash "$1" "$2" "${@:3}"')
-    return subprocess.run([_bash(), "-c", script, "hash", ca, args,
-                           *[s.as_posix() for s in sources]],
-                          capture_output=True, text=True, cwd=cwd)
+              'mapfile -t srcs <<<"$T_SRCS"; '
+              'cc_build_inputs_hash "$T_CA" "$T_ARGS" "${srcs[@]}"')
+    env = {**os.environ, "T_CA": Path(ca).as_posix() if ca else "", "T_ARGS": args,
+           "T_SRCS": "\n".join(s.as_posix() for s in sources)}
+    return subprocess.run([_bash(), "-c", script],
+                          capture_output=True, text=True, cwd=cwd, env=env)
 
 
 def _h(ca: str, args: str, *sources: Path, cwd: Path) -> str:
@@ -245,37 +260,40 @@ class Tree:
         for f in (".env.example", "VERSION", ".gitignore"):
             shutil.copy2(ROOT / f, self.repo / f)
         env = (ROOT / ".env.example").read_text(encoding="utf-8")
-        env += (f"\nCC_STATE_DIR={self.state}\nCC_ENABLE_SANDBOX=1\nCC_ENABLE_CRAWLER=1\n"
+        # Forward slashes: setup.sh SOURCES .env, and bash drops the unquoted
+        # backslashes of a Windows spelling.
+        env += (f"\nCC_STATE_DIR={self.state.as_posix()}\nCC_ENABLE_SANDBOX=1\nCC_ENABLE_CRAWLER=1\n"
                 "CC_TLS_INSECURE=0\nCC_CA_BUNDLE=\n")
-        (self.repo / ".env").write_text(env, encoding="utf-8")
+        write_lf(self.repo / ".env", env)
         setup = self.single / "setup.sh"
         text = setup.read_text(encoding="utf-8")
         tail = 'main "$@"'
         assert text.rstrip().endswith(tail)
         hook = 'if [[ -n "${__CALL:-}" ]]; then "$@"; exit $?; fi\n'
-        setup.write_text(text.rstrip()[: -len(tail)] + hook + tail + "\n", encoding="utf-8")
+        write_lf(setup, text.rstrip()[: -len(tail)] + hook + tail + "\n")
         b = tmp / "bin"
         b.mkdir()
-        (b / "podman").write_text(_PODMAN, encoding="utf-8")
-        (b / "podman").chmod(0o755)
+        write_lf(b / "podman", _PODMAN, mode=0o755)
+        python_shim(b)   # $PY must be a real interpreter (no python3 in Git's /usr/bin)
 
     @property
     def script(self) -> str:
         return str(self.single / "build-sandbox-image.sh")
 
     def env(self) -> dict[str, str]:
-        return {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
-                "HOME": str(self.tmp / "home"), "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
-                "STUB_LOG": str(self.log), "STUB_STORE": str(self.store), "LANG": "C.UTF-8"}
+        return with_stub_path(
+            {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
+             "HOME": str(self.tmp / "home"), "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
+             "STUB_LOG": self.log.as_posix(), "STUB_STORE": self.store.as_posix(), "LANG": "C.UTF-8"},
+            self.tmp / "bin")
 
     def call(self, *args: str, staged: bool = False) -> subprocess.CompletedProcess:
         # staged=True is update.sh apply's acquisition: CC_STAGED_FOR names the
         # deployment (here the same temp tree), which setup.sh AND the build
         # script it runs both read.
         extra = {"CC_STAGED_FOR": str(self.repo)} if staged else {}
-        return subprocess.run([_bash(), str(self.single / "setup.sh"), *args],
-                              cwd=self.single, capture_output=True, text=True, timeout=120,
-                              stdin=subprocess.DEVNULL, env={**self.env(), "__CALL": "1", **extra})
+        return run_driver([_bash(), str(self.single / "setup.sh"), *args], cwd=self.single,
+                          env={**self.env(), "__CALL": "1", **extra})
 
     def inputs_hash(self) -> str:
         r = subprocess.run([_bash(), self.script, "--inputs-hash"], cwd=self.single,
@@ -286,8 +304,8 @@ class Tree:
 
     def seed(self, ref: str, label: str) -> None:
         key = ref.replace("/", "_").replace(":", "_")
-        (self.store / key).write_text(label + "\n", encoding="utf-8")
-        with (self.store / "refs").open("a", encoding="utf-8") as f:
+        write_lf(self.store / key, label + "\n")
+        with (self.store / "refs").open("a", encoding="utf-8", newline="\n") as f:
             f.write(ref + "\n")
 
     def label(self, ref: str) -> str:
@@ -310,10 +328,11 @@ class Tree:
         return self.call("p_image_sandbox").returncode == 0
 
 
+# Skipped on Windows until the 2026-10-02 testbed run's second pass ("Git Bash
+# prepends /usr/bin to PATH"): with_stub_path now puts the stub podman FIRST,
+# and the stubs and their data are written LF.
 @pytest.fixture
 def tree(tmp_path: Path) -> Tree:
-    if sys.platform == "win32":
-        pytest.skip("Git Bash prepends /usr/bin to PATH; a stub podman cannot shadow the real one")
     return Tree(tmp_path)
 
 
@@ -334,6 +353,7 @@ def test_inputs_hash_mode_writes_nothing_and_calls_no_podman(tree: Tree):
     assert h == tree.inputs_hash(), "the hash is not deterministic"
 
 
+@drives_installer
 def test_absent_image_is_built_with_the_label(tree: Tree):
     assert not tree.probe(), "the probe passed with no image at all"
     r = tree.fetch()
@@ -345,6 +365,7 @@ def test_absent_image_is_built_with_the_label(tree: Tree):
     assert tree.probe(), "the probe is still false once the label matches"
 
 
+@drives_installer
 def test_a_matching_label_is_not_rebuilt(tree: Tree):
     tree.seed(SANDBOX, tree.inputs_hash())
     assert tree.probe()
@@ -353,6 +374,7 @@ def test_a_matching_label_is_not_rebuilt(tree: Tree):
     assert tree.builds() == [], "an image built from these inputs was rebuilt"
 
 
+@drives_installer
 def test_a_different_label_is_rebuilt_with_the_new_hash(tree: Tree):
     tree.seed(SANDBOX, "0" * 64)
     assert not tree.probe(), "the probe passed on a STALE image — a changed Dockerfile would never re-run the row"
@@ -365,6 +387,7 @@ def test_a_different_label_is_rebuilt_with_the_new_hash(tree: Tree):
     assert tree.probe()
 
 
+@drives_installer
 def test_an_unlabelled_image_is_rebuilt_once(tree: Tree):
     """Built by a release before v2.57.0: no label counts as different."""
     tree.seed(SANDBOX, "")
@@ -378,6 +401,7 @@ def test_an_unlabelled_image_is_rebuilt_once(tree: Tree):
     assert len(tree.builds()) == 1, "rebuilt twice"
 
 
+@drives_installer
 def test_need_image_compares_the_label_and_never_builds(tree: Tree):
     """stack's assertion keeps its meaning — never a build mid-deploy — and
     agrees with the stack rows' probe, which is the same p_image_* function."""
@@ -393,6 +417,7 @@ def test_need_image_compares_the_label_and_never_builds(tree: Tree):
     assert r.returncode == 0 and r.stdout.startswith("PASS image-sandbox:"), r.stdout
 
 
+@drives_installer
 def test_a_changed_dockerfile_rebuilds_and_a_rollback_rebuilds_the_old_one(tree: Tree):
     """The release case and the rollback case are one mechanism: the label is
     compared with the hash of the tree checked out NOW."""
@@ -403,7 +428,7 @@ def test_a_changed_dockerfile_rebuilds_and_a_rollback_rebuilds_the_old_one(tree:
     assert tree.probe()
 
     # The update: the release changes the Dockerfile.
-    dockerfile.write_text(old_text + "# a release changed this\n", encoding="utf-8")
+    write_lf(dockerfile, old_text + "# a release changed this\n")
     assert not tree.probe(), "a changed Dockerfile left the fetch row reading done"
     r = tree.fetch()
     assert "rebuilt — build inputs changed" in _pass_line(r.stdout)
@@ -411,7 +436,7 @@ def test_a_changed_dockerfile_rebuilds_and_a_rollback_rebuilds_the_old_one(tree:
     assert new_hash != old_hash and tree.probe()
 
     # The rollback: `update.sh rollback` restores the old tree and re-runs fetch.
-    dockerfile.write_text(old_text, encoding="utf-8")
+    write_lf(dockerfile, old_text)
     assert not tree.probe(), "after a rollback the NEW image read as current"
     r = tree.fetch()
     assert "rebuilt — build inputs changed" in _pass_line(r.stdout)
@@ -419,6 +444,7 @@ def test_a_changed_dockerfile_rebuilds_and_a_rollback_rebuilds_the_old_one(tree:
     assert len(tree.builds()) == 3
 
 
+@drives_installer
 def test_a_crlf_checkout_does_not_rebuild(tree: Tree):
     tree.fetch()
     dockerfile = tree.repo / "deploy" / "k3s" / "sandbox.Dockerfile"
@@ -426,6 +452,7 @@ def test_a_crlf_checkout_does_not_rebuild(tree: Tree):
     assert tree.probe(), "a CRLF checkout of the same release read as changed inputs"
 
 
+@drives_installer
 def test_an_env_seam_change_rebuilds(tree: Tree):
     """The resolved base ref is a build input: a re-resolved CC_IMG_PYTHON (a
     new lock, a substitution, an operator pin) rebuilds the sandbox."""
@@ -436,6 +463,7 @@ def test_an_env_seam_change_rebuilds(tree: Tree):
     assert not tree.probe()
 
 
+@drives_installer
 def test_a_failed_rebuild_is_a_fail_and_the_probe_stays_false(tree: Tree):
     tree.seed(SANDBOX, "0" * 64)
     (tree.store / "fail-build").write_text("")
@@ -445,6 +473,7 @@ def test_a_failed_rebuild_is_a_fail_and_the_probe_stays_false(tree: Tree):
     assert not tree.probe()
 
 
+@drives_installer
 @pytest.mark.parametrize("script,ref", [
     ("build-graphiti-image.sh", "localhost/cc-graphiti:1.0.2-anthropic"),
     ("build-crawler-image.sh", "localhost/cc-crawler:1"),
@@ -469,6 +498,7 @@ def _tags(builds: list[str]) -> list[str]:
     return [b.split(" -t ", 1)[1].split()[0] for b in builds]
 
 
+@drives_installer
 def test_a_staged_build_is_tagged_aside_and_the_live_image_is_untouched(tree: Tree):
     """update.sh apply promises that a stop before the merge leaves the
     containers as they were. The staged fetch now BUILDS the new release's local
@@ -490,6 +520,7 @@ def test_a_staged_build_is_tagged_aside_and_the_live_image_is_untouched(tree: Tr
     assert "podman untag" not in tree.log.read_text(), "a staged run untagged something"
 
 
+@drives_installer
 def test_the_post_merge_fetch_builds_the_live_tag_and_drops_the_aside_one(tree: Tree):
     tree.seed(SANDBOX, "0" * 64)
     tree.fetch(staged=True)
@@ -507,6 +538,7 @@ def test_the_post_merge_fetch_builds_the_live_tag_and_drops_the_aside_one(tree: 
     assert ASIDE not in tree.refs() and SANDBOX in tree.refs()
 
 
+@drives_installer
 def test_a_staged_run_builds_nothing_when_the_live_image_already_matches(tree: Tree):
     """A release that did not touch this image's inputs: the running image IS
     the one it needs, so there is nothing to prove and no aside tag to leave."""
@@ -518,6 +550,7 @@ def test_a_staged_run_builds_nothing_when_the_live_image_already_matches(tree: T
     assert ASIDE not in tree.refs()
 
 
+@drives_installer
 def test_a_rerun_staged_acquisition_reuses_its_aside_build(tree: Tree):
     """An apply that stopped AFTER the staged build and is re-run: the aside
     image is current, so it is not built twice."""
@@ -529,6 +562,7 @@ def test_a_rerun_staged_acquisition_reuses_its_aside_build(tree: Tree):
     assert len(tree.builds()) == 1
 
 
+@drives_installer
 @pytest.mark.parametrize("script,ref", [
     ("build-graphiti-image.sh", "localhost/cc-graphiti:1.0.2-anthropic"),
     ("build-crawler-image.sh", "localhost/cc-crawler:1"),

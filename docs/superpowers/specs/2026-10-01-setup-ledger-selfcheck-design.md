@@ -1,11 +1,12 @@
 # The install remembers what it did, proves it as the app, and has one definition
 
-> **Status:** partial — P1 shipped in v2.55.0 (D1, D2, D3, D5's exit-code rule and
-> `fetch` fix, D10); P2 shipped in v2.56.0 (D4, and from D11 the `started`
-> status, the run lock, the plan, in-process redaction and the readiness-only
-> rule); P3 shipped in v2.57.0 (D6, D7, the rest of D5); P4 shipped in v2.58.0
-> (D8, the two remaining `human` rows, D11's driver split); P5 (D9's
-> acceptance run on the laptop) is open and gates the final tag.
+> **Status:** implemented — P1 v2.55.0 (D1, D2, D3, D5's exit-code rule and
+> `fetch` fix, D10); P2 v2.56.0 (D4, and from D11 the `started` status, the
+> run lock, the plan, in-process redaction, the readiness-only rule); P3
+> v2.57.0 (D6, D7, the rest of D5); P4 v2.58.0 (D8, the remaining `human`
+> rows, D11's driver split); P5 v2.58.2 — D9's acceptance run on a Windows
+> laptop, three passes, the last one clean. What is NOT proven is listed under
+> "What the acceptance run proved, and what it did not".
 > Decisions D1–D10 taken with the operator on 2026-10-01; D11 (precedents,
 > seven adoptions) approved 2026-10-02.
 > **As-built:** P1 — `deploy/single/steps.tsv` (new), `deploy/single/ledger-lib.sh`
@@ -242,7 +243,7 @@ credential the app actually holds:
 | graph | Graphiti status via `CC_GRAPHITI_MCP_URL`; Neo4j reachable behind it |
 | sandbox | `CC_SANDBOX_RUNNER_URL` answers with `CC_SANDBOX_RUNNER_TOKEN`, when `CC_ENABLE_SANDBOX=1` |
 | crawler | `{CC_CRAWLER_URL}/healthz`, when `CC_ENABLE_CRAWLER=1` |
-| mail | the configured provider lists one ref (Exchange when `exchange.configured()`, else the n8n façade when `CC_ENABLE_N8N=1`) |
+| mail | the configured provider lists one ref — Exchange when `exchange.configured()`, else the n8n façade — and ONLY when something in the app reads mail: `CC_FEED_ENABLED=1`, or an enabled heartbeat `feed.poll` schedule, or Exchange configured. (As built in v2.58.2; the first version keyed on `CC_ENABLE_N8N`/the façade token and FAILed every default install, because `make-secrets.sh` always generates the token and the k3s profile does not set the flag.) |
 | integrations | `scripts/atlassian_probe.py`'s checks, when Jira/Confluence are configured |
 | cockpit | `http://127.0.0.1:{CC_COCKPIT_PORT}/` answers (CLI mode only) |
 | links | every `CC_*_UI_URL` / `_DOCS_URL` the Systems page would show is either blank by flag or answers |
@@ -451,6 +452,76 @@ binds by name.
   missing one tag, confirm the tree is untouched; (4) the demo proposal
   reached through `CHECKLIST.md`'s steps and nothing else.
 
+**The first pass (2026-10-02, v2.58.0 on a Windows 10 laptop, by the
+checklist).** It stopped on three findings that no Linux test could have
+produced, which is what the run is for. The self-check's `mail` row FAILed on
+every default install (it read the façade token `make-secrets.sh` always
+generates as "configured"), so `boot` was unreachable. No release zip could
+be imported on Windows (Git for Windows' UnZip does not let `*` cross `/`, so
+the vendor skip excluded 3 of 49,809 entries and the tree's symlinks failed
+the unpack). And the suite could not finish (pytest-timeout on Windows ends
+the whole session when one test passes the ceiling). What DID hold, on a real
+host: an `app` interrupted at `mint-key` was refused at `boot` and resumed by
+`./setup.sh` alone; a killed run left `started` rows, the next reclaimed the
+stale lock, and a concurrent run was refused naming the pid; an update that
+could not be acquired left the tree, `.env`, the ledger, the manifest and
+every container's image ID untouched; and a deployment with an emptied ledger
+and a narrow spine key was adopted in seven minutes with no container
+recreated and the key widened in place, its value unchanged. The run also
+measured what the ledger costs under MSYS — ~21 s before any command's first
+line — and that the ledger recorded a stop wrongly (rows the phase never
+reached were judged by their probes). v2.58.2 is those fixes; the reboot, the
+demo and a clean update were not reached and are the repeat run's.
+
+**The second and third passes (2026-10-03, release candidates of v2.58.2).**
+The second ran every scenario and confirmed the first pass's fixes on the
+box, and found what only a real reboot and a real update could: the logon
+entry runs in a console, so the resume run prompted for the operator's name
+and waited forever in a locked session whenever the name had been given in
+the cockpit; `./setup.sh` refused to start the installed release while an
+imported update waited, which kept the install down after an acquisition
+that stopped; the API's start-up self-check ran before `boot` had started the
+sandbox runner; and `llm` re-ran on every run with the speech engine off,
+because the plan asks its probes before `.env` is exported. The fixes for the
+Windows-only failures were first made blind and failed again on the box; the
+round that worked validated each one there, in a scratch clone beside the
+deployment. The third pass, on the tree that is tagged, was clean.
+
+### What the acceptance run proved, and what it did not
+
+Proven on a Windows 10 laptop (Git Bash, a podman machine), by the checklist
+alone, on the tagged tree: a fresh install to every ledger row `done`; an
+`app` interrupted at `mint-key`, refused at `boot` and resumed by `./setup.sh`
+to the end; a run killed mid-phase (`started` rows, the stale lock reclaimed,
+a concurrent run refused naming the pid); the demo approved in the cockpit,
+the seven bundled skills imported, the self-check passing with the sandbox
+runner; a reboot with the operator's name absent from `.env` — one logon
+attempt, three listeners 268 s after SSH returned, `status` all green, one
+logon entry; an update whose acquisition could not complete, from a real
+release zip, leaving the tree, `.env`, the ledger, the manifest and every
+container's image ID as they were, and `./setup.sh` then running the
+installed release; a clean update (271 s, nothing recreated) through to all
+rows `done` at the new version; `update.sh rollback`; and the adoption of a
+deployment with an empty ledger and a narrow spine key (190 s, no container
+recreated, the key widened on the real proxy with its value unchanged).
+
+Measured there: the first output line of any command at about one second
+(21 before the fork reduction); the suite at 44 minutes through the `test`
+phase — it runs once per release, and after an update that is before `boot`.
+
+NOT proven, and stated so nobody assumes it: a real Linux single-node host
+(the `systemd --user` units are stub-tested and pass `systemd-analyze`; under
+systemd `After=` orders the runner before the API but does not wait for it);
+n8n on this profile (the credential gate and the workflow import ran against
+stubs only); a corporate CA, a proxy or a mirror on this release (the
+2026-09-24/25 runs covered those seams on earlier releases); the recreate
+path of the image catch-up (no update in the run changed an image). Left
+open from the run: after `update.sh rollback` the release rolled back from is
+still imported on `upstream`, so the next run reports it as waiting and
+`apply` would install it again — neither the rollback's output nor the
+checklist says so, and its last line still reads "update applied"; the
+Systems page shows n8n as Down when n8n is not deployed.
+
 ### D10 — A deployment carries no local patches; a defect travels back as a report
 
 The operator's rule, 2026-10-01: an install configures through the
@@ -603,7 +674,12 @@ same two moves: change the `.env` key the line names, or report the row.
 - `demo` is skipped once one decided proposal exists; with the ledger that
   rule can go (the row is `done`), but a re-run on an installed box must not
   enrol a second fixture — keep the event-log probe as the row's `probe`.
-- `phase_test` once per version is ~10 minutes on Linux and unmeasured on
-  Windows (F40); the laptop run measures it.
+- `phase_test` once per version is ~10 minutes on Linux and 44 minutes on
+  the Windows laptop (measured, P5); after an update it runs before `boot`
+  on the next `./setup.sh`. Whether it should run at update time instead is
+  the operator's decision and is open.
+- With n8n enabled the credential gate asks for the Google Calendar
+  credential too, because `make-secrets.sh` always generates the calendar
+  façade token; making the calendar façade opt-in needs a flag and is open.
 - The diagnose bundle's size with a whole run's log: cap at the last run and
   say so in the first line.

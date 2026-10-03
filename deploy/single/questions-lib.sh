@@ -105,6 +105,22 @@ v_host() { # v_host <value>
   return 1
 }
 
+# Every v_path* refuses a BACKSLASH first, on the answer as written. `.env` is
+# SOURCED by setup.sh, and bash drops the backslashes of an unquoted
+# `C:\Users\me\state` (it reads `C:Usersmestate`), while update.sh and the
+# state-dir resolver read the text as written — so the two disagreed about
+# where the state dir is (seen in the 2026-10-02 testbed run's second pass).
+# `configure` never stores one: on MSYS it rewrites the answer with `cygpath
+# -m` before validating, so this only ever fires on a hand edit (check's
+# answers section) or a backslash typed on a host without cygpath. The reason
+# names the forward-slash spelling to write instead.
+q__path_slashes() { # q__path_slashes <answer as written>
+  [[ "$1" == *\\* ]] || return 0
+  printf 'written with backslashes (%s): setup.sh SOURCES .env and bash drops them (it reads %s) while update.sh reads the text as written, so the two disagree about this path — write it with forward slashes: %s\n' \
+    "$1" "${1//\\/}" "${1//\\//}"
+  return 1
+}
+
 # A path the OPERATOR fills separately from answering it (v2.58.0): only the
 # ANSWER's shape is judged here — a path on this host, not a URL — and never
 # whether anything is there yet. That is a STEP of the install, with its own
@@ -114,6 +130,16 @@ v_host() { # v_host <value>
 # exit 3) instead of failing the answer. Normalised (F33) like every v_path*:
 # `configure` rewrites the answer for any validator whose name starts so.
 v_path() { # v_path <value>
+  q__path_slashes "$1" || return 1
+  # The URL test runs on the RAW answer, before normalisation: on MSYS
+  # q_norm_path_answer is `cygpath -m`, which reads `https://host/x.pem` as a
+  # relative path and collapses the `//`, so `://` never survived and a URL
+  # VALIDATED — `configure` then stored a mangled path that only surfaced later
+  # as check/ca-bundle "no such file" (2026-10-02 Windows acceptance run, F15).
+  if [[ "$1" == *://* ]]; then
+    printf 'a path on this host, not a URL: %s\n' "$1"
+    return 1
+  fi
   local p; p="$(q_norm_path_answer "$1")"
   if [[ "$p" == *://* ]]; then
     printf 'a path on this host, not a URL: %s\n' "$p"
@@ -127,6 +153,7 @@ v_path() { # v_path <value>
 # to `C:/Users/me/ca.pem`, the spelling every consumer accepts, and `configure`
 # stores that form. Both spellings validate; only one is stored.
 v_path_readable() { # v_path_readable <value>
+  q__path_slashes "$1" || return 1
   local p; p="$(q_norm_path_answer "$1")"
   [[ -f "$p" && -r "$p" ]] && return 0
   [[ -e "$p" ]] && { printf 'exists but is not a readable file: %s\n' "$p"; return 1; }
@@ -137,6 +164,7 @@ v_path_readable() { # v_path_readable <value>
 # An existing directory, or one whose PARENT exists and is writable. It never
 # creates anything: the caller may be `check`, which executes nothing.
 v_path_dir_or_creatable() { # v_path_dir_or_creatable <value>
+  q__path_slashes "$1" || return 1
   local p; p="$(q_norm_path_answer "$1")"   # F33 — see v_path_readable
   if [[ -d "$p" ]]; then
     [[ -w "$p" ]] && return 0

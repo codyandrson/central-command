@@ -284,6 +284,9 @@ phase_preflight() {
 check_tree_pristine() {
   local rc=0
   cc_tree_diff "$REPO_ROOT" || rc=$?
+  # The verdict p_tree_pristine would reach, remembered for the rest of the run
+  # (setup.sh, P5): the row's probe and every mutating phase's guard ask again.
+  (( rc == 1 )) || TREE_PRISTINE_HELD=1
   case "$rc" in
     0) pass "tree-pristine" "the working tree and HEAD carry no difference from the installed release — this deployment is the release it claims to be" ;;
     1) fail "tree-pristine" "this deployment DIFFERS from the release it claims to be: $TREE_DIFF_PATHS. An install configures through .env and never rewrites any part of Central Command (2026-10-01 design record, D10) — restore those paths (git restore -- <path>) and carry the change back to a development session as a finding: ./setup.sh report writes one. There is no flag past this line" ;;
@@ -415,7 +418,8 @@ preflight_host() {
   # On Windows the OS trust store is what schannel curl and podman.exe
   # consult — CC_CA_BUNDLE alone never reaches them. Usually the corporate CA
   # is there by policy; when it is not, the fix is the operator's (admin).
-  if [[ -n "${CC_CA_BUNDLE:-}" && ( "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ) ]] && command -v certutil >/dev/null 2>&1; then
+  cc_uname_s
+  if [[ -n "${CC_CA_BUNDLE:-}" && ( "$UNAME_S" == MINGW* || "$UNAME_S" == MSYS* ) ]] && command -v certutil >/dev/null 2>&1; then
     local thumb; thumb="$(openssl x509 -in "$CC_CA_BUNDLE" -noout -fingerprint -sha1 2>/dev/null | sed 's/.*=//; s/://g')"
     if [[ -n "$thumb" ]] && certutil -store Root "$thumb" >/dev/null 2>&1; then
       pass "ca-windows-store" "CC_CA_BUNDLE's CA is in the Windows Root store (schannel curl and podman.exe trust it)"
@@ -429,17 +433,18 @@ preflight_host() {
   # Unreachable indexes are a fact about the network; CC_AIRGAP is how the
   # operator says it is deliberate. `deploy/discover.sh` is the tool that maps
   # what this network can actually reach and which mirrors to write into .env.
-  local u reach=1 probes
+  # The WARN names only the indexes that did not answer (index_reachable).
+  local u reach=1 probes unreached=""
   probes="${CC_PYPI_INDEX_URL:-https://pypi.org/simple/} ${CC_NPM_REGISTRY:-https://registry.npmjs.org/}"
   for u in $probes; do
-    curl -fsS -m 10 -o /dev/null "$u" 2>/dev/null || reach=0
+    index_reachable "$u" || { reach=0; unreached="$unreached $u"; }
   done
   if (( reach )); then
     pass "package-indexes" "reachable:$(printf ' %s' $probes)"
   elif [[ "$CC_AIRGAP" == "1" ]]; then
     pass "package-indexes" "unreachable, as expected with CC_AIRGAP=1 — fetch will say per artifact"
   else
-    warn "package-indexes" "unreachable:$(printf ' %s' $probes) — run deploy/discover.sh to map this network, then set the mirror seams in .env (see .env.example's deployment section); deploy/AIRGAP.md"
+    warn "package-indexes" "unreachable:${unreached} — run deploy/discover.sh to map this network, then set the mirror seams in .env (see .env.example's deployment section); deploy/AIRGAP.md"
   fi
 
   # Discovery cross-check (read-only). If /discover ran, its discovery.env —
@@ -475,8 +480,22 @@ preflight_host() {
   # configured as a registries.conf mirror OR as a CC_REGISTRY_* prefix.
   if command -v podman >/dev/null 2>&1; then
     local regs; regs="$(podman info --format '{{range .Registries}}{{.}} {{end}}' 2>/dev/null | tr -s ' ')"
-    pass "podman-registries" "podman sees: ${regs:-no registries.conf entries (fully-qualified refs only)} (the 'machine' phase owns the drop-in that puts entries there — ./setup.sh machine --dry-run reports the diff)"
+    pass "podman-registries" "podman sees: ${regs:-no registries.conf entries (fully-qualified refs only)} (the machine phase owns the drop-in that puts entries there, and prints its diff before it writes one)"
   fi
+}
+
+# One package index, reachable or not — asked with HEAD, not GET: the public
+# simple index's ROOT is the whole index (46.7 MB, 6-6.5 s at the 2026-10-02
+# testbed's evening bandwidth), so a GET under -m 10 measured the link's speed
+# rather than reachability, and on a slower evening one run printed
+# `package-indexes: unreachable` and then, 16 s later, `index-pypi ... answers
+# HTTP 200` (F17). A server that refuses HEAD (curl 22: an HTTP error) gets the
+# GET it always got; a connection that failed is not asked twice.
+index_reachable() { # index_reachable <url>  -> 0 = it answered
+  local rc=0
+  curl -fsS -I -m 10 -o /dev/null "$1" 2>/dev/null || rc=$?
+  if (( rc == 22 )); then rc=0; curl -fsS -m 10 -o /dev/null "$1" 2>/dev/null || rc=$?; fi
+  return "$rc"
 }
 
 # The machine, REPORTED: current state plus the diff the `machine` phase would
@@ -728,6 +747,22 @@ check_images() {
 }
 
 # ── section: indexes ────────────────────────────────────────────────────────
+# The two package indexes are each asked for ONE SMALL PROJECT THE INSTALL
+# ITSELF NEEDS — its metadata, by the same GET pip/uv and npm make, through the
+# configured seam with the CA/insecure/proxy settings applied. That is what the
+# probe proves: this index serves package metadata from here. The project is
+# taken from the lockfiles on purpose, because a MIRROR is only obliged to hold
+# what the install resolves: an offline mirror seeded from requirements.lock
+# and web/package-lock.json answers for these two, and would 404 for an
+# arbitrary one. The old choices were exactly that kind: `pip` and `npm` are in
+# NEITHER lockfile, and `npm`'s packument is 25.8 MB — under the 20 s cap a
+# slow evening FAILed the gate on a healthy registry (the same trap as the
+# host section's F17, 2026-10-02 testbed run). Not HEAD: a mirror may refuse
+# it, and a HEAD proves less than the metadata GET the tools actually make.
+# tests/test_single_check_is_dry.py pins both names to their lockfiles.
+INDEX_PROBE_PYPI_PROJECT=h11          # requirements.lock (httpcore, uvicorn)
+INDEX_PROBE_NPM_PACKAGE=picocolors    # web/package-lock.json (postcss, @babel/code-frame)
+
 check_indexes() {
   # The PyPI SIMPLE index, probed at a project page rather than the root: a
   # mirror may serve / as a portal and still resolve.
@@ -735,10 +770,10 @@ check_indexes() {
   if [[ -z "${CC_PYPI_INDEX_URL:-}" && "$CC_AIRGAP" == "1" ]]; then
     warn "index-pypi" "CC_AIRGAP=1 and CC_PYPI_INDEX_URL is unset, so the PUBLIC index is what a resolve would use — set the mirror; the resolution check below is what decides"
   else
-    probe_http "index-pypi" "${pypi%/}/pip/" "the PyPI simple index (${pypi})" "CC_PYPI_INDEX_URL"
+    probe_http "index-pypi" "${pypi%/}/${INDEX_PROBE_PYPI_PROJECT}/" "the PyPI simple index (${pypi})" "CC_PYPI_INDEX_URL"
   fi
   local npm="${CC_NPM_REGISTRY:-https://registry.npmjs.org}"
-  probe_http "index-npm" "${npm%/}/npm" "the npm registry (${npm})" "CC_NPM_REGISTRY"
+  probe_http "index-npm" "${npm%/}/${INDEX_PROBE_NPM_PACKAGE}" "the npm registry (${npm})" "CC_NPM_REGISTRY"
 
   # apt runs INSIDE the three image builds, and the suite comes from each base
   # image: zepai/knowledge-graph-mcp and library/python:3.12-slim-bookworm are

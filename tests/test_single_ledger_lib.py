@@ -151,7 +151,8 @@ def test_step_fields_and_requires_come_back_qualified():
     # Space-separated and `<phase>/<step>`-qualified, which is what the ledger
     # keys on — the same step name lives in two phases (venv, cockpit,
     # image-sandbox, embed-dimension).
-    assert requires.split() == ["app/install", "app/mint-key", "verify/selfcheck"], requires
+    assert requires.split() == ["app/install", "app/mint-key", "verify/selfcheck",
+                              "boot/boot-sandbox"], requires   # the runner first (F20)
     assert gate_kind == "gate"
     assert empty_reads == "", "a `-` field must read back as empty, not as '-'"
 
@@ -603,3 +604,58 @@ def test_the_plan_text_counts_later_rows_with_the_same_reason(tmp_path):
     rows = [f"one/{s}\tstarted\t2.56.0\tT9\tx\t" for s in "abc"]
     r = _phase(tmp_path, rows)
     assert r["text"].endswith("(and 2 more rows started and never finished)"), r["text"]
+
+
+def test_a_tree_digest_does_not_see_line_endings(tmp_path):
+    """cc_tree_hash is CRLF-INSENSITIVE on every host. On Git for Windows'
+    bash a `$'\\r'` written INSIDE a command substitution's text is dropped
+    (`$( x=$'\\r'; echo ${#x} )` prints 0), so the strip that lived there did
+    nothing on Windows and a CRLF-only change re-ran every step that
+    fingerprints a tree (the 2026-10-02 testbed run's second pass)."""
+    d = tmp_path / "t"
+    (d / "sub").mkdir(parents=True)
+    (d / "sub" / "a.txt").write_bytes(b"one\ntwo\n")
+    (d / "sub" / "b.txt").write_bytes(b"three\n")
+    root = d.as_posix()
+    lf = ok(f'cc_tree_hash "{root}" sub').strip()
+    (d / "sub" / "a.txt").write_bytes(b"one\r\ntwo\r\n")
+    crlf = ok(f'cc_tree_hash "{root}" sub').strip()
+    assert lf == crlf and len(lf) == 64, (lf, crlf)
+    (d / "sub" / "a.txt").write_bytes(b"one\r\ntwo!\r\n")
+    assert ok(f'cc_tree_hash "{root}" sub').strip() != lf, "a real change must still change it"
+
+
+def test_no_carriage_return_escape_is_written_inside_a_command_substitution():
+    """The defect class behind the test above, held at the source: a `$'\\r'`
+    inside `$( … )` TEXT is an empty string on Git Bash. A strip belongs in a
+    function body (which a `$(fn)` then runs) or outside the substitution."""
+    import re
+
+    files = sorted({*(ROOT / "deploy" / "single").glob("*.sh"),
+                    *(ROOT / "deploy" / "single" / "phases").glob("*.sh"),
+                    ROOT / "deploy" / "env-lib.sh"})
+    offenders = []
+    for f in files:
+        lines = f.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if "$'\\r'" not in line:
+                continue
+            j = i
+            while j > 0 and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{", lines[j]):
+                j -= 1
+            text = "\n".join(lines[j:i] + [line[:line.index("$'\\r'")]])
+            text = re.sub(r"#[^\n]*", "", re.sub(r"'[^'\n]*'", "", text))
+            stack, k = [], 0
+            while k < len(text):
+                if text.startswith("$(", k):
+                    stack.append("$")
+                    k += 2
+                    continue
+                if text[k] == "(":
+                    stack.append("(")
+                elif text[k] == ")" and stack:
+                    stack.pop()
+                k += 1
+            if "$" in stack:
+                offenders.append(f"{f.relative_to(ROOT)}:{i + 1}: {line.strip()}")
+    assert not offenders, "$'\\r' inside a command substitution:\n" + "\n".join(offenders)

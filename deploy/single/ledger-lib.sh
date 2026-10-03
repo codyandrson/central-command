@@ -59,6 +59,13 @@
 #     cc_steps_requires <phase> <step>     its requires, space-separated
 #     cc_fingerprint <env-file> <reads>    sha256 over the step's input VALUES
 #                                          (and a tree input's content, `@dir`)
+#     cc_fingerprint_prime <env-file> <reads>...
+#                                          many rows' digests, ONE hasher process
+#     cc_fingerprint_prime_rows <env-file> [<phase>]
+#                                          the same for a phase, or every row
+#     cc_ledger_cache_drop                 forget the run's cached digests,
+#                                          tree hashes and probe verdicts
+#     cc_probe_memo <probe> <env-file>     a probe's verdict, once per run
 #     cc_tree_hash <root> <dir>            a repo-relative directory's content hash
 #     cc_ledger_write <ledger> <step> <status> <version> <at> <fp> <reason>
 #     cc_ledger_write_batch <ledger> [<step> <status> <version> <at> <fp> <reason>]...
@@ -89,8 +96,7 @@ STEPS_ORDER=()
 STEPS_PHASE_LIST=""
 # The ledger, in memory, keyed `<phase>/<step>` -> its whole line. Loaded ONCE
 # per decision (cc_ledger_load) rather than re-read per field: cc_ledger_field
-# reads the whole file and forks a `cut` per call, and the plan judges every
-# row of the install — Git Bash on Windows forks slowly enough for that to show.
+# reads the whole file per call, and the plan judges every row of the install.
 declare -A LEDGER_ROWS=()
 
 # Column order, by name. One list, so a new column is one edit here and one in
@@ -109,12 +115,33 @@ cc__step_col() { # cc__step_col <name>
   esac
 }
 
-# One column out of one row. `cut`, not an IFS split: a `doc` sentence contains
-# spaces and IFS-splitting on a tab COLLAPSES consecutive tabs, which is
-# exactly why the schema writes `-` for an empty field (questions.tsv's rule,
-# learned the same way).
+# Every column of one row, into the global array TSV_F (TSV_F[0] is column 1).
+# NOT an IFS split: a `doc` sentence contains spaces, and IFS-splitting on a
+# tab COLLAPSES consecutive tabs, which is exactly why the schema writes `-`
+# for an empty field (questions.tsv's rule, learned the same way). This split
+# keeps an empty field empty, as `cut -f` does, so a hand edit that left one
+# empty still reaches cc_steps_load's "a row with no phase" refusal rather than
+# shifting every column after it. Pure parameter expansion and no `$(...)`: it
+# used to be `printf | cut` per column, and cc_steps_load reads five columns of
+# every row on every command — ~1,000 forks before the first line on Git Bash,
+# where a fork costs tens of milliseconds (P5, the first laptop acceptance run).
+TSV_F=()
+cc__tsv_split() { # cc__tsv_split <row>  -> TSV_F
+  local rest="$1"
+  TSV_F=()
+  while [[ "$rest" == *$'\t'* ]]; do
+    TSV_F+=("${rest%%$'\t'*}")
+    rest="${rest#*$'\t'}"
+  done
+  TSV_F+=("$rest")
+}
+
+# One column out of one row, printed — `cut -d<tab> -f<n>`'s answer for a row
+# that has a tab (every manifest and ledger row has several): an empty string
+# past the last column.
 cc__step_cut() { # cc__step_cut <row> <n>
-  printf '%s' "$1" | cut -d$'\t' -f"$2"
+  cc__tsv_split "$1"
+  printf '%s' "${TSV_F[$(( $2 - 1 ))]:-}"
 }
 
 # Parse and VALIDATE. Returns 1 with the reason on stderr — a manifest this
@@ -135,11 +162,9 @@ cc_steps_load() { # cc_steps_load <steps.tsv>
       printf 'steps: a row needs 8 tab-separated fields, saw %s: %s\n' "$(( ${#n} + 1 ))" "$line" >&2
       return 1
     fi
-    phase="$(cc__step_cut "$line" 1)"
-    step="$(cc__step_cut "$line" 2)"
-    kind="$(cc__step_cut "$line" 3)"
-    reads="$(cc__step_cut "$line" 5)"
-    probe="$(cc__step_cut "$line" 7)"
+    cc__tsv_split "$line"
+    phase="${TSV_F[0]}"; step="${TSV_F[1]}"; kind="${TSV_F[2]}"
+    reads="${TSV_F[4]}"; probe="${TSV_F[6]}"
     [[ -n "$phase" && "$phase" != "-" ]] || { printf 'steps: a row with no phase: %s\n' "$line" >&2; return 1; }
     [[ -n "$step"  && "$step"  != "-" ]] || { printf 'steps: a row with no step name: %s\n' "$line" >&2; return 1; }
     case "$kind" in run|gate|human) ;; *) printf 'steps: %s/%s has kind %s — run, gate or human\n' "$phase" "$step" "$kind" >&2; return 1 ;; esac
@@ -192,7 +217,8 @@ cc_step_field() { # cc_step_field <phase> <step> <column-name>
   [[ -n "$row" ]] || return 1
   col="$(cc__step_col "$3")"
   [[ "$col" != 0 ]] || return 1
-  local v; v="$(cc__step_cut "$row" "$col")"
+  cc__tsv_split "$row"
+  local v="${TSV_F[$(( col - 1 ))]:-}"
   [[ "$v" == "-" ]] && v=""
   printf '%s' "$v"
 }
@@ -203,18 +229,35 @@ cc_steps_requires() { # cc_steps_requires <phase> <step>
   printf '%s' "${v//,/ }"
 }
 
-# The three columns a DECISION needs, into ROWDEF_KIND / ROWDEF_READS /
-# ROWDEF_PROBE,
-# with no fork: cc_step_field costs a subshell and a `cut` per column, and the
-# plan asks for two columns of every row. An IFS split on a tab is safe HERE
-# (and only because cc_steps_load refused any row with an empty field — every
-# empty one is written `-`, so no two tabs are adjacent to collapse).
+# The four columns a DECISION needs, into ROWDEF_KIND / ROWDEF_READS /
+# ROWDEF_PROBE / ROWDEF_REQUIRES (`-` read as empty, like cc_step_field),
+# with no fork: cc_step_field costs a subshell per column, and the plan asks for
+# several columns of every row. Split by cc__tsv_split, which keeps an empty
+# field empty — an IFS split on a tab would collapse two adjacent tabs (the
+# reason every empty field is written `-`), so this does not lean on the
+# convention to read the right column.
 cc__step_split() { # cc__step_split <phase> <step>
-  local row="${STEPS_ROW[$1/$2]:-}" _p _s req writes doc
-  ROWDEF_KIND=""; ROWDEF_READS=""; ROWDEF_PROBE=""
+  local row="${STEPS_ROW[$1/$2]:-}"
+  ROWDEF_KIND=""; ROWDEF_READS=""; ROWDEF_PROBE=""; ROWDEF_REQUIRES=""
   [[ -n "$row" ]] || return 1
-  IFS=$'\t' read -r _p _s ROWDEF_KIND req ROWDEF_READS writes ROWDEF_PROBE doc <<<"$row"
+  cc__tsv_split "$row"
+  ROWDEF_KIND="${TSV_F[2]:-}"; ROWDEF_REQUIRES="${TSV_F[3]:-}"
+  ROWDEF_READS="${TSV_F[4]:-}"; ROWDEF_PROBE="${TSV_F[6]:-}"
   [[ "$ROWDEF_READS" == "-" ]] && ROWDEF_READS=""
+  [[ "$ROWDEF_REQUIRES" == "-" ]] && ROWDEF_REQUIRES=""
+  return 0
+}
+
+# A phase's step names, in manifest order, into PHASE_STEPS — what
+# cc_steps_for_phase prints, without the process substitution a
+# `while read … < <(cc_steps_for_phase …)` costs (a fork per call).
+PHASE_STEPS=()
+cc__phase_steps() { # cc__phase_steps <phase>  -> PHASE_STEPS
+  local key
+  PHASE_STEPS=()
+  for key in ${STEPS_ORDER[@]+"${STEPS_ORDER[@]}"}; do
+    [[ "${key%%/*}" == "$1" ]] && PHASE_STEPS+=("${key#*/}")
+  done
   return 0
 }
 
@@ -231,8 +274,62 @@ cc__step_split() { # cc__step_split <phase> <step>
 # a no-op rather than a crash). This file carried a second copy of that
 # fallback until v2.57.0; env-lib.sh is sourced first, as the header says.
 cc_fingerprint() { # cc_fingerprint <env-file> <reads-csv>
-  local f="$1" csv="$2" payload="" key root
-  [[ -z "$csv" || "$csv" == "-" ]] && { printf 'none'; return 0; }
+  cc__fingerprint_into "$1" "$2"
+  printf '%s' "$FP_OUT"
+}
+
+# ── the fingerprint, without the forks (P5) ─────────────────────────────────
+# The value above, computed the way the driver's hot path needs it. Each digest
+# is the SAME sha256 over the SAME payload — the fingerprints already recorded
+# in installed ledgers stay equal, so nothing re-runs after this update — but:
+#
+#   * cc__fingerprint_into sets FP_OUT instead of printing (a `$(…)` is a fork);
+#   * the values come from env-lib.sh's answer-file cache (the one
+#     cc_get_kv_cached reads), one read of .env per row or per batch instead
+#     of a `$(cc_get_kv …)` subshell per key;
+#   * a digest is CACHED per `reads` list (FP_CACHE) for as long as .env reads
+#     the same — KVCACHE_GEN moves whenever the file's content does, whoever
+#     wrote it — and the tree it was taken under;
+#   * cc_fingerprint_prime hashes MANY rows in ONE hasher process: each
+#     payload is handed to it as a process substitution, so it is a pipe and
+#     never a file (a payload carries .env VALUES, and a value never lands on
+#     disk outside .env). One fork per payload, no exec — where the old path
+#     cost a `$(…)`, a pipeline, a `sha256sum` and a `cut` per row.
+#
+# FP_CACHE / TREE_CACHE are not CC_-prefixed: results, not answers.
+declare -A FP_CACHE=()
+declare -A TREE_CACHE=()
+FP_CACHE_TAG=""
+FP_OUT=""
+FP_PAYLOAD=""
+
+# Drop every per-run cache this file keeps (the fingerprints, the tree
+# hashes, the probe verdicts). The digests also invalidate themselves when
+# .env changes; a phase that RAN can change what a probe reads or (in
+# principle) a tree, so setup.sh calls this after every phase function returns.
+cc_ledger_cache_drop() {
+  FP_CACHE=(); TREE_CACHE=(); FP_CACHE_TAG=""; PROBE_MEMO=()
+}
+
+# The cache is about ONE answer file at ONE content generation, under ONE tree
+# root; anything else empties it. Returns 1 when the file is not there (the
+# caller then computes without caching, as cc_get_kv would read it: empty).
+cc__fp_cache_sync() { # cc__fp_cache_sync <env-file>
+  cc__kv_cache_sync "$1" || { FP_CACHE=(); FP_CACHE_TAG=""; return 1; }
+  local tag="$1|$KVCACHE_GEN|${LEDGER_TREE_ROOT:-}"
+  [[ "$FP_CACHE_TAG" == "$tag" ]] || { FP_CACHE=(); FP_CACHE_TAG="$tag"; }
+  return 0
+}
+
+# The bytes the digest is taken over, into FP_PAYLOAD: "KEY=VALUE\n" per key in
+# manifest order, a tree input's content hash where its value would be. The
+# CALLER syncs the answer-file cache first (cc__fp_cache_sync — one read of .env
+# per row, or per batch, rather than one per key); <synced> says whether that
+# found the file. Unsynced, or a key the cache does not hold by construction
+# (not an identifier), reads through cc_get_kv itself.
+cc__fingerprint_payload() { # cc__fingerprint_payload <env-file> <reads-csv> <synced:0|1>
+  local f="$1" csv="$2" synced="${3:-0}" key root dir
+  FP_PAYLOAD=""
   # Comma-split without touching the caller's IFS for anything else.
   local oldifs="$IFS"
   IFS=','
@@ -247,13 +344,101 @@ cc_fingerprint() { # cc_fingerprint <env-file> <reads-csv>
       # caller fingerprinting a staged tree). Not CC_-prefixed: it is not an
       # operator answer (see STEPS_ROW above).
       root="${LEDGER_TREE_ROOT:-}"
-      [[ -n "$root" ]] || root="$(cd "$(dirname "$f")" 2>/dev/null && pwd)"
-      payload="${payload}${key}=$(cc_tree_hash "$root" "${key#@}")"$'\n'
+      if [[ -z "$root" ]]; then
+        # `dirname`'s answer, without its exec.
+        case "$f" in */*) dir="${f%/*}"; dir="${dir:-/}" ;; *) dir="." ;; esac
+        root="${TREE_CACHE[root:$dir]:-}"
+        if [[ -z "$root" ]]; then
+          root="$(cd "$dir" 2>/dev/null && pwd)"
+          [[ -n "$root" ]] && TREE_CACHE["root:$dir"]="$root"
+        fi
+      fi
+      cc__tree_hash_into "$root" "${key#@}"
+      FP_PAYLOAD="${FP_PAYLOAD}${key}=${TREE_OUT}"$'\n'
       continue
     fi
-    payload="${payload}${key}=$(cc_get_kv "$f" "$key")"$'\n'
+    if (( synced )) && [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      FP_PAYLOAD="${FP_PAYLOAD}${key}=${KVCACHE[$key]:-}"$'\n'
+    else
+      FP_PAYLOAD="${FP_PAYLOAD}${key}=$(cc_get_kv "$f" "$key")"$'\n'
+    fi
   done
-  printf '%s' "$payload" | cc_sha256_stdin
+}
+
+cc__fingerprint_into() { # cc__fingerprint_into <env-file> <reads-csv>  -> FP_OUT
+  local f="$1" csv="$2" cached=0
+  [[ -z "$csv" || "$csv" == "-" ]] && { FP_OUT='none'; return 0; }
+  if cc__fp_cache_sync "$f"; then
+    cached=1
+    [[ -n "${FP_CACHE[$csv]+x}" ]] && { FP_OUT="${FP_CACHE[$csv]}"; return 0; }
+  fi
+  cc__fingerprint_payload "$f" "$csv" "$cached"
+  FP_OUT="$(printf '%s' "$FP_PAYLOAD" | cc_sha256_stdin)"
+  (( cached )) && FP_CACHE["$csv"]="$FP_OUT"
+  return 0
+}
+
+# Fill FP_CACHE for every given `reads` list not already in it, in ONE hasher
+# process. Same three-way fallback as cc_sha256_stdin, read back per input in
+# argument order; any surprise (an unparseable line, a count that does not
+# match) caches nothing, and cc__fingerprint_into then hashes each row alone —
+# slower, never different.
+cc_fingerprint_prime() { # cc_fingerprint_prime <env-file> <reads-csv>...
+  local f="$1"; shift
+  cc__fp_cache_sync "$f" || return 0
+  local -A seen=()
+  local csvs=() payloads=() csv
+  for csv in "$@"; do
+    [[ -z "$csv" || "$csv" == "-" ]] && continue
+    [[ -n "${FP_CACHE[$csv]+x}" || -n "${seen[$csv]+x}" ]] && continue
+    seen["$csv"]=1
+    cc__fingerprint_payload "$f" "$csv" 1
+    csvs+=("$csv"); payloads+=("$FP_PAYLOAD")
+  done
+  (( ${#csvs[@]} )) || return 0
+  if (( ${#csvs[@]} == 1 )); then
+    cc__fingerprint_into "$f" "${csvs[0]}"
+    return 0
+  fi
+  local tool=() out line i=0 h
+  if command -v sha256sum >/dev/null 2>&1; then tool=(sha256sum)
+  elif command -v shasum >/dev/null 2>&1; then tool=(shasum -a 256)
+  elif command -v openssl >/dev/null 2>&1; then tool=(openssl dgst -sha256)
+  else
+    for csv in "${csvs[@]}"; do FP_CACHE["$csv"]=nohash; done
+    return 0
+  fi
+  # One process substitution per payload, built as words for `eval` — the
+  # payloads themselves are never part of the evaluated text, only their
+  # array indices are.
+  local cmd='"${tool[@]}"'
+  for i in "${!payloads[@]}"; do cmd+=" <(printf '%s' \"\${payloads[$i]}\")"; done
+  out="$(eval "$cmd" 2>/dev/null)" || return 0
+  local digests=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "${tool[0]}" in
+      openssl) h="${line##*= }" ;;
+      *)       h="${line%% *}" ;;
+    esac
+    [[ "$h" =~ ^[0-9a-f]{64}$ ]] || return 0
+    digests+=("$h")
+  done <<<"$out"
+  (( ${#digests[@]} == ${#csvs[@]} )) || return 0
+  for i in "${!csvs[@]}"; do FP_CACHE["${csvs[$i]}"]="${digests[$i]}"; done
+  return 0
+}
+
+# Prime every row of one phase (or, with no phase, of the whole manifest).
+cc_fingerprint_prime_rows() { # cc_fingerprint_prime_rows <env-file> [<phase>]
+  local f="$1" phase="${2:-}" key reads=()
+  for key in ${STEPS_ORDER[@]+"${STEPS_ORDER[@]}"}; do
+    [[ -z "$phase" || "${key%%/*}" == "$phase" ]] || continue
+    cc__step_split "${key%%/*}" "${key#*/}" || continue
+    reads+=("$ROWDEF_READS")
+  done
+  (( ${#reads[@]} )) || return 0
+  cc_fingerprint_prime "$f" "${reads[@]}"
 }
 
 # ── a TREE input (v2.57.0) ──────────────────────────────────────────────────
@@ -277,24 +462,47 @@ cc_fingerprint() { # cc_fingerprint <env-file> <reads-csv>
 # blindness: a final line with or without its newline hashes the same, which
 # is a difference no importer can see either. A directory that is not there
 # hashes to `absent`, so it still compares equal to itself.
+#
+# cc__tree_hash_into is the same digest into TREE_OUT, cached per run in
+# TREE_CACHE (keyed root and directory; cc_ledger_cache_drop empties it after
+# every phase): the plan, the `started` mark and the record each fingerprint the
+# same tree, and a release's tree does not change under a run.
+TREE_OUT=""
+cc__tree_hash_into() { # cc__tree_hash_into <root> <repo-relative dir>  -> TREE_OUT
+  local k="tree:$1|${2%/}"
+  if [[ -n "${TREE_CACHE[$k]+x}" ]]; then TREE_OUT="${TREE_CACHE[$k]}"; return 0; fi
+  TREE_OUT="$(cc_tree_hash "$1" "$2")"
+  TREE_CACHE["$k"]="$TREE_OUT"
+}
+
+# The payload, as a FUNCTION run inside the $(...) below — never as text
+# written inside it: Git for Windows' bash (5.3, MSYS) re-reads a command
+# substitution's text and drops the carriage return a `$'\r'` there produces
+# (`$( x=$'\r'; echo ${#x} )` prints 0), so the CR strip below did nothing on
+# Windows and a CRLF-only difference changed the digest (the 2026-10-02
+# testbed run's second pass, measured; tests/test_single_cockpit_inputs.py's
+# CRLF case). Same subshell, same output, no extra fork.
+cc__tree_payload() { # cc__tree_payload <root> <repo-relative dir>  — run in a subshell
+  local rel="$2" p line
+  cd "$1" || return 1
+  # Byte order, not the locale's collation: the digest is a property of the
+  # tree, never of the machine reading it.
+  LC_ALL=C
+  shopt -s globstar nullglob dotglob
+  for p in "$rel"/**; do
+    [[ -f "$p" ]] || continue
+    printf '%s\001\n' "$p"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      printf '%s\n' "${line%$'\r'}"
+    done <"$p"
+    printf '\001\n'
+  done
+}
+
 cc_tree_hash() { # cc_tree_hash <root> <repo-relative dir>
   local root="$1" rel="${2%/}" payload
   [[ -d "$root/$rel" ]] || { printf 'absent'; return 0; }
-  payload="$(
-    cd "$root" || exit 1
-    # Byte order, not the locale's collation: the digest is a property of the
-    # tree, never of the machine reading it.
-    LC_ALL=C
-    shopt -s globstar nullglob dotglob
-    for p in "$rel"/**; do
-      [[ -f "$p" ]] || continue
-      printf '%s\001\n' "$p"
-      while IFS= read -r line || [[ -n "$line" ]]; do
-        printf '%s\n' "${line%$'\r'}"
-      done <"$p"
-      printf '\001\n'
-    done
-  )" || { printf 'unreadable'; return 0; }
+  payload="$(cc__tree_payload "$root" "$rel")" || { printf 'unreadable'; return 0; }
   printf '%s' "$payload" | cc_sha256_stdin
 }
 
@@ -369,11 +577,14 @@ cc_ledger_write_batch() { # cc_ledger_write_batch <ledger> [<step> <status> <ver
 cc_ledger_mark_started() { # cc_ledger_mark_started <ledger> <phase> <version> <at> <env-file>
   local ledger="$1" phase="$2" ver="$3" at="$4" envf="$5" step
   local args=()
-  while IFS= read -r step; do
+  cc__phase_steps "$phase"
+  (( ${#PHASE_STEPS[@]} )) && cc_fingerprint_prime_rows "$envf" "$phase"
+  for step in ${PHASE_STEPS[@]+"${PHASE_STEPS[@]}"}; do
     [[ -n "$step" ]] || continue
     cc__step_split "$phase" "$step" || continue
-    args+=("$phase/$step" started "$ver" "$at" "$(cc_fingerprint "$envf" "$ROWDEF_READS")" "")
-  done < <(cc_steps_for_phase "$phase")
+    cc__fingerprint_into "$envf" "$ROWDEF_READS"
+    args+=("$phase/$step" started "$ver" "$at" "$FP_OUT" "")
+  done
   (( ${#args[@]} )) || return 0
   cc_ledger_write_batch "$ledger" "${args[@]}"
 }
@@ -404,13 +615,27 @@ cc_ledger_load() { # cc_ledger_load <ledger>
   return 0
 }
 
+# The LAST row for <step> (a hand edit can leave two), read straight from the
+# file — cc_ledger_read's lines, without its process substitution, and the
+# column split by cc__tsv_split (`cut -f`'s answer, empty fields kept) rather
+# than a `cut` per call.
+cc__ledger_row() { # cc__ledger_row <ledger> <step>  -> LEDGER_ROW_OUT
+  local line
+  LEDGER_ROW_OUT=""
+  [[ -f "$1" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == '#'* ]] && continue
+    [[ "$line" == "$2"$'\t'* ]] && LEDGER_ROW_OUT="$line"
+  done <"$1"
+  return 0
+}
+
 cc_ledger_field() { # cc_ledger_field <ledger> <step> <column-number>
-  local line out=""
-  while IFS= read -r line; do
-    [[ "$line" == "$2"$'\t'* ]] || continue
-    out="$(printf '%s' "$line" | cut -d$'\t' -f"$3")"
-  done < <(cc_ledger_read "$1")
-  printf '%s' "$out"
+  cc__ledger_row "$1" "$2"
+  [[ -n "$LEDGER_ROW_OUT" ]] || return 0
+  cc__tsv_split "$LEDGER_ROW_OUT"
+  printf '%s' "${TSV_F[$(( $3 - 1 ))]:-}"
 }
 
 cc_ledger_status() { # cc_ledger_status <ledger> <step>
@@ -433,18 +658,44 @@ cc_ledger_status() { # cc_ledger_status <ledger> <step>
 # blocked by `boot/boot-api` on every install that has not booted yet — i.e.
 # forever. What the manifest's intra-phase requires buy is the ORDER the
 # generated checklist reads in (D8) and the guard that it is acyclic.
+#
+# One pass over the ledger, no fork: the status of every row into a local map
+# (the LAST row per step, and only lines carrying a tab — exactly what
+# cc_ledger_status's `<step><tab>` match reads), then the requires walked in
+# manifest order.
 cc_ledger_blocked() { # cc_ledger_blocked <ledger> <phase>
-  local ledger="$1" phase="$2" step req r st
-  while IFS= read -r step; do
-    req="$(cc_steps_requires "$phase" "$step")"
+  cc__ledger_blocked_into "$1" "$2" || return 1
+  printf '%s' "$LEDGER_BLOCKED"
+}
+
+# The same answer into LEDGER_BLOCKED ("<step> <status>"; empty and status 1
+# when nothing blocks) — the driver asks it twice per phase command, and the
+# `$(…)` around each was a fork.
+LEDGER_BLOCKED=""
+cc__ledger_blocked_into() { # cc__ledger_blocked_into <ledger> <phase>  -> LEDGER_BLOCKED
+  local ledger="$1" phase="$2" step req r st line
+  local -A stat=()
+  LEDGER_BLOCKED=""
+  if [[ -f "$ledger" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      [[ -z "$line" || "$line" == '#'* || "$line" != *$'\t'* ]] && continue
+      cc__tsv_split "$line"
+      [[ -n "${TSV_F[0]}" ]] && stat["${TSV_F[0]}"]="${TSV_F[1]:-}"
+    done <"$ledger"
+  fi
+  cc__phase_steps "$phase"
+  for step in ${PHASE_STEPS[@]+"${PHASE_STEPS[@]}"}; do
+    cc__step_split "$phase" "$step" || continue
+    req="${ROWDEF_REQUIRES//,/ }"
     for r in $req; do
       [[ "${r%%/*}" == "$phase" ]] && continue
-      st="$(cc_ledger_status "$ledger" "$r")"
+      st="${stat[$r]:-}"
       [[ "$st" == done ]] && continue
-      printf '%s %s' "$r" "${st:-pending}"
+      LEDGER_BLOCKED="$r ${st:-pending}"
       return 0
     done
-  done < <(cc_steps_for_phase "$phase")
+  done
   return 1
 }
 
@@ -487,11 +738,46 @@ cc_row_decide() { # cc_row_decide <ledger-row|''> <version> <env-file> <reads> <
     *)       ROW_CODE=pending; return 0 ;;
   esac
   if [[ "$rver" != "$ver" ]]; then ROW_CODE=version; ROW_DETAIL="$rver -> $ver"; return 0; fi
-  if [[ "$rfp" != "$(cc_fingerprint "$envf" "$reads")" ]]; then ROW_CODE=inputs; return 0; fi
+  cc__fingerprint_into "$envf" "$reads"
+  if [[ "$rfp" != "$FP_OUT" ]]; then ROW_CODE=inputs; return 0; fi
   if [[ "$probe" == "-" || -z "$probe" ]]; then ROW_CODE=unprobed; return 0; fi
-  if ! "$probe" >/dev/null 2>&1; then ROW_CODE=drift; ROW_DETAIL="$probe"; return 0; fi
+  # A row that reads nothing took no fingerprint, so nothing synced the cache
+  # the probe memo is keyed on; its probe may read .env all the same.
+  [[ -z "$reads" || "$reads" == "-" ]] && { cc__kv_cache_sync "$envf" || true; }
+  if ! cc_probe_memo "$probe" "$envf"; then ROW_CODE=drift; ROW_DETAIL="$probe"; return 0; fi
   ROW_VERDICT=skip; ROW_CODE=done; ROW_DETAIL="$at"
   return 0
+}
+
+# A probe's verdict, asked at most ONCE per run while nothing it could read has
+# changed (P5). The plan probes every row of a phase the ledger would skip, and
+# the full run's skip (phase_is_done) asks the same probes again a few seconds
+# later, after `check`; on Git Bash one probe is several forks, and an
+# all-done install walked six phases in ~60 s that way. A verdict is kept
+# while .env reads the same (KVCACHE_GEN) and until
+# setup.sh drops the caches after a phase
+# function returns (cc_ledger_cache_drop) — the one exception it makes is
+# `check`, the dry gate, which changes nothing a probe reads but .env, and .env
+# is watched. A probe that READS THE NETWORK (an API's /health) is memoized
+# too: the plan was already a prediction, and the loop's verdict is now the
+# same one, taken seconds earlier.
+#
+# stdin from /dev/null: a caller may be READING a list from its stdin, and a
+# probe that read stdin would swallow the rest of it.
+declare -A PROBE_MEMO=()
+#
+# THE CALLER has synced env-lib.sh's answer-file cache (cc__kv_cache_sync) for
+# <env-file> since the last thing that could have written it, so KVCACHE_GEN is
+# current: cc_row_decide does, by fingerprinting the row first (and with an
+# explicit sync for a row that reads nothing). Not synced again here — that is
+# one more whole read of .env per probe.
+cc_probe_memo() { # cc_probe_memo <probe> <env-file>  -> the probe's status
+  local k="$1|$2|$KVCACHE_GEN" rc=0
+  if [[ -n "${PROBE_MEMO[$k]+x}" ]]; then return "${PROBE_MEMO[$k]}"; fi
+  "$1" </dev/null >/dev/null 2>&1 || rc=$?
+  (( rc == 0 )) || rc=1
+  PROBE_MEMO["$k"]="$rc"
+  return "$rc"
 }
 
 # ONE phase: it is skipped only when EVERY row is (D2 rule 2). Sets
@@ -514,7 +800,17 @@ cc_phase_decide() { # cc_phase_decide <ledger> <phase> <version> <env-file>
   PHASE_READS=""; PHASE_PROBE=""; PHASE_SAME=0; PHASE_NROWS=0
   PHASE_LAST_AT=""; PHASE_DONE_LINES=""
   cc_ledger_load "$ledger"
-  while IFS= read -r step; do
+  cc__phase_steps "$phase"
+  # Every row's fingerprint in one hasher process, but only once a row is
+  # going to need one — a phase with no `done` row (a fresh install) hashes
+  # nothing at all, as before.
+  for step in ${PHASE_STEPS[@]+"${PHASE_STEPS[@]}"}; do
+    if [[ "${LEDGER_ROWS[$phase/$step]:-}" == "$phase/$step"$'\t'done$'\t'"$ver"$'\t'* ]]; then
+      cc_fingerprint_prime_rows "$envf" "$phase"
+      break
+    fi
+  done
+  for step in ${PHASE_STEPS[@]+"${PHASE_STEPS[@]}"}; do
     [[ -n "$step" ]] || continue
     cc__step_split "$phase" "$step" || continue
     PHASE_NROWS=$((PHASE_NROWS + 1))
@@ -532,7 +828,7 @@ cc_phase_decide() { # cc_phase_decide <ledger> <phase> <version> <env-file>
     elif [[ "$ROW_CODE" == "$PHASE_CODE" ]]; then
       PHASE_SAME=$((PHASE_SAME + 1))
     fi
-  done < <(cc_steps_for_phase "$phase")
+  done
   if (( PHASE_NROWS == 0 )); then PHASE_VERDICT=run; PHASE_CODE=norows; fi
   [[ "$PHASE_VERDICT" == run ]] && PHASE_DONE_LINES=""
   return 0
@@ -542,6 +838,12 @@ cc_phase_decide() { # cc_phase_decide <ledger> <phase> <version> <env-file>
 # tree input `@skills` as "the files under skills/" — which is what changed
 # when a release (or a hand edit the tree-pristine row will refuse) touched it.
 cc__reads_words() { # cc__reads_words <reads-csv>
+  cc__reads_words_into "$1"
+  printf '%s' "$READS_WORDS"
+}
+
+READS_WORDS=""
+cc__reads_words_into() { # cc__reads_words_into <reads-csv>  -> READS_WORDS
   local out="" r
   local oldifs="$IFS"; IFS=','
   for r in $1; do
@@ -551,7 +853,7 @@ cc__reads_words() { # cc__reads_words <reads-csv>
     out="${out:+$out, }$r"
   done
   IFS="$oldifs"
-  printf '%s' "$out"
+  READS_WORDS="$out"
 }
 
 # One plan sentence for the phase cc_phase_decide just judged, WITHOUT the
@@ -559,10 +861,19 @@ cc__reads_words() { # cc__reads_words <reads-csv>
 # `inputs` line names the row's `reads` keys and says "one of", because a
 # fingerprint is a digest over all of them and cannot say which one moved.
 cc_phase_plan_text() { # cc_phase_plan_text <phase> <version>
-  local phase="$1" ver="$2" more="" what=""
+  cc__phase_plan_text_into "$1" "$2"
+  printf '%s' "$PLAN_TEXT"
+}
+
+# The same sentence into PLAN_TEXT, built with `printf -v` — the plan prints
+# one per phase, and a `$(cc_phase_plan_text …)` per phase was a fork per phase.
+PLAN_TEXT=""
+cc__phase_plan_text_into() { # cc__phase_plan_text_into <phase> <version>  -> PLAN_TEXT
+  local phase="$1" ver="$2" more="" what="" plural="s" body=""
+  PLAN_TEXT=""
   if [[ "$PHASE_VERDICT" == skip ]]; then
     if (( PHASE_NROWS == 1 )); then what="its 1 row is"; else what="all $PHASE_NROWS rows are"; fi
-    printf '%s: WILL SKIP — %s done at %s with the same inputs, and every effect still reads present (last done %s)' \
+    printf -v PLAN_TEXT '%s: WILL SKIP — %s done at %s with the same inputs, and every effect still reads present (last done %s)' \
       "$phase" "$what" "$ver" "${PHASE_LAST_AT:--}"
     return 0
   fi
@@ -576,19 +887,21 @@ cc_phase_plan_text() { # cc_phase_plan_text <phase> <version>
       inputs)  what="with changed inputs" ;;
       *)       what="like it" ;;
     esac
-    more=" (and $PHASE_SAME more row$( (( PHASE_SAME == 1 )) || printf s) $what)"
+    (( PHASE_SAME == 1 )) && plural=""
+    more=" (and $PHASE_SAME more row$plural $what)"
   fi
-  printf '%s: WILL RUN — ' "$phase"
   case "$PHASE_CODE" in
-    pending) printf 'never run: %s is pending%s' "$PHASE_STEP" "$more" ;;
-    failed)  printf 'failed last time: %s — "%s"%s' "$PHASE_STEP" "${PHASE_DETAIL:-no reason was recorded}" "$more" ;;
-    started) printf 'the last run was interrupted here: %s was started at %s and never finished%s' "$PHASE_STEP" "$PHASE_DETAIL" "$more" ;;
-    gate)    printf 'waiting on you: %s%s%s' "$PHASE_STEP" "${PHASE_DETAIL:+ — \"$PHASE_DETAIL\"}" "$more" ;;
-    version) printf 'version changed, %s: %s%s' "$PHASE_DETAIL" "$PHASE_STEP" "$more" ;;
-    inputs)  printf 'inputs changed: %s reads one of %s%s' "$PHASE_STEP" "$(cc__reads_words "$PHASE_READS")" "$more" ;;
-    drift)   printf 'effect absent: %s is recorded done but its probe %s reads false now (drift)' "$PHASE_STEP" "$PHASE_PROBE" ;;
-    norows)  printf 'the manifest declares no rows for it, so there is nothing to skip on' ;;
-    *)       printf '%s: %s' "$PHASE_CODE" "$PHASE_STEP" ;;
+    pending) printf -v body 'never run: %s is pending%s' "$PHASE_STEP" "$more" ;;
+    failed)  printf -v body 'failed last time: %s — "%s"%s' "$PHASE_STEP" "${PHASE_DETAIL:-no reason was recorded}" "$more" ;;
+    started) printf -v body 'the last run was interrupted here: %s was started at %s and never finished%s' "$PHASE_STEP" "$PHASE_DETAIL" "$more" ;;
+    gate)    printf -v body 'waiting on you: %s%s%s' "$PHASE_STEP" "${PHASE_DETAIL:+ — \"$PHASE_DETAIL\"}" "$more" ;;
+    version) printf -v body 'version changed, %s: %s%s' "$PHASE_DETAIL" "$PHASE_STEP" "$more" ;;
+    inputs)  cc__reads_words_into "$PHASE_READS"
+             printf -v body 'inputs changed: %s reads one of %s%s' "$PHASE_STEP" "$READS_WORDS" "$more" ;;
+    drift)   printf -v body 'effect absent: %s is recorded done but its probe %s reads false now (drift)' "$PHASE_STEP" "$PHASE_PROBE" ;;
+    norows)  printf -v body 'the manifest declares no rows for it, so there is nothing to skip on' ;;
+    *)       printf -v body '%s: %s' "$PHASE_CODE" "$PHASE_STEP" ;;
   esac
+  printf -v PLAN_TEXT '%s: WILL RUN — %s' "$phase" "$body"
   return 0
 }

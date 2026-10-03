@@ -22,19 +22,28 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from tests.installer_source import (
+    drives_installer,
+    python_shim,
+    run_driver,
+    with_stub_path,
+    write_lf,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Git Bash prepends /usr/bin to PATH; a stub curl cannot shadow the real one "
-           "(tests/test_update_runner.py's reason)",
-)
+# Skipped on Windows until the 2026-10-02 testbed run's second pass ("Git Bash
+# prepends /usr/bin to PATH"): with_stub_path now puts the stub curl FIRST, the
+# registry stub is a Python script run by `python3` = this interpreter
+# (python_shim — Git's /usr/bin has none), and every stub is written LF. Each
+# test runs the real resolve-images.sh, so it goes through run_driver under
+# the installer's ceiling.
+pytestmark = drives_installer
 
 # The registry: a manifest HEAD for any ref (200 + the locked digest, so the
 # lock verifies) and a tags list holding the locked tag. A repository named in
@@ -91,16 +100,15 @@ class Tree:
         for f in ("resolve-images.sh", "images.txt"):
             shutil.copy2(ROOT / "deploy" / "single" / f, single / f)
         # Only the core + graphiti-base rows: the optional components are off.
-        (self.repo / ".env").write_text(
-            f"CC_STATE_DIR={self.state}\nCC_ENABLE_N8N=0\nCC_ENABLE_SPEECH=0\n"
-            "CC_ENABLE_SANDBOX=0\nCC_ENABLE_CRAWLER=0\n", encoding="utf-8")
+        write_lf(self.repo / ".env",
+                 f"CC_STATE_DIR={self.state.as_posix()}\nCC_ENABLE_N8N=0\nCC_ENABLE_SPEECH=0\n"
+                 "CC_ENABLE_SANDBOX=0\nCC_ENABLE_CRAWLER=0\n")
         b = tmp / "bin"
         b.mkdir()
-        (b / "curl").write_text(_CURL, encoding="utf-8")
-        (b / "curl").chmod(0o755)
+        python_shim(b)
+        write_lf(b / "curl", _CURL, mode=0o755)
         # No blind pull ever succeeds: a missing repository is a FAIL row.
-        (b / "podman").write_text("#!/usr/bin/env bash\nexit 125\n", encoding="utf-8")
-        (b / "podman").chmod(0o755)
+        write_lf(b / "podman", "#!/usr/bin/env bash\nexit 125\n", mode=0o755)
         self.locks, self.digests = {}, {}
         for line in (single / "images.txt").read_text(encoding="utf-8").splitlines():
             parts = line.split("#", 1)[0].split()
@@ -113,11 +121,12 @@ class Tree:
     def resolve(self, *, missing: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
         self.cfg.write_text(json.dumps({"missing": list(missing), "locks": self.locks,
                                         "digests": self.digests}), encoding="utf-8")
-        env = {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
-               "HOME": str(self.tmp / "home"), "STUB_CFG": str(self.cfg), "LANG": "C.UTF-8"}
-        return subprocess.run([_bash(), "resolve-images.sh"], cwd=self.repo / "deploy" / "single",
-                              capture_output=True, text=True, env=env, timeout=120,
-                              stdin=subprocess.DEVNULL)
+        env = with_stub_path(
+            {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
+             "HOME": str(self.tmp / "home"), "STUB_CFG": str(self.cfg), "LANG": "C.UTF-8"},
+            self.tmp / "bin")
+        return run_driver([_bash(), "resolve-images.sh"], cwd=self.repo / "deploy" / "single",
+                          env=env)
 
     def env_value(self, key: str) -> str:
         out = ""
@@ -127,7 +136,7 @@ class Tree:
         return out
 
     def set_env(self, key: str, value: str) -> None:
-        with (self.repo / ".env").open("a", encoding="utf-8") as f:
+        with (self.repo / ".env").open("a", encoding="utf-8", newline="\n") as f:
             f.write(f"{key}={value}\n")
 
     def manifest_rows(self) -> dict[str, str]:
@@ -157,13 +166,22 @@ def test_a_failed_resolve_carries_its_row_and_is_re_resolved_next_time(tree: Tre
     assert written == f"docker.io/library/postgres:{tree.locks['library/postgres']}"
     row = tree.manifest_rows()["CC_IMG_POSTGRES"]
 
-    # The mirror loses postgres for one run: a FAIL row, and the run stops for
-    # the operator. The manifest still carries the resolver's OWN earlier row
-    # for that image, byte for byte — it is what lets the next run recognise
-    # the .env value as a self-write.
+    # The mirror loses postgres for one run: the operator's seam (D5 —
+    # "useraction is reserved for … a mirror that lacks a tag"), so a
+    # USERACTION row, NO FAIL line, and the run stops for the operator at exit
+    # 3 (P5: the resolver used to print this as a FAIL beside an exit 3). The
+    # manifest still carries the resolver's OWN earlier row for that image,
+    # byte for byte — it is what lets the next run recognise the .env value as
+    # a self-write.
     second = tree.resolve(missing=("library/postgres",))
     assert second.returncode == 3, second.stdout + second.stderr
-    assert _line(second.stdout, "image-postgres").startswith("FAIL ")
+    assert _line(second.stdout, "image-postgres").startswith("USERACTION "), second.stdout
+    assert "CC_REGISTRY_DOCKERIO" in _line(second.stdout, "image-postgres")
+    assert not any(l.startswith("FAIL ") for l in second.stdout.splitlines()), second.stdout
+    # Outside an update the move is the install's one command.
+    summary = _line(second.stdout, "resolve-images")
+    assert "re-run: ./setup.sh (it resumes at fetch)" in summary, summary
+    assert "update.sh" not in summary, summary
     assert tree.env_value("CC_IMG_POSTGRES") == written, "a failed resolve rewrote the key"
     assert tree.manifest_rows().get("CC_IMG_POSTGRES") == row, (
         "a run that could not resolve an image must carry its PREVIOUS manifest "
@@ -193,12 +211,14 @@ def test_a_real_pin_survives_all_three_runs(tree: Tree):
     assert "operator pin honoured" in _line(second.stdout, "image-redis")
     assert tree.manifest_rows()["CC_IMG_REDIS"].split()[4] == "pinned"
 
-    # The pin's registry and another image's are both down: two FAIL rows, and
-    # BOTH carried rows keep their meaning — postgres's self-write and redis's
-    # `pinned`.
+    # The pin's registry and another image's are both down: the pin that no
+    # longer exists is a FAIL (it names the key), the mirror lacking postgres a
+    # USERACTION, so the run is exit 1 — and BOTH carried rows keep their
+    # meaning — postgres's self-write and redis's `pinned`.
     third = tree.resolve(missing=("library/postgres", "library/redis"))
-    assert third.returncode == 3, third.stdout + third.stderr
+    assert third.returncode == 1, third.stdout + third.stderr
     assert _line(third.stdout, "image-redis").startswith("FAIL ")
+    assert _line(third.stdout, "image-postgres").startswith("USERACTION ")
     assert tree.manifest_rows()["CC_IMG_REDIS"].split()[4] == "pinned"
 
     fourth = tree.resolve()
@@ -218,6 +238,24 @@ def test_a_first_run_failure_carries_nothing(tree: Tree):
     rows = tree.manifest_rows()
     assert "CC_IMG_POSTGRES" not in rows
     assert "CC_IMG_NEO4J" in rows
+
+
+def test_an_operator_pin_that_does_not_exist_is_still_a_fail(tree: Tree):
+    """The other side of D5's line: a mirror that lacks a tag is the operator's
+    seam (USERACTION, exit 3), but a PIN the operator wrote that the registry
+    has no manifest for is broken input, and the rule file says so — a FAIL
+    naming the key, exit 1, even with every other image healthy."""
+    first = tree.resolve()
+    assert first.returncode == 0, first.stdout + first.stderr
+    tree.set_env("CC_IMG_REDIS", "docker.io/library/redis:7.4-alpine")
+
+    r = tree.resolve(missing=("library/redis",))
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    line = _line(r.stdout, "image-redis")
+    assert line.startswith("FAIL ") and "CC_IMG_REDIS" in line and "no such manifest" in line, line
+    assert not any(l.startswith("USERACTION image-") for l in r.stdout.splitlines()), r.stdout
+    assert tree.env_value("CC_IMG_REDIS") == "docker.io/library/redis:7.4-alpine", "the pin was rewritten"
 
 
 # ── a component switched OFF and back ON is not a pin either ────────────────

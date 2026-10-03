@@ -191,6 +191,22 @@ def pytest_collection_modifyitems(config, items):  # noqa: ARG001
         item.add_marker(skip)
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Hand the running test to `tests/installer_source.run_driver`, which
+    fits its own timeout inside the test's pytest-timeout ceiling and refuses
+    a test that drives the real installer without `@drives_installer`."""
+    import time
+
+    from tests import installer_source
+
+    installer_source.CURRENT = (item, time.monotonic())
+    try:
+        yield
+    finally:
+        installer_source.CURRENT = None
+
+
 def _switch_to_test_database() -> None:
     """Point the whole suite at a dedicated database, creating it if needed.
 

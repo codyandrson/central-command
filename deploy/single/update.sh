@@ -64,7 +64,11 @@
 #                     -> USERACTION: restart is the operator's
 #                     A deployment whose ledger cannot carry the update (one
 #                     installed before the ledger existed, v2.55.0) stops after
-#                     the schema with ONE USERACTION: run ./setup.sh once
+#                     the schema with ONE USERACTION: run ./setup.sh once.
+#                     With NOTHING imported (`local` already is `upstream`)
+#                     the deploy steps run again only to finish an update that
+#                     merged and stopped (update_unfinished reads the ledger);
+#                     otherwise apply prints one PASS and exits 0
 #     rollback        reset `local` to the last pre-update tag and re-deploy
 #                     the restored tree through the same post-merge sequence
 #
@@ -205,6 +209,89 @@ on_local_branch() { [[ "$(G rev-parse --abbrev-ref HEAD 2>/dev/null)" == "local"
 
 merged_already() { G merge-base --is-ancestor upstream local 2>/dev/null; }
 
+# ── is there an update to FINISH? (P5, the first laptop acceptance run) ─────
+# `local` already containing `upstream` means one of two things, and apply used
+# to treat both as the first: an update that MERGED and then stopped in a
+# post-merge phase (re-running apply is how it resumes), or nothing imported at
+# all — a failed import, a second apply. The laptop run took the second for the
+# first and re-ran every post-merge phase over the installed release by name
+# (498 s, every image re-resolved, the npm tree re-installed).
+#
+# The ledger tells them apart, from what it records and nothing else:
+#   * an update that merged moved the tree to a VERSION the ledger has not all
+#     caught up with — the post-merge phases record their rows at the NEW
+#     version, the rest (check, machine, test, boot, demo) keep the old one
+#     until the next ./setup.sh. So: some row carries a version other than the
+#     tree's;
+#   * and it is UNFINISHED while a row of a post-merge phase is not `done` at
+#     the tree's version (a phase that stopped, or one it never reached).
+# Both, and the post-merge sequence resumes. Neither or only one, and there is
+# no update to finish: a ledger complete at this version, or an install whose
+# own open rows are ./setup.sh's to resume (all at this version — it never
+# moved). An EMPTY ledger cannot say either way: that is the deployment that
+# predates the ledger, and the sequence runs as it always has, so its
+# ledger-adopt pause is still reached.
+POST_MERGE_PHASES="fetch llm stack app verify"   # deploy_current_tree's order
+tree_version() {
+  local v
+  v="$(sed -n 's/^version=//p' "$REPO_ROOT/VERSION" 2>/dev/null | head -1 | tr -d ' \r')"
+  printf '%s' "${v:-unknown}"
+}
+# -> 0 there is an update to finish (or the ledger cannot tell) · 1 there is
+# not. Sets APPLY_OPEN to the first post-merge row that is not done at the
+# tree's version ("<phase>/<step> <status> at <version>"), empty when none.
+update_unfinished() {
+  local ledger="$STATE_DIR/ledger.tsv" ver key row st rver moved=0 p step _a _b _c
+  APPLY_OPEN=""
+  declare -F cc_ledger_load >/dev/null && declare -F cc_steps_load >/dev/null || return 0
+  cc_steps_load "$HERE/steps.tsv" 2>/dev/null || return 0
+  cc_ledger_load "$ledger"
+  (( ${#LEDGER_ROWS[@]} )) || return 0
+  ver="$(tree_version)"
+  for key in "${!LEDGER_ROWS[@]}"; do
+    IFS=$'\t' read -r _a st rver _b <<<"${LEDGER_ROWS[$key]}"
+    [[ "$rver" == "$ver" ]] || { moved=1; break; }
+  done
+  for p in $POST_MERGE_PHASES; do
+    while IFS= read -r step; do
+      [[ -n "$step" ]] || continue
+      row="${LEDGER_ROWS[$p/$step]:-}"
+      st=pending; rver="-"
+      [[ -n "$row" ]] && IFS=$'\t' read -r _a st rver _c <<<"$row"
+      if [[ "$st" != done || "$rver" != "$ver" ]]; then
+        APPLY_OPEN="$p/$step $st at $rver"
+        break 2
+      fi
+    done < <(cc_steps_for_phase "$p")
+  done
+  (( moved )) && [[ -n "$APPLY_OPEN" ]]
+}
+
+# The first manifest row of ANY phase that is not done at the tree's version
+# ("<phase>/<step> <status> at <version>"), empty when none — what `apply`
+# with nothing to apply may say about the rest of the install. Reads what
+# update_unfinished loaded; empty when the ledger library is not there.
+INSTALL_OPEN=""
+install_open() {
+  local ver p step row st rver _a _c
+  INSTALL_OPEN=""
+  declare -F cc_steps_for_phase >/dev/null || return 0
+  (( ${#LEDGER_ROWS[@]} )) || return 0
+  ver="$(tree_version)"
+  for p in $STEPS_PHASE_LIST; do
+    while IFS= read -r step; do
+      [[ -n "$step" ]] || continue
+      row="${LEDGER_ROWS[$p/$step]:-}"
+      st=pending; rver="-"
+      [[ -n "$row" ]] && IFS=$'\t' read -r _a st rver _c <<<"$row"
+      if [[ "$st" != done || "$rver" != "$ver" ]]; then
+        INSTALL_OPEN="$p/$step $st at $rver"
+        return 0
+      fi
+    done < <(cc_steps_for_phase "$p")
+  done
+}
+
 # ── version gate (2026-08-27 contract) ──────────────────────────────────────
 # VERSION at the repo root: `version=` + `min_upgrade_from=`. The updater
 # refuses downgrades and out-of-order jumps LOUDLY; a missing file (a
@@ -316,12 +403,33 @@ cmd_init() {
 }
 
 # ── import <zip> ────────────────────────────────────────────────────────────
+# The archive is read and unpacked by deploy/single/release-zip.py (Python's
+# zipfile, on the interpreter cc_resolve_py finds — the one setup.sh runs its
+# helpers on), never by `unzip`. The 2026-10-02 Windows acceptance run (F6)
+# measured why: Git for Windows' UnZip 6.00 does not let `*` cross `/`, so the
+# vendor skip `-x <prefix>docs/vendor/*` excluded 3 of 49,809 entries; all of
+# docs/vendor was unpacked (104 s) and its four symlink members failed with
+# `symlink error` — NO release zip could be imported on Windows. The skip is a
+# path PREFIX now, which means the same thing on every host, and the host
+# needs no unzip at all.
+IMPORT_PY=""   # resolved once, by cmd_import; may be several words (the uv fallback)
+release_zip() { # release_zip <subcommand> <args...> — paths normalized for a native Python
+  [[ -n "$IMPORT_PY" ]] || IMPORT_PY="$(cc_resolve_py)"
+  PYTHONUTF8=1 $IMPORT_PY "$(cc_norm_path "$HERE/release-zip.py")" "$@"
+}
+
 cmd_import() {
   local zip="${1:-}"
   [[ -n "$zip" && -f "$zip" ]] || { fail "zip" "usage: ./update.sh import <downloaded-source-zip>"; return 1; }
   need_git || return 1
   need_initialized || return 1
-  command -v unzip >/dev/null 2>&1 || { fail "unzip" "unzip not found — install it, or unpack the archive yourself and re-zip is not needed: any tool producing the same tree works, but this script drives unzip"; return 1; }
+  [[ -f "$HERE/release-zip.py" ]] || { fail "extract" "$HERE/release-zip.py is missing — it is release content, so re-extract the release this tree was installed from"; return 1; }
+  IMPORT_PY="$(cc_resolve_py)"
+  if ! $IMPORT_PY -c 'import zipfile' >/dev/null 2>&1; then
+    fail "extract" "no working Python for the importer: tried python3, python, then '$IMPORT_PY' — the install runs on the same one (./setup.sh check's tool-python row); put a python3 on PATH, or uv with CPython 3.12 reachable"
+    return 1
+  fi
+  local zipn; zipn="$(cc_norm_path "$zip")"
 
   local tmp; tmp="$(mktemp -d)" || { fail "tmp" "mktemp failed"; return 1; }
   # The worktree lives under $tmp; we never cd into it from this shell, so the
@@ -352,26 +460,24 @@ cmd_import() {
   #
   # The zip's wrapper directory is derived from an entry we KNOW the name of,
   # never from "the first entry" — a zip listing starts wherever its author's
-  # tool started. Not every unzip carries zipinfo (`-Z1`): busybox's does not, so
-  # `-l` is the fallback and an archive neither can list falls through to the
-  # full path rather than failing — the shape check after unpacking is the gate.
-  local zip_prefix zip_sch vend_deployed vend_zip
-  zip_sch="$(unzip -Z1 "$zip" '*central_command/db/schema.sql' 2>/dev/null | head -1 | tr -d '\r')"
-  [[ -n "$zip_sch" ]] || zip_sch="$(unzip -l "$zip" 2>/dev/null | awk '{print $NF}' \
-      | grep -m1 'central_command/db/schema\.sql$' | tr -d '\r')"
+  # tool started. An archive that cannot be listed falls through to the full
+  # path rather than failing here — the extraction itself is the gate.
+  local zip_prefix zip_sch vend_deployed vend_zip vendor_skip=""
+  zip_sch="$(release_zip find "$zipn" 'central_command/db/schema.sql' 2>/dev/null | head -1 | tr -d '\r')"
 
-  local -a unzip_x=() vendor_keep=()
+  local -a vendor_keep=()
   if [[ -z "$zip_sch" ]]; then
     warn "vendor-docs" "cannot list this archive's entries — full sync"
   else
     zip_prefix="${zip_sch%central_command/db/schema.sql}"   # "" or "<repo>-<ref>/"
     vend_deployed="$(G show "upstream:docs/vendor/MANIFEST" 2>/dev/null | tr -d ' \t\r\n')"
-    vend_zip="$(unzip -p "$zip" "${zip_prefix}docs/vendor/MANIFEST" 2>/dev/null | tr -d ' \t\r\n')"
+    vend_zip="$(release_zip cat "$zipn" "${zip_prefix}docs/vendor/MANIFEST" 2>/dev/null | tr -d ' \t\r\n')"
     if [[ -z "$vend_deployed" || -z "$vend_zip" ]]; then
       warn "vendor-docs" "no manifest on one side — full sync"
     elif [[ "$vend_deployed" == "$vend_zip" ]]; then
-      # Keep MANIFEST itself out of the unzip too: it is equal by definition.
-      unzip_x=(-x "${zip_prefix}docs/vendor/*")
+      # A PREFIX, not a glob: every entry under it — MANIFEST itself (equal by
+      # definition), every depth, every symlink — is neither read nor written.
+      vendor_skip="${zip_prefix}docs/vendor/"
       vendor_keep=(':!docs/vendor')
       pass "vendor-docs" "unchanged since the deployed release (manifest match) — $(G ls-files -- docs/vendor | grep -c .) files skipped"
     else
@@ -379,28 +485,36 @@ cmd_import() {
     fi
   fi
 
-  # ── unzip, with its stderr treated as failure (ledger F20) ────────────────
+  # ── extract: every failure is a FAIL naming the entry (ledger F20, F6) ────
   # `unzip` printed `symlink error: No such file or directory` and exited 0 on
-  # the 2026-09-24 Windows run, so an imported tree could silently lose a link —
-  # and docs/vendor really does carry symlink entries (git mode 120000). A
-  # warning here means the tree on disk is not the tree in the archive, which is
-  # exactly what an import may not guess about: stop, and let the operator
-  # re-fetch the zip.
-  local uz_err="$tmp/unzip.err" urc=0
-  note "--> unzip -q $zip ${unzip_x[*]:-} -d $tmp/x"
-  unzip -q "$zip" ${unzip_x[@]+"${unzip_x[@]}"} -d "$tmp/x" 2>"$uz_err"; urc=$?
-  if (( urc != 0 )) || [[ -s "$uz_err" ]]; then
-    local uz_msg; uz_msg="$(head -1 "$uz_err" 2>/dev/null)"
-    fail "unzip" "${uz_msg:-unzip exited $urc with no message} — the archive did not unpack cleanly (unzip reports a bad entry and still exits 0), so the tree on disk is not the release; re-download the source zip and re-run"
+  # the 2026-09-24 Windows run, so an imported tree could silently lose a link.
+  # release-zip.py decides EVERY entry before it writes one, so a refused
+  # archive writes nothing: a name that would land outside $tmp/x is refused,
+  # and a SYMLINK entry is never written to disk (Windows cannot create one
+  # without privileges) — its path and target go to $tmp/links and are recorded
+  # into the import commit below as git symlinks, so `upstream` carries exactly
+  # the release's links on every host. A link pointing outside the tree is
+  # refused, naming it. Unix permission bits come from the zip (git archive
+  # records 0755/0644), so an executable script stays executable.
+  local ex_err="$tmp/extract.err" links="$tmp/links" xrc=0
+  local -a ex_args=(extract "$zipn" "$(cc_norm_path "$tmp/x")" --links "$(cc_norm_path "$links")")
+  [[ -n "$vendor_skip" ]] && ex_args+=(--skip "$vendor_skip")
+  note "--> release-zip.py extract $zip${vendor_skip:+ --skip $vendor_skip} -> $tmp/x"
+  release_zip "${ex_args[@]}" 2>"$ex_err"; xrc=$?
+  if (( xrc != 0 )); then
+    local ex_msg; ex_msg="$(grep -m1 '^release-zip: ' "$ex_err" 2>/dev/null)"
+    [[ -n "$ex_msg" ]] || ex_msg="$(tail -1 "$ex_err" 2>/dev/null)"
+    fail "extract" "${ex_msg#release-zip: }${ex_msg:+ — }the archive did not unpack (exit $xrc), and nothing from it was committed; a truncated download is re-downloaded, an entry refused by name is a defect in the archive — run ./setup.sh report"
     return 1
   fi
-  pass "unzip" "archive unpacked"
+  pass "extract" "archive unpacked${vendor_skip:+ (docs/vendor skipped)}"
 
   # GitHub zips wrap everything in a single `<repo>-<ref>/` directory.
   local src="$tmp/x" entries=()
   while IFS= read -r -d '' e; do entries+=("$e"); done < <(find "$tmp/x" -mindepth 1 -maxdepth 1 -print0)
   [[ ${#entries[@]} -eq 1 && -d "${entries[0]}" ]] && src="${entries[0]}"
   [[ -f "$src/central_command/db/schema.sql" ]] || { fail "zip-shape" "this does not look like a Central Command source zip (no central_command/db/schema.sql)"; return 1; }
+  local wrap="${src#"$tmp/x"}"; wrap="${wrap#/}"
 
   ensure_identity
   G worktree prune >/dev/null 2>&1   # a crashed prior import leaves a stale registration behind
@@ -417,7 +531,24 @@ cmd_import() {
     bash -c 'set -o pipefail; (cd "$1" && tar cf - ${3:+--exclude="$3"} .) | (cd "$2" && tar xf -)' \
       _ "$src" "$tmp/wt" "${vendor_keep[0]:+./docs/vendor}" || return 1
   git -C "$tmp/wt" add -A
-  if [[ -z "$(git -C "$tmp/wt" status --porcelain)" ]]; then
+  # The release's symlinks, straight into the index (mode 120000, the target as
+  # the blob) — never through the filesystem. Paths are relative to the zip's
+  # wrapper, i.e. to the repository root.
+  local lpath ltarget lblob nlinks=0
+  if [[ -s "$links" ]]; then
+    while IFS=$'\t' read -r lpath ltarget || [[ -n "$lpath" ]]; do
+      [[ -n "$lpath" ]] || continue
+      [[ -n "$wrap" ]] && lpath="${lpath#"$wrap"/}"
+      lblob="$(printf '%s' "$ltarget" | git -C "$tmp/wt" hash-object -w --stdin)" \
+        && git -C "$tmp/wt" update-index --add --cacheinfo "120000,$lblob,$lpath" \
+        || { fail "extract" "could not record the symlink entry $lpath -> $ltarget into the import"; return 1; }
+      nlinks=$((nlinks+1))
+    done <"$links"
+    note "    recorded $nlinks symlink(s) as git links (mode 120000), none written to disk"
+  fi
+  # The INDEX against upstream, not `status`: a recorded link is in the index
+  # and deliberately absent from the worktree, which `status` reports as a change.
+  if git -C "$tmp/wt" diff --cached --quiet HEAD --; then
     pass "import" "no changes — \`upstream\` already matches $(basename "$zip")"
     return 0
   fi
@@ -722,6 +853,32 @@ cmd_apply() {
     return 1
   fi
 
+  # Nothing new to merge? Then resume ONLY an update that merged and stopped
+  # (update_unfinished); otherwise this apply has nothing to do, says so in one
+  # line and exits 0 — it is not a second way to redeploy the installed
+  # release. Asked BEFORE the API gate: with nothing to do there is nothing to
+  # stop the API for.
+  local resume=0
+  if merged_already; then
+    if ! update_unfinished; then
+      if [[ -z "$APPLY_OPEN" ]]; then
+        # Only what was checked (F26 of the 2026-10-02 testbed run's second
+        # pass: this said "the ledger is complete" while test/test was failed):
+        # the UPDATE's phases are done; any other open row is ./setup.sh's.
+        install_open
+        local msg="nothing to apply: \`local\` is \`upstream\`, and the update's phases (${POST_MERGE_PHASES// /, }) are done at $(tree_version)"
+        if [[ -n "$INSTALL_OPEN" ]]; then
+          msg+=". Other rows are open — ${INSTALL_OPEN%% *} is ${INSTALL_OPEN#* } — and ./setup.sh resumes them"
+        fi
+        pass "apply" "$msg"
+      else
+        pass "apply" "nothing to apply: \`local\` is \`upstream\` and no update is waiting to be finished (every ledger row is at $(tree_version), the release this tree is). The install itself is not finished — ${APPLY_OPEN%% *} is ${APPLY_OPEN#* } — and ./setup.sh is what resumes it"
+      fi
+      return 0
+    fi
+    resume=1
+  fi
+
   # The stop half of the deb/rpm bracket: nothing mutates under a live API.
   if api_running; then
     useraction "api-stop" "the API is answering on 127.0.0.1:$(api_port) — stop your uvicorn process (and the sandbox runner, if running), then re-run ./update.sh apply"
@@ -729,8 +886,12 @@ cmd_apply() {
   fi
 
   ensure_identity
-  if merged_already; then
-    pass "merge" "\`local\` already contains \`upstream\` — continuing with the deploy steps"
+  if (( resume )); then
+    if [[ -n "$APPLY_OPEN" ]]; then
+      pass "merge" "\`local\` already contains \`upstream\`, and the update merged into it stopped before it finished (${APPLY_OPEN%% *} is ${APPLY_OPEN#* }) — resuming its deploy steps"
+    else
+      pass "merge" "\`local\` already contains \`upstream\` and the ledger has no rows yet (a deployment older than the ledger) — continuing with the deploy steps"
+    fi
   else
     version_gate || return 1
     # ACQUIRE BEFORE ANYTHING MOVES (D5) — before the backup, the checkpoint

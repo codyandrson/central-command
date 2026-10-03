@@ -35,11 +35,9 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 from pathlib import Path
 
-import pytest
-
+from tests.installer_source import drives_installer, with_stub_path, write_lf
 from tests.test_single_driver_ledger import (  # noqa: F401  (tree is a fixture)
     ROOT,
     _protocol,
@@ -68,11 +66,11 @@ SHIPPED = {p.name: _ID.search(p.read_text(encoding="utf-8")).group(1)
            for p in sorted(WORKFLOWS.glob("*.json"))}
 CALENDAR = ("cc-calendar-facade.json", "lib-google-calendar.json")
 
-needs_stub_curl = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Git Bash prepends /mingw64/bin to PATH, so a stub curl cannot shadow the real "
-           "one the script's webhook poll calls (tests/test_update_runner.py's reason)",
-)
+# The stub `curl` must beat Git's /mingw64/bin/curl, which Git Bash's launcher
+# puts in front of the PATH it is handed: with_stub_path puts the stub
+# directory first for real (these tests were skipped on Windows until the
+# 2026-10-02 testbed run's second pass), and the stubs and their data are
+# written LF (write_lf) — a CR survives `read -r`.
 
 # podman, as the n8n container and n8n's database. Everything it is asked goes
 # to $STUB/log. Flags (files in $STUB): n8n-down (the database does not
@@ -126,19 +124,18 @@ def _stack(repo: Path, *, n8n: str = "1", calendar: str = "", token: str = "test
     bindir = repo.parent / "bin"
     bindir.mkdir(exist_ok=True)
     for name, body in (("podman", _PODMAN), ("curl", _CURL)):
-        (bindir / name).write_text(body, encoding="utf-8")
-        (bindir / name).chmod(0o755)
-    (stub / "creds").write_text("".join(c + "\n" for c in creds), encoding="utf-8")
+        write_lf(bindir / name, body, mode=0o755)
+    write_lf(stub / "creds", "".join(c + "\n" for c in creds))
     for name, value in flags.items():
-        (stub / name.replace("_", "-")).write_text(value + "\n", encoding="utf-8")
+        write_lf(stub / name.replace("_", "-"), value + "\n")
     _append_stubs(repo, _STACK_STUBS)
     _set(repo / ".env", {"CC_ENABLE_N8N": n8n, "CC_N8N_PORT": "5679", "CC_EMBED_DIM": "1024",
                          "CC_POD_PREFIX": "cc-", "CC_EMAIL_FACADE_TOKEN": token,
                          "CC_CALENDAR_FACADE_TOKEN": calendar})
     phases_before = ("check", "machine", "fetch", "llm")
     _write_ledger(repo, [(f"{r[0]}/{r[1]}", "done") for r in _rows() if r[0] in phases_before])
-    r = _run(repo, "stack", env_extra={"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
-                                       "STUB": str(stub)})
+    stubbed = with_stub_path({"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}, bindir)
+    r = _run(repo, "stack", env_extra={**stubbed, "STUB": stub.as_posix()})
     log = (stub / "log").read_text(encoding="utf-8") if (stub / "log").exists() else ""
     return r, log, stub
 
@@ -188,6 +185,7 @@ def test_the_probe_and_the_script_agree_on_the_optional_calendar_pair():
 # ── the row, run ────────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_n8n_off_is_done_and_the_script_never_runs(tree: Path):
     r, log, stub = _stack(tree, n8n="0")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -197,6 +195,7 @@ def test_n8n_off_is_done_and_the_script_never_runs(tree: Path):
     assert _ledger(tree)["stack/n8n-workflows"][1] == "done"
 
 
+@drives_installer
 def test_the_credential_gate_stops_the_phase_before_the_script(tree: Path):
     r, log, stub = _stack(tree, creds=())
     assert r.returncode == 3, r.stdout + r.stderr
@@ -205,7 +204,7 @@ def test_the_credential_gate_stops_the_phase_before_the_script(tree: Path):
     assert _count(stub, "imports") == 0 and "container exists" not in log, log
 
 
-@needs_stub_curl
+@drives_installer
 def test_credential_present_applies_once_and_the_row_is_done(tree: Path):
     r, log, stub = _stack(tree)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -226,7 +225,7 @@ def test_credential_present_applies_once_and_the_row_is_done(tree: Path):
             assert (f"'{wid}'" in sel) == (name not in CALENDAR), (name, sel)
 
 
-@needs_stub_curl
+@drives_installer
 def test_with_the_calendar_token_the_probe_expects_all_four(tree: Path):
     r, log, _ = _stack(tree, calendar="test-calendar-token")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -234,7 +233,7 @@ def test_with_the_calendar_token_the_probe_expects_all_four(tree: Path):
         assert all(f"'{wid}'" in sel for wid in SHIPPED.values()), sel
 
 
-@needs_stub_curl
+@drives_installer
 def test_the_scripts_own_useraction_reaches_the_operator_as_one(tree: Path):
     """apply-workflows.sh prints `USERACTION n8n: …` on stderr when the import
     left a credential unresolved, then activates, restarts and exits 0. Under
@@ -256,7 +255,7 @@ def test_the_scripts_own_useraction_reaches_the_operator_as_one(tree: Path):
     assert row[1] == "gate" and "Google Calendar account" in row[5], row
 
 
-@needs_stub_curl
+@drives_installer
 def test_a_failing_script_is_a_fail_naming_why(tree: Path):
     r, _, _ = _stack(tree, import_fails="1")
     assert r.returncode == 1, r.stdout + r.stderr
@@ -266,6 +265,7 @@ def test_a_failing_script_is_a_fail_naming_why(tree: Path):
     assert _ledger(tree)["stack/n8n-workflows"][1] == "failed"
 
 
+@drives_installer
 def test_a_blank_facade_token_is_a_fail_not_a_silent_skip(tree: Path):
     """The script refuses a blank CC_EMAIL_FACADE_TOKEN before it touches n8n
     (no curl reached), and that refusal is the row's FAIL."""
@@ -275,7 +275,7 @@ def test_a_blank_facade_token_is_a_fail_not_a_silent_skip(tree: Path):
     assert _count(stub, "imports") == 0 and "curl" not in log, log
 
 
-@needs_stub_curl
+@drives_installer
 def test_the_probe_is_false_when_a_shipped_workflow_is_missing(tree: Path):
     """The script exits 0, but n8n's database holds one shipped workflow fewer
     than the files: the effect is absent, and the driver says so by name."""

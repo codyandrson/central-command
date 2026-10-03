@@ -29,6 +29,7 @@ from __future__ import annotations
 import pathlib
 import re
 import subprocess
+import uuid
 
 import pytest
 
@@ -38,7 +39,7 @@ import pytest
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
 from central_command.api.update import _bash as _resolve_bash  # noqa: E402
-from tests.installer_source import installer_source, phase_files, single_scripts  # noqa: E402
+from tests.installer_source import env_path, installer_source, phase_files, single_scripts  # noqa: E402
 BASH = _resolve_bash() or "bash"
 
 
@@ -972,12 +973,35 @@ def _trust_step(df: pathlib.Path) -> str:
     return m.group(0)
 
 
+@pytest.fixture
+def built_images():
+    """(engine, tags) — every image tag a trust-step test builds, removed again
+    when the test ends, pass or fail, on the engine that built it. The suite
+    runs as the install's `test` phase, i.e. in the DEPLOYMENT's own container
+    storage, and each run used to leave two `cc-trust-step-*` images there plus
+    the `<none>` ones every re-tag orphaned (~0.9 GB on the 2026-10-02 Windows
+    testbed, F16). Each tag is unique to the test, so a re-tag never orphans an
+    image and removing by tag can never touch one this test did not build;
+    `rmi` also drops the build's own untagged parent layers (it prunes by
+    default on docker and on podman), and never anything tagged."""
+    built: tuple[list[str], list[str]] = ([], [])
+    yield built
+    engine, tags = built
+    for tag in tags:
+        subprocess.run([engine[0], "rmi", "-f", tag], capture_output=True, text=True, check=False,
+                       timeout=120)
+
+
 @pytest.mark.parametrize("df", DOCKERFILES, ids=lambda p: p.parent.name)
-def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path):
+def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path, built_images):
     """The glob COPY is a no-op with no CA, and installs the CA when there is one."""
     exe = _docker()
     if exe is None:
         pytest.skip(f"no container builder holding {BUILD_BASE} on this host")
+    engine, tags = built_images
+    engine.append(exe)
+    token = uuid.uuid4().hex[:10]
+    noca, withca = f"cc-trust-step-noca-{token}", f"cc-trust-step-ca-{token}"
 
     step = _trust_step(df)
     ctx = tmp_path / "ctx"
@@ -986,6 +1010,7 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path):
         f"FROM {BUILD_BASE}\nARG CC_TLS_INSECURE=0\n{step}\n", encoding="utf-8")
 
     def build(tag: str) -> subprocess.CompletedProcess:
+        tags.append(tag)  # before the build: a half-built tag is removed too
         return subprocess.run([exe, "build", "-t", tag, str(ctx)],
                               capture_output=True, text=True)
 
@@ -999,19 +1024,19 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path):
     #    testbed's test phase three times over (2026-09-25).
     if exe == "podman":
         (ctx / "cc-ca.crt").write_text("", encoding="utf-8")
-    r = build("cc-trust-step-noca")
+    r = build(noca)
     assert r.returncode == 0, (
         ("an EMPTY cc-ca.crt must build and install nothing:\n" if exe == "podman"
          else "a zero-match `COPY cc-ca.cr[t]` must be a no-op:\n") + r.stdout + r.stderr
     )
-    r = subprocess.run([exe, "run", "--rm", "cc-trust-step-noca",
+    r = subprocess.run([exe, "run", "--rm", noca,
                         "sh", "-c", "ls /usr/local/share/ca-certificates/"],
                        capture_output=True, text=True)
     if exe == "podman":
         # The empty file is copied (the step keeps it as a marker) but the `-s`
         # guard must not have installed it into the system bundle: nothing
         # under /etc/ssl/certs mentions the marker name.
-        r2 = subprocess.run([exe, "run", "--rm", "cc-trust-step-noca", "sh", "-c",
+        r2 = subprocess.run([exe, "run", "--rm", noca, "sh", "-c",
                              "ls /etc/ssl/certs/ | grep -c cc-ca || true"],
                             capture_output=True, text=True)
         assert r2.stdout.strip() == "0", "an EMPTY CA file was installed into the bundle"
@@ -1032,10 +1057,10 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path):
             if l and "CERTIFICATE" not in l][0]
     (ctx / "cc-ca.crt").write_text(pem.read_text(), encoding="utf-8")
 
-    r = build("cc-trust-step-ca")
+    r = build(withca)
     assert r.returncode == 0, r.stdout + r.stderr
     r = subprocess.run(
-        [exe, "run", "--rm", "cc-trust-step-ca", "sh", "-c",
+        [exe, "run", "--rm", withca, "sh", "-c",
          "grep -c '" + body + "' /etc/ssl/certs/ca-certificates.crt"],
         capture_output=True, text=True)
     assert r.stdout.strip() not in ("", "0"), (
@@ -1087,7 +1112,7 @@ def test_a_single_certificate_bundle_warns_while_a_public_source_is_reachable(tm
     env = tmp_path / ".env"
 
     # One certificate, and every public seam blank: WARN, with the recipe.
-    env.write_text(f"CC_CA_BUNDLE={ca}\nCC_PYPI_INDEX_URL=\n")
+    env.write_text(f"CC_CA_BUNDLE={env_path(ca)}\nCC_PYPI_INDEX_URL=\n")
     out = _check_ca_bundle_harness(env)
     assert out.startswith("WARN answers-ca-bundle:"), out
     assert "REPLACES the trust store" in out
@@ -1097,7 +1122,7 @@ def test_a_single_certificate_bundle_warns_while_a_public_source_is_reachable(tm
 
     # Same bundle, every public source mirrored: nothing public is dialled.
     env.write_text(
-        f"CC_CA_BUNDLE={ca}\n"
+        f"CC_CA_BUNDLE={env_path(ca)}\n"
         "CC_REGISTRY_DOCKERIO=registry.corp.example\n"
         "CC_REGISTRY_GHCR=registry.corp.example\n"
         "CC_REGISTRY_MCR=registry.corp.example\n"
@@ -1111,7 +1136,7 @@ def test_a_single_certificate_bundle_warns_while_a_public_source_is_reachable(tm
 
     # A combined bundle is a PASS whatever the seams say.
     ca.write_text(ONE_CERT * 3)
-    env.write_text(f"CC_CA_BUNDLE={ca}\n")
+    env.write_text(f"CC_CA_BUNDLE={env_path(ca)}\n")
     out = _check_ca_bundle_harness(env)
     assert out.startswith("PASS answers-ca-bundle:"), out
     assert "3 certificates" in out
@@ -1261,6 +1286,12 @@ def test_the_uv_python_fallback_never_syncs_the_project():
         for line in src.splitlines():
             if 'PY="uv run' in line:
                 assert "--no-project" in line, f"{name}: {line.strip()}"
+    # setup.sh and update.sh's importer take it from env-lib.sh's cc_resolve_py
+    # since P5 — the ONE definition must carry the flag too.
+    lib = (SINGLE.parent / "env-lib.sh").read_text(encoding="utf-8")
+    fallback = [l for l in lib.splitlines() if "uv run" in l and "printf" in l]
+    assert fallback, "cc_resolve_py's uv fallback line is gone from deploy/env-lib.sh"
+    assert all("--no-project" in l for l in fallback), fallback
 
 
 def test_the_app_phase_derives_the_proxy_url_the_app_dials():

@@ -41,7 +41,9 @@ demo_awaiting() {
 
 phase_demo() {
   load_env || return 1
-  api_up || { fail "demo" "the API is not running — run ./setup.sh (it resumes at boot, which starts it)"; return 1; }
+  # Under the first row's name: nothing of the demo can run without the API,
+  # and a check-name that is no row would mark none of them.
+  api_up || { fail "demo-feed" "the API is not running — run ./setup.sh (it resumes at boot, which starts it)"; return 1; }
 
   if demo_decided; then
     pass "demo" "skipped — the event log already shows a decided proposal (the loop is proven on this install)"
@@ -84,9 +86,9 @@ phase_demo() {
     if ! poll_until 600 10 demo_awaiting; then
       local failed; failed="$(api_json "$(api_url)/api/dispatch" '(d.get("ledger") or {}).get("FAILED",0)')"
       if [[ "$failed" =~ ^[1-9] ]]; then
-        fail "demo" "the triage run FAILED — read $STATE_DIR/uvicorn.log; recover with POST $(api_url)/api/work/<item_id>/requeue (never re-POST the email: a repeat Message-ID is a silent no-op)"
+        fail "demo-dispatch" "the triage run FAILED — read $STATE_DIR/uvicorn.log; recover with POST $(api_url)/api/work/<item_id>/requeue (never re-POST the email: a repeat Message-ID is a silent no-op)"
       else
-        fail "demo" "no proposal parked within 10 minutes — read $STATE_DIR/uvicorn.log and $(api_url)/api/dispatch"
+        fail "demo-dispatch" "no proposal parked within 10 minutes — read $STATE_DIR/uvicorn.log and $(api_url)/api/dispatch"
       fi
       return 1
     fi

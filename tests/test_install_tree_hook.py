@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import env_path
+
 ROOT = Path(__file__).resolve().parent.parent
 HOOK = ROOT / ".claude" / "hooks" / "guard-install-tree.sh"
 DENY_SNIPPET = "DENIED by .claude/hooks/guard-install-tree.sh"
@@ -71,7 +73,7 @@ def deployment(tmp_path: Path):
     _git(repo, "commit", "-q", "-m", "init")
 
     (repo / "ignored.txt").write_text("not tracked\n", encoding="utf-8")
-    (repo / ".env").write_text(f"CC_STATE_DIR={state}\n", encoding="utf-8")
+    (repo / ".env").write_text(f"CC_STATE_DIR={env_path(state)}\n", encoding="utf-8")
     (state / "ledger.tsv").write_text("", encoding="utf-8")
 
     return repo, state

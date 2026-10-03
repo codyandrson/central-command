@@ -220,10 +220,13 @@ phase_machine() {
     pass "machine-proxy" "$CC_MACHINE_PROXY_CONF already matches CC_PROXY"
   fi
 
-  # Restarting: only --import-native-ca needs one (it imports at START).
+  # Restarting: only --import-native-ca needs one (it imports at START). The
+  # pause is that ROW's (machine-native-ca), so the ledger records it as the
+  # gate it is rather than as nothing — a check-name that is no row marks none
+  # (P5; tests/test_single_reporter_rows.py).
   if (( ! dry )) && (( ${#MACHINE_CHANGED[@]} )); then
     local r; r="$(cc_machine_restart_needed "${MACHINE_CHANGED[@]}")" \
-      && useraction "machine-restart" "$r"
+      && useraction "machine-native-ca" "$r"
   fi
   return 0
 }

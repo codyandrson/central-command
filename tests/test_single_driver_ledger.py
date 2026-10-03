@@ -48,6 +48,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.installer_source import drives_installer, env_path, run_driver
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # Debris a WINDOWS deployment grows inside deploy/, which must never reach the
@@ -116,7 +118,7 @@ def tree(tmp_path: Path) -> Path:
     (tmp_path / "home").mkdir()
     state = tmp_path / "state"
     state.mkdir()
-    _set(repo / ".env", {"CC_STATE_DIR": str(state)})
+    _set(repo / ".env", {"CC_STATE_DIR": env_path(state)})
     return repo
 
 
@@ -136,11 +138,7 @@ def _run(repo: Path, *args: str, env_extra: dict[str, str] | None = None):
                   "CC_EXECUTOR_MODE"):
         env.pop(stale, None)
     env.update(env_extra or {})
-    return subprocess.run(
-        [_bash_exe(), "setup.sh", *args],
-        cwd=repo / "deploy" / "single",
-        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300, env=env,
-    )
+    return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
 
 
 def _write_ledger(repo: Path, rows: list[tuple[str, str]]) -> Path:
@@ -163,6 +161,7 @@ def _protocol(out: str) -> list[str]:
 # ── the refusals ────────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_boot_on_an_empty_ledger_refuses_and_names_the_step(tree: Path):
     """The acceptance criterion, verbatim from the record: "./setup.sh boot on
     a tree with no `app` row refuses"."""
@@ -180,6 +179,7 @@ def test_boot_on_an_empty_ledger_refuses_and_names_the_step(tree: Path):
     assert "LEDGER " in r.stdout
 
 
+@drives_installer
 def test_an_older_updater_on_a_pre_ledger_install_gets_a_pause_not_a_failure(tree: Path):
     """A deployment installed before the ledger existed is updated by the
     updater it already has, which merges first and then calls this script's
@@ -199,6 +199,7 @@ def test_an_older_updater_on_a_pre_ledger_install_gets_a_pause_not_a_failure(tre
     assert "FAIL fetch: requires" in by_hand.stdout, by_hand.stdout
 
 
+@drives_installer
 def test_the_developer_bypass_is_refused_on_a_live_deployment(tree: Path):
     """D3: `CC_SETUP_UNLEDGERED=1` is the only bypass there is, it is
     documented nowhere an operator reads, and it does not apply when the
@@ -215,6 +216,7 @@ def test_the_developer_bypass_is_refused_on_a_live_deployment(tree: Path):
     assert "FAIL boot: requires app/install" in r.stdout, r.stdout
 
 
+@drives_installer
 def test_the_developer_bypass_works_when_the_executor_is_not_live(tree: Path):
     """The other half: it IS a bypass, or it would not be one. `machine` is the
     target because on a host with no podman machine the phase is a no-op, so
@@ -235,6 +237,7 @@ def test_the_developer_bypass_works_when_the_executor_is_not_live(tree: Path):
     assert "FAIL machine: requires" not in allowed.stdout, allowed.stdout
 
 
+@drives_installer
 def test_failed_app_rows_block_verify_and_name_mint_key(tree: Path):
     """The step whose mid-function `return 1` used to skip nine `.env` writes
     and the cockpit build in silence. Its ledger row is now what `verify`
@@ -262,6 +265,7 @@ def test_failed_app_rows_block_verify_and_name_mint_key(tree: Path):
 # ── status ──────────────────────────────────────────────────────────────────
 
 
+@drives_installer
 def test_status_prints_the_ledger_table_and_writes_no_ledger_row(tree: Path):
     led = _write_ledger(tree, [
         ("check/tree-pristine", "done"),
@@ -285,6 +289,7 @@ def test_status_prints_the_ledger_table_and_writes_no_ledger_row(tree: Path):
     assert led.read_bytes() == before, "status mutates nothing, the ledger included"
 
 
+@drives_installer
 def test_an_empty_ledger_exists_after_any_command(tree: Path):
     """D2, via the record's hook (D10.2): the ledger's EXISTENCE is what says
     "this tree is a deployment", so it may not wait for the first mutating
@@ -321,6 +326,7 @@ def _tree_lines(out: str) -> list[str]:
     return [l for l in _protocol(out) if "tree-pristine" in l]
 
 
+@drives_installer
 def test_a_modified_tracked_file_is_refused_and_named(git_tree: Path):
     """P1's acceptance criterion: "a tree with one tracked file modified
     refuses every command and names the file"."""
@@ -338,6 +344,7 @@ def test_a_modified_tracked_file_is_refused_and_named(git_tree: Path):
     assert r.returncode == 1, r.stdout + r.stderr
 
 
+@drives_installer
 def test_a_mutating_phase_refuses_on_a_modified_tree_too(git_tree: Path):
     """The same test at the top of `load_env` for every mutating phase — so a
     difference cannot slip through by running a phase directly. `test` is the
@@ -365,6 +372,7 @@ def test_a_mutating_phase_refuses_on_a_modified_tree_too(git_tree: Path):
     assert row and row[0].split("\t")[1] == "failed", led
 
 
+@drives_installer
 def test_a_pristine_git_tree_passes_the_row(git_tree: Path):
     r = _run(git_tree, "preflight")
     lines = _tree_lines(r.stdout)
@@ -372,6 +380,7 @@ def test_a_pristine_git_tree_passes_the_row(git_tree: Path):
     assert lines[0].startswith("PASS tree-pristine:"), lines[0]
 
 
+@drives_installer
 def test_no_git_baseline_is_a_useraction_naming_update_init(tree: Path):
     """A fresh zip install cannot prove anything about itself yet, and it
     cannot create the baseline either — so it is told which one command does
@@ -447,6 +456,7 @@ def _ledger_rows(repo: Path) -> dict[str, list[str]]:
             if l and not l.startswith("#")}
 
 
+@drives_installer
 def test_the_plan_on_an_empty_ledger_says_every_phase_runs_and_why(tree: Path):
     _stub_driver(tree)
     r = _run(tree)
@@ -469,34 +479,46 @@ def test_the_plan_on_an_empty_ledger_says_every_phase_runs_and_why(tree: Path):
     assert "PLAN machine: WILL RUN" in log
 
 
+def _manifest_rows() -> list[list[str]]:
+    steps = ROOT / "deploy" / "single" / "steps.tsv"
+    return [l.rstrip("\r").split("\t") for l in steps.read_text(encoding="utf-8").splitlines()
+            if l.strip() and not l.startswith("#")]
+
+
+@drives_installer
 def test_the_plan_skips_an_all_done_phase_and_names_a_changed_input(tree: Path):
+    """Two runs, not three (2026-10-02 testbed, F15: 304 s on Windows): the
+    run after the first changes ONE input, so the same plan shows both a phase
+    skipped because nothing it reads moved and one re-run because something
+    did. A phase is "touched" when one of its rows reads the changed key."""
     _stub_driver(tree)
     first = _run(tree)
     assert first.returncode == 0, first.stdout + first.stderr
-
-    again = _run(tree)
-    plan = _plan(again.stdout)
-    for p in _STUB_PHASES[1:]:
-        assert f"PLAN {p}: WILL SKIP" in plan[p], plan[p]
-    assert "all 7 rows are done at" in plan["boot"], plan["boot"]
-    assert "(last done 20" in plan["boot"], plan["boot"]
-    # ...and the run did what the plan said: nothing but check ran.
-    ran = [l for l in again.stdout.splitlines() if l.endswith("-stub: ran")]
-    assert ran == ["PASS check-stub: ran"], ran
 
     # An input the boot rows READ changes. The plan names the row and the KEY
     # NAMES it reads ("one of" — a fingerprint cannot say which), never a value.
     _set(tree / ".env", {"CC_API_PORT": "59871"})
     changed = _run(tree)
     plan = _plan(changed.stdout)
+    rows = _manifest_rows()
+    touched = {r[0] for r in rows if "CC_API_PORT" in r[4].split(",")}
+    assert touched == {"boot", "demo"}, touched  # the premise of what follows
+    for p in _STUB_PHASES[1:]:
+        if p in touched:
+            continue
+        n = sum(1 for r in rows if r[0] == p)
+        what = "its 1 row is" if n == 1 else f"all {n} rows are"
+        assert f"PLAN {p}: WILL SKIP — {what} done at" in plan[p], plan[p]
+        assert "(last done 20" in plan[p], plan[p]
     assert ("PLAN boot: WILL RUN — inputs changed: boot/boot-api reads one of "
             "CC_API_PORT, CC_DATABASE_URL") in plan["boot"], plan["boot"]
-    assert "PLAN app: WILL SKIP" in plan["app"], plan["app"]
     assert not any("59871" in l for l in plan.values()), plan
-    assert "PASS boot-stub: ran" in changed.stdout
-    assert "PASS app-stub: ran" not in changed.stdout
+    # ...and the run did what the plan said: check, and the touched phases only.
+    ran = [l for l in changed.stdout.splitlines() if l.endswith("-stub: ran")]
+    assert ran == ["PASS check-stub: ran", "PASS boot-stub: ran", "PASS demo-stub: ran"], ran
 
 
+@drives_installer
 def test_a_step_that_failed_is_never_recorded_done_even_when_its_probe_holds(tree: Path):
     """The defect P2 found: `verify-live` FAILed inside verify.sh while its
     probe (the spine key answers /v1/models) held, so the row was written
@@ -504,7 +526,10 @@ def test_a_step_that_failed_is_never_recorded_done_even_when_its_probe_holds(tre
     printed FAIL is `failed`, with that message as its reason, whatever the
     probe says — and the next full run runs the phase again."""
     flags = _stub_driver(tree)
-    assert _run(tree).returncode == 0       # everything done, every probe true
+    # Everything done, every probe true — written, not run (one invocation
+    # fewer; F15). `verify` needs only its requires done, and the full run at
+    # the end re-judges every phase whatever its fingerprint says.
+    _write_ledger(tree, [(f"{r[0]}/{r[1]}", "done") for r in _manifest_rows()])
 
     (flags / "fail-verify").write_text("verify-live", encoding="utf-8")
     r = _run(tree, "verify")
@@ -526,9 +551,10 @@ def test_a_step_that_failed_is_never_recorded_done_even_when_its_probe_holds(tre
     assert _ledger_rows(tree)["verify/verify-live"][1] == "done"
 
 
+@drives_installer
 def test_a_step_that_stopped_for_the_operator_is_a_gate_even_when_its_probe_holds(tree: Path):
     flags = _stub_driver(tree)
-    assert _run(tree).returncode == 0
+    _write_ledger(tree, [(f"{r[0]}/{r[1]}", "done") for r in _manifest_rows()])
     (flags / "ua-test").write_text("test", encoding="utf-8")
     r = _run(tree, "test")
     assert r.returncode == 3, r.stdout + r.stderr
@@ -552,6 +578,7 @@ def _wait_for(path: Path, seconds: float = 60) -> None:
         time.sleep(0.1)
 
 
+@drives_installer
 @pytest.mark.skipif(os.name == "nt", reason="SIGKILL of a process group is POSIX")
 def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes(tree: Path):
     """The record's P2 acceptance criterion: "a phase killed mid-run leaves its
@@ -613,6 +640,7 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
     assert not (_state_dir(tree) / "run.lock").exists()
 
 
+@drives_installer
 def test_a_started_requirement_refuses_and_says_the_run_was_interrupted(tree: Path):
     _write_ledger(tree, [
         ("check/tree-pristine", "done"),
@@ -629,3 +657,403 @@ def test_a_started_requirement_refuses_and_says_the_run_was_interrupted(tree: Pa
     # The plan said so first, and the refused phase was NOT marked started.
     assert "PLAN verify: WILL NOT RUN — it requires stack/up-stack, which is started" in r.stdout
     assert "verify/verify-deployed" not in _ledger_rows(tree)
+
+
+# ── P5: a row the phase never reached is `pending`, and a pause is a `gate` ──
+#
+# The first acceptance run on the Windows laptop (v2.58.0) measured both:
+# after `FAIL mint-key` the later app rows were recorded by their PROBES — the
+# ones whose key the configure-born .env already held `done`, the rest `failed`
+# with an empty reason — where D9's acceptance sentence says "an injected
+# failure in app's mint-key leaves app/mint-key failed and every later app row
+# pending". And after the llm catalog pause `catalog-filled` read `done` (its
+# probe only asked that each alias be LISTED, which a skeleton is), the probe
+# rows after it `done` though they never ran, `catalog-declared` `failed`
+# though it had printed PASS, and the status `gate` never appeared — the pause
+# was printed under `llm-models`, which is no row.
+#
+# These drive the REAL phase functions (phase_app, phase_llm) in a temp copy,
+# with only what would leave the machine stubbed in the copy's tail: `curl`
+# (the proxy), `uv`, compose and the image catch-up, and the interpreter that
+# would run register-models.py against a proxy.
+
+import sys  # noqa: E402
+
+from tests.installer_source import installer_functions  # noqa: E402
+
+
+def _append_tail(repo: Path, body: str) -> None:
+    setup = repo / "deploy" / "single" / "setup.sh"
+    text = setup.read_text(encoding="utf-8")
+    tail = 'main "$@"'
+    assert text.rstrip().endswith(tail)
+    setup.write_text(text.rstrip()[: -len(tail)] + body.rstrip("\n") + "\n" + tail + "\n",
+                     encoding="utf-8")
+
+
+def _rows_done_through(repo: Path, last_phase: str) -> None:
+    """Every manifest row of the phases up to AND including `last_phase`,
+    `done` at this version — so the phase after it passes the ledger gate."""
+    keep = _STUB_PHASES[: _STUB_PHASES.index(last_phase) + 1]
+    rows = []
+    for line in (repo / "deploy" / "single" / "steps.tsv").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and line.split("\t")[0] in keep:
+            rows.append(("/".join(line.split("\t")[:2]), "done"))
+    _write_ledger(repo, rows)
+
+
+def _manifest_steps(repo: Path, phase: str) -> list[str]:
+    out = []
+    for line in (repo / "deploy" / "single" / "steps.tsv").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and line.split("\t")[0] == phase:
+            out.append(f"{phase}/{line.split(chr(9))[1]}")
+    return out
+
+
+@drives_installer
+def test_a_failed_mint_key_leaves_every_later_app_row_pending(tree: Path):
+    """D9's acceptance sentence, against the REAL phase_app: the proxy refuses
+    /key/generate. app/mint-key is `failed` with its message; every app row
+    after it is `pending` with NO reason, whatever its probe would read — the
+    .env.example this tree was configured from already holds CC_LLM_BASE_URL
+    and CC_DEFAULT_MODEL (the laptop's `done` rows), and leaves
+    CC_LLM_PROXY_UI_URL blank (its `failed` rows with an empty reason). A
+    later row's probe is never even asked."""
+    _set(tree / ".env", {"CC_LLM_PROXY_ADMIN_KEY": "sk-test-admin-0000000000",
+                         "CC_LLM_API_KEY": "", "CC_EXECUTOR_MODE": "dry_run"})
+    _rows_done_through(tree, "stack")
+    for exe in ("python", "uvicorn"):
+        f = tree / ".venv" / "bin" / exe
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        f.chmod(0o755)
+    asked = tree.parent / "later-probe-asked"
+    _append_tail(tree, f'''
+uv() {{ return 0; }}
+# The proxy: up, but /key/generate answers no key (the laptop's run B).
+curl() {{
+  [[ -p /dev/stdin ]] && cat >/dev/null
+  local a; for a in "$@"; do [[ "$a" == */key/generate ]] && {{ echo '{{"error":"proxy went away"}}'; return 22; }}; done
+  return 7
+}}
+# A LATER row's probe, instrumented: a row the phase never reached is never probed.
+p_llm_base_url() {{ touch "{asked.as_posix()}"; return 0; }}
+''')
+
+    r = _run(tree, "app")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "FAIL mint-key: /key/generate did not return a key" in r.stdout, r.stdout
+    rows = _ledger_rows(tree)
+    steps = _manifest_steps(tree, "app")
+    cut = steps.index("app/mint-key")
+    for s in steps[:cut]:
+        assert rows[s][1] == "done", (s, rows[s])
+    assert rows["app/mint-key"][1] == "failed"
+    assert rows["app/mint-key"][5].startswith("/key/generate did not return a key"), rows["app/mint-key"]
+    later = steps[cut + 1:]
+    assert later and "app/app-llm-base-url" in later and "app/cockpit" in later, later
+    for s in later:
+        assert rows[s][1] == "pending" and rows[s][5] == "", (s, rows[s])
+    assert not asked.exists(), "a row the phase never reached was probed"
+    # No line claims a row nobody ran: the ledger's net (the effect-absent
+    # FAIL) is for a phase that REPORTED success, and this one did not.
+    assert not any("effect is absent" in l for l in _protocol(r.stdout)), _protocol(r.stdout)
+
+    # ...and the developer form after it is refused, naming the step (D9).
+    b = _run(tree, "boot")
+    assert b.returncode == 1, b.stdout + b.stderr
+    assert "FAIL boot: requires app/mint-key, which is failed" in b.stdout, b.stdout
+    # The next run's plan names the failed row — and does not call the rows it
+    # never reached failed too (the laptop's said "(and 7 more rows failed)").
+    plan = _plan(_run(tree, "app").stdout)
+    assert 'failed last time: app/mint-key — "/key/generate did not return a key' in plan["app"], plan
+    assert "more rows failed" not in plan["app"], plan["app"]
+
+
+_LLM_ALIASES = ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano", "cc-tts", "cc-stt")
+
+
+def _model_info(placeholders: tuple[str, ...]) -> str:
+    import json
+    return json.dumps({"data": [
+        {"model_name": a, "litellm_params": {
+            "model": "openai/PLACEHOLDER" if a in placeholders else "openai/some-model",
+            "api_base": "PLACEHOLDER" if a in placeholders else "http://llm.example.com/v1"}}
+        for a in _LLM_ALIASES]})
+
+
+@drives_installer
+def test_the_llm_catalog_pause_is_a_gate_and_the_rows_after_it_are_pending(tree: Path):
+    """The REAL phase_llm, up to its pause: register-models.py (stubbed — it
+    would talk to a proxy) exits 3 because cc-embedding is still a PLACEHOLDER
+    skeleton. What the laptop's ledger said there, and what it says now:
+
+      catalog-declared  failed ("did not report success")  -> done (it printed PASS)
+      catalog           done                               -> done (skeletons ARE its effect)
+      catalog-filled    done                               -> gate (its own USERACTION)
+      probe-*, embed-*  done / failed, never ran           -> pending, no reason
+    """
+    _set(tree / ".env", {"CC_ENABLE_SPEECH": "0", "CC_EXECUTOR_MODE": "dry_run"})
+    _rows_done_through(tree, "fetch")
+    stub_py = tree.parent / "py"
+    stub_py.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$1" in *register-models.py) echo "  PENDING  cc-embedding  model is still openai/PLACEHOLDER"; exit 3 ;; esac\n'
+        f'exec "{Path(sys.executable).as_posix()}" "$@"\n', encoding="utf-8")
+    stub_py.chmod(0o755)
+    info = tree.parent / "model-info.json"
+    info.write_text(_model_info(("cc-embedding",)), encoding="utf-8")
+    models = ",".join('{"id":"%s"}' % a for a in _LLM_ALIASES)
+    _append_tail(tree, f'''
+PY="{stub_py.as_posix()}"
+compose() {{ return 0; }}
+catch_up_images() {{ pass "$1" "stub: every container runs the image its ref resolves to now"; }}
+image_drift() {{ return 0; }}
+wait_http() {{ return 0; }}
+curl() {{
+  [[ -p /dev/stdin ]] && cat >/dev/null
+  local a url=""; for a in "$@"; do [[ "$a" == http* ]] && url="$a"; done
+  case "$url" in
+    */health/liveliness) return 0 ;;
+    */v1/models) printf '%s' '{{"data":[{models}]}}' ;;
+    */model/info) cat "{info.as_posix()}" ;;
+    *) return 7 ;;
+  esac
+}}
+''')
+
+    r = _run(tree, "llm")
+
+    assert r.returncode == 3, r.stdout + r.stderr
+    ua = [l for l in _protocol(r.stdout) if l.startswith("USERACTION ")]
+    assert len(ua) == 1 and ua[0].startswith("USERACTION catalog-filled:"), ua
+    assert "FAIL" not in "\n".join(_protocol(r.stdout)), _protocol(r.stdout)
+    rows = _ledger_rows(tree)
+    for s in ("llm/secrets", "llm/up-litellm", "llm/litellm-live", "llm/up-speech",
+              "llm/catalog-declared", "llm/catalog"):
+        assert rows[s][1] == "done", (s, rows[s])
+    gate = rows["llm/catalog-filled"]
+    assert gate[1] == "gate" and "operator action needed" in gate[5], gate
+    steps = _manifest_steps(tree, "llm")
+    later = steps[steps.index("llm/catalog-filled") + 1:]
+    assert "llm/probe-chat" in later and "llm/embed-dimension" in later, later
+    for s in later:
+        assert rows[s][1] == "pending" and rows[s][5] == "", (s, rows[s])
+
+    # The next run's PLAN says the truth about the pause: waiting on you, at
+    # the gate — not "failed last time: llm/catalog-declared".
+    again = _run(tree, "llm")
+    assert "PLAN llm: WILL RUN — waiting on you: llm/catalog-filled" in again.stdout, again.stdout
+
+
+def _probe_script(info: str | None, *, crlf: bool = False) -> str:
+    """catalog_unfilled + p_catalog_filled, lifted out of the installer, over
+    a stub proxy answering `info` (None: the proxy does not answer). `crlf`
+    makes the interpreter end its lines the way Windows Python does on a pipe."""
+    fns = installer_functions()
+    curl = ('curl() { [[ -p /dev/stdin ]] && cat >/dev/null; return 7; }' if info is None else
+            "curl() { [[ -p /dev/stdin ]] && cat >/dev/null; printf '%s' '" + info + "'; }")
+    py = Path(sys.executable).as_posix()
+    return "\n".join([
+        "set -uo pipefail",
+        # The product runs `$PY` UNQUOTED (it may be the multi-word uv
+        # fallback), so PY must survive word splitting: this interpreter's own
+        # path may hold a space (a Windows checkout under "Working Folder" —
+        # the 2026-10-02 testbed run's second pass, where `$PY` ran
+        # `C:/Users/<u>/Working` and every case read unfilled=[] with exit 1).
+        (f'__cc_test_py() {{ "{py}" "$@" | {{ while IFS= read -r l; do printf "%s\\r\\n" "$l"; done; }}; }}'
+         if crlf else f'__cc_test_py() {{ "{py}" "$@"; }}'),
+        "PY=__cc_test_py",
+        'ENV_FILE=/dev/null',
+        'get_kv() { printf sk-test-admin; }',
+        'p_flag() { printf 4000; }',
+        'cc_required_aliases() { printf "cc-default\\ngraphiti-llm\\ncc-embedding\\ngpt-4.1-nano\\n"; }',
+        curl,
+        "catalog_required_aliases() {" + fns["catalog_required_aliases"] + "\n}",
+        "catalog_unfilled() {" + fns["catalog_unfilled"] + "\n}",
+        "p_catalog_filled() {" + fns["p_catalog_filled"] + "\n}",
+        'echo "unfilled=[$(catalog_unfilled | tr "\\n" " ")]"',
+        "p_catalog_filled",
+    ])
+
+
+@pytest.mark.parametrize("case,placeholders,extra,filled,unfilled", [
+    ("every required alias filled", (), None, True, ""),
+    ("one skeleton left", ("cc-embedding",), None, False, "cc-embedding"),
+    ("a skeleton BESIDE a real row of the same alias", (), "cc-default", False, "cc-default"),
+    ("an optional alias's skeleton only", ("cc-tts", "cc-stt"), None, True, ""),
+])
+def test_catalog_filled_reads_the_placeholder_convention(case, placeholders, extra, filled, unfilled):
+    """llm/catalog-filled's probe means FILLED: register-models.py marks an
+    unfilled skeleton with PLACEHOLDER in the litellm_params it owns, and
+    /v1/models lists it like any row — which is why the old probe read the
+    pause as done."""
+    import json
+    data = json.loads(_model_info(placeholders))
+    if extra:
+        data["data"].append({"model_name": extra, "litellm_params": {
+            "model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}})
+    r = subprocess.run([_bash_exe(), "-c", _probe_script(json.dumps(data))],
+                       capture_output=True, text=True, timeout=60)
+    assert (r.returncode == 0) is filled, (case, r.stdout, r.stderr)
+    assert f"unfilled=[{unfilled + ' ' if unfilled else ''}]" in r.stdout, (case, r.stdout)
+
+
+def test_the_unfilled_list_carries_no_carriage_return():
+    """Windows Python ends every printed line "\\r\\n" on a pipe, and Git
+    Bash's $(...) strips only the last one: a two-alias answer read
+    "cc-default\\r" — the 2026-10-02 testbed run's second pass. The list is
+    CR-free whatever the interpreter writes."""
+    import json
+    data = json.loads(_model_info(("cc-default", "cc-embedding")))
+    r = subprocess.run([_bash_exe(), "-c", _probe_script(json.dumps(data), crlf=True)],
+                       capture_output=True, text=True, timeout=60, check=False)
+    assert r.returncode != 0, (r.stdout, r.stderr)
+    assert "unfilled=[cc-default cc-embedding ]" in r.stdout, repr(r.stdout)
+
+
+def test_the_skill_library_ids_carry_no_carriage_return():
+    """boot/skills-imported compares each bundled id against this list with a
+    bash pattern; with Windows Python's "\\r\\n" every id but the last read
+    `<id>\\r`, so the probe was false forever and every bundled skill was
+    re-imported on every run. The list is CR-free whatever the interpreter
+    writes; an API that does not answer is still 1."""
+    fns = installer_functions()
+    py = Path(sys.executable).as_posix()
+    body = '{"skills": [{"id": "alpha"}, {"id": "beta"}, {"id": "gamma"}]}'
+    def script(curl_ok: bool) -> str:
+        return "\n".join([
+            "set -uo pipefail",
+            f'__cc_test_py() {{ "{py}" "$@" | {{ while IFS= read -r l; do printf "%s\\r\\n" "$l"; done; }}; }}',
+            "PY=__cc_test_py",
+            "api_url() { printf http://127.0.0.1:1; }",
+            ("curl() { printf '%s' '" + body + "'; }") if curl_ok else "curl() { return 7; }",
+            "skills_library_ids() {" + fns["skills_library_ids"] + "\n}",
+            'have="$(skills_library_ids)"; rc=$?',
+            'printf "rc=%s have=[%s]\\n" "$rc" "${have//$\'\\n\'/,}"',
+            '[[ $\'\\n\'"$have"$\'\\n\' == *$\'\\n\'alpha$\'\\n\'* ]] && echo alpha-found',
+        ])
+    r = subprocess.run([_bash_exe(), "-c", script(True)], capture_output=True, text=True,
+                       timeout=60, check=False)
+    assert "rc=0 have=[alpha,beta,gamma]" in r.stdout and "alpha-found" in r.stdout, repr(r.stdout + r.stderr)
+    r = subprocess.run([_bash_exe(), "-c", script(False)], capture_output=True, text=True,
+                       timeout=60, check=False)
+    assert "rc=1 have=[]" in r.stdout, repr(r.stdout + r.stderr)
+
+
+@pytest.mark.parametrize("env_speech,dotenv_speech,filled,unfilled", [
+    # The PLAN's case: nothing exported yet, .env says speech is off, and the
+    # cc-tts/cc-stt skeletons were never filled — that is FILLED.
+    (None, "0", True, ""),
+    # .env says speech is on: the two skeletons are what the gate waits on.
+    (None, "1", False, "cc-tts cc-stt"),
+    # After load_env the process value is .env's value — the same verdict.
+    ("0", "0", True, ""),
+])
+def test_the_catalog_probes_read_the_speech_flag_from_env_file_when_it_is_not_exported(
+        tmp_path, env_speech, dotenv_speech, filled, unfilled):
+    """F18 of the 2026-10-02 testbed run's second pass: the plan asks the
+    probes BEFORE load_env exports .env, and cc_required_aliases reads only
+    the environment (default: speech on). With CC_ENABLE_SPEECH=0 in .env and
+    the speech skeletons unfilled, the plan read `catalog-filled` false, `llm`
+    re-ran on every ./setup.sh, and the memo carried that false into the run.
+    The real cc_required_aliases, p_flag and .env reader here — only the proxy
+    is stubbed."""
+    fns = installer_functions()
+    envf = tmp_path / "dot.env"
+    envf.write_text(f"CC_ENABLE_SPEECH={dotenv_speech}\nCC_LLM_PROXY_ADMIN_KEY=sk-test-admin\n",
+                    encoding="utf-8", newline="\n")
+    info = _model_info(("cc-tts", "cc-stt"))
+    py = Path(sys.executable).as_posix()
+    script = "\n".join([
+        "set -uo pipefail",
+        f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"',
+        f'. "{(ROOT / "deploy" / "single" / "questions-lib.sh").as_posix()}"',
+        f'__cc_test_py() {{ "{py}" "$@"; }}',
+        "PY=__cc_test_py",
+        f'ENV_FILE="{envf.as_posix()}"',
+        "get_kv() {" + fns["get_kv"] + "\n}",
+        "p_flag() {" + fns["p_flag"] + "\n}",
+        "curl() { [[ -p /dev/stdin ]] && cat >/dev/null; printf '%s' '" + info + "'; }",
+        "catalog_required_aliases() {" + fns["catalog_required_aliases"] + "\n}",
+        "p_catalog_aliases() { return 0; }",
+        "catalog_unfilled() {" + fns["catalog_unfilled"] + "\n}",
+        "p_catalog_filled() {" + fns["p_catalog_filled"] + "\n}",
+        'echo "unfilled=[$(catalog_unfilled | tr "\\n" " ")]"',
+        "p_catalog_filled",
+    ])
+    env = {k: v for k, v in os.environ.items() if k != "CC_ENABLE_SPEECH"}
+    if env_speech is not None:
+        env["CC_ENABLE_SPEECH"] = env_speech
+    r = subprocess.run([_bash_exe(), "-c", script], capture_output=True, text=True,
+                       timeout=60, env=env, check=False)
+    assert (r.returncode == 0) is filled, (r.stdout, r.stderr)
+    assert f"unfilled=[{unfilled + ' ' if unfilled else ''}]" in r.stdout, (r.stdout, r.stderr)
+
+
+def test_catalog_filled_is_false_when_the_proxy_does_not_answer():
+    r = subprocess.run([_bash_exe(), "-c", _probe_script(None)],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode != 0, r.stdout + r.stderr
+
+
+# ── an imported update that has not been applied (F24) ───────────────────────
+# The 2026-10-02 testbed run's second pass: after an update whose acquisition
+# stopped (the checklist's flow had already stopped the API), `./setup.sh`
+# REFUSED to run the installed release ("use ./update.sh plan"), so the
+# deployment stayed down. An import `local` does not contain leaves the tree
+# exactly the installed release: the run proceeds and says the update waits.
+# A merge left half-way is the state that is actually unsafe, and is refused.
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def _deployment_with_waiting_update(repo: Path) -> None:
+    _git(repo, "init", "-q", ".")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "core.autocrlf", "false")
+    _git(repo, "checkout", "-qb", "local")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "the installed release")
+    _git(repo, "branch", "upstream")
+    _git(repo, "checkout", "-q", "upstream")
+    (repo / "NEW.txt").write_text("the next release\n", encoding="utf-8")
+    _git(repo, "add", "NEW.txt")
+    _git(repo, "commit", "-qm", "import v9.9.9")
+    _git(repo, "checkout", "-q", "local")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@drives_installer
+def test_a_waiting_update_does_not_keep_the_installed_release_down(tree: Path):
+    _stub_driver(tree)
+    _deployment_with_waiting_update(tree)
+    r = _run(tree)
+    assert r.returncode in (0, 2), r.stdout + r.stderr
+    assert "existing-install" not in r.stdout + r.stderr
+    assert "an imported update is waiting" in r.stderr, r.stderr
+    assert "./update.sh apply" in r.stderr
+    assert "PASS boot-stub: ran" in r.stdout, r.stdout
+    # One line, and no protocol line: it moves no counter into a stop.
+    assert not [l for l in r.stdout.splitlines() if "update is waiting" in l]
+    assert _git(tree, "rev-parse", "--abbrev-ref", "HEAD") == "local"
+    assert not (tree / "NEW.txt").exists(), "the run must not touch the imported release"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@drives_installer
+def test_a_merge_left_half_way_is_refused(tree: Path):
+    _stub_driver(tree)
+    _deployment_with_waiting_update(tree)
+    git_dir = Path(_git(tree, "rev-parse", "--absolute-git-dir"))
+    (git_dir / "MERGE_HEAD").write_text(_git(tree, "rev-parse", "upstream") + "\n", encoding="utf-8")
+    r = _run(tree)
+    assert r.returncode == 1, r.stdout + r.stderr
+    fails = [l for l in r.stdout.splitlines() if l.startswith("FAIL merge-in-progress:")]
+    assert len(fails) == 1 and "git merge --abort" in fails[0], r.stdout
+    assert "-stub: ran" not in r.stdout, "a phase ran on a half-merged tree"

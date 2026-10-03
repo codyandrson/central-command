@@ -40,7 +40,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.installer_source import installer_source
+from tests.installer_source import drives_installer, env_path, installer_source, run_driver
 
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
@@ -129,11 +129,7 @@ def _run_setup(repo: Path, *args: str) -> subprocess.CompletedProcess:
     for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
                   *GENERATED):
         env.pop(stale, None)
-    return subprocess.run(
-        [_bash_exe(), "setup.sh", *args],
-        cwd=repo / "deploy" / "single",
-        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300, env=env,
-    )
+    return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
 
 
 def _set(path: Path, values: dict[str, str]) -> None:
@@ -159,6 +155,7 @@ def _require(repo: Path, key: str) -> None:
                       encoding="utf-8")
 
 
+@drives_installer
 def test_an_empty_answer_file_needs_no_answers_and_exits_0(tree: Path):
     """v2.45.1: nothing in the shipped schema is required, so a file with no
     answers at all is a complete one — the blanks all have documented meanings,
@@ -179,6 +176,7 @@ def test_an_empty_answer_file_needs_no_answers_and_exits_0(tree: Path):
     assert set(keys) == {"CC_STATE_DIR", *GENERATED}, keys
 
 
+@drives_installer
 def test_a_required_row_with_no_terminal_is_reported_and_exits_3(tree: Path):
     """rustup's rule, against a schema that HAS a required row. No shipped row
     is required today, so this is the guard for the next one that is."""
@@ -196,6 +194,7 @@ def test_a_required_row_with_no_terminal_is_reported_and_exits_3(tree: Path):
     assert "CC_LITELLM_SALT_KEY" not in body, body
 
 
+@drives_installer
 def test_a_missing_answer_file_is_created_from_the_template(tree: Path):
     assert not (tree / ".env").exists()
 
@@ -213,6 +212,7 @@ def test_a_missing_answer_file_is_created_from_the_template(tree: Path):
     assert "CC_POD_PREFIX=cc-" in (tree / ".env").read_text(encoding="utf-8")
 
 
+@drives_installer
 @pytest.mark.parametrize("declare_upstream", [True, False],
                          ids=["upstream-declared", "catalog-in-the-litellm-ui"])
 def test_a_prefilled_answer_file_asks_nothing_and_changes_nothing(
@@ -228,7 +228,7 @@ def test_a_prefilled_answer_file_asks_nothing_and_changes_nothing(
     shutil.copy2(tree / ".env.example", env_file)
     state = tree.parent / "home" / "state" / "carried"
     state.mkdir(parents=True)
-    values = {**GENERATED, "CC_STATE_DIR": str(state)}
+    values = {**GENERATED, "CC_STATE_DIR": env_path(state)}
     if declare_upstream:
         values |= UPSTREAM
     _set(env_file, values)
@@ -246,6 +246,7 @@ def test_a_prefilled_answer_file_asks_nothing_and_changes_nothing(
     assert env_file.read_bytes() == before, "a carried-in answer file is left byte-identical"
 
 
+@drives_installer
 def test_it_never_prompts_without_a_terminal_even_without_the_flag(tree: Path):
     """stdin is /dev/null here, which is the CI-runner and the agent-session
     case. Fail-closed applies to both, not only to the explicit flag."""
@@ -259,6 +260,7 @@ def test_it_never_prompts_without_a_terminal_even_without_the_flag(tree: Path):
     assert "USERACTION CC_SOMETHING_UNANSWERABLE:" in r.stdout
 
 
+@drives_installer
 def test_check_with_no_answer_file_stops_for_the_operator(tree: Path):
     """"Run configure" is the operator's MOVE, which is exit 3 in this protocol
     — not exit 1, which sends them to "fix the FAIL lines above" for a file that
