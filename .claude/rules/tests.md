@@ -27,7 +27,7 @@ when a matching file is read.
   probes the read path ONCE per session with a 10 s budget and skips every
   marked test when it does not answer. So `graph_live` skips in the summary
   mean **the graph backend was down** — not that those tests passed. A new test
-  that reaches `graphiti.search_facts`/`search_private_facts`/`get_episodes`
+  that reaches `graphiti.search_facts`/`get_episodes`
   for real needs the marker, or it becomes the next hang.
 - **A test that runs the real installer is marked `@drives_installer` and
   calls `run_driver`** (v2.58.2; `tests/installer_source.py`). pytest-timeout

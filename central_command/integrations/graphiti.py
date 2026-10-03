@@ -200,18 +200,6 @@ async def known_groups() -> list[str]:
     return groups
 
 
-async def search_private_facts(agent_id: str, query: str, max_facts: int = 8) -> list[dict]:
-    """Facts from ONLY `agent_id`'s private partition — never the shared groups
-    `search_facts` also spans. For reads that want exclusively an agent's own
-    distilled record (e.g. the EA's follow-up tracking, slice B) where shared-
-    group results would just be noise."""
-    out = await _call_tool(
-        "search_memory_facts",
-        {"query": query, "max_facts": max_facts, "group_ids": [private_group(agent_id)]},
-    )
-    return out.get("facts", [])
-
-
 async def get_episodes(
     last_n: int = 50, agent_id: str | None = None, private_only: bool = False
 ) -> list[dict]:

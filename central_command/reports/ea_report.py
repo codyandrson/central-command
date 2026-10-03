@@ -104,6 +104,15 @@ async def snapshot(since: datetime) -> dict:
         },
         "work_ledger_by_state": await repo.ledger_counts(),
         "tasks_by_status": await repo.task_counts(),
+        # Every task not yet terminal — who owes what inside the control
+        # plane. Titles only: the instructions are one read away.
+        "open_tasks": [
+            {"task_id": t["id"], "title": (t.get("title") or "")[:160],
+             "agent_id": t.get("agent_id"), "status": t["status"],
+             "created_at": _iso(t.get("created_at"))}
+            for t in await repo.list_tasks(limit=0)
+            if t["status"] not in repo.TASK_TERMINAL
+        ],
         # WINDOWED — what changed since `since`.
         "activity": by_kind,
         "awaiting_decision": [

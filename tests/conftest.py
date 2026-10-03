@@ -67,6 +67,29 @@ def no_custom_field_discovery(monkeypatch):
     monkeypatch.setattr(jira, "_custom_fields_cache", (float("inf"), []))
 
 
+@pytest.fixture(autouse=True)
+def _no_live_tracker_read():
+    """The EA's contact reads the issue tracker for open follow-ups. A checkout
+    whose `.env` carries real Jira credentials would send every test that
+    builds a contact to the real tracker, so the read is unconfigured here;
+    tests/test_ea_followups.py puts the real function back and stubs the
+    client under it.
+
+    Set and restored by hand, NOT through `monkeypatch`: requesting that
+    fixture here would create it before `isolated_queue`, so it would be
+    undone AFTER that fixture's teardown — which would then connect with
+    whatever database URL a test had patched in."""
+    from central_command.reports import ea_followups
+
+    async def unconfigured(max_issues: int = 15) -> dict:
+        return {"available": False, "reason": "not configured"}
+
+    real = ea_followups.tracked
+    ea_followups.tracked = unconfigured
+    yield
+    ea_followups.tracked = real
+
+
 @pytest.fixture(scope="session", autouse=True)
 def no_live_graph_writes():
     """The knowledge graph is not a test fixture — refuse a real write.

@@ -4,6 +4,50 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-03 — v2.59.0: follow-ups leave the graph
+
+The executive assistant kept its follow-ups — commitments and open questions
+— as private graph episodes, and read them back into every brief. A follow-up
+is state: it opens, it has an owner, it closes. The graph holds facts and
+cannot close anything; a "closing episode" retires the old fact only if the
+extractor happens to invalidate it. On a live instance the first thing the
+mechanism recorded was the agent's own run state ("the next resumed run
+should continue the tour"), which extraction rightly turned into nothing,
+which the verification worklist flagged as a failure, which the curator then
+"fixed" by building entities and relationships for it by hand.
+
+- **Follow-ups are routed by kind, to stores that can close them.** The EA's
+  built-in charter no longer says to record them as episodes. A question only
+  the operator can settle is an `ask_operator` item; work a teammate owes is
+  a task; a dated commitment is an issue in the tracker, labelled
+  `follow-up`, filed by the teammate who holds the tracker (the EA proposes
+  the task, it is granted nothing new). With no such teammate the commitment
+  is stated in the report and not tracked.
+- **An agent's own run state is not recorded separately at all.** The
+  transcript, the open ask and the tasks that exist already hold it; the
+  charter says to put "where I am" in the ask or conclusion being written
+  anyway, and never in a graph episode, a task or an issue of its own.
+- **The `graph.add_episode` retention test refuses process state for every
+  agent, in any scope** — where a run got to, what the next run should do, a
+  commitment or question still open.
+- **The EA's brief reads what replaced the graph block.** `follow_ups` (a
+  semantic search of the EA's private partition) is gone. `open_tasks` lists
+  every unfinished task; `tracked_follow_ups` lists the tracker's open
+  `follow-up` issues, soonest due first, and is omitted when Jira is not
+  configured. A tracker outage degrades that one key and never the contact.
+  `graphiti.search_private_facts` had no other caller and is removed.
+- **An empty extraction has a door that is not the curator.** In the Verify
+  tab a row whose extraction produced nothing now says that this can be the
+  right result and offers **Nothing expected** (the existing confirm, closing
+  the row without a task). And the curator's remediation brief names no
+  change as a valid outcome: for a text with no durable fact in it, say so
+  and propose nothing.
+- **Applying it:** the code half needs nothing by hand. Two things do, on a
+  deployment that has run the EA: its STORED charter is a governed version
+  and keeps the old paragraph until it is revised (the built-in is only the
+  fallback), and episodes already written to the EA's private partition stay
+  there until curated out.
+
 ## 2026-10-03 — v2.58.3: a late k3s no longer leaves the control plane dead
 
 - **The three long-running k3s host units `Want` k3s instead of `Require`

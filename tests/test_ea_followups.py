@@ -1,12 +1,14 @@
-"""The EA's follow-up read — slice B of EA widening (2026-08-06).
+"""The EA's follow-up read — the issue tracker's open follow-up issues.
 
-Mirrors tests/test_ea_calendar.py's shape: `open_loops()` is a SIBLING read
-over HTTP that can fail, and the anchor property is that a graph outage
-degrades the EA's contact and never cancels it (see
-tests/test_ea_calendar.py's `test_a_calendar_outage_degrades_the_contact_but_never_cancels_it`
-for the analogous calendar assertion; the follow-up equivalent lives here).
+Until v2.59.0 follow-ups were private graph episodes; they are tracker issues
+now (see `reports/ea_followups.py` for why). Mirrors tests/test_ea_calendar.py's
+shape: `tracked()` is a SIBLING read over HTTP that can fail, and the anchor
+property is that a tracker outage degrades the EA's contact and never cancels
+it.
 
-NO NETWORK: `graphiti.search_private_facts` is monkeypatched in every test.
+NO NETWORK: `jira.search_issues` is monkeypatched in every test. conftest
+replaces `ea_followups.tracked` for the whole suite; `_REAL_TRACKED` is the
+function as imported, put back by the fixture below.
 """
 
 from __future__ import annotations
@@ -18,10 +20,20 @@ import pytest
 from central_command.config import settings
 from central_command.db import repo
 from central_command.heartbeat import actions as hb_actions
-from central_command.integrations import calendar_facade, graphiti
+from central_command.integrations import calendar_facade, jira
 from central_command.reports import ea_followups
-from central_command.runtime.ea_profile import AGENT_ID
+from central_command.runtime import ea_profile, packs
 from tests.conftest import needs_pg
+
+_REAL_TRACKED = ea_followups.tracked
+
+_ISSUE = {
+    "issue_key": "TASKS-7", "summary": "Vendor owes the SLA answer",
+    "status": "To Do", "issue_type": "Task", "labels": ["follow-up"],
+    "due_date": "2026-10-09", "updated": "2026-10-02T10:00:00Z",
+    "assignee": None, "parent": None, "link_count": 0,
+    "url": "https://jira.example.com/browse/TASKS-7",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -30,54 +42,66 @@ def configured(monkeypatch):
     monkeypatch.setattr(settings, "executor_mode", "dry_run")
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "ea_contact_budget_per_day", 0)
-    # No calendar token: keeps these tests about follow_ups, not calendar.
+    # No calendar token: keeps these tests about follow-ups, not calendar.
     monkeypatch.setattr(settings, "calendar_facade_token", "")
+    monkeypatch.setattr(ea_followups, "tracked", _REAL_TRACKED)
+    monkeypatch.setattr(jira, "configured", lambda: True)
+
+
+def _found(*issues):
+    async def fake(jql, limit=None):
+        assert ea_profile.FOLLOW_UP_LABEL in jql
+        assert "statusCategory != Done" in jql
+        return {"ok": True, "issues": list(issues), "count": len(issues),
+                "truncated": False}
+    return fake
 
 
 # --- the reader itself -----------------------------------------------------
 
 
-async def test_open_loops_returns_a_compact_fact_list(monkeypatch):
-    async def fake(agent_id, query, max_facts=8):
-        assert agent_id == AGENT_ID
-        return [{"fact": "Ping vendor about the SLA by Friday", "valid_at": "2026-08-05"}]
-
-    monkeypatch.setattr(graphiti, "search_private_facts", fake)
-    out = await ea_followups.open_loops()
+async def test_tracked_returns_a_compact_issue_list(monkeypatch):
+    monkeypatch.setattr(jira, "search_issues", _found(_ISSUE))
+    out = await ea_followups.tracked()
     assert out == {
         "available": True,
         "count": 1,
-        "facts": [{"fact": "Ping vendor about the SLA by Friday",
-                   "valid_at": "2026-08-05", "invalid_at": None}],
+        "truncated": False,
+        "issues": [{"issue_key": "TASKS-7",
+                    "summary": "Vendor owes the SLA answer",
+                    "status": "To Do", "due_date": "2026-10-09",
+                    "assignee": None,
+                    "url": "https://jira.example.com/browse/TASKS-7"}],
     }
 
 
-async def test_open_loops_is_empty_and_honest_when_there_is_nothing_open(monkeypatch):
-    async def fake(agent_id, query, max_facts=8):
-        return []
-
-    monkeypatch.setattr(graphiti, "search_private_facts", fake)
-    out = await ea_followups.open_loops()
-    assert out == {"available": True, "count": 0, "facts": []}
+async def test_tracked_is_empty_and_honest_when_there_is_nothing_open(monkeypatch):
+    monkeypatch.setattr(jira, "search_issues", _found())
+    out = await ea_followups.tracked()
+    assert out == {"available": True, "count": 0, "truncated": False, "issues": []}
 
 
-async def test_open_loops_raises_on_a_transport_failure():
+async def test_an_unconfigured_tracker_is_said_so_and_never_called(monkeypatch):
+    async def _explode(*a, **kw):
+        raise AssertionError("an unconfigured tracker must not be called")
+
+    monkeypatch.setattr(jira, "configured", lambda: False)
+    monkeypatch.setattr(jira, "search_issues", _explode)
+    assert await ea_followups.tracked() == {
+        "available": False, "reason": "not configured"}
+
+
+async def test_tracked_raises_on_a_transport_failure(monkeypatch):
     """It does NOT swallow its own failure — same shape as `ea_calendar.day()`,
     which also raises and leaves degrading to the caller (heartbeat/actions.py).
     """
 
-    async def boom(agent_id, query, max_facts=8):
-        raise ConnectionError("graph down")
+    async def boom(jql, limit=None):
+        raise ConnectionError("tracker down")
 
-    import central_command.reports.ea_followups as mod
-
-    orig = graphiti.search_private_facts
-    try:
-        graphiti.search_private_facts = boom
-        with pytest.raises(ConnectionError):
-            await mod.open_loops()
-    finally:
-        graphiti.search_private_facts = orig
+    monkeypatch.setattr(jira, "search_issues", boom)
+    with pytest.raises(ConnectionError):
+        await ea_followups.tracked()
 
 
 # --- the EA's contact --------------------------------------------------------
@@ -97,32 +121,46 @@ def stub_task(monkeypatch):
     return seen
 
 
+def _block(brief: str) -> dict:
+    return json.loads(brief.split("```json\n")[1].split("\n```")[0])
+
+
 @needs_pg
-async def test_the_brief_carries_follow_ups_and_says_to_narrate_them(
+async def test_the_brief_carries_tracked_follow_ups_and_open_tasks(
     monkeypatch, stub_task
 ):
-    async def fake(agent_id, query, max_facts=8):
-        return [{"fact": "Waiting on the vendor's SLA answer", "valid_at": None}]
-
-    monkeypatch.setattr(graphiti, "search_private_facts", fake)
+    monkeypatch.setattr(jira, "search_issues", _found(_ISSUE))
 
     await hb_actions._ea_contact("sched_fu_ok", {"kind": "check_in"})
 
     brief = stub_task[0]
-    assert "prior private episodes" in brief
-    block = json.loads(brief.split("```json\n")[1].split("\n```")[0])
-    assert block["follow_ups"]["available"] is True
-    assert block["follow_ups"]["count"] == 1
+    assert "`tracked_follow_ups` is the issue tracker's open issues" in brief
+    block = _block(brief)
+    assert block["tracked_follow_ups"]["count"] == 1
+    assert isinstance(block["open_tasks"], list)
+    # The graph-backed block is gone, and so is its instruction.
+    assert "follow_ups" not in block
+    assert "closing episode" not in brief
 
 
 @needs_pg
-async def test_a_follow_up_outage_degrades_the_contact_but_never_cancels_it(
+async def test_an_unconfigured_tracker_leaves_the_block_out(monkeypatch, stub_task):
+    monkeypatch.setattr(jira, "configured", lambda: False)
+
+    await hb_actions._ea_contact("sched_fu_none", {"kind": "check_in"})
+
+    assert "tracked_follow_ups" not in _block(stub_task[0])
+    assert "`tracked_follow_ups` is" not in stub_task[0]
+
+
+@needs_pg
+async def test_a_tracker_outage_degrades_the_contact_but_never_cancels_it(
     monkeypatch, stub_task
 ):
-    async def boom(agent_id, query, max_facts=8):
-        raise ConnectionError("graph down")
+    async def boom(jql, limit=None):
+        raise ConnectionError("tracker down")
 
-    monkeypatch.setattr(graphiti, "search_private_facts", boom)
+    monkeypatch.setattr(jira, "search_issues", boom)
 
     from central_command import events
 
@@ -139,21 +177,21 @@ async def test_a_follow_up_outage_degrades_the_contact_but_never_cancels_it(
 
     assert out["delivered"] is True
     assert hb_actions.EA_DELIVERED_EVENT in emitted
-    block = json.loads(stub_task[0].split("```json\n")[1].split("\n```")[0])
-    assert block["follow_ups"]["available"] is False
-    assert block["follow_ups"]["error"]
+    block = _block(stub_task[0])
+    assert block["tracked_follow_ups"]["available"] is False
+    assert block["tracked_follow_ups"]["error"]
 
 
 @needs_pg
-async def test_a_budget_deferred_contact_makes_zero_graph_calls(monkeypatch):
+async def test_a_budget_deferred_contact_makes_zero_outside_calls(monkeypatch):
     """Same rule as the calendar: nothing delivered, nothing spent — including
-    no read of the EA's own graph partition."""
+    no read of the tracker."""
     monkeypatch.setattr(settings, "ea_contact_budget_per_day", 3)
 
     async def _explode(*a, **kw):
-        raise AssertionError("the graph must not be read for a deferred contact")
+        raise AssertionError("nothing outside is read for a deferred contact")
 
-    monkeypatch.setattr(graphiti, "search_private_facts", _explode)
+    monkeypatch.setattr(jira, "search_issues", _explode)
     monkeypatch.setattr(calendar_facade, "list_events", _explode)
 
     async def spent(kind, actor, since):
@@ -163,3 +201,42 @@ async def test_a_budget_deferred_contact_makes_zero_graph_calls(monkeypatch):
 
     out = await hb_actions._ea_contact("sched_fu_broke", {"kind": "digest"})
     assert out["delivered"] is False
+
+
+# --- the rule the read replaced ----------------------------------------------
+
+
+def test_the_charter_routes_follow_ups_away_from_the_graph():
+    """A follow-up is state, and the graph cannot close anything. The charter
+    used to tell the EA to record commitments, open questions — and, in
+    practice, its own run state — as private episodes."""
+    charter = ea_profile.CHARTER
+    assert "TRACK FOLLOW-UPS AS THEIR OWN EPISODES" not in charter
+    assert "CLOSING episode" not in charter
+    assert "NEVER IN THE GRAPH" in charter
+    assert f"labelled `{ea_profile.FOLLOW_UP_LABEL}`" in charter
+    assert "YOUR OWN RUN STATE IS ALREADY KEPT" in charter
+    assert "not a graph episode, not a task, not an issue" in charter
+
+
+def test_the_episode_pack_refuses_process_state_for_every_agent():
+    cap = next(c for c in packs.PACKS["graph-propose"].capabilities
+               if c.name == "graph.add_episode")
+    assert "PROCESS STATE IS NEVER AN EPISODE, in any scope" in cap.notes
+
+
+async def test_the_curator_brief_names_no_change_as_a_valid_outcome(monkeypatch):
+    """An empty extraction of a text with no durable fact in it is correct. The
+    brief used to offer the curator only one outcome — make the graph say what
+    the text says — so it built entities for a run-state note."""
+    from central_command.gateway import graph_auditor
+
+    async def body(row):
+        return "The next resumed run should continue the tour."
+
+    monkeypatch.setattr(graph_auditor, "_approved_episode_body", body)
+    brief = await graph_auditor.remediation_instructions(
+        {"id": "ver_1", "group_id": "central_command_ea", "scope": "private",
+         "delta": {}}, "Should something have been created from this?")
+    assert "NO CHANGE IS A VALID OUTCOME" in brief
+    assert "propose nothing" in brief

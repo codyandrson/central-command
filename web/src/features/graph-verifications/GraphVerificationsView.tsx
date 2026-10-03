@@ -171,6 +171,10 @@ function AwaitingCard({ row, confirm, problem }: {
   const [acting, setActing] = useState<'' | 'confirm' | 'problem'>('');
   const [error, setError] = useState('');
   const flags = mechanicalMessages(row.mechanical);
+  // An empty extraction is not always a defect: a text with no durable fact
+  // in it SHOULD produce nothing, and that outcome needs a door that does not
+  // task the curator to invent a graph for it.
+  const nothingExtracted = Boolean(row.mechanical.empty_delta) && !row.mechanical.missing;
 
   const act = useCallback(async (kind: 'confirm' | 'problem') => {
     setActing(kind); setError('');
@@ -235,6 +239,13 @@ function AwaitingCard({ row, confirm, problem }: {
 
       <div className="mt-3 border-t border-border/40 pt-3">
         {error && <p className="mb-2 text-[0.733rem] text-destructive">{error}</p>}
+        {nothingExtracted && (
+          <p className="mb-2 text-[0.733rem] text-muted-foreground">
+            Nothing was extracted. If the approved text holds no durable fact,
+            that is the right result — close it with “Nothing expected”. Use
+            “Problem…” only if something should have been created.
+          </p>
+        )}
         {showProblem && (
           <>
             <textarea
@@ -265,7 +276,7 @@ function AwaitingCard({ row, confirm, problem }: {
             className="border-green/30 bg-green/8 text-green hover:bg-green/12"
           >
             <Check size={13} />
-            {acting === 'confirm' ? 'Confirming…' : 'Confirm'}
+            {acting === 'confirm' ? 'Confirming…' : nothingExtracted ? 'Nothing expected' : 'Confirm'}
           </Button>
           {showProblem ? (
             <Button

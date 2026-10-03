@@ -172,7 +172,11 @@ async def remediation_instructions(row: dict, note: str) -> str:
     return (
         "A knowledge-graph write diverged from what the operator approved. "
         "Propose the MINIMAL gated curation edits that make the graph say what "
-        "the approved text says.\n\n"
+        "the approved text says. NO CHANGE IS A VALID OUTCOME: if the approved "
+        "text states no durable fact about the world — an agent's own run or "
+        "session state, a note to itself — an empty extraction is the right "
+        "extraction. Say so in plain text and propose nothing; never build "
+        "entities or relationships just so the episode has some.\n\n"
         f"verification_id (carry this in every action's arguments): {row['id']}\n"
         f"Graph group: {row['group_id']} (scope {row['scope']})\n\n"
         f"APPROVED EPISODE TEXT:\n---\n{approved}\n---\n\n"

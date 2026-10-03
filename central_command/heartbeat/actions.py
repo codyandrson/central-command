@@ -581,15 +581,15 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
         snapshot["calendar"] = calendar
 
     # Same rule as the calendar, same placement: AFTER the budget check, so a
-    # deferred contact makes no graph call either. An outage degrades this key
-    # and never the contact — `follow_ups` always ends up in the block, unlike
-    # `calendar` which is omitted when unconfigured (there is no "not
-    # configured" state for the graph: it is always in play).
+    # deferred contact makes no tracker call either. An outage degrades this
+    # key and never the contact; like `calendar`, it is omitted when the
+    # tracker is not configured.
     try:
-        follow_ups = await ea_followups.open_loops()
+        tracked = await ea_followups.tracked()
     except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
-        follow_ups = {"available": False, "error": str(e)}
-    snapshot["follow_ups"] = follow_ups
+        tracked = {"available": False, "error": str(e)}
+    if tracked.get("reason") != "not configured":
+        snapshot["tracked_follow_ups"] = tracked
 
     brief = (
         f"{_EA_FRAMING[kind]}\n\n"
@@ -605,12 +605,17 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
            "it should change, propose the change (if you hold that pack) or "
            "tell the operator, and never imply anything has already been "
            "created, moved or cancelled.\n" if "calendar" in snapshot else "")
-        + ("`follow_ups` is a read of YOUR OWN prior private episodes — the "
-           "commitments and open questions you have already distilled and "
-           "recorded. It is GROUND TRUTH for what is currently open: narrate "
-           "it, never re-derive it. When something in the window resolves one "
-           "of these, propose a closing episode naming what resolved it.\n"
-           if follow_ups.get("available") else "")
+        + "`open_tasks` is every task not yet finished, and "
+        "`open_operator_items` every question still waiting on the operator: "
+        "together they are what the team currently owes and is owed inside "
+        "the control plane.\n"
+        + ("`tracked_follow_ups` is the issue tracker's open issues labelled "
+           "as follow-ups, soonest due first — the dated commitments. It is "
+           "GROUND TRUTH for what is currently open: narrate it, never "
+           "re-derive it, and say which are due or overdue. You do not close "
+           "these yourself; when something in the window resolves one, say so "
+           "and name the issue.\n"
+           if tracked.get("available") else "")
         + "\n"
         "```json\n" + json.dumps(snapshot, indent=2, default=str) + "\n```\n\n"
         "If this is worth the operator's attention AND you have a question only "
