@@ -55,6 +55,18 @@ def test_every_enforced_policy_names_its_guard_test():
 # and should fail on arrival rather than pass silently.
 _BANNED_RUNTIME_IMPORTS = frozenset({"gateway", "skills", "executor"})
 
+# The knowledge graph's WRITE path, module by module (design record 2026-10-04,
+# D6). Agents' graph reads run over bolt in-process now, so "the runtime tier
+# holds no bolt" is retired; the rule that replaces it is that `runtime/`
+# holds no WRITE path: not the ingest worker, not the builder of the Graphiti
+# object (which carries add_episode/remove_episode), not the curation writer.
+# `integrations.graphiti` — the reads — stays importable.
+_BANNED_RUNTIME_MODULES = frozenset({
+    "central_command.integrations.graphiti_ingest",
+    "central_command.integrations.graphiti_client",
+    "central_command.integrations.neo4j_writer",
+})
+
 
 def _banned_import(node: ast.AST, package_parts: tuple[str, ...]) -> str | None:
     """The banned subpackage `node` reaches, or None.
@@ -85,6 +97,8 @@ def _banned_import(node: ast.AST, package_parts: tuple[str, ...]) -> str | None:
         # name directly under `central_command`.
         if len(parts) >= 2 and parts[0] == "central_command" and parts[1] in _BANNED_RUNTIME_IMPORTS:
             return dotted
+        if any(dotted == m or dotted.startswith(m + ".") for m in _BANNED_RUNTIME_MODULES):
+            return dotted
     return None
 
 
@@ -108,6 +122,60 @@ def test_runtime_never_imports_the_gateway_tier():
                     f"{rel} line {node.lineno} imports {hit!r} — runtime/ may "
                     "never reach the write tier"
                 )
+
+
+def test_the_graph_write_modules_are_banned_in_every_import_spelling():
+    """The module ban resolves every spelling, like the subpackage ban does."""
+    cases = {
+        "import central_command.integrations.graphiti_ingest": True,
+        "from central_command.integrations import graphiti_client": True,
+        "from central_command.integrations.neo4j_writer import create_node": True,
+        "from ..integrations import graphiti_ingest": True,
+        "from central_command.integrations import graphiti": False,
+        "from central_command.integrations import neo4j_reader": False,
+    }
+    for source, banned in cases.items():
+        node = ast.parse(source).body[0]
+        hit = _banned_import(node, ("central_command", "runtime"))
+        assert (hit is not None) is banned, (source, hit)
+
+
+def test_the_graph_read_module_reaches_its_client_only_lazily():
+    """`runtime/` imports `integrations/graphiti.py` (the reads). That module
+    may reach the Graphiti object — which carries write methods — only through
+    a FUNCTION-LOCAL import, so importing the read module loads no write path
+    and the runtime ban above stays checkable. It calls no write method."""
+    path = Path(executor.__file__).parents[1] / "integrations" / "graphiti.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:  # MODULE level only
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            hit = _banned_import(node, ("central_command", "integrations"))
+            assert hit is None, f"graphiti.py imports {hit!r} at module level"
+    writes = {"add_episode", "add_episode_bulk", "add_triplet", "remove_episode",
+              "build_indices_and_constraints", "ensure_indices", "enqueue"}
+    called = {
+        n.attr for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute) and n.attr in writes
+    }
+    assert called == set(), f"graphiti.py touches graph write methods: {sorted(called)}"
+
+
+def test_importing_the_app_does_not_import_graphiti_core():
+    """graphiti_core reads SEMAPHORE_LIMIT and the telemetry switch at import;
+    `graphiti_client` sets both first, which only works if nothing loaded at
+    application start imports the package before it."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "import sys, central_command.api.app; "
+         "print(any(m == 'graphiti_core' or m.startswith('graphiti_core.') for m in sys.modules))"],
+        capture_output=True, text=True, timeout=110,
+        cwd=Path(executor.__file__).parents[2],
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip().splitlines()[-1] == "False"
 
 
 # --- audit-trail browsing (needs Postgres, same convention as test_eventlog) --

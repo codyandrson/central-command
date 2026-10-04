@@ -7,8 +7,7 @@ first half was not, and it is the weaker half of the pair: every client under
 `central_command/integrations/` holds real credentials and exposes its reads and
 its WRITES side by side in the same module. `jira.get_issue` and
 `jira.transition_issue` are one import apart; so are `confluence.get_page` and
-`confluence.trash_page`, `graphiti.search_facts` and `graphiti.add_episode`,
-`email_facade.get_message` and `email_facade.report_spam`, `litellm.list_models`
+`confluence.trash_page`, `email_facade.get_message` and `email_facade.report_spam`, `litellm.list_models`
 and `litellm.delete_model`.
 
 Nothing mechanical stopped a `propose_*` tool from being "simplified" into the
@@ -71,8 +70,9 @@ READ_ALLOWLIST: dict[str, set[str]] = {
         "get_issue", "get_merge_request", "list_commits", "list_instances",
         "list_issues", "list_merge_requests", "read_file", "search_repos",
     },
-    # `add_episode` is the graph WRITE and is deliberately absent: the runtime
-    # reaches it only as a `graph.add_episode` proposal the Executor performs.
+    # The graph WRITE is not in `graphiti` at all any more (the ingest worker,
+    # `graphiti_ingest`, which runtime/ may not import — test_governance.py);
+    # the runtime reaches it only as a `graph.add_episode` proposal.
     "graphiti": {
         "get_group_episodes", "known_groups", "search_facts", "search_nodes",
         "steward_map",

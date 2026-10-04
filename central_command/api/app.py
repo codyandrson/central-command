@@ -170,6 +170,22 @@ async def lifespan(app: FastAPI):
         await _repo.reclaim_stale_work_items(0)
     except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
         pass
+    # The durable graph ingest worker (design record 2026-10-04, D5). ON by
+    # default, unlike the loops below: it is the only thing that lands an
+    # APPROVED episode, so "off" means approvals queue and nothing extracts
+    # (CC_GRAPH_INGEST_ENABLED=false; the test suite sets it). Started before
+    # the heartbeat so its cutover — pre-queue approvals that never landed —
+    # usually runs ahead of the verification sweep (the sweep applies the
+    # same rule if it gets there first). Its start does no I/O beyond the
+    # lease; recovery, index DDL and the cutover run on its own first ticks.
+    if settings.graph_ingest_enabled:
+        try:
+            from central_command.gateway import graph_auditor
+            from central_command.integrations import graphiti_ingest
+
+            await graphiti_ingest.worker.start(cutover=graph_auditor.enqueue_cutover)
+        except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+            pass
     # Opt-in (CC_DISPATCH_ENABLED / CC_FEED_ENABLED / CC_HEARTBEAT_ENABLED):
     # background loops never start by surprise.
     if settings.dispatch_enabled:
@@ -228,6 +244,12 @@ async def lifespan(app: FastAPI):
     await sweeper.stop()
     await feed.stop()
     await dispatcher.stop()
+    # An extraction in flight is cancelled and left RUNNING; the next start's
+    # recovery decides it by its marker.
+    from central_command.integrations import graphiti_ingest as _ingest
+
+    with contextlib.suppress(Exception):
+        await _ingest.worker.stop()
     # Last: everything above may still need a connection to land its stop.
     await repo.close_pool()
 

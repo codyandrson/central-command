@@ -35,8 +35,9 @@ def test_runtime_never_imports_the_writer():
         if "neo4j_writer" in path.read_text(encoding="utf-8")
     ]
     assert offenders == [], (
-        f"{offenders} import the operator write path. Agents reach the graph only "
-        "through Graphiti's MCP server and a gated graph.add_episode proposal."
+        f"{offenders} import the operator write path. Agents READ the graph "
+        "(integrations/graphiti.py) and write only through a gated "
+        "graph.add_episode proposal."
     )
 
 

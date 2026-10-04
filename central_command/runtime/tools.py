@@ -113,7 +113,7 @@ async def search_knowledge_graph(ctx: RunContext, query: str) -> str:
         elif f.get("valid_at"):
             note = f" [valid from {f['valid_at']}]"
         # The relation type is all the payload carries about the endpoints —
-        # search_memory_facts returns source/target as UUIDs, never names, so
+        # search_facts returns source/target as UUIDs, never names, so
         # there is nothing else here to name them with.
         rel = f" ({f['name']})" if f.get("name") else ""
         # The edge uuid leads: graph.update_edge / delete_edge take it, and a
@@ -132,10 +132,10 @@ async def _steward_attribution() -> dict[str, str]:
 
 
 def _steward_note(item: dict, stewards: dict[str, str]) -> str:
-    """Per-item attribution, at whatever granularity the MCP result actually
-    carries: both search_memory_facts and search_nodes return `group_id` per
-    result (graphiti_core's EdgeResult/NodeResult), so stamping is per-fact /
-    per-entity, not a coarser per-search-call guess."""
+    """Per-item attribution, at whatever granularity the search result
+    actually carries: both search_facts and search_nodes return `group_id`
+    per result (graphiti_core's EntityEdge/EntityNode), so stamping is
+    per-fact / per-entity, not a coarser per-search-call guess."""
     group_id = item.get("group_id")
     if not group_id:
         return ""
@@ -180,7 +180,8 @@ async def search_knowledge_graph_entities(ctx: RunContext, query: str) -> str:
 # --- The graph-curate pack's any-partition reads (2026-09-01) -----------------
 # Granted ONLY with graph-curate: they see every agent's private partition,
 # the one deliberate exception to "an agent never reads another's partition".
-# Still reads over the MCP path — no bolt, no credentials, nothing gated.
+# Still reads only (integrations/graphiti.py, in-process) — no write path,
+# nothing gated.
 
 
 async def list_graph_groups(ctx: RunContext) -> str:

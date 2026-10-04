@@ -379,7 +379,7 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
     retried event on the log. Scoped to the rows this test created; the dev
     database is shared."""
     from central_command.gateway import executor, gateway
-    from central_command.integrations import graphiti
+    from central_command.integrations import graphiti_ingest
     from central_command.runtime.run import ingest_and_propose
     from central_command.runtime.spike_model import make_sc1_model, make_spike_model
 
@@ -413,13 +413,13 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
     # write never ran.
     graph_calls: list[tuple] = []
 
-    async def add_episode(name, body, source_description="", group_id=None, reference_time=None):
+    async def enqueue(name, body, source_description, group_id, **kw):
         graph_calls.append((name, body))
         if down["on"]:
-            raise RuntimeError("Connection refused talking to graphiti")
-        return "ack"
+            raise RuntimeError("Connection refused talking to the spine")
+        return {"verification": {"id": "v"}, "job": {"id": 1}}
 
-    monkeypatch.setattr(graphiti, "add_episode", add_episode)
+    monkeypatch.setattr(graphiti_ingest, "enqueue", enqueue)
     sc1 = make_sc1_model()
     parked_exec = await ingest_and_propose(
         "Dana: DEMO-1 slipped, due Aug 3.", model=sc1

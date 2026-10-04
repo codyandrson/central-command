@@ -1,7 +1,8 @@
 """Graph verification tests (2026-08-19 spec).
 
-The properties: a missing episode is a loud operator finding, never a judgment
-question; mechanical failures skip the judgment agent entirely; shadow mode
+The properties: a row waits while its ingest job is queued (the durable queue,
+2026-10-04) and is audited by the episode uuid the job recorded; a missing
+episode is a loud operator finding, never a judgment question; mechanical failures skip the judgment agent entirely; shadow mode
 parks EVERY audited row with the verdict attached; active mode auto-closes
 ONLY aligned + mechanically-clean + addition-only; a delta that invalidates
 existing facts always parks (its class graduates separately); the verdict hits
@@ -79,9 +80,7 @@ def _graph(monkeypatch, episode=EPISODE, delta=None):
 
 
 def _fresh_group() -> str:
-    """The absence deadline counts PENDING rows queued ahead in the GROUP, so
-    a test that wants 'past the deadline' needs a group no earlier test left
-    a PENDING row in."""
+    """A group no other test has rows or ingest jobs in."""
     return f"gv-{_uuid.uuid4().hex[:8]}"
 
 
@@ -95,130 +94,184 @@ async def _row(**kwargs):
 async def _events_for(ref_id):
     rows = await repo.list_events_of_kinds(
         ["graph.audit.verdict", "graph.verification.parked",
-         "graph.verification.confirmed", "graph.verification.resubmitted"])
+         "graph.verification.confirmed", "graph.ingest.failed"])
     return [r for r in rows if r.get("ref_id") == ref_id]
 
 
-async def test_absent_episode_waits_inside_the_ingestion_deadline(monkeypatch):
-    """Ingestion is a serial queue — a batch of approvals lands an hour after
-    execute (measured 2026-08-20, nine healthy episodes false-parked as
-    missing). Inside the deadline, absence means WAIT, not park."""
-    _graph(monkeypatch, episode=None)
-    row = await _row()
-    outcome = await graph_auditor.verify_one(row)  # default 360-minute deadline
-    assert outcome == "waiting"
-    landed = await repo.get_graph_verification(row["id"])
-    assert landed["status"] == "PENDING"
+async def _row_with_job(**kwargs):
+    group = kwargs.pop("group_id", None) or _fresh_group()
+    pid = kwargs.pop("proposal_id", None) or f"p-{_uuid.uuid4().hex[:8]}"
+    ver, job = await repo.create_graph_verification_with_job(
+        proposal_id=pid, episode_name="probe", group_id=group, scope="shared",
+        marker=f"proposal={pid}",
+        payload={"name": "probe", "episode_body": "Ada leads the probe team.",
+                 "source_description": f"x | proposal={pid}",
+                 "reference_time": "2026-01-01T00:00:00Z"},
+    )
+    return ver, job
+
+
+async def _set_job(job_id, **cols):
+    conn = await repo._conn()
+    try:
+        sets = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(cols))
+        await conn.execute(f"update graph_ingest_job set {sets} where id = $1",
+                           job_id, *cols.values())
+    finally:
+        await conn.close()
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "RUNNING"])
+async def test_a_row_whose_job_is_still_open_waits(monkeypatch, status):
+    """No guessing from a row's age any more: the job says it has not run."""
+    async def must_not_read(*a, **k):
+        raise AssertionError("an open job needs no graph read")
+
+    monkeypatch.setattr(neo4j_reader, "episode_by_marker", must_not_read)
+    monkeypatch.setattr(neo4j_reader, "episode_delta", must_not_read)
+    row, job = await _row_with_job()
+    await _set_job(job["id"], status=status)
+    assert await graph_auditor.verify_one(row) == "waiting"
+    assert (await repo.get_graph_verification(row["id"]))["status"] == "PENDING"
     assert await _events_for(row["id"]) == []
 
 
+async def test_a_done_job_is_audited_by_the_uuid_it_recorded(monkeypatch):
+    """The marker lookup is not consulted: the job recorded the episode."""
+    seen = []
+
+    async def no_marker(*a, **k):
+        raise AssertionError("a DONE job's row is audited by its uuid")
+
+    async def get_delta(uuid, window_minutes=30):
+        seen.append(uuid)
+        return _delta()
+
+    monkeypatch.setattr(neo4j_reader, "episode_by_marker", no_marker)
+    monkeypatch.setattr(neo4j_reader, "episode_delta", get_delta)
+    row, job = await _row_with_job()
+    await _set_job(job["id"], status="DONE", episode_uuid="ep-from-job")
+    assert await graph_auditor.verify_one(row) == "awaiting"
+    assert seen == ["ep-from-job"]
+    landed = await repo.get_graph_verification(row["id"])
+    assert landed["episode_uuid"] == "ep-from-job"
+    assert landed["status"] == "AWAITING_OPERATOR"
+
+
+async def test_a_failed_job_whose_park_never_landed_is_parked_from_the_job(monkeypatch):
+    """The worker parks the row when a job fails; a crash between the two
+    writes leaves it PENDING — the sweep lands it from the job's record."""
+    _graph(monkeypatch, episode=None)
+    row, job = await _row_with_job()
+    await _set_job(job["id"], status="FAILED", last_error="JSONDecodeError: truncated")
+    assert await graph_auditor.verify_one(row) == "failed"
+    landed = await repo.get_graph_verification(row["id"])
+    assert landed["status"] == "AWAITING_OPERATOR"
+    assert landed["mechanical"] == {"ingest_failed": True,
+                                    "error": "JSONDecodeError: truncated"}
+    assert [e["kind"] for e in await _events_for(row["id"])] == ["graph.verification.parked"]
+
+
 def _approved(monkeypatch, args=None, approver="human:doe"):
-    """Stub the proposal record behind `_approved_episode` and capture what
-    the sweep re-sends to Graphiti."""
-    from central_command.integrations import graphiti
-
-    sent = []
-
-    # Mirrors graphiti.add_episode's REAL signature: reference_time is
-    # keyword-only with no default. A fake with a default hid the v2.38.0
-    # regression where the re-submit omitted it (found live 2026-09-21).
-    async def fake_add_episode(name, episode_body, source_description, group_id=None,
-                               *, reference_time: str):
-        sent.append(dict(name=name, episode_body=episode_body,
-                         source_description=source_description, group_id=group_id,
-                         reference_time=reference_time))
-        return "queued"
-
+    """Stub the proposal record behind `_approved_episode`."""
     async def fake_approved(row):
         return None if args is None else (args, approver)
 
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(graph_auditor, "_approved_episode", fake_approved)
-    return sent
 
 
 ARGS = {"name": "probe", "episode_body": "Ada leads the probe team.",
         "source_description": "operator statement",
-        "reference_time": "2026-01-01T00:00:00Z"}
+        "reference_time": "2026-01-01T00:00:00+00:00"}
 
 
-async def test_absent_episode_past_the_deadline_is_resubmitted_once(monkeypatch):
-    """Graphiti's ingestion queue is in memory: the nightly Neo4j dump scales
-    it to zero and every acked-but-unextracted episode is gone (2026-09-15,
-    68 in one night). The first absence past the deadline RE-SENDS the approved
-    episode byte-identical to the Executor's send — same marker, so the same
-    lookup finds it — and restarts the clock. The row stays PENDING."""
+async def test_a_pre_queue_row_that_never_landed_is_enqueued_from_its_proposal(monkeypatch):
+    """A row from before the durable queue whose episode the retired server
+    acked and never extracted: enqueued ONCE, byte-identical to the
+    Executor's first send — same marker, the same normalised instant."""
     _graph(monkeypatch, episode=None)
-    sent = _approved(monkeypatch, ARGS)
+    _approved(monkeypatch, ARGS)
     group = _fresh_group()
     row = await _row(group_id=group)
-    assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "resubmitted"
-    assert sent == [dict(
-        name="probe", episode_body="Ada leads the probe team.",
-        source_description="operator statement | trust=human-approved"
-                           " | approver=human:doe | proposal=p-test",
-        group_id=group,
-        # The instant the operator approved, normalised exactly as the
-        # Executor's first send — never omitted, never "now".
-        reference_time="2026-01-01T00:00:00Z")]
-    landed = await repo.get_graph_verification(row["id"])
-    assert landed["status"] == "PENDING"
-    assert landed["resubmitted_at"] is not None
-    assert [e["kind"] for e in await _events_for(row["id"])] == ["graph.verification.resubmitted"]
-    # The deadline now runs from the re-submission, not the original row.
-    assert await graph_auditor.verify_one(landed) == "waiting"
-    assert len(sent) == 1
+    assert await graph_auditor.verify_one(row) == "waiting"
+    job = await repo.ingest_job_for_verification(row["id"])
+    assert job["status"] == "QUEUED" and job["group_id"] == group
+    assert job["payload"] == {
+        "name": "probe", "episode_body": "Ada leads the probe team.",
+        "source_description": "operator statement | trust=human-approved"
+                              " | approver=human:doe | proposal=p-test",
+        "reference_time": "2026-01-01T00:00:00Z",
+    }
+    # Next tick: the job is open, so the row waits — no second enqueue.
+    assert await graph_auditor.verify_one(row) == "waiting"
+    conn = await repo._conn()
+    try:
+        assert await conn.fetchval(
+            "select count(*) from graph_ingest_job where verification_id = $1", row["id"]) == 1
+    finally:
+        await conn.close()
 
 
-async def test_missing_episode_parks_loud_without_judgment(monkeypatch):
-    """A SECOND absence is the finding — no third send, ever."""
-    _graph(monkeypatch, episode=None)
-    sent = _approved(monkeypatch, ARGS)
-    row = await _row(group_id=_fresh_group())
-    assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "resubmitted"
-    row = await repo.get_graph_verification(row["id"])
-    outcome = await graph_auditor.verify_one(row, missing_after_minutes=0)
-    assert outcome == "missing"
-    assert len(sent) == 1
-    landed = await repo.get_graph_verification(row["id"])
-    assert landed["status"] == "AWAITING_OPERATOR"
-    assert landed["mechanical"] == {"missing": True, "resubmitted": True}
-    assert landed["verdict"] is None
-    kinds = [e["kind"] for e in await _events_for(row["id"])]
-    assert kinds == ["graph.verification.resubmitted", "graph.verification.parked"]
-
-
-async def test_nothing_to_resend_parks_missing_at_once(monkeypatch):
+async def test_nothing_to_enqueue_parks_missing_at_once(monkeypatch):
     """An unattributed row has no approved text — the sweep cannot invent an
-    episode, so absence parks on the first miss, marked as never re-sent."""
+    episode, so absence parks on the first miss."""
     _graph(monkeypatch, episode=None)
-    sent = _approved(monkeypatch, None)
+    _approved(monkeypatch, None)
     row = await _row(group_id=_fresh_group())
-    assert await graph_auditor.verify_one(row, missing_after_minutes=0) == "missing"
-    assert sent == []
+    assert await graph_auditor.verify_one(row) == "missing"
+    assert await repo.ingest_job_for_verification(row["id"]) is None
     landed = await repo.get_graph_verification(row["id"])
-    assert landed["mechanical"] == {"missing": True, "resubmitted": False}
+    assert landed["mechanical"] == {"missing": True, "no_approved_text": True}
 
 
-async def test_absence_deadline_stretches_with_the_queue_ahead(monkeypatch):
-    """2026-09-15: a fixed 360-minute deadline re-sent 13 episodes that were
-    merely QUEUED behind a 72-episode replay, and every one landed twice.
-    The MCP server exposes no queue depth, so the PENDING rows queued ahead
-    of a row in its group, at the measured drain rate, stretch the deadline;
-    the floor still applies to the row at the head of the queue."""
+async def test_a_curation_recheck_with_no_episode_parks_missing(monkeypatch):
+    """A re-check row re-reads an episode that already landed; it never
+    re-extracts one."""
     _graph(monkeypatch, episode=None)
-    sent = _approved(monkeypatch, ARGS)
+    _approved(monkeypatch, ARGS)
+    original = await _row(group_id=_fresh_group())
+    recheck = await _row(group_id=original["group_id"], remediation_of=original["id"],
+                         proposal_id="p-cur")
+    assert await graph_auditor.verify_one(recheck) == "missing"
+    assert await repo.ingest_job_for_verification(recheck["id"]) is None
+
+
+async def test_cutover_enqueues_only_absent_pre_queue_rows(monkeypatch):
+    """The once-per-start cutover: absent episodes are enqueued, landed ones
+    are left to the marker lookup, re-check rows and rows that already have
+    a job are never candidates."""
+    landed_marker = f"proposal=p-{_uuid.uuid4().hex[:8]}"
+
+    async def by_marker(marker, group_id):
+        return EPISODE if marker == landed_marker else None
+
+    monkeypatch.setattr(neo4j_reader, "episode_by_marker", by_marker)
+    _approved(monkeypatch, ARGS)
     group = _fresh_group()
-    head = await _row(group_id=group)
-    behind = await _row(group_id=group, proposal_id="p-behind", marker="proposal=p-behind")
-    assert await graph_auditor.absence_deadline_minutes(head, 0) == 0
-    assert await graph_auditor.absence_deadline_minutes(behind, 0) == (
-        graph_auditor.INGEST_MINUTES_PER_EPISODE)
-    # The row behind waits even with the floor at zero; the head does not.
-    assert await graph_auditor.verify_one(behind, missing_after_minutes=0) == "waiting"
-    assert sent == []
-    assert await graph_auditor.verify_one(head, missing_after_minutes=0) == "resubmitted"
-    assert len(sent) == 1
+    absent = await _row(group_id=group, proposal_id="p-a", marker="proposal=p-a")
+    present = await _row(group_id=group, proposal_id="p-b", marker=landed_marker)
+    recheck = await _row(group_id=group, remediation_of=absent["id"], proposal_id="p-c",
+                         marker="proposal=p-a")
+    queued, _job = await _row_with_job(group_id=group)
+
+    candidates = {r["id"] for r in await repo.pending_verifications_without_job()}
+    assert absent["id"] in candidates and present["id"] in candidates
+    assert recheck["id"] not in candidates and queued["id"] not in candidates
+
+    # Scope the cutover to this test's rows (the table is shared).
+    real = repo.pending_verifications_without_job
+    mine = {absent["id"], present["id"], recheck["id"], queued["id"]}
+
+    async def scoped():
+        return [r for r in await real() if r["id"] in mine]
+
+    monkeypatch.setattr(repo, "pending_verifications_without_job", scoped)
+    out = await graph_auditor.enqueue_cutover()
+    assert out == {"enqueued": [absent["id"]], "skipped": []}
+    assert (await repo.ingest_job_for_verification(absent["id"]))["status"] == "QUEUED"
+    assert await repo.ingest_job_for_verification(present["id"]) is None
+    # Run again: idempotent — the enqueued row now has a job.
+    assert (await graph_auditor.enqueue_cutover())["enqueued"] == []
 
 
 def test_render_delta_explains_window_attribution():
@@ -375,8 +428,8 @@ def test_sweep_action_is_registered_and_quiet_when_idle():
     spec = ACTIONS["graph.verify_sweep"]
     assert spec.material is not None
     assert not spec.material({"checked": 0, "auto_verified": 0, "awaiting": 0,
-                              "missing": 0, "resubmitted": 0, "errors": []})
-    assert spec.material({"checked": 1, "resubmitted": 1})
+                              "missing": 0, "waiting": 3, "failed": 0, "errors": []})
+    assert spec.material({"checked": 1, "failed": 1})
     assert spec.material({"checked": 1, "awaiting": 1})
     assert spec.material({"checked": 1, "errors": [{"id": "x"}]})
 

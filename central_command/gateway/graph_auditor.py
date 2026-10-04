@@ -1,11 +1,16 @@
 """Graph verification — mechanical read-back plus the graph-auditor's judgment.
 
 Closes the loop the 2026-08-19 spec names: the approval gate reviews the
-EPISODE, Graphiti's queued extraction runs after it, unreviewed, and the ack
-is not graph state. The Executor leaves a `graph_verification` row per
-approved episode (stamped with a `proposal=<id>` marker); the
-`graph.verify_sweep` heartbeat action drives `verify_sweep()` here over rows
-past a settle delay.
+EPISODE, extraction runs after it, unreviewed. The Executor leaves a
+`graph_verification` row per approved episode (stamped with a
+`proposal=<id>` marker) and, in the same transaction, a `graph_ingest_job`
+(design record 2026-10-04, D5); the `graph.verify_sweep` heartbeat action
+drives `verify_sweep()` here. Since the durable queue the sweep no longer
+infers from the outside whether an episode landed: a row is audited once its
+job is DONE, by the episode uuid the job recorded; a FAILED job has already
+parked its row; a QUEUED/RUNNING one is simply waiting. Rows with no job at
+all — written before the queue existed, or a curation re-check — are still
+found by their marker.
 
 The design rules honoured, in the dismissal auditor's mold (gateway/auditor.py):
 
@@ -221,38 +226,6 @@ async def _approved_episode_body(row: dict) -> str | None:
     return approved[0]["episode_body"] if approved else None
 
 
-async def _resubmit(row: dict) -> bool:
-    """Re-send the approved episode, byte-identical to the Executor's first
-    send (same name, body, provenance stamp and marker), so the sweep finds it
-    by the same marker next tick. Graphiti's ingestion queue is in memory: a
-    restart — the nightly Neo4j dump scales it to zero — drops every episode
-    it had acked but not extracted (2026-09-15: 64 replays and four fresh
-    approvals in one night), and a LiteLLM alias outage drops them one by one.
-    False when nothing can be re-sent: no approved text on record."""
-    from central_command.gateway.executor import (
-        _episode_reference_time,
-        episode_source_description,
-    )
-    from central_command.integrations import graphiti
-
-    approved = await _approved_episode(row)
-    if approved is None:
-        return False
-    args, approver = approved
-    # The SAME instant the Executor sent: `reference_time` is keyword-only
-    # with no default (DL-057), and this call omitted it from v2.38.0 until
-    # v2.39.1 — every re-submission raised TypeError and the sweep logged
-    # "graph verification failed" for the row on every tick. The test fake
-    # had a default the real function does not; it now mirrors the signature.
-    await graphiti.add_episode(
-        args["name"], args["episode_body"],
-        episode_source_description(args.get("source_description", ""), approver, row["marker"]),
-        group_id=row["group_id"],
-        reference_time=_episode_reference_time(args.get("reference_time")),
-    )
-    return True
-
-
 async def _judge(
     row: dict, episode_body: str, delta: dict, model=None
 ) -> GraphAuditVerdict | None:
@@ -296,66 +269,118 @@ async def _judge(
         return None
 
 
-# Measured 2026-09-15 (instance journal): 8-19 minutes per episode while the
-# extraction model's slot is shared with agent turns, not the 2-3 the deadline
-# was first built on. The MCP server exposes no queue depth, so the PENDING
-# rows ahead of a row are the only queue-position signal we have.
-INGEST_MINUTES_PER_EPISODE = 15
+_NO_APPROVED_TEXT = "no approved text on record"
 
 
-async def absence_deadline_minutes(row: dict, floor_minutes: int) -> int:
-    """How long a row may sit with no episode before absence means anything:
-    the floor, or the queue ahead of it at the measured drain rate, whichever
-    is longer. A fixed 360 re-sent 13 merely-queued episodes on 2026-09-15
-    (the sweep saw absence; the serial worker was 6.5 hours behind after a
-    72-episode replay) and every one landed twice."""
-    ahead = await repo.pending_graph_verifications_ahead(row)
-    return max(floor_minutes, ahead * INGEST_MINUTES_PER_EPISODE)
+async def _enqueue_from_proposal(row: dict) -> str | None:
+    """Enqueue one pre-queue row's episode from its APPROVED proposal,
+    byte-identical to the Executor's first send (same name, body, provenance
+    stamp and marker, same normalised reference time). None when queued;
+    otherwise the reason it could not be."""
+    from central_command.gateway.executor import (
+        ExecutorError,
+        _episode_reference_time,
+        episode_source_description,
+    )
+
+    approved = await _approved_episode(row)
+    if approved is None:
+        return _NO_APPROVED_TEXT
+    args, approver = approved
+    try:
+        reference_time = _episode_reference_time(args.get("reference_time"))
+    except ExecutorError as e:
+        return str(e)
+    await repo.create_ingest_job(
+        verification_id=row["id"], proposal_id=row["proposal_id"], group_id=row["group_id"],
+        payload={
+            "name": args["name"],
+            "episode_body": args["episode_body"],
+            "source_description": episode_source_description(
+                args.get("source_description", ""), approver, row["marker"]),
+            "reference_time": reference_time,
+        },
+    )
+    return None
 
 
-async def verify_one(row: dict, model=None, missing_after_minutes: int = 360) -> str:
+async def enqueue_cutover() -> dict:
+    """The cutover to the durable queue, run once per ingest-worker start (the
+    worker is handed this callable; the integrations tier never imports the
+    gate). Every PENDING verification row with no ingest job and no episode in
+    the graph — an approval the retired MCP server acknowledged and never
+    extracted — is enqueued from its approved proposal. A row whose episode IS
+    in the graph needs nothing: the sweep verifies it by marker. Raises if
+    Neo4j cannot answer (the worker retries next tick): enqueueing without
+    looking would extract a landed episode twice. `verify_one` applies the
+    same rule to a row it meets first, so the order of the two never matters."""
+    enqueued: list[str] = []
+    skipped: list[dict] = []
+    for row in await repo.pending_verifications_without_job():
+        if await neo4j_reader.episode_by_marker(row["marker"], row["group_id"]) is not None:
+            continue
+        reason = await _enqueue_from_proposal(row)
+        if reason is None:
+            enqueued.append(row["id"])
+        else:
+            skipped.append({"id": row["id"], "reason": reason})
+    if enqueued or skipped:
+        await events.emit(
+            "graph.ingest.cutover", payload={"enqueued": enqueued, "skipped": skipped},
+            actor="graph-ingest",
+        )
+    return {"enqueued": enqueued, "skipped": skipped}
+
+
+async def _park_missing(row: dict, mechanical: dict) -> str:
+    await repo.finish_graph_verification(
+        row["id"], status="AWAITING_OPERATOR", mechanical=mechanical,
+    )
+    await events.emit(
+        "graph.verification.parked", ref_id=row["id"],
+        payload={"proposal_id": row["proposal_id"], "episode_name": row["episode_name"],
+                 "mechanical": mechanical, "verdict": None},
+        actor="graph-auditor",
+    )
+    return "missing"
+
+
+async def verify_one(row: dict, model=None) -> str:
     """Audit one PENDING verification row and land it. Returns the outcome
     bucket for the sweep's tally:
-    'waiting' | 'resubmitted' | 'missing' | 'auto_verified' | 'awaiting'."""
-    episode = await neo4j_reader.episode_by_marker(row["marker"], row["group_id"])
-    if episode is None:
-        # Absence is only evidence once the row is STALE. Ingestion is a
-        # serial queue on the local model, so a BATCH of approvals lands long
-        # after execute — a 10-minute settle false-parked nine healthy
-        # episodes on 2026-08-20. Inside the deadline (the floor, stretched
-        # by the queue ahead — `absence_deadline_minutes`) the row just stays
-        # PENDING for the next tick. Past it, the episode is re-submitted
-        # ONCE and the clock restarts (Graphiti's queue is in memory — see
-        # `_resubmit`); a second absence IS the silent-drop finding (the
-        # class that lost 25 acked episodes on 2026-08-15).
-        from datetime import datetime, timezone
-
-        since = row.get("resubmitted_at") or row["created_at"]
-        # `since` is the DATABASE's clock and now() is this host's: a DB a few
-        # ms ahead (a podman machine on Windows) makes a fresh row's age negative.
-        age_minutes = max(0.0, (datetime.now(timezone.utc) - since).total_seconds() / 60)
-        if age_minutes < await absence_deadline_minutes(row, missing_after_minutes):
+    'waiting' | 'failed' | 'missing' | 'auto_verified' | 'awaiting'."""
+    job = await repo.ingest_job_for_verification(row["id"])
+    if job is not None:
+        if job["status"] in ("QUEUED", "RUNNING"):
             return "waiting"
-        if row.get("resubmitted_at") is None and await _resubmit(row):
-            await repo.mark_graph_verification_resubmitted(row["id"])
-            await events.emit(
-                "graph.verification.resubmitted", ref_id=row["id"],
-                payload={"proposal_id": row["proposal_id"],
-                         "episode_name": row["episode_name"], "marker": row["marker"]},
-                actor="graph-auditor",
-            )
-            return "resubmitted"
-        mechanical = {"missing": True, "resubmitted": row.get("resubmitted_at") is not None}
-        await repo.finish_graph_verification(
-            row["id"], status="AWAITING_OPERATOR", mechanical=mechanical,
-        )
-        await events.emit(
-            "graph.verification.parked", ref_id=row["id"],
-            payload={"proposal_id": row["proposal_id"], "episode_name": row["episode_name"],
-                     "mechanical": mechanical, "verdict": None},
-            actor="graph-auditor",
-        )
-        return "missing"
+        if job["status"] == "FAILED":
+            # The worker parks the row when the job fails; a row still PENDING
+            # here means that park never landed (a crash between the two
+            # writes) — land it now, from the job's own record.
+            fresh = await repo.get_graph_verification(row["id"])
+            if fresh is not None and fresh["status"] != "PENDING":
+                return "failed"
+            await _park_missing(row, {"ingest_failed": True, "error": job.get("last_error")})
+            return "failed"
+        episode = {"uuid": job["episode_uuid"]}
+    else:
+        # No job: a row from before the durable queue, or a curation re-check
+        # (which re-reads an episode that already landed). Found by marker.
+        episode = await neo4j_reader.episode_by_marker(row["marker"], row["group_id"])
+        if episode is None:
+            if row.get("remediation_of"):
+                return await _park_missing(row, {"missing": True})
+            # A pre-queue approval that never landed: the cutover's rule,
+            # applied here too in case the sweep reaches the row first.
+            reason = await _enqueue_from_proposal(row)
+            if reason is None:
+                return "waiting"
+            mechanical = {"missing": True}
+            if reason == _NO_APPROVED_TEXT:
+                mechanical["no_approved_text"] = True
+            else:
+                mechanical["error"] = reason
+            return await _park_missing(row, mechanical)
 
     delta = await neo4j_reader.episode_delta(episode["uuid"])
     unembedded = [
@@ -441,22 +466,18 @@ async def verify_one(row: dict, model=None, missing_after_minutes: int = 360) ->
     return "awaiting"
 
 
-async def verify_sweep(
-    settle_minutes: int = 10, model=None, missing_after_minutes: int = 360
-) -> dict:
+async def verify_sweep(settle_minutes: int = 10, model=None) -> dict:
     """The heartbeat entry: audit every PENDING row past the settle delay.
-    A row that errors (or whose episode is still queued) stays PENDING and is
-    retried next tick — the sweep can never wedge, and never silently drops a
-    row."""
+    A row that errors (or whose ingest job is still queued) stays PENDING and
+    is retried next tick — the sweep can never wedge, and never silently
+    drops a row."""
     rows = await repo.due_graph_verifications(settle_minutes)
     summary = {"checked": 0, "auto_verified": 0, "awaiting": 0, "missing": 0,
-               "waiting": 0, "resubmitted": 0, "errors": []}
+               "waiting": 0, "failed": 0, "errors": []}
     for row in rows:
         summary["checked"] += 1
         try:
-            outcome = await verify_one(
-                row, model=model, missing_after_minutes=missing_after_minutes
-            )
+            outcome = await verify_one(row, model=model)
             summary[outcome] += 1
         except Exception as e:  # noqa: BLE001 — one bad row must not starve the rest
             log.exception("graph verification failed for %s", row["id"])

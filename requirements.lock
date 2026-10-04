@@ -21,6 +21,7 @@ asyncpg==0.31.0
 attrs==26.1.0
 authlib==1.7.2
 babel==2.18.0
+backoff==2.2.1
 beartype==0.22.9
 beautifulsoup4==4.15.0
 cached-property==2.0.1
@@ -54,6 +55,7 @@ genai-prices==0.1.4
 google-auth==2.56.3
 google-genai==2.19.0
 googleapis-common-protos==1.75.1
+graphiti-core==0.30.2
 griffelib==2.2.0
 h11==0.16.0
 htmldate==1.10.0
@@ -115,6 +117,7 @@ pdfplumber==0.11.10
 pillow==12.3.0
 platformdirs==4.11.3
 pluggy==1.6.0
+posthog==7.62.1
 prompt-toolkit==3.0.53
 protobuf==7.36.0
 py-key-value-aio==0.4.5

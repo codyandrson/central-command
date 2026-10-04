@@ -1,9 +1,10 @@
 """OPERATOR curation writes against the Graphiti graph — the write half of the
 cockpit Graph panel (increment #1 of the 2026-08-09 graph-inspection spec).
 
-**This is not an agent path and must never become one.** Agents reach the graph
-only through Graphiti's MCP server, and the one write they can cause is a gated
-`graph.add_episode` proposal. What lives here is the operator's own hand on the data:
+**This is not an agent path and must never become one.** Agents READ the graph
+(in-process, `integrations/graphiti.py`), and the one write they can cause is a
+gated `graph.add_episode` proposal, which the ingest worker extracts after
+approval. What lives here is the operator's own hand on the data:
 delete a hallucinated node, fix a wrong edge, add a fact the extractor missed.
 There is no approval gate because the operator IS the gate — the corollary is
 that nothing in `runtime/` may import this module, exactly as with `gateway/`.

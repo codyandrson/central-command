@@ -15,10 +15,21 @@ dependencies = [
     "httpx>=0.27",
     # Cron-expression schedules for the heartbeat (D27).
     "croniter>=2.0",
-    # Read-only bolt reads for the cockpit Graph panel
-    # (integrations/neo4j_reader.py). Agents still reach the graph only
-    # through Graphiti's MCP — this is the API tier's own client.
+    # Bolt for the cockpit Graph panel (integrations/neo4j_reader.py, every
+    # session READ_ACCESS), the operator's curation writer
+    # (integrations/neo4j_writer.py) and graphiti-core's own driver. Agents'
+    # graph reads run over it in-process too; what `runtime/` may never hold
+    # is a WRITE path (tests/test_governance.py enforces the import graph).
     "neo4j>=5",
+    # The knowledge graph's extraction and search, in-process (design record
+    # 2026-10-04, D1) — it replaced the Graphiti MCP server, whose in-memory
+    # queue acknowledged episodes and then dropped them. EXACT pin: the two
+    # upstream fixes we carry (deploy/graphiti-patches/, applied by
+    # scripts/apply_graphiti_patches.py after every install) are written
+    # against this version and refuse any other. Raising it is a deliberate
+    # act: bump here AND `graphiti_patches.PINNED_VERSION` (a test pins them
+    # equal), re-cut both patches, run the full suite.
+    "graphiti-core==0.30.2",
     # The Executor parses proposed LiteLLM config files before writing them
     # (litellm.apply_config_change); deploy/pi/litellm/policy.py reads the
     # routing declaration with it too.
@@ -48,9 +59,10 @@ dependencies = [
 # M0/M1 spine can be built and tested without the heavier runtime stack.
 # NOTE: confirm exact versions against current docs at M2 (see Phase-1 plan §7).
 # `dbos` and `mcp` were declared here for a future that arrived differently:
-# durability is Postgres + `runtime/durable.py`, and the only MCP we speak is
-# Graphiti's, over HTTP in `integrations/graphiti.py`. Nothing imports either
-# package (grep, 2026-08-01) — removed rather than left as a claim.
+# durability is Postgres + `runtime/durable.py`, and the graph is reached
+# through graphiti-core in-process (core dependencies above) — no MCP client
+# at all. Nothing imports either package (grep, 2026-08-01) — removed rather
+# than left as a claim.
 runtime = [
     # Pinned to the TESTED minor. Unpinned, a fresh install resolved 2.33.0 and
     # failed test_skills_delivery (rehearsal finding F9, 2026-08-21) — every

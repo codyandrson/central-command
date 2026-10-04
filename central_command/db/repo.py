@@ -4634,59 +4634,22 @@ async def graph_verification_for_proposal(proposal_id: str) -> dict | None:
 
 
 async def due_graph_verifications(settle_minutes: int, limit: int = 20) -> list[dict]:
-    """PENDING rows past the settle delay — old enough that Graphiti's queued
-    extraction should have landed, so a missing episode is a finding, not a
-    race."""
+    """PENDING rows past the settle delay. Whether a row is READY is no
+    longer inferred from its age: the sweep reads the row's ingest job
+    (`ingest_job_for_verification`) and waits while it is QUEUED/RUNNING."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
             """
             select * from graph_verification
              where status = 'PENDING'
-               and coalesce(resubmitted_at, created_at) < now() - make_interval(mins => $1)
+               and created_at < now() - make_interval(mins => $1)
              order by created_at
              limit $2
             """,
             settle_minutes, limit,
         )
         return [_graph_verification_row(r) for r in rows]
-    finally:
-        await conn.close()
-
-
-async def pending_graph_verifications_ahead(row: dict) -> int:
-    """PENDING rows in the same group queued no later than this one — the
-    episodes Graphiti's serial worker must drain before it reaches this
-    row's. A re-submitted row joins the back of the queue, hence the
-    coalesce on both sides."""
-    conn = await _conn()
-    try:
-        return await conn.fetchval(
-            """
-            select count(*) from graph_verification
-             where status = 'PENDING' and group_id = $1 and id <> $2
-               and coalesce(resubmitted_at, created_at)
-                   <= (select coalesce(resubmitted_at, created_at)
-                         from graph_verification where id = $2)
-            """,
-            row["group_id"], row["id"],
-        )
-    finally:
-        await conn.close()
-
-
-async def mark_graph_verification_resubmitted(verification_id: str) -> bool:
-    """The sweep re-submitted the approved episode: the row stays PENDING and
-    its settle/deadline clock restarts from `resubmitted_at`. Once only —
-    a second absence is the finding."""
-    conn = await _conn()
-    try:
-        r = await conn.execute(
-            """update graph_verification set resubmitted_at = now()
-                where id = $1 and status = 'PENDING' and resubmitted_at is null""",
-            verification_id,
-        )
-        return r.endswith(" 1")
     finally:
         await conn.close()
 
@@ -4775,6 +4738,278 @@ async def list_graph_verifications(status: str | None = None, limit: int = 100) 
                 limit,
             )
         return [_graph_verification_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# --- the durable graph ingest queue (design record 2026-10-04, D5) -------------
+# One `graph_ingest_job` per approved episode. The Executor writes it in the
+# same transaction as the verification row; `integrations/graphiti_ingest.py`
+# is its only consumer. Statuses are documented on the table in schema.sql.
+
+# Serialises claims across processes. The worker also holds a session lease
+# (graphiti_ingest.INGEST_LEASE_KEY), so in practice one process claims; this
+# keeps the head-of-group read and the RUNNING flip atomic regardless.
+_INGEST_CLAIM_LOCK = 0x67760004
+
+
+def _ingest_job_row(row) -> dict:
+    d = dict(row)
+    for key in ("payload", "result"):
+        v = d.get(key)
+        if isinstance(v, str):
+            d[key] = json.loads(v)
+    return d
+
+
+async def create_graph_verification_with_job(
+    *, proposal_id: str, episode_name: str, group_id: str, scope: str, marker: str,
+    payload: dict,
+) -> tuple[dict, dict]:
+    """The Executor's `graph.add_episode`: the verification row and the ingest
+    job, in ONE transaction — there is no state in which an approved episode
+    has a verification row the queue does not know about, or a job no
+    verification row will audit."""
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            ver = await conn.fetchrow(
+                """
+                insert into graph_verification
+                    (id, proposal_id, episode_name, group_id, scope, marker)
+                values ($1, $2, $3, $4, $5, $6)
+                returning *
+                """,
+                str(uuid.uuid4()), proposal_id, episode_name, group_id, scope, marker,
+            )
+            job = await conn.fetchrow(
+                """
+                insert into graph_ingest_job (verification_id, proposal_id, group_id, payload)
+                values ($1, $2, $3, $4::jsonb)
+                returning *
+                """,
+                ver["id"], proposal_id, group_id, json.dumps(payload),
+            )
+        return _graph_verification_row(ver), _ingest_job_row(job)
+    finally:
+        await conn.close()
+
+
+async def create_ingest_job(
+    *, verification_id: str | None, proposal_id: str | None, group_id: str, payload: dict,
+) -> dict:
+    """One job for an EXISTING verification row — the cutover's enqueue."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            insert into graph_ingest_job (verification_id, proposal_id, group_id, payload)
+            values ($1, $2, $3, $4::jsonb)
+            returning *
+            """,
+            verification_id, proposal_id, group_id, json.dumps(payload),
+        )
+        return _ingest_job_row(row)
+    finally:
+        await conn.close()
+
+
+async def claim_ingest_jobs(exclude_groups: list[str] | tuple[str, ...] = ()) -> list[dict]:
+    """Claim the HEAD of every group that can start now, flipping it RUNNING.
+
+    The head of a group is its oldest non-terminal job (QUEUED or RUNNING, by
+    id). A group whose head is RUNNING, or QUEUED but backing off
+    (`not_before` in the future), yields nothing — later jobs wait behind it:
+    strict per-group FIFO. FAILED and DONE are terminal and never block.
+    `exclude_groups` are groups this process is already running."""
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            await conn.execute("select pg_advisory_xact_lock($1)", _INGEST_CLAIM_LOCK)
+            rows = await conn.fetch(
+                """
+                with heads as (
+                    select distinct on (group_id) id, group_id, status, not_before
+                      from graph_ingest_job
+                     where status in ('QUEUED', 'RUNNING')
+                     order by group_id, id
+                )
+                update graph_ingest_job j
+                   set status = 'RUNNING', started_at = now(), attempts = j.attempts + 1,
+                       not_before = null
+                  from heads h
+                 where j.id = h.id
+                   and h.status = 'QUEUED'
+                   and (h.not_before is null or h.not_before <= now())
+                   and not (h.group_id = any($1::text[]))
+                returning j.*
+                """,
+                list(exclude_groups),
+            )
+        return sorted((_ingest_job_row(r) for r in rows), key=lambda r: r["id"])
+    finally:
+        await conn.close()
+
+
+async def finish_ingest_job(job_id: int, *, episode_uuid: str, result: dict) -> bool:
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update graph_ingest_job
+               set status = 'DONE', episode_uuid = $2, result = $3::jsonb,
+                   last_error = null, finished_at = now()
+             where id = $1 and status = 'RUNNING'
+            """,
+            job_id, episode_uuid, json.dumps(result),
+        )
+        return r.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def defer_ingest_job(job_id: int, *, error: str, delay_seconds: int) -> bool:
+    """A transient failure: back to QUEUED, not eligible for `delay_seconds`.
+    The group waits behind it (strict FIFO)."""
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update graph_ingest_job
+               set status = 'QUEUED', last_error = $2,
+                   not_before = now() + make_interval(secs => $3)
+             where id = $1 and status = 'RUNNING'
+            """,
+            job_id, error, float(delay_seconds),
+        )
+        return r.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def fail_ingest_job(job_id: int, *, error: str) -> bool:
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update graph_ingest_job
+               set status = 'FAILED', last_error = $2, finished_at = now()
+             where id = $1 and status = 'RUNNING'
+            """,
+            job_id, error,
+        )
+        return r.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def requeue_ingest_job(job_id: int) -> bool:
+    """Back to QUEUED with no backoff — a job interrupted by shutdown or a
+    crash whose episode did NOT land (`recover_ingest_job_done` is the landed
+    case). No attempt is refunded: `attempts` counts starts."""
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            "update graph_ingest_job set status = 'QUEUED', not_before = null "
+            "where id = $1 and status = 'RUNNING'",
+            job_id,
+        )
+        return r.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def recover_ingest_job_done(job_id: int, *, episode_uuid: str) -> bool:
+    """A RUNNING job whose episode IS in the graph (add_episode writes the
+    episode and everything it produced in one transaction, so it landed
+    whole): DONE with the uuid the marker found. The node/edge lists are
+    unknown on this path — the result says so."""
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update graph_ingest_job
+               set status = 'DONE', episode_uuid = $2,
+                   result = '{"recovered": true}'::jsonb, finished_at = now()
+             where id = $1 and status = 'RUNNING'
+            """,
+            job_id, episode_uuid,
+        )
+        return r.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def running_ingest_jobs() -> list[dict]:
+    """Every RUNNING job, with its verification row's marker — the startup
+    recovery's worklist (nothing runs in THIS process yet, so each one is an
+    orphan of a dead one)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select j.*, v.marker as marker
+              from graph_ingest_job j
+              left join graph_verification v on v.id = j.verification_id
+             where j.status = 'RUNNING'
+             order by j.id
+            """
+        )
+        return [_ingest_job_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def ingest_job_for_verification(verification_id: str) -> dict | None:
+    """The newest job feeding a verification row, or None (a row from before
+    the queue, or a curation re-check, which never has one)."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """select * from graph_ingest_job where verification_id = $1
+                order by id desc limit 1""",
+            verification_id,
+        )
+        return _ingest_job_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def get_ingest_job(job_id: int) -> dict | None:
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow("select * from graph_ingest_job where id = $1", job_id)
+        return _ingest_job_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def pending_verifications_without_job() -> list[dict]:
+    """The cutover's candidates: PENDING verification rows that are not a
+    curation re-check and have no ingest job, oldest first."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select v.* from graph_verification v
+             where v.status = 'PENDING' and v.remediation_of is null
+               and not exists (select 1 from graph_ingest_job j where j.verification_id = v.id)
+             order by v.created_at
+            """
+        )
+        return [_graph_verification_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def ingest_queue_counts() -> dict[str, int]:
+    """`{status: count}` over the whole queue — for the status surfaces."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select status, count(*) as n from graph_ingest_job group by status"
+        )
+        return {r["status"]: int(r["n"]) for r in rows}
     finally:
         await conn.close()
 

@@ -169,8 +169,43 @@ class Settings(BaseSettings):
     # integrations.litellm_credstore fails loudly, never half-decrypts.
     litellm_salt_key: str = ""
 
-    # MCP endpoints (existing homelab services).
-    graphiti_mcp_url: str = "http://127.0.0.1:8000/mcp"
+    # The knowledge graph's extraction and search run IN THIS PROCESS through
+    # graphiti-core (design record 2026-10-04, D1-D2) — there is no Graphiti
+    # server any more. `integrations/graphiti_client.py` builds the one client
+    # from these plus settings this file already has: CC_LLM_BASE_URL and
+    # CC_LLM_API_KEY (the application's own LiteLLM key, which carries the
+    # graph's aliases), CC_EMBED_ALIAS/CC_EMBED_DIM, CC_NEO4J_URL/
+    # CC_NEO4J_PASSWORD. Nothing here is ever exported as OPENAI_* (see the
+    # load_dotenv note at the top of this file); base URL and key are passed
+    # to the library as arguments.
+    #   graph_llm_alias        -> the extraction model's LiteLLM alias. A PLAIN
+    #                             `openai/<model>` alias (.claude/rules/graph.md).
+    #   graph_llm_max_tokens   -> output cap per extraction call, passed as the
+    #                             client's constructor argument (it overrides
+    #                             the config field).
+    #   graph_llm_temperature  -> 0: unset means the backend's default
+    #                             sampling, not determinism.
+    #   graph_semaphore_limit  -> graphiti-core's SEMAPHORE_LIMIT (how many of
+    #                             its own coroutines one extraction runs at
+    #                             once). Read by the library at IMPORT, so the
+    #                             client sets it before the first import. 3 is
+    #                             the value the retired server ran with.
+    #   graph_rerank_alias     -> a LiteLLM `/rerank` alias (D3). Set: search
+    #                             uses the cross-encoder recipes through our
+    #                             RerankClient. Unset (the single-node default):
+    #                             search uses the RRF recipes, as the stock
+    #                             server did.
+    #   graph_ingest_enabled   -> the durable ingest worker (D5). ON by
+    #                             default — unlike the opt-in loops, it is the
+    #                             only thing that lands an APPROVED episode;
+    #                             off means approvals queue and nothing
+    #                             extracts. The test suite turns it off.
+    graph_llm_alias: str = "graphiti-llm"
+    graph_llm_max_tokens: int = 4096
+    graph_llm_temperature: float = 0.0
+    graph_semaphore_limit: int = 3
+    graph_rerank_alias: str = ""
+    graph_ingest_enabled: bool = True
 
     # Knowledge graph tenanting: reads span the preserved homelab graph ("main")
     # plus Central Command's own group; writes land ONLY in Central Command's group, so
@@ -245,7 +280,7 @@ class Settings(BaseSettings):
     fetch_max_bytes: int = 2_000_000
 
     # Pluggable outbound trust for the FIXED, operator-configured integration
-    # clients — Jira, Graphiti's MCP endpoint, the LiteLLM admin/embed calls
+    # clients — Jira, graphiti-core's LiteLLM calls, the LiteLLM admin/embed calls
     # (work-transition compatibility design, decision 3; see
     # integrations/http.py). Distinct from the fetch_* settings above, which
     # scope an agent-named URL's client identity by host; these apply
@@ -622,13 +657,16 @@ class Settings(BaseSettings):
     # deployed); integrations/crawler.py degrades instead of raising.
     crawler_url: str = "http://127.0.0.1:8091"
 
-    # Cockpit Graph panel (2026-08-09): read-only bolt reads against the
-    # Graphiti graph, via deploy/k3s/cc-graph-bolt.service (a standing
-    # port-forward of svc/neo4j 7687 to 127.0.0.1 ONLY — same loopback rule
-    # as every other CC_* endpoint; the ClusterIP-only Service is unchanged).
+    # Bolt to the knowledge graph (2026-08-09 for the cockpit Graph panel;
+    # since 2026-10-04 also graphiti-core's own driver), via
+    # deploy/k3s/cc-graph-bolt.service (a standing port-forward of svc/neo4j
+    # 7687 to 127.0.0.1 ONLY — same loopback rule as every other CC_*
+    # endpoint; the ClusterIP-only Service is unchanged).
     # `integrations/neo4j_reader.py` opens every session read-only; there is
-    # no raw-Cypher endpoint. `runtime/` still holds zero Neo4j references —
-    # agents keep reaching the graph only through Graphiti's MCP.
+    # no raw-Cypher endpoint. Agents' graph READS run over this bolt
+    # in-process; the rule `runtime/` lives under is that it holds no WRITE
+    # path — it may not import graphiti_ingest, graphiti_client or
+    # neo4j_writer (tests/test_governance.py).
     neo4j_url: str = "bolt://127.0.0.1:7687"
     neo4j_password: str = ""
     # Browser-reachable Neo4j Browser URL (tailnet) — display-only, for the

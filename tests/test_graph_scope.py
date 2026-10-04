@@ -1,11 +1,12 @@
 """Per-agent scoped knowledge-graph writes and widened reads (unit only — no
-Postgres, no network; `graphiti._call_tool` is monkeypatched throughout)."""
+Postgres, no network; the read layer's search/episode seams and the
+Executor's enqueue are faked throughout)."""
 
 import pytest
 
 from central_command.db import repo
 from central_command.gateway.executor import ExecutorError, _graph_add_episode
-from central_command.integrations import graphiti
+from central_command.integrations import graphiti, graphiti_ingest, neo4j_reader
 from tests.conftest import needs_pg
 
 
@@ -22,28 +23,45 @@ async def test_schema_seeds_the_founding_experts_steward_groups():
 
 
 @pytest.fixture
-def verification_rows(monkeypatch):
-    """Keep the handler DB-free: capture the verification row the executor
-    writes before the graph write (2026-08-19 spec) instead of inserting it."""
-    rows = []
+def enqueued(monkeypatch):
+    """Keep the handler DB-free: capture what the Executor enqueues (the
+    verification row and the ingest job are written together by
+    `graphiti_ingest.enqueue`) instead of writing it. Mirrors the REAL
+    signature: reference_time keyword-only, no default."""
+    calls = []
 
-    async def fake_create(**kwargs):
-        rows.append(kwargs)
-        return {"id": "cc-test", **kwargs}
+    async def fake_enqueue(name, episode_body, source_description, group_id, *,
+                           reference_time, proposal_id, scope, marker):
+        calls.append({"name": name, "episode_body": episode_body,
+                      "source_description": source_description, "group_id": group_id,
+                      "reference_time": reference_time, "proposal_id": proposal_id,
+                      "scope": scope, "marker": marker})
+        return {"verification": {"id": "cc-test"}, "job": {"id": 1}}
 
-    monkeypatch.setattr(repo, "create_graph_verification", fake_create)
-    return rows
+    monkeypatch.setattr(graphiti_ingest, "enqueue", fake_enqueue)
+    return calls
 
 
 @pytest.fixture
 def captured(monkeypatch):
+    """The read layer's two seams: library search and the episode Cypher."""
     calls = []
 
-    async def fake_call_tool(name, arguments, timeout=30.0):
-        calls.append((name, arguments))
-        return {"message": "ok", "facts": [], "nodes": [], "episodes": []}
+    async def fake_search(kind, query, limit, group_ids):
+        calls.append((kind, {"group_ids": group_ids, "limit": limit}))
 
-    monkeypatch.setattr(graphiti, "_call_tool", fake_call_tool)
+        class _Results:
+            edges: list = []
+            nodes: list = []
+
+        return _Results()
+
+    async def fake_latest(group_ids, limit):
+        calls.append(("episodes", {"group_ids": group_ids, "limit": limit}))
+        return []
+
+    monkeypatch.setattr(graphiti, "_search", fake_search)
+    monkeypatch.setattr(neo4j_reader, "latest_episodes", fake_latest)
     return calls
 
 
@@ -62,24 +80,20 @@ def no_stewards(monkeypatch):
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
 
 
-async def test_add_episode_defaults_to_the_shared_group(captured):
-    await graphiti.add_episode("n", "body", "src", reference_time="2026-01-01T00:00:00Z")
-    assert captured[0][1]["group_id"] == graphiti.settings.graph_write_group
-    # The reference time rides every add_memory call (2026-09-19): Graphiti's
+async def test_add_episode_defaults_to_the_shared_group(enqueued, no_stewards):
+    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z",
+            "scope": "shared"}
+    await _graph_add_episode(args, approver="lee", proposer=None)
+    assert enqueued[0]["group_id"] == graphiti.settings.graph_write_group
+    # The reference time rides every enqueued episode (2026-09-19): Graphiti's
     # own default is "the moment I processed this", which is the assumption
-    # the argument exists to end — so the client has no default either.
-    assert captured[0][1]["reference_time"] == "2026-01-01T00:00:00Z"
+    # the argument exists to end — so nothing on the path has a default.
+    assert enqueued[0]["reference_time"] == "2026-01-01T00:00:00Z"
 
 
-async def test_add_episode_honors_an_explicit_group_id(captured):
-    await graphiti.add_episode("n", "body", "src", group_id="central_command_jira-expert",
-                               reference_time="2026-01-01T00:00:00Z")
-    assert captured[0][1]["group_id"] == "central_command_jira-expert"
-
-
-def test_add_episode_has_no_reference_time_default():
+def test_enqueue_has_no_reference_time_default():
     import inspect
-    param = inspect.signature(graphiti.add_episode).parameters["reference_time"]
+    param = inspect.signature(graphiti_ingest.enqueue).parameters["reference_time"]
     assert param.kind is inspect.Parameter.KEYWORD_ONLY
     assert param.default is inspect.Parameter.empty
 
@@ -132,9 +146,10 @@ async def test_steward_map_only_includes_active_agents_with_a_domain(monkeypatch
 
 
 def test_every_group_id_satisfies_graphitis_charset():
-    """graphiti_core rejects group_ids outside [a-zA-Z0-9_-] — and add_episode
-    is QUEUED, so a bad group id acks and then drops the episode with the
-    error visible only in the pod log. The colon in the original
+    """graphiti_core rejects group_ids outside [a-zA-Z0-9_-] — under the
+    retired MCP server add_episode was QUEUED in memory, so a bad group id
+    acked and then dropped the episode with the error visible only in the pod
+    log (the ingest worker now fails such a job loudly). The colon in the original
     `central_command:<agent_id>` scheme silently lost every private-scope write
     from 2026-08-01 to 2026-08-15 (25 approved episodes)."""
     import re
@@ -148,112 +163,68 @@ def test_every_group_id_satisfies_graphitis_charset():
         assert valid.fullmatch(graphiti.private_group(agent_id)), agent_id
 
 
-async def test_executor_shared_scope_uses_default_group(monkeypatch, verification_rows, no_stewards):
-    seen = {}
-
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
-        seen["group_id"] = group_id
-        return "ack"
-
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
+async def test_executor_shared_scope_uses_default_group(monkeypatch, enqueued, no_stewards):
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
-    assert seen["group_id"] is None
+    assert enqueued[0]["group_id"] == graphiti.settings.graph_write_group
 
 
 async def test_executor_shared_scope_defaults_to_a_stewards_domain_group(
-    monkeypatch, verification_rows
+    monkeypatch, enqueued
 ):
     """The write-side half of domain stewardship: an unscoped shared write
     from an agent with a steward_group lands in that domain, not the plain
     shared group."""
-    seen = {}
-
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
-        seen["group_id"] = group_id
-        return "ack"
-
     async def fake_get_agent(agent_id):
         return {"id": agent_id, "steward_group": "domain_jira"}
 
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
-    assert seen["group_id"] == "domain_jira"
+    assert enqueued[0]["group_id"] == "domain_jira"
 
 
 async def test_executor_shared_scope_explicit_group_id_wins_over_steward(
-    monkeypatch, verification_rows
+    monkeypatch, enqueued
 ):
-    seen = {}
-
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
-        seen["group_id"] = group_id
-        return "ack"
-
     async def fake_get_agent(agent_id):
         return {"id": agent_id, "steward_group": "domain_jira"}
 
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared", "group_id": "some_other_group"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
-    assert seen["group_id"] == "some_other_group"
+    assert enqueued[0]["group_id"] == "some_other_group"
 
 
 async def test_executor_private_scope_uses_proposers_partition_regardless_of_args(
-    monkeypatch, verification_rows
+    monkeypatch, enqueued
 ):
-    seen = {}
-
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
-        seen["group_id"] = group_id
-        return "ack"
-
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     # An agent-authored "agent_id" in args must be ignored — proposer is the
     # only trusted partition owner.
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "agent_id": "someone-else"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
-    assert seen["group_id"] == "central_command_jira-expert"
+    assert enqueued[0]["group_id"] == "central_command_jira-expert"
 
 
-async def test_executor_stamps_marker_and_records_verification_before_the_write(
-    monkeypatch, verification_rows
+async def test_executor_stamps_marker_and_enqueues_verification_and_job_together(
+    monkeypatch, enqueued
 ):
-    """2026-08-19 spec: the ack is not graph state, so every approved episode
-    leaves a verification row (written BEFORE the write — a call that times out
-    after landing must still be audited) and carries the row's marker in
-    source_description so the sweep can find the real Episodic node."""
-    order = []
-    seen = {}
-
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
-        order.append("write")
-        seen["source_description"] = source_description
-        seen["group_id"] = group_id
-        return "ack"
-
-    async def fake_create(**kwargs):
-        order.append("row")
-        verification_rows.append(kwargs)
-        return {"id": "cc-test", **kwargs}
-
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
-    monkeypatch.setattr(repo, "create_graph_verification", fake_create)
+    """2026-08-19 spec, durable since 2026-10-04: every approved episode leaves
+    a verification row AND an ingest job (one `enqueue`, one transaction —
+    tests/test_graph_ingest.py proves the transaction) and carries the row's
+    marker in source_description, which is the idempotency key the worker's
+    crash recovery finds the Episodic node by."""
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private"}
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
 
-    assert order == ["row", "write"]
-    (row,) = verification_rows
+    (row,) = enqueued
     assert row["marker"].startswith("proposal=")
-    assert row["marker"] in seen["source_description"]
-    assert row["episode_name"] == "n"
+    assert row["marker"] in row["source_description"]
+    assert row["proposal_id"] == row["marker"].split("=", 1)[1]
+    assert row["name"] == "n"
     assert row["scope"] == "private"
-    # The row stores the RESOLVED group — private scope means the proposer's
-    # partition, even though add_episode is called with the same value.
-    assert row["group_id"] == "central_command_jira-expert" == seen["group_id"]
+    # The RESOLVED group — private scope means the proposer's partition.
+    assert row["group_id"] == "central_command_jira-expert"
 
 
 async def test_executor_private_scope_without_proposer_raises(monkeypatch):
@@ -272,23 +243,15 @@ async def test_executor_unknown_scope_raises(monkeypatch):
 
 
 async def test_executor_private_for_agent_targets_that_agents_partition(
-    monkeypatch, verification_rows
+    monkeypatch, enqueued
 ):
-    seen = {}
-
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
-        seen["group_id"] = group_id
-        return "ack"
-
     async def fake_get_agent(agent_id):
         return {"id": agent_id, "role": "triage email", "status": "ACTIVE"}
 
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "inbox-triage"}
     await _graph_add_episode(args, approver="lee", proposer="ea")
-    assert seen["group_id"] == "central_command_inbox-triage"
-    assert verification_rows[0]["group_id"] == "central_command_inbox-triage"
+    assert enqueued[0]["group_id"] == "central_command_inbox-triage"
 
 
 @pytest.mark.parametrize("row", [
@@ -297,40 +260,30 @@ async def test_executor_private_for_agent_targets_that_agents_partition(
     {"id": "ghost", "role": "old hand", "status": "RETIRED"},
 ])
 async def test_executor_private_for_agent_must_be_an_active_roster_member(
-    monkeypatch, verification_rows, row
+    monkeypatch, enqueued, row
 ):
-    async def fake_add_episode(*a, **k):
-        raise AssertionError("must not write")
-
     async def fake_get_agent(agent_id):
         return row
 
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "ghost"}
     with pytest.raises(ExecutorError, match="for_agent"):
         await _graph_add_episode(args, approver="lee", proposer="ea")
+    assert enqueued == []  # nothing queued
 
 
 async def test_executor_private_for_agent_self_needs_no_roster_lookup(
-    monkeypatch, verification_rows
+    monkeypatch, enqueued
 ):
     """for_agent == proposer is the plain private path — no lookup, so a
     proposer that is not (yet) a roster member keeps working as before."""
-    seen = {}
-
-    async def fake_add_episode(name, episode_body, source_description, group_id=None, reference_time=None):
-        seen["group_id"] = group_id
-        return "ack"
-
     async def fake_get_agent(agent_id):
         raise AssertionError("no lookup expected")
 
-    monkeypatch.setattr(graphiti, "add_episode", fake_add_episode)
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
     args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "ea"}
     await _graph_add_episode(args, approver="lee", proposer="ea")
-    assert seen["group_id"] == "central_command_ea"
+    assert enqueued[0]["group_id"] == "central_command_ea"
 
 
 # --- the curator's any-partition reads (graph-curate pack) ---------------------

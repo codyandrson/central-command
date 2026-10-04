@@ -546,21 +546,37 @@ async def check_embedding_as_app(ctx: Context) -> Outcome:
 
 
 async def check_graph(ctx: Context) -> Outcome:
+    """The knowledge graph's database, pinged over bolt (design record
+    2026-10-04, D6: graphiti-core runs in this process; there is no server
+    left to ask). An authentication failure names the password, anything
+    else the URL."""
     from central_command.integrations import graphiti
 
-    if not settings.graphiti_mcp_url:
-        return fail("CC_GRAPHITI_MCP_URL is empty — agents have no graph", "CC_GRAPHITI_MCP_URL")
-    try:
-        status = await graphiti.get_status()
-    except Exception as exc:  # noqa: BLE001
-        return fail(f"Graphiti did not answer at CC_GRAPHITI_MCP_URL ({_describe(exc)})",
-                    "CC_GRAPHITI_MCP_URL")
+    if not settings.neo4j_url:
+        return fail("CC_NEO4J_URL is empty — agents have no graph", "CC_NEO4J_URL")
+    status = await graphiti.get_status()
     if isinstance(status, dict) and status.get("status") == "ok":
-        return ok("Graphiti answers at CC_GRAPHITI_MCP_URL and reports its Neo4j connected")
+        return ok("Neo4j answers over bolt at CC_NEO4J_URL")
     said = status.get("message") if isinstance(status, dict) else status
-    return fail(f"Graphiti answers but reports its database unreachable ({_clip(said or '')}) "
-                "— check the Neo4j service and its password, CC_NEO4J_PASSWORD",
-                "CC_NEO4J_PASSWORD")
+    if isinstance(status, dict) and status.get("error") == "AuthError":
+        return fail(f"Neo4j refused the credentials ({_clip(said or '')}) — check "
+                    "CC_NEO4J_PASSWORD", "CC_NEO4J_PASSWORD")
+    return fail(f"Neo4j did not answer at CC_NEO4J_URL ({_clip(said or '')})", "CC_NEO4J_URL")
+
+
+async def check_graph_patches(ctx: Context) -> Outcome:
+    """The two upstream fixes we carry are in the INSTALLED graphiti-core (D7).
+    Without them the ingest worker refuses to extract — approved episodes stay
+    queued — so their absence is a FAIL naming the command that applies them."""
+    from central_command.integrations import graphiti_client
+
+    state = graphiti_client.patch_state()
+    if state and all(v == "patched" for v in state.values()):
+        return ok(f"graphiti-core carries both fixes ({', '.join(sorted(state))})")
+    shown = ", ".join(f"{k}: {v}" for k, v in sorted(state.items()))
+    return fail(f"graphiti-core is missing carried fixes ({shown}) — the ingest worker "
+                "refuses to extract until python scripts/apply_graphiti_patches.py runs",
+                "python scripts/apply_graphiti_patches.py")
 
 
 async def check_sandbox(ctx: Context) -> Outcome:
@@ -864,7 +880,9 @@ CHECKS: tuple[Check, ...] = (
     Check("completion-as-app", "litellm", "CC_SELFCHECK_COMPLETION_TIMEOUT",
           lambda ctx: ctx.completion_timeout),
     Check("embedding-as-app", "litellm", "CC_EMBED_ALIAS", _fixed(_EMBED_TIMEOUT + 5)),
-    Check("graph", "graphiti", "CC_GRAPHITI_MCP_URL", _fixed(_GRAPH_TIMEOUT + 5)),
+    Check("graph", "neo4j", "CC_NEO4J_URL", _fixed(_GRAPH_TIMEOUT + 5)),
+    Check("graph-patches", "graphiti", "python scripts/apply_graphiti_patches.py",
+          _fixed(_SHORT)),
     Check("sandbox", "sandbox-runner", "CC_SANDBOX_RUNNER_URL", _fixed(_SHORT * 2)),
     Check("crawler", "crawler", "CC_CRAWLER_URL", _fixed(_SHORT * 2)),
     Check("mail", "n8n", _mail_remedy, _fixed(_MAIL_TIMEOUT + 5)),
@@ -932,6 +950,7 @@ _CHECK_IMPORTS = (
     "central_command.runtime.models",
     "central_command.integrations.neo4j_writer",
     "central_command.integrations.graphiti",
+    "central_command.integrations.graphiti_client",
     "central_command.integrations.email_facade",
     "central_command.integrations.exchange",
 )

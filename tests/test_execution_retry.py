@@ -27,7 +27,7 @@ from central_command.api import nerve_gateway, orchestration
 from central_command.config import settings
 from central_command.db import repo
 from central_command.gateway import executor, gateway
-from central_command.integrations import graphiti
+from central_command.integrations import graphiti_ingest
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model, make_spike_model
 from tests.conftest import needs_pg
@@ -65,13 +65,16 @@ def _jira_spy(monkeypatch, *, fail: str | None = None) -> list[tuple]:
 def _graph_spy(monkeypatch, *, fail: str | None = None) -> list[tuple]:
     calls: list[tuple] = []
 
-    async def add_episode(name, body, source_description="", group_id=None, reference_time=None):
+    # The graph action's execute-time call is the enqueue (the durable queue,
+    # 2026-10-04); an outage there is a spine outage, but the retry machinery
+    # is the same for any action's transient failure.
+    async def enqueue(name, body, source_description, group_id, **kw):
         calls.append((name, body))
         if fail:
             raise RuntimeError(fail)
-        return "ack"
+        return {"verification": {"id": "v"}, "job": {"id": 1}}
 
-    monkeypatch.setattr(graphiti, "add_episode", add_episode)
+    monkeypatch.setattr(graphiti_ingest, "enqueue", enqueue)
     return calls
 
 

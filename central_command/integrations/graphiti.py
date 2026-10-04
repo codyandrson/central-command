@@ -1,18 +1,30 @@
-"""Client for the Graphiti knowledge graph, via its MCP server (streamable HTTP).
+"""READS of the Graphiti knowledge graph, in-process through graphiti-core
+(design record 2026-10-04, D1/D6). The module name and every read's signature
+and result keys are the ones the MCP-server client had, so agent tools, routes
+and their tests changed at the edges only.
 
-`cc-graphiti` fronts the Neo4j graph — a floating k3s pod (chromebox-preferred,
-fails over to the Pi), reached at loopback 127.0.0.1:8000/mcp via ServiceLB
-same as on the retired compose stack. Not the desktop's retired `nat-graphiti`.
-Per DESIGN §3, **reading is layered, writing is gated**: read operations are
-ungated and safe for the runtime tier (agents pull context freely); write
-operations are called by the Executor *after* approval — never handed to a
-thinker agent. The graph never ingests raw email text, only distilled claims
-(D13: store refs, not bodies).
+Per DESIGN §3, **reading is layered, writing is gated**: everything here is a
+read, ungated and safe for the runtime tier (agents pull context freely). There
+is no write in this module. Episodes are written by the durable ingest worker
+(`integrations/graphiti_ingest.py`) after the Executor enqueues an APPROVED
+episode; curation is `integrations/neo4j_writer.py`. The runtime tier may
+import this module and none of those (tests/test_governance.py) — which is why
+the Graphiti object, which carries write methods, is reached here only through
+a FUNCTION-LOCAL import of `graphiti_client`: importing this module loads no
+write path, and the import graph stays checkable. The graph never ingests raw
+email text, only distilled claims (D13: store refs, not bodies).
+
+Search never calls `Graphiti.search()`: it assigns `.limit` on a module-level
+recipe that `add_episode` also reads for its dedupe and invalidation
+candidates, so one search would change extraction for the life of the
+process. Every search goes through `search_()` with a DEEP COPY of the recipe
+and the limit set on the copy — which also fixes the server's own limit bug
+(it sliced a ten-result recipe, so asking for 25 facts returned ten).
 
 Group tenanting: reads span the preserved homelab graph (`main`) plus
-Central Command's own group; writes land in Central Command's shared group by default,
-or in an agent's own PRIVATE partition (`central_command_<agent_id>`, see
-`private_group`) when the approved proposal's scope says so (D11-r1: agents
+Central Command's own group; writes land in Central Command's shared group by
+default, or in an agent's own PRIVATE partition (`central_command_<agent_id>`,
+see `private_group`) when the approved proposal's scope says so (D11-r1: agents
 have a private partition; every write is still gated — private only changes
 WHERE the episode lands, never whether it needed approval). A read given an
 `agent_id` additionally spans that agent's own private partition, so an agent
@@ -21,97 +33,24 @@ can recall its own past private episodes but not another agent's.
 
 from __future__ import annotations
 
-import json
-
-import httpx
+import re
 
 from central_command.config import settings
-from central_command.integrations import http as http_client
+from central_command.integrations import neo4j_reader
 
-# Operations that mutate the graph — only the Executor may call these, post-approval.
-WRITE_OPS = {"add_episode"}
-READ_OPS = {"search_facts", "search_nodes", "get_status"}
-
-_PROTOCOL = "2025-03-26"
-_HEADERS = {
-    "content-type": "application/json",
-    "accept": "application/json, text/event-stream",
-}
+# graphiti_core's own rule for a group id (`helpers.validate_group_id`).
+GROUP_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class GraphitiError(Exception):
     pass
 
 
-def parse_sse_message(text: str) -> dict:
-    """Extract the JSON-RPC message from a streamable-HTTP SSE response body.
-    The server answers each POST with a short SSE stream whose final `data:`
-    line carries the response."""
-    message = None
-    for line in text.splitlines():
-        if line.startswith("data: "):
-            message = line[len("data: "):]
-    if message is None:
-        raise GraphitiError(f"no SSE data in response: {text[:200]!r}")
-    return json.loads(message)
+def _client():
+    # Function-local on purpose: see the module docstring (trust boundary).
+    from central_command.integrations import graphiti_client
 
-
-async def _call_tool(name: str, arguments: dict, timeout: float = 30.0) -> dict:
-    """One MCP tools/call round-trip (initialize → initialized → call).
-
-    A fresh session per call keeps this stateless and reconnect-proof; the
-    handshake is two tiny local HTTP posts, which is noise next to the graph
-    query itself.
-    """
-    url = settings.graphiti_mcp_url
-    async with httpx.AsyncClient(timeout=timeout, **http_client.client_kwargs()) as client:
-        init = await client.post(
-            url,
-            headers=_HEADERS,
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": _PROTOCOL,
-                    "capabilities": {},
-                    "clientInfo": {"name": "central_command", "version": "0.1"},
-                },
-            },
-        )
-        init.raise_for_status()
-        session = init.headers.get("mcp-session-id")
-        if not session:
-            raise GraphitiError("MCP server returned no session id")
-        headers = {**_HEADERS, "mcp-session-id": session}
-
-        await client.post(
-            url, headers=headers, json={"jsonrpc": "2.0", "method": "notifications/initialized"}
-        )
-
-        resp = await client.post(
-            url,
-            headers=headers,
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": name, "arguments": arguments},
-            },
-        )
-        resp.raise_for_status()
-
-    message = parse_sse_message(resp.text)
-    if "error" in message:
-        raise GraphitiError(str(message["error"]))
-    result = message.get("result") or {}
-    content = (result.get("content") or [{}])[0].get("text", "")
-    if result.get("isError"):
-        raise GraphitiError(content or "graphiti tool call failed")
-    try:
-        return json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        return {"message": content}
+    return graphiti_client
 
 
 async def steward_map() -> dict[str, str]:
@@ -144,9 +83,10 @@ def private_group(agent_id: str) -> str:
     """An agent's own graph partition — never read by another agent.
 
     Underscore separator, NOT a colon: graphiti_core rejects any group_id
-    outside ``[a-zA-Z0-9_-]`` — and add_episode is queued, so a bad group id
-    is a silent drop that still acks (found 2026-08-15: 25 approved episodes
-    lost). ``tests/test_graph_scope.py`` pins the charset."""
+    outside ``[a-zA-Z0-9_-]`` — under the retired MCP server that was a silent
+    drop that still acked (found 2026-08-15: 25 approved episodes lost); the
+    ingest worker now fails such a job loudly. ``tests/test_graph_scope.py``
+    pins the charset."""
     return f"{settings.graph_write_group}_{agent_id}"
 
 
@@ -155,43 +95,95 @@ async def groups_for(agent_id: str | None) -> list[str]:
     return groups + [private_group(agent_id)] if agent_id else groups
 
 
+# --- result shapes (the keys the MCP server returned; callers depend on them) ---
+
+
+def _iso(value) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def node_result(node) -> dict:
+    """An EntityNode as the server's `search_nodes` returned it: no embedding
+    anywhere in it (an attribute key containing 'embedding' included)."""
+    return {
+        "uuid": node.uuid,
+        "name": node.name,
+        "labels": list(node.labels or []),
+        "created_at": _iso(node.created_at),
+        "summary": node.summary,
+        "group_id": node.group_id,
+        "attributes": {
+            k: v for k, v in (node.attributes or {}).items() if "embedding" not in k.lower()
+        },
+    }
+
+
+def fact_result(edge) -> dict:
+    """An EntityEdge as the server's `search_memory_facts` returned it."""
+    return edge.model_dump(mode="json", exclude={"fact_embedding"})
+
+
 # --- reads (ungated; safe for the runtime tier) --------------------------------
+
+
+def _recipe(kind: str, limit: int):
+    """A DEEP COPY of the recipe with `limit` set on the copy — never the
+    module-level object (see the module docstring). Cross-encoder recipes
+    when a `/rerank` alias is configured, RRF otherwise (no centre node is
+    exposed yet; D6)."""
+    client = _client()
+    client._prepare_environment()  # before graphiti_core's first import
+    from graphiti_core.search import search_config_recipes as recipes
+
+    rerank = client.reranker_configured()
+    base = {
+        ("edge", True): recipes.EDGE_HYBRID_SEARCH_CROSS_ENCODER,
+        ("edge", False): recipes.EDGE_HYBRID_SEARCH_RRF,
+        ("node", True): recipes.NODE_HYBRID_SEARCH_CROSS_ENCODER,
+        ("node", False): recipes.NODE_HYBRID_SEARCH_RRF,
+    }[(kind, rerank)]
+    config = base.model_copy(deep=True)
+    config.limit = max(1, int(limit))
+    return config
+
+
+async def _search(kind: str, query: str, limit: int, group_ids: list[str]):
+    client = _client()
+    graphiti = client.get_graphiti()
+    config = _recipe(kind, limit)
+    return await graphiti.search_(query, config=config, group_ids=group_ids)
 
 
 async def search_facts(
     query: str, max_facts: int = 8, agent_id: str | None = None,
     group_ids: list[str] | None = None,
 ) -> list[dict]:
-    """Relevant facts (entity relationships, with temporal validity).
-    `group_ids` overrides the caller's read scope — the curator's
+    """Relevant facts (entity relationships, with temporal validity), up to
+    `max_facts`. `group_ids` overrides the caller's read scope — the curator's
     any-partition read (graph-curate pack); every other caller leaves it None."""
-    out = await _call_tool(
-        "search_memory_facts",
-        {"query": query, "max_facts": max_facts,
-         "group_ids": group_ids or await groups_for(agent_id)},
+    results = await _search(
+        "edge", query, max_facts, group_ids or await groups_for(agent_id)
     )
-    return out.get("facts", [])
+    return [fact_result(e) for e in results.edges][:max_facts]
 
 
 async def search_nodes(
     query: str, max_nodes: int = 8, agent_id: str | None = None,
     group_ids: list[str] | None = None,
 ) -> list[dict]:
-    """Relevant entities (nodes with summaries). `group_ids` as in search_facts."""
-    out = await _call_tool(
-        "search_nodes",
-        {"query": query, "max_nodes": max_nodes,
-         "group_ids": group_ids or await groups_for(agent_id)},
+    """Relevant entities (nodes with summaries), up to `max_nodes`. `group_ids`
+    as in search_facts."""
+    results = await _search(
+        "node", query, max_nodes, group_ids or await groups_for(agent_id)
     )
-    return out.get("nodes", [])
+    return [node_result(n) for n in results.nodes][:max_nodes]
 
 
 async def known_groups() -> list[str]:
     """Every group Central Command would ever have written to: the shared read
     set (steward domains included) plus one private partition per active
-    roster agent. Derived from the roster, not from Neo4j — the runtime tier
-    has no bolt, and a group nobody on the roster owns is the cockpit's
-    business, not an agent's."""
+    roster agent. Derived from the roster, not from Neo4j — a group nobody on
+    the roster owns is the cockpit's business, not an agent's."""
     from central_command.db import repo as db_repo
 
     groups = await _read_groups()
@@ -214,45 +206,25 @@ async def get_episodes(
 
 
 async def get_group_episodes(group_ids: list[str], last_n: int = 50) -> list[dict]:
-    """Episodes in exactly these groups — no caller-scope widening."""
-    out = await _call_tool(
-        "get_episodes",
-        {"group_ids": group_ids, "max_episodes": last_n},
-    )
-    return out.get("episodes", [])
+    """The latest `last_n` episodes in exactly these groups, newest first — no
+    caller-scope widening. Our own Cypher (`neo4j_reader.latest_episodes`):
+    upstream's `EpisodicNode.get_by_group_ids` orders by uuid, so past the
+    limit its "latest N" was an arbitrary slice (upstream #1724)."""
+    bad = [g for g in group_ids if not GROUP_ID.match(g or "")]
+    if bad:
+        raise GraphitiError(
+            f"invalid group id(s) {bad!r}: a group id is letters, digits, '_' and '-' only"
+        )
+    return await neo4j_reader.latest_episodes(group_ids, max(1, int(last_n)))
 
 
 async def get_status() -> dict:
-    return await _call_tool("get_status", {})
-
-
-# --- writes (Executor-only, post-approval) -------------------------------------
-
-
-async def add_episode(
-    name: str, episode_body: str, source_description: str, group_id: str | None = None,
-    *, reference_time: str,
-) -> str:
-    """Commit one distilled, approved episode to a graph group — Central Command's
-    shared group by default, or `group_id` (e.g. `private_group(agent_id)`)
-    when the approved proposal scoped it private.
-    `reference_time` is the ISO-8601 instant the source material is from; it
-    is keyword-only and has NO default on purpose — Graphiti's own default is
-    "now", and an episode anchored to its ingestion moment is the mistake the
-    whole argument exists to end (MCP server >= 1.1.0 accepts it; 1.0.2 did
-    not, and stamped every episode at processing time).
-    Graphiti queues ingestion (entity/fact extraction) server-side; the return
-    is its acknowledgement, not the finished graph state."""
-    out = await _call_tool(
-        "add_memory",
-        {
-            "name": name,
-            "episode_body": episode_body,
-            "source": "text",
-            "source_description": source_description,
-            "group_id": group_id or settings.graph_write_group,
-            "reference_time": reference_time,
-        },
-        timeout=60.0,
-    )
-    return out.get("message", "episode submitted")
+    """A Neo4j ping (D6). `{"status": "ok"|"error", "message": …}` — the shape
+    the server's get_status had; `error` names the exception type when the
+    database did not answer. Never raises."""
+    try:
+        await neo4j_reader._read("RETURN 1 AS ok")
+    except Exception as exc:  # noqa: BLE001 — the status IS the answer
+        return {"status": "error", "error": type(exc).__name__,
+                "message": f"{type(exc).__name__}: {exc}"}
+    return {"status": "ok", "message": "Neo4j answers over bolt"}

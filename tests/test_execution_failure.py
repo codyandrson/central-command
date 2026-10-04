@@ -19,7 +19,7 @@ import pytest
 from central_command.config import settings
 from central_command.db import repo
 from central_command.gateway import executor, gateway
-from central_command.integrations import graphiti
+from central_command.integrations import graphiti_ingest
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model, make_spike_model
 from tests.conftest import needs_pg
@@ -78,10 +78,11 @@ async def test_partial_execution_records_what_completed(monkeypatch):
         done.append((issue_key, due_date))
 
     async def graph_broken(*a, **k):
-        raise RuntimeError("neo4j unreachable")
+        # The graph action's only dependency at execute time is the enqueue.
+        raise RuntimeError("spine unreachable")
 
     monkeypatch.setattr(executor.jira, "set_due_date", jira_ok)
-    monkeypatch.setattr(graphiti, "add_episode", graph_broken)
+    monkeypatch.setattr(graphiti_ingest, "enqueue", graph_broken)
 
     model = make_sc1_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)

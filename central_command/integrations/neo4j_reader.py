@@ -4,9 +4,12 @@ browser never talks to Neo4j directly. Every session is opened with the
 driver's read access mode, so this client physically cannot write even if a
 query slipped past review.
 
-`runtime/` still holds zero Neo4j references: agents keep reaching the graph
-only through Graphiti's MCP server. This is the API tier's own client, same
-side of the trust boundary as the Executor.
+Agents' graph reads reach this module too, through `integrations/graphiti.py`
+(the latest-episodes listing) — the reads moved in-process with graphiti-core
+(design record 2026-10-04, D6). That is safe because every session here is
+READ_ACCESS; the rule `runtime/` lives under is that it holds no WRITE path
+(`neo4j_writer`, `graphiti_ingest`, `graphiti_client` — tests/test_governance.py),
+not that it holds no bolt.
 
 Reachability comes from deploy/k3s/cc-graph-bolt.service, a standing
 port-forward of svc/neo4j 7687 to 127.0.0.1 ONLY (Restart=always) — the
@@ -344,12 +347,35 @@ async def count_episodes(group_ids: list[str]) -> int:
     return rows[0]["total"] if rows else 0
 
 
+async def latest_episodes(group_ids: list[str], limit: int) -> list[dict]:
+    """The latest `limit` Episodic nodes across `group_ids`, newest first, in
+    the shape the Graphiti server's `get_episodes` returned. Ordered by
+    `created_at` here because upstream's `EpisodicNode.get_by_group_ids`
+    orders by uuid (upstream #1724) — past its limit "the latest N" was an
+    arbitrary slice."""
+    rows = await _read(
+        """
+        MATCH (e:Episodic)
+        WHERE e.group_id IN $group_ids
+        RETURN e.uuid AS uuid, e.name AS name, e.content AS content,
+               e.created_at AS created_at, e.source AS source,
+               e.source_description AS source_description, e.group_id AS group_id
+        ORDER BY e.created_at DESC, e.uuid
+        LIMIT $limit
+        """,
+        group_ids=group_ids, limit=limit,
+    )
+    return [{**row, "created_at": _iso(row["created_at"])} for row in rows]
+
+
 async def episode_by_marker(marker: str, group_id: str) -> dict | None:
     """The Episodic node the verification sweep is looking for — matched by a
     marker token stamped into `source_description` at propose time (Task 2's
     `| proposal=<id>`, or a test's own uuid4). Newest wins if more than one
-    contains the marker; absence past the settle window IS the silent-drop
-    finding this function exists to surface."""
+    contains the marker. Since the durable ingest queue (2026-10-04) the
+    marker is also the idempotency key: the ingest worker's crash recovery
+    asks this whether an interrupted job's episode landed, and verification
+    rows from before the queue are still found by it."""
     rows = await _read(
         """
         MATCH (e:Episodic)

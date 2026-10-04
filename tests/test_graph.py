@@ -6,9 +6,11 @@ same proposal→approval→execute pipeline as a Jira change, and the Executor
 stamps trust + approver into the episode's source. Reads are ungated and
 best-effort: a down graph degrades triage, never wedges it.
 
-Client round-trips against the real `cc-graphiti` service are integration
-tests and skip when it isn't reachable. They assert the read mechanism, never
-the graph's contents — see the note above the live section.
+Read round-trips against the real graph (graphiti-core in-process, over bolt)
+are integration tests and skip when it isn't reachable. They assert the read
+mechanism, never the graph's contents — see the note above the live section.
+The Executor's side of the write path is an ENQUEUE (the durable ingest queue,
+2026-10-04); the worker's side is tests/test_graph_ingest.py.
 """
 
 from __future__ import annotations
@@ -21,24 +23,11 @@ from central_command.config import settings
 from central_command.contract import Action
 from central_command.db import repo
 from central_command.gateway import executor, gateway
-from central_command.integrations import graphiti
+from central_command.integrations import graphiti, graphiti_ingest
 from central_command.runtime import tools
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model
 from tests.conftest import needs_pg
-
-# --- SSE parsing (pure, always runs) ------------------------------------------
-
-
-def test_parse_sse_message_takes_the_final_data_line():
-    body = 'event: message\ndata: {"a": 1}\n\nevent: message\ndata: {"b": 2}\n\n'
-    assert graphiti.parse_sse_message(body) == {"b": 2}
-
-
-def test_parse_sse_message_rejects_empty_stream():
-    with pytest.raises(graphiti.GraphitiError):
-        graphiti.parse_sse_message("event: ping\n\n")
-
 
 # --- the agent's read tool (graph faked; always runs) --------------------------
 
@@ -73,7 +62,7 @@ async def test_read_tool_formats_facts_with_validity(monkeypatch):
 async def test_read_tool_stamps_steward_attribution_on_facts_from_a_domain_group(monkeypatch):
     """2026-08-22 domain stewardship: a fact whose group_id is a steward's
     domain group is stamped with who stewards it, at fact granularity — the
-    MCP result carries group_id per fact (graphiti_core's EdgeResult), so
+    search result carries group_id per fact (graphiti_core's EntityEdge), so
     that is the finest attribution actually available."""
     async def fake_search(query, max_facts=8, agent_id=None):
         return [
@@ -155,19 +144,25 @@ _GRAPH_ACTION = Action(
 )
 
 
+def _fake_enqueue(calls: list):
+    """Mirrors `graphiti_ingest.enqueue`'s REAL signature (keyword-only
+    reference_time with no default — DL-057)."""
+    async def fake_enqueue(name, episode_body, source_description, group_id, *,
+                           reference_time, proposal_id, scope, marker):
+        calls.append((name, episode_body, source_description))
+        return {"verification": {"id": "v-1"}, "job": {"id": 7}}
+
+    return fake_enqueue
+
+
 async def test_executor_stamps_trust_and_approver_into_the_episode(monkeypatch):
     calls = []
-
-    async def fake_add(name, episode_body, source_description, group_id=None, reference_time=None):
-        calls.append((name, episode_body, source_description))
-        return "queued"
-
-    monkeypatch.setattr(graphiti, "add_episode", fake_add)
+    monkeypatch.setattr(graphiti_ingest, "enqueue", _fake_enqueue(calls))
     monkeypatch.setattr(settings, "executor_mode", "live")
 
     outcome = await executor.execute([_GRAPH_ACTION], approver="human:lee", source_refs=["x"])
 
-    assert "graph episode 'DEMO-1 deadline slip' committed" in outcome.result_text
+    assert "graph episode 'DEMO-1 deadline slip' queued for extraction" in outcome.result_text
     (name, body, source) = calls[0]
     assert body == "DEMO-1's deadline moved to 2026-08-03."
     assert "trust=human-approved" in source
@@ -179,7 +174,7 @@ async def test_dry_run_never_touches_the_graph(monkeypatch):
     async def explode(*a, **k):
         raise AssertionError("dry_run must not call the graph")
 
-    monkeypatch.setattr(graphiti, "add_episode", explode)
+    monkeypatch.setattr(graphiti_ingest, "enqueue", explode)
     monkeypatch.setattr(settings, "executor_mode", "dry_run")
     outcome = await executor.execute([_GRAPH_ACTION], approver="human:lee", source_refs=[])
     assert "[dry-run]" in outcome.result_text
@@ -190,16 +185,14 @@ async def test_dry_run_never_touches_the_graph(monkeypatch):
 
 @needs_pg
 async def test_sc1_one_approval_commits_jira_and_graph(monkeypatch):
-    graph_calls, jira_calls = [], []
-
-    async def fake_add(name, episode_body, source_description, group_id=None, reference_time=None):
-        graph_calls.append(name)
-        return "queued"
+    """The REAL enqueue: one approval changes Jira and leaves the episode on
+    the durable queue — a verification row and its job, nothing extracted
+    inline."""
+    jira_calls = []
 
     async def fake_due(issue_key, due_date):
         jira_calls.append((issue_key, due_date))
 
-    monkeypatch.setattr(graphiti, "add_episode", fake_add)
     monkeypatch.setattr(executor.jira, "set_due_date", fake_due)
     monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(settings, "demo_mode", True)
@@ -218,15 +211,27 @@ async def test_sc1_one_approval_commits_jira_and_graph(monkeypatch):
         run["session_id"], run["proposal_id"], model=model
     )
     assert jira_calls == [("DEMO-1", "2026-08-03")]
-    assert graph_calls == ["DEMO-1 deadline slip"]
-    assert "committed" in result["result_text"]
+    assert "queued for extraction" in result["result_text"]
     assert await repo.session_status(run["session_id"]) == "DONE"
+    ver = await repo.graph_verification_for_proposal(run["proposal_id"])
+    job = await repo.ingest_job_for_verification(ver["id"])
+    try:
+        assert ver["status"] == "PENDING" and ver["episode_name"] == "DEMO-1 deadline slip"
+        assert job["status"] == "QUEUED" and job["proposal_id"] == run["proposal_id"]
+        assert job["payload"]["name"] == "DEMO-1 deadline slip"
+        assert f"proposal={run['proposal_id']}" in job["payload"]["source_description"]
+    finally:
+        conn = await repo._conn()
+        try:
+            await conn.execute("delete from graph_ingest_job where id = $1", job["id"])
+        finally:
+            await conn.close()
 
 
-# --- live integration (needs the real cc-graphiti; read-only) ------------------
+# --- live integration (needs the real graph over bolt; read-only) -------------
 #
-# These assert the READ MECHANISM — that a query reaches the service, the SSE
-# envelope parses and the result decodes into the shape callers destructure.
+# These assert the READ MECHANISM — that a query reaches the graph through
+# graphiti-core and the result decodes into the shape callers destructure.
 # They must NEVER assert that a particular fact is present: graph CONTENT is
 # disposable during the build and gets wiped before real use, so a corpus
 # assertion fails for a reason that has nothing to do with the client. (That is
@@ -249,17 +254,17 @@ def _graphiti_up() -> bool:
 
 
 @pytest.mark.graph_live
-@pytest.mark.skipif(not _graphiti_up(), reason="cc-graphiti not reachable")
+@pytest.mark.skipif(not _graphiti_up(), reason="the graph (Neo4j) is not reachable")
 async def test_live_fact_search_round_trips_and_is_well_shaped():
-    # A broken transport raises GraphitiError; an empty corpus returns []. Both
-    # are distinguishable, and only the first is a failure.
+    # A broken transport raises; an empty corpus returns []. Both are
+    # distinguishable, and only the first is a failure.
     facts = await graphiti.search_facts("decommission", max_facts=3)
     assert isinstance(facts, list)
     assert len(facts) <= 3
     assert all("fact" in f for f in facts)
 
 
-@pytest.mark.skipif(not _graphiti_up(), reason="cc-graphiti not reachable")
+@pytest.mark.skipif(not _graphiti_up(), reason="the graph (Neo4j) is not reachable")
 async def test_live_episode_listing_round_trips_and_is_scoped_to_our_groups():
     episodes = await graphiti.get_episodes(last_n=5)
     assert isinstance(episodes, list)

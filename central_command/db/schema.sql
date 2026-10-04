@@ -1128,7 +1128,51 @@ alter table graph_verification add column if not exists remediation_of text;
 -- v2.34.0: an absent episode is RE-SUBMITTED once before it is a finding.
 -- Graphiti's ingestion queue is in memory; a restart (the nightly Neo4j
 -- dump scales it to zero) drops whatever it had acked but not extracted.
+-- HISTORICAL since the durable ingest queue below (2026-10-04): nothing sets
+-- or reads it any more. Kept, not dropped — schema changes are additive-only,
+-- and the column records what happened to the rows it was set on.
 alter table graph_verification add column if not exists resubmitted_at timestamptz;
+
+-- The durable ingest queue (design record 2026-10-04, D5). One row per
+-- approved episode, written by the Executor in the SAME transaction as its
+-- graph_verification row; the ingest worker (integrations/graphiti_ingest.py)
+-- runs graphiti-core's add_episode for it. `payload` is exactly what is sent:
+-- name, episode_body, source_description (provenance-stamped, carrying the
+-- `proposal=<id>` marker — the crash-recovery idempotency key) and
+-- reference_time. Statuses:
+--   QUEUED   waiting (not_before set = backing off after a transient failure)
+--   RUNNING  claimed by the worker; at most ONE per group (the index below)
+--   DONE     landed — episode_uuid and result {nodes, edges} recorded
+--   FAILED   permanent failure; the linked verification row is parked for the
+--            operator with the error. Terminal: it never blocks its group.
+-- Jobs in one group run strictly in id order (upstream requires episodes in
+-- a group to be added sequentially); different groups run side by side.
+create table if not exists graph_ingest_job (
+    id               bigserial primary key,
+    verification_id  text,
+    proposal_id      text,
+    group_id         text not null,
+    payload          jsonb not null,
+    kind             text not null default 'add_episode',
+    status           text not null default 'QUEUED',
+    attempts         int not null default 0,
+    not_before       timestamptz,
+    last_error       text,
+    episode_uuid     text,
+    result           jsonb,
+    created_at       timestamptz not null default now(),
+    started_at       timestamptz,
+    finished_at      timestamptz
+);
+
+-- The claim query reads the head (oldest non-terminal job) of every group.
+create index if not exists graph_ingest_job_open_idx
+    on graph_ingest_job (group_id, id) where status in ('QUEUED', 'RUNNING');
+-- Never two RUNNING jobs in one group, enforced by the database itself.
+create unique index if not exists graph_ingest_job_one_running_idx
+    on graph_ingest_job (group_id) where status = 'RUNNING';
+create index if not exists graph_ingest_job_verification_idx
+    on graph_ingest_job (verification_id);
 
 -- Confluence founders (2026-08-21, operator decision): confluence-expert is
 -- jira-expert's twin (practice knowledge + the narrow space-creation grant —

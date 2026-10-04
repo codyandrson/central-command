@@ -2500,7 +2500,8 @@ async def usage() -> dict:
 @router.get("/graph/episodes")
 async def graph_episodes(limit: int = 50, agent_id: str | None = None, scope: str = "private") -> dict:
     """Recent memory episodes (read-only; reads are ungated by design).
-    Newest first — group merge order from the MCP server is not guaranteed.
+    Newest first (`graphiti.get_episodes` orders by created_at; the sort
+    below also orders the scope-tagged page).
     With `agent_id`, `scope="private"` (the default — the per-agent chat
     panel's default view) narrows the read to that agent's own partition;
     `scope="all"` widens it back to shared + private, each episode tagged

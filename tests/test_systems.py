@@ -1,6 +1,6 @@
 """Wire-shape test for GET /api/systems — the cockpit's launchpad.
 
-Health checks (HTTP GET, TCP connect, Graphiti's get_status) are monkeypatched
+Health checks (HTTP GET, TCP connect, the Neo4j ping, the graphiti patch state) are monkeypatched
 so the test needs no live services and no database. What it actually proves:
 every entry carries the required keys, no credential VALUE ever reaches the
 payload, and CC_N8N_UI_URL flows through to the n8n entry's url.
@@ -41,7 +41,8 @@ async def test_systems_wire_shape_and_no_credential_leak(monkeypatch):
 
     monkeypatch.setattr(systems, "_http_check", fake_http_check)
     monkeypatch.setattr(systems, "_tcp_check", fake_tcp_check)
-    monkeypatch.setattr(systems, "_neo4j_status_via_graphiti", fake_neo4j_status)
+    monkeypatch.setattr(systems, "_neo4j_status", fake_neo4j_status)
+    monkeypatch.setattr(systems, "_graphiti_status", fake_neo4j_status)
 
     out = await systems.list_systems()
     payload = out["systems"]
@@ -95,7 +96,8 @@ async def test_systems_includes_external_entries_only_when_configured(monkeypatc
 
     monkeypatch.setattr(systems, "_http_check", fake_http_check)
     monkeypatch.setattr(systems, "_tcp_check", fake_tcp_check)
-    monkeypatch.setattr(systems, "_neo4j_status_via_graphiti", fake_neo4j_status)
+    monkeypatch.setattr(systems, "_neo4j_status", fake_neo4j_status)
+    monkeypatch.setattr(systems, "_graphiti_status", fake_neo4j_status)
 
     out = await systems.list_systems()
     by_id = {row["id"]: row for row in out["systems"]}
@@ -122,7 +124,8 @@ async def test_llama_swap_probe_is_the_browser_origin(monkeypatch):
 
     monkeypatch.setattr(systems, "_http_check", fake_http_check)
     monkeypatch.setattr(systems, "_tcp_check", fake_tcp_check)
-    monkeypatch.setattr(systems, "_neo4j_status_via_graphiti", fake_neo4j_status)
+    monkeypatch.setattr(systems, "_neo4j_status", fake_neo4j_status)
+    monkeypatch.setattr(systems, "_graphiti_status", fake_neo4j_status)
 
     by_id = {row["id"]: row for row in (await systems.list_systems())["systems"]}
     assert by_id["llama-swap"]["status"] == "up"

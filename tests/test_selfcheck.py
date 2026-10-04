@@ -4,7 +4,7 @@ fix it; nothing it prints carries a credential.
 
 Every outward call is faked at the seam the check uses (`selfcheck._get`,
 `selfcheck._pg_connect`, `resolve_model`, `neo4j_writer.request_embedding`,
-`graphiti.get_status`, `email_facade.list_refs`, the Atlassian probe loader):
+`graphiti.get_status` (a bolt ping), `graphiti_client.patch_state`, `email_facade.list_refs`, the Atlassian probe loader):
 no test here reaches a network or a live service. The one exception is
 `test_spine_against_the_test_database`, which uses the suite's own disposable
 test database (conftest) to prove the real query and that schema.sql seeds a
@@ -30,7 +30,13 @@ from pydantic_ai.models.function import FunctionModel
 
 from central_command import selfcheck
 from central_command.config import settings
-from central_command.integrations import email_facade, exchange, graphiti, neo4j_writer
+from central_command.integrations import (
+    email_facade,
+    exchange,
+    graphiti,
+    graphiti_client,
+    neo4j_writer,
+)
 from central_command.runtime import models
 from tests.conftest import needs_pg
 
@@ -99,6 +105,8 @@ class Fakes:
         self.vector = [0.0] * DIM
         self.embed_error: Exception | None = None
         self.status: object = {"status": "ok", "message": "connected"}
+        self.patches = {"1729-invalidation-scope.patch": "patched",
+                        "1666-reasoning-first-dedupe.patch": "patched"}
         self.refs: object = [{"uuid": "abc", "conversation_id": "t1"}]
         self.atlassian = {"checks": 9, "failures": 0, "fail_lines": []}
 
@@ -163,7 +171,7 @@ def fakes(monkeypatch):
         "embed_dim": DIM,
         "database_url": f"postgresql://cc:{MARK_DB}@db.example.com:5442/cc",
         "litellm_db_url": f"postgresql://ll:{MARK_DB}@db.example.com:5443/ll",
-        "graphiti_mcp_url": "http://graph.example.com:8000/mcp",
+        "neo4j_url": "bolt://graph.example.com:7687",
         "neo4j_password": MARK_NEO,
         "sandbox_runner_url": RUNNER,
         "sandbox_runner_token": MARK_SBX,
@@ -202,6 +210,7 @@ def fakes(monkeypatch):
     monkeypatch.setattr(neo4j_writer, "request_embedding", f.request_embedding)
     monkeypatch.setattr(neo4j_writer, "_EMBED_MODEL", "cc-embedding")
     monkeypatch.setattr(graphiti, "get_status", f.get_status)
+    monkeypatch.setattr(graphiti_client, "patch_state", lambda: f.patches)
     monkeypatch.setattr(exchange, "configured", lambda: False)
     monkeypatch.setattr(email_facade, "list_refs", f.list_refs)
     monkeypatch.setattr(selfcheck, "_load_atlassian_probe", f.probe)
@@ -316,13 +325,21 @@ def _break_embedding_key(f, mp):
 
 
 def _break_graph(f, mp):
-    f.status = httpx.ConnectError("refused")
-    return "CC_GRAPHITI_MCP_URL"
+    f.status = {"status": "error", "error": "ServiceUnavailable",
+                "message": "ServiceUnavailable: Couldn't connect"}
+    return "CC_NEO4J_URL"
 
 
 def _break_graph_neo4j(f, mp):
-    f.status = {"status": "error", "message": "database connection failed"}
+    f.status = {"status": "error", "error": "AuthError",
+                "message": f"AuthError: unauthorized ({MARK_NEO})"}
     return "CC_NEO4J_PASSWORD"
+
+
+def _break_graph_patches(f, mp):
+    f.patches = {"1729-invalidation-scope.patch": "pristine",
+                 "1666-reasoning-first-dedupe.patch": "pristine"}
+    return "python scripts/apply_graphiti_patches.py"
 
 
 def _break_sandbox(f, mp):
@@ -378,6 +395,7 @@ BREAKS = [
     ("completion-as-app", _break_completion),
     ("embedding-as-app", _break_embedding), ("embedding-as-app", _break_embedding_key),
     ("graph", _break_graph), ("graph", _break_graph_neo4j),
+    ("graph-patches", _break_graph_patches),
     ("sandbox", _break_sandbox),
     ("crawler", _break_crawler),
     ("mail", _break_mail), ("mail", _break_mail_exchange),

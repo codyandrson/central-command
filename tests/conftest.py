@@ -21,7 +21,20 @@ import pytest
 
 from central_command.config import settings
 from central_command.db import repo
-from central_command.integrations import graphiti, jira, neo4j_writer
+from central_command.integrations import graphiti, graphiti_client, jira, neo4j_writer
+
+# The durable ingest worker never starts under the suite (an app lifespan in a
+# TestClient would otherwise claim other tests' jobs). Tests that exercise it
+# drive `graphiti_ingest.run_job` / `IngestWorker` directly with a fake client.
+settings.graph_ingest_enabled = False
+
+# graphiti-core's write surface on a real `Graphiti` object. A test reaching any
+# of these through `graphiti_client.get_graphiti()` fails (see below).
+_GRAPHITI_WRITES = frozenset({
+    "add_episode", "add_episode_bulk", "add_triplet", "remove_episode",
+    "build_indices_and_constraints", "build_communities", "update_communities",
+    "summarize_saga", "nodes", "edges",
+})
 
 
 def aresolve(fn):
@@ -103,12 +116,14 @@ def no_live_graph_writes():
 
     Two things about the placement are deliberate.
 
-    It guards the TRANSPORT, not `add_episode`: several tests legitimately call
-    the real `add_episode` with `_call_tool` faked underneath to assert on the
-    group_id it computes, and a guard one level up fails those for doing exactly
-    the right thing. Refusing the `add_memory` CALL catches every writer —
-    runtime, executor, or a bare integration call — and leaves reads alone, so
-    the live read round-trips in tests/test_graph.py still run.
+    It guards the ONE BUILDER, not the callers: since graphiti-core runs
+    in-process (2026-10-04) every write the library can make goes through the
+    object `graphiti_client.get_graphiti()` returns — the ingest worker's
+    `add_episode`, the start-up index DDL, anything a future caller adds. The
+    real object comes back wrapped so its write methods refuse, and its reads
+    (search_, driver, clients) pass through, so the live read round-trips in
+    tests/test_graph.py still run. Tests of the worker replace
+    `graphiti_ingest._client` with a fake and never reach this.
 
     And it is SESSION-scoped, so it is never torn down between tests. The
     writes seen here were intermittent, which is the signature of an async task
@@ -116,27 +131,33 @@ def no_live_graph_writes():
     restored by the time that task lands, and the write goes to the real graph
     with nothing left to stop it.
     """
-    real_call_tool = graphiti._call_tool
+    real_get_graphiti = graphiti_client.get_graphiti
 
-    async def guarded(name, arguments, timeout=30.0):
-        # Same opt-in as the bolt guard below, added 2026-08-19: the
-        # invalidation-attribution probe (tests/test_graph_delta_live.py) must
-        # write real scratch-group episodes, because what Graphiti's queued
-        # ingestion actually stamps on retired edges is a claim about the live
-        # store that a fake proves nothing about. Never by default.
-        if name == "add_memory" and os.getenv("CC_LIVE_GRAPH_TESTS") != "1":
-            raise AssertionError(
-                "a test wrote to the live knowledge graph (add_memory). It is "
-                "not a fixture — fake graphiti.add_episode or graphiti._call_tool "
-                "instead (see tests/test_graph.py, tests/test_graph_scope.py), or "
-                "set CC_LIVE_GRAPH_TESTS=1 to run a cleanup-after-itself live "
-                "probe deliberately."
-            )
-        return await real_call_tool(name, arguments, timeout=timeout)
+    class _ReadOnlyGraphiti:
+        def __init__(self, inner):
+            object.__setattr__(self, "_inner", inner)
+
+        def __getattr__(self, name):
+            # Same opt-in as the bolt guard below (2026-08-19): a deliberate
+            # cleanup-after-itself live probe may write scratch-group episodes,
+            # because what extraction actually stamps on retired edges is a
+            # claim about the live store a fake proves nothing about.
+            if name in _GRAPHITI_WRITES and os.getenv("CC_LIVE_GRAPH_TESTS") != "1":
+                raise AssertionError(
+                    f"a test reached graphiti-core's {name!r} on a REAL client — a "
+                    "write to the live knowledge graph. It is not a fixture: "
+                    "replace graphiti_ingest._client with a fake (see "
+                    "tests/test_graph_ingest.py), or set CC_LIVE_GRAPH_TESTS=1 to "
+                    "run a cleanup-after-itself live probe deliberately."
+                )
+            return getattr(self._inner, name)
+
+    def guarded_get_graphiti():
+        return _ReadOnlyGraphiti(real_get_graphiti())
 
     # The bolt WRITE path (operator curation, 2026-08-15) needs the same guard
-    # for the same reason, one layer lower: it does not go through MCP at all,
-    # so `add_memory` never sees it. It is opt-in rather than absolutely
+    # for the same reason, one layer lower: it does not go through graphiti-core
+    # at all. It is opt-in rather than absolutely
     # refused, because its invariants — an entity's types written to two
     # places, an edge's endpoints written to two places — are claims about what
     # Neo4j actually stores and a fake proves none of them. Run them
@@ -154,18 +175,19 @@ def no_live_graph_writes():
             )
         return await real_write(query, **params)
 
-    graphiti._call_tool = guarded
+    graphiti_client.get_graphiti = guarded_get_graphiti
     neo4j_writer._write = guarded_write
     try:
         yield
     finally:
-        graphiti._call_tool = real_call_tool
+        graphiti_client.get_graphiti = real_get_graphiti
         neo4j_writer._write = real_write
 
 
 # ── the live-graph preflight (ledger F40) ───────────────────────────────────
 # The graph guard above deliberately lets live READS run: a fake proves nothing
-# about whether the SSE envelope parses and the result decodes. But every one of
+# about whether the library's search and our result shapes agree with the real
+# store. But every one of
 # those reads embeds its query through LiteLLM to an external backend, and when
 # that backend is off they do not fail — they HANG. Measured 2026-09-24: nine
 # tests sat at the 90 s ceiling with `--timeout`, and without one they wait for
@@ -179,8 +201,9 @@ def no_live_graph_writes():
 #
 # The probe is the cheapest call the marked tests themselves make (the same
 # `search_facts` round-trip as tests/test_graph.py's live fact search), because a
-# cheaper probe would answer for the wrong component: `get_status` returns fine
-# with the embedder dead, which is exactly the state that hangs.
+# cheaper probe would answer for the wrong component: `get_status` (a bolt
+# ping) returns fine with the embedder dead, which is exactly the state that
+# hangs.
 GRAPH_PREFLIGHT_SECS = 10.0
 GRAPH_DOWN_REASON = (
     "graph backend did not answer within 10 s (embedder/LLM offline?) "

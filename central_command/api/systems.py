@@ -162,23 +162,26 @@ def _entries() -> list[dict]:
             "credential": {"label": "DB URL", "location": "CC_DATABASE_URL"},
         },
         {
+            # graphiti-core runs IN this process (design record 2026-10-04):
+            # there is no server to reach. Its health is whether the two
+            # carried fixes are installed — without them the ingest worker
+            # extracts nothing.
             "id": "graphiti",
-            "name": "Graphiti MCP",
+            "name": "Graphiti (in-process)",
             "kind": "api",
             "url": None,
-            "health": _http_check(
-                f"{_origin(settings.graphiti_mcp_url)}/health"
-                if _origin(settings.graphiti_mcp_url)
-                else None
-            ),
-            "credential": {"label": "none (internal)", "location": "n/a"},
+            "health": _graphiti_status(),
+            "credential": {
+                "label": "the app's LiteLLM key (graph aliases)",
+                "location": "CC_LLM_API_KEY",
+            },
         },
         {
             "id": "neo4j",
             "name": "Neo4j",
             "kind": "ui",
             "url": settings.neo4j_browser_url or None,
-            "health": _neo4j_status_via_graphiti(),
+            "health": _neo4j_status(),
             "credential": {
                 "label": "database password",
                 "location": "NEO4J_PASSWORD in deploy/pi/.env",
@@ -280,22 +283,34 @@ async def _unknown() -> tuple[str, float | None]:
     return "unknown", None
 
 
-async def _neo4j_status_via_graphiti() -> tuple[str, float | None]:
-    """No direct Neo4j health surface is exposed to this process (bolt reads
-    go through neo4j_reader for the Graph panel, not through here) — take
-    Graphiti's own get_status as a proxy: if Graphiti reports the graph is
-    reachable, Neo4j is up behind it. Any failure (Graphiti down, MCP error,
-    status missing the field) reads as "unknown", never a false "down"."""
+async def _neo4j_status() -> tuple[str, float | None]:
+    """A bolt ping (`graphiti.get_status`), the same one the self-check's
+    `graph` row and the agents' reads depend on. A failure is "down": the
+    ping is direct now, so a failure is the database's, not a proxy's."""
     from central_command.integrations import graphiti
 
     try:
         status = await asyncio.wait_for(graphiti.get_status(), timeout=_TIMEOUT)
     except Exception:
         return "unknown", None
-    ok = status.get("status") or status.get("ok") or status.get("neo4j")
-    if ok in (True, "ok", "healthy", "connected"):
+    return ("up", None) if status.get("status") == "ok" else ("down", None)
+
+
+async def _graphiti_status() -> tuple[str, float | None]:
+    """`up` when the installed graphiti-core carries both fixes, `down` when
+    it does not (the ingest worker refuses to extract), `unknown` when the
+    state cannot be read (a non-editable install ships no patch files)."""
+    from central_command.integrations import graphiti_client
+
+    try:
+        state = graphiti_client.patch_state()
+    except Exception:
+        return "unknown", None
+    if state and all(v == "patched" for v in state.values()):
         return "up", None
-    return "unknown", None
+    if any(v == "unknown" for v in state.values()):
+        return "unknown", None
+    return "down", None
 
 
 @router.get("/systems")

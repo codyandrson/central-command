@@ -11,6 +11,10 @@ the runs in flight):
             re-applies the stop flag every tick — a turn that starts during
             the hold (an approval's resume) parks too — and writes the
             updater's trigger the moment nothing is RUNNING.
+            The graph ingest worker (integrations/graphiti_ingest.py) reads
+            the same flag and claims no NEW extraction while it stands; one
+            already running is not waited for — if the update stops it, its
+            transaction never committed and the next start re-queues it.
   now     → write the trigger with `force` regardless; whatever is still
             RUNNING dies with the process and is swept FAILED at startup, and
             the wait screen said so.

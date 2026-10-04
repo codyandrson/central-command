@@ -2113,7 +2113,7 @@ async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
     )
 
 
-async def graph_verify_sweep(settle_minutes: int = 10, missing_after_minutes: int = 360) -> dict:
+async def graph_verify_sweep(settle_minutes: int = 10) -> dict:
     """Audit approved graph episodes once ingestion settles — called by the
     `graph.verify_sweep` heartbeat action. A passthrough for the same reason
     `retry_sweep` lives here: the body needs the gateway tier (judging a
@@ -2121,6 +2121,4 @@ async def graph_verify_sweep(settle_minutes: int = 10, missing_after_minutes: in
     import the gate."""
     from central_command.gateway import graph_auditor
 
-    return await graph_auditor.verify_sweep(
-        settle_minutes=settle_minutes, missing_after_minutes=missing_after_minutes
-    )
+    return await graph_auditor.verify_sweep(settle_minutes=settle_minutes)

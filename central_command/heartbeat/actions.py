@@ -364,16 +364,18 @@ async def _discussion_sweep(schedule_id: str, params: dict) -> dict:
 
 
 async def _graph_verify_sweep(schedule_id: str, params: dict) -> dict:
-    """Audit approved graph episodes after ingestion settles (2026-08-19 spec).
+    """Audit approved graph episodes once their ingest job is done (2026-08-19
+    spec; the durable queue since 2026-10-04).
 
     The body lives in `gateway.graph_auditor` (judging a verification is part
     of the gate), reached through `api.orchestration` because this package may
-    never import the gate — same route as `retry.sweep`."""
+    never import the gate — same route as `retry.sweep`. A stored
+    `missing_after_minutes` from before the queue is ignored: absence is no
+    longer inferred from a row's age."""
     from central_command.api import orchestration
 
     return await orchestration.graph_verify_sweep(
         settle_minutes=int(params.get("settle_minutes", 10)),
-        missing_after_minutes=int(params.get("missing_after_minutes", 360)),
     )
 
 
@@ -1533,21 +1535,17 @@ ACTIONS: dict[str, ActionSpec] = {
         ActionSpec(
             kind="graph.verify_sweep",
             description=(
-                "Audit approved graph episodes once ingestion has settled: "
+                "Audit approved graph episodes once their ingest job is done: "
                 "mechanical read-back checks (landed, right group, non-empty, "
                 "embedded) plus the graph-auditor's alignment judgment; "
-                "findings park for the operator."
+                "findings park for the operator. A row whose extraction is "
+                "still queued waits; one whose extraction failed was already "
+                "parked by the ingest worker."
             ),
             params={
                 "settle_minutes": (
                     "minutes after execute before a row is first checked "
                     "(default 10)"
-                ),
-                "missing_after_minutes": (
-                    "age past which a still-absent episode parks as MISSING — "
-                    "ingestion is a serial queue (~2-3 min/episode), so a batch "
-                    "of approvals lands an hour late; inside this deadline the "
-                    "row just waits for the next tick (default 360)"
                 ),
             },
             required=(),
@@ -1563,7 +1561,7 @@ ACTIONS: dict[str, ActionSpec] = {
             # and must write nothing.
             material=lambda r: bool(
                 r.get("auto_verified") or r.get("awaiting")
-                or r.get("missing") or r.get("resubmitted") or r.get("errors")
+                or r.get("missing") or r.get("failed") or r.get("errors")
             ),
         ),
         ActionSpec(

@@ -22,7 +22,8 @@ health check that costs more than the work it guards.
 
 Endpoints verified against the live Pi stack on 2026-07-31 (read-only GETs):
   n8n       GET  http://127.0.0.1:5678/healthz          -> 200 {"status":"ok"}
-  graphiti  GET  http://127.0.0.1:8000/health           -> 200 {"status":"healthy",...}
+  graphiti  TCP  the bolt port of CC_NEO4J_URL          (since 2026-10-04: graphiti-core
+            runs in-process, so the graph's dependency is Neo4j itself)
   litellm   GET  http://127.0.0.1:4000/health/liveliness -> 200 "I'm alive!"
 Each is derived from the SAME setting the real client uses, so a redeployment
 that moves a service moves its probe with it.
@@ -31,12 +32,14 @@ UNKNOWN is not DOWN: a dependency with no probe defined (`dependency_for_
 capability` returning None) is attempted anyway — there the attempt IS the
 probe, bounded by the budget.
 
-Tier note: this module imports config and httpx and nothing else. It must stay
-that way — `heartbeat/` may never reach the gate (tests/test_heartbeat.py).
+Tier note: this module imports config, httpx and the standard library and
+nothing else. It must stay that way — `heartbeat/` may never reach the gate
+(tests/test_heartbeat.py).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -103,8 +106,24 @@ async def probe_n8n() -> bool:
 
 
 async def probe_graphiti() -> bool:
-    """The Graphiti MCP server (and, through it, Neo4j)."""
-    return await _get_ok(_root(settings.graphiti_mcp_url) + "/health")
+    """The knowledge graph: graphiti-core runs in this process, so what a
+    retried `graph.*` action needs is Neo4j's bolt port (curation writes over
+    it; an add_episode only enqueues, and the ingest worker retries its own
+    transient failures). A TCP connect — no driver import, per the tier note."""
+    parsed = httpx.URL(settings.neo4j_url)
+    host, port = parsed.host, parsed.port or 7687
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=PROBE_TIMEOUT_SECONDS
+        )
+    except (OSError, asyncio.TimeoutError):
+        return False
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except OSError:
+        pass
+    return True
 
 
 async def probe_litellm() -> bool:

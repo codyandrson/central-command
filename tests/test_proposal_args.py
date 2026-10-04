@@ -20,7 +20,7 @@ from central_command.contract import ARG_SPECS, Action, Proposal, Reversibility,
 from central_command.db import repo
 from central_command.gateway import executor
 from central_command.gateway.capabilities import gated_write_names
-from central_command.integrations import graphiti
+from central_command.integrations import graphiti_ingest
 from central_command.runtime import packs
 from central_command.runtime import tools as tools_mod
 from central_command.runtime.deps import TriageDeps
@@ -142,7 +142,7 @@ async def test_executor_refuses_the_same_shape_before_any_action_runs(monkeypatc
     async def explode(*a, **k):
         raise AssertionError("handler ran on a malformed action")
 
-    monkeypatch.setattr(graphiti, "add_episode", explode)
+    monkeypatch.setattr(graphiti_ingest, "enqueue", explode)
     good = Action(capability="graph.add_episode",
                   arguments={"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"},
                   target_ref={"system": "graphiti", "id": "central_command"},

@@ -4,7 +4,8 @@ edge's `episodes` property, or is `expired_at`-in-window the only signal?
 
 Opt-in only (`CC_LIVE_GRAPH_TESTS=1`), same posture as test_graph_curation.py:
 mocking the graph here would test nothing, the whole point is what Neo4j and
-the queued local extractor actually do. Runs in a dedicated scratch group
+the local extractor actually do (graphiti-core in-process since 2026-10-04 —
+add_episode is awaited, so the polls below return on their first pass). Runs in a dedicated scratch group
 (`gvtest_attribution`, not in `graph_read_groups`) and cleans up in a finally
 block regardless of outcome.
 """
@@ -18,11 +19,29 @@ import uuid as _uuid
 
 import pytest
 
-from central_command.integrations import graphiti, neo4j_reader, neo4j_writer
+from datetime import datetime
+
+from central_command.integrations import (
+    graph_ontology,
+    graphiti_client,
+    neo4j_reader,
+    neo4j_writer,
+)
 
 GROUP = "gvtest_attribution"
 POLL_SECONDS = 15
 POLL_TIMEOUT_SECONDS = 6 * 60
+
+
+async def _add_episode(name: str, body: str, source_description: str, reference_time: str):
+    """The same call the ingest worker makes, against the REAL client (the
+    conftest guard lets it through only under CC_LIVE_GRAPH_TESTS=1)."""
+    return await graphiti_client.get_graphiti().add_episode(
+        name=name, episode_body=body, source_description=source_description,
+        reference_time=datetime.fromisoformat(reference_time),
+        source=graphiti_client.text_source(), group_id=GROUP,
+        entity_types=graph_ontology.ENTITY_TYPES,
+    )
 
 
 async def _poll_for_episode(marker: str, want_edge: bool) -> tuple[dict, dict] | None:
@@ -66,21 +85,17 @@ async def test_invalidation_attribution_live():
     if not await neo4j_reader.ping():
         pytest.skip("no bolt connection (cc-graph-bolt.service / cc-neo4j)")
 
-    # conftest's `no_live_graph_writes` guard lets `add_memory` through under
-    # the same CC_LIVE_GRAPH_TESTS=1 opt-in as the bolt-write guard (this test
-    # is why the MCP side gained the opt-in, 2026-08-19).
+    # conftest's `no_live_graph_writes` guard lets a real client's add_episode
+    # through under the same CC_LIVE_GRAPH_TESTS=1 opt-in as the bolt-write
+    # guard (this test is why the guard gained the opt-in, 2026-08-19).
     marker1 = f"attribution-probe-{_uuid.uuid4()}"
     marker2 = f"attribution-probe-{_uuid.uuid4()}"
     try:
-        await graphiti.add_episode(
-            name="attribution probe 1",
-            episode_body=(
-                "Marisol Vexley is the chief executive of Scratchcorp "
-                "Attribution Test Ltd."
-            ),
-            source_description=f"gvtest | marker={marker1}",
-            group_id=GROUP,
-            reference_time="2026-01-01T00:00:00Z",
+        await _add_episode(
+            "attribution probe 1",
+            "Marisol Vexley is the chief executive of Scratchcorp Attribution Test Ltd.",
+            f"gvtest | marker={marker1}",
+            "2026-01-01T00:00:00+00:00",
         )
         result1 = await _poll_for_episode(marker1, want_edge=True)
         assert result1 is not None, (
@@ -91,15 +106,12 @@ async def test_invalidation_attribution_live():
         episode1, delta1 = result1
         print(f"\n=== episode 1: {episode1['uuid']} — {len(delta1['edges'])} edge(s) ===")
 
-        await graphiti.add_episode(
-            name="attribution probe 2",
-            episode_body=(
-                "Barnaby Quilcott is now the chief executive of Scratchcorp "
-                "Attribution Test Ltd, replacing Marisol Vexley."
-            ),
-            source_description=f"gvtest | marker={marker2}",
-            group_id=GROUP,
-            reference_time="2026-01-02T00:00:00Z",
+        await _add_episode(
+            "attribution probe 2",
+            "Barnaby Quilcott is now the chief executive of Scratchcorp "
+            "Attribution Test Ltd, replacing Marisol Vexley.",
+            f"gvtest | marker={marker2}",
+            "2026-01-02T00:00:00+00:00",
         )
         result2 = await _poll_for_invalidation(marker2)
         assert result2 is not None, (

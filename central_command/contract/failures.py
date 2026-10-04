@@ -168,6 +168,45 @@ def classify_failure(exc: BaseException | None) -> str:
             else SEMANTIC
         )
 
+    # --- the knowledge graph's libraries (graphiti-core in-process, 2026-10-04)
+    # graphiti-core lets these propagate RAW out of add_episode and search, so
+    # the type is the evidence. A truncated generation surfaces as a bare
+    # JSONDecodeError after the library's own four attempts, and a schema
+    # mismatch as a pydantic ValidationError: the model ANSWERED, and the same
+    # input gets the same answer — semantic, named here so no text sniff can
+    # misread a field name in one as an outage.
+    import json as _json
+
+    try:
+        from pydantic import ValidationError as _ValidationError
+    except Exception:  # noqa: BLE001 — pragma: no cover
+        _ValidationError = ()  # type: ignore[assignment]
+    if isinstance(exc, _json.JSONDecodeError) or (
+        _ValidationError and isinstance(exc, _ValidationError)
+    ):
+        return SEMANTIC
+    try:
+        import openai
+
+        if isinstance(exc, openai.APIStatusError):
+            if exc.status_code in TRANSIENT_STATUS:
+                return TRANSIENT
+            return classify_failure_text(str(getattr(exc, "body", "") or ""))
+        if isinstance(exc, openai.APIConnectionError):  # APITimeoutError included
+            return TRANSIENT
+    except ImportError:  # pragma: no cover — openai rides pydantic-ai/graphiti-core
+        pass
+    try:
+        from neo4j.exceptions import ServiceUnavailable, SessionExpired
+        from neo4j.exceptions import TransientError as _Neo4jTransient
+
+        # The database was down or busy (the nightly dump, a pod moving, a
+        # deadlock the server asks us to retry) — never a judged request.
+        if isinstance(exc, (ServiceUnavailable, SessionExpired, _Neo4jTransient)):
+            return TRANSIENT
+    except ImportError:  # pragma: no cover — neo4j is a core dependency
+        pass
+
     # --- transport-level failures: nothing was ever judged --------------------
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError, socket.timeout)):
         return TRANSIENT

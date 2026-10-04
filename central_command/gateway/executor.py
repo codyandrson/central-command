@@ -334,34 +334,34 @@ async def _graph_add_episode(args: dict, approver: str, proposer: str | None) ->
     # ARG_SPECS already refuses a missing value before any action runs; this
     # is the shape check (a real instant, not "today") and the direct-call guard.
     reference_time = _episode_reference_time(args.get("reference_time"))
-    # Verification (2026-08-19 spec): the ack below is Graphiti ACCEPTING the
-    # episode, never the finished graph state — extraction is queued and has
-    # silently dropped acked episodes before. The marker stamped into
-    # source_description is how the graph-verify-sweep later finds the actual
-    # Episodic node and reads back what extraction really produced. The row is
-    # written BEFORE the write on purpose: if the call below times out AFTER
-    # the write landed (the executor's known retry residual), the sweep still
-    # audits it — whereas a row written after the ack vanishes with the crash.
-    # A row whose episode never appears is a loud, true finding either way.
-    from central_command.db import repo as db_repo
+    # The durable ingest queue (design record 2026-10-04, D5): the episode the
+    # operator approved is written to Postgres — its verification row and its
+    # ingest job, in ONE transaction — and extraction runs afterwards in the
+    # ingest worker, on the record. Nothing is acknowledged and then dropped:
+    # a job ends DONE (the sweep audits the episode by the uuid it recorded)
+    # or FAILED (the row is parked for the operator with the error). The
+    # `proposal=<id>` marker stamped into source_description stays: it is
+    # provenance, and now also the idempotency key the worker's crash
+    # recovery looks the episode up by.
+    from central_command.integrations import graphiti_ingest
 
     proposal_id = _current_proposal_id.get() or f"unattributed-{uuid.uuid4().hex[:12]}"
     marker = f"proposal={proposal_id}"
-    await db_repo.create_graph_verification(
-        proposal_id=proposal_id,
-        episode_name=args["name"],
-        group_id=group_id or settings.graph_write_group,
-        scope=scope,
-        marker=marker,
-    )
-    ack = await graphiti.add_episode(
+    queued = await graphiti_ingest.enqueue(
         args["name"],
         args["episode_body"],
         episode_source_description(args.get("source_description", ""), approver, marker),
-        group_id=group_id,
+        group_id or settings.graph_write_group,
         reference_time=reference_time,
+        proposal_id=proposal_id,
+        scope=scope,
+        marker=marker,
     )
-    return f"graph episode '{args['name']}' committed ({ack})"
+    job = (queued or {}).get("job") or {}
+    return (
+        f"graph episode '{args['name']}' queued for extraction"
+        + (f" (ingest job {job['id']})" if job.get("id") is not None else "")
+    )
 
 
 def _episode_reference_time(raw) -> str:
@@ -401,8 +401,9 @@ def _episode_reference_time(raw) -> str:
 
 def episode_source_description(source_description: str, approver: str, marker: str) -> str:
     """The provenance stamp every approved episode carries into the graph. One
-    composition, shared with the verify sweep's re-submission so a replayed
-    episode is byte-identical to the one the Executor first sent."""
+    composition, shared with the ingest cutover (`graph_auditor.enqueue_cutover`)
+    so an episode enqueued from its proposal is byte-identical to the one the
+    Executor would have sent."""
     return f"{source_description} | trust=human-approved | approver={approver} | {marker}"
 
 
