@@ -73,7 +73,7 @@ never silent and never a PASS: every command that sees it prints one
 | node | `NODE_EXTRA_CA_CERTS` | `NODE_TLS_REJECT_UNAUTHORIZED=0` |
 | git | `GIT_SSL_CAINFO` | `GIT_SSL_NO_VERIFY=1` |
 | podman pulls | installed into the podman machine's trust store by `./setup.sh machine` (plus `podman machine set --import-native-ca` where podman ≥ 6.0 has the flag) | `insecure = true` per `[[registry]]` in the machine's `registries.conf` drop-in, also written by `./setup.sh machine` |
-| the three image builds | copied into a STAGED build context as `cc-ca.crt` (`<state>/build/<image>/`); the Dockerfiles install it into the image trust store. **Not** a `--secret` — that is broken on a Windows podman machine, see below | `--tls-verify=false` + `--build-arg CC_TLS_INSECURE=1` |
+| the local image builds | copied into a STAGED build context as `cc-ca.crt` (`<state>/build/<image>/`); the Dockerfiles install it into the image trust store. **Not** a `--secret` — that is broken on a Windows podman machine, see below | `--tls-verify=false` + `--build-arg CC_TLS_INSECURE=1` |
 | apt inside a build | the same staged CA | `Acquire::https::Verify-Peer "false"` in `/etc/apt/apt.conf.d/99cc-insecure` |
 | pip / npm inside a build | `PIP_CERT` / `NPM_CONFIG_CAFILE`, set by the build's trust step | `PIP_TRUSTED_HOST` (from the index host), `NPM_CONFIG_STRICT_SSL=false` |
 | LiteLLM (the LLM endpoint) | `SSL_CERT_FILE`, from the CA mounted read-only at `/etc/cc/ca.pem` | `SSL_VERIFY=False` |
@@ -99,12 +99,12 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 
 | Source | Used by | Seam | Notes |
 |---|---|---|---|
-| docker.io | postgres, neo4j, redis, n8n, the graphiti and sandbox base images | `CC_REGISTRY_DOCKERIO` | a HOST prefix (`registry.corp.example`), never a URL |
+| docker.io | postgres, neo4j, redis, n8n, the sandbox base image | `CC_REGISTRY_DOCKERIO` | a HOST prefix (`registry.corp.example`), never a URL |
 | ghcr.io | LiteLLM, the speech engine (`speaches`) | `CC_REGISTRY_GHCR` | same shape |
 | mcr.microsoft.com | the crawler base (Microsoft's Playwright image: browsers + OS libs baked in) | `CC_REGISTRY_MCR` | replaces Debian + Microsoft's browser CDN for that build |
-| one image at a path this mirror renames, or a tag you verified yourself | any image, including the three build bases | `CC_IMG_<NAME>` | THE seam a host variable cannot express. An operator pin WINS: the resolver verifies that exact ref exists (manifest HEAD by tag, or by digest for a `…@sha256:…` ref, parsed from YOUR ref), `WARN`s that it honoured a pin, records it as `pinned`, and never rewrites it. A pin the registry does not have is a `FAIL` naming the key — a pin is checked, not trusted. Unset it to resolve against `images.txt` again |
-| Debian archive | `apt-get` inside the graphiti and sandbox builds | `CC_APT_MIRROR`, `CC_APT_SECURITY_MIRROR` | build-args; the deb822 sources file is REWRITTEN from `/etc/os-release` (slim images ship no `sources.list`; security is a separate path on every mirror) |
-| PyPI | the app's venv (uv), graphiti's `uv pip`, the crawler's `pip` | `CC_PYPI_INDEX_URL` | fanned out to `PIP_INDEX_URL` AND `UV_DEFAULT_INDEX` — uv reads no `PIP_*`, and `UV_INDEX_URL` is deprecated |
+| one image at a path this mirror renames, or a tag you verified yourself | any image, including the build bases | `CC_IMG_<NAME>` | THE seam a host variable cannot express. An operator pin WINS: the resolver verifies that exact ref exists (manifest HEAD by tag, or by digest for a `…@sha256:…` ref, parsed from YOUR ref), `WARN`s that it honoured a pin, records it as `pinned`, and never rewrites it. A pin the registry does not have is a `FAIL` naming the key — a pin is checked, not trusted. Unset it to resolve against `images.txt` again |
+| Debian archive | `apt-get` inside the sandbox build | `CC_APT_MIRROR`, `CC_APT_SECURITY_MIRROR` | build-args; the deb822 sources file is REWRITTEN from `/etc/os-release` (slim images ship no `sources.list`; security is a separate path on every mirror) |
+| PyPI | the app's venv (uv) — the knowledge-graph client `graphiti-core` and its `posthog` and `backoff` dependencies included, since it runs in the app (design record 2026-10-04) — and the crawler's `pip` | `CC_PYPI_INDEX_URL` | fanned out to `PIP_INDEX_URL` AND `UV_DEFAULT_INDEX` — uv reads no `PIP_*`, and `UV_INDEX_URL` is deprecated. Under `CC_AIRGAP=1` the venv installs exactly `requirements.lock`, so a mirror is COMPLETE when it serves every pin in that file — graphiti-core included; the carried patches (`deploy/graphiti-patches/`) are in the tree and need no download |
 | python-build-standalone | uv, only when the host has no CPython 3.12 | `CC_PYTHON_MIRROR` | `UV_PYTHON_INSTALL_MIRROR`; a `file://` directory works |
 | registry.npmjs.org | the cockpit build (`npm ci`), `sandbox-runtime` inside the sandbox build | `CC_NPM_REGISTRY` | `NPM_CONFIG_REGISTRY`; the lockfile's `resolved` URLs point at npmjs and npm rewrites them to the configured registry (its `replace-registry-host` default) — a lock regenerated AGAINST a mirror would not be rewritten back |
 | huggingface.co | the speech engine's models (Kokoro TTS + faster-whisper STT), fetched by `cc-speech` when the `llm` phase installs them | `CC_HF_ENDPOINT`, or pre-place the hub snapshots in the `speech-models` volume | `HF_HUB_CACHE` is the volume; a present snapshot is not re-fetched. `CC_ENABLE_SPEECH=0` removes the source entirely (point `cc-tts`/`cc-stt` at your own engines) |
@@ -112,7 +112,7 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 | the upstream LLM endpoint | LiteLLM — and `check`, directly from the host | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0. One base, one key, one upstream model id per alias (the alias upper-cased, every non-alphanumeric `_`). `cc_required_aliases` in `deploy/env-lib.sh` decides which aliases this deployment needs — the four core ones always, `cc-tts`/`cc-stt` only with `CC_ENABLE_SPEECH=1`. **All three families are OPTIONAL** (v2.45.1): blank is the normal case and means the catalog is entered in the LiteLLM UI at the `llm` phase's deliberate pause; see below |
 | an on-premises Exchange server (EWS) | the mail feed, the ledger's hydration, the mail tools and the Executor's mail/calendar writes, via `integrations/exchange.py` | `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`, `CC_EXCHANGE_PASSWORD`, `CC_EXCHANGE_EMAIL` | INTERNAL — there is no mirror seam and nothing to stage: it is a service on the site's own network, reached at install time and at run time alike. Trust rides the rows below: the internal CA in `CC_CA_BUNDLE`, the PKI client certificate in `CC_CLIENT_CERT`/`CC_CLIENT_KEY`, `CC_TLS_INSECURE=1` as the other answer. Blank everywhere = no Exchange, and the n8n Gmail façade is the mail path. Prove it with `python scripts/exchange_smoke.py` |
 | a Jira / Confluence site (Cloud or Data Center) | every Jira and Confluence read and the Executor's Jira writes, via `integrations/jira.py` and `integrations/confluence.py` | `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`, `CC_JIRA_API_TOKEN`, `CC_JIRA_API_FLAVOR`, `CC_JIRA_AUTH_MODE`, `CC_CONFLUENCE_BASE_URL`, `CC_CONFLUENCE_EMAIL`, `CC_CONFLUENCE_API_TOKEN`, `CC_CONFLUENCE_API_FLAVOR`, `CC_CONFLUENCE_AUTH_MODE`, `CC_CONFLUENCE_PROFILE` | v2.53.0 — ASKED at `configure` and PROBED by `check`'s `integrations` section and by both profiles' `verify.sh` (`python scripts/atlassian_probe.py --quiet`), so a stale token is found before the UI rather than mid-tour. No mirror seam and nothing to stage: on an internal Data Center it is a service on the site's own network, and trust rides the CA/insecure rows below. Blank `CC_JIRA_BASE_URL` = NO Jira, and an agent holding a `jira`/`confluence` capability then fails at execution with "Jira is not configured"; blank `CC_CONFLUENCE_BASE_URL` = no Confluence, never "the same site as Jira". A CLOUD API token is ACCOUNT-scoped, so one token serves both products on one site |
-| a private/corporate CA (TLS interception, a self-signed mirror) | everything: host acquisition, the three builds, podman pulls, LiteLLM, the speech engine | `CC_CA_BUNDLE` | one key, fanned out — the table above |
+| a private/corporate CA (TLS interception, a self-signed mirror) | everything: host acquisition, the local image builds, podman pulls, LiteLLM, the speech engine | `CC_CA_BUNDLE` | one key, fanned out — the table above |
 | a mandatory egress proxy | every host-side acquisition, and (inside a podman machine) pulls and builds | `CC_PROXY` | fanned out to `http(s)_proxy` in both cases, `no_proxy` pinned to loopback; `./setup.sh machine` writes the machine's `containers.conf` `[engine] env` drop-in |
 | — (verification off) | everything the CA row covers, except the speech engine | `CC_TLS_INSECURE=1` | the other supported answer to interception |
 | — (credentials) | `deploy/discover.sh`'s probes | `CC_NETRC=1` | `--netrc`, so credentials stay in `~/.netrc` and never in `.env` |
@@ -326,10 +326,10 @@ are reachable and which mirrors can stand in.
 
 | Missing source | Minimal move |
 |---|---|
-| Debian apt | apt is consumed ONLY inside the three local image builds — point `CC_APT_MIRROR`/`CC_APT_SECURITY_MIRROR` at the mirror discovery found. Nothing else in the profile touches apt. |
+| Debian apt | apt is consumed ONLY inside the local image builds (the sandbox's Debian base; the crawler's Ubuntu base has its own archive) — point `CC_APT_MIRROR`/`CC_APT_SECURITY_MIRROR` at the mirror discovery found. Nothing else in the profile touches apt. |
 | NodeSource (apt-based Node) | Node ≥ 22 is a HOST prerequisite (it *runs* the cockpit). Pre-stage the official self-contained tarball — `node-v22.x-linux-<arch>.tar.xz` from nodejs.org or its mirror, untarred onto PATH — no apt involved. |
 | registry.npmjs.org | `CC_NPM_REGISTRY` at the npm mirror (the lockfile's `resolved` URLs are rewritten automatically). |
-| PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror; the pip installs inside the graphiti/crawler builds ride the same seam as build-args. |
+| PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror — it must carry every pin in `requirements.lock`, graphiti-core (the graph client, in the app's venv since 2026-10-04) among them; the pip install inside the crawler build rides the same seam as a build-arg. |
 | A container registry | `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` at the registry mirror. A mirror that renames PATHS, or one tag that is simply absent: `CC_IMG_<NAME>`. |
 | python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. Under `CC_AIRGAP=1` neither being true is a `check` FAIL, not a warning — the download is known to be impossible. |
 | huggingface.co | Speech: `CC_HF_ENDPOINT` at an HF mirror, or pre-place the two hub snapshots in the `speech-models` volume, or `CC_ENABLE_SPEECH=0` and register `cc-tts`/`cc-stt` at engines you already have. Cockpit-local Whisper (k3s only): pre-place `ggml-*.bin` in `config.whisperModelDir`, or set `WHISPER_MODELS_BASE_URL`. |
@@ -356,14 +356,17 @@ pull of the locked tag, with a WARN. Resolved refs are written to `.env` as
 **A WARN-level substitution plus a green `./setup.sh verify` is a supported
 install:** capability is proven by probes, not by version strings.
 
-The three locally BUILT images resolve their base through the same manifest
-(v2.43.0): the resolver writes `CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP`,
-`CC_IMG_PYTHON` and `CC_IMG_PLAYWRIGHT_PYTHON`, each `build-*-image.sh` passes
+The locally BUILT images resolve their base through the same manifest
+(v2.43.0): the resolver writes `CC_IMG_PYTHON` and
+`CC_IMG_PLAYWRIGHT_PYTHON`, each `build-*-image.sh` passes
 its one as a `--build-arg`, and each Dockerfile's `ARG` default must equal its
 `images.txt` row (a test fails the suite if they drift). `requirements.lock` is
 the frozen Python resolution and `web/package-lock.json` the cockpit's: a mirror
 that "gets updated regularly" changes nothing until a release bumps a pin —
-that is the point.
+that is the point. (Until 2026-10-04 there was a third local image, the
+Graphiti MCP server, built from `zepai/knowledge-graph-mcp` with apt and pip
+inside the build. The graph client is a Python dependency of the app now, so
+that base image, its row and its build left the mirror list.)
 
 ## Open items (copied from the design record)
 

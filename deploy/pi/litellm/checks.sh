@@ -33,7 +33,7 @@ code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/health/livel
 echo "ok  liveliness"
 
 # 2. the aliases nothing may drop: cc-default (every agent run), graphiti-llm
-#    (graph extraction), cc-embedding (the embedding ROLE — Graphiti has NO
+#    (graph extraction), cc-embedding (the embedding ROLE — graphiti-core has NO
 #    embedding fallback, so an embedder outage is a graph WRITE outage).
 info="$(curl -s --max-time 20 -H "Authorization: Bearer $KEY" "$BASE/model/info")" \
   || fail "model/info: could not reach $BASE"

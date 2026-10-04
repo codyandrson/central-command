@@ -215,11 +215,3 @@ def test_each_real_patch_applies_cleanly_or_is_already_applied_to_a_copy(tmp_pat
     gp.apply_patches(copy)
     assert set(gp.patch_state(copy).values()) == {"patched"}
     assert all(s == "already patched" for _, _, s in gp.apply_patches(copy))
-
-
-def test_the_core_patches_in_the_image_context_have_not_drifted():
-    # The image's Dockerfile COPYs patches/ from its own build context, so the
-    # two core patches are carried in both places until the image is removed.
-    old = ROOT / "deploy" / "pi" / "graphiti" / "patches"
-    for name in gp.PATCH_FILES:
-        assert (gp.PATCH_DIR / name).read_bytes() == (old / name).read_bytes(), name

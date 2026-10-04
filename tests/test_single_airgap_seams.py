@@ -50,7 +50,6 @@ COMPOSE = SINGLE / "compose.yaml"
 # THE answer file's template — one file for the app and the deployment.
 ENV_EXAMPLE = ROOT / ".env.example"
 DOCKERFILES = [
-    ROOT / "deploy" / "pi" / "graphiti" / "Dockerfile",
     ROOT / "deploy" / "k3s" / "sandbox.Dockerfile",
     ROOT / "central_command" / "crawler" / "Dockerfile",
 ]
@@ -62,7 +61,6 @@ SCRIPTS = [
     SINGLE / "make-secrets.sh",
     SINGLE / "verify.sh",
     SINGLE / "update.sh",
-    SINGLE / "build-graphiti-image.sh",
     SINGLE / "build-sandbox-image.sh",
     SINGLE / "build-crawler-image.sh",
     SINGLE / "discover-llm.sh",
@@ -74,7 +72,7 @@ SCRIPTS = [
     *phase_files(),
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
-COMPONENTS = {"core", "n8n", "graphiti-base", "sandbox-base", "crawler-base", "speech"}
+COMPONENTS = {"core", "n8n", "sandbox-base", "crawler-base", "speech"}
 REGISTRY_VAR = {"CC_REGISTRY_DOCKERIO": "dockerio", "CC_REGISTRY_GHCR": "ghcr", "CC_REGISTRY_MCR": "mcr"}
 REGISTRY_HOST = {"docker.io": "dockerio", "ghcr.io": "ghcr", "mcr.microsoft.com": "mcr"}
 
@@ -292,7 +290,6 @@ def _dockerfile_bases() -> set[tuple[str, str, str]]:
 def test_each_build_script_passes_its_base_ref_through():
     """The manifest only reaches a build if the script hands the variable over."""
     for script, var in (
-        ("build-graphiti-image.sh", "CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP"),
         ("build-sandbox-image.sh", "CC_IMG_PYTHON"),
         ("build-crawler-image.sh", "CC_IMG_PLAYWRIGHT_PYTHON"),
     ):
@@ -652,7 +649,7 @@ def test_every_command_in_the_profile_calls_the_one_fanout():
     for script in (
         SINGLE / "setup.sh", SINGLE / "update.sh", SINGLE / "verify.sh",
         SINGLE / "make-secrets.sh", SINGLE / "resolve-images.sh",
-        SINGLE / "discover-llm.sh", SINGLE / "build-graphiti-image.sh",
+        SINGLE / "discover-llm.sh",
         SINGLE / "build-sandbox-image.sh", SINGLE / "build-crawler-image.sh",
     ):
         assert "cc_export_tls_env" in script.read_text(encoding="utf-8"), (
@@ -667,7 +664,7 @@ def test_every_command_that_sees_the_insecure_knob_says_so():
         SINGLE / "setup.sh", SINGLE / "update.sh", SINGLE / "verify.sh",
         SINGLE / "make-secrets.sh", SINGLE / "resolve-images.sh",
         ROOT / "deploy" / "discover.sh",
-        SINGLE / "build-graphiti-image.sh", SINGLE / "build-sandbox-image.sh",
+        SINGLE / "build-sandbox-image.sh",
         SINGLE / "build-crawler-image.sh",
     ):
         text = script.read_text(encoding="utf-8")
@@ -688,8 +685,7 @@ def test_every_command_that_sees_the_insecure_knob_says_so():
             )
 
 
-BUILD_SCRIPTS = ("build-graphiti-image.sh", "build-sandbox-image.sh",
-                 "build-crawler-image.sh")
+BUILD_SCRIPTS = ("build-sandbox-image.sh", "build-crawler-image.sh")
 
 
 def test_the_builds_carry_the_knobs_into_the_image():
@@ -779,8 +775,7 @@ def test_every_podman_build_of_these_dockerfiles_has_a_cc_ca_crt_to_match():
         "cc_stage_build_context must create an EMPTY cc-ca.crt when there is no "
         "CA, or a podman build with no CC_CA_BUNDLE dies on the glob COPY"
     )
-    for script in ("build-graphiti-image.sh", "build-sandbox-image.sh",
-                   "build-crawler-image.sh"):
+    for script in ("build-sandbox-image.sh", "build-crawler-image.sh"):
         text = (ROOT / "deploy" / "k3s" / script).read_text(encoding="utf-8")
         assert ": >cc-ca.crt" in text, (
             f"deploy/k3s/{script}: its chromebox build is `podman build`, so the "
@@ -809,7 +804,6 @@ def _build_dry_run(script: str, tmp_path: pathlib.Path, ca: pathlib.Path | None)
 
 
 @pytest.mark.parametrize("script,dockerfile", [
-    ("build-graphiti-image.sh", "Dockerfile"),
     ("build-sandbox-image.sh", "sandbox.Dockerfile"),
     ("build-crawler-image.sh", "Dockerfile"),
 ])
@@ -883,7 +877,7 @@ def test_staging_replaces_the_context_and_never_keeps_a_stale_ca(tmp_path):
     (src / "patches" / "p.patch").write_text("x\n")
     ca = tmp_path / "ca.pem"
     ca.write_text("-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----\n")
-    staged = tmp_path / "state" / "build" / "cc-graphiti"
+    staged = tmp_path / "state" / "build" / "cc-crawler"
 
     def run(with_ca: bool):
         r = subprocess.run(

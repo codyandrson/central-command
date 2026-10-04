@@ -30,6 +30,8 @@ when a matching file is read.
 - **A floating pod needs its image on BOTH nodes**, and locally-built images
   need `imagePullPolicy: IfNotPresent` (`Always` CrashLoops on a tag no
   registry serves). A missing image is invisible until the pod actually moves.
+  (No floating pod runs a local image today — the Graphiti server was the one,
+  and it left; the rule stands for the next.)
 - **In a unit's `ExecStart=/bin/sh -c`, `A && B & exec C` backgrounds A and B
   together.** `&` binds the whole `&&` chain into one background subshell,
   so a variable set in A is empty in C (the bolt relay opened to "" for 13
@@ -37,10 +39,13 @@ when a matching file is read.
   that should background carry the `&`; `tests/test_graph_bolt_unit.py`
   runs the line under stubs and asserts both relays get the address.
 - **The file-built configmaps are refreshed by the updater, per file.**
-  `make-secrets.sh` builds `cc-graphiti-config`, `cc-litellm-config` and
-  `cc-schema-sql` from files; `kubectl apply -f deploy/k3s/` never touches
-  them. `cc-update.sh` re-applies the ones a release changed — add a new
-  file-built configmap to that list or it silently never deploys.
+  `make-secrets.sh` builds `cc-litellm-config` and `cc-schema-sql` from
+  files; `kubectl apply -f deploy/k3s/` never touches them. `cc-update.sh`
+  re-applies the ones a release changed — add a new file-built configmap to
+  that list or it silently never deploys. Editing a refreshed file (even a
+  comment) restarts its consumer during the update: `deploy/pi/litellm/
+  config.yaml` restarts cc-litellm, so leave it alone unless the change is
+  worth that.
 - **Neo4j CrashLoops on its own Kubernetes Service name.** k8s injects
   service-discovery env vars and the Neo4j entrypoint turns every
   `NEO4J_`-prefixed var into a config setting. The fix is
@@ -60,6 +65,30 @@ when a matching file is read.
   day it is set, on every tailnet client. A ServiceLB service is linked as
   plain `http://<tailnet name>:<port>`; serve fronts only what is
   loopback-only on the host. `tests/test_systems_links_derived.py` pins it.
+- **The update ACROSS a removal is run by the PREVIOUS release's
+  `cc-update.sh`** (systemd runs the installed copy; the merge replaces the
+  file, the running bash keeps the old one). Its IMAGES rows and configmap
+  rows are in ITS memory, and they run against the NEW tree: a row whose
+  input paths differ between the installed release and the target is
+  prebuilt with the target's build script (missing script = `die prebuild`),
+  its deployment is rollout-restarted AFTER the `removed.txt` deletes
+  (deleted deployment = `die manifests` on a MERGED tree, no rollback), and a
+  changed configmap file it cannot read is the same `die`. So when a release
+  removes a locally built image or a file-built configmap: keep the row's
+  input paths BYTE-IDENTICAL for one release (no stub — a changed stub is a
+  changed input), tombstone the Deployment/Service now, and tombstone the
+  make-secrets.sh objects it mounts (configmap, Secret) one release LATER —
+  the old updater's rollback re-applies the old manifests, which recreate the
+  Deployment but not what it mounts. The next release, applied by the new
+  updater, deletes the frozen files. The Graphiti removal is the worked case
+  (`tests/test_graphiti_server_boundary.py`, `deploy/k3s/README.md` §0a).
+  The steps the NEW release needs an existing install to gain (here: the
+  graphiti-core patches, the app key's wider scope, `CC_GRAPH_RERANK_ALIAS`)
+  ship one release earlier in a BRIDGE (v2.59.1, bullet below), and the new
+  release's `min_upgrade_from` names it — so no update needs the operator's
+  hands. The same mechanism makes a COMMENT edit to a build script, a
+  Dockerfile or a build context rebuild that image during an update — touch
+  them only when the image should change.
 - **What a release needs an EXISTING install to gain, the updater does — one
   release AHEAD** (v2.59.1, the bridge into the Graphiti-library release).
   The update INTO release N runs N-1's `cc-update.sh` (systemd runs the copy
@@ -77,6 +106,15 @@ when a matching file is read.
   with no rollback, while each gap only holds graph extraction or search.
   The release that needs them sets `min_upgrade_from` to the bridge, which
   the installed updater enforces at resolve. `tests/test_k3s_update_reconcile.py`.
+  The patch step is the graphiti-core carried fixes (design record
+  2026-10-04, D7): `setup.sh app` runs the same script after its install (a
+  FAIL there) and `verify.sh` asserts `--check`. The scope widening is a
+  union through `/key/update` (an empty list is "all models" and is left
+  alone; the key's VALUE never changes, so nothing restarts); the app's key
+  reaches every alias the app calls itself — graph extraction, embedding and
+  rerank since graphiti-core moved in-process, and the three Graphiti-only
+  keys are retired. `APP_ENV_DEFAULTS` and `setup.sh app`'s defaults loop are
+  one table in two places — keep them in step.
 - **A long-running host unit `Wants=k3s.service`, never `Requires=` it.**
   `Requires=` ties the unit's start job to k3s's FIRST start attempt: when
   that fails at boot, systemd cancels the dependent once ("Dependency

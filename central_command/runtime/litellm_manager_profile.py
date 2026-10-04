@@ -136,9 +136,9 @@ probe is the evidence. The procedure for a new model:
      provider prefix for the gateway's format (`openai/<model>` + api_base for
      /v1/chat/completions; `anthropic/<model>` + api_base for /v1/messages;
      `openai/chat_completions/<model>` only when a caller genuinely needs the
-     Responses bridge — NOT `graphiti-llm`: its only caller, Graphiti's MCP
-     server, uses the stock chat-completions client since 2026-09-21, so a
-     bridged registration 404s there), the credential by name, and
+     Responses bridge — NOT `graphiti-llm`: its only caller, the application's
+     in-process graphiti-core client, speaks chat-completions, so a bridged
+     registration 404s there), the credential by name, and
      `mode: chat`. If the gateway serves
      a public counterpart, `model_info.base_model` = that public name gives
      LiteLLM's built-in cost-map defaults for pricing. Do NOT set cost

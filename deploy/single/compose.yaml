@@ -54,7 +54,7 @@
 #
 #   Image refs come from CC_IMG_* written by resolve-images.sh; the fallbacks
 #   are images.txt's locked tags, so `docker compose config` works on a bare
-#   checkout. The three locally-built images are EXACT — our own code is one
+#   checkout. The two locally-built images are EXACT — our own code is one
 #   tested unit, and `localhost/` is the ref form podman resolves out of
 #   local storage without asking a registry.
 # ============================================================================
@@ -210,16 +210,18 @@ services:
     image: ${CC_IMG_NEO4J:-docker.io/library/neo4j:5.26.2}
     restart: always
     environment:
-      # The container's expected "user/password" form; Graphiti wants the bare
-      # password. Same source value, two shapes.
+      # The container's expected "user/password" form; the app (CC_NEO4J_URL +
+      # CC_NEO4J_PASSWORD) passes the bare password. Same source value.
       NEO4J_AUTH: neo4j/${CC_NEO4J_PASSWORD}
       NEO4J_server_memory_heap_initial__size: 512m
       NEO4J_server_memory_heap_max__size: 1G
       NEO4J_server_memory_pagecache_size: 512m
     ports:
       # Published on LOOPBACK, unlike the k3s profile where Neo4j is
-      # ClusterIP-only behind a port-forward unit. On one machine the operator
-      # curation path (integrations/neo4j_writer.py) talks bolt directly.
+      # ClusterIP-only behind a relay unit. On one machine the app talks bolt
+      # here directly: graphiti-core's extraction and search (in-process, no
+      # Graphiti server — design record 2026-10-04, D1) and the curation and
+      # read paths (integrations/neo4j_writer.py, neo4j_reader.py).
       - "127.0.0.1:${CC_NEO4J_BOLT_PORT:-7687}:7687"
       - "127.0.0.1:${CC_NEO4J_HTTP_PORT:-7474}:7474"
     volumes:
@@ -242,66 +244,6 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-
-  graphiti:
-    container_name: ${CC_POD_PREFIX:-cc-}graphiti
-    # LOCALLY BUILT by build-graphiti-image.sh — exact, never resolved.
-    image: localhost/cc-graphiti:${CC_GRAPHITI_TAG:-1.0.2-anthropic}
-    pull_policy: never
-    restart: always
-    depends_on:
-      neo4j:
-        condition: service_healthy
-      litellm:
-        condition: service_healthy
-    environment:
-      CONFIG_PATH: /app/mcp/config/config.yaml
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: ${CC_NEO4J_PASSWORD}
-      GRAPHITI_LLM_API_KEY: ${GRAPHITI_LLM_API_KEY:-${CC_LLM_PROXY_ADMIN_KEY}}
-      EMBEDDER_API_KEY: ${EMBEDDER_API_KEY:-${CC_LLM_PROXY_ADMIN_KEY}}
-      EMBEDDER_API_URL: http://litellm:4000/v1
-      # LOAD-BEARING since MCP 1.1.0 (2026-09-19): the factory passes the
-      # config file's llm api_url as the client's base_url (1.0.2 ignored it).
-      LLM_API_URL: http://litellm:4000/v1
-      # MCP 1.1.0's built-in entity-type models carry a required `description`
-      # attribute that grows without bound on a hub entity. `none` keeps their
-      # docstrings (the extraction guidance) and drops the fields
-      # (deploy/pi/graphiti/patches/cc-entity-type-source.patch).
-      GRAPHITI_ENTITY_TYPE_FIELDS: none
-      # The RERANKER's endpoint, and the LLM's. graphiti_core builds its
-      # cross-encoder as OpenAIRerankerClient() with no config, so the openai
-      # SDK falls back to these two vars — the only seam available without
-      # patching the image. OPENAI_API_KEY is REQUIRED even though it is not
-      # the embedder's: Graphiti.__init__ unconditionally constructs the
-      # reranker client, which raises without a key.
-      OPENAI_BASE_URL: http://litellm:4000/v1
-      OPENAI_API_KEY: ${RERANKER_API_KEY:-${CC_LLM_PROXY_ADMIN_KEY}}
-      # GRAPHITI_RERANK_MODEL is DELIBERATELY UNSET: it selects the true
-      # cross-encoder path through LiteLLM /rerank, which needs a
-      # rerank-capable model this profile does not assume. Unset falls back to
-      # upstream's logprob classifier against OPENAI_BASE_URL, addressing the
-      # gpt-4.1-nano alias registered for exactly this. README.md "Reranking".
-      GRAPHITI_TELEMETRY_ENABLED: "false"
-      SEMAPHORE_LIMIT: "3"
-      # The MEASURED embedding dimension (setup.sh's llm phase writes it into
-      # .env). graphiti-config.yaml expands it from this container's env.
-      # Never a model card's number: a mis-sized vector corrupts the Neo4j
-      # index instead of erroring, and the dimension is permanent.
-      CC_EMBED_DIM: ${CC_EMBED_DIM}
-    ports:
-      - "127.0.0.1:${CC_GRAPHITI_PORT:-8000}:8000"
-    volumes:
-      - ./graphiti-config.yaml:/app/mcp/config/config.yaml:ro
-    healthcheck:
-      # The app's interpreter lives in a venv in this image; `python3` is the
-      # fallback rather than an assumption about PATH. No curl in here.
-      test: ["CMD-SHELL", "p=/app/mcp/.venv/bin/python; [ -x $$p ] || p=python3; $$p -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 60s
 
   # ── OPTIONAL: n8n ─────────────────────────────────────────────────────────
   # n8n exists here for exactly one reason: it holds the Gmail OAuth

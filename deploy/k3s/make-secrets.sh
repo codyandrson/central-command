@@ -44,25 +44,14 @@ require() {
   fi
 }
 for k in LITELLM_MASTER_KEY LITELLM_SALT_KEY LITELLM_POSTGRES_PASSWORD \
-         NEO4J_PASSWORD GRAPHITI_LLM_API_KEY EMBEDDER_API_KEY RERANKER_API_KEY \
-         N8N_ENCRYPTION_KEY N8N_DB_PASSWORD; do
+         NEO4J_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD; do
   require "$k"
 done
 
-# PENDING is ACCEPTED, deliberately. The three Graphiti keys are LiteLLM virtual
-# keys, so on a fully-clean deployment they cannot exist until the proxy is up —
-# and the proxy cannot come up until this script has made its Secret. init-env.sh
-# writes the literal PENDING to break that cycle; `require` only refuses EMPTY,
-# so nothing here needed loosening. Say so out loud rather than shipping a
-# Graphiti that authenticates with the word PENDING and nobody noticing.
-pending=""
-for k in GRAPHITI_LLM_API_KEY EMBEDDER_API_KEY RERANKER_API_KEY; do
-  [[ "${!k}" == "PENDING" ]] && pending+=" $k"
-done
-if [[ -n "$pending" ]]; then
-  echo "NOTE: still PENDING (placeholder, not a working key):$pending" >&2
-  echo "      Graphiti will 401 until ./deploy/k3s/mint-keys.sh mints them." >&2
-fi
+# The three Graphiti virtual keys (GRAPHITI_LLM_API_KEY, EMBEDDER_API_KEY,
+# RERANKER_API_KEY) and their Secret left with the Graphiti server (design
+# record 2026-10-04, D10): graphiti-core runs inside the app on CC_LLM_API_KEY.
+# An existing deploy/pi/.env may still carry them; nothing reads them.
 
 apply_secret() {  # apply_secret <name> <k=v>...
   local name="$1"; shift
@@ -97,23 +86,10 @@ litellm_args=(
 apply_secret cc-litellm "${litellm_args[@]}"
 
 # NEO4J_AUTH is the container's expected "user/password" form; NEO4J_PASSWORD is
-# what Graphiti wants on its own. Same secret, two shapes, one source value.
+# the bare value. Same secret, two shapes, one source value.
 apply_secret cc-neo4j \
   "NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}" \
   "NEO4J_PASSWORD=$NEO4J_PASSWORD"
-
-# All three are LiteLLM virtual keys pointed at the workstation's local models —
-# Graphiti reaches no external provider since 2026-08-01. Each is scoped to its
-# own model group so a leak in one cannot spend through another:
-#   GRAPHITI_LLM_API_KEY -> ["graphiti-llm"]          entity extraction
-#   EMBEDDER_API_KEY     -> ["cc-embedding"]           embeddings (role alias)
-#   RERANKER_API_KEY     -> ["cc-default","cc-rerank"] cross-encoder (role alias)
-# ANTHROPIC_API_KEY is intentionally absent — nothing in the graphiti config
-# selects the anthropic provider any more.
-apply_secret cc-graphiti \
-  "GRAPHITI_LLM_API_KEY=$GRAPHITI_LLM_API_KEY" \
-  "EMBEDDER_API_KEY=$EMBEDDER_API_KEY" \
-  "RERANKER_API_KEY=$RERANKER_API_KEY"
 
 apply_secret cc-n8n \
   "N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY" \
@@ -131,7 +107,7 @@ apply_secret cc-n8n \
 #
 # CC_LLM_API_KEY is reused here because it is the key already in .env, and it
 # points at THIS cluster's LiteLLM — never an external provider. A dedicated
-# scoped virtual key (the Graphiti precedent) was offered and DECLINED by the
+# scoped virtual key (the retired Graphiti server's precedent) was offered and DECLINED by the
 # operator 2026-08-07: the key only reaches the loopback/tailnet-only proxy
 # fronting local models, so compromise buys free local inference, not spend
 # or data. Revisit only if the shared key's MCP object_permission list ever
@@ -153,7 +129,7 @@ else
 fi
 
 echo "configmaps:"
-# These three are FILES in the repo, mounted the same way compose mounted them.
+# These two are FILES in the repo, mounted the same way compose mounted them.
 apply_cm_file() {  # apply_cm_file <name> <key>=<path>
   local name="$1" spec="$2"
   "${KUBECTL[@]}" -n "$NS" create configmap "$name" --from-file="$spec" \
@@ -161,7 +137,6 @@ apply_cm_file() {  # apply_cm_file <name> <key>=<path>
   echo "  configmap/$name"
 }
 apply_cm_file cc-litellm-config  "config.yaml=$REPO_ROOT/deploy/pi/litellm/config.yaml"
-apply_cm_file cc-graphiti-config "config.yaml=$REPO_ROOT/deploy/pi/graphiti/config.yaml"
 apply_cm_file cc-schema-sql      "01-schema.sql=$REPO_ROOT/central_command/db/schema.sql"
 
 echo

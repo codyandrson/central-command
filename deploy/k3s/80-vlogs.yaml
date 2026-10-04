@@ -51,7 +51,7 @@ metadata:
   namespace: central-command
 spec:
   # LoadBalancer so the UI answers on the Pi's loopback (ServiceLB), same
-  # mechanism as litellm/graphiti. In-cluster shippers use the DNS name.
+  # mechanism as litellm. In-cluster shippers use the DNS name.
   type: LoadBalancer
   selector:
     app: cc-vlogs

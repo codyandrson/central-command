@@ -979,7 +979,7 @@ resolve_python_deps() {
 # `io.podman.compose.config-hash` label it was created with (podman_compose.py,
 # compose_up, read at the v1.6.0 tag on 2026-10-02). The image REF string is in
 # that dict; the image ID behind it is not. So since this release made a
-# changed Dockerfile REBUILD `localhost/cc-graphiti:<tag>` under the same tag —
+# changed Dockerfile REBUILD `localhost/cc-crawler:1` under the same tag —
 # and equally when a third-party tag such as `postgres:16` is re-pulled to a new
 # digest — `up` left the OLD container running and reported it healthy.
 # (podman-compose's main branch has since added an image-ID comparison, still
@@ -1201,8 +1201,8 @@ stack_data_on_volume() { # stack_data_on_volume <service>
 # is safe is recreated in ONE call — compose's own force-recreate, scoped to
 # those services (--no-deps: their dependencies are already up and are not
 # touched; podman-compose additionally recreates a recreated service's RUNNING
-# DEPENDENTS, its `down` having removed them — graphiti after neo4j, litellm
-# after its database — all of them stateless or volume-backed), waiting on
+# DEPENDENTS, its `down` having removed them — litellm after its database,
+# n8n after its own — all of them stateless or volume-backed), waiting on
 # compose.yaml's healthchecks exactly as `up --wait` does. Then it asks again:
 # a recreate that did not land is a FAIL, never a PASS. Every verdict is printed
 # under the CALLER's check-name, so a failure here fails that ledger row.
@@ -2048,7 +2048,7 @@ p_node_ok() {
   [[ "${nv%%.*}" =~ ^[0-9]+$ ]] || return 1
   (( ${nv%%.*} >= 22 ))
 }
-# The three LOCAL images: done means the tag is present AND its build-inputs
+# The LOCAL images: done means the tag is present AND its build-inputs
 # label equals this tree's (v2.57.0, local_image_state). That comparison is
 # what re-runs these rows when a release changes a Dockerfile or its context —
 # their `reads` name only .env keys, and a file is not one.
@@ -2162,13 +2162,14 @@ p_embed_dim() {
 
 # ── stack ───────────────────────────────────────────────────────────────────
 p_up_stack() {
-  local gp
-  gp="$(p_flag CC_GRAPHITI_PORT 8000)"
   p_litellm_live || return 1
-  # The spine's Postgres speaks no HTTP, and Graphiti's MCP root is not a
-  # health page — a listener is the honest evidence for both.
+  # The spine's Postgres and Neo4j's bolt speak no HTTP — a listener is the
+  # honest evidence for both.
   port_listener "$(p_flag CC_PG_PORT 5442)" || return 1
-  port_listener "$gp" || return 1
+  port_listener "$(p_flag CC_NEO4J_BOLT_PORT 7687)" || return 1
+  # The retired Graphiti server's container is gone (phases/stack.sh's
+  # retire_graphiti_container) — read-only: `container exists` changes nothing.
+  ! podman container exists "$(p_flag CC_POD_PREFIX cc-)graphiti" 2>/dev/null || return 1
   # Up is not enough: every enabled service's container must run the image its
   # ref resolves to NOW (v2.57.0), or the row is not done — a rebuilt local
   # image or a re-pulled tag otherwise hides behind a healthy old container.

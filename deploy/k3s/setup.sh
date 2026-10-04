@@ -23,9 +23,10 @@
 #     preflight   named checks of the CLUSTER and both hosts. Read-only.
 #     llm         secrets + the LiteLLM trio + register/policy/mint + probes
 #                 THROUGH the proxy (README §1's "absent" fork, made code)
-#     stack       build the three local images if missing, apply every
+#     stack       build the two local images if missing, apply every
 #                 manifest, mint the kubeconfigs, gVisor
-#     app         venv, editable install, root .env, web/.env, cockpit build,
+#     app         venv, editable install + the graphiti-core patches, root
+#                 .env, web/.env, cockpit build,
 #                 systemd units, first boot (the roster hires itself)
 #     verify      verify.sh (+ --clean-install passthrough) + README §9 smokes
 #
@@ -71,7 +72,7 @@ SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
 # "the stack is up" assertion — `get pods` reports a CrashLooping pod as
 # Running until the probe flips it.
 DEPLOYMENTS=(cc-postgres cc-litellm-db cc-litellm-redis cc-litellm
-             cc-neo4j cc-graphiti cc-n8n-db cc-n8n cc-crawler cc-vlogs cc-speech)
+             cc-neo4j cc-n8n-db cc-n8n cc-crawler cc-vlogs cc-speech)
 
 PY=python3
 
@@ -338,28 +339,14 @@ phase_validate() {
     if [[ -z "${!v:-}" ]]; then
       fail "answer-${v}" "$v is empty in deploy/pi/.env — run: ./deploy/k3s/init-env.sh"
     elif [[ "${!v}" == PENDING ]]; then
-      fail "answer-${v}" "$v is PENDING — only the three Graphiti virtual-key slots may hold that"
+      fail "answer-${v}" "$v is PENDING — a placeholder, not a credential; clear it and run: ./deploy/k3s/init-env.sh"
     else
       pass "answer-${v}" "$v is set"
     fi
   done
-
-  # The three Graphiti slots are the ONLY legal home for PENDING: they are
-  # LiteLLM virtual keys, which cannot exist before the proxy does. make-
-  # secrets.sh accepts the placeholder; mint-keys.sh replaces it in the llm
-  # phase. PENDING here is therefore a NOTE, not a warning — it is the
-  # designed pre-mint state.
-  local pending=""
-  for v in GRAPHITI_LLM_API_KEY EMBEDDER_API_KEY RERANKER_API_KEY; do
-    if [[ -z "${!v:-}" ]]; then
-      fail "answer-${v}" "$v is empty — run ./deploy/k3s/init-env.sh (it writes PENDING to break the chicken-and-egg)"
-    elif [[ "${!v}" == PENDING ]]; then
-      pending+=" $v"
-    else
-      pass "answer-${v}" "$v is minted"
-    fi
-  done
-  [[ -n "$pending" ]] && pass "graphiti-keys-pending" "still PENDING (expected before the llm phase mints them):$pending"
+  # GRAPHITI_LLM_API_KEY / EMBEDDER_API_KEY / RERANKER_API_KEY are no longer
+  # read by anything (the Graphiti server left; design record 2026-10-04, D10)
+  # — an existing file may still carry them, and that is harmless.
 
   # The app's .env. validate REPORTS ONLY — it mutates nothing, so the fix is
   # printed rather than performed (the llm phase creates it, for mint-keys.sh).
@@ -468,13 +455,10 @@ phase_preflight() {
     return 1
   fi
 
-  # Two builders, one per architecture, per README §1 and §3: docker builds the
-  # arm64 graphiti image HERE; podman builds every amd64 image THERE. Neither
-  # is optional — the graphiti image must exist on both nodes or a failover
-  # ImagePullBackOffs.
-  command -v docker >/dev/null 2>&1 \
-    && pass "builder-docker" "docker present on this node (arm64 graphiti build)" \
-    || fail "builder-docker" "docker not found — build-graphiti-image.sh builds the arm64 half with it (README §1)"
+  # One builder: podman on the compute node builds both local images (sandbox
+  # and crawler are compute-REQUIRED, so amd64 only, natively, no QEMU). The
+  # anchor's docker was only ever for the arm64 half of the retired Graphiti
+  # image, which floated and so had to exist on both nodes.
   if compute_ssh 'command -v podman' >/dev/null 2>&1; then
     pass "builder-podman" "podman present on the compute node (native amd64 builds, no QEMU)"
   else
@@ -580,9 +564,9 @@ llm_gate() { # llm_gate <what-failed>
   note "  the re-run checks are in deploy/pi/litellm/model-preferences.yaml:"
   note "    graphiti-llm           MUST be a PLAIN openai/<model> — same as"
   note "                           cc-default. The old chat_completions/"
-  note "                           bridge prefix is now WRONG: Graphiti's MCP"
-  note "                           server uses the stock chat-completions"
-  note "                           client, and a bridged alias 404s."
+  note "                           bridge prefix is now WRONG: the app's"
+  note "                           in-process graphiti-core client speaks"
+  note "                           chat-completions, and a bridged alias 404s."
   note "    cc-rerank + qwen3-rerank-local  api_base MUST end in /v1/rerank, mode rerank"
   note "    cc-embedding           the embedding ROLE — same upstream as"
   note "                           qwen3-embedding-local; both rows must exist"
@@ -623,7 +607,7 @@ phase_llm() {
   # init-env.sh may have generated values into the file we sourced before it.
   load_env || return 1
 
-  step "secrets" "namespace, five Secrets and three ConfigMaps applied from deploy/pi/.env" \
+  step "secrets" "namespace, the Secrets and the two file-built ConfigMaps applied from deploy/pi/.env" \
     "$HERE/make-secrets.sh" || return 1
 
   # Only the LiteLLM trio here. README §1's fork ("already running" vs
@@ -688,9 +672,11 @@ phase_llm() {
   # that file does not exist — so it has to exist by now, not by the app phase.
   ensure_app_env || return 1
   # Mint AFTER registering: each key is scoped to model groups that must exist.
-  # Idempotent (a set, non-PENDING value is kept); it also re-runs
-  # make-secrets.sh and restarts cc-graphiti if that deployment exists yet.
-  step "mint-keys" "the three Graphiti virtual keys + CC_LLM_API_KEY minted (or kept)" \
+  # Idempotent (a set, non-PENDING value is kept, and a kept key's scope is
+  # WIDENED to the graph aliases when it lacks them — how an install that
+  # predates the in-process graph client gets them); it also re-runs
+  # make-secrets.sh for the crawler's Secret.
+  step "mint-keys" "CC_LLM_API_KEY minted (or kept), scoped to cc-default, speech and the graph aliases" \
     "$HERE/mint-keys.sh" || return 1
 
   # The probes. A failure here is a USER-ACTION gate, not a plain FAIL
@@ -708,8 +694,8 @@ phase_llm() {
     return 3
   fi
   # cc-embedding is the embedding ROLE alias (2026-08-30, parity with the
-  # single-node profile) — mint-keys.sh scopes EMBEDDER_API_KEY to exactly
-  # that name; qwen3-rerank-local/qwen3-embedding-local stay as real-model rows.
+  # single-node profile) — the app's graph client embeds through exactly that
+  # name; qwen3-rerank-local/qwen3-embedding-local stay as real-model rows.
   local dim
   dim="$(probe_alias embed cc-embedding 2>/dev/null | tail -1)"
   if [[ ! "$dim" =~ ^[0-9]+$ ]]; then
@@ -748,19 +734,8 @@ images_compute() { compute_ssh 'sudo k3s ctr -n k8s.io images ls -q' 2>/dev/null
 phase_stack() {
   load_env || return 1
 
-  local anchor_imgs compute_imgs
-  anchor_imgs="$(images_anchor)"
+  local compute_imgs
   compute_imgs="$(images_compute)"
-
-  # cc-graphiti FLOATS, so it must exist on BOTH nodes — a missing copy is
-  # invisible until the day the pod actually moves.
-  local gref=docker.io/library/cc-graphiti:1.0.2-anthropic
-  if grep -qx "$gref" <<<"$anchor_imgs" && grep -qx "$gref" <<<"$compute_imgs"; then
-    pass "image-graphiti" "$gref present on both nodes"
-  else
-    step "image-graphiti" "$gref built (arm64 here with docker, amd64 there with podman) and imported on both nodes" \
-      "$HERE/build-graphiti-image.sh" || return 1
-  fi
 
   # cc-sandbox and cc-crawler are compute-REQUIRED (gVisor and Chromium live
   # there), so they are single-arch by design and only checked there.
@@ -839,6 +814,13 @@ phase_app() {
     step "install" "central_command installed editable with [dev,runtime]" \
       in_repo uv pip install -e ".[dev,runtime]" || return 1
   fi
+  # The two carried graphiti-core fixes (deploy/graphiti-patches/, design
+  # record 2026-10-04 D7), applied after EVERY dependency install — an install
+  # puts back a pristine package. Idempotent; a hunk that matches neither the
+  # pristine nor the patched file FAILS here (the version is pinned, so that
+  # is a real finding). Without them the ingest worker refuses extraction.
+  step "graphiti-patches" "the carried graphiti-core fixes are applied to the venv (deploy/graphiti-patches/)" \
+    in_repo "$REPO_ROOT/.venv/bin/python" scripts/apply_graphiti_patches.py || return 1
 
   ensure_app_env || return 1
 
@@ -848,7 +830,7 @@ phase_app() {
     fail "app-llm-key" "CC_LLM_API_KEY is unset in the app's .env — mint it: ./deploy/k3s/setup.sh llm"
     return 1
   fi
-  pass "app-llm-key" "CC_LLM_API_KEY is set (a virtual key scoped to cc-default, never the master key)"
+  pass "app-llm-key" "CC_LLM_API_KEY is set (a virtual key scoped by mint-keys.sh, never the master key)"
 
   # Cross-file values: the same fact lives in two files, so copy it rather than
   # ask the operator to keep them in sync by hand.
@@ -863,6 +845,22 @@ phase_app() {
   set_kv_if_unset "$APP_ENV" CC_MCP_DEPLOY_KUBECONFIG  "/home/codyslab/.cc-mcp-deployer.kubeconfig"       "app-mcp-kubeconfig"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_KUBECONFIG     "/home/codyslab/.cc-litellm-operator.kubeconfig"   "app-litellm-kubeconfig"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_LOG_KUBECONFIG "/home/codyslab/.cc-litellm-logreader.kubeconfig"  "app-litellm-log-kubeconfig"
+
+  # Settings with a value THIS profile needs, added only when the key is
+  # ABSENT: an operator's own value — an empty one included, which is an
+  # explicit "off" — is never touched. The same table cc-update.sh's
+  # APP_ENV_DEFAULTS carries for an existing install; keep the two in step.
+  #   CC_GRAPH_RERANK_ALIAS=cc-rerank — this profile registers the cc-rerank
+  #   cross-encoder, and graph search uses it only when this names it.
+  local row key
+  for row in "CC_GRAPH_RERANK_ALIAS=cc-rerank"; do
+    key="${row%%=*}"
+    if grep -q "^${key}=" "$APP_ENV"; then
+      pass "app-${key,,}" "$key already present in the app's .env — left alone"
+    else
+      set_kv "$APP_ENV" "$key" "${row#*=}" && pass "app-${key,,}" "$row added to the app's .env"
+    fi
+  done
 
   # The Systems page's "Open →" links, derived from tailscale (see
   # derive_systems_links above). Display-only; a WARN, never a FAIL.
@@ -1013,7 +1011,6 @@ phase_verify() {
   # and they are what an operator reads when verify.sh's 30-odd lines scroll.
   local svc url
   for svc in "litellm=http://127.0.0.1:4000/health/liveliness" \
-             "graphiti=http://127.0.0.1:8000/health" \
              "control-plane-api=http://127.0.0.1:8080/health" \
              "n8n=http://127.0.0.1:5678/healthz"; do
     url="${svc#*=}"

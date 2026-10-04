@@ -25,7 +25,12 @@ templates + `podman kube play` on 2026-09-03 (design record
 
 **Always up:** `postgres` (the spine, schema auto-loaded from the repo's
 `schema.sql` on a FRESH database) · `litellm` + its own `litellm-db` and
-`litellm-redis` · `neo4j` · `graphiti` (MCP).
+`litellm-redis` · `neo4j`. There is no graph SERVICE: the knowledge graph's
+extraction and search run inside the API through graphiti-core, talking bolt
+to `neo4j` (design record
+`docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md`; the
+Graphiti MCP container left in that release, and the `stack` phase removes an
+existing install's leftover `<prefix>graphiti` container by name).
 
 **Profiles**, selected from the `CC_ENABLE_*` flags by `setup.sh`:
 
@@ -60,8 +65,8 @@ the k3s profile's gVisor.
 
 **Order lives in the file, not in the driver.** `healthcheck` +
 `depends_on: condition: service_healthy` express what used to be a sequence of
-plays and polls: litellm waits for its database and redis, graphiti waits for
-neo4j and litellm. `setup.sh` brings services up with `--wait`. Two host-side
+plays and polls: litellm waits for its database and redis, n8n for its own.
+`setup.sh` brings services up with `--wait`. Two host-side
 polls survive on purpose — LiteLLM's first-boot Prisma migration (5 minutes),
 and the speech engine, which carries **no** healthcheck because its first boot
 spends up to half an hour downloading ~1GB of models.
@@ -71,7 +76,7 @@ Services find each other by **compose service name** (`neo4j`, `litellm`,
 convention is gone. `CC_POD_PREFIX` still prefixes `container_name`, which is
 how `verify.sh`, `./setup.sh report` and `update.sh` address containers. Host
 access is loopback-published ports at the same numbers the app's `.env` already
-assumes (postgres 5442, litellm 4000, graphiti 8000, bolt 7687).
+assumes (postgres 5442, litellm 4000, bolt 7687).
 
 The proxy's model catalog is **DB-stored** (`store_model_in_db`, as on k3s) and
 **yours to fill in**: the `llm` phase creates the required aliases
@@ -255,8 +260,9 @@ just a different `api_base` on the `cc-embedding` row.
 `fetch` is the only phase that needs the network, and it runs BEFORE
 anything is deployed: it RESOLVES every image against your registry (see
 below), pulls the resolved refs, builds
-the three local images (graphiti, sandbox, crawler) with your mirrors passed
-in as build-args, resolves the Python dependencies, and runs the cockpit's
+the local images (sandbox, crawler — each when enabled) with your mirrors
+passed in as build-args, resolves the Python dependencies (graphiti-core, the
+graph client, among them — from `CC_PYPI_INDEX_URL` like the rest), and runs the cockpit's
 `npm ci`. Each artifact it cannot get is a `FAIL` naming the `.env` seam that
 governs it (`CC_REGISTRY_*`, `CC_APT_MIRROR`, `CC_PYPI_INDEX_URL`,
 `CC_NPM_REGISTRY`, …), and the phase exits 1 (v2.55.0 — a `USERACTION` is
@@ -286,9 +292,8 @@ never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `re
 The resolved refs are written to `.env` as `CC_IMG_*` (compose.yaml reads
 them) and recorded in `$CC_STATE_DIR/installed.manifest`. **A `WARN`-level substitution plus
 a green `verify` phase is a supported install** — capability is proven by
-probes, not by version strings. Since v2.43.0 the three locally BUILT images resolve their base
-through the same manifest: the resolver writes
-`CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP`, `CC_IMG_PYTHON` and
+probes, not by version strings. Since v2.43.0 the locally BUILT images resolve their base
+through the same manifest: the resolver writes `CC_IMG_PYTHON` and
 `CC_IMG_PLAYWRIGHT_PYTHON`, and each `build-*-image.sh` passes its one as a
 `--build-arg`, so a substituted or re-namespaced base reaches the build instead
 of failing it. The Dockerfile `ARG` default is the locked ref, which is what a
@@ -664,14 +669,15 @@ the rows present but undecryptable. `make-secrets.sh` generates them once and
 never overwrites a value that is already set. **Back `.env` up somewhere
 outside the install tree.**
 
-**`CC_EMBED_DIM` is a discover-once decision, not a tunable.** It is written
-into the graphiti config and thus into the Neo4j vector index. A mis-sized
+**`CC_EMBED_DIM` is a discover-once decision, not a tunable.** The app's
+graph client embeds at that width, so it is the width of every vector stored
+in Neo4j. A mis-sized
 vector does not error — it corrupts retrieval silently. Changing the embedder
 later means dropping the index and re-embedding the whole graph.
 
 **`graphiti-llm` must be a PLAIN `openai/<model>` — the old `chat_completions/`
-bridge prefix now 404s.** (2026-09-21) Graphiti's MCP server uses upstream's
-stock chat-completions client, which POSTs `/v1/chat/completions` with a
+bridge prefix now 404s.** The app's in-process graphiti-core client
+(`OpenAIGenericClient`) POSTs `/v1/chat/completions` with a
 `response_format` json_schema; LiteLLM forwards that to the upstream server
 unchanged, so a plain registration — exactly like `cc-default` — carries it
 through correctly. The old `openai/chat_completions/` prefix forced LiteLLM's
@@ -696,15 +702,29 @@ gitignored. Never commit it, and never print its values.
 
 ## Reranking
 
-`GRAPHITI_RERANK_MODEL` is deliberately unset, so Graphiti falls back to
-upstream's logprob-classifier reranker, which addresses a model literally
-named `gpt-4.1-nano` through LiteLLM. This profile registers that alias
-mapped to the user's chat model (the live k3s deployment does the same), so
-reranked searches work out of the box. Two caveats: an endpoint that does not
-return logprobs degrades rerank *quality*, not availability; and if the
-user's endpoint offers a real `/rerank`-capable cross-encoder, set
-`GRAPHITI_RERANK_MODEL` to it instead — that is the better path when it
-exists.
+`CC_GRAPH_RERANK_ALIAS` is deliberately unset on this profile, so graph search
+runs graphiti-core's RRF recipes, exactly as the retired Graphiti server did
+here; the client is built with upstream's logprob-classifier reranker on the
+`gpt-4.1-nano` alias, which this profile registers mapped to the user's chat
+model (an endpoint that does not return logprobs degrades rerank *quality*,
+not availability). If the user's endpoint offers a real `/rerank`-capable
+cross-encoder, register it as an alias and set `CC_GRAPH_RERANK_ALIAS` to it
+in `.env` — search then uses the cross-encoder recipes (the k3s profile does
+this with `cc-rerank`). Whether the two paths become one is a later,
+measured decision; no alias requirement changes with it.
+
+## The graph client's patches
+
+graphiti-core carries two upstream fixes we ship as patch files
+(`deploy/graphiti-patches/`). The `app/graphiti-patches` row applies them to
+the installed package right after `app/install`, on every install and every
+update, with the venv's own Python (`scripts/apply_graphiti_patches.py`:
+idempotent, atomic — uv's hardlinked cache is never written through — and
+loud on a hunk that matches neither the pristine nor the patched file). Its
+probe is the same script with `--check`. Without the fixes the API still
+serves graph reads, but its ingest worker refuses extraction (approved
+episodes stay queued) and `verify/selfcheck`'s `graph-patches` line says so.
+A development checkout runs the script by hand after `pip install`.
 
 ## Windows
 

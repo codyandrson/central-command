@@ -296,7 +296,7 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
         tree,
         "PASS selfcheck-spine: ok\n"
         "PASS selfcheck-proxy-as-app: CC_DEFAULT_MODEL is listed\n"
-        "WARN selfcheck-graph: CC_GRAPHITI_MCP_URL answered slowly\n"
+        "WARN selfcheck-graph: CC_NEO4J_URL answered slowly\n"
         "some chatter that is not a protocol line\n",
         rc=2,
     )
@@ -305,7 +305,7 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
 
     lines = _protocol(r.stdout)
     assert "PASS selfcheck-spine: ok" in lines, lines
-    assert "WARN selfcheck-graph: CC_GRAPHITI_MCP_URL answered slowly" in lines, lines
+    assert "WARN selfcheck-graph: CC_NEO4J_URL answered slowly" in lines, lines
     row = [l for l in lines if l.startswith("PASS selfcheck:")]
     assert row and "2 check(s) passed, 1 warned" in row[0], lines
     # The phase itself raised no FAIL for the row. The only FAIL selfcheck
@@ -315,7 +315,7 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
     # Chatter is detail: stderr, never a protocol line.
     assert "some chatter" in r.stderr
     log = (_state_dir(tree) / "setup-log.txt").read_text(encoding="utf-8")
-    assert "WARN selfcheck-graph: CC_GRAPHITI_MCP_URL answered slowly" in log
+    assert "WARN selfcheck-graph: CC_NEO4J_URL answered slowly" in log
     assert "PASS selfcheck-proxy-as-app:" in log
     # The row's PROBE still holds it back: the key is empty, so a passing
     # module cannot write verify/selfcheck done on its own say-so — the

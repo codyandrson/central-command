@@ -87,9 +87,9 @@ llm_gate() { # llm_gate <what-failed>
   note "    cc-default     openai/<your chat model>          the spine's alias"
   note "    graphiti-llm   openai/<model>   PLAIN prefix — same as cc-default"
   note "                   (the old chat_completions/ bridge prefix now 404s;"
-  note "                   Graphiti's MCP server uses the stock chat client)"
+  note "                   the app's graphiti-core client uses chat-completions)"
   note "    cc-embedding   openai/<your embedding model>     dimension is permanent"
-  note "    gpt-4.1-nano   openai/<your chat model>          Graphiti's reranker"
+  note "    gpt-4.1-nano   openai/<your chat model>          graphiti-core's reranker alias"
   note "    cc-tts         openai/<your TTS model>           cockpit read-aloud"
   note "    cc-stt         openai/<your Whisper model>       cockpit voice input"
   if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
@@ -248,7 +248,7 @@ phase_llm() {
     llm_gate "the graphiti-llm alias did not return schema-constrained JSON (a chat_completions/ prefix on the registration is a likely cause — it should be a plain openai/<model>)"
     return 3
   fi
-  if ! step "probe-rerank-model" "a completion came back through gpt-4.1-nano (Graphiti's reranker alias)" \
+  if ! step "probe-rerank-model" "a completion came back through gpt-4.1-nano (graphiti-core's reranker alias)" \
     "$HERE/discover-llm.sh" --proxy chat gpt-4.1-nano; then
     llm_gate "the gpt-4.1-nano alias did not return a completion"
     return 3

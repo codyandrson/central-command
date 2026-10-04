@@ -102,7 +102,7 @@ Then, once per tree:
 
 ## The steps
 
-`./setup.sh` walks these 77 rows, in 10 phases, in this
+`./setup.sh` walks these 76 rows, in 10 phases, in this
 order. A row marked *gate* stops the run (exit 3) until you have acted; a row
 marked *yours* is a thing only you can do, recorded once its effect is present.
 Everything else the run does itself. A step that a flag turns off counts as
@@ -134,93 +134,92 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
 13. `fetch/image-redis`: Pull the Redis image LiteLLM caches through.
 14. `fetch/image-berriai_litellm_database`: Pull the LiteLLM proxy image.
 15. `fetch/image-n8nio_n8n`: Pull the n8n image, when `CC_ENABLE_N8N=1`.
-16. `fetch/image-zepai_knowledge_graph_mcp`: Pull the base image the Graphiti MCP image is built from.
-17. `fetch/image-python`: Pull the base image the sandbox image is built from, when `CC_ENABLE_SANDBOX=1`.
-18. `fetch/image-playwright_python`: Pull the base image the crawler image is built from, when `CC_ENABLE_CRAWLER=1`.
-19. `fetch/image-speaches_ai_speaches`: Pull the bundled speech engine's image, when `CC_ENABLE_SPEECH=1`.
-20. `fetch/image-graphiti`: Build the Graphiti MCP image against your sources.
-21. `fetch/image-sandbox`: Build the agent sandbox image, when `CC_ENABLE_SANDBOX=1`.
-22. `fetch/image-crawler`: Build the browser-rendering crawl image, when `CC_ENABLE_CRAWLER=1`.
-23. `fetch/venv`: Create the install's CPython 3.12 virtual environment and resolve the Python graph.
-24. `fetch/cockpit`: Install the cockpit's npm tree from the configured registry — skipped while web/node_modules was installed from this same package-lock.json.
+16. `fetch/image-python`: Pull the base image the sandbox image is built from, when `CC_ENABLE_SANDBOX=1`.
+17. `fetch/image-playwright_python`: Pull the base image the crawler image is built from, when `CC_ENABLE_CRAWLER=1`.
+18. `fetch/image-speaches_ai_speaches`: Pull the bundled speech engine's image, when `CC_ENABLE_SPEECH=1`.
+19. `fetch/image-sandbox`: Build the agent sandbox image, when `CC_ENABLE_SANDBOX=1`.
+20. `fetch/image-crawler`: Build the browser-rendering crawl image, when `CC_ENABLE_CRAWLER=1`.
+21. `fetch/venv`: Create the install's CPython 3.12 virtual environment and resolve the Python graph.
+22. `fetch/cockpit`: Install the cockpit's npm tree from the configured registry — skipped while web/node_modules was installed from this same package-lock.json.
 
 ### `llm`
 
-25. `llm/secrets`: Generate every credential .env still leaves blank (it never overwrites one that is set).
-26. `llm/up-litellm`: Bring the LiteLLM proxy up with its own database and redis, and recreate any of the three whose container is not on the image its ref resolves to now.
-27. `llm/litellm-live`: Wait for the proxy to finish its first-boot migrations and answer /health/liveliness.
-28. `llm/up-speech`: Start the bundled speech engine, when `CC_ENABLE_SPEECH=1`.
-29. `llm/catalog-declared`: Say which way this install answers the LLM question: declared in .env, or entered in the LiteLLM UI.
-30. `llm/catalog`: Register every alias this deployment requires, as a real row or as a skeleton.
-31. **`llm/catalog-filled` (gate — the run stops here): YOUR MOVE, unless .env declared the upstream: fill in each alias's provider in the LiteLLM UI at `http://127.0.0.1:<CC_LITELLM_PORT>/ui`.**
+23. `llm/secrets`: Generate every credential .env still leaves blank (it never overwrites one that is set).
+24. `llm/up-litellm`: Bring the LiteLLM proxy up with its own database and redis, and recreate any of the three whose container is not on the image its ref resolves to now.
+25. `llm/litellm-live`: Wait for the proxy to finish its first-boot migrations and answer /health/liveliness.
+26. `llm/up-speech`: Start the bundled speech engine, when `CC_ENABLE_SPEECH=1`.
+27. `llm/catalog-declared`: Say which way this install answers the LLM question: declared in .env, or entered in the LiteLLM UI.
+28. `llm/catalog`: Register every alias this deployment requires, as a real row or as a skeleton.
+29. **`llm/catalog-filled` (gate — the run stops here): YOUR MOVE, unless .env declared the upstream: fill in each alias's provider in the LiteLLM UI at `http://127.0.0.1:<CC_LITELLM_PORT>/ui`.**
     Where: the LiteLLM UI, http://127.0.0.1:4000/ui (port 4000 unless `.env` sets `CC_LITELLM_PORT`) — log in as `admin` with `.env`'s `CC_LLM_PROXY_ADMIN_KEY`. Every alias `.env` did not declare is entered here — including one served from a different host or port than `CC_LLM_UPSTREAM_BASE_URL` (typically the embedder), because `.env` declares one upstream base URL and key for all of them; a server that checks no key still needs a non-empty key field (`none`).
-32. `llm/probe-chat`: Get a real completion back through the cc-default alias — the one the agents address.
-33. `llm/probe-structured`: Get schema-constrained JSON back through graphiti-llm, which is what graph extraction needs.
-34. `llm/probe-rerank-model`: Get a completion back through gpt-4.1-nano, the alias graphiti_core addresses by that literal name.
-35. `llm/speech-live`: Wait for the speech engine to answer /health, when `CC_ENABLE_SPEECH=1`.
-36. `llm/speech-model`: Install the TTS and STT model snapshots into the engine's volume (the first call downloads them).
-37. `llm/probe-tts`: Synthesise speech through the cc-tts alias, when `CC_ENABLE_SPEECH=1`.
-38. `llm/probe-stt`: Transcribe what cc-tts just said through the cc-stt alias, when `CC_ENABLE_SPEECH=1`.
-39. `llm/probe-embed`: Get a vector back through the cc-embedding alias.
-40. `llm/embed-dimension`: Record the MEASURED embedding dimension in .env — it is permanent once the graph index exists.
+30. `llm/probe-chat`: Get a real completion back through the cc-default alias — the one the agents address.
+31. `llm/probe-structured`: Get schema-constrained JSON back through graphiti-llm, which is what graph extraction needs.
+32. `llm/probe-rerank-model`: Get a completion back through gpt-4.1-nano, the alias graphiti_core addresses by that literal name.
+33. `llm/speech-live`: Wait for the speech engine to answer /health, when `CC_ENABLE_SPEECH=1`.
+34. `llm/speech-model`: Install the TTS and STT model snapshots into the engine's volume (the first call downloads them).
+35. `llm/probe-tts`: Synthesise speech through the cc-tts alias, when `CC_ENABLE_SPEECH=1`.
+36. `llm/probe-stt`: Transcribe what cc-tts just said through the cc-stt alias, when `CC_ENABLE_SPEECH=1`.
+37. `llm/probe-embed`: Get a vector back through the cc-embedding alias.
+38. `llm/embed-dimension`: Record the MEASURED embedding dimension in .env — it is permanent once the graph index exists.
 
 ### `stack`
 
-41. `stack/image-sandbox`: Assert the sandbox image is in local storage AND was built from this tree's build inputs, rather than building one mid-deploy.
-42. `stack/image-crawler`: Assert the crawler image is in local storage AND was built from this tree's build inputs, rather than building one mid-deploy.
-43. `stack/embed-dimension`: Refuse to create the graph before the embedding dimension has been measured.
-44. `stack/up-stack`: Bring the whole stack up, wait on compose.yaml's healthchecks, and recreate any container that is not on the image its ref resolves to now (a rebuilt local image, a re-pulled tag).
-45. `stack/restart-on-boot`: Make the containers come back after a host reboot (podman-restart inside the machine).
-46. **`stack/n8n-credential` (yours): YOUR MOVE: when `CC_ENABLE_N8N=1`, create in the n8n UI at `http://127.0.0.1:<CC_N8N_PORT>/` every credential the façade workflows about to be imported reference by name, and complete each Google sign-in — "Gmail account" (Gmail OAuth2 API) always, and "Google Calendar account" (Google Calendar OAuth2 API) when `CC_CALENDAR_FACADE_TOKEN` is set; the run names exactly the ones still missing.**
+39. `stack/image-sandbox`: Assert the sandbox image is in local storage AND was built from this tree's build inputs, rather than building one mid-deploy.
+40. `stack/image-crawler`: Assert the crawler image is in local storage AND was built from this tree's build inputs, rather than building one mid-deploy.
+41. `stack/embed-dimension`: Refuse to create the graph before the embedding dimension has been measured.
+42. `stack/up-stack`: Bring the whole stack up, wait on compose.yaml's healthchecks, and recreate any container that is not on the image its ref resolves to now (a rebuilt local image, a re-pulled tag).
+43. `stack/restart-on-boot`: Make the containers come back after a host reboot (podman-restart inside the machine).
+44. **`stack/n8n-credential` (yours): YOUR MOVE: when `CC_ENABLE_N8N=1`, create in the n8n UI at `http://127.0.0.1:<CC_N8N_PORT>/` every credential the façade workflows about to be imported reference by name, and complete each Google sign-in — "Gmail account" (Gmail OAuth2 API) always, and "Google Calendar account" (Google Calendar OAuth2 API) when `CC_CALENDAR_FACADE_TOKEN` is set; the run names exactly the ones still missing.**
     Where: the n8n UI, http://127.0.0.1:5678/ (port 5678 unless `.env` sets `CC_N8N_PORT`).
-47. `stack/n8n-workflows`: Apply the n8n façade workflows this release ships (deploy/n8n/workflows/) — import, activate, restart n8n, wait for the email webhook — when `CC_ENABLE_N8N=1`; the calendar pair only when `CC_CALENDAR_FACADE_TOKEN` is set, and a credential the import cannot find by name stops the run for you.
+45. `stack/n8n-workflows`: Apply the n8n façade workflows this release ships (deploy/n8n/workflows/) — import, activate, restart n8n, wait for the email webhook — when `CC_ENABLE_N8N=1`; the calendar pair only when `CC_CALENDAR_FACADE_TOKEN` is set, and a credential the import cannot find by name stops the run for you.
 
 ### `app`
 
-48. `app/venv`: Assert the virtual environment the app runs in.
-49. `app/install`: Install central_command editable into that environment.
-50. `app/app-env`: Assert the one answer file and its mode (0600 where the filesystem honours it).
-51. `app/mint-key`: Mint the spine's OWN LiteLLM virtual key, scoped to the aliases this deployment requires, or widen an existing key's scope to cover them, so a leak of the agents' credential cannot reconfigure the proxy.
-52. `app/app-llm-base-url`: Derive the proxy URL the app dials.
-53. `app/app-default-model`: Derive which model the agents run on (this profile's proxy carries cc-default).
-54. `app/app-embed-alias`: Derive the alias the graph writer embeds through.
-55. `app/app-litellm-db-url`: Derive the connection string for LiteLLM's own database.
-56. `app/app-link-litellm`: Derive the Systems page's link to the proxy UI.
-57. `app/app-link-neo4j`: Derive the Systems page's link to the Neo4j browser.
-58. `app/app-link-n8n`: Derive the Systems page's link to n8n, when `CC_ENABLE_N8N=1`.
-59. `app/app-link-crawler`: Derive the Systems page's link to the crawl service, when `CC_ENABLE_CRAWLER=1`.
-60. `app/app-link-sandbox`: Derive the Systems page's link to the sandbox runner, when `CC_ENABLE_SANDBOX=1`.
-61. `app/cockpit`: Build the cockpit — both the SPA and the Node server every panel routes through — skipped while the build on disk was made from these same sources, configs and lockfile.
+46. `app/venv`: Assert the virtual environment the app runs in.
+47. `app/install`: Install central_command editable into that environment.
+48. `app/graphiti-patches`: Apply the two carried graphiti-core fixes (deploy/graphiti-patches/) to the installed package — after every install, because an install puts back a pristine copy; without them the API holds graph extraction.
+49. `app/app-env`: Assert the one answer file and its mode (0600 where the filesystem honours it).
+50. `app/mint-key`: Mint the spine's OWN LiteLLM virtual key, scoped to the aliases this deployment requires, or widen an existing key's scope to cover them, so a leak of the agents' credential cannot reconfigure the proxy.
+51. `app/app-llm-base-url`: Derive the proxy URL the app dials.
+52. `app/app-default-model`: Derive which model the agents run on (this profile's proxy carries cc-default).
+53. `app/app-embed-alias`: Derive the alias the graph writer embeds through.
+54. `app/app-litellm-db-url`: Derive the connection string for LiteLLM's own database.
+55. `app/app-link-litellm`: Derive the Systems page's link to the proxy UI.
+56. `app/app-link-neo4j`: Derive the Systems page's link to the Neo4j browser.
+57. `app/app-link-n8n`: Derive the Systems page's link to n8n, when `CC_ENABLE_N8N=1`.
+58. `app/app-link-crawler`: Derive the Systems page's link to the crawl service, when `CC_ENABLE_CRAWLER=1`.
+59. `app/app-link-sandbox`: Derive the Systems page's link to the sandbox runner, when `CC_ENABLE_SANDBOX=1`.
+60. `app/cockpit`: Build the cockpit — both the SPA and the Node server every panel routes through — skipped while the build on disk was made from these same sources, configs and lockfile.
 
 ### `verify`
 
-62. `verify/verify-deployed`: Assert every deployment and configuration fact verify.sh knows, under the admin key.
-63. `verify/verify-live`: Assert the same deployment LIVE: a real completion and the embedding dimension.
-64. `verify/selfcheck`: Run the application's own self-check, with the settings and the credential the agents will use, before anything is booted.
+61. `verify/verify-deployed`: Assert every deployment and configuration fact verify.sh knows, under the admin key.
+62. `verify/verify-live`: Assert the same deployment LIVE: a real completion and the embedding dimension.
+63. `verify/selfcheck`: Run the application's own self-check, with the settings and the credential the agents will use, before anything is booted.
 
 ### `test`
 
-65. `test/test`: Run the offline suite — the gate, once per release.
+64. `test/test`: Run the offline suite — the gate, once per release.
 
 ### `boot`
 
-66. **`boot/operator-name` (yours): YOUR MOVE: tell the agents what to call you — setup asks on a terminal, the cockpit asks on first run otherwise.**
+65. **`boot/operator-name` (yours): YOUR MOVE: tell the agents what to call you — setup asks on a terminal, the cockpit asks on first run otherwise.**
     Where: the terminal running `./setup.sh`, which asks once; with no terminal, the cockpit's first-run prompt bar at http://127.0.0.1:3080/ (port 3080 unless `.env` sets `CC_COCKPIT_PORT`).
-67. `boot/boot-sandbox`: Start the sandbox runner on `CC_SANDBOX_RUNNER_URL`'s port with the same `CC_SANDBOX_RUNNER_TOKEN` the API sends, when `CC_ENABLE_SANDBOX=1` — BEFORE the API, so the API's start-up self-check finds it answering (its links row reads `CC_SANDBOX_DOCS_URL`, its sandbox row the runner); off, this row is done and nothing starts.
-68. `boot/boot-api`: Start the API — through its systemd --user unit where a user manager answers, detached otherwise — and wait for /health.
-69. `boot/boot-roster`: Assert first boot hired the founding roster.
-70. `boot/skills-imported`: Import each bundled skills/\*/ folder the library does not already hold — create-only: a skill already there is never overwritten, even when the release changed it.
-71. `boot/boot-cockpit`: Start the cockpit server — through its unit where one can run — and wait for it to answer.
-72. `boot/boot-at-logon`: Register the logon entry that runs ./setup.sh — the resume command — after a reboot, retrying while the podman machine starts (Windows only).
+66. `boot/boot-sandbox`: Start the sandbox runner on `CC_SANDBOX_RUNNER_URL`'s port with the same `CC_SANDBOX_RUNNER_TOKEN` the API sends, when `CC_ENABLE_SANDBOX=1` — BEFORE the API, so the API's start-up self-check finds it answering (its links row reads `CC_SANDBOX_DOCS_URL`, its sandbox row the runner); off, this row is done and nothing starts.
+67. `boot/boot-api`: Start the API — through its systemd --user unit where a user manager answers, detached otherwise — and wait for /health.
+68. `boot/boot-roster`: Assert first boot hired the founding roster.
+69. `boot/skills-imported`: Import each bundled skills/\*/ folder the library does not already hold — create-only: a skill already there is never overwritten, even when the release changed it.
+70. `boot/boot-cockpit`: Start the cockpit server — through its unit where one can run — and wait for it to answer.
+71. `boot/boot-at-logon`: Register the logon entry that runs ./setup.sh — the resume command — after a reboot, retrying while the podman machine starts (Windows only).
 
 ### `demo`
 
-73. `demo/demo-feed`: Enrol the fixture email (a repeat Message-ID is a no-op by design).
-74. `demo/demo-dispatch`: Let the dispatcher claim it and run a real triage against your endpoint.
-75. **`demo/demo-approve` (gate — the run stops here): YOUR MOVE: open the cockpit's Decisions Inbox, read the proposal and its evidence, and decide.**
+72. `demo/demo-feed`: Enrol the fixture email (a repeat Message-ID is a no-op by design).
+73. `demo/demo-dispatch`: Let the dispatcher claim it and run a real triage against your endpoint.
+74. **`demo/demo-approve` (gate — the run stops here): YOUR MOVE: open the cockpit's Decisions Inbox, read the proposal and its evidence, and decide.**
     Where: the cockpit, http://127.0.0.1:3080/ (port 3080 unless `.env` sets `CC_COCKPIT_PORT`).
-76. `demo/demo-decided`: Assert the decision reached the event log.
-77. `demo/demo-executed`: Assert the Executor performed the approved action and stamped provenance.
+75. `demo/demo-decided`: Assert the decision reached the event log.
+76. `demo/demo-executed`: Assert the Executor performed the approved action and stamped provenance.
 
 ## When it stops
 

@@ -563,7 +563,7 @@ cc__write_curlrc() { # cc__write_curlrc <path> [extra-line ...]
 #   specified
 # reproduced on the 2026-09-24 Windows Podman Desktop run with a trivial
 # Dockerfile and every spelling of the context path; the same build without
-# --secret succeeds. So with CC_CA_BUNDLE set, NONE of the three local images
+# --secret succeeds. So with CC_CA_BUNDLE set, NONE of the local images
 # could build on Windows — the one platform this profile targets.
 #
 # The amendment: a CA certificate is PUBLIC material. It is the private key that
@@ -583,8 +583,8 @@ cc__write_curlrc() { # cc__write_curlrc <path> [extra-line ...]
 #
 # The staged tree is REGENERABLE: it is deleted and rebuilt on every build, so a
 # CA from a previous run can never linger and the directory is safe to delete.
-# Contexts are small by design (deploy/pi/graphiti 56K including patches/ and
-# config.yaml, central_command/crawler 32K, the sandbox Dockerfile alone), so
+# Contexts are small by design (central_command/crawler 32K, the sandbox
+# Dockerfile alone), so
 # `cp -R` is enough and rsync is not a dependency.
 #
 # Prints the staged directory on stdout.
@@ -613,10 +613,10 @@ cc_stage_build_context() { # cc_stage_build_context <staged-dir> <ca-bundle|''> 
 }
 
 # ── what a LOCAL image was built from (v2.57.0) ─────────────────────────────
-# The three locally built images carry FIXED tags (localhost/cc-sandbox:1,
-# cc-crawler:1, cc-graphiti:<CC_GRAPHITI_TAG>), and the fetch phase used to
-# read "tag present" as done — so a release that changed a Dockerfile, a patch
-# under deploy/pi/graphiti/patches/ or the crawler's service.py never rebuilt
+# The locally built images carry FIXED tags (localhost/cc-sandbox:1,
+# cc-crawler:1; until 2026-10-04 also the Graphiti server's), and the fetch
+# phase used to read "tag present" as done — so a release that changed a
+# Dockerfile, an image patch or the crawler's service.py never rebuilt
 # on update, and the OLD image kept running under the new release. "Our own
 # images stay exact — the release is one tested unit" (deploy-single.md) was
 # false the moment a tag outlived its inputs. So every build records a HASH of
@@ -708,19 +708,18 @@ cc_build_inputs_label() { printf 'cc.build-inputs'; }
 # WHERE A STAGED BUILD PUTS ITS IMAGE (v2.57.0, 2026-10-01 design record D5).
 # `update.sh apply` runs the NEW release's fetch from a staged tree BEFORE the
 # merge, and promises that a stop there leaves the tree, the branch, the
-# database and the containers as they were. The three local images have FIXED
+# database and the containers as they were. The local images have FIXED
 # tags, so a staged build under the live tag would break that promise the moment
 # it finished: new sandbox sessions on the OLD code would start from the NEW
-# image, and any recreation of graphiti or the crawler would pick it up. So a
+# image, and any recreation of the crawler would pick it up. So a
 # staged build is tagged ASIDE — the live ref with `-staged` appended to its
 # tag. It proves the build and warms the layer cache; the post-merge fetch then
 # builds under the live tag (fast: every layer is cached) and that image's label
 # is the one local_image_state reads.
 # The form: still a valid reference on podman and docker (a tag is
-# [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}; the longest live tag, CC_GRAPHITI_TAG's
-# default, stays far below 128), still under `localhost/` so podman never asks a
-# registry for it, and it cannot be a release tag — ours are `1` and the
-# Graphiti tag, and no release names one `-staged`.
+# [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}; ours are far below 128), still under
+# `localhost/` so podman never asks a registry for it, and it cannot be a
+# release tag — ours are `1`, and no release names one `-staged`.
 # ONE definition: the build scripts tag with it and setup.sh reads and later
 # untags with it, and both decide "staged" from CC_STAGED_FOR.
 cc_staged_image_ref() { # cc_staged_image_ref <live-ref>

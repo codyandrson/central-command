@@ -5,3 +5,12 @@
 # Removing a manifest from this directory means adding its line here.
 # Format: <namespace> <kind> <name>
 central-command deployment cc-adminer
+# Design record 2026-10-04, D10: the Graphiti MCP server left the
+# deployment — graphiti-core runs inside the control plane now. Its configmap
+# (cc-graphiti-config) and Secret (cc-graphiti) are deliberately NOT here yet:
+# the previous release's updater rolls back by re-applying the previous
+# manifests, which recreate this Deployment and Service but not those two
+# (make-secrets.sh made them), so deleting them now would leave a rolled-back
+# graph server unable to start. They join this list one release later.
+central-command deployment cc-graphiti
+central-command service graphiti

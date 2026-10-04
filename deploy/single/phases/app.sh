@@ -22,6 +22,7 @@
 #   (setup.sh) is shared with another phase or the driver and lives there:
 #     venv                               run    p_venv  (setup.sh)
 #     install                            run    p_install
+#     graphiti-patches                   run    p_graphiti_patches
 #     app-env                            run    p_env_file
 #     mint-key                           run    p_mint_key
 #     app-llm-base-url                   run    p_llm_base_url
@@ -232,6 +233,17 @@ phase_app() {
       in_repo uv pip install -e ".[dev,runtime]" || return 1
   fi
 
+  # app/graphiti-patches: the two carried graphiti-core fixes (design record
+  # 2026-10-04, D7) onto the package the install just put down — after EVERY
+  # install, because an install puts back a pristine copy. The applier is the
+  # venv's own Python (no `patch` binary is assumed), idempotent, atomic
+  # (temp file + os.replace, so uv's hardlinked cache is never written
+  # through) and loud: a file that is neither pristine nor patched FAILS
+  # here — the version is pinned, so that is a release defect, not drift.
+  local vpy; vpy="$(venv_python)" || { fail "graphiti-patches" "no venv Python to apply the graphiti-core fixes with"; return 1; }
+  step "graphiti-patches" "the carried graphiti-core fixes are applied to the installed package (deploy/graphiti-patches/)" \
+    in_repo "$vpy" scripts/apply_graphiti_patches.py || return 1
+
   # There is no second .env to create any more (v2.42.0): load_env required
   # the one answer file before this phase could run. Its MODE is still worth
   # asserting — on this profile it holds every credential in the install — and
@@ -357,6 +369,13 @@ p_env_file() {
 # starts it with (v2.58.0). On `import central_command` alone, a venv that had
 # lost uvicorn read installed: the full run skipped app as done, and boot then
 # failed on the missing server every time, with nothing that could repair it.
+# Read-only: --check reports and exits 1 unless every carried fix is present.
+p_graphiti_patches() {
+  local py
+  py="$(venv_python)" || return 1
+  ( cd "$REPO_ROOT" && "$py" scripts/apply_graphiti_patches.py --check ) >/dev/null 2>&1
+}
+
 p_install() {
   local py
   py="$(venv_python)" || return 1

@@ -8,8 +8,8 @@
 #
 # Registries covered = every registry an image in deploy/k3s/*.yaml pulls
 # from today (docker.io: postgres, redis, neo4j, n8n; ghcr.io: litellm).
-# cc-graphiti is built locally per-node and never pulled, so it needs no
-# mirror entry.
+# The locally built images (cc-sandbox, cc-crawler) are never pulled, so
+# they need no mirror entry — only their base images do, at build time.
 #
 # Optional: run k3s/k3s-agent with --disable-default-registry-endpoint so a
 # misconfigured mirror fails loud (ImagePullBackOff) instead of silently

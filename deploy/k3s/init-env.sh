@@ -10,10 +10,10 @@
 #     * copies deploy/pi/.env.example -> deploy/pi/.env if absent, chmod 600
 #     * fills every GENERATED-marked variable that is EMPTY
 #       (`openssl rand -hex 32`; LITELLM_MASTER_KEY as `sk-` + hex)
-#     * writes the literal PENDING into the three Graphiti virtual-key slots —
-#       they can only be minted once the proxy is up, and make-secrets.sh only
-#       refuses on EMPTY, so a PENDING placeholder lets the LiteLLM trio come
-#       up first. ./deploy/k3s/mint-keys.sh replaces them afterwards.
+#     * (no virtual-key slots any more: the three Graphiti keys that needed a
+#       PENDING placeholder left with the Graphiti server, design record
+#       2026-10-04 D10. The app's key, CC_LLM_API_KEY, lives in the repo-root
+#       .env and ./deploy/k3s/mint-keys.sh mints it once the proxy is up.)
 #     * leaves ELICITED variables alone and prints which ones you must supply.
 #
 #   IDEMPOTENT: a non-empty value is never overwritten. That is the entire
@@ -46,7 +46,7 @@ current() {  # current <name> -> the value, or empty
 set_var() {  # set_var <name> <value>
   local name="$1" val="$2"
   if grep -q "^${name}=" "$ENV_FILE"; then
-    # Values here are hex / sk-hex / PENDING — no sed metacharacters possible.
+    # Values here are hex / sk-hex — no sed metacharacters possible.
     sed -i "s|^${name}=.*|${name}=${val}|" "$ENV_FILE"
   else
     printf '%s=%s\n' "$name" "$val" >>"$ENV_FILE"
@@ -63,16 +63,6 @@ ensure() {  # ensure <name> [prefix] — generate only when empty
   echo "  generated $name"
 }
 
-placeholder() {  # placeholder <name> — PENDING only when empty
-  local name="$1"
-  if [[ -n "$(current "$name")" ]]; then
-    echo "  kept      $name (already set)"
-    return
-  fi
-  set_var "$name" PENDING
-  echo "  PENDING   $name (mint-keys.sh fills this)"
-}
-
 echo "GENERATED credentials:"
 ensure NEO4J_PASSWORD
 ensure LITELLM_MASTER_KEY sk-
@@ -81,11 +71,6 @@ ensure LITELLM_POSTGRES_PASSWORD
 ensure N8N_ENCRYPTION_KEY
 ensure N8N_DB_PASSWORD
 
-echo
-echo "Graphiti virtual keys (chicken-and-egg: the proxy must exist first):"
-placeholder GRAPHITI_LLM_API_KEY
-placeholder EMBEDDER_API_KEY
-placeholder RERANKER_API_KEY
 
 echo
 echo "ELICITED — supply these yourself if you need them (empty is fine and is"
@@ -98,10 +83,10 @@ echo "            — make-secrets.sh substitutes working values when blank."
 
 echo
 echo "Next:"
-echo "  1. ./deploy/k3s/make-secrets.sh   (PENDING passes; empty would not)"
+echo "  1. ./deploy/k3s/make-secrets.sh"
 echo "  2. bring the stack up, register models:"
 echo "       python3 deploy/pi/litellm/register-models.py --dry-run   # then without"
-echo "  3. ./deploy/k3s/mint-keys.sh      (replaces the three PENDINGs + CC_LLM_API_KEY)"
+echo "  3. ./deploy/k3s/mint-keys.sh      (mints CC_LLM_API_KEY into the repo-root .env)"
 echo
 echo "Back $ENV_FILE up OUTSIDE this tree. LITELLM_SALT_KEY and"
 echo "N8N_ENCRYPTION_KEY can never be rotated without losing what they encrypt."

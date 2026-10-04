@@ -27,11 +27,9 @@
 #     image-redis                        run    p_image_redis
 #     image-berriai_litellm_database     run    p_image_berriai_litellm_database
 #     image-n8nio_n8n                    run    p_image_n8nio_n8n
-#     image-zepai_knowledge_graph_mcp    run    p_image_zepai_knowledge_graph_mcp
 #     image-python                       run    p_image_python
 #     image-playwright_python            run    p_image_playwright_python
 #     image-speaches_ai_speaches         run    p_image_speaches_ai_speaches
-#     image-graphiti                     run    p_image_graphiti
 #     image-sandbox                      run    p_image_sandbox  (setup.sh)
 #     image-crawler                      run    p_image_crawler  (setup.sh)
 #     venv                               run    p_venv  (setup.sh)
@@ -202,7 +200,6 @@ drop_staged_tag() { # drop_staged_tag <live-ref>
 
 phase_fetch() {
   load_env || return 1
-  : "${CC_GRAPHITI_TAG:=1.0.2-anthropic}"
   [[ -f "$HERE/images.txt" ]] || { fail "images-txt" "$HERE/images.txt missing"; return 1; }
 
   # The ONE deliberate pause this phase keeps (D5): an unresolvable pin or a
@@ -214,8 +211,6 @@ phase_fetch() {
   local frc=0
   fetch_images || frc=$?
 
-  fetch_local "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" \
-    "$HERE/build-graphiti-image.sh" "CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP (the base ref, resolved from images.txt), CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_PYPI_INDEX_URL, CC_CA_BUNDLE, CC_TLS_INSECURE"
   if [[ "$CC_ENABLE_SANDBOX" == 1 ]]; then
     fetch_local "image-sandbox" "localhost/cc-sandbox:1" \
       "$HERE/build-sandbox-image.sh" "CC_IMG_PYTHON (the base ref, resolved from images.txt), CC_REGISTRY_DOCKERIO, CC_APT_MIRROR, CC_NPM_REGISTRY, CC_CA_BUNDLE, CC_TLS_INSECURE"
@@ -372,10 +367,6 @@ p_image_n8nio_n8n() {
   p_img CC_IMG_N8NIO_N8N
 }
 
-p_image_zepai_knowledge_graph_mcp() {
-  p_img CC_IMG_ZEPAI_KNOWLEDGE_GRAPH_MCP
-}
-
 p_image_python() {
   p_off CC_ENABLE_SANDBOX 1 1 && return 0
   p_img CC_IMG_PYTHON
@@ -391,6 +382,3 @@ p_image_speaches_ai_speaches() {
   p_img CC_IMG_SPEACHES_AI_SPEACHES
 }
 
-p_image_graphiti() {
-  [[ "$(local_image_state "localhost/cc-graphiti:$(p_flag CC_GRAPHITI_TAG 1.0.2-anthropic)" "$HERE/build-graphiti-image.sh")" == current ]]
-}

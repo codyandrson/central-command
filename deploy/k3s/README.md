@@ -32,6 +32,43 @@ green; `rollback` reverses from the journal). Do NOT press "Check for
 updates" in the cockpit for this release. Fresh installs follow §1 onward as
 before.
 
+## 0a. The update that removes the Graphiti server
+
+The release that moved graphiti-core into the control plane (design record
+`docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md`, D10)
+deletes `cc-graphiti` and its `graphiti` Service. Its FIRST update is run by
+the PREVIOUS release's `cc-update.sh` — systemd runs the installed copy — so
+the tree is built to survive that script: the old image row's inputs
+(`deploy/pi/graphiti/`, `deploy/k3s/build-graphiti-image.sh`) are left
+byte-identical for this one release, so the old updater neither rebuilds the
+image nor rollout-restarts the Deployment its `removed.txt` pass deletes; and
+the `cc-graphiti-config` configmap and `cc-graphiti` Secret are tombstoned
+one release LATER, so the old updater's rollback (which re-applies the old
+manifests) still finds what the old Deployment mounts. The update itself is
+the normal one-click apply.
+
+What the old updater cannot do, because its code predates the change — steps
+the operator runs ONCE after that update reports success (every later update
+does all of them itself, in `cc-update.sh`):
+
+```bash
+cd /home/codyslab/central-command
+.venv/bin/python scripts/apply_graphiti_patches.py      # the carried graphiti-core fixes
+./deploy/k3s/mint-keys.sh --scope-only                  # the app key gains graphiti-llm, cc-embedding, cc-rerank
+grep -q '^CC_GRAPH_RERANK_ALIAS=' .env || echo 'CC_GRAPH_RERANK_ALIAS=cc-rerank' >> .env
+sudo systemctl restart cc-uvicorn                       # picks up the rerank setting
+```
+
+Until then nothing is lost: without the patches the ingest worker REFUSES
+extraction and keeps approved episodes queued (it re-checks every minute, no
+restart needed); without the wider key graph reads and extraction get a 403,
+which the worker treats as transient; without the rerank setting graph search
+runs the RRF recipes instead of the `cc-rerank` cross-encoder. Once no
+rollback to the previous release is wanted, revoke the three retired key
+aliases (`graphiti-llm`, `graphiti-embeddings`, `graphiti-reranker`) in the
+LiteLLM UI; the `cc-graphiti:1.0.2-anthropic` image can then be removed from
+both nodes' containerd.
+
 ## 1. Prerequisites & assumptions
 
 Assumed already true before phase 2:
@@ -42,9 +79,8 @@ Assumed already true before phase 2:
   without a password prompt (every build script shells over that).
 - Repo cloned at **`/home/codyslab/central-command`**.
 - **`deploy/pi/.env`** populated — run **`./deploy/k3s/init-env.sh`**: it copies
-  the template, generates every **GENERATED** variable that is empty, writes
-  `PENDING` into the three Graphiti virtual-key slots (they cannot exist before
-  the proxy does), and prints the **ELICITED** ones you must supply yourself. It
+  the template, generates every **GENERATED** variable that is empty, and
+  prints the **ELICITED** ones you must supply yourself. It
   never overwrites a value that is already set, so it is safe to re-run and safe
   on a restore. It is the single source of truth for container secrets.
   `LITELLM_SALT_KEY` /
@@ -57,9 +93,10 @@ Assumed already true before phase 2:
 - **uv-managed CPython 3.12** and **NodeSource 22** on the Pi.
 - **`socat`** on the Pi (`sudo apt install socat`) — the loopback relay
   `cc-graph-bolt` runs on it (§6).
-- **Docker CE** still installed on the Pi — `build-graphiti-image.sh` builds the
-  arm64 half with `docker`. (The compose *stack* is superseded; the daemon is
-  still the arm64 builder.)
+- **No arm64 image builder.** Both locally built images (sandbox, crawler)
+  are compute-node-only and built there with podman. Docker on the anchor was
+  the arm64 half of the retired Graphiti image and is no longer required (the
+  superseded compose stack in `deploy/pi/` is the only thing that still uses it).
 - **gVisor (`runsc`) on the chromebox** — installed by
   `./deploy/k3s/install-gvisor.sh` (idempotent: reports-and-exits when already
   present). Without it, sandbox Jobs never start — the `gvisor` RuntimeClass
@@ -111,9 +148,9 @@ Assumed already true before phase 2:
     the app addresses (cc-default, cc-embedding, cc-rerank) AND the
     real-model rows they point at — plus the two invariants most easily got
     wrong: `graphiti-llm` must be a PLAIN `openai/<model>`, same prefix as
-    `cc-default` (2026-09-21 — Graphiti's MCP server uses the stock
-    chat-completions client now, and the old `openai/chat_completions/`
-    Responses→chat bridge prefix 404s), and the rerank rows' (`cc-rerank`,
+    `cc-default` (the app's in-process graphiti-core client,
+    `OpenAIGenericClient`, speaks chat-completions, and the old
+    `openai/chat_completions/` Responses→chat bridge prefix 404s), and the rerank rows' (`cc-rerank`,
     `qwen3-rerank-local`) **`api_base` must end in `/v1/rerank`** (the
     `cohere/` client POSTs the base verbatim and appends nothing). Nothing
     you enter in the UI is ever overwritten by the script. Timeouts have
@@ -128,13 +165,18 @@ Assumed already true before phase 2:
     against it before it will authenticate:
 
     ```bash
-    ./deploy/k3s/mint-keys.sh    # 3 graphiti keys + CC_LLM_API_KEY, then
-                                 # re-runs make-secrets.sh + restarts cc-graphiti
+    ./deploy/k3s/mint-keys.sh    # CC_LLM_API_KEY (+ web/.env's cockpit key),
+                                 # then re-runs make-secrets.sh
     ```
 
     Mint **after** registering — each key is scoped to model groups that have to
-    exist. Idempotent: a value that is set and not `PENDING` is kept (`FORCE=1`
-    to override).
+    exist. The app's key reaches `cc-default`, `cc-tts`/`cc-stt` and the graph's
+    aliases (`graphiti-llm`, `cc-embedding`, `cc-rerank` — graphiti-core runs
+    inside the app). Idempotent: a value that is set is kept (`FORCE=1` to
+    override), and a kept app key whose model list lacks one of those aliases
+    GAINS it in place (`/key/update`, a union; an empty list — "all models" —
+    is left alone). `--scope-only` does just that widening; `cc-update.sh`
+    runs it on every update.
 - Air-gapped site only: copy `registries.yaml.example` to
   `/etc/rancher/k3s/registries.yaml` on **both** nodes first, fill `MIRROR_HOST`,
   then `systemctl restart k3s` (Pi) / `k3s-agent` (chromebox).
@@ -148,12 +190,10 @@ cd /home/codyslab/central-command
 ```
 
 `init-env.sh` is the bootstrap; `make-secrets.sh` reads what it produced.
-`PENDING` in the three Graphiti key slots is expected here and passes — those
-are minted in §1's step 2, after the proxy is up.
 
-Creates the namespace, five Secrets (`cc-litellm`, `cc-neo4j`, `cc-graphiti`,
-`cc-n8n`, and `cc-crawler-llm` if `CC_LLM_API_KEY` is set) and three ConfigMaps
-(`cc-litellm-config`, `cc-graphiti-config`, `cc-schema-sql`) **from
+Creates the namespace, the Secrets (`cc-litellm`, `cc-neo4j`, `cc-n8n`, and
+`cc-crawler-llm` if `CC_LLM_API_KEY` is set) and two ConfigMaps
+(`cc-litellm-config`, `cc-schema-sql`) **from
 `deploy/pi/.env`**. Imperative on purpose: no base64'd secret ever lands in the
 repo. Idempotent (`--dry-run=client | apply`).
 
@@ -162,17 +202,15 @@ Run this **before** phase 4 — pods that reference a missing Secret sit in
 
 ## 3. Locally-built images
 
-Three images are built here, not pulled. Everything else is multi-arch upstream.
+Two images are built here, not pulled. Everything else is multi-arch upstream.
 
 ```bash
-./deploy/k3s/build-graphiti-image.sh    # BOTH nodes: arm64 (docker, Pi) + amd64 (podman, chromebox)
 ./deploy/k3s/build-sandbox-image.sh     # chromebox only
 ./deploy/k3s/build-crawler-image.sh     # chromebox only — slow, installs Chromium
 ```
 
-- `cc-graphiti` **floats**, so it must exist on *both* nodes under the exact ref
-  `docker.io/library/cc-graphiti:1.0.2-anthropic`. A missing copy is invisible
-  until the day the pod actually moves.
+- (`build-graphiti-image.sh` is still in the tree for ONE release, unused and
+  byte-identical — see §0a. Do not run or edit it.)
 - `cc-sandbox` and `cc-crawler` are chromebox-**required** (gVisor and Chromium
   live there), so they are single-arch by design.
 - **The `localhost/` trap:** podman tags local builds `localhost/<name>`; the
@@ -180,10 +218,7 @@ Three images are built here, not pulled. Everything else is multi-arch upstream.
   registry serves — `ImagePullBackOff` on that node only. The scripts tag with
   the fully-qualified ref and verify with `grep -qx` on a *captured* list; each
   one exits non-zero if the ref is missing. Believe that check.
-- Builds are native — **no QEMU**. The graphiti build ships the context to the
-  chromebox and builds there.
-- The `-anthropic` in the tag is a misnomer (Graphiti's LLM is the local Qwen).
-  Keep it: renaming means rebuilding and re-importing on both nodes for nothing.
+- Builds are native — **no QEMU**: both run on the compute node with podman.
 
 ## 3a. Label the nodes
 
@@ -225,7 +260,6 @@ Expected placement once settled:
 | `cc-crawler` | chromebox (**required**) | Chromium stays off the Pi | ServiceLB :8091 |
 | `cc-speech` | chromebox (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models` | ServiceLB :8093 |
 | `cc-litellm` | **floats** (prefers chromebox) | stateless, the arm64 memory hog | ServiceLB :4000 |
-| `cc-graphiti` | **floats** (prefers chromebox) | stateless | ServiceLB :8000 |
 | `cc-fluentbit` | DaemonSet, both nodes | log collection | none |
 
 Pinned is not a preference: `local-path` stamps a *required* hostname
@@ -258,8 +292,20 @@ by re-running the script, never by editing the file.
 cd /home/codyslab/central-command
 python3 -m venv .venv && source .venv/bin/activate   # uv-managed CPython 3.12
 pip install -e ".[dev,runtime]"
+python scripts/apply_graphiti_patches.py             # AFTER every install
 (cd web && npm install && npm run build)
 ```
+
+The knowledge graph's extraction and search run inside the API through
+graphiti-core (no Graphiti pod). Two upstream fixes we carry
+(`deploy/graphiti-patches/`) are applied to the INSTALLED package by
+`scripts/apply_graphiti_patches.py` — after every dependency install, because
+an install puts back a pristine copy. It is idempotent and atomic (uv's
+hardlinked cache is never written through), and `--check` reports without
+changing anything. Without the fixes the API serves graph reads but its
+ingest worker refuses extraction (approved episodes stay queued) and the
+self-check's `graph-patches` row says why. `setup.sh app` and `cc-update.sh`
+(its `rebuild()`, the rollback's included) run it.
 
 ## 6. systemd units
 
@@ -314,7 +360,7 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   "Apply update now" writes `/run/cc-update/trigger`; `cc-update.path` starts
   the root one-shot `cc-update.service` → `deploy/k3s/cc-update.sh`, which
   version-gates, **prebuilds any locally-built image whose inputs changed
-  (cc-graphiti / cc-sandbox / cc-crawler) while the system is still UP** — a
+  (cc-sandbox / cc-crawler) while the system is still UP** — a
   failed build then costs no downtime at all — dumps the spine/litellm/n8n DBs
   plus their decryption keys (Neo4j is out of scope — nightly
   `cc-backup.timer` covers it), stops the services, merges the release
@@ -543,7 +589,7 @@ Quick smoke checks:
 
 ```bash
 curl -fsS http://127.0.0.1:4000/health/liveliness   # litellm
-curl -fsS http://127.0.0.1:8000/health              # graphiti MCP
+.venv/bin/python scripts/apply_graphiti_patches.py --check   # graph fixes (from the checkout)
 curl -fsS http://127.0.0.1:8080/health              # control plane API
 curl -fsS http://127.0.0.1:5678/healthz             # n8n
 sudo k3s kubectl -n central-command get pods -o wide    # placement, all Running 1/1

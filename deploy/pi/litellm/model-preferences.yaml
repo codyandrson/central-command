@@ -49,11 +49,12 @@
 #   PER REQUEST from the `thinking_mechanism` / `thinking_levels` declarations
 #   above (runtime/models._thinking_body), never baked into a deployment.
 #   ONE EXCEPTION, and it is the operator's to set, not this file's:
-#   `graphiti-llm`. Its only caller is Graphiti, which is not our runtime and
-#   cannot inject anything per request (graphiti-core sends reasoning controls
-#   only for gpt-5/o1/o3 model names). Behind a hybrid-thinking local model the
-#   alias itself must carry `chat_template_kwargs: {"enable_thinking": false}`
-#   — see deploy/pi/graphiti/config.yaml. It was set by hand on 2026-08-18,
+#   `graphiti-llm`. Its only caller is graphiti-core (in the app process since
+#   2026-10-04, but not through runtime/models), which cannot inject anything
+#   per request (it sends reasoning controls only for gpt-5/o1/o3 model
+#   names). Behind a hybrid-thinking local model the alias itself must carry
+#   `chat_template_kwargs: {"enable_thinking": false}` — the `extra_params`
+#   block on graphiti-llm below. It was set by hand on 2026-08-18,
 #   silently lost when the alias was re-created, and found again on 2026-09-20
 #   as unbounded extraction turns. A re-created alias needs it re-entered.
 # ============================================================================
@@ -268,10 +269,10 @@ models:
 # the `models:` entries where the top-level `timeout:` is the single home.
 # ============================================================================
 registration_only:
-  # THE BRIDGE IS GONE (2026-09-21). Graphiti's MCP server now uses upstream's
-  # stock chat-completions client (`OpenAIGenericClient`, chosen automatically
-  # for any non-OpenAI URL) instead of the Responses-API client we used to
-  # patch in — it POSTs to `/v1/chat/completions` with a `response_format`
+  # THE BRIDGE IS GONE (2026-09-21). The graph client — graphiti-core, in the
+  # app process since 2026-10-04 — uses upstream's chat-completions client
+  # (`OpenAIGenericClient`) instead of the Responses-API client the retired
+  # server was once patched to use — it POSTs to `/v1/chat/completions` with a `response_format`
   # json_schema, and LiteLLM forwards that to llama.cpp unchanged. So the
   # alias must be a PLAIN `openai/<model>`, exactly like cc-default. The old
   # `openai/chat_completions/` prefix is now WRONG: it forces LiteLLM's
@@ -298,9 +299,10 @@ registration_only:
       chat_template_kwargs:
         enable_thinking: false
 
-  # Named for graphiti's cross-encoder config, pointed at the local Qwen. It is
-  # in RERANKER_API_KEY's model scope alongside cc-default; the name is a
-  # graphiti-side expectation, not a claim that any OpenAI model is in use.
+  # Named for graphiti-core's default cross-encoder (the app builds it on this
+  # alias when CC_GRAPH_RERANK_ALIAS is unset), pointed at the local Qwen; the
+  # name is a graphiti-side expectation, not a claim that any OpenAI model is
+  # in use.
   gpt-4.1-nano:
     registration:
       model: openai/PLACEHOLDER
@@ -318,7 +320,7 @@ registration_only:
       timeout: 60
 
   # THE EMBEDDING ROLE — what Central Command actually addresses (config.py
-  # `embed_alias`, graphiti config.yaml `embedder.model`, neo4j_writer).
+  # `embed_alias` — graphiti-core's embedder and neo4j_writer alike).
   # Points at the same upstream as qwen3-embedding-local; both rows exist on
   # purpose (see the role-vs-real note above). RE-POINTING THIS ROLE IS A
   # MIGRATION, NEVER A SWAP: vectors from a different model live in a
@@ -335,8 +337,9 @@ registration_only:
       api_base: PLACEHOLDER
       timeout: 60
 
-  # THE RERANK ROLE — GRAPHITI_RERANK_MODEL (deploy/k3s/40-graph.yaml)
-  # addresses this name. Same cohere-client constraints as qwen3-rerank-local
+  # THE RERANK ROLE — CC_GRAPH_RERANK_ALIAS (the app's .env; the k3s
+  # installer and updater set it) addresses this name, through the app's
+  # RerankClient (integrations/graphiti_client.py). Same cohere-client constraints as qwen3-rerank-local
   # below: api_base is POSTed verbatim and MUST end in /v1/rerank, and a swap
   # target must itself be a rerank-shaped endpoint (llama.cpp --rerank), never
   # a chat model.

@@ -15,11 +15,15 @@ You create episodes by proposing `graph.add_episode`; its arguments (`name`,
 `for_agent`) are in `what-belongs`. It lands with `source: "text"` in the
 group the scope selects.
 
-**Ingestion is queued and asynchronous.** The return value is Graphiti's
-acknowledgement, **not the finished graph state**. An episode you just
-committed will not be searchable as facts immediately — on this deployment
-extraction takes **~56 seconds per episode**. Do not conclude the write failed
-because a search a moment later found nothing.
+**Ingestion is asynchronous, and durable.** Approval records the episode as a
+job on the ingest queue; extraction runs afterwards, one episode at a time
+within a group. Approval is **not the finished graph state**. An episode you
+just committed will not be searchable as facts immediately — on this
+deployment extraction has taken **~56 seconds per episode**, and a burst in one
+group waits its turn. Do not conclude the write failed because a search a
+moment later found nothing: a job that fails is retried (transient causes) or
+parked for the operator with its error (permanent ones), never silently
+dropped.
 
 ## Entity (node) — a thing the graph believes exists
 

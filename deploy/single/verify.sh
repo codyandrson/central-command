@@ -54,7 +54,6 @@ fi
 : "${CC_POD_PREFIX:=cc-}"
 : "${CC_PG_PORT:=5442}"
 : "${CC_LITELLM_PORT:=4000}"
-: "${CC_GRAPHITI_PORT:=8000}"
 : "${CC_NEO4J_BOLT_PORT:=7687}"
 : "${CC_NEO4J_HTTP_PORT:=7474}"
 : "${CC_N8N_PORT:=5678}"
@@ -107,7 +106,7 @@ echo "== containers (prefix=${CC_POD_PREFIX})"
 # Containers, not pods: compose has no pods. The names are compose.yaml's
 # container_name values, which keep the cc- prefix for exactly this reason.
 ctrs="$(podman ps -a --format '{{.Names}} {{.Status}}' 2>/dev/null)"
-for p in postgres-postgres litellm-db litellm-redis litellm neo4j graphiti; do
+for p in postgres-postgres litellm-db litellm-redis litellm neo4j; do
   name="${CC_POD_PREFIX}${p}"
   line="$(grep -E "^${name} " <<<"$ctrs")"
   if [[ -z "$line" ]]; then
@@ -193,23 +192,15 @@ else
   bad "neo4j http answers"
 fi
 
-# The derived image patches FastMCP's DNS-rebinding allowlist to exactly
-# {graphiti, localhost, 127.0.0.1}; any other Host gets HTTP 421. Reaching it
-# as 127.0.0.1 is on the list, so a 421 here means the patch is missing.
-gh="$(wait_for 240 curl -fsS "http://127.0.0.1:${CC_GRAPHITI_PORT}/health" && \
-      curl -fsS "http://127.0.0.1:${CC_GRAPHITI_PORT}/health" 2>/dev/null)"
-if [[ -n "$gh" ]]; then
-  ok "graphiti MCP /health answers"
+# There is no Graphiti server to probe (design record 2026-10-04, D10):
+# graphiti-core runs inside the API, and the application proves its own graph
+# path — the bolt connection, the carried patches — in verify/selfcheck. What
+# a deployment check CAN still catch is the retired container outliving the
+# update that removed its service (phases/stack.sh retires it by name).
+if grep -qE "^${CC_POD_PREFIX}graphiti " <<<"$ctrs"; then
+  bad "the retired Graphiti server container ${CC_POD_PREFIX}graphiti is gone (re-run ./setup.sh — the stack phase removes it)"
 else
-  bad "graphiti MCP /health answers"
-fi
-# Graphiti holds a bolt session open to Neo4j; a config or credential error
-# shows up in its log, not in /health.
-glog="$(podman logs "${CC_POD_PREFIX}graphiti" 2>&1 | tail -200)"
-if grep -qiE 'authentication failure|unable to retrieve routing|could not connect|traceback' <<<"$glog"; then
-  bad "graphiti log is clean of connection/auth errors"
-else
-  ok "graphiti log is clean of connection/auth errors"
+  ok "the retired Graphiti server container is gone"
 fi
 
 # Jira/Confluence — the one OFF-BOX dependency this script probes, and the only

@@ -67,7 +67,6 @@ echo "== A. services are up and answering =="
 check "postgres (spine)  127.0.0.1:5442" "${K[*]} exec deploy/cc-postgres -- pg_isready -U central_command"
 check "litellm            127.0.0.1:4000" "curl -fsS http://127.0.0.1:4000/health/liveliness"
 check "litellm: live routing policy == model-preferences.yaml" "python3 deploy/pi/litellm/policy.py --check"
-check "graphiti MCP       127.0.0.1:8000" "curl -fsS http://127.0.0.1:8000/health"
 check "n8n                127.0.0.1:5678" "curl -fsS http://127.0.0.1:5678/healthz"
 check "crawler            127.0.0.1:8091" "curl -fsS http://127.0.0.1:8091/healthz"
 check "speech             127.0.0.1:8093" "curl -fsS http://127.0.0.1:8093/health"
@@ -75,16 +74,21 @@ check "speech             127.0.0.1:8093" "curl -fsS http://127.0.0.1:8093/healt
 check "speech TTS model installed        " "curl -fsS http://127.0.0.1:8093/v1/models/speaches-ai/Kokoro-82M-v1.0-ONNX"
 check "speech STT model installed        " "curl -fsS http://127.0.0.1:8093/v1/models/Systran/faster-whisper-small"
 check "control plane API  127.0.0.1:8080" "curl -fsS http://127.0.0.1:8080/health"
+# graphiti-core runs inside the API (design record 2026-10-04, D7): the two
+# carried fixes must be on the INSTALLED package, or the ingest worker refuses
+# extraction. Re-applied after every install by setup.sh and cc-update.sh.
+check "graphiti-core carries the fixes in deploy/graphiti-patches/" \
+  ".venv/bin/python scripts/apply_graphiti_patches.py --check"
 check "victorialogs       127.0.0.1:9428" "curl -fsS http://127.0.0.1:9428/health"
 check "pgweb (db ui)      127.0.0.1:8092" "curl -fsS -o /dev/null http://127.0.0.1:8092/"
 # 7474 is the cc-graph-bolt unit's loopback forward (Neo4j Browser), not a k8s
 # host binding — a FAIL here means the unit is stale/down, not the pod.
 check "neo4j browser fwd  127.0.0.1:7474" "curl -fsS -o /dev/null http://127.0.0.1:7474/"
 check "nerve cockpit      127.0.0.1:3080" "curl -fsS -o /dev/null http://127.0.0.1:3080"
-# neo4j is ClusterIP-only by design now (the app reaches the graph solely
-# through Graphiti's MCP endpoint), so it is probed from INSIDE the cluster.
-# Probing it on 127.0.0.1:7474 would be a false FAIL — and adding a host binding
-# to make that check pass would be a real regression.
+# neo4j is ClusterIP-only by design (the host reaches it only through the
+# cc-graph-bolt relay checked above), so the pod itself is probed from INSIDE
+# the cluster. Adding a host binding to make a direct check pass would be a
+# real regression.
 check "neo4j              ClusterIP (in-cluster only)" \
   "${K[*]} exec deploy/cc-neo4j -- wget -qO- http://localhost:7474"
 
@@ -208,9 +212,9 @@ fi
 # accepted consequence is that browser-rendered import is down when the
 # compute node is; rungs 0/1 of the import ladder don't need it.
 pinned cc-crawler "$COMPUTE_NODE"
-# The floating pair is NOT asserted to a node — that would defeat the point.
-# What matters is that they PREFER the compute node and can run on either.
-for a in cc-litellm cc-graphiti; do
+# The floating service is NOT asserted to a node — that would defeat the point.
+# What matters is that it PREFERS the compute node and can run on either.
+for a in cc-litellm; do
   got="$(node_of "$a")"
   if [[ "$got" == "$COMPUTE_NODE" ]]; then
     ok "$a floating, currently on $COMPUTE_NODE (preferred)"
@@ -224,17 +228,6 @@ done
 # will never start.
 unbound="$("${K[@]}" get pvc -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase} {end}' 2>/dev/null | tr ' ' '\n' | grep -v '=Bound$' | grep -v '^$' || true)"
 if [[ -z "$unbound" ]]; then ok "every PVC is Bound"; else bad "unbound PVCs: $unbound"; fi
-# The floating image must exist on BOTH nodes under the exact reference the
-# kubelet resolves. Capture then grep — `ctr ... | grep -q` inverts under
-# pipefail (grep exits early, ctr takes SIGPIPE).
-REF=docker.io/library/cc-graphiti:1.0.2-anthropic
-pi_i="$(sudo k3s ctr -n k8s.io images ls -q 2>/dev/null)"
-cb_i="$(ssh -o ConnectTimeout=10 "$COMPUTE_SSH" 'sudo k3s ctr -n k8s.io images ls -q' 2>/dev/null)"
-if grep -qx "$REF" <<<"$pi_i" && grep -qx "$REF" <<<"$cb_i"; then
-  ok "cc-graphiti image present on BOTH nodes (failover would not ImagePullBackOff)"
-else
-  bad "cc-graphiti image missing on a node — floating would break on failover"
-fi
 # The RuntimeClass object applies unconditionally, so a chromebox missing the
 # runsc HOST half stays green everywhere until the first sandbox Job hangs at
 # a "failed to create shim" event, weeks later. Assert the host half here.

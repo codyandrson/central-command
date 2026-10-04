@@ -56,9 +56,7 @@ need_image() { # need_image <check-name> <image-ref> <build-script>
 
 phase_stack() {
   load_env || return 1
-  : "${CC_GRAPHITI_TAG:=1.0.2-anthropic}"
 
-  need_image "image-graphiti" "localhost/cc-graphiti:${CC_GRAPHITI_TAG}" "$HERE/build-graphiti-image.sh" || return 1
   if [[ "$CC_ENABLE_SANDBOX" == "1" ]]; then
     need_image "image-sandbox" "localhost/cc-sandbox:1" "$HERE/build-sandbox-image.sh" || return 1
   else
@@ -86,11 +84,12 @@ phase_stack() {
   step "up-stack" "the stack is up and healthy (${PROFILE_FLAGS[*]:-no optional profiles})" \
     compose "${PROFILE_FLAGS[@]}" up -d --wait || return 1
   # `up` converged the DEFINITIONS; this converges the IMAGES (v2.57.0). A
-  # release that rebuilt graphiti or the crawler under its fixed tag, or a
+  # release that rebuilt the sandbox or the crawler under its fixed tag, or a
   # re-pulled third-party tag, leaves the old container running through `up`
   # — every enabled service whose container is not on the image its ref
   # resolves to now is recreated here, by name, and said so (image_drift).
   catch_up_images "up-stack" || return 1
+  retire_graphiti_container || return 1
 
   # `restart: always` is honoured by podman-restart.service, which a podman
   # MACHINE (Windows/macOS) ships disabled: after a host reboot every
@@ -124,6 +123,28 @@ phase_stack() {
   # therefore had none until its first update; `stack` is where they land now,
   # for an install and an update alike.
   stack_n8n_workflows
+}
+
+# ── the retired Graphiti server's container (design record 2026-10-04, D10) ──
+# compose.yaml no longer declares a `graphiti` service — graphiti-core runs
+# inside the API — but `compose up` never removes a container whose service
+# left the file, and the old one is `restart: always`: it would keep its port
+# and come back after every reboot. So an install that predates the removal
+# has it removed here, by name, once; a fresh install finds none. Not
+# --remove-orphans: whether podman-compose counts a disabled PROFILE's
+# containers as orphans is not something this profile may assume. The image
+# is left in local storage — `./update.sh rollback` to the previous release
+# rebuilds nothing it already has.
+retired_graphiti_name() { printf '%sgraphiti' "${CC_POD_PREFIX:-cc-}"; }
+retire_graphiti_container() {
+  local name; name="$(retired_graphiti_name)"
+  podman container exists "$name" 2>/dev/null || return 0
+  if podman rm -f "$name" >/dev/null 2>&1; then
+    pass "up-stack" "removed the retired Graphiti server container $name — the graph client runs inside the API now"
+  else
+    fail "up-stack" "could not remove the retired Graphiti server container $name (podman rm -f $name) — it keeps its port and restarts at boot"
+    return 1
+  fi
 }
 
 # ── the n8n credentials the import needs (2026-10-01 design record, D1) ─────

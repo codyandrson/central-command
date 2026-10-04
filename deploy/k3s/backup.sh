@@ -20,10 +20,12 @@
 #   dumps and key material must never sit in a tree that gets pushed.
 #
 #   Neo4j Community has no online backup, so the graph is a scale-to-0 -> dump
-#   -> scale-to-1 cycle. cc-graphiti is scaled down for the SAME window
-#   deliberately: with neo4j gone it still ACKs add_memory {submitted:true} and
-#   the queued episode dies async and silently. Down, an in-window caller gets a
-#   loud transport error instead.
+#   -> scale-to-1 cycle. Nothing else is scaled down with it any more: the
+#   retired Graphiti server had to be (it acknowledged episodes it then lost
+#   with Neo4j gone), but the app's in-process ingest queue treats an
+#   unreachable Neo4j as TRANSIENT — the job goes back to QUEUED with backoff
+#   and lands after the window (design record 2026-10-04, D5); a graph read in
+#   the window gets a loud error.
 #
 #   Exits NON-ZERO if any store failed, so a silent failure streak cannot be
 #   mistaken for success.
@@ -118,13 +120,12 @@ else
   say "  ok → $(basename "$keyfile") (0600)"
 fi
 
-# --- Neo4j: offline dump on the chromebox ------------------------------------
+# --- Neo4j: offline dump on the compute node ------------------------------------
 # The PVC is ReadWriteOnce and node-pinned, so the dumper pod must land on the
 # same node and cc-neo4j must be down first.
 neo4j_ok=0
 graph_back() {
   "${K[@]}" scale deploy/cc-neo4j --replicas=1 >/dev/null 2>&1 9>&-
-  "${K[@]}" scale deploy/cc-graphiti --replicas=1 >/dev/null 2>&1 9>&-
   "${K[@]}" delete pod/neo4j-dumper --ignore-not-found --wait=false >/dev/null 2>&1 9>&-
   return 0
 }
@@ -133,8 +134,7 @@ graph_back() {
 trap graph_back EXIT
 trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
 
-say "dumping neo4j (brief scale-down of cc-graphiti + cc-neo4j)…"
-"${K[@]}" scale deploy/cc-graphiti --replicas=0 >/dev/null 9>&-
+say "dumping neo4j (brief scale-down of cc-neo4j)…"
 "${K[@]}" scale deploy/cc-neo4j    --replicas=0 >/dev/null 9>&-
 "${K[@]}" wait --for=delete pod -l app=cc-neo4j --timeout=180s >/dev/null 2>&1 9>&-
 
@@ -250,13 +250,13 @@ say "done → ${OUT}/ (retain ${RETAIN_DAYS}d, $(du -sh "$OUT" | cut -f1) total)
 #
 #   Neo4j — offline load on the chromebox, overwriting the store. Same dumper
 #   pod shape as above, with `database load --from-stdin`:
-#     k3s kubectl -n central-command scale deploy/cc-graphiti deploy/cc-neo4j --replicas=0
+#     k3s kubectl -n central-command scale deploy/cc-neo4j --replicas=0
 #     # create the neo4j-dumper pod (see the manifest inlined above), then:
 #     gunzip -c neo4j_<stamp>.dump.gz | k3s kubectl -n central-command exec -i pod/neo4j-dumper -- \
 #       neo4j-admin database load neo4j --from-stdin --overwrite-destination=true
 #     k3s kubectl -n central-command exec pod/neo4j-dumper -- chown -R 7474:7474 /data
 #     k3s kubectl -n central-command delete pod/neo4j-dumper
-#     k3s kubectl -n central-command scale deploy/cc-neo4j deploy/cc-graphiti --replicas=1
+#     k3s kubectl -n central-command scale deploy/cc-neo4j --replicas=1
 #   The chown is not optional: the dumper runs as root, the neo4j pod as 7474,
 #   and root-owned store files fail to start with an error that reads like
 #   corruption.

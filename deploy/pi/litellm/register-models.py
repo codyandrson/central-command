@@ -58,9 +58,9 @@ no PLACEHOLDER (`mode: rerank`, a timeout) must match exactly. api_key is
 never checked — LiteLLM never echoes it — the probes catch a wrong key.
 `graphiti-llm` additionally fails (drift, exit 3) if its filled-in model
 still carries a `chat_completions/` bridge prefix — that prefix forced
-LiteLLM's Responses->chat bridge, which Graphiti's MCP server no longer
-needs (it uses the stock chat-completions client since 2026-09-21) and which
-404s against llama-swap.
+LiteLLM's Responses->chat bridge, which the graph client does not use (the
+app's in-process graphiti-core speaks chat-completions through
+OpenAIGenericClient) and which 404s against llama-swap.
 
 The declaration is `.yaml` (PyYAML) or `.json` (stdlib — the single-node
 profile's, so the pre-venv python needs nothing). `models:` entries take
@@ -321,8 +321,8 @@ def plan(want: dict[str, dict], live_models: list[dict],
                      for k, v in (invariants.get(alias) or {}).items()
                      if k not in OWNED and k != "api_key" and _norm(live_params.get(k)) != _norm(v)]
         # graphiti-llm-specific invariant: the Responses->chat bridge prefix is
-        # no longer wanted (2026-09-21) — Graphiti's MCP server uses upstream's
-        # stock chat-completions client now, and a bridged model 404s against
+        # no longer wanted (2026-09-21) — the app's graphiti-core client uses
+        # upstream's chat-completions client, and a bridged model 404s against
         # llama-swap. A generic prefix/suffix pattern match would not catch
         # this (both "openai/qwen..." and "openai/chat_completions/qwen..."
         # start with "openai/"), so it is checked explicitly.
@@ -330,7 +330,7 @@ def plan(want: dict[str, dict], live_models: list[dict],
             problems.append(
                 f"model: {live_params.get('model')!r} still carries the "
                 "chat_completions/ bridge prefix, which is no longer wanted — "
-                "Graphiti's MCP server uses the stock chat-completions client "
+                "the app's graphiti-core client uses chat-completions "
                 "and a bridged alias 404s. Change the model to openai/<model> "
                 "in the LiteLLM UI."
             )

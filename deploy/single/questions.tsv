@@ -86,7 +86,6 @@ CC_COCKPIT_PORT	advanced	Loopback port for the cockpit server (the Node process 
 CC_PG_PORT	advanced	Loopback port for the spine's Postgres	5442	n	v_port	-	n
 CC_LITELLM_PORT	advanced	Loopback port for the LiteLLM proxy and its UI	4000	n	v_port	-	n
 CC_LITELLM_DB_PORT	advanced	Loopback port for LiteLLM's own Postgres	5443	n	v_port	-	n
-CC_GRAPHITI_PORT	advanced	Loopback port for Graphiti's MCP endpoint	8000	n	v_port	-	n
 CC_NEO4J_BOLT_PORT	advanced	Loopback port for Neo4j's bolt protocol	7687	n	v_port	-	n
 CC_NEO4J_HTTP_PORT	advanced	Loopback port for Neo4j's HTTP browser	7474	n	v_port	-	n
 CC_N8N_PORT	advanced	Loopback port for n8n, used only with the n8n profile on	5678	n	v_port	-	n

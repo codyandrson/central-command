@@ -1,7 +1,7 @@
 """A changed Dockerfile rebuilds: the local images carry their inputs hash (v2.57.0, P3).
 
-The three locally built images have FIXED tags (`localhost/cc-sandbox:1`,
-`cc-crawler:1`, `cc-graphiti:<CC_GRAPHITI_TAG>`), and until this release the
+The locally built images have FIXED tags (`localhost/cc-sandbox:1`,
+`cc-crawler:1`; the Graphiti server's until it left, 2026-10-04), and until this release the
 `fetch` phase skipped the build whenever the tag existed and its probes read
 "tag present" as done. So a release that changed a Dockerfile or anything in
 its build context never rebuilt on update and the OLD image kept running —
@@ -116,7 +116,7 @@ def test_one_byte_of_the_dockerfile_changes_the_hash(tmp_path):
     a = _ctx(tmp_path / "a", CTX)
     b = _ctx(tmp_path / "b", {**CTX, "Dockerfile": CTX["Dockerfile"].replace(b"one", b"onf")})
     assert _h("", ARGS, a, cwd=tmp_path) != _h("", ARGS, b, cwd=tmp_path)
-    # ...and so does a file deeper in the context (a graphiti patch).
+    # ...and so does a file deeper in the context (an image patch).
     c = _ctx(tmp_path / "c", {**CTX, "patches/a.patch": b"--- a\n+++ c\n"})
     assert _h("", ARGS, a, cwd=tmp_path) != _h("", ARGS, c, cwd=tmp_path)
     # ...and a file that only exists in one of them.
@@ -475,18 +475,16 @@ def test_a_failed_rebuild_is_a_fail_and_the_probe_stays_false(tree: Tree):
 
 @drives_installer
 @pytest.mark.parametrize("script,ref", [
-    ("build-graphiti-image.sh", "localhost/cc-graphiti:1.0.2-anthropic"),
     ("build-crawler-image.sh", "localhost/cc-crawler:1"),
 ])
-def test_the_other_two_builds_carry_the_label_too(tree: Tree, script, ref):
+def test_the_other_build_carries_the_label_too(tree: Tree, script, ref):
     path = str(tree.single / script)
     r = tree.call("fetch_local", "image-x", ref, path, "SEAMS")
     assert f"PASS image-x: {ref} built" in r.stdout, r.stdout + r.stderr
     want = subprocess.run([_bash(), path, "--inputs-hash"], cwd=tree.single, capture_output=True,
                           text=True, env=tree.env(), stdin=subprocess.DEVNULL).stdout.strip()
     assert len(want) == 64 and tree.label(ref) == want
-    probe = "p_image_graphiti" if "graphiti" in script else "p_image_crawler"
-    assert tree.call(probe).returncode == 0
+    assert tree.call("p_image_crawler").returncode == 0
 
 
 # ── a STAGED build moves no live tag (v2.57.0, D5) ──────────────────────────
@@ -564,10 +562,9 @@ def test_a_rerun_staged_acquisition_reuses_its_aside_build(tree: Tree):
 
 @drives_installer
 @pytest.mark.parametrize("script,ref", [
-    ("build-graphiti-image.sh", "localhost/cc-graphiti:1.0.2-anthropic"),
     ("build-crawler-image.sh", "localhost/cc-crawler:1"),
 ])
-def test_the_other_two_builds_tag_aside_when_staged(tree: Tree, script, ref):
+def test_the_other_build_tags_aside_when_staged(tree: Tree, script, ref):
     path = str(tree.single / script)
     r = tree.call("fetch_local", "image-x", ref, path, "SEAMS", staged=True)
     assert f"PASS image-x: {ref}-staged built" in r.stdout, r.stdout + r.stderr

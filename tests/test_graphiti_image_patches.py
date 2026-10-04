@@ -11,6 +11,15 @@ built-in docstring and drops only the fields, the Dockerfile applies it and
 fails loud on drift, BOTH deploy profiles set the switch, and the retired
 Responses-client pin (`cc-openai-client-switch.patch`, `GRAPHITI_OPENAI_CLIENT`)
 does not come back — MCP 1.1.0's stock chat-completions client is the client.
+
+The server itself left the deployment (design record 2026-10-04, D10):
+graphiti-core runs in the app, its entity types come from
+`central_command/integrations/graph_ontology.py` (field-less, the same
+docstrings — tests/test_graph_ontology.py), and neither profile sets the
+switch any more. `deploy/pi/graphiti/` stays BYTE-IDENTICAL for one release
+for the previous updater's sake (tests/test_graphiti_server_boundary.py), so
+these pins on its content still hold and still back DL-104's record; they go
+with the directory in the next release.
 """
 
 from __future__ import annotations
@@ -47,10 +56,3 @@ def test_the_dockerfile_applies_the_patch_and_fails_loud_on_drift():
     dockerfile = _read(GRAPHITI / "Dockerfile")
     assert "patch -p1 -F 5 < /tmp/graphiti-patches/cc-entity-type-source.patch" in dockerfile
     assert "grep -q 'GRAPHITI_ENTITY_TYPE_FIELDS' src/utils/type_config.py" in dockerfile
-
-
-def test_both_deploy_profiles_set_the_entity_type_switch():
-    k3s = _read(ROOT / "deploy" / "k3s" / "40-graph.yaml")
-    assert "- name: GRAPHITI_ENTITY_TYPE_FIELDS\n              value: none" in k3s
-    single = _read(ROOT / "deploy" / "single" / "compose.yaml")
-    assert "GRAPHITI_ENTITY_TYPE_FIELDS: none" in single

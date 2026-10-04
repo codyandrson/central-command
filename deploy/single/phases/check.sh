@@ -196,7 +196,7 @@ validate_answers() {
 # THE ports, in one place: numeric, in range, and distinct — two services on one
 # hostPort is a published port that half-starts the stack. `check` calls this
 # and then adds a LISTENER probe per port, which needs no second list.
-CC_PORT_KEYS=(CC_PG_PORT CC_LITELLM_PORT CC_LITELLM_DB_PORT CC_GRAPHITI_PORT
+CC_PORT_KEYS=(CC_PG_PORT CC_LITELLM_PORT CC_LITELLM_DB_PORT
               CC_NEO4J_BOLT_PORT CC_NEO4J_HTTP_PORT CC_N8N_PORT CC_CRAWLER_PORT
               CC_SPEECH_PORT CC_COCKPIT_PORT CC_API_PORT)
 validate_ports() {
@@ -775,14 +775,14 @@ check_indexes() {
   local npm="${CC_NPM_REGISTRY:-https://registry.npmjs.org}"
   probe_http "index-npm" "${npm%/}/${INDEX_PROBE_NPM_PACKAGE}" "the npm registry (${npm})" "CC_NPM_REGISTRY"
 
-  # apt runs INSIDE the three image builds, and the suite comes from each base
-  # image: zepai/knowledge-graph-mcp and library/python:3.12-slim-bookworm are
-  # Debian BOOKWORM, mcr playwright/python:v1.62.0-noble is Ubuntu NOBLE
+  # apt runs INSIDE the local image builds, and the suite comes from each base
+  # image: library/python:3.12-slim-bookworm is Debian BOOKWORM, mcr
+  # playwright/python:v1.62.0-noble is Ubuntu NOBLE
   # (images.txt's locked tags say so). Hardcoded here on purpose — a suite is a
   # property of the base image, not an operator answer.
   local apt="${CC_APT_MIRROR:-https://deb.debian.org/debian}"
   probe_http "index-apt" "${apt%/}/dists/bookworm/Release" \
-    "the Debian bookworm archive (${apt}) — apt runs inside the graphiti and sandbox builds" "CC_APT_MIRROR"
+    "the Debian bookworm archive (${apt}) — apt runs inside the sandbox build" "CC_APT_MIRROR"
   if [[ "$CC_ENABLE_CRAWLER" == "1" ]]; then
     probe_http "index-apt-ubuntu" "http://archive.ubuntu.com/ubuntu/dists/noble/Release" \
       "the Ubuntu noble archive — apt runs inside the CRAWLER build (its base is Microsoft's Playwright image, Ubuntu noble). CC_APT_MIRROR is a DEBIAN path and cannot stand in" "CC_ENABLE_CRAWLER=0, or an archive.ubuntu.com mirror"
@@ -912,12 +912,12 @@ print("\n".join(str(m.get("id","")) for m in (d.get("data") or [])))' "$out" 2>/
     upstream_probe "llm-chat-${a}" "a real completion came back from $cid (the $a upstream)" chat "$cid"
   done
 
-  # The STRUCTURED round trip, for graphiti-llm's id only: Graphiti's MCP server
-  # drives extraction through chat/completions with a json_schema
+  # The STRUCTURED round trip, for graphiti-llm's id only: the app's in-process
+  # graphiti-core client drives extraction through chat/completions with a json_schema
   # response_format, and an endpoint that ignores the schema is the one failure
   # a plain chat probe cannot see.
   key="$(cc_alias_env_key graphiti-llm)"; cid="${!key:-}"
-  [[ -z "$cid" ]] || upstream_probe "llm-structured" "$cid returned schema-constrained JSON (what Graphiti needs)" structured "$cid"
+  [[ -z "$cid" ]] || upstream_probe "llm-structured" "$cid returned schema-constrained JSON (what graph extraction needs)" structured "$cid"
 
   # The EMBEDDING round trip, which is also THE measurement of CC_EMBED_DIM.
   key="$(cc_alias_env_key cc-embedding)"; cid="${!key:-}"

@@ -29,9 +29,9 @@
 #     schema kept (additive-only means old code runs fine against it).
 #
 #   DB-dump scope deliberately excludes Neo4j: dumping it means scaling
-#   cc-graphiti/cc-neo4j to 0 on the CHROMEBOX (backup.sh's scale-down/dump/
-#   scale-up cycle), which this update never touches or migrates and which
-#   would add real downtime to an already-live rollout. The nightly
+#   cc-neo4j to 0 on the compute node (backup.sh's scale-down/dump/scale-up
+#   cycle), which this update never touches or migrates and which would add
+#   real downtime to an already-live rollout. The nightly
 #   `cc-backup.timer` covers Neo4j DR; this pre-update dump is only for the
 #   three stores an update can actually put in a bad state.
 #
@@ -195,18 +195,20 @@ reconcile_app_config() {
 }
 
 # ── locally-built images ────────────────────────────────────────────────────
-# The three images no registry serves. Every ref is FULLY QUALIFIED, including
+# The two images no registry serves. Every ref is FULLY QUALIFIED, including
 # on the podman side: podman tags local builds `localhost/<name>`, which the
 # kubelet never matches, and the manifests' bare names normalise to exactly
 # these. Fields: name | ref | build script | deployment | nodes | change inputs.
-#   - graphiti FLOATS, so both nodes must hold it (preferred nodeAffinity).
 #   - sandbox and crawler carry REQUIRED affinity to the compute node.
+#   - the graphiti row left with the Graphiti server (design record
+#     2026-10-04, D10). A row's REMOVAL takes one release to land, because the
+#     update ACROSS it runs the previous release's copy of this script: see the
+#     note on deploy/k3s/build-graphiti-image.sh in .claude/rules/deploy-k3s.md.
 #   - cc-sandbox has NO Deployment: the sandbox runner creates pods per run, so
 #     a fresh pod picks the new bytes up on its own and there is nothing to
 #     restart. Hence the empty deployment field.
 # A change to a build script is a changed input like any file in its context.
 IMAGES=(
-  "graphiti|docker.io/library/cc-graphiti:1.0.2-anthropic|build-graphiti-image.sh|cc-graphiti|anchor compute|deploy/pi/graphiti deploy/k3s/build-graphiti-image.sh"
   "sandbox|docker.io/library/cc-sandbox:1|build-sandbox-image.sh||compute|deploy/k3s/sandbox.Dockerfile deploy/k3s/build-sandbox-image.sh"
   "crawler|docker.io/library/cc-crawler:1|build-crawler-image.sh|cc-crawler|compute|central_command/crawler deploy/k3s/build-crawler-image.sh"
 )
@@ -489,11 +491,11 @@ main() {
     done <<<"$changed_yaml"
   fi
 
-  # Three configmaps are built FROM FILES by make-secrets.sh, not declared in
+  # Two configmaps are built FROM FILES by make-secrets.sh, not declared in
   # a manifest, so `apply -f deploy/k3s/` never refreshes them: a release
-  # that edits the Graphiti ontology or the LiteLLM config changed nothing
-  # in the cluster (found 2026-09-16 — the Person description in
-  # deploy/pi/graphiti/config.yaml had no path to the pod). Re-apply the
+  # that edited a mounted config file changed nothing in the cluster (found
+  # 2026-09-16 — an ontology edit in the retired Graphiti server's config had
+  # no path to its pod). Re-apply the
   # ones this release touched and restart their consumer; schema.sql is
   # applied to the live database above and its configmap only seeds a
   # FRESH install, so it is refreshed without a restart.
@@ -512,7 +514,6 @@ main() {
       TOUCHED_DEPLOYS+=("$cm_deploy")
     fi
   done <<'CM'
-deploy/pi/graphiti/config.yaml|cc-graphiti-config|config.yaml|cc-graphiti
 deploy/pi/litellm/config.yaml|cc-litellm-config|config.yaml|cc-litellm
 central_command/db/schema.sql|cc-schema-sql|01-schema.sql|
 CM

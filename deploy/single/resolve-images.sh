@@ -188,7 +188,6 @@ component_wanted() { # images.txt's last column vs the flags
   case "$1" in
     core)          return 0 ;;
     n8n)           [[ "$CC_ENABLE_N8N" == 1 ]] ;;
-    graphiti-base) return 0 ;;
     sandbox-base)  [[ "$CC_ENABLE_SANDBOX" == 1 ]] ;;
     crawler-base)  [[ "$CC_ENABLE_CRAWLER" == 1 ]] ;;
     speech)        [[ "$CC_ENABLE_SPEECH" == 1 ]] ;;

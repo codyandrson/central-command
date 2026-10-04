@@ -42,7 +42,7 @@ capability_manifest() {
   echo "     postgres    the spine (schema auto-loaded)"
   echo "     litellm     the proxy + its own postgres and redis"
   echo "     neo4j       the knowledge graph store"
-  echo "     graphiti    the graph's MCP service"
+  echo "     graph       graphiti-core, IN the API process (no separate service)"
   if [[ "$CC_ENABLE_SANDBOX" == "1" ]]; then
     echo "     sandbox     agent sandbox on the PODMAN backend, rootless — WEAKER"
     echo "                 ISOLATION than the k3s profile's gVisor. The runner is a"

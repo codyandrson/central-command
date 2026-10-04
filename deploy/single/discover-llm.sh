@@ -26,8 +26,8 @@
 #                 ./discover-llm.sh --proxy transcribe cc-stt /tmp/p.mp3
 #               speech then transcribe is the round trip setup runs: the
 #               transcription must contain what was synthesised.
-#               `structured` is the graphiti-llm check: Graphiti's MCP server
-#               drives extraction through /v1/chat/completions with a
+#               `structured` is the graphiti-llm check: the app's in-process
+#               graphiti-core client drives extraction through /v1/chat/completions with a
 #               response_format json_schema, and a registration that still
 #               carries the old openai/chat_completions/ bridge prefix sends
 #               "chat_completions/<model>" upstream and llama-swap 404s — the
@@ -172,8 +172,8 @@ else:
     ;;
   structured)
     [[ -n "${2:-}" ]] || { echo "usage: $0 structured <model-id>" >&2; exit 1; }
-    # The exact call Graphiti's MCP server makes now (2026-09-21, stock
-    # OpenAIGenericClient): /v1/chat/completions with response_format
+    # The exact call the app's graphiti-core client makes (OpenAIGenericClient,
+    # design record 2026-10-04 D2): /v1/chat/completions with response_format
     # json_schema. Through the proxy this is what proves the alias is a
     # PLAIN openai/<model> registration, not a bridged one.
     _api -H 'Content-Type: application/json' \

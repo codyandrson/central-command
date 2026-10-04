@@ -150,7 +150,7 @@ def _stub_bin(tmp: Path, log: Path, calls: Path) -> Path:
     # Inside the bash stubs below, every path in the spelling bash resolves.
     tmp_p, log, calls = tmp.as_posix(), log.as_posix(), calls.as_posix()
     # podman: no machine, every container exists, pulls succeed unless the
-    # flag file names the ref. The three local images are already there, built
+    # flag file names the ref. The local images are already there, built
     # by an earlier release (present, no build-inputs label) unless the test
     # seeds a label for one in labels/. A build records its `-t` ref and its
     # `--label` value there, so the stage's ASIDE tag and the live one can be
@@ -160,12 +160,12 @@ def _stub_bin(tmp: Path, log: Path, calls: Path) -> Path:
 echo "podman $*" >> "{log}"
 key() {{ local k="${{1//\\//_}}"; printf '%s' "${{k//:/_}}"; }}
 case "$1" in
-  images) printf 'localhost/cc-graphiti:1.0.2-anthropic\\nlocalhost/cc-sandbox:1\\nlocalhost/cc-crawler:1\\n'
+  images) printf 'localhost/cc-sandbox:1\\nlocalhost/cc-crawler:1\\n'
           cat "{tmp_p}/built" 2>/dev/null ;;
   image)  [[ "${{2:-}}" == inspect ]] || exit 0
           ref="${{@: -1}}"
           [[ -f "{tmp_p}/labels/$(key "$ref")" ]] && {{ cat "{tmp_p}/labels/$(key "$ref")"; exit 0; }}
-          case "$ref" in localhost/cc-graphiti:1.0.2-anthropic|localhost/cc-sandbox:1|localhost/cc-crawler:1) exit 0 ;; esac
+          case "$ref" in localhost/cc-sandbox:1|localhost/cc-crawler:1) exit 0 ;; esac
           grep -qxF -- "$ref" "{tmp_p}/built" 2>/dev/null && exit 0
           exit 125 ;;
   build)  label=""; ref=""; shift
@@ -546,8 +546,10 @@ def test_the_adoption_pause_is_one_command_even_with_n8n(dep: Dep):
     assert "once more" not in ua[0] and "update.sh" not in ua[0], ua[0]
 
 
-GRAPHITI = "localhost/cc-graphiti:1.0.2-anthropic"
-ASIDE = GRAPHITI + "-staged"
+# The local image these two follow: the sandbox's (switched on below). The
+# Graphiti server's image played this part until it left (2026-10-04, D10).
+LOCAL = "localhost/cc-sandbox:1"
+ASIDE = LOCAL + "-staged"
 
 
 def _label_file(dep: Dep, ref: str) -> Path:
@@ -567,22 +569,23 @@ def _builds(dep: Dep) -> list[tuple[str, str]]:
 
 @drives_installer
 def test_a_stop_after_the_staged_build_leaves_the_live_image_tag_alone(dep: Dep):
-    """D5's promise, for the image store: the running deployment's graphiti tag
+    """D5's promise, for the image store: the running deployment's sandbox tag
     stays on the image its containers use when apply stops before the merge —
     here at the catalog probe, AFTER the staged fetch built the new image."""
     dep.fill_ledger()
+    _set(dep.repo / ".env", {"CC_ENABLE_SANDBOX": "1"})
     old = "0" * 64
-    write_lf(_label_file(dep, GRAPHITI), old + "\n")      # the old release's build
+    write_lf(_label_file(dep, LOCAL), old + "\n")         # the old release's build
     dep.configure(models=("cc-default", "graphiti-llm", "cc-embedding"))
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
     r = dep.update("apply")
 
     assert r.returncode == 3, r.stdout + r.stderr
-    assert any(l.startswith(f"PASS image-graphiti: {ASIDE} built") for l in r.stdout.splitlines()), r.stdout
+    assert any(l.startswith(f"PASS image-sandbox: {ASIDE} built") for l in r.stdout.splitlines()), r.stdout
     builds = _builds(dep)
     assert [t for t, _ in builds] == [ASIDE], builds
-    assert _label_file(dep, GRAPHITI).read_text().strip() == old, (
+    assert _label_file(dep, LOCAL).read_text().strip() == old, (
         "the staged build moved the LIVE tag: a stop before the merge would leave new "
         "containers and sandbox sessions on the NEW image under the OLD code"
     )
@@ -594,7 +597,8 @@ def test_a_stop_after_the_staged_build_leaves_the_live_image_tag_alone(dep: Dep)
 @drives_installer
 def test_the_post_merge_fetch_builds_the_live_tag_from_the_same_inputs_and_drops_the_aside(dep: Dep):
     dep.fill_ledger()
-    write_lf(_label_file(dep, GRAPHITI), "0" * 64 + "\n")
+    _set(dep.repo / ".env", {"CC_ENABLE_SANDBOX": "1"})
+    write_lf(_label_file(dep, LOCAL), "0" * 64 + "\n")
 
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
 
@@ -603,11 +607,11 @@ def test_the_post_merge_fetch_builds_the_live_tag_from_the_same_inputs_and_drops
     # Staged aside first, then the live tag after the merge — with the SAME
     # inputs hash (the tag is not an input), which is what makes the second
     # build a cache hit on a real engine.
-    assert [t for t, _ in builds] == [ASIDE, GRAPHITI], builds
+    assert [t for t, _ in builds] == [ASIDE, LOCAL], builds
     assert builds[0][1] == builds[1][1]
-    assert _label_file(dep, GRAPHITI).read_text().strip() == builds[1][1]
+    assert _label_file(dep, LOCAL).read_text().strip() == builds[1][1]
     log = dep.log.read_text().splitlines()
-    live_build = next(i for i, l in enumerate(log) if l.startswith("podman build") and f"-t {GRAPHITI} " in l)
+    live_build = next(i for i, l in enumerate(log) if l.startswith("podman build") and f"-t {LOCAL} " in l)
     untag = [i for i, l in enumerate(log) if l == f"podman untag {ASIDE} {ASIDE}"]
     assert untag and untag[0] > live_build, "the aside tag was not dropped after the live build"
     assert ASIDE not in (dep.tmp / "built").read_text().split()
@@ -718,6 +722,26 @@ def test_apply_with_nothing_imported_leaves_an_unfinished_install_to_setup(dep: 
     assert line and "verify/selfcheck is failed" in line[0] and "./setup.sh" in line[0], r.stdout
     assert dep.called() == [], dep.called()
     _untouched(dep, head, env, led)
+
+
+@drives_installer
+def test_a_retired_steps_stale_row_is_not_an_update_to_finish(dep: Dep):
+    """A step the manifest no longer declares (fetch/image-graphiti left with
+    the Graphiti server, 2026-10-04) keeps the version it was last recorded at
+    forever. It must not read as "this tree moved", or every open row of the
+    install would be redeployed by apply as an unfinished update."""
+    dep.fill_ledger(OLD)
+    text = dep.ledger.read_text().replace("verify/selfcheck\tdone", "verify/selfcheck\tfailed")
+    text += "fetch/image-graphiti\tdone\t2.0.0\t2026-09-01T00:00:00Z\tnone\t\n"
+    write_lf(dep.ledger, text)
+    _nothing_imported(dep)
+
+    r = dep.update("apply")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    line = [l for l in r.stdout.splitlines() if l.startswith("PASS apply: nothing to apply")]
+    assert line and "verify/selfcheck is failed" in line[0], r.stdout
+    assert dep.called() == [], dep.called()
 
 
 @drives_installer

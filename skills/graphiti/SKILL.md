@@ -6,8 +6,9 @@ description: The team's shared knowledge graph — episodes vs entities vs facts
 # Graphiti
 
 Central Command's shared memory is a **Graphiti** temporal knowledge graph over
-Neo4j, reached through Graphiti's MCP server (`central_command/integrations/
-graphiti.py`). There is **no private agent memory** (D11) — every agent reads
+Neo4j, run in-process through the `graphiti-core` library (reads in
+`central_command/integrations/graphiti.py`; approved episodes are extracted by
+a durable ingest queue). There is **no private agent memory** (D11) — every agent reads
 the same store, so what you commit becomes what the whole team believes.
 
 **Reading is layered and ungated. Writing is gated.** You search freely; a graph
@@ -24,7 +25,8 @@ before the Executor commits it.
   `SUPERSEDED` — `episodes-entities-facts` and `steward-duties`.
 - You are stating **confidence** or citing the document — `steward-duties`.
 - Something is **failing** — `operations`. The extraction pipeline here has one
-  configuration that is load-bearing and non-obvious.
+  configuration that is load-bearing and non-obvious, and ingestion failures
+  are recorded rather than dropped.
 
 ## Four things to hold even without loading a reference
 
@@ -49,5 +51,5 @@ before the Executor commits it.
   makes an episode worth committing.
 - `steward-duties` — confidence, citation, contradictions, and when the right
   answer is plain text or a question.
-- `operations` — the tool surface, degradation behaviour, and the extraction
-  configuration that must not be "simplified".
+- `operations` — the tool surface, degradation behaviour, the ingest queue, and
+  the extraction configuration that must not be "simplified".

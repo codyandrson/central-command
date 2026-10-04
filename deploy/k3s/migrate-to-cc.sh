@@ -312,9 +312,11 @@ step_k8s() {
   compute="$("${K[@]}" get nodes -l gv-role/compute=true -o jsonpath='{.items[0].metadata.name}')"
   [[ -n $anchor && -n $compute ]] || die "could not resolve the anchor/compute nodes from gv-role labels"
   "${K[@]}" label node "$anchor" cc-role/anchor=true --overwrite; "${K[@]}" label node "$compute" cc-role/compute=true --overwrite
-  local tag; tag="$(grep -oE 'cc-graphiti:[A-Za-z0-9._-]+' "$REPO/deploy/k3s/40-graph.yaml" | head -1 | cut -d: -f2)"
+  # The Graphiti image left the manifests (design record 2026-10-04, D10): a
+  # tree that no longer names it has nothing to carry across the rename.
+  local tag; tag="$(grep -oE 'cc-graphiti:[A-Za-z0-9._-]+' "$REPO/deploy/k3s/40-graph.yaml" | head -1 | cut -d: -f2 || true)"
   for n in "$anchor" "$compute"; do
-    retag "$n" "docker.io/library/gv-graphiti:$tag" "docker.io/library/cc-graphiti:$tag"
+    [[ -n "$tag" ]] && retag "$n" "docker.io/library/gv-graphiti:$tag" "docker.io/library/cc-graphiti:$tag"
     retag "$n" docker.io/library/gv-sandbox:1 docker.io/library/cc-sandbox:1
     retag "$n" docker.io/library/gv-crawler:1 docker.io/library/cc-crawler:1
   done

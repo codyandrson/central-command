@@ -63,7 +63,7 @@ spec:
                     values: ["true"]
       # Nothing here reads an injected service-discovery variable, and the
       # namespace's Services would otherwise dump ~40 legacy env vars into a
-      # Chromium process's environment. Same precaution as cc-graphiti.
+      # Chromium process's environment. Same precaution as cc-neo4j.
       enableServiceLinks: false
       automountServiceAccountToken: false
       containers:

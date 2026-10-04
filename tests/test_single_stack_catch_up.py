@@ -75,6 +75,9 @@ case "$1" in
   ps)     [[ -f "$STUB/fail-ps" ]] && exit 125
           cat "$STUB/containers" 2>/dev/null; exit 0 ;;
   images) cat "$STUB/images" 2>/dev/null; exit 0 ;;
+  # `container exists`: only the retired Graphiti container is ever asked
+  # about here, and it is absent unless <state>/graphiti-exists says so.
+  container) [[ -f "$STUB/graphiti-exists" ]] && exit 0; exit 1 ;;
   compose)
     [[ "${2:-}" == version ]] && { echo "podman-compose version 1.6.0"; exit 0; }
     [[ " $* " == *" up "* ]] || exit 0
@@ -146,7 +149,6 @@ class Stack:
             "litellm-redis": "docker.io/library/redis:7-alpine",
             "litellm": "ghcr.io/berriai/litellm-database:main-stable",
             "neo4j": "docker.io/library/neo4j:5.26.2",
-            "graphiti": "localhost/cc-graphiti:1.0.2-anthropic",
             "crawler": "localhost/cc-crawler:1",
         }
         self.containers = {svc: OLD for svc in self.refs}
@@ -301,7 +303,7 @@ def test_every_stateful_service_keeps_its_data_on_a_named_volume(stack: Stack):
         assert mounts and mounts[0].split(":", 1)[0] in named, f"{svc}: {path} is not on a named volume"
         assert stack.call("stack_data_on_volume", svc).returncode == 0, svc
     # A stateless service is always safe to recreate.
-    assert stack.call("stack_data_on_volume", "graphiti").returncode == 0
+    assert stack.call("stack_data_on_volume", "crawler").returncode == 0
 
 
 def _expand(stack: Stack, ref: str, **extra: str):
@@ -319,11 +321,11 @@ def test_compose_expand_follows_compose_interpolation(stack: Stack):
     stack.write_env()
     r = _expand(stack, "${CC_IMG_POSTGRES:-docker.io/library/postgres:16}")
     assert r.stdout == "mirror.example.com/library/postgres:16.9"
-    r = _expand(stack, "localhost/cc-graphiti:${CC_GRAPHITI_TAG:-1.0.2-anthropic}")
-    assert r.stdout == "localhost/cc-graphiti:1.0.2-anthropic"
-    r = _expand(stack, "localhost/cc-graphiti:${CC_GRAPHITI_TAG:-1.0.2-anthropic}",
-                CC_GRAPHITI_TAG="9.9-test")
-    assert r.stdout == "localhost/cc-graphiti:9.9-test", "the shell's value wins, as in a phase"
+    r = _expand(stack, "localhost/cc-local:${CC_LOCAL_TAG:-1.0.2-test}")
+    assert r.stdout == "localhost/cc-local:1.0.2-test"
+    r = _expand(stack, "localhost/cc-local:${CC_LOCAL_TAG:-1.0.2-test}",
+                CC_LOCAL_TAG="9.9-test")
+    assert r.stdout == "localhost/cc-local:9.9-test", "the shell's value wins, as in a phase"
 
 
 # ── the question ────────────────────────────────────────────────────────────
@@ -343,9 +345,9 @@ def test_everything_current_is_no_drift_in_two_podman_calls(stack: Stack):
 
 @drives_installer
 def test_a_rebuilt_local_image_behind_its_fixed_tag_is_drift(stack: Stack):
-    stack.rebuild("localhost/cc-graphiti:1.0.2-anthropic")
+    stack.rebuild("localhost/cc-crawler:1")
     rc, kinds = stack.drift()
-    assert rc == 1 and kinds == {"graphiti": "differs"}, kinds
+    assert rc == 1 and kinds == {"crawler": "differs"}, kinds
 
 
 @drives_installer
@@ -414,9 +416,9 @@ def test_the_up_litellm_probe_reads_false_on_a_stale_trio_member(stack: Stack):
 @drives_installer
 def test_the_up_stack_probe_reads_false_on_any_stale_container(stack: Stack):
     """The whole p_up_stack: the proxy (stub curl), two listeners, and now the
-    images. A stale graphiti behind healthy ports used to read done."""
+    images. A stale local image behind healthy ports used to read done."""
     socks = []
-    for key in ("CC_PG_PORT", "CC_GRAPHITI_PORT"):
+    for key in ("CC_PG_PORT", "CC_NEO4J_BOLT_PORT"):
         s = socket.socket()
         s.bind(("127.0.0.1", 0))
         s.listen()
@@ -425,6 +427,11 @@ def test_the_up_stack_probe_reads_false_on_any_stale_container(stack: Stack):
     stack.write_env()
     try:
         assert stack.call("p_up_stack").returncode == 0
+        # The retired Graphiti server's container outliving its service is
+        # not done either (phases/stack.sh removes it by name).
+        write_lf(stack.stub / "graphiti-exists", "")
+        assert stack.call("p_up_stack").returncode != 0
+        (stack.stub / "graphiti-exists").unlink()
         stack.rebuild("localhost/cc-crawler:1")
         assert stack.call("p_up_stack").returncode != 0
     finally:
@@ -457,22 +464,22 @@ def test_nothing_stale_recreates_nothing(stack: Stack):
 
 @drives_installer
 def test_a_stale_local_image_is_recreated_by_name_and_said_so(stack: Stack):
-    stack.rebuild("localhost/cc-graphiti:1.0.2-anthropic")
+    stack.rebuild("localhost/cc-crawler:1")
 
     r = stack.call("catch_up_images", "up-stack")
 
     assert r.returncode == 0, r.stdout + r.stderr
-    assert stack.recreates() == [["graphiti"]], stack.log()
+    assert stack.recreates() == [["crawler"]], stack.log()
     up = next(l for l in stack.log().splitlines() if "--force-recreate" in l)
     # compose's own force-recreate, scoped to the one service, with the
     # enabled profiles, waiting on the healthchecks as `up --wait` does.
     assert "--env-file" in up and "--profile crawler" in up
-    assert "up -d --force-recreate --no-deps --wait graphiti" in up
-    passes = _lines(r.stdout, "PASS up-stack: graphiti recreated")
+    assert "up -d --force-recreate --no-deps --wait crawler" in up
+    passes = _lines(r.stdout, "PASS up-stack: crawler recreated")
     assert len(passes) == 1, r.stdout
     assert OLD[:12] in passes[0] and NEW[:12] in passes[0]
-    assert "localhost/cc-graphiti:1.0.2-anthropic now resolves to" in passes[0]
-    assert stack.container_ids()["graphiti"] == NEW
+    assert "localhost/cc-crawler:1 now resolves to" in passes[0]
+    assert stack.container_ids()["crawler"] == NEW
     assert stack.drift() == (0, {})
 
 
@@ -534,17 +541,17 @@ def test_absent_and_unfetched_are_fails_that_name_the_move(stack: Stack):
 
 @drives_installer
 def test_a_failed_or_ineffective_recreate_is_a_fail_never_a_pass(stack: Stack):
-    stack.rebuild("localhost/cc-graphiti:1.0.2-anthropic")
+    stack.rebuild("localhost/cc-crawler:1")
     write_lf(stack.stub / "fail-recreate", "")
     r = stack.call("catch_up_images", "up-stack")
-    assert r.returncode == 1 and _lines(r.stdout, "FAIL up-stack: could not recreate graphiti"), r.stdout
-    assert not _lines(r.stdout, "PASS up-stack: graphiti")
+    assert r.returncode == 1 and _lines(r.stdout, "FAIL up-stack: could not recreate crawler"), r.stdout
+    assert not _lines(r.stdout, "PASS up-stack: crawler")
 
     (stack.stub / "fail-recreate").unlink()
-    (stack.stub / "recreate" / "graphiti").unlink()       # "succeeds", changes nothing
+    (stack.stub / "recreate" / "crawler").unlink()        # "succeeds", changes nothing
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 1
-    assert _lines(r.stdout, "FAIL up-stack: graphiti was recreated and still does not run"), r.stdout
+    assert _lines(r.stdout, "FAIL up-stack: crawler was recreated and still does not run"), r.stdout
 
 
 @drives_installer

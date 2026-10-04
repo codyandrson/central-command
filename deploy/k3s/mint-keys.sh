@@ -3,33 +3,47 @@
 # Mint the LiteLLM virtual keys against the RUNNING proxy and write them
 # back where each one is read from.
 #
-#   Three go into deploy/pi/.env (replacing init-env.sh's PENDING placeholders):
-#     GRAPHITI_LLM_API_KEY  -> ["graphiti-llm"]                    extraction
-#     EMBEDDER_API_KEY      -> ["cc-embedding"]            embeddings (role alias)
-#     RERANKER_API_KEY      -> ["cc-default","cc-rerank"]  cross-encoder (role alias)
 #   One goes into the REPO-ROOT .env, which is the app's own env:
-#     CC_LLM_API_KEY        -> ["cc-default","cc-tts","cc-stt"]  alias cc-spine
+#     CC_LLM_API_KEY  -> alias cc-spine, models SPINE_MODELS below
 #   One goes into web/.env (when it exists), the cockpit's Node server:
-#     OPENAI_API_KEY        -> ["cc-tts","cc-stt"]   alias cc-cockpit
+#     OPENAI_API_KEY  -> ["cc-tts","cc-stt"]   alias cc-cockpit
 #
-#   Each is scoped to its own model group so a leak in one cannot spend through
-#   another. `tags` is deliberately absent from every body — a tags field 403s
-#   on non-Enterprise LiteLLM.
+#   The app's key reaches every alias the app calls ITSELF: cc-default (the
+#   agents), cc-tts/cc-stt (api/speech.py forwards the cockpit's voice traffic
+#   with it), and — since graphiti-core runs inside the app (design record
+#   2026-10-04, D2) — graphiti-llm (extraction), cc-embedding (the graph's
+#   embedder) and cc-rerank (graph search's cross-encoder, CC_GRAPH_RERANK_ALIAS).
+#   The three Graphiti-only keys this script used to mint (GRAPHITI_LLM_API_KEY,
+#   EMBEDDER_API_KEY, RERANKER_API_KEY) left with the Graphiti server; nothing
+#   reads them, and they are revoked in the LiteLLM UI by hand once the
+#   previous release is no longer a rollback target.
 #
-#   This closes the chicken-and-egg: the proxy must exist before a virtual key
-#   can, and the proxy's Secret must exist before the proxy can. init-env.sh
-#   writes PENDING, make-secrets.sh accepts it, the trio comes up, this runs.
+#   Each key is scoped to its own model group so a leak in one cannot spend
+#   through another. `tags` is deliberately absent from every body — a tags
+#   field 403s on non-Enterprise LiteLLM.
 #
 #   IDEMPOTENT: a value that is already set and is not PENDING is KEPT. Set
 #   FORCE=1 to mint a replacement anyway (the old key is NOT deleted — revoke it
 #   in the LiteLLM UI if you mean to).
 #
-#   Then it re-runs make-secrets.sh and restarts cc-graphiti, because the keys
-#   reach the pod through a Secret and a Secret change is not a pod restart.
-#   On a clean install cc-graphiti does not exist yet (§4 applies it after this
-#   runs in §1) — that case is a note, not an error.
+#   SCOPE, for a key that is kept: the app key's model list is READ and, when it
+#   is a non-empty list missing an alias in SPINE_MODELS, the missing ones are
+#   ADDED through /key/update — a union, so a model an operator added is never
+#   removed, and the key's VALUE never changes (nothing restarts). An EMPTY list
+#   is LiteLLM's "every model" and is left alone. This is how an EXISTING
+#   install gets the graph aliases: cc-update.sh runs `--scope-only` on every
+#   update, and the llm phase of setup.sh runs this script whole. Same rule as
+#   the single-node profile's mint_spine_key.
 #
-#   Usage:  ./deploy/k3s/mint-keys.sh        [FORCE=1]
+#   Then it re-runs make-secrets.sh: cc-crawler-llm carries CC_LLM_API_KEY, and
+#   on a clean install that Secret can only be made once this key exists.
+#
+#   Usage:  ./deploy/k3s/mint-keys.sh                 [FORCE=1]
+#           ./deploy/k3s/mint-keys.sh --scope-only    only the scope check above:
+#                                                     no minting, no Secrets,
+#                                                     no kubectl. Exit 1 when the
+#                                                     scope could not be read or
+#                                                     widened.
 # ============================================================================
 set -euo pipefail
 
@@ -38,8 +52,16 @@ PI_ENV="$REPO_ROOT/deploy/pi/.env"
 ROOT_ENV="$REPO_ROOT/.env"
 WEB_ENV="$REPO_ROOT/web/.env"
 BASE_URL="${CC_LITELLM_URL:-http://127.0.0.1:4000}"
-KUBECTL=(sudo k3s kubectl)
-NS=central-command
+
+# The ONE list of what the app's own key must reach on this profile.
+SPINE_MODELS='["cc-default","cc-tts","cc-stt","graphiti-llm","cc-embedding","cc-rerank"]'
+
+SCOPE_ONLY=0
+case "${1:-}" in
+  --scope-only) SCOPE_ONLY=1 ;;
+  "") ;;
+  *) echo "usage: $0 [--scope-only]" >&2; exit 1 ;;
+esac
 
 [[ -f "$PI_ENV" ]] || { echo "FATAL: $PI_ENV not found — run ./deploy/k3s/init-env.sh first" >&2; exit 1; }
 [[ -f "$ROOT_ENV" ]] || { echo "FATAL: $ROOT_ENV not found — cp .env.example .env first" >&2; exit 1; }
@@ -47,7 +69,7 @@ NS=central-command
 MASTER="$(sed -n 's/^LITELLM_MASTER_KEY=//p' "$PI_ENV" | head -1)"
 [[ -n "$MASTER" ]] || { echo "FATAL: LITELLM_MASTER_KEY empty in $PI_ENV" >&2; exit 1; }
 
-curl -fsS "$BASE_URL/health/liveliness" >/dev/null \
+curl -fsS -m 10 "$BASE_URL/health/liveliness" >/dev/null \
   || { echo "FATAL: no LiteLLM proxy at $BASE_URL — bring the trio up first." >&2; exit 1; }
 
 current() {  # current <file> <name>
@@ -63,6 +85,21 @@ set_var() {  # set_var <file> <name> <value>
   else
     printf '%s=%s\n' "$name" "$val" >>"$f"
   fi
+}
+
+# One proxy call under the master key. The key — and a body that carries
+# another key — travel in a curl config on STDIN, never in an argv (`ps`).
+proxy() {  # proxy <path> [json-body] -> response body; non-zero on HTTP error
+  local path="$1" body="${2:-}"
+  body="${body//\\/\\\\}"; body="${body//\"/\\\"}"
+  {
+    printf 'url = "%s/%s"\n' "$BASE_URL" "$path"
+    printf 'header = "Authorization: Bearer %s"\n' "$MASTER"
+    if [[ -n "$body" ]]; then
+      printf 'header = "Content-Type: application/json"\n'
+      printf 'data = "%s"\n' "$body"
+    fi
+  } | curl -sS -f -m 30 -K - 2>/dev/null
 }
 
 generate() {  # generate <alias> <json-array-of-models> -> raw response body; non-zero on HTTP error
@@ -116,17 +153,68 @@ ensure_key() {  # ensure_key <file> <var> <alias> <models-json>
   echo "  minted  $var -> alias $alias, models $models"
 }
 
+# ensure_scope <file> <var> <models-json> — widen a HELD key to cover <models>.
+# Returns 1 only when the scope could not be read or the update was refused.
+ensure_scope() {
+  local f="$1" var="$2" want="$3" cur info plan state missing union
+  cur="$(current "$f" "$var")"
+  if [[ -z "$cur" || "$cur" == PENDING ]]; then
+    echo "  scope   $var not minted yet — nothing to widen (the llm phase of ./deploy/k3s/setup.sh mints it)"
+    return 0
+  fi
+  info="$(proxy "key/info?key=$cur")" || {
+    echo "  WARN    could not read $var's scope from $BASE_URL/key/info under the master key" >&2
+    return 1
+  }
+  # One python pass, the JSON on STDIN and only alias NAMES in the argv:
+  #   line 1  empty | covered | missing   (anything else = could not read it)
+  #   line 2  the missing aliases, space-separated
+  #   line 3  the UNION as a JSON array, current order first
+  plan="$(python3 -c '
+import json, sys
+try:
+    m = (json.load(sys.stdin).get("info") or {})["models"]
+    assert isinstance(m, list)
+except Exception:
+    sys.exit(0)
+want = json.loads(sys.argv[1])
+gone = [a for a in want if a not in m]
+print("empty" if not m else ("missing" if gone else "covered"))
+print(" ".join(gone))
+print(json.dumps(m + gone))
+' "$want" <<<"$info" 2>/dev/null)" || plan=""
+  state="$(sed -n 1p <<<"$plan")"
+  missing="$(sed -n 2p <<<"$plan")"
+  union="$(sed -n 3p <<<"$plan")"
+  case "$state" in
+    empty)
+      echo "  scope   $var's model list is EMPTY, which LiteLLM reads as every model — left alone" ;;
+    covered)
+      echo "  scope   $var already reaches $want" ;;
+    missing)
+      if proxy "key/update" "{\"key\": \"$cur\", \"models\": $union}" >/dev/null; then
+        echo "  widened $var: ADDED $missing (every model it had is kept; the key's value is unchanged)"
+      else
+        echo "  WARN    $var lacks $missing and /key/update was refused — add them to the key in the LiteLLM UI" >&2
+        return 1
+      fi ;;
+    *)
+      echo "  WARN    could not parse $var's scope from /key/info" >&2
+      return 1 ;;
+  esac
+}
+
+if (( SCOPE_ONLY )); then
+  echo "checking the app key's scope against $BASE_URL:"
+  ensure_scope "$ROOT_ENV" CC_LLM_API_KEY "$SPINE_MODELS"
+  exit $?
+fi
+
 echo "minting virtual keys against $BASE_URL:"
-ensure_key "$PI_ENV"   GRAPHITI_LLM_API_KEY graphiti-llm        '["graphiti-llm"]'
-ensure_key "$PI_ENV"   EMBEDDER_API_KEY     graphiti-embeddings '["cc-embedding"]'
-# cc-default is in scope alongside the reranker because Graphiti falls back to
-# the logprob-classifier prompts on cc-default when GRAPHITI_RERANK_MODEL is
-# unset or the rerank route fails (40-graph.yaml).
-ensure_key "$PI_ENV"   RERANKER_API_KEY     graphiti-reranker   '["cc-default","cc-rerank"]'
 # The spine's key is a VIRTUAL key, never the master key (config.py's contract).
-# cc-tts/cc-stt are in the spine's scope because api/speech.py forwards the
-# cockpit's voice traffic with THIS key when the API serves the cockpit itself.
-ensure_key "$ROOT_ENV" CC_LLM_API_KEY       cc-spine            '["cc-default","cc-tts","cc-stt"]'
+ensure_key   "$ROOT_ENV" CC_LLM_API_KEY cc-spine "$SPINE_MODELS"
+ensure_scope "$ROOT_ENV" CC_LLM_API_KEY "$SPINE_MODELS" \
+  || echo "  (the scope was not widened — graph calls 403 until the key reaches $SPINE_MODELS)" >&2
 # The cockpit's Node server (cc-nerve) speaks to the proxy on its own key,
 # scoped to the two speech aliases only. web/.env may not exist yet at this
 # script's clean-install position (setup's app phase writes it) — then the
@@ -136,23 +224,10 @@ if [[ -f "$WEB_ENV" ]]; then
 fi
 
 echo
-echo "re-applying secrets (the keys reach the pods through a Secret):"
+echo "re-applying secrets (cc-crawler-llm carries CC_LLM_API_KEY):"
 "$REPO_ROOT/deploy/k3s/make-secrets.sh"
 
 echo
-# At this script's own documented clean-install position (README §1) the graph
-# manifests have NOT been applied yet — §4 does that — so a bare `rollout
-# restart` errors NotFound and `set -e` kills the script AFTER the keys are
-# written but BEFORE the instructions below print. Capture-then-test, never
-# `| grep -q`, which inverts under pipefail when kubectl takes SIGPIPE.
-if "${KUBECTL[@]}" -n "$NS" get deploy/cc-graphiti >/dev/null 2>&1; then
-  echo "restarting cc-graphiti (a Secret change is not a pod restart):"
-  "${KUBECTL[@]}" -n "$NS" rollout restart deploy/cc-graphiti
-  "${KUBECTL[@]}" -n "$NS" rollout status deploy/cc-graphiti --timeout=180s
-else
-  echo "cc-graphiti not deployed yet — it will read the fresh Secret when §4 first creates it."
-fi
-
-echo
-echo "Done. cc-uvicorn also reads CC_LLM_API_KEY — restart it if it is running:"
+echo "Done. cc-uvicorn reads CC_LLM_API_KEY — restart it if a key was MINTED"
+echo "(a widened scope needs no restart):"
 echo "  sudo systemctl restart cc-uvicorn"

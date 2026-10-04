@@ -19,7 +19,7 @@
 #     kubectl label node chromebox   cc-role/compute=true
 #     * Stateless compute FLOATS, preferring the compute node, falling back
 #       to the anchor automatically (preferred nodeAffinity + fast NoExecute
-#       tolerations).  -> cc-litellm, graphiti
+#       tolerations).  -> cc-litellm
 #     * Stateful services are PINNED, because local-path stamps a REQUIRED
 #       kubernetes.io/hostname nodeAffinity onto every PV it provisions: a pod
 #       holding that PVC can never move. Shared storage does not rescue them
@@ -45,10 +45,11 @@
 #       forwards to the service wherever its pods are — so localhost:4000
 #       works on the Pi whether LiteLLM is on the Pi or the chromebox. No
 #       NodePort range hacks.
-#     * cc-neo4j is ClusterIP ONLY. Verified 2026-07-31: the app has zero
-#       direct Neo4j references, reaching the graph solely through Graphiti's
-#       MCP endpoint. That is stricter than the compose stack, which bound
-#       7474/7687 on loopback.
+#     * cc-neo4j is ClusterIP ONLY. The host reaches it through one loopback
+#       relay, cc-graph-bolt.service (127.0.0.1:7687/7474 -> svc/neo4j), which
+#       is the bolt endpoint the app's in-process graphiti-core and its graph
+#       reader/writer use. That is stricter than the compose stack, which
+#       bound 7474/7687 on loopback itself.
 #
 #   Secrets are NOT in this directory. make-secrets.sh reads deploy/pi/.env
 #   (gitignored) and creates them imperatively — see the script.

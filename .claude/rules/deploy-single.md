@@ -91,7 +91,7 @@ when a matching file is read.
   operator's. A pin is checked against the registry (HEAD by tag or digest,
   parsed from the PINNED ref so a re-namespaced PATH works), WARNed, recorded
   as `pinned`, and never rewritten; a pin that does not exist is a FAIL naming
-  the key. The three `*-base` rows reach the builds through the same keys, and
+  the key. The `*-base` rows reach the builds through the same keys, and
   each Dockerfile's `ARG CC_IMG_*` default must equal its `images.txt` row.
 - **A provider that ANSWERS can still be too old — podman-compose 1.6.0 is a
   FLOOR** (v2.47.0). The work site ran 1.5.0 and `check` said PASS, because
@@ -314,8 +314,12 @@ when a matching file is read.
   the missing ones through `/key/update` (an EMPTY list is LiteLLM's "all
   models" and is left alone), and a proxy that cannot be asked is a WARN.
   Both keys travel in a curl config on STDIN (`curl -K -`), never an argv.
-  Measured, and not what the record first guessed: the graph writer embeds
-  with the ADMIN key, so the narrow scope never broke embedding.
+  Since graphiti-core runs in the API (design record 2026-10-04, D2) the
+  scope is load-bearing for the graph: extraction (`graphiti-llm`), its
+  embedder (`cc-embedding`) and the reranker alias (`gpt-4.1-nano`) are all
+  called with THIS key — the curation writer still embeds with the admin key.
+  The k3s profile's equivalent is `mint-keys.sh` (`--scope-only` from its
+  updater); its list adds `cc-rerank`.
 - **The report redacts as it collects, from `redact.tsv`, and the scan
   stays** (v2.56.0, D11 — Replicated's redactors). `deploy/single/redact.tsv`
   declares `key` rows (globs over `.env` key NAMES whose VALUES become
@@ -409,8 +413,8 @@ when a matching file is read.
   it (the cockpit's `npm ci` then `npm run build` was one), and a `bash -c`
   pipe needs its own `set -o pipefail`.
 - **A locally built image carries the hash of what it was built from, and
-  "the tag exists" is not "done"** (v2.57.0). The three local tags are fixed
-  (`cc-sandbox:1`, `cc-crawler:1`, `cc-graphiti:<tag>`), `fetch_local`
+  "the tag exists" is not "done"** (v2.57.0). The local tags are fixed
+  (`cc-sandbox:1`, `cc-crawler:1`; the Graphiti server's until it left), `fetch_local`
   skipped the build whenever the tag existed, and so a release that changed
   a Dockerfile never rebuilt on update. Each build script computes
   `cc_build_inputs_hash` — the Dockerfile, every file of the build context,
@@ -602,6 +606,27 @@ when a matching file is read.
   acquisition that stopped, because the update flow had already stopped the
   API. It prints one note naming `./update.sh apply` and goes on. What is
   refused is a merge left half-way (`MERGE_HEAD`).
+- **graphiti-core's carried fixes are a ROW after `app/install`, and its
+  probe is the applier's `--check`** (design record 2026-10-04, D7). The graph
+  client runs inside the API, and `uv pip install` puts back a pristine
+  package on every install, so `app/graphiti-patches` (requires
+  `app/install`) runs `scripts/apply_graphiti_patches.py` with the venv's own
+  Python every time the app phase runs — a fresh install, an update's
+  post-merge `app`, a rollback's. No `patch` binary is assumed; the applier
+  writes temp-then-`os.replace` because uv HARDLINKS installed files from its
+  cache (an in-place write would patch the cache and every venv sharing it,
+  so `UV_LINK_MODE` needs no change); a hunk matching neither the pristine
+  nor the patched file FAILS (the version is pinned — that is a defect, not
+  drift). `verify/selfcheck`'s `graph-patches` line is the running system's
+  own check, and the ingest worker refuses extraction without them.
+- **`compose up` never removes a container whose SERVICE left
+  `compose.yaml`** — so a release that drops a service retires its container
+  BY NAME in the `stack` phase (`retire_graphiti_container`, the Graphiti
+  server's, 2026-10-04), and `p_up_stack` reads false while it exists. Never
+  `--remove-orphans`: whether podman-compose counts a disabled PROFILE's
+  containers as orphans is not something this profile may assume, and
+  `restart: always` would otherwise bring the dead service back at every
+  reboot, holding its port. Its image is left in storage for a rollback.
 - **`boot` starts the sandbox runner BEFORE the API** (v2.58.2). The API runs
   its self-check once at start; with the runner started after it, the cached
   result showed the runner's link failing until someone pressed Run. The

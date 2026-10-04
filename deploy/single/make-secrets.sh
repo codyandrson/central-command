@@ -91,13 +91,11 @@ ensure CC_CALENDAR_FACADE_TOKEN
 # the API read this one value from the one file.
 ensure CC_SANDBOX_RUNNER_TOKEN
 
-# Graphiti's three credentials SHOULD be LiteLLM virtual keys scoped to one
-# model group each. Until the installer mints them they fall back to the
-# master key — coarser, but a working install beats a broken one. The fallback
-# is NOT generated here: compose.yaml expresses it as
-# ${GRAPHITI_LLM_API_KEY:-${CC_LLM_PROXY_ADMIN_KEY}}, so filling the variable in
-# .env later takes effect without regenerating anything. Same for the n8n
-# database's user/name defaults.
+# No graph credentials here: the Graphiti server and its three keys left the
+# profile (design record 2026-10-04, D10) — graphiti-core runs inside the API
+# on the app's own scoped key, CC_LLM_API_KEY, which the app phase mints
+# (app/mint-key) from cc_required_aliases. The n8n database's user/name
+# defaults are compose.yaml's, not generated here either.
 
 echo
 # chmod is a silent no-op on NTFS (2026-08-21 Windows validation, W8) — verify

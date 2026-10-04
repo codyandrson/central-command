@@ -83,7 +83,9 @@ echo "podman $*" >> "$STUB/log"
 ''' + CRED_ANSWER + r'''
 ctr="$STUB/ctr"
 case "$1" in
-  container) exit 0 ;;
+  # The stack phase asks whether the RETIRED Graphiti server's container is
+  # still there (phases/stack.sh, retire_graphiti_container): it is not.
+  container) [[ "${3:-}" == *graphiti ]] && exit 1; exit 0 ;;
   cp)        dst="${3#*:}"; mkdir -p "$ctr$(dirname "$dst")"; cp "$2" "$ctr$dst"; exit 0 ;;
   restart)   echo restart >> "$STUB/restarts"; exit 0 ;;
   exec)      shift; [[ "$1" == -i ]] && shift
@@ -185,12 +187,18 @@ def test_the_probe_and_the_script_agree_on_the_optional_calendar_pair():
 # ── the row, run ────────────────────────────────────────────────────────────
 
 
+def _n8n_container_asks(log: str) -> list[str]:
+    """`container exists` calls the n8n script made — the stack phase's own
+    question about the retired Graphiti container is not the script running."""
+    return [l for l in log.splitlines() if "container exists" in l and "graphiti" not in l]
+
+
 @drives_installer
 def test_n8n_off_is_done_and_the_script_never_runs(tree: Path):
     r, log, stub = _stack(tree, n8n="0")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "PASS n8n-workflows: CC_ENABLE_N8N is not 1" in r.stdout
-    assert "container exists" not in log and _count(stub, "imports") == 0, log
+    assert not _n8n_container_asks(log) and _count(stub, "imports") == 0, log
     assert not (_state_dir(tree) / "n8n-workflows.log").exists()
     assert _ledger(tree)["stack/n8n-workflows"][1] == "done"
 
@@ -201,7 +209,7 @@ def test_the_credential_gate_stops_the_phase_before_the_script(tree: Path):
     assert r.returncode == 3, r.stdout + r.stderr
     assert _lines(r.stdout, "USERACTION n8n-credential:"), r.stdout
     assert not _lines(r.stdout, "PASS n8n-workflows:"), r.stdout
-    assert _count(stub, "imports") == 0 and "container exists" not in log, log
+    assert _count(stub, "imports") == 0 and not _n8n_container_asks(log), log
 
 
 @drives_installer

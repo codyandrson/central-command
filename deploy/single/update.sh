@@ -249,6 +249,10 @@ update_unfinished() {
   (( ${#LEDGER_ROWS[@]} )) || return 0
   ver="$(tree_version)"
   for key in "${!LEDGER_ROWS[@]}"; do
+    # A row the manifest no longer declares (a retired step — fetch/image-graphiti
+    # left with the Graphiti server, 2026-10-04) keeps the version it was last
+    # recorded at forever; it says nothing about whether THIS tree moved.
+    [[ -n "${STEPS_ROW[$key]+x}" ]] || continue
     IFS=$'\t' read -r _a st rver _b <<<"${LEDGER_ROWS[$key]}"
     [[ "$rver" == "$ver" ]] || { moved=1; break; }
   done
@@ -596,7 +600,7 @@ cmd_plan() {
   # Anything the fetch phase acquires: apply runs the NEW release's fetch from
   # a staged worktree BEFORE the merge (D5), so a mirror that cannot serve the
   # new pins stops the update with the live tree untouched.
-  grep -qE '^(deploy/single/images\.txt|deploy/pi/graphiti/|deploy/k3s/sandbox\.Dockerfile|central_command/crawler/Dockerfile|requirements\.lock|web/package(-lock)?\.json)' <<<"$names" \
+  grep -qE '^(deploy/single/images\.txt|deploy/k3s/sandbox\.Dockerfile|central_command/crawler/Dockerfile|requirements\.lock|web/package(-lock)?\.json)' <<<"$names" \
     && pass "flag-fetch" "dependency inputs changed — apply acquires them (images, local builds, python, cockpit) from a staged copy of upstream BEFORE the merge, and stops with nothing changed if one cannot be had" \
     || pass "flag-fetch" "no dependency input change — apply still proves the acquisition from a staged copy before the merge (fast-forwards over what is present)"
 
@@ -643,7 +647,7 @@ apply_schema() {
 # deployment's .env and state dir, nests under this run's lock, writes no ledger
 # row, and resolves image refs into COPIES of the CC_IMG_* answers and the
 # manifest (setup.sh's fetch_images says why the real ones must not move yet).
-# The same goes for the image store: the three LOCAL images have fixed tags the
+# The same goes for the image store: the LOCAL images have fixed tags the
 # running deployment uses, so the staged run builds them under an ASIDE tag
 # (env-lib.sh's cc_staged_image_ref, `<live-ref>-staged`) — a stop before the
 # merge leaves every live tag on the image the old containers and the old
@@ -662,8 +666,8 @@ apply_schema() {
 STAGE_PATHS=(
   deploy             # setup.sh and its libraries/manifests (env-lib, ledger-lib,
                      # questions, machine-lib, steps.tsv, images.txt), the
-                     # resolver, the build scripts and two build contexts:
-                     # deploy/pi/graphiti/ and deploy/k3s/sandbox.Dockerfile
+                     # resolver, the build scripts and the sandbox's build
+                     # context, deploy/k3s/sandbox.Dockerfile
   central_command    # what `uv pip install --dry-run -e .` builds metadata from
                      # (hatchling: packages = ["central_command"]), and
                      # central_command/crawler/, the crawler image's context
@@ -823,6 +827,9 @@ deploy_current_tree() {
   # be a separate step here, after app, which a fresh install never ran. Its
   # @deploy/n8n tree input re-runs it when a release changes a workflow.
   deploy_phase stack "the stack phase stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
+  # app re-installs the Python graph and then runs its app/graphiti-patches
+  # row (design record 2026-10-04, D7): the carried graphiti-core fixes go
+  # back onto every fresh install of the package, an update's included.
   deploy_phase app "the app phase stopped for your action — the USERACTION line above says what; then re-run ${RERUN}" || return 1
   # verify includes the application's own self-check (verify/selfcheck) since
   # v2.56.0 — the update is proven as the app, not only as a deployment.
