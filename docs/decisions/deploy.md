@@ -58,7 +58,8 @@ the entry format and how to add one.
 - **Rule:** [.claude/rules/deploy-k3s.md](../../.claude/rules/deploy-k3s.md) — "**The file-built configmaps are refreshed by the updater, per file.**"
 - **Why:** Not recorded beyond the stated mechanism: `kubectl apply -f
   deploy/k3s/` never touches file-built configmaps
-  (`cc-graphiti-config`/`cc-litellm-config`/`cc-schema-sql`); `cc-update.sh`
+  (`cc-litellm-config`/`cc-schema-sql`; `cc-graphiti-config` was one until the
+  Graphiti server left); `cc-update.sh`
   re-applies only the ones a release changed — a new file-built configmap
   must be added to that list or it silently never deploys.
 - **Enforced:** script: `deploy/k3s/make-secrets.sh` / `deploy/k3s/cc-update.sh` file-map (script-level, no pytest)

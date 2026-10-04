@@ -122,6 +122,40 @@ async def _events(ref_id: str) -> list[str]:
     return [e["kind"] for e in await repo.list_events(ref_id=ref_id)]
 
 
+# --- the Systems page's view of the queue -----------------------------------------
+
+
+async def test_the_queue_summary_counts_open_work_and_names_the_retry_reason(fake):
+    g = _group()
+    before = await repo.ingest_queue_summary()
+    a = await _enqueue("sum-a", g)
+    b = await _enqueue("sum-b", _group())
+    c = await _enqueue("sum-c", _group())
+    quiet = await repo.ingest_queue_summary()
+    assert quiet["QUEUED"] == before["QUEUED"] + 3
+    # Never attempted: no retry reason to show.
+    assert quiet["retry_error"] is None
+
+    # b: attempted, re-queued with a reason (a transient failure). c: failed.
+    conn = await repo._conn()
+    try:
+        await conn.execute(
+            "update graph_ingest_job set status = 'QUEUED', attempts = 4, started_at = now(), "
+            "last_error = $2 where id = $1", b["job"]["id"], "Error code: 403 - key not allowed",
+        )
+        await conn.execute(
+            "update graph_ingest_job set status = 'FAILED', attempts = 1, last_error = 'boom' "
+            "where id = $1", c["job"]["id"],
+        )
+    finally:
+        await conn.close()
+    after = await repo.ingest_queue_summary()
+    assert after["QUEUED"] == before["QUEUED"] + 2 and after["FAILED"] == before["FAILED"] + 1
+    assert after["RUNNING"] == before["RUNNING"]
+    assert after["retry_error"] == "Error code: 403 - key not allowed"
+    assert a["job"]["id"]  # (a stays QUEUED, attempts 0: not a retry)
+
+
 # --- the Executor's side: one transaction ---------------------------------------
 
 

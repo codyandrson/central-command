@@ -171,6 +171,9 @@ def _entries() -> list[dict]:
             "kind": "api",
             "url": None,
             "health": _graphiti_status(),
+            # A short line under the card: the ingest queue's counts and, when
+            # a job is being retried, why (see _graph_queue_detail).
+            "detail_probe": _graph_queue_detail,
             "credential": {
                 "label": "the app's LiteLLM key (graph aliases)",
                 "location": "CC_LLM_API_KEY",
@@ -313,6 +316,31 @@ async def _graphiti_status() -> tuple[str, float | None]:
     return "down", None
 
 
+_DETAIL_ERROR_CLIP = 200
+
+
+async def _graph_queue_detail() -> str | None:
+    """The ingest queue in one line: `ingest queue: 2 queued, 1 running, 0
+    failed`, and — when a QUEUED job has already been attempted — the most
+    recent error it was re-queued with. A mis-scoped LiteLLM key answers 403,
+    which is classified transient and retried forever: a stuck queue otherwise
+    shows only on a job row. None when the table cannot be read (the line is
+    absent, the card is unchanged)."""
+    from central_command.db import repo
+
+    try:
+        q = await asyncio.wait_for(repo.ingest_queue_summary(), timeout=_TIMEOUT)
+    except Exception:
+        return None
+    line = f"ingest queue: {q['QUEUED']} queued, {q['RUNNING']} running, {q['FAILED']} failed"
+    error = (q.get("retry_error") or "").strip()
+    if error:
+        if len(error) > _DETAIL_ERROR_CLIP:
+            error = error[:_DETAIL_ERROR_CLIP].rstrip() + "…"
+        line += f" — retrying after: {error}"
+    return line
+
+
 @router.get("/systems")
 async def list_systems() -> dict:
     entries = _entries()
@@ -324,7 +352,12 @@ async def list_systems() -> dict:
     )
     out = []
     for entry, (status, latency_ms) in zip(entries, healths):
-        row = {k: v for k, v in entry.items() if k != "health"}
+        row = {k: v for k, v in entry.items() if k not in ("health", "detail_probe")}
+        probe = entry.get("detail_probe")
+        if probe is not None:
+            detail = await probe()
+            if detail:
+                row["detail"] = detail
         if entry["id"] == "cockpit":
             status, latency_ms = "up", None
         row["status"] = status

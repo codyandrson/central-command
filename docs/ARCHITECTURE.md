@@ -105,7 +105,7 @@ holds or uses external credentials.
 | `events/` | ② | no | The append-only event log: write to Postgres, then fan out; WARNING+ log records bridged into events | `events.emit` (the only publish path), `log.py`, `bridge.py` | [AGENTS.md](../AGENTS.md) |
 | `ingest/` | ② | no | The Work Ledger and everything that feeds it: live mail feed, backlog enrollment, the backpressure dispatcher, mail-body conversion, filesystem watcher, catalog enrollment, bulk dismissal, wiki freshness sweep | `dispatcher.process_claimed` (the one path every item takes), `ledger.enroll_*` / `hydrate_work_item`, `mailtext.py` (the one mail-body converter), `feed.poll_once` | [integrations](../.claude/rules/integrations.md), [`QUEUE.md`](QUEUE.md) |
 | `heartbeat/` | ② | no | The scheduler for recurring team work: tick loop, action registry, dependency-health probes | `engine.fire` (one firing path for tick and run-now), `actions.py` (`ActionSpec`, 12 kinds), `probes.py` | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `integrations/` | ④ | **yes** | Clients for external systems. **Native** clients: `jira.py`, `confluence.py`, `litellm.py`, `litellm_credstore.py`, `forge.py`, `neo4j_reader.py`, `neo4j_writer.py`. **Via MCP**: `graphiti.py`. **n8n façades** (n8n holds the mail/calendar OAuth): `email_facade.py`, `calendar_facade.py` (the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: `webfetch.py`, `crawler.py`, `sandbox_client.py`. `http.py` is the pluggable-trust httpx factory (CA bundle / mTLS) | per-client modules | [integrations](../.claude/rules/integrations.md), [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
+| `integrations/` | ④ | **yes** | Clients for external systems. **Native** clients: `jira.py`, `confluence.py`, `litellm.py`, `litellm_credstore.py`, `forge.py`, `neo4j_reader.py`, `neo4j_writer.py`. **graphiti-core, in-process** (no server): `graphiti.py` (reads — the one graph module `runtime/` may import), `graphiti_client.py` (the one place the library is built and imported), `graphiti_ingest.py` (the durable ingest queue's worker), `graph_ontology.py` (the ten entity types). **n8n façades** (n8n holds the mail/calendar OAuth): `email_facade.py`, `calendar_facade.py` (the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: `webfetch.py`, `crawler.py`, `sandbox_client.py`. `http.py` is the pluggable-trust httpx factory (CA bundle / mTLS) | per-client modules | [integrations](../.claude/rules/integrations.md), [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
 | `reports/` | ② | no | Deterministic, judgment-free reads composed from the spine: the EA's snapshot, the operator's calendar day, the EA's open follow-ups | called only from `runtime/tools.py` and `heartbeat/actions.py` | — |
 | `sandbox/` | out-of-process | **none, by design** | A standalone FastAPI service (`runner.py`) giving agents a disposable workspace. Two backends behind one API: `kubectl` (a gVisor Job+Pod per session) or `podman` (a container per session). Never imported; reached only through `integrations/sandbox_client.py`. Its single exit is the gated `mcp.sync_source`, content captured at propose time | `runner.py` | [AGENTS.md](../AGENTS.md) |
 | `crawler/` | out-of-process | none | A standalone browser-rendering crawl service (`service.py`) for whole-site documentation import. Never imported; reached through `integrations/crawler.py`, whose only caller is `skills/site_import.py` | `service.py` | — |
@@ -262,9 +262,13 @@ authority. Sessions are never deleted, and one agent may hold several at once.
   proxy; `runtime/models.resolve_model()` is the one seam (and where
   `CC_DEMO_MODE` swaps in the deterministic model). See
   [models rules](../.claude/rules/models.md).
-- **Knowledge graph.** Agents read Graphiti over MCP and write only by gated
-  `graph.add_episode` proposals into scoped partitions; the cockpit's Graph
-  panel reads Neo4j directly over bolt. See [graph rules](../.claude/rules/graph.md).
+- **Knowledge graph.** graphiti-core runs inside the API process. Agents read
+  the graph in-process (searches and episode listings, over bolt) and write
+  only by gated `graph.add_episode` proposals into scoped partitions: approval
+  queues a durable `graph_ingest_job`, and the worker extracts it afterwards,
+  strictly in order per group. The cockpit's Graph panel reads Neo4j directly
+  over bolt. The rule `runtime/` lives under is that it holds no WRITE path —
+  not that it holds no bolt (DL-134). See [graph rules](../.claude/rules/graph.md).
 
 ## 5. The cockpit (`web/`)
 
@@ -311,9 +315,9 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 
 | Surface | What it is | Entry points | Read first |
 |---|---|---|---|
-| `deploy/single/` | Single-node profile on Compose (`compose.yaml`: postgres, litellm + its db and redis, graphiti, crawler, speech; n8n behind a profile). Deterministic driver: its phases and steps are declared once, in `steps.tsv` (run order), and recorded in a ledger (`<state>/ledger.tsv`) as each completes; the operator's procedure is the generated [`CHECKLIST.md`](../deploy/single/CHECKLIST.md); exit codes 0/1/2/3 (3 = stopped for the operator) | `setup.sh`, `update.sh` (`init` · `import` · `stage` · `plan` · `apply` · `rollback`), `resolve-images.sh` + `images.txt` (constraint / locked tag / locked digest) | [`deploy/single/README.md`](../deploy/single/README.md), [deploy-single rules](../.claude/rules/deploy-single.md) |
+| `deploy/single/` | Single-node profile on Compose (`compose.yaml`: postgres, litellm + its db and redis, neo4j, crawler, speech; n8n behind a profile). Deterministic driver: its phases and steps are declared once, in `steps.tsv` (run order), and recorded in a ledger (`<state>/ledger.tsv`) as each completes; the operator's procedure is the generated [`CHECKLIST.md`](../deploy/single/CHECKLIST.md); exit codes 0/1/2/3 (3 = stopped for the operator) | `setup.sh`, `update.sh` (`init` · `import` · `stage` · `plan` · `apply` · `rollback`), `resolve-images.sh` + `images.txt` (constraint / locked tag / locked digest) | [`deploy/single/README.md`](../deploy/single/README.md), [deploy-single rules](../.claude/rules/deploy-single.md) |
 | `deploy/k3s/` | Multi-node profile: numbered manifests (`00-namespace` … `90-speech`), placement split by state (stateful pinned, stateless floats), services exposed on loopback, the API / cockpit / sandbox-runner as systemd units outside the cluster. Same driver contract, six phases: validate · preflight · llm · stack · app · verify | `setup.sh`, `verify.sh`, `cc-update.sh`, `backup.sh`, `make-secrets.sh`, `mint-keys.sh`, `build-*-image.sh` | [`deploy/k3s/README.md`](../deploy/k3s/README.md), [deploy-k3s rules](../.claude/rules/deploy-k3s.md) |
-| `deploy/pi/` | **Part live, part retired — never delete it as a whole.** Live: the `.env` the k3s scripts source (it holds the two encryption keys that must never change), the LiteLLM config and routing policy (`litellm/`), the Graphiti image build context (`graphiti/`), and the cockpit's systemd unit. Retired: the pre-k3s Compose stack and its units and scripts. `gateway/executor.py` and `runtime/tools.py` also name the `litellm/` files by path | — | [`deploy/pi/README.md`](../deploy/pi/README.md) (the authoritative live/retired table) |
+| `deploy/pi/` | **Part live, part retired — never delete it as a whole.** Live: the `.env` the k3s scripts source (it holds the two encryption keys that must never change), the LiteLLM config and routing policy (`litellm/`), and the cockpit's systemd unit. (`graphiti/` is the retired Graphiti server's frozen build context, deleted by the next release.) Retired: the pre-k3s Compose stack and its units and scripts. `gateway/executor.py` and `runtime/tools.py` also name the `litellm/` files by path | — | [`deploy/pi/README.md`](../deploy/pi/README.md) (the authoritative live/retired table) |
 | `deploy/n8n/` | The mail and calendar façade workflows as code; applied by both updaters | `apply-workflows.sh` | [`deploy/n8n/README.md`](../deploy/n8n/README.md) |
 | `deploy/discover.sh`, `deploy/AIRGAP.md` | Environment discovery and the mirror / CA / proxy seams for restricted networks. Registry mirrors are per-upstream: `CC_REGISTRY_DOCKERIO`, `CC_REGISTRY_GHCR`, `CC_REGISTRY_MCR` | `discover.sh` | [`deploy/AIRGAP.md`](../deploy/AIRGAP.md) — **first**, for any mirrored or no-egress install |
 | `deploy/desktop-superseded/` | History only; nothing references it | — | — |
@@ -351,7 +355,7 @@ Code comments cite these; this is where they resolve.
 | M7 | The backpressure dispatcher | `ingest/dispatcher.py` |
 | M8 | The event log | `events/log.py` |
 | M9 | Run context (`deps`) and the thread-lock/fold gap closed | `runtime/deps.py` |
-| M10 | The knowledge-graph write path | `integrations/graphiti.py`, `tests/test_graph.py` |
+| M10 | The knowledge-graph write path | `integrations/graphiti_ingest.py` (originally `integrations/graphiti.py`), `tests/test_graph.py` |
 | M11 | Coaching without deploys: governed charter versions; skills as rows | `runtime/skills.py`, `db/schema.sql` |
 | M12 | The live email feed | `ingest/feed.py` |
 | M13 | Backlog sweep: refs-only enrollment, content at claim time | `ingest/ledger.py` |
@@ -398,7 +402,7 @@ integration tool's credential isolation*.
 | "D1"–"D5" in `deploy/single/` and deploy docs | Compose substrate / version pins / update pipeline / Helm / Zarf-not-adopted | [deploy-refactor spec](superpowers/specs/2026-09-03-deploy-refactor-design.md) |
 | "Decision 9" in `gateway/wiki_claims.py`, `ingest/wiki_freshness.py`, `schema.sql` | Wiki claims: the wiki forgets deterministically | [sources-catalog spec](superpowers/specs/2026-08-23-sources-catalog-design.md) |
 | "Decision 1–6", "Decision 1–5" | Local to the [expert-team-scaling](superpowers/specs/2026-08-22-expert-team-scaling-design.md) and [teaming doctrine](superpowers/specs/2026-07-29-teaming-consultation-doctrine-design.md) specs; not cited elsewhere | those specs |
-| "D9 / Story 2.1 / AR-9" in `deploy/pi/graphiti/` | A pre-public numbering for the Graphiti LLM-client choice — **not** founding D9 *(origin lost: no surviving document defines that Story/AR scheme)* | — |
+| "D9 / Story 2.1 / AR-9" in `deploy/pi/graphiti/` (frozen, deleted next release) | A pre-public numbering for the Graphiti LLM-client choice — **not** founding D9 *(origin lost: no surviving document defines that Story/AR scheme)* | — |
 | `D-sandbox`, `D-web-read`, `D-confluence`, `D-graph-inspect` | Named, unnumbered decisions; each resolves to the design record of the same topic | [`superpowers/README.md`](superpowers/README.md) |
 | "D1–D12" with 2026-09-19/20 dates | The 2026-09 consistency audit's operator decisions; the durable ones are in the [decision log](decisions/README.md) | — |
 

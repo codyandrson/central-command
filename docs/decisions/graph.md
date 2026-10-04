@@ -38,7 +38,7 @@ how to add one.
 - **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**The suite may not write to the live graph**"
 - **Why:** Not recorded beyond the stated invariant: one leftover scratch
   entity is enough to fail an unrelated live read test.
-- **Enforced:** test: `tests/conftest.py::no_live_graph_writes` (checks `os.getenv("CC_LIVE_GRAPH_TESTS") != "1"` before allowing `add_memory`), used across `tests/test_graph_curation.py`, `tests/test_graph_delta_live.py`
+- **Enforced:** test: `tests/conftest.py::no_live_graph_writes` (checks `os.getenv("CC_LIVE_GRAPH_TESTS") != "1"` before allowing a write method on a real `graphiti_client.get_graphiti()` object), used across `tests/test_graph_curation.py`, `tests/test_graph_delta_live.py`
 - **Source:** .claude/rules/graph.md
 
 ### DL-054 — An async bolt driver cached at module scope is loop-bound
@@ -77,8 +77,9 @@ how to add one.
 - **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**Graphiti will retire a fact it merely RECOGNISES, and the guard is not the model.**"
 - **Why:** Upstream's `resolve_extracted_edges` offers a whole-group semantic
   search as invalidation candidates (empty `SearchFilters()`); upstream
-  patch #1729 is carried under `deploy/pi/graphiti/patches/` (with #1666,
-  reasoning-first dedupe — drop both when they merge upstream).
+  patch #1729 is carried as a patch file under `deploy/graphiti-patches/`
+  (with #1666, reasoning-first dedupe — drop both when they merge upstream),
+  applied to the installed package (mechanism: DL-132).
 - **Enforced:** test: `tests/test_graph_verification.py` exercises related invalidation logic; not pinned to this exact upstream-patch invariant
 - **Source:** .claude/rules/graph.md; docs/superpowers/specs/2026-08-19-graph-verification-auditor-design.md (adjacent)
 

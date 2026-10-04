@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useGraphVerifications, type VerificationRow } from './useGraphVerifications';
+import { clip, mechanicalMessages } from './mechanical';
 
 function fmtTime(iso: string | null): string {
   if (!iso) return '';
@@ -42,18 +43,6 @@ function VerdictChip({ verdict }: { verdict: VerificationRow['verdict'] }) {
 function StatusChip({ status }: { status: VerificationRow['status'] }) {
   const tone = status === 'PROBLEM' ? 'danger' : status === 'VERIFIED' ? 'success' : 'primary';
   return <span className="cockpit-badge" data-tone={tone}>{status}</span>;
-}
-
-/** The mechanical-check messages, plainly worded — the spec's list, verbatim. */
-function mechanicalMessages(m: VerificationRow['mechanical']): string[] {
-  const out: string[] = [];
-  if (m.missing) out.push(m.resubmitted ? 'episode never landed, even after a re-submission' : 'episode never landed');
-  if (m.empty_delta) out.push('extraction produced nothing');
-  if (m.unembedded && m.unembedded.length > 0) {
-    out.push(`${m.unembedded.length} entities unembedded (invisible to semantic recall)`);
-  }
-  if (m.no_approved_text) out.push('no approved text on record');
-  return out;
 }
 
 /** NEW = created by this episode; EXISTING = a pre-existing node/edge the
@@ -210,7 +199,17 @@ function AwaitingCard({ row, confirm, problem }: {
       {flags.length > 0 && (
         <ul className="mb-2 space-y-0.5">
           {flags.map((f, i) => (
-            <li key={i} className="text-[0.733rem] text-destructive">{f}</li>
+            <li key={i} className="text-[0.733rem] text-destructive" title={f.detail}>
+              {f.text}
+              {f.detail && (
+                <span
+                  data-testid="mechanical-detail"
+                  className="block whitespace-pre-wrap cockpit-wrap text-[0.667rem] text-foreground/75"
+                >
+                  {clip(f.detail)}
+                </span>
+              )}
+            </li>
           ))}
         </ul>
       )}

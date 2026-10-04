@@ -226,7 +226,7 @@ not a different brain. (Claude Agent SDK was the live alternative.)
 **Modular monolith, 4 tiers:** ① React UI → ② FastAPI control plane (Gateway,
 Executor, Dispatcher, Event log, Projections) → ③ Agent Runtime (Pydantic AI + Claude:
 sessions, `propose_*` toolset, retrieval, context assembly) → ④ Stores (Postgres,
-Graphiti/Neo4j via MCP, n8n tool façade via MCP/webhook). **The trust boundary is a
+Graphiti/Neo4j **(corrected 2026-10-04: graphiti-core runs in the API process; the MCP server this line named is gone)**, n8n tool façade via MCP/webhook). **The trust boundary is a
 code boundary:** tier ③ only ever gets propose + read, never the Executor.
 
 **Storage:** Postgres = domain model + event log + work ledger (+ DBOS later);

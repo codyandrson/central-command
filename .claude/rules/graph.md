@@ -1,8 +1,10 @@
 ---
 paths:
   - "central_command/integrations/graphiti*"
+  - "central_command/integrations/graph_ontology.py"
   - "central_command/integrations/neo4j_*"
-  - "deploy/pi/graphiti/**"
+  - "deploy/graphiti-patches/**"
+  - "scripts/apply_graphiti_patches.py"
   - "deploy/k3s/*graph*"
   - "scripts/*graph*"
 ---
@@ -24,61 +26,77 @@ when a matching file is read.
   `cc-embedding` alias at exactly 1024 dimensions; a mis-sized vector is
   dropped rather than stored (nothing schema-side enforces the width). Neo4j
   5.x has no parameterized labels, hence the closed `ENTITY_TYPES` allowlist
-  mirroring `graphiti/config.yaml`.
-- **The suite may not write to the live graph** — over MCP
-  (`no_live_graph_writes`) or over bolt (`neo4j_writer._write` refuses). Opt
+  mirroring `integrations/graph_ontology.py` (a test pins the two equal).
+- **The bulk path's shape is canonical; a model's `save()` writes a different
+  one.** `add_episode` stores entities through `add_nodes_and_edges_bulk`: a
+  `labels` property, and facts with `source_node_uuid`/`target_node_uuid`.
+  `EntityNode.save()` / `EntityEdge.save()` store no `labels` property and
+  name the endpoints `source_uuid`/`target_uuid`. Every extracted fact in the
+  graph has the bulk shape, so moving curation onto `save()` would add a second
+  shape, not remove one. Hand-made writes stay our own Cypher
+  (`neo4j_writer`), which writes the bulk shape and has no upstream
+  equivalent to lean on for update, merge or move.
+- **The suite may not write to the live graph** — through the library
+  (`no_live_graph_writes` wraps the ONE builder,
+  `graphiti_client.get_graphiti()`, so a real client's write methods refuse)
+  or over bolt (`neo4j_writer._write` refuses). Opt
   in with `CC_LIVE_GRAPH_TESTS=1` when you mean it: one leftover scratch
   entity is enough to fail an unrelated live read test. And **an async bolt
   driver cached at module scope is loop-bound**; `neo4j_reader._get_driver`
   keys its cache on the running loop, and the writer shares that driver
-  because access mode is a property of the SESSION, never of the driver.
-- **Graphiti's LLM client is upstream's, and `graphiti-llm` is a PLAIN
-  `openai/<model>` alias.** MCP 1.1.0 picks graphiti_core's chat-completions
-  client for any non-OpenAI LLM URL; it sends `response_format: json_schema`,
-  LiteLLM forwards it, llama.cpp enforces it as a grammar, and the client
-  passes `llm.max_tokens` itself (verified 2026-09-21). From 2026-08-01 to
-  v2.39.0 the alias carried an `openai/chat_completions/` prefix to bridge
-  the Responses-API client we then pinned with a patch; on the chat client
-  that prefix sends `chat_completions/<model>` upstream and 404s. The setup
-  probes now assert the prefix is ABSENT. Do not reintroduce the pin or the
-  prefix; if a future graphiti_core release changes the client choice, change
-  the alias and the probe together.
+  because access mode is a property of the SESSION, never of the driver. The
+  Graphiti object `graphiti_client` builds is cached per loop for the same
+  reason.
+- **The LLM client is graphiti-core's `OpenAIGenericClient`, built by us, and
+  `graphiti-llm` is a PLAIN `openai/<model>` alias.** `graphiti_client` passes
+  every client in (a missing one makes `Graphiti.__init__` quietly build an
+  OpenAI client that wants an OpenAI key); the generic client sends
+  `response_format: json_schema` to `/v1/chat/completions`, LiteLLM forwards
+  it, llama.cpp enforces it as a grammar, and `max_tokens` is the constructor
+  argument (verified 2026-09-21). From 2026-08-01 to v2.39.0 the alias carried
+  an `openai/chat_completions/` prefix to bridge a Responses-API client we then
+  pinned with a patch; on the chat client that prefix sends
+  `chat_completions/<model>` upstream and 404s. The setup probes assert the
+  prefix is ABSENT. Do not reintroduce the prefix or a Responses client; if a
+  future graphiti-core release changes which client suits a non-OpenAI
+  backend, change the alias and the probe together.
 - **A REQUIRED string attribute on a Graphiti entity type is an unbounded
   one.** graphiti-core re-extracts a typed entity's attributes on EVERY
   episode with the prior value in the prompt, and its 250-char cap exempts
   required fields (`attribute_length_cap_skipped_required` — dropping one
-  would fail validation), so the value is rewritten longer each time. MCP
-  1.1.0 made this the default: it substitutes its own built-in model — each
-  with a required `description` — for any configured type whose NAME it
-  knows, silently discarding the description in `config.yaml`. On the hub
-  Person (502 edges) that reached 4378 chars and generations of 41-52k chars
-  into the output cap: ~700 GPU-minutes a week, discarded (2026-09-20).
-  `GRAPHITI_ENTITY_TYPE_FIELDS=none` (our `cc-entity-type-source.patch`)
-  keeps each built-in model's DOCSTRING and drops its fields, which skips the
-  per-entity attribute call. **The docstrings are the guidance**: the
-  extraction prompt's entity-types block is built from `__doc__` alone, and
-  the first cut of this fix (v2.38.4) swapped them for `config.yaml`'s
-  one-line descriptions — with thinking off, the local model then answered
-  `{"extracted_entities": []}` for short episodes (0/4 vs 4/4 with the
-  docstrings, logprobs 2026-09-21). config.yaml's descriptions reach the
-  prompt only for a name upstream has no model for. If you ever add a real
-  attribute, make it Optional or give it `Field(max_length=…)`. Two things
-  ride along: thinking is switched OFF on the `graphiti-llm` ALIAS
-  (`chat_template_kwargs: {"enable_thinking": false}` in its litellm_params —
-  graphiti-core sends reasoning controls only for gpt-5/o1/o3 names, and
-  llama.cpp does not enforce a json_schema grammar while the model thinks),
-  and a log line is the only place the symptom shows — read the Graphiti
-  pod's log before theorising about the model.
+  would fail validation), so the value is rewritten longer each time. The
+  stock MCP server made this the default (its built-in models each carry a
+  required `description`): on the hub Person (502 edges) that reached 4378
+  chars and generations of 41-52k chars into the output cap: ~700 GPU-minutes
+  a week, discarded (2026-09-20). `integrations/graph_ontology.py` is the
+  answer: ten FIELD-LESS models, in the declaration order of the ontology, whose
+  docstrings are the stock built-ins' verbatim. A model with no fields skips
+  the per-entity attribute call. **The docstrings are the guidance**: the
+  extraction prompt's entity-types block is built from `__doc__` alone, and the
+  first cut of the fix (v2.38.4) swapped them for one-line descriptions — with
+  thinking off, the local model then answered `{"extracted_entities": []}` for
+  short episodes (0/4 vs 4/4 with the docstrings, logprobs 2026-09-21). They
+  are assigned as explicit strings and pinned by SHA-256 in
+  `tests/test_graph_ontology.py`; changing one changes what the extraction
+  model is told, and the same alias serves another workload, so measure
+  against both. If you ever add a real attribute, make it Optional or give it
+  `Field(max_length=…)`. Two things ride along: thinking is switched OFF on
+  the `graphiti-llm` ALIAS (`chat_template_kwargs: {"enable_thinking": false}`
+  in its litellm_params — graphiti-core sends reasoning controls only for
+  gpt-5/o1/o3 names, and llama.cpp does not enforce a json_schema grammar
+  while the model thinks), and a failed job's `last_error` (and the Verify
+  row it parks) is where the symptom shows — read it before theorising about
+  the model.
 - **Graphiti never assumes an episode's time.** Every present-tense fact's
-  `valid_at` is anchored to the episode's `reference_time`, and Graphiti's
-  own fallback is the moment it PROCESSED the episode — under MCP 1.0.2 that
-  fallback was the only behaviour, and 44% of the live graph's edges read
-  "became true when ingested" (2026-09-19). `graph.add_episode` therefore
-  REQUIRES `reference_time` (the instant the SOURCE material is from, derived
-  by the agent, approved by the operator): the shared `ARG_SPECS` refuses a
-  proposal without it in both tiers, the Executor refuses anything that is
-  not an ISO-8601 instant ("today" included), and `graphiti.add_episode` has
-  no default for it. Don't add one anywhere — a default IS the assumption.
+  `valid_at` is anchored to the episode's `reference_time`, and the fallback
+  is the moment the episode was PROCESSED — when nothing states a time, 44% of
+  the live graph's edges read "became true when ingested" (2026-09-19).
+  `graph.add_episode` therefore REQUIRES `reference_time` (the instant the
+  SOURCE material is from, derived by the agent, approved by the operator):
+  the shared `ARG_SPECS` refuses a proposal without it in both tiers, the
+  Executor refuses anything that is not an ISO-8601 instant ("today"
+  included), and neither `graphiti_ingest.enqueue` nor the worker has a
+  default for it. Don't add one anywhere — a default IS the assumption.
   The same law covers the operator's hand: `graph.create_edge` requires
   `valid_at`, spelled `unbounded` when the text gives no start (the Executor
   maps it to null), and `neo4j_writer.create_edge` stores a None start as
@@ -88,13 +106,18 @@ when a matching file is read.
   compares every fact's window with the text's dates.
 - **Graphiti will retire a fact it merely RECOGNISES, and the guard is not
   the model.** Upstream's `resolve_extracted_edges` offers a whole-group
-  semantic search as invalidation candidates (empty `SearchFilters()`); we
-  carry upstream #1729 under `deploy/pi/graphiti/patches/` (with #1666,
-  reasoning-first dedupe — drop both when they merge). Before blaming
-  extraction quality on the model, check the invalidation scope, the sampling
-  (unset temperature means the backend default, not deterministic), and the
-  field ORDER of the schema (with schema-constrained decoding, index arrays
-  before a `reasoning` field means the model answers before it thinks).
+  semantic search as invalidation candidates (empty `SearchFilters()`). We
+  carry upstream #1729 (invalidation scope) and #1666 (reasoning-first dedupe)
+  as patch files in `deploy/graphiti-patches/`, applied to the INSTALLED
+  package by `scripts/apply_graphiti_patches.py` after every dependency
+  install (setup, the updater, and by hand in a development environment); the
+  ingest worker refuses to extract without them and the self-check's
+  `graph-patches` row says so — drop both when they merge upstream and the pin
+  moves. Before blaming extraction quality on the model, check the
+  invalidation scope, the sampling (unset temperature means the backend
+  default, not deterministic — `graph_llm_temperature` is 0), and the field
+  ORDER of the schema (with schema-constrained decoding, index arrays before a
+  `reasoning` field means the model answers before it thinks).
 - **Episodes name the operator; "the operator" is not a graph subject.** The
   Person ontology refuses a role as a name, so an episode written "the
   operator is subscribed to X" lands with no subscriber or spawns a bare
@@ -108,10 +131,23 @@ when a matching file is read.
   e.created_at`, and its attribution window closes when the next episode in
   the group begins, because a fixed window credits one retirement to every
   neighbour while a backlog drains (2026-09-15: 89 of 90 entries were
-  artifacts). Graphiti's MCP queue is in memory, serial per group, and
-  exposes no depth — an "absent" episode may just be queued, so the
-  re-submit deadline stretches with the PENDING rows ahead of it.
+  artifacts). An episode that is not in the graph yet is a `graph_ingest_job`
+  row, not an absence to infer: jobs run in strict order per group (groups run
+  side by side), a crash is recovered by the `proposal=<id>` marker on the
+  Episodic node (landed → DONE, else QUEUED again), and nothing is ever
+  re-submitted. A transient failure re-queues with backoff; a permanent one
+  FAILS the job and parks its Verify row with the error.
+- **`add_episode(uuid=…)` LOADS an existing episode; it does not name a new
+  one.** It raises when there is none, so a new episode's uuid cannot be
+  chosen in advance — read it from the result (`AddEpisodeResults.episode.uuid`,
+  recorded on the job row).
+- **`EpisodicNode.get_by_group_ids` orders by `uuid`, not by time**
+  (upstream #1724), so past the limit "the latest N" is an arbitrary slice.
+  "The latest episodes" is our own Cypher ordered by `created_at`
+  (`neo4j_reader.latest_episodes`); don't reach for the library's list methods
+  to mean "recent".
 - **The ontology needs somewhere for every category to go.** Graphiti's
   upstream default entity types had no `Person`, so every person landed as a
   bare `Entity` while orgs typed correctly. Declare high-priority types FIRST
-  so they beat the "use as last resort" types.
+  (the order of `graph_ontology.ENTITY_TYPES`) so they beat the "use as last
+  resort" types.

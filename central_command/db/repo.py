@@ -5014,6 +5014,40 @@ async def ingest_queue_counts() -> dict[str, int]:
         await conn.close()
 
 
+async def ingest_queue_summary() -> dict:
+    """What the Systems page says about the ingest queue: `{"QUEUED": n,
+    "RUNNING": n, "FAILED": n, "retry_error": str | None}`.
+
+    `retry_error` is the most recent `last_error` among QUEUED jobs that have
+    already been attempted (`attempts > 0`) — a job back in the queue with a
+    reason, i.e. a transient failure being retried. A key that is mis-scoped
+    answers 403, which is classified transient and retried forever; without
+    this the reason lives only on a job row nobody opens."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select status, count(*) as n from graph_ingest_job "
+            "where status in ('QUEUED', 'RUNNING', 'FAILED') group by status"
+        )
+        counts = {r["status"]: int(r["n"]) for r in rows}
+        error = await conn.fetchval(
+            """
+            select last_error from graph_ingest_job
+             where status = 'QUEUED' and attempts > 0 and last_error is not null
+             order by started_at desc nulls last, id desc
+             limit 1
+            """
+        )
+        return {
+            "QUEUED": counts.get("QUEUED", 0),
+            "RUNNING": counts.get("RUNNING", 0),
+            "FAILED": counts.get("FAILED", 0),
+            "retry_error": error,
+        }
+    finally:
+        await conn.close()
+
+
 # --- Sources catalog (slice 1, 2026-08-30) ------------------------------------
 # Three tables per docs/superpowers/specs/2026-08-23-sources-catalog-design.md:
 # `source` (governed data), `catalog_document`/`catalog_version`/`catalog_location`

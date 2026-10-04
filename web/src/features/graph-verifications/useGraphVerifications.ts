@@ -14,9 +14,20 @@ import { apiFetch } from '@/lib/apiFetch';
 const POLL_MS = 30_000;
 
 export interface VerificationMechanical {
-  missing: boolean;
-  /** v2.34.0: the sweep re-sent the approved episode once before giving up. */
+  /** Absent on a row parked by a failed extraction (`ingest_failed`). */
+  missing?: boolean;
+  /** v2.34.0 .. v2.58: the sweep re-sent the approved episode once before
+   *  giving up. Nothing writes it any more (the durable ingest queue replaced
+   *  the re-submit), but stored rows keep the flag, so it still renders. */
   resubmitted?: boolean;
+  /** The ingest worker gave up on this episode's extraction (a permanent
+   *  failure). It is not retried; `error` is the failure text. Also set, with
+   *  no `missing`, when the sweep finds the job FAILED and its park never
+   *  landed. */
+  ingest_failed?: boolean;
+  /** The failure text behind `ingest_failed` — or, on a `missing` row, why the
+   *  cutover could not re-queue the approved episode. May be long or null. */
+  error?: string | null;
   empty_delta?: boolean;
   unembedded?: string[];
   no_approved_text?: boolean;

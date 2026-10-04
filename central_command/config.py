@@ -15,8 +15,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Since v2.42.0 the root `.env` is also the SINGLE-NODE DEPLOYMENT's answer
 # file (design record 2026-09-23, D1), so a handful of non-CC_ keys now land in
 # this process's environment too: LITELLM_POSTGRES_PASSWORD, N8N_*,
-# UI_USERNAME/UI_PASSWORD, GRAPHITI_LLM_API_KEY, EMBEDDER_API_KEY,
-# RERANKER_API_KEY. `extra="ignore"` means pydantic never sees them, and
+# UI_USERNAME/UI_PASSWORD. (The Graphiti-only keys that used to ride here —
+# GRAPHITI_LLM_API_KEY, EMBEDDER_API_KEY, RERANKER_API_KEY — left with the
+# Graphiti server; the application's own LiteLLM key now carries those
+# aliases.) `extra="ignore"` means pydantic never sees them, and
 # nothing in central_command/ or web/server reads any of those names — checked
 # when the merge landed. Keep it that way: a deploy key whose name collides
 # with something the app or the cockpit reads (PORT, GATEWAY_URL, OPENAI_*,
@@ -135,9 +137,10 @@ class Settings(BaseSettings):
 
     # The embedder the curation writer (integrations/neo4j_writer) uses — the
     # LiteLLM ALIAS, not the upstream model name, and the vector dimension the
-    # Neo4j indexes were created with. Must equal the graphiti config's
-    # embedder block: they index the same vectors, and a mismatched dimension
-    # is silently-broken similarity, not an error (verified 2026-08-30: there
+    # Neo4j indexes were created with. The embedder `graphiti_client` builds
+    # for extraction uses the same two settings, so the curation writer and
+    # graphiti-core index the same vectors; a mismatched dimension is
+    # silently-broken similarity, not an error (verified 2026-08-30: there
     # is NO Neo4j vector index — graphiti scores per-row with
     # vector.similarity.cosine(), so nothing schema-side enforces the width).
     # The dimension is discovered at setup and is effectively permanent —

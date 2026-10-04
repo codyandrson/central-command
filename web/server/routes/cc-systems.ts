@@ -25,6 +25,8 @@ interface CcSystem {
   status: 'up' | 'down' | 'unknown';
   latency_ms: number | null;
   credential: { label: string; location: string };
+  /** A short status line some rows carry (the graph row's ingest queue). */
+  detail?: string;
 }
 
 app.get('/api/systems', rateLimitGeneral, async (c) => {
@@ -44,6 +46,7 @@ app.get('/api/systems', rateLimitGeneral, async (c) => {
         linkLabel: s.link_label ?? null,
         status: s.status,
         latencyMs: s.latency_ms,
+        detail: s.detail ?? null,
         credential: { label: s.credential.label, location: s.credential.location },
       })),
       updatedAt: Date.now(),

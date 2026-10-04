@@ -24,8 +24,10 @@ when a matching file is read.
   existing row is never written to. Both `setup.sh` drivers exit 3 on a fresh
   catalog on purpose — the operator fills in providers and credentials in the
   proxy UI before anything else deploys — and the re-run validates each alias
-  with a real request, including a Responses-API `structured` probe through
-  `graphiti-llm`. Don't reintroduce provider values into a tracked
+  with a real request, including a `structured` probe through `graphiti-llm`
+  (schema-constrained JSON over chat completions — what the application's
+  in-process graphiti-core client sends, and the one failure a plain chat
+  probe cannot see). Don't reintroduce provider values into a tracked
   declaration or into `.env`.
 - **A model's capabilities are MEASURED, never guessed — and an undeclared
   flag is not neutral.** Central Command reads an absent `supports_*` as

@@ -12,7 +12,8 @@ const SYSTEMS = {
   systems: [
     { id: 'postgres', name: 'Postgres', kind: 'store', url: null, linkLabel: null, status: 'up', latencyMs: 3, credential: { label: 'DB URL', location: 'CC_DATABASE_URL' } },
     { id: 'litellm', name: 'LiteLLM', kind: 'api', url: null, linkLabel: null, status: 'up', latencyMs: 9, credential: { label: 'key', location: 'LITELLM_MASTER_KEY' } },
-    { id: 'n8n', name: 'n8n', kind: 'ui', url: null, linkLabel: null, status: 'up', latencyMs: 5, credential: { label: 'login', location: 'n8n' } },
+    { id: 'n8n', name: 'n8n', kind: 'ui', url: null, linkLabel: null, status: 'up', latencyMs: 5, detail: null, credential: { label: 'login', location: 'n8n' } },
+    { id: 'graphiti', name: 'Graphiti (in-process)', kind: 'api', url: null, linkLabel: null, status: 'up', latencyMs: null, detail: 'ingest queue: 2 queued, 0 running, 0 failed — retrying after: 403 key not allowed to access model', credential: { label: 'key', location: 'CC_LLM_API_KEY' } },
   ],
 };
 
@@ -39,6 +40,18 @@ function mockFetch(handler: (c: Call) => unknown): Call[] {
   }) as unknown as typeof fetch;
   return calls;
 }
+
+describe('SystemsView status line', () => {
+  it('shows a row\'s detail (the graph ingest queue) and nothing on rows without one', async () => {
+    mockFetch(() => doc());
+    render(<SystemsView />);
+    const detail = await screen.findByTestId('system-detail-graphiti');
+    expect(detail).toHaveTextContent('ingest queue: 2 queued, 0 running, 0 failed');
+    expect(detail).toHaveTextContent('retrying after: 403');
+    expect(screen.queryByTestId('system-detail-n8n')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('system-detail-postgres')).not.toBeInTheDocument();
+  });
+});
 
 describe('SystemsView self-check', () => {
   afterEach(() => {

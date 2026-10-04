@@ -127,7 +127,7 @@ A modular monolith in four tiers:
 1. **Control Plane UI** — React cockpit (`web/`, a forked OpenClaw-Nerve frontend)
 2. **Control Plane API & Services** — FastAPI (`central_command/api`, `central_command/gateway`)
 3. **Agent Runtime** — Pydantic AI 2.x + Claude (`central_command/runtime`) — *propose + read only*
-4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph via MCP), n8n
+4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph; graphiti-core runs in the API process), n8n
    (email façade holding the Gmail OAuth)
 
 Durable pause/resume is explicit persistence over Postgres (the paused run's

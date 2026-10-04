@@ -14,6 +14,8 @@ interface SystemRow {
   linkLabel: string | null;
   status: 'up' | 'down' | 'unknown';
   latencyMs: number | null;
+  /** A short status line (the graph row's ingest queue); absent on most rows. */
+  detail?: string | null;
   credential: SystemCredential;
 }
 
@@ -242,6 +244,11 @@ function SystemCard({ system, checks }: { system: SystemRow; checks: SelfCheckCh
         >
           {system.linkLabel ?? 'Open'} <ExternalLink size={11} />
         </a>
+      )}
+      {system.detail && (
+        <p className="cockpit-wrap text-[0.667rem] text-muted-foreground" data-testid={`system-detail-${system.id}`}>
+          {system.detail}
+        </p>
       )}
       <p className="text-[0.667rem] text-muted-foreground/70">
         credential: {system.credential.label} — {system.credential.location}

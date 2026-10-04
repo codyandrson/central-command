@@ -169,7 +169,7 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-09-21
-- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**Graphiti's LLM client is upstream's, and `graphiti-llm` is a PLAIN `openai/<model>` alias.**"
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**The LLM client is graphiti-core's `OpenAIGenericClient`, built by us, and `graphiti-llm` is a PLAIN `openai/<model>` alias.**"
 - **Why:** v2.38.4's fix for the unbounded attribute replaced MCP 1.1.0's
   built-in entity-type models with field-less models built from config.yaml's
   one-line descriptions — and the extraction prompt's entity-types block is
@@ -178,10 +178,20 @@ hygiene, and how the test suite itself must be written. See
   short episodes (0/4 with the one-liners vs 4/4 with the built-in
   docstrings, logprobs 2026-09-21). The Responses-client pin was circular (it
   preserved an alias that only existed for the old client); the stock chat
-  client with a plain alias was verified through the proxy.
+  client with a plain alias was verified through the proxy. Since the
+  library migration (2026-10-04) the client class is constructed by
+  `integrations/graphiti_client.py` (DL-129) and the docstrings live in
+  `integrations/graph_ontology.py` (DL-133); the rule — plain alias, built-in
+  docstrings — is unchanged. The image patches that the image-patch tests
+  below pin are FROZEN with `deploy/pi/graphiti/` and are deleted by the next
+  release, so `tests/test_graphiti_image_patches.py` is deliberately kept for
+  exactly one more release and then retires with them; the tests that carry
+  this rule forward are `tests/test_graph_ontology.py` and
+  `tests/test_litellm_policy.py`.
 - **Enforced:** test: `tests/test_graphiti_image_patches.py::test_the_entity_type_patch_keeps_the_builtin_docstring_and_drops_the_fields`, test: `tests/test_graphiti_image_patches.py::test_the_responses_client_pin_is_retired`, test: `tests/test_litellm_policy.py` and `tests/test_single_models_declaration.py` (plain prefix), script: `deploy/single/discover-llm.sh` (structured probe)
 - **Source:** CHANGELOG v2.39.0
 - **Supersedes:** DL-055
+
 ### DL-105 — `setup.sh check` executes nothing, and it is the gate
 
 - **Status:** active
@@ -545,3 +555,117 @@ hygiene, and how the test suite itself must be written. See
   `setup.sh`-driving test — a gate that cannot finish is not a gate.
 - **Enforced:** script: `tests/installer_source.py`; script: `tests/conftest.py`
 - **Source:** CHANGELOG v2.58.2 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
+
+### DL-129 — graphiti-core runs in the application process; its client is built explicitly and imported lazily
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**graphiti-core is imported lazily, and only through `integrations/graphiti_client.py`.**"
+- **Why:** The stock Graphiti MCP server acknowledged an episode before it was
+  extracted and logged-and-dropped failures after the acknowledgement, offered
+  no curation, and shipped as a locally built image per architecture; the
+  library's `add_episode` is awaitable, raises, and returns what it wrote.
+  Three constraints follow and are why the client is one module: a client left
+  as `None` makes `Graphiti.__init__` quietly build an OpenAI client that wants
+  an OpenAI key, so every client is passed in and a missing setting fails by
+  name; importing the package reads `SEMAPHORE_LIMIT` and arms telemetry, so
+  the environment is set before the first import and nothing loaded at
+  application start may import it; and no `OPENAI_*` variable is ever exported
+  into the process, so base URL and key are constructor arguments.
+- **Enforced:** test: `tests/test_graphiti_client.py::test_missing_configuration_is_refused_by_name`, test: `tests/test_graphiti_client.py::test_the_client_is_built_explicitly_and_issues_no_ddl`, test: `tests/test_governance.py::test_importing_the_app_does_not_import_graphiti_core`, and test: `tests/test_graphiti_client.py::test_the_pyproject_pin_is_the_patches_version` (the exact pin)
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D1, D2); code comment `central_command/integrations/graphiti_client.py`
+
+### DL-130 — Graph ingestion is a durable queue in Postgres, strictly ordered per group, with no global cap
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "An episode that is not in the graph yet is a `graph_ingest_job` row, not an absence to infer"
+- **Why:** The MCP server's queue lived in memory, exposed no depth and no
+  completion signal, and lost a restart's worth of episodes; the verification
+  sweep's absence deadline, queue-depth estimate and one-shot re-submission
+  existed only to infer from outside what the server never reported. The
+  `graph_ingest_job` table puts "afterwards" on the record: jobs in one group
+  run strictly in order (upstream requires sequential adds per group, and the
+  database refuses a second RUNNING job in a group), different groups run side
+  by side, and a crash is recovered by the `proposal=<id>` marker on the
+  Episodic node (an episode is written whole in one transaction, so the marker
+  proves it landed). There is deliberately NO global concurrency cap and no
+  setting for one: an extraction already issues several model calls at once,
+  the model backend queues what it cannot serve, and a limit belongs to the
+  model it protects, not to this queue. A transient failure re-queues with
+  backoff and a permanent one fails the job and parks its Verify row — nothing
+  is acknowledged and then dropped, and nothing is re-submitted.
+- **Enforced:** test: `tests/test_graph_ingest.py::test_one_group_runs_in_order_and_groups_run_side_by_side`, test: `tests/test_graph_ingest.py::test_the_database_refuses_two_running_jobs_in_one_group`, test: `tests/test_graph_ingest.py::test_a_transient_failure_requeues_with_backoff`, test: `tests/test_graph_ingest.py::test_a_permanent_failure_fails_the_job_and_parks_its_row` and test: `tests/test_graph_ingest.py::test_recovery_marks_a_landed_orphan_done`; the absence of a global cap is discipline only
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D5); code comment `central_command/integrations/graphiti_ingest.py`
+
+### DL-131 — Graphiti.search() is never called; every search copies its recipe
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**Never call `Graphiti.search()`**"
+- **Why:** `Graphiti.search()` assigns `limit` on a module-level recipe object
+  that `add_episode` also reads for its dedupe and invalidation candidates, so
+  one search call changes extraction for the life of the process. Every search
+  therefore goes through `search_()` with a deep copy of the recipe and the
+  limit set on the copy, which also fixes the retired server's own bug (it
+  sliced a ten-result recipe, so asking for 25 facts returned ten).
+- **Enforced:** test: `tests/test_graphiti_client.py::test_search_uses_a_deep_copy_with_the_requested_limit` (the module-level recipes are untouched and the requested limit is honoured); no test forbids the call by name
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D2, D6); code comment `central_command/integrations/graphiti.py`
+
+### DL-132 — The two graphiti-core fixes are patch files applied to the installed package, and the worker refuses to extract without them
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "We carry upstream #1729 (invalidation scope) and #1666 (reasoning-first dedupe) as patch files in `deploy/graphiti-patches/`"
+- **Why:** The invalidation scope (#1729) and the reasoning-first dedupe
+  schema (#1666) are upstream bugs we hit and submitted, both still open. A
+  fork was rejected because an air-gapped site cannot be assumed to reach it.
+  The applier is stdlib-only (`patch` is not on every substrate), exact-context
+  with no fuzz (the version is pinned, so a mismatch is a finding),
+  idempotent, all-or-nothing, and writes through a temp file and `os.replace`
+  because `uv` hardlinks installed files from its cache and an in-place write
+  would patch the cache and every environment sharing it. A hand step can be
+  forgotten, so the running system checks too: the ingest worker starts no
+  extraction while the patch sentinels are absent from the installed package
+  (jobs stay QUEUED; reads are unaffected) and the self-check's `graph-patches`
+  row says why.
+- **Enforced:** test: `tests/test_graphiti_patches.py::test_each_real_patch_applies_cleanly_or_is_already_applied_to_a_copy`, test: `tests/test_graphiti_patches.py::test_a_mismatch_fails_loudly_and_writes_nothing_anywhere`, test: `tests/test_graphiti_patches.py::test_write_is_atomic_hardlink_safe_and_keeps_the_mode`, test: `tests/test_graph_ingest.py::test_without_the_carried_patches_nothing_is_extracted`, and test: `tests/test_graphiti_server_boundary.py::test_the_patch_step_follows_every_install_and_tolerates_an_old_tree`; script: `scripts/apply_graphiti_patches.py`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D7); code comment `central_command/integrations/graphiti_patches.py`
+- **Supersedes:** (the mechanism of DL-056 only — DL-056 stays active; its patches no longer ride in an image)
+
+### DL-133 — The ontology is ten field-less models whose docstrings are pinned by hash
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**The docstrings are the guidance**"
+- **Why:** A required string attribute on an entity type is rewritten longer on
+  every episode (the hub Person reached 4378 characters and generations of
+  41-52k into the output cap), and the extraction prompt's type block is built
+  from `__doc__` alone — replacing the docstrings with one-line descriptions
+  made the local model extract nothing from short episodes (0/4 vs 4/4,
+  2026-09-21). `integrations/graph_ontology.py` therefore defines the ten
+  models with no fields and the stock built-ins' docstrings verbatim, assigned
+  as explicit strings (so the bytes do not depend on the interpreter's
+  docstring handling) and pinned by SHA-256. The same alias serves a second
+  workload, so a change to one is a change to what the model is told:
+  measure against both.
+- **Enforced:** test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin`, test: `tests/test_graph_ontology.py::test_every_model_is_field_less` and test: `tests/test_graph_ontology.py::test_the_writer_allowlist_names_the_same_types`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D4); code comment `central_command/integrations/graph_ontology.py`
+
+### DL-134 — runtime/ may import the graph's reads and none of its write modules
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "`runtime/` may import `integrations/graphiti` (reads) and nothing that writes"
+- **Why:** With graphiti-core in the application process, agents' graph reads
+  run over bolt, so the older statement "the runtime tier holds no bolt" is
+  retired and replaced by the rule that is actually enforced: the runtime tier
+  holds no WRITE path. `graphiti_client` builds an object that carries
+  `add_episode` and `remove_episode`, `graphiti_ingest` is the queue's worker,
+  and `neo4j_writer` is the operator's ungated curation hand — none may be
+  imported from `runtime/`. The read module reaches its client only through a
+  function-local import and calls no write method, which keeps the ban
+  checkable: importing it loads no write path.
+- **Enforced:** test: `tests/test_governance.py::test_the_graph_write_modules_are_banned_in_every_import_spelling`, test: `tests/test_governance.py::test_runtime_never_imports_the_gateway_tier`, test: `tests/test_governance.py::test_the_graph_read_module_reaches_its_client_only_lazily` and test: `tests/test_runtime_integration_reads.py::test_runtime_never_imports_a_write_only_integration`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D6); code comment `central_command/integrations/neo4j_reader.py`
+- **Supersedes:** (refines DL-103's list of banned modules; DL-103 stays active)

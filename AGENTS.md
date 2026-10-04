@@ -49,7 +49,8 @@ Modular monolith, 4 tiers:
 1. **Control Plane UI** — React (`web/`)
 2. **Control Plane API & Services** — FastAPI (`central_command/api`, `central_command/gateway`)
 3. **Agent Runtime** — Pydantic AI + Claude (`central_command/runtime`) — can **only propose + read**
-4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph, via MCP), n8n
+4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph — graphiti-core runs in
+   the API process, no server), n8n
    (email façade holding the Gmail OAuth; Jira is a native client in
    `integrations/jira.py` — n8n only where it already solved a hard integration
    problem)
@@ -110,6 +111,15 @@ where the story is gone.
   every tool that CHANGES a service is a gated `propose_*`. What constrains a
   sandbox is that it holds NO credentials; provisioning one converts reach
   into ungated writes, so that is an explicit operator decision.
+- **graphiti-core is imported lazily, and only through
+  `integrations/graphiti_client.py`.** Importing it reads `SEMAPHORE_LIMIT`
+  and arms telemetry, so the client sets both first and nothing loaded at
+  application start may import the package. **Never call `Graphiti.search()`**
+  — it mutates a module-level recipe that `add_episode` also reads, so one
+  search changes extraction for the life of the process; search through
+  `search_()` with a deep-copied recipe. `runtime/` may import
+  `integrations/graphiti` (reads) and nothing that writes: not the client, not
+  `graphiti_ingest`, not `neo4j_writer`.
 - **The sandbox's only exit is `mcp.sync_source`, and content is captured at
   PROPOSE time.** The tool embeds the files in the proposal; the Executor
   writes exactly those bytes and never re-reads the sandbox — an agent that

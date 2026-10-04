@@ -61,7 +61,8 @@ from central_command.integrations.neo4j_reader import _get_driver
 
 log = logging.getLogger(__name__)
 
-# Mirrors `entity_types` in deploy/pi/graphiti/config.yaml. Closed on purpose:
+# Mirrors `graph_ontology.ENTITY_TYPE_NAMES` (tests/test_graph_ontology.py pins the
+# two equal). Closed on purpose:
 # Neo4j 5.26 has no parameterized labels (dynamic `SET n:$(x)` is a 2025.x
 # feature), so a label reaches Cypher via string interpolation and the allowlist
 # is what makes that safe. A type added to the ontology belongs here too.
@@ -70,7 +71,8 @@ ENTITY_TYPES = (
     "Event", "Organization", "Document", "Topic", "Object",
 )
 
-# Must equal the graphiti config's embedder block. They index the same vectors.
+# Must equal the embedder `graphiti_client` builds (the same two settings).
+# They index the same vectors.
 # Settings (CC_EMBED_ALIAS / CC_EMBED_DIM), defaulting to the homelab values —
 # the single-node profile discovers both at setup (2026-08-21 design).
 _EMBED_MODEL = settings.embed_alias

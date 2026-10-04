@@ -136,3 +136,62 @@ async def test_llama_swap_probe_is_the_browser_origin(monkeypatch):
     by_id = {row["id"]: row for row in (await systems.list_systems())["systems"]}
     assert by_id["llama-swap"]["url"] is None
     assert by_id["llama-swap"]["status"] == "unknown"
+
+
+async def _patched_probes(monkeypatch):
+    async def up(*_a):
+        return ("up", None)
+
+    monkeypatch.setattr(systems, "_http_check", up)
+    monkeypatch.setattr(systems, "_tcp_check", up)
+    monkeypatch.setattr(systems, "_neo4j_status", up)
+    monkeypatch.setattr(systems, "_graphiti_status", up)
+
+
+async def test_the_graph_row_carries_the_ingest_queue_line_and_no_other_row_does(monkeypatch):
+    """A stuck queue (a mis-scoped key answers 403, which is retried forever)
+    must show on the Systems page, on the EXISTING graph row — not only on a
+    job row nobody opens."""
+    from central_command.db import repo
+
+    await _patched_probes(monkeypatch)
+
+    async def summary():
+        return {"QUEUED": 3, "RUNNING": 1, "FAILED": 2,
+                "retry_error": "Error code: 403 - key not allowed to access model " + "x" * 400}
+
+    monkeypatch.setattr(repo, "ingest_queue_summary", summary)
+
+    rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
+    detail = rows["graphiti"]["detail"]
+    assert detail.startswith("ingest queue: 3 queued, 1 running, 2 failed — retrying after: Error code: 403")
+    assert len(detail) < 300 and detail.endswith("…")  # the error is clipped
+    assert [i for i, r in rows.items() if "detail" in r] == ["graphiti"]
+    assert "detail_probe" not in rows["graphiti"]
+
+
+async def test_a_quiet_queue_says_only_its_counts(monkeypatch):
+    from central_command.db import repo
+
+    await _patched_probes(monkeypatch)
+
+    async def summary():
+        return {"QUEUED": 0, "RUNNING": 0, "FAILED": 0, "retry_error": None}
+
+    monkeypatch.setattr(repo, "ingest_queue_summary", summary)
+    rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
+    assert rows["graphiti"]["detail"] == "ingest queue: 0 queued, 0 running, 0 failed"
+
+
+async def test_an_unreadable_queue_leaves_the_row_without_a_detail(monkeypatch):
+    from central_command.db import repo
+
+    await _patched_probes(monkeypatch)
+
+    async def broken():
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(repo, "ingest_queue_summary", broken)
+    rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
+    assert "detail" not in rows["graphiti"]
+    assert rows["graphiti"]["status"] == "up"

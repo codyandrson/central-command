@@ -52,6 +52,12 @@ describe('cc-systems adapter', () => {
           status: 'down', latency_ms: null,
           credential: { label: 'DB URL', location: 'CC_DATABASE_URL' },
         },
+        {
+          id: 'graphiti', name: 'Graphiti (in-process)', kind: 'api', url: null,
+          status: 'up', latency_ms: null,
+          detail: 'ingest queue: 2 queued, 0 running, 0 failed',
+          credential: { label: 'key', location: 'CC_LLM_API_KEY' },
+        },
       ],
     }));
 
@@ -67,6 +73,11 @@ describe('cc-systems adapter', () => {
     const pg = body.systems.find((s) => s.id === 'postgres')!;
     expect(pg.status).toBe('down');
     expect(pg.url).toBeNull();
+
+    // The optional status line rides through; rows without one carry null.
+    expect(body.systems.find((s) => s.id === 'graphiti')!.detail)
+      .toBe('ingest queue: 2 queued, 0 running, 0 failed');
+    expect(n8n.detail).toBeNull();
   });
 
   it('relays a gateway error as 502', async () => {
