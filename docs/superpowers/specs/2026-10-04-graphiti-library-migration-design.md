@@ -150,12 +150,13 @@ success the episode uuid and the uuids of the nodes and edges
   gates the EPISODE, and extraction still runs afterwards. What changes is
   that "afterwards" is now on the record.
 - **The worker** is a background task started in the application lifespan.
-  It claims the oldest `QUEUED` job whose group has no `RUNNING` job —
-  upstream requires episodes in a group to be added sequentially — and
-  awaits `add_episode`. Cross-group concurrency is
-  `CC_GRAPH_INGEST_CONCURRENCY`, default 1: one extraction at a time, where
-  the stock server ran groups in parallel. One local model slot serves
-  everything; parallel extraction only moves the queue into the model's.
+  Jobs in one group run strictly in order — upstream requires episodes in a
+  group to be added sequentially — and different groups run side by side, as
+  the stock server's per-group queues did. There is no global cap and no
+  setting for one: an extraction already issues several model calls at once,
+  the model backend queues what it cannot serve, and a limit belongs to the
+  model it protects, not to this queue. A call that times out waiting is a
+  transient failure and the job runs again.
 - **Failures are classified with the existing taxonomy**
   (`contract/failures.py`). Transient — Neo4j unavailable (the nightly dump
   included), LLM connection errors, 429/5xx — returns the job to `QUEUED`
