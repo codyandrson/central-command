@@ -1,7 +1,7 @@
 # Graphiti as a library: the MCP server leaves, ingestion becomes durable, and the graph's shapes get one owner
 
-> **Status:** open — decided 2026-10-04, not yet built
-> **As-built:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md`
+> **Status:** partial — release 1 (D1–D7, D10) shipped in v2.60.0 (2026-10-05); D8, D9 and agent search filters are release 2
+> **As-built:** `central_command/integrations/graphiti_client.py`, `central_command/integrations/graphiti.py`, `central_command/integrations/graphiti_ingest.py`, `central_command/integrations/graph_ontology.py`, `central_command/integrations/graphiti_patches.py`, `scripts/apply_graphiti_patches.py`, `deploy/graphiti-patches/`, `central_command/gateway/graph_auditor.py`, `central_command/db/schema.sql`, `deploy/k3s/cc-update.sh`, `deploy/k3s/mint-keys.sh`, `deploy/k3s/removed.txt`, `deploy/single/steps.tsv`, `tests/test_graph_ingest.py`, `tests/test_graphiti_client.py`, `tests/test_graphiti_server_boundary.py`, `tests/test_k3s_update_reconcile.py`
 
 ## The problem
 
@@ -117,6 +117,16 @@ upstream's `OpenAIRerankerClient` pointed at LiteLLM with the
 Release 1 is a parity release; collapsing the two paths into one is a later
 decision with its own measurements.
 
+As built, parity turned out narrower than this paragraph assumed: the stock
+server's two search tools never called a reranker at all without our patch
+(they ran the RRF recipes), so on the single-node profile the fallback
+reranker is built because the constructor requires one and is never asked —
+search there runs the RRF recipes, exactly as the server did. k3s keeps the
+cross-encoder through `CC_GRAPH_RERANK_ALIAS=cc-rerank`, which its installer
+and updater add to `.env`. Which reranker, if any, each profile should use is
+deferred, by the operator's decision, to a benchmark after the cutover; no
+alias requirement changed with this release.
+
 `add_episode` never calls the cross-encoder. Only agent and cockpit search
 do.
 
@@ -183,6 +193,15 @@ A new episode's uuid cannot be chosen in advance: `add_episode(uuid=...)`
 LOADS an existing episode and raises if there is none. The id is read from
 the result.
 
+As built: there is one worker per DATABASE, not per process — it holds an
+advisory-lock lease, and a second process that cannot take it says so and
+does not run, so recovery's "a RUNNING job is an orphan" is true by
+construction. A transient failure re-queues on the shared backoff curve with
+no exhaustion (an outage is waited out, not converted into failures), and
+only its FIRST transient failure emits `graph.ingest.deferred`, so a long
+outage is one event and not a stream; the Systems page's graph row shows the
+queue's counts, which is where a stuck backlog is seen.
+
 ### D6. Reads move in-process, and the import graph still draws the boundary
 
 - Search uses `search_()` with a deep-copied recipe and the limit set on the
@@ -231,6 +250,13 @@ running system checks too: the selfcheck gains a row, and the ingest worker
 refuses to start extraction when the patch sentinels are absent from the
 installed package. Reads are unaffected.
 
+As built, a failure to patch is a WARNING in the k3s updater, never a stop —
+a stop at `rebuild()` would leave a merged tree mid-update with no rollback —
+and a REFUSAL in the worker, which keeps the jobs queued and re-checks every
+minute, so running the script by hand releases them without a restart. The
+installers (`setup.sh app` on k3s, the `app/graphiti-patches` row on single
+node) fail the step.
+
 ### D8. Hand-made writes keep our Cypher, pinned to the shape extraction writes
 
 graphiti-core has two write paths that disagree. The bulk path
@@ -277,20 +303,38 @@ check.
 
 ### D10. Removing the server from both substrates
 
-- **k3s:** delete the deployment, service, configmap and secret from the
-  manifests and add them to `removed.txt` (`kubectl apply` never prunes);
-  drop the image row, the build step and the health checks; remove the
-  scale-down choreography from `backup.sh`; widen the application key's
-  scope in `mint-keys.sh`.
-- **The first update across the boundary** is run by the OLD updater, which
-  sees the image's inputs changed and calls a build script the new tag no
-  longer has. A stub `deploy/k3s/build-graphiti-image.sh` that exits 0 ships
-  for one release and is deleted in the next.
-- **Single node:** delete the compose service, the base-image row, the
-  build script and the `fetch`/`up-stack` rows; regenerate the checklist.
-  One fewer image to mirror, build and carry.
-- **Air-gap:** graphiti-core and its dependencies join the lock and the
-  PyPI-mirror completeness story in `deploy/AIRGAP.md`.
+- **k3s:** the deployment and service leave the manifests and join
+  `removed.txt` (`kubectl apply` never prunes); the image row, the build step
+  and the health checks are dropped; `backup.sh` loses its scale-down
+  choreography; `mint-keys.sh` widens the application key's scope and gains
+  `--scope-only`, which widens a kept key in place.
+- **The first update across the boundary is run by the PREVIOUS release's
+  updater,** whose image row and configmap-refresh row live in its memory and
+  run against the new tree: a changed input there means a prebuild with the
+  target's build script and then a rollout restart of a Deployment the
+  tombstones have just deleted — a stop after the merge, with no rollback. So
+  there is NO stub build script: the old image's files
+  (`deploy/pi/graphiti/`, `deploy/k3s/build-graphiti-image.sh`) stay
+  byte-identical and unreferenced for one release, and are deleted by the
+  next one, which this release's updater applies. The deployment and service
+  are tombstoned now; the configmap and Secret one release LATER, because the
+  previous updater's rollback re-applies its manifests, which recreate the
+  Deployment but not what it mounts.
+- **The bridge.** What an existing install must gain — the patch step, the
+  wider key scope, `CC_GRAPH_RERANK_ALIAS` — has to be done by that previous
+  updater, so it ships one release earlier: v2.59.1 adds the patch step to
+  `rebuild()` and a `reconcile` phase before the restart, both keyed on what
+  the merged tree contains. v2.60.0's `min_upgrade_from=2.59.1` makes older
+  installs refuse the jump at resolve, before anything changes; no update
+  needs the operator's hands.
+- **Single node:** the compose service, the base-image row, the build script
+  and the `fetch`/`up-stack` rows are gone and the checklist regenerated; the
+  `stack` phase removes an existing install's leftover container by name
+  (`compose up` never removes a container whose service left the file). Its
+  updater runs the new release's own `setup.sh`, so it needed no bridge.
+- **Air-gap:** graphiti-core and its dependencies are in the lock and the
+  PyPI-mirror completeness story in `deploy/AIRGAP.md`; the base image, its
+  apt work and its mirror rows are gone.
 - **Rollback** re-applies the previous manifests; the previous image is left
   on the nodes for that reason and is not garbage-collected by this release.
 
@@ -300,7 +344,10 @@ check.
    no server. Acceptance: the suite; a prompt-parity test (the entity-types
    block rendered from our models equals the bytes the server's models
    produced); and one live episode through approval, extraction, verify and
-   a search on a non-production graph.
+   a search on a non-production graph. The live run was done on 2026-10-05:
+   two episodes through enqueue, the worker, verification and search
+   against a real graph and the local model, with the expected entity types,
+   text-derived dates and exactly one scoped invalidation.
 2. **What the library makes possible** — D8, D9, search filters for agents,
    the reader's canonical switch, the refreshed vendored documentation
    (fetched from the graphiti repository at our pinned tag; the present

@@ -77,7 +77,7 @@ each job with graphiti-core's `add_episode`:
   episode (found by the `proposal=<id>` marker in `source_description`) already
   landed.
 
-So "queued" is a state on a record, not a promise from a server. Never
+So "queued" is a state on a record, not an acknowledgement. Never
 re-propose an episode because a search came back empty; look at the job, not at
 the graph, to learn whether it ran.
 
@@ -112,8 +112,8 @@ retrying.
 `graph.add_episode` requires `reference_time` (the instant the source material
 is from), the Executor refuses a proposal without a real ISO-8601 instant, and
 the job row stores it — there is no default anywhere. Graphiti anchors every
-present-tense fact to it; its own fallback ("when I processed this") is what
-produced ingestion-dated facts under the old server and is never relied on.
+present-tense fact to it; its own fallback ("when I processed this") produces
+ingestion-dated facts and is never relied on.
 
 ## The embedder is not optional
 
@@ -152,8 +152,8 @@ returning plausible-looking nonsense with no error anywhere. Investigated
    `python3 scripts/oneoff/reembed_graph.py` (dry run) → `--apply` →
    `--verify`. On the host the app runs on; needs `NEO4J_PASSWORD` and
    `EMBEDDER_API_KEY` set in the shell — the latter is any LiteLLM key that
-   reaches `cc-embedding` (the app's `CC_LLM_API_KEY` does; the retired
-   Graphiti server's key of that name is gone). Neo4j HTTP is loopback-only.
+   reaches `cc-embedding` (the app's `CC_LLM_API_KEY` does — export it under
+   that name for the run). Neo4j HTTP is loopback-only.
 
 **Different-dimension swap — all of the above, plus:**
 - Change `CC_EMBED_DIM` in the app's `.env` (setup.sh REFUSES a drifted

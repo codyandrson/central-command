@@ -4,6 +4,65 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-05 — v2.60.0: the knowledge graph runs in the application
+
+Extraction and search used to go through the stock Graphiti MCP server, a
+separate service that acknowledged an episode as "queued", kept the queue in
+memory, logged a failure after the acknowledgement and dropped it. A restart
+lost whatever it held, and nothing said whether an approved episode had
+landed: the verification sweep inferred it from outside, with an absence
+deadline, a queue-depth estimate and a one-shot re-submission. The library
+the server wrapped, graphiti-core, now runs inside the control plane, and the
+server is gone. **Requires v2.59.1** (`min_upgrade_from`): on k3s that
+bridge's updater is the one that applies this release, and it does the steps
+below that an existing install needs. Anything older is refused before
+anything changes.
+
+- **No Graphiti server, on either profile.** The `cc-graphiti` deployment and
+  service (k3s), the compose service (single node), the image and its build,
+  its config file, its port, and its three LiteLLM keys are retired. The app's
+  own key now reaches `graphiti-llm`, `cc-embedding` and, on k3s, `cc-rerank`.
+  An existing k3s key is widened in place, with the same value and no
+  re-mint. One fewer image to build and mirror; graphiti-core arrives with
+  the rest of the Python dependencies.
+- **Ingestion is a durable queue in Postgres.** An approval writes a job, and
+  extraction runs after it, strictly in order within a group and side by
+  side across groups, with no global cap. A transient failure (the graph
+  down for its nightly dump, a model outage, a 429) waits and runs again. A
+  permanent one fails the job.
+- **What the operator sees differently.**
+  - A failed extraction now appears in the Verify tab with its error, instead
+    of disappearing.
+  - The Systems page's graph row shows the queue: queued, running and failed.
+  - There are no re-submissions; the verification sweep audits an episode by
+    the id its job recorded.
+- **Two server bugs are gone with it.** Asking a graph search for more than
+  ten results returns more than ten. "The latest episodes" are the latest by
+  time, not an arbitrary slice.
+- **The two upstream fixes we carry are patch files applied to the installed
+  package**, after every dependency install: the k3s installer and updater
+  (rollbacks included), and a new single-node step after `app/install`.
+  Without them graph reads still work, but the ingest worker refuses to
+  extract: jobs stay queued and the self-check's `graph-patches` line says
+  why.
+- **Deliberately unchanged:** each profile's search reranking (the
+  cross-encoder on k3s through `CC_GRAPH_RERANK_ALIAS`, which the updater
+  adds; the RRF recipes on single node, as before), every model alias, the
+  ontology, and what an agent can call.
+- **Left for the next release.** On k3s the old image's build files stay in
+  the tree, frozen and unused, for this one release, because the updater that
+  applies it still carries a row for them. The old configmap and Secret are
+  removed one release later, so a rollback still finds them. A few comments
+  that sit inside image build inputs still name the server; editing them now
+  would rebuild those images during the update.
+- **Applying it:**
+  - Apply v2.59.1 first, then this release, by the ordinary one-click update.
+  - On single node, `./update.sh apply`, then `./setup.sh` to start the API;
+    the stack phase removes the old container.
+  - Once rollback to 2.59.x is no longer wanted, the old Graphiti image and
+    its three LiteLLM key aliases (`graphiti-llm`, `graphiti-embeddings`,
+    `graphiti-reranker`) can be removed.
+
 ## 2026-10-05 — v2.59.1: the updater learns the steps the next release needs
 
 A bridge release: nothing changes for a running deployment. The next release

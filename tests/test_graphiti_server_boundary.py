@@ -1,8 +1,11 @@
 """The Graphiti server's removal survives the PREVIOUS release's k3s updater.
 
 Design record 2026-10-04, D10. The update across this boundary is run by the
-cc-update.sh of the release being replaced (systemd runs the installed copy),
-and that copy still carries, in memory:
+cc-update.sh of the release being replaced (systemd runs the installed copy).
+`min_upgrade_from=2.59.1` makes that release the v2.59.1 BRIDGE, whose
+updater applies the graphiti-core patches, widens the app key's scope and adds
+CC_GRAPH_RERANK_ALIAS by itself (tests/test_k3s_update_reconcile.py) — and
+which, because v2.59.1 still runs the server, still carries, in memory:
 
 * an IMAGES row `graphiti | … | build-graphiti-image.sh | cc-graphiti | … |
   deploy/pi/graphiti deploy/k3s/build-graphiti-image.sh` — if ANY file under
@@ -108,3 +111,25 @@ def test_the_patch_step_follows_every_install_and_tolerates_an_old_tree():
     setup = (ROOT / "deploy" / "k3s" / "setup.sh").read_text(encoding="utf-8")
     app = setup[setup.index("phase_app() {"):]
     assert app.index("uv pip install") < app.index("scripts/apply_graphiti_patches.py")
+
+
+def test_the_jump_requires_the_bridge_release():
+    """v2.59.1's updater is the one that carries the patch step, the reconcile
+    phase and the scope widening; anything older would need the operator's
+    hands, so the installed updater refuses it at resolve."""
+    text = (ROOT / "VERSION").read_text(encoding="utf-8")
+    assert re.search(r"^min_upgrade_from=2\.59\.1$", text, re.M), text
+
+
+def test_this_updater_keeps_the_bridges_steps():
+    """The next boundary's update is run by THIS release's updater: the steps
+    the bridge introduced stay, keyed on what the merged tree contains."""
+    upd = (ROOT / "deploy" / "k3s" / "cc-update.sh").read_text(encoding="utf-8")
+    for name in ("patch_graphiti() {", "ensure_app_env_defaults() {", "reconcile_app_config() {"):
+        assert name in upd, name
+    main = upd[upd.index("\nmain() {"):]
+    assert main.index("reconcile_app_config") < main.index('phase "starting services"')
+    assert "grep -q -- '--scope-only'" in upd
+    mint = (ROOT / "deploy" / "k3s" / "mint-keys.sh").read_text(encoding="utf-8")
+    assert "--scope-only)" in mint
+    assert re.search(r"^#CC_GRAPH_RERANK_ALIAS=", (ROOT / ".env.example").read_text(), re.M)

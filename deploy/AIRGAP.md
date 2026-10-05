@@ -363,10 +363,9 @@ its one as a `--build-arg`, and each Dockerfile's `ARG` default must equal its
 `images.txt` row (a test fails the suite if they drift). `requirements.lock` is
 the frozen Python resolution and `web/package-lock.json` the cockpit's: a mirror
 that "gets updated regularly" changes nothing until a release bumps a pin —
-that is the point. (Until 2026-10-04 there was a third local image, the
-Graphiti MCP server, built from `zepai/knowledge-graph-mcp` with apt and pip
-inside the build. The graph client is a Python dependency of the app now, so
-that base image, its row and its build left the mirror list.)
+that is the point. The knowledge-graph client (graphiti-core) is a Python
+dependency of the app, so it arrives through the PyPI seam with everything
+else in `requirements.lock`.
 
 ## Open items (copied from the design record)
 

@@ -133,6 +133,10 @@ BANNED_MODULES = {
         "the operator's ungated bolt curation path — neo4j_writer.py's own "
         "docstring bans it from runtime/"
     ),
+    # The graph's write modules (design record 2026-10-04, D6) — the same
+    # list tests/test_governance.py bans in every import spelling.
+    "graphiti_ingest": "the ingest queue's worker body, which writes episodes",
+    "graphiti_client": "builds the Graphiti object, whose methods write",
 }
 
 

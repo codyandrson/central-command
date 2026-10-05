@@ -44,8 +44,11 @@ NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD") or sys.exit("NEO4J_PASSWORD no
 EMBED_URL = os.environ.get("EMBEDDER_API_URL", "http://127.0.0.1:4000/v1")
 EMBED_KEY = os.environ.get("EMBEDDER_API_KEY") or sys.exit("EMBEDDER_API_KEY not set")
 
-# These three must agree with deploy/pi/graphiti/config.yaml. A mismatch is the
-# silent-failure mode the spec exists to prevent, so assert it rather than trust.
+# These must agree with the app's CC_EMBED_ALIAS / CC_EMBED_DIM (config.py) —
+# graphiti-core's embedder and the curation writer both embed with those. A
+# mismatch is the silent-failure mode the spec exists to prevent, so assert it
+# rather than trust. EMBEDDER_API_KEY is any LiteLLM key reaching the alias
+# (the app's CC_LLM_API_KEY does).
 MODEL = os.environ.get("EMBEDDER_MODEL", "cc-embedding")
 DIMS = int(os.environ.get("EMBEDDER_DIMENSIONS", "1024"))
 BATCH = int(os.environ.get("REEMBED_BATCH", "32"))

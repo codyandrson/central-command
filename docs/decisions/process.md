@@ -595,7 +595,7 @@ hygiene, and how the test suite itself must be written. See
   model it protects, not to this queue. A transient failure re-queues with
   backoff and a permanent one fails the job and parks its Verify row — nothing
   is acknowledged and then dropped, and nothing is re-submitted.
-- **Enforced:** test: `tests/test_graph_ingest.py::test_one_group_runs_in_order_and_groups_run_side_by_side`, test: `tests/test_graph_ingest.py::test_the_database_refuses_two_running_jobs_in_one_group`, test: `tests/test_graph_ingest.py::test_a_transient_failure_requeues_with_backoff`, test: `tests/test_graph_ingest.py::test_a_permanent_failure_fails_the_job_and_parks_its_row` and test: `tests/test_graph_ingest.py::test_recovery_marks_a_landed_orphan_done`; the absence of a global cap is discipline only
+- **Enforced:** test: `tests/test_graph_ingest.py::test_one_group_runs_in_order_and_groups_run_side_by_side`, test: `tests/test_graph_ingest.py::test_the_database_refuses_two_running_jobs_in_one_group`, test: `tests/test_graph_ingest.py::test_a_transient_failure_requeues_with_backoff`, test: `tests/test_graph_ingest.py::test_a_permanent_failure_fails_the_job_and_parks_its_row` and test: `tests/test_graph_ingest.py::test_recovery_marks_a_landed_orphan_done` and test: `tests/test_graph_ingest_no_cap.py::test_the_only_ingest_setting_is_the_on_off_switch` (no setting for a cap; the side-by-side test above proves one job per group is claimed in one tick)
 - **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D5); code comment `central_command/integrations/graphiti_ingest.py`
 
 ### DL-131 — Graphiti.search() is never called; every search copies its recipe
@@ -609,7 +609,7 @@ hygiene, and how the test suite itself must be written. See
   therefore goes through `search_()` with a deep copy of the recipe and the
   limit set on the copy, which also fixes the retired server's own bug (it
   sliced a ten-result recipe, so asking for 25 facts returned ten).
-- **Enforced:** test: `tests/test_graphiti_client.py::test_search_uses_a_deep_copy_with_the_requested_limit` (the module-level recipes are untouched and the requested limit is honoured); no test forbids the call by name
+- **Enforced:** test: `tests/test_graphiti_search_never_called.py::test_no_graphiti_search_call_anywhere_in_the_package` (a source walk: no `.search(` on the Graphiti client in `central_command/`) and test: `tests/test_graphiti_client.py::test_search_uses_a_deep_copy_with_the_requested_limit` (the module-level recipes are untouched and the requested limit is honoured)
 - **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D2, D6); code comment `central_command/integrations/graphiti.py`
 
 ### DL-132 — The two graphiti-core fixes are patch files applied to the installed package, and the worker refuses to extract without them

@@ -34,40 +34,38 @@ before.
 
 ## 0a. The update that removes the Graphiti server
 
-The release that moved graphiti-core into the control plane (design record
+v2.60.0 moved graphiti-core into the control plane (design record
 `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md`, D10)
-deletes `cc-graphiti` and its `graphiti` Service. Its FIRST update is run by
-the PREVIOUS release's `cc-update.sh` — systemd runs the installed copy — so
-the tree is built to survive that script: the old image row's inputs
-(`deploy/pi/graphiti/`, `deploy/k3s/build-graphiti-image.sh`) are left
-byte-identical for this one release, so the old updater neither rebuilds the
+and deletes `cc-graphiti` and its `graphiti` Service. **Update from v2.59.1
+or later** — v2.60.0's `min_upgrade_from=2.59.1`, and the installed updater
+refuses an older install's jump at resolve, before anything changes. Apply
+v2.59.1 first (the cockpit offers only the newest release, so take v2.59.1
+while it is the newest, or name it as the update's target).
+
+The update INTO v2.60.0 is run by v2.59.1's `cc-update.sh` (systemd runs the
+installed copy), and that bridge release is what makes it hands-free: after
+the dependency install it applies graphiti-core's carried fixes, and before
+the services start it widens the app key's scope (`mint-keys.sh
+--scope-only`, the new release's script) and adds `CC_GRAPH_RERANK_ALIAS=
+cc-rerank` to the app's `.env` when the key is absent. Nothing to run by hand.
+
+The tree is also built to survive that updater's in-memory rows: the old
+image row's inputs (`deploy/pi/graphiti/`, `deploy/k3s/build-graphiti-image.sh`)
+are left byte-identical for this one release, so it neither rebuilds the
 image nor rollout-restarts the Deployment its `removed.txt` pass deletes; and
 the `cc-graphiti-config` configmap and `cc-graphiti` Secret are tombstoned
-one release LATER, so the old updater's rollback (which re-applies the old
-manifests) still finds what the old Deployment mounts. The update itself is
-the normal one-click apply.
+one release LATER, so its rollback (which re-applies the v2.59.1 manifests)
+still finds what the old Deployment mounts.
 
-What the old updater cannot do, because its code predates the change — steps
-the operator runs ONCE after that update reports success (every later update
-does all of them itself, in `cc-update.sh`):
-
-```bash
-cd /home/codyslab/central-command
-.venv/bin/python scripts/apply_graphiti_patches.py      # the carried graphiti-core fixes
-./deploy/k3s/mint-keys.sh --scope-only                  # the app key gains graphiti-llm, cc-embedding, cc-rerank
-grep -q '^CC_GRAPH_RERANK_ALIAS=' .env || echo 'CC_GRAPH_RERANK_ALIAS=cc-rerank' >> .env
-sudo systemctl restart cc-uvicorn                       # picks up the rerank setting
-```
-
-Until then nothing is lost: without the patches the ingest worker REFUSES
-extraction and keeps approved episodes queued (it re-checks every minute, no
-restart needed); without the wider key graph reads and extraction get a 403,
-which the worker treats as transient; without the rerank setting graph search
-runs the RRF recipes instead of the `cc-rerank` cross-encoder. Once no
-rollback to the previous release is wanted, revoke the three retired key
-aliases (`graphiti-llm`, `graphiti-embeddings`, `graphiti-reranker`) in the
-LiteLLM UI; the `cc-graphiti:1.0.2-anthropic` image can then be removed from
-both nodes' containerd.
+Once no rollback to v2.59.x is wanted: revoke the three retired key aliases
+(`graphiti-llm`, `graphiti-embeddings`, `graphiti-reranker`) in the LiteLLM
+UI, and remove the `cc-graphiti:1.0.2-anthropic` image from both nodes'
+containerd. If the update's journal shows a WARNING from the patch step or
+the scope check, the matching command is
+`.venv/bin/python scripts/apply_graphiti_patches.py` or
+`./deploy/k3s/mint-keys.sh --scope-only` — until then extraction is held
+(jobs stay queued) or graph calls get a 403 the worker retries; nothing is
+lost.
 
 ## 1. Prerequisites & assumptions
 
