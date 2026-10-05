@@ -112,10 +112,86 @@ healthy() { # poll the API up to 2 minutes; it is the load-bearing process
 rebuild() { # as codyslab, never root
   "${RUNAS[@]}" env VIRTUAL_ENV="$REPO/.venv" PATH="/home/codyslab/.local/bin:$PATH" \
     bash -c "cd '$REPO' && uv pip install -e '.[dev,runtime]'" || return 1
+  patch_graphiti
   # `npm ci`, never `npm install`: install REWRITES package-lock.json when its
   # resolution differs (2026-08-29: one metadata line), leaving a dirty tracked
   # file that makes the NEXT run die at resolve's clean-tree check.
   "${RUNAS[@]}" bash -c "cd '$REPO/web' && npm ci && npm run build" || return 1
+}
+
+# The carried graphiti-core fixes (deploy/graphiti-patches/, design record
+# 2026-10-04 D7) go onto the installed package after EVERY dependency install,
+# because `uv pip install` puts back a pristine copy whenever it reinstalls the
+# package. In rebuild(), so the rollback's rebuild re-patches too — but a
+# rollback reinstalls the PREVIOUS release, which may predate graphiti-core and
+# the script, so an absent script is a skip, not a failure. A failure to patch
+# is a loud WARNING and never fails the update: everything but extraction runs
+# on an unpatched package, the ingest worker REFUSES extraction without the
+# fixes (jobs stay queued, nothing is lost) and the self-check's graph-patches
+# row names it — while a FAIL here would stop a merged tree mid-update with no
+# rollback. Fix the cause, then run the script by hand as the operator.
+patch_graphiti() {
+  [[ -f "$REPO/scripts/apply_graphiti_patches.py" ]] || return 0
+  if "${RUNAS[@]}" bash -c "cd '$REPO' && .venv/bin/python scripts/apply_graphiti_patches.py"; then
+    note "graphiti-core: carried fixes applied (or already present)"
+  else
+    note "WARNING: scripts/apply_graphiti_patches.py failed — graph extraction is held (jobs stay queued) until it succeeds; reads are unaffected"
+  fi
+  return 0
+}
+
+# Settings a release adds to the APP's .env (the repo-root one) with a value
+# this PROFILE needs, appended only when the key is ABSENT — an operator's own
+# value, an empty one included (an explicit "off"), is never touched — and only
+# when the tree on disk DECLARES the key in its .env.example: this table ships
+# one release ahead of the code that reads it (the v2.59.1 bridge), and a key
+# the running release does not know is never written. setup.sh's app phase
+# carries the same table from the release that reads the key, so a fresh
+# install and an updated one converge on the same file. Rows: KEY=VALUE.
+#   CC_GRAPH_RERANK_ALIAS=cc-rerank — this profile registers the cc-rerank
+#   cross-encoder; without the key graph search silently loses reranking
+#   (the retired Graphiti server set GRAPHITI_RERANK_MODEL in its manifest).
+APP_ENV_DEFAULTS=(
+  "CC_GRAPH_RERANK_ALIAS=cc-rerank"
+)
+ensure_app_env_defaults() {
+  local row key
+  [[ -f "$REPO/.env" ]] || { note "WARNING: $REPO/.env not found — no app settings added"; return 0; }
+  for row in "${APP_ENV_DEFAULTS[@]}"; do
+    key="${row%%=*}"
+    if ! grep -qE "^#? ?${key}=" "$REPO/.env.example" 2>/dev/null; then
+      note "app .env: $key is not declared by this release's .env.example — not added"
+    elif grep -q "^${key}=" "$REPO/.env"; then
+      note "app .env: $key already present — left alone"
+    else
+      # A file whose last line has no newline would glue the row onto it.
+      "${RUNAS[@]}" bash -c '[[ -s "$2" && -n "$(tail -c1 "$2")" ]] && printf "\n" >>"$2"; printf "%s\n" "$1" >>"$2"' _ "$row" "$REPO/.env" \
+        && note "app .env: added $row" \
+        || note "WARNING: could not add $row to $REPO/.env — add it by hand"
+    fi
+  done
+  return 0
+}
+
+# Bring an EXISTING install's configuration up to what the release ON DISK
+# expects, before the app starts on it: the app settings it added
+# (APP_ENV_DEFAULTS), and the scope of the app's own LiteLLM key, which must
+# reach every alias the app calls itself. `mint-keys.sh --scope-only` widens
+# it in place — never re-mints, never narrows — and is the MERGED tree's
+# script: a release whose mint-keys.sh has no such flag has nothing to widen,
+# and is skipped. Both WARN-only: a key that cannot be widened means graph
+# calls are refused with 403, which the ingest worker treats as transient
+# (jobs wait), and rolling the tree back would not fix a proxy-side refusal.
+reconcile_app_config() {
+  ensure_app_env_defaults
+  if ! grep -q -- '--scope-only' "$REPO/deploy/k3s/mint-keys.sh" 2>/dev/null; then
+    note "app key scope: this release's mint-keys.sh has no --scope-only — nothing to widen"
+  elif "${RUNAS[@]}" "$REPO/deploy/k3s/mint-keys.sh" --scope-only; then
+    note "app key scope checked"
+  else
+    note "WARNING: mint-keys.sh --scope-only failed — widen CC_LLM_API_KEY's models by hand in the LiteLLM UI (see its output above); graph calls 403 until then"
+  fi
+  return 0
 }
 
 # ── locally-built images ────────────────────────────────────────────────────
@@ -499,6 +575,12 @@ CM
   # above is the rollback for this step.
   PHASE_NOW=n8n; phase "applying n8n workflows (deploy/n8n/)"
   bash "$REPO/deploy/n8n/apply-workflows.sh" --k3s || die n8n "deploy/n8n/apply-workflows.sh failed — the n8n dump from the db-backup phase restores the previous workflows"
+
+  # After every file of the release is in place and before the app starts on
+  # it — the ingest worker starts with cc-uvicorn, so the patches (rebuild,
+  # above), the settings and the key scope must all be there first.
+  PHASE_NOW=reconcile; phase "reconciling app settings and the app key's scope"
+  reconcile_app_config
 
   PHASE_NOW=restart; phase "starting services"
   start_services || die restart "systemctl start failed"

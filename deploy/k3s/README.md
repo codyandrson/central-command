@@ -318,9 +318,16 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   failed build then costs no downtime at all — dumps the spine/litellm/n8n DBs
   plus their decryption keys (Neo4j is out of scope — nightly
   `cc-backup.timer` covers it), stops the services, merges the release
-  tag, applies schema, rebuilds AS codyslab, **applies changed `deploy/k3s/`
+  tag, applies schema, rebuilds AS codyslab (venv, cockpit — and, when the
+  release ships `scripts/apply_graphiti_patches.py`, graphiti-core's carried
+  fixes right after the install), **applies changed `deploy/k3s/`
   manifests and installs changed unit files (`daemon-reload`; a changed
-  `cc-update.service` takes effect next run)**, restarts, health-checks, and
+  `cc-update.service` takes effect next run)**, then — before the restart —
+  reconciles the app's configuration with the release (v2.59.1): appends each
+  `APP_ENV_DEFAULTS` setting the release's `.env.example` declares and `.env`
+  lacks (never one already present, an empty "off" included), and widens the
+  app key's scope with the release's `mint-keys.sh --scope-only` when it has
+  one; restarts, health-checks, and
   **rolls back automatically** if the new version is unhealthy — reset to the
   pre-update tag + rebuild, plus re-applying the checkpoint's manifests and
   retagging each node's preserved `…:pre-update-<stamp>` image back, for

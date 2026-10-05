@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-05 — v2.59.1: the updater learns the steps the next release needs
+
+A bridge release: nothing changes for a running deployment. The next release
+moves the knowledge graph's extraction and search into the application
+(graphiti-core as a library, no Graphiti server), and on the k3s profile the
+update INTO a release is run by the updater of the release it replaces —
+systemd runs the copy on disk, and the merge only replaces it for the next
+run. So what that update needs has to be in the updater one release earlier.
+v2.60.0 requires v2.59.1 (`min_upgrade_from`); the updater refuses the jump
+from anything older, before it changes anything.
+
+- **The patch step follows every dependency install.** When the release being
+  applied ships `scripts/apply_graphiti_patches.py`, `cc-update.sh` runs it
+  with the venv's Python right after `uv pip install` — in the forward pass
+  and in a rollback's rebuild. No script, no step: this release ships none,
+  and a rollback onto it finds none. A failure is a warning, never a stop.
+- **The app's configuration is reconciled before the services start.** A new
+  `reconcile` phase, after the units and the n8n workflows: each setting in
+  `APP_ENV_DEFAULTS` is appended to the app's `.env` when the key is absent
+  AND the release being applied declares it in `.env.example` (today one
+  row, `CC_GRAPH_RERANK_ALIAS=cc-rerank`, which no current release declares,
+  so nothing is written yet; an operator's own value, an empty one included,
+  is never touched); and the app key's LiteLLM scope is widened by the
+  release's own `mint-keys.sh --scope-only` when it has that flag (this
+  release's does not). Warnings only — a gap here holds graph work, it does
+  not stop an update half-way.
+- **Applying it:** the ordinary one-click update. On k3s it takes effect for
+  the update AFTER this one, which is the point. The single-node profile is
+  unchanged: its updater already runs the new release's own `setup.sh`.
+
 ## 2026-10-03 — v2.59.0: follow-ups leave the graph
 
 The executive assistant kept its follow-ups — commitments and open questions

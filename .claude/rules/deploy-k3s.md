@@ -60,6 +60,23 @@ when a matching file is read.
   day it is set, on every tailnet client. A ServiceLB service is linked as
   plain `http://<tailnet name>:<port>`; serve fronts only what is
   loopback-only on the host. `tests/test_systems_links_derived.py` pins it.
+- **What a release needs an EXISTING install to gain, the updater does — one
+  release AHEAD** (v2.59.1, the bridge into the Graphiti-library release).
+  The update INTO release N runs N-1's `cc-update.sh` (systemd runs the copy
+  on disk; the merge replaces it only for the next run), so a step N needs
+  ships in the updater of an earlier release and is keyed on what the MERGED
+  tree contains, never on a version number: `rebuild()` runs
+  `scripts/apply_graphiti_patches.py` after `uv pip install` when that script
+  exists (absent = skip; that is also what a rollback onto an older release
+  finds); `reconcile_app_config`, after the units and the n8n workflows and
+  BEFORE `start_services` (the ingest worker starts with cc-uvicorn), appends
+  each `APP_ENV_DEFAULTS` row only when `.env` lacks the key AND the merged
+  `.env.example` declares it (a running release never gets a key it does not
+  read), and runs the merged `mint-keys.sh --scope-only` only when that
+  script has the flag. All of it WARN-only: a `die` there stops a MERGED tree
+  with no rollback, while each gap only holds graph extraction or search.
+  The release that needs them sets `min_upgrade_from` to the bridge, which
+  the installed updater enforces at resolve. `tests/test_k3s_update_reconcile.py`.
 - **A long-running host unit `Wants=k3s.service`, never `Requires=` it.**
   `Requires=` ties the unit's start job to k3s's FIRST start attempt: when
   that fails at boot, systemd cancels the dependent once ("Dependency
