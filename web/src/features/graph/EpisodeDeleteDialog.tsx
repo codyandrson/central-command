@@ -145,7 +145,7 @@ export function EpisodeDeleteDialog({
                 {preview.episode.group_id}
                 {preview.episode.created_at && ` · ${localTime(preview.episode.created_at)}`}
               </div>
-              <p className="mt-1 whitespace-pre-wrap break-words text-foreground/90">{preview.episode.content}</p>
+              <p className="mt-1 whitespace-pre-wrap cockpit-wrap break-words text-foreground/90">{preview.episode.content}</p>
             </div>
             <p className="tabular-nums text-foreground" data-testid="delete-counts">
               Deletes the episode, {preview.facts.length} fact{preview.facts.length === 1 ? '' : 's'},{' '}

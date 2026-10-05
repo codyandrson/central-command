@@ -44,6 +44,7 @@ RUN_METHODS = {"run", "run_sync", "run_stream", "iter"}
 NOT_AN_AGENT = {
     "subprocess": "the stdlib process runner (api/update.py)",
     "session": "a Neo4j driver session (integrations/neo4j_reader.py, neo4j_writer.py)",
+    "tx": "a Neo4j managed transaction (neo4j_writer._write_tx — episode deletion)",
     "conn": "an asyncpg connection",
     "handler": "ingest/dispatcher.py's _KindHandler — its `.run` is the per-kind entrypoint",
     "spec": "heartbeat/actions.py's ActionSpec — its `.run` is the action body",

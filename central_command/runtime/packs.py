@@ -1971,6 +1971,11 @@ NON_ADVISORY_TOOLS = frozenset({
 # is named here, which is the safe direction.
 ADVISORY_DEFERRAL_TOOLS = frozenset({
     "propose_action",
+    # An episode deletion (v2.61.0) is the skill-draft case: the preview of
+    # what goes is captured INTO the proposal at propose time and the
+    # Executor recomputes it — nothing in it is specific to the run that
+    # drafted it. A consulted curator may draft one; the operator decides.
+    "propose_delete_episode",
     # propose_jira_update (dropped from every toolset 2026-08-21) was kept
     # here and in tools.py only as a stand-in for pre-drop consult-parked
     # proposals; the resume path is tool_call_id-based (see

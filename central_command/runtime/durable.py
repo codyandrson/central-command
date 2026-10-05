@@ -57,6 +57,7 @@ PROPOSE_TOOLS = frozenset(
         "propose_bulk_dismiss", "propose_mail_rule",
         "propose_report_spam", "propose_unsubscribe",
         "propose_mail_send", "propose_mail_move",
+        "propose_delete_episode",
     }
 )
 ASK_TOOLS = frozenset({"ask_operator"})

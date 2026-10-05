@@ -750,3 +750,14 @@ async def test_the_audit_reports_broken_provenance_beside_the_other_findings(mon
     assert set(health["broken_fact_provenance"][0]) == {
         "uuid", "name", "fact", "source_name", "target_name", "episodes", "missing_episodes"}
     assert set(health["stale_episode_fact_refs"][0]) == {"uuid", "name", "group_id", "missing_facts"}
+
+
+def test_every_pack_propose_tool_resumes_as_a_proposal():
+    """A propose_* tool the resume path does not classify parks as 'unknown'
+    and its approval never resumes the drafter — found while adding
+    propose_delete_episode (nothing else pinned the list)."""
+    from central_command.runtime import durable
+    from central_command.runtime.packs import PACKS
+
+    names = {t for p in PACKS.values() for t in p.tool_names if t.startswith("propose_")}
+    assert names - durable.PROPOSE_TOOLS == set()

@@ -1612,7 +1612,7 @@ async def _mcp_build_image(args: dict, approver: str, proposer: str | None) -> s
     # oci-archive over the ssh pipe straight into containerd's k8s.io
     # namespace — no intermediate file on either box, matching the
     # tar|ssh|podman idiom above; -n k8s.io is what makes the image visible
-    # to the kubelet (build-graphiti-image.sh / build-sandbox-image.sh).
+    # to the kubelet (build-sandbox-image.sh, build-crawler-image.sh).
     import_inner = (
         "podman save --format oci-archive " + ref
         + " | sudo k3s ctr -n k8s.io images import -"
