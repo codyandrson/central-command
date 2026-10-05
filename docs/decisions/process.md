@@ -182,13 +182,10 @@ hygiene, and how the test suite itself must be written. See
   library migration (2026-10-04) the client class is constructed by
   `integrations/graphiti_client.py` (DL-129) and the docstrings live in
   `integrations/graph_ontology.py` (DL-133); the rule — plain alias, built-in
-  docstrings — is unchanged. The image patches that the image-patch tests
-  below pin are FROZEN with `deploy/pi/graphiti/` and are deleted by the next
-  release, so `tests/test_graphiti_image_patches.py` is deliberately kept for
-  exactly one more release and then retires with them; the tests that carry
-  this rule forward are `tests/test_graph_ontology.py` and
-  `tests/test_litellm_policy.py`.
-- **Enforced:** test: `tests/test_graphiti_image_patches.py::test_the_entity_type_patch_keeps_the_builtin_docstring_and_drops_the_fields`, test: `tests/test_graphiti_image_patches.py::test_the_responses_client_pin_is_retired`, test: `tests/test_litellm_policy.py` and `tests/test_single_models_declaration.py` (plain prefix), script: `deploy/single/discover-llm.sh` (structured probe)
+  docstrings — is unchanged. The image patches and their pinning tests left
+  with `deploy/pi/graphiti/` in v2.61.0, one release after the server did;
+  the tests below carry the rule forward.
+- **Enforced:** test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin`, test: `tests/test_litellm_policy.py::test_graphiti_llm_is_a_plain_openai_alias`, test: `tests/test_graphiti_client.py::test_the_client_is_built_explicitly_and_issues_no_ddl` (the stock OpenAIGenericClient), test: `tests/test_single_models_declaration.py` (plain prefix), script: `deploy/single/discover-llm.sh` (structured probe)
 - **Source:** CHANGELOG v2.39.0
 - **Supersedes:** DL-055
 

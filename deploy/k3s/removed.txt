@@ -6,11 +6,14 @@
 # Format: <namespace> <kind> <name>
 central-command deployment cc-adminer
 # Design record 2026-10-04, D10: the Graphiti MCP server left the
-# deployment — graphiti-core runs inside the control plane now. Its configmap
-# (cc-graphiti-config) and Secret (cc-graphiti) are deliberately NOT here yet:
-# the previous release's updater rolls back by re-applying the previous
-# manifests, which recreate this Deployment and Service but not those two
-# (make-secrets.sh made them), so deleting them now would leave a rolled-back
-# graph server unable to start. They join this list one release later.
+# deployment — graphiti-core runs inside the control plane now. Its Deployment
+# and Service were tombstoned in v2.60.0; its configmap (cc-graphiti-config)
+# and Secret (cc-graphiti) follow here one release LATER, because the previous
+# updater's rollback re-applies the previous manifests, which recreate the
+# Deployment but not these two (make-secrets.sh made them), so deleting them a
+# release earlier would have left a rolled-back graph server unable to start.
+# make-secrets.sh no longer creates either.
 central-command deployment cc-graphiti
 central-command service graphiti
+central-command configmap cc-graphiti-config
+central-command secret cc-graphiti

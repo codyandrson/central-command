@@ -130,9 +130,7 @@ Treat every one as third-party documentation:
   `deploy/pi/.env` (secrets), `deploy/pi/litellm/` (the live LiteLLM
   policy) and `deploy/pi/cc-nerve.service` (still the live cockpit unit — it is
   installed FROM `deploy/pi/` by `deploy/k3s/README.md`'s own runbook) are
-  still read by `deploy/k3s/`; `deploy/pi/graphiti/` is the retired Graphiti
-  server's frozen build context, kept one release for the update across the
-  boundary. See `deploy/pi/README.md`.
+  still read by `deploy/k3s/`. See `deploy/pi/README.md`.
   Nothing in *this* `docs/` directory is used, including `install.sh` (49 KB).
 - **`docs/API.md` (2,125 lines), `ARCHITECTURE.md`, `CONFIGURATION.md`** —
   accurate for upstream's API surface, partially true here. The Central Command

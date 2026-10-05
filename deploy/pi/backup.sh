@@ -20,11 +20,10 @@
 #   gets pushed to GitHub.
 #
 #   Neo4j Community has no online backup, so the graph is a stop -> dump ->
-#   start cycle. Graphiti is stopped for the SAME window deliberately: with
-#   neo4j down it still ACKs add_memory {submitted:true} and the queued episode
-#   dies async and silently. Stopped, an in-window caller gets a loud transport
-#   error instead. (The lesson is the homelab's scripts/backup-db.sh 2.1
-#   review; it applies here unchanged.)
+#   start cycle. (This stack once stopped the Graphiti MCP server for the SAME
+#   window deliberately: with neo4j down it still ACKed add_memory and the
+#   queued episode died async and silently. The server left in v2.61.0 —
+#   graphiti-core runs inside the app now, with a durable ingest queue.)
 #
 #   Run nightly from cc-backup.timer. Exits NON-ZERO if any store failed, so a
 #   silent failure streak is impossible to mistake for success.
@@ -109,10 +108,8 @@ fi
 # --- Neo4j: offline dump -----------------------------------------------------
 neo4j_ok=0
 neo4j_was_running="$(docker inspect -f '{{.State.Running}}' cc-neo4j 2>/dev/null || echo false)"
-graphiti_was_running="$(docker inspect -f '{{.State.Running}}' cc-graphiti 2>/dev/null || echo false)"
 
 restore_graph_stack() {
-  [[ "$graphiti_was_running" == "true" ]] && docker start cc-graphiti >/dev/null 2>&1 9>&-
   [[ "$neo4j_was_running" == "true" ]] && docker start cc-neo4j >/dev/null 2>&1 9>&-
   return 0
 }
@@ -121,8 +118,7 @@ restore_graph_stack() {
 trap restore_graph_stack EXIT
 trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
 
-say "dumping neo4j (brief stop of cc-graphiti + cc-neo4j)…"
-[[ "$graphiti_was_running" == "true" ]] && docker stop -t 30 cc-graphiti >/dev/null 9>&-
+say "dumping neo4j (brief stop of cc-neo4j)…"
 [[ "$neo4j_was_running" == "true" ]] && docker stop -t 120 cc-neo4j >/dev/null 9>&-
 
 neo4j_file="${OUT}/neo4j_${STAMP}.dump.gz"
@@ -188,7 +184,7 @@ say "done → ${OUT}/ (retain ${RETAIN_DAYS}d, $(du -sh "$OUT" | cut -f1) total)
 #     sudo systemctl start cc-uvicorn
 #
 #   Neo4j — offline load, overwriting the store:
-#     docker compose -f deploy/pi/docker-compose.yml stop graphiti neo4j
+#     docker compose -f deploy/pi/docker-compose.yml stop neo4j
 #     gunzip -c neo4j_<stamp>.dump.gz | docker run --rm -i -v cc_neo4j_data:/data \
 #       --entrypoint neo4j-admin docker.io/library/neo4j:5.26.2 \
 #       database load neo4j --from-stdin --overwrite-destination=true

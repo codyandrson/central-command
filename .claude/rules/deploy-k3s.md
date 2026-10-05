@@ -79,9 +79,14 @@ when a matching file is read.
   changed input), tombstone the Deployment/Service now, and tombstone the
   make-secrets.sh objects it mounts (configmap, Secret) one release LATER —
   the old updater's rollback re-applies the old manifests, which recreate the
-  Deployment but not what it mounts. The next release, applied by the new
-  updater, deletes the frozen files. The Graphiti removal is the worked case
-  (`tests/test_graphiti_server_boundary.py`, `deploy/k3s/README.md` §0a).
+  Deployment but not what it mounts. The release after that, applied by an
+  updater that no longer has the rows, deletes the frozen files, adds the
+  configmap/Secret tombstones, and raises `min_upgrade_from` past the last
+  release whose updater still had them (an older install would otherwise
+  prebuild with a script that is gone). The Graphiti removal is the worked
+  case, now finished across v2.60.0 (server out, files frozen) and v2.61.0
+  (files deleted, configmap/Secret tombstoned): `tests/test_graphiti_server_boundary.py`,
+  `deploy/k3s/README.md` §0a.
   The steps the NEW release needs an existing install to gain (here: the
   graphiti-core patches, the app key's wider scope, `CC_GRAPH_RERANK_ALIAS`)
   ship one release earlier in a BRIDGE (v2.59.1, bullet below), and the new

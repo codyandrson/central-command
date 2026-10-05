@@ -182,7 +182,7 @@ def test_a_localhost_or_hostless_pin_is_not_a_registry():
     """`localhost/cc-sandbox:1` and a bare name have no registry to configure."""
     out = run("cc_pin_hosts", {
         "CC_TLS_INSECURE": "1",
-        "CC_IMG_A": "localhost/cc-graphiti:1.0.2-anthropic",
+        "CC_IMG_A": "localhost/cc-crawler:1",
         "CC_IMG_B": "postgres:16",
         "CC_IMG_C": "mirror.corp.example:5000/library/redis:7-alpine",
     })

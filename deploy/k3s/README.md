@@ -49,13 +49,15 @@ the services start it widens the app key's scope (`mint-keys.sh
 --scope-only`, the new release's script) and adds `CC_GRAPH_RERANK_ALIAS=
 cc-rerank` to the app's `.env` when the key is absent. Nothing to run by hand.
 
-The tree is also built to survive that updater's in-memory rows: the old
-image row's inputs (`deploy/pi/graphiti/`, `deploy/k3s/build-graphiti-image.sh`)
-are left byte-identical for this one release, so it neither rebuilds the
-image nor rollout-restarts the Deployment its `removed.txt` pass deletes; and
-the `cc-graphiti-config` configmap and `cc-graphiti` Secret are tombstoned
-one release LATER, so its rollback (which re-applies the v2.59.1 manifests)
-still finds what the old Deployment mounts.
+The tree was built to survive that updater's in-memory rows: the old image
+row's inputs (`deploy/pi/graphiti/`, `deploy/k3s/build-graphiti-image.sh`) were
+left byte-identical through v2.60.0, so it neither rebuilt the image nor
+rollout-restarted the Deployment its `removed.txt` pass deletes. v2.61.0,
+applied by v2.60.0's updater (which has no such rows), deleted those files and
+tombstoned the `cc-graphiti-config` configmap and `cc-graphiti` Secret — one
+release LATER than the Deployment, so v2.59.1's rollback (which re-applies the
+v2.59.1 manifests) still found what the old Deployment mounts. v2.61.0's
+`min_upgrade_from` is v2.60.0: an install still on v2.59.1 takes v2.60.0 first.
 
 Once no rollback to v2.59.x is wanted: revoke the three retired key aliases
 (`graphiti-llm`, `graphiti-embeddings`, `graphiti-reranker`) in the LiteLLM
@@ -207,8 +209,7 @@ Two images are built here, not pulled. Everything else is multi-arch upstream.
 ./deploy/k3s/build-crawler-image.sh     # chromebox only — slow, installs Chromium
 ```
 
-- (`build-graphiti-image.sh` is still in the tree for ONE release, unused and
-  byte-identical — see §0a. Do not run or edit it.)
+- (The Graphiti image and its build script left in v2.61.0 — see §0a.)
 - `cc-sandbox` and `cc-crawler` are chromebox-**required** (gVisor and Chromium
   live there), so they are single-arch by design.
 - **The `localhost/` trap:** podman tags local builds `localhost/<name>`; the

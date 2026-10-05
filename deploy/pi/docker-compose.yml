@@ -8,8 +8,8 @@
 #
 #     postgres  5442  the spine (state, ledger, event log)
 #     litellm   4000  LLM routing (+ its own postgres & redis)
-#     neo4j     7687  knowledge-graph backend
-#     graphiti  8000  MCP server the agents read and the Executor writes
+#     neo4j     7687  knowledge-graph backend (graphiti-core runs inside the app;
+#                     the Graphiti MCP server left this stack in v2.61.0)
 #     n8n       5678  the EMAIL facade only — it holds the Gmail OAuth
 #
 #   Deliberately NOT here: mattermost, the n8n worker + redis queue, n8n-mcp
@@ -132,10 +132,8 @@ services:
       # !! ANTHROPIC_API_KEY IS DELIBERATELY NOT PASSED IN (2026-07-26) !!
       # The Anthropic models resolve their key from the NAMED CREDENTIAL
       # `anthropic-main` (LiteLLM Credentials; models reference it via
-      # litellm_credential_name), so nothing here needs an ambient one. Note the
-      # env var IS still required by cc-graphiti further down — it is scoped out
-      # of THIS service only. It is absent here because LiteLLM treats it as a
-      # LAST-RESORT FALLBACK in two places that must never silently bill the operator's
+      # litellm_credential_name), so nothing here needs an ambient one. It is absent here because LiteLLM
+      # treats it as a LAST-RESORT FALLBACK in two places that must never silently bill the operator's
       # pay-per-token key:
       #   1. /anthropic/* passthrough injects it as x-api-key
       #      (pass_through_endpoints/passthrough_endpoint_router.py get_credentials),
@@ -201,76 +199,6 @@ services:
       - "127.0.0.1:7687:7687"
     healthcheck:
       test: ["CMD-SHELL", "wget -O /dev/null -q http://localhost:7474 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
-    networks: [cc-net]
-
-  # The service name MUST stay `graphiti`: the derived image patches FastMCP's
-  # DNS-rebinding allowlist to exactly {graphiti, localhost, 127.0.0.1}, and an
-  # unlisted Host header is answered with HTTP 421.
-  graphiti:
-    build: ./graphiti
-    image: cc-graphiti:1.0.2-anthropic
-    container_name: cc-graphiti
-    mem_limit: 1g   # blast-radius cap (2026-07-28) — see litellm
-    restart: always
-    environment:
-      - CONFIG_PATH=/app/mcp/config/config.yaml
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?set NEO4J_PASSWORD in deploy/pi/.env}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in deploy/pi/.env}
-      # EMBEDDINGS (migrated 2026-07-26): self-hosted Qwen3-Embedding-0.6B on
-      # The operator's workstation, reached through THIS Pi's LiteLLM so the endpoint,
-      # spend and any future failover stay in one place. The key is a LiteLLM
-      # virtual key scoped to the embedding group only — not the master key.
-      # Endpoint + credential only. The MODEL and DIMENSIONS are literals in
-      # graphiti/config.yaml on purpose — they must agree with each other and
-      # with the graph's stored vectors, so they don't belong in loose env.
-      - EMBEDDER_API_URL=${EMBEDDER_API_URL:-http://litellm:4000/v1}
-      - EMBEDDER_API_KEY=${EMBEDDER_API_KEY:?set EMBEDDER_API_KEY in deploy/pi/.env}
-      # The RERANKER now goes through LiteLLM too (2026-07-26). graphiti_core
-      # builds its cross-encoder as `OpenAIRerankerClient()` with no config, so
-      # AsyncOpenAI falls back to these two env vars — that is the only seam
-      # available without patching the image. The model it asks for is the
-      # hardcoded 'gpt-4.1-nano', mapped by model_group_alias in
-      # litellm/config.yaml to cc-default (the workstation's llama.cpp).
-      #
-      # The target MUST expose logprobs/top_logprobs: the reranker scores
-      # passages from token log-probabilities. Anthropic models cannot serve
-      # this at all, so cc-smart/claude-* are NOT valid targets here.
-      - OPENAI_BASE_URL=${RERANKER_API_URL:-http://litellm:4000/v1}
-      # OPENAI_API_KEY IS STILL REQUIRED — and NOT for embeddings.
-      #
-      # The long-standing comment here said "EMBEDDINGS ONLY", and spec Unit 3
-      # said to drop this once the embedder moved. Both were wrong: dropping it
-      # crash-looped cc-graphiti on startup (2026-07-26), because
-      # graphiti_core.Graphiti.__init__ unconditionally constructs an
-      # `OpenAIRerankerClient` cross-encoder, which raises if no key is present:
-      #
-      #   graphiti.py:224  self.cross_encoder = OpenAIRerankerClient()
-      #   openai/_client.py:514  OpenAIError: The api_key client option must be set
-      #
-      # It is the RERANKER's credential, not the embedder's. It now holds a
-      # LiteLLM virtual key (alias graphiti-reranker) rather than an OpenAI key,
-      # because OPENAI_BASE_URL above points the client at LiteLLM. The var name
-      # is dictated by the openai SDK's env fallback and cannot be renamed
-      # without patching graphiti_core.
-      - OPENAI_API_KEY=${RERANKER_API_KEY:?set RERANKER_API_KEY in deploy/pi/.env — LiteLLM key for the cross-encoder}
-      - GRAPHITI_TELEMETRY_ENABLED=false
-      # The Pi has 4 cores and shares them with k3s; keep extraction modest.
-      - SEMAPHORE_LIMIT=3
-    volumes:
-      - ./graphiti/config.yaml:/app/mcp/config/config.yaml:ro
-    ports:
-      - "127.0.0.1:8000:8000"
-    depends_on:
-      neo4j:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
