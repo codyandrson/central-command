@@ -666,3 +666,68 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_governance.py::test_the_graph_write_modules_are_banned_in_every_import_spelling`, test: `tests/test_governance.py::test_runtime_never_imports_the_gateway_tier`, test: `tests/test_governance.py::test_the_graph_read_module_reaches_its_client_only_lazily` and test: `tests/test_runtime_integration_reads.py::test_runtime_never_imports_a_write_only_integration`
 - **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D6); code comment `central_command/integrations/neo4j_reader.py`
 - **Supersedes:** (refines DL-103's list of banned modules; DL-103 stays active)
+
+### DL-135 — Deleting an episode is upstream's pinned rule, in one transaction of ours, through the group's queue
+
+- **Status:** active
+- **Date:** 2026-10-05
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**Deleting an episode is upstream's rule, in ONE transaction of ours, through the group's queue, against the set the operator approved**"
+- **Why:** `Graphiti.remove_episode` runs three separate auto-commit deletes
+  (facts, then entities in `CALL … IN TRANSACTIONS` batches, then the
+  episode), so a crash between them leaves half a deletion whose re-run reads
+  a different set; for a destructive operation atomicity is worth more than
+  reusing upstream's code, and the hash pin on the installed source keeps the
+  hand-written rule honest across upgrades. Running it as a `remove_episode`
+  job on the episode's group queue means it can never race an extraction in
+  that group, and a re-run of a committed deletion finishes DONE and repeats
+  only the idempotent provenance cleanup (which upstream omits).
+- **Enforced:** test: `tests/test_graph_delete_episode.py::test_our_deletion_rule_is_pinned_to_the_installed_remove_episode`, test: `tests/test_graph_delete_episode.py::test_the_deletion_removes_the_set_and_cleans_provenance`, test: `tests/test_graph_delete_episode.py::test_a_deletion_waits_behind_an_extraction_in_its_group` and test: `tests/test_graph_delete_episode.py::test_recovery_reruns_a_running_deletion_without_a_marker_lookup`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D9); CHANGELOG v2.61.0
+
+### DL-136 — A deletion's preview is captured at propose time and compared, never executed from
+
+- **Status:** active
+- **Date:** 2026-10-05
+- **Rule:** (recorded here) A `graph.delete_episode` proposal carries the
+  preview of what it deletes, captured by `propose_delete_episode`; the
+  Executor recomputes the preview and refuses (ExecutorError) when the set of
+  episode, fact and entity uuids differs, refuses a proposal that carries no
+  preview, and the deleting transaction compares a third time. The cockpit's
+  direct path confirms the preview's digest and gets a 409 when it is stale.
+- **Why:** The operator approves the LIST of what goes, not the agent's
+  description of it, and the world can change between propose and approve —
+  a world-state check, so it is Executor-only (the shape stays in
+  `contract.ARG_SPECS`, DL-010). Executing from the embedded copy would let a
+  graph that moved delete something nobody saw; deleting a smaller set
+  silently would mis-report what the approval did.
+- **Enforced:** test: `tests/test_graph_delete_episode.py::test_the_executor_refuses_when_the_set_changed`, test: `tests/test_graph_delete_episode.py::test_the_executor_refuses_a_proposal_that_carries_no_preview`, test: `tests/test_graph_delete_episode.py::test_a_changed_set_is_refused_and_nothing_is_deleted` and test: `tests/test_graph_delete_episode.py::test_a_stale_digest_is_refused_before_anything_is_queued`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D9); CHANGELOG v2.61.0
+
+### DL-137 — Hand-made writes have the installed bulk path's shape, guarded against the package
+
+- **Status:** active
+- **Date:** 2026-10-05
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**The bulk path's shape is canonical; a model's `save()` writes a different one.**"
+- **Why:** Every extracted object in the graph has the bulk shape, and our
+  curation Cypher has no upstream equivalent to lean on for update, merge or
+  move; deriving upstream's property sets from the installed package at test
+  time makes an upgrade that adds, renames or drops a property a failing test
+  instead of a second shape in the graph. The same release stopped writing
+  the `embedding_model`/`embedding_dimensions` stamp, which upstream's readers
+  surfaced as an attribute in agents' fact results.
+- **Enforced:** test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape`, test: `tests/test_graph_write_shape.py::test_vectors_are_stored_with_the_bulk_paths_procedures`, test: `tests/test_graph_write_shape.py::test_reads_take_the_relationship_as_truth` and test: `tests/test_graph_search_filters.py::test_fact_attributes_no_longer_carry_the_embedding_stamps`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D8); CHANGELOG v2.61.0
+
+### DL-138 — A date filter carries at most one parameter-bearing OR group per field
+
+- **Status:** active
+- **Date:** 2026-10-05
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**A Graphiti date filter takes at most ONE parameter-carrying OR group per field.**"
+- **Why:** graphiti-core names a date filter's query parameter by its
+  position inside its AND group only, so a second OR group with a compared
+  date overwrites the first group's value and the search silently filters on
+  the wrong instant. The parameterless `IS NULL` alternative is the only other
+  group allowed, because an open validity bound is how a still-current fact
+  is stored.
+- **Enforced:** test: `tests/test_graph_search_filters.py::test_a_date_field_never_has_two_parameter_carrying_or_groups` and test: `tests/test_graph_search_filters.py::test_two_parameter_groups_would_collide_which_is_why_we_never_build_them`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D6); CHANGELOG v2.61.0

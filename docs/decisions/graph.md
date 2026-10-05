@@ -11,9 +11,11 @@ how to add one.
 - **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**A Graphiti entity and edge each store their identity TWICE, and a hand-made write must set both halves.**"
 - **Why:** Not recorded beyond the stated mechanism: types live in real Neo4j
   labels AND an `n.labels` property; edge endpoints live in the relationship
-  AND in `source_node_uuid`/`target_node_uuid` properties, and the cockpit
-  draws from the PROPERTIES. Neo4j cannot repoint a relationship in place,
-  so a repoint is copy-then-delete.
+  AND in `source_node_uuid`/`target_node_uuid` properties (until v2.61.0 the
+  cockpit drew from the PROPERTIES; since then every read takes the
+  relationship as truth and the properties stay as the bulk shape's copy).
+  Neo4j cannot repoint a relationship in place, so a repoint is
+  copy-then-delete.
 - **Enforced:** discipline only — no guard test located this pass
 - **Source:** .claude/rules/graph.md
 
@@ -28,7 +30,7 @@ how to add one.
   everyone; a verification check that was itself off-by-one very nearly
   normalized exactly that mistake, so the write path now checks the size
   itself and refuses/drops anything that doesn't match.
-- **Enforced:** test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_dropped_not_stored` (a fake embedder, no live graph) and test: `tests/test_graph_embedding_width.py::test_every_text_changing_graph_write_re_embeds_and_stamps` (the walk over the write functions)
+- **Enforced:** test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_dropped_not_stored` (a fake embedder, no live graph) and test: `tests/test_graph_embedding_width.py::test_every_text_changing_graph_write_re_embeds` (the walk over the write functions)
 - **Source:** .claude/rules/graph.md
 
 ### DL-053 — The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1

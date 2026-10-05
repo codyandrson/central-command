@@ -18,9 +18,16 @@ when a matching file is read.
 - **A Graphiti entity and edge each store their identity TWICE, and a
   hand-made write must set both halves.** Types live in real Neo4j labels AND
   an `n.labels` property; edge endpoints live in the relationship AND in
-  `source_node_uuid`/`target_node_uuid` properties — the cockpit draws from
-  the PROPERTIES. Neo4j cannot repoint a relationship in place, so a repoint
-  is copy-then-delete (`integrations/neo4j_writer.py`). And **a node with no
+  `source_node_uuid`/`target_node_uuid` properties. Since v2.61.0 every READ
+  takes the relationship's real endpoints (`startNode`/`endNode`) and real
+  labels as truth, as upstream's own reads do; the properties stay WRITTEN
+  (they are the bulk shape) and only the audit's mismatch check reads them.
+  Neo4j cannot repoint a relationship in place, so a repoint is
+  copy-then-delete (`integrations/neo4j_writer.py`) — and **a copy that keeps
+  its uuid must delete its original IN THE SAME STATEMENT**, by the matched
+  variable: a second statement matching by uuid matches the copy too and
+  deletes both (rescope_episode lost every moved fact whose endpoint was
+  split, found on a scratch graph 2026-10-05). And **a node with no
   `name_embedding` is invisible to the semantic half of hybrid search** while
   still turning up in keyword hits — every write re-embeds through the
   `cc-embedding` alias at exactly 1024 dimensions; a mis-sized vector is
@@ -35,7 +42,53 @@ when a matching file is read.
   graph has the bulk shape, so moving curation onto `save()` would add a second
   shape, not remove one. Hand-made writes stay our own Cypher
   (`neo4j_writer`), which writes the bulk shape and has no upstream
-  equivalent to lean on for update, merge or move.
+  equivalent to lean on for update, merge or move. `tests/test_graph_write_shape.py`
+  derives the bulk path's property sets from the INSTALLED package (the dict
+  builders in `utils/bulk_utils.py`, the Neo4j bulk queries) and fails on any
+  difference not in its WHY-annotated allowlist — so a fact we create carries
+  `expired_at` (null) and `reference_time` like an extracted one, and vectors
+  go through `db.create.setNodeVectorProperty` / `setRelationshipVectorProperty`
+  like the bulk path's (the procedure REFUSES a null vector, so a degraded
+  write clears the property instead). No `embedding_model`/`embedding_dimensions`
+  stamp: upstream's readers turn any unknown property into an entity
+  ATTRIBUTE, which reached agents' fact results; old stamped rows are stripped
+  in `graphiti.fact_result`/`node_result`. Embeddings stay OUR request, not the
+  library's embedder: `OpenAIEmbedder.create` slices the vector to
+  `embedding_dim`, so a wrong-width model would be truncated into a
+  meaningless vector instead of being dropped.
+- **Deleting an episode is upstream's rule, in ONE transaction of ours,
+  through the group's queue, against the set the operator approved**
+  (`graph.delete_episode`, v2.61.0). The rule is `Graphiti.remove_episode`'s:
+  the facts among its `entity_edges` whose `episodes[0]` is this episode, the
+  entities exactly one MENTIONS reaches, and — because the node delete is
+  DETACH — every fact still attached to those entities (COLLATERAL, shown
+  separately). Plus the cleanup upstream omits: the dead uuid leaves every
+  surviving fact's `episodes`, deleted facts leave other episodes'
+  `entity_edges`. `tests/test_graph_delete_episode.py` pins the installed
+  `remove_episode` source by hash: if it fails after an upgrade, READ the new
+  rule and match it before re-pinning. Upstream runs three separate
+  auto-commit deletes (the node one in `CALL … IN TRANSACTIONS` batches), so a
+  crash between them leaves half a deletion whose re-run reads a different
+  set — ours computes, compares and deletes in one `execute_write`, so a
+  RUNNING `remove_episode` job is simply re-run (a gone episode finishes DONE
+  and still cleans up) and is never settled by the marker. The set is
+  computed THREE times — at propose (embedded in the proposal, the cockpit's
+  digest), at execute (the Executor refuses a change) and inside the deleting
+  transaction (the job FAILS rather than delete a different set). The patch
+  gate never holds a deletion back; a deletion still waits behind the
+  extraction ahead of it in its group. `remove_episode` trusts the ORDER of
+  `edge.episodes`: the graph audit lists facts whose list is empty or names a
+  missing episode — curate those before deleting near them.
+- **A Graphiti date filter takes at most ONE parameter-carrying OR group per
+  field.** `edge_search_filter_query_constructor` names a date parameter by
+  its position INSIDE its AND group (`valid_at_0`), so a second OR group with
+  a compared date silently overwrites the first one's value. The agent
+  filters (`graphiti.fact_filters`) build `[[IS NULL], [<op> instant]]` — the
+  parameterless `IS NULL` is what an open bound means (a fact with no
+  `invalid_at` is still true) — and `tests/test_graph_search_filters.py` runs
+  the library's own constructor over every window we build. A centre node
+  selects the node-distance recipes whatever the reranker; with no filter the
+  call is byte-identical to v2.60.0's.
 - **The suite may not write to the live graph** — through the library
   (`no_live_graph_writes` wraps the ONE builder,
   `graphiti_client.get_graphiti()`, so a real client's write methods refuse)

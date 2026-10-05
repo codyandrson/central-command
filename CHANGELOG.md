@@ -4,6 +4,97 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-05 — v2.61.0: an episode can be deleted, and agents can search by time, type and neighbourhood
+
+The second half of the move onto graphiti-core. An approved episode could be
+added to the graph and never taken back out: a wrong claim stayed, and its
+facts with it. Now the operator can delete an episode — from the episode walk
+or from an entity's source list — or approve a deletion the curator proposes,
+and in both cases sees exactly what will go before anything does. **Requires
+v2.60.0** (`min_upgrade_from`): an install must now step through each release
+tag in order (2.59.1 → 2.60.0 → 2.61.0).
+
+- **Deleting an episode, with a preview.** The rule is graphiti-core's own
+  `remove_episode`: the episode, the facts it was the first to create, the
+  entities no other episode mentions. Because those entities are deleted with
+  everything attached, other episodes' facts on them go too; the preview
+  lists them separately as collateral. It also lists the surviving facts that
+  will stop citing the episode — a cleanup upstream skips and we do. The
+  deletion runs as a job on the episode's group queue, so it never races an
+  extraction, and in a single transaction, so it happens whole or not at all.
+  If the graph changes between the preview and the deletion, nothing is
+  deleted: the Executor refuses, the job refuses, and the cockpit re-reads
+  the preview. It is irreversible; to restore an episode, propose it again.
+  - In the cockpit: "Delete episode" in the walk and beside each source
+    episode in the detail drawer. The dialog lists the counts, the facts and
+    entities, the collateral (flagged) and the facts that only lose the
+    citation, and asks for an explicit acknowledgement. After a deletion the
+    walk moves to the neighbouring episode. A deletion still waiting behind
+    earlier work in its group reads "queued".
+  - For agents: a gated `graph.delete_episode` in the curator's `graph-curate`
+    pack, proposed through `propose_delete_episode`, which puts the preview
+    in the proposal for the operator to approve.
+  - **Reworking an episode is a deletion plus a fresh episode** with the
+    corrected text. An episode is never edited in place, because its text is
+    what the operator approved. A wrong extraction of a right text is still
+    fixed with the curator's surgical edits.
+  - The record: `graph.curated` when the operator confirms, the proposal's
+    decision when one is approved, and `graph.episode.deleted` with every uuid
+    removed when the job finishes. A refused or failed deletion is
+    `graph.ingest.failed`. Verification rows that audited a deleted episode
+    are kept as they are; the Verify tab marks them "episode deleted", and
+    the sweep no longer reads a deleted episode as an extraction that
+    produced nothing.
+  - The graph audit gains two findings: facts whose source list is empty or
+    names an episode that no longer exists, and episodes whose fact list
+    names a fact that is gone. The deletion rule trusts each fact's first
+    source, so look at these before deleting around them.
+- **Agents can narrow a graph search.**
+  - **By time:** `as_of` (what was true at an instant), or `after`/`before`
+    (true at some point in a window). A fact with no recorded end counts as
+    still true.
+  - **By type:** entity search takes types from the ten ontology types; a
+    wrong name comes back with the list.
+  - **By neighbourhood:** both searches, and the curator's group search, can
+    rank by distance from one entity.
+  - With no filter, every search makes exactly the call it made before.
+- **Hand-made graph writes have the shape extraction writes, and a test
+  holds them to it.** The test derives the property sets from the installed
+  graphiti-core, so an upgrade that changes them fails the suite instead of
+  forking the graph. Facts made in the cockpit or by curation now carry
+  `expired_at` and `reference_time` like extracted ones. Vectors are stored
+  the way the library stores them. The `embedding_model`/
+  `embedding_dimensions` stamp is no longer written: graphiti-core reports
+  unknown properties as attributes, so it had been showing up in agents' fact
+  results; existing stamps are stripped from results.
+- **The cockpit reads a relationship's real endpoints.** Before, it read the
+  copy kept in the edge's properties. Both are still written, and the audit
+  still compares them.
+- **Fixed: moving an episode to another group could lose facts.** When an
+  episode moved and an entity it mentioned stayed behind as a split copy, the
+  facts on that entity were deleted instead of moved. Found while testing
+  this release on a scratch graph.
+- **The Graphiti server's leftovers are gone.** Its frozen image files and
+  build script are deleted, and its configmap and Secret are removed from the
+  cluster at the update. v2.60.0's updater, which applies this release, has
+  no row for any of them. Comments inside image build inputs and the LiteLLM
+  config that still name the server are left alone, because editing one
+  would rebuild an image or restart the proxy during the update.
+- **What an existing deployment does by hand:**
+  - **Grants:** nothing. `graph.delete_episode` is in the `graph-curate` pack
+    the curator already holds.
+  - **Curator charter:** an already-hired curator keeps the charter it has.
+    The new delete-and-rework guidance reaches it through the pack's text at
+    every run; for the charter itself, update it in the cockpit if you want
+    the new paragraph there too.
+  - **Skill text:** the graphiti skill's reference text in the tree describes
+    the filters and deletion. A deployment whose skills were imported earlier
+    keeps its imported copy until it is updated.
+  - **Before the first deletion:** run Graph → Audit and look at "Facts with
+    broken provenance".
+  - **Updating:** the ordinary one-click update from 2.60.0. On single node,
+    `./update.sh apply`.
+
 ## 2026-10-05 — v2.60.0: the knowledge graph runs in the application
 
 Extraction and search used to go through the stock Graphiti MCP server, a

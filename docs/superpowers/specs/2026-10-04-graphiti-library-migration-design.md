@@ -1,7 +1,7 @@
 # Graphiti as a library: the MCP server leaves, ingestion becomes durable, and the graph's shapes get one owner
 
-> **Status:** partial — release 1 (D1–D7, D10) shipped in v2.60.0 (2026-10-05); D8, D9 and agent search filters are release 2
-> **As-built:** `central_command/integrations/graphiti_client.py`, `central_command/integrations/graphiti.py`, `central_command/integrations/graphiti_ingest.py`, `central_command/integrations/graph_ontology.py`, `central_command/integrations/graphiti_patches.py`, `scripts/apply_graphiti_patches.py`, `deploy/graphiti-patches/`, `central_command/gateway/graph_auditor.py`, `central_command/db/schema.sql`, `deploy/k3s/cc-update.sh`, `deploy/k3s/mint-keys.sh`, `deploy/k3s/removed.txt`, `deploy/single/steps.tsv`, `tests/test_graph_ingest.py`, `tests/test_graphiti_client.py`, `tests/test_graphiti_server_boundary.py`, `tests/test_k3s_update_reconcile.py`
+> **Status:** partial — release 1 (D1–D7, D10) shipped in v2.60.0 and release 2 (D8, D9, agent search filters, the reader's canonical switch, D10's deferred deletions) in v2.61.0 (both 2026-10-05); the refreshed vendored graphiti documentation (D11) remains
+> **As-built:** `central_command/integrations/graphiti_client.py`, `central_command/integrations/graphiti.py`, `central_command/integrations/graphiti_ingest.py`, `central_command/integrations/graph_ontology.py`, `central_command/integrations/graphiti_patches.py`, `central_command/integrations/neo4j_reader.py`, `central_command/integrations/neo4j_writer.py`, `scripts/apply_graphiti_patches.py`, `deploy/graphiti-patches/`, `central_command/gateway/graph_auditor.py`, `central_command/gateway/executor.py`, `central_command/runtime/tools.py`, `central_command/db/schema.sql`, `deploy/k3s/cc-update.sh`, `deploy/k3s/mint-keys.sh`, `deploy/k3s/removed.txt`, `deploy/single/steps.tsv`, `web/src/features/graph/EpisodeDeleteDialog.tsx`, `tests/test_graph_ingest.py`, `tests/test_graphiti_client.py`, `tests/test_graphiti_server_boundary.py`, `tests/test_k3s_update_reconcile.py`, `tests/test_graph_delete_episode.py`, `tests/test_graph_write_shape.py`, `tests/test_graph_search_filters.py`
 
 ## The problem
 
@@ -224,6 +224,18 @@ agents in release 2. Date filters use a single OR group: the library names
 its filter parameters by position inside the AND group only, so several OR
 groups overwrite each other.
 
+As built (v2.61.0): `search_knowledge_graph` takes `as_of`, or
+`after`/`before` (ISO-8601, validated in the tool); `search_knowledge_graph_entities`
+takes `entity_types` (validated against the ontology, the valid names in the
+retry message); both — and the curator's `search_graph_group` — take
+`center_entity_uuid`, which selects the node-distance recipes whatever the
+reranker. The "single OR group" rule is enforced in its precise form: per
+date field, at most ONE OR group carries a compared date; the only other group
+is the parameterless `IS NULL`, because an open bound is how a still-current
+fact is stored (`invalid_at` null) and a window that excluded it would hide
+every current fact. The test runs the library's own constructor over every
+window built. With no filter the call is v2.60.0's exactly.
+
 ### D7. The two core fixes are patch files applied at install
 
 `deploy/graphiti-patches/` holds `1729-invalidation-scope.patch` and
@@ -280,6 +292,27 @@ bulk path does. Whether `embedding_model`/`embedding_dimensions` — which
 upstream's reads surface as entity attributes — stay on nodes is settled in
 release 2 against what `reembed_graph.py` needs.
 
+As built (v2.61.0): `tests/test_graph_write_shape.py` derives the bulk path's
+property sets for an entity, a fact, an episode and a MENTIONS edge from the
+installed package and compares what `neo4j_writer` writes; the allowlist of
+deliberate differences is empty. Facts gained `expired_at` (null) and
+`reference_time` (the provenance episode's instant); vectors are stored with
+the bulk path's procedures (a null vector clears the property instead — the
+procedure refuses null). Embeddings are still our own request, NOT the
+library's embedder: `OpenAIEmbedder.create` slices the vector to
+`embedding_dim`, which would turn a wrong-width model's vector into a
+truncated one instead of dropping it. The stamps are no longer written —
+nothing reads them but the re-embed migration, which writes its own and treats
+an unstamped row as pending, as it already did every extracted row — and
+`fact_result` strips any key containing "embedding" from a fact's attributes
+(the node result already did; the fact result leaked them). Every cockpit read
+takes `startNode`/`endNode` and real labels as truth; the duplicated
+properties are still written and only the audit's mismatch check reads them.
+Found on a scratch graph while doing this: `rescope_episode` deleted the copy
+of every moved fact whose endpoint was split (the copy kept the uuid and the
+delete matched by uuid); fixed by deleting the original in the same
+statement.
+
 ### D9. `graph.delete_episode`, through the same queue
 
 A new gated capability. The proposal carries, captured at propose time, what
@@ -300,6 +333,35 @@ edited in place, because its text is what the operator approved.
 ships, the live graph is checked for facts whose list is empty or was
 reordered by a past one-off script, and the cockpit's graph audit gains that
 check.
+
+As built (v2.61.0): the removal is NOT a call to upstream's `remove_episode`.
+That method runs three separate auto-commit deletes (the node one in
+`CALL … IN TRANSACTIONS` batches), so a crash between them leaves half a
+deletion whose re-run reads a different set. `neo4j_writer.delete_episode`
+computes upstream's rule (`neo4j_reader.compute_delete_preview`), compares it
+with the approved set, deletes and cleans up in ONE `execute_write`; a hash
+pin on the installed `remove_episode` source keeps the hand-written rule in
+step with upstream. Verified on a scratch Neo4j 5.26 against upstream's own
+`remove_episode` on the same fixture: identical survivors. The preview also
+lists COLLATERAL facts (not created by the episode, deleted because DETACH
+takes everything attached to a deleted entity) and the surviving facts that
+lose this provenance. The set is computed at propose time (embedded in the
+proposal; the cockpit confirms its digest), at execute time (the Executor
+refuses a change or a missing preview) and inside the deleting transaction
+(the job FAILS with `graph.ingest.failed` rather than delete a different
+set). The job is `kind='remove_episode'` on the group's queue: it waits behind
+earlier work in the group, the patch gate does not hold it, recovery re-runs
+a RUNNING one (a gone episode finishes DONE and still cleans up), and
+completion writes `graph.episode.deleted`. The operator's direct path
+(`DELETE /graph/episode`, from the episode walk or the drawer's source list)
+records `graph.curated` before queueing and waits a bounded time (202 when
+still queued). Verification rows are history: the sweep parks a row whose
+episode was deleted with `episode_deleted` instead of reading an empty
+delta, and the Verify tab marks such rows. The audit reports facts whose
+`episodes` is empty or names a missing episode, and episodes whose
+`entity_edges` names a missing fact. Not checked by this release: whether a
+past one-off script REORDERED a list (nothing records the original order);
+the live graph was not read for it here.
 
 ### D10. Removing the server from both substrates
 
@@ -338,6 +400,19 @@ check.
 - **Rollback** re-applies the previous manifests; the previous image is left
   on the nodes for that reason and is not garbage-collected by this release.
 
+As built, the second half (v2.61.0): v2.60.0's `cc-update.sh` — the updater
+that applies v2.61.0 — has no Graphiti image row and no Graphiti configmap
+row (its IMAGES are sandbox and crawler; its configmap rows are the LiteLLM
+config and the schema), so `deploy/pi/graphiti/` and
+`deploy/k3s/build-graphiti-image.sh` were deleted and the configmap
+`cc-graphiti-config` and Secret `cc-graphiti` joined `removed.txt`
+(`make-secrets.sh` stopped creating both in v2.60.0). `min_upgrade_from` is
+2.60.0: a 2.59.1 install still carries the image row in its updater's memory
+and would die at prebuild on the deleted build script, so it refuses at
+resolve instead — an install steps through each release tag in order. The
+single-node updater runs the new release's own `setup.sh`, which never
+referenced those paths.
+
 ### D11. Two releases
 
 1. **Parity cutover** — D1 to D7 and D10. Same behaviour, a durable queue,
@@ -351,7 +426,11 @@ check.
 2. **What the library makes possible** — D8, D9, search filters for agents,
    the reader's canonical switch, the refreshed vendored documentation
    (fetched from the graphiti repository at our pinned tag; the present
-   snapshot is mostly Zep Cloud pages).
+   snapshot is mostly Zep Cloud pages). Shipped in v2.61.0 with D10's
+   deferred deletions, EXCEPT the vendored documentation: `docs/vendor/` is
+   only ever regenerated by `scripts/vendor_docs_fetch.sh` (which also
+   regenerates its manifest), and that refetch was not part of this release.
+   It is what keeps this record `partial`.
 
 ## Not adopted
 
