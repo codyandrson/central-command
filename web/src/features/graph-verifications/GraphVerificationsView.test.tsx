@@ -45,6 +45,11 @@ function row(mechanical: VerificationMechanical): VerificationRow {
 }
 
 describe('mechanicalMessages', () => {
+  it('says a deleted episode was deleted, not that extraction produced nothing', () => {
+    expect(mechanicalMessages({ missing: false, episode_deleted: true }).map((f) => f.text))
+      .toEqual(['episode was deleted before it was audited']);
+  });
+
   it('words an ingest failure as FAILED and not retried, with the error as detail', () => {
     const flags = mechanicalMessages({ ingest_failed: true, error: 'JSONDecodeError: Unterminated string' });
     expect(flags).toEqual([

@@ -39,5 +39,6 @@ export function mechanicalMessages(m: VerificationRow['mechanical']): Mechanical
     out.push({ text: `${m.unembedded.length} entities unembedded (invisible to semantic recall)` });
   }
   if (m.no_approved_text) out.push({ text: 'no approved text on record' });
+  if (m.episode_deleted) out.push({ text: 'episode was deleted before it was audited' });
   return out;
 }

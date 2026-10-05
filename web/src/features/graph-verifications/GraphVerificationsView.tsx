@@ -183,6 +183,11 @@ function AwaitingCard({ row, confirm, problem }: {
         <p className="text-sm font-medium text-foreground">{row.episode_name}</p>
         <StatusChip status={row.status} />
         <VerdictChip verdict={row.verdict} />
+        {row.episode_deleted && (
+          <span className="cockpit-badge" title="This episode has since been deleted (graph.delete_episode); the row is kept as history">
+            episode deleted
+          </span>
+        )}
         {row.remediation_of && (
           <span className="cockpit-badge" data-tone="primary" title="Fresh read-back after an approved curation fix">
             re-check after fix
@@ -304,6 +309,7 @@ function HistoryRow({ row }: { row: VerificationRow }) {
     <li className="flex flex-wrap items-center gap-2 border-b border-border/20 px-1 py-1.5 text-[0.733rem] last:border-b-0">
       <span className="min-w-0 flex-1 truncate text-foreground/90">{row.episode_name}</span>
       <StatusChip status={row.status} />
+      {row.episode_deleted && <span className="cockpit-badge">episode deleted</span>}
       {row.closed_by && <span className="text-muted-foreground">by {row.closed_by}</span>}
       {row.problem_note && (
         <span className="min-w-0 max-w-[40ch] truncate text-muted-foreground" title={row.problem_note}>

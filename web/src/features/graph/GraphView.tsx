@@ -16,9 +16,12 @@ import expandCollapse from 'cytoscape-expand-collapse';
 import { Waypoints, Search, X, AlertTriangle, Plus, ShieldAlert, Boxes, Footprints } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { useGraph, type GraphNode, type GraphEdge, type GraphEpisode, type GraphGroupScope } from './useGraph';
+import {
+  useGraph, type GraphNode, type GraphEdge, type GraphEpisode, type GraphGroupScope, type EpisodeDeletePreview,
+} from './useGraph';
 import { AuditPanel } from './AuditPanel';
 import { EpisodeWalk } from './EpisodeWalk';
+import { EpisodeDeleteDialog } from './EpisodeDeleteDialog';
 import { communitiesFrom } from './clustering';
 
 cytoscape.use(fcose);
@@ -513,9 +516,11 @@ function EdgeEditor({ edge, curate, onDone }: {
 
 /** Side drawer: node/edge details + provenance. Overlays the canvas — never
  *  displaces the search panel or shifts layout. */
-function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onChange, groups, onRemoveFromCanvas }: {
+function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onChange, groups, onRemoveFromCanvas, onDeleteEpisode }: {
   selection: Selection;
   episodes: GraphEpisode[];
+  /** Opens the episode-deletion confirm dialog (which shows the preview). */
+  onDeleteEpisode: (episodeUuid: string) => void;
   onClose: () => void;
   entityTypes: string[];
   curate: Curation;
@@ -580,9 +585,18 @@ function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onCha
               <div className="space-y-2">
                 {episodes.map((ep) => (
                   <div key={ep.uuid} className="rounded-md border border-border/40 bg-muted/20 px-2.5 py-2 text-[0.7rem]">
-                    <div className="font-medium text-foreground">{ep.name}</div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-medium text-foreground">{ep.name}</div>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        className="shrink-0 text-destructive hover:text-destructive"
+                        title="Delete this source episode and what only it produced — shows exactly what goes first"
+                        onClick={() => onDeleteEpisode(ep.uuid)}
+                      >Delete episode</Button>
+                    </div>
                     <div className="text-muted-foreground">{ep.source_description}</div>
-                    {ep.valid_at && <div className="text-muted-foreground/80">{ep.valid_at}</div>}
+                    {ep.valid_at && <div className="text-muted-foreground/80">{new Date(ep.valid_at).toLocaleString()}</div>}
                     {ep.content_preview && (
                       <p className="mt-1 text-muted-foreground/90">{ep.content_preview}</p>
                     )}
@@ -725,6 +739,7 @@ export function GraphView() {
   const [truncated, setTruncated] = useState(false);
   const [clustered, setClustered] = useState(false);
   const [walking, setWalking] = useState(false);
+  const [deletingEpisode, setDeletingEpisode] = useState<string | null>(null);
   // Mirrors nodeDataRef as STATE, because the merge/relate pickers have to
   // re-render when the canvas gains a node; a ref alone never triggers that.
   const [loadedNodes, setLoadedNodes] = useState<GraphNode[]>([]);
@@ -1121,6 +1136,16 @@ export function GraphView() {
     setLoadedNodes([...nodeDataRef.current.values()]);
   }, [uncluster]);
 
+  /** A deletion from the drawer's provenance list landed: drop what it
+   *  removed off the canvas and re-read the selected node's provenance. */
+  const episodeDeleted = useCallback(async (preview: EpisodeDeletePreview) => {
+    for (const f of [...preview.facts, ...preview.collateral_facts]) {
+      await applyChange({ kind: 'edge-deleted', uuid: f.uuid });
+    }
+    for (const n of preview.entities) await applyChange({ kind: 'node-deleted', uuid: n.uuid });
+    if (selection?.kind === 'node') setEpisodes(await provenance(selection.node.uuid));
+  }, [applyChange, selection, provenance]);
+
   const createNode = useCallback(async (draft: GraphNode) => {
     const { uuid } = await graph.createNode({
       name: draft.name, labels: draft.labels,
@@ -1270,6 +1295,9 @@ export function GraphView() {
                 episodeSubgraph={graph.episodeSubgraph}
                 onLoad={loadEpisode}
                 onClose={() => setWalking(false)}
+                loadDeletePreview={graph.episodeDeletePreview}
+                deleteEpisode={graph.deleteEpisode}
+                onDeleted={() => { void fetchStatus(); }}
               />
             </Panel>
             <SplitSeparator inset={false} />
@@ -1315,6 +1343,15 @@ export function GraphView() {
             onChange={(change) => { void applyChange(change); }}
             groups={groupOptions}
             onRemoveFromCanvas={removeFromCanvas}
+            onDeleteEpisode={setDeletingEpisode}
+          />
+          <EpisodeDeleteDialog
+            episodeUuid={deletingEpisode}
+            open={deletingEpisode !== null}
+            onOpenChange={(open) => { if (!open) setDeletingEpisode(null); }}
+            loadPreview={graph.episodeDeletePreview}
+            deleteEpisode={graph.deleteEpisode}
+            onDeleted={(preview) => { void episodeDeleted(preview); }}
           />
         </Panel>
       </SplitGroup>

@@ -31,6 +31,9 @@ export interface VerificationMechanical {
   empty_delta?: boolean;
   unembedded?: string[];
   no_approved_text?: boolean;
+  /** v2.61.0: the episode was DELETED (graph.delete_episode) before the
+   *  sweep audited it — not an extraction that produced nothing. */
+  episode_deleted?: boolean;
 }
 
 export interface DeltaEntity {
@@ -100,6 +103,10 @@ export interface VerificationRow {
   /** Only present on `awaiting` rows — the operator's decision is "does the
    *  delta match THIS claim", so it must ride along with the row it explains. */
   approved_text?: string | null;
+  /** v2.61.0: the episode this row audited has since been deleted on
+   *  purpose (a DONE deletion job). The row is history and is never
+   *  rewritten; the card says so instead of pointing at a missing episode. */
+  episode_deleted?: boolean;
 }
 
 export interface VerificationsData {

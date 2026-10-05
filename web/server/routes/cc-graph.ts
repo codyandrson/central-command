@@ -57,6 +57,7 @@ app.get('/api/graph/status', rateLimitGeneral, (c) => proxyGet(c, '/graph/status
 app.get('/api/graph/audit', rateLimitGeneral, (c) => proxyGet(c, '/graph/audit'));
 app.get('/api/graph/episodes/index', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/index'));
 app.get('/api/graph/episodes/subgraph', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/subgraph'));
+app.get('/api/graph/episodes/delete-preview', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/delete-preview'));
 
 /** Proxy a body-carrying write, forwarding the JSON verbatim. */
 async function proxyBody(c: Context, method: 'POST' | 'PATCH', backendPath: string) {
@@ -121,6 +122,11 @@ app.post('/api/graph/edge', rateLimitGeneral, (c) => proxyBody(c, 'POST', '/grap
 app.patch('/api/graph/edge', rateLimitGeneral, (c) => proxyBody(c, 'PATCH', '/graph/edge'));
 app.delete('/api/graph/edge', rateLimitGeneral, (c) => proxyDelete(c, '/graph/edge'));
 app.post('/api/graph/merge', rateLimitGeneral, (c) => proxyBody(c, 'POST', '/graph/merge'));
+// Episode deletion (design record 2026-10-04, D9): the operator confirms the
+// preview's digest; the backend queues the deletion on the episode's group and
+// answers 200 when it finished or 202 {status: 'queued', job_id} when it is
+// still waiting its turn — both pass through as `result`.
+app.delete('/api/graph/episode', rateLimitGeneral, (c) => proxyDelete(c, '/graph/episode'));
 
 app.put('/api/graph/settings', rateLimitGeneral, async (c) => {
   try {

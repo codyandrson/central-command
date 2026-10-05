@@ -199,6 +199,39 @@ export function AuditPanel({ groupId, audit, onLoadNodes, onClose }: {
               ))}
             </div>
           </Section>
+
+          <Section
+            title="Facts with broken provenance"
+            count={report.health.counts.broken_fact_provenance ?? 0}
+            empty="Every fact names episodes that exist."
+          >
+            <div className="space-y-1">
+              {(report.health.broken_fact_provenance ?? []).map((f) => (
+                <div key={f.uuid} className="rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5 text-[0.7rem] text-muted-foreground">
+                  <span className="text-foreground">{f.source_name} → {f.target_name}:</span> {f.fact ?? f.name}
+                  <div>
+                    {f.episodes.length === 0
+                      ? 'cites no episode'
+                      : `cites ${f.missing_episodes.length} episode(s) that no longer exist`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section
+            title="Episodes naming missing facts"
+            count={report.health.counts.stale_episode_fact_refs ?? 0}
+            empty="Every episode's fact list resolves."
+          >
+            <div className="space-y-1">
+              {(report.health.stale_episode_fact_refs ?? []).map((ep) => (
+                <div key={ep.uuid} className="rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5 text-[0.7rem] text-muted-foreground">
+                  <span className="text-foreground">{ep.name}</span> ({ep.group_id}) — {ep.missing_facts.length} missing fact reference(s)
+                </div>
+              ))}
+            </div>
+          </Section>
         </div>
       )}
     </div>

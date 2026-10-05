@@ -56,6 +56,59 @@ export interface EpisodeSubgraph {
   edges: GraphEdge[];
 }
 
+/** One fact in a deletion preview (`/api/graph/episodes/delete-preview`). */
+export interface PreviewFact {
+  uuid: string;
+  name: string | null;
+  fact: string | null;
+  source: string | null;
+  source_name: string | null;
+  target: string | null;
+  target_name: string | null;
+}
+
+/** Exactly what deleting one episode removes — upstream's remove_episode
+ *  rule, computed by the backend (design record 2026-10-04, D9). */
+export interface EpisodeDeletePreview {
+  episode: {
+    uuid: string; name: string; group_id: string; content: string;
+    source_description: string | null; created_at: string | null; valid_at: string | null;
+  };
+  /** Facts this episode was the FIRST to create. */
+  facts: PreviewFact[];
+  /** Entities no other episode mentions. */
+  entities: { uuid: string; name: string; labels: string[]; group_id: string }[];
+  /** Facts NOT created by this episode that go anyway: an endpoint entity is deleted. */
+  collateral_facts: PreviewFact[];
+  /** Surviving facts that only lose this episode as a source. */
+  provenance_facts: PreviewFact[];
+  episodes_losing_fact_refs: string[];
+  /** What the operator confirms; a changed graph changes it. */
+  digest: string;
+}
+
+/** `DELETE /api/graph/episode`: finished, or queued behind its group. */
+export type EpisodeDeleteResult =
+  | { status: 'done'; job_id: number; result: Record<string, unknown> }
+  | { status: 'queued'; job_id: number; detail?: string };
+
+export interface AuditBrokenFact {
+  uuid: string;
+  name: string | null;
+  fact: string | null;
+  source_name: string | null;
+  target_name: string | null;
+  episodes: string[];
+  missing_episodes: string[];
+}
+
+export interface AuditStaleEpisode {
+  uuid: string;
+  name: string;
+  group_id: string;
+  missing_facts: string[];
+}
+
 export interface GraphGroupScope {
   id: string;
   scope: 'public' | 'private';
@@ -112,11 +165,17 @@ export interface GraphAudit {
     untyped_nodes: AuditHealthNode[];
     missing_embedding_nodes: AuditHealthNode[];
     dangling_edges: AuditDanglingEdge[];
+    /** v2.61.0: facts whose `episodes` is empty or names a missing episode. */
+    broken_fact_provenance?: AuditBrokenFact[];
+    /** v2.61.0: episodes whose `entity_edges` names a fact that is gone. */
+    stale_episode_fact_refs?: AuditStaleEpisode[];
     counts: {
       isolated_nodes: number;
       untyped_nodes: number;
       missing_embedding_nodes: number;
       dangling_edges: number;
+      broken_fact_provenance?: number;
+      stale_episode_fact_refs?: number;
     };
   };
 }
@@ -320,10 +379,19 @@ export function useGraph() {
     uuid: string; edges_moved: number; edges_discarded: number;
   }>('/api/graph/merge', 'POST', { keep_uuid, drop_uuid }), [write]);
 
+  // --- Episode deletion (v2.61.0) — THROWS, like the writes above: the
+  // dialog must show why a preview or a delete failed. --------------------
+  const episodeDeletePreview = useCallback((uuid: string) => fetchResult<EpisodeDeletePreview>(
+    `/api/graph/episodes/delete-preview?${new URLSearchParams({ uuid }).toString()}`), []);
+
+  const deleteEpisode = useCallback((uuid: string, digest: string) => write<EpisodeDeleteResult>(
+    `/api/graph/episode?${new URLSearchParams({ uuid, digest }).toString()}`, 'DELETE'), [write]);
+
   return {
     status, error, fetchStatus, search, neighborhood, provenance, saveSettings, loadAll, audit,
     episodeIndex, episodeSubgraph,
     entityTypes, createNode, updateNode, deleteNode,
     createEdge, updateEdge, deleteEdge, mergeNodes,
+    episodeDeletePreview, deleteEpisode,
   };
 }
