@@ -15,10 +15,30 @@ Never guess a uuid; read it here.
   `- <uuid> | <name>: <summary>`. Ask this when the question is about a *thing*
   ("what do you know about X"); a fact search alone returns fragments.
 
+Both take OPTIONAL narrowing (since v2.61.0); an ordinary search needs none:
+
+- **When** (facts): `as_of=<instant>` — only facts true at that instant; or
+  `after=` / `before=` — facts true at some point in that window (either
+  bound alone works). Not both kinds at once. Each is an ISO-8601 date or
+  date-time (`2025-03-01`, `2025-03-01T09:00:00Z`); a word like "today" is
+  refused — resolve it with `current_time` first. A fact with no recorded
+  start (or end) counts as open on that side, so a still-current fact is
+  found by `as_of=today`.
+- **What kind** (entities): `entity_types=[…]` from exactly the ten ontology
+  types — Person, Preference, Requirement, Procedure, Location, Event,
+  Organization, Document, Topic, Object. A wrong name is handed back with the
+  list.
+- **Around whom** (both): `center_entity_uuid=<uuid>` ranks results by graph
+  distance from one entity — a uuid a search already returned, never an
+  invented one. (A centred search does not use the cross-encoder reranker.)
+
 Holders of `graph-curate` (the curator) have three more, which see EVERY
 partition: `list_graph_groups`, `list_graph_group_episodes(group_id)` (episode
-uuids, for `graph.rescope_episode`) and `search_graph_group(group_id, query)`
-(facts and entities inside one group, uuids leading).
+uuids, for `graph.rescope_episode` and `propose_delete_episode`) and
+`search_graph_group(group_id, query, …)` (facts and entities inside one group,
+uuids leading; the same optional narrowing as above). The curator also holds
+`propose_delete_episode(episode_uuid, rationale)`, which reads exactly what a
+deletion removes and embeds it in the proposal (below).
 
 `search_tools` searches only skill reference material — a miss there never
 means a tool above is missing. Nothing else in this document is callable by
@@ -33,6 +53,20 @@ the gap.
 proposal you draft, which the Executor performs after the operator approves.
 The runtime tier **cannot** write even if approved by mistake — that is the
 trust boundary, not a convention.
+
+**Deleting and reworking an episode.** `graph.delete_episode` (v2.61.0)
+deletes an episode, the facts it was the FIRST to create, the entities no
+other episode mentions, and — because entities are detach-deleted — any other
+fact still attached to those entities (the "collateral", listed separately);
+surviving facts stop citing it. That is graphiti-core's own `remove_episode`
+rule plus one cleanup it omits, run in one transaction on the episode's group
+queue, so it never races an extraction. The proposal carries the preview;
+the Executor and the queue each recompute it and refuse if the set has
+changed — re-propose then. It is IRREVERSIBLE: restoring means proposing the
+episode again. An episode is never edited in place — its text is what the
+operator approved — so REWORKING one whose text was wrong is this deletion
+plus a fresh `graph.add_episode` with the corrected text. A wrong EXTRACTION
+of a right text is not a deletion; it is the curator's surgical edits.
 
 ## Degradation — a down graph must not wedge you
 
@@ -166,12 +200,15 @@ returning plausible-looking nonsense with no error anywhere. Investigated
   prefer a stop-writes-then-migrate window (dispatch off, no curation)
   rather than migrating under load.
 
-**Stamps:** every embedding write — the reembed script AND the curation
-writer (`neo4j_writer`) since v2.8.1 — records `embedding_model` +
-`embedding_dimensions` beside the vector; the script keys its resumability
-and `--verify` on them. Rows written before v2.8.1 are unstamped, so the
-first `--apply` after this release re-embeds them once and stamps them;
-from then on `--verify` is meaningful as a standing consistency check.
+**Stamps:** the reembed script records `embedding_model` +
+`embedding_dimensions` beside every vector it writes and keys its
+resumability and `--verify` on them. The curation writer stamped its own
+writes from v2.8.1 to v2.60.0 and no longer does (v2.61.0): extraction never
+stamps either, upstream's readers surface any unknown property as an entity
+attribute, and the stamps are stripped from search results. An unstamped
+row is simply "pending" to the script, so between migrations `--verify`
+reports every row written since the last run as unstamped — expected, not
+drift.
 
 ## Where knowledge comes from
 

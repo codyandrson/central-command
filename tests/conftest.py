@@ -175,13 +175,29 @@ def no_live_graph_writes():
             )
         return await real_write(query, **params)
 
+    # The writer's one transactional path (episode deletion, v2.61.0) is a
+    # second door to the same store, guarded the same way.
+    real_write_tx = neo4j_writer._write_tx
+
+    async def guarded_write_tx(work):
+        if os.getenv("CC_LIVE_GRAPH_TESTS") != "1":
+            raise AssertionError(
+                "a test opened a write transaction on the live knowledge graph "
+                "(neo4j_writer._write_tx). Replace it with a fake (see "
+                "tests/test_graph_delete_episode.py), or set CC_LIVE_GRAPH_TESTS=1 "
+                "to run a cleanup-after-itself live probe deliberately."
+            )
+        return await real_write_tx(work)
+
     graphiti_client.get_graphiti = guarded_get_graphiti
     neo4j_writer._write = guarded_write
+    neo4j_writer._write_tx = guarded_write_tx
     try:
         yield
     finally:
         graphiti_client.get_graphiti = real_get_graphiti
         neo4j_writer._write = real_write
+        neo4j_writer._write_tx = real_write_tx
 
 
 # ── the live-graph preflight (ledger F40) ───────────────────────────────────

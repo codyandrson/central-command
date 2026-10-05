@@ -36,9 +36,21 @@ API lifespan) runs graphiti-core's `add_episode` for each job:
   (the hold's "nothing new is scheduled"); an extraction already running is
   not waited for — if the update stops the process under it, the recovery
   above re-queues it, because its transaction never committed.
+* **Episode deletion rides the same queue** (`kind='remove_episode'`, design
+  record D9): a deletion queued in a group runs strictly after every
+  extraction queued before it there and before every one queued after, so it
+  can never race one. The job runs `neo4j_writer.delete_episode` — upstream's
+  rule plus our provenance cleanup in ONE transaction — and passes it the set
+  the operator approved, so a graph that moved since is REFUSED (permanent:
+  FAILED + `graph.ingest.failed`), never deleted differently. Recovery simply
+  re-queues a RUNNING delete: it committed whole or not at all, and a re-run
+  on an episode that is already gone finishes DONE and still does the
+  cleanup. The patch gate does not hold deletes back — the carried patches
+  concern extraction.
 
 Events (append-only, so written only where they say something the rows do
-not): `graph.ingest.failed` for every permanent failure (then the existing
+not): `graph.episode.deleted` when a deletion job finishes, naming every uuid
+it removed; `graph.ingest.failed` for every permanent failure (then the existing
 `graph.verification.parked` for the row it parks); `graph.ingest.deferred`
 on a job's FIRST transient failure only (later retries live on the row — an
 outage must not write a row per backoff tick); `graph.ingest.recovered` and
@@ -77,9 +89,16 @@ PATCH_RECHECK_SECONDS = 60.0
 STOP_TIMEOUT_SECONDS = 30.0
 ERROR_TEXT_LIMIT = 2000
 
+ADD = "add_episode"
+REMOVE = "remove_episode"
+
 
 class InvalidGroupId(ValueError):
     """A group id graphiti_core would refuse — permanent."""
+
+
+class UnknownJobKind(ValueError):
+    """A job row this release cannot run — permanent."""
 
 
 def _client():
@@ -110,7 +129,11 @@ def classify(exc: BaseException) -> str:
     """TRANSIENT or SEMANTIC for an ingest failure. graphiti_core's own error
     family (GroupIdValidationError, NodeNotFoundError, …) is permanent by
     type; everything else goes through the shared taxonomy."""
-    if isinstance(exc, InvalidGroupId):
+    if isinstance(exc, (InvalidGroupId, UnknownJobKind)):
+        return SEMANTIC
+    from central_command.integrations import neo4j_writer
+
+    if isinstance(exc, neo4j_writer.WriteError):  # PreviewChanged included
         return SEMANTIC
     try:
         import sys
@@ -153,29 +176,95 @@ async def enqueue(
     return {"verification": verification, "job": job}
 
 
+async def enqueue_delete(
+    episode_uuid: str, group_id: str, *, preview: dict, requested_by: str,
+    proposal_id: str | None = None,
+) -> dict:
+    """Queue the deletion of one episode on its group's queue. `preview` is
+    the one the deletion was approved against — the proposal's embedded
+    preview, or the cockpit's confirmed one; the worker deletes only if the
+    graph still matches it. Returns the job row."""
+    from central_command.integrations import neo4j_reader
+
+    sets = neo4j_reader.preview_sets(preview)
+    payload = {
+        "episode_uuid": episode_uuid,
+        "episode_name": (preview.get("episode") or {}).get("name"),
+        "expected": sets,
+        "digest": preview.get("digest"),
+        "requested_by": requested_by,
+    }
+    job = await repo.create_ingest_job(
+        verification_id=None, proposal_id=proposal_id, group_id=group_id,
+        payload=payload, kind=REMOVE,
+    )
+    worker.wake()
+    return job
+
+
+async def wait_for_job(job_id: int, timeout: float, poll: float = 0.25) -> dict | None:
+    """The job row once it is DONE or FAILED, or its current row when
+    `timeout` passes first — a bounded wait for the cockpit's direct delete."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        job = await repo.get_ingest_job(job_id)
+        if job is None or job["status"] in ("DONE", "FAILED") or time.monotonic() >= deadline:
+            return job
+        await asyncio.sleep(poll)
+
+
+def _deleter():
+    """The deletion primitive. THE seam tests replace."""
+    from central_command.integrations import neo4j_writer
+
+    return neo4j_writer.delete_episode
+
+
 # --- one job --------------------------------------------------------------------
+
+
+async def _run_remove(job: dict) -> dict:
+    payload = job["payload"]
+    expected = payload.get("expected") or {}
+    approved = {
+        "episode": {"uuid": expected.get("episode")},
+        "facts": [{"uuid": u} for u in expected.get("facts") or []],
+        "collateral_facts": [{"uuid": u} for u in expected.get("collateral_facts") or []],
+        "entities": [{"uuid": u} for u in expected.get("entities") or []],
+    } if expected else None
+    return await _deleter()(
+        payload["episode_uuid"], expected=approved,
+        known_dead_facts=list(expected.get("facts") or []) + list(expected.get("collateral_facts") or []),
+    )
 
 
 async def run_job(job: dict) -> str:
     """Run one CLAIMED (RUNNING) job to its next state. Returns
     'done' | 'deferred' | 'failed'. A CancelledError leaves the job RUNNING on
     purpose — the add_episode transaction may or may not have committed, and
-    only the marker can tell (`recover`)."""
+    only the marker can tell (`recover`); a delete committed whole or not at
+    all, and recovery re-runs it."""
     payload = job["payload"]
+    kind = job.get("kind") or ADD
     try:
         if not GROUP_ID.match(job["group_id"] or ""):
             raise InvalidGroupId(
                 f"group id {job['group_id']!r} is not letters, digits, '_' and '-' only"
             )
-        result = await _client().add_episode(
-            name=payload["name"],
-            episode_body=payload["episode_body"],
-            source_description=payload["source_description"],
-            reference_time=_reference_time(payload["reference_time"]),
-            source=_text_source(),
-            group_id=job["group_id"],
-            entity_types=graph_ontology.ENTITY_TYPES,
-        )
+        if kind == REMOVE:
+            removed = await _run_remove(job)
+        elif kind != ADD:
+            raise UnknownJobKind(f"unknown ingest job kind {kind!r}")
+        else:
+            result = await _client().add_episode(
+                name=payload["name"],
+                episode_body=payload["episode_body"],
+                source_description=payload["source_description"],
+                reference_time=_reference_time(payload["reference_time"]),
+                source=_text_source(),
+                group_id=job["group_id"],
+                entity_types=graph_ontology.ENTITY_TYPES,
+            )
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — every failure lands somewhere
@@ -187,6 +276,7 @@ async def run_job(job: dict) -> str:
                 await events.emit(
                     "graph.ingest.deferred", ref_id=job.get("verification_id") or f"ingest-job-{job['id']}",
                     payload={"job_id": job["id"], "proposal_id": job.get("proposal_id"),
+                             "kind": kind,
                              "group_id": job["group_id"], "error": _error_text(exc),
                              "retry_in_seconds": delay},
                     actor=ACTOR,
@@ -194,6 +284,22 @@ async def run_job(job: dict) -> str:
             return "deferred"
         await _fail(job, exc)
         return "failed"
+
+    if kind == REMOVE:
+        await repo.finish_ingest_job(
+            job["id"], episode_uuid=payload["episode_uuid"], result=removed,
+        )
+        # Bookkeeping of a completed deletion, after it: the AUTHORISATION
+        # was recorded before the job existed (the proposal's decision event,
+        # or the operator's `graph.curated` request).
+        await events.emit(
+            "graph.episode.deleted", ref_id=payload["episode_uuid"],
+            payload={"job_id": job["id"], "proposal_id": job.get("proposal_id"),
+                     "group_id": job["group_id"], "requested_by": payload.get("requested_by"),
+                     "episode_name": payload.get("episode_name"), **removed},
+            actor=ACTOR,
+        )
+        return "done"
 
     await repo.finish_ingest_job(
         job["id"],
@@ -211,10 +317,13 @@ async def _fail(job: dict, exc: BaseException) -> None:
     log.warning("graph ingest job %s FAILED (permanent): %s", job["id"], error)
     await repo.fail_ingest_job(job["id"], error=error)
     verification_id = job.get("verification_id")
-    episode_name = (job.get("payload") or {}).get("name")
+    payload = job.get("payload") or {}
+    episode_name = payload.get("name") or payload.get("episode_name")
     await events.emit(
         "graph.ingest.failed", ref_id=verification_id or f"ingest-job-{job['id']}",
         payload={"job_id": job["id"], "proposal_id": job.get("proposal_id"),
+                 "kind": job.get("kind") or ADD,
+                 "episode_uuid": payload.get("episode_uuid"),
                  "group_id": job["group_id"], "episode_name": episode_name,
                  "error": error, "error_type": type(exc).__name__,
                  "attempts": job.get("attempts")},
@@ -247,6 +356,13 @@ async def recover(exclude_ids: set[int] | frozenset[int] = frozenset()) -> dict:
     requeued: list[int] = []
     for job in await repo.running_ingest_jobs():
         if job["id"] in exclude_ids:
+            continue
+        if (job.get("kind") or ADD) == REMOVE:
+            # One transaction: it committed whole or not at all, and a re-run
+            # of a committed delete finishes DONE (the episode is gone) after
+            # repeating the idempotent cleanup. So: run it again.
+            await repo.requeue_ingest_job(job["id"])
+            requeued.append(job["id"])
             continue
         marker = job.get("marker") or (
             f"proposal={job['proposal_id']}" if job.get("proposal_id") else None
@@ -434,18 +550,22 @@ class IngestWorker:
         if hold.active:
             self._report(None, "held: an update is waiting")
             return []
+        kinds = None
         if not self._patches_gate():
             self._report(
                 "graphiti-core is missing the carried fixes (deploy/graphiti-patches) — "
                 "extraction REFUSED, jobs stay queued; run scripts/apply_graphiti_patches.py",
                 "blocked: patches absent",
             )
-            return []
-        claimed = await repo.claim_ingest_jobs(exclude_groups=list(self._jobs))
+            # The patches concern extraction; a deletion at the head of its
+            # group still runs (it waits behind an extraction like any job).
+            kinds = (REMOVE,)
+        claimed = await repo.claim_ingest_jobs(exclude_groups=list(self._jobs), kinds=kinds)
         for job in claimed:
             self._job_ids[job["group_id"]] = job["id"]
             self._jobs[job["group_id"]] = asyncio.create_task(self._run(job))
-        self._report(None, "running")
+        if kinds is None:
+            self._report(None, "running")
         return [j["id"] for j in claimed]
 
     async def _run(self, job: dict) -> None:

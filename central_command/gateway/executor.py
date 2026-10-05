@@ -429,6 +429,59 @@ async def _reverify_after_curation(args: dict) -> None:
     )
 
 
+async def _graph_delete_episode(args: dict, approver: str, proposer: str | None) -> str:
+    """graph.delete_episode (design record 2026-10-04, D9).
+
+    The proposal carries `preview` — exactly what the deletion removes,
+    captured by the propose tool at propose time and shown to the operator.
+    It is never executed from: this recomputes the preview from the graph
+    NOW and refuses when the set of episode/fact/entity uuids differs (a
+    world-state check, so Executor-only — `contract.ARG_SPECS` checks shape).
+    A proposal with no preview is refused too: the operator approved a
+    deletion without seeing what it deletes.
+
+    Then the deletion is queued on the episode's group (kind
+    `remove_episode`), so it runs strictly in order with that group's
+    extractions; the worker computes the set a THIRD time inside the deleting
+    transaction and refuses there if it moved again. Nothing here deletes."""
+    from central_command.integrations import graphiti_ingest, neo4j_reader
+
+    episode_uuid = args["episode_uuid"]
+    approved = args.get("preview")
+    if not isinstance(approved, dict) or not (approved.get("episode") or {}).get("uuid"):
+        raise ExecutorError(
+            "graph.delete_episode: the proposal carries no preview of what it deletes — "
+            "nothing was approved against; re-propose it with propose_delete_episode, "
+            "which captures the preview"
+        )
+    if approved["episode"]["uuid"] != episode_uuid:
+        raise ExecutorError(
+            f"graph.delete_episode: the preview is of episode {approved['episode']['uuid']!r}, "
+            f"not {episode_uuid!r}"
+        )
+    current = await neo4j_reader.episode_delete_preview(episode_uuid)
+    if current is None:
+        raise ExecutorError(
+            f"graph.delete_episode: no episode with uuid {episode_uuid} — it is already "
+            "gone; nothing to delete"
+        )
+    changes = neo4j_reader.preview_changes(approved, current)
+    if changes:
+        raise ExecutorError(
+            "graph.delete_episode: the graph changed since this deletion was proposed — "
+            "nothing was deleted; re-propose to see the current set: " + "; ".join(changes)
+        )
+    job = await graphiti_ingest.enqueue_delete(
+        episode_uuid, current["episode"]["group_id"], preview=current,
+        requested_by=approver, proposal_id=_current_proposal_id.get(),
+    )
+    return (
+        f"episode '{current['episode']['name']}' queued for deletion (ingest job {job['id']}): "
+        f"{len(current['facts'])} fact(s), {len(current['collateral_facts'])} collateral "
+        f"fact(s), {len(current['entities'])} entit(y/ies)"
+    )
+
+
 UNBOUNDED = "unbounded"
 
 
@@ -2263,6 +2316,7 @@ HANDLERS = {
     "confluence.set_labels": _confluence_set_labels,
     "confluence.create_space": _confluence_create_space,
     "graph.add_episode": _graph_add_episode,
+    "graph.delete_episode": _graph_delete_episode,
     "calendar.create_event": _calendar_create_event,
     "calendar.update_event": _calendar_update_event,
     "calendar.delete_event": _calendar_delete_event,

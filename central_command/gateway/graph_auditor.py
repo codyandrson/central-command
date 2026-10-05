@@ -382,6 +382,25 @@ async def verify_one(row: dict, model=None) -> str:
                 mechanical["error"] = reason
             return await _park_missing(row, mechanical)
 
+    # Deleted on purpose (graph.delete_episode) before this row was audited:
+    # say so, rather than reading the empty delta as an extraction that
+    # produced nothing.
+    deletion = await repo.episode_deletion_job(episode["uuid"])
+    if deletion is not None:
+        await repo.finish_graph_verification(
+            row["id"], status="AWAITING_OPERATOR", episode_uuid=episode["uuid"],
+            mechanical={"missing": False, "episode_deleted": True,
+                        "deletion_job": deletion["id"]},
+        )
+        await events.emit(
+            "graph.verification.parked", ref_id=row["id"],
+            payload={"proposal_id": row["proposal_id"], "episode_name": row["episode_name"],
+                     "mechanical": {"episode_deleted": True, "deletion_job": deletion["id"]},
+                     "verdict": None},
+            actor="graph-auditor",
+        )
+        return "awaiting"
+
     delta = await neo4j_reader.episode_delta(episode["uuid"])
     unembedded = [
         n.get("name") for n in delta.get("entities") or [] if not n.get("has_embedding")

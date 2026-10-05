@@ -4797,31 +4797,39 @@ async def create_graph_verification_with_job(
 
 async def create_ingest_job(
     *, verification_id: str | None, proposal_id: str | None, group_id: str, payload: dict,
+    kind: str = "add_episode",
 ) -> dict:
-    """One job for an EXISTING verification row — the cutover's enqueue."""
+    """One job outside the Executor's add-episode transaction: the cutover's
+    enqueue for an EXISTING verification row, or an episode deletion
+    (`kind='remove_episode'`, no verification row)."""
     conn = await _conn()
     try:
         row = await conn.fetchrow(
             """
-            insert into graph_ingest_job (verification_id, proposal_id, group_id, payload)
-            values ($1, $2, $3, $4::jsonb)
+            insert into graph_ingest_job (verification_id, proposal_id, group_id, payload, kind)
+            values ($1, $2, $3, $4::jsonb, $5)
             returning *
             """,
-            verification_id, proposal_id, group_id, json.dumps(payload),
+            verification_id, proposal_id, group_id, json.dumps(payload), kind,
         )
         return _ingest_job_row(row)
     finally:
         await conn.close()
 
 
-async def claim_ingest_jobs(exclude_groups: list[str] | tuple[str, ...] = ()) -> list[dict]:
+async def claim_ingest_jobs(
+    exclude_groups: list[str] | tuple[str, ...] = (),
+    kinds: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
     """Claim the HEAD of every group that can start now, flipping it RUNNING.
 
     The head of a group is its oldest non-terminal job (QUEUED or RUNNING, by
     id). A group whose head is RUNNING, or QUEUED but backing off
     (`not_before` in the future), yields nothing — later jobs wait behind it:
     strict per-group FIFO. FAILED and DONE are terminal and never block.
-    `exclude_groups` are groups this process is already running."""
+    `exclude_groups` are groups this process is already running. `kinds`
+    (None = any) claims only heads of those kinds — a head of another kind
+    still holds its group, so the order never changes."""
     conn = await _conn()
     try:
         async with conn.transaction():
@@ -4829,7 +4837,7 @@ async def claim_ingest_jobs(exclude_groups: list[str] | tuple[str, ...] = ()) ->
             rows = await conn.fetch(
                 """
                 with heads as (
-                    select distinct on (group_id) id, group_id, status, not_before
+                    select distinct on (group_id) id, group_id, status, not_before, kind
                       from graph_ingest_job
                      where status in ('QUEUED', 'RUNNING')
                      order by group_id, id
@@ -4842,9 +4850,10 @@ async def claim_ingest_jobs(exclude_groups: list[str] | tuple[str, ...] = ()) ->
                    and h.status = 'QUEUED'
                    and (h.not_before is null or h.not_before <= now())
                    and not (h.group_id = any($1::text[]))
+                   and ($2::text[] is null or h.kind = any($2::text[]))
                 returning j.*
                 """,
-                list(exclude_groups),
+                list(exclude_groups), None if kinds is None else list(kinds),
             )
         return sorted((_ingest_job_row(r) for r in rows), key=lambda r: r["id"])
     finally:
@@ -4971,6 +4980,41 @@ async def ingest_job_for_verification(verification_id: str) -> dict | None:
             verification_id,
         )
         return _ingest_job_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def episode_deletion_job(episode_uuid: str) -> dict | None:
+    """The DONE deletion job that removed this episode, or None — how the
+    verification sweep and the Verify tab tell "deleted on purpose" from
+    "extraction produced nothing"."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """select * from graph_ingest_job
+                where kind = 'remove_episode' and status = 'DONE'
+                  and payload->>'episode_uuid' = $1
+                order by id desc limit 1""",
+            episode_uuid,
+        )
+        return _ingest_job_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def deleted_episode_uuids(episode_uuids: list[str]) -> set[str]:
+    """Which of these episodes a DONE deletion job removed."""
+    if not episode_uuids:
+        return set()
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """select distinct payload->>'episode_uuid' as u from graph_ingest_job
+                where kind = 'remove_episode' and status = 'DONE'
+                  and payload->>'episode_uuid' = any($1::text[])""",
+            list(episode_uuids),
+        )
+        return {r["u"] for r in rows}
     finally:
         await conn.close()
 

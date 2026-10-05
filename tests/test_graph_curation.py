@@ -100,11 +100,11 @@ async def test_entity_types_are_written_to_both_places(live_graph):
     assert set(rows[0]["prop"]) == {"Entity", "Organization"}
 
 
-async def test_curation_writes_stamp_their_embeddings(live_graph):
-    """Every embedding a curation write stores carries the same
-    embedding_model/embedding_dimensions stamp reembed_graph.py keys its
-    resumability and --verify on — and a degraded write (no vector) carries
-    no stamp, so the invariant is stamp-iff-vector, not stamp-always."""
+async def test_curation_writes_carry_no_embedding_stamp(live_graph):
+    """Since v2.61.0 a curation write stores its vector the bulk path's way
+    and NO embedding_model/embedding_dimensions stamp: extraction never
+    stamps, upstream's readers turn unknown properties into attributes, and
+    only the re-embed migration (which writes its own) reads them."""
     a = await _node(live_graph, f"ZZ A {_uuid.uuid4()}", ["Person"])
     b = await _node(live_graph, f"ZZ B {_uuid.uuid4()}", ["Person"])
     edge = await neo4j_writer.create_edge(a, b, "KNOWS", "ZZ A knows ZZ B")
@@ -121,11 +121,7 @@ async def test_curation_writes_stamp_their_embeddings(live_graph):
     )
     row = rows[0]
     for kind in ("n", "e"):
-        if row[f"{kind}_vec"]:
-            assert row[f"{kind}_model"] == neo4j_writer._EMBED_MODEL
-            assert row[f"{kind}_dims"] == neo4j_writer._EMBED_DIMENSIONS
-        else:  # degraded write (embedder unreachable) — no stamp either
-            assert row[f"{kind}_model"] is None and row[f"{kind}_dims"] is None
+        assert row[f"{kind}_model"] is None and row[f"{kind}_dims"] is None
 
 
 async def test_repointing_an_edge_moves_the_relationship_and_its_properties(live_graph):
@@ -145,8 +141,8 @@ async def test_repointing_an_edge_moves_the_relationship_and_its_properties(live
     )
     assert len(rows) == 1, "repoint left a duplicate or lost the edge"
     row = rows[0]
-    # The cockpit draws from the PROPERTIES; Cypher traverses the relationship.
-    # They must agree, or the panel keeps rendering the old picture.
+    # Reads take the relationship; the properties are the bulk shape's copy
+    # and the audit's mismatch check reads them. They must agree.
     assert row["real_target"] == row["prop_target"] == c
     assert row["real_source"] == row["prop_source"] == a
 

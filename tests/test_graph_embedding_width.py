@@ -120,15 +120,20 @@ async def test_a_mis_sized_vector_is_dropped_not_stored(width, fake_embedder):
     )
 
 
-async def test_the_provenance_stamp_is_nulled_with_the_vector():
-    """A stamp beside a missing vector would claim an embedding that is not
-    there — and `scripts/oneoff/reembed_graph.py` keys its resumability and its
-    --verify on exactly these two properties."""
-    present = neo4j_writer._stamp_params([0.5] * settings.embed_dim)
-    assert present == {
-        "embed_model": settings.embed_alias, "embed_dims": settings.embed_dim,
-    }
-    assert neo4j_writer._stamp_params(None) == {"embed_model": None, "embed_dims": None}
+def test_a_vector_is_stored_the_bulk_way_and_a_missing_one_is_cleared():
+    """v2.61.0 (design record D8): a vector is stored with the bulk path's
+    procedure, and a degraded write CLEARS the property — a stale vector
+    beside changed text keeps matching the old text, and the procedure itself
+    refuses a null. (Until v2.60.0 an `embedding_model`/`embedding_dimensions`
+    stamp rode beside it; the writer no longer writes one —
+    tests/test_graph_write_shape.py.)"""
+    tail, params = neo4j_writer._vector("n", "name_embedding", "node", [0.5] * settings.embed_dim)
+    assert tail == " WITH n CALL db.create.setNodeVectorProperty(n, 'name_embedding', $vector)"
+    assert params == {"vector": [0.5] * settings.embed_dim}
+    tail, params = neo4j_writer._vector("e", "fact_embedding", "edge", [0.5])
+    assert "db.create.setRelationshipVectorProperty(e, 'fact_embedding', $vector)" in tail
+    assert neo4j_writer._vector("n", "name_embedding", "node", None) == (
+        " SET n.name_embedding = null", {})
 
 
 async def test_an_unreachable_embedder_degrades_the_write_rather_than_failing_it(monkeypatch):
@@ -163,14 +168,16 @@ NO_TEXT_TO_EMBED = {
     "delete_edge": "deletes; there is no text left to embed",
     "merge_nodes": "repoints relationships onto a node that already carries its own vector",
     "rescope_episode": "moves an episode between groups; name and fact are untouched",
+    "delete_episode": "deletes; there is no text left to embed",
 }
 
 
-def test_every_text_changing_graph_write_re_embeds_and_stamps():
+def test_every_text_changing_graph_write_re_embeds():
     """`create_node`, `create_edge`, `update_node`, `update_edge` — the four
     that write a name or a fact. Each must pass its new text through `embed()`
-    and write the stamp beside it, or the node goes into the graph invisible to
-    semantic search."""
+    and store the result through `_vector()` (the bulk path's procedure, or a
+    clear when the embedder was down), or the node goes into the graph
+    invisible to semantic search."""
     offenders = []
     for fn in _writer_functions():
         name = fn.name
@@ -182,17 +189,17 @@ def test_every_text_changing_graph_write_re_embeds_and_stamps():
             (c.func.attr if isinstance(c.func, ast.Attribute) else getattr(c.func, "id", None))
             for c in ast.walk(fn) if isinstance(c, ast.Call)
         }
-        if "embed" not in called or "_stamp_params" not in called:
+        if "embed" not in called or "_vector" not in called:
             offenders.append(
                 f"neo4j_writer.{name} (calls embed={'embed' in called}, "
-                f"_stamp_params={'_stamp_params' in called})"
+                f"_vector={'_vector' in called})"
             )
     assert sorted(offenders) == [], (
         "a graph write changes a node's name or an edge's fact without "
         "re-embedding it. The write will succeed and the row will look fine; "
         "it just stops answering the semantic half of hybrid search, keyword "
-        "hits masking the gap. Call `embed(...)` on the new text and splat "
-        "`**_stamp_params(vector)` into the same query — or, if the function "
+        "hits masking the gap. Call `embed(...)` on the new text and store it "
+        "with `_vector(...)` in the same query — or, if the function "
         "genuinely changes no embeddable text, add it to NO_TEXT_TO_EMBED with "
         f"the reason: {sorted(offenders)}"
     )

@@ -69,6 +69,15 @@ the approved text says — never more:
 - An episode in the wrong partition → graph.rescope_episode with the
   episode uuid and the target group_id (one proposal per episode; name the
   episode and both groups in your intent).
+- An episode whose approved TEXT was itself wrong (the operator says the
+  claim was mistaken, not that extraction garbled it) → propose its deletion
+  with propose_delete_episode: it captures exactly what will go (the facts
+  only this episode created, the entities nobody else mentions, and any
+  collateral) for the operator to approve. An episode is never edited in
+  place — its text is what the operator approved — so the corrected claim
+  is a fresh graph.add_episode — propose it too if you hold that
+  capability; if you do not, write the corrected text into your deletion's
+  intent and tell the operator it needs committing by an agent that does.
 
 Rules:
 - Fix only what the operator's request and the record support. If it is
@@ -79,8 +88,8 @@ Rules:
   for re-check. Operator-tasked work has none; do not invent one.
 - Cite the operator's note or request in your evidence; your expected_effect
   states what the graph should read AFTER the fix.
-- Never re-ingest to fix an EXTRACTION — a new episode re-rolls the same
-  dice. Fixes are deterministic edits; adding missed content is
+- Never re-ingest to fix an EXTRACTION, and never delete an episode to fix
+  one — a new episode re-rolls the same dice. Fixes are deterministic edits; adding missed content is
   graph.create_*, which writes the approved words directly; a wrong
   partition is graph.rescope_episode, which moves the record intact.
 - Use your graph read tools to inspect the CURRENT state before proposing:

@@ -432,6 +432,18 @@ PACKS: dict[str, Pack] = {
         name="graph-read",
         description="Search the team's shared knowledge graph (ungated read).",
         tool_names=("search_knowledge_graph", "search_knowledge_graph_entities"),
+        guidance=(
+            "SEARCHING THE GRAPH: both searches take optional narrowing, and an "
+            "ordinary search needs none of it. For WHEN — search_knowledge_graph "
+            "takes as_of (facts true at one instant) or after/before (facts true at "
+            "some point in a window), each an ISO-8601 date like 2025-03-01; call "
+            "current_time to resolve 'today' or 'last month' first. For WHAT KIND — "
+            "search_knowledge_graph_entities takes entity_types from exactly: Person, "
+            "Preference, Requirement, Procedure, Location, Event, Organization, "
+            "Document, Topic, Object. For AROUND WHOM — both take center_entity_uuid, "
+            "an entity uuid a search already returned (never an invented one), and "
+            "rank results by how close they sit to it."
+        ),
     ),
     "graph-propose": Pack(
         name="graph-propose",
@@ -522,7 +534,12 @@ PACKS: dict[str, Pack] = {
                        "teammate in 'for_agent' so it lands in THEIR partition, "
                        "not yours — omit it and 'private' means your own. The "
                        "scope is an operator-visible routing decision on the "
-                       "proposal, not something you can change after approval."),
+                       "proposal, not something you can change after approval. "
+                       "An approved episode is never edited in place — its "
+                       "text is what the operator approved. Correcting one "
+                       "whose TEXT was wrong is graph.delete_episode (the "
+                       "graph-curate pack) plus a fresh graph.add_episode "
+                       "with the corrected text."),
             ),
         ),
     ),
@@ -583,7 +600,7 @@ PACKS: dict[str, Pack] = {
         # private ones included — the one deliberate exception to D11-r1's
         # "never reads another agent's partition", granted by holding THIS
         # pack: a curator that cannot see the patient cannot operate.
-        tool_names=("propose_action", "list_graph_groups",
+        tool_names=("propose_action", "propose_delete_episode", "list_graph_groups",
                     "list_graph_group_episodes", "search_graph_group"),
         guidance=(
             "SCOPE: every episode, entity and relationship carries a "
@@ -596,7 +613,13 @@ PACKS: dict[str, Pack] = {
             "A mis-scoped doctrine is fixed by graph.rescope_episode on the "
             "episode, never by re-creating its nodes in another group. Use "
             "list_graph_groups → list_graph_group_episodes to inventory a "
-            "partition, and search_graph_group to read inside one."
+            "partition, and search_graph_group to read inside one. "
+            "REWORK: an episode is never edited in place — its text is what the "
+            "operator approved. When the approved TEXT itself was wrong, the fix is "
+            "graph.delete_episode (propose it with propose_delete_episode, which "
+            "captures what will go) plus a fresh graph.add_episode carrying the "
+            "corrected text; a wrong EXTRACTION of a right text is fixed with the "
+            "surgical edits below, never by deleting the episode."
         ),
         capabilities=(
             GatedCapability(
@@ -612,6 +635,20 @@ PACKS: dict[str, Pack] = {
                        "ones shared with a staying episode are split into a "
                        "copy in the target group. Nothing is deleted. Name the "
                        "episode and both groups in your intent."),
+            ),
+            GatedCapability(
+                name="graph.delete_episode",
+                arguments=("{'episode_uuid': '<episode>', 'preview': <captured for "
+                           "you>} — propose ONLY through propose_delete_episode"),
+                notes=("reversibility = 'irreversible'. Deletes the episode, the "
+                       "facts it was FIRST to create, the entities no other "
+                       "episode mentions, and every fact still attached to those "
+                       "entities (shown as collateral); surviving facts stop "
+                       "citing it. propose_delete_episode reads that set and puts "
+                       "it in the proposal; the deletion is refused if the graph "
+                       "changes before it runs — re-propose then. For a doctrine "
+                       "in the wrong partition use graph.rescope_episode, which "
+                       "deletes nothing."),
             ),
             GatedCapability(
                 name="graph.create_node",

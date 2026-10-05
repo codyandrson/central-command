@@ -207,6 +207,31 @@ REGISTRY: list[Capability] = [
         description="Move an episode to the group it should have been committed to (2026-09-01).",
     ),
     Capability(
+        name="graph.delete_episode",
+        kind="write",
+        gate="human approval",
+        risk=(
+            "IRREVERSIBLE — the episode's text is deleted, with the facts it was "
+            "first to create, the entities no other episode mentions, and every "
+            "fact still attached to those entities; restoring it means "
+            "re-proposing the episode as a new graph.add_episode"
+        ),
+        holder="Executor",
+        route=(
+            "durable ingest queue (kind remove_episode, in the episode's group) → "
+            "neo4j_writer.delete_episode (bolt; upstream remove_episode's rule plus "
+            "provenance cleanup, one transaction)"
+        ),
+        arguments=["episode_uuid", "preview (captured at propose time; compared, never executed)"],
+        description=(
+            "Delete an episode and what only it produced (design record "
+            "2026-10-04, D9). The proposal carries the preview the operator "
+            "approves; the Executor and the queue each recompute it and refuse "
+            "if the set to delete has changed. Reworking an episode is this plus "
+            "a fresh graph.add_episode with the corrected text."
+        ),
+    ),
+    Capability(
         name="catalog.tag",
         kind="write",
         gate="human approval",

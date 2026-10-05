@@ -16,11 +16,19 @@ port-forward of svc/neo4j 7687 to 127.0.0.1 ONLY (Restart=always) — the
 cc-neo4j Service itself stays ClusterIP-only. A dropped forward is a normal
 outage-equivalent state (pod moved, service restarting), never a 500: every
 read here degrades to "unavailable" rather than raising past the route.
+
+**The relationship's real endpoints are the truth** (design record
+2026-10-04, D8, as upstream's own reads do): every edge read here takes its
+source/target from `startNode(e)`/`endNode(e)` and every type from the real
+labels. The `source_node_uuid`/`target_node_uuid` properties are still WRITTEN
+(the bulk shape carries them) but read only by the audit's mismatch check.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 
 from neo4j import READ_ACCESS, AsyncGraphDatabase
@@ -107,8 +115,8 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
             MATCH (n:Entity {uuid: $uuid})-[e:RELATES_TO]-(m:Entity)
             WHERE (e.valid_at IS NULL OR e.valid_at <= datetime($at))
               AND (e.invalid_at IS NULL OR e.invalid_at > datetime($at))
-            RETURN DISTINCT e.uuid AS uuid, e.source_node_uuid AS source,
-                   e.target_node_uuid AS target, e.name AS name, e.fact AS fact,
+            RETURN DISTINCT e.uuid AS uuid, startNode(e).uuid AS source,
+                   endNode(e).uuid AS target, e.name AS name, e.fact AS fact,
                    e.valid_at AS valid_at, e.invalid_at AS invalid_at,
                    e.created_at AS created_at,
                    m.uuid AS neighbor_uuid, m.name AS neighbor_name,
@@ -122,8 +130,8 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
         edge_rows = await _read(
             """
             MATCH (n:Entity {uuid: $uuid})-[e:RELATES_TO]-(m:Entity)
-            RETURN DISTINCT e.uuid AS uuid, e.source_node_uuid AS source,
-                   e.target_node_uuid AS target, e.name AS name, e.fact AS fact,
+            RETURN DISTINCT e.uuid AS uuid, startNode(e).uuid AS source,
+                   endNode(e).uuid AS target, e.name AS name, e.fact AS fact,
                    e.valid_at AS valid_at, e.invalid_at AS invalid_at,
                    e.created_at AS created_at,
                    m.uuid AS neighbor_uuid, m.name AS neighbor_name,
@@ -200,8 +208,8 @@ async def everything(group_id: str | None, limit: int, at: str | None = None) ->
         WHERE ($group_id IS NULL OR (a.group_id = $group_id AND b.group_id = $group_id))
           AND ($at IS NULL OR ((e.valid_at IS NULL OR e.valid_at <= datetime($at))
                AND (e.invalid_at IS NULL OR e.invalid_at > datetime($at))))
-        RETURN e.uuid AS uuid, e.source_node_uuid AS source,
-               e.target_node_uuid AS target, e.name AS name, e.fact AS fact,
+        RETURN e.uuid AS uuid, a.uuid AS source,
+               b.uuid AS target, e.name AS name, e.fact AS fact,
                e.valid_at AS valid_at, e.invalid_at AS invalid_at,
                e.created_at AS created_at
         LIMIT $limit
@@ -308,7 +316,7 @@ async def episode_subgraph(uuid: str) -> dict | None:
         """
         MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity)
         WHERE $uuid IN e.episodes
-        RETURN e.uuid AS uuid, e.source_node_uuid AS source, e.target_node_uuid AS target,
+        RETURN e.uuid AS uuid, a.uuid AS source, b.uuid AS target,
                e.name AS name, e.fact AS fact, e.valid_at AS valid_at,
                e.invalid_at AS invalid_at, e.created_at AS created_at
         """,
@@ -724,6 +732,27 @@ async def audit(group_id: str | None, threshold: float) -> dict:
         group_id=group_id,
     )
 
+    # Provenance integrity (design record 2026-10-04, D9). Deleting an episode
+    # trusts each fact's `episodes` list — its FIRST entry decides who created
+    # the fact — so a fact whose list is empty, or names an episode that no
+    # longer exists, is a fact no deletion will ever account for correctly;
+    # and an episode whose `entity_edges` names a fact that is gone is a stale
+    # reference the same rule would read.
+    broken_fact_rows = await _read(
+        AUDIT_BROKEN_FACT_PROVENANCE + " RETURN " + AUDIT_BROKEN_FACT_FIELDS + " LIMIT 50",
+        group_id=group_id,
+    )
+    broken_fact_count = await _read(
+        AUDIT_BROKEN_FACT_PROVENANCE + " RETURN count(e) AS c", group_id=group_id,
+    )
+    stale_ref_rows = await _read(
+        AUDIT_STALE_EPISODE_REFS + " RETURN " + AUDIT_STALE_EPISODE_FIELDS + " LIMIT 50",
+        group_id=group_id,
+    )
+    stale_ref_count = await _read(
+        AUDIT_STALE_EPISODE_REFS + " RETURN count(ep) AS c", group_id=group_id,
+    )
+
     return {
         "duplicate_entities": duplicate_entities,
         "duplicate_edges": duplicate_edges,
@@ -732,14 +761,45 @@ async def audit(group_id: str | None, threshold: float) -> dict:
             "untyped_nodes": untyped_nodes,
             "missing_embedding_nodes": missing_embedding_nodes,
             "dangling_edges": dangling_edges,
+            "broken_fact_provenance": broken_fact_rows,
+            "stale_episode_fact_refs": stale_ref_rows,
             "counts": {
                 "isolated_nodes": isolated_count[0]["c"] if isolated_count else 0,
                 "untyped_nodes": untyped_count[0]["c"] if untyped_count else 0,
                 "missing_embedding_nodes": missing_embedding_count[0]["c"] if missing_embedding_count else 0,
                 "dangling_edges": dangling_count[0]["c"] if dangling_count else 0,
+                "broken_fact_provenance": broken_fact_count[0]["c"] if broken_fact_count else 0,
+                "stale_episode_fact_refs": stale_ref_count[0]["c"] if stale_ref_count else 0,
             },
         },
     }
+
+
+AUDIT_BROKEN_FACT_PROVENANCE = """
+MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity)
+WHERE ($group_id IS NULL OR (a.group_id = $group_id AND b.group_id = $group_id))
+WITH a, b, e, coalesce(e.episodes, []) AS eps
+OPTIONAL MATCH (ep:Episodic) WHERE ep.uuid IN eps
+WITH a, b, e, eps, collect(ep.uuid) AS present
+WITH a, b, e, eps, [x IN eps WHERE NOT x IN present] AS missing
+WHERE size(eps) = 0 OR size(missing) > 0
+"""
+AUDIT_BROKEN_FACT_FIELDS = (
+    "e.uuid AS uuid, e.name AS name, e.fact AS fact, a.name AS source_name, "
+    "b.name AS target_name, eps AS episodes, missing AS missing_episodes"
+)
+AUDIT_STALE_EPISODE_REFS = """
+MATCH (ep:Episodic)
+WHERE ($group_id IS NULL OR ep.group_id = $group_id)
+  AND size(coalesce(ep.entity_edges, [])) > 0
+UNWIND ep.entity_edges AS fid
+OPTIONAL MATCH ()-[r:RELATES_TO {uuid: fid}]->()
+WITH ep, fid, r WHERE r IS NULL
+WITH ep, collect(fid) AS missing
+"""
+AUDIT_STALE_EPISODE_FIELDS = (
+    "ep.uuid AS uuid, ep.name AS name, ep.group_id AS group_id, missing AS missing_facts"
+)
 
 
 async def counts() -> dict:
@@ -758,3 +818,175 @@ async def counts() -> dict:
         "node_count": row["node_count"], "edge_count": row["edge_count"],
         "group_ids": row["group_ids"],
     }
+
+
+# --- what deleting an episode removes (design record 2026-10-04, D9) ----------
+# ONE rule, used three ways: the propose tool embeds this preview in a
+# `graph.delete_episode` proposal, the Executor recomputes it and refuses when
+# it changed, and the ingest worker computes it again INSIDE the deleting
+# transaction (`neo4j_writer.delete_episode`) and refuses there too. The rule
+# is upstream's `Graphiti.remove_episode` (graphiti_core/graphiti.py), pinned
+# by tests/test_graph_delete_episode.py so an upgrade that changes it fails
+# the suite:
+#
+#   * the facts it deletes are those among the episode's `entity_edges` whose
+#     `episodes[0]` is this episode — the facts it was FIRST to create;
+#   * the entities it deletes are those it MENTIONS that exactly one MENTIONS
+#     relationship reaches (count(*) == 1 — this episode's own);
+#   * Node.delete DETACH DELETEs, so every RELATES_TO still attached to a
+#     deleted entity goes with it — listed here separately as COLLATERAL,
+#     because those facts were not this episode's to delete and the operator
+#     must see them;
+#   * one cleanup upstream omits: the dead uuid leaves the `episodes` list of
+#     every surviving fact (`provenance_facts`), and a deleted fact's uuid
+#     leaves every other episode's `entity_edges`.
+
+PREVIEW_EPISODE = """
+MATCH (e:Episodic {uuid: $uuid})
+RETURN e.uuid AS uuid, e.name AS name, e.content AS content, e.group_id AS group_id,
+       e.source_description AS source_description, e.created_at AS created_at,
+       e.valid_at AS valid_at, coalesce(e.entity_edges, []) AS entity_edges
+"""
+# `EntityEdge.get_by_uuids` matches (n:Entity)-[e:RELATES_TO]->(m:Entity).
+PREVIEW_EDGES = """
+MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+WHERE r.uuid IN $uuids
+RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
+       coalesce(r.episodes, []) AS episodes,
+       a.uuid AS source, a.name AS source_name, b.uuid AS target, b.name AS target_name
+"""
+# `get_mentioned_nodes` + the per-node count query of remove_episode.
+PREVIEW_MENTIONED = """
+MATCH (:Episodic {uuid: $uuid})-[:MENTIONS]->(n:Entity)
+WITH DISTINCT n
+MATCH (e:Episodic)-[:MENTIONS]->(n)
+RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels, n.group_id AS group_id,
+       count(*) AS mentions
+"""
+PREVIEW_INCIDENT = """
+MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+WHERE a.uuid IN $entities OR b.uuid IN $entities
+RETURN DISTINCT r.uuid AS uuid, r.name AS name, r.fact AS fact,
+       coalesce(r.episodes, []) AS episodes,
+       a.uuid AS source, a.name AS source_name, b.uuid AS target, b.name AS target_name
+"""
+PREVIEW_CITING = """
+MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+WHERE $uuid IN r.episodes
+RETURN r.uuid AS uuid, r.name AS name, r.fact AS fact,
+       coalesce(r.episodes, []) AS episodes,
+       a.uuid AS source, a.name AS source_name, b.uuid AS target, b.name AS target_name
+"""
+PREVIEW_OTHER_EPISODES = """
+MATCH (o:Episodic)
+WHERE o.uuid <> $uuid AND any(x IN coalesce(o.entity_edges, []) WHERE x IN $dead)
+RETURN o.uuid AS uuid
+"""
+
+
+def _fact(row: dict) -> dict:
+    return {
+        "uuid": row["uuid"], "name": row.get("name"), "fact": row.get("fact"),
+        "source": row.get("source"), "source_name": row.get("source_name"),
+        "target": row.get("target"), "target_name": row.get("target_name"),
+    }
+
+
+def deletion_set(
+    episode_uuid: str, entity_edge_rows: list[dict], mentioned_rows: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Upstream's rule, as data: (facts it deletes, entities it deletes).
+
+    `entity_edge_rows` are the facts named in the episode's `entity_edges`
+    (each with its `episodes` list); `mentioned_rows` the entities it MENTIONS,
+    each with `mentions` = how many MENTIONS relationships reach it. Pure, so
+    the pin test can hold it beside upstream's lines."""
+    facts = [r for r in entity_edge_rows if r.get("episodes") and r["episodes"][0] == episode_uuid]
+    entities = [r for r in mentioned_rows if r.get("mentions") == 1]
+    return facts, entities
+
+
+def preview_digest(episode_uuid: str, fact_uuids, collateral_uuids, entity_uuids) -> str:
+    """A fingerprint of exactly what a deletion removes — the episode, every
+    fact (first-created AND collateral) and every entity, order-free. Both
+    the cockpit's confirm and the Executor's re-check compare this."""
+    canon = json.dumps({
+        "episode": episode_uuid,
+        "facts": sorted(set(fact_uuids) | set(collateral_uuids)),
+        "entities": sorted(set(entity_uuids)),
+    }, sort_keys=True)
+    return hashlib.sha256(canon.encode()).hexdigest()
+
+
+async def compute_delete_preview(run, episode_uuid: str) -> dict | None:
+    """The preview, computed through `run(query, **params) -> list[dict]` —
+    the reader's READ session here, the writer's own transaction when it
+    deletes, so both see the rule computed the same way. None when there is
+    no such episode."""
+    rows = await run(PREVIEW_EPISODE, uuid=episode_uuid)
+    if not rows:
+        return None
+    ep = rows[0]
+    edge_rows = await run(PREVIEW_EDGES, uuids=list(ep["entity_edges"] or []))
+    mentioned = await run(PREVIEW_MENTIONED, uuid=episode_uuid)
+    facts, entities = deletion_set(episode_uuid, edge_rows, mentioned)
+    entity_uuids = [n["uuid"] for n in entities]
+    fact_uuids = {f["uuid"] for f in facts}
+    incident = await run(PREVIEW_INCIDENT, entities=entity_uuids) if entity_uuids else []
+    collateral = [r for r in incident if r["uuid"] not in fact_uuids]
+    dead = fact_uuids | {r["uuid"] for r in collateral}
+    citing = await run(PREVIEW_CITING, uuid=episode_uuid)
+    provenance = [r for r in citing if r["uuid"] not in dead]
+    others = await run(PREVIEW_OTHER_EPISODES, uuid=episode_uuid, dead=sorted(dead)) if dead else []
+    return {
+        "episode": {
+            "uuid": ep["uuid"], "name": ep["name"], "group_id": ep["group_id"],
+            "content": ep["content"] or "", "source_description": ep["source_description"],
+            "created_at": _iso(ep["created_at"]), "valid_at": _iso(ep["valid_at"]),
+        },
+        "facts": [_fact(r) for r in facts],
+        "entities": [
+            {"uuid": n["uuid"], "name": n["name"], "labels": n["labels"], "group_id": n["group_id"]}
+            for n in entities
+        ],
+        "collateral_facts": [_fact(r) for r in collateral],
+        "provenance_facts": [_fact(r) for r in provenance],
+        "episodes_losing_fact_refs": sorted({r["uuid"] for r in others}),
+        "digest": preview_digest(
+            ep["uuid"], fact_uuids, [r["uuid"] for r in collateral], entity_uuids,
+        ),
+    }
+
+
+async def episode_delete_preview(episode_uuid: str) -> dict | None:
+    """What `graph.delete_episode` would remove, read-only. None when there
+    is no such episode."""
+    return await compute_delete_preview(_read, episode_uuid)
+
+
+def preview_sets(preview: dict) -> dict:
+    """The uuid sets a preview commits to — what is compared, never the text."""
+    return {
+        "episode": (preview.get("episode") or {}).get("uuid"),
+        "facts": sorted(f["uuid"] for f in preview.get("facts") or []),
+        "collateral_facts": sorted(f["uuid"] for f in preview.get("collateral_facts") or []),
+        "entities": sorted(n["uuid"] for n in preview.get("entities") or []),
+    }
+
+
+def preview_changes(approved: dict, current: dict) -> list[str]:
+    """Human-readable differences between two previews' DELETION sets
+    (episode, facts, collateral facts, entities); [] when identical."""
+    a, c = preview_sets(approved), preview_sets(current)
+    out: list[str] = []
+    if a["episode"] != c["episode"]:
+        out.append(f"episode {a['episode']!r} is now {c['episode']!r}")
+    for key, label in (("facts", "facts"), ("collateral_facts", "collateral facts"),
+                       ("entities", "entities")):
+        added = sorted(set(c[key]) - set(a[key]))
+        gone = sorted(set(a[key]) - set(c[key]))
+        if added:
+            out.append(f"{len(added)} more {label} would now be deleted: {', '.join(added)}")
+        if gone:
+            out.append(f"{len(gone)} {label} approved for deletion no longer would be: {', '.join(gone)}")
+    return out

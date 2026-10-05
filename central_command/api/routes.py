@@ -2554,6 +2554,13 @@ async def graph_verifications() -> dict:
         r for r in await repo.list_graph_verifications(limit=50)
         if r["status"] in ("VERIFIED", "PROBLEM")
     ]
+    # A row whose episode was later DELETED on purpose stays as it is (it is
+    # history); the card says the episode is gone rather than pointing at it.
+    deleted = await repo.deleted_episode_uuids(
+        [r["episode_uuid"] for r in awaiting + recent if r.get("episode_uuid")]
+    )
+    for r in awaiting + recent:
+        r["episode_deleted"] = bool(r.get("episode_uuid")) and r["episode_uuid"] in deleted
     return {
         "enabled": settings.graph_auditor_enabled,
         "mode": settings.graph_auditor_mode,
@@ -3349,7 +3356,7 @@ async def _curate(coro, op: str, detail: dict):
 @router.get("/graph/entity-types")
 async def graph_entity_types() -> dict:
     """The ontology the operator may pick from — served rather than hard-coded
-    in the cockpit, so the panel cannot drift from `graphiti/config.yaml`."""
+    in the cockpit, so the panel cannot drift from `integrations/graph_ontology.py`."""
     return {"entity_types": list(neo4j_writer.ENTITY_TYPES)}
 
 
@@ -3396,6 +3403,73 @@ async def graph_edge_delete(uuid: str) -> dict:
 async def graph_merge(body: GraphMergeIn) -> dict:
     return await _curate(neo4j_writer.merge_nodes(body.keep_uuid, body.drop_uuid),
         "merge", body.model_dump())
+
+
+# Episode deletion, the operator's own hand (design record 2026-10-04, D9).
+# The same rule, the same queue and the same refusal as the gated
+# graph.delete_episode: the cockpit shows the preview, the operator confirms
+# THAT preview (its digest comes back here), and the deletion is a job on the
+# episode's group queue so it can never race an extraction. The request is
+# bounded: it waits a few seconds for the job, then answers 202 with the job
+# id and the cockpit says "queued".
+EPISODE_DELETE_WAIT_SECONDS = 15.0
+
+
+@router.get("/graph/episodes/delete-preview")
+async def graph_episode_delete_preview(uuid: str) -> dict:
+    """Exactly what deleting this episode would remove — read-only."""
+    try:
+        preview = await neo4j_reader.episode_delete_preview(uuid)
+    except Exception as e:
+        raise HTTPException(503, f"graph unavailable: {e}") from e
+    if preview is None:
+        raise HTTPException(404, "no such episode")
+    return preview
+
+
+@router.delete("/graph/episode")
+async def graph_episode_delete(uuid: str, digest: str):
+    """Delete one episode as previewed. `digest` is the preview's: if the
+    graph has moved since the operator looked, nothing is queued (409) and the
+    dialog re-reads the preview."""
+    from fastapi.responses import JSONResponse
+
+    from central_command.integrations import graphiti_ingest
+
+    try:
+        preview = await neo4j_reader.episode_delete_preview(uuid)
+    except Exception as e:
+        raise HTTPException(503, f"graph unavailable: {e}") from e
+    if preview is None:
+        raise HTTPException(404, "no such episode")
+    if preview["digest"] != digest:
+        raise HTTPException(
+            409, "the graph changed since this preview was read — nothing was deleted; "
+                 "review the new preview and confirm again",
+        )
+    # The operator's confirmation AUTHORISES the job, so it is on the record
+    # before the job exists (the append-only log's emit-before rule) — with
+    # the exact sets confirmed. Completion is `graph.episode.deleted`.
+    await events.emit(
+        "graph.curated", ref_id=uuid,
+        payload={"op": "episode.delete", "detail": {"uuid": uuid, "digest": digest},
+                 "result": neo4j_reader.preview_sets(preview)},
+        actor="operator",
+    )
+    job = await graphiti_ingest.enqueue_delete(
+        uuid, preview["episode"]["group_id"], preview=preview, requested_by="operator",
+    )
+    final = await graphiti_ingest.wait_for_job(job["id"], EPISODE_DELETE_WAIT_SECONDS)
+    status = (final or {}).get("status")
+    if status == "DONE":
+        return {"status": "done", "job_id": job["id"], "result": final.get("result") or {}}
+    if status == "FAILED":
+        raise HTTPException(422, f"deletion failed: {final.get('last_error')}")
+    return JSONResponse(
+        status_code=202,
+        content={"status": "queued", "job_id": job["id"],
+                 "detail": "queued behind earlier work in this group; it runs in order"},
+    )
 
 
 # --- Sources catalog (slice 1, 2026-08-30) ------------------------------------

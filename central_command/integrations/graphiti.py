@@ -102,6 +102,15 @@ def _iso(value) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _no_embedding(attributes: dict | None) -> dict:
+    """Upstream's readers surface every property they do not know as an
+    ATTRIBUTE, so the `embedding_model`/`embedding_dimensions` stamps the
+    curation writer wrote until v2.61.0 (and that `scripts/oneoff/
+    reembed_graph.py` still writes) would ride into agents' results. Any key
+    containing 'embedding' is dropped, as the retired server dropped it."""
+    return {k: v for k, v in (attributes or {}).items() if "embedding" not in k.lower()}
+
+
 def node_result(node) -> dict:
     """An EntityNode as the server's `search_nodes` returned it: no embedding
     anywhere in it (an attribute key containing 'embedding' included)."""
@@ -112,71 +121,179 @@ def node_result(node) -> dict:
         "created_at": _iso(node.created_at),
         "summary": node.summary,
         "group_id": node.group_id,
-        "attributes": {
-            k: v for k, v in (node.attributes or {}).items() if "embedding" not in k.lower()
-        },
+        "attributes": _no_embedding(node.attributes),
     }
 
 
 def fact_result(edge) -> dict:
-    """An EntityEdge as the server's `search_memory_facts` returned it."""
-    return edge.model_dump(mode="json", exclude={"fact_embedding"})
+    """An EntityEdge as the server's `search_memory_facts` returned it — with
+    the same embedding-key rule as nodes applied to its attributes (until
+    v2.61.0 a fact's `embedding_model`/`embedding_dimensions` leaked here)."""
+    out = edge.model_dump(mode="json", exclude={"fact_embedding"})
+    out["attributes"] = _no_embedding(out.get("attributes"))
+    return out
 
 
 # --- reads (ungated; safe for the runtime tier) --------------------------------
 
 
-def _recipe(kind: str, limit: int):
+def _recipe(kind: str, limit: int, centered: bool = False):
     """A DEEP COPY of the recipe with `limit` set on the copy — never the
-    module-level object (see the module docstring). Cross-encoder recipes
-    when a `/rerank` alias is configured, RRF otherwise (no centre node is
-    exposed yet; D6)."""
+    module-level object (see the module docstring). With a centre node, the
+    node-distance recipe (whatever the reranker — the retired server did the
+    same: its centre-node search never used the cross-encoder); without one,
+    cross-encoder recipes when a `/rerank` alias is configured, RRF otherwise
+    (D6)."""
     client = _client()
     client._prepare_environment()  # before graphiti_core's first import
     from graphiti_core.search import search_config_recipes as recipes
 
-    rerank = client.reranker_configured()
-    base = {
-        ("edge", True): recipes.EDGE_HYBRID_SEARCH_CROSS_ENCODER,
-        ("edge", False): recipes.EDGE_HYBRID_SEARCH_RRF,
-        ("node", True): recipes.NODE_HYBRID_SEARCH_CROSS_ENCODER,
-        ("node", False): recipes.NODE_HYBRID_SEARCH_RRF,
-    }[(kind, rerank)]
+    if centered:
+        base = {"edge": recipes.EDGE_HYBRID_SEARCH_NODE_DISTANCE,
+                "node": recipes.NODE_HYBRID_SEARCH_NODE_DISTANCE}[kind]
+    else:
+        rerank = client.reranker_configured()
+        base = {
+            ("edge", True): recipes.EDGE_HYBRID_SEARCH_CROSS_ENCODER,
+            ("edge", False): recipes.EDGE_HYBRID_SEARCH_RRF,
+            ("node", True): recipes.NODE_HYBRID_SEARCH_CROSS_ENCODER,
+            ("node", False): recipes.NODE_HYBRID_SEARCH_RRF,
+        }[(kind, rerank)]
     config = base.model_copy(deep=True)
     config.limit = max(1, int(limit))
     return config
 
 
-async def _search(kind: str, query: str, limit: int, group_ids: list[str]):
+# --- search filters (design record 2026-10-04, D6; release 2) --------------------
+# graphiti_core names a date filter's query parameter by its POSITION INSIDE
+# ITS AND GROUP only (`valid_at_0`, `valid_at_1`, … — search_filters.py,
+# `edge_search_filter_query_constructor`), so two OR groups that each carry a
+# compared date write the same parameter name and the second silently
+# overwrites the first. The rule here: per date field, AT MOST ONE OR group
+# carries a parameter; the only other group allowed is the parameterless
+# `IS NULL` alternative, which is what an open validity bound means (a fact
+# with no `invalid_at` is still true). tests/test_graph_search_filters.py runs
+# the library's own constructor over every combination we build.
+
+
+def fact_filters(*, as_of=None, after=None, before=None):
+    """`SearchFilters` for a fact validity window, or None when no bound is
+    given (so the default search is unchanged). Instants are timezone-aware
+    datetimes.
+
+    - `as_of`: facts true at that instant — started at or before it (or no
+      recorded start) and not ended by it (or no recorded end);
+    - `after` / `before`: facts true at SOME point in that window — not ended
+      by `after`, started before `before` (either bound alone works).
+    `as_of` with `after`/`before` is refused (one window per search)."""
+    if as_of is None and after is None and before is None:
+        return None
+    if as_of is not None and (after is not None or before is not None):
+        raise ValueError("give either as_of, or after/before — not both")
+    _client()._prepare_environment()
+    from graphiti_core.search.search_filters import (
+        ComparisonOperator as Op,
+        DateFilter,
+        SearchFilters,
+    )
+
+    def open_or(op, when):
+        # [[IS NULL], [<op> when]]: exactly one parameter-carrying group.
+        return [[DateFilter(comparison_operator=Op.is_null)],
+                [DateFilter(date=when, comparison_operator=op)]]
+
+    valid_at = invalid_at = None
+    if as_of is not None:
+        valid_at = open_or(Op.less_than_equal, as_of)
+        invalid_at = open_or(Op.greater_than, as_of)
+    if after is not None:
+        invalid_at = open_or(Op.greater_than, after)
+    if before is not None:
+        valid_at = open_or(Op.less_than, before)
+    return SearchFilters(valid_at=valid_at, invalid_at=invalid_at)
+
+
+def entity_type_names() -> tuple[str, ...]:
+    """The ontology's type names, in declaration order — what an entity-type
+    filter may name (`graph_ontology.ENTITY_TYPE_NAMES`)."""
+    from central_command.integrations import graph_ontology
+
+    return graph_ontology.ENTITY_TYPE_NAMES
+
+
+def node_filters(entity_types=None):
+    """`SearchFilters` restricting entity search to these ontology types, or
+    None when none are given. Names are validated by the caller against
+    `graph_ontology.ENTITY_TYPE_NAMES`; an unknown one is refused here too
+    (it is interpolated into Cypher as a label)."""
+    if not entity_types:
+        return None
+    from central_command.integrations import graph_ontology
+
+    unknown = [t for t in entity_types if t not in graph_ontology.ENTITY_TYPE_NAMES]
+    if unknown:
+        raise ValueError(
+            f"unknown entity type(s) {unknown}; valid: {', '.join(graph_ontology.ENTITY_TYPE_NAMES)}"
+        )
+    _client()._prepare_environment()
+    from graphiti_core.search.search_filters import SearchFilters
+
+    return SearchFilters(node_labels=list(dict.fromkeys(entity_types)))
+
+
+async def _search(kind: str, query: str, limit: int, group_ids: list[str], *,
+                  search_filter=None, center_node_uuid: str | None = None):
     client = _client()
     graphiti = client.get_graphiti()
-    config = _recipe(kind, limit)
-    return await graphiti.search_(query, config=config, group_ids=group_ids)
+    config = _recipe(kind, limit, centered=bool(center_node_uuid))
+    # No filter and no centre: exactly the call v2.60.0 made (pinned).
+    extra = {}
+    if search_filter is not None:
+        extra["search_filter"] = search_filter
+    if center_node_uuid:
+        extra["center_node_uuid"] = center_node_uuid
+    return await graphiti.search_(query, config=config, group_ids=group_ids, **extra)
 
 
 async def search_facts(
     query: str, max_facts: int = 8, agent_id: str | None = None,
-    group_ids: list[str] | None = None,
+    group_ids: list[str] | None = None, *, as_of=None, after=None, before=None,
+    center_node_uuid: str | None = None,
 ) -> list[dict]:
     """Relevant facts (entity relationships, with temporal validity), up to
     `max_facts`. `group_ids` overrides the caller's read scope — the curator's
-    any-partition read (graph-curate pack); every other caller leaves it None."""
+    any-partition read (graph-curate pack); every other caller leaves it None.
+    `as_of` / `after` / `before` (aware datetimes) restrict to a validity
+    window (`fact_filters`); `center_node_uuid` ranks by graph distance from
+    that entity."""
     results = await _search(
-        "edge", query, max_facts, group_ids or await groups_for(agent_id)
+        "edge", query, max_facts, group_ids or await groups_for(agent_id),
+        search_filter=fact_filters(as_of=as_of, after=after, before=before),
+        center_node_uuid=center_node_uuid,
     )
     return [fact_result(e) for e in results.edges][:max_facts]
 
 
 async def search_nodes(
     query: str, max_nodes: int = 8, agent_id: str | None = None,
-    group_ids: list[str] | None = None,
+    group_ids: list[str] | None = None, *, entity_types: list[str] | None = None,
+    center_node_uuid: str | None = None,
 ) -> list[dict]:
     """Relevant entities (nodes with summaries), up to `max_nodes`. `group_ids`
-    as in search_facts."""
+    as in search_facts; `entity_types` restricts to those ontology types;
+    `center_node_uuid` ranks by graph distance from that entity."""
     results = await _search(
-        "node", query, max_nodes, group_ids or await groups_for(agent_id)
+        "node", query, max_nodes, group_ids or await groups_for(agent_id),
+        search_filter=node_filters(entity_types), center_node_uuid=center_node_uuid,
     )
     return [node_result(n) for n in results.nodes][:max_nodes]
+
+
+async def episode_delete_preview(episode_uuid: str) -> dict | None:
+    """What `graph.delete_episode` would remove (a read; `neo4j_reader`'s
+    READ_ACCESS session). The runtime's propose tool embeds it in the
+    proposal; None when there is no such episode."""
+    return await neo4j_reader.episode_delete_preview(episode_uuid)
 
 
 async def known_groups() -> list[str]:

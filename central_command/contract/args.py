@@ -85,6 +85,13 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "graph.update_edge": ArgSpec(required=("uuid",)),
     "graph.delete_edge": ArgSpec(required=("uuid",)),
     "graph.rescope_episode": ArgSpec(required=("episode_uuid", "group_id")),
+    # graph.delete_episode (v2.61.0, design record D9): the handler subscripts
+    # only the uuid. The proposal ALSO carries `preview` — what the deletion
+    # removes, captured by the propose tool — which the Executor never
+    # executes from: it recomputes the set and refuses when it differs. Its
+    # absence is refused there, not here, because only the Executor can say
+    # "the operator saw nothing" with the world to compare against.
+    "graph.delete_episode": ArgSpec(required=("episode_uuid",)),
     # `mode` is optional and defaults to 'replace'; only the CLOSED set of
     # values belongs here. That the document exists is the Executor's check.
     "catalog.tag": ArgSpec(

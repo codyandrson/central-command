@@ -1147,6 +1147,12 @@ alter table graph_verification add column if not exists resubmitted_at timestamp
 --            operator with the error. Terminal: it never blocks its group.
 -- Jobs in one group run strictly in id order (upstream requires episodes in
 -- a group to be added sequentially); different groups run side by side.
+-- `kind` (v2.61.0, design record D9): 'add_episode' (above) or
+-- 'remove_episode' — an approved episode deletion, run on the SAME per-group
+-- queue so it never races an extraction. Its payload is {episode_uuid,
+-- episode_name, expected: the uuid sets the operator approved, digest,
+-- requested_by}; it has no verification row, and on DONE `result` lists
+-- every uuid it removed.
 create table if not exists graph_ingest_job (
     id               bigserial primary key,
     verification_id  text,
@@ -1173,6 +1179,10 @@ create unique index if not exists graph_ingest_job_one_running_idx
     on graph_ingest_job (group_id) where status = 'RUNNING';
 create index if not exists graph_ingest_job_verification_idx
     on graph_ingest_job (verification_id);
+-- "Was this episode deleted on purpose?" — the verification sweep and the
+-- Verify tab ask it by episode uuid.
+create index if not exists graph_ingest_job_removed_episode_idx
+    on graph_ingest_job ((payload->>'episode_uuid')) where kind = 'remove_episode';
 
 -- Confluence founders (2026-08-21, operator decision): confluence-expert is
 -- jira-expert's twin (practice knowledge + the narrow space-creation grant —

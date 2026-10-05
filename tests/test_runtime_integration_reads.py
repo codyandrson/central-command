@@ -73,9 +73,13 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # The graph WRITE is not in `graphiti` at all any more (the ingest worker,
     # `graphiti_ingest`, which runtime/ may not import — test_governance.py);
     # the runtime reaches it only as a `graph.add_episode` proposal.
+    # `episode_delete_preview` (v2.61.0) READS what a deletion would remove
+    # (neo4j_reader's READ_ACCESS session) for propose_delete_episode to embed;
+    # `entity_type_names` returns the ontology's names for the search tools'
+    # `entity_types` validation.
     "graphiti": {
-        "get_group_episodes", "known_groups", "search_facts", "search_nodes",
-        "steward_map",
+        "entity_type_names", "episode_delete_preview", "get_group_episodes", "known_groups",
+        "search_facts", "search_nodes", "steward_map",
     },
     # `report_spam` is the mailbox write and is absent — and so are `send` and
     # `move` (Exchange native client design, 2026-09-25): the runtime reaches

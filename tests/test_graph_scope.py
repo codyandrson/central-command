@@ -47,7 +47,7 @@ def captured(monkeypatch):
     """The read layer's two seams: library search and the episode Cypher."""
     calls = []
 
-    async def fake_search(kind, query, limit, group_ids):
+    async def fake_search(kind, query, limit, group_ids, **filters):
         calls.append((kind, {"group_ids": group_ids, "limit": limit}))
 
         class _Results:

@@ -24,16 +24,27 @@ graph quietly misbehaves:
   cockpit's use `labels(n)`. Write one and not the other and the two views of
   the same node disagree forever.
 - **An edge's endpoints are stored TWICE too**: as the relationship itself and
-  as `source_node_uuid` / `target_node_uuid` properties — and the cockpit draws
-  from the properties. Neo4j cannot repoint a relationship in place, so
+  as `source_node_uuid` / `target_node_uuid` properties. The relationship is
+  the truth (every read — upstream's and the cockpit's since v2.61.0 — takes
+  `startNode`/`endNode`), but the properties are part of the bulk shape and
+  are still written. Neo4j cannot repoint a relationship in place, so
   `update_edge` recreates it and rewrites both properties together.
+- **The shape is the bulk path's** (`add_nodes_and_edges_bulk`, what
+  extraction writes) and `tests/test_graph_write_shape.py` compares the
+  property sets written here against the INSTALLED package's: a fact carries
+  `expired_at` and `reference_time` like an extracted one, and vectors are
+  stored with `db.create.setNodeVectorProperty` /
+  `setRelationshipVectorProperty`, as the bulk queries store them.
 - **Embeddings are not optional decoration.** `name_embedding` / `fact_embedding`
   are half of Graphiti's hybrid search; a node written without one is reachable
   by keyword (the fulltext indexes) but INVISIBLE to the semantic half, so an
   agent asking "who is the operator's grandfather" would miss the fact the operator just
   typed in. Every write here re-embeds through the same LiteLLM alias and the
   same dimensions Graphiti is configured with — a mismatch there is a
-  corrupt index, not an error. Embedding is best-effort on purpose: if the
+  corrupt index, not an error. (Through our own request, not the library's
+  embedder: `OpenAIEmbedder.create` slices the vector to `embedding_dim`, so
+  a model answering at the wrong width would be TRUNCATED into a
+  meaningless vector instead of being dropped.) Embedding is best-effort on purpose: if the
   workstation is off, the edit still lands (losing the operator's correction to
   a sleeping GPU is worse) and the response says the embedding is missing.
 - **`episodes` is provenance, and an operator entry gets a REAL one.** Every
@@ -57,6 +68,7 @@ import httpx
 
 from central_command.config import settings
 from central_command.integrations import http as http_client
+from central_command.integrations import neo4j_reader
 from central_command.integrations.neo4j_reader import _get_driver
 
 log = logging.getLogger(__name__)
@@ -91,6 +103,25 @@ async def _write(query: str, **params) -> list[dict]:
     async with driver.session() as session:
         result = await session.run(query, **params)
         return [record.data() async for record in result]
+
+
+async def _write_tx(work):
+    """Run `work(run)` inside ONE managed write transaction, where `run(query,
+    **params) -> list[dict]` executes on that transaction — all of it commits
+    or none of it does. The driver retries the whole function on a transient
+    error, so `work` must be safe to run again from the top (it is: it reads
+    the state it acts on inside the same transaction)."""
+    driver = _get_driver()
+
+    async def tx_fn(tx):
+        async def run(query: str, **params) -> list[dict]:
+            result = await tx.run(query, **params)
+            return [record.data() async for record in result]
+
+        return await work(run)
+
+    async with driver.session() as session:
+        return await session.execute_write(tx_fn)
 
 
 async def request_embedding(text: str, timeout: float = 60.0) -> list[float]:
@@ -137,18 +168,16 @@ async def embed(text: str) -> list[float] | None:
     return vector
 
 
-def _stamp_params(vector: list[float] | None) -> dict:
-    """The provenance stamp written beside every embedding — the same
-    `embedding_model`/`embedding_dimensions` properties
-    scripts/oneoff/reembed_graph.py keys its resumability and --verify on,
-    so a migration can tell re-embedded rows from pending ones. A degraded
-    write (vector None) nulls the stamp too: a stamp beside a missing
-    vector would claim an embedding that is not there."""
-    present = vector is not None
-    return {
-        "embed_model": _EMBED_MODEL if present else None,
-        "embed_dims": _EMBED_DIMENSIONS if present else None,
-    }
+def _vector(var: str, prop: str, kind: str, vector: list[float] | None) -> tuple[str, dict]:
+    """Store a vector the way the bulk path does — `db.create.setNodeVectorProperty`
+    / `setRelationshipVectorProperty` (verified on Neo4j 5.26: it replaces an
+    existing list property in place and refuses a null vector) — or, for a
+    degraded write, CLEAR it: a stale vector beside changed text keeps matching
+    the OLD text in every semantic search. Returns (cypher tail, params)."""
+    if vector is None:
+        return f" SET {var}.{prop} = null", {}
+    proc = "setNodeVectorProperty" if kind == "node" else "setRelationshipVectorProperty"
+    return f" WITH {var} CALL db.create.{proc}({var}, '{prop}', $vector)", {"vector": vector}
 
 
 def _validated_labels(labels: list[str] | None) -> list[str]:
@@ -173,13 +202,14 @@ _OPERATOR_SOURCE = (
 
 async def _record_operator_episode(
     content: str, group_id: str, mentions: list[str], entity_edges: list[str],
+    now: datetime | None = None,
 ) -> str:
     """Provenance for a hand-made fact: an Episodic node saying WHO (the
     operator), WHEN (now) and WHAT was entered, MENTIONS-linked to the entities
     involved — the same shape extraction writes, so the Provenance drawer and
     Graphiti's own reads treat it as a first-class episode."""
     ep_uuid = str(_uuid.uuid4())
-    now = _now()
+    now = now or _now()
     await _write(
         """
         CREATE (ep:Episodic)
@@ -208,17 +238,16 @@ async def create_node(
     vector = await embed(f"{name}\n{summary}".strip())
     node_uuid = str(_uuid.uuid4())
     label_clause = "".join(f":{l}" for l in extra)
+    vec_tail, vec_params = _vector("n", "name_embedding", "node", vector)
     await _write(
         f"""
         CREATE (n:Entity{label_clause})
         SET n.uuid = $uuid, n.name = $name, n.summary = $summary,
             n.group_id = $group_id, n.created_at = $created_at,
-            n.labels = $labels, n.name_embedding = $embedding,
-            n.embedding_model = $embed_model, n.embedding_dimensions = $embed_dims
-        """,
+            n.labels = $labels
+        """ + vec_tail,
         uuid=node_uuid, name=name, summary=summary, group_id=group_id,
-        created_at=_now(), labels=extra + ["Entity"], embedding=vector,
-        **_stamp_params(vector),
+        created_at=_now(), labels=extra + ["Entity"], **vec_params,
     )
     episode = await _record_operator_episode(
         f"{name}: {summary}" if summary else name, group_id,
@@ -250,12 +279,6 @@ async def update_node(
 
     sets = ["n.name = $name", "n.summary = $summary"]
     params: dict = {"uuid": uuid, "name": new_name, "summary": new_summary}
-    if text_changed:
-        sets.append("n.name_embedding = $embedding")
-        sets.append("n.embedding_model = $embed_model")
-        sets.append("n.embedding_dimensions = $embed_dims")
-        params["embedding"] = vector
-        params.update(_stamp_params(vector))
     if labels is not None:
         extra = _validated_labels(labels)
         # Strip every ontology label, then re-apply the chosen ones. `:Entity`
@@ -268,8 +291,12 @@ async def update_node(
         sets.append("n.labels = $labels")
         params["labels"] = extra + ["Entity"]
 
+    tail = ""
+    if text_changed:
+        tail, vec_params = _vector("n", "name_embedding", "node", vector)
+        params.update(vec_params)
     await _write(
-        f"MATCH (n:Entity {{uuid: $uuid}}) SET {', '.join(sets)}", **params
+        f"MATCH (n:Entity {{uuid: $uuid}}) SET {', '.join(sets)}{tail}", **params
     )
     return {"uuid": uuid, "embedded": vector is not None if text_changed else None}
 
@@ -322,10 +349,12 @@ async def create_edge(
         raise WriteError("source or target entity not found")
     vector = await embed(fact)
     edge_uuid = str(_uuid.uuid4())
+    now = _now()
     episode = await _record_operator_episode(
         fact, ends[0]["group_id"],
-        mentions=[source_uuid, target_uuid], entity_edges=[edge_uuid],
+        mentions=[source_uuid, target_uuid], entity_edges=[edge_uuid], now=now,
     )
+    vec_tail, vec_params = _vector("e", "fact_embedding", "edge", vector)
     await _write(
         """
         MATCH (a:Entity {uuid: $source}), (b:Entity {uuid: $target})
@@ -337,13 +366,12 @@ async def create_edge(
             e.invalid_at = CASE WHEN $invalid_at IS NULL THEN null
                                 ELSE datetime($invalid_at) END,
             e.source_node_uuid = $source, e.target_node_uuid = $target,
-            e.episodes = [$episode], e.fact_embedding = $embedding,
-            e.embedding_model = $embed_model, e.embedding_dimensions = $embed_dims
-        """,
+            e.episodes = [$episode],
+            e.expired_at = null, e.reference_time = $created_at
+        """ + vec_tail,
         source=source_uuid, target=target_uuid, uuid=edge_uuid, name=name,
-        fact=fact, group_id=ends[0]["group_id"], created_at=_now(),
-        valid_at=valid_at, invalid_at=invalid_at, embedding=vector, episode=episode,
-        **_stamp_params(vector),
+        fact=fact, group_id=ends[0]["group_id"], created_at=now,
+        valid_at=valid_at, invalid_at=invalid_at, episode=episode, **vec_params,
     )
     return {"uuid": edge_uuid, "embedded": vector is not None, "episode": episode}
 
@@ -357,13 +385,13 @@ async def update_edge(
 ) -> dict:
     """Edit an edge, including REPOINTING it. Neo4j cannot move a relationship's
     endpoints, so a repoint is create-copy-then-delete — and the two uuid
-    properties are rewritten in the same statement, because the cockpit draws
-    the graph from those properties and not from the topology."""
+    properties are rewritten in the same statement: reads take the topology
+    as truth, but the properties are part of the bulk shape and the audit's
+    mismatch check reads them."""
     current = await _write(
         """
-        MATCH ()-[e:RELATES_TO {uuid: $uuid}]->()
-        RETURN e.name AS name, e.fact AS fact,
-               e.source_node_uuid AS source, e.target_node_uuid AS target
+        MATCH (a)-[e:RELATES_TO {uuid: $uuid}]->(b)
+        RETURN e.name AS name, e.fact AS fact, a.uuid AS source, b.uuid AS target
         """,
         uuid=uuid,
     )
@@ -376,12 +404,6 @@ async def update_edge(
 
     sets = ["e.name = $name", "e.fact = $fact"]
     params: dict = {"uuid": uuid, "name": new_name, "fact": new_fact}
-    if new_fact != row["fact"]:
-        sets.append("e.fact_embedding = $embedding")
-        sets.append("e.embedding_model = $embed_model")
-        sets.append("e.embedding_dimensions = $embed_dims")
-        params["embedding"] = vector
-        params.update(_stamp_params(vector))
     if clear_valid:
         # An OPEN start: "true since before anyone recorded when". Distinct
         # from leaving the field alone, which is what None means.
@@ -401,8 +423,12 @@ async def update_edge(
         # expired_at, so a restore that leaves it set still reads as retired.
         sets.append("e.expired_at = null")
 
+    tail = ""
+    if new_fact != row["fact"]:
+        tail, vec_params = _vector("e", "fact_embedding", "edge", vector)
+        params.update(vec_params)
     await _write(
-        f"MATCH ()-[e:RELATES_TO {{uuid: $uuid}}]->() SET {', '.join(sets)}", **params
+        f"MATCH ()-[e:RELATES_TO {{uuid: $uuid}}]->() SET {', '.join(sets)}{tail}", **params
     )
 
     new_source = row["source"] if source_uuid is None else source_uuid
@@ -567,6 +593,10 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
             moved_edges += 1
             continue
         new_uuid = e["uuid"] if exclusive else str(_uuid.uuid4())
+        # An exclusive edge keeps its uuid, so the original is deleted IN THE
+        # SAME STATEMENT, by the matched variable: a second statement matching
+        # by uuid would match the copy too and delete both (found 2026-10-05
+        # on a scratch graph — the moved fact vanished).
         await _write(
             """
             MATCH ()-[e:RELATES_TO {uuid: $uuid}]->()
@@ -575,12 +605,11 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
             SET e2 = properties(e), e2.uuid = $new_uuid, e2.group_id = $group_id,
                 e2.source_node_uuid = $src, e2.target_node_uuid = $dst,
                 e2.episodes = [$episode]
-            """,
+            """ + ("DELETE e" if exclusive else ""),
             uuid=e["uuid"], src=src, dst=dst, new_uuid=new_uuid,
             group_id=group_id, episode=episode_uuid,
         )
         if exclusive:
-            await _write("MATCH ()-[e:RELATES_TO {uuid: $uuid}]->() DELETE e", uuid=e["uuid"])
             moved_edges += 1
         else:
             await _write(
@@ -640,3 +669,89 @@ async def _copy_entity(uuid: str, labels: list[str], group_id: str) -> str:
         uuid=uuid, new_uuid=new_uuid, group_id=group_id, now=_now(),
     )
     return new_uuid
+
+
+class PreviewChanged(WriteError):
+    """The graph no longer deletes what the operator approved — refused."""
+
+
+DELETE_FACTS = "MATCH ()-[r:RELATES_TO]->() WHERE r.uuid IN $facts DELETE r"
+DELETE_ENTITIES = "MATCH (n:Entity) WHERE n.uuid IN $entities DETACH DELETE n"
+DELETE_EPISODE = "MATCH (e:Episodic {uuid: $uuid}) DETACH DELETE e"
+STRIP_EPISODE_FROM_FACTS = """
+MATCH ()-[r:RELATES_TO]->() WHERE $uuid IN r.episodes
+SET r.episodes = [x IN r.episodes WHERE x <> $uuid]
+RETURN count(r) AS n
+"""
+STRIP_DEAD_FACTS_FROM_EPISODES = """
+MATCH (o:Episodic) WHERE any(x IN coalesce(o.entity_edges, []) WHERE x IN $dead)
+SET o.entity_edges = [x IN o.entity_edges WHERE NOT x IN $dead]
+RETURN count(o) AS n
+"""
+
+
+async def delete_episode(
+    episode_uuid: str, *, expected: dict | None = None, known_dead_facts: list[str] = (),
+) -> dict:
+    """Delete one episode and what only it produced — upstream's
+    `Graphiti.remove_episode` rule (computed by `neo4j_reader.
+    compute_delete_preview`, pinned to upstream by tests/test_graph_delete_episode.py)
+    plus the provenance cleanup upstream omits — in ONE transaction of our own.
+
+    Why not call `remove_episode` and then clean up: upstream runs it as three
+    separate auto-commit deletes (`Edge.delete_by_uuids`, then
+    `Node.delete_by_uuids` — itself `CALL … IN TRANSACTIONS` batches — then
+    the episode), so a crash between them leaves an episode whose facts are
+    gone and whose entities are not, and a re-run reads a DIFFERENT set (the
+    deleted facts no longer count). For a destructive operation atomicity is
+    worth more than reusing upstream's code; the pin test keeps the rule
+    honest. Here the set is read, compared and deleted in one transaction:
+    it happens whole or not at all, so a re-run after a crash is the same
+    deletion.
+
+    `expected` — the preview the deletion was approved against (the
+    proposal's embedded preview, or the cockpit's confirmed one). When given
+    and the sets differ, nothing is deleted: `PreviewChanged`.
+
+    Idempotent: when the episode is already gone the deletion is DONE, and the
+    cleanup still runs — the dead uuid leaves every fact's `episodes`, and
+    `known_dead_facts` (the uuids the approved preview deleted) leave every
+    episode's `entity_edges`."""
+
+    async def work(run):
+        preview = await neo4j_reader.compute_delete_preview(run, episode_uuid)
+        if preview is None:
+            dead = sorted(set(known_dead_facts))
+            stripped = await run(STRIP_EPISODE_FROM_FACTS, uuid=episode_uuid)
+            refs = await run(STRIP_DEAD_FACTS_FROM_EPISODES, dead=dead) if dead else []
+            return {
+                "uuid": episode_uuid, "already_absent": True,
+                "facts_deleted": [], "collateral_deleted": [], "entities_deleted": [],
+                "facts_unlinked": stripped[0]["n"] if stripped else 0,
+                "episodes_updated": refs[0]["n"] if refs else 0,
+            }
+        if expected is not None:
+            changes = neo4j_reader.preview_changes(expected, preview)
+            if changes:
+                raise PreviewChanged(
+                    "the graph changed since this deletion was approved — nothing was "
+                    "deleted: " + "; ".join(changes)
+                )
+        sets = neo4j_reader.preview_sets(preview)
+        dead = sorted(set(sets["facts"]) | set(sets["collateral_facts"]))
+        await run(DELETE_FACTS, facts=sets["facts"])
+        await run(DELETE_ENTITIES, entities=sets["entities"])
+        await run(DELETE_EPISODE, uuid=episode_uuid)
+        stripped = await run(STRIP_EPISODE_FROM_FACTS, uuid=episode_uuid)
+        refs = await run(STRIP_DEAD_FACTS_FROM_EPISODES, dead=dead) if dead else []
+        return {
+            "uuid": episode_uuid, "already_absent": False,
+            "name": preview["episode"]["name"], "group_id": preview["episode"]["group_id"],
+            "facts_deleted": sets["facts"], "collateral_deleted": sets["collateral_facts"],
+            "entities_deleted": sets["entities"],
+            "facts_unlinked": stripped[0]["n"] if stripped else 0,
+            "episodes_updated": refs[0]["n"] if refs else 0,
+            "digest": preview["digest"],
+        }
+
+    return await _write_tx(work)
