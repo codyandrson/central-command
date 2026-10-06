@@ -3,7 +3,8 @@
 
 The properties: the dependency pin and the patches agree on ONE version; the
 client is built from explicit clients only and refuses missing configuration
-by name; building it never issues index DDL; the reranker is fail-soft; every
+by name; building it never issues index DDL; a reranker failure raises (no
+fallback order — tests/test_graph_rerank.py holds the rest); every
 search runs on a DEEP COPY of its recipe with the requested limit (the
 module-level recipe, which add_episode also reads, is never touched); and the
 read results keep the keys the retired MCP server returned.
@@ -72,6 +73,7 @@ def configured(monkeypatch):
         "graph_llm_temperature": 0.0,
         "graph_semaphore_limit": 3,
         "graph_rerank_alias": "",
+        "graph_rerank_kind": "",
         "embed_alias": "cc-embedding",
         "embed_dim": 1024,
         "neo4j_url": "bolt://127.0.0.1:1",
@@ -96,7 +98,6 @@ async def test_the_client_is_built_explicitly_and_issues_no_ddl(configured):
         assert os.environ["SEMAPHORE_LIMIT"] == "3"
         # The constructor's scheduled index DDL was cancelled before it ran.
         assert g.driver._init_task is None
-        from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
         from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 
         assert isinstance(g.llm_client, OpenAIGenericClient)
@@ -106,9 +107,9 @@ async def test_the_client_is_built_explicitly_and_issues_no_ddl(configured):
         assert str(g.llm_client.client.base_url).rstrip("/") == "http://proxy.example.com:4000/v1"
         assert g.embedder.config.embedding_model == "cc-embedding"
         assert g.embedder.config.embedding_dim == 1024
-        # No /rerank alias: upstream's reranker on the parity alias.
-        assert isinstance(g.cross_encoder, OpenAIRerankerClient)
-        assert g.cross_encoder.config.model == graphiti_client.RERANK_FALLBACK_ALIAS
+        # No reranker alias: our NoReranker (the RRF recipes never call it;
+        # the gpt-4.1-nano fallback client upstream would build is gone).
+        assert isinstance(g.cross_encoder, graphiti_client.NoReranker)
         assert g.max_coroutines == 3
     finally:
         await g.driver.close()
@@ -123,6 +124,24 @@ async def test_a_rerank_alias_selects_our_rerank_client(configured, monkeypatch)
         assert g.cross_encoder.model == "cc-rerank"
     finally:
         await g.driver.close()
+
+
+async def test_a_chat_kind_selects_our_chat_reranker(configured, monkeypatch):
+    monkeypatch.setattr(settings, "graph_rerank_alias", "cc-rerank")
+    monkeypatch.setattr(settings, "graph_rerank_kind", "chat")
+    g = graphiti_client._build()
+    try:
+        assert isinstance(g.cross_encoder, graphiti_client.ChatRerankClient)
+        assert g.cross_encoder.model == "cc-rerank"
+    finally:
+        await g.driver.close()
+
+
+def test_an_unknown_kind_refuses_to_build(configured, monkeypatch):
+    monkeypatch.setattr(settings, "graph_rerank_alias", "cc-rerank")
+    monkeypatch.setattr(settings, "graph_rerank_kind", "bogus")
+    with pytest.raises(graphiti_client.GraphitiNotConfigured, match="CC_GRAPH_RERANK_KIND"):
+        graphiti_client._build()
 
 
 # --- RerankClient (D3) --------------------------------------------------------------
@@ -160,16 +179,19 @@ async def test_rerank_posts_documents_and_sorts_by_relevance(monkeypatch):
     assert seen["body"] == {"model": "cc-rerank", "query": "who leads", "documents": ["a", "b", "c"]}
 
 
-@pytest.mark.parametrize("handler", [
-    lambda r: httpx.Response(503, json={"error": "down"}),
-    lambda r: httpx.Response(200, json={"unexpected": True}),
-    lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused")),
+@pytest.mark.parametrize("handler,raised", [
+    (lambda r: httpx.Response(503, json={"error": "down"}), graphiti_client.RerankHTTPError),
+    (lambda r: httpx.Response(200, json={"unexpected": True}), graphiti_client.RerankError),
+    (lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused")), httpx.ConnectError),
 ])
-async def test_rerank_fails_soft_to_input_order(monkeypatch, handler):
+async def test_rerank_raises_instead_of_falling_back_to_input_order(monkeypatch, handler, raised):
+    """The retired fail-soft (input order with placeholder scores) hid a
+    reranker outage as worse ordering; the operator's rule (2026-10-05) is that
+    a failure raises and the read path's own retry and error handling decide."""
     _mock_httpx(monkeypatch, handler)
     client = graphiti_client.RerankClient("http://proxy.example.com:4000", "sk-x", "cc-rerank")
-    out = await client.rank("q", ["a", "b", "c", "d"])
-    assert out == [("a", 1.0), ("b", 0.75), ("c", 0.5), ("d", 0.25)]
+    with pytest.raises(raised):
+        await client.rank("q", ["a", "b", "c", "d"])
 
 
 # --- search: deep-copied recipe, the requested limit -----------------------------------
@@ -206,15 +228,21 @@ def _node(i: int):
                       name_embedding=[0.1], attributes={"role": "lead", "name_embedding": [1.0]})
 
 
-@pytest.mark.parametrize("rerank,edge_recipe,node_recipe", [
-    ("", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
-    ("cc-rerank", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
+@pytest.mark.parametrize("rerank,kind,edge_recipe,node_recipe", [
+    ("", "", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
+    ("", "chat", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
+    ("cc-rerank", "", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
+    ("cc-rerank", "rerank", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
+    ("cc-rerank", "chat", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
 ])
 async def test_search_uses_a_deep_copy_with_the_requested_limit(
-    monkeypatch, rerank, edge_recipe, node_recipe
+    monkeypatch, rerank, kind, edge_recipe, node_recipe
 ):
+    """The tier selection: a reranker of EITHER kind selects the cross-encoder
+    recipes; no alias selects rank fusion, whatever the kind says."""
     _, _, recipes = _lib()
     monkeypatch.setattr(settings, "graph_rerank_alias", rerank)
+    monkeypatch.setattr(settings, "graph_rerank_kind", kind)
     fake = _FakeGraphiti(edges=[_edge(i) for i in range(30)], nodes=[_node(i) for i in range(30)])
     monkeypatch.setattr(graphiti_client, "get_graphiti", lambda: fake)
     before = {name: getattr(recipes, name).limit for name in (edge_recipe, node_recipe)}

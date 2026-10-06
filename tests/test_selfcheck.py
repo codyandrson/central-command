@@ -4,7 +4,7 @@ fix it; nothing it prints carries a credential.
 
 Every outward call is faked at the seam the check uses (`selfcheck._get`,
 `selfcheck._pg_connect`, `resolve_model`, `neo4j_writer.request_embedding`,
-`graphiti.get_status` (a bolt ping), `graphiti_client.patch_state`, `email_facade.list_refs`, the Atlassian probe loader):
+`graphiti.get_status` (a bolt ping), `graphiti_client.patch_state`, `selfcheck._rerank_probe`, `email_facade.list_refs`, the Atlassian probe loader):
 no test here reaches a network or a live service. The one exception is
 `test_spine_against_the_test_database`, which uses the suite's own disposable
 test database (conftest) to prove the real query and that schema.sql seeds a
@@ -109,6 +109,9 @@ class Fakes:
                         "1666-reasoning-first-dedupe.patch": "patched"}
         self.refs: object = [{"uuid": "abc", "conversation_id": "t1"}]
         self.atlassian = {"checks": 9, "failures": 0, "fail_lines": []}
+        self.rerank_error: Exception | None = None
+        self.rerank_calls: list[tuple[str, str]] = []
+        self.rerank_order = [selfcheck.RERANK_PROBE_RELEVANT, selfcheck.RERANK_PROBE_IRRELEVANT]
 
     async def get(self, url, *, headers=None, timeout=None):
         self.calls.append((url, dict(headers or {})))
@@ -141,6 +144,12 @@ class Fakes:
         if isinstance(self.status, Exception):
             raise self.status
         return self.status
+
+    async def rerank_probe(self, kind, alias):
+        self.rerank_calls.append((kind, alias))
+        if self.rerank_error:
+            raise self.rerank_error
+        return [(p, 1.0 - i / 2) for i, p in enumerate(self.rerank_order)]
 
     async def list_refs(self, query):
         if isinstance(self.refs, Exception):
@@ -196,6 +205,8 @@ def fakes(monkeypatch):
         "vlogs_ui_url": "",
         "db_ui_url": "",
         "api_port": 8080,
+        "graph_rerank_alias": "cc-rerank",
+        "graph_rerank_kind": "rerank",
         **LINKS,
     }.items():
         monkeypatch.setattr(settings, name, value)
@@ -211,6 +222,7 @@ def fakes(monkeypatch):
     monkeypatch.setattr(neo4j_writer, "_EMBED_MODEL", "cc-embedding")
     monkeypatch.setattr(graphiti, "get_status", f.get_status)
     monkeypatch.setattr(graphiti_client, "patch_state", lambda: f.patches)
+    monkeypatch.setattr(selfcheck, "_rerank_probe", f.rerank_probe)
     monkeypatch.setattr(exchange, "configured", lambda: False)
     monkeypatch.setattr(email_facade, "list_refs", f.list_refs)
     monkeypatch.setattr(selfcheck, "_load_atlassian_probe", f.probe)
@@ -342,6 +354,24 @@ def _break_graph_patches(f, mp):
     return "python scripts/apply_graphiti_patches.py"
 
 
+def _break_graph_rerank(f, mp):
+    request = httpx.Request("POST", f"{PROXY}/rerank")
+    f.rerank_error = graphiti_client.RerankHTTPError(
+        "HTTP 403", response=httpx.Response(403, request=request), body=None)
+    return "CC_GRAPH_RERANK_ALIAS"
+
+
+def _break_graph_rerank_kind(f, mp):
+    mp.setattr(settings, "graph_rerank_kind", "cohere")
+    return "CC_GRAPH_RERANK_KIND"
+
+
+def _break_graph_rerank_malformed(f, mp):
+    mp.setattr(settings, "graph_rerank_kind", "chat")
+    f.rerank_error = graphiti_client.RerankError("the chat reranker answered 'We'")
+    return "CC_GRAPH_RERANK_KIND"
+
+
 def _break_sandbox(f, mp):
     f.responses[f"{RUNNER}/openapi.json"] = httpx.Response(401, json={"detail": "bad token"})
     return "CC_SANDBOX_RUNNER_TOKEN"
@@ -396,6 +426,8 @@ BREAKS = [
     ("embedding-as-app", _break_embedding), ("embedding-as-app", _break_embedding_key),
     ("graph", _break_graph), ("graph", _break_graph_neo4j),
     ("graph-patches", _break_graph_patches),
+    ("graph-rerank", _break_graph_rerank), ("graph-rerank", _break_graph_rerank_kind),
+    ("graph-rerank", _break_graph_rerank_malformed),
     ("sandbox", _break_sandbox),
     ("crawler", _break_crawler),
     ("mail", _break_mail), ("mail", _break_mail_exchange),
@@ -796,3 +828,45 @@ def test_selfcheck_restarts_nothing():
     calls = {n.func.attr for n in ast.walk(tree)
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
     assert not calls & {"restart", "stop", "kill", "terminate", "system", "Popen"}
+
+
+# --- graph-rerank: three tiers, and a failure says search will ERROR ------------------
+
+
+async def test_no_reranker_is_a_configured_state_not_a_failure(fakes, monkeypatch):
+    monkeypatch.setattr(settings, "graph_rerank_alias", "")
+    check = by_name(await selfcheck.run(mode="cli"))["graph-rerank"]
+    assert check["status"] == "skip"
+    assert "rank fusion" in check["message"] and "cc-rerank" in check["message"]
+    assert selfcheck.protocol_line(check).startswith("PASS selfcheck-graph-rerank: ")
+    assert fakes.rerank_calls == []  # nothing spent
+
+
+@pytest.mark.parametrize("kind,expected", [("", "rerank"), ("rerank", "rerank"), ("chat", "chat")])
+async def test_the_probe_runs_the_configured_kind_with_one_relevant_and_one_irrelevant(
+    fakes, monkeypatch, kind, expected
+):
+    monkeypatch.setattr(settings, "graph_rerank_kind", kind)
+    check = by_name(await selfcheck.run(mode="cli"))["graph-rerank"]
+    assert check["status"] == "pass", check
+    assert fakes.rerank_calls == [(expected, "cc-rerank")]
+
+
+async def test_a_failed_chat_probe_says_search_will_error_and_names_the_three_causes(fakes, monkeypatch):
+    monkeypatch.setattr(settings, "graph_rerank_kind", "chat")
+    request = httpx.Request("POST", f"{PROXY}/v1/chat/completions")
+    import openai
+
+    fakes.rerank_error = openai.APIStatusError(
+        "bad", response=httpx.Response(400, request=request), body=None)
+    check = by_name(await selfcheck.run(mode="cli"))["graph-rerank"]
+    assert check["status"] == "fail"
+    msg = check["message"]
+    assert "ERRORS" in msg and "no unranked fallback" in msg
+    assert "logprobs" in msg and "thinking" in msg and "scope" in msg
+
+
+async def test_a_reranker_that_ranks_backwards_is_a_warning(fakes):
+    fakes.rerank_order.reverse()
+    check = by_name(await selfcheck.run(mode="cli"))["graph-rerank"]
+    assert check["status"] == "warn" and check["remedy"] == "CC_GRAPH_RERANK_ALIAS"

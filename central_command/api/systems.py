@@ -319,13 +319,12 @@ async def _graphiti_status() -> tuple[str, float | None]:
 _DETAIL_ERROR_CLIP = 200
 
 
-async def _graph_queue_detail() -> str | None:
+async def _graph_queue_line() -> str | None:
     """The ingest queue in one line: `ingest queue: 2 queued, 1 running, 0
     failed`, and — when a QUEUED job has already been attempted — the most
     recent error it was re-queued with. A mis-scoped LiteLLM key answers 403,
     which is classified transient and retried forever: a stuck queue otherwise
-    shows only on a job row. None when the table cannot be read (the line is
-    absent, the card is unchanged)."""
+    shows only on a job row. None when the table cannot be read."""
     from central_command.db import repo
 
     try:
@@ -339,6 +338,42 @@ async def _graph_queue_detail() -> str | None:
             error = error[:_DETAIL_ERROR_CLIP].rstrip() + "…"
         line += f" — retrying after: {error}"
     return line
+
+
+def _reranker_line() -> str:
+    """The reranker this process searches with (D3 as rebuilt in v2.62.0):
+    `reranker: none — rank fusion only`, `reranker: chat via 'cc-rerank'
+    (12 calls, median 6.1 s)`, and — when a call has RAISED since the API
+    started — how many and the last error. A failing reranker makes fact
+    search error, so this is where the operator sees why."""
+    from central_command.integrations import graphiti_client
+
+    try:
+        kind = graphiti_client.rerank_kind()
+    except graphiti_client.GraphitiNotConfigured:
+        return f"reranker: MISCONFIGURED — CC_GRAPH_RERANK_KIND={settings.graph_rerank_kind!r} is not rerank or chat"
+    if kind is None:
+        return "reranker: none — rank fusion only (map cc-rerank to enable)"
+    st = graphiti_client.rerank_stats()
+    parts = [f"{st['calls']} calls"]
+    if st["median_latency_s"] is not None:
+        parts.append(f"median {st['median_latency_s']:g} s")
+    line = f"reranker: {kind} via {settings.graph_rerank_alias!r} ({', '.join(parts)})"
+    if st["failures"]:
+        error = st["last_error"] or ""
+        if len(error) > _DETAIL_ERROR_CLIP:
+            error = error[:_DETAIL_ERROR_CLIP].rstrip() + "…"
+        malformed = f", {st['malformed']} malformed" if st["malformed"] else ""
+        line += f" — {st['failures']} failed{malformed}; last: {error}"
+    return line
+
+
+async def _graph_queue_detail() -> str | None:
+    """The Graphiti row's detail: the ingest queue's line (absent when the
+    table cannot be read) and the reranker's."""
+    queue = await _graph_queue_line()
+    rerank = _reranker_line()
+    return f"{queue} · {rerank}" if queue else rerank
 
 
 @router.get("/systems")

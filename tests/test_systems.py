@@ -165,7 +165,8 @@ async def test_the_graph_row_carries_the_ingest_queue_line_and_no_other_row_does
     rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
     detail = rows["graphiti"]["detail"]
     assert detail.startswith("ingest queue: 3 queued, 1 running, 2 failed — retrying after: Error code: 403")
-    assert len(detail) < 300 and detail.endswith("…")  # the error is clipped
+    queue_part = detail.split(" · reranker:")[0]
+    assert len(queue_part) < 300 and queue_part.endswith("…")  # the error is clipped
     assert [i for i, r in rows.items() if "detail" in r] == ["graphiti"]
     assert "detail_probe" not in rows["graphiti"]
 
@@ -179,11 +180,14 @@ async def test_a_quiet_queue_says_only_its_counts(monkeypatch):
         return {"QUEUED": 0, "RUNNING": 0, "FAILED": 0, "retry_error": None}
 
     monkeypatch.setattr(repo, "ingest_queue_summary", summary)
+    monkeypatch.setattr(settings, "graph_rerank_alias", "")
     rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
-    assert rows["graphiti"]["detail"] == "ingest queue: 0 queued, 0 running, 0 failed"
+    assert rows["graphiti"]["detail"] == (
+        "ingest queue: 0 queued, 0 running, 0 failed · "
+        "reranker: none — rank fusion only (map cc-rerank to enable)")
 
 
-async def test_an_unreadable_queue_leaves_the_row_without_a_detail(monkeypatch):
+async def test_an_unreadable_queue_drops_only_the_queue_line(monkeypatch):
     from central_command.db import repo
 
     await _patched_probes(monkeypatch)
@@ -192,6 +196,36 @@ async def test_an_unreadable_queue_leaves_the_row_without_a_detail(monkeypatch):
         raise OSError("connection refused")
 
     monkeypatch.setattr(repo, "ingest_queue_summary", broken)
+    monkeypatch.setattr(settings, "graph_rerank_alias", "")
     rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
-    assert "detail" not in rows["graphiti"]
+    assert rows["graphiti"]["detail"].startswith("reranker: none")
+    assert "ingest queue" not in rows["graphiti"]["detail"]
     assert rows["graphiti"]["status"] == "up"
+
+
+async def test_the_graph_row_names_the_reranker_and_its_last_failure(monkeypatch):
+    """A configured reranker that fails makes fact search ERROR; the Systems
+    row is where the operator sees which reranker and why."""
+    from central_command.db import repo
+    from central_command.integrations import graphiti_client
+
+    await _patched_probes(monkeypatch)
+
+    async def summary():
+        return {"QUEUED": 0, "RUNNING": 0, "FAILED": 0, "retry_error": None}
+
+    monkeypatch.setattr(repo, "ingest_queue_summary", summary)
+    monkeypatch.setattr(settings, "graph_rerank_alias", "cc-rerank")
+    monkeypatch.setattr(settings, "graph_rerank_kind", "chat")
+    monkeypatch.setattr(graphiti_client, "rerank_stats", lambda: {
+        "calls": 12, "failures": 2, "malformed": 1, "median_latency_s": 6.1,
+        "last_error": "RerankError: the chat reranker 'cc-rerank' answered 'We'",
+        "last_error_at": "2026-10-05T12:00:00Z"})
+    detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
+    assert detail.endswith(
+        "reranker: chat via 'cc-rerank' (12 calls, median 6.1 s) — 2 failed, 1 malformed; "
+        "last: RerankError: the chat reranker 'cc-rerank' answered 'We'")
+
+    monkeypatch.setattr(settings, "graph_rerank_kind", "bogus")
+    detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
+    assert "reranker: MISCONFIGURED" in detail and "CC_GRAPH_RERANK_KIND" in detail

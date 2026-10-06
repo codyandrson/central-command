@@ -39,8 +39,10 @@ fetched 2026-10-02):
     difference between liveness and readiness probes and when to apply them
     for your app."
 
-**It costs money, so it is cached.** Two of the checks — `completion-as-app`
-and `embedding-as-app` — spend one model request each. The API therefore
+**It costs money, so it is cached.** Three of the checks spend model
+requests: `completion-as-app` and `embedding-as-app` spend one model request
+each, and `graph-rerank` (when a reranker is configured) one `/rerank` call or
+two one-token chat completions. The API therefore
 keeps the LAST result in memory and runs again only at start
 (`CC_SELFCHECK_ON_START`) or when asked (`POST /api/selfcheck/run`); reading
 the result spends nothing. Never put this on a timer.
@@ -579,6 +581,73 @@ async def check_graph_patches(ctx: Context) -> Outcome:
                 "python scripts/apply_graphiti_patches.py")
 
 
+# `graph-rerank`'s probe: one query, one clearly relevant and one clearly
+# irrelevant passage. Fixed strings; nothing about the install.
+RERANK_PROBE_QUERY = "Which city is the capital of France?"
+RERANK_PROBE_RELEVANT = "Paris is the capital and largest city of France."
+RERANK_PROBE_IRRELEVANT = "A sourdough starter needs flour, water and a warm kitchen."
+_RERANK_TIMEOUT = 120.0
+_NO_RERANKER = ("no reranker configured (CC_GRAPH_RERANK_ALIAS is empty) — fact and entity "
+                "search rank by rank fusion alone, the lower-quality ordering. To turn reranking "
+                "on, map the cc-rerank alias in LiteLLM (a dedicated reranker, or a chat model "
+                "with thinking off) and re-run ./setup.sh")
+_CHAT_RERANK_CAUSES = ("the usual causes: the endpoint returns no logprobs; the model is a "
+                       "reasoning model and thinking is not disabled on the alias; the app "
+                       "key's scope lacks the alias")
+
+
+async def _rerank_probe(kind: str, alias: str) -> list[tuple[str, float]]:
+    """The seam the tests replace: one real rank() through the client the app
+    builds for this kind, with the app's own key."""
+    from central_command.integrations import graphiti_client
+
+    client = graphiti_client.build_reranker(kind, alias)
+    return await client.rank(RERANK_PROBE_QUERY, [RERANK_PROBE_IRRELEVANT, RERANK_PROBE_RELEVANT])
+
+
+async def check_graph_rerank(ctx: Context) -> Outcome:
+    """The reranker, proven AS THE APP (design record 2026-10-04, D3 as rebuilt
+    in v2.62.0). No alias is a configured state, not a failure — a PASS line
+    saying what it costs. With one, a real rank() of a relevant and an
+    irrelevant passage: a failure is a FAIL, because a configured reranker that
+    fails makes fact search ERROR (there is no unranked fallback)."""
+    from central_command.integrations import graphiti_client
+
+    alias = settings.graph_rerank_alias
+    if not alias:
+        return Outcome(SKIP, _NO_RERANKER)
+    try:
+        kind = graphiti_client.rerank_kind()
+    except graphiti_client.GraphitiNotConfigured as exc:
+        return fail(str(exc), "CC_GRAPH_RERANK_KIND")
+    if _llm_missing():
+        return _llm_missing_fail("graph search cannot reach the reranker")
+    started = time.monotonic()
+    try:
+        ranked = await _rerank_probe(kind, alias)
+    except graphiti_client.RerankError as exc:
+        return fail(f"the {kind} reranker {alias!r} answered but cannot rank "
+                    f"({_clip(str(exc), 240)}) — {_CHAT_RERANK_CAUSES if kind == 'chat' else 'is the alias a rerank-shaped endpoint?'}; "
+                    "until it is fixed, fact search ERRORS (there is no unranked fallback). "
+                    "Fix the alias in LiteLLM, or set CC_GRAPH_RERANK_KIND to what it is",
+                    "CC_GRAPH_RERANK_KIND")
+    except Exception as exc:  # noqa: BLE001
+        status = getattr(exc, "status_code", None)
+        said = f"HTTP {status}" if status else _describe(exc)
+        causes = (f"; {_CHAT_RERANK_CAUSES}" if kind == "chat"
+                  else "; a 403 is usually the app key's scope lacking the alias")
+        return fail(f"the {kind} reranker {alias!r} failed ({said}){causes}. Until it is fixed, "
+                    "fact search ERRORS (there is no unranked fallback) — fix the alias in "
+                    "LiteLLM, or empty CC_GRAPH_RERANK_ALIAS to run without a reranker",
+                    "CC_GRAPH_RERANK_ALIAS")
+    ms = int((time.monotonic() - started) * 1000)
+    if not ranked or ranked[0][0] != RERANK_PROBE_RELEVANT:
+        return warn(f"the {kind} reranker {alias!r} answered in {ms} ms but ranked an "
+                    "irrelevant passage above a relevant one — check which model is behind "
+                    "the alias", "CC_GRAPH_RERANK_ALIAS")
+    return ok(f"the {kind} reranker {alias!r} ranked a relevant passage first in {ms} ms")
+
+
 async def check_sandbox(ctx: Context) -> Outcome:
     if not _flag("CC_ENABLE_SANDBOX", True):
         return not_applicable("CC_ENABLE_SANDBOX=0")
@@ -883,6 +952,7 @@ CHECKS: tuple[Check, ...] = (
     Check("graph", "neo4j", "CC_NEO4J_URL", _fixed(_GRAPH_TIMEOUT + 5)),
     Check("graph-patches", "graphiti", "python scripts/apply_graphiti_patches.py",
           _fixed(_SHORT)),
+    Check("graph-rerank", "graphiti", "CC_GRAPH_RERANK_ALIAS", _fixed(_RERANK_TIMEOUT)),
     Check("sandbox", "sandbox-runner", "CC_SANDBOX_RUNNER_URL", _fixed(_SHORT * 2)),
     Check("crawler", "crawler", "CC_CRAWLER_URL", _fixed(_SHORT * 2)),
     Check("mail", "n8n", _mail_remedy, _fixed(_MAIL_TIMEOUT + 5)),

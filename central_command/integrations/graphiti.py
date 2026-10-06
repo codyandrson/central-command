@@ -142,8 +142,9 @@ def _recipe(kind: str, limit: int, centered: bool = False):
     module-level object (see the module docstring). With a centre node, the
     node-distance recipe (whatever the reranker — the retired server did the
     same: its centre-node search never used the cross-encoder); without one,
-    cross-encoder recipes when a `/rerank` alias is configured, RRF otherwise
-    (D6)."""
+    cross-encoder recipes when a reranker of either kind (`/rerank` or chat)
+    is configured, RRF otherwise (D6). A configured reranker that fails RAISES
+    out of `search_()` — there is no unranked fallback."""
     client = _client()
     client._prepare_environment()  # before graphiti_core's first import
     from graphiti_core.search import search_config_recipes as recipes

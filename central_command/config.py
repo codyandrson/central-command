@@ -193,11 +193,22 @@ class Settings(BaseSettings):
     #                             once). Read by the library at IMPORT, so the
     #                             client sets it before the first import. 3 is
     #                             the value the retired server ran with.
-    #   graph_rerank_alias     -> a LiteLLM `/rerank` alias (D3). Set: search
-    #                             uses the cross-encoder recipes through our
-    #                             RerankClient. Unset (the single-node default):
-    #                             search uses the RRF recipes, as the stock
-    #                             server did.
+    #   graph_rerank_alias     -> the reranker's LiteLLM alias (`cc-rerank`;
+    #                             D3 as rebuilt in v2.62.0). Set: fact and
+    #                             entity search use the cross-encoder recipes.
+    #                             Empty: no reranker, the RRF recipes (rank
+    #                             fusion alone — measurably worse ordering).
+    #   graph_rerank_kind      -> what is behind that alias: `rerank` (a
+    #                             dedicated model behind LiteLLM's /rerank) or
+    #                             `chat` (a chat model asked True/False per
+    #                             candidate, scored from logprobs — the alias
+    #                             must have thinking OFF). Empty with an alias
+    #                             set means `rerank`, which is what every
+    #                             install meant before this setting existed.
+    #                             The installers PROBE it; an operator's value
+    #                             wins. A failing reranker RAISES — there is no
+    #                             fallback order and no time budget (routing
+    #                             and retries are LiteLLM's).
     #   graph_ingest_enabled   -> the durable ingest worker (D5). ON by
     #                             default — unlike the opt-in loops, it is the
     #                             only thing that lands an APPROVED episode;
@@ -208,6 +219,7 @@ class Settings(BaseSettings):
     graph_llm_temperature: float = 0.0
     graph_semaphore_limit: int = 3
     graph_rerank_alias: str = ""
+    graph_rerank_kind: str = ""
     graph_ingest_enabled: bool = True
 
     # Knowledge graph tenanting: reads span the preserved homelab graph ("main")
@@ -523,7 +535,7 @@ class Settings(BaseSettings):
     # The limit is a property of the BACKEND, not of Central Command: a
     # hosted API takes hundreds in parallel and must not wait behind a local
     # 27B turn. So the spec names alias GROUPS that share one backend:
-    #   "cc-default+gpt-4.1-nano=1"          one slot shared by both aliases
+    #   "cc-default+cc-smart=1"              one slot shared by both aliases
     #   "cc-default=1;*=8"                    plus a pool of 8 for everything else
     # `+` joins aliases onto one pool, `;` (or `,`) separates pools, `*` is
     # the pool for any alias not named. Unnamed aliases are UNLIMITED when
