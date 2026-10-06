@@ -567,7 +567,12 @@ llm_gate() { # llm_gate <what-failed>
   note "                           bridge prefix is now WRONG: the app's"
   note "                           in-process graphiti-core client speaks"
   note "                           chat-completions, and a bridged alias 404s."
-  note "    cc-rerank + qwen3-rerank-local  api_base MUST end in /v1/rerank, mode rerank"
+  note "    qwen3-rerank-local     api_base MUST end in /v1/rerank, mode rerank"
+  note "    cc-rerank              graph search's reranker ROLE: a dedicated reranker"
+  note "                           (cohere/<id>, api_base ending /v1/rerank, mode"
+  note "                           rerank — like qwen3-rerank-local) or a chat model"
+  note "                           with logprobs and thinking OFF (openai/<id>). The"
+  note "                           probe decides which (CC_GRAPH_RERANK_KIND)."
   note "    cc-embedding           the embedding ROLE — same upstream as"
   note "                           qwen3-embedding-local; both rows must exist"
   note "    cc-tts / cc-stt        the speech ROLES; the bundled cc-speech pod"
@@ -591,12 +596,48 @@ llm_gate() { # llm_gate <what-failed>
 # mode is still not usable here. Passing CC_LLM_BASE_URL/CC_LLM_API_KEY as env
 # vars (DIRECT mode, which sources nothing) is what keeps it on our proxy, and
 # keeps the key out of argv.
-probe_alias() { # probe_alias <chat|structured|embed|speech|transcribe> <alias> [file]
+probe_alias() { # probe_alias <chat|structured|embed|speech|transcribe|rerank|rerank-chat> <alias> [file]
   CC_LLM_BASE_URL="http://127.0.0.1:4000/v1" \
   CC_LLM_API_KEY="${LITELLM_MASTER_KEY:-}" \
   CC_EMBED_BASE_URL="http://127.0.0.1:4000/v1" \
   CC_EMBED_API_KEY="${LITELLM_MASTER_KEY:-}" \
     "$REPO_ROOT/deploy/single/discover-llm.sh" "$@"
+}
+
+rerank_decide_k3s() {
+  local alias kind found=""
+  if grep -q '^CC_GRAPH_RERANK_ALIAS=$' "$APP_ENV" 2>/dev/null; then
+    pass "probe-rerank" "CC_GRAPH_RERANK_ALIAS is empty in the app's .env — your explicit 'no reranker'; not probed (fact search ranks by rank fusion alone)"
+    return 0
+  fi
+  alias="$(get_kv "$APP_ENV" CC_GRAPH_RERANK_ALIAS)"; alias="${alias:-cc-rerank}"
+  kind="$(get_kv "$APP_ENV" CC_GRAPH_RERANK_KIND)"
+  case "$kind" in
+    "")
+      if probe_alias rerank "$alias"; then found=rerank
+      elif probe_alias rerank-chat "$alias"; then found=chat
+      fi
+      if [[ -z "$found" ]]; then
+        llm_gate "the $alias alias answers neither LiteLLM's /rerank nor a True/False chat question with logprobs (a chat model must not think first — disable thinking on the row); graph search would ERROR with it configured"
+        return 3
+      fi
+      set_kv "$APP_ENV" CC_GRAPH_RERANK_KIND "$found"
+      pass "probe-rerank" "$alias is a ${found} reranker — CC_GRAPH_RERANK_KIND=$found written to the app's .env"
+      ;;
+    rerank|chat)
+      local sub=rerank; [[ "$kind" == chat ]] && sub=rerank-chat
+      if ! probe_alias "$sub" "$alias"; then
+        llm_gate "CC_GRAPH_RERANK_KIND=$kind, but $alias does not answer as a $kind reranker — fix the row, or empty CC_GRAPH_RERANK_KIND in the app's .env to re-detect; graph search would ERROR meanwhile"
+        return 3
+      fi
+      pass "probe-rerank" "the $kind reranker $alias answers (CC_GRAPH_RERANK_KIND=$kind is set, so it was proven, not re-detected)"
+      ;;
+    *)
+      fail "probe-rerank" "CC_GRAPH_RERANK_KIND=$kind in the app's .env is not rerank or chat — fix or empty it (the API refuses to build the graph client meanwhile)"
+      return 1
+      ;;
+  esac
+  return 0
 }
 
 phase_llm() {
@@ -693,6 +734,16 @@ phase_llm() {
     llm_gate "the graphiti-llm alias did not return schema-constrained JSON (a chat_completions/ prefix on the registration is a likely cause — it should be a plain openai/<model>)"
     return 3
   fi
+  # cc-rerank's KIND, decided by PROBING (design record 2026-10-04, D3 as
+  # rebuilt in v2.62.0) — the same two probes as the single-node profile:
+  # LiteLLM's /rerank first (a dedicated reranker), then the chat shape (a
+  # True/False answer with logprobs, thinking off). This profile REQUIRES the
+  # alias in its catalog, so "neither" is the same USER-ACTION gate as every
+  # other probe here. The kind is written to the app's .env only when the key
+  # is empty — a kind that is set is PROVEN, never re-detected (empty it to
+  # re-detect). An explicitly EMPTY CC_GRAPH_RERANK_ALIAS is the operator's
+  # "no reranker" and is not probed.
+  rerank_decide_k3s || return $?
   # cc-embedding is the embedding ROLE alias (2026-08-30, parity with the
   # single-node profile) — the app's graph client embeds through exactly that
   # name; qwen3-rerank-local/qwen3-embedding-local stay as real-model rows.

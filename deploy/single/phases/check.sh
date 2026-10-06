@@ -886,11 +886,16 @@ print("\n".join(str(m.get("id","")) for m in (d.get("data") or [])))' "$out" 2>/
   fi
   rm -f "$out"
 
-  # Membership, per declared id.
+  # Membership, per declared id. The optional aliases (cc-rerank) are checked
+  # only when declared — unset is a decision, not a gap.
   local id ids="" missing=""
-  for a in $(cc_required_aliases); do
+  for a in $(cc_required_aliases) $(cc_optional_aliases); do
     key="$(cc_alias_env_key "$a")"; id="${!key:-}"
-    [[ -n "$id" ]] || { warn "llm-declared-${a}" "$key is unset — this alias cannot be checked (the llm phase will pause for it in the LiteLLM UI)"; continue; }
+    if [[ -z "$id" ]]; then
+      [[ " $(cc_optional_aliases) " == *" $a "* ]] && continue
+      warn "llm-declared-${a}" "$key is unset — this alias cannot be checked (the llm phase will pause for it in the LiteLLM UI)"
+      continue
+    fi
     ids="${ids:+$ids }${a}=${id}"
     (( have_list )) || continue
     if grep -qxF "$id" <<<"$listed"; then
@@ -901,16 +906,28 @@ print("\n".join(str(m.get("id","")) for m in (d.get("data") or [])))' "$out" 2>/
   done
   [[ -z "$missing" ]] || fail "llm-members" "declared model id(s) the endpoint does not list: $missing — fix the id, or the endpoint"
 
-  # One CHAT round trip per DISTINCT chat model id (three aliases commonly name
+  # One CHAT round trip per DISTINCT chat model id (the aliases commonly name
   # one model; a second identical call proves nothing and costs tokens).
+  # cc-rerank, when declared, is usually a chat model too (its KIND — /rerank
+  # or chat — is probed through the proxy in the llm phase, where it is
+  # decided); a dedicated reranker answers no chat, so its failure here is a
+  # WARN, not a FAIL.
   local seen="" cid
-  for a in cc-default graphiti-llm gpt-4.1-nano; do
+  for a in cc-default graphiti-llm; do
     key="$(cc_alias_env_key "$a")"; cid="${!key:-}"
     [[ -n "$cid" ]] || continue
     [[ " $seen " == *" $cid "* ]] && { pass "llm-chat-${a}" "same model id as an alias already probed ($cid) — one round trip covers both"; continue; }
     seen="${seen:+$seen }$cid"
     upstream_probe "llm-chat-${a}" "a real completion came back from $cid (the $a upstream)" chat "$cid"
   done
+  key="$(cc_alias_env_key cc-rerank)"; cid="${!key:-}"
+  if [[ -n "$cid" ]]; then
+    if [[ " $seen " == *" $cid "* ]]; then
+      pass "llm-rerank" "$key=$cid is a chat model already probed — the llm phase decides whether it reranks (True/False with logprobs, thinking off)"
+    else
+      pass "llm-rerank" "$key=$cid declared — optional; the llm phase probes it through the proxy as a dedicated reranker (/rerank), then as a chat model, and uses none if neither answers"
+    fi
+  fi
 
   # The STRUCTURED round trip, for graphiti-llm's id only: the app's in-process
   # graphiti-core client drives extraction through chat/completions with a json_schema

@@ -2121,8 +2121,9 @@ p_catalog_aliases() {
 # and Git Bash's $(...) strips only the LAST line's — so a two-alias answer
 # read "cc-tts\r" and every consumer that derives a key from a name, or
 # compares one, got it wrong. Stripped here, in-process.
-catalog_unfilled() {
-  local key info out
+catalog_unfilled() { # catalog_unfilled [alias...] — default: the required ones
+  local key info out aliases
+  if (( $# )); then aliases="$*"; else aliases="$(catalog_required_aliases)"; fi
   key="$(get_kv "$ENV_FILE" CC_LLM_PROXY_ADMIN_KEY)"
   [[ -n "$key" ]] || return 1
   info="$(printf 'Authorization: Bearer %s\n' "$key" \
@@ -2141,7 +2142,7 @@ for alias in sys.argv[1:]:
                        and "PLACEHOLDER" in r["litellm_params"][k]
                        for r in mine for k in OWNED):
         print(alias)
-' $(catalog_required_aliases) <<<"$info" 2>/dev/null)" || return 1
+' $aliases <<<"$info" 2>/dev/null)" || return 1
   [[ -z "$out" ]] || printf '%s\n' "${out//$'\r'/}"
 }
 

@@ -30,7 +30,7 @@
 #     catalog-filled                     gate   p_catalog_filled  (setup.sh)
 #     probe-chat                         run    p_alias_cc_default
 #     probe-structured                   run    p_alias_graphiti_llm
-#     probe-rerank-model                 run    p_alias_gpt_4_1_nano
+#     probe-rerank                       run    p_rerank_decided
 #     speech-live                        run    p_speech_up
 #     speech-model                       run    p_speech_models
 #     probe-tts                          run    p_alias_cc_tts
@@ -89,7 +89,11 @@ llm_gate() { # llm_gate <what-failed>
   note "                   (the old chat_completions/ bridge prefix now 404s;"
   note "                   the app's graphiti-core client uses chat-completions)"
   note "    cc-embedding   openai/<your embedding model>     dimension is permanent"
-  note "    gpt-4.1-nano   openai/<your chat model>          graphiti-core's reranker alias"
+  note "    cc-rerank      OPTIONAL — graph search's reranker; the run does not"
+  note "                   pause for it. A dedicated reranker (cohere/<id>, api_base"
+  note "                   ending /v1/rerank, mode rerank), or a chat model with"
+  note "                   thinking OFF. Setup probes which, and uses none if neither"
+  note "                   answers."
   note "    cc-tts         openai/<your TTS model>           cockpit read-aloud"
   note "    cc-stt         openai/<your Whisper model>       cockpit voice input"
   if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
@@ -248,11 +252,7 @@ phase_llm() {
     llm_gate "the graphiti-llm alias did not return schema-constrained JSON (a chat_completions/ prefix on the registration is a likely cause — it should be a plain openai/<model>)"
     return 3
   fi
-  if ! step "probe-rerank-model" "a completion came back through gpt-4.1-nano (graphiti-core's reranker alias)" \
-    "$HERE/discover-llm.sh" --proxy chat gpt-4.1-nano; then
-    llm_gate "the gpt-4.1-nano alias did not return a completion"
-    return 3
-  fi
+  rerank_decide || return $?
 
   # Speech: one synthesis, then transcribe what it said — the round trip proves
   # both aliases with real audio.
@@ -322,6 +322,92 @@ phase_llm() {
   pass "embed-dimension" "CC_EMBED_DIM=${dim} recorded in .env"
 }
 
+# ── llm/probe-rerank: graph search's reranker, decided by PROBING ────────────
+# Design record 2026-10-04, D3 as rebuilt in v2.62.0 — the operator's decision:
+# every deployment gets the best reranking its environment provides, through ONE
+# optional alias, `cc-rerank`. A dedicated reranker (LiteLLM's /rerank) if the
+# alias is one; otherwise an ordinary chat model asked True/False per candidate
+# (nearly as good, measured 2026-10-05, and slower); otherwise none (rank fusion
+# alone). The probes are discover-llm.sh's `rerank` and `rerank-chat`, through
+# the proxy under the admin key; the app's own key gains the alias in `app`
+# (spine_scope_aliases), and verify/selfcheck's graph-rerank row re-proves it
+# AS THE APP.
+#
+#   CC_GRAPH_RERANK_KIND set (by the operator, or by an earlier run — a written
+#     kind is a pin): that kind is PROVEN, never re-detected; a failure stops
+#     the run (USERACTION), because a configured reranker that fails makes fact
+#     search ERROR. To re-detect, empty the key and re-run.
+#   no kind: probe /rerank, then the chat shape. Found: write the kind, and the
+#     alias when .env has none. Neither: when the operator set
+#     CC_GRAPH_RERANK_ALIAS that is a USERACTION (same reason); when nothing
+#     names the alias, a WARN — it stays UNUSED, and the run says why and how.
+#   cc-rerank not mapped (absent, or still its PLACEHOLDER skeleton) and no
+#     alias in .env: PASS, no reranker. Never mapped to the extraction model
+#     automatically — that costs up to 50 chat calls per agent fact search (2 x
+#     the tools' 25-fact limit) on the model that extracts; the operator opts in
+#     by answering CC_LLM_UPSTREAM_MODEL_CC_RERANK.
+rerank_probe_kind() { # rerank_probe_kind <rerank|chat> <alias>
+  local sub=rerank
+  [[ "$1" == chat ]] && sub=rerank-chat
+  note "--> $HERE/discover-llm.sh --proxy $sub $2"
+  "$HERE/discover-llm.sh" --proxy "$sub" "$2" >&2
+}
+
+rerank_decide() {
+  local alias kind pinned_alias unfilled found=""
+  pinned_alias="$(q_unquote "$(get_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS)")"
+  kind="$(q_unquote "$(get_kv "$ENV_FILE" CC_GRAPH_RERANK_KIND)")"
+  alias="${pinned_alias:-cc-rerank}"
+  local fix="fact search ERRORS until it is fixed (a configured reranker that fails is never skipped). Fix the $alias row in the LiteLLM UI — a dedicated reranker answers /rerank; a chat model must return logprobs and have thinking OFF on the alias — or empty CC_GRAPH_RERANK_ALIAS in .env to run without a reranker, then re-run: ./setup.sh"
+
+  if [[ -z "$pinned_alias" ]]; then
+    if ! unfilled="$(catalog_unfilled "$alias")"; then
+      warn "probe-rerank" "could not read the proxy's /model/info to see whether $alias is mapped — no reranker this run (fact search ranks by rank fusion alone); re-run ./setup.sh"
+      return 0
+    fi
+    if [[ -n "$unfilled" ]]; then
+      pass "probe-rerank" "no reranker: $alias is not mapped (absent, or still its skeleton) — fact search ranks by rank fusion alone, the lower-quality ordering. To turn reranking on: answer CC_LLM_UPSTREAM_MODEL_CC_RERANK (./setup.sh configure — the same model as graphiti-llm is the one-line choice when no dedicated reranker exists), or fill the $alias row in the LiteLLM UI and set CC_GRAPH_RERANK_ALIAS=$alias in .env; then re-run ./setup.sh"
+      return 0
+    fi
+  fi
+
+  if [[ -n "$kind" ]]; then
+    case "$kind" in
+      rerank|chat) ;;
+      *) fail "probe-rerank" "CC_GRAPH_RERANK_KIND=$kind is not a reranker kind — set rerank or chat, or empty it so setup probes; the API refuses to build the graph client meanwhile"; return 1 ;;
+    esac
+    if rerank_probe_kind "$kind" "$alias"; then
+      [[ -n "$pinned_alias" ]] || set_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS "$alias"
+      pass "probe-rerank" "the $kind reranker $alias answers (CC_GRAPH_RERANK_KIND=$kind is set, so it was proven, not re-detected — empty the key to re-detect)"
+      return 0
+    fi
+    useraction "probe-rerank" "CC_GRAPH_RERANK_KIND=$kind, but $alias does not answer as a $kind reranker — $fix"
+    return 3
+  fi
+
+  if rerank_probe_kind rerank "$alias"; then
+    found=rerank
+  elif rerank_probe_kind chat "$alias"; then
+    found=chat
+  fi
+  if [[ -n "$found" ]]; then
+    [[ -n "$pinned_alias" ]] || set_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS "$alias"
+    set_kv "$ENV_FILE" CC_GRAPH_RERANK_KIND "$found"
+    if [[ "$found" == rerank ]]; then
+      pass "probe-rerank" "$alias is a dedicated reranker (/rerank answered) — CC_GRAPH_RERANK_ALIAS=$alias, CC_GRAPH_RERANK_KIND=rerank written to .env; graph search reranks with it"
+    else
+      pass "probe-rerank" "$alias answers True/False with logprobs as a chat model — CC_GRAPH_RERANK_ALIAS=$alias, CC_GRAPH_RERANK_KIND=chat written to .env; graph search reranks with it (nearly the quality of a dedicated reranker, slower: one chat call per candidate)"
+    fi
+    return 0
+  fi
+  if [[ -n "$pinned_alias" ]]; then
+    useraction "probe-rerank" "CC_GRAPH_RERANK_ALIAS=$alias answers neither a /rerank request nor a True/False chat question with logprobs — $fix"
+    return 3
+  fi
+  warn "probe-rerank" "$alias is mapped but answers neither a /rerank request nor a True/False chat question with logprobs, so it is NOT used — fact search ranks by rank fusion alone. Usual causes: the endpoint returns no logprobs; the model is a reasoning model and thinking is not disabled on the alias (chat_template_kwargs enable_thinking false on a llama.cpp backend); a rerank row whose api_base does not end in /v1/rerank. Fix the row, set CC_GRAPH_RERANK_ALIAS=$alias in .env, and re-run ./setup.sh (it then probes again, and stops if the alias still fails)"
+  return 0
+}
+
 # ── llm ─────────────────────────────────────────────────────────────────────
 p_secrets() {
   local k
@@ -370,8 +456,13 @@ p_alias_graphiti_llm() {
   p_alias graphiti-llm
 }
 
-p_alias_gpt_4_1_nano() {
-  p_alias gpt-4.1-nano
+# llm/probe-rerank: the decision is recorded — no reranker alias in use, or a
+# kind beside it. (The WARN case, mapped but answering neither shape, leaves
+# the alias empty and so reads done: the run said why, and setting
+# CC_GRAPH_RERANK_ALIAS — a `reads` key — makes the next run probe again.)
+p_rerank_decided() {
+  is_placeholder "$(get_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS)" && return 0
+  ! is_placeholder "$(get_kv "$ENV_FILE" CC_GRAPH_RERANK_KIND)"
 }
 
 p_alias_cc_embedding() {

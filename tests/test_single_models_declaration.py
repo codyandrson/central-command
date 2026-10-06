@@ -38,7 +38,8 @@ def test_single_config_declares_no_models_and_no_provider_env():
 
 def test_single_declaration_is_skeletons_with_the_invariants(rm):
     want = rm.declared(rm.load_declaration(SINGLE / "models.json"))
-    assert set(want) == {"cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano", "cc-tts", "cc-stt"}
+    # gpt-4.1-nano left in v2.62.0; cc-rerank is the optional reranker role.
+    assert set(want) == {"cc-default", "graphiti-llm", "cc-embedding", "cc-rerank", "cc-tts", "cc-stt"}
     assert want["graphiti-llm"]["model"] == "openai/PLACEHOLDER"
     # The speech aliases carry LiteLLM's audio modes — an invariant, like graphiti-llm's plain prefix.
     assert want["cc-tts"]["mode"] == "audio_speech" and want["cc-stt"]["mode"] == "audio_transcription"
@@ -56,9 +57,13 @@ def test_k3s_declaration_is_skeletons_too(rm):
     for alias, params in want.items():
         assert rm.PLACEHOLDER in params["model"], alias
         assert "api_key" not in params, alias
+    # The dedicated rerank row keeps its invariants; cc-rerank's skeleton is
+    # that shape too, but the row is judged by setup's probe (either kind).
     for rerank in ("qwen3-rerank-local", "cc-rerank"):
         assert want[rerank]["mode"] == "rerank"
         assert want[rerank]["api_base"].endswith("/v1/rerank")
+    assert rm.probe_judged(rm.load_declaration(K3S_POLICY)) == {"cc-rerank"}
+    assert "gpt-4.1-nano" not in want
     assert want["graphiti-llm"]["timeout"] == 300  # registration_only carries its own
 
 
@@ -88,7 +93,7 @@ def test_plan_creates_absent_reports_pending_never_updates(rm):
         _live("cc-default", model="openai/gpt-4.1", api_base="https://api.example.com/v1"),
         _live("graphiti-llm", model="openai/gpt-4.1", api_base="https://api.example.com/v1"),
         _live("cc-embedding", model="openai/text-embedding-3-small", api_base="https://embed.example.com/v1"),
-        _live("gpt-4.1-nano", model="openai/gpt-4.1-mini", api_base="https://api.example.com/v1"),
+        _live("cc-rerank", model="openai/gpt-4.1-mini", api_base="https://api.example.com/v1"),
         _live("cc-tts", model="openai/speaches-ai/Kokoro-82M-v1.0-ONNX", api_base="http://cc-speech:8000/v1", mode="audio_speech"),
         _live("cc-stt", model="openai/whisper-1", api_base="https://stt.example.com/v1", mode="audio_transcription"),
     ]

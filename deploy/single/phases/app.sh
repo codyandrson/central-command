@@ -65,7 +65,7 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
 # The key used to be minted with a hard-coded ["cc-default", "cc-tts",
 # "cc-stt"] — a SECOND hand-kept alias list beside cc_required_aliases (the ONE
 # list, deploy/env-lib.sh), and it had already drifted: graphiti-llm,
-# cc-embedding and gpt-4.1-nano were never in it. MEASURED before this fix:
+# cc-embedding and the then-reranker alias were never in it. MEASURED before this fix:
 # that is NOT what breaks graph embedding — the graph writer embeds with the
 # ADMIN key, not this one — but the record's fix stands on its own: a scope is
 # a list, a list has one definition, so the key is scoped to exactly the
@@ -80,11 +80,18 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
 # literal `*` both mean 'all models on the proxy'" — which is why an empty
 # scope is LEFT ALONE below rather than "fixed" into a narrower one.
 
-# The required aliases as a JSON array, built from cc_required_aliases — never
-# a second list.
+# The key's scope: cc_required_aliases plus the reranker alias when .env names
+# one (cc_scope_aliases, deploy/env-lib.sh) — never a second list. The reranker
+# joins only once the llm phase has proven it and written CC_GRAPH_RERANK_ALIAS
+# (or the operator set it), because graph search calls it with THIS key.
+spine_scope_aliases() {
+  cc_scope_aliases "$(get_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS)"
+}
+
+# The scope as a JSON array.
 spine_aliases_json() {
   local a out=""
-  for a in $(cc_required_aliases); do out="${out:+$out, }\"$a\""; done
+  for a in $(spine_scope_aliases); do out="${out:+$out, }\"$a\""; done
   printf '[%s]' "$out"
 }
 
@@ -148,8 +155,8 @@ mint_spine_key() {
       return 1
     fi
     set_kv "$ENV_FILE" CC_LLM_API_KEY "$minted"
-    local list; list="$(cc_required_aliases)"
-    pass "mint-key" "minted a LiteLLM virtual key scoped to ${list// / + } (cc_required_aliases) and stored it as CC_LLM_API_KEY"
+    local list; list="$(spine_scope_aliases)"
+    pass "mint-key" "minted a LiteLLM virtual key scoped to ${list// / + } (cc_required_aliases, plus the reranker alias when set) and stored it as CC_LLM_API_KEY"
     return 0
   fi
 
@@ -183,7 +190,7 @@ gone = [a for a in want if a not in m]
 print("empty" if not m else ("missing" if gone else "covered"))
 print(" ".join(gone))
 print(json.dumps(m + gone))
-' $(cc_required_aliases) <<<"$info" 2>/dev/null)" || plan=""
+' $(spine_scope_aliases) <<<"$info" 2>/dev/null)" || plan=""
   state="$(sed -n 1p <<<"$plan")"
   missing="$(sed -n 2p <<<"$plan")"
   union="$(sed -n 3p <<<"$plan")"
@@ -192,7 +199,7 @@ print(json.dumps(m + gone))
       pass "mint-key" "CC_LLM_API_KEY already set; its model list is EMPTY, which LiteLLM reads as every model on the proxy — left alone (not minting a second key)"
       ;;
     covered)
-      pass "mint-key" "CC_LLM_API_KEY already set; its scope already covers every alias this deployment requires ($(cc_required_aliases)) — not minting a second key"
+      pass "mint-key" "CC_LLM_API_KEY already set; its scope already covers every alias this deployment requires ($(spine_scope_aliases)) — not minting a second key"
       ;;
     missing)
       if proxy_cfg "key/update" "{\"key\": \"$(cfg_quote "$cur_key")\", \"models\": $union}" \

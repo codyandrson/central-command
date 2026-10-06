@@ -255,7 +255,7 @@ models:
 # demand `model_info.adaptive_router_preferences` on an embedder and a rerank
 # endpoint, and report permanent DRIFT against a perfectly healthy proxy.
 # `models:` is "what the router chooses between"; this block is "what else has
-# to be registered". Together they are the authoritative list of ten (the
+# to be registered". Together they are the authoritative list of eleven (the
 # three Anthropic entries above are commented out — retired 2026-08-30).
 #
 # ROLE vs REAL MODEL (2026-08-30, operator decision): every Central Command
@@ -299,15 +299,10 @@ registration_only:
       chat_template_kwargs:
         enable_thinking: false
 
-  # Named for graphiti-core's default cross-encoder (the app builds it on this
-  # alias when CC_GRAPH_RERANK_ALIAS is unset), pointed at the local Qwen; the
-  # name is a graphiti-side expectation, not a claim that any OpenAI model is
-  # in use.
-  gpt-4.1-nano:
-    registration:
-      model: openai/PLACEHOLDER
-      api_base: PLACEHOLDER
-      timeout: 300
+  # (`gpt-4.1-nano` — graphiti-core's default cross-encoder, which the app
+  # built on that alias name and never called — left this declaration in
+  # v2.62.0. register-models.py lists an existing row as `extra` and leaves
+  # it alone; delete it in the UI whenever convenient.)
 
   # Its own llama.cpp server (:8083), CPU-resident since 2026-08-19. Exactly
   # 1024 dimensions — nothing schema-side enforces the width, so a mis-sized
@@ -338,17 +333,24 @@ registration_only:
       timeout: 60
 
   # THE RERANK ROLE — CC_GRAPH_RERANK_ALIAS (the app's .env; the k3s
-  # installer and updater set it) addresses this name, through the app's
-  # RerankClient (integrations/graphiti_client.py). Same cohere-client constraints as qwen3-rerank-local
-  # below: api_base is POSTed verbatim and MUST end in /v1/rerank, and a swap
-  # target must itself be a rerank-shaped endpoint (llama.cpp --rerank), never
-  # a chat model.
+  # installer and updater set it) addresses this name. Its KIND
+  # (CC_GRAPH_RERANK_KIND) is PROBED by setup.sh's llm phase (design record
+  # 2026-10-04, D3 as rebuilt in v2.62.0): a dedicated reranker answers
+  # LiteLLM's /rerank (the app's RerankClient) — the skeleton below is that
+  # shape, with the same cohere-client constraint as qwen3-rerank-local
+  # (api_base POSTed verbatim, so it MUST end in /v1/rerank); or an ordinary
+  # chat model used as a reranker (openai/<id>, one True/False question per
+  # candidate scored from logprobs — the row MUST return logprobs and carry
+  # thinking OFF, e.g. the chat_template_kwargs block graphiti-llm carries).
+  # `judged_by_probe`: the skeleton is created as written, but a filled-in
+  # row is not held to these patterns — the probe is the judge of both shapes.
   cc-rerank:
     registration:
       model: cohere/PLACEHOLDER
       api_base: PLACEHOLDER/v1/rerank
       mode: rerank
       timeout: 60
+    judged_by_probe: true
 
   # THE SPEECH ROLES — what the cockpit's read-aloud and voice input address
   # (web/.env OPENAI_TTS_MODEL / OPENAI_STT_MODEL, api/speech.py). cc-speech

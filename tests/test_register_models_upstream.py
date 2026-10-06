@@ -49,7 +49,7 @@ IDS = {
     "CC_LLM_UPSTREAM_MODEL_CC_DEFAULT": "corp-claude",
     "CC_LLM_UPSTREAM_MODEL_GRAPHITI_LLM": "corp-claude",
     "CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING": "corp-embed",
-    "CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO": "corp-claude",
+    "CC_LLM_UPSTREAM_MODEL_CC_RERANK": "corp-claude",
     "CC_LLM_UPSTREAM_MODEL_CC_TTS": "corp-tts",
     "CC_LLM_UPSTREAM_MODEL_CC_STT": "corp-whisper",
 }
@@ -129,20 +129,23 @@ def _live(alias, **params):
 def test_alias_env_key_matches_the_bash_derivation(rm):
     """Two languages, one derivation — bash tells the operator which key removes
     the pause, python turns it into a row."""
-    for alias in ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano",
-                  "cc-tts", "cc-stt"):
+    for alias in ("cc-default", "graphiti-llm", "cc-embedding", "cc-rerank",
+                  "cc-tts", "cc-stt", "gpt-4.1-nano"):
         want = subprocess.run(
             [_bash_exe(), "-c", f'. "{ENV_LIB.as_posix()}"; cc_alias_env_key {alias}'],
             capture_output=True, text=True, check=True).stdout.strip()
         assert rm.alias_env_key(alias) == want, alias
+    assert rm.alias_env_key("cc-rerank") == "CC_LLM_UPSTREAM_MODEL_CC_RERANK"
     assert rm.alias_env_key("gpt-4.1-nano") == "CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO"
 
 
 @pytest.mark.parametrize("speech,expected", [
-    ("1", ["cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano", "cc-tts", "cc-stt"]),
+    # gpt-4.1-nano left the list in v2.62.0 (graphiti-core's unused default
+    # reranker); cc-rerank is OPTIONAL (cc_optional_aliases), never required.
+    ("1", ["cc-default", "graphiti-llm", "cc-embedding", "cc-tts", "cc-stt"]),
     # With the bundled engine off, cc-tts/cc-stt point at engines of the
     # operator's own — a UI job, not an upstream .env can name.
-    ("0", ["cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano"]),
+    ("0", ["cc-default", "graphiti-llm", "cc-embedding"]),
 ])
 def test_cc_required_aliases_follows_the_speech_flag(speech, expected):
     out = subprocess.run(
@@ -158,7 +161,7 @@ def test_no_keys_creates_placeholder_skeletons(rm, monkeypatch, capsys):
     assert rc == rm.EXIT_ACTION, out
     created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
     assert set(created) == {"cc-default", "graphiti-llm", "cc-embedding",
-                            "gpt-4.1-nano", "cc-tts", "cc-stt"}
+                            "cc-rerank", "cc-tts", "cc-stt"}
     for alias, params in created.items():
         assert params["model"] == "openai/PLACEHOLDER", alias
         assert params["api_base"] == "PLACEHOLDER", alias
@@ -198,7 +201,7 @@ def test_a_placeholder_row_is_updated_once_env_declares_the_upstream(rm, monkeyp
         _live("cc-default", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
         _live("graphiti-llm", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
         _live("cc-embedding", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
-        _live("gpt-4.1-nano", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
+        _live("cc-rerank", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
         _live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_speech"),
         _live("cc-stt", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_transcription"),
     ]
@@ -219,7 +222,10 @@ def test_a_row_the_operator_edited_is_never_touched(rm, monkeypatch, capsys):
         _live("cc-default", model="openai/their-own-model", api_base="https://theirs.example/v1"),
         _live("graphiti-llm", model="openai/their-own-model", api_base="https://theirs.example/v1"),
         _live("cc-embedding", model="openai/their-embed", api_base="https://theirs.example/v1"),
-        _live("gpt-4.1-nano", model="openai/their-own-model", api_base="https://theirs.example/v1"),
+        # A DEDICATED reranker where the skeleton says openai/: cc-rerank is
+        # judged_by_probe, so a row of either shape is the operator's, not drift.
+        _live("cc-rerank", model="cohere/their-rerank", api_base="https://theirs.example/v1/rerank",
+              mode="rerank"),
         _live("cc-tts", model="openai/their-tts", api_base="https://theirs.example/v1", mode="audio_speech"),
         _live("cc-stt", model="openai/their-stt", api_base="https://theirs.example/v1", mode="audio_transcription"),
     ]
@@ -237,16 +243,19 @@ def test_require_makes_non_required_skeletons_optional(rm, monkeypatch, capsys):
     nothing on the install would call. With --require naming the four, the
     skeletons are `optional` and the phase proceeds."""
     filled = {a: _live(a, model="openai/qwen", api_base="http://up:1/v1", api_key="k")
-              for a in ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano")}
+              for a in ("cc-default", "graphiti-llm", "cc-embedding")}
     live = list(filled.values()) + [
         _live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
         _live("cc-stt", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
     ]
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=live, env={},
                           argv=("--policy", str(SINGLE / "models.json"),
-                                "--require", "cc-default graphiti-llm cc-embedding gpt-4.1-nano"))
+                                "--require", "cc-default graphiti-llm cc-embedding"))
     assert rc == 0, out
     assert "optional cc-tts" in out and "optional cc-stt" in out
+    # cc-rerank is optional on every install: its skeleton is created and
+    # left for the operator, never a pause.
+    assert "optional cc-rerank" in out
     assert not [p for p, _ in proxy.calls if p.endswith("/model/update")]
     # and the same catalog WITHOUT --require still pauses: k3s parity
     rc2, out2, _ = _run(rm, monkeypatch, capsys, live=live, env={})
@@ -295,3 +304,21 @@ def test_the_k3s_declaration_pins_graphiti_llm_thinking_off(rm):
     import yaml
     policy = yaml.safe_load((ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml").read_text(encoding="utf-8"))
     assert rm.declared(policy)["graphiti-llm"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_a_probe_judged_alias_is_created_as_its_skeleton_and_never_held_to_it(rm):
+    """cc-rerank is right as a dedicated reranker OR as a chat model; the
+    setup probe decides (design record 2026-10-04, D3 as rebuilt in v2.62.0).
+    Its skeleton is still the creation value, and a PLACEHOLDER left in it is
+    still pending — but a filled row of either shape is ok."""
+    for path in (SINGLE / "models.json", ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml"):
+        policy = rm.load_declaration(path)
+        assert rm.probe_judged(policy) == {"cc-rerank"}, path
+        want = rm.declared(policy)
+        invariants = {a: ({} if a in rm.probe_judged(policy) else p) for a, p in want.items()}
+        for row in (_live("cc-rerank", model="openai/qwen", api_base="http://up:1/v1"),
+                    _live("cc-rerank", model="cohere/rr", api_base="http://up:2/v1/rerank", mode="rerank")):
+            statuses = {a: st for st, a, _ in rm.plan({"cc-rerank": want["cc-rerank"]}, [row], invariants)}
+            assert statuses == {"cc-rerank": "ok"}, (path, row)
+        skel = _live("cc-rerank", **want["cc-rerank"])
+        assert [st for st, *_ in rm.plan({"cc-rerank": want["cc-rerank"]}, [skel], invariants)] == ["pending"]

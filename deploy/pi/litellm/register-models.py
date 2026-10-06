@@ -249,6 +249,23 @@ def declared(policy: dict, upstream: dict[str, dict] | None = None) -> dict[str,
     return out
 
 
+def probe_judged(policy: dict) -> set[str]:
+    """Aliases whose declaration is a SKELETON only (`judged_by_probe: true`).
+
+    Their registration values are what an absent alias is CREATED with, but a
+    filled-in row is never judged against them, because more than one shape is
+    right: `cc-rerank` may be a dedicated reranker (`cohere/…`, `/v1/rerank`,
+    `mode: rerank`) or an ordinary chat model used as one (`openai/…`), and
+    setup's probe — not a pattern — decides which (design record 2026-10-04,
+    D3 as rebuilt in v2.62.0). A PLACEHOLDER left in one is still `pending`."""
+    out: set[str] = set()
+    for block in ("models", "registration_only"):
+        for alias, spec in (policy.get(block) or {}).items():
+            if isinstance(spec, dict) and spec.get("judged_by_probe"):
+                out.add(alias)
+    return out
+
+
 def _norm(v):
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
 
@@ -361,8 +378,10 @@ def main() -> int:
     policy = load_declaration(args.policy)
     # The DECLARATION's own patterns — what an existing row is judged against,
     # whatever .env says. Never replaced by the upstream values: see plan().
-    invariants = declared(policy)
-    want = invariants
+    # A probe-judged alias has none: its row is judged by setup's probe.
+    want = declared(policy)
+    judged = probe_judged(policy)
+    invariants = {a: ({} if a in judged else p) for a, p in want.items()}
     # The upstream, when .env declares it (design record D3). Resolved from the
     # ENVIRONMENT explicitly rather than inside declared(), so every caller that
     # asks for the declaration alone gets the skeletons.

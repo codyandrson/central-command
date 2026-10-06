@@ -14,6 +14,8 @@
 #     ./discover-llm.sh embed      <model-id>    # embed one string, print DIMENSION
 #     ./discover-llm.sh speech     <model-id> <out.mp3>   # synthesise one sentence
 #     ./discover-llm.sh transcribe <model-id> <audio>     # transcribe it back
+#     ./discover-llm.sh rerank      <model-id>   # LiteLLM /rerank ranks relevant over irrelevant
+#     ./discover-llm.sh rerank-chat <model-id>   # True/False + logprobs, as the chat reranker asks
 #
 #   TWO RUNGS, and the difference is the diagnosis (2026-08-25, LiteLLM-first):
 #
@@ -24,6 +26,18 @@
 #                 ./discover-llm.sh --proxy embed      cc-embedding
 #                 ./discover-llm.sh --proxy speech     cc-tts /tmp/p.mp3
 #                 ./discover-llm.sh --proxy transcribe cc-stt /tmp/p.mp3
+#                 ./discover-llm.sh --proxy rerank      cc-rerank
+#                 ./discover-llm.sh --proxy rerank-chat cc-rerank
+#               `rerank` / `rerank-chat` decide what KIND of model the
+#               optional reranker alias is (design record 2026-10-04, D3 as
+#               rebuilt in v2.62.0): a dedicated reranker answers /rerank and
+#               scores a relevant passage above an irrelevant one; a chat model
+#               used as a reranker must answer the app's one-token True/False
+#               question with logprobs — True for the relevant passage, False
+#               for the irrelevant one. A reasoning model whose thinking is not
+#               disabled on the alias answers with a reasoning token instead,
+#               and fails here. The app's own ChatRerankClient is the truth;
+#               verify/selfcheck's graph-rerank row re-proves it as the app.
 #               speech then transcribe is the round trip setup runs: the
 #               transcription must contain what was synthesised.
 #               `structured` is the graphiti-llm check: the app's in-process
@@ -225,8 +239,66 @@ if "command" not in text.lower():
     sys.exit(f"FATAL: transcription {text!r} does not contain what was synthesised (\"Central Command is listening.\")")
 print(f"transcribe ok: {sys.argv[1]} -> {text!r}")' "$2"
     ;;
+  rerank)
+    [[ -n "${2:-}" ]] || { echo "usage: $0 rerank <model-id>" >&2; exit 1; }
+    # The app's RerankClient call: POST <proxy root>/rerank with {model, query,
+    # documents}. Document 0 is irrelevant and document 1 relevant, so a model
+    # that merely echoes input order fails.
+    _api -H 'Content-Type: application/json' \
+      -d "{\"model\": \"$2\", \"query\": \"Which city is the capital of France?\", \"documents\": [\"A sourdough starter needs flour, water and a warm kitchen.\", \"Paris is the capital and largest city of France.\"]}" \
+      "${CC_LLM_BASE_URL%/v1}/rerank" | $PY -c '
+import json, sys
+try:
+    res = json.load(sys.stdin)["results"]
+    score = {int(r["index"]): float(r["relevance_score"]) for r in res}
+except Exception as exc:
+    sys.exit(f"FATAL: /rerank did not answer a results list ({type(exc).__name__}) — not a rerank-shaped endpoint")
+if sorted(score) != [0, 1]:
+    sys.exit(f"FATAL: /rerank scored {sorted(score)} for 2 documents")
+if not score[1] > score[0]:
+    sys.exit(f"FATAL: /rerank ranked the irrelevant passage first ({score})")
+print(f"rerank ok: {sys.argv[1]} -> relevant {score[1]:.3f} > irrelevant {score[0]:.3f}")' "$2"
+    ;;
+  rerank-chat)
+    [[ -n "${2:-}" ]] || { echo "usage: $0 rerank-chat <model-id>" >&2; exit 1; }
+    # The app's ChatRerankClient request shape (graphiti_client.py): upstream
+    # graphiti-core's question, temperature 0, ONE token, logprobs with the top
+    # two alternatives, no logit_bias. Asked twice, relevant then irrelevant.
+    rc_out=""
+    for pair in "Paris is the capital and largest city of France.|true" \
+                "A sourdough starter needs flour, water and a warm kitchen.|false"; do
+      passage="${pair%|*}"; want="${pair##*|}"
+      body="$($PY -c '
+import json, sys
+model, passage = sys.argv[1], sys.argv[2]
+i = " " * 27
+user = (f"\n{i}Respond with \"True\" if PASSAGE is relevant to QUERY and \"False\" otherwise.\n"
+        f"{i}<PASSAGE>\n{i}{passage}\n{i}</PASSAGE>\n"
+        f"{i}<QUERY>\n{i}Which city is the capital of France?\n{i}</QUERY>\n{i}")
+print(json.dumps({"model": model, "temperature": 0, "max_tokens": 1, "logprobs": True,
+                  "top_logprobs": 2, "messages": [
+    {"role": "system", "content": "You are an expert tasked with determining whether the passage is relevant to the query"},
+    {"role": "user", "content": user}]}))' "$2" "$passage")"
+      rc_out="$(_api -H 'Content-Type: application/json' -d "$body" "${CC_LLM_BASE_URL}/chat/completions" | $PY -c '
+import json, sys
+want = sys.argv[1]
+r = json.load(sys.stdin)
+lp = ((r.get("choices") or [{}])[0].get("logprobs") or {}).get("content") or []
+top = (lp[0].get("top_logprobs") if lp else None) or []
+if not top:
+    sys.exit("FATAL: no logprobs in the answer — the endpoint behind the alias must support logprobs/top_logprobs on chat completions")
+tok = str(top[0].get("token", ""))
+word = tok.replace("▁", " ").replace("Ġ", " ").strip().lower().split(" ")[0] if tok.strip() else ""
+if word not in ("true", "false"):
+    sys.exit(f"FATAL: the first token is {tok!r}, not True/False — a reasoning model needs thinking DISABLED on the alias (e.g. chat_template_kwargs enable_thinking false for a llama.cpp backend)")
+if word != want:
+    sys.exit(f"FATAL: answered {tok!r} where {want} was expected — the model does not judge relevance")
+print(word)' "$want")" || exit 1
+    done
+    echo "rerank-chat ok: $2 answers True/False with logprobs (relevant -> true, irrelevant -> ${rc_out})"
+    ;;
   *)
-    echo "usage: $0 [--proxy] models | chat <model-id> | structured <model-id> | embed <model-id> | speech <model-id> <out.mp3> | transcribe <model-id> <audio>" >&2
+    echo "usage: $0 [--proxy] models | chat <model-id> | structured <model-id> | embed <model-id> | speech <model-id> <out.mp3> | transcribe <model-id> <audio> | rerank <model-id> | rerank-chat <model-id>" >&2
     exit 1
     ;;
 esac

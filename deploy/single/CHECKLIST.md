@@ -154,7 +154,7 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
     Where: the LiteLLM UI, http://127.0.0.1:4000/ui (port 4000 unless `.env` sets `CC_LITELLM_PORT`) — log in as `admin` with `.env`'s `CC_LLM_PROXY_ADMIN_KEY`. Every alias `.env` did not declare is entered here — including one served from a different host or port than `CC_LLM_UPSTREAM_BASE_URL` (typically the embedder), because `.env` declares one upstream base URL and key for all of them; a server that checks no key still needs a non-empty key field (`none`).
 30. `llm/probe-chat`: Get a real completion back through the cc-default alias — the one the agents address.
 31. `llm/probe-structured`: Get schema-constrained JSON back through graphiti-llm, which is what graph extraction needs.
-32. `llm/probe-rerank-model`: Get a completion back through gpt-4.1-nano, the alias graphiti_core addresses by that literal name.
+32. `llm/probe-rerank`: Decide graph search's reranker by PROBING the optional cc-rerank alias: LiteLLM's /rerank first (a dedicated reranker), then a True/False chat answer with logprobs (a chat model with thinking off), else none — and write the result to .env unless you pinned a kind.
 33. `llm/speech-live`: Wait for the speech engine to answer /health, when `CC_ENABLE_SPEECH=1`.
 34. `llm/speech-model`: Install the TTS and STT model snapshots into the engine's volume (the first call downloads them).
 35. `llm/probe-tts`: Synthesise speech through the cc-tts alias, when `CC_ENABLE_SPEECH=1`.
@@ -179,7 +179,7 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
 47. `app/install`: Install central_command editable into that environment.
 48. `app/graphiti-patches`: Apply the two carried graphiti-core fixes (deploy/graphiti-patches/) to the installed package — after every install, because an install puts back a pristine copy; without them the API holds graph extraction.
 49. `app/app-env`: Assert the one answer file and its mode (0600 where the filesystem honours it).
-50. `app/mint-key`: Mint the spine's OWN LiteLLM virtual key, scoped to the aliases this deployment requires, or widen an existing key's scope to cover them, so a leak of the agents' credential cannot reconfigure the proxy.
+50. `app/mint-key`: Mint the spine's OWN LiteLLM virtual key, scoped to the aliases this deployment requires (and the reranker alias when one is in use), or widen an existing key's scope to cover them, so a leak of the agents' credential cannot reconfigure the proxy.
 51. `app/app-llm-base-url`: Derive the proxy URL the app dials.
 52. `app/app-default-model`: Derive which model the agents run on (this profile's proxy carries cc-default).
 53. `app/app-embed-alias`: Derive the alias the graph writer embeds through.
@@ -266,7 +266,8 @@ What the run prints, besides the protocol lines:
 - **`./setup.sh status`** prints the ledger, re-checks the postconditions, runs
   `verify.sh` and the application's whole self-check. It changes nothing, but
   the self-check spends two small model requests (one completion, one
-  embedding).
+  embedding), plus the reranker's probe when one is configured (one `/rerank`
+  call, or two one-token completions).
 - **The cockpit** is at http://127.0.0.1:3080/ (port 3080 unless `.env` sets `CC_COCKPIT_PORT`). It asks your name on first run if `.env`
   does not carry one. The EA's team tour is the seeded `team-tour` schedule:
   **Run now** in the cockpit's Crons tab.

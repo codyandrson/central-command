@@ -248,11 +248,38 @@ def test_a_fresh_mint_is_scoped_to_exactly_the_required_aliases(tree: Path, spee
 
 def test_the_mint_body_is_built_from_the_one_list_not_typed():
     """The source keeps no second alias list: the mint's models come from
-    cc_required_aliases (through spine_aliases_json)."""
+    cc_required_aliases, plus the reranker alias when .env names one, through
+    cc_scope_aliases (deploy/env-lib.sh) — spine_aliases_json reads
+    spine_scope_aliases, which reads nothing else."""
     src = installer_source()
     assert '"cc-default", "cc-tts", "cc-stt"' not in src
     body = src.split("spine_aliases_json() {", 1)[1].split("\n}", 1)[0]
-    assert "cc_required_aliases" in body
+    assert "spine_scope_aliases" in body
+    scope = src.split("spine_scope_aliases() {", 1)[1].split("\n}", 1)[0]
+    assert "cc_scope_aliases" in scope and "CC_GRAPH_RERANK_ALIAS" in scope
+    lib = (ROOT / "deploy" / "env-lib.sh").read_text(encoding="utf-8")
+    fn = lib.split("cc_scope_aliases() {", 1)[1].split("\n}", 1)[0]
+    assert "cc_required_aliases" in fn
+
+
+@drives_installer
+def test_a_reranker_in_use_joins_the_scope(tree: Path):
+    """Since graphiti-core runs in the API, graph search calls the reranker
+    with THIS key: once CC_GRAPH_RERANK_ALIAS names one (the llm phase's probe
+    wrote it, or the operator did), the mint's scope carries it too — and an
+    install with no reranker is scoped to the required aliases alone (above)."""
+    _set(tree / ".env", {"CC_ENABLE_SPEECH": "0", "CC_GRAPH_RERANK_ALIAS": "cc-rerank",
+                         "CC_GRAPH_RERANK_KIND": "chat"})
+
+    r = _run_app(tree)
+
+    line = _mint_line(r.stdout)
+    assert line.startswith("PASS mint-key: minted"), line
+    argv = (_stub(tree) / "argv.log").read_text(encoding="utf-8")
+    m = re.search(r'\{"models": (\[[^\]]*\])', argv)
+    assert m, argv
+    assert json.loads(m.group(1)) == _required("0") + ["cc-rerank"]
+    _assert_no_secret_in_argv(tree)
 
 
 # ── an existing key ─────────────────────────────────────────────────────────

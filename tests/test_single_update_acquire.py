@@ -277,7 +277,7 @@ class Dep:
                 if dig != "-":
                     digests[f"{path}:{lock}"] = dig
         if models is None:
-            models = ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano")
+            models = ("cc-default", "graphiti-llm", "cc-embedding")
         write_lf(self.cfg, json.dumps({"log": str(self.log), "missing": list(missing),
                                         "models": list(models), "locks": locks,
                                         "digests": digests, "placeholders": list(placeholders)}))
@@ -430,7 +430,7 @@ def test_a_failed_staged_artifact_is_a_fail_and_still_changes_nothing(dep: Dep):
 @drives_installer
 def test_a_missing_required_alias_is_a_useraction_with_the_tree_untouched(dep: Dep):
     dep.fill_ledger()
-    dep.configure(models=("cc-default", "graphiti-llm", "cc-embedding"))
+    dep.configure(models=("cc-default", "graphiti-llm"))
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
     r = dep.update("apply")
@@ -438,8 +438,10 @@ def test_a_missing_required_alias_is_a_useraction_with_the_tree_untouched(dep: D
     assert r.returncode == 3, r.stdout + r.stderr
     probe = [l for l in r.stdout.splitlines() if l.startswith("USERACTION catalog-probe:")]
     assert probe, r.stdout
-    assert "gpt-4.1-nano" in probe[0] and "LiteLLM UI" in probe[0], probe[0]
-    assert "CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO" in probe[0], probe[0]
+    assert "cc-embedding" in probe[0] and "LiteLLM UI" in probe[0], probe[0]
+    assert "CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING" in probe[0], probe[0]
+    # The optional reranker alias is never a reason to stop an update.
+    assert "cc-rerank" not in probe[0], probe[0]
     # The fetch half passed: both halves always run, so one pass names every seam.
     assert "PASS resolve-images:" in r.stdout
     _untouched(dep, head, env, led)
@@ -460,7 +462,7 @@ def test_a_placeholder_skeleton_is_not_a_filled_alias(dep: Dep):
     assert r.returncode == 3, r.stdout + r.stderr
     probe = [l for l in r.stdout.splitlines() if l.startswith("USERACTION catalog-probe:")]
     assert probe and "cc-embedding" in probe[0] and "PLACEHOLDER" in probe[0], r.stdout
-    assert "gpt-4.1-nano" not in probe[0], probe[0]
+    assert "graphiti-llm" not in probe[0], probe[0]
     _untouched(dep, head, env, led)
 
 
@@ -469,12 +471,12 @@ def test_a_declared_missing_alias_does_not_stop_the_update(dep: Dep):
     """A release that ADDS an alias must stay appliable by a declared-catalog
     install: its row only appears when the post-merge llm phase registers it."""
     dep.fill_ledger()
-    dep.configure(models=("cc-default", "graphiti-llm", "cc-embedding"))
+    dep.configure(models=("cc-default", "graphiti-llm"))
     _set(dep.repo / ".env", {"CC_LLM_UPSTREAM_BASE_URL": "http://llm.example.com/v1",
                              "CC_LLM_UPSTREAM_API_KEY": "upstream-test-key",
-                             "CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO": "some-small-model"})
+                             "CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING": "some-embedder"})
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
-    assert any(l.startswith("PASS catalog-probe:") and "gpt-4.1-nano" in l
+    assert any(l.startswith("PASS catalog-probe:") and "cc-embedding" in l
                for l in r.stdout.splitlines()), r.stdout
     assert "PASS acquire:" in r.stdout, r.stdout
     # It merged. (What happens after is the stub llm's business: it registers
@@ -576,7 +578,7 @@ def test_a_stop_after_the_staged_build_leaves_the_live_image_tag_alone(dep: Dep)
     _set(dep.repo / ".env", {"CC_ENABLE_SANDBOX": "1"})
     old = "0" * 64
     write_lf(_label_file(dep, LOCAL), old + "\n")         # the old release's build
-    dep.configure(models=("cc-default", "graphiti-llm", "cc-embedding"))
+    dep.configure(models=("cc-default", "graphiti-llm"))
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
     r = dep.update("apply")

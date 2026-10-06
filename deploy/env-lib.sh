@@ -939,8 +939,8 @@ cc_tls_insecure_warn_once() { # cc_tls_insecure_warn_once <consumers>
 #   CC_LLM_UPSTREAM_MODEL_<A>  the UPSTREAM model id for alias <A>
 #
 # The key NAME is the alias upper-cased with every non-alphanumeric turned into
-# `_`: cc-default -> CC_LLM_UPSTREAM_MODEL_CC_DEFAULT, gpt-4.1-nano ->
-# CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO. Mirrored in
+# `_`: cc-default -> CC_LLM_UPSTREAM_MODEL_CC_DEFAULT, cc-rerank ->
+# CC_LLM_UPSTREAM_MODEL_CC_RERANK. Mirrored in
 # deploy/pi/litellm/register-models.py (`alias_env_key`) — that script is what
 # turns these into rows, and it runs as Python, so the derivation exists twice
 # on purpose; `tests/test_register_models_upstream.py` pins the pair.
@@ -951,16 +951,40 @@ cc_alias_env_key() { # cc_alias_env_key <alias>
 
 # WHICH aliases a given deployment requires. ONE list, read by the `check`
 # command (a missing key is a USERACTION naming it) and by setup's `llm` phase
-# (all declared = no UI pause). The four core aliases are always required; the
+# (all declared = no UI pause). The three core aliases are always required; the
 # speech pair only with the bundled engine — with CC_ENABLE_SPEECH=0 the
 # operator points cc-tts/cc-stt at engines of their own, which is a UI job, not
-# an upstream this file can name.
+# an upstream this file can name. (`gpt-4.1-nano` left this list in v2.62.0: it
+# was graphiti-core's default reranker, built and never called — an install
+# that still has the row or its CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO key keeps
+# them, harmlessly.)
 #
 # Reads CC_ENABLE_SPEECH from the environment (the caller has sourced .env).
 cc_required_aliases() {
-  printf 'cc-default graphiti-llm cc-embedding gpt-4.1-nano'
+  printf 'cc-default graphiti-llm cc-embedding'
   [[ "${CC_ENABLE_SPEECH:-1}" == "1" ]] && printf ' cc-tts cc-stt'
   printf '\n'
+}
+
+# The aliases a deployment MAY map, and setup then probes and uses — never a
+# reason to pause. One today: `cc-rerank`, graph search's reranker (design
+# record 2026-10-04, D3 as rebuilt in v2.62.0): a dedicated reranker, else a
+# chat model with thinking off, else none. models.json declares its skeleton
+# and register-models.py leaves it `optional`.
+cc_optional_aliases() {
+  printf 'cc-rerank\n'
+}
+
+# The spine key's SCOPE: every required alias, plus the reranker alias when the
+# app is configured to call one (`cc_scope_aliases <CC_GRAPH_RERANK_ALIAS>`).
+# Built from cc_required_aliases — never a second list — because since
+# graphiti-core runs in the API, the reranker is called with THIS key.
+cc_scope_aliases() { # cc_scope_aliases [rerank-alias]
+  local list; list="$(cc_required_aliases)"
+  if [[ -n "${1:-}" && " $list " != *" $1 "* ]]; then
+    list="$list $1"
+  fi
+  printf '%s\n' "$list"
 }
 
 # ── ONE exit-code rule (2026-10-01 design record, D5) ───────────────────────

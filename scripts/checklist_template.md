@@ -157,7 +157,8 @@ What the run prints, besides the protocol lines:
 - **`./setup.sh status`** prints the ledger, re-checks the postconditions, runs
   `verify.sh` and the application's whole self-check. It changes nothing, but
   the self-check spends two small model requests (one completion, one
-  embedding).
+  embedding), plus the reranker's probe when one is configured (one `/rerank`
+  call, or two one-token completions).
 - **The cockpit** is at {{cockpit}}. It asks your name on first run if `.env`
   does not carry one. The EA's team tour is the seeded `team-tour` schedule:
   **Run now** in the cockpit's Crons tab.
