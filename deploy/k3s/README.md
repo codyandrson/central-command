@@ -158,8 +158,15 @@ Assumed already true before phase 2:
     OFF; it is `judged_by_probe`, so its row is not held to the skeleton's
     patterns — the llm phase probes `/rerank`, then the chat shape, and writes
     the result to `CC_GRAPH_RERANK_KIND` (only when that key is empty; a set
-    kind is proven, never re-detected). Tiers, the measured numbers and the
-    benchmark: `deploy/single/README.md`, Reranking. Nothing
+    kind is proven, never re-detected). `cc-rerank` and `qwen3-rerank-local`
+    are `optional: true` (v2.62.1): with **no reranker**, leave both skeletons
+    unfilled — the catalog step does not pause for them, and the probe
+    PASSes "no reranker" and writes `CC_GRAPH_RERANK_ALIAS=` (empty, an
+    explicit off) to the app's `.env`. To turn it on later, fill `cc-rerank`,
+    set `CC_GRAPH_RERANK_ALIAS=cc-rerank` there and re-run the llm phase. An
+    unfilled row the app's `.env` names is a gate whose message gives that
+    exact line. Tiers, the measured numbers and the benchmark:
+    `deploy/single/README.md`, Reranking. Nothing
     you enter in the UI is ever overwritten by the script. Timeouts have
     exactly one home per model, which is what makes `policy.py --check` a
     real gate rather than a coin flip. `policy.py --apply` still only

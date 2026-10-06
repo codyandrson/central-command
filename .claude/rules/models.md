@@ -75,3 +75,20 @@ when a matching file is read.
   malformed answer as a semantic `RerankError`. Never auto-map the
   extraction model: a chat reranker costs up to 2 × the limit calls per
   search on it. `scripts/graph_rerank_bench.py` measures a site's own.
+- **The `openai/` provider cannot answer `/rerank` — a dedicated reranker
+  needs a rerank-capable provider row** (v2.62.1; measured on a real proxy
+  2026-10-05: `POST /rerank` on an `openai/…` row is HTTP 500 "Unsupported
+  provider: openai", a `cohere/<id>` row with `api_base` ending `/v1/rerank`
+  and `mode: rerank` answers; LiteLLM's rerank provider list,
+  `docs/vendor/litellm/docs/rerank.md`, names no OpenAI). So the one `.env`
+  answer derives TWO shapes (`register-models.py alias_shapes`) and setup
+  registers and probes them in order — dedicated (`cohere/<id>`, the base
+  ending `/v1/rerank` exactly once), then chat (`openai/<id>`) — keeping the
+  row that answered, the chat one when neither did. An answer naming
+  `cohere/`, `hosted_vllm/` or `infinity/` is used verbatim, dedicated only;
+  any other slash is part of a model id. `--shape` writes only a row that is
+  absent, a skeleton, or one of the shapes the CURRENT answer derives — a row
+  filled by hand (or made from an earlier answer) is never rewritten — and
+  writes nothing when the row already is that shape, so a re-run never
+  flaps. `optional: true` in a declaration means the alias never pauses
+  setup; `cc-rerank` (both profiles) and `qwen3-rerank-local` (k3s) carry it.

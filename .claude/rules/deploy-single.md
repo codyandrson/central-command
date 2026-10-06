@@ -340,6 +340,13 @@ when a matching file is read.
   search; the question's help text offers it as a one-line answer instead.
   `gpt-4.1-nano` (graphiti-core's default reranker, built and never called)
   left the required list; an existing row and its `.env` key are harmless.
+  Since v2.62.1 an answered `CC_LLM_UPSTREAM_MODEL_CC_RERANK` is REGISTERED in
+  each shape before its probe (`rerank_shape` → `register-models.py --shape`):
+  the `openai/` provider cannot answer `/rerank`, so the dedicated try is a
+  `cohere/<id>` row on the base ending `/v1/rerank`, and the chat try the
+  plain `openai/<id>`; the row left is the one that answered (chat when
+  neither did — it was registered last). A pinned kind registers and probes
+  only its own shape.
 - **The report redacts as it collects, from `redact.tsv`, and the scan
   stays** (v2.56.0, D11 — Replicated's redactors). `deploy/single/redact.tsv`
   declares `key` rows (globs over `.env` key NAMES whose VALUES become

@@ -730,11 +730,33 @@ answering neither shape is a WARN, and the alias stays unused.
 
 **To turn reranking on**, do ONE of:
 
-- answer `CC_LLM_UPSTREAM_MODEL_CC_RERANK` (`./setup.sh configure`) — with no
-  dedicated reranker, the same model id as `graphiti-llm` is the one-line
-  answer — and re-run `./setup.sh`;
-- or fill the `cc-rerank` row in the LiteLLM UI, set
-  `CC_GRAPH_RERANK_ALIAS=cc-rerank` in `.env`, and re-run `./setup.sh`.
+- answer `CC_LLM_UPSTREAM_MODEL_CC_RERANK` (`./setup.sh configure`) and re-run
+  `./setup.sh`. Setup registers the row and probes it in order, keeping the
+  row that answers:
+  1. a **dedicated reranker** — `cohere/<id>`, `api_base` = the declared
+     upstream base ending `/v1/rerank`, `mode: rerank` (what a llama.cpp
+     `--rerank` server answers; the `openai/` provider cannot answer LiteLLM's
+     `/rerank`, so a dedicated reranker needs a rerank-capable provider row);
+  2. a **chat model** — `openai/<id>` on the declared base.
+
+  If neither answers, the chat-shaped row stays (the plain mapping of what you
+  typed) and a WARN says both were tried. To name the provider yourself, answer
+  `cohere/<id>`, `hosted_vllm/<id>` or `infinity/<id>`: only those three
+  prefixes are read as a provider (any other text, `org/model` included, is the
+  model id), the row is registered verbatim (the base ending `/v1/rerank` for
+  `cohere`, the server root for the other two) and probed only as a dedicated
+  reranker. With no dedicated reranker, the same model id as `graphiti-llm` is
+  the one-line answer;
+- or fill the `cc-rerank` row in the LiteLLM UI with whatever provider your
+  reranker speaks — LiteLLM documents Cohere, Together AI, Azure AI, Jina AI,
+  AWS Bedrock, HuggingFace, Infinity, vLLM, DeepInfra, Vertex AI, Fireworks AI,
+  Voyage AI and IBM watsonx.ai for rerank — set
+  `CC_GRAPH_RERANK_ALIAS=cc-rerank` in `.env`, and re-run `./setup.sh`. A row
+  filled by hand is never rewritten; it is probed as it is.
+
+Setup only ever reshapes a row it made from `.env` (one still equal to a shape
+the current answer derives). A kind that is set registers and probes only its
+own shape, and a re-run with nothing changed writes nothing.
 
 A chat model that reasons by default needs thinking OFF **on the alias**: for a
 llama.cpp-style backend that is `chat_template_kwargs: {"enable_thinking":

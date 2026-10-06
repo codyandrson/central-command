@@ -1,6 +1,6 @@
 # Graphiti as a library: the MCP server leaves, ingestion becomes durable, and the graph's shapes get one owner
 
-> **Status:** partial — release 1 (D1–D7, D10) shipped in v2.60.0 and release 2 (D8, D9, agent search filters, the reader's canonical switch, D10's deferred deletions) in v2.61.0 (both 2026-10-05); D3 rebuilt as the reranker decision in v2.62.0; the refreshed vendored graphiti documentation (D11) remains
+> **Status:** partial — release 1 (D1–D7, D10) shipped in v2.60.0 and release 2 (D8, D9, agent search filters, the reader's canonical switch, D10's deferred deletions) in v2.61.0 (both 2026-10-05); D3 rebuilt as the reranker decision in v2.62.0 (the dedicated shape registered from `.env` in v2.62.1); the refreshed vendored graphiti documentation (D11) remains
 > **As-built:** `central_command/integrations/graphiti_client.py`, `central_command/integrations/graphiti.py`, `central_command/integrations/graphiti_ingest.py`, `central_command/integrations/graph_ontology.py`, `central_command/integrations/graphiti_patches.py`, `central_command/integrations/neo4j_reader.py`, `central_command/integrations/neo4j_writer.py`, `scripts/apply_graphiti_patches.py`, `deploy/graphiti-patches/`, `central_command/gateway/graph_auditor.py`, `central_command/gateway/executor.py`, `central_command/runtime/tools.py`, `central_command/db/schema.sql`, `deploy/k3s/cc-update.sh`, `deploy/k3s/mint-keys.sh`, `deploy/k3s/removed.txt`, `deploy/single/steps.tsv`, `web/src/features/graph/EpisodeDeleteDialog.tsx`, `tests/test_graph_ingest.py`, `tests/test_graphiti_client.py`, `tests/test_graphiti_server_boundary.py`, `tests/test_k3s_update_reconcile.py`, `tests/test_graph_delete_episode.py`, `tests/test_graph_write_shape.py`, `tests/test_graph_search_filters.py`, `tests/test_graph_rerank.py`, `tests/test_single_rerank_probe.py`, `scripts/graph_rerank_bench.py`
 
 ## The problem
@@ -201,6 +201,21 @@ a reranker (nearly the same quality, slower); otherwise none.
   same gate as its other probes. In both declarations the row is
   `judged_by_probe`: `register-models.py` creates the skeleton and does not
   hold a filled-in row to its patterns, because both shapes are right.
+- **One answer, two shapes** (v2.62.1). The `openai/` provider cannot answer
+  LiteLLM's `/rerank` (HTTP 500 "Unsupported provider: openai", measured on a
+  real proxy 2026-10-05), so the v2.62.0 answer path — `.env`'s
+  `CC_LLM_UPSTREAM_MODEL_CC_RERANK` registered as `openai/<id>` — could only
+  ever yield the chat tier. The answer now derives a dedicated shape
+  (`cohere/<id>`, the declared base ending `/v1/rerank`, `mode: rerank`) and
+  a chat shape (`openai/<id>`), and the single-node llm phase registers and
+  probes them in that order, keeping the row that answered (the chat row when
+  neither did). An answer naming `cohere/`, `hosted_vllm/` or `infinity/` is
+  registered verbatim and probed only as a dedicated reranker. Only a row
+  setup made from `.env` is ever reshaped; a hand-filled row is probed as it
+  is. On k3s, `cc-rerank` and `qwen3-rerank-local` became `optional`: an
+  unfilled skeleton is "no reranker" (a PASS, and an explicit empty
+  `CC_GRAPH_RERANK_ALIAS` in the app's `.env`), so a site with no reranker
+  can finish the install; a filled row is probed as before.
 - **`gpt-4.1-nano` is retired** as a required alias, question, probe and
   declaration on both substrates — it was only ever the dead fallback. An
   existing row and `CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO` are left alone.

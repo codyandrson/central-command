@@ -267,13 +267,15 @@ the choice that matters most for the quality of what agents recall:
 
 | the site has | map `cc-rerank` to | quality | cost |
 |---|---|---|---|
-| a dedicated reranker (llama.cpp `--rerank`, a mirrored rerank service) | it — `cohere/<id>`, api_base ending `/v1/rerank`, mode `rerank` | best | one request per search |
+| a dedicated reranker (llama.cpp `--rerank`, a mirrored rerank service) | it — answer `CC_LLM_UPSTREAM_MODEL_CC_RERANK` with its id and setup registers `cohere/<id>` on the declared base ending `/v1/rerank`, mode `rerank` (or name the provider: `cohere/`, `hosted_vllm/`, `infinity/`); another provider API is a row filled in the LiteLLM UI | best | one request per search |
 | only chat models | a chat model with logprobs and thinking OFF (the `graphiti-llm` model is the one-line answer: `CC_LLM_UPSTREAM_MODEL_CC_RERANK` = the same id) | nearly the same | up to 50 one-token calls per agent fact search |
 | neither, or no capacity to spare | nothing | rank fusion alone — measurably worse ordering | none |
 
 One measurement, on a synthetic corpus at 8 results per search (2026-10-05):
 top-1 75.0% / 66.7% / 37.5%, median search 0.50 s / 6.6 s / 0.19 s. The latency
-is the model's, not the method's — `scripts/graph_rerank_bench.py` measures
+is the model's, not the method's. The one answer is tried as a dedicated
+reranker first and as a chat model second, and the row that answers stays: the
+`openai/` provider cannot answer LiteLLM's `/rerank`. `scripts/graph_rerank_bench.py` measures
 your own (`deploy/single/README.md`, Reranking). A chat model that thinks
 before answering, or an endpoint that returns no logprobs, fails the probe and
 is not used; a configured reranker that later FAILS makes fact search error

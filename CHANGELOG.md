@@ -4,6 +4,53 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-06 — v2.62.1: one answer is enough for a dedicated reranker, and k3s can run without one
+
+v2.62.0 let a single-node operator name the reranker with one answer,
+`CC_LLM_UPSTREAM_MODEL_CC_RERANK`, but registered it as `openai/<id>`. LiteLLM's
+`openai/` provider cannot answer `/rerank` (measured on a real proxy: HTTP 500
+"Unsupported provider: openai"), so that answer could only ever produce the chat
+tier, never the dedicated one the question names first. On k3s, a site with no
+reranker could not finish the install at all: `cc-rerank` and
+`qwen3-rerank-local` were required rows. **Requires v2.60.0**, as before.
+
+- **The answer is tried as both kinds, dedicated first.** When `.env` declares
+  the upstream and `CC_LLM_UPSTREAM_MODEL_CC_RERANK`, the llm phase registers
+  the row and probes it, then tries the next shape, keeping the one that
+  answers:
+  - a dedicated reranker: `cohere/<id>`, `api_base` = the declared base ending
+    `/v1/rerank` (a base ending `/v1` or `/v1/` is not doubled), `mode: rerank`.
+    This is the shape a llama.cpp `--rerank` server answers.
+  - a chat model: `openai/<id>` on the declared base.
+  If neither answers, the chat row stays — the plain mapping of what you typed
+  — and the WARN says both were tried and lists the rerank providers LiteLLM
+  documents, for a row you fill by hand.
+- **You can name the provider.** An answer starting `cohere/`,
+  `hosted_vllm/` or `infinity/` is registered verbatim as a dedicated reranker
+  and probed only that way. Any other text is the model id, `org/model`
+  included.
+- **Setup only reshapes rows it made.** A row is rewritten only when it is
+  absent, a skeleton, or one of the shapes the current answer derives. A row
+  filled in the LiteLLM UI is never rewritten; it is probed as it is. A kind
+  that is set registers and probes only its own shape. A re-run with nothing
+  changed writes nothing.
+- **k3s can finish with no reranker.** `cc-rerank` and `qwen3-rerank-local` are
+  optional in the declaration. Left unfilled, the catalog step does not pause
+  for them; the probe passes with "no reranker" and writes
+  `CC_GRAPH_RERANK_ALIAS=` (empty) to the app's `.env`, so neither the
+  installer's default nor the updater's turns reranking on later. An unfilled
+  row that the app's `.env` names is a gate whose message gives that exact line
+  and how to map a chat model instead. A filled row is probed exactly as before.
+- **What each install does:**
+  - **k3s, updating from 2.62.0:** nothing. The update changes code and the
+    LiteLLM declaration file, which only setup reads; nothing is rebuilt and
+    the proxy is not restarted. The updater's routing-policy apply runs as on
+    every update and reads none of what changed.
+  - **Single node, updating:** nothing changes unless you answered
+    `CC_LLM_UPSTREAM_MODEL_CC_RERANK` and setup left `CC_GRAPH_RERANK_KIND`
+    empty. To have a dedicated reranker at that base tried now, empty
+    `CC_GRAPH_RERANK_KIND` (if v2.62.0 wrote `chat`) and run `./setup.sh`.
+
 ## 2026-10-05 — v2.62.0: graph search reranks with the best model a site has, and a reranker that fails says so
 
 Graph search orders the facts it finds before an agent sees them, and a
