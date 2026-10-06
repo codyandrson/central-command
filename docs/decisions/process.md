@@ -731,3 +731,38 @@ hygiene, and how the test suite itself must be written. See
   is stored.
 - **Enforced:** test: `tests/test_graph_search_filters.py::test_a_date_field_never_has_two_parameter_carrying_or_groups` and test: `tests/test_graph_search_filters.py::test_two_parameter_groups_would_collide_which_is_why_we_never_build_them`
 - **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D6); CHANGELOG v2.61.0
+
+### DL-139 — Graph search reranks through one optional alias, the best kind the environment has, and the installers probe which
+
+- **Status:** active
+- **Date:** 2026-10-05
+- **Rule:** [.claude/rules/models.md](../../.claude/rules/models.md) — "**Graph search's reranker is ONE optional alias with three tiers, best
+  first — and a chat reranker needs logprobs and a NON-thinking alias; the
+  probe is the judge**"
+- **Why:** The post-cutover benchmark (2026-10-05, synthetic corpus, 72
+  questions at 8 results) measured top-1 37.5% with no reranker, 66.7% with a
+  chat model as reranker and 75.0% with a dedicated one — and found that the
+  single-node profile had no reranking at all: it required, registered and
+  probed a `gpt-4.1-nano` alias for a client search never called. The operator
+  decided every deployment gets the best reranking its environment provides
+  through one alias. A thinking model answers the one-token question with a
+  reasoning token, which is why the alias must have thinking off and why the
+  kind is decided by a probe rather than declared.
+- **Enforced:** test: `tests/test_graphiti_client.py::test_search_uses_a_deep_copy_with_the_requested_limit`, test: `tests/test_graph_rerank.py::test_the_chat_question_is_upstreams_verbatim`, test: `tests/test_graph_rerank.py::test_the_kind_follows_the_setting_and_empty_means_rerank`, test: `tests/test_graph_rerank.py::test_a_reasoning_token_is_an_error_naming_the_causes_never_a_neutral_score` and test: `tests/test_single_rerank_probe.py::test_a_mapped_alias_is_probed_rerank_first_and_the_kind_written`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D3, rewritten); CHANGELOG v2.62.0
+
+### DL-140 — A reranker that fails raises; there is no fallback order and no time budget
+
+- **Status:** active
+- **Date:** 2026-10-05
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**A reranker that fails RAISES out of `search_()`; nothing is skipped and
+  nothing waits on a budget**"
+- **Why:** The operator's rule (2026-10-05): routing and retries belong to
+  LiteLLM and the existing retry seams, and anything that fails should try
+  again or throw an error rather than be silently abandoned. The release-1
+  `RerankClient` returned the input order with placeholder scores on any
+  error, so a reranker outage degraded ordering with nothing on record;
+  raising lets the one failure taxonomy decide what the read path retries and
+  puts the error in front of the agent and on the Systems row.
+- **Enforced:** test: `tests/test_graph_rerank.py::test_an_http_failure_raises_and_is_classified_by_its_status`, test: `tests/test_graph_rerank.py::test_a_malformed_rerank_answer_is_a_semantic_error_not_placeholder_scores`, test: `tests/test_graph_rerank.py::test_a_transient_reranker_failure_is_retried_once_then_reported`, test: `tests/test_graph_rerank.py::test_no_reranker_refuses_to_be_called` and test: `tests/test_graphiti_client.py::test_rerank_raises_instead_of_falling_back_to_input_order`
+- **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D3, rewritten); CHANGELOG v2.62.0

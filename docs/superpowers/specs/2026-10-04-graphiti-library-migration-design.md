@@ -1,7 +1,7 @@
 # Graphiti as a library: the MCP server leaves, ingestion becomes durable, and the graph's shapes get one owner
 
-> **Status:** partial — release 1 (D1–D7, D10) shipped in v2.60.0 and release 2 (D8, D9, agent search filters, the reader's canonical switch, D10's deferred deletions) in v2.61.0 (both 2026-10-05); the refreshed vendored graphiti documentation (D11) remains
-> **As-built:** `central_command/integrations/graphiti_client.py`, `central_command/integrations/graphiti.py`, `central_command/integrations/graphiti_ingest.py`, `central_command/integrations/graph_ontology.py`, `central_command/integrations/graphiti_patches.py`, `central_command/integrations/neo4j_reader.py`, `central_command/integrations/neo4j_writer.py`, `scripts/apply_graphiti_patches.py`, `deploy/graphiti-patches/`, `central_command/gateway/graph_auditor.py`, `central_command/gateway/executor.py`, `central_command/runtime/tools.py`, `central_command/db/schema.sql`, `deploy/k3s/cc-update.sh`, `deploy/k3s/mint-keys.sh`, `deploy/k3s/removed.txt`, `deploy/single/steps.tsv`, `web/src/features/graph/EpisodeDeleteDialog.tsx`, `tests/test_graph_ingest.py`, `tests/test_graphiti_client.py`, `tests/test_graphiti_server_boundary.py`, `tests/test_k3s_update_reconcile.py`, `tests/test_graph_delete_episode.py`, `tests/test_graph_write_shape.py`, `tests/test_graph_search_filters.py`
+> **Status:** partial — release 1 (D1–D7, D10) shipped in v2.60.0 and release 2 (D8, D9, agent search filters, the reader's canonical switch, D10's deferred deletions) in v2.61.0 (both 2026-10-05); D3 rebuilt as the reranker decision in v2.62.0; the refreshed vendored graphiti documentation (D11) remains
+> **As-built:** `central_command/integrations/graphiti_client.py`, `central_command/integrations/graphiti.py`, `central_command/integrations/graphiti_ingest.py`, `central_command/integrations/graph_ontology.py`, `central_command/integrations/graphiti_patches.py`, `central_command/integrations/neo4j_reader.py`, `central_command/integrations/neo4j_writer.py`, `scripts/apply_graphiti_patches.py`, `deploy/graphiti-patches/`, `central_command/gateway/graph_auditor.py`, `central_command/gateway/executor.py`, `central_command/runtime/tools.py`, `central_command/db/schema.sql`, `deploy/k3s/cc-update.sh`, `deploy/k3s/mint-keys.sh`, `deploy/k3s/removed.txt`, `deploy/single/steps.tsv`, `web/src/features/graph/EpisodeDeleteDialog.tsx`, `tests/test_graph_ingest.py`, `tests/test_graphiti_client.py`, `tests/test_graphiti_server_boundary.py`, `tests/test_k3s_update_reconcile.py`, `tests/test_graph_delete_episode.py`, `tests/test_graph_write_shape.py`, `tests/test_graph_search_filters.py`, `tests/test_graph_rerank.py`, `tests/test_single_rerank_probe.py`, `scripts/graph_rerank_bench.py`
 
 ## The problem
 
@@ -80,7 +80,7 @@ silently build an OpenAI client that wants an OpenAI key.
   set: this client ignores it.
 - **Embedder:** `OpenAIEmbedder` with the `cc-embedding` alias at
   `CC_EMBED_DIM`.
-- **Cross-encoder:** our own `RerankClient` (D3).
+- **Cross-encoder:** ours — `RerankClient`, `ChatRerankClient` or `NoReranker` (D3).
 - **Driver:** `Neo4jDriver` on `CC_NEO4J_URL`, built lazily and keyed on the
   running loop, as `neo4j_reader._get_driver` already is. Its constructor
   schedules index DDL when a loop is running; startup also awaits
@@ -102,33 +102,115 @@ candidates, so one search call changes extraction for the life of the
 process. Every search goes through `search_()` with
 `RECIPE.model_copy(deep=True)`.
 
-### D3. The reranker is a class of ours, and parity decides which one
+### D3. The reranker: one optional alias, the best kind the environment has, and a failure raises
 
-`RerankClient(base_url, api_key, model)` implements
-`CrossEncoderClient.rank`: POST `{model, query, documents}` to LiteLLM's
-`/rerank`, sort by `relevance_score`, and on any error return the input order
-with descending placeholder scores — fail-soft, exactly as the retired
-server patch did. It is used when `CC_GRAPH_RERANK_ALIAS` is set (`cc-rerank`
-on k3s today).
+*Rewritten in v2.62.0 to the decision as built. The release-1 text (a
+`RerankClient` for `/rerank`, upstream's `OpenAIRerankerClient` on a
+`gpt-4.1-nano` alias otherwise, "parity decides") is superseded; what it
+found is kept below because it is why the decision was needed.*
 
-When it is unset — the single-node substrate today — the client is
-upstream's `OpenAIRerankerClient` pointed at LiteLLM with the
-`gpt-4.1-nano` alias, which is what the stock factory builds there now.
-Release 1 is a parity release; collapsing the two paths into one is a later
-decision with its own measurements.
+**What release 1 found.** The stock server's two search tools never called a
+reranker without our patch — they ran the RRF recipes. So on the single-node
+profile the client built upstream's `OpenAIRerankerClient` on the
+`gpt-4.1-nano` alias because the constructor requires a cross-encoder, and
+search never asked it: **single node had no reranking at all**, while
+requiring the operator to map, and setup to probe, an alias nothing called.
+k3s reranked through `CC_GRAPH_RERANK_ALIAS=cc-rerank`, a dedicated model,
+and its client swallowed every error into the input order.
 
-As built, parity turned out narrower than this paragraph assumed: the stock
-server's two search tools never called a reranker at all without our patch
-(they ran the RRF recipes), so on the single-node profile the fallback
-reranker is built because the constructor requires one and is never asked —
-search there runs the RRF recipes, exactly as the server did. k3s keeps the
-cross-encoder through `CC_GRAPH_RERANK_ALIAS=cc-rerank`, which its installer
-and updater add to `.env`. Which reranker, if any, each profile should use is
-deferred, by the operator's decision, to a benchmark after the cutover; no
-alias requirement changed with this release.
+**The measurement (2026-10-05).** A synthetic, deliberately confusable corpus
+(150 episodes → 90 entities, ~345 facts), 72 known-answer fact questions, 8
+results per search:
 
-`add_episode` never calls the cross-encoder. Only agent and cockpit search
-do.
+| condition | top-1 | top-3 | top-8 | MRR | median search |
+|---|---|---|---|---|---|
+| no reranker (RRF recipe) | 37.5% | 75.0% | 97.2% | 0.577 | 0.19 s |
+| chat model as reranker (upstream's client on a local 27B chat model, thinking off, logprobs on) | 66.7% | 97.2% | 100% | 0.815 | 6.6 s |
+| dedicated reranker via LiteLLM `/rerank` | 75.0% | 94.4% | 100% | 0.850 | 0.50 s |
+
+Dedicated against chat: MRR difference 0.035, 95% CI −0.035…0.10 — not
+significant. Both far better than none (CI of the gain ≈ 0.14…0.37). Entity
+search was at ceiling in every condition. Found while measuring: the chat
+reranker asks ONE question per candidate, `max_tokens=1`, `logprobs`,
+`top_logprobs=2`, scores P("True"), and sends a `logit_bias` for two
+OpenAI-tokenizer ids; a model that THINKS first emits a reasoning token
+("We") as its one token, so every score is garbage; the edge recipe reranks
+the top 2 × limit fused candidates.
+
+**The decision (the operator's).** Every deployment gets the best reranking
+its environment can provide, through ONE alias the operator maps in LiteLLM:
+a dedicated reranker if one exists; otherwise an ordinary chat model used as
+a reranker (nearly the same quality, slower); otherwise none.
+
+- **`CC_GRAPH_RERANK_ALIAS`** (`cc-rerank`, optional on both substrates) and
+  **`CC_GRAPH_RERANK_KIND`**: `rerank` → `RerankClient` (LiteLLM `/rerank`);
+  `chat` → `ChatRerankClient`; empty with an alias set → `rerank`, which is
+  what every install meant before the setting existed (an existing k3s
+  deployment behaves as before with no `.env` change). An unknown kind is
+  `GraphitiNotConfigured` naming the setting. No alias: the RRF recipes, and
+  the constructor gets `NoReranker`, which raises if anything calls it.
+  `RERANK_FALLBACK_ALIAS` and the built-but-never-called upstream client are
+  deleted.
+- **`ChatRerankClient`** asks upstream's question VERBATIM (a test renders
+  upstream's f-string from the installed source and compares, so the
+  measurement keeps describing what we send), temperature 0, one token,
+  `top_logprobs=2`, score = P(True) from the top token. It does NOT send
+  `logit_bias`: those ids are unrelated tokens on every other tokenizer and
+  some gateways refuse the parameter; with temperature 0 and the score read
+  only from a True/False top token, a +1 nudge on two arbitrary tokens could
+  only have mattered where it displaced the answer — which our parser now
+  reports as an error rather than scoring. The answer is read robustly (case,
+  a leading space, `▁`/`Ġ` word markers); a top token that is neither True nor
+  False, or no logprobs, is a `RerankError` naming the alias and the usual
+  causes. At most `CC_GRAPH_SEMAPHORE_LIMIT` requests at once; the first
+  failure cancels the rest. Its AsyncOpenAI client is the graph's other
+  clients' (`_openai_client`): the same trust settings and SDK defaults.
+- **A failure raises — no fallback order, no time budget** (the operator,
+  2026-10-05: "We are using LiteLLM for our routing and retry logic.
+  Anything that fails should try again or throw an error."). Release 1's
+  fail-soft (input order with placeholder scores) is retired from
+  `RerankClient` too. A non-2xx `/rerank` answer is `RerankHTTPError`, an
+  `openai.APIStatusError`, so `contract.classify_failure` judges it by the
+  same status rule as every other LiteLLM call (403/408/429/5xx transient);
+  a malformed answer is a semantic `RerankError`. It propagates out of
+  `search_()`; the agent read path's bounded retry (`tools._read_with_retry`)
+  tries a transient failure once more and then tells the agent the graph is
+  unavailable. No retry loop in the clients; the per-request HTTP timeout
+  raises. In-process counters (calls, failures, malformed, last error,
+  recent median latency) feed the Systems row and the self-check.
+- **Recipe choice is unchanged in shape** (D6): cross-encoder recipes when a
+  reranker of either kind is configured and no centre node; RRF otherwise.
+- **Health.** The self-check's `graph-rerank` row: no alias is a PASS line
+  saying what it costs (a configured state, not a failure); with one, a live
+  rank of a relevant and an irrelevant passage as the app — a failure is a
+  FAIL saying fact search will error until it is fixed, naming for `chat` the
+  three usual causes (no logprobs; thinking not disabled on the alias; the app
+  key's scope lacks the alias). The Systems page's Graphiti row shows the
+  reranker in use and its last error.
+- **Installs decide the kind by PROBING** (`discover-llm.sh rerank` /
+  `rerank-chat`): `/rerank` first, then the chat shape; the result is written
+  only where `.env` has none, and a kind that is set is proven, never
+  re-detected. Single node: `cc-rerank` is optional (`cc_optional_aliases`),
+  its skeleton is created and never pauses the run, its question offers the
+  `graphiti-llm` model as a one-line answer — never mapped automatically,
+  because a chat reranker costs up to 2 × the limit calls per search on the
+  extraction model (50 at the agent tools' 25-fact limit) — and the app key
+  gains the alias once it is in use. Mapped but answering neither shape is a
+  WARN and the alias stays unused; an alias the operator set that fails is a
+  USERACTION. k3s: the declaration requires the alias, so "neither" is the
+  same gate as its other probes. In both declarations the row is
+  `judged_by_probe`: `register-models.py` creates the skeleton and does not
+  hold a filled-in row to its patterns, because both shapes are right.
+- **`gpt-4.1-nano` is retired** as a required alias, question, probe and
+  declaration on both substrates — it was only ever the dead fallback. An
+  existing row and `CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO` are left alone.
+- **`scripts/graph_rerank_bench.py`** reproduces the measurement on an
+  operator's own models (a scratch group, deleted afterwards), because the
+  latency above is one model's.
+
+`add_episode` never calls the cross-encoder. Only agent search does; the
+cockpit's Graph panel search is `neo4j_reader.search_entities`, which has no
+reranker.
 
 ### D4. The ontology is ten field-less models in our tree
 
@@ -413,7 +495,7 @@ resolve instead — an install steps through each release tag in order. The
 single-node updater runs the new release's own `setup.sh`, which never
 referenced those paths.
 
-### D11. Two releases
+### D11. Two releases, and the reranker decision
 
 1. **Parity cutover** — D1 to D7 and D10. Same behaviour, a durable queue,
    no server. Acceptance: the suite; a prompt-parity test (the entity-types
@@ -431,6 +513,12 @@ referenced those paths.
    only ever regenerated by `scripts/vendor_docs_fetch.sh` (which also
    regenerates its manifest), and that refetch was not part of this release.
    It is what keeps this record `partial`.
+3. **The reranker decision** (v2.62.0) — D3 rewritten after the post-cutover
+   benchmark: one optional alias with three tiers, the kind probed by both
+   installers, `gpt-4.1-nano` retired, and the retirement of release 1's
+   fail-soft (a reranker that fails now raises). It did not need a bridge:
+   none of v2.61.0's updater inputs changed, so `min_upgrade_from` stays
+   2.60.0.
 
 ## Not adopted
 

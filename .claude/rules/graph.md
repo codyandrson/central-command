@@ -204,3 +204,26 @@ when a matching file is read.
   bare `Entity` while orgs typed correctly. Declare high-priority types FIRST
   (the order of `graph_ontology.ENTITY_TYPES`) so they beat the "use as last
   resort" types.
+- **A reranker that fails RAISES out of `search_()`; nothing is skipped and
+  nothing waits on a budget** (v2.62.0, the operator's rule of 2026-10-05:
+  "Anything that fails should try again or throw an error"). `RerankClient`
+  used to return the input order with placeholder scores on any error — a
+  reranker outage silently degraded ordering; now a non-2xx is a
+  `RerankHTTPError` (an `openai.APIStatusError`, so the one taxonomy
+  classifies it: 403/408/429/5xx transient, other 4xx semantic), a
+  connection failure propagates raw, and a malformed answer — a `/rerank`
+  body that does not score every candidate exactly once, a chat answer that
+  is neither True nor False — is a semantic `RerankError` naming the alias
+  and the likely causes. The agent read path (`tools._read_with_retry`)
+  retries a transient one once and then tells the agent the graph is
+  unavailable; there is no retry loop in the clients and no whole-search
+  timeout (an HTTP request's own timeout RAISES). `ChatRerankClient` asks
+  at most `CC_GRAPH_SEMAPHORE_LIMIT` at once and the first failure cancels
+  the rest. Its question is upstream's VERBATIM and
+  `tests/test_graph_rerank.py` renders upstream's f-string from the
+  INSTALLED source to compare: if it fails after an upgrade, upstream
+  changed what the benchmark measured — a human decides. With no alias the
+  constructor gets `NoReranker`, which raises if called (the RRF recipes
+  never call it). Counters (`graphiti_client.rerank_stats`) feed the
+  Systems row and the self-check's `graph-rerank` row. The cockpit's Graph
+  panel search is `neo4j_reader.search_entities` — no reranker at all.

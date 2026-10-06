@@ -4,6 +4,86 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-05 — v2.62.0: graph search reranks with the best model a site has, and a reranker that fails says so
+
+Graph search orders the facts it finds before an agent sees them, and a
+reranker does that ordering far better than rank fusion alone. A benchmark run
+after the move to graphiti-core (a synthetic corpus, 72 known-answer questions,
+8 results) put the right fact first 37.5% of the time with no reranker, 66.7%
+with an ordinary chat model doing the reranking, and 75.0% with a dedicated
+reranker; the last two were not distinguishable on that corpus. It also showed
+that a single-node install had no reranking at all: it built a reranker on a
+`gpt-4.1-nano` alias that search never called. Now every install reranks with
+the best thing it has, through one alias. **Requires v2.60.0**, as before.
+
+- **One optional alias, three tiers.** `cc-rerank` mapped to a dedicated
+  reranker (LiteLLM `/rerank`), otherwise to a chat model asked True/False per
+  candidate and scored from its logprobs, otherwise nothing.
+  `CC_GRAPH_RERANK_KIND` (`rerank` or `chat`) says which; empty with an alias
+  set means `rerank`, which is what the k3s profile has always run.
+  - A chat model used as a reranker must return logprobs and must not think
+    first: a model that reasons answers with a reasoning token and every score
+    is noise. Thinking is switched off on the alias — for a llama.cpp backend,
+    `chat_template_kwargs: {"enable_thinking": false}` on the row, as
+    `graphiti-llm` carries it.
+  - The question is graphiti-core's own, word for word; a test holds it to the
+    installed library so the benchmark keeps describing what we send. We do not
+    send upstream's `logit_bias`, which names two OpenAI-tokenizer token ids.
+  - A chat reranker costs up to twice the search limit in one-token calls per
+    search — up to 50 for an agent's fact search.
+- **Setup probes the kind.** On both substrates the llm phase asks the alias
+  LiteLLM's `/rerank` first, then the chat shape, and writes
+  `CC_GRAPH_RERANK_ALIAS` and `CC_GRAPH_RERANK_KIND` only where `.env` has
+  none. A kind that is set is proven on every run, never re-detected; empty it
+  to re-detect. On single node `cc-rerank` is optional: its skeleton is created
+  and the run never pauses for it, unmapped is a PASS line, and mapped but
+  answering neither shape is a WARN that leaves it unused. The app's key gains
+  the alias once it is in use. On k3s the alias is required, as before, so a
+  failing probe is the same stop as the other aliases'. The LiteLLM row is no
+  longer held to the dedicated shape: setup's probe judges it.
+- **A reranker that fails raises.** Before, a reranker error quietly fell
+  back to the unranked order. The operator's rule now applies: routing and
+  retries are LiteLLM's, and anything that fails retries or reports an error.
+  There is no fallback order and no time budget. An agent's graph search
+  retries a transient failure (unreachable, 429, 5xx, timeout) once and then
+  reports the graph unavailable; a malformed answer is reported at once.
+  **This changes behaviour for a k3s deployment with a dedicated reranker:**
+  a reranker outage used to make search ordering silently worse; now graph fact
+  search fails, after that retry, until the reranker is back. Running without
+  a reranker is still a choice: empty `CC_GRAPH_RERANK_ALIAS`.
+- **You can see it.** The self-check gains `graph-rerank`: no reranker is a
+  PASS line saying search uses rank fusion; with one, it ranks a relevant and
+  an irrelevant passage as the app and fails, naming the usual causes, if it
+  cannot. The Systems page's Graphiti row shows the reranker in use, its call
+  count and median time, and its last error.
+- **`gpt-4.1-nano` is retired.** It is no longer a required alias, a question,
+  a probe or a declared row on either substrate. An existing row and its
+  `CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO` key are left alone and do nothing;
+  delete them whenever convenient.
+- **Measure your own.** `scripts/graph_rerank_bench.py` ingests the synthetic
+  corpus into a scratch group, compares no reranker, the configured one, and
+  any aliases you name, and deletes the group again. It refuses to run without
+  `--i-understand-this-writes-to-the-graph`. Ingestion takes about 25 s per
+  episode on a single local model slot.
+- **What each install does:**
+  - **k3s, updating from 2.61.0:** nothing. `CC_GRAPH_RERANK_ALIAS=cc-rerank`
+    with no kind keeps using `/rerank`. The update changes code only, with no
+    image rebuild and no proxy restart. A setup re-run later probes and
+    writes `CC_GRAPH_RERANK_KIND=rerank`.
+  - **Single node, updating:** the update's llm phase creates the `cc-rerank`
+    skeleton and finds it unmapped, so search runs as it did, with no
+    reranker. **To turn reranking on,** do one of these, then run
+    `./setup.sh`:
+    - answer `CC_LLM_UPSTREAM_MODEL_CC_RERANK` in `./setup.sh configure`. The
+      same model id as `graphiti-llm` is the one-line answer when no
+      dedicated reranker exists. On a hybrid-thinking llama.cpp model, also
+      switch thinking off on the `cc-rerank` row.
+    - fill the `cc-rerank` row in the LiteLLM UI and set
+      `CC_GRAPH_RERANK_ALIAS=cc-rerank` in `.env`.
+  - **Single node that had set `CC_GRAPH_RERANK_ALIAS` by hand:** the update
+    probes it and writes the kind. If it answers neither shape, the update
+    stops and says why; fix the row or empty the key.
+
 ## 2026-10-05 — v2.61.0: an episode can be deleted, and agents can search by time, type and neighbourhood
 
 The second half of the move onto graphiti-core. An approved episode could be

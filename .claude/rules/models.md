@@ -52,3 +52,26 @@ when a matching file is read.
   an unchanged fingerprint is never shown again. "Any change" means exactly
   those fields: a provider catalog carries no price, context or description,
   so a fingerprint cannot see them. `reconcile_snapshot` is pure; keep it so.
+- **Graph search's reranker is ONE optional alias with three tiers, best
+  first — and a chat reranker needs logprobs and a NON-thinking alias; the
+  probe is the judge** (v2.62.0, design record 2026-10-04 D3 as rebuilt).
+  `cc-rerank` mapped to a dedicated reranker (`CC_GRAPH_RERANK_KIND=rerank`,
+  LiteLLM `/rerank`), else to an ordinary chat model (`chat`: upstream
+  graphiti-core's True/False question per candidate, `max_tokens=1`,
+  `top_logprobs=2`, score = P(True)), else nothing (rank fusion). Measured
+  once (2026-10-05, synthetic corpus, 8 results): top-1 75.0% / 66.7% /
+  37.5%, median search 0.50 s / 6.6 s / 0.19 s — dedicated and chat not
+  distinguishable there, both far above none. A model that THINKS first
+  spends its one token on reasoning ("We") and every score is garbage, so
+  thinking is switched off ON THE ALIAS (llama.cpp:
+  `chat_template_kwargs: {"enable_thinking": false}`, as `graphiti-llm`
+  carries it; other gateways have their own switch). The row is
+  `judged_by_probe` in both declarations — `register-models.py` creates the
+  skeleton and does not hold a filled-in row to its patterns, because both
+  shapes are right. **No fallback order and no time budget**: routing and
+  retries are LiteLLM's (operator's rule, 2026-10-05); a reranker that fails
+  RAISES, its HTTP failures as `openai.APIStatusError` so
+  `contract.classify_failure` judges them by the one status rule, a
+  malformed answer as a semantic `RerankError`. Never auto-map the
+  extraction model: a chat reranker costs up to 2 × the limit calls per
+  search on it. `scripts/graph_rerank_bench.py` measures a site's own.

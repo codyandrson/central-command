@@ -302,7 +302,7 @@ when a matching file is read.
   REQUIRE the row, which is how an empty `CC_LLM_API_KEY` stops reaching
   `boot`. `--pre-boot` skips only what `boot` starts (cockpit, sandbox
   runner); `./setup.sh status` runs the whole table and so spends two small
-  model requests — which is why the API CACHES (`GET /api/selfcheck` spends
+  model requests (plus the reranker's probe when one is configured) — which is why the API CACHES (`GET /api/selfcheck` spends
   nothing; a run is at API start or on `POST /api/selfcheck/run`). Nothing
   may ever restart, stop or reconfigure anything because a check failed, and
   never put it on a timer.
@@ -315,11 +315,31 @@ when a matching file is read.
   models" and is left alone), and a proxy that cannot be asked is a WARN.
   Both keys travel in a curl config on STDIN (`curl -K -`), never an argv.
   Since graphiti-core runs in the API (design record 2026-10-04, D2) the
-  scope is load-bearing for the graph: extraction (`graphiti-llm`), its
-  embedder (`cc-embedding`) and the reranker alias (`gpt-4.1-nano`) are all
-  called with THIS key — the curation writer still embeds with the admin key.
-  The k3s profile's equivalent is `mint-keys.sh` (`--scope-only` from its
-  updater); its list adds `cc-rerank`.
+  scope is load-bearing for the graph: extraction (`graphiti-llm`) and its
+  embedder (`cc-embedding`) are called with THIS key — the curation writer
+  still embeds with the admin key — and so is the reranker, which joins the
+  scope through `cc_scope_aliases` only once `CC_GRAPH_RERANK_ALIAS` names it
+  (v2.62.0; `cc-rerank` is OPTIONAL, `cc_optional_aliases`, and never pauses
+  the run). The k3s profile's equivalent is `mint-keys.sh` (`--scope-only`
+  from its updater); its list always carries `cc-rerank`.
+- **The reranker's KIND is probed, a set kind is a pin, and the extraction
+  model is never mapped for the operator** (v2.62.0, design record
+  2026-10-04 D3 as rebuilt). `llm/probe-rerank` asks `cc-rerank` LiteLLM's
+  `/rerank` first, then the chat shape (`discover-llm.sh rerank` /
+  `rerank-chat` — one-token True/False with logprobs; a thinking model
+  answers a reasoning token and fails), and writes `CC_GRAPH_RERANK_ALIAS` /
+  `CC_GRAPH_RERANK_KIND` only where `.env` has none. A kind that is set is
+  PROVEN on every run, never re-detected — a failure is a USERACTION,
+  because a configured reranker that fails makes fact search ERROR; the same
+  goes for an alias the operator set. Unmapped (absent, or its skeleton) is
+  a PASS saying rank fusion; mapped but answering neither shape and named by
+  nothing is a WARN that leaves the alias UNUSED (its probe reads done, so
+  setting `CC_GRAPH_RERANK_ALIAS` — a `reads` key — is what makes the next
+  run probe again). Never auto-map `cc-rerank` to the `graphiti-llm` model:
+  a chat reranker costs up to 2 × the search limit one-token calls on it per
+  search; the question's help text offers it as a one-line answer instead.
+  `gpt-4.1-nano` (graphiti-core's default reranker, built and never called)
+  left the required list; an existing row and its `.env` key are harmless.
 - **The report redacts as it collects, from `redact.tsv`, and the scan
   stays** (v2.56.0, D11 — Replicated's redactors). `deploy/single/redact.tsv`
   declares `key` rows (globs over `.env` key NAMES whose VALUES become

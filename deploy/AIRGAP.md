@@ -259,6 +259,27 @@ never written to — it WINS over `.env`, and the script says so. A `127.0.0.1`
 upstream is rewritten to `host.containers.internal` for the row, with a WARN:
 the row is dialled by a container.
 
+### The reranker: the best one this site has, through one optional alias
+
+Graph search reranks its candidate facts through `cc-rerank`, and the install
+PROBES what kind of model it is. On a site with no hosted rerank API this is
+the choice that matters most for the quality of what agents recall:
+
+| the site has | map `cc-rerank` to | quality | cost |
+|---|---|---|---|
+| a dedicated reranker (llama.cpp `--rerank`, a mirrored rerank service) | it — `cohere/<id>`, api_base ending `/v1/rerank`, mode `rerank` | best | one request per search |
+| only chat models | a chat model with logprobs and thinking OFF (the `graphiti-llm` model is the one-line answer: `CC_LLM_UPSTREAM_MODEL_CC_RERANK` = the same id) | nearly the same | up to 50 one-token calls per agent fact search |
+| neither, or no capacity to spare | nothing | rank fusion alone — measurably worse ordering | none |
+
+One measurement, on a synthetic corpus at 8 results per search (2026-10-05):
+top-1 75.0% / 66.7% / 37.5%, median search 0.50 s / 6.6 s / 0.19 s. The latency
+is the model's, not the method's — `scripts/graph_rerank_bench.py` measures
+your own (`deploy/single/README.md`, Reranking). A chat model that thinks
+before answering, or an endpoint that returns no logprobs, fails the probe and
+is not used; a configured reranker that later FAILS makes fact search error
+(there is no unranked fallback), and the self-check's `graph-rerank` row and
+the Systems page say why.
+
 ## The podman machine is a second host
 
 On Windows and macOS podman runs inside a VM, and **that VM is a second host**:

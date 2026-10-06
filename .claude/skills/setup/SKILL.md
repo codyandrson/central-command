@@ -248,7 +248,9 @@ answer in conversation (then you write the answer into `.env`).
   the container's row, with a WARN), `CC_LLM_UPSTREAM_API_KEY` (`none` if the
   server ignores it, but never empty), and one `CC_LLM_UPSTREAM_MODEL_<ALIAS>`
   per required alias — `_CC_DEFAULT`, `_GRAPHITI_LLM`, `_CC_EMBEDDING`,
-  `_GPT_4_1_NANO`, plus `_CC_TTS` / `_CC_STT` when `CC_ENABLE_SPEECH=1`. The
+  plus `_CC_TTS` / `_CC_STT` when `CC_ENABLE_SPEECH=1` — and optionally
+  `_CC_RERANK`, graph search's reranker, whose kind the llm phase probes
+  (`deploy/single/README.md`, Reranking). The
   values are the UPSTREAM model ids (`deploy/single/discover-llm.sh models`
   lists what a server names them — the operator's command). Either way the
   operator owns the values; a row they fill in the UI always wins over `.env`.
@@ -452,12 +454,13 @@ declares as a SKELETON (`register-models.py`, create-only) and **pauses
 (exit 3) on a fresh catalog** for the operator to enter providers, model
 ids and keys/credentials in the LiteLLM UI; the re-run checks the
 invariants (`graphiti-llm` must be a PLAIN `openai/<model>`, same prefix as
-`cc-default` — the old `chat_completions/` bridge prefix 404s; rerank's
-`/v1/rerank` api_base), applies the routing policy (`policy.py --apply` →
-restart → `--check`), mints the virtual keys, then probes `cc-default`,
-`graphiti-llm` (a structured chat/completions round trip) and
-`cc-embedding` through the proxy — a probe failure is the same
-exit-3 gate.
+`cc-default` — the old `chat_completions/` bridge prefix 404s;
+`qwen3-rerank-local`'s `/v1/rerank` api_base), applies the routing policy
+(`policy.py --apply` → restart → `--check`), mints the virtual keys, then
+probes `cc-default`, `graphiti-llm` (a structured chat/completions round
+trip), `cc-rerank` (its kind: `/rerank`, else a True/False chat answer with
+logprobs — written to `CC_GRAPH_RERANK_KIND`) and `cc-embedding` through the
+proxy — a probe failure is the same exit-3 gate.
 `stack` builds the per-arch images only if missing and rolls out every
 manifest. `app` installs the venv/cockpit and the systemd units and **enables
 and starts `cc-uvicorn` with the rest of them** (2026-09-18) — there is no

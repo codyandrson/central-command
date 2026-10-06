@@ -115,8 +115,8 @@ does not say:
 - Windows has no real `python3`; the scripts fall back to uv's (already
   required). Git Bash ships `openssl` and `curl`.
 - An OpenAI-compatible endpoint: base URL, API key, and a model id per alias
-  (chat, graph extraction, embedding, reranker, and the speech pair if you keep
-  the bundled engine) — declared in `.env`, or entered in the LiteLLM UI when
+  (chat, graph extraction, embedding, and the speech pair if you keep the
+  bundled engine; a reranker is optional — see Reranking) — declared in `.env`, or entered in the LiteLLM UI when
   the run stops for the catalog. No `configure` question is required.
 - **A terminal, for `configure`.** It is the one interactive step; with no TTY it
   refuses to guess and tells you which keys to fill in instead (see the loop).
@@ -702,16 +702,59 @@ gitignored. Never commit it, and never print its values.
 
 ## Reranking
 
-`CC_GRAPH_RERANK_ALIAS` is deliberately unset on this profile, so graph search
-runs graphiti-core's RRF recipes, exactly as the retired Graphiti server did
-here; the client is built with upstream's logprob-classifier reranker on the
-`gpt-4.1-nano` alias, which this profile registers mapped to the user's chat
-model (an endpoint that does not return logprobs degrades rerank *quality*,
-not availability). If the user's endpoint offers a real `/rerank`-capable
-cross-encoder, register it as an alias and set `CC_GRAPH_RERANK_ALIAS` to it
-in `.env` — search then uses the cross-encoder recipes (the k3s profile does
-this with `cc-rerank`). Whether the two paths become one is a later,
-measured decision; no alias requirement changes with it.
+Graph search reorders its candidate facts with a **reranker**, through ONE
+optional LiteLLM alias, `cc-rerank`. Which kind of model is behind it decides
+the tier — best first:
+
+| what `cc-rerank` maps to | `CC_GRAPH_RERANK_KIND` | top-1 | MRR | median search |
+|---|---|---|---|---|
+| a dedicated reranker (LiteLLM `/rerank`: `cohere/<id>`, api_base ending `/v1/rerank`, mode `rerank` — llama.cpp `--rerank`, a hosted rerank API) | `rerank` | 75.0% | 0.850 | 0.50 s |
+| an ordinary chat model, asked True/False per candidate and scored from logprobs — it must return logprobs and must NOT think first | `chat` | 66.7% | 0.815 | 6.6 s |
+| nothing (rank fusion alone) | — | 37.5% | 0.577 | 0.19 s |
+
+The numbers are ONE measurement (2026-10-05) on a synthetic, deliberately
+confusable corpus — 150 episodes, 72 known-answer questions, 8 results per
+search — with one environment's models; the dedicated and chat rows are not
+distinguishable on it (MRR difference 0.035, 95% interval −0.035…0.10), both
+are far better than none, and latency is entirely the model's. Measure yours
+with `scripts/graph_rerank_bench.py` (it writes a scratch group, compares
+whichever candidates you name, and deletes the group again).
+
+**Setup decides the kind by probing.** The `llm/probe-rerank` row asks the
+alias LiteLLM's `/rerank` first, then the chat shape, and writes
+`CC_GRAPH_RERANK_ALIAS` / `CC_GRAPH_RERANK_KIND` into `.env` only where they
+are unset — your value wins, and a kind that is set is proven on every run
+rather than re-detected (empty it to re-detect). Unmapped (absent, or still its
+skeleton) is a PASS line saying search ranks by rank fusion; mapped but
+answering neither shape is a WARN, and the alias stays unused.
+
+**To turn reranking on**, do ONE of:
+
+- answer `CC_LLM_UPSTREAM_MODEL_CC_RERANK` (`./setup.sh configure`) — with no
+  dedicated reranker, the same model id as `graphiti-llm` is the one-line
+  answer — and re-run `./setup.sh`;
+- or fill the `cc-rerank` row in the LiteLLM UI, set
+  `CC_GRAPH_RERANK_ALIAS=cc-rerank` in `.env`, and re-run `./setup.sh`.
+
+A chat model that reasons by default needs thinking OFF **on the alias**: for a
+llama.cpp-style backend that is `chat_template_kwargs: {"enable_thinking":
+false}` on the row's litellm params, exactly as `graphiti-llm` carries it on
+the k3s profile; other gateways have their own switch. The probe is the judge
+either way — a model that thinks answers with a reasoning token, and fails it.
+Setup never maps the alias for you: a chat reranker costs up to 50 one-token
+calls on that model per agent fact search (twice the tools' 25-fact limit).
+
+**A configured reranker that fails makes fact search fail.** There is no
+fallback order and no time budget: routing and retries are LiteLLM's, the
+agent's read path retries a transient failure once, and then the agent is told
+the graph is unavailable. The self-check's `graph-rerank` row and the Systems
+page's Graphiti row show the reranker in use and its last error. To run without
+one, empty `CC_GRAPH_RERANK_ALIAS`.
+
+(`gpt-4.1-nano` — the alias graphiti-core's default reranker addressed, which
+the app built and never called — is no longer required, registered or probed.
+An install that still has the row or `CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO` keeps
+them, harmlessly.)
 
 ## The graph client's patches
 

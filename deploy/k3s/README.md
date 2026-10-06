@@ -150,16 +150,23 @@ Assumed already true before phase 2:
     wrong: `graphiti-llm` must be a PLAIN `openai/<model>`, same prefix as
     `cc-default` (the app's in-process graphiti-core client,
     `OpenAIGenericClient`, speaks chat-completions, and the old
-    `openai/chat_completions/` Responses→chat bridge prefix 404s), and the rerank rows' (`cc-rerank`,
-    `qwen3-rerank-local`) **`api_base` must end in `/v1/rerank`** (the
-    `cohere/` client POSTs the base verbatim and appends nothing). Nothing
+    `openai/chat_completions/` Responses→chat bridge prefix 404s), and a
+    dedicated rerank row's (`qwen3-rerank-local`, and `cc-rerank` when it is
+    one) **`api_base` must end in `/v1/rerank`** (the `cohere/` client POSTs
+    the base verbatim and appends nothing). `cc-rerank` is graph search's
+    reranker ROLE and may instead be a chat model with logprobs and thinking
+    OFF; it is `judged_by_probe`, so its row is not held to the skeleton's
+    patterns — the llm phase probes `/rerank`, then the chat shape, and writes
+    the result to `CC_GRAPH_RERANK_KIND` (only when that key is empty; a set
+    kind is proven, never re-detected). Tiers, the measured numbers and the
+    benchmark: `deploy/single/README.md`, Reranking. Nothing
     you enter in the UI is ever overwritten by the script. Timeouts have
     exactly one home per model, which is what makes `policy.py --check` a
     real gate rather than a coin flip. `policy.py --apply` still only
     *annotates* models that already exist — register first, always. The
     setup driver (`./deploy/k3s/setup.sh llm`) runs all of this, gate
-    included, and then probes `cc-default`, `graphiti-llm` (structured) and
-    the embedder through the proxy.
+    included, and then probes `cc-default`, `graphiti-llm` (structured),
+    `cc-rerank` (its kind) and the embedder through the proxy.
 
     **2. A fresh master key**, so every downstream virtual key must be re-minted
     against it before it will authenticate:
