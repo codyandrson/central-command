@@ -560,6 +560,63 @@ answers):
   approval on the new install. `verify.sh --clean-install` asserts the running
   process is LIVE.
 
+## 8a. Starting over on the same cluster — `setup.sh reset`
+
+To test the install as a new operator would see it — the name prompt, the team
+tour, the first mail, an empty graph — without rebuilding the cluster:
+
+```bash
+./deploy/k3s/setup.sh reset                  # prints the plan, changes nothing
+./deploy/k3s/setup.sh reset --confirm-wipe   # does it
+./deploy/k3s/setup.sh --clean-install        # installs on the empty stores
+```
+
+`reset` is destructive and is never part of the no-argument run. It is the
+operator's command: an agent conducting a setup does not run it.
+
+| | |
+|---|---|
+| **Deleted** | the spine database (`cc-pgdata`: roster, charters, grants, schedules, mail ledger, proposals, sessions, event log, the operator's name) and the knowledge graph (`cc-neo4j-data`). Both come back empty; the spine reloads `schema.sql` (§7). |
+| **Removed** | what agents deployed: MCP servers in `cc-mcp`, sandbox jobs in `cc-sandbox`, and the untracked folders under `servers/` (moved into the keep folder, not deleted). |
+| **Moved aside** | the app's `.env` and `web/.env`, so the next run starts from `.env.example`. `--keep-env` leaves them in place — that is a data-only reset, and it will not show you what the installer forgets to ask. |
+| **Kept** | the cluster, node labels, images, gVisor; the LiteLLM database (models, virtual keys, spend); the n8n database (the Gmail and Calendar OAuth); `deploy/pi/.env` (`LITELLM_SALT_KEY`, `N8N_ENCRYPTION_KEY`); the logs; the systemd units. |
+
+The order is the safety: `backup.sh` runs first, and nothing is stopped or
+deleted unless it exits 0 and leaves all four dumps and the key file. That set
+is hard-linked into `keep-pre-reset-<stamp>/` under the backup directory —
+the nightly retention prunes top-level files only, so it never ages out — and
+the moved env files land in its `env/` folder. Rolling back is §10 against
+that folder. `make-secrets.sh` then rebuilds the ConfigMaps, so the empty spine
+loads this checkout's `schema.sql` and not an older copy held in the cluster.
+Then the API, the sandbox runner and the cockpit are stopped, the
+two volumes are deleted and recreated from their manifests, and the phase
+asserts both stores are first-run ones (seeded roster, empty mail ledger, zero
+graph nodes) before it moves the env files.
+
+It leaves the app **stopped**. `./deploy/k3s/setup.sh --clean-install` starts
+it: the `llm` phase finds the models already registered and re-mints the app's
+key (the old one left with the old `.env`), and the `app` phase generates new
+façade tokens and re-applies the n8n workflows. To give answers the installer
+does not ask for before first boot, create the file first — `cp .env.example
+.env && chmod 600 .env`, then fill `CC_JIRA_*` / `CC_CONFLUENCE_*` and
+`CC_BACKLOG_CUTOFF_DATE` (the old values are in the keep folder's
+`env/root.env`).
+
+What it does not reach:
+
+- **The outside world.** Mail an approved proposal reported as spam stays out
+  of the inbox, and issues created in Jira stay created. The mail feed decides
+  "already seen" from the spine alone, so everything still in the inbox inside
+  the backlog window is enrolled again.
+- **A systemd drop-in** in `/etc/systemd/system/cc-uvicorn.service.d/` (§8). The
+  phase names any it finds in a WARN; it does not remove them.
+- **Skills.** Nothing on this substrate imports the `skills/` folders; a fresh
+  spine has none until they are imported through the API
+  (`POST /api/skills/import`).
+- **A second run.** Re-running `reset` after a partial failure is safe, but its
+  backup then dumps the already-emptied store — the dump set worth keeping is
+  the FIRST `keep-pre-reset-*` folder, by content, not by date.
+
 ## 9. Verification
 
 The API is already up — §6 both enabled and started `cc-uvicorn` (its

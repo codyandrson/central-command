@@ -32,6 +32,10 @@
 #
 #     status      re-run postconditions only, nothing mutating
 #     diagnose    write setup-diagnostics.txt for pasting to Claude
+#     reset       DESTRUCTIVE, never part of a full run: back up, then delete
+#                 the spine database and the graph so the next run is a
+#                 first-run install on the same cluster (README §8a). Changes
+#                 nothing without --confirm-wipe.
 #
 #   No argument = all six phases in order, stopping at the first hard failure
 #   or gate. There is no state file: every step is idempotent, so RESUME IS
@@ -1095,6 +1099,250 @@ phase_verify() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PHASE: reset — wipe the INSTANCE, keep the SYSTEM. Never part of `all`.
+# ─────────────────────────────────────────────────────────────────────────────
+# "Start over without tearing it down": the spine database and the knowledge
+# graph go (roster, charters, ledger, proposals, sessions, event log, the
+# operator's name; every node and edge), so the next ./setup.sh lands on the
+# designed first-run state. What is slow or impossible to redo STAYS — the
+# cluster, the images, the LiteLLM database (models, keys, spend), the n8n
+# database (the OAuth credentials) and deploy/pi/.env (the two keys that must
+# never rotate). README §8a is the prose.
+#
+# Three properties, each pinned by tests/test_k3s_reset_phase.py:
+#   * a bare `reset` changes NOTHING — it prints the plan and stops with a
+#     USERACTION; only --confirm-wipe mutates;
+#   * nothing is wiped until backup.sh has exited 0 and every file of that
+#     dump set is linked into keep-pre-reset-<stamp>/, a folder the nightly
+#     retention never reads (it prunes top-level files only);
+#   * RESET_STORES is the whole list of what is deleted. The LiteLLM and n8n
+#     volumes are not in it, and deploy/pi/.env is never touched.
+#
+# The app's .env and web/.env are MOVED into the keep folder unless --keep-env
+# is given: a carried-over .env is a migration, not a fresh install (the
+# 2026-09-26 rebuild that kept one never showed the onboarding's gaps).
+RESET_CONFIRM=0
+RESET_KEEP_ENV=0
+# <deployment>|<pvc>|<manifest in deploy/k3s/>
+RESET_STORES=("cc-postgres|cc-pgdata|20-postgres.yaml"
+              "cc-neo4j|cc-neo4j-data|40-graph.yaml")
+# The spine's and the graph's consumers, all outside the cluster. The app
+# phase's `enable --now` starts them again.
+RESET_UNITS=(cc-uvicorn cc-sandbox-runner cc-nerve)
+
+# Poll until a `kubectl get … -o name` comes back empty.
+wait_gone() { # wait_gone <seconds> <kubectl get args...>
+  local deadline=$(( SECONDS + $1 )); shift
+  while [[ -n "$("$@" -o name 2>/dev/null)" ]]; do
+    (( SECONDS < deadline )) || return 1
+    sleep 3
+  done
+}
+
+# One store: stop its pod, delete the volume, recreate both from the manifest.
+reset_store() { # reset_store <deployment> <pvc> <manifest>
+  local dep="$1" pvc="$2" manifest="$3" pv
+  pv="$("${K[@]}" get pvc "$pvc" -o jsonpath='{.spec.volumeName}' 2>/dev/null)"
+  step "reset-stop-${dep}" "$dep scaled to 0" \
+    "${K[@]}" scale "deploy/$dep" --replicas=0 || return 1
+  if wait_gone 180 "${K[@]}" get pods -l "app=$dep"; then
+    pass "reset-drained-${dep}" "no $dep pod is left holding $pvc"
+  else
+    fail "reset-drained-${dep}" "a $dep pod is still terminating after 180s — $pvc was NOT deleted. Look at: sudo k3s kubectl -n $NS get pods -l app=$dep"
+    return 1
+  fi
+  step "reset-wipe-${pvc}" "$pvc deleted" \
+    "${K[@]}" delete pvc "$pvc" --ignore-not-found --timeout=180s || return 1
+  # local-path removes the directory when the PV goes (reclaimPolicy Delete).
+  # A PV that outlives its claim is a Retain policy: the new claim still gets
+  # a new, empty volume, and the old data is left on the node.
+  if [[ -n "$pv" ]]; then
+    if wait_gone 180 "${KROOT[@]}" get "pv/$pv"; then
+      pass "reset-released-${pvc}" "the volume behind $pvc ($pv) is gone"
+    else
+      warn "reset-released-${pvc}" "the volume $pv still exists after 180s — its data is still on the node (a Retain reclaim policy?). The store below starts on a NEW volume regardless; delete the old one by hand: sudo k3s kubectl delete pv $pv"
+    fi
+  fi
+  step "reset-recreate-${dep}" "$manifest re-applied (a new, empty $pvc)" \
+    "${KROOT[@]}" apply -f "$HERE/$manifest" || return 1
+  step "reset-start-${dep}" "$dep scaled to 1" \
+    "${K[@]}" scale "deploy/$dep" --replicas=1 || return 1
+  step "reset-rollout-${dep}" "$dep rolled out on the empty volume" \
+    "${K[@]}" rollout status "deploy/$dep" --timeout=600s || return 1
+}
+
+# The proof that both stores are the first-run ones: the schema loaded and
+# seeded a roster, the mail ledger is empty, the graph has no node. Neo4j
+# answers bolt a little after its pod reports ready, hence the short poll.
+reset_assert_fresh() {
+  local roster ledger nodes deadline
+  roster="$("${K[@]}" exec deploy/cc-postgres -- psql -qtAX -U central_command -d central_command \
+             -c "select count(*) from agent where role <> ''" 2>/dev/null)"
+  ledger="$("${K[@]}" exec deploy/cc-postgres -- psql -qtAX -U central_command -d central_command \
+             -c 'select count(*) from work_item' 2>/dev/null)"
+  if [[ "$roster" =~ ^[0-9]+$ ]] && (( roster > 0 )) && [[ "$ledger" == 0 ]]; then
+    pass "reset-spine-fresh" "the spine is a first-run database (schema loaded, ${roster} seeded agents, empty mail ledger)"
+  else
+    fail "reset-spine-fresh" "the spine does not look like a first-run database (seeded agents: '${roster}', mail ledger rows: '${ledger}') — schema.sql loads only on an empty volume; look at: sudo k3s kubectl -n $NS logs deploy/cc-postgres"
+  fi
+  deadline=$(( SECONDS + 120 ))
+  while :; do
+    nodes="$("${K[@]}" exec deploy/cc-neo4j -- cypher-shell -u neo4j -p "${NEO4J_PASSWORD:-}" \
+              --format plain 'match (n) return count(n)' 2>/dev/null | tail -1)"
+    [[ "$nodes" =~ ^[0-9]+$ ]] && break
+    (( SECONDS < deadline )) || break
+    sleep 5
+  done
+  if [[ "$nodes" == 0 ]]; then
+    pass "reset-graph-fresh" "the graph is empty and answers with the configured password"
+  else
+    fail "reset-graph-fresh" "the graph did not answer as an empty store (node count: '${nodes}') — look at: sudo k3s kubectl -n $NS logs deploy/cc-neo4j"
+  fi
+}
+
+phase_reset() {
+  local bdir="${CC_BACKUP_DIR:-$HOME/cc-backups}" row dep pvc manifest
+
+  if (( ! RESET_CONFIRM )); then
+    note "reset would, in this order:"
+    note "  1. run deploy/k3s/backup.sh and link its dump set into"
+    note "     $bdir/keep-pre-reset-<stamp>/ (kept past the nightly retention)"
+    note "  2. stop ${RESET_UNITS[*]}"
+    note "  3. delete what agents deployed: MCP servers (cc-mcp), sandbox jobs (cc-sandbox),"
+    note "     untracked folders under servers/ (moved into the keep folder)"
+    for row in "${RESET_STORES[@]}"; do
+      IFS='|' read -r dep pvc manifest <<<"$row"
+      note "  4. DELETE the volume ${pvc} and recreate ${dep} empty"
+    done
+    if (( RESET_KEEP_ENV )); then
+      note "  5. keep the app's .env and web/.env (--keep-env)"
+    else
+      note "  5. move the app's .env and web/.env into the keep folder (--keep-env keeps them)"
+    fi
+    note "It keeps: the cluster, the images, the LiteLLM and n8n databases, deploy/pi/.env, the logs."
+    useraction "reset-confirm" "nothing was changed. reset deletes this deployment's spine database and knowledge graph after backing them up (the plan is on stderr); to do it, re-run: ./deploy/k3s/setup.sh reset --confirm-wipe"
+    return 0
+  fi
+
+  load_env || return 1
+
+  # ── 1. the backup, and its dump set out of the retention's reach ──────────
+  local stamp keep marker label f
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  keep="$bdir/keep-pre-reset-$stamp"
+  marker="$(mktemp)" || { fail "reset-backup" "mktemp failed"; return 1; }
+  touch -d '2 seconds ago' "$marker"
+  if ! step "reset-backup" "backup.sh dumped all four stores and the keys" \
+       sudo env REPO="$REPO_ROOT" CC_BACKUP_DIR="$bdir" "$HERE/backup.sh"; then
+    rm -f "$marker"
+    note "nothing was stopped or wiped: reset does not proceed without a complete backup."
+    return 1
+  fi
+  sudo install -d -m 700 "$keep" && sudo chown --reference="$bdir" "$keep" \
+    || { rm -f "$marker"; fail "reset-keep" "could not create $keep — nothing was wiped"; return 1; }
+  for label in central_command litellm n8n neo4j keys; do
+    f="$(sudo find "$bdir" -maxdepth 1 -type f -name "${label}_*" -newer "$marker" | sort | tail -1)"
+    if [[ -z "$f" ]]; then
+      rm -f "$marker"
+      fail "reset-keep" "backup.sh exited 0 but left no new ${label}_* file in $bdir — nothing was wiped"
+      return 1
+    fi
+    # A hard link costs no space and survives the prune of the original name.
+    sudo ln "$f" "$keep/" 2>/dev/null || sudo cp -p "$f" "$keep/" \
+      || { rm -f "$marker"; fail "reset-keep" "could not keep $(basename "$f") in $keep — nothing was wiped"; return 1; }
+  done
+  rm -f "$marker"
+  pass "reset-keep" "this dump set is kept in $keep (outside the nightly retention)"
+
+  # schema.sql reaches the spine through the cc-schema-sql ConfigMap, ONCE, on
+  # the empty volume, and nothing applies it at runtime — so the ConfigMap is
+  # rebuilt from THIS checkout before the volume goes, or the new spine is
+  # born with whatever schema the cluster last held. Still before anything
+  # stops: a failure here leaves the deployment running.
+  step "reset-schema-configmap" "Secrets and ConfigMaps rebuilt from this checkout (the schema the empty spine will load)" \
+    "$HERE/make-secrets.sh" || return 1
+
+  # ── 2. the consumers ───────────────────────────────────────────────────────
+  local u
+  for u in "${RESET_UNITS[@]}"; do
+    if systemctl is-active --quiet "$u"; then
+      step "reset-stop-${u}" "$u stopped" sudo systemctl stop "$u" || return 1
+    else
+      pass "reset-stop-${u}" "$u was not running"
+    fi
+  done
+
+  # ── 3. what agents deployed — the rows that knew about it are about to go ──
+  if "${KROOT[@]}" -n cc-mcp delete deployments,services --all --ignore-not-found --timeout=120s >&2; then
+    pass "reset-mcp-servers" "no agent-deployed MCP server is left in cc-mcp"
+  else
+    warn "reset-mcp-servers" "could not clear cc-mcp — a deployment there is now an orphan the new instance does not know; look at: sudo k3s kubectl -n cc-mcp get deploy,svc"
+  fi
+  if "${KROOT[@]}" -n cc-sandbox delete jobs --all --ignore-not-found --timeout=120s >&2; then
+    pass "reset-sandbox-jobs" "no sandbox job is left in cc-sandbox"
+  else
+    warn "reset-sandbox-jobs" "could not clear cc-sandbox — look at: sudo k3s kubectl -n cc-sandbox get jobs"
+  fi
+  # servers/<name>/ arrives only through an approved mcp.sync_source; a folder
+  # git does not track is the old instance's. Tracked examples stay.
+  # Without git there is no telling the two apart, so nothing is moved.
+  local d moved=0
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    for d in "$REPO_ROOT"/servers/*/; do
+      [[ -d "$d" ]] || continue
+      d="${d%/}"
+      [[ -n "$(git -C "$REPO_ROOT" ls-files -- "servers/${d##*/}" 2>/dev/null | head -1)" ]] && continue
+      sudo install -d -m 700 "$keep/servers" && sudo mv "$d" "$keep/servers/" && moved=$((moved+1)) \
+        || warn "reset-mcp-sources" "could not move $d into $keep/servers/ — move it by hand before an agent syncs a server of that name"
+    done
+    pass "reset-mcp-sources" "${moved} synced MCP source folder(s) moved into the keep folder"
+  else
+    warn "reset-mcp-sources" "this checkout is not a git work tree, so the old instance's synced folders under servers/ cannot be told from the shipped examples — none was moved; remove the old instance's by hand"
+  fi
+
+  # ── 4. the two stores ──────────────────────────────────────────────────────
+  for row in "${RESET_STORES[@]}"; do
+    IFS='|' read -r dep pvc manifest <<<"$row"
+    reset_store "$dep" "$pvc" "$manifest" || return 1
+  done
+  reset_assert_fresh
+  (( FAILS )) && return 1
+
+  # ── 5. the app's answers ───────────────────────────────────────────────────
+  if (( RESET_KEEP_ENV )); then
+    pass "reset-env" "the app's .env and web/.env were kept (--keep-env)"
+  else
+    local src dst
+    sudo install -d -m 700 "$keep/env" && sudo chown --reference="$bdir" "$keep/env" \
+      || { fail "reset-env" "could not create $keep/env — the env files were left in place"; return 1; }
+    for row in "$APP_ENV|root.env" "$REPO_ROOT/web/.env|web.env"; do
+      src="${row%%|*}"; dst="$keep/env/${row##*|}"
+      [[ -f "$src" ]] || continue
+      sudo mv "$src" "$dst" || { fail "reset-env" "could not move $src to $dst"; return 1; }
+    done
+    pass "reset-env" "the app's .env and web/.env moved to $keep/env/ — the next setup run starts from .env.example"
+  fi
+
+  # Outside the repo AND the cluster, so nothing above reaches it, and it beats
+  # .env: a dry_run pin here would simulate every approval on the new instance.
+  local dropins
+  dropins="$(ls /etc/systemd/system/cc-uvicorn.service.d/ 2>/dev/null | tr '\n' ' ')"
+  if [[ -n "${dropins// /}" ]]; then
+    warn "reset-unit-dropins" "cc-uvicorn still has systemd drop-ins from the old instance (${dropins% }) in /etc/systemd/system/cc-uvicorn.service.d/ — they override the app's .env; read them and remove any you do not mean to carry over"
+  fi
+
+  note ""
+  note "The instance is gone and the app is stopped. To install on the empty stores:"
+  if (( ! RESET_KEEP_ENV )); then
+    note "  (optional, to give your answers BEFORE first boot)  cp .env.example .env && chmod 600 .env,"
+    note "  then fill what the installer does not ask: CC_JIRA_* / CC_CONFLUENCE_*, CC_BACKLOG_CUTOFF_DATE."
+    note "  The old values are in $keep/env/root.env."
+  fi
+  note "    ./deploy/k3s/setup.sh --clean-install"
+  note "The pre-reset dump set and its restore keys: $keep/"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # status — postconditions only. Mutates nothing.
 # ─────────────────────────────────────────────────────────────────────────────
 phase_status() {
@@ -1231,12 +1479,19 @@ usage() {
   cat >&2 <<USAGE
 usage: ./deploy/k3s/setup.sh [validate|preflight|llm|stack|app|verify|status|diagnose]
                              [--clean-install]
+       ./deploy/k3s/setup.sh reset [--confirm-wipe] [--keep-env]
 
   no argument     runs validate -> preflight -> llm -> stack -> app -> verify,
                   stopping at the first phase that hard-fails or needs you
   --clean-install passed through to verify.sh (verify/status phases): section B
                   asserts the stores are initialized instead of asserting
                   migrated instance data. Use it on a fresh install.
+  reset           DESTRUCTIVE and never part of the no-argument run: backs up
+                  all four stores, then deletes the spine database and the
+                  knowledge graph and recreates both empty. Keeps the cluster,
+                  the LiteLLM and n8n databases and deploy/pi/.env. Without
+                  --confirm-wipe it only prints the plan. --keep-env keeps the
+                  app's .env and web/.env (default: moved beside the backup).
   exit codes      0 clean · 1 hard failure · 2 completed with warnings
                   3 stopped for USER ACTION (see the last USERACTION line)
   status log      every check is appended to deploy/k3s/setup-log.txt
@@ -1250,6 +1505,8 @@ main() {
   for a in "$@"; do
     case "$a" in
       --clean-install) VERIFY_ARGS+=("$a") ;;
+      --confirm-wipe)  RESET_CONFIRM=1 ;;
+      --keep-env)      RESET_KEEP_ENV=1 ;;
       -h|--help|help)  usage; exit 0 ;;
       -*)              usage; exit 1 ;;
       *)               cmd="$a" ;;
@@ -1258,7 +1515,7 @@ main() {
 
   logline "run start: ./setup.sh $*"
   case "$cmd" in
-    validate|preflight|llm|stack|app|verify|status|diagnose)
+    validate|preflight|llm|stack|app|verify|status|diagnose|reset)
       run_phase "$cmd"; local prc=$?
       logline "run end: ./setup.sh $cmd -> exit $prc"
       exit $prc

@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-06 — v2.63.0: start over on the same k3s cluster with one command
+
+Testing the install as a new operator sees it — the name prompt, the team tour,
+the first mail, an empty graph — meant deleting volumes and moving files by
+hand from the runbook. `deploy/k3s/setup.sh` gains a `reset` phase that does
+it. Nothing changes for a running deployment that never calls it. **Requires
+v2.60.0**, as before.
+
+- **`./deploy/k3s/setup.sh reset --confirm-wipe`** deletes the spine database
+  and the knowledge graph and recreates both empty, removes what agents
+  deployed (MCP servers, sandbox jobs, synced `servers/` folders), and moves the
+  app's `.env` and `web/.env` aside so the next run starts from `.env.example`.
+  It keeps the cluster, the images, the LiteLLM database, the n8n database
+  (the mail and calendar OAuth) and `deploy/pi/.env`. `--keep-env` leaves the
+  two env files in place.
+- **A bare `reset` changes nothing.** It prints the plan and stops with a
+  USERACTION line (exit 3). The phase is never part of the no-argument run.
+- **No complete backup, no wipe.** `backup.sh` runs first. Unless it exits 0
+  and leaves all four dumps and the key file, nothing is stopped or deleted.
+  The set is hard-linked into `keep-pre-reset-<stamp>/` under the backup
+  directory, which the nightly retention never prunes; the moved env files
+  land beside it.
+- **It proves the result.** The phase fails unless the spine answers with a
+  seeded roster and an empty mail ledger and the graph answers with zero
+  nodes. It leaves the app stopped; `./deploy/k3s/setup.sh --clean-install`
+  installs on the empty stores.
+- Runbook: `deploy/k3s/README.md` §8a, including what a reset does not reach
+  (mail and issues already changed outside, a systemd drop-in, skills).
+  `tests/test_k3s_reset_phase.py` runs the phase under stubs.
+
 ## 2026-10-06 — v2.62.1: one answer is enough for a dedicated reranker, and k3s can run without one
 
 v2.62.0 let a single-node operator name the reranker with one answer,
