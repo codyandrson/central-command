@@ -322,3 +322,190 @@ def test_a_probe_judged_alias_is_created_as_its_skeleton_and_never_held_to_it(rm
             assert statuses == {"cc-rerank": "ok"}, (path, row)
         skel = _live("cc-rerank", **want["cc-rerank"])
         assert [st for st, *_ in rm.plan({"cc-rerank": want["cc-rerank"]}, [skel], invariants)] == ["pending"]
+
+
+# ── cc-rerank's two shapes (v2.62.1) ────────────────────────────────────────
+# The openai/ provider cannot answer LiteLLM's /rerank (HTTP 500 "Unsupported
+# provider: openai", measured 2026-10-05), so the one .env answer derives a
+# dedicated shape (cohere/, /v1/rerank, mode rerank) and a chat shape
+# (openai/, the plain base); setup registers and probes them in that order.
+
+RERANK = "CC_LLM_UPSTREAM_MODEL_CC_RERANK"
+
+
+@pytest.mark.parametrize("base,cohere,root", [
+    ("http://h:8080/v1", "http://h:8080/v1/rerank", "http://h:8080"),
+    ("http://h:8080/v1/", "http://h:8080/v1/rerank", "http://h:8080"),
+    ("http://h:8080", "http://h:8080/v1/rerank", "http://h:8080"),
+    ("http://h:8080/", "http://h:8080/v1/rerank", "http://h:8080"),
+    ("https://gw.example/llm/v1", "https://gw.example/llm/v1/rerank", "https://gw.example/llm"),
+    ("http://h:8080/v1/rerank", "http://h:8080/v1/rerank", "http://h:8080"),
+    ("  http://h:8080/v1  ", "http://h:8080/v1/rerank", "http://h:8080"),
+])
+def test_the_dedicated_api_base_ends_in_v1_rerank_exactly_once(rm, base, cohere, root):
+    assert rm.rerank_base(base) == cohere
+    assert rm.rerank_base(base, "hosted_vllm") == root
+    assert rm.rerank_base(base, "infinity") == root
+
+
+@pytest.mark.parametrize("answer,provider", [
+    ("cohere/bge-reranker-v2-m3", "cohere"),
+    ("hosted_vllm/BAAI/bge-reranker-v2-m3", "hosted_vllm"),
+    ("infinity/mxbai-rerank", "infinity"),
+    ("BAAI/bge-reranker-v2-m3", None),          # an org/model upstream id
+    ("qwen3-reranker-0.6b", None),
+    ("openai/gpt-x", None),                      # openai cannot rerank: a model id
+    ("together_ai/Salesforce/Llama-Rank-V1", None),  # hosted elsewhere: not this base
+    ("cohere/", None), ("Cohere/x", None),
+])
+def test_an_explicit_provider_is_only_one_from_the_allowlist(rm, answer, provider):
+    assert rm.explicit_provider(answer) == provider
+
+
+def _single():
+    return SINGLE / "models.json"
+
+
+def test_one_answer_derives_both_shapes_in_probe_order(rm):
+    policy = rm.load_declaration(_single())
+    env = {**BASE, RERANK: "BAAI/bge-reranker-v2-m3"}
+    shapes = rm.alias_shapes("cc-rerank", policy, env)
+    assert list(shapes) == ["rerank", "chat"]
+    assert shapes["rerank"] == {"model": "cohere/BAAI/bge-reranker-v2-m3",
+                                "api_base": "https://llm.corp.example/v1/rerank",
+                                "mode": "rerank", "api_key": KEY}
+    assert shapes["chat"] == {"model": "openai/BAAI/bge-reranker-v2-m3",
+                              "api_base": "https://llm.corp.example/v1", "api_key": KEY}
+    # a loopback base is the container's view in both shapes
+    loop = rm.alias_shapes("cc-rerank", policy, {**env, "CC_LLM_UPSTREAM_BASE_URL": "http://127.0.0.1:8082/v1/"})
+    assert loop["rerank"]["api_base"] == "http://host.containers.internal:8082/v1/rerank"
+    assert loop["chat"]["api_base"] == "http://host.containers.internal:8082/v1/"  # as declared
+    # an explicit provider: the dedicated shape only, verbatim
+    explicit = rm.alias_shapes("cc-rerank", policy, {**env, RERANK: "hosted_vllm/rr"})
+    assert explicit == {"rerank": {"model": "hosted_vllm/rr", "api_base": "https://llm.corp.example",
+                                   "mode": "rerank", "api_key": KEY}}
+    # not declared, or not a probe-judged alias: nothing to derive
+    assert rm.alias_shapes("cc-rerank", policy, {RERANK: "x"}) == {}
+    assert rm.alias_shapes("cc-default", policy, {**BASE, "CC_LLM_UPSTREAM_MODEL_CC_DEFAULT": "x"}) == {}
+
+
+def test_the_k3s_skeleton_timeout_rides_every_shape(rm):
+    policy = rm.load_declaration(ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml")
+    shapes = rm.alias_shapes("cc-rerank", policy, {**BASE, RERANK: "rr"})
+    assert shapes["rerank"]["timeout"] == 60 and shapes["chat"]["timeout"] == 60
+
+
+def _shapes(rm, answer="rr"):
+    return rm.alias_shapes("cc-rerank", rm.load_declaration(_single()), {**BASE, RERANK: answer})
+
+
+def test_ensure_shape_writes_only_rows_setup_made(rm):
+    shapes = _shapes(rm)
+    chat = _live("cc-rerank", **{k: v for k, v in shapes["chat"].items() if k != "api_key"})
+    ded = _live("cc-rerank", **{k: v for k, v in shapes["rerank"].items() if k != "api_key"})
+    skel = _live("cc-rerank", model="openai/PLACEHOLDER", api_base="PLACEHOLDER")
+    hand = _live("cc-rerank", model="cohere/their-own", api_base="http://theirs:9/v1/rerank", mode="rerank")
+    assert rm.ensure_shape("cc-rerank", "rerank", shapes, [])[0] == "create"
+    # the row setup made as chat becomes the dedicated shape, by id
+    verdict, body = rm.ensure_shape("cc-rerank", "rerank", shapes, [chat])
+    assert verdict == "update" and body["litellm_params"] == shapes["rerank"]
+    assert body["model_info"]["id"] == "id-cc-rerank"
+    assert rm.ensure_shape("cc-rerank", "chat", shapes, [ded])[0] == "update"
+    assert rm.ensure_shape("cc-rerank", "rerank", shapes, [skel])[0] == "update"
+    # already that shape: nothing is written — a re-run never flaps the row
+    assert rm.ensure_shape("cc-rerank", "rerank", shapes, [ded]) == ("same", None)
+    assert rm.ensure_shape("cc-rerank", "chat", shapes, [chat]) == ("same", None)
+    # a row filled by hand is never written, whichever shape is asked for
+    for kind in ("rerank", "chat"):
+        assert rm.ensure_shape("cc-rerank", kind, shapes, [hand]) == ("operator", None)
+    # two rows behind the alias are the operator's arrangement
+    assert rm.ensure_shape("cc-rerank", "rerank", shapes, [chat, ded])[0] == "operator"
+    # a row made from an EARLIER .env answer is no longer setup's to reshape
+    assert rm.ensure_shape("cc-rerank", "rerank", _shapes(rm, "other-model"), [chat])[0] == "operator"
+    # an explicit provider has no chat shape
+    assert rm.ensure_shape("cc-rerank", "chat", _shapes(rm, "cohere/rr"), [])[0] == "underivable"
+    assert rm.ensure_shape("cc-rerank", "rerank", {}, [])[0] == "underivable"
+
+
+def test_the_catalog_creates_the_plain_mapping_and_an_explicit_provider_verbatim(rm, monkeypatch, capsys):
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={**BASE, **IDS, RERANK: "rr"})
+    assert rc == 0, out
+    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
+    assert created["cc-rerank"] == {"model": "openai/rr", "api_base": "https://llm.corp.example/v1",
+                                    "api_key": KEY}
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={**BASE, **IDS, RERANK: "cohere/rr"})
+    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
+    assert created["cc-rerank"]["model"] == "cohere/rr"
+    assert created["cc-rerank"]["api_base"] == "https://llm.corp.example/v1/rerank"
+    assert created["cc-rerank"]["mode"] == "rerank"
+    assert KEY not in out
+
+
+def test_a_row_setup_reshaped_is_not_reported_as_the_operators(rm, monkeypatch, capsys):
+    """After the dedicated shape answered, the catalog step's next run sees a
+    row that differs from the plain mapping — it is still what .env declares,
+    so no 'the row you filled in WINS' note, and nothing is written."""
+    shapes = _shapes(rm)
+    filled = [_live(a, model="openai/x", api_base="https://llm.corp.example/v1")
+              for a in ("cc-default", "graphiti-llm", "cc-embedding")]
+    filled += [_live(a, model="openai/x", api_base="http://up/v1", mode=m)
+               for a, m in (("cc-tts", "audio_speech"), ("cc-stt", "audio_transcription"))]
+    ded = _live("cc-rerank", **{k: v for k, v in shapes["rerank"].items() if k != "api_key"})
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=filled + [ded], env={**BASE, **IDS, RERANK: "rr"})
+    assert rc == 0, out
+    assert proxy.calls == [], proxy.calls
+    assert "note     cc-rerank" not in out
+
+
+@pytest.mark.parametrize("live_kind,ask,expected_rc,path", [
+    (None, "rerank", 0, "/model/new"),
+    ("chat", "rerank", 0, "/model/update"),
+    ("rerank", "rerank", 0, None),
+    ("hand", "rerank", 5, None),
+])
+def test_the_shape_cli(rm, monkeypatch, capsys, live_kind, ask, expected_rc, path):
+    shapes = _shapes(rm)
+    rows = {"chat": [_live("cc-rerank", model="openai/rr", api_base="https://llm.corp.example/v1")],
+            "rerank": [_live("cc-rerank", model="cohere/rr", api_base="https://llm.corp.example/v1/rerank",
+                             mode="rerank")],
+            "hand": [_live("cc-rerank", model="hosted_vllm/x", api_base="http://theirs")],
+            None: []}[live_kind]
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=rows, env={**BASE, RERANK: "rr"},
+                          argv=("--policy", str(_single()), "--shape", f"cc-rerank={ask}"))
+    assert rc == expected_rc, out
+    assert [p for p, _ in proxy.calls] == ([path] if path else [])
+    assert KEY not in out, "the api key must never appear in a printed line"
+    if path:
+        assert proxy.calls[0][1]["litellm_params"] == shapes[ask]
+        assert "(set, not printed)" in out
+    # undeclared: exit 6, nothing written
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=rows, env={},
+                          argv=("--policy", str(_single()), "--shape", f"cc-rerank={ask}"))
+    assert rc == 6 and proxy.calls == []
+
+
+def test_row_state(rm, monkeypatch, capsys):
+    for live, want in (([], "absent"),
+                       ([_live("cc-rerank", model="cohere/PLACEHOLDER", api_base="PLACEHOLDER/v1/rerank")], "skeleton"),
+                       ([_live("cc-rerank", model="cohere/rr", api_base="http://h/v1/rerank")], "filled")):
+        rc, out, proxy = _run(rm, monkeypatch, capsys, live=live, env={},
+                              argv=("--row-state", "cc-rerank"))
+        assert rc == 0 and out.strip() == want and proxy.calls == []
+
+
+def test_an_optional_alias_never_pauses_even_without_require(rm, monkeypatch, capsys):
+    """k3s passes no --require: before v2.62.1 an unfilled cc-rerank (and its
+    real-model row) paused every install, so a site with no reranker could
+    not finish. Both are `optional: true` now; a filled row is unchanged."""
+    k3s = ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml"
+    policy = rm.load_declaration(k3s)
+    assert rm.optional_aliases(policy) == {"cc-rerank", "qwen3-rerank-local"}
+    assert rm.optional_aliases(rm.load_declaration(_single())) == {"cc-rerank"}
+    want = rm.declared(policy)
+    live = [_live(a, **{k: (v.replace("PLACEHOLDER", "x") if isinstance(v, str) else v)
+                        for k, v in p.items()})
+            for a, p in want.items() if a not in ("cc-rerank", "qwen3-rerank-local")]
+    live += [_live(a, **want[a]) for a in ("cc-rerank", "qwen3-rerank-local")]
+    rc, out, _ = _run(rm, monkeypatch, capsys, live=live, env={}, argv=("--policy", str(k3s)))
+    assert rc == 0, out
+    assert "optional cc-rerank" in out and "optional qwen3-rerank-local" in out

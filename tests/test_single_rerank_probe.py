@@ -41,7 +41,11 @@ esac
 
 
 def _run(tmp_path: Path, env_lines: dict[str, str], *, unfilled: str = "",
-         rerank: str = "no", chat: str = "no", catalog_down: bool = False):
+         rerank: str = "no", chat: str = "no", catalog_down: bool = False,
+         shape_rerank: int = 6, shape_chat: int = 6):
+    """`shape_*` is register-models.py --shape's answer per kind: 0 written or
+    already that shape, 5 a row filled by hand, 6 .env does not declare it
+    (the default — the v2.62.0 behaviour: probe the row as it is)."""
     fns = installer_functions()
     here = tmp_path / "here"
     here.mkdir(exist_ok=True)
@@ -66,6 +70,8 @@ def _run(tmp_path: Path, env_lines: dict[str, str], *, unfilled: str = "",
         ('catalog_unfilled() { return 1; }' if catalog_down else
          'catalog_unfilled() { [[ -n "${STUB_UNFILLED:-}" ]] && printf "%s\\n" "$STUB_UNFILLED"; return 0; }'),
         "rerank_probe_kind() {" + fns["rerank_probe_kind"] + "\n}",
+        'rerank_shape() { printf "shape %s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
+        'if [[ "$1" == rerank ]]; then return "$STUB_SHAPE_RERANK"; fi; return "$STUB_SHAPE_CHAT"; }',
         "rerank_decide() {" + fns["rerank_decide"] + "\n}",
         "p_rerank_decided() {" + fns["p_rerank_decided"] + "\n}",
         'rerank_decide; rc=$?',
@@ -73,7 +79,8 @@ def _run(tmp_path: Path, env_lines: dict[str, str], *, unfilled: str = "",
         'p_rerank_decided && echo "DECIDED=yes" || echo "DECIDED=no"',
     ])
     env = {**os.environ, "STUB_LOG": str(log), "STUB_RERANK": rerank, "STUB_CHAT": chat,
-           "STUB_UNFILLED": unfilled}
+           "STUB_UNFILLED": unfilled, "STUB_SHAPE_RERANK": str(shape_rerank),
+           "STUB_SHAPE_CHAT": str(shape_chat)}
     r = subprocess.run([_bash_exe(), "-c", script], capture_output=True, text=True, env=env,
                        timeout=60)
     final: dict[str, str] = {}
@@ -81,8 +88,11 @@ def _run(tmp_path: Path, env_lines: dict[str, str], *, unfilled: str = "",
         if "=" in line:
             k, v = line.split("=", 1)
             final[k] = v
-    probes = log.read_text(encoding="utf-8").split("\n")
-    return r, final, [p for p in probes if p]
+    lines = [p for p in log.read_text(encoding="utf-8").split("\n") if p]
+    # `probes` keeps the v2.62.0 view (the probes alone); `steps` is every
+    # registration and probe, in order.
+    _run.steps = lines
+    return r, final, [p for p in lines if not p.startswith("shape ")]
 
 
 def _line(r) -> str:
@@ -166,3 +176,59 @@ def test_an_unreadable_catalog_is_a_warn_not_a_guess(tmp_path):
     r, env, probes = _run(tmp_path, {}, catalog_down=True, rerank="ok")
     assert _rc(r) == 0 and _line(r).startswith("WARN probe-rerank:")
     assert probes == [] and "CC_GRAPH_RERANK_ALIAS" not in env
+
+
+# ── v2.62.1: a declared answer is REGISTERED in each shape before its probe ──
+
+
+def test_declared_dedicated_answers_first_and_its_row_is_left(tmp_path):
+    r, env, _ = _run(tmp_path, {}, rerank="ok", shape_rerank=0, shape_chat=0)
+    assert _rc(r) == 0 and env["CC_GRAPH_RERANK_KIND"] == "rerank"
+    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank"]  # chat never registered
+
+
+def test_declared_chat_answers_after_the_dedicated_shape_fails(tmp_path):
+    r, env, _ = _run(tmp_path, {}, chat="ok", shape_rerank=0, shape_chat=0)
+    assert _rc(r) == 0 and env["CC_GRAPH_RERANK_KIND"] == "chat"
+    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank",
+                          "shape chat cc-rerank", "rerank-chat cc-rerank"]
+
+
+def test_declared_neither_leaves_the_chat_row_and_warns_naming_both_and_the_providers(tmp_path):
+    r, env, _ = _run(tmp_path, {}, shape_rerank=0, shape_chat=0)
+    line = _line(r)
+    assert _rc(r) == 0 and line.startswith("WARN probe-rerank:")
+    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank",
+                          "shape chat cc-rerank", "rerank-chat cc-rerank"]
+    # registered last, the chat shape — the plain mapping — is what stays
+    assert "a dedicated reranker, then a chat model" in line
+    assert "Together AI" in line and "Infinity" in line and "hosted_vllm/<id>" in line
+    assert "CC_GRAPH_RERANK_KIND" not in env and "CC_GRAPH_RERANK_ALIAS" not in env
+
+
+def test_an_explicit_provider_is_probed_only_as_a_dedicated_reranker(tmp_path):
+    # --shape chat answers 6: an explicit provider derives no chat shape.
+    r, env, _ = _run(tmp_path, {}, chat="ok", shape_rerank=0, shape_chat=6)
+    assert _rc(r) == 0 and _line(r).startswith("WARN probe-rerank:")
+    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank", "shape chat cc-rerank"]
+    assert "CC_GRAPH_RERANK_KIND" not in env
+
+
+def test_a_row_filled_by_hand_is_probed_as_it_is_both_ways(tmp_path):
+    r, env, _ = _run(tmp_path, {}, chat="ok", shape_rerank=5, shape_chat=5)
+    assert _rc(r) == 0 and env["CC_GRAPH_RERANK_KIND"] == "chat"
+    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank",
+                          "shape chat cc-rerank", "rerank-chat cc-rerank"]
+    assert "registered and probed" not in r.stdout
+
+
+def test_a_pinned_kind_registers_and_probes_only_its_shape(tmp_path):
+    r, env, _ = _run(tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": "chat"},
+                     rerank="ok", chat="ok", shape_rerank=0, shape_chat=0)
+    assert _rc(r) == 0
+    assert _run.steps == ["shape chat cc-rerank", "rerank-chat cc-rerank"]
+
+
+def test_a_failed_shape_registration_is_a_fail(tmp_path):
+    r, _, _ = _run(tmp_path, {}, rerank="ok", shape_rerank=1)
+    assert _rc(r) == 1 and _line(r).startswith("FAIL probe-rerank:")

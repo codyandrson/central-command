@@ -353,12 +353,32 @@ rerank_probe_kind() { # rerank_probe_kind <rerank|chat> <alias>
   "$HERE/discover-llm.sh" --proxy "$sub" "$2" >&2
 }
 
+# Make the alias's row the <kind> SHAPE derived from .env (v2.62.1):
+#   rerank  cohere/<CC_LLM_UPSTREAM_MODEL_CC_RERANK>, api_base = the declared
+#           base ending in /v1/rerank, mode rerank — the openai/ provider
+#           cannot answer LiteLLM's /rerank, so a dedicated reranker needs a
+#           rerank-capable provider row (an answer that names its provider,
+#           `cohere/…`, `hosted_vllm/…`, `infinity/…`, is used verbatim)
+#   chat    openai/<id> on the declared base — the plain mapping
+# register-models.py --shape writes ONLY a row that is absent, a skeleton, or
+# one of these derived shapes (a row setup made from .env); a row filled by
+# hand is never written (rc 5), and nothing is derivable without the .env
+# declaration (rc 6). An unchanged row is not written at all — no flapping.
+# The keys reach it the way the catalog step passes them: the environment.
+rerank_shape() { # rerank_shape <rerank|chat> <alias> -> 0 | 5 | 6 | other
+  CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
+  LITELLM_MASTER_KEY="${CC_LLM_PROXY_ADMIN_KEY:-}" \
+    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" \
+      --shape "$2=$1" >&2
+}
+
 rerank_decide() {
-  local alias kind pinned_alias unfilled found=""
+  local alias kind pinned_alias unfilled found="" rc declared=0 tried=""
   pinned_alias="$(q_unquote "$(get_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS)")"
   kind="$(q_unquote "$(get_kv "$ENV_FILE" CC_GRAPH_RERANK_KIND)")"
   alias="${pinned_alias:-cc-rerank}"
   local fix="fact search ERRORS until it is fixed (a configured reranker that fails is never skipped). Fix the $alias row in the LiteLLM UI — a dedicated reranker answers /rerank; a chat model must return logprobs and have thinking OFF on the alias — or empty CC_GRAPH_RERANK_ALIAS in .env to run without a reranker, then re-run: ./setup.sh"
+  local providers="LiteLLM's documented rerank providers: Cohere (cohere/<id>, api_base ending /v1/rerank — also what a llama.cpp --rerank server speaks), Together AI, Azure AI, Jina AI, AWS Bedrock, HuggingFace, Infinity, vLLM (hosted_vllm/<id>), DeepInfra, Vertex AI, Fireworks AI, Voyage AI, IBM watsonx.ai"
 
   if [[ -z "$pinned_alias" ]]; then
     if ! unfilled="$(catalog_unfilled "$alias")"; then
@@ -366,7 +386,7 @@ rerank_decide() {
       return 0
     fi
     if [[ -n "$unfilled" ]]; then
-      pass "probe-rerank" "no reranker: $alias is not mapped (absent, or still its skeleton) — fact search ranks by rank fusion alone, the lower-quality ordering. To turn reranking on: answer CC_LLM_UPSTREAM_MODEL_CC_RERANK (./setup.sh configure — the same model as graphiti-llm is the one-line choice when no dedicated reranker exists), or fill the $alias row in the LiteLLM UI and set CC_GRAPH_RERANK_ALIAS=$alias in .env; then re-run ./setup.sh"
+      pass "probe-rerank" "no reranker: $alias is not mapped (absent, or still its skeleton) — fact search ranks by rank fusion alone, the lower-quality ordering. To turn reranking on: answer CC_LLM_UPSTREAM_MODEL_CC_RERANK (./setup.sh configure — setup tries it as a dedicated reranker, then as a chat model; the same model as graphiti-llm is the one-line choice when no dedicated reranker exists), or fill the $alias row in the LiteLLM UI and set CC_GRAPH_RERANK_ALIAS=$alias in .env; then re-run ./setup.sh"
       return 0
     fi
   fi
@@ -375,6 +395,13 @@ rerank_decide() {
     case "$kind" in
       rerank|chat) ;;
       *) fail "probe-rerank" "CC_GRAPH_RERANK_KIND=$kind is not a reranker kind — set rerank or chat, or empty it so setup probes; the API refuses to build the graph client meanwhile"; return 1 ;;
+    esac
+    # A pinned kind: only ITS shape is registered (when .env declares it) and
+    # probed — never re-detected.
+    rerank_shape "$kind" "$alias"; rc=$?
+    case "$rc" in
+      0|5|6) ;;
+      *) fail "probe-rerank" "register-models.py --shape failed (exit $rc) — run: ./setup.sh report"; return 1 ;;
     esac
     if rerank_probe_kind "$kind" "$alias"; then
       [[ -n "$pinned_alias" ]] || set_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS "$alias"
@@ -385,11 +412,29 @@ rerank_decide() {
     return 3
   fi
 
-  if rerank_probe_kind rerank "$alias"; then
-    found=rerank
-  elif rerank_probe_kind chat "$alias"; then
-    found=chat
-  fi
+  # Detect: the dedicated shape first, then the chat shape. With .env declaring
+  # the alias, each shape is REGISTERED before it is probed and the row left
+  # behind is the one that answered; a row filled by hand (rc 5) or an alias
+  # .env does not declare (rc 6) is probed as it is, both ways.
+  local k
+  for k in rerank chat; do
+    rerank_shape "$k" "$alias"; rc=$?
+    case "$rc" in
+      0) declared=1 ;;
+      5) ;;
+      6) (( declared )) && continue ;;   # an explicit provider has no chat shape
+      *) fail "probe-rerank" "register-models.py --shape failed (exit $rc) — run: ./setup.sh report"; return 1 ;;
+    esac
+    if [[ "$k" == rerank ]]; then
+      tried="${tried:+$tried, then }a dedicated reranker"
+    else
+      tried="${tried:+$tried, then }a chat model"
+    fi
+    if rerank_probe_kind "$k" "$alias"; then
+      found="$k"
+      break
+    fi
+  done
   if [[ -n "$found" ]]; then
     [[ -n "$pinned_alias" ]] || set_kv "$ENV_FILE" CC_GRAPH_RERANK_ALIAS "$alias"
     set_kv "$ENV_FILE" CC_GRAPH_RERANK_KIND "$found"
@@ -400,11 +445,16 @@ rerank_decide() {
     fi
     return 0
   fi
+  # Neither answered: the row left is the CHAT shape — the plain mapping of
+  # what the operator typed — because it was registered last (an explicit
+  # provider's dedicated row stays as typed).
   if [[ -n "$pinned_alias" ]]; then
     useraction "probe-rerank" "CC_GRAPH_RERANK_ALIAS=$alias answers neither a /rerank request nor a True/False chat question with logprobs — $fix"
     return 3
   fi
-  warn "probe-rerank" "$alias is mapped but answers neither a /rerank request nor a True/False chat question with logprobs, so it is NOT used — fact search ranks by rank fusion alone. Usual causes: the endpoint returns no logprobs; the model is a reasoning model and thinking is not disabled on the alias (chat_template_kwargs enable_thinking false on a llama.cpp backend); a rerank row whose api_base does not end in /v1/rerank. Fix the row, set CC_GRAPH_RERANK_ALIAS=$alias in .env, and re-run ./setup.sh (it then probes again, and stops if the alias still fails)"
+  local how="Fix the row"
+  (( declared )) && how="Setup registered and probed it as ${tried} from CC_LLM_UPSTREAM_MODEL_CC_RERANK. If your reranker speaks another provider API, fill the $alias row in the LiteLLM UI with that provider (${providers}), or answer CC_LLM_UPSTREAM_MODEL_CC_RERANK as cohere/<id>, hosted_vllm/<id> or infinity/<id>"
+  warn "probe-rerank" "$alias is mapped but answers neither a /rerank request nor a True/False chat question with logprobs, so it is NOT used — fact search ranks by rank fusion alone. Usual causes: the endpoint returns no logprobs; the model is a reasoning model and thinking is not disabled on the alias (chat_template_kwargs enable_thinking false on a llama.cpp backend); a rerank row whose provider cannot answer /rerank (openai/ cannot) or whose api_base does not end in /v1/rerank. ${how}; then set CC_GRAPH_RERANK_ALIAS=$alias in .env and re-run ./setup.sh (it then probes again, and stops if the alias still fails)"
   return 0
 }
 

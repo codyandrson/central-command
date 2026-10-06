@@ -612,6 +612,27 @@ rerank_decide_k3s() {
   fi
   alias="$(get_kv "$APP_ENV" CC_GRAPH_RERANK_ALIAS)"; alias="${alias:-cc-rerank}"
   kind="$(get_kv "$APP_ENV" CC_GRAPH_RERANK_KIND)"
+  # cc-rerank is OPTIONAL in the declaration (v2.62.1): an unfilled skeleton
+  # no longer pauses the catalog step, so a site with no reranker finishes the
+  # install. Unfilled, with no alias or kind in the app's .env, is "no
+  # reranker" — written as an explicit empty CC_GRAPH_RERANK_ALIAS, so neither
+  # the app phase's default nor the updater's turns it on behind the operator.
+  # Unfilled while the app's .env NAMES it is the gate: search would error.
+  local state
+  state="$($PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --row-state "$alias" 2>/dev/null)" || state=""
+  if [[ "$state" != filled ]]; then
+    if [[ -z "$state" ]]; then
+      fail "probe-rerank" "could not read the proxy's /model/info to see whether $alias is filled — run: ./deploy/k3s/setup.sh diagnose"
+      return 1
+    fi
+    if ! grep -q '^CC_GRAPH_RERANK_ALIAS=' "$APP_ENV" && [[ -z "$kind" ]]; then
+      set_kv "$APP_ENV" CC_GRAPH_RERANK_ALIAS ""
+      pass "probe-rerank" "no reranker: $alias is $state in the LiteLLM catalog — CC_GRAPH_RERANK_ALIAS= (empty, an explicit off) written to the app's .env; fact search ranks by rank fusion alone. To turn reranking on: fill the $alias row in the LiteLLM UI (a dedicated reranker, cohere/<id> with api_base ending /v1/rerank and mode rerank; or a chat model with logprobs and thinking OFF, openai/<id>), set CC_GRAPH_RERANK_ALIAS=$alias in the app's .env, and re-run ./deploy/k3s/setup.sh llm"
+      return 0
+    fi
+    llm_gate "the $alias alias is $state in the LiteLLM catalog, but the app's .env names it (CC_GRAPH_RERANK_ALIAS=$alias${kind:+, CC_GRAPH_RERANK_KIND=$kind}) — fill the row (a dedicated reranker, or a chat model with logprobs and thinking off), or put the line CC_GRAPH_RERANK_ALIAS= (empty) in the app's .env to run without a reranker; graph search would ERROR meanwhile"
+    return 3
+  fi
   case "$kind" in
     "")
       if probe_alias rerank "$alias"; then found=rerank

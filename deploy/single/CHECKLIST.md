@@ -154,7 +154,7 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
     Where: the LiteLLM UI, http://127.0.0.1:4000/ui (port 4000 unless `.env` sets `CC_LITELLM_PORT`) — log in as `admin` with `.env`'s `CC_LLM_PROXY_ADMIN_KEY`. Every alias `.env` did not declare is entered here — including one served from a different host or port than `CC_LLM_UPSTREAM_BASE_URL` (typically the embedder), because `.env` declares one upstream base URL and key for all of them; a server that checks no key still needs a non-empty key field (`none`).
 30. `llm/probe-chat`: Get a real completion back through the cc-default alias — the one the agents address.
 31. `llm/probe-structured`: Get schema-constrained JSON back through graphiti-llm, which is what graph extraction needs.
-32. `llm/probe-rerank`: Decide graph search's reranker by PROBING the optional cc-rerank alias: LiteLLM's /rerank first (a dedicated reranker), then a True/False chat answer with logprobs (a chat model with thinking off), else none — and write the result to .env unless you pinned a kind.
+32. `llm/probe-rerank`: Decide graph search's reranker by PROBING the optional cc-rerank alias: LiteLLM's /rerank first (a dedicated reranker), then a True/False chat answer with logprobs (a chat model with thinking off), else none — registering each shape first when .env declares `CC_LLM_UPSTREAM_MODEL_CC_RERANK`, keeping the row that answers — and write the result to .env unless you pinned a kind.
 33. `llm/speech-live`: Wait for the speech engine to answer /health, when `CC_ENABLE_SPEECH=1`.
 34. `llm/speech-model`: Install the TTS and STT model snapshots into the engine's volume (the first call downloads them).
 35. `llm/probe-tts`: Synthesise speech through the cc-tts alias, when `CC_ENABLE_SPEECH=1`.

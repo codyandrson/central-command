@@ -129,7 +129,7 @@ def container_api_base(url: str) -> tuple[str, bool]:
     return f"{scheme}{userinfo}{'@' if userinfo else ''}{hostport}{rest}", True
 
 
-def upstream_rows(aliases, env) -> tuple[dict[str, dict], list[str]]:
+def upstream_rows(aliases, env, explicit_ok=()) -> tuple[dict[str, dict], list[str]]:
     """{alias: real litellm_params} for every alias .env declares, + notes.
 
     All three of base URL, key and the alias's model key must be present for
@@ -152,8 +152,145 @@ def upstream_rows(aliases, env) -> tuple[dict[str, dict], list[str]]:
         model_id = (env.get(alias_env_key(alias)) or "").strip()
         if not model_id:
             continue
-        rows[alias] = {"model": f"openai/{model_id}", "api_base": api_base, "api_key": key}
+        provider = explicit_provider(model_id) if alias in explicit_ok else None
+        if provider:
+            # Named its provider: the dedicated shape, verbatim (alias_shapes).
+            rows[alias] = {"model": model_id, "api_base": rerank_base(api_base, provider),
+                           "mode": "rerank", "api_key": key}
+        else:
+            rows[alias] = {"model": f"openai/{model_id}", "api_base": api_base, "api_key": key}
     return rows, notes
+
+
+# ── a probe-judged alias's two SHAPES (v2.62.1) ──────────────────────────────
+# `cc-rerank` may be a dedicated reranker or a chat model used as one, and the
+# one answer `.env` gives (CC_LLM_UPSTREAM_MODEL_CC_RERANK) cannot say which.
+# The `openai/` provider cannot answer LiteLLM's /rerank ("Unsupported
+# provider: openai", HTTP 500 — measured 2026-10-05) and LiteLLM's rerank
+# providers list no OpenAI (docs/vendor/litellm/docs/rerank.md), so a
+# dedicated reranker needs a rerank-capable provider row. Two shapes are
+# derived from the declared values, and setup's llm phase registers and probes
+# them in order — the dedicated one first:
+#   rerank  cohere/<id>, api_base = the declared base ending in /v1/rerank
+#           (LiteLLM's cohere client POSTs the api_base VERBATIM), mode rerank
+#   chat    openai/<id>, the declared base — the plain mapping
+# An answer that NAMES its provider (`<provider>/<id>`, provider in
+# EXPLICIT_RERANK_PROVIDERS) has only the rerank shape, registered verbatim.
+# Everything else — `org/model` included — is a model id.
+EXPLICIT_RERANK_PROVIDERS = ("cohere", "hosted_vllm", "infinity")
+SHAPE_ORDER = ("rerank", "chat")
+
+
+def rerank_base(base: str, provider: str = "cohere") -> str:
+    """The api_base a dedicated reranker row needs, from the declared /v1 base.
+    `cohere`: the path made to end in /v1/rerank exactly once (`…/v1`,
+    `…/v1/`, a bare root and an existing `…/v1/rerank` all land on
+    `…/v1/rerank`). `hosted_vllm` / `infinity`: the server ROOT — their
+    LiteLLM docs (docs/vendor/litellm/docs/providers/vllm.md, infinity.md)
+    give a root api_base; the probe is the judge."""
+    b = base.strip().rstrip("/")
+    if b.endswith("/v1/rerank"):
+        b = b[: -len("/rerank")]
+    if provider == "cohere":
+        return (b if b.endswith("/v1") else b + "/v1") + "/rerank"
+    return b[: -len("/v1")] if b.endswith("/v1") else b
+
+
+def explicit_provider(answer: str) -> str | None:
+    """The provider an answer names explicitly, or None (then the whole answer
+    is the upstream model id). Precise on purpose: only `<p>/<rest>` with `p`
+    in EXPLICIT_RERANK_PROVIDERS and a non-empty rest — upstream ids such as
+    `BAAI/bge-reranker-v2-m3` contain slashes too."""
+    head, sep, rest = answer.strip().partition("/")
+    return head if sep and rest and head in EXPLICIT_RERANK_PROVIDERS else None
+
+
+def alias_shapes(alias: str, policy: dict, env) -> dict[str, dict]:
+    """{kind: litellm_params} for a probe-judged alias whose upstream `.env`
+    declares (base, key and the alias's model id), in probe order; {} when
+    `.env` does not declare it. Every shape carries the declared key and the
+    declaration's timeout, never its PLACEHOLDER patterns."""
+    if alias not in probe_judged(policy):
+        return {}
+    base = (env.get(UPSTREAM_BASE_KEY) or "").strip()
+    key = (env.get(UPSTREAM_API_KEY) or "").strip()
+    answer = (env.get(alias_env_key(alias)) or "").strip()
+    if not (base and key and answer):
+        return {}
+    base, _ = container_api_base(base)
+    extra = {k: v for k, v in (declared(policy).get(alias) or {}).items()
+             if k == "timeout"}
+    provider = explicit_provider(answer)
+    if provider:
+        return {"rerank": {"model": answer, "api_base": rerank_base(base, provider),
+                           "mode": "rerank", "api_key": key, **extra}}
+    return {
+        "rerank": {"model": f"cohere/{answer}", "api_base": rerank_base(base),
+                   "mode": "rerank", "api_key": key, **extra},
+        "chat": {"model": f"openai/{answer}", "api_base": base, "api_key": key, **extra},
+    }
+
+
+def same_shape(live_params: dict, shape: dict) -> bool:
+    """A live row IS this shape: same model and api_base, and the shape's mode
+    when it has one. (api_key is never compared — LiteLLM masks it.)"""
+    if any(live_params.get(k) != shape.get(k) for k in ("model", "api_base")):
+        return False
+    return "mode" not in shape or live_params.get("mode") == shape["mode"]
+
+
+def optional_aliases(policy: dict) -> set[str]:
+    """Aliases declared `optional: true` — never a reason to pause (exit 3),
+    whatever --require says. `cc-rerank` on both profiles: graph search runs
+    without a reranker (rank fusion), so a skeleton nobody filled is a choice."""
+    out: set[str] = set()
+    for block in ("models", "registration_only"):
+        for alias, spec in (policy.get(block) or {}).items():
+            if isinstance(spec, dict) and spec.get("optional"):
+                out.add(alias)
+    return out
+
+
+def row_state(alias: str, live_models: list[dict]) -> str:
+    """absent | skeleton | filled — `skeleton` while any of its rows still
+    carries PLACEHOLDER in an owned param (the rule catalog-filled uses)."""
+    rows = [m for m in live_models if m.get("model_name") == alias]
+    if not rows:
+        return "absent"
+    for r in rows:
+        lp = r.get("litellm_params") or {}
+        if any(isinstance(lp.get(k), str) and PLACEHOLDER in lp[k] for k in OWNED):
+            return "skeleton"
+    return "filled"
+
+
+def ensure_shape(alias: str, kind: str, shapes: dict[str, dict],
+                 live_models: list[dict]) -> tuple[str, dict | None]:
+    """What `--shape alias=kind` does to the proxy — pure, so it is testable.
+    -> (verdict, request) where verdict is
+         same     the row already IS that shape: nothing to write (no flap)
+         create   absent: POST /model/new with the shape
+         update   a skeleton, or a row SETUP made from .env (it equals one of
+                  the derived shapes): POST /model/update with the shape
+         operator a row anyone filled differently by hand — never written
+         underivable  .env does not declare this alias, or not this kind"""
+    shape = shapes.get(kind)
+    if shape is None:
+        return "underivable", None
+    rows = [m for m in live_models if m.get("model_name") == alias]
+    if not rows:
+        return "create", {"model_name": alias, "litellm_params": shape}
+    if len(rows) > 1:
+        return "operator", None
+    lp = rows[0].get("litellm_params") or {}
+    if same_shape(lp, shape):
+        return "same", None
+    ours = any(same_shape(lp, other) for other in shapes.values())
+    skeleton = row_state(alias, rows) == "skeleton"
+    if ours or skeleton:
+        return "update", {"model_name": alias, "litellm_params": shape,
+                          "model_info": {"id": (rows[0].get("model_info") or {}).get("id")}}
+    return "operator", None
 
 
 def redacted(params: dict) -> dict:
@@ -372,10 +509,28 @@ def main() -> int:
     # aliases nothing on that install would ever call. Default: all of them.
     ap.add_argument("--require", default="",
                     help="space-separated aliases that must be filled in; the rest are optional")
+    # The two narrow modes setup's reranker step uses (v2.62.1). Neither
+    # touches any alias but the one named.
+    ap.add_argument("--shape", metavar="ALIAS=KIND",
+                    help="make a probe-judged alias's row the KIND shape (rerank|chat) derived "
+                         "from .env — only when the row is absent, a skeleton, or one setup made "
+                         "from .env; exit 0 done / 5 a row filled by hand, left alone / "
+                         "6 .env does not declare that shape")
+    ap.add_argument("--row-state", metavar="ALIAS",
+                    help="print absent | skeleton | filled for ALIAS and exit 0; writes nothing")
     args = ap.parse_args()
     required = set(args.require.split()) if args.require.strip() else None
 
     policy = load_declaration(args.policy)
+    if args.row_state:
+        print(row_state(args.row_state, _request("GET", "/model/info").get("data", [])))
+        return 0
+    if args.shape:
+        return shape_main(args.shape, policy, dry_run=args.dry_run)
+    # An `optional: true` alias never pauses the run (cc-rerank: no reranker
+    # is a choice), whatever --require names.
+    optional = optional_aliases(policy)
+    required = (set(declared(policy)) if required is None else required) - optional
     # The DECLARATION's own patterns — what an existing row is judged against,
     # whatever .env says. Never replaced by the upstream values: see plan().
     # A probe-judged alias has none: its row is judged by setup's probe.
@@ -385,9 +540,17 @@ def main() -> int:
     # The upstream, when .env declares it (design record D3). Resolved from the
     # ENVIRONMENT explicitly rather than inside declared(), so every caller that
     # asks for the declaration alone gets the skeletons.
-    upstream, notes = upstream_rows(list(invariants), os.environ)
+    upstream, notes = upstream_rows(list(invariants), os.environ, explicit_ok=judged)
     if upstream:
         want = declared(policy, upstream)
+    # A probe-judged alias .env declares is CREATED as its plain mapping (the
+    # chat shape; an explicit provider's dedicated shape) — setup's reranker
+    # step then reshapes it in probe order (--shape). Every derived shape is
+    # "what .env declares", so none of them is reported as the operator's.
+    shapes = {a: alias_shapes(a, policy, os.environ) for a in judged}
+    for a, sh in shapes.items():
+        if sh and a in upstream:
+            want[a] = dict(sh.get("chat") or sh["rerank"])
     for note in notes:
         print(f"  note     {note}")
     if upstream:
@@ -407,7 +570,8 @@ def main() -> int:
             if alias in upstream:
                 lp = next((m.get("litellm_params") or {} for m in live
                            if m.get("model_name") == alias), {})
-                if any(lp.get(k) != upstream[alias][k] for k in ("model", "api_base")):
+                derived = list((shapes.get(alias) or {}).values()) or [upstream[alias]]
+                if not any(same_shape(lp, sh) for sh in derived):
                     print(f"  note     {alias}: the row on the proxy is not what "
                           f"{alias_env_key(alias)} / {UPSTREAM_BASE_KEY} declare — "
                           "the row you filled in WINS; this script never overwrites one")
@@ -467,6 +631,38 @@ def main() -> int:
     for alias, problems in action_needed:
         print(f"  {alias}: " + "; ".join(problems))
     return EXIT_ACTION
+
+
+def shape_main(spec: str, policy: dict, *, dry_run: bool = False) -> int:
+    alias, _, kind = spec.partition("=")
+    if kind not in SHAPE_ORDER:
+        print(f"--shape wants ALIAS=rerank|chat, got {spec!r}", file=sys.stderr)
+        return 2
+    shapes = alias_shapes(alias, policy, os.environ)
+    live = _request("GET", "/model/info").get("data", [])
+    verdict, body = ensure_shape(alias, kind, shapes, live)
+    if verdict == "underivable":
+        print(f"  shape    {alias}: .env does not declare a {kind} shape for it "
+              f"({UPSTREAM_BASE_KEY}, {UPSTREAM_API_KEY}, {alias_env_key(alias)})")
+        return 6
+    if verdict == "operator":
+        print(f"  shape    {alias}: a row filled by hand — left alone (it is not one of the "
+              f"shapes {alias_env_key(alias)} derives); setup probes it as it is")
+        return 5
+    if verdict == "same":
+        print(f"  shape    {alias}: already the {kind} shape — nothing written")
+        return 0
+    print(f"  {verdict.upper():8} {alias}  {kind} shape "
+          f"{json.dumps(redacted(body['litellm_params']), sort_keys=True)}")
+    if not dry_run:
+        stamp = datetime.now(timezone.utc).isoformat()
+        info = {**(body.get("model_info") or {}), "updated_by": "register-models.py",
+                "updated_at": stamp}
+        if verdict == "create":
+            info.update(created_by="register-models.py", created_at=stamp)
+        _request("POST", "/model/new" if verdict == "create" else "/model/update",
+                 {**body, "model_info": info})
+    return 0
 
 
 if __name__ == "__main__":

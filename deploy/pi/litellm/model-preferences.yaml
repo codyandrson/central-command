@@ -351,6 +351,11 @@ registration_only:
       mode: rerank
       timeout: 60
     judged_by_probe: true
+    # OPTIONAL (v2.62.1): an unfilled skeleton never pauses setup — graph
+    # search then runs without a reranker, and setup's probe says so and
+    # writes CC_GRAPH_RERANK_ALIAS= (empty, an explicit "off") to the app's
+    # .env. A filled row is probed exactly as before.
+    optional: true
 
   # THE SPEECH ROLES — what the cockpit's read-aloud and voice input address
   # (web/.env OPENAI_TTS_MODEL / OPENAI_STT_MODEL, api/speech.py). cc-speech
@@ -389,6 +394,10 @@ registration_only:
       # (found 2026-08-29, first clean install driven from this file).
       mode: rerank
       timeout: 60
+    # Optional with the role it serves (cc-rerank, above): a site with no
+    # dedicated reranker has nothing to put here, and nothing in the app
+    # addresses this row by name.
+    optional: true
 
 # Written to the DB via POST /fallback, NOT via router_settings.fallbacks —
 # with store_model_in_db: true the DB wins for that key and a config.yaml
