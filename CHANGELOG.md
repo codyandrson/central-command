@@ -4,6 +4,27 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-06 — v2.64.0: a k3s install comes up with its skills
+
+The single-node installer has imported the bundled `skills/` folders at boot
+since v2.57.0. The k3s driver never did: a fresh spine there had an empty
+skill library until the operator imported each folder by hand, and agents
+whose charters lean on a skill ran without it. **Requires v2.60.0**, as before.
+
+- **`./deploy/k3s/setup.sh app` imports the bundled skills.** After the units
+  start it waits for the API to answer, then posts every `skills/<id>/SKILL.md`
+  folder to `POST /api/skills/import` with the folder name as the id — the same
+  step, with the same rules, as the single-node `boot/skills-imported` row.
+- **Create-only.** A skill the library already holds is left as it is, retired
+  ones included, even when this release changed the bundled copy. On an
+  existing install the phase adds only what the library lacks.
+- **A failure says which skill.** An import the API refuses, or an API that
+  does not answer within 180 seconds, is a FAIL line naming the skill and the
+  route, not a silent skip.
+- The updater does not run this step. After an update that adds a bundled
+  skill, run `./deploy/k3s/setup.sh app`. `deploy/k3s/README.md` §7;
+  `tests/test_k3s_skills_import.py`.
+
 ## 2026-10-06 — v2.63.0: start over on the same k3s cluster with one command
 
 Testing the install as a new operator sees it — the name prompt, the team tour,

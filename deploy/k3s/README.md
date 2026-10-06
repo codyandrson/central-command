@@ -467,6 +467,15 @@ early under the rehearsal persona. It stays dropped.)
 
 ## 7. Fresh-database facts
 
+**Skills are not in the schema — the `app` phase imports them** (v2.64.0).
+Once the API answers, `setup.sh app` posts every `skills/<id>/SKILL.md` folder
+this release ships to the API's own `POST /api/skills/import`. It is
+create-only: a skill the library already holds, retired ones included, is
+never re-imported, even when the release changed the bundled copy. Re-running
+the phase on an existing install adds only the bundled skills the library
+lacks. The updater does not run this step; after an update that adds a
+bundled skill, run `./deploy/k3s/setup.sh app`.
+
 `cc-postgres` mounts the `cc-schema-sql` ConfigMap at
 `/docker-entrypoint-initdb.d`. Postgres runs it **only when the data directory
 is empty** — i.e. only on a fresh `cc-pgdata` PVC. Nothing applies `schema.sql`
@@ -596,7 +605,7 @@ graph nodes) before it moves the env files.
 It leaves the app **stopped**. `./deploy/k3s/setup.sh --clean-install` starts
 it: the `llm` phase finds the models already registered and re-mints the app's
 key (the old one left with the old `.env`), and the `app` phase generates new
-façade tokens and re-applies the n8n workflows. To give answers the installer
+façade tokens, re-applies the n8n workflows and imports the bundled skills. To give answers the installer
 does not ask for before first boot, create the file first — `cp .env.example
 .env && chmod 600 .env`, then fill `CC_JIRA_*` / `CC_CONFLUENCE_*` and
 `CC_BACKLOG_CUTOFF_DATE` (the old values are in the keep folder's
@@ -610,9 +619,6 @@ What it does not reach:
   the backlog window is enrolled again.
 - **A systemd drop-in** in `/etc/systemd/system/cc-uvicorn.service.d/` (§8). The
   phase names any it finds in a WARN; it does not remove them.
-- **Skills.** Nothing on this substrate imports the `skills/` folders; a fresh
-  spine has none until they are imported through the API
-  (`POST /api/skills/import`).
 - **A second run.** Re-running `reset` after a partial failure is safe, but its
   backup then dumps the already-emptied store — the dump set worth keeping is
   the FIRST `keep-pre-reset-*` folder, by content, not by date.

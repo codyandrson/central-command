@@ -27,7 +27,8 @@
 #                 manifest, mint the kubeconfigs, gVisor
 #     app         venv, editable install + the graphiti-core patches, root
 #                 .env, web/.env, cockpit build,
-#                 systemd units, first boot (the roster hires itself)
+#                 systemd units, first boot (the roster hires itself), the
+#                 bundled skills imported
 #     verify      verify.sh (+ --clean-install passthrough) + README §9 smokes
 #
 #     status      re-run postconditions only, nothing mutating
@@ -79,6 +80,9 @@ DEPLOYMENTS=(cc-postgres cc-litellm-db cc-litellm-redis cc-litellm
              cc-neo4j cc-n8n-db cc-n8n cc-crawler cc-vlogs cc-speech)
 
 PY=python3
+
+# The control-plane API. cc-uvicorn.service binds it; it never moves.
+API_URL=http://127.0.0.1:8080
 
 # ── output protocol ─────────────────────────────────────────────────────────
 # Exit taxonomy (2026-08-27 contract): 0 clean · 1 hard failure · 2 warnings ·
@@ -867,6 +871,80 @@ phase_stack() {
 in_repo() { ( cd "$REPO_ROOT" && "$@" ); }
 in_web()  { ( cd "$REPO_ROOT/web" && "$@" ); }
 
+# ── the bundled skills ───────────────────────────────────────────────────────
+# The same step as the single-node profile's boot/skills-imported (design
+# record 2026-10-01, D7), which this driver lacked: a fresh spine had no
+# skills until an operator imported the folders by hand. Every
+# skills/<id>/SKILL.md folder this release ships: "<id>\t<abs dir>" per line.
+# The id is the FOLDER name, passed to the importer explicitly
+# (tests/test_single_boot_supervision.py proves each equals the id the
+# importer would derive), so a skill imported by hand from the same folder is
+# recognised as the same skill.
+bundled_skill_dirs() {
+  local d
+  for d in "$REPO_ROOT"/skills/*/; do
+    [[ -f "${d}SKILL.md" ]] || continue
+    d="${d%/}"
+    printf '%s\t%s\n' "${d##*/}" "$d"
+  done
+  return 0
+}
+
+# The ids the library holds, one per line — RETIRED ones included (GET
+# /api/skills includes them by default): a bundled skill the operator retired
+# is still "held", and re-importing it would undo their decision.
+# 1 = the API did not answer, which is not the same as an empty library.
+skills_library_ids() {
+  local out
+  out="$(curl -fsS -m 15 "$API_URL/api/skills" 2>/dev/null)" || return 1
+  printf '%s' "$out" | $PY -c 'import json,sys; [print(s.get("id","")) for s in json.load(sys.stdin).get("skills",[])]' 2>/dev/null
+}
+
+# The importer is the API's own `POST /api/skills/import` — body {"path": <a
+# SKILL.md + references/ folder on this host>, "skill_id": <id>} — which reads
+# the folder from disk. CREATE-ONLY: a skill the library already holds is
+# never re-imported, even when this release changed the bundled copy; the
+# operator's library is theirs once a skill is in it.
+app_skills_import() {
+  local have id d body resp code why="" added=() kept=() failed=()
+  if ! have="$(skills_library_ids)"; then
+    fail "skills-imported" "GET $API_URL/api/skills did not answer, so the bundled skills were not imported — read: journalctl -u cc-uvicorn -n 50"
+    return 1
+  fi
+  while IFS=$'\t' read -r id d; do
+    [[ -n "$id" ]] || continue
+    if [[ $'\n'"$have"$'\n' == *$'\n'"$id"$'\n'* ]]; then
+      kept+=("$id")
+      continue
+    fi
+    body="$($PY -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "skill_id": sys.argv[2]}))' "$d" "$id")"
+    note "--> POST $API_URL/api/skills/import  {skill_id: $id}"
+    resp="$(printf '%s' "$body" | curl -sS -m 120 -X POST -H 'content-type: application/json' \
+      -w '\n%{http_code}' -d @- "$API_URL/api/skills/import" 2>&1)"
+    code="${resp##*$'\n'}"
+    if [[ "$code" == 200 ]]; then
+      added+=("$id")
+    else
+      failed+=("$id")
+      why="${resp%$'\n'*}"; why="${why//$'\n'/ }"; why="${why:0:240}"
+    fi
+  done < <(bundled_skill_dirs)
+  if (( ${#failed[@]} )); then
+    fail "skills-imported" "could not import ${failed[*]} through POST $API_URL/api/skills/import: ${why:-no answer} — read: journalctl -u cc-uvicorn -n 50"
+    return 1
+  fi
+  if (( ${#added[@]} + ${#kept[@]} == 0 )); then
+    pass "skills-imported" "this release bundles no skills (no skills/*/SKILL.md) — nothing to import"
+    return 0
+  fi
+  local msg=""
+  (( ${#added[@]} )) && msg="imported ${#added[@]} bundled skill(s): ${added[*]}"
+  if (( ${#kept[@]} )); then
+    msg="${msg:+$msg; }${#kept[@]} already in the library and LEFT AS THEY ARE: ${kept[*]}"
+  fi
+  pass "skills-imported" "$msg — create-only: a skill the library holds is never overwritten, even when this release changed the bundled copy (re-import one on purpose with POST /api/skills/import and its skill_id)"
+}
+
 phase_app() {
   load_env || return 1
 
@@ -1056,6 +1134,16 @@ phase_app() {
   else
     warn "n8n-workflows" "apply-workflows.sh did not finish — usual cause: no credential named \"Gmail account\" / \"Google Calendar account\" in n8n yet (README §8). Create it, then: ./deploy/n8n/apply-workflows.sh --k3s"
   fi
+
+  # The bundled skills go in through the API's own importer, so the API must
+  # be answering first — on a first boot it hires the roster before it does.
+  if wait_http "$API_URL/health" 180; then
+    pass "api-up" "the control-plane API answers at $API_URL"
+    app_skills_import
+  else
+    fail "api-up" "the control-plane API did not answer at $API_URL/health within 180s, so the bundled skills were not imported — read: journalctl -u cc-uvicorn -n 50, then re-run: ./deploy/k3s/setup.sh app"
+  fi
+
   note ""
   note "First boot hires the roster. Next: ./deploy/k3s/setup.sh verify --clean-install,"
   note "then README.md phase 8: INSTANCE DATA — what a clean install does NOT"
