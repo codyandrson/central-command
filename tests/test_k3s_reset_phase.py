@@ -34,7 +34,11 @@ printf 'k3s %s\\n' "$*" >> "$STUB_LOG"
 args=" $* "
 case "$args" in
   *" get pvc "*)        printf 'pv-of-%s' "$5" ;;
-  *" get pods "*|*" get pv/"*) ;;
+  *" get deploy/"*)     printf '%s' "${STUB_REPLICAS:-1}" ;;
+  *" get pods "*)
+    # A dead pod keeps its label: listed without the phase filter, never with it.
+    [[ "$args" == *"status.phase!=Failed"* ]] || echo pod/cc-postgres-dead ;;
+  *" get pv/"*) ;;
   *"from agent where"*) echo 11 ;;
   *"from work_item"*)   echo "${STUB_LEDGER:-0}" ;;
   *"cypher-shell"*)     echo 0 ;;
@@ -171,6 +175,17 @@ def test_a_confirmed_reset_backs_up_then_wipes_exactly_the_spine_and_the_graph(t
     assert (keep / "servers" / "synced-by-agent" / "server.py").is_file()
     assert not (tree / "servers" / "synced-by-agent").exists()
     assert (tree / "servers" / "echo-demo" / "README.md").is_file()
+
+
+def test_a_store_a_previous_run_left_at_zero_is_started_before_the_backup(tree: Path):
+    """The phase scales to 0 before it deletes; a failure between the two left
+    cc-postgres stopped, and the re-run's backup then had nothing to dump."""
+    r, calls = _run(tree, "--confirm-wipe", STUB_REPLICAS="0")
+    assert "FAIL " not in r.stdout, r.stdout + r.stderr
+    backup_at = next(i for i, c in enumerate(calls) if c.startswith("backup "))
+    resumed = [i for i, c in enumerate(calls) if "scale deploy/cc-postgres --replicas=1" in c]
+    assert resumed and resumed[0] < backup_at, "the stopped store must be running before backup.sh dumps it"
+    assert "PASS reset-resume-cc-postgres:" in r.stdout
 
 
 def test_keep_env_leaves_the_apps_answers_in_place(tree: Path):

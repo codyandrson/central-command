@@ -1233,10 +1233,16 @@ reset_store() { # reset_store <deployment> <pvc> <manifest>
   pv="$("${K[@]}" get pvc "$pvc" -o jsonpath='{.spec.volumeName}' 2>/dev/null)"
   step "reset-stop-${dep}" "$dep scaled to 0" \
     "${K[@]}" scale "deploy/$dep" --replicas=0 || return 1
-  if wait_gone 180 "${K[@]}" get pods -l "app=$dep"; then
-    pass "reset-drained-${dep}" "no $dep pod is left holding $pvc"
+  # Only a LIVE pod holds the volume. A pod in a terminal phase (Failed,
+  # Succeeded — an eviction, an OOM kill the GC never collected) keeps the
+  # label and never leaves on a scale-down; waiting for it would never end
+  # (2026-10-06, the first real run of this phase). pvc-protection ignores
+  # those too, so the delete below does not wait on them either.
+  if wait_gone 180 "${K[@]}" get pods -l "app=$dep" \
+       --field-selector 'status.phase!=Succeeded,status.phase!=Failed'; then
+    pass "reset-drained-${dep}" "no live $dep pod is left holding $pvc"
   else
-    fail "reset-drained-${dep}" "a $dep pod is still terminating after 180s — $pvc was NOT deleted. Look at: sudo k3s kubectl -n $NS get pods -l app=$dep"
+    fail "reset-drained-${dep}" "a $dep pod is still live after 180s — $pvc was NOT deleted. Listed: $("${K[@]}" get pods -l "app=$dep" -o wide 2>&1 | tr '\n' ';'). Look at: sudo k3s kubectl -n $NS describe pod -l app=$dep"
     return 1
   fi
   step "reset-wipe-${pvc}" "$pvc deleted" \
@@ -1313,6 +1319,21 @@ phase_reset() {
   fi
 
   load_env || return 1
+
+  # A store a previous reset run stopped (it scales to 0 before it deletes,
+  # and a failure between the two leaves it there) cannot be dumped. Bring it
+  # back first, so a re-run after a partial failure can take its backup.
+  local replicas
+  for row in "${RESET_STORES[@]}"; do
+    IFS='|' read -r dep pvc manifest <<<"$row"
+    replicas="$("${K[@]}" get "deploy/$dep" -o jsonpath='{.spec.replicas}' 2>/dev/null)"
+    [[ "$replicas" == 0 ]] || continue
+    note "$dep is at 0 replicas (a previous reset run stopped it) — starting it so it can be backed up"
+    step "reset-resume-${dep}" "$dep scaled back to 1 for the backup" \
+      "${K[@]}" scale "deploy/$dep" --replicas=1 || return 1
+    step "reset-resume-rollout-${dep}" "$dep running again" \
+      "${K[@]}" rollout status "deploy/$dep" --timeout=600s || return 1
+  done
 
   # ── 1. the backup, and its dump set out of the retention's reach ──────────
   local stamp keep marker label f

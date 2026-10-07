@@ -4,6 +4,27 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-07 — v2.64.1: reset waits for live pods only, and a re-run can take its backup
+
+The first real run of `setup.sh reset` (v2.63.0) stopped twice at the same
+line: `cc-postgres` scaled to 0, and "a pod is still terminating after 180s".
+It was not terminating. The wait listed every pod carrying `app=cc-postgres`,
+and a pod in a terminal phase — one the cluster's GC never collected — keeps
+the label and never leaves on a scale-down, so the wait could not end. The
+backup a few seconds earlier had dumped the same database without trouble.
+
+- **The drain wait counts live pods only** (`--field-selector
+  status.phase!=Succeeded,status.phase!=Failed`). A dead pod holds no volume
+  — PVC protection ignores it too — so it is not waited for. The FAIL line
+  now prints what is listed instead of guessing why.
+- **A re-run after a partial failure starts with a backup it can take.** The
+  phase scales a store to 0 before it deletes its volume; a failure between
+  the two left the spine stopped, and the next run's `backup.sh` had nothing
+  to dump and refused to proceed. A store found at 0 replicas is scaled back
+  to 1 and rolled out before the backup.
+- `tests/test_k3s_reset_phase.py` covers both: a dead pod in the listing, and
+  a store left at zero.
+
 ## 2026-10-06 — v2.64.0: a k3s install comes up with its skills
 
 The single-node installer has imported the bundled `skills/` folders at boot

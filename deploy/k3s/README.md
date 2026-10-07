@@ -619,9 +619,11 @@ What it does not reach:
   the backlog window is enrolled again.
 - **A systemd drop-in** in `/etc/systemd/system/cc-uvicorn.service.d/` (§8). The
   phase names any it finds in a WARN; it does not remove them.
-- **A second run.** Re-running `reset` after a partial failure is safe, but its
-  backup then dumps the already-emptied store — the dump set worth keeping is
-  the FIRST `keep-pre-reset-*` folder, by content, not by date.
+- **A second run.** Re-running `reset` after a partial failure is safe: a store
+  the failed run left at 0 replicas is started again so the backup can dump
+  it. If the failure came after a store was already emptied, that run's
+  backup dumps the empty store — the dump set worth keeping is the FIRST
+  `keep-pre-reset-*` folder, by content, not by date.
 
 ## 9. Verification
 
