@@ -33,7 +33,12 @@ K3S = '''#!/usr/bin/env bash
 printf 'k3s %s\\n' "$*" >> "$STUB_LOG"
 args=" $* "
 case "$args" in
-  *" get pvc "*)        printf 'pv-of-%s' "$5" ;;
+  *" get pvc "*)
+    case "$args" in
+      *deletionTimestamp*) printf '%s' "${STUB_PVC_DELETING:-}" ;;
+      *volumeName*)        printf 'pv-of-%s' "$5" ;;
+      *" -o name "*)       ;;   # wait_gone: the claim is gone
+    esac ;;
   *" get deploy/"*)     printf '%s' "${STUB_REPLICAS:-1}" ;;
   *" get pods "*)
     # A dead pod keeps its label: listed without the phase filter, never with it.
@@ -186,6 +191,29 @@ def test_a_store_a_previous_run_left_at_zero_is_started_before_the_backup(tree: 
     resumed = [i for i, c in enumerate(calls) if "scale deploy/cc-postgres --replicas=1" in c]
     assert resumed and resumed[0] < backup_at, "the stopped store must be running before backup.sh dumps it"
     assert "PASS reset-resume-cc-postgres:" in r.stdout
+
+
+def test_dead_pods_are_removed_before_the_claim_is_deleted(tree: Path):
+    """A pod in a terminal phase still counts as a user of the claim for the
+    pvc-protection controller, so the claim's deletion hangs behind it."""
+    r, calls = _run(tree, "--confirm-wipe")
+    assert "FAIL " not in r.stdout, r.stdout + r.stderr
+    for dep, pvc in (("cc-postgres", "cc-pgdata"), ("cc-neo4j", "cc-neo4j-data")):
+        drained = next(i for i, c in enumerate(calls) if f"scale deploy/{dep} --replicas=0" in c)
+        dead = next(i for i, c in enumerate(calls) if f"delete pods -l app={dep}" in c)
+        wiped = next(i for i, c in enumerate(calls) if f" delete pvc {pvc}" in c)
+        assert drained < dead < wiped, (dep, calls)
+
+
+def test_a_claim_a_previous_run_left_half_deleted_is_finished_and_recreated_before_the_backup(tree: Path):
+    r, calls = _run(tree, "--confirm-wipe", STUB_PVC_DELETING="2026-10-07T19:20:00Z")
+    assert "FAIL " not in r.stdout, r.stdout + r.stderr
+    backup_at = next(i for i, c in enumerate(calls) if c.startswith("backup "))
+    dead = next(i for i, c in enumerate(calls) if "delete pods -l app=cc-postgres" in c)
+    recreated = next(i for i, c in enumerate(calls) if "apply -f" in c and "20-postgres.yaml" in c)
+    assert dead < recreated < backup_at, calls
+    assert "WARN reset-resume-cc-postgres:" in r.stdout and "keep-pre-reset-" in r.stdout
+    assert "PASS reset-keep:" in r.stdout, "the run still goes on to the wipe proper"
 
 
 def test_keep_env_leaves_the_apps_answers_in_place(tree: Path):

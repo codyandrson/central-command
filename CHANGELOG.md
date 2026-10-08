@@ -4,6 +4,26 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-07 — v2.64.2: reset removes dead pods before it deletes a claim
+
+v2.64.1's reset got one line further and stopped at `reset-wipe-cc-pgdata`.
+The dead pod that had stalled the drain wait was still there, and the
+pvc-protection controller counts every scheduled pod that mounts a claim as
+its user — a pod in a terminal phase included; only a pod already shut down
+(a deletion timestamp with zero grace) is ignored. So the claim's deletion
+waited on a pod that was never going to leave.
+
+- **Dead pods are deleted before the claim.** Once no live pod is left,
+  everything still carrying the store's label is dead and is removed with
+  `kubectl delete pods -l app=<store>`; then the claim goes.
+- **A re-run finishes a half-deleted claim.** A claim a previous run asked to
+  delete and that is still waiting can host no pod, so it cannot be dumped.
+  The phase removes its dead pods, waits for it to go, recreates the store on
+  an empty volume, and says so in a WARN: the backup that follows dumps that
+  empty store, and the dump worth keeping is the previous run's
+  `keep-pre-reset-*` folder. The run then proceeds to the wipe proper.
+- `tests/test_k3s_reset_phase.py` covers both orders.
+
 ## 2026-10-07 — v2.64.1: reset waits for live pods only, and a re-run can take its backup
 
 The first real run of `setup.sh reset` (v2.63.0) stopped twice at the same

@@ -597,8 +597,10 @@ the nightly retention prunes top-level files only, so it never ages out — and
 the moved env files land in its `env/` folder. Rolling back is §10 against
 that folder. `make-secrets.sh` then rebuilds the ConfigMaps, so the empty spine
 loads this checkout's `schema.sql` and not an older copy held in the cluster.
-Then the API, the sandbox runner and the cockpit are stopped, the
-two volumes are deleted and recreated from their manifests, and the phase
+Then the API, the sandbox runner and the cockpit are stopped; each store is
+scaled to 0, its dead pods are removed (a pod in a terminal phase still counts
+as a user of the claim, and would hold its deletion forever), its volume is
+deleted and recreated from the manifest; and the phase
 asserts both stores are first-run ones (seeded roster, empty mail ledger, zero
 graph nodes) before it moves the env files.
 

@@ -1227,6 +1227,28 @@ wait_gone() { # wait_gone <seconds> <kubectl get args...>
   done
 }
 
+# The pvc-protection controller counts EVERY scheduled pod that mounts a claim
+# as its user — a pod in a terminal phase included (an eviction, an OOM kill
+# the GC never collected); only a pod already shut down (deletionTimestamp
+# with grace 0) is ignored. So a dead pod blocks the claim's deletion for as
+# long as it exists (2026-10-07, the third real run of this phase). Once no
+# live pod is left, everything still carrying the label is dead: remove it.
+reset_dead_pods() { # reset_dead_pods <deployment> <pvc>
+  step "reset-dead-pods-$1" "dead $1 pods removed (a dead pod still counts as a user of $2)" \
+    "${K[@]}" delete pods -l "app=$1" --ignore-not-found --wait=true --timeout=120s
+}
+
+# A store's deployment and claim, from its manifest, running on an empty volume.
+reset_recreate_store() { # reset_recreate_store <deployment> <pvc> <manifest>
+  local dep="$1" pvc="$2" manifest="$3"
+  step "reset-recreate-${dep}" "$manifest re-applied (a new, empty $pvc)" \
+    "${KROOT[@]}" apply -f "$HERE/$manifest" || return 1
+  step "reset-start-${dep}" "$dep scaled to 1" \
+    "${K[@]}" scale "deploy/$dep" --replicas=1 || return 1
+  step "reset-rollout-${dep}" "$dep rolled out on the empty volume" \
+    "${K[@]}" rollout status "deploy/$dep" --timeout=600s || return 1
+}
+
 # One store: stop its pod, delete the volume, recreate both from the manifest.
 reset_store() { # reset_store <deployment> <pvc> <manifest>
   local dep="$1" pvc="$2" manifest="$3" pv
@@ -1245,6 +1267,7 @@ reset_store() { # reset_store <deployment> <pvc> <manifest>
     fail "reset-drained-${dep}" "a $dep pod is still live after 180s — $pvc was NOT deleted. Listed: $("${K[@]}" get pods -l "app=$dep" -o wide 2>&1 | tr '\n' ';'). Look at: sudo k3s kubectl -n $NS describe pod -l app=$dep"
     return 1
   fi
+  reset_dead_pods "$dep" "$pvc" || return 1
   step "reset-wipe-${pvc}" "$pvc deleted" \
     "${K[@]}" delete pvc "$pvc" --ignore-not-found --timeout=180s || return 1
   # local-path removes the directory when the PV goes (reclaimPolicy Delete).
@@ -1257,12 +1280,7 @@ reset_store() { # reset_store <deployment> <pvc> <manifest>
       warn "reset-released-${pvc}" "the volume $pv still exists after 180s — its data is still on the node (a Retain reclaim policy?). The store below starts on a NEW volume regardless; delete the old one by hand: sudo k3s kubectl delete pv $pv"
     fi
   fi
-  step "reset-recreate-${dep}" "$manifest re-applied (a new, empty $pvc)" \
-    "${KROOT[@]}" apply -f "$HERE/$manifest" || return 1
-  step "reset-start-${dep}" "$dep scaled to 1" \
-    "${K[@]}" scale "deploy/$dep" --replicas=1 || return 1
-  step "reset-rollout-${dep}" "$dep rolled out on the empty volume" \
-    "${K[@]}" rollout status "deploy/$dep" --timeout=600s || return 1
+  reset_recreate_store "$dep" "$pvc" "$manifest"
 }
 
 # The proof that both stores are the first-run ones: the schema loaded and
@@ -1323,9 +1341,28 @@ phase_reset() {
   # A store a previous reset run stopped (it scales to 0 before it deletes,
   # and a failure between the two leaves it there) cannot be dumped. Bring it
   # back first, so a re-run after a partial failure can take its backup.
-  local replicas
+  local replicas deleting
   for row in "${RESET_STORES[@]}"; do
     IFS='|' read -r dep pvc manifest <<<"$row"
+    # A claim a previous run asked to delete and that is still here is held by
+    # a dead pod (see reset_dead_pods); no pod can start on it, so it cannot
+    # be dumped either. Finish that deletion and recreate the store EMPTY: the
+    # backup below then dumps an empty store, and the dump worth keeping is
+    # the previous run's keep-pre-reset-* folder.
+    deleting="$("${K[@]}" get pvc "$pvc" -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null)"
+    if [[ -n "$deleting" ]]; then
+      note "$pvc has been awaiting deletion since $deleting (a previous reset run) — finishing it"
+      reset_dead_pods "$dep" "$pvc" || return 1
+      if wait_gone 180 "${K[@]}" get pvc "$pvc"; then
+        pass "reset-resume-wipe-${pvc}" "$pvc is gone"
+      else
+        fail "reset-resume-wipe-${pvc}" "$pvc is still awaiting deletion after its dead pods were removed — something else holds it. Look at: sudo k3s kubectl -n $NS describe pvc $pvc"
+        return 1
+      fi
+      reset_recreate_store "$dep" "$pvc" "$manifest" || return 1
+      warn "reset-resume-${dep}" "$dep now runs on a NEW, EMPTY volume (a previous run had already deleted $pvc) — the backup below dumps that empty store; the dump worth keeping is the previous run's keep-pre-reset-* folder"
+      continue
+    fi
     replicas="$("${K[@]}" get "deploy/$dep" -o jsonpath='{.spec.replicas}' 2>/dev/null)"
     [[ "$replicas" == 0 ]] || continue
     note "$dep is at 0 replicas (a previous reset run stopped it) — starting it so it can be backed up"
