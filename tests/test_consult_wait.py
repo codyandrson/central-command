@@ -195,3 +195,74 @@ async def _call_consult(tools, monkeypatch, *, expect_defer: bool):
         return e.metadata
     assert not expect_defer, "consult answered inline when it should have waited"
     return out
+
+
+async def test_a_conversation_asker_rests_with_its_answer_instead_of_closing(monkeypatch) -> None:
+    """HANG #3 (2026-10-14, the EA's onboarding lane). The asker was a
+    CONVERSATION; its specialist finished; the resume produced a text answer;
+    and the one-shot tail landed the lane DONE with the answer stored only in
+    `consult_answer`, which no pane renders. The cockpit showed "I'm holding
+    here until you've decided it" forever. A conversation asker rests
+    AWAITING_OPERATOR with the resumed turn in its transcript, pushes
+    `conversation.continued`, and sheds the wait block."""
+    import uuid as _uuid
+
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+    from central_command.db import repo
+    from central_command.runtime import converse
+
+    sid = f"sess_cw_{_uuid.uuid4().hex[:8]}"
+    await repo.upsert_agent("cw-ea", "cw-ea", "cc-default", "test charter")
+    conn = await repo._conn()
+    try:
+        await conn.execute(
+            "insert into session (id, agent_id, status, mode, run_state) "
+            "values ($1, $2, 'RUNNING', 'conversation', $3::jsonb)",
+            sid, "cw-ea",
+            '{"messages": [], "consult_wait": {"specialist_session_id": "sess_spec", '
+            '"tool_call_id": "call_1", "target": "accountability"}}',
+        )
+    finally:
+        await conn.close()
+
+    landed: list[str] = []
+
+    async def _never_land(session_id, **kw):
+        landed.append(session_id)
+
+    monkeypatch.setattr(converse, "land_session", _never_land)
+
+    class _Final:
+        output = "The three lines of effort are live."
+
+        def all_messages(self):
+            return [
+                ModelRequest(parts=[UserPromptPart(content="Looks good")]),
+                ModelResponse(parts=[TextPart(content=self.output)]),
+            ]
+
+    try:
+        out = await orchestration._settle_consult_resume(
+            _Final(), agent=None, model=None, session_id=sid, agent_id="cw-ea",
+            task_id=None, proposal_id="prop_spec",
+        )
+        assert out == {"deferred": False, "output": _Final.output, "continued": True}
+        assert landed == []
+        row = await repo.get_session(sid)
+        assert row["status"] == "AWAITING_OPERATOR"
+        rs = await repo.get_session_run_state(sid)
+        assert "consult_wait" not in rs
+        assert rs["consult_answer"] == _Final.output
+        texts = [p.get("content") for m in rs["messages"] for p in m.get("parts", [])]
+        assert _Final.output in texts  # the answer is in the transcript the pane renders
+        kinds = [e["kind"] for e in await repo.list_events(ref_id=sid)]
+        assert "conversation.continued" in kinds and "session.completed" not in kinds
+    finally:
+        conn = await repo._conn()
+        try:
+            await conn.execute("delete from audit_event where ref_id = $1", sid)
+            await conn.execute("delete from session where id = $1", sid)
+            await conn.execute("delete from agent where id = 'cw-ea'")
+        finally:
+            await conn.close()

@@ -318,6 +318,22 @@ async def claim_parked_orchestration(session_id: str) -> dict | None:
         await conn.close()
 
 
+async def drop_session_run_state_keys(session_id: str, keys: list[str]) -> None:
+    """Remove keys from the run_state bag (status untouched). The merge writers
+    above cannot delete a key — `|| {"k": null}` leaves a JSON null behind —
+    so a park block that is over (`consult_wait` once the asker has carried
+    on) is removed here rather than nulled."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            "update session set run_state = coalesce(run_state, '{}'::jsonb) - $2::text[], "
+            "updated_at = now() where id = $1",
+            session_id, list(keys),
+        )
+    finally:
+        await conn.close()
+
+
 async def sessions_awaiting_agents() -> list[str]:
     """Parked sessions waiting on other agents — the resume sweep's worklist.
 

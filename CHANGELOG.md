@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-14 — v2.65.1: a conversation that consulted a teammate carries on
+
+The EA's onboarding tour asked accountability to register the operator's
+lines of effort; accountability drafted, the lane parked ("I'm holding here
+until you've decided it"), the operator approved, and the EA's resumed turn
+answered in text. The consult-resume tail then landed the lane DONE: the
+answer went into `run_state.consult_answer`, which no pane renders, the
+transcript never got the resumed turn, and the `agent:<id>:main` alias
+resolved to nothing. The cockpit showed the lane frozen at "holding here"
+with the tour unfinished.
+
+- **A conversation asker rests, it does not land.** `_settle_consult_resume`
+  now runs the same `_continue_if_conversation` tail a proposal made inside a
+  conversation gets: the resumed turn is persisted, the session returns to
+  AWAITING_OPERATOR, `conversation.continued` is pushed, and the
+  `consult_wait` block is removed (`repo.drop_session_run_state_keys` — the
+  merge writers cannot delete a key). One-shot and orchestration askers land
+  exactly as before. `tests/test_consult_wait.py` pins it against the
+  database.
+- **Operator note:** the lane this was found on (the EA's tour) is already
+  closed and cannot be reopened; start a new EA session and ask it to
+  continue the tour. The cockpit update's hold stops the heartbeat and the
+  restart only starts it again when `CC_HEARTBEAT_ENABLED=true`; set it, or
+  every schedule stays off after an apply until `POST /api/heartbeat/start`.
+
 ## 2026-10-14 — v2.65.0: the extraction model is told to answer in JSON, and rules are entities
 
 The first episode approved on the in-process library (v2.60.0) landed with no

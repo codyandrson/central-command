@@ -987,7 +987,7 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         out = await _settle_consult_resume(
             final, agent=agent, model=model, session_id=session_id,
             agent_id=agent_id, task_id=pending.get("task_id"),
-            chain=_parked_chain(claimed),
+            chain=_parked_chain(claimed), proposal_id=pending.get("proposal_id"),
         )
         return {"resumed": True, "session_id": session_id,
                 "after": "consulted", **out}
@@ -1202,7 +1202,7 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
     out = await _settle_consult_resume(
         final, agent=agent, model=model, session_id=session_id,
         agent_id=agent_id, task_id=wait.get("task_id"),
-        chain=_parked_chain(claimed),
+        chain=_parked_chain(claimed), proposal_id=(prop or {}).get("id"),
     )
     return {"resumed": True, "session_id": session_id, "target": target, **out}
 
@@ -1323,11 +1323,18 @@ def _parked_chain(run_state: dict | None) -> tuple[str, ...]:
 
 async def _settle_consult_resume(
     final, *, agent, model, session_id: str, agent_id: str, task_id: str | None,
-    chain: tuple[str, ...] = (),
+    chain: tuple[str, ...] = (), proposal_id: str | None = None,
 ) -> dict:
     """What the woken asker ended on. Every outcome a fresh run can reach, the
     resumed leg can reach too — including consulting AGAIN, which parks another
-    wait rather than dead-ending (a second question is not a failure)."""
+    wait rather than dead-ending (a second question is not a failure).
+
+    A CONVERSATION asker that answers in text is not finished — it is talking
+    to the operator, who is right there. It rests AWAITING_OPERATOR with the
+    resumed turn in its transcript and `conversation.continued` pushed, the
+    same tail a proposal made inside a conversation gets; landing it DONE
+    (v2.65.0 and before) closed the EA's onboarding lane mid-tour with its
+    answer stored where no pane renders it (2026-10-14)."""
     from central_command.runtime.consult import ANSWER_CEILING, park_consult_wait
     from central_command.runtime.converse import land_session
     from central_command.runtime.durable import classify_deferred, extract_deferred
@@ -1346,6 +1353,13 @@ async def _settle_consult_resume(
         await repo.update_session_run_state(
             session_id, {"consult_answer": _clip(text, ANSWER_CEILING)}
         )
+        from central_command.gateway.gateway import _continue_if_conversation
+
+        if await _continue_if_conversation(session_id, final, "consulted", proposal_id):
+            # The wait is over and the lane is resting, not parked: the block
+            # must go, or the next sweep reads a wait that no longer exists.
+            await repo.drop_session_run_state_keys(session_id, ["consult_wait"])
+            return {"deferred": False, "output": text, "continued": True}
         await land_session(session_id, agent_id=agent_id)
         return {"deferred": False, "output": text}
 
