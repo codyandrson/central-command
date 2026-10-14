@@ -115,6 +115,40 @@ async def test_the_client_is_built_explicitly_and_issues_no_ddl(configured):
         await g.driver.close()
 
 
+async def test_the_llm_client_tells_the_model_to_answer_in_json(configured, monkeypatch):
+    """json_schema mode keeps the grammar AND primes the prompt (v2.65.0): the
+    last message ends with upstream's own json_object-mode instruction and the
+    schema, and `response_format` is still `json_schema`. A call with no
+    response model is left alone."""
+    from graphiti_core.prompts.models import Message
+    from pydantic import BaseModel
+
+    class Out(BaseModel):
+        extracted_entities: list[str]
+
+    g = graphiti_client._build()
+    try:
+        llm = g.llm_client
+        seen: list[list[str]] = []
+
+        async def capture(messages, response_model, **kw):
+            seen.append([m.content for m in messages])
+            return {"extracted_entities": []}
+
+        monkeypatch.setattr(llm, "_generate_response_with_retry", capture)
+        msgs = [Message(role="system", content="sys"), Message(role="user", content="text")]
+        assert await llm.generate_response(msgs, response_model=Out) == {"extracted_entities": []}
+        tail = "\n\nRespond with a JSON object in the following format:\n\n" + json.dumps(Out.model_json_schema())
+        assert seen[-1][-1] == "text" + tail
+        assert llm.structured_output_mode == "json_schema"
+        assert llm._build_response_format(Out)["type"] == "json_schema"
+        # Without a response model nothing is appended.
+        await llm.generate_response([Message(role="system", content="s"), Message(role="user", content="plain")])
+        assert seen[-1][-1] == "plain"
+    finally:
+        await g.driver.close()
+
+
 async def test_a_rerank_alias_selects_our_rerank_client(configured, monkeypatch):
     monkeypatch.setattr(settings, "graph_rerank_alias", "cc-rerank")
     g = graphiti_client._build()

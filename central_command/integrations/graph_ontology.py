@@ -206,3 +206,21 @@ ENTITY_TYPES: dict[str, type[BaseModel]] = {
 }
 
 ENTITY_TYPE_NAMES: tuple[str, ...] = tuple(ENTITY_TYPES)
+
+# What the ingest worker passes as `custom_extraction_instructions` (v2.65.0).
+# graphiti-core 0.30's own extraction prompt forbids "abstract concepts" and
+# "generic nouns" and ends "when in doubt, do NOT extract" — which, on the
+# local model, swallowed the rules, schedules and preferences the Preference,
+# Requirement and Procedure types above exist to hold: a standing rule the
+# operator set came back as one Person and no fact (2026-10-14). Measured on
+# the four live onboarding texts with the prompt cache off: the three
+# briefs became Procedures and the preferences Preferences, every named
+# person, place and system stayed, and nothing generic was added. Changing
+# this changes what every extraction is told — measure it against both
+# workloads that share the model before shipping.
+EXTRACTION_INSTRUCTIONS = (
+    "Standing rules, policies, procedures, schedules and preferences that a "
+    "named person sets ARE entities here: extract each one as a Procedure or "
+    "Preference with a specific, self-describing name (e.g. \"EA morning brief "
+    "at 06:00\"), so that a fact can link the person to the rule."
+)

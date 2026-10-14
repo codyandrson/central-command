@@ -4,6 +4,52 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-14 — v2.65.0: the extraction model is told to answer in JSON, and rules are entities
+
+The first episode approved on the in-process library (v2.60.0) landed with no
+entities and no facts: the local model answered the entity-extraction prompt
+`{"extracted_entities": []}` in eight tokens, and the job finished DONE with
+empty lists. Three later episodes extracted 14, 1 and 3 entities. Replaying
+all four requests byte for byte, with first-token log-probabilities, showed
+one mechanism behind all four outcomes.
+
+- **The prompt never said "JSON", so every extraction was a coin flip.**
+  graphiti-core 0.30's extraction prompt is a long "NEVER extract … when in
+  doubt, do NOT extract" and, in the client's default `json_schema` mode, the
+  schema travels only in `response_format` — the grammar is meant to do the
+  rest. With thinking off the model's preferred first token was prose (`I`,
+  grammar-illegal) on all four texts, and the two legal openers it fell back
+  to sat 0.2–0.6 nats apart: the pretty-printed `{` goes on to list the
+  entities, the compact `{"` closes the list empty. The v2.39.0 knife edge,
+  flipped by the stricter upstream prompt. The client now appends upstream's
+  own `json_object`-mode line — "Respond with a JSON object in the following
+  format" plus the schema — to every structured call while `response_format`
+  stays `json_schema`, so the server still enforces the shape. Measured on
+  the four live texts with the prompt cache off: `{` moves to ~95 % on each,
+  with the same entity sets the lucky runs produced. Thinking on is not the
+  fix: the 4096-token budget goes entirely to reasoning (empty content), and
+  at 16k it took five minutes to find one entity.
+- **A standing rule is an entity.** Two of the four texts were rules the
+  operator set (a contact cadence, a communication standard) and yielded one
+  Person and no fact even when the JSON opener won — the Preference,
+  Requirement and Procedure types exist for exactly those, and upstream's
+  "abstract concepts … generic nouns" ban swallowed them. The ingest worker
+  now passes `graph_ontology.EXTRACTION_INSTRUCTIONS` as
+  `custom_extraction_instructions`: the three briefs become Procedures, the
+  preferences Preferences, every named person, place and system stays, and
+  nothing generic was added on the two concrete texts. One constant; changing
+  it changes what every extraction is told, so measure before shipping.
+- **Why nobody was told.** A DONE job with empty lists is a success to the
+  library and to the worker, and the Verify tab — the designed door for
+  "extraction produced nothing" (v2.59.0's *Nothing expected*) — was off on
+  the deployment that hit this (the sweep schedule disabled, the auditor
+  unset since the clean slate). Enable `graph-verify-sweep` and set
+  `CC_GRAPH_AUDITOR_ENABLED`; the row this release was written for parks
+  there and can be re-submitted once the update is applied.
+- Guards: `tests/test_graphiti_client.py` (the appended line and the kept
+  `json_schema` mode), `tests/test_graph_ingest.py` (the worker passes the
+  instructions), `tests/test_graph_ontology.py` (the text, pinned).
+
 ## 2026-10-07 — v2.64.2: reset removes dead pods before it deletes a claim
 
 v2.64.1's reset got one line further and stopped at `reset-wipe-cc-pgdata`.

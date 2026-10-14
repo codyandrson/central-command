@@ -437,6 +437,40 @@ def _openai_client(api_key: str, base_url: str):
     return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
 
+def _llm_client_class():
+    """`OpenAIGenericClient` that also TELLS the model to answer in JSON.
+
+    Upstream's client, in its default `json_schema` mode, sends the schema in
+    `response_format` only and leaves the prompt silent about JSON — the
+    grammar is meant to do the rest. With thinking off, the local model's
+    preferred first token for the extraction prompt is prose (`I`, which the
+    grammar forbids), and the two grammar-legal openers it falls back to sit
+    a fraction of a nat apart: the pretty-printed `{` goes on to list the
+    entities, the compact `{"` closes the list empty. Which one won decided
+    every live extraction (measured 2026-10-14 on the four onboarding
+    texts: 0, 14, 1 and 3 entities, each a coin flip). Appending the same
+    "Respond with a JSON object in the following format" line upstream uses
+    in `json_object` mode moves `{` to ~95% on all four — same entity sets as
+    the lucky runs — while `response_format` stays `json_schema`, so the
+    server still enforces the shape. This is the v2.39.0 knife edge again,
+    flipped by 0.30's stricter prompt; see CHANGELOG v2.65.0.
+    """
+    import json as _json
+
+    from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
+
+    class JsonPrimedClient(OpenAIGenericClient):
+        async def generate_response(self, messages, response_model=None, *args, **kwargs):
+            if response_model is not None and self.structured_output_mode == "json_schema":
+                messages[-1].content += (
+                    "\n\nRespond with a JSON object in the following format:\n\n"
+                    + _json.dumps(response_model.model_json_schema())
+                )
+            return await super().generate_response(messages, response_model, *args, **kwargs)
+
+    return JsonPrimedClient
+
+
 def _build():
     _require_config()
     _prepare_environment()
@@ -445,7 +479,6 @@ def _build():
     from graphiti_core.driver.neo4j_driver import Neo4jDriver
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
     from graphiti_core.llm_client.config import LLMConfig
-    from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 
     if helpers.SEMAPHORE_LIMIT != int(settings.graph_semaphore_limit):
         # graphiti_core was imported before this module could set the knob.
@@ -458,7 +491,7 @@ def _build():
     base_v1 = _proxy_v1()
     key = settings.llm_api_key
 
-    llm = OpenAIGenericClient(
+    llm = _llm_client_class()(
         config=LLMConfig(
             api_key=key, model=settings.graph_llm_alias, base_url=base_v1,
             temperature=settings.graph_llm_temperature,

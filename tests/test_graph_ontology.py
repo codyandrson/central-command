@@ -76,3 +76,18 @@ def test_the_writer_allowlist_names_the_same_types():
     # safe while the two agree.
     assert set(neo4j_writer.ENTITY_TYPES) == set(onto.ENTITY_TYPE_NAMES)
     assert tuple(neo4j_writer.ENTITY_TYPES) == onto.ENTITY_TYPE_NAMES
+
+
+def test_the_extraction_instructions_name_the_rule_types():
+    """The worker passes this text to every add_episode (v2.65.0); it exists
+    so the ontology's rule-shaped types are reachable past upstream's
+    "when in doubt, do NOT extract". Changing it is a change to what the
+    extraction model is told — measure before shipping."""
+    text = onto.EXTRACTION_INSTRUCTIONS
+    assert "Procedure" in text and "Preference" in text
+    assert text == (
+        "Standing rules, policies, procedures, schedules and preferences that a "
+        "named person sets ARE entities here: extract each one as a Procedure or "
+        "Preference with a specific, self-describing name (e.g. \"EA morning brief "
+        "at 06:00\"), so that a fact can link the person to the rule."
+    )

@@ -264,6 +264,7 @@ async def run_job(job: dict) -> str:
                 source=_text_source(),
                 group_id=job["group_id"],
                 entity_types=graph_ontology.ENTITY_TYPES,
+                custom_extraction_instructions=graph_ontology.EXTRACTION_INSTRUCTIONS,
             )
     except asyncio.CancelledError:
         raise

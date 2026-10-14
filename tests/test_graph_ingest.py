@@ -240,6 +240,7 @@ async def test_the_worker_passes_the_ontology_text_source_and_the_instant(fake):
     await w.settle()
     (call,) = fake.calls
     assert call["entity_types"] is graph_ontology.ENTITY_TYPES
+    assert call["custom_extraction_instructions"] is graph_ontology.EXTRACTION_INSTRUCTIONS
     assert call["source"] == "text" and call["group_id"] == group
     assert call["reference_time"].isoformat() == "2026-01-01T00:00:00+00:00"
     assert call["source_description"] == job["payload"]["source_description"]
