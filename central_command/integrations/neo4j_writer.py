@@ -518,13 +518,27 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
     group, so a node like "operator" is shared by every episode in the
     partition and cannot follow one of them. The rule per object:
 
-    - an entity MENTIONED only by this episode (among its group's episodes)
-      MOVES; one still mentioned by a staying episode is SPLIT — a copy in
-      the target group, this episode's MENTIONS repointed to the copy;
+    - an entity MENTIONED only by this episode (among its group's CONTENT
+      episodes) MOVES, and its bookkeeping moves with it; one still mentioned
+      by a staying content episode is SPLIT — a copy in the target group,
+      this episode's MENTIONS repointed to the copy, the original and its
+      bookkeeping left for the content that still describes it;
     - a RELATES_TO edge whose `episodes` is only this episode MOVES (re-created
       when an endpoint was split, since Neo4j cannot repoint in place); an
       edge that also cites a staying episode is SPLIT the same way and this
       episode is removed from the original's `episodes`.
+
+    BOOKKEEPING is not content (operator ruling 2026-10-14: a rescope is
+    judged by its end state — the moved content exists in the target and
+    nowhere else). Every hand-made write records an "operator manual entry"
+    episode for provenance, and a node's own record mentions that one node
+    and carries no fact. Counting it as "another episode still mentions the
+    node" made every curated node SPLIT: a copy in the target, the original
+    stranded in the old group with nothing but its provenance pointing at it
+    (found by the live round-trip, 2026-10-14). A record that mentions one
+    node and no fact is that node's bookkeeping and travels with it; an
+    operator record that carries a fact (create_edge's) mentions two nodes
+    and IS content, so it still counts.
 
     Which is exactly the graph that ingesting the episode into the target
     group in the first place would have produced. Embeddings are copied, never
@@ -541,24 +555,45 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
     if old_group == group_id:
         raise WriteError(f"episode already in group {group_id}")
 
-    # Entities: exclusive → move; shared with a staying episode → split.
+    # Entities: exclusive among CONTENT episodes → move (bookkeeping along);
+    # shared with a staying content episode → split.
     mentioned = await _write(
         """
         MATCH (ep:Episodic {uuid: $uuid})-[:MENTIONS]->(n:Entity)
         OPTIONAL MATCH (other:Episodic)-[:MENTIONS]->(n)
           WHERE other.uuid <> $uuid AND other.group_id = n.group_id
-        RETURN n.uuid AS uuid, labels(n) AS labels, count(other) AS others
+        WITH n, other,
+             other IS NOT NULL
+             AND other.source_description = $operator_source
+             AND size(coalesce(other.entity_edges, [])) = 0
+             AND size([(other)-[:MENTIONS]->(x:Entity) | x]) = 1 AS bookkeeping
+        RETURN n.uuid AS uuid, labels(n) AS labels,
+               count(CASE WHEN other IS NOT NULL AND NOT bookkeeping THEN 1 END) AS others,
+               [o IN collect(CASE WHEN bookkeeping THEN other.uuid END) WHERE o IS NOT NULL]
+                 AS bookkeeping
         """,
-        uuid=episode_uuid,
+        uuid=episode_uuid, operator_source=_OPERATOR_SOURCE,
     )
     remap: dict[str, str] = {}  # old entity uuid -> uuid now in the target group
-    moved_nodes = split_nodes = 0
+    moved_nodes = split_nodes = moved_provenance = 0
     for n in mentioned:
         if n["others"] == 0:
             await _write(
                 "MATCH (n:Entity {uuid: $uuid}) SET n.group_id = $group_id",
                 uuid=n["uuid"], group_id=group_id,
             )
+            if n["bookkeeping"]:
+                await _write(
+                    """
+                    MATCH (ep:Episodic) WHERE ep.uuid IN $uuids
+                    SET ep.group_id = $group_id
+                    WITH ep
+                    MATCH (ep)-[m:MENTIONS]->(:Entity)
+                    SET m.group_id = $group_id
+                    """,
+                    uuids=n["bookkeeping"], group_id=group_id,
+                )
+                moved_provenance += len(n["bookkeeping"])
             remap[n["uuid"]] = n["uuid"]
             moved_nodes += 1
         else:
@@ -649,6 +684,7 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
         "uuid": episode_uuid, "from": old_group, "to": group_id,
         "nodes_moved": moved_nodes, "nodes_split": split_nodes,
         "edges_moved": moved_edges, "edges_split": split_edges,
+        "provenance_moved": moved_provenance,
     }
 
 

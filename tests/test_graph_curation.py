@@ -253,13 +253,39 @@ async def test_rescoping_an_episode_moves_exclusive_content_and_splits_shared(li
     shared = await _node(live_graph, f"ZZ shared {_uuid.uuid4()}", ["Organization"])
     only = await _node(live_graph, f"ZZ only {_uuid.uuid4()}", ["Person"])
     edge = await neo4j_writer.create_edge(only, shared, "WORKS_AT", "ZZ only works at ZZ shared")
-    # create_edge recorded ONE episode mentioning both; make `shared` also
-    # mentioned by a second, staying episode.
-    staying = await neo4j_writer._record_operator_episode("stay", GROUP, mentions=[shared], entity_edges=[])
+    # create_edge recorded ONE content episode mentioning both. `only` is also
+    # mentioned by its own creation record (bookkeeping — travels with it);
+    # make `shared` also mentioned by a second, staying CONTENT episode: an
+    # extraction-shaped one, not an operator record, because a single-mention
+    # operator record IS a node's bookkeeping and would move with the node.
+    staying = str(_uuid.uuid4())
+    await neo4j_writer._write(
+        """
+        CREATE (ep:Episodic {uuid: $uuid, name: 'stay', content: 'ZZ shared stays',
+                             source: 'text', source_description: 'ZZ extraction',
+                             group_id: $g, created_at: datetime(), valid_at: datetime(),
+                             entity_edges: []})
+        WITH ep MATCH (n:Entity {uuid: $shared})
+        CREATE (ep)-[:MENTIONS {uuid: randomUUID(), group_id: $g, created_at: datetime()}]->(n)
+        """,
+        uuid=staying, g=GROUP, shared=shared,
+    )
     try:
         result = await neo4j_writer.rescope_episode(edge["episode"], target)
         assert (result["nodes_moved"], result["nodes_split"]) == (1, 1)
         assert result["edges_moved"] == 1 and result["edges_split"] == 0
+        assert result["provenance_moved"] == 1  # `only`'s creation record went with it
+
+        # The operator's rule: the moved content exists in the target and
+        # NOWHERE else — nothing in the old group mentions `only` any more,
+        # and its provenance record is in the target too.
+        rows = await neo4j_reader._read(
+            "MATCH (ep:Episodic)-[:MENTIONS]->(n:Entity {uuid: $u}) "
+            "RETURN n.group_id AS node_group, collect(ep.group_id) AS episode_groups",
+            u=only,
+        )
+        assert rows[0]["node_group"] == target
+        assert rows[0]["episode_groups"] and set(rows[0]["episode_groups"]) == {target}
 
         rows = await neo4j_reader._read(
             """

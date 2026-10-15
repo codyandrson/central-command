@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-14 — v2.65.2: a rescope leaves nothing behind
+
+The first live run of the curation round-trips (`CC_LIVE_GRAPH_TESTS=1`)
+since the library migration failed on `rescope_episode`: a node the moved
+episode had exclusively produced came back SPLIT instead of moved — a copy
+in the target group, the original stranded in the old one with nothing but
+its own provenance record pointing at it. The test's expectation had been
+wrong since v2.20.0 and had never been run against a real graph.
+
+- **Bookkeeping is not content.** Every hand-made write records an
+  "operator manual entry" episode for provenance, and a node's own record
+  mentions that one node and carries no fact. The move-or-split rule counted
+  it as "another episode still mentions this node", so every curated node
+  split on rescope. The operator's ruling (2026-10-14): a rescope is judged
+  by its end state — the moved content exists in the target and nowhere
+  else. The rule now ignores single-mention, fact-less operator records when
+  deciding, and moves them WITH the node; an operator record that carries a
+  fact (`create_edge`'s) mentions two nodes and is content, so it still
+  counts. An entity that other content in the old group still mentions is
+  still split, because that content was not asked to move. The result gains
+  `provenance_moved`. No new property, no migration: the rule keys on the
+  record's shape, so it covers every record already on a graph.
+- **The round-trip states the rule.** Its "staying" episode is now an
+  extraction-shaped content episode (an operator record mentioning one node
+  IS bookkeeping under the new rule), and it asserts the end state: the moved
+  node's provenance is in the target group and nothing in the old group
+  mentions the node any more. Verified against a live Neo4j, 10 of 10.
+
 ## 2026-10-14 — v2.65.1: a conversation that consulted a teammate carries on
 
 The EA's onboarding tour asked accountability to register the operator's
