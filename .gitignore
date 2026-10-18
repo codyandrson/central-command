@@ -11,11 +11,6 @@ venv/
 .env
 .env.local
 
-# Database dumps staged by deploy/pi/migrate-from-desktop.sh. These carry real
-# data AND encrypted credentials (the n8n dump holds the Gmail OAuth record) —
-# never commit them.
-deploy/pi/migration/
-
 # Node / web
 node_modules/
 web/node_modules/

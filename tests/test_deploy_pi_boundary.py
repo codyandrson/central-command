@@ -1,19 +1,22 @@
-"""The deploy/pi split, release A (v2.66.0): the live set has moved and every
-reader names the new paths, while deploy/pi/ keeps a byte-identical duplicate
-of that set for ONE release — because the update INTO this release is run by
-the installed v2.65.x cc-update.sh, whose configmap row, units glob and
-policy-apply still name deploy/pi/... against the merged tree (the same shape
-as the Graphiti removal, tests/test_graphiti_server_boundary.py). Release A
-deletes nothing: the retired Compose stack is still here too, and both sets
-leave in v2.67.0 once this release is validated.
+"""The deploy/pi split, release B (v2.67.0): deploy/pi/ is gone from the
+tracked tree. Release A (v2.66.0) moved the live set to deploy/shared/litellm/,
+deploy/k3s/.env and deploy/k3s/cc-nerve.service and repointed every reader,
+but kept a byte-identical duplicate under deploy/pi/ for ONE release — because
+the update INTO A was run by the installed v2.65.x cc-update.sh, whose
+configmap row, units glob and policy-apply still named deploy/pi/... against
+the merged tree (the same shape as the Graphiti removal,
+tests/test_graphiti_server_boundary.py). A's own updater names only the new
+paths, so B — applied by it — deletes the duplicate live set, the retired
+Compose stack and the README whole; `git show v2.65.3:deploy/pi/<file>` is the
+way to reach them now.
 
-These pin that state. Release B flips them: deploy/pi/ gone, no mention left.
+These pin that state, and that every reader still names the new paths.
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +24,8 @@ PI = ROOT / "deploy" / "pi"
 SHARED = ROOT / "deploy" / "shared" / "litellm"
 K3S = ROOT / "deploy" / "k3s"
 
+# What B deleted: the duplicate live set A kept for one release, the retired
+# Compose stack, and the directory's README.
 LIVE_DUPLICATES = ("litellm/config.yaml", "litellm/model-preferences.yaml", "litellm/policy.py",
                    "litellm/register-models.py", "litellm/checks.sh", "cc-nerve.service", ".env.example")
 RETIRED = ("docker-compose.yml", "cc-uvicorn.service", "backup.sh", "cc-backup.service", "cc-backup.timer",
@@ -38,72 +43,22 @@ def _non_comment(path: Path) -> list[str]:
     return [l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")]
 
 
-# ── release A deletes nothing ───────────────────────────────────────────────
+# ── release B deleted deploy/pi/ whole ──────────────────────────────────────
 
 
-def test_the_duplicate_live_set_and_the_retired_stack_are_still_here():
-    for rel in LIVE_DUPLICATES + RETIRED:
-        assert (PI / rel).is_file(), rel
-    assert (PI / "README.md").is_file()
+def test_nothing_under_deploy_pi_is_tracked():
+    out = subprocess.run(["git", "ls-files", "deploy/pi"], cwd=ROOT, check=True,
+                         capture_output=True, text=True).stdout
+    assert out.strip() == "", out
 
 
-V2_65_4_SHA256 = {
-    "litellm/config.yaml": "51a22c5469a5cec67a550ed14f7801ace31d002af8687b406476485fd9db7fcd",
-    "litellm/model-preferences.yaml": "bd1133533b3341a349796efe6d0fa727bffed58611a00775e760b00fc0380e5e",
-    "litellm/policy.py": "77559803263bdf3fa57eed988c291af7f0d12e61cc0d586bfabccfb976bda0ce",
-    "litellm/register-models.py": "c0a54f9c4d0eb4306fc3aa386449e2512789730fd9d4a2c458745061a81cf176",
-    "litellm/checks.sh": "dfb3749b2accff7aa0871297a9742eea8b6a06dae8fffc94950dcac757716fd3",
-    "cc-nerve.service": "909a87e604cba54a95da0771a8865c719fbb806f006273b1bf239cfaff0abb31",
-    ".env.example": "a7f950c2f7efd458937773161cd05a785b8ae9135518e6a20a539768a2babd83",
-}
-
-
-def test_the_duplicates_are_byte_identical_to_v2_65_4():
-    """The v2.65.x updater's configmap row diffs deploy/pi/litellm/config.yaml
-    against the checkpoint and its policy-apply runs deploy/pi/litellm/policy.py
-    on the merged tree — so the OLD copies must not change by one byte until
-    v2.67.0 deletes them. Pinned by hash, not by comparison with the moved
-    copies: those legitimately differ (paths in comments and messages, and the
-    env resolver below)."""
-    for rel, digest in V2_65_4_SHA256.items():
-        assert hashlib.sha256((PI / rel).read_bytes()).hexdigest() == digest, rel
-
-
-def test_the_moved_copies_differ_from_the_old_only_where_they_must():
-    for name in ("config.yaml", "model-preferences.yaml"):
-        assert _non_comment(PI / "litellm" / name) == _non_comment(SHARED / name), name
-    assert _non_comment(PI / "cc-nerve.service") == _non_comment(K3S / "cc-nerve.service")
-    assert _non_comment(PI / ".env.example") == _non_comment(K3S / ".env.example")
-    for name in ("policy.py", "register-models.py"):
-        old = (PI / "litellm" / name).read_text(encoding="utf-8")
-        new = (SHARED / name).read_text(encoding="utf-8")
-        # HERE.parent/.env was deploy/pi/.env; from deploy/shared/litellm/ it is
-        # nothing — the Executor runs these with no LITELLM_MASTER_KEY in the
-        # environment, so the file fallback is load-bearing and must resolve
-        # like env-path.sh: the new path when it exists, else the old.
-        assert 'ENV_PATH = HERE.parent / ".env"' in old, name
-        assert 'ENV_PATH = _env_path()' in new and '"deploy" / "k3s" / ".env"' in new \
-            and '"deploy" / "pi" / ".env"' in new, name
-        strip = lambda s: "\n".join(l for l in s.splitlines() if "deploy/pi" not in l and "deploy/shared" not in l
-                                     and "deploy/k3s" not in l and "ENV_PATH" not in l and "REPO_ROOT" not in l
-                                     and "_env_path" not in l and l.strip() not in ("new = REPO_ROOT / \"deploy\" / \"k3s\" / \".env\"",
-                                     "if new.exists() or new.is_symlink():", "return new", '"""'))
-        # everything else is the same program
-        old_lines = set(strip(old).splitlines())
-        for line in strip(new).splitlines():
-            if line.strip() and line not in old_lines:
-                assert "env" in line.lower() or "path before v2.66.0" in line or "single-node" in line \
-                    or "Only a fallback" in line, (name, line)
-
-
-def test_the_old_checks_script_is_untouched_and_the_new_one_uses_the_resolver():
-    old = _code(PI / "litellm" / "checks.sh")
-    assert '"$HERE/../.env"' in old                      # its v2.65.3 shape
-    new = _code(SHARED / "checks.sh")
-    assert "cc_k3s_env_file" in new and '"$HERE/../.env"' not in new
-    # everything but the key lookup is the same script
-    strip = lambda s: "\n".join(l for l in s.splitlines() if "KEY" not in l and "ENV_FILE" not in l and "env-path" not in l)
-    assert strip(old) == strip(new)
+def test_the_duplicate_live_set_the_retired_stack_and_the_readme_are_gone():
+    """File by file, not the directory: a deployment keeps an untracked
+    deploy/pi/.env symlink (the resolver's fallback) until the operator's
+    post-apply checklist for this release removes it and the empty directory;
+    nothing under deploy/pi/ is tracked or ignored any more."""
+    for rel in LIVE_DUPLICATES + RETIRED + ("README.md",):
+        assert not (PI / rel).exists(), rel
 
 
 # ── every reader names the new paths ────────────────────────────────────────

@@ -32,8 +32,7 @@ def test_the_retired_servers_build_inputs_are_gone_and_nothing_names_them():
     assert not (ROOT / "deploy" / "single" / "build-graphiti-image.sh").exists()
     for rel in ("deploy/k3s/cc-update.sh", "deploy/k3s/setup.sh", "deploy/k3s/make-secrets.sh",
                 "deploy/k3s/verify.sh", "deploy/k3s/backup.sh", "deploy/k3s/migrate-to-cc.sh",
-                "deploy/single/setup.sh", "deploy/single/update.sh", "deploy/pi/backup.sh",
-                "deploy/pi/docker-compose.yml"):
+                "deploy/single/setup.sh", "deploy/single/update.sh"):
         code = _code(rel)
         assert "build-graphiti-image.sh" not in code, rel
         assert "deploy/pi/graphiti" not in code, rel
