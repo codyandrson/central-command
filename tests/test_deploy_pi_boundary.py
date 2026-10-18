@@ -160,3 +160,117 @@ def test_the_floor_is_unchanged_until_the_deletion_release():
     text = (ROOT / "VERSION").read_text(encoding="utf-8")
     assert re.search(r"^version=2\.66\.\d+$", text, re.M), text
     assert re.search(r"^min_upgrade_from=2\.60\.0$", text, re.M), text
+
+
+# ── nothing in the tree names deploy/pi outside history and the kept seam ───
+
+
+def _block(start: str):
+    """Lines from the one starting with `start` up to (not including) the next
+    column-0 non-blank line — the next heading or bullet in Markdown, the next
+    top-level statement in Python."""
+    def pred(lines: list[str], i: int) -> bool:
+        for j in range(i, -1, -1):
+            if lines[j].startswith(start):
+                return True
+            if lines[j] and not lines[j][0].isspace():
+                return False
+        return False
+    return pred
+
+
+def _heading_range(first: str, stop: str | None = None):
+    """Lines from the heading `first` up to the heading `stop` (to the end of
+    the file when there is none). Both headings must exist, or a renumbering
+    would silently widen the range."""
+    def pred(lines: list[str], i: int) -> bool:
+        assert any(l.startswith(first) for l in lines), f"heading {first!r} not found"
+        assert stop is None or any(l.startswith(stop) for l in lines), f"heading {stop!r} not found"
+        seen = False
+        for j in range(i + 1):
+            if stop is not None and lines[j].startswith(stop):
+                return False
+            if lines[j].startswith(first):
+                seen = True
+        return seen
+    return pred
+
+
+def _contains(*needles: str):
+    return lambda lines, i: all(n in lines[i] for n in needles)
+
+
+def _message(lines: list[str], i: int) -> bool:
+    """An operator-facing message, not a path a script opens: the name sits
+    after the message call's opening quote."""
+    line = lines[i]
+    at = line.find("deploy/pi")
+    return any(0 <= line.find(tok) < at for tok in ('note "', 'die "', 'step "', 'echo "'))
+
+
+# path or directory prefix → (reason, line predicate or None for the whole file)
+ALLOWED = {
+    "CHANGELOG.md": ("release history names the paths each release changed", None),
+    "docs/superpowers/": ("design records are dated history; their As-built headers point at live files", None),
+    "docs/audit/": ("audit ledgers are dated history", None),
+    "docs/decisions/process.md": ("the decision log recounts the v2.61.0 Graphiti deletion", None),
+    "deploy/desktop-superseded/": ("the pre-move desktop units, kept as history", None),
+    "deploy/k3s/env-path.sh": ("the resolver's fallback and the one-time move (kept through B by decision)", None),
+    "deploy/shared/litellm/policy.py": ("the resolver's Python mirror", _block("def _env_path(")),
+    "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),
+    "tests/test_k3s_env_path.py": ("exercises the resolver and the move in every layout", None),
+    "deploy/k3s/cc-update.sh": ("operator-facing fallback message", _message),
+    "deploy/k3s/init-env.sh": ("operator-facing fallback message", _message),
+    "deploy/k3s/setup.sh": ("operator-facing fallback message", _message),
+    "deploy/k3s/migrate-to-cc.sh": ("operator-facing fallback message", _message),
+    "deploy/k3s/README.md": ("sections 0a/0b are the dated history of the two boundary updates; "
+                             "section 10 reaches the retired stack through git",
+                             lambda lines, i: _heading_range("## 0a.", "## 1.")(lines, i)
+                             or (_heading_range("## 10.")(lines, i)
+                                 and _contains("git show v2.65.3:deploy/pi/")(lines, i))),
+    "docs/ARCHITECTURE.md": ("the D9 / Story 2.1 provenance row names the retired image's files",
+                             _contains("D9 / Story 2.1")),
+    ".claude/rules/deploy-k3s.md": ("the dated v2.66.0 bite mark on the env move",
+                                    _block("- **The containers' env is")),
+    "web/VENDORED.md": ("past tense: where the live set lived until v2.66.0", _contains("lived in", "v2.66.0")),
+    "deploy/shared/README.md": ("past tense: where these files lived until v2.66.0", _contains("lived in", "v2.66.0")),
+    "tests/test_deploy_pi_boundary.py": ("this guard: its docstrings, regexes and negative assertions name the path", None),
+    "tests/test_graphiti_server_boundary.py": ("the Graphiti removal's guard asserts deploy/pi/graphiti is never named", None),
+}
+
+
+def _allowed(path: str, lines: list[str], i: int) -> bool:
+    # A `#`-led comment line in a non-Markdown file (.sh, .py, .yaml, .service,
+    # .Dockerfile, .env.example alike) may recount where things were.
+    if not path.endswith(".md") and lines[i].lstrip().startswith("#"):
+        return True
+    for key, (_reason, pred) in ALLOWED.items():
+        if path == key or (key.endswith("/") and path.startswith(key)):
+            return pred is None or pred(lines, i)
+    return False
+
+
+def test_no_tracked_file_names_deploy_pi_outside_history_and_the_kept_seam():
+    """deploy/pi/ was deleted in v2.67.0. What may still say the name is
+    enumerated in ALLOWED with its reason — dated history, the resolver seam
+    kept by decision, operator-facing fallback messages, and comment lines —
+    so the next reference anywhere else fails here naming its file and line."""
+    # The path itself, not a prefix of another (deploy/pipeline); the segment-built
+    # form `"deploy" / "pi"` is NOT seen here — only the literal is guarded.
+    r = subprocess.run(["git", "grep", "-n", "-I", "-E", "-e", r"deploy/pi([^A-Za-z0-9_-]|$)"], cwd=ROOT,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    assert r.returncode in (0, 1), r.stderr
+    hits: dict[str, list[int]] = {}
+    for row in r.stdout.split("\n"):
+        if not row:
+            continue
+        path, line, _ = row.split(":", 2)
+        hits.setdefault(path, []).append(int(line))
+    offenders = []
+    for path, numbers in sorted(hits.items()):
+        # split("\n"), not splitlines(): git counts newlines only
+        lines = (ROOT / path).read_text(encoding="utf-8", errors="replace").split("\n")
+        for n in numbers:
+            if not _allowed(path, lines, n - 1):
+                offenders.append(f"{path}:{n}: {lines[n - 1].strip()}")
+    assert not offenders, "deploy/pi named outside the allowlist:\n  " + "\n  ".join(offenders)
