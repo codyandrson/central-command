@@ -1,6 +1,7 @@
 # deploy/shared/ — assets both deployment substrates read
 
-Until v2.66.0 these lived in `deploy/pi/litellm/`. Nothing here is specific to
+Until v2.66.0 these lived in `deploy/pi/litellm/` (a directory deleted whole
+in v2.67.0). Nothing here is specific to
 one substrate; the k3s profile (`deploy/k3s/`) and the single-node profile
 (`deploy/single/`) both reach into it.
 

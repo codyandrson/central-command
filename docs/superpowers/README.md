@@ -39,12 +39,12 @@ This indexes the design records under `docs/superpowers/`: specs, plans, and res
 | 2026-07-29 | [Teaming & consultation doctrine](specs/2026-07-29-teaming-consultation-doctrine-design.md) | partial | `central_command/runtime/consult.py` |
 | 2026-07-29 | [Knowledge-layer routing & the steward](specs/2026-07-29-knowledge-layer-routing-design.md) | partial | `central_command/gateway/auditor.py` |
 | 2026-07-27 | [Tier-3 discussion stall escalation — design](specs/2026-07-27-discussion-stall-escalation-design.md) | implemented | `central_command/db/schema.sql` |
-| 2026-07-27 | [The `cc-default` alias seam — design](specs/2026-07-27-default-alias-seam-design.md) | implemented | `deploy/pi/litellm/model-preferences.yaml` |
+| 2026-07-27 | [The `cc-default` alias seam — design](specs/2026-07-27-default-alias-seam-design.md) | implemented | `deploy/shared/litellm/model-preferences.yaml` |
 | 2026-07-27 | [Stage 5 — Coaching experiences: hire the coach](specs/2026-07-27-coaching-experiences-design.md) | partial | `central_command/runtime/coach_profile.py` |
 | 2026-07-26 | [The Skills Library — design](specs/2026-07-26-skills-library-design.md) | implemented | `central_command/runtime/packs.py` |
 | 2026-07-26 | [Quality-router migration — design](specs/2026-07-26-quality-router-migration-design.md) | superseded | `docs/superpowers/specs/2026-07-27-default-alias-seam-design.md` |
 | 2026-07-26 | [Local model serving + embedding migration — design](specs/2026-07-26-local-serving-and-embedding-migration-design.md) | partial | `central_command/integrations/neo4j_writer.py`, `scripts/oneoff/reembed_graph.py` |
-| 2026-07-26 | [Adaptive routing that learns — design](specs/2026-07-26-adaptive-routing-that-learns-design.md) | superseded | `deploy/pi/litellm/model-preferences.yaml` |
+| 2026-07-26 | [Adaptive routing that learns — design](specs/2026-07-26-adaptive-routing-that-learns-design.md) | superseded | `deploy/shared/litellm/model-preferences.yaml` |
 
 ## Plans (18)
 
@@ -67,13 +67,13 @@ This indexes the design records under `docs/superpowers/`: specs, plans, and res
 | 2026-07-27 | [Stage 5a — Coach Spine Implementation Plan](plans/2026-07-27-stage-5a-coach-spine.md) | implemented | `central_command/runtime/coach_profile.py`, `central_command/runtime/run.py` |
 | 2026-07-27 | [Tier-3 Discussion Stall Escalation — Implementation Plan](plans/2026-07-27-discussion-stall-escalation.md) | implemented | `central_command/db/schema.sql` |
 | 2026-07-26 | [Skills Library Implementation Plan](plans/2026-07-26-skills-library.md) | implemented | `central_command/runtime/packs.py` |
-| 2026-07-26 | [Adaptive Routing (Units 1–2) Implementation Plan](plans/2026-07-26-adaptive-routing-units-1-2.md) | partial | `deploy/pi/litellm/model-preferences.yaml` |
+| 2026-07-26 | [Adaptive Routing (Units 1–2) Implementation Plan](plans/2026-07-26-adaptive-routing-units-1-2.md) | partial | `deploy/shared/litellm/model-preferences.yaml` |
 
 ## Research (9)
 
 | date | record | status | as-built |
 |---|---|---|---|
-| 2026-08-06 | [Gated LiteLLM config change with verified restart + auto-rollback (2026-08-06)](research/2026-08-06-litellm-config-change-design.md) | superseded | `deploy/pi/litellm/model-preferences.yaml` |
+| 2026-08-06 | [Gated LiteLLM config change with verified restart + auto-rollback (2026-08-06)](research/2026-08-06-litellm-config-change-design.md) | superseded | `deploy/shared/litellm/model-preferences.yaml` |
 | 2026-08-06 | [The editor — a content-quality evaluator (2026-08-06, DRAFT for operator review)](research/2026-08-06-editor-quality-evaluator-design.md) | implemented | `central_command/runtime/editor_profile.py` |
 | 2026-08-06 | [EA widening — design proposal (2026-08-06, DRAFT for operator review)](research/2026-08-06-ea-widening-design.md) | partial | `central_command/integrations/calendar_facade.py` |
 | 2026-08-03 | [Scrub housekeeping plan — 2026-08-03](research/2026-08-03-scrub-housekeeping-plan.md) | partial | `central_command/db/schema.sql` |

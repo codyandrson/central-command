@@ -126,8 +126,7 @@ Assumed already true before phase 2:
   `cc-graph-bolt` runs on it (§6).
 - **No arm64 image builder.** Both locally built images (sandbox, crawler)
   are compute-node-only and built there with podman. Docker on the anchor was
-  the arm64 half of the retired Graphiti image and is no longer required (the
-  superseded compose stack in `deploy/pi/` is the only thing that still uses it).
+  the arm64 half of the retired Graphiti image and is no longer required.
 - **gVisor (`runsc`) on the chromebox** — installed by
   `./deploy/k3s/install-gvisor.sh` (idempotent: reports-and-exits when already
   present). Without it, sandbox Jobs never start — the `gvisor` RuntimeClass
@@ -353,9 +352,10 @@ self-check's `graph-patches` row says why. `setup.sh app` and `cc-update.sh`
 
 ## 6. systemd units
 
-Install from `deploy/k3s/`, **not** `deploy/pi/`. The old
-`deploy/pi/cc-uvicorn.service` has `ExecStartPre=docker compose up -d`, which
-resurrects the Docker stack and fights k3s for 5442.
+Install the units from `deploy/k3s/` only. The retired Compose stack's
+`cc-uvicorn.service` (deleted in v2.67.0 with the rest of that stack) had
+`ExecStartPre=docker compose up -d`, which resurrects the Docker stack and
+fights k3s for 5442.
 
 **`web/.env` must exist before `cc-nerve` starts**, or every cockpit panel
 that proxies to the backend (kanban, memories, charter, graph, crons,
@@ -721,7 +721,14 @@ https://raspberrypi.tail2ae84b.ts.net:9428/select/vmui/
   before wiping: `sudo /home/codyslab/central-command/deploy/k3s/backup.sh`, and
   confirm the `keys_<stamp>.env` beside it — without those two keys the dumps
   are ciphertext).
-- **Whole stack:** the Docker Compose stack in `deploy/pi/` is the documented
-  fallback (`docker compose -f deploy/pi/docker-compose.yml up -d` plus the old
-  `deploy/pi/cc-uvicorn.service`). It fights k3s for 5442 — stop the cluster
-  workloads first, and only do this deliberately.
+- **Whole stack:** the pre-k3s Docker Compose stack was deleted from the tree
+  in v2.67.0. Reach it at v2.65.3, the last tag before the split (its bytes are
+  unchanged through v2.66.2, but a bridge release is not where a fallback
+  should point): `git show v2.65.3:deploy/pi/docker-compose.yml` reads the compose file, and `git archive v2.65.3 deploy/pi | tar -x` from the checkout root
+  restores the whole directory, `cc-uvicorn.service` included — the compose
+  file expects `litellm/config.yaml` and a `.env` beside it, and the unit
+  hard-codes that path. It had already drifted
+  dead before its deletion: it runs postgres, LiteLLM, Neo4j and n8n only — no
+  Graphiti, crawler, speech or reranker — so it restores a database host, not
+  the product. It fights k3s for 5442 — stop the cluster workloads first, and
+  only do this deliberately.

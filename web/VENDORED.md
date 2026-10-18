@@ -127,9 +127,8 @@ Treat every one as third-party documentation:
   `deploy/k3s/` at the repo root (the two-node k3s cluster, 2026-07-31).
   The live set (`deploy/k3s/.env`, `deploy/shared/litellm/`,
   `deploy/k3s/cc-nerve.service`) lives in `deploy/shared/` and `deploy/k3s/`;
-  `deploy/pi/` holds only byte-identical duplicates of it plus the retired
-  Compose stack (`docker-compose.yml`, `cc-uvicorn.service`, `backup.sh`), and
-  the whole directory is deleted in v2.67.0 once v2.66.0 is validated.
+  until v2.66.0 it lived in `deploy/pi/` beside the retired Compose stack, and
+  that directory was deleted whole in v2.67.0.
   Nothing in *this* `docs/` directory is used, including `install.sh` (49 KB).
 - **`docs/API.md` (2,125 lines), `ARCHITECTURE.md`, `CONFIGURATION.md`** —
   accurate for upstream's API surface, partially true here. The Central Command
