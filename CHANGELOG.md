@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-17 — v2.65.3: the decision log records what the operator remembers
+
+Docs only — no runtime behavior changes. Two decision-log entries gain the
+story behind the rule from the operator's own account, since no in-repo record
+carried it: autodiscovery memory (DL-066) exists because the pre-v2.25.0 sweep
+re-examined the whole provider catalog daily and tripped a provider's usage
+limits before any of its models were used; the MCP server-name translation
+(DL-065) exists because a `-` in a server name was rejected by the proxy in
+practice. The six entries whose origin nobody remembers (DL-008, 051, 054, 063,
+064, 088) keep "not recorded" on purpose — a rule's story being lost is a fact
+worth stating, not a gap to fill with a guess.
+
 ## 2026-10-14 — v2.65.2: a rescope leaves nothing behind
 
 The first live run of the curation round-trips (`CC_LIVE_GRAPH_TESTS=1`)

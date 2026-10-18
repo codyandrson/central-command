@@ -149,7 +149,7 @@ recorded in-repo." rather than inventing one.
 | DL-063 | Models live in LiteLLM's database and belong to the operator; setup pauses for them | active | undated | script: `register-models.py` | [models.md](models.md) |
 | DL-064 | A model's capabilities are measured, never guessed; an undeclared flag is not neutral | active | undated | discipline only | [models.md](models.md) |
 | DL-065 | LiteLLM forbids "-" in MCP server names; the translation is duplicated on purpose | active | undated | code structure only | [models.md](models.md) |
-| DL-066 | Autodiscovery has memory; only new/changed/failed ids reach the agent | active | undated | test: `tests/test_heartbeat.py::test_reconcile_only_new_changed_or_failed_reach_the_agent` | [models.md](models.md) |
+| DL-066 | Autodiscovery has memory; only new/changed/failed ids reach the agent | active | 2026-09-11 | test: `tests/test_heartbeat.py::test_reconcile_only_new_changed_or_failed_reach_the_agent` | [models.md](models.md) |
 | DL-067 | Local→cloud model fallback is deliberately off | active | 2026-07-31 | code structure only | [models.md](models.md) |
 | DL-068 | The router-mode serving unit was never built; model swapping lives outside this repo | active | 2026-07-26 | discipline only | [models.md](models.md) |
 | DL-069 | A price is catalog data, never an agent's claim | active | 2026-09-14 | test: `tests/test_catalog_pricing.py::test_add_prices_from_the_catalog_and_drops_what_the_agent_wrote` | [models.md](models.md) |

@@ -39,24 +39,30 @@ to add one.
 - **Status:** active
 - **Date:** undated
 - **Rule:** [.claude/rules/models.md](../../.claude/rules/models.md) — "**LiteLLM forbids `-` in MCP server names; Kubernetes requires it.**"
-- **Why:** `mcp_server.id` stays the k8s-valid canonical id and the proxy
-  sees `_litellm_server_name()`'s underscored form, translated in exactly
-  two places (the Executor and `runtime/packs.py`'s toolset URL) because
-  `runtime/` may never import `gateway/` — a single shared helper is not an
-  option across that boundary.
+- **Why:** A server name carrying `-` was rejected by the proxy in practice
+  (the operator recalls the failure, not its details; the incident itself is
+  not recorded). `mcp_server.id` stays the k8s-valid canonical id and the
+  proxy sees `_litellm_server_name()`'s underscored form, translated in
+  exactly two places (the Executor and `runtime/packs.py`'s toolset URL)
+  because `runtime/` may never import `gateway/` — a single shared helper is
+  not an option across that boundary.
 - **Enforced:** code structure only — `central_command/gateway/executor.py:1199` (`_litellm_server_name`), referenced (not redefined) at `central_command/runtime/packs.py:1848`
 - **Source:** .claude/rules/models.md
 
 ### DL-066 — Autodiscovery has memory; only new/changed/failed ids reach the agent
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-09-11
 - **Rule:** [.claude/rules/models.md](../../.claude/rules/models.md) — "**Autodiscovery has MEMORY, and only new/changed/failed ids reach the agent.**"
-- **Why:** Not recorded beyond the stated mechanism: the `autodiscovery_snapshot`
-  app_setting records, per credential and catalog id, a fingerprint of
-  `FINGERPRINT_FIELDS` and a disposition (registered/skipped/pending); a
-  skip is inferred from a DONE task that registered nothing, and a skipped
-  id with an unchanged fingerprint is never shown again.
+- **Why:** Before v2.25.0 the daily discovery sweep re-examined the whole
+  provider catalog every run — hundreds of ids, each probed and offered to
+  the agent again — which was expensive in tokens and tripped a provider's
+  per-IP usage limits before any of its models had been used for real work
+  (operator's account). The `autodiscovery_snapshot` app_setting now records,
+  per credential and catalog id, a fingerprint of `FINGERPRINT_FIELDS` and a
+  disposition (registered/skipped/pending); a skip is inferred from a DONE
+  task that registered nothing, and a skipped id with an unchanged
+  fingerprint is never shown again.
 - **Enforced:** test: `tests/test_heartbeat.py::test_reconcile_only_new_changed_or_failed_reach_the_agent` (the rule over every disposition) and test: `tests/test_heartbeat.py::test_a_second_pass_does_not_retask_examined_models` (the whole loop through `ACTIONS["litellm.discovery"]`, snapshot written back); `tests/test_catalog_enroll.py` was the wrong place to look. The one gap that left — nothing pinned `FINGERPRINT_FIELDS` itself, so a volatile field added to it would restore daily re-examination silently — is closed by test: `tests/test_autodiscovery_fingerprint.py::test_the_fingerprint_fields_are_the_agreed_four`
 - **Source:** .claude/rules/models.md
 
