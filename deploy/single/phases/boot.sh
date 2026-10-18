@@ -379,7 +379,7 @@ boot_skills_import() {
     fi
     # A path the API's Python can open: on Git Bash that is C:/… (cc_norm_path),
     # never /c/….
-    body="$($PY -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "skill_id": sys.argv[2]}))' "$(cc_norm_path "$d")" "$id")"
+    body="$($PY -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "skill_id": sys.argv[2], "apply_default_grants": True}))' "$(cc_norm_path "$d")" "$id")"
     note "--> POST $(api_url)/api/skills/import  {skill_id: $id}"
     resp="$(printf '%s' "$body" | curl -sS -m 120 -X POST -H 'content-type: application/json' \
       -w '\n%{http_code}' -d @- "$(api_url)/api/skills/import" 2>&1)"

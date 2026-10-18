@@ -3044,6 +3044,9 @@ class SkillImportIn(BaseModel):
     skill_id: str | None = None
     source_url: str | None = None
     describes: str | None = None
+    # Only the installers set this, for the skills/ folders this release ships.
+    # An operator-supplied folder's `default_agents` must not grant itself.
+    apply_default_grants: bool = False
 
 
 @router.post("/skills/import")
@@ -3055,6 +3058,7 @@ async def import_skill_route(body: SkillImportIn) -> dict:
         result = await import_skill_folder(
             body.path, skill_id=body.skill_id,
             source_url=body.source_url, describes=body.describes,
+            apply_default_grants=body.apply_default_grants,
         )
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(422, str(e)) from e

@@ -72,7 +72,7 @@ async def _all():
 @pytest.mark.asyncio
 async def test_import_grants_roster_agents_and_reports_the_rest(world, tmp_path):
     folder = _folder(tmp_path, f"{ROSTER[0]}, {ROSTER[1]}, {OFF_ROSTER}, cc-test-dg-nobody")
-    r = await import_skill_folder(folder, skill_id=SKILL)
+    r = await import_skill_folder(folder, skill_id=SKILL, apply_default_grants=True)
     assert r["default_grants"] == {
         "applied": list(ROSTER), "skipped": [],
         "unknown": [OFF_ROSTER, "cc-test-dg-nobody"],
@@ -86,10 +86,10 @@ async def test_import_grants_roster_agents_and_reports_the_rest(world, tmp_path)
 @pytest.mark.asyncio
 async def test_reimport_skips_existing_and_never_resurrects_a_revoked_grant(world, tmp_path):
     folder = _folder(tmp_path, ", ".join(ROSTER))
-    await import_skill_folder(folder, skill_id=SKILL)
+    await import_skill_folder(folder, skill_id=SKILL, apply_default_grants=True)
     assert await repo.revoke_skill(ROSTER[0], SKILL, "operator said no")
 
-    r = await import_skill_folder(folder, skill_id=SKILL)
+    r = await import_skill_folder(folder, skill_id=SKILL, apply_default_grants=True)
 
     assert r["default_grants"]["applied"] == []
     assert sorted(r["default_grants"]["skipped"]) == sorted(ROSTER)
@@ -106,3 +106,12 @@ async def test_a_skill_without_default_agents_grants_nothing(world, tmp_path):
     (f / "SKILL.md").write_text("---\nname: plain\n---\n# p")
     r = await import_skill_folder(f, skill_id=SKILL)
     assert r["default_grants"] == {"applied": [], "skipped": [], "unknown": []}
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_default_agents_is_ignored_unless_the_caller_opts_in(world, tmp_path):
+    folder = _folder(tmp_path, ROSTER[0])
+    r = await import_skill_folder(folder, skill_id=SKILL)
+    assert r["default_grants"] == {"applied": [], "skipped": [], "unknown": []}
+    assert await _all() == []

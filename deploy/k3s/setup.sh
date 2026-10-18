@@ -921,7 +921,7 @@ app_skills_import() {
       kept+=("$id")
       continue
     fi
-    body="$($PY -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "skill_id": sys.argv[2]}))' "$d" "$id")"
+    body="$($PY -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "skill_id": sys.argv[2], "apply_default_grants": True}))' "$d" "$id")"
     note "--> POST $API_URL/api/skills/import  {skill_id: $id}"
     resp="$(printf '%s' "$body" | curl -sS -m 120 -X POST -H 'content-type: application/json' \
       -w '\n%{http_code}' -d @- "$API_URL/api/skills/import" 2>&1)"

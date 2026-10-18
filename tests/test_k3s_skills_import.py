@@ -102,8 +102,8 @@ def test_an_empty_library_gains_every_bundled_folder(repo: Path):
     assert "RC=0" in r.stdout, r.stdout + r.stderr
     assert "PASS skills-imported: imported 2 bundled skill(s): alpha beta" in r.stdout
     assert api.posts == [
-        {"path": str(repo / "skills" / "alpha"), "skill_id": "alpha"},
-        {"path": str(repo / "skills" / "beta"), "skill_id": "beta"},
+        {"path": str(repo / "skills" / "alpha"), "skill_id": "alpha", "apply_default_grants": True},
+        {"path": str(repo / "skills" / "beta"), "skill_id": "beta", "apply_default_grants": True},
     ]
 
 

@@ -4,6 +4,13 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-18 — v2.66.2: default grants are opt-in per import
+
+`POST /api/skills/import` honours a folder's `default_agents` only when the
+body carries `apply_default_grants: true` (default false); both installers send
+it for the bundled skills. A folder the operator imports by hand can no longer
+grant itself to agents. v2.66.1 below applied them on every import.
+
 ## 2026-10-18 — v2.66.1: bundled skills arrive granted, not just imported
 
 Found on a real deployment: after a reset every agent ran nine days with zero

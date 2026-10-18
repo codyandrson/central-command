@@ -72,6 +72,7 @@ async def import_skill_folder(
     skill_id: str | None = None,
     source_url: str | None = None,
     describes: str | None = None,
+    apply_default_grants: bool = False,
 ) -> dict:
     """Import one skill folder. Returns what was written.
 
@@ -134,7 +135,9 @@ async def import_skill_folder(
             "a distinct skill_id."
         )
 
-    default_agents = parse_id_list(meta.get("default_agents", ""))
+    default_agents = (
+        parse_id_list(meta.get("default_agents", "")) if apply_default_grants else []
+    )
 
     references_to_write: list[tuple[str, Path, str]] = []
     for f in ref_files:
