@@ -76,13 +76,13 @@ psql_old()   { "${K[@]}" -n $OLD_NS exec -i "deploy/$1" -- psql -v ON_ERROR_STOP
 cypher_old() { "${K[@]}" -n $OLD_NS exec -i deploy/gv-neo4j -- cypher-shell -u neo4j -p "$NEO4J_PASSWORD" --format plain "$@"; }
 
 load_env() {
-  # deploy/pi/.env holds the store credentials (never printed). Read it
+  # deploy/k3s/.env holds the store credentials (never printed). Read it
   # whichever prefix it carries — the env step rewrites it mid-run.
-  [[ -f $REPO/deploy/pi/.env ]] || die "missing $REPO/deploy/pi/.env"
+  [[ -f $REPO/deploy/k3s/.env ]] || die "missing $REPO/deploy/k3s/.env (run ./deploy/k3s/init-env.sh — it moves an old deploy/pi/.env)"
   local k; for k in NEO4J_PASSWORD N8N_ENCRYPTION_KEY LITELLM_SALT_KEY N8N_DB_USER N8N_DB_NAME; do
-    printf -v "$k" '%s' "$(sed -n "s/^$k=//p" "$REPO/deploy/pi/.env" | tail -1 | sed "s/^['\"]//; s/['\"]\$//")"
+    printf -v "$k" '%s' "$(sed -n "s/^$k=//p" "$REPO/deploy/k3s/.env" | tail -1 | sed "s/^['\"]//; s/['\"]\$//")"
   done
-  : "${NEO4J_PASSWORD:?NEO4J_PASSWORD missing from deploy/pi/.env}"
+  : "${NEO4J_PASSWORD:?NEO4J_PASSWORD missing from deploy/k3s/.env}"
   N8N_DB_USER="${N8N_DB_USER:-n8n}"; N8N_DB_NAME="${N8N_DB_NAME:-n8n}"
 }
 
@@ -127,7 +127,7 @@ step_backup() {
   "${K[@]}" -n $OLD_NS exec deploy/gv-litellm-db -- pg_dump -U llmproxy litellm    | gzip >"$out/litellm_$STAMP.sql.gz"
   "${K[@]}" -n $OLD_NS exec deploy/gv-n8n-db     -- pg_dump -U "$N8N_DB_USER" "$N8N_DB_NAME" | gzip >"$out/n8n_$STAMP.sql.gz"
   { echo "N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}"; echo "LITELLM_SALT_KEY=${LITELLM_SALT_KEY:-}"; echo "NEO4J_PASSWORD=$NEO4J_PASSWORD"; } >"$out/keys_$STAMP.env"
-  for f in .env deploy/pi/.env web/.env; do [[ -f $REPO/$f ]] && cp -p "$REPO/$f" "$out/$(tr / _ <<<"$f")_$STAMP"; done
+  for f in .env deploy/k3s/.env web/.env; do [[ -f $REPO/$f ]] && cp -p "$REPO/$f" "$out/$(tr / _ <<<"$f")_$STAMP"; done
   chown -R $OWNER:$OWNER "$out"
   for f in "$out"/*_"$STAMP".sql.gz; do [[ $(stat -c %s "$f") -gt 1024 ]] || die "dump $f is suspiciously small"; done
   record backup_stamp "$STAMP"; record backup_dir "$out"
@@ -266,7 +266,7 @@ SQL
 step_env() {
   done_step env && return
   say "env: rewrite the gitignored .env files, rename the identifiers file"
-  for f in .env deploy/pi/.env web/.env; do
+  for f in .env deploy/k3s/.env web/.env; do
     [[ -f $REPO/$f ]] || continue
     "${RUNAS[@]}" perl -pi -e "$PERL_RULES" "$REPO/$f"
     note "$f: $(grep -c '^CC_' "$REPO/$f") CC_ keys, $(grep -ciE 'grandvision|\bgv[-_.]' "$REPO/$f") old-name lines left"
@@ -320,7 +320,7 @@ step_k8s() {
     retag "$n" docker.io/library/gv-sandbox:1 docker.io/library/cc-sandbox:1
     retag "$n" docker.io/library/gv-crawler:1 docker.io/library/cc-crawler:1
   done
-  # 3. the new namespaces: secrets/configmaps from deploy/pi/.env, then manifests
+  # 3. the new namespaces: secrets/configmaps from deploy/k3s/.env, then manifests
   "${RUNAS[@]}" "$REPO/deploy/k3s/make-secrets.sh"
   "${K[@]}" apply -f "$REPO/deploy/k3s/"
   # 4. data: local-path provisions a claim's directory on first pod start, so
@@ -348,7 +348,7 @@ step_k8s() {
 step_host() {
   done_step host && return
   say "host: units, package, cockpit"
-  for f in "$REPO"/deploy/k3s/cc-*.service "$REPO"/deploy/k3s/cc-*.path "$REPO"/deploy/k3s/cc-*.timer "$REPO/deploy/pi/cc-nerve.service"; do
+  for f in "$REPO"/deploy/k3s/cc-*.service "$REPO"/deploy/k3s/cc-*.path "$REPO"/deploy/k3s/cc-*.timer "$REPO/deploy/k3s/cc-nerve.service"; do
     install -m 644 "$f" /etc/systemd/system/
   done
   install -m 644 "$REPO/deploy/k3s/cc-update-tmpfiles.conf" /etc/tmpfiles.d/cc-update.conf
@@ -437,7 +437,7 @@ SQL
   cypher_old "MATCH ()-[r]->() WHERE r.group_id STARTS WITH '$NEW_DB' SET r.group_id = '$OLD_DB' + substring(r.group_id, size('$NEW_DB')) RETURN count(r);"
   gunzip -c "$dir/litellm_$stamp.sql.gz" | { "${K[@]}" -n $OLD_NS exec -i deploy/gv-litellm-db -- psql -U llmproxy -d postgres -c "drop database litellm with (force)" -c "create database litellm owner llmproxy" >/dev/null; "${K[@]}" -n $OLD_NS exec -i deploy/gv-litellm-db -- psql -q -U llmproxy -d litellm; }
   gunzip -c "$dir/n8n_$stamp.sql.gz" | { "${K[@]}" -n $OLD_NS exec -i deploy/gv-n8n-db -- psql -U "$N8N_DB_USER" -d postgres -c "drop database $N8N_DB_NAME with (force)" -c "create database $N8N_DB_NAME owner $N8N_DB_USER" >/dev/null; "${K[@]}" -n $OLD_NS exec -i deploy/gv-n8n-db -- psql -q -U "$N8N_DB_USER" -d "$N8N_DB_NAME"; }
-  for f in .env deploy/pi/.env web/.env; do local b="$dir/$(tr / _ <<<"$f")_$stamp"; [[ -f $b ]] && install -o $OWNER -g $OWNER -m 600 "$b" "$REPO/$f"; done
+  for f in .env deploy/k3s/.env web/.env; do local b="$dir/$(tr / _ <<<"$f")_$stamp"; [[ -f $b ]] && install -o $OWNER -g $OWNER -m 600 "$b" "$REPO/$f"; done
   [[ $(recorded identifiers_moved) == 1 && -f $HOME_DIR/.cc-private-identifiers ]] && mv "$HOME_DIR/.cc-private-identifiers" "$HOME_DIR/.gv-private-identifiers"
   [[ $(recorded backups_moved) == 1 && -d $BACKUPS && ! -e $HOME_DIR/gv-backups ]] && mv "$BACKUPS" "$HOME_DIR/gv-backups"
   systemctl daemon-reload

@@ -12,7 +12,7 @@
 # Mirror seams (2026-08-30): a build container sees none of the host's mirror
 # configuration, so each external source is a build-arg — blank = public. The
 # single-node driver passes them from the repo-root .env; the k3s build script
-# passes nothing. See deploy/pi/graphiti/Dockerfile for why the apt file is
+# passes nothing. See the retired Graphiti image's Dockerfile (deploy/pi/graphiti/, deleted in v2.61.0) for why the apt file is
 # rewritten from /etc/os-release rather than sed'ed.
 # The base REF comes from the manifest (2026-09-23 design record, D2):
 # resolve-images.sh resolves images.txt's `sandbox-base` row and the single-node

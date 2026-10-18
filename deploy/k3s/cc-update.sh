@@ -70,10 +70,13 @@ WT=""                # build worktree, "" when none exists
 
 set -a
 # shellcheck disable=SC1091
-[[ -f "$REPO/deploy/pi/.env" ]] && . "$REPO/deploy/pi/.env"
+# shellcheck source=env-path.sh
+. "$REPO/deploy/k3s/env-path.sh"
+ENV_FILE="$(cc_k3s_env_file "$REPO")"
+[[ -f "$ENV_FILE" ]] && . "$ENV_FILE"
 set +a
 
-# Same resolution as the build scripts and verify.sh: override in deploy/pi/.env.
+# Same resolution as the build scripts and verify.sh: override in deploy/k3s/.env.
 COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
 
 note() { printf '%s\n' "$*"; }   # journald captures stdout — that IS the log
@@ -154,6 +157,26 @@ patch_graphiti() {
 APP_ENV_DEFAULTS=(
   "CC_GRAPH_RERANK_ALIAS=cc-rerank"
 )
+# The containers' env moved from deploy/pi/.env to deploy/k3s/.env in v2.66.0
+# (the deploy/pi split). The file is UNTRACKED, so the merge does not move it;
+# the merged tree's own function does, keyed on that tree carrying it (a
+# rollback onto an older tree finds no script and skips). WARN-only: every
+# reader resolves the old path as a fallback, so an unmoved file only means
+# the move happens on the next init-env.sh or update. Runs right after the
+# merge, before anything in the merged tree reads the env (reconcile's
+# mint-keys.sh does).
+migrate_k3s_env() {
+  [[ -f "$REPO/deploy/k3s/env-path.sh" ]] || return 0
+  # shellcheck source=env-path.sh
+  . "$REPO/deploy/k3s/env-path.sh"
+  if "${RUNAS[@]}" bash -c '. "$1/deploy/k3s/env-path.sh" && cc_k3s_env_migrate "$1"' _ "$REPO"; then
+    note "containers' env: $(cc_k3s_env_file "$REPO")"
+  else
+    note "WARNING: the containers' env was not moved to deploy/k3s/.env — readers fall back to deploy/pi/.env; run ./deploy/k3s/init-env.sh"
+  fi
+  return 0
+}
+
 ensure_app_env_defaults() {
   local row key
   [[ -f "$REPO/.env" ]] || { note "WARNING: $REPO/.env not found — no app settings added"; return 0; }
@@ -454,7 +477,7 @@ main() {
   } >"$keyfile"
   chown codyslab:codyslab "$keyfile" 2>/dev/null; chmod 600 "$keyfile"
   [[ -n "${N8N_ENCRYPTION_KEY:-}" && -n "${LITELLM_SALT_KEY:-}" ]] \
-    || note "WARNING: a decryption key is missing from deploy/pi/.env — the litellm/n8n dumps above would not be restorable"
+    || note "WARNING: a decryption key is missing from deploy/k3s/.env — the litellm/n8n dumps above would not be restorable"
 
   PHASE_NOW=busy; refuse_if_busy busy
 
@@ -467,6 +490,9 @@ main() {
     "${RUNAS[@]}" git -C "$REPO" merge --abort 2>/dev/null
     die merge "merge of v$TARGET_VERSION conflicts with local commits — resolve by hand (services restarted on the OLD version)"
   fi
+
+  PHASE_NOW=env; phase "containers' env path (deploy/k3s/.env)"
+  migrate_k3s_env
 
   PHASE_NOW=schema; phase "applying schema (additive-only, idempotent)"
   "${K[@]}" exec -i deploy/cc-postgres -- psql -q -U central_command -d central_command -v ON_ERROR_STOP=1 \
@@ -514,7 +540,7 @@ main() {
       TOUCHED_DEPLOYS+=("$cm_deploy")
     fi
   done <<'CM'
-deploy/pi/litellm/config.yaml|cc-litellm-config|config.yaml|cc-litellm
+deploy/shared/litellm/config.yaml|cc-litellm-config|config.yaml|cc-litellm
 central_command/db/schema.sql|cc-schema-sql|01-schema.sql|
 CM
 
@@ -540,7 +566,7 @@ CM
   done
 
   changed_units="$(changed_between 'deploy/k3s/*.service' 'deploy/k3s/*.path' 'deploy/k3s/*.timer' \
-                                   'deploy/k3s/*-tmpfiles.conf' 'deploy/pi/cc-nerve.service')"
+                                   'deploy/k3s/*-tmpfiles.conf')"
   if [[ -n "$changed_units" ]]; then
     while read -r f; do
       [[ -f "$REPO/$f" ]] || continue   # a unit DELETED by the release is not ours to install
@@ -597,7 +623,7 @@ CM
     # standing limit: like cc-update.service, a change to THIS block takes
     # effect on the NEXT run.
     phase "litellm policy apply"
-    if "${RUNAS[@]}" python3 "$REPO/deploy/pi/litellm/policy.py" --apply; then
+    if "${RUNAS[@]}" python3 "$REPO/deploy/shared/litellm/policy.py" --apply; then
       note "litellm policy applied"
     else
       note "WARNING: policy.py --apply failed — run it by hand after fixing the cause (verify.sh --check stays red until then)"

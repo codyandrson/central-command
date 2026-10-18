@@ -64,11 +64,12 @@ def tree(tmp_path: Path) -> Path:
     (tmp_path / "deploy" / "k3s").mkdir(parents=True)
     (tmp_path / "deploy" / "pi").mkdir(parents=True)
     shutil.copy(MINT, tmp_path / "deploy" / "k3s" / "mint-keys.sh")
+    shutil.copy(MINT.parent / "env-path.sh", tmp_path / "deploy" / "k3s" / "env-path.sh")
     # A make-secrets.sh that would prove --scope-only ran it.
     ms = tmp_path / "deploy" / "k3s" / "make-secrets.sh"
     ms.write_text("#!/usr/bin/env bash\ntouch \"$(dirname \"$0\")/MADE_SECRETS\"\n")
     ms.chmod(0o755)
-    (tmp_path / "deploy" / "pi" / ".env").write_text(f"LITELLM_MASTER_KEY={MASTER}\n")
+    (tmp_path / "deploy" / "k3s" / ".env").write_text(f"LITELLM_MASTER_KEY={MASTER}\n")
     (tmp_path / ".env").write_text(f"CC_LLM_API_KEY={SPINE}\n")
     stubs = tmp_path / "stubs"
     stubs.mkdir()

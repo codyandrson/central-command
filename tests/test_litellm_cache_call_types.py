@@ -23,7 +23,7 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 
 CONFIG_SOURCES = [
-    REPO / "deploy" / "pi" / "litellm" / "config.yaml",
+    REPO / "deploy" / "shared" / "litellm" / "config.yaml",
     REPO / "deploy" / "single" / "litellm-config.yaml",
 ]
 

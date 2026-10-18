@@ -9,7 +9,7 @@
 #
 # Open http://<this-host's tailscale name>:7474, connect to
 # bolt://<same host>:7687, user neo4j, password NEO4J_PASSWORD in
-# deploy/pi/.env.
+# deploy/k3s/.env.
 set -euo pipefail
 
 TSIP=$(tailscale ip -4 | head -1)

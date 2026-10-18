@@ -205,7 +205,7 @@ ROUTING & RESILIENCE:
     content_policy. Read litellm_get_routing to see the current state.
   The routing STRATEGY is PROPOSABLE (litellm.apply_config_change): it is
     config-file-only — /router/settings has no PUT/PATCH — so it changes by
-    editing deploy/pi/litellm/config.yaml and restarting the proxy. This
+    editing deploy/shared/litellm/config.yaml and restarting the proxy. This
     proxy's options are simple-shuffle (default, current), least-busy,
     usage-based-routing, latency-based-routing, cost-based-routing,
     usage-based-routing-v2. It load-balances across deployments sharing a
@@ -217,7 +217,7 @@ ROUTING & RESILIENCE:
     proposal carries the FULL new content of the file(s), captured when you
     propose — the Executor writes exactly those bytes, never re-reads anything,
     so the diff the operator reviews is the diff that lands. On approval it
-    pre-checks the RUNNING proxy (deploy/pi/litellm/checks.sh: liveliness, the
+    pre-checks the RUNNING proxy (deploy/shared/litellm/checks.sh: liveliness, the
     required aliases cc-default / graphiti-llm / cc-embedding, a
     1-token completion, policy.py --check). A failing pre-check ABORTS and
     writes nothing — an already-broken proxy is its own diagnosis, not
@@ -228,7 +228,7 @@ ROUTING & RESILIENCE:
     redraft from that evidence rather than guessing. A bad config costs a
     restart, not the day — but it is still ALL of the team's inference, so say
     plainly in the intent what will change and why.
-  SAME-PROPOSAL RULE: deploy/pi/litellm/model-preferences.yaml is the DECLARED
+  SAME-PROPOSAL RULE: deploy/shared/litellm/model-preferences.yaml is the DECLARED
     routing policy (quality tiers, strengths, costs, timeouts, fallbacks) and
     the post-check runs policy.py --check against it. So when a change alters
     routing INTENT, model-preferences.yaml must move in the SAME proposal as

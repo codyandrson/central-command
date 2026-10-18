@@ -9,7 +9,7 @@ writes (or refuses to write) a dump set. No cluster, no root.
   * nothing is stopped or deleted unless the backup exited 0 AND left the whole
     dump set, which is then kept outside the nightly retention's reach;
   * only the spine and graph volumes are deleted — never LiteLLM's or n8n's,
-    never deploy/pi/.env.
+    never deploy/k3s/.env.
 """
 
 from __future__ import annotations
@@ -83,13 +83,14 @@ def tree(tmp_path: Path) -> Path:
     (t / "deploy" / "pi").mkdir()
     (t / "web").mkdir()
     shutil.copy(SETUP, k3s / "setup.sh")
+    shutil.copy(SETUP.parent / "env-path.sh", k3s / "env-path.sh")
     (k3s / "backup.sh").write_text(BACKUP)
     (k3s / "backup.sh").chmod(0o755)
     (k3s / "make-secrets.sh").write_text('#!/usr/bin/env bash\necho make-secrets >> "$STUB_LOG"\n')
     (k3s / "make-secrets.sh").chmod(0o755)
     for m in ("20-postgres.yaml", "40-graph.yaml"):
         (k3s / m).write_text("# stub\n")
-    (t / "deploy" / "pi" / ".env").write_text("NEO4J_PASSWORD=pw\nLITELLM_SALT_KEY=salt\n")
+    (t / "deploy" / "k3s" / ".env").write_text("NEO4J_PASSWORD=pw\nLITELLM_SALT_KEY=salt\n")
     (t / ".env").write_text("CC_JIRA_BASE_URL=https://jira.example.com\n")
     (t / "web" / ".env").write_text("PORT=3080\n")
     # One shipped example (tracked) and one folder an agent synced (untracked).
@@ -175,7 +176,7 @@ def test_a_confirmed_reset_backs_up_then_wipes_exactly_the_spine_and_the_graph(t
     assert not (tree / ".env").exists() and not (tree / "web" / ".env").exists()
     assert "jira.example.com" in (keep / "env" / "root.env").read_text()
     assert (keep / "env" / "web.env").is_file()
-    assert "LITELLM_SALT_KEY=salt" in (tree / "deploy" / "pi" / ".env").read_text()
+    assert "LITELLM_SALT_KEY=salt" in (tree / "deploy" / "k3s" / ".env").read_text()
     # The synced MCP source left with the instance; the shipped example stayed.
     assert (keep / "servers" / "synced-by-agent" / "server.py").is_file()
     assert not (tree / "servers" / "synced-by-agent").exists()

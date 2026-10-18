@@ -428,7 +428,7 @@ the *why*, the placement table, §8's instance-data decisions and rollback.
 
 **Elicitation (before the driver).** Two answer files:
 
-- `deploy/pi/.env` — run `./deploy/k3s/init-env.sh` (idempotent); it
+- `deploy/k3s/.env` — run `./deploy/k3s/init-env.sh` (idempotent); it
   generates every GENERATED value and prints the ELICITED ones to collect.
   Topology: placement is the role labels `cc-role/anchor` /
   `cc-role/compute` (preflight names the label commands if missing), and
@@ -496,7 +496,7 @@ deploy/k3s/<file>.yaml` for each of `20-postgres`, `40-graph`, `50-n8n`,
 `31-litellm-rbac` only for a FULL wipe — deleting a manifest's PVCs deletes
 the data), plus `sudo systemctl disable --now cc-uvicorn cc-nerve
 cc-graph-bolt cc-sandbox-runner cc-backup.timer`. Same `.env`-backup
-reminder, for `deploy/pi/.env`. For a FULLY-clean slate, also purge the
+reminder, for `deploy/k3s/.env`. For a FULLY-clean slate, also purge the
 gitignored leftovers a manifest wipe misses — the minted
 `~/.cc-*.kubeconfig` files (stale tokens outlive their namespaces) and the
 podman profile's litter in a shared checkout — since v2.42.0 only what a

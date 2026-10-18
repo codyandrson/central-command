@@ -16,7 +16,7 @@ to add one.
   overwritten. Both `setup.sh` drivers exit 3 on a fresh catalog on purpose
   so the operator fills in providers and credentials before anything else
   deploys.
-- **Enforced:** script: `deploy/pi/litellm/register-models.py` is create-only; setup pauses (exit 3) on a fresh catalog
+- **Enforced:** script: `deploy/shared/litellm/register-models.py` is create-only; setup pauses (exit 3) on a fresh catalog
 - **Source:** .claude/rules/models.md
 
 ### DL-064 — A model's capabilities are measured, never guessed; an undeclared flag is not neutral
@@ -70,7 +70,7 @@ to add one.
 
 - **Status:** active
 - **Date:** 2026-07-31
-- **Rule:** (recorded here) `deploy/pi/litellm/model-preferences.yaml`
+- **Rule:** (recorded here) `deploy/shared/litellm/model-preferences.yaml`
   declares `fallbacks: {}` — no local model falls back to a cloud model.
 - **Why:** The YAML's own comment: fallback keys to `claude-haiku-4-5` were
   removed after a workstation outage silently reached Anthropic and then
@@ -78,7 +78,7 @@ to add one.
   The file states plainly: "This is CURRENT CONFIGURATION, not a rule.
   Provider models are expected back later to make the system more robust."
 - **Enforced:** code structure only — an empty YAML block (`fallbacks: {}`); no test asserts fallbacks stay empty
-- **Source:** code comment `deploy/pi/litellm/model-preferences.yaml:372-390`
+- **Source:** code comment `deploy/shared/litellm/model-preferences.yaml:372-390`
 
 ### DL-068 — The router-mode serving unit was never built; model swapping lives outside this repo
 

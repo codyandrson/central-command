@@ -48,7 +48,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PI_ENV="$REPO_ROOT/deploy/pi/.env"
+# shellcheck source=deploy/k3s/env-path.sh
+. "$REPO_ROOT/deploy/k3s/env-path.sh"
+PI_ENV="$(cc_k3s_env_file "$REPO_ROOT")"   # the containers' env (deploy/k3s/.env)
 ROOT_ENV="$REPO_ROOT/.env"
 WEB_ENV="$REPO_ROOT/web/.env"
 BASE_URL="${CC_LITELLM_URL:-http://127.0.0.1:4000}"

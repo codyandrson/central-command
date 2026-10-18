@@ -1,6 +1,6 @@
 ---
 paths:
-  - "deploy/pi/litellm/**"
+  - "deploy/shared/litellm/**"
   - "**/register-models.py"
   - "**/model-preferences.yaml"
   - "**/policy.py"

@@ -2,7 +2,8 @@
 # ============================================================================
 # Central Command disaster-recovery backup — k3s edition (2026-07-31).
 #
-#   Supersedes deploy/pi/backup.sh, which drove the Docker stack. Same four
+#   Supersedes the retired Compose stack's backup.sh (deploy/pi/, gone in
+#   v2.67.0), which drove the Docker stack. Same four
 #   stores, same validity checks, same retention rule, same exit contract. The
 #   only real change is HOW each store is reached, plus one new fact: the graph
 #   now lives on the CHROMEBOX, so its dump runs there.
@@ -49,7 +50,10 @@ mkdir -p "$OUT"; chmod 700 "$OUT"
 
 set -a
 # shellcheck disable=SC1091
-[[ -f "${REPO}/deploy/pi/.env" ]] && . "${REPO}/deploy/pi/.env"
+# shellcheck source=env-path.sh
+. "${REPO}/deploy/k3s/env-path.sh"
+ENV_FILE="$(cc_k3s_env_file "$REPO")"
+[[ -f "$ENV_FILE" ]] && . "$ENV_FILE"
 set +a
 
 # One backup at a time — an overlapping run would fight over the neo4j scale-down.
@@ -114,7 +118,7 @@ keyfile="${OUT}/keys_${STAMP}.env"
 } > "$keyfile"
 chmod 600 "$keyfile"
 if [[ -z "${N8N_ENCRYPTION_KEY:-}" || -z "${LITELLM_SALT_KEY:-}" ]]; then
-  say "ERROR: a decryption key is missing from deploy/pi/.env — DR would be impossible"
+  say "ERROR: a decryption key is missing from deploy/k3s/.env — DR would be impossible"
   failed+=("keys")
 else
   say "  ok → $(basename "$keyfile") (0600)"
@@ -225,7 +229,7 @@ say "done → ${OUT}/ (retain ${RETAIN_DAYS}d, $(du -sh "$OUT" | cut -f1) total)
 #        under a different N8N_ENCRYPTION_KEY leaves the credential rows present
 #        and undecryptable.
 #     2. k3s kubectl -n central-command scale deploy/cc-n8n --replicas=0
-#     3. Put that keys_<stamp>.env's N8N_ENCRYPTION_KEY into deploy/pi/.env, then
+#     3. Put that keys_<stamp>.env's N8N_ENCRYPTION_KEY into deploy/k3s/.env, then
 #          ./deploy/k3s/make-secrets.sh
 #     4. Delete the key file the FRESH instance stamped onto the PVC. n8n writes
 #        its generated key into /home/node/.n8n/config on FIRST boot and that
@@ -262,6 +266,6 @@ say "done → ${OUT}/ (retain ${RETAIN_DAYS}d, $(du -sh "$OUT" | cut -f1) total)
 #   corruption.
 #
 #   Keys — if restoring onto a NEW host, put keys_<stamp>.env's values into
-#   deploy/pi/.env BEFORE running make-secrets.sh. Same-host restores already
+#   deploy/k3s/.env BEFORE running make-secrets.sh. Same-host restores already
 #   have them.
 # ============================================================================

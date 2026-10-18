@@ -470,7 +470,7 @@ def test_the_required_alias_list_is_one_function():
     # ...and the KEY derivation exists in python too (register-models.py turns
     # the values into rows), which is why both sides are pinned to each other in
     # tests/test_register_models_upstream.py.
-    rm = (ROOT / "deploy" / "pi" / "litellm" / "register-models.py").read_text(encoding="utf-8")
+    rm = (ROOT / "deploy" / "shared" / "litellm" / "register-models.py").read_text(encoding="utf-8")
     assert "def alias_env_key" in rm
 
 

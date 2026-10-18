@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "deploy" / "k3s" / "90-speech.yaml"
 PROSE = (
     ROOT / "deploy" / "k3s" / "setup.sh",
-    ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml",
+    ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml",
     MANIFEST,
 )
 

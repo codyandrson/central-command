@@ -123,7 +123,7 @@ def _entries() -> list[dict]:
             ),
             "credential": {
                 "label": "admin key + UI login",
-                "location": "CC_LLM_PROXY_ADMIN_KEY (+ UI_USERNAME/UI_PASSWORD in deploy/pi/.env)",
+                "location": "CC_LLM_PROXY_ADMIN_KEY (+ UI_USERNAME/UI_PASSWORD in deploy/k3s/.env)",
             },
         },
         {
@@ -134,7 +134,7 @@ def _entries() -> list[dict]:
             "health": _tcp_check(settings.litellm_db_url or None, 5443),
             "credential": {
                 "label": "salt key + DB password",
-                "location": "CC_LITELLM_SALT_KEY + LITELLM_POSTGRES_PASSWORD in deploy/pi/.env",
+                "location": "CC_LITELLM_SALT_KEY + LITELLM_POSTGRES_PASSWORD in deploy/k3s/.env",
             },
         },
         {
@@ -187,7 +187,7 @@ def _entries() -> list[dict]:
             "health": _neo4j_status(),
             "credential": {
                 "label": "database password",
-                "location": "NEO4J_PASSWORD in deploy/pi/.env",
+                "location": "NEO4J_PASSWORD in deploy/k3s/.env",
             },
         },
         {
@@ -198,7 +198,7 @@ def _entries() -> list[dict]:
             "health": _http_check(_origin(settings.email_facade_url)),
             "credential": {
                 "label": "n8n login + encryption key (Gmail OAuth lives inside n8n)",
-                "location": "n8n login + N8N_ENCRYPTION_KEY in deploy/pi/.env",
+                "location": "n8n login + N8N_ENCRYPTION_KEY in deploy/k3s/.env",
             },
         },
         {

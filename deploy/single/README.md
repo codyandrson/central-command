@@ -80,7 +80,7 @@ assumes (postgres 5442, litellm 4000, bolt 7687).
 
 The proxy's model catalog is **DB-stored** (`store_model_in_db`, as on k3s) and
 **yours to fill in**: the `llm` phase creates the required aliases
-(`models.json`, via `deploy/pi/litellm/register-models.py` — create-only) as
+(`models.json`, via `deploy/shared/litellm/register-models.py` — create-only) as
 skeletons and **pauses** for you to enter the provider, model ids and key in
 the LiteLLM UI; running `./setup.sh` again resumes from the ledger at `llm`,
 validates each alias with a real request, and continues. Nothing you enter

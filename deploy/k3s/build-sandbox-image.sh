@@ -28,7 +28,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKERFILE="$REPO_ROOT/deploy/k3s/sandbox.Dockerfile"
 IMAGE=cc-sandbox:1
 IMAGE_REF="docker.io/library/${IMAGE}"
-CHROMEBOX="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"   # compute-node ssh target; override in deploy/pi/.env
+CHROMEBOX="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"   # compute-node ssh target; override in deploy/k3s/.env
 CTR_NS=k8s.io  # k3s's containerd keeps kubernetes images in this namespace
 
 [[ -f "$DOCKERFILE" ]] || { echo "FATAL: $DOCKERFILE not found" >&2; exit 1; }

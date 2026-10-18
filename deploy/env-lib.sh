@@ -18,7 +18,7 @@
 #
 #   Consumed by: deploy/single/{setup,update,resolve-images,verify,make-secrets,
 #   discover-llm,build-*}.sh and deploy/discover.sh. The k3s profile is NOT in
-#   scope for this record and keeps its own deploy/pi/.env and web/.env.
+#   scope for this record and keeps its own deploy/k3s/.env and web/.env.
 #
 #   Functions (all cc_-prefixed so a caller's own helpers never collide):
 #     cc_get_kv <file> <key>              read one dotenv value, no sourcing
@@ -941,7 +941,7 @@ cc_tls_insecure_warn_once() { # cc_tls_insecure_warn_once <consumers>
 # The key NAME is the alias upper-cased with every non-alphanumeric turned into
 # `_`: cc-default -> CC_LLM_UPSTREAM_MODEL_CC_DEFAULT, cc-rerank ->
 # CC_LLM_UPSTREAM_MODEL_CC_RERANK. Mirrored in
-# deploy/pi/litellm/register-models.py (`alias_env_key`) — that script is what
+# deploy/shared/litellm/register-models.py (`alias_env_key`) — that script is what
 # turns these into rows, and it runs as Python, so the derivation exists twice
 # on purpose; `tests/test_register_models_upstream.py` pins the pair.
 cc_alias_env_key() { # cc_alias_env_key <alias>

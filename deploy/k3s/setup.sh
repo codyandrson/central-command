@@ -13,7 +13,7 @@
 #   This file ORCHESTRATES; it does not reimplement. Every real operation
 #   already lives next to it (init-env.sh, make-secrets.sh, mint-keys.sh,
 #   build-*-image.sh, make-*-kubeconfig.sh, install-gvisor.sh, verify.sh, and
-#   deploy/pi/litellm/{register-models,policy}.py) and is CALLED, not copied.
+#   deploy/shared/litellm/{register-models,policy}.py) and is CALLED, not copied.
 #   README.md stays the prose runbook; this mechanizes its §1–§6 and §9.
 #
 #   PHASES — each a subcommand, each individually re-runnable via the SAME
@@ -61,7 +61,9 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-ENV_FILE="$REPO_ROOT/deploy/pi/.env"     # the CONTAINERS' env (make-secrets.sh)
+# shellcheck source=env-path.sh
+. "$HERE/env-path.sh"
+ENV_FILE="$(cc_k3s_env_file "$REPO_ROOT")"   # the CONTAINERS' env (deploy/k3s/.env; make-secrets.sh)
 APP_ENV="$REPO_ROOT/.env"                # the APP's env (CC_*)
 NS=central-command
 
@@ -170,7 +172,7 @@ is_placeholder() { [[ -z "$1" || "$1" == *CHANGEME* || "$1" == PENDING ]]; }
 set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
   local cur; cur="$(get_kv "$1" "$2")"
   if [[ -z "$3" ]] && is_placeholder "$cur"; then
-    warn "$4" "$2 has no value to copy — the source variable is empty in deploy/pi/.env"
+    warn "$4" "$2 has no value to copy — the source variable is empty in deploy/k3s/.env"
     return 0
   fi
   if is_placeholder "$cur"; then
@@ -339,13 +341,13 @@ phase_validate() {
   load_env || return 1
   pass "answer-file" "$ENV_FILE present"
 
-  # The GENERATED block (deploy/pi/.env.example). init-env.sh fills every one
+  # The GENERATED block (deploy/k3s/.env.example). init-env.sh fills every one
   # of these; an empty one means it was never run, or was edited since.
   local v
   for v in NEO4J_PASSWORD LITELLM_MASTER_KEY LITELLM_SALT_KEY \
            LITELLM_POSTGRES_PASSWORD N8N_ENCRYPTION_KEY N8N_DB_PASSWORD; do
     if [[ -z "${!v:-}" ]]; then
-      fail "answer-${v}" "$v is empty in deploy/pi/.env — run: ./deploy/k3s/init-env.sh"
+      fail "answer-${v}" "$v is empty in deploy/k3s/.env — run: ./deploy/k3s/init-env.sh"
     elif [[ "${!v}" == PENDING ]]; then
       fail "answer-${v}" "$v is PENDING — a placeholder, not a credential; clear it and run: ./deploy/k3s/init-env.sh"
     else
@@ -412,7 +414,7 @@ phase_preflight() {
   # exempt: the minted kubeconfigs live in $HOME by design).
   local unit stray
   stray=""
-  for unit in "$HERE"/cc-*.service "$HERE"/cc-*.path "$HERE"/cc-*.timer "$REPO_ROOT/deploy/pi/cc-nerve.service"; do
+  for unit in "$HERE"/cc-*.service "$HERE"/cc-*.path "$HERE"/cc-*.timer "$HERE/cc-nerve.service"; do
     if grep -E '^(WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=' "$unit" 2>/dev/null \
        | grep -oE '/home/[^ :"]+' | grep -vq "^$REPO_ROOT"; then
       stray="$stray $(basename "$unit")"
@@ -459,7 +461,7 @@ phase_preflight() {
   if compute_ssh true 2>/dev/null; then
     pass "compute-ssh" "passwordless ssh to $CC_COMPUTE_SSH"
   else
-    fail "compute-ssh" "cannot ssh to $CC_COMPUTE_SSH without a prompt — fix the key, or set CC_COMPUTE_SSH in deploy/pi/.env"
+    fail "compute-ssh" "cannot ssh to $CC_COMPUTE_SSH without a prompt — fix the key, or set CC_COMPUTE_SSH in deploy/k3s/.env"
     return 1
   fi
 
@@ -563,13 +565,13 @@ llm_gate() { # llm_gate <what-failed>
   note "  UI:           http://127.0.0.1:4000/ui   (Models + Endpoints)"
   note "  login:        username 'admin', password = LITELLM_MASTER_KEY"
   note "                (or UI_USERNAME/UI_PASSWORD if set in .env)"
-  note "                (the value is in deploy/pi/.env — not printed here)"
+  note "                (the value is in deploy/k3s/.env — not printed here)"
   note ""
   note "  For each alias listed above, edit the row: replace every PLACEHOLDER"
   note "  (model id after the prefix, api_base host) and enter the key — for"
   note "  the Anthropic rows create the credential under Endpoints and attach"
   note "  it (ANTHROPIC_API_KEY is deliberately NOT in the pod). The invariants"
-  note "  the re-run checks are in deploy/pi/litellm/model-preferences.yaml:"
+  note "  the re-run checks are in deploy/shared/litellm/model-preferences.yaml:"
   note "    graphiti-llm           MUST be a PLAIN openai/<model> — same as"
   note "                           cc-default. The old chat_completions/"
   note "                           bridge prefix is now WRONG: the app's"
@@ -627,7 +629,7 @@ rerank_decide_k3s() {
   # the app phase's default nor the updater's turns it on behind the operator.
   # Unfilled while the app's .env NAMES it is the gate: search would error.
   local state
-  state="$($PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --row-state "$alias" 2>/dev/null)" || state=""
+  state="$($PY "$REPO_ROOT/deploy/shared/litellm/register-models.py" --row-state "$alias" 2>/dev/null)" || state=""
   if [[ "$state" != filled ]]; then
     if [[ -z "$state" ]]; then
       fail "probe-rerank" "could not read the proxy's /model/info to see whether $alias is filled — run: ./deploy/k3s/setup.sh diagnose"
@@ -672,12 +674,14 @@ rerank_decide_k3s() {
 phase_llm() {
   load_env || return 1
 
-  step "init-env" "deploy/pi/.env bootstrapped (idempotent — nothing set was overwritten)" \
+  step "init-env" "deploy/k3s/.env bootstrapped (idempotent — nothing set was overwritten; an old deploy/pi/.env is moved here)" \
     "$HERE/init-env.sh" || return 1
-  # init-env.sh may have generated values into the file we sourced before it.
+  # init-env.sh may have generated values into the file we sourced before it —
+  # or MOVED it: re-resolve the path, then re-read.
+  ENV_FILE="$(cc_k3s_env_file "$REPO_ROOT")"
   load_env || return 1
 
-  step "secrets" "namespace, the Secrets and the two file-built ConfigMaps applied from deploy/pi/.env" \
+  step "secrets" "namespace, the Secrets and the two file-built ConfigMaps applied from deploy/k3s/.env" \
     "$HERE/make-secrets.sh" || return 1
 
   # Only the LiteLLM trio here. README §1's fork ("already running" vs
@@ -714,14 +718,14 @@ phase_llm() {
   # placeholder left in, a broken invariant — is the USER-ACTION gate, and it
   # fires BEFORE the policy, the keys and every later phase.
   local rrc=0
-  $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" >&2 || rrc=$?
+  $PY "$REPO_ROOT/deploy/shared/litellm/register-models.py" >&2 || rrc=$?
   case "$rrc" in
     0) pass "catalog" "every declared alias is registered, filled in and consistent" ;;
     3) llm_gate "the model catalog needs your provider details (see the alias list above)"; return 3 ;;
     *) fail "catalog" "register-models.py failed (exit $rrc) — run: ./deploy/k3s/setup.sh diagnose"; return 1 ;;
   esac
   step "policy-apply" "routing policy + costs applied onto the registered models" \
-    $PY "$REPO_ROOT/deploy/pi/litellm/policy.py" --apply || return 1
+    $PY "$REPO_ROOT/deploy/shared/litellm/policy.py" --apply || return 1
 
   # REQUIRED, not hygiene: the adaptive router reads member preferences only
   # when it is CONSTRUCTED, so without this restart /adaptive_router/state
@@ -736,7 +740,7 @@ phase_llm() {
     return 1
   fi
   step "policy-check" "the live routing policy matches model-preferences.yaml" \
-    $PY "$REPO_ROOT/deploy/pi/litellm/policy.py" --check || return 1
+    $PY "$REPO_ROOT/deploy/shared/litellm/policy.py" --check || return 1
 
   # mint-keys.sh writes CC_LLM_API_KEY into the REPO-ROOT .env and FATALs if
   # that file does not exist — so it has to exist by now, not by the app phase.
@@ -1072,7 +1076,7 @@ phase_app() {
     else
       # Not fatal — a browser on this host works. Over the tailnet the page
       # loads and the WebSocket then 403s, visible only in the server log.
-      warn "web-env" "web/.env written without ALLOWED_ORIGINS — set CC_COCKPIT_ORIGIN in deploy/pi/.env to your cockpit URL and add the line (README §6); tailnet browsers 403 on the WS upgrade without it"
+      warn "web-env" "web/.env written without ALLOWED_ORIGINS — set CC_COCKPIT_ORIGIN in deploy/k3s/.env to your cockpit URL and add the line (README §6); tailnet browsers 403 on the WS upgrade without it"
     fi
   fi
 
@@ -1100,10 +1104,9 @@ phase_app() {
     warn "cockpit" "node ${nv:-not found} is not >= 22 — cockpit not built; the API runs without it"
   fi
 
-  # systemd units from deploy/k3s/, NOT deploy/pi/ — the old
-  # deploy/pi/cc-uvicorn.service has `ExecStartPre=docker compose up -d`, which
-  # resurrects the Docker stack and fights k3s for 5442. cc-nerve is the one
-  # unit that still legitimately lives in deploy/pi/.
+  # systemd units from deploy/k3s/ only. The retired Compose stack's
+  # cc-uvicorn.service (deploy/pi/, gone in v2.67.0) had `ExecStartPre=docker
+  # compose up -d`, which resurrects the Docker stack and fights k3s for 5442.
   local u
   for u in cc-uvicorn.service cc-sandbox-runner.service cc-graph-bolt.service \
            cc-backup.service cc-backup.timer cc-update.service cc-update.path; do
@@ -1114,8 +1117,8 @@ phase_app() {
   # the root one-shot. See cc-update.sh's header for the design.
   step "update-tmpfiles" "cc-update trigger/status directories declared and created" \
     sudo bash -c "cp '$HERE/cc-update-tmpfiles.conf' /etc/tmpfiles.d/cc-update.conf && systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf" || return 1
-  step "unit-cc-nerve.service" "cc-nerve.service installed (from deploy/pi/)" \
-    sudo cp "$REPO_ROOT/deploy/pi/cc-nerve.service" /etc/systemd/system/ || return 1
+  step "unit-cc-nerve.service" "cc-nerve.service installed" \
+    sudo cp "$HERE/cc-nerve.service" /etc/systemd/system/ || return 1
   step "daemon-reload" "systemd reloaded" sudo systemctl daemon-reload || return 1
 
   # First boot is no longer held for an interview (v2.37.0): the operator's
@@ -1194,7 +1197,7 @@ phase_verify() {
 # operator's name; every node and edge), so the next ./setup.sh lands on the
 # designed first-run state. What is slow or impossible to redo STAYS — the
 # cluster, the images, the LiteLLM database (models, keys, spend), the n8n
-# database (the OAuth credentials) and deploy/pi/.env (the two keys that must
+# database (the OAuth credentials) and deploy/k3s/.env (the two keys that must
 # never rotate). README §8a is the prose.
 #
 # Three properties, each pinned by tests/test_k3s_reset_phase.py:
@@ -1204,7 +1207,7 @@ phase_verify() {
 #     dump set is linked into keep-pre-reset-<stamp>/, a folder the nightly
 #     retention never reads (it prunes top-level files only);
 #   * RESET_STORES is the whole list of what is deleted. The LiteLLM and n8n
-#     volumes are not in it, and deploy/pi/.env is never touched.
+#     volumes are not in it, and deploy/k3s/.env is never touched.
 #
 # The app's .env and web/.env are MOVED into the keep folder unless --keep-env
 # is given: a carried-over .env is a migration, not a fresh install (the
@@ -1331,7 +1334,7 @@ phase_reset() {
     else
       note "  5. move the app's .env and web/.env into the keep folder (--keep-env keeps them)"
     fi
-    note "It keeps: the cluster, the images, the LiteLLM and n8n databases, deploy/pi/.env, the logs."
+    note "It keeps: the cluster, the images, the LiteLLM and n8n databases, deploy/k3s/.env, the logs."
     useraction "reset-confirm" "nothing was changed. reset deletes this deployment's spine database and knowledge graph after backing them up (the plan is on stderr); to do it, re-run: ./deploy/k3s/setup.sh reset --confirm-wipe"
     return 0
   fi
@@ -1566,7 +1569,7 @@ phase_diagnose() {
     done
     printf 'python: '; $PY -V 2>&1 | head -1
     echo
-    echo "== deploy/pi/.env (names only)"
+    echo "== the containers' env, $ENV_FILE (names only)"
     env_key_names "$ENV_FILE"
     echo
     echo "== the app's .env (names only)"
@@ -1635,7 +1638,7 @@ usage: ./deploy/k3s/setup.sh [validate|preflight|llm|stack|app|verify|status|dia
   reset           DESTRUCTIVE and never part of the no-argument run: backs up
                   all four stores, then deletes the spine database and the
                   knowledge graph and recreates both empty. Keeps the cluster,
-                  the LiteLLM and n8n databases and deploy/pi/.env. Without
+                  the LiteLLM and n8n databases and deploy/k3s/.env. Without
                   --confirm-wipe it only prints the plan. --keep-env keeps the
                   app's .env and web/.env (default: moved beside the backup).
   exit codes      0 clean · 1 hard failure · 2 completed with warnings

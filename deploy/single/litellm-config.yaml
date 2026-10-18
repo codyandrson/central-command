@@ -5,7 +5,7 @@
 # NO models here. The catalog lives in LiteLLM's Postgres (store_model_in_db)
 # exactly as on the k3s profile and is managed in the proxy UI/API: setup
 # creates the required aliases as SKELETONS (models.json via
-# deploy/pi/litellm/register-models.py) and PAUSES for the operator to enter
+# deploy/shared/litellm/register-models.py) and PAUSES for the operator to enter
 # the provider, model ids and key, then validates. Until 2026-08-30 four
 # models were declared in a model_list AND store_model_in_db was true —
 # config-declared entries are static (the UI cannot edit them, and a
@@ -29,7 +29,7 @@ litellm_settings:
     type: redis
     host: os.environ/REDIS_HOST
     port: os.environ/REDIS_PORT
-    # NEVER add embedding/aembedding here (mirrors deploy/pi/litellm/
+    # NEVER add embedding/aembedding here (mirrors deploy/shared/litellm/
     # config.yaml, pinned by tests/test_litellm_cache_call_types.py):
     # a /v1/embeddings batch mixing cache hits and misses comes back
     # MISALIGNED — miss rows receive a neighboring cached input's vector

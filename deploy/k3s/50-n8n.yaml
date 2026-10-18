@@ -10,7 +10,7 @@
 #   Gmail OAuth credential; restoring the database under a different key leaves
 #   the credential row present but undecryptable, which costs a re-consent and a
 #   Google Cloud redirect-URI change. make-secrets.sh reads it from the existing
-#   deploy/pi/.env for exactly this reason — never generate a new one.
+#   deploy/k3s/.env for exactly this reason — never generate a new one.
 #
 #   Single instance in the default `regular` execution mode. The desktop ran
 #   queue mode (main + worker + redis) for the retired s0-s3 pipelines; the

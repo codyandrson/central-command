@@ -21,7 +21,7 @@ async def test_read_config_accepts_the_deployment_manifest():
 
 
 async def test_read_config_still_refuses_other_paths():
-    out = await tools.litellm_read_config(None, "deploy/pi/.env")
+    out = await tools.litellm_read_config(None, "deploy/k3s/.env")
     assert "refused" in out
 
 

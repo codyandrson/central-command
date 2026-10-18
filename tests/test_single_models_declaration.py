@@ -13,8 +13,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
-SCRIPT = ROOT / "deploy" / "pi" / "litellm" / "register-models.py"
-K3S_POLICY = ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml"
+SCRIPT = ROOT / "deploy" / "shared" / "litellm" / "register-models.py"
+K3S_POLICY = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"
 
 
 @pytest.fixture(scope="module")

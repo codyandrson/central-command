@@ -161,7 +161,7 @@ async def model_accepts_images(model_id: str) -> bool:
     `model_info.supports_vision` as `None` for our self-hosted entries, which
     means "nobody declared it", NOT "yes". Only an explicit `True` is a yes, so
     an undeclared model is treated as text-only. Declare the truth in
-    `deploy/pi/litellm/model-preferences.yaml` (the same `model_info` home the
+    `deploy/shared/litellm/model-preferences.yaml` (the same `model_info` home the
     routing preferences already use) rather than teaching this function to
     guess from the model's name.
 

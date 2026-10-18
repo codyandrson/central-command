@@ -1609,15 +1609,15 @@ async def litellm_list_mcp_servers(ctx: RunContext) -> str:
 
 
 _LITELLM_CONFIG_FILES = (
-    "deploy/pi/litellm/config.yaml",
-    "deploy/pi/litellm/model-preferences.yaml",
+    "deploy/shared/litellm/config.yaml",
+    "deploy/shared/litellm/model-preferences.yaml",
     "deploy/k3s/30-litellm.yaml",
 )
 
 
 async def litellm_read_config(ctx: RunContext, path: str) -> str:
-    """Read a LiteLLM config or deployment file. `deploy/pi/litellm/config.yaml`
-    and `deploy/pi/litellm/model-preferences.yaml` are the two files a
+    """Read a LiteLLM config or deployment file. `deploy/shared/litellm/config.yaml`
+    and `deploy/shared/litellm/model-preferences.yaml` are the two files a
     `litellm.apply_config_change` proposal may carry — read the CURRENT content
     before proposing either: the proposal carries the FULL new file, so
     authoring it from memory instead of the real current state is how a change

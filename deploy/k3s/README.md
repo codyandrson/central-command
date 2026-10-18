@@ -69,6 +69,37 @@ the scope check, the matching command is
 (jobs stay queued) or graph calls get a 403 the worker retries; nothing is
 lost.
 
+## 0b. The update that moves the containers' env
+
+v2.66.0 is the first half of the `deploy/pi/` split (two releases, the shape
+of §0a). The live set moved: `deploy/pi/litellm/` → `deploy/shared/litellm/`
+(both deployment substrates read it), `deploy/pi/.env` → `deploy/k3s/.env`
+(template `deploy/k3s/.env.example`), `deploy/pi/cc-nerve.service` →
+`deploy/k3s/cc-nerve.service`. Every k3s script finds the env through ONE
+function, `cc_k3s_env_file` in `deploy/k3s/env-path.sh`: the new path when it
+exists, else the old one. **v2.66.0 deletes nothing** — the old copies stay
+byte-identical for one release because the update INTO v2.66.0 is run by the
+installed v2.65.x updater, whose configmap row, units glob and policy-apply
+still name `deploy/pi/...` against the merged tree. v2.67.0 deletes
+`deploy/pi/` whole (duplicates and the retired Compose stack) once v2.66.0 is
+validated, and sets `min_upgrade_from=2.66.0`.
+
+The env file is untracked, so no merge moves it and no rollback restores it.
+The move is `cc_k3s_env_migrate` (same file): `deploy/pi/.env` a regular file
+and `deploy/k3s/.env` absent → `mv`, mode kept, and a relative symlink left at
+the old path so any release that still reads it finds the same bytes; both
+present as regular files → refused, nothing touched. Two callers, same
+function: **after applying v2.66.0, run `./deploy/k3s/init-env.sh`** — it
+migrates first, then does its usual never-overwrite fill — and v2.66.0's own
+updater runs it right after the merge of the NEXT release (WARN-only; an
+unmoved file only means every reader keeps using the old path). Check with
+`ls -la deploy/k3s/.env deploy/pi/.env`: the first a `-rw-------` file, the
+second a symlink to `../k3s/.env`. The two keys inside never change; compare
+`sha256sum` of the file before and after if in doubt. Rollback matrix: a
+failed v2.66.0 apply lands on v2.65.x with nothing moved; a failed v2.67.0
+apply lands on v2.66.0, which reads the new path first. The symlink is
+removed by hand after v2.67.0 is accepted; nothing automated needs it then.
+
 ## 1. Prerequisites & assumptions
 
 Assumed already true before phase 2:
@@ -78,7 +109,7 @@ Assumed already true before phase 2:
 - **Tailscale** up on both; the Pi can `ssh chromebox_admin@100.113.118.28`
   without a password prompt (every build script shells over that).
 - Repo cloned at **`/home/codyslab/central-command`**.
-- **`deploy/pi/.env`** populated — run **`./deploy/k3s/init-env.sh`**: it copies
+- **`deploy/k3s/.env`** populated — run **`./deploy/k3s/init-env.sh`**: it copies
   the template, generates every **GENERATED** variable that is empty, and
   prints the **ELICITED** ones you must supply yourself. It
   never overwrites a value that is already set, so it is safe to re-run and safe
@@ -120,7 +151,7 @@ Assumed already true before phase 2:
     empty `cc-litellm-pgdata`. That means two rebuilds, in this order.
 
     **1. An empty model catalog.** `store_model_in_db: true`, so every model
-    lives in that database and NOT in `deploy/pi/litellm/config.yaml` — and
+    lives in that database and NOT in `deploy/shared/litellm/config.yaml` — and
     since 2026-08-30 the catalog is the operator's, managed in the proxy UI.
     `register-models.py` is create-only: it creates every alias
     `model-preferences.yaml` declares as a SKELETON (name, invariants, and
@@ -131,12 +162,12 @@ Assumed already true before phase 2:
     the policy goes on:
 
     ```bash
-    python3 deploy/pi/litellm/register-models.py             # exit 3 = go fill in the UI
-    python3 deploy/pi/litellm/register-models.py             # exit 0 = every row filled and consistent
-    python3 deploy/pi/litellm/policy.py --apply              # routing policy
+    python3 deploy/shared/litellm/register-models.py             # exit 3 = go fill in the UI
+    python3 deploy/shared/litellm/register-models.py             # exit 0 = every row filled and consistent
+    python3 deploy/shared/litellm/policy.py --apply              # routing policy
     sudo k3s kubectl -n central-command rollout restart deploy/cc-litellm
     sudo k3s kubectl -n central-command rollout status deploy/cc-litellm --timeout=120s
-    python3 deploy/pi/litellm/policy.py --check              # proves parity
+    python3 deploy/shared/litellm/policy.py --check              # proves parity
     ```
 
     The restart is required, not optional: the adaptive router reads member
@@ -199,7 +230,7 @@ Assumed already true before phase 2:
 
 ```bash
 cd /home/codyslab/central-command
-./deploy/k3s/init-env.sh        # bootstraps deploy/pi/.env (idempotent)
+./deploy/k3s/init-env.sh        # bootstraps deploy/k3s/.env (idempotent)
 ./deploy/k3s/make-secrets.sh
 ```
 
@@ -208,7 +239,7 @@ cd /home/codyslab/central-command
 Creates the namespace, the Secrets (`cc-litellm`, `cc-neo4j`, `cc-n8n`, and
 `cc-crawler-llm` if `CC_LLM_API_KEY` is set) and two ConfigMaps
 (`cc-litellm-config`, `cc-schema-sql`) **from
-`deploy/pi/.env`**. Imperative on purpose: no base64'd secret ever lands in the
+`deploy/k3s/.env`**. Imperative on purpose: no base64'd secret ever lands in the
 repo. Idempotent (`--dry-run=client | apply`).
 
 Run this **before** phase 4 — pods that reference a missing Secret sit in
@@ -360,7 +391,7 @@ sudo cp deploy/k3s/cc-update.service         /etc/systemd/system/
 sudo cp deploy/k3s/cc-update.path            /etc/systemd/system/
 sudo cp deploy/k3s/cc-update-stage.service   /etc/systemd/system/
 sudo cp deploy/k3s/cc-update-stage.path      /etc/systemd/system/
-sudo cp deploy/pi/cc-nerve.service           /etc/systemd/system/
+sudo cp deploy/k3s/cc-nerve.service           /etc/systemd/system/
 sudo cp deploy/k3s/cc-update-tmpfiles.conf   /etc/tmpfiles.d/cc-update.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
 
@@ -510,7 +541,7 @@ repo). Full commands are in the **RESTORE section at the bottom of
    workflows with `./deploy/n8n/apply-workflows.sh --k3s` (`deploy/n8n/README.md`;
    the `app` phase runs it once with freshly generated façade tokens, v2.51.0,
    and the updater re-applies them on every release that changes them). The restore only works if
-   `N8N_ENCRYPTION_KEY` in `deploy/pi/.env` is the value the dump was taken
+   `N8N_ENCRYPTION_KEY` in `deploy/k3s/.env` is the value the dump was taken
    under; otherwise the rows are there and undecryptable — pair the dump with
    its **same-stamp `keys_<stamp>.env`**, not with whatever is in `.env` now.
 
@@ -558,7 +589,7 @@ answers):
   `deploy/single/{secrets,stack,stack-llm,optional-*}.yaml`,
   `deploy/single/setup-diagnostics.txt`. Back `deploy/single/.env` up to
   `~/cc-backups/` first — it may hold that profile's never-rotate keys.
-- The instance env files (`.env`, `web/.env`, `deploy/pi/.env`) — usually
+- The instance env files (`.env`, `web/.env`, `deploy/k3s/.env`) — usually
   already backed up and removed by the teardown, but verify rather than
   assume.
 - **A leftover executor drop-in**: `/etc/systemd/system/cc-uvicorn.service.d/`
@@ -588,7 +619,7 @@ operator's command: an agent conducting a setup does not run it.
 | **Deleted** | the spine database (`cc-pgdata`: roster, charters, grants, schedules, mail ledger, proposals, sessions, event log, the operator's name) and the knowledge graph (`cc-neo4j-data`). Both come back empty; the spine reloads `schema.sql` (§7). |
 | **Removed** | what agents deployed: MCP servers in `cc-mcp`, sandbox jobs in `cc-sandbox`, and the untracked folders under `servers/` (moved into the keep folder, not deleted). |
 | **Moved aside** | the app's `.env` and `web/.env`, so the next run starts from `.env.example`. `--keep-env` leaves them in place — that is a data-only reset, and it will not show you what the installer forgets to ask. |
-| **Kept** | the cluster, node labels, images, gVisor; the LiteLLM database (models, virtual keys, spend); the n8n database (the Gmail and Calendar OAuth); `deploy/pi/.env` (`LITELLM_SALT_KEY`, `N8N_ENCRYPTION_KEY`); the logs; the systemd units. |
+| **Kept** | the cluster, node labels, images, gVisor; the LiteLLM database (models, virtual keys, spend); the n8n database (the Gmail and Calendar OAuth); `deploy/k3s/.env` (`LITELLM_SALT_KEY`, `N8N_ENCRYPTION_KEY`); the logs; the systemd units. |
 
 The order is the safety: `backup.sh` runs first, and nothing is stopped or
 deleted unless it exits 0 and leaves all four dumps and the key file. That set

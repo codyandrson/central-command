@@ -73,7 +73,7 @@ two-step failure — workstation unreachable → fall back to haiku → haiku re
 the only target.
 
 **To reverse it:** add the keys back to
-`deploy/pi/litellm/model-preferences.yaml` and run `policy.py --apply`, or
+`deploy/shared/litellm/model-preferences.yaml` and run `policy.py --apply`, or
 propose `litellm.set_fallbacks` per alias. **The bite mark: the ALIAS needs its
 own fallback key**, not just the member deployment. When the alias's single
 deployment is in cooldown the router 429s on `cc-default` before any call
@@ -94,15 +94,15 @@ Do not propose re-enabling cooldown while aliases have one deployment each.
 
 ## Where the routing policy lives
 
-- `deploy/pi/litellm/config.yaml` — proxy settings only. **No models.** A
+- `deploy/shared/litellm/config.yaml` — proxy settings only. **No models.** A
   `fallbacks` block here reads back as `[]` because with
   `store_model_in_db: true` the DB wins that key (verified 2026-07-26); a test
   fails if one reappears.
-- `deploy/pi/litellm/model-preferences.yaml` — the **declared** policy:
+- `deploy/shared/litellm/model-preferences.yaml` — the **declared** policy:
   per-model `quality_tier`, `strengths`, `input_cost_per_token`, `timeout`,
   `supports_vision`, `max_input_tokens`, `thinking_mechanism`/`thinking_levels`,
   and `fallbacks`. It is the truth the repo commits to.
-- `deploy/pi/litellm/policy.py --check` reports drift (exit 1); `--apply` makes
+- `deploy/shared/litellm/policy.py --check` reports drift (exit 1); `--apply` makes
   the live proxy match. `verify.sh` runs the check.
 
 **The two halves live in different homes inside LiteLLM:**

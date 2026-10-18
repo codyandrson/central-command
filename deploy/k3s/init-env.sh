@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Bootstrap deploy/pi/.env for a clean k3s install.
+# Bootstrap deploy/k3s/.env — the containers' env — for a clean k3s install.
 #
 #   Same generating idiom as deploy/single/make-secrets.sh — the k3s substrate
 #   simply never had one, so the 2026-08-23 clean-install run generated nine
 #   credentials by hand. This is that job, tracked.
 #
 #   What it does:
-#     * copies deploy/pi/.env.example -> deploy/pi/.env if absent, chmod 600
+#     * moves an existing deploy/pi/.env to deploy/k3s/.env (one time, a
+#       symlink left behind — deploy/k3s/env-path.sh), then
+#     * copies deploy/k3s/.env.example -> deploy/k3s/.env if absent, chmod 600
 #     * fills every GENERATED-marked variable that is EMPTY
 #       (`openssl rand -hex 32`; LITELLM_MASTER_KEY as `sk-` + hex)
 #     * (no virtual-key slots any more: the three Graphiti keys that needed a
@@ -27,8 +29,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ENV_FILE="$REPO_ROOT/deploy/pi/.env"
-TEMPLATE="$REPO_ROOT/deploy/pi/.env.example"
+# shellcheck source=deploy/k3s/env-path.sh
+. "$REPO_ROOT/deploy/k3s/env-path.sh"
+cc_k3s_env_migrate "$REPO_ROOT" || { echo "FATAL: the containers' env is in two places — see the message above" >&2; exit 1; }
+ENV_FILE="$REPO_ROOT/deploy/k3s/.env"
+TEMPLATE="$REPO_ROOT/deploy/k3s/.env.example"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   [[ -f "$TEMPLATE" ]] || { echo "FATAL: $TEMPLATE missing" >&2; exit 1; }
@@ -85,7 +90,7 @@ echo
 echo "Next:"
 echo "  1. ./deploy/k3s/make-secrets.sh"
 echo "  2. bring the stack up, register models:"
-echo "       python3 deploy/pi/litellm/register-models.py --dry-run   # then without"
+echo "       python3 deploy/shared/litellm/register-models.py --dry-run   # then without"
 echo "  3. ./deploy/k3s/mint-keys.sh      (mints CC_LLM_API_KEY into the repo-root .env)"
 echo
 echo "Back $ENV_FILE up OUTSIDE this tree. LITELLM_SALT_KEY and"

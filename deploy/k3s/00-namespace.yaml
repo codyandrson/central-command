@@ -37,7 +37,7 @@
 #   database already is.
 #
 #   EXPOSURE — the host still reaches everything at today's addresses, so
-#   deploy/pi/.env needs no edits:
+#   deploy/k3s/.env needs no edits:
 #     * Pi-pinned services use hostPort bound to 127.0.0.1 (loopback only,
 #       exactly as the compose stack bound them).
 #     * FLOATING services use type: LoadBalancer. k3s's built-in ServiceLB
@@ -51,7 +51,7 @@
 #       reader/writer use. That is stricter than the compose stack, which
 #       bound 7474/7687 on loopback itself.
 #
-#   Secrets are NOT in this directory. make-secrets.sh reads deploy/pi/.env
+#   Secrets are NOT in this directory. make-secrets.sh reads deploy/k3s/.env
 #   (gitignored) and creates them imperatively — see the script.
 # ============================================================================
 apiVersion: v1

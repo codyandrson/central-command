@@ -19,8 +19,8 @@ from central_command.db import repo
 from central_command.gateway import executor
 from central_command.gateway.capabilities import gated_write_names
 
-CONFIG = "deploy/pi/litellm/config.yaml"
-PREFS = "deploy/pi/litellm/model-preferences.yaml"
+CONFIG = "deploy/shared/litellm/config.yaml"
+PREFS = "deploy/shared/litellm/model-preferences.yaml"
 
 OLD_CONFIG = "router_settings:\n  allowed_fails: 1\n"
 NEW_CONFIG = "router_settings:\n  allowed_fails: 3\n  routing_strategy: least-busy\n"
@@ -71,7 +71,7 @@ class Harness:
 @pytest.fixture
 def h(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "demo_mode", True)
-    (tmp_path / "deploy/pi/litellm").mkdir(parents=True)
+    (tmp_path / "deploy/shared/litellm").mkdir(parents=True)
     (tmp_path / CONFIG).write_text(OLD_CONFIG)
     (tmp_path / PREFS).write_text(OLD_PREFS)
     kubeconfig = tmp_path / "kubeconfig"
@@ -113,7 +113,7 @@ def test_the_capability_is_a_gated_write_with_a_handler():
         ({CONFIG: "router_settings:\n  bad: [unclosed\n"}, "not valid YAML"),
         ({CONFIG: "general_settings:\n  master_key: sk-ant-abc123\n"}, "secret shape"),
         ({CONFIG: "keys:\n  - ATATT-jira-token\n"}, "secret shape"),
-        ({"deploy/pi/.env": "X=1\n"}, "is not one of"),
+        ({"deploy/k3s/.env": "X=1\n"}, "is not one of"),
         ({}, "non-empty"),
         (
             {CONFIG: "model_list:\n  - model_name: cc-default\n  - model_name: graphiti-llm\n"},

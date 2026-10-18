@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Create the Central Command Secrets and ConfigMaps in k3s FROM deploy/pi/.env.
+# Create the Central Command Secrets and ConfigMaps in k3s FROM deploy/k3s/.env.
 #
-#   Secrets are created IMPERATIVELY, on purpose. deploy/pi/.env is gitignored
+#   Secrets are created IMPERATIVELY, on purpose. deploy/k3s/.env is gitignored
 #   and is the single source of truth for credentials; rendering them into a
 #   YAML file under deploy/k3s/ would put base64'd secrets in a tree that gets
 #   pushed. base64 is not encryption. So: no secret literals live in this repo.
@@ -20,7 +20,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ENV_FILE="$REPO_ROOT/deploy/pi/.env"
+# shellcheck source=deploy/k3s/env-path.sh
+. "$REPO_ROOT/deploy/k3s/env-path.sh"
+ENV_FILE="$(cc_k3s_env_file "$REPO_ROOT")"
 NS=central-command
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -51,7 +53,7 @@ done
 # The three Graphiti virtual keys (GRAPHITI_LLM_API_KEY, EMBEDDER_API_KEY,
 # RERANKER_API_KEY) and their Secret left with the Graphiti server (design
 # record 2026-10-04, D10): graphiti-core runs inside the app on CC_LLM_API_KEY.
-# An existing deploy/pi/.env may still carry them; nothing reads them.
+# An existing deploy/k3s/.env may still carry them; nothing reads them.
 
 apply_secret() {  # apply_secret <name> <k=v>...
   local name="$1"; shift
@@ -113,7 +115,7 @@ apply_secret cc-n8n \
 # or data. Revisit only if the shared key's MCP object_permission list ever
 # fronts something sensitive (recorded in STATUS.md).
 # CC_LLM_API_KEY lives in the REPO ROOT .env (the app's env), not in
-# deploy/pi/.env — the app reads it directly, so it was never migrated here.
+# deploy/k3s/.env — the app reads it directly, so it was never migrated here.
 # Fall back to the root .env for this one var rather than duplicating a
 # credential across two files.
 if [[ -z "${CC_LLM_API_KEY:-}" && -f "$REPO_ROOT/.env" ]]; then
@@ -136,7 +138,7 @@ apply_cm_file() {  # apply_cm_file <name> <key>=<path>
     --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - >/dev/null
   echo "  configmap/$name"
 }
-apply_cm_file cc-litellm-config  "config.yaml=$REPO_ROOT/deploy/pi/litellm/config.yaml"
+apply_cm_file cc-litellm-config  "config.yaml=$REPO_ROOT/deploy/shared/litellm/config.yaml"
 apply_cm_file cc-schema-sql      "01-schema.sql=$REPO_ROOT/central_command/db/schema.sql"
 
 echo

@@ -750,13 +750,13 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route=(
-            "gateway/executor.py → write deploy/pi/litellm/*.yaml + git commit → "
+            "gateway/executor.py → write deploy/shared/litellm/*.yaml + git commit → "
             "re-render configmap/cc-litellm-config (and policy.py --apply for "
             "model-preferences.yaml) → kubectl rollout restart deploy/cc-litellm "
-            "→ deploy/pi/litellm/checks.sh"
+            "→ deploy/shared/litellm/checks.sh"
         ),
-        arguments=["files ({path: full new content}, only deploy/pi/litellm/config.yaml "
-                   "and deploy/pi/litellm/model-preferences.yaml)"],
+        arguments=["files ({path: full new content}, only deploy/shared/litellm/config.yaml "
+                   "and deploy/shared/litellm/model-preferences.yaml)"],
         description=(
             "Change the LiteLLM settings that have NO admin API — routing "
             "strategy, num_retries, cooldowns, per-deployment rpm/tpm/order, "
@@ -1406,7 +1406,7 @@ REGISTRY: list[Capability] = [
         ),
         holder="agent (litellm_read_config tool)",
         route=(
-            "repo files deploy/pi/litellm/{config.yaml,model-preferences.yaml} "
+            "repo files deploy/shared/litellm/{config.yaml,model-preferences.yaml} "
             "and deploy/k3s/30-litellm.yaml (path-allowlisted)"
         ),
         arguments=["path"],
@@ -2202,7 +2202,7 @@ POLICIES: list[Policy] = [
         enforced_at=(
             "gateway/executor.py's litellm.apply_config_change handler: file "
             "content is captured at PROPOSE time and written verbatim; only "
-            "deploy/pi/litellm/config.yaml and model-preferences.yaml may be "
+            "deploy/shared/litellm/config.yaml and model-preferences.yaml may be "
             "written; secret shapes in content are refused (these files "
             "reference env vars — LITELLM_SALT_KEY and every key live in the "
             "Secret, never here); a failing PRE-check aborts before anything "
@@ -2212,7 +2212,7 @@ POLICIES: list[Policy] = [
         guard="tests/test_litellm_config_change.py::test_post_check_failure_restores_the_files_and_fails_the_proposal",
         description=(
             "The highest-blast-radius capability in the registry carries its "
-            "own undo: a config that does not pass deploy/pi/litellm/checks.sh "
+            "own undo: a config that does not pass deploy/shared/litellm/checks.sh "
             "after the restart is reverted to the snapshotted bytes, "
             "re-rendered, restarted and re-checked, and the proposal FAILS with "
             "both check outputs so the agent redrafts from real evidence. A "

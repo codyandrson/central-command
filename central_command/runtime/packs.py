@@ -1596,9 +1596,9 @@ PACKS: dict[str, Pack] = {
             ),
             GatedCapability(
                 name="litellm.apply_config_change",
-                arguments=("{'files': {'deploy/pi/litellm/config.yaml': '<the FULL new "
+                arguments=("{'files': {'deploy/shared/litellm/config.yaml': '<the FULL new "
                            "file content>'}} — and/or the same for "
-                           "'deploy/pi/litellm/model-preferences.yaml'. Those two "
+                           "'deploy/shared/litellm/model-preferences.yaml'. Those two "
                            "paths, nothing else"),
                 notes=("THE config-file lever: routing STRATEGY, num_retries, "
                        "cooldowns (allowed_fails/cooldown_time), per-deployment "

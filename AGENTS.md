@@ -39,9 +39,9 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 
 <!-- /bmad:context -->
 
-`deploy/pi/` is part LIVE, part retired — never delete it as a whole as
-"the superseded compose stack." See `deploy/pi/README.md` for which files
-`deploy/k3s/` still reads directly and which are rollback-only.
+The live deploy set lives in `deploy/shared/` and `deploy/k3s/`. `deploy/pi/`
+holds only byte-identical duplicates of it plus the retired Compose stack; the
+whole directory is deleted in v2.67.0 once v2.66.0 is validated.
 
 ## Architecture — runtime is Pydantic AI 2.0 + Claude
 

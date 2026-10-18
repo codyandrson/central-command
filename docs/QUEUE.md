@@ -61,7 +61,7 @@ against the rule — a rising `reopened_count` is the signal to revoke.
 
 All knobs are `CC_*` environment variables read at process start from the
 **repo-root `.env`** (cc-uvicorn's WorkingDirectory; defaults in
-`central_command/config.py`). `deploy/pi/.env` is a different file — it feeds
+`central_command/config.py`). `deploy/k3s/.env` is a different file — it feeds
 `make-secrets.sh` for the k8s pods, not the app. There is deliberately
 no runtime API to change them — one process's config governs the whole queue
 (that's what the dispatcher's advisory lease enforces). The cycle is always:

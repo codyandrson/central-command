@@ -2009,11 +2009,11 @@ async def _mcp_tool_call(args: dict, approver: str, proposer: str | None) -> str
 #                              post-check's `policy.py --check` would fail on
 #                              every preferences edit and roll it straight back.
 
-_LITELLM_CONFIG_FILE = "deploy/pi/litellm/config.yaml"
-_LITELLM_PREFS_FILE = "deploy/pi/litellm/model-preferences.yaml"
+_LITELLM_CONFIG_FILE = "deploy/shared/litellm/config.yaml"
+_LITELLM_PREFS_FILE = "deploy/shared/litellm/model-preferences.yaml"
 _LITELLM_CONFIG_PATHS = (_LITELLM_CONFIG_FILE, _LITELLM_PREFS_FILE)
-_LITELLM_CHECKS_SCRIPT = "deploy/pi/litellm/checks.sh"
-_LITELLM_POLICY_SCRIPT = "deploy/pi/litellm/policy.py"
+_LITELLM_CHECKS_SCRIPT = "deploy/shared/litellm/checks.sh"
+_LITELLM_POLICY_SCRIPT = "deploy/shared/litellm/policy.py"
 _LITELLM_NAMESPACE = "central-command"
 _LITELLM_CONFIGMAP = "cc-litellm-config"
 _LITELLM_DEPLOYMENT = "deployment/cc-litellm"
@@ -2087,7 +2087,7 @@ def _litellm_validate_files(files: dict) -> None:
 
 
 async def _litellm_run_checks() -> tuple[int, str]:
-    """The ONE check seam — deploy/pi/litellm/checks.sh, the same script for the
+    """The ONE check seam — deploy/shared/litellm/checks.sh, the same script for the
     pre-check, the post-check, the rollback re-check and a human at a prompt."""
     root = _repo_root()
     rc, out, err = await _run(

@@ -1,6 +1,6 @@
 """The declared LiteLLM routing policy is well-formed and matches config.yaml.
 
-deploy/pi/litellm/model-preferences.yaml is the DECLARED truth for how the
+deploy/shared/litellm/model-preferences.yaml is the DECLARED truth for how the
 adaptive router scores each model. LiteLLM reads the two halves from two
 DIFFERENT homes -- adaptive_router_preferences from model_info,
 input_cost_per_token from litellm_params -- and fails at neither loudly: a
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-_LITELLM_DIR = Path(__file__).resolve().parents[1] / "deploy" / "pi" / "litellm"
+_LITELLM_DIR = Path(__file__).resolve().parents[1] / "deploy" / "shared" / "litellm"
 POLICY_PATH = _LITELLM_DIR / "model-preferences.yaml"
 CONFIG_PATH = _LITELLM_DIR / "config.yaml"
 

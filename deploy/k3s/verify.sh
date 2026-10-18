@@ -2,7 +2,8 @@
 # ============================================================================
 # Prove the k3s deployment is correct. Run this ON THE PI.
 #
-#   Ported from deploy/pi/verify.sh, which checked the Docker stack. Every
+#   Ported from the retired Compose stack's verify.sh (deploy/pi/, gone in
+#   v2.67.0), which checked the Docker stack. Every
 #   assertion it made is still made here; the access mechanism changed and two
 #   sections gained new obligations.
 #
@@ -40,7 +41,10 @@ K=(sudo k3s kubectl -n "$NS")
 
 set -a
 # shellcheck disable=SC1091
-[[ -f deploy/pi/.env ]] && . deploy/pi/.env
+# shellcheck source=env-path.sh
+. deploy/k3s/env-path.sh
+ENV_FILE="$(cc_k3s_env_file "$PWD")"
+[[ -f "$ENV_FILE" ]] && . "$ENV_FILE"
 set +a
 
 # Topology is ROLE LABELS, not hostnames (2026-08-27 contract): manifests pin
@@ -48,7 +52,7 @@ set +a
 # (JVM/gVisor/Chromium muscle). Resolve each role to its node once; every
 # placement assertion below compares against these, so a node swap is a
 # relabel, not a verify.sh edit. SSH target for the compute node comes from
-# deploy/pi/.env (CC_COMPUTE_SSH), defaulting to today's chromebox.
+# deploy/k3s/.env (CC_COMPUTE_SSH), defaulting to today's chromebox.
 ANCHOR_NODE="$(sudo k3s kubectl get nodes -l cc-role/anchor=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 COMPUTE_NODE="$(sudo k3s kubectl get nodes -l cc-role/compute=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
@@ -66,7 +70,7 @@ echo "== A. services are up and answering =="
 # exactly the property worth asserting.
 check "postgres (spine)  127.0.0.1:5442" "${K[*]} exec deploy/cc-postgres -- pg_isready -U central_command"
 check "litellm            127.0.0.1:4000" "curl -fsS http://127.0.0.1:4000/health/liveliness"
-check "litellm: live routing policy == model-preferences.yaml" "python3 deploy/pi/litellm/policy.py --check"
+check "litellm: live routing policy == model-preferences.yaml" "python3 deploy/shared/litellm/policy.py --check"
 check "n8n                127.0.0.1:5678" "curl -fsS http://127.0.0.1:5678/healthz"
 check "crawler            127.0.0.1:8091" "curl -fsS http://127.0.0.1:8091/healthz"
 check "speech             127.0.0.1:8093" "curl -fsS http://127.0.0.1:8093/health"
@@ -95,7 +99,7 @@ check "neo4j              ClusterIP (in-cluster only)" \
 # Jira / Confluence — OFF-BOX by design, and the one dependency here whose
 # failure is invisible until an agent tries to work (v2.53.0): a wrong or expired
 # Atlassian token looks exactly like a healthy deployment. The credentials live
-# in the APP's .env (the repo-root one, not deploy/pi/.env), which is what
+# in the APP's .env (the repo-root one, not deploy/k3s/.env), which is what
 # central_command.config.settings reads, so the probe runs with the repo root as
 # its cwd. scripts/atlassian_probe.py is the ONE walk of those endpoints — never
 # a second probe here. The venv's python, because the probe imports httpx and

@@ -39,7 +39,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
-SCRIPT = ROOT / "deploy" / "pi" / "litellm" / "register-models.py"
+SCRIPT = ROOT / "deploy" / "shared" / "litellm" / "register-models.py"
 ENV_LIB = ROOT / "deploy" / "env-lib.sh"
 
 KEY = "sk-super-secret-not-in-any-log"
@@ -307,7 +307,7 @@ def test_extra_params_may_not_redeclare_an_owned_field(rm):
 
 def test_the_k3s_declaration_pins_graphiti_llm_thinking_off(rm):
     import yaml
-    policy = yaml.safe_load((ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml").read_text(encoding="utf-8"))
+    policy = yaml.safe_load((ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml").read_text(encoding="utf-8"))
     assert rm.declared(policy)["graphiti-llm"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
@@ -316,7 +316,7 @@ def test_a_probe_judged_alias_is_created_as_its_skeleton_and_never_held_to_it(rm
     setup probe decides (design record 2026-10-04, D3 as rebuilt in v2.62.0).
     Its skeleton is still the creation value, and a PLACEHOLDER left in it is
     still pending — but a filled row of either shape is ok."""
-    for path in (SINGLE / "models.json", ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml"):
+    for path in (SINGLE / "models.json", ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"):
         policy = rm.load_declaration(path)
         assert rm.probe_judged(policy) == {"cc-rerank"}, path
         want = rm.declared(policy)
@@ -395,7 +395,7 @@ def test_one_answer_derives_both_shapes_in_probe_order(rm):
 
 
 def test_the_k3s_skeleton_timeout_rides_every_shape(rm):
-    policy = rm.load_declaration(ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml")
+    policy = rm.load_declaration(ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml")
     shapes = rm.alias_shapes("cc-rerank", policy, {**BASE, RERANK: "rr"})
     assert shapes["rerank"]["timeout"] == 60 and shapes["chat"]["timeout"] == 60
 
@@ -505,7 +505,7 @@ def test_an_optional_alias_never_pauses_even_without_require(rm, monkeypatch, ca
     """k3s passes no --require: before v2.62.1 an unfilled cc-rerank (and its
     real-model row) paused every install, so a site with no reranker could
     not finish. Both are `optional: true` now; a filled row is unchanged."""
-    k3s = ROOT / "deploy" / "pi" / "litellm" / "model-preferences.yaml"
+    k3s = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"
     policy = rm.load_declaration(k3s)
     assert rm.optional_aliases(policy) == {"cc-rerank", "qwen3-rerank-local"}
     assert rm.optional_aliases(rm.load_declaration(_single())) == {"cc-rerank"}

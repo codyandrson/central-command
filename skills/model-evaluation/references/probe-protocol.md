@@ -102,7 +102,7 @@ thinking_levels: ["off", "low", "medium", "xhigh"]
 
 (the exact vocabulary `runtime/models.py::_thinking_body` reads — see its
 `_ANTHROPIC_EFFORT` map and the `qwen_template` branch, and
-`deploy/pi/litellm/model-preferences.yaml`'s comments on `qwen3.8-27b`/
+`deploy/shared/litellm/model-preferences.yaml`'s comments on `qwen3.8-27b`/
 `cc-default`: their chat template takes `enable_thinking`/`reasoning_effort`
 through `chat_template_kwargs`, and there is **no** `reasoning_effort: "none"`
 for that template — the template raises and every request 500s, so `"off"`

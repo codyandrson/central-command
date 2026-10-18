@@ -125,12 +125,11 @@ Treat every one as third-party documentation:
   `UPDATING.md`, `TAILSCALE.md`** — upstream's install and deploy paths. They
   **contradict** how Central Command is actually deployed. The real deployment is
   `deploy/k3s/` at the repo root (the two-node k3s cluster, 2026-07-31).
-  `deploy/pi/` is only PARTLY superseded — its `docker-compose.yml`,
-  `cc-uvicorn.service` and `backup.sh` are retired rollback references, but
-  `deploy/pi/.env` (secrets), `deploy/pi/litellm/` (the live LiteLLM
-  policy) and `deploy/pi/cc-nerve.service` (still the live cockpit unit — it is
-  installed FROM `deploy/pi/` by `deploy/k3s/README.md`'s own runbook) are
-  still read by `deploy/k3s/`. See `deploy/pi/README.md`.
+  The live set (`deploy/k3s/.env`, `deploy/shared/litellm/`,
+  `deploy/k3s/cc-nerve.service`) lives in `deploy/shared/` and `deploy/k3s/`;
+  `deploy/pi/` holds only byte-identical duplicates of it plus the retired
+  Compose stack (`docker-compose.yml`, `cc-uvicorn.service`, `backup.sh`), and
+  the whole directory is deleted in v2.67.0 once v2.66.0 is validated.
   Nothing in *this* `docs/` directory is used, including `install.sh` (49 KB).
 - **`docs/API.md` (2,125 lines), `ARCHITECTURE.md`, `CONFIGURATION.md`** —
   accurate for upstream's API surface, partially true here. The Central Command

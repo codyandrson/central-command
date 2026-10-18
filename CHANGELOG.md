@@ -4,6 +4,40 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-17 — v2.66.0: the live half of deploy/pi/ has a home named for what it is
+
+First of two releases splitting `deploy/pi/` (spec: the deploy/pi split,
+2026-10-17; audit ledger D8 step 2). The directory had been "part live, part
+retired" since the k3s cutover: three things in it were read by name from both
+tiers of the app and every k3s script, the rest was the retired Compose stack,
+and every reader carried a "never delete it as a whole" warning. Now:
+
+- **`deploy/shared/litellm/`** holds the five LiteLLM files (`config.yaml`,
+  `model-preferences.yaml`, `policy.py`, `register-models.py`, `checks.sh`) —
+  shared because the single-node installer runs `register-models.py` too. The
+  Executor, the runtime's read tool, the packs, the k3s scripts and the
+  single-node `llm` phase all name the new path. `config.yaml` and
+  `model-preferences.yaml` are the k3s profile's declared policy; the single
+  profile's equivalents stay `deploy/single/{litellm-config.yaml,models.json}`
+  (`deploy/shared/README.md`).
+- **`deploy/k3s/.env`** is the k3s containers' env (template
+  `deploy/k3s/.env.example`), and **`deploy/k3s/env-path.sh`** is the one
+  resolver every k3s script and `checks.sh` use: the new path when it exists,
+  else `deploy/pi/.env`. The file is untracked, so the move is a filesystem
+  act by one function, `cc_k3s_env_migrate`: `mv` with mode kept and a
+  relative symlink left at the old path, refused when both paths are regular
+  files. `init-env.sh` runs it first (the operator's step after this update);
+  `cc-update.sh` runs it right after the merge of the next release, WARN-only.
+  The two keys inside are never touched (`tests/test_k3s_env_path.py`).
+- **`deploy/k3s/cc-nerve.service`** joins the other units.
+- **Nothing is deleted.** The old copies stay byte-identical under
+  `deploy/pi/` for one release, because the update INTO this release is run by
+  the installed v2.65.x updater, whose configmap row, units glob and
+  policy-apply still name those paths (`.claude/rules/deploy-k3s.md`, "the
+  update ACROSS a removal"; `tests/test_deploy_pi_boundary.py` pins the
+  duplicate set and that the retired files are still present). v2.67.0 deletes
+  `deploy/pi/` whole once this release is validated and raises
+  `min_upgrade_from` to 2.66.0. Runbook: `deploy/k3s/README.md` §0b.
 ## 2026-10-17 — v2.65.4: a declared `mode` reaches the row LiteLLM health-checks
 
 `register-models.py` wrote a declared `mode` (`rerank`, `audio_speech`,

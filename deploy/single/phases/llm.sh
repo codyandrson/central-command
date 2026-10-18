@@ -222,7 +222,7 @@ phase_llm() {
   local rrc=0
   CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
   LITELLM_MASTER_KEY="${CC_LLM_PROXY_ADMIN_KEY:-}" \
-    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" \
+    $PY "$REPO_ROOT/deploy/shared/litellm/register-models.py" --policy "$HERE/models.json" \
       --require "$(cc_required_aliases)" >&2 || rrc=$?
   # --require is what makes exit 3 mean "a REQUIRED alias is not filled in":
   # cc-tts/cc-stt with CC_ENABLE_SPEECH=0 are created as skeletons and
@@ -368,7 +368,7 @@ rerank_probe_kind() { # rerank_probe_kind <rerank|chat> <alias>
 rerank_shape() { # rerank_shape <rerank|chat> <alias> -> 0 | 5 | 6 | other
   CC_LITELLM_URL="http://127.0.0.1:${CC_LITELLM_PORT}" \
   LITELLM_MASTER_KEY="${CC_LLM_PROXY_ADMIN_KEY:-}" \
-    $PY "$REPO_ROOT/deploy/pi/litellm/register-models.py" --policy "$HERE/models.json" \
+    $PY "$REPO_ROOT/deploy/shared/litellm/register-models.py" --policy "$HERE/models.json" \
       --shape "$2=$1" >&2
 }
 

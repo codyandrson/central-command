@@ -134,7 +134,7 @@ happens to read the same either way.
 
 ## The declared policy file and `policy.py`
 
-`deploy/pi/litellm/model-preferences.yaml` declares, per model:
+`deploy/shared/litellm/model-preferences.yaml` declares, per model:
 `quality_tier` (1=budget 2=mid 3=frontier), `strengths` (from LiteLLM's fixed
 `RequestType` taxonomy — seven values, no more), `input_cost_per_token`,
 `timeout`, and — since 2026-08-19 — `supports_vision`, `max_input_tokens`,

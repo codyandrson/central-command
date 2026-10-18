@@ -1,27 +1,32 @@
-# deploy/pi/ — part live, part retired
+# deploy/pi/ — duplicates and a retired stack, both gone in v2.67.0
 
-`deploy/pi/` predates the two-node k3s cluster (`deploy/k3s/`, 2026-07-31) and
-several files here have since been superseded — but not the whole directory.
-`deploy/k3s/`'s own scripts and runbook still read several files here
-directly, and deleting this tree would break a live deployment. Before calling
-anything in here "the superseded compose stack," check which file you mean.
+Since v2.66.0 nothing here is read by name. The live set moved:
 
-## LIVE
-
-| Path | Read by |
+| Was | Now |
 |---|---|
-| `deploy/pi/.env` | `deploy/k3s/make-secrets.sh`, `mint-keys.sh`, `backup.sh`, `cc-update.sh`, `graph-browse.sh` — holds `LITELLM_SALT_KEY`, `N8N_ENCRYPTION_KEY` and every other secret those scripts source. |
-| `deploy/pi/litellm/config.yaml` | Built into the `cc-litellm-config` ConfigMap by `make-secrets.sh` and re-applied by `cc-update.sh` on a release that changes it — the live LiteLLM proxy config. |
-| `deploy/pi/litellm/model-preferences.yaml`, `policy.py`, `register-models.py`, `checks.sh` | The live LiteLLM routing policy: `cc-update.sh` runs `policy.py --apply`/`--check`, and `deploy/k3s/README.md` walks `register-models.py` for onboarding a new model. |
-| `deploy/pi/cc-nerve.service` | Still the live cockpit-UI unit — `deploy/k3s/README.md`'s systemd section installs it FROM this path (`cc-uvicorn` moved to a k3s-aware unit in `deploy/k3s/`; the cockpit unit itself never needed to). |
+| `deploy/pi/.env` (untracked) | `deploy/k3s/.env` — `./deploy/k3s/init-env.sh` moves it once and leaves a symlink here; `deploy/k3s/env-path.sh` is the one resolver every k3s script uses |
+| `deploy/pi/.env.example` | `deploy/k3s/.env.example` |
+| `deploy/pi/litellm/*` | `deploy/shared/litellm/*` (read by both deployment substrates) |
+| `deploy/pi/cc-nerve.service` | `deploy/k3s/cc-nerve.service` |
 
-## RETIRED — kept as rollback path or reference only
+The copies below stay for exactly one release, byte-identical, because the
+update INTO v2.66.0 is run by the installed v2.65.x `cc-update.sh`, whose
+configmap row, units glob and policy-apply still name these paths against the
+merged tree (see `.claude/rules/deploy-k3s.md`, "the update ACROSS a removal").
+Do not edit them: a changed `litellm/config.yaml` here would restart
+`cc-litellm` during that update for nothing.
 
-| Path | Status |
-|---|---|
-| `deploy/pi/docker-compose.yml` | The pre-k3s self-contained Pi stack. `deploy/k3s/README.md` documents it as the last-resort fallback if the cluster itself is unusable — never run alongside k3s (it fights for port 5442). It no longer declares the Graphiti server (removed in v2.61.0; graphiti-core runs inside the app); its three keys left `deploy/pi/.env.example` with it. |
-| `deploy/pi/cc-uvicorn.service` | Superseded by `deploy/k3s/cc-uvicorn.service`. The old unit's `ExecStartPre=docker compose up -d` resurrects the Docker stack and fights k3s for 5442 — do not install it while the cluster runs. |
-| `deploy/pi/backup.sh`, `cc-backup.service` | Superseded by `deploy/k3s/backup.sh` + `deploy/k3s/cc-backup.service`, which back up all four k3s-hosted stores instead of the Docker Compose ones. |
-| `deploy/pi/verify.sh` | Superseded by `deploy/k3s/verify.sh` (ported from this file — see its header). Checked the Docker stack; has no k3s awareness. |
-| `deploy/pi/migrate-from-desktop.sh` | One-time cutover script (desktop → Pi, 2026-07-26). Spent; kept for the history and as a template if a similar migration is ever needed again. |
-| `deploy/pi/n8n/calendar-facade-writes.md` | A design/journal record of one past n8n workflow edit, not a live reference — nothing reads it. |
+## Duplicates (unread since v2.66.0, deleted in v2.67.0)
+
+`.env.example`, `litellm/{config.yaml, model-preferences.yaml, policy.py,
+register-models.py, checks.sh}`, `cc-nerve.service`.
+
+## Retired — the pre-k3s Compose stack (deleted in v2.67.0)
+
+`docker-compose.yml`, `cc-uvicorn.service` (its `ExecStartPre=docker compose
+up -d` fights k3s for port 5442 — never install it beside the cluster),
+`backup.sh`, `cc-backup.service`, `cc-backup.timer`, `verify.sh`,
+`migrate-from-desktop.sh`, `n8n/calendar-facade-writes.md`. The Compose file
+had already drifted from the deployment (no Graphiti, crawler, speech or
+reranker). After v2.67.0 it is reachable as
+`git show v2.65.3:deploy/pi/docker-compose.yml`.
