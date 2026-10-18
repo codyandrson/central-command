@@ -208,7 +208,7 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
 66. `boot/boot-sandbox`: Start the sandbox runner on `CC_SANDBOX_RUNNER_URL`'s port with the same `CC_SANDBOX_RUNNER_TOKEN` the API sends, when `CC_ENABLE_SANDBOX=1` — BEFORE the API, so the API's start-up self-check finds it answering (its links row reads `CC_SANDBOX_DOCS_URL`, its sandbox row the runner); off, this row is done and nothing starts.
 67. `boot/boot-api`: Start the API — through its systemd --user unit where a user manager answers, detached otherwise — and wait for /health.
 68. `boot/boot-roster`: Assert first boot hired the founding roster.
-69. `boot/skills-imported`: Import each bundled skills/\*/ folder the library does not already hold — create-only: a skill already there is never overwritten, even when the release changed it.
+69. `boot/skills-imported`: Import each bundled skills/\*/ folder the library does not already hold — create-only: a skill already there is never overwritten, even when the release changed it. Each newly imported skill's front-matter default holders are granted (create-only, never undoing a revocation); grant more in the cockpit's Agents view.
 70. `boot/boot-cockpit`: Start the cockpit server — through its unit where one can run — and wait for it to answer.
 71. `boot/boot-at-logon`: Register the logon entry that runs ./setup.sh — the resume command — after a reboot, retrying while the podman machine starts (Windows only).
 

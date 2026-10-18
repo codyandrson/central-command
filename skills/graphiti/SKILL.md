@@ -1,6 +1,7 @@
 ---
 name: Graphiti
 description: The team's shared knowledge graph — episodes vs entities vs facts, the bi-temporal model and what SUPERSEDED means, group tenanting (read main + central_command, write central_command only), what makes an episode worth committing, and the confidence and citation duties that ride every extraction. Load before searching the graph, judging whether a fact is durable, or proposing graph.add_episode.
+default_agents: graph-curator, ea, inbox-triage, jira-expert
 ---
 
 # Graphiti

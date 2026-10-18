@@ -1,6 +1,7 @@
 ---
 name: LiteLLM
 description: Central Command's self-hosted LiteLLM proxy — the one-alias routing doctrine, the local-only fallback decision and how to reverse it, the workstation's llama-swap slot (one model at a time, FIFO queue), model_info fields native vs invented, virtual keys and the Enterprise-tags 403, the salt-key rule, and health endpoints. Load before reading proxy state, advising on routing, or proposing any litellm.* change.
+default_agents: litellm-manager
 ---
 
 # LiteLLM

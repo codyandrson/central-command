@@ -4112,6 +4112,44 @@ async def grant_skill(agent_id: str, skill_id: str, granted_by: str = "operator"
         await conn.close()
 
 
+async def seed_skill_grants(
+    skill_id: str, agent_ids: list[str], granted_by: str = "seed:skill",
+) -> dict:
+    """Grant `skill_id` to each listed agent, CREATE-ONLY.
+
+    A row that exists in ANY state blocks the grant: an active one is already
+    done, and a revoked one is the operator's decision, which an idempotent
+    seed must never undo (`grant_skill` deliberately clears `revoked_at`; this
+    function never calls it). An id that is not an ACTIVE roster member
+    (`role <> ''`) is reported, not an error — a default list names agents a
+    given instance may not have hired.
+    Returns {"applied": [...], "skipped": [...], "unknown": [...]}.
+    """
+    out: dict[str, list[str]] = {"applied": [], "skipped": [], "unknown": []}
+    conn = await _conn()
+    try:
+        for agent_id in dict.fromkeys(agent_ids):
+            on_roster = await conn.fetchval(
+                "select 1 from agent where id = $1 and role <> '' and status = 'ACTIVE'",
+                agent_id,
+            )
+            if not on_roster:
+                out["unknown"].append(agent_id)
+                continue
+            result = await conn.execute(
+                """
+                insert into agent_skill_grant (agent_id, skill_id, granted_by)
+                values ($1, $2, $3)
+                on conflict (agent_id, skill_id) do nothing
+                """,
+                agent_id, skill_id, granted_by,
+            )
+            out["applied" if result.endswith(" 1") else "skipped"].append(agent_id)
+        return out
+    finally:
+        await conn.close()
+
+
 async def revoke_skill(agent_id: str, skill_id: str, reason: str) -> bool:
     conn = await _conn()
     try:

@@ -1,6 +1,7 @@
 ---
 name: Central Command conventions
 description: How this system's governance actually works — the proposal gate, evidence and claim-checking, roster/grants/charters, and the rules that were learned by breaking them. Load before proposing a change, judging another agent's proposal, drafting a charter edit, or planning work for the team.
+default_agents: accountability, coach, confluence-expert, ea, graph-curator, inbox-triage, jira-expert, litellm-manager, mcp-manager, wiki-agent
 ---
 
 # Central Command conventions

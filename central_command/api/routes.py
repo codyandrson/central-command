@@ -3063,6 +3063,11 @@ async def import_skill_route(body: SkillImportIn) -> dict:
         payload={"path": body.path, "references": len(result["references"])},
         actor="operator",
     )
+    for agent_id in result["default_grants"]["applied"]:
+        await events.emit(
+            "skill.granted", ref_id=agent_id,
+            payload={"skill_id": result["skill_id"], "default": True}, actor="seed:skill",
+        )
     return result
 
 

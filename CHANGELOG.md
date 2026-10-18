@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-18 — v2.66.1: bundled skills arrive granted, not just imported
+
+Found on a real deployment: after a reset every agent ran nine days with zero
+skill grants, because the installers imported the seven bundled skills and
+nothing told the operator that granting is a separate step.
+
+- **`default_agents:` front-matter** in `skills/<id>/SKILL.md` — a comma list
+  (bracketed or bare) of the agents that should hold the skill. All seven
+  bundled skills now declare theirs.
+- **`POST /api/skills/import` applies them create-only.** Via
+  `repo.seed_skill_grants`: a grant is written only when NO `agent_skill_grant`
+  row exists for that (agent, skill) — an active row is already done and a
+  revoked one is the operator's decision, never undone. Ids that are not an
+  active roster member are reported under `default_grants.unknown`, not an
+  error. The response gains `default_grants {applied, skipped, unknown}`, and
+  each applied grant emits `skill.granted` with actor `seed:skill`.
+- **Both installers' `skills-imported` step print the count** ("applied N
+  default skill grant(s)"); the single-node CHECKLIST row and
+  `deploy/k3s/README.md` name the Agents view for further grants. The step
+  still imports only skills the library lacks, so an existing library gains no
+  grants on update.
+
 ## 2026-10-17 — v2.66.0: the live half of deploy/pi/ has a home named for what it is
 
 First of two releases splitting `deploy/pi/` (spec: the deploy/pi split,

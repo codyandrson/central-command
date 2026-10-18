@@ -507,6 +507,11 @@ the phase on an existing install adds only the bundled skills the library
 lacks. The updater does not run this step; after an update that adds a
 bundled skill, run `./deploy/k3s/setup.sh app`.
 
+Each skill's `default_agents` front-matter names the agents that hold it; the
+import grants those CREATE-ONLY (a revoked grant is never restored; unknown
+agent ids are reported, not fatal) and the step prints how many it applied.
+Further grants are made in the cockpit's Agents view.
+
 `cc-postgres` mounts the `cc-schema-sql` ConfigMap at
 `/docker-entrypoint-initdb.d`. Postgres runs it **only when the data directory
 is empty** — i.e. only on a fresh `cc-pgdata` PVC. Nothing applies `schema.sql`

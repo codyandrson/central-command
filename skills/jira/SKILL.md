@@ -1,6 +1,7 @@
 ---
 name: Jira
 description: Jira Cloud as Central Command actually reaches it — the native REST v3 client's endpoints, field shapes and validation, JQL that survives contact with a real board, what separates a useful issue change from a noisy one, and practice patterns for epics, dependencies, risks, boards and this instance's cost/benefit fields. Load before reading Jira state, advising another agent about Jira, or proposing any jira.* capability.
+default_agents: jira-expert, inbox-triage, accountability, wiki-agent
 ---
 
 # Jira

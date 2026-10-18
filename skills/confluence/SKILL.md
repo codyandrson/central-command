@@ -1,6 +1,7 @@
 ---
 name: Confluence
 description: Confluence as Central Command reaches it — two instance flavors (Cloud v2 API, Server/DC 9.x v1-only), storage-format page authoring, CQL search, the macro capability profile that gates what you may compose, and the read/write tool surface. Load before reading Confluence state, advising another agent about Confluence, or proposing any confluence.* capability.
+default_agents: confluence-expert, wiki-agent
 ---
 
 # Confluence

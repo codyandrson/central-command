@@ -366,7 +366,7 @@ skills_library_ids() {
 # reads `@skills`, so a release that ADDS a bundled skill re-runs the row and
 # imports exactly that one.
 boot_skills_import() {
-  local have id d body resp code why="" added=() kept=() failed=()
+  local have id d body resp code why="" n granted=0 added=() kept=() failed=()
   if ! have="$(skills_library_ids)"; then
     fail "skills-imported" "GET $(api_url)/api/skills did not answer, so the bundled skills were not imported — read $STATE_DIR/uvicorn.log"
     return 1
@@ -386,6 +386,8 @@ boot_skills_import() {
     code="${resp##*$'\n'}"
     if [[ "$code" == 200 ]]; then
       added+=("$id")
+      n="$(printf '%s' "${resp%$'\n'*}" | $PY -c 'import json,sys; print(len(json.load(sys.stdin).get("default_grants",{}).get("applied",[])))' 2>/dev/null)"
+      granted=$((granted + ${n:-0}))
     else
       failed+=("$id")
       why="${resp%$'\n'*}"; why="${why//$'\n'/ }"; why="${why:0:240}"
@@ -401,6 +403,7 @@ boot_skills_import() {
   fi
   local msg=""
   (( ${#added[@]} )) && msg="imported ${#added[@]} bundled skill(s): ${added[*]}"
+  (( ${#added[@]} )) && msg="$msg; applied $granted default skill grant(s) (create-only; further grants are made in the cockpit's Agents view)"
   if (( ${#kept[@]} )); then
     msg="${msg:+$msg; }${#kept[@]} already in the library and LEFT AS THEY ARE: ${kept[*]}"
   fi

@@ -1,6 +1,7 @@
 ---
 name: MCP
 description: The MCP server creation pipeline as Central Command actually built it — the sandbox that authors servers from scratch, the one gated exit (mcp.sync_source), and the state machine that carries a server through build, deploy and LiteLLM registration. Load before working in the sandbox, before proposing any mcp.* or litellm.register_mcp_server capability, or before advising on a server's naming/removal.
+default_agents: mcp-manager
 ---
 
 # MCP

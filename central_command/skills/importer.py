@@ -41,6 +41,12 @@ def parse_frontmatter(raw: str) -> tuple[dict, str]:
     return meta, raw[m.end():].lstrip("\n")
 
 
+def parse_id_list(value: str) -> list[str]:
+    """`[a, b]` or `a, b` -> ["a", "b"]. Flat frontmatter has no list syntax, so
+    `default_agents` is a comma list, optionally bracketed."""
+    return [p.strip().strip("'\"") for p in value.strip().strip("[]").split(",") if p.strip()]
+
+
 def _doc_key(filename: str) -> str:
     """A stable slug per reference file, so re-import VERSIONS rather than
     duplicates. Derived from the filename, which is what stays constant upstream."""
@@ -128,6 +134,8 @@ async def import_skill_folder(
             "a distinct skill_id."
         )
 
+    default_agents = parse_id_list(meta.get("default_agents", ""))
+
     references_to_write: list[tuple[str, Path, str]] = []
     for f in ref_files:
         key = _doc_key(f.name)
@@ -158,4 +166,12 @@ async def import_skill_folder(
         )
         references.append(key)
 
-    return {"skill_id": sid, "guidance": "guidance", "references": references}
+    # Default holders (front-matter `default_agents`), applied CREATE-ONLY after
+    # the skill exists: a revoked grant stays revoked, an unknown agent is a
+    # note. The route emits the events; this only writes the rows.
+    default_grants = await repo.seed_skill_grants(sid, default_agents)
+
+    return {
+        "skill_id": sid, "guidance": "guidance", "references": references,
+        "default_grants": default_grants,
+    }

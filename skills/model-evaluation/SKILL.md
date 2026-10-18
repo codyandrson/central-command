@@ -1,6 +1,7 @@
 ---
 name: Model Evaluation
 description: The register → probe → declare → record procedure for a new or private LiteLLM model — what `litellm_probe_model` actually measures and how to read an inconclusive result, provider-prefix/format-detection recipes for an unknown gateway, and a pre-staged public model library (LiteLLM cost map, models.dev, LLMStats, Aider) to sanity-check a private variant against its public counterpart. Load before registering a new model or reading a probe result.
+default_agents: litellm-manager
 ---
 
 # Model Evaluation
