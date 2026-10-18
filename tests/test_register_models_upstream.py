@@ -123,7 +123,12 @@ def _bash_exe() -> str:
 
 
 def _live(alias, **params):
-    return {"model_name": alias, "litellm_params": params, "model_info": {"id": f"id-{alias}"}}
+    # A row as the fixed script leaves it: mode in litellm_params AND model_info
+    # (LiteLLM's /health reads model_info.mode).
+    info = {"id": f"id-{alias}"}
+    if params.get("mode"):
+        info["mode"] = params["mode"]
+    return {"model_name": alias, "litellm_params": params, "model_info": info}
 
 
 def test_alias_env_key_matches_the_bash_derivation(rm):
@@ -473,7 +478,10 @@ def test_the_shape_cli(rm, monkeypatch, capsys, live_kind, ask, expected_rc, pat
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=rows, env={**BASE, RERANK: "rr"},
                           argv=("--policy", str(_single()), "--shape", f"cc-rerank={ask}"))
     assert rc == expected_rc, out
-    assert [p for p, _ in proxy.calls] == ([path] if path else [])
+    want_calls = [path] if path else []
+    if path == "/model/update":  # the model_info.mode write rides a PATCH
+        want_calls.append("/model/id-cc-rerank/update")
+    assert [p for p, _ in proxy.calls] == want_calls
     assert KEY not in out, "the api key must never appear in a printed line"
     if path:
         assert proxy.calls[0][1]["litellm_params"] == shapes[ask]
@@ -509,3 +517,37 @@ def test_an_optional_alias_never_pauses_even_without_require(rm, monkeypatch, ca
     rc, out, _ = _run(rm, monkeypatch, capsys, live=live, env={}, argv=("--policy", str(k3s)))
     assert rc == 0, out
     assert "optional cc-rerank" in out and "optional qwen3-rerank-local" in out
+
+
+def test_mode_is_written_to_model_info_on_create(rm, monkeypatch, capsys):
+    """/health probes by model_info.mode; litellm_params.mode alone left cc-tts
+    and cc-stt "unhealthy" for weeks (2026-10-17)."""
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={})
+    created = {b["model_name"]: b for p, b in proxy.calls if p.endswith("/model/new")}
+    assert created["cc-tts"]["model_info"]["mode"] == "audio_speech"
+    assert created["cc-stt"]["model_info"]["mode"] == "audio_transcription"
+    assert created["cc-tts"]["litellm_params"]["mode"] == "audio_speech"
+    assert "mode" not in created["cc-default"]["model_info"]
+
+
+def test_mode_is_patched_into_model_info_on_update(rm, monkeypatch, capsys):
+    """POST /model/update drops model_info.mode; PATCH /model/{id}/update keeps it."""
+    skel = [_live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_speech")]
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=skel, env={**BASE, **IDS})
+    patches = [(p, b) for p, b in proxy.calls if "/update" in p and p.startswith("/model/id-")]
+    assert ("/model/id-cc-tts/update", {"model_info": {"mode": "audio_speech"}}) in patches
+
+
+def test_shape_update_patches_mode_and_same_needs_model_info_mode(rm):
+    shapes = _shapes(rm)
+    ded = _live("cc-rerank", **{k: v for k, v in shapes["rerank"].items() if k != "api_key"})
+    assert rm.ensure_shape("cc-rerank", "rerank", shapes, [ded]) == ("same", None)
+    # a row whose litellm_params.mode is right but model_info.mode is missing is
+    # setup's own earlier write: repaired, not left unhealthy
+    ded["model_info"].pop("mode")
+    verdict, body = rm.ensure_shape("cc-rerank", "rerank", shapes, [ded])
+    assert verdict == "update" and body["model_info"]["mode"] == "rerank"
+    # a hand-filled row stays the operator's
+    hand = _live("cc-rerank", model="cohere/their-own", api_base="http://theirs:9/v1/rerank", mode="rerank")
+    hand["model_info"].pop("mode")
+    assert rm.ensure_shape("cc-rerank", "rerank", shapes, [hand]) == ("operator", None)

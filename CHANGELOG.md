@@ -4,6 +4,19 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-17 — v2.65.4: a declared `mode` reaches the row LiteLLM health-checks
+
+`register-models.py` wrote a declared `mode` (`rerank`, `audio_speech`,
+`audio_transcription`) only into `litellm_params`, but LiteLLM's `/health`
+chooses its probe from `model_info.mode`. `cc-tts` and `cc-stt` were therefore
+probed with a chat completion and reported "unhealthy" for weeks although real
+speech calls worked. The script now writes `mode` to `model_info` as well:
+on `POST /model/new` (create), and on update by a follow-up
+`PATCH /model/{id}/update` — `POST /model/update` silently drops
+`model_info.mode` (verified on the live proxy; LiteLLM's docs call it the
+legacy route). `--shape` treats a row whose `model_info.mode` is missing as
+setup's own earlier write and repairs it; hand-filled rows stay untouched.
+
 ## 2026-10-17 — v2.65.3: the decision log records what the operator remembers
 
 Docs only — no runtime behavior changes. Two decision-log entries gain the

@@ -231,12 +231,43 @@ def alias_shapes(alias: str, policy: dict, env) -> dict[str, dict]:
     }
 
 
-def same_shape(live_params: dict, shape: dict) -> bool:
+def same_shape(live_params: dict, shape: dict, live_model_info: dict | None = None) -> bool:
     """A live row IS this shape: same model and api_base, and the shape's mode
     when it has one. (api_key is never compared — LiteLLM masks it.)"""
     if any(live_params.get(k) != shape.get(k) for k in ("model", "api_base")):
         return False
-    return "mode" not in shape or live_params.get("mode") == shape["mode"]
+    if "mode" not in shape:
+        return True
+    if live_params.get("mode") != shape["mode"]:
+        return False
+    # LiteLLM's /health reads model_info.mode, not litellm_params.mode.
+    return live_model_info is None or (live_model_info.get("mode") == shape["mode"])
+
+
+def mode_info(params: dict) -> dict:
+    """{"mode": ...} for model_info when the params declare a concrete mode.
+
+    LiteLLM's /health picks its probe from `model_info.mode` (docs.litellm.ai
+    /docs/proxy/health); `litellm_params.mode` is ignored there, so cc-tts /
+    cc-stt / cc-rerank were probed with a chat completion and read "unhealthy"
+    for weeks (2026-10-17). `mode` is therefore written to BOTH places.
+    """
+    mode = params.get("mode")
+    return {"mode": mode} if isinstance(mode, str) and PLACEHOLDER not in mode else {}
+
+
+def patch_mode(model_id, params: dict) -> None:
+    """Persist model_info.mode on an EXISTING row.
+
+    Verified 2026-10-17 on the live proxy: POST /model/update silently drops
+    model_info.mode, PATCH /model/{id}/update keeps it. LiteLLM's docs call
+    POST /model/update the legacy route (docs.litellm.ai/docs/proxy/ptu_flat_cost
+    lists PATCH /model/{model_id}/update as the current one), so the PATCH is
+    the write this script trusts for model_info.
+    """
+    info = mode_info(params)
+    if info and model_id:
+        _request("PATCH", f"/model/{model_id}/update", {"model_info": info})
 
 
 def optional_aliases(policy: dict) -> set[str]:
@@ -279,17 +310,19 @@ def ensure_shape(alias: str, kind: str, shapes: dict[str, dict],
         return "underivable", None
     rows = [m for m in live_models if m.get("model_name") == alias]
     if not rows:
-        return "create", {"model_name": alias, "litellm_params": shape}
+        return "create", {"model_name": alias, "litellm_params": shape,
+                          "model_info": mode_info(shape)}
     if len(rows) > 1:
         return "operator", None
     lp = rows[0].get("litellm_params") or {}
-    if same_shape(lp, shape):
+    info = rows[0].get("model_info") or {}
+    if same_shape(lp, shape, info):
         return "same", None
     ours = any(same_shape(lp, other) for other in shapes.values())
     skeleton = row_state(alias, rows) == "skeleton"
     if ours or skeleton:
         return "update", {"model_name": alias, "litellm_params": shape,
-                          "model_info": {"id": (rows[0].get("model_info") or {}).get("id")}}
+                          "model_info": {"id": info.get("id"), **mode_info(shape)}}
     return "operator", None
 
 
@@ -583,7 +616,8 @@ def main() -> int:
                 stamp = datetime.now(timezone.utc).isoformat()
                 _request("POST", "/model/new",
                          {"model_name": alias, "litellm_params": want[alias],
-                          "model_info": {"created_by": "register-models.py", "created_at": stamp,
+                          "model_info": {**mode_info(want[alias]),
+                                         "created_by": "register-models.py", "created_at": stamp,
                                          "updated_by": "register-models.py", "updated_at": stamp}})
                 created += 1
             if not real:
@@ -604,6 +638,7 @@ def main() -> int:
                           "model_info": {"id": (live_row.get("model_info") or {}).get("id"),
                                          "updated_by": "register-models.py",
                                          "updated_at": stamp}})
+                patch_mode((live_row.get("model_info") or {}).get("id"), want[alias])
                 updated += 1
         elif required is not None and alias not in required:
             print(f"  optional {alias}  " + "; ".join(problems)
@@ -662,6 +697,8 @@ def shape_main(spec: str, policy: dict, *, dry_run: bool = False) -> int:
             info.update(created_by="register-models.py", created_at=stamp)
         _request("POST", "/model/new" if verdict == "create" else "/model/update",
                  {**body, "model_info": info})
+        if verdict == "update":
+            patch_mode(info.get("id"), body["litellm_params"])
     return 0
 
 
