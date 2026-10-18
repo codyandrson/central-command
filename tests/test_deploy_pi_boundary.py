@@ -70,17 +70,37 @@ def test_every_k3s_env_reader_goes_through_the_resolver():
         assert "env-path.sh" in code, name
         # init-env.sh MOVES the file first and then owns the new path; the rest resolve it
         assert ("cc_k3s_env_migrate" if name == "init-env.sh" else "cc_k3s_env_file") in code, name
+    # The readers outside deploy/k3s/: the LiteLLM checks script (moved in
+    # release A) and the n8n workflow installer's --k3s arm (release A's move
+    # table missed it; it read deploy/pi/.env through the symlink).
+    checks = _code(SHARED / "checks.sh")
+    assert "env-path.sh" in checks and "cc_k3s_env_file" in checks and '"$HERE/../.env"' not in checks
+    n8n = _code(ROOT / "deploy" / "n8n" / "apply-workflows.sh")
+    assert "env-path.sh" in n8n and 'DB_ENV="$(cc_k3s_env_file "$REPO")"' in n8n
+
+
+def _tracked_shell_scripts() -> list[Path]:
+    """Every tracked shell script, plus a root setup.sh/update.sh if one ever
+    appears — not a directory glob, so the next reader added anywhere under
+    the tree is scanned too (deploy/n8n/apply-workflows.sh slipped past the
+    deploy/k3s-only scan in release A)."""
+    out = subprocess.run(["git", "ls-files", "--", "*.sh", "setup.sh", "update.sh"], cwd=ROOT,
+                         check=True, capture_output=True, text=True).stdout
+    return [ROOT / rel for rel in out.splitlines() if rel]
 
 
 def test_no_script_reads_the_old_env_path_directly():
     """The literal old path survives only inside the resolver's fallback and
     in operator-facing messages — never as a path a script opens."""
     opens = re.compile(r'(\$\{?\w+\}?/deploy/pi/\.env|(?<![\w/])deploy/pi/\.env\s*\]\]|\.\s+deploy/pi/\.env)')
-    for path in list(K3S.glob("*.sh")) + [SHARED / "checks.sh"]:
-        if path.name == "env-path.sh":
+    scripts = _tracked_shell_scripts()
+    assert ROOT / "deploy" / "n8n" / "apply-workflows.sh" in scripts
+    assert ROOT / "deploy" / "shared" / "litellm" / "checks.sh" in scripts
+    for path in scripts:
+        if path == K3S / "env-path.sh":
             continue
         for line in _non_comment(path):
-            assert not opens.search(line), f"{path.name}: {line.strip()}"
+            assert not opens.search(line), f"{path.relative_to(ROOT)}: {line.strip()}"
 
 
 def test_the_updater_names_the_new_paths_and_carries_the_move():

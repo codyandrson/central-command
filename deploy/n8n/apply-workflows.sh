@@ -47,7 +47,12 @@ get_kv() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -1 | tr -d '"'"'"; }
 # ── runtime seams ────────────────────────────────────────────────────────────
 if [[ $RT == k3s ]]; then
   ENV_FILE="$REPO/.env"
-  DB_ENV="$REPO/deploy/pi/.env"          # where the k3s profile keeps N8N_DB_*
+  # The k3s profile keeps N8N_DB_* in the containers' env; resolve its path
+  # like every k3s script does (deploy/k3s/.env, else the pre-v2.66.0 path).
+  # shellcheck source=../k3s/env-path.sh
+  # shellcheck disable=SC1091
+  . "$REPO/deploy/k3s/env-path.sh"
+  DB_ENV="$(cc_k3s_env_file "$REPO")"
   K=(k3s kubectl -n "$NS")
   [[ $EUID -eq 0 ]] || K=(sudo k3s kubectl -n "$NS")
   # Running only: a rollout leaves Completed/old pods under the same label,
