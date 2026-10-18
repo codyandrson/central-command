@@ -257,5 +257,6 @@ def test_a_refused_move_is_a_warning_never_a_stop(repo: Path):
     r = _run_updater_step(repo)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "WARNING" in r.stdout and "deploy/pi/.env" in r.stdout
+    assert "./deploy/k3s/init-env.sh" in r.stdout      # the operator's fix is named, release after release
     assert (repo / "deploy" / "k3s" / ".env").read_text() == "NEW=1\n"
     assert (repo / "deploy" / "pi" / ".env").read_text() == "OLD=1\n"
