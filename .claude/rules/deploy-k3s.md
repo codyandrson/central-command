@@ -130,10 +130,13 @@ when a matching file is read.
   (`cc-backup`) is the exception.
 - **The containers' env is `deploy/k3s/.env`, found through ONE function
   and moved by ONE function** (v2.66.0, the deploy/pi split). Every k3s
-  script and `deploy/shared/litellm/checks.sh` source `deploy/k3s/env-path.sh`
-  and call `cc_k3s_env_file` — never a literal path; `policy.py` and
-  `register-models.py` mirror the same two-step lookup in Python because the
-  Executor runs them with no `LITELLM_MASTER_KEY` in the environment. The
+  script, `deploy/shared/litellm/checks.sh` and the `--k3s` arm of
+  `deploy/n8n/apply-workflows.sh` (the reader release A missed) source
+  `deploy/k3s/env-path.sh` and call `cc_k3s_env_file` — never a literal path;
+  `policy.py` and `register-models.py` mirror the same two-step lookup in
+  Python because the Executor runs them with no `LITELLM_MASTER_KEY` in the
+  environment, and `scripts/graph_inspect.py` (operator tooling, for
+  `NEO4J_PASSWORD`) mirrors it too. The
   file is UNTRACKED (no merge moves it, no `reset --hard` restores it), so
   `cc_k3s_env_migrate` does the move once — `mv`, mode kept, a relative
   symlink left at `deploy/pi/.env` for any release that still reads it —
@@ -141,5 +144,8 @@ when a matching file is read.
   first; `cc-update.sh` calls it right after the merge (WARN-only, keyed on
   the merged tree having the script). Never regenerate, print or copy the
   two keys inside. `tests/test_k3s_env_path.py` runs the real functions in
-  every layout; `tests/test_deploy_pi_boundary.py` pins the duplicate set
-  under `deploy/pi/` by hash until v2.67.0 deletes it.
+  every layout; `tests/test_deploy_pi_boundary.py` pins that nothing under
+  `deploy/pi/` is tracked since v2.67.0, that every reader is on the
+  resolver, and that no tracked file names the old directory outside dated
+  history, the resolver seam, operator-facing fallback messages and comment
+  lines (its `ALLOWED` table is the list, one reason per entry).

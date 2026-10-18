@@ -37,8 +37,19 @@ LIMIT $limit
 """
 
 
+def _env_path() -> Path:
+    """The k3s containers' env, resolved as deploy/k3s/env-path.sh resolves it:
+    deploy/k3s/.env when it exists (file or symlink), else the path before
+    v2.66.0. Inline because this script carries its own deps (PEP 723)."""
+    repo = Path(__file__).resolve().parent.parent
+    new = repo / "deploy" / "k3s" / ".env"
+    if new.exists() or new.is_symlink():
+        return new
+    return repo / "deploy" / "pi" / ".env"
+
+
 def neo4j_password() -> str:
-    env = Path(__file__).resolve().parent.parent / "deploy" / "pi" / ".env"
+    env = _env_path()
     for line in env.read_text(encoding="utf-8").splitlines():
         if line.startswith("NEO4J_PASSWORD="):
             return line.split("=", 1)[1].strip()

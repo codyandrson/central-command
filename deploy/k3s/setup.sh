@@ -1108,7 +1108,7 @@ phase_app() {
   fi
 
   # systemd units from deploy/k3s/ only. The retired Compose stack's
-  # cc-uvicorn.service (deploy/pi/, gone in v2.67.0) had `ExecStartPre=docker
+  # cc-uvicorn.service (deploy/pi/, deleted in v2.67.0) had `ExecStartPre=docker
   # compose up -d`, which resurrects the Docker stack and fights k3s for 5442.
   local u
   for u in cc-uvicorn.service cc-sandbox-runner.service cc-graph-bolt.service \

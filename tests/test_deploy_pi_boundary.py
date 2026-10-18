@@ -142,6 +142,15 @@ def test_the_app_and_the_single_profile_name_the_shared_files():
         assert "deploy/pi/" not in (ROOT / rel).read_text(encoding="utf-8"), rel
 
 
+def test_operator_tooling_resolves_the_env_like_the_resolver():
+    """scripts/graph_inspect.py builds the path from segments, which no
+    literal-string guard sees; it must prefer deploy/k3s/.env like policy.py."""
+    src = (ROOT / "scripts" / "graph_inspect.py").read_text(encoding="utf-8")
+    assert '"deploy" / "k3s" / ".env"' in src
+    assert src.index('"deploy" / "k3s" / ".env"') < src.index('"deploy" / "pi" / ".env"')
+    assert "if new.exists() or new.is_symlink():" in src
+
+
 def test_the_moved_litellm_directory_still_finds_its_own_siblings():
     for name in ("policy.py", "register-models.py"):
         src = (SHARED / name).read_text(encoding="utf-8")

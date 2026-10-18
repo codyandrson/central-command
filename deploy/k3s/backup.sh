@@ -2,7 +2,7 @@
 # ============================================================================
 # Central Command disaster-recovery backup — k3s edition (2026-07-31).
 #
-#   Supersedes the retired Compose stack's backup.sh (deploy/pi/, gone in
+#   Supersedes the retired Compose stack's backup.sh (deploy/pi/, deleted in
 #   v2.67.0), which drove the Docker stack. Same four
 #   stores, same validity checks, same retention rule, same exit contract. The
 #   only real change is HOW each store is reached, plus one new fact: the graph

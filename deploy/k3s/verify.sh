@@ -2,7 +2,7 @@
 # ============================================================================
 # Prove the k3s deployment is correct. Run this ON THE PI.
 #
-#   Ported from the retired Compose stack's verify.sh (deploy/pi/, gone in
+#   Ported from the retired Compose stack's verify.sh (deploy/pi/, deleted in
 #   v2.67.0), which checked the Docker stack. Every
 #   assertion it made is still made here; the access mechanism changed and two
 #   sections gained new obligations.
