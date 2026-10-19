@@ -4,6 +4,46 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-18 — v2.67.1: the split's retrospective closes its open items
+
+The deploy/pi split's retrospective, written after v2.67.0 was applied, found
+five small verification gaps — none a defect in what shipped, each a check
+or a sentence the two releases should have carried. This patch closes them:
+two tests and two runbook sentences, nothing the updater rebuilds or
+re-applies (no image, configmap, unit or schema input changes). **Still
+requires v2.66.0** (`min_upgrade_from` unchanged).
+
+- **The Python resolver mirrors' order is pinned again.** Release B's first
+  story deleted the test that held `deploy/shared/litellm/policy.py` and
+  `register-models.py` to the resolver's order — `deploy/k3s/.env` first,
+  taken when it exists or is a symlink, the old path only after — and only
+  `scripts/graph_inspect.py` was pinned afterwards. The Executor runs both
+  files without `LITELLM_MASTER_KEY` in the environment, so that fallback is
+  load-bearing: flipping the order would have passed the suite.
+  `tests/test_deploy_pi_boundary.py` now holds all three mirrors to it.
+- **The guard sees the segment-built form.** The tree-wide guard greps the
+  literal `deploy/pi`, which is how `graph_inspect.py`'s `"deploy" / "pi" /
+  ".env"` slipped past release A's move table. A second guard greps every
+  tracked `.py` and `.sh` for the forms the languages build the path from
+  (`"deploy" / "pi"`, `"deploy", "pi"`, either quote style) against its own
+  enumerated allowlist — the three `_env_path` blocks and the tests that lay
+  the old tree out under `tmp_path` or assert it is gone — so the shape
+  planted anywhere else fails naming its file and line.
+- **The runbook's whole-stack fallback says where its `.env` comes from.**
+  `deploy/k3s/README.md` §10: the v2.65.3 archive carries only
+  `.env.example` and the compose file `:?`-requires six variables from the
+  `.env` beside it, so `deploy/k3s/.env` is copied to `deploy/pi/.env` before
+  the first `docker compose up` (unless §0b's symlink is still there and
+  already serves it). And §0b's leftover-removal one-liner states
+  its precondition: only when `ls -la deploy/pi/.env` shows a symlink; a
+  regular file there means the migrate step refused and must be settled
+  first.
+- **The floor test pins only the floor.** `test_the_floor_is_release_a`
+  asserted `version=2.67.x` as well as `min_upgrade_from=2.66.0`, so the
+  first 2.68.0 bump would have failed it at the gate; the version line is
+  `tests/test_version_file.py`'s to check, and the test now keeps only the
+  floor.
+
 ## 2026-10-18 — v2.67.0: deploy/pi/ is gone
 
 Second of the two releases splitting `deploy/pi/` (v2.66.0 was the first;

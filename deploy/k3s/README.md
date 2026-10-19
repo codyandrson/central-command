@@ -100,7 +100,11 @@ failed v2.66.0 apply lands on v2.65.x with nothing moved; a failed v2.67.0
 apply lands on v2.66.0, which reads the new path first. The symlink is
 removed by hand after v2.67.0 is accepted (`rm -r deploy/pi/litellm/__pycache__
 && rmdir deploy/pi/litellm && rm deploy/pi/.env && rmdir deploy/pi`); nothing
-automated needs it then.
+automated needs it then. Run that only when `ls -la deploy/pi/.env` shows a
+symlink (`-> ../k3s/.env`). A regular file there means the migrate step
+refused — both paths were regular files — and the two must be settled first
+(the one the containers were built from is `deploy/k3s/.env`; compare before
+removing anything), or the `rm` deletes the only copy of the keys.
 
 ## 1. Prerequisites & assumptions
 
@@ -730,7 +734,13 @@ https://raspberrypi.tail2ae84b.ts.net:9428/select/vmui/
   `git show v2.65.3:deploy/pi/docker-compose.yml` reads the compose file, and `git archive v2.65.3 deploy/pi | tar -x` from the checkout root
   restores the whole directory, `cc-uvicorn.service` included — the compose
   file expects `litellm/config.yaml` and a `.env` beside it, and the unit
-  hard-codes that path. It had already drifted
+  hard-codes that path. The archive carries only `.env.example`, and the
+  compose file `:?`-requires six variables from that `.env`, so copy
+  `deploy/k3s/.env` to `deploy/pi/.env` before the first `docker compose up`
+  — without it the fallback stops at its first command. (If §0b's symlink is
+  still in place, `deploy/pi/.env` already resolves to `deploy/k3s/.env` and
+  serves the same bytes; `cp` onto it only reports "same file" — leave it.)
+  It had already drifted
   dead before its deletion: it runs postgres, LiteLLM, Neo4j and n8n only — no
   Graphiti, crawler, speech or reranker — so it restores a database host, not
   the product. It fights k3s for 5442 — stop the cluster workloads first, and

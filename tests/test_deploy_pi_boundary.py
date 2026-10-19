@@ -142,13 +142,29 @@ def test_the_app_and_the_single_profile_name_the_shared_files():
         assert "deploy/pi/" not in (ROOT / rel).read_text(encoding="utf-8"), rel
 
 
+PYTHON_RESOLVER_MIRRORS = (SHARED / "policy.py", SHARED / "register-models.py",
+                           ROOT / "scripts" / "graph_inspect.py")
+
+
 def test_operator_tooling_resolves_the_env_like_the_resolver():
-    """scripts/graph_inspect.py builds the path from segments, which no
-    literal-string guard sees; it must prefer deploy/k3s/.env like policy.py."""
-    src = (ROOT / "scripts" / "graph_inspect.py").read_text(encoding="utf-8")
-    assert '"deploy" / "k3s" / ".env"' in src
-    assert src.index('"deploy" / "k3s" / ".env"') < src.index('"deploy" / "pi" / ".env"')
-    assert "if new.exists() or new.is_symlink():" in src
+    """The three Python mirrors of cc_k3s_env_file build the path from
+    segments, which no literal-string guard sees; each must prefer
+    deploy/k3s/.env — taken when it exists OR is a symlink, like the shell
+    resolver — and fall back to the old path only after. The Executor runs
+    policy.py and register-models.py without LITELLM_MASTER_KEY in the
+    environment, so the file fallback is load-bearing: release B's first
+    story deleted the test that pinned the two shared files, and flipping
+    their order or dropping is_symlink() passed the suite until this."""
+    fallback_kept = ("the resolver's deploy/pi fallback is kept by decision until a release drops it "
+                     "from all three mirrors and this test together")
+    for path in PYTHON_RESOLVER_MIRRORS:
+        src = path.read_text(encoding="utf-8")
+        name = str(path.relative_to(ROOT))
+        # `new` IS the k3s path — not merely "the k3s literal appears first"
+        assert re.search(r'^\s+new = \w+ / "deploy" / "k3s" / "\.env"$', src, re.M), name
+        assert '"deploy" / "pi" / ".env"' in src, f"{name}: {fallback_kept}"
+        assert src.index('"deploy" / "k3s" / ".env"') < src.index('"deploy" / "pi" / ".env"'), name
+        assert "if new.exists() or new.is_symlink():" in src, name
 
 
 def test_the_moved_litellm_directory_still_finds_its_own_siblings():
@@ -168,9 +184,12 @@ def test_the_floor_is_release_a():
     v2.66.x's names the new paths; a v2.65.x updater's configmap row would die
     on deploy/pi/litellm/config.yaml against the merged tree, after the merge
     and without a rollback. So B's floor is A: an install on v2.65.x takes
-    v2.66.0 first."""
+    v2.66.0 first. Only the floor is pinned here: the version line belongs to
+    tests/test_version_file.py (VERSION against the newest CHANGELOG
+    heading), and an earlier form that also pinned `version=2.67.x` would
+    have failed the first 2.68.0 bump at the gate for no reason. The floor
+    stays 2.66.0 until a release deliberately raises it."""
     text = (ROOT / "VERSION").read_text(encoding="utf-8")
-    assert re.search(r"^version=2\.67\.\d+$", text, re.M), text
     assert re.search(r"^min_upgrade_from=2\.66\.0$", text, re.M), text
 
 
@@ -236,10 +255,12 @@ ALLOWED = {
     "deploy/k3s/setup.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/migrate-to-cc.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/README.md": ("sections 0a/0b are the dated history of the two boundary updates; "
-                             "section 10 reaches the retired stack through git",
+                             "section 10 reaches the retired stack through git and says which "
+                             "env to copy to the old path before the Compose fallback can start",
                              lambda lines, i: _heading_range("## 0a.", "## 1.")(lines, i)
                              or (_heading_range("## 10.")(lines, i)
-                                 and _contains("git show v2.65.3:deploy/pi/")(lines, i))),
+                                 and (_contains("git show v2.65.3:deploy/pi/")(lines, i)
+                                      or _contains("deploy/k3s/.env", "deploy/pi/.env")(lines, i)))),
     "docs/ARCHITECTURE.md": ("the D9 / Story 2.1 provenance row names the retired image's files",
                              _contains("D9 / Story 2.1")),
     ".claude/rules/deploy-k3s.md": ("the dated v2.66.0 bite mark on the env move",
@@ -267,8 +288,8 @@ def test_no_tracked_file_names_deploy_pi_outside_history_and_the_kept_seam():
     enumerated in ALLOWED with its reason — dated history, the resolver seam
     kept by decision, operator-facing fallback messages, and comment lines —
     so the next reference anywhere else fails here naming its file and line."""
-    # The path itself, not a prefix of another (deploy/pipeline); the segment-built
-    # form `"deploy" / "pi"` is NOT seen here — only the literal is guarded.
+    # The path itself, not a prefix of another (deploy/pipeline). The
+    # segment-built form `"deploy" / "pi"` is not seen here; the next test is.
     r = subprocess.run(["git", "grep", "-n", "-I", "-E", "-e", r"deploy/pi([^A-Za-z0-9_-]|$)"], cwd=ROOT,
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     assert r.returncode in (0, 1), r.stderr
@@ -286,3 +307,49 @@ def test_no_tracked_file_names_deploy_pi_outside_history_and_the_kept_seam():
             if not _allowed(path, lines, n - 1):
                 offenders.append(f"{path}:{n}: {lines[n - 1].strip()}")
     assert not offenders, "deploy/pi named outside the allowlist:\n  " + "\n  ".join(offenders)
+
+
+# path → (reason, line predicate or None for the whole file)
+SEGMENT_ALLOWED = {
+    "deploy/shared/litellm/policy.py": ("the resolver's Python mirror", _block("def _env_path(")),
+    "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),
+    "scripts/graph_inspect.py": ("the resolver's Python mirror", _block("def _env_path(")),
+    "tests/test_k3s_env_path.py": ("builds every env layout under tmp_path", None),
+    "tests/test_k3s_mint_key_scope.py": ("builds the pre-move layout under tmp_path", None),
+    "tests/test_k3s_reset_phase.py": ("builds the pre-move layout under tmp_path", None),
+    "tests/test_deploy_pi_boundary.py": ("this guard: it names the shape it greps for and asserts the path is gone", None),
+    "tests/test_graphiti_server_boundary.py": ("asserts deploy/pi/graphiti is gone", None),
+}
+
+
+def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
+    """The literal guard above never saw scripts/graph_inspect.py, which built
+    the old path as `"deploy" / "pi" / ".env"` — release A's move table missed
+    it for the same reason. This greps every tracked .py and .sh for the forms
+    the languages build the path from (`"deploy" / "pi"`, `"deploy", "pi"`,
+    either quote style); what may carry them is enumerated in SEGMENT_ALLOWED
+    with its reason — the three resolver mirrors' _env_path blocks and the
+    tests that lay the old tree out under tmp_path or assert it is gone — so
+    the shape planted anywhere else fails here naming its file and line."""
+    r = subprocess.run(["git", "grep", "-n", "-I", "-E", "-e",
+                        r"""["']deploy["']\s*(/|,)\s*["']pi["']""", "--", "*.py", "*.sh"],
+                       cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    assert r.returncode in (0, 1), r.stderr
+    hits: dict[str, list[int]] = {}
+    for row in r.stdout.split("\n"):
+        if not row:
+            continue
+        path, line, _ = row.split(":", 2)
+        hits.setdefault(path, []).append(int(line))
+    # the canary: the grep sees what the literal guard could not. It holds as
+    # long as the resolver's fallback is kept (by decision); the release that
+    # drops it from the three mirrors retires this line with them.
+    assert "scripts/graph_inspect.py" in hits, "canary gone: the segment grep no longer matches graph_inspect.py"
+    offenders = []
+    for path, numbers in sorted(hits.items()):
+        lines = (ROOT / path).read_text(encoding="utf-8", errors="replace").split("\n")
+        _reason, pred = SEGMENT_ALLOWED.get(path, (None, False))
+        for n in numbers:
+            if pred is False or (pred is not None and not pred(lines, n - 1)):
+                offenders.append(f"{path}:{n}: {lines[n - 1].strip()}")
+    assert not offenders, "deploy/pi built from segments outside the allowlist:\n  " + "\n  ".join(offenders)
