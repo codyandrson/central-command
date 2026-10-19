@@ -4,6 +4,66 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-18 — v2.67.0: deploy/pi/ is gone
+
+Second of the two releases splitting `deploy/pi/` (v2.66.0 was the first;
+spec: the deploy/pi split, 2026-10-17; audit ledger D8 step 2). The directory
+is deleted whole — sixteen tracked files — and nothing in the tree reads it
+any more. **Requires v2.66.0** (`min_upgrade_from`): the update INTO a release
+is run by the installed updater, and only v2.66.x's names the new paths. A
+v2.65.x updater's configmap row would die on `deploy/pi/litellm/config.yaml`
+against the merged tree — after the merge, with no rollback — so an install
+still on v2.65.x takes v2.66.0 first.
+
+- **What left the tree.** The duplicate live set v2.66.0 kept for one release
+  (`litellm/config.yaml`, `model-preferences.yaml`, `policy.py`,
+  `register-models.py`, `checks.sh`, `cc-nerve.service`, `.env.example`),
+  whose homes since v2.66.0 are `deploy/shared/litellm/`,
+  `deploy/k3s/cc-nerve.service` and `deploy/k3s/.env.example`. The retired
+  Docker Compose stack (`docker-compose.yml`, `cc-uvicorn.service`,
+  `backup.sh`, `cc-backup.service`, `cc-backup.timer`, `verify.sh`,
+  `migrate-from-desktop.sh`, `n8n/calendar-facade-writes.md`), superseded by
+  the k3s deployment and drifted dead long before — it ran postgres, LiteLLM,
+  Neo4j and n8n only. And the directory's README. `.gitignore` no longer
+  lists `deploy/pi/migration/`.
+- **The whole-stack fallback is reached through history.** Runbook
+  `deploy/k3s/README.md` §10: `git show v2.65.3:deploy/pi/docker-compose.yml`
+  reads the compose file and `git archive v2.65.3 deploy/pi | tar -x` restores
+  the directory. The retired stack's bytes are identical at every tag from
+  v2.65.3 through v2.66.2; the runbook pins v2.65.3 because a fallback should
+  point at neither a bridge release nor a patch cut while the split was under
+  way.
+- **The one reader v2.66.0 missed.** `deploy/n8n/apply-workflows.sh --k3s`
+  opened `deploy/pi/.env` by its literal path and worked only through the
+  symlink `cc_k3s_env_migrate` leaves at the old path — which the post-apply
+  checklist removes. It now resolves the env through `cc_k3s_env_file` like
+  every other reader, and the guard that let it through scans every tracked
+  shell script, not just `deploy/k3s/`. `scripts/graph_inspect.py`, which
+  built the old path from segments where no literal-string guard sees it,
+  prefers `deploy/k3s/.env` too.
+- **Guarded.** `tests/test_deploy_pi_boundary.py` pins the deleted state:
+  `git ls-files deploy/pi` is empty, every reader names the new paths, the
+  floor is 2.66.0, and no tracked file names `deploy/pi` outside an
+  enumerated allowlist — release history, dated design records, the
+  resolver's fallback, operator-facing messages and comment lines — so the
+  next reference anywhere else fails naming its file and line.
+- **Kept on purpose.** The resolver's `deploy/pi/.env` fallback
+  (`deploy/k3s/env-path.sh` and its Python mirrors) stays through this
+  release and is dropped later, once the deployment is known to work without
+  it. `deploy/shared/litellm/config.yaml` is untouched although two of its
+  comments still say "gone in v2.67.0": any byte change to that file diffs
+  the configmap row and restarts `cc-litellm`.
+- **After applying:** `deploy/pi/` on a deployment holds only the untracked
+  `.env` symlink (and a `litellm/__pycache__/`). The updater's `containers'
+  env path` phase performs the move itself if `init-env.sh` was not run after
+  v2.66.0; it refuses — WARN only — when both paths are regular files, so
+  settle that before applying. Remove the leftovers by hand afterwards —
+  `rm -r deploy/pi/litellm/__pycache__ && rmdir deploy/pi/litellm && rm
+  deploy/pi/.env && rmdir deploy/pi`, two `rmdir`s so anything else left
+  there stops the command instead of being swept: nothing automated needs the
+  symlink now that v2.66.0 is the rollback floor. Runbook:
+  `deploy/k3s/README.md` §0b and §10.
+
 ## 2026-10-18 — v2.66.2: default grants are opt-in per import
 
 `POST /api/skills/import` honours a folder's `default_agents` only when the

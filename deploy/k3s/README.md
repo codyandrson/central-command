@@ -98,7 +98,9 @@ second a symlink to `../k3s/.env`. The two keys inside never change; compare
 `sha256sum` of the file before and after if in doubt. Rollback matrix: a
 failed v2.66.0 apply lands on v2.65.x with nothing moved; a failed v2.67.0
 apply lands on v2.66.0, which reads the new path first. The symlink is
-removed by hand after v2.67.0 is accepted; nothing automated needs it then.
+removed by hand after v2.67.0 is accepted (`rm -r deploy/pi/litellm/__pycache__
+&& rmdir deploy/pi/litellm && rm deploy/pi/.env && rmdir deploy/pi`); nothing
+automated needs it then.
 
 ## 1. Prerequisites & assumptions
 
@@ -722,9 +724,10 @@ https://raspberrypi.tail2ae84b.ts.net:9428/select/vmui/
   confirm the `keys_<stamp>.env` beside it — without those two keys the dumps
   are ciphertext).
 - **Whole stack:** the pre-k3s Docker Compose stack was deleted from the tree
-  in v2.67.0. Reach it at v2.65.3, the last tag before the split (its bytes are
-  unchanged through v2.66.2, but a bridge release is not where a fallback
-  should point): `git show v2.65.3:deploy/pi/docker-compose.yml` reads the compose file, and `git archive v2.65.3 deploy/pi | tar -x` from the checkout root
+  in v2.67.0. Reach it at v2.65.3 (the retired stack's bytes are identical at
+  every tag from v2.65.3 through v2.66.2; a fallback should point at neither a
+  bridge release nor a patch cut while the split was under way):
+  `git show v2.65.3:deploy/pi/docker-compose.yml` reads the compose file, and `git archive v2.65.3 deploy/pi | tar -x` from the checkout root
   restores the whole directory, `cc-uvicorn.service` included — the compose
   file expects `litellm/config.yaml` and a `.env` beside it, and the unit
   hard-codes that path. It had already drifted

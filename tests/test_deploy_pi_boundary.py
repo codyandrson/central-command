@@ -163,12 +163,15 @@ def test_the_rules_glob_follows_the_files():
     assert "deploy/shared/litellm/**" in rules and "deploy/pi/litellm/**" not in rules
 
 
-def test_the_floor_is_unchanged_until_the_deletion_release():
-    """Release B (the deletions) raises min_upgrade_from to this release; this
-    one leaves the floor where the Graphiti removal put it."""
+def test_the_floor_is_release_a():
+    """The update INTO a release is run by the installed updater. Only
+    v2.66.x's names the new paths; a v2.65.x updater's configmap row would die
+    on deploy/pi/litellm/config.yaml against the merged tree, after the merge
+    and without a rollback. So B's floor is A: an install on v2.65.x takes
+    v2.66.0 first."""
     text = (ROOT / "VERSION").read_text(encoding="utf-8")
-    assert re.search(r"^version=2\.66\.\d+$", text, re.M), text
-    assert re.search(r"^min_upgrade_from=2\.60\.0$", text, re.M), text
+    assert re.search(r"^version=2\.67\.\d+$", text, re.M), text
+    assert re.search(r"^min_upgrade_from=2\.66\.0$", text, re.M), text
 
 
 # ── nothing in the tree names deploy/pi outside history and the kept seam ───
