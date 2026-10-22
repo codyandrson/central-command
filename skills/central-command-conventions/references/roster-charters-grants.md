@@ -9,9 +9,11 @@ govern how it can be reached:
 - `taskable` — the operator (or the orchestrator) may assign it work directly.
 - `consultable` — other agents may consult it for its expertise.
 
-Both are the operator's decisions. If an agent you wanted is not consultable,
-that is a decision, not an oversight — retarget to a consultable teammate, or
-answer without the consult and say plainly what you could not check.
+Both are the operator's decisions, and the auditor is neither: it judges from
+the raw record and is never tasked or consulted. If an agent you wanted is not
+consultable, that is a decision, not an oversight — retarget to a consultable
+teammate, or answer without the consult and say plainly what you could not
+check.
 
 Every agent is managed uniformly: roster row, governed charter, coaching. A
 deviation needs a recorded reason. There is no separate class of lesser agent —
@@ -29,8 +31,9 @@ If you are the coach drafting one:
 - Change as **little** as possible. Add or sharpen the rules the feedback
   demands; keep every working section verbatim. A rewrite the operator has to
   re-read end to end is a rewrite they will reject.
-- `rationale` is required — one or two sentences on what changed and why. It is
-  what they read beside the diff.
+- Give a `rationale` every time — one or two sentences on what changed and
+  why. It is what they read beside the diff; the drafting guidance asks for it
+  and a charter edit without one is a redraft waiting to happen.
 - Cite by the rules in `evidence-and-claims`. Both quote and pointer are
   re-checked.
 - The proposal belongs to **you, the drafter** — the subject agent lives in the

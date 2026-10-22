@@ -1,70 +1,28 @@
-# Roadmap — unfinished work found in the records
+# Roadmap — kept, not scheduled
 
-> Seeded 2026-09-20 from a consistency audit of every design record against
-> the code. This is an inventory with a disposition per item, **not** a
-> schedule and not a spec. Each design record's own header says what was built
-> ([index](superpowers/README.md)); this file collects what was *not*.
+> Regenerated 2026-10-22 from [`PRD.md`](PRD.md) §6.2, one row per item in
+> §6.2's order. Nothing here is scheduled: the PRD keeps these for later, and
+> this file says what is missing for each and where the design record is.
+> The build list — PRD §6.1, including the reversibility-in-inbox work (FR-15)
+> and the gate overrides that replaced the founding policy registry (FR-4) —
+> is epics in flight, tracked in the ticket store, not here. When §6.2
+> changes, regenerate this file; do not edit a row the PRD no longer carries.
 >
-> Dispositions: **spec next** — ready for a short spec before any build ·
-> **blocked** — cannot proceed, with the blocker named · **operator task** —
-> needs the operator's hands or judgment, not code · **deferred** — deliberately
-> not being built; the revisit condition is stated.
+> Dispositions carried over from the earlier inventory where an item had one:
+> **spec next** — ready for a short spec before any build · **deferred** —
+> deliberately not being built; the revisit condition is stated · **operator
+> task** — needs the operator's judgment, not code.
 
-## Spec next
-
-| Item | What is missing | Source record |
-|---|---|---|
-| Coaching stages 5b / 5c / 5d | Stage 5a (the coach, governed charter edits) is built; each later stage has its open question recorded in the spec | [coaching experiences](superpowers/specs/2026-07-27-coaching-experiences-design.md) |
-| Cross-session reviewer (self-directed learning §4) | Session-close reflection is built; the scheduled reviewer that reads *across* sessions has no code | [self-directed learning](superpowers/specs/2026-08-01-self-directed-learning-design.md) |
-| Update pipeline, full shape (deploy-refactor D3) | `deploy/single/update.sh` has import/stage/plan/apply/rollback; the specced separate pre-test phase and plan-time constraint resolution against the mirror are not built | [deploy refactor](superpowers/specs/2026-09-03-deploy-refactor-design.md) |
-| k3s Helm chart (deploy-refactor D4) | Not started; `deploy/k3s/` still runs the bespoke manifest + `cc-update.sh` choreography | [deploy refactor](superpowers/specs/2026-09-03-deploy-refactor-design.md) |
-| Supersede/annotation writes as gated Confluence actions; steward bulk-approval graduation | Knowledge-layer item 5 — the steward measures agreement (`gateway/steward_agreement.py`) but no class has graduated | [knowledge-layer routing](superpowers/specs/2026-07-29-knowledge-layer-routing-design.md) |
-| D7 auto-assign graduation; post-graduation spot-checks | The orchestrator recommends, the operator assigns. The ladder names the evidence-starvation blind spot after a class graduates; no spot-check mechanism exists for the dismissal classes | [trust-tier graduation](superpowers/specs/2026-07-30-trust-tier-graduation-design.md) |
-| Spot-check before `graph.verify_invalidation` graduates | Decided in the graph-auditor spec as a precondition; verify what exists before flipping that class | [graph verification auditor](superpowers/specs/2026-08-19-graph-verification-auditor-design.md) |
-| EA follow-ups (EA-widening Slice B) | Slice A (calendar writes) is built; Slice B is not | [EA widening](superpowers/research/2026-08-06-ea-widening-design.md) |
-| Episode-walk cluster walk | The Graph panel's Walk toggle is navigation-only; walking a cluster is the agreed next increment | [graph inspection](superpowers/specs/2026-08-09-graph-inspection-design.md) |
-| Comprehensive onboarding flow | The in-product first-run prompt and EA tour exist; an end-to-end guided onboarding does not | [setup & onboarding](superpowers/specs/2026-08-21-setup-onboarding-design.md), [team tour](superpowers/specs/2026-08-23-ea-hosted-team-tour-design.md) |
-| Guard tests for unguarded invariants | Eight landed 2026-09-20: runtime's reads-only use of credentialed `integrations/` clients (DL-103, the one that was inspection-only), `deps=` on every agent run (DL-024), a charter on every fresh run (DL-022), the Executor's proposer coming from the proposal row (DL-009), dispatch staying opt-in (DL-048), `process_claimed` as the one work-item path (DL-050), the graph's 1024-dimension embedding check (DL-052), the composer refusal-code allowlist (DL-090), plus the `FINGERPRINT_FIELDS` gap in DL-066. The entries still reading `discipline only` are the deliberate remainder: operational lore (placement, image refs, shell-pipeline gotchas, "don't reintroduce X") and process practices, which have no code seam a walk could hold — left unguarded on purpose rather than pending | [decision log](decisions/README.md) |
-| Cockpit RPC pressure: `sessions.list` storm, approve-resume still inline | Approve and reject return when recorded; the session-list polling load remains | [`CHANGELOG.md`](../CHANGELOG.md) v2.27.2, v2.29.3 |
-
-## Blocked
-
-| Item | Blocked on | Source record |
-|---|---|---|
-| Exchange adapter over an internal PowerShell automation toolset | Being on-site in the target work environment; endpoint verification cannot be done remotely | [work-transition compatibility](superpowers/specs/2026-08-21-work-transition-compatibility-design.md) |
-| Sources catalog slice 8: work adapters (SharePoint, mapped drives, Atlassian Data Center) | The same work migration; slices 1–7 prove the pattern first | [sources catalog](superpowers/specs/2026-08-23-sources-catalog-design.md) |
-| Human-team staffing agent | Real team traffic to staff against; doctrine is decided | [human-team staffing](superpowers/specs/2026-08-21-human-team-staffing-design.md) |
-| Graphistry push from the Graph panel | A GPU host to run it; the three-state seam is already in the cockpit | [graph inspection](superpowers/specs/2026-08-09-graph-inspection-design.md) |
-
-## Operator task
-
-| Item | What it takes | Source record |
-|---|---|---|
-| Editor rollout ("Steer" slices 2–3) | The editor is hired and built. Getting drafters to consult it is *coaching* through the existing charter loop, not a build | [editor quality evaluator](superpowers/research/2026-08-06-editor-quality-evaluator-design.md) |
-| Discussion-stall escalation | Built; its `discussion-sweep` schedule is seeded disabled. Enable it in the crons tab, or decide it stays dormant | [discussion-stall escalation](superpowers/specs/2026-07-27-discussion-stall-escalation-design.md) |
-| Graduating any auditor class | Every class defaults to shadow. Flipping one is an operator decision made on its agreement record — see "Who may approve what" in [`ARCHITECTURE.md`](ARCHITECTURE.md) | [trust-tier graduation](superpowers/specs/2026-07-30-trust-tier-graduation-design.md) |
-
-## Deferred — deliberately not being built
-
-| Item | Revisit when | Source record |
-|---|---|---|
-| Skills library Stage 4: per-agent gate model | Skill grants prove too coarse in practice | [skills library](superpowers/specs/2026-07-26-skills-library-design.md) |
-| Activity full-text search and saved views | The Activity view's filters stop being enough | [activity coverage](superpowers/specs/2026-08-11-activity-coverage-design.md) |
-| Standing auto-dismiss rules | Bulk dismissal (one decision per known set) stops being enough; a standing rule is a graduation nobody has decided | [bulk dismissal](superpowers/specs/2026-08-17-bulk-dismissal-design.md) |
-| A2A-style threaded consults | Transcript evidence shows single-shot consults losing information | [expert-team scaling](superpowers/specs/2026-08-22-expert-team-scaling-design.md) |
-| Full-roster team tour | The core-five tour plus "offer the rest" proves insufficient | [team tour](superpowers/specs/2026-08-23-ea-hosted-team-tour-design.md) |
-| Agent-version lifecycle and replay (founding D18) | Charter versioning + revert stops being enough | [`DESIGN.md`](DESIGN.md) §4 |
-| Adaptive routing feedback loop; local→cloud fallback chains | Withdrawn on evidence; fallbacks are declared but deliberately not configured | [quality-router migration](superpowers/specs/2026-07-26-quality-router-migration-design.md), [decision log](decisions/models.md) |
-| `ARG_SPECS` full coverage | Never pre-emptively — a spec is added when a capability family produces a multi-round rejection in practice | [decision log](decisions/trust-gate.md) |
-
-## Small cleanups (no spec needed)
-
-- `ProposalStatus.approved` and `SessionStatus.awaiting_input` / `.aborted`
-  (`central_command/contract/enums.py`) are declared and never assigned.
-  Harmless; removing them means touching the `status in (...)` guards around
-  the approval claim, so leave them unless that code is being changed anyway.
-  (`ProposalStatus.proposed` is live: it is the in-memory default before a
-  proposal is parked.)
-- A legacy-identifier rename across the cockpit's proxy helpers and remaining
-  comments, as its own release.
-- A Windows service wrapper for the API and cockpit on the single-node profile.
+| # | Item (PRD §6.2) | What is missing | Source record | Disposition |
+|---|---|---|---|---|
+| 1 | Helm umbrella chart for k3s, with the k3s ledger follow-on and single-env-file consolidation tied to it | Not started: `deploy/k3s/` runs numbered manifests applied with kubectl and `cc-update.sh`. The k3s profile has no per-step ledger (the single-node ledger record scoped k3s out and owes a follow-on). Secrets live in three gitignored env files on k3s (root `.env`, `web/.env`, `deploy/k3s/.env`); they fold into one when the chart's values file becomes the config surface | [deploy refactor](superpowers/specs/2026-09-03-deploy-refactor-design.md) D4; [DL-155](decisions/process.md) (Flux not adopted); [DL-181](decisions/process.md) | spec next |
+| 2 | Per-agent LiteLLM keys (low priority) | All traffic is attributed to one virtual key. The runtime already reads `CC_LLM_PROXY_KEY_<AGENT_ID>` per agent (`central_command/config.py`), but no per-agent key is minted or wired; the operator captures and sets one by hand | [LiteLLM skill, spend attribution](../skills/litellm/references/keys-and-teams.md); PRD FR-37 | — |
+| 3 | Façade idempotency keys (an open double-apply risk) | Executor replay is cursor-based, so a succeeded action never reruns, but a half-landed non-idempotent façade write (mail, calendar) can double-apply on retry; the façade must honour an idempotency key end to end | [outage equivalence](superpowers/specs/2026-07-31-outage-equivalence-design.md); [DL-172](decisions/process.md) | — |
+| 4 | Coaching stages 5b to 5d; the cross-session reviewer | Stage 5a (the coach, governed charter edits) is built; each later stage has its open question recorded in the spec. Session-close reflection is built; the scheduled reviewer that reads *across* sessions has no code | [coaching experiences](superpowers/specs/2026-07-27-coaching-experiences-design.md); [self-directed learning](superpowers/specs/2026-08-01-self-directed-learning-design.md) | spec next |
+| 5 | Auditor-approved trust stamps once a graduated class writes facts (FR-12) | Only `human-approved` and `operator-direct` are stamped today. `auditor-approved` needs a graduated class that writes facts (FR-10) and the stamp written on that path | PRD §3 "Trust stamp", FR-12; [DL-171](decisions/process.md) | — |
+| 6 | Threaded consults; full-roster tour | Consults are single-shot, advisory or drafting (FR-20); the tour covers the core five and offers the rest. Revisit threaded consults when transcript evidence shows single-shot consults losing information, and the full tour when the core-five tour plus "offer the rest" proves insufficient | [expert-team scaling](superpowers/specs/2026-08-22-expert-team-scaling-design.md); [team tour](superpowers/specs/2026-08-23-ea-hosted-team-tour-design.md); [DL-170](decisions/process.md), [DL-177](decisions/process.md) | deferred |
+| 7 | A reranker tier and benchmark | Three tiers exist behind one optional alias (dedicated reranker, chat model with logprobs, none) and one synthetic measurement (2026-10-05, `scripts/graph_rerank_bench.py`). A settled tier per deployment and a benchmark on real graph queries are not | [`deploy/single/README.md`](../deploy/single/README.md) "Reranking"; [DL-182](decisions/process.md) | operator task |
+| 8 | A versioned reference-material registry so stale references are mechanically detectable (FR-22) | Reference material carries a capture stamp and an agent declares a `stale_knowledge` gap when it contradicts what it observed; nothing detects "the references are v2, the system is v3" without an agent noticing | PRD FR-22; [DL-163](decisions/process.md) (capability gaps are answers) | — |
+| 9 | Contradiction detection and the scrub proposal (FR-50) | Nothing compares a newly approved claim against what the system already holds; no scrub proposal exists. Detection on each approved write and on request, the scrub only through the gate, adjudication the operator's | PRD FR-50, FR-32 | spec next |
+| 10 | Inbound mail attachment and image handling (FR-26) | The mail feed reaches a model as text only; attachments and images on inbound mail are not surfaced or captured (outbound attachment bytes already travel in proposals, FR-14) | PRD FR-26 | — |
+| 11 | Operator-sampled spot checks, built when the first world-changing class is ready to graduate (FR-10) | No spot-check mechanism exists. A graduated class stops producing operator decisions to pair against (post-graduation evidence starvation), so spot checks are required before any world-changing class graduates. Owner: the operator; revisit when a class's agreement quadrant is clean | [trust-tier graduation](superpowers/specs/2026-07-30-trust-tier-graduation-design.md); [DL-171](decisions/process.md); PRD FR-10 | operator task |

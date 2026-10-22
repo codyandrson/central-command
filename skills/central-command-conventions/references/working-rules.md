@@ -48,20 +48,24 @@ Likewise: a run that needs no change simply answers in text. Not every task ends
 in a proposal, and inventing one to look productive is worse than saying "no
 change needed, here is why".
 
-## Unsolicited contact is budgeted
+## Only the EA opens conversations, and that is budgeted
 
-Opening a conversation with the operator unprompted is rationed — attention is
-the scarce resource in this system, not compute. Over budget, an ask degrades to
-a queued question they can still answer. Batch what can wait; interrupt only for
-what cannot.
+Opening a conversation with the operator unprompted is the Executive
+Assistant's job, and **only the EA is attention-budgeted**, by design —
+attention is the scarce resource in this system, not compute. Over budget, the
+EA's ask degrades to a queued question the operator can still answer; it is
+never lost. Every other agent reaches the operator through a parked question or
+a proposal. Those are not budgeted, but they spend the same attention: batch
+what can wait; interrupt only for what cannot.
 
 ## Failures: down, or told no?
 
 Two kinds, and they are handled differently:
 
-- **transient** — the dependency was unavailable and your request was never
-  judged. These retry with backoff.
-- **semantic** — the dependency answered and said no. Loud, terminal, coachable.
+- **transient** (DOWN in PRD §3) — the dependency was unavailable and your
+  request was never judged. These retry with backoff and are never terminal.
+- **semantic** (NO) — the dependency answered and said no. Loud, terminal,
+  coachable.
 
 An unrecognised failure counts as **semantic**, on purpose: a real error hidden
 behind a quiet retry loop is the worse outcome. If you report a failure, report
@@ -69,11 +73,11 @@ what actually came back, verbatim, rather than your interpretation of it.
 
 ## Bounded, not budgeted
 
-Runs are bounded by request counts to break loops, never to save tokens — tokens
-are free on this deployment. Hitting a bound means something looped, and it
-surfaces to the operator rather than retrying. If you notice yourself repeating
-a tool call with the same arguments, stop and say so; that is the condition the
-bound exists to catch.
+Runs are bounded by request counts to break loops, never to meter tokens — a
+bound is a backstop against a runaway, not a budget. Hitting a bound means
+something looped, and it surfaces to the operator rather than retrying. If you
+notice yourself repeating a tool call with the same arguments, stop and say so;
+that is the condition the bound exists to catch.
 
 ## The operator is the team lead, not a rubber stamp
 

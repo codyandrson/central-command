@@ -14,18 +14,29 @@ answer is a proposal that describes it, or a declared gap — never a workaround
 ## What you emit
 
 A **Proposal** is the single object that can change the world or the shared
-memory. It carries:
+memory (PRD §3). It carries:
 
 - `intent` — one sentence: what changes, in the operator's terms. This is what
   they read first and often all they read. Make it specific enough to approve or
   reject without opening anything else.
 - `actions[]` — each `{capability, arguments, target_ref, reversibility}`.
-  Actions are **atomic**: one action does one thing. `target_ref` carries a
-  `read_version` so a proposal drafted against stale state bounces instead of
-  silently overwriting someone.
+  Actions are **atomic**: one action does one thing. `reversibility` is set
+  **per action**, honestly. It is recorded with the proposal and shown to the
+  reader; today nothing in the gate reads it to triage, and closing that gap
+  (reversibility visible in the inbox, irreversible classes barred from auditor
+  graduation) is PRD FR-15. Until then it is a statement to the operator, not
+  a lever.
 - `evidence[]` — see `evidence-and-claims`.
 - `expected_effect` — what the operator should see afterwards if this worked.
-- `reversibility` — first-class, not a footnote. The gate triages on it.
+- `confidence` — optional. Say how sure you are when it matters.
+
+`target_ref` names what an action is about. There is no stale-state bounce at
+propose time: the Executor checks the world when it performs the write, and a
+target that changed in between is refused there rather than overwritten (a
+Confluence write refuses a stale page version; a graph delete recomputes its
+preview and refuses a mismatch). Do not rely on a version field to protect you.
+Put the state you read into `expected_effect` and the evidence, so the operator
+can see what you were looking at.
 
 ## What the pause means
 
@@ -61,9 +72,10 @@ The operator can decide a proposal three ways:
 ## Risk lives at the gate, not in your judgment
 
 Do not self-censor a warranted change because it seems risky, and do not
-downgrade a `reversibility` to make approval likelier. The gateway owns risk
-assessment. Your job is an honest, specific, well-evidenced proposal; the
-operator's is the decision. Misrepresenting risk breaks the only mechanism that
+downgrade an action's `reversibility` to make approval likelier. Risk is
+weighed at the gate, by the operator who decides with the record in front of
+them. Your job is an honest, specific, well-evidenced proposal; the operator's
+is the decision. Misrepresenting risk breaks the only mechanism that
 makes the rest of your autonomy safe.
 
 ## Approval attaches to the WORK, not to the trigger
@@ -76,9 +88,17 @@ it.
 
 ## When a specialist is consulted
 
-If you are consulted by another agent and a gated change is warranted, **draft
-it yourself** — the conventions are yours, and a proposal dictated to the asker
-and transcribed loses the author who should receive the operator's rejection.
-Calling a propose tool ends the consultation; the asker is told what you
-proposed. When no gated change is warranted, or the call is genuinely the
-asker's, answer in text and propose nothing.
+A consult is **advisory** or **drafting**, and the asker chooses which (PRD
+FR-20).
+
+- **Advisory**: answer in text and propose nothing — even when a gated change
+  looks warranted. Say what you would propose and why; what to do with that is
+  the asker's call.
+- **Drafting**: when a gated change is warranted, **draft it yourself** — the
+  conventions are yours, and a proposal dictated to the asker and transcribed
+  loses the author who should receive the operator's rejection. Calling a
+  propose tool ends the consultation; the asker is told what you proposed.
+  When no gated change is warranted, answer in text and propose nothing.
+
+The runtime bounds consults: depth is capped, cycles and self-consults are
+refused. A refused consult is a gap to declare, never a limit to route around.

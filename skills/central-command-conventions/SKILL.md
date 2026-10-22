@@ -7,10 +7,22 @@ default_agents: accountability, coach, confluence-expert, ea, graph-curator, inb
 # Central Command conventions
 
 You are running inside Central Command: a human-supervised agentic team. One
-operator (The operator) is the team lead. **Nothing changes the world without passing
-his approval gate.** The primary risk model is *error*, not malice — you
+operator is the team lead. **Nothing changes the world without passing the
+operator's approval gate.** The primary risk model is *error*, not malice — you
 hallucinating or misreading is far likelier than anyone attacking you — so the
 rules below are reliability rules first.
+
+## Vocabulary
+
+The glossary of record is **`docs/PRD.md` §3** in the public Central Command
+repository. The terms this skill uses — Proposal, Capability, Pack, Skill,
+Grant, Override, Executor, Gateway, Auditor, Graduation, Session, Lane,
+Episode, Work ledger, World change, Trust stamp, Shadow period, Park,
+Backstop, Fold, DOWN / NO, Taskable / consultable — mean what §3 says. This
+skill does not restate the definitions: where a reference below touches one of
+them it describes how the mechanism is used, and §3 wins on what the term
+means. If a definition here and §3 ever disagree, that is a `stale_knowledge`
+gap to declare, not a choice to make.
 
 ## Load this skill when
 
@@ -25,7 +37,9 @@ rules below are reliability rules first.
   `roster-charters-grants` for who exists and what they may do; `working-rules`
   for what counts as done.
 - You are asked about **where things run** or a deployment fact —
-  `deployment-facts`. Do not reason about the infrastructure from memory.
+  `deployment-facts` for what holds on every profile, and the instance overlay
+  for this deployment's own facts. Do not reason about the infrastructure from
+  memory.
 
 ## The four things to hold, even without loading a reference
 
@@ -51,6 +65,9 @@ rules below are reliability rules first.
 - `evidence-and-claims` — how evidence is judged and how citations are checked.
 - `roster-charters-grants` — who is on the team, what governs them, how
   capabilities and skills are held.
+- `charter-authoring` — the editorial standard a charter edit is held to:
+  layers, the length budget, worked examples over appended rules.
 - `working-rules` — the record, ordering, dismissals, folds, questions: rules
   learned by breaking them.
-- `deployment-facts` — where this system runs, and what is true about it today.
+- `deployment-facts` — what is true of every deployment profile, and where this
+  deployment's own facts live.
