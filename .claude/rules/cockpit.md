@@ -17,9 +17,11 @@ when a matching file is read.
   container, while its children's variants work. jsdom has no layout engine,
   so no render test can catch this — `web/src/features/container-query-scope.test.ts`
   reads the SOURCE instead.
-- **`tsc` does not delete removed sources from `server-dist`.** Delete a
-  `server/` module and its compiled `.js` ships on after a rebuild — remove
-  it by hand in the same change.
+- **`tsc` does not delete removed sources from `server-dist`.** `npm run
+  build` starts with `rm -rf server-dist`, so a full build ships no orphan;
+  a bare `tsc` or an incremental dev run does — delete a `server/` module and
+  its compiled `.js` ships on after that rebuild, so remove it by hand in the
+  same change.
 - **The cockpit hand-declares its own interfaces over untyped RPC payloads,
   so a field the gateway never sends is invisible to `tsc` AND to every
   frontend test** — the feature silently never renders. The defence is a

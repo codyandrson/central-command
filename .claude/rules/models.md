@@ -36,8 +36,9 @@ when a matching file is read.
   request per capability and returns the declared→observed diff. Probe trap:
   a thinking model can spend a small `max_tokens` on reasoning and answer
   HTTP 200 with EMPTY content — that is "inconclusive", never "no". Declared
-  fleet facts live in `model-preferences.yaml`; after a release that changes
-  them, `policy.py --apply` — the updater does not.
+  fleet facts live in `model-preferences.yaml`; the updater applies them on
+  release (`cc-update.sh`'s `litellm policy apply` phase runs `policy.py
+  --apply`), so run it by hand only for a change made outside a release.
 - **LiteLLM forbids `-` in MCP server names; Kubernetes requires it.**
   `mcp_server.id` stays the k8s-valid canonical id and the proxy sees
   `_litellm_server_name()`'s underscored form — translated in exactly two

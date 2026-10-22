@@ -3,7 +3,6 @@ paths:
   - "deploy/n8n/**"
   - "central_command/integrations/jira.py"
   - "central_command/integrations/exchange.py"
-  - "central_command/integrations/n8n_facade.py"
   - "central_command/contract/mail.py"
   - "central_command/ingest/**"
 ---

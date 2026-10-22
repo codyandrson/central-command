@@ -182,8 +182,10 @@ when a matching file is read.
   for the row, with a WARN, because a CONTAINER dials it.
 - **The single-node install ACQUIRES before it deploys, and never falls back
   on its own.** `setup.sh fetch` is the one phase that touches the network;
-  each failure names its `.env` seam and the phase exits 3; `deploy/discover.sh`
-  is how a restricted network learns which mirror to write into each seam.
+  each failure names its `.env` seam, a FAIL exits 1, and only a seam the
+  operator alone can fill (a mirror lacking a locked tag) exits 3;
+  `deploy/discover.sh` is how a restricted network learns which mirror to write
+  into each seam.
   Adding an image means adding its constraint/lock line to `images.txt` — the
   seam test fails otherwise. **Version flexibility is for third-party
   dependencies only:** the locked digest is verified when the mirror serves

@@ -172,9 +172,10 @@ when a matching file is read.
   ORDER of the schema (with schema-constrained decoding, index arrays before a
   `reasoning` field means the model answers before it thinks).
 - **Episodes name the operator; "the operator" is not a graph subject.** The
-  Person ontology refuses a role as a name, so an episode written "the
-  operator is subscribed to X" lands with no subscriber or spawns a bare
-  `operator` entity. The graph-propose pack renders the configured name into
+  Person ontology only asks for named individuals (prompt guidance in the
+  type's docstring, and in the pack rule), nothing enforces it, so an episode
+  written "the operator is subscribed to X" lands with no subscriber or
+  spawns a bare `operator` entity. The graph-propose pack renders the configured name into
   its rule; keep any new episode-writing pack on the same rule.
 - **An edge with `expired_at` is not necessarily a retired fact.** Graphiti
   expires a NEW edge at birth whenever the extractor supplied an `invalid_at`

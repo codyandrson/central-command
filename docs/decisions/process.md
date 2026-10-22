@@ -77,7 +77,7 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** undated
-- **Rule:** [AGENTS.md](../../AGENTS.md) — "**`schema.sql` is auto-loaded on a FRESH database only — nothing applies it at runtime.**"
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**`schema.sql` is applied on a FRESH database and by the updater at release — never at process start.**"
 - **Why:** The test DB re-executes `schema.sql` on every run, so a new column
   passes the whole suite and then breaks a live deployment with an
   undefined-column error that reads like a code bug; additive columns must
@@ -557,7 +557,7 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-10-04
-- **Rule:** [AGENTS.md](../../AGENTS.md) — "**graphiti-core is imported lazily, and only through `integrations/graphiti_client.py`.**"
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**graphiti-core is imported lazily, and only by the two `integrations/` modules that need it: `graphiti_client.py` and the read module `graphiti.py`.**"
 - **Why:** The stock Graphiti MCP server acknowledged an episode before it was
   extracted and logged-and-dropped failures after the acknowledgement, offered
   no curation, and shipped as a locally built image per architecture; the

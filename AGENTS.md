@@ -10,17 +10,17 @@
 
 ## Central Command
 
-A human-supervised agentic-team framework: a control plane where the operator tasks Claude agents and approves every action that changes the world. Python 3.12 (FastAPI, Pydantic AI) with a React/Hono cockpit in `web/`, Postgres as the spine, Graphiti/Neo4j, LiteLLM, n8n. Single-operator and self-hosted, with an air-gapped deployment target; the risk model is error, not malice. Full design: `docs/DESIGN.md`; what changed: `CHANGELOG.md`; design records: `docs/superpowers/`.
+A human-supervised agentic-team framework: a control plane where the operator tasks Claude agents and approves, by default, every action that changes the world. Python 3.12 (FastAPI, Pydantic AI) with a React/Hono cockpit in `web/`, Postgres as the spine, Graphiti/Neo4j, LiteLLM, n8n. Single-operator and self-hosted, with an air-gapped deployment target; the risk model is error, not malice. Full design: `docs/DESIGN.md`; what changed: `CHANGELOG.md`; design records: `docs/superpowers/`.
 
 ## Policy
 
-- Nothing changes the world without passing an approval gate; the tier rules are under Architecture below.
+- Nothing changes the world without passing an approval gate, BY DEFAULT; the tier rules are under Architecture below. The default has a closed, named exemption list: the operator's own graph curation and the deterministic wiki annotation (`wiki_annotation_mode="auto"`) — the two writes with no agent in the path. Adding to the list is the operator's call, never an agent's. The general per-grant override that will carry such exemptions is not built yet; today the one live form is an MCP tool's gate (`ungated` or `human approval`, with the operator's per-agent `agent_mcp_gate_override`). An ungated write creates no proposal at all (it is never a proposal auto-approved as `system`); once overrides exist it carries an override stamp instead.
 - Secrets live only in `.env` (gitignored). Never commit or print them, and keep anything sensitive or personal out of tracked files: no real operator identity, no real mail/issue content, no deployment facts, nothing that lowers the cost of attacking an instance. Prose says "the operator"; examples use the Doe/Rivers cast and `example.com`; instance facts go in a private repo or gitignored `CLAUDE.local.md`.
 - Never weaken `scripts/prepush-scan.sh` (the pre-push guard) to get a push through; move the content to a private repo instead.
 - `master` is the only branch — no `main`. A feature branch is a deliberate choice to raise with the operator, not a default.
 - A release is three things: a CHANGELOG entry, a `VERSION` bump, a tag. The updaters read `VERSION` as the installed version — not git, not the tag; `tests/test_version_file.py` pins it to the newest CHANGELOG heading.
 - Never change `LITELLM_SALT_KEY` or `N8N_ENCRYPTION_KEY`; they encrypt the stored LiteLLM virtual keys and the Gmail OAuth credential, and a restore under a different key leaves the rows present but undecryptable.
-- Never edit `docs/vendor/` (refetch via `scripts/vendor_docs_fetch.sh`, which regenerates the `docs/vendor/MANIFEST` fingerprint `update.sh import` reads to skip those 47k files — `scripts/vendor_manifest.sh`, guarded by `tests/test_vendor_manifest.py`) or hand-create anything in `servers/` (it arrives only through an approved `mcp.sync_source`). Regenerating `requirements.lock` is a deliberate act.
+- Never edit `docs/vendor/` (refetch via `scripts/vendor_docs_fetch.sh`, which regenerates the `docs/vendor/MANIFEST` fingerprint `update.sh import` reads to skip those 47k files — `scripts/vendor_manifest.sh`, guarded by `tests/test_vendor_manifest.py`) or hand-create anything in `servers/` (it arrives only through an approved `mcp.sync_source`; the hand-committed `servers/echo-demo/` demo is the one stated exception, and nothing else is added by hand). Regenerating `requirements.lock` is a deliberate act.
 
 ## Where things are
 
@@ -95,22 +95,28 @@ where the story is gone.
   founding-roster UPDATEs are guarded by `where … and role = ''`, so the
   INSERT above them must NOT seed `role`. If you add a seeded column, ask
   what a brand-new database does, not what the dev box does.
-- **`schema.sql` is auto-loaded on a FRESH database only — nothing applies it
-  at runtime.** The test DB re-executes it every run, so a new column passes
-  the whole suite and then breaks a live deployment with an undefined-column
-  error that reads like a code bug. Apply additive columns to the running
-  database in the same change that adds them to the file (they are
-  `add column if not exists`, so it is idempotent).
+- **`schema.sql` is applied on a FRESH database and by the updater at release
+  — never at process start.** A fresh database auto-loads it (initdb); a
+  running one gets it from the updater's `schema` phase (`cc-update.sh`,
+  `update.sh apply`), additive-only and idempotent, on every update. Nothing in
+  the app process applies it. The test DB re-executes it every run, so a new
+  column passes the whole suite and then breaks a dev or hand-run database
+  with an undefined-column error that reads like a code bug — apply additive
+  columns to any database the updater does not own in the same change that
+  adds them to the file. Keep every statement `add column if not exists`
+  style: the updater re-runs the whole file against the live database.
 - **The agent sandbox is CONTAINMENT, not restriction.** It exists so an
   agent can work freely without risking the host — NOT to limit what it can
   reach. Egress is open; the gate is the CAPABILITY, never reachability —
-  every tool that CHANGES a service is a gated `propose_*`. What constrains a
+  every tool that CHANGES a service is a `propose_*`, gated by default (Policy lists the exemptions). What constrains a
   sandbox is that it holds NO credentials; provisioning one converts reach
   into ungated writes, so that is an explicit operator decision.
-- **graphiti-core is imported lazily, and only through
-  `integrations/graphiti_client.py`.** Importing it reads `SEMAPHORE_LIMIT`
-  and arms telemetry, so the client sets both first and nothing loaded at
-  application start may import the package. **Never call `Graphiti.search()`**
+- **graphiti-core is imported lazily, and only by the two `integrations/`
+  modules that need it: `graphiti_client.py` and the read module
+  `graphiti.py`.** Importing it reads `SEMAPHORE_LIMIT` and arms telemetry,
+  so the client sets both first (`graphiti.py` imports `graphiti_core.search*`
+  function-locally, after `client._prepare_environment()`) and nothing loaded
+  at application start may import the package. **Never call `Graphiti.search()`**
   — it mutates a module-level recipe that `add_episode` also reads, so one
   search changes extraction for the life of the process; search through
   `search_()` with a deep-copied recipe. `runtime/` may import
@@ -127,8 +133,9 @@ where the story is gone.
   no action needed — WITHDRAWN, folds released, session closed, and the agent
   is NEVER resumed (a test makes the agent factory raise if any path tries).
   Rejecting to make something go away is the trap Dismiss exists to end.
-  Nothing feeds coaching automatically — the operator curates signals case by
-  case.
+  Nothing feeds coaching automatically: the operator foregrounds the signals
+  that matter case by case, and the coach reads everything — a selection is
+  foregrounded context, not a fence.
 - **A proposal's argument SHAPE is checked in BOTH tiers from ONE list —
   `contract.ARG_SPECS`.** The runtime hands a malformed draft back to the
   model (`tools._validate_proposal`, ModelRetry with every problem at once);
@@ -155,6 +162,16 @@ where the story is gone.
   allowlist. Errors are always material; cadence liveness lives in
   `last_fired_at`, not in history. Don't quiet an action that authorises
   work.
+- **A seeded heartbeat schedule that contacts the operator or the world is
+  born disabled; an internal sweep may seed enabled, and each is listed
+  here.** The first enable of an outward seed (the EA contacts, `mail-poll`,
+  `drain-window`, the graph verification sweep, the Jira hygiene task) is an
+  operator click on the event log; the table default is `enabled false`.
+  The only internal sweep seeded enabled is `retry-sweep` (outage
+  convergence — a strict no-op when nothing is parked, it re-drives only
+  what was already authorised); `schema.sql` records the deviation where it
+  is seeded. Seeding another enabled schedule means adding it to this list
+  in the same change.
 - **Agents take `deps`** (`runtime/deps.py`). Every `agent.run()` needs
   `deps=TriageDeps(...)`; resume paths pass a fresh one on purpose.
 - **Every proposal takes one path too:**

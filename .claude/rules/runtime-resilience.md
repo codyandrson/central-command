@@ -66,7 +66,7 @@ when a matching file is read.
 - **A tool result is bounded by the INPUT window, and mail tokenises at ~2
   chars/token.** `tools._clip` derives its ceiling from the smallest
   discovered input window (`context.tool_result_ceiling`), never from the
-  output cap; the estimate starts at `CHARS_PER_TOKEN = 3` and switches to the density the proxy's own token count reveals (`record_density`, per model, tool schemas included); and `prepare_window`
+  output cap; the estimate starts at `CHARS_PER_TOKEN = 3` and switches to the density the proxy's own token count reveals (`record_density`, per model, from the serialized messages only — the proxy's count includes tool schemas, the character count does not, so the ratio does not either); and `prepare_window`
   clips a request that would not fit rather than sending it (2026-09-16:
   four `mail_read`s in one turn, ten dead sessions). A per-tool cap goes on
   the tool (`_MAIL_BODY_CEILING`), not on the constant.
