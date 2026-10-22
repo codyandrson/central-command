@@ -1652,3 +1652,51 @@ hygiene, and how the test suite itself must be written. See
   on a non-production graph.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md; DL-129; DL-130
+
+### DL-183 — The design-record index is generated from each record's own Status header, never hand-maintained
+
+- **Status:** active
+- **Date:** 2026-09-20
+- **Rule:** (recorded here) The index of design records under `docs/superpowers/` is generated
+  by `scripts/gen_records_index.py` from the `Status` / `As-built` header each
+  record carries; no hand-maintained table of records lives anywhere else.
+- **Why:** The hand-maintained table in `docs/DESIGN.md` drifted from the code
+  it summarised (two wrong cells and one missing row, found in the 2026-09-20
+  consistency audit) because nothing tied its claims back to the records or
+  the code they described. A header on each record, checked by a test, does.
+- **Enforced:** test: `tests/test_design_record_headers.py::test_readme_matches_the_generator`
+- **Source:** CHANGELOG v2.38.3; scripts/gen_records_index.py; docs/DESIGN.md (the inline note moved here on 2026-10-21)
+
+### DL-184 — Jira is a native client; an unconfigured client fails loudly and never routes to a webhook
+
+- **Status:** active
+- **Date:** 2026-09-26
+- **Rule:** (recorded here) Jira is reached through the native client in `integrations/jira.py`
+  (D23: a native client unless n8n had already solved a hard integration
+  problem). The n8n Jira façade fallback is removed; an unconfigured client
+  raises before any request.
+- **Why:** Every Jira function was wrapped to route to the n8n webhook when the
+  native credentials were absent. No deployment had used that path since the
+  cutover, its n8n half hard-coded one Cloud site, and its one live effect
+  was a 2026-09-23 incident where a Data Center install was silently sent to
+  a webhook that did not exist.
+- **Enforced:** test: `tests/test_jira_client.py::test_unconfigured_client_fails_loudly_instead_of_routing_anywhere`
+- **Source:** CHANGELOG v2.50.0; docs/DESIGN.md (the inline correction of 2026-09-20 moved here on 2026-10-21)
+
+### DL-185 — docs/DESIGN.md is the frozen founding record; its vision, as-built facts and reasons each live in one other layer
+
+- **Status:** active
+- **Date:** 2026-10-21
+- **Rule:** (recorded here) `docs/DESIGN.md` is frozen as the founding record: nothing in it is
+  edited except dated superseded notes and pointers. The vision lives in
+  `docs/PRD.md`, the system as built in `docs/ARCHITECTURE.md`, and the reasons
+  behind rules in `docs/decisions/`. Dated history (the changelog, the
+  journal, design records) is likewise cited and never revised.
+- **Why:** The file claimed to be frozen while carrying inline corrections
+  dated 2026-08-01, 2026-09-20 and 2026-10-04 and two different freeze dates,
+  so a reader could not tell founding intent from later fact. The
+  documentation review sharpened "old documents become pointers" to "every
+  document is revised or removed on its content; dated history is the only
+  exemption".
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/PRD.md FR-49; PRD addendum §C (SHARPENED) and §D (founding record)

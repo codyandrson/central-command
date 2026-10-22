@@ -1,8 +1,14 @@
 # Central Command
 
-> A human-supervised agentic-team framework — a control plane over a team of
-> Claude agents where the operator is team lead: tasking agents, approving their
-> actions, answering their questions, and coaching their behavior over time.
+> A human-supervised agentic-team framework: a control plane over a team of
+> Claude agents, with the operator as team lead.
+
+## Purpose
+
+What Central Command is for, who it is for, and what it must do are written
+once, in [`docs/PRD.md`](docs/PRD.md). This README does not restate them: it
+gets you started, gives the one-paragraph core idea below, and points to the
+layer that owns each other kind of content (see *Where to read next*).
 
 ## Getting started
 
@@ -100,14 +106,10 @@ installed before the ledger existed (v2.55.0); the named subcommands
 not undo are in
 [`deploy/single/README.md`](deploy/single/README.md#updating-an-existing-deployment).
 
-**Nothing changes the world without passing an approval gate.** Single-operator,
-self-hosted on a Linux homelab (podman). The primary risk model is *error, not
-malice* (hallucination / misreads), so the guards are reliability guards that
-also happen to stop misuse.
-
 ## The core idea
 
-An agent can only **propose** and **read** — never write. It emits a `Proposal`
+By default, nothing changes the world without passing an approval gate. An
+agent can only **propose** and **read** — never write. It emits a `Proposal`
 (intent + actions + evidence), the run **durably pauses** (survives a full
 process restart), the proposal lands in a **Decisions Inbox**, and only after the
 operator approves does a credentialed **Executor** perform the real write (Jira,
@@ -132,7 +134,8 @@ A modular monolith in four tiers:
 
 Durable pause/resume is explicit persistence over Postgres (the paused run's
 message history + pending tool call), so an agent can wait days for a human
-approval and survive a restart.
+approval and survive a restart. The full, as-built picture is
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Where to read next
 
@@ -140,7 +143,10 @@ approval and survive a restart.
 |-----|------------|
 | [`CLAUDE.md`](CLAUDE.md) | Orientation — read this first: what the system is, how to run it, conventions and hard-won gotchas |
 | [`CHANGELOG.md`](CHANGELOG.md) | What changed, release by release (the operator's live status and development journal are private instance documents) |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | The full design compendium and decision record |
+| [`docs/PRD.md`](docs/PRD.md) | The vision: why this exists, who it is for, and what it must do |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the system is built, as built |
+| [`docs/decisions/`](docs/decisions/README.md) | Why each rule exists: the decision log, with stable ids |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | The founding design, frozen as a record (read the PRD for the vision) |
 
 ## Running it
 

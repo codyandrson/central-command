@@ -266,3 +266,6 @@ recorded in-repo." rather than inventing one.
 | DL-180 | One tool installs and updates; a running process never replaces its own code; backups track reversibility | active | 2026-08-27 | discipline only | [process.md](process.md) |
 | DL-181 | Setup design details: the k3s driver shares the single-node phases, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling | active | 2026-09-23 | discipline only | [process.md](process.md) |
 | DL-182 | The graphiti-core migration: one LiteLLM key, failure classes without exhaustion, verification by recorded episode, benchmarked reranker | active | 2026-10-04 | discipline only | [process.md](process.md) |
+| DL-183 | The design-record index is generated from each record's own Status header, never hand-maintained | active | 2026-09-20 | test: `tests/test_design_record_headers.py::test_readme_matches_the_generator` | [process.md](process.md) |
+| DL-184 | Jira is a native client; an unconfigured client fails loudly and never routes to a webhook | active | 2026-09-26 | test: `tests/test_jira_client.py::test_unconfigured_client_fails_loudly_instead_of_routing_anywhere` | [process.md](process.md) |
+| DL-185 | docs/DESIGN.md is the frozen founding record; its vision, as-built facts and reasons each live in one other layer | active | 2026-10-21 | discipline only | [process.md](process.md) |
