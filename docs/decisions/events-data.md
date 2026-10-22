@@ -18,7 +18,7 @@ materiality allowlist, and the Postgres spine. See
   CHANGELOG's tracked window (from 2026-08-27) has no "M8"/"event log"
   heading, so the milestone predates the CHANGELOG's coverage.
 - **Enforced:** test: `tests/test_eventlog.py::test_decision_is_logged_before_execution`
-- **Source:** code comment `central_command/events/log.py:1-18`; docs/DESIGN.md:139
+- **Source:** code comment `central_command/events/log.py:1-18`; docs/DESIGN.md:120
 
 ### DL-037 — ActionSpec.material is an explicit, non-authorising and self-recording allowlist
 
@@ -29,7 +29,7 @@ materiality allowlist, and the Postgres spine. See
   declare itself material only if it is both non-authorising AND
   self-recording, so a cadence-liveness tick that found nothing writes
   nothing while an error is always material.
-- **Enforced:** code structure only — `central_command/heartbeat/actions.py:29,48`; `tests/test_heartbeat.py` and `tests/test_retry_sweep.py` exercise heartbeat actions generally but no test asserts the allowlist's two-condition parity directly
+- **Enforced:** code structure only — `central_command/heartbeat/actions.py:29,48`; test: `tests/test_heartbeat.py::test_quiet_eligibility_is_an_explicit_allowlist` pins the exact set of actions whose `material` is not None and asserts the loud ones stay loud (membership, not the two conditions semantically — the code comment at heartbeat/actions.py line 47 calls it "parity-tested")
 - **Source:** AGENTS.md bite marks
 
 ### DL-038 — events.emit() is the only way to publish
@@ -43,7 +43,7 @@ materiality allowlist, and the Postgres spine. See
   `proposal.created` landing after the proposal's save is not a violation of
   the emit-before rule.
 - **Enforced:** code structure only — `central_command/events/log.py`; no source-walk test found guarding against a second write path to Postgres/SSE
-- **Source:** docs/DESIGN.md:139
+- **Source:** docs/DESIGN.md:120
 
 ### DL-039 — asyncio.Event at module scope is loop-bound; use a flag plus a queue sentinel
 

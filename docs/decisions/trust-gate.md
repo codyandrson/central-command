@@ -39,8 +39,8 @@ for the entry format and how to add one.
   source — but only on recorded agreement evidence, one class at a time, and
   revocably: "graduation is configuration, never code." A fresh install is
   fully human-gated. Doctrine: the trust-tier graduation spec.
-- **Enforced:** code structure only — `central_command/gateway/auditor.py:1-50` (doctrine docstring and class constants) and `:285-340` (`approve_and_execute` call site, `approver="auditor"`); `central_command/config.py:368-420` (`auditor_enabled`/`auditor_mode`/`auditor_document_mode`/`graph_auditor_enabled`/`graph_auditor_mode`, all default off/"shadow"); test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` pins the invalidation carve-out
-- **Source:** code comment `central_command/gateway/auditor.py:1-50`; code comment `central_command/config.py:368-420`
+- **Enforced:** code structure only — `central_command/gateway/auditor.py:1-50` (doctrine docstring and class constants) and `:285-340` (`approve_and_execute` call site, `approver="auditor"` at `:328`); `central_command/config.py:469-483,503-515` (`auditor_enabled`/`auditor_mode`/`auditor_document_mode`/`graph_auditor_enabled`/`graph_auditor_mode`, all default off/"shadow"); test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` pins the invalidation carve-out
+- **Source:** code comment `central_command/gateway/auditor.py:1-50`; code comment `central_command/config.py:469-483,503-515`
 
 ### DL-003 — Some deterministic writes are gated by the operator's own click, not by propose/approve
 
@@ -61,8 +61,8 @@ for the entry format and how to add one.
   review — gating it would review nothing.
   `docs/superpowers/specs/2026-08-09-graph-inspection-design.md` records this
   explicitly as a deliberate exception to the general approval-gate rule.
-- **Enforced:** code structure only — `central_command/api/routes.py` (`_curate()` and its six call sites); `central_command/config.py:395-402` (`wiki_annotation_mode`, default `"off"`); `central_command/ingest/wiki_freshness.py:229`
-- **Source:** `docs/superpowers/specs/2026-08-09-graph-inspection-design.md` §5-7,72,154; code comment `central_command/config.py:395-402`
+- **Enforced:** code structure only — `central_command/api/routes.py` (`_curate()` and its six call sites); `central_command/config.py:498` (`wiki_annotation_mode`, default `"off"`); `central_command/ingest/wiki_freshness.py:229`
+- **Source:** `docs/superpowers/specs/2026-08-09-graph-inspection-design.md` §5-7,72,154; code comment `central_command/config.py:495-498`
 
 ### DL-004 — The trust boundary is the import graph: runtime never imports gateway
 
@@ -89,6 +89,7 @@ for the entry format and how to add one.
   gated writes), not on network reachability.
 - **Enforced:** discipline only — no test asserts egress stays open or that a sandbox tool never becomes credentialed
 - **Source:** AGENTS.md bite marks
+- **Supersedes:** DL-007
 
 ### DL-006 — The sandbox's only exit is mcp.sync_source, and content is captured at propose time
 
@@ -103,18 +104,26 @@ for the entry format and how to add one.
 
 ### DL-007 — srt stays dormant in the sandbox image; bwrap-fs-only ships instead
 
-- **Status:** active
+- **Status:** superseded
 - **Date:** 2026-08-03
-- **Rule:** (recorded here) The sandbox image ships gVisor plus a deny-all
+- **Rule:** (recorded here) The sandbox image shipped gVisor plus a deny-all
   NetworkPolicy and `bwrap --share-net` (filesystem-only isolation) instead
   of `srt`: `srt`'s network-namespace removal was tested and does not work
   under gVisor, while `bwrap --share-net` does. `srt` stays dormant as a
   residual capability until bwrap-fs-only wrapping is proven viable.
 - **Why:** `docs/superpowers/plans/2026-08-03-sandbox-slice1.md` records the
   direct test result: "srt works under gVisor... TESTED 2026-08-03 — DOES
-  NOT... the incompatibility is srt's netns removal specifically."
+  NOT... the incompatibility is srt's netns removal specifically." That
+  finding stands. Superseded 2026-10-21 (review ruling GATE-011): the deny-all
+  egress half was replaced on 2026-08-04 by DL-005 (containment, not
+  restriction). Live posture today: gVisor is the pod's `runtimeClassName`;
+  the namespace NetworkPolicy denies INGRESS only and allows all egress
+  (`deploy/k3s/60-sandbox.yaml`); `srt` and `bubblewrap` are installed in the
+  image and dormant; nothing in the code or manifests wraps a command in
+  `bwrap --share-net`, so the "bwrap-fs-only ships" half was never wired.
 - **Enforced:** discipline only — a recorded residual risk, no test
-- **Source:** docs/superpowers/plans/2026-08-03-sandbox-slice1.md
+- **Source:** docs/superpowers/plans/2026-08-03-sandbox-slice1.md; code comment `deploy/k3s/sandbox.Dockerfile:3-10`
+- **Superseded-by:** DL-005
 
 ### DL-008 — A proposal's arguments arrive flattened from real Claude, nested from the demo model
 
@@ -159,12 +168,15 @@ for the entry format and how to add one.
 - **Rule:** (recorded here) `contract.ARG_SPECS` deliberately covers only
   SOME gated-write capabilities: a spec is added when a capability family
   produces a multi-round rejection in practice, never pre-emptively, because
-  completeness-by-default would contradict that policy. As of v2.38.2
-  (measured by running `central_command.gateway.capabilities.gated_write_names()`
-  and `len(central_command.contract.args.ARG_SPECS)` against the worktree's
-  interpreter): 16 `ARG_SPECS` entries, 89 total registered capabilities
-  (`gateway.capabilities.REGISTRY`), 58 gated-write capabilities, so 42 gated
-  writes currently carry no arg spec.
+  completeness-by-default would contradict that policy. The counts
+  drift with every release, so they are dated, not current. As first measured
+  (v2.38.2): 16 `ARG_SPECS` entries, 89 registered capabilities, 58
+  gated-write capabilities, 42 gated writes without a spec. Re-measured
+  2026-10-21 (v2.67.2, by running `central_command.gateway.capabilities.gated_write_names()`
+  and `len(central_command.contract.args.ARG_SPECS)`): 58 `ARG_SPECS` entries,
+  97 registered capabilities (`gateway.capabilities.REGISTRY`), 65 gated-write
+  capabilities, so 7 gated writes carry no arg spec. Partial-by-design still
+  holds; the spec set grew by incident, as the rule says.
 - **Why:** `central_command/contract/args.py` — "Only SHAPE belongs here...
   Found live 2026-08-29: one `graph.add_episode` intent took FOUR approvals."
   The operator confirmed 2026-09-20 that partial-by-design is the intended

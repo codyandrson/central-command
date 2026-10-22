@@ -46,7 +46,7 @@ to add one.
   exactly two places (the Executor and `runtime/packs.py`'s toolset URL)
   because `runtime/` may never import `gateway/` — a single shared helper is
   not an option across that boundary.
-- **Enforced:** code structure only — `central_command/gateway/executor.py:1199` (`_litellm_server_name`), referenced (not redefined) at `central_command/runtime/packs.py:1848`
+- **Enforced:** code structure only — `central_command/gateway/executor.py:1406` (`_litellm_server_name`); `central_command/runtime/packs.py:2213` repeats `server_id.replace("-", "_")` instead of referencing the helper (its comment at `:2211` says "duplicated deliberately")
 - **Source:** .claude/rules/models.md
 
 ### DL-066 — Autodiscovery has memory; only new/changed/failed ids reach the agent
@@ -77,8 +77,12 @@ to add one.
   died anyway on a `max_tokens` mismatch (366 such errors in four days).
   The file states plainly: "This is CURRENT CONFIGURATION, not a rule.
   Provider models are expected back later to make the system more robust."
+  Reaffirmed by the operator on 2026-10-05 and carried into the PRD
+  (2026-10-21): routing and retries are LiteLLM's, a failure lands retryable
+  at full quality rather than degraded, fallbacks stay off by operator
+  decision, and only the operator reverses that.
 - **Enforced:** code structure only — an empty YAML block (`fallbacks: {}`); no test asserts fallbacks stay empty
-- **Source:** code comment `deploy/shared/litellm/model-preferences.yaml:372-390`
+- **Source:** code comment `deploy/shared/litellm/model-preferences.yaml:413-432`
 
 ### DL-068 — The router-mode serving unit was never built; model swapping lives outside this repo
 

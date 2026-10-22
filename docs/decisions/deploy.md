@@ -74,7 +74,7 @@ the entry format and how to add one.
   turns every `NEO4J_`-prefixed var into a config setting; the fix is
   `enableServiceLinks: false` on the pod, NOT disabling strict validation
   (which silences the symptom and leaves junk settings parsed).
-- **Enforced:** code structure only — `deploy/k3s/40-graph.yaml:102,192` (present twice); no automated guard against removal
+- **Enforced:** code structure only — `deploy/k3s/40-graph.yaml:86` (the one Neo4j occurrence; the other `enableServiceLinks` lines belong to other pods); no automated guard against removal
 - **Source:** .claude/rules/deploy-k3s.md
 
 ### DL-080 — Use the fully-qualified image ref; podman's localhost/ tag is invisible to Kubernetes

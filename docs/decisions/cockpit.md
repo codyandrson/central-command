@@ -24,10 +24,12 @@ for the entry format and how to add one.
 - **Status:** active
 - **Date:** undated
 - **Rule:** [.claude/rules/cockpit.md](../../.claude/rules/cockpit.md) — "**`tsc` does not delete removed sources from `server-dist`.**"
-- **Why:** Not recorded beyond the stated mechanism: deleting a `server/`
-  module and its compiled `.js` ships on after a rebuild unless removed by
-  hand in the same change.
-- **Enforced:** discipline only
+- **Why:** Not recorded beyond the stated mechanism: a bare `tsc` leaves a
+  deleted `server/` module's compiled `.js` in `server-dist`, where it ships
+  on. Narrowed 2026-10-21: `web/package.json`'s `build:server` now begins
+  `rm -rf server-dist &&`, so `npm run build` clears removed sources and the
+  remove-by-hand advice applies only to a bare or incremental `tsc` run.
+- **Enforced:** code structure only — `web/package.json` `build:server` wipes `server-dist` first; no test guards it
 - **Source:** .claude/rules/cockpit.md
 
 ### DL-089 — The cockpit hand-declares its own wire interfaces; the defence is a backend wire-shape test

@@ -93,10 +93,14 @@ one.
 - **Date:** 2026-07-18
 - **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**Header-less email still needs a stable key:**"
 - **Why:** Deduplicating ingested items needs a stable identity, but content
-  that arrives without real mail headers (hand-fed or demo text) has none —
-  hashing the content alone would wrongly treat "the same words submitted
-  twice on purpose" as a duplicate, so header-less items get a fresh synthetic
-  id per submission instead.
+  that arrives without real mail headers (hand-fed or demo text) has none, so
+  the key is synthesised from a SHA-256 of the raw text: identical text gets
+  the SAME id, which keeps enrollment idempotent (`ledger.parse_email`,
+  asserted by `a == b` in the enforcing test). The earlier text of this entry
+  said the opposite (a fresh id per submission) and was inverted; corrected
+  2026-10-21 (review ruling INGEST-002) — the content-hash id is the decision.
+  The trade-off accepted: the same words submitted twice on purpose are one
+  item.
 - **Enforced:** test: `tests/test_ledger.py::test_bare_text_gets_a_stable_synthetic_message_id`
 - **Source:** .claude/rules/integrations.md
 

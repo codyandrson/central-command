@@ -14,6 +14,10 @@ resilience, and the runtime's context/window handling. See
   were actually sound — only real inference could. The two concerns (which
   model answers, versus whether a write is actually performed) were kept as
   separate switches so neither could be mistaken for the other.
+  **Amended 2026-10-21 (review ruling, PRD FR-42; see DL-141):** the
+  deterministic model is now a test-only mode and the dry-run executor mode
+  is to be removed, so the second switch will not survive. The rule quoted
+  here is the position as of its date; it does not change until the code does.
 - **Enforced:** code structure only — `central_command/config.py`; exercised indirectly across most of `tests/` via `demo_mode=True` fixtures, no single dedicated test
 - **Source:** AGENTS.md bite marks
 
@@ -64,7 +68,7 @@ resilience, and the runtime's context/window handling. See
   "current session" shortcut kept pointing at an agent's newest conversation
   even after that conversation was closed, making a closed lane appear to
   still be live.
-- **Enforced:** code structure only — `central_command/api/nerve_gateway.py:341` (`_latest_conversation(open_only=True)`), called at lines 373/484/892/1394; no dedicated pytest guard found by name
+- **Enforced:** code structure only — `central_command/api/nerve_gateway.py:347` (`_latest_conversation(open_only=True)`), called at lines 379/490/898/1400; no dedicated pytest guard found by name
 - **Source:** AGENTS.md bite marks
 
 ### DL-026 — An attachment reaches the agent as content, or the send fails — no third state

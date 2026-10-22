@@ -57,7 +57,9 @@ hygiene, and how the test suite itself must be written. See
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "Never edit `docs/vendor/`"
 - **Why:** Not recorded beyond the stated policy itself: `docs/vendor/`
   refreshes only via `scripts/vendor_docs_fetch.sh`, and `servers/` arrives
-  only through an approved `mcp.sync_source` proposal (see DL-006).
+  through an approved `mcp.sync_source` proposal (see DL-006). The one
+  exception is `servers/echo-demo/`, hand-committed as the worked example
+  (review ruling GATE-001, 2026-10-21); nothing else is hand-created there.
 - **Enforced:** script: `scripts/vendor_docs_fetch.sh` for vendor docs; `servers/` is populated only via the `mcp.sync_source` executor path (code structure)
 - **Source:** AGENTS.md Policy
 
@@ -766,3 +768,887 @@ hygiene, and how the test suite itself must be written. See
   puts the error in front of the agent and on the Systems row.
 - **Enforced:** test: `tests/test_graph_rerank.py::test_an_http_failure_raises_and_is_classified_by_its_status`, test: `tests/test_graph_rerank.py::test_a_malformed_rerank_answer_is_a_semantic_error_not_placeholder_scores`, test: `tests/test_graph_rerank.py::test_a_transient_reranker_failure_is_retried_once_then_reported`, test: `tests/test_graph_rerank.py::test_no_reranker_refuses_to_be_called` and test: `tests/test_graphiti_client.py::test_rerank_raises_instead_of_falling_back_to_input_order`
 - **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D3, rewritten); CHANGELOG v2.62.0
+
+### DL-141 — The deterministic model is test-only and the dry-run executor mode is removed
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) AGENTS.md's "Two run modes" bite mark records `CC_DEMO_MODE` and
+  `CC_EXECUTOR_MODE` (`dry_run` vs `live`) as it stood. The 2026-10 review
+  amends it (PRD FR-42): the deterministic model becomes a test-only mode,
+  renamed, with a guard that refuses it in any deployment env file; the
+  dry-run executor mode is removed and a fresh install starts live. Tests
+  use fakes. Not yet built; until it lands, DL-021 describes the code.
+- **Why:** A dry-run executor that logs a write instead of performing it is a
+  silent-success trap: the proposal reads EXECUTED and nothing happened.
+  The deterministic stand-in model was only ever meant for plumbing tests,
+  and a deployment that boots on it answers without judgment (the reason
+  DL-021 kept the two switches separate). Rejected alternative recorded in
+  the PRD addendum §B (dry-run executor mode).
+- **Enforced:** discipline only — the guard and the meta-test are owed (PRD §6.1 item 8); until built, nothing enforces the amendment
+- **Source:** docs/PRD.md FR-42; PRD addendum §B and §E (GATE-125..128); DL-021
+
+### DL-142 — The read-version stale bounce at propose time is retired; world-state checks at execution replace it
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) A proposal is not bounced at propose time for a stale read-version.
+  World-state checks happen at execution, and a world that changed between
+  propose and approve produces the world-changed redraft (PRD FR-5, FR-24).
+- **Why:** The design contract's rule 4 had a proposal carry the version of what it
+  read, to be compared at propose time. In practice the field was written
+  "unknown" and nothing read it, while the checks that matter (the ticket is
+  still in the state the draft assumed) can only run at execution because
+  the world can change between propose and approve. Review ruling GATE-006
+  retired the bounce and dropped the field from drafting guidance; the
+  world-changed redraft (INGEST-045) is the mechanism that replaces it. This
+  is also why `contract.ARG_SPECS` checks SHAPE only (AGENTS.md).
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/PRD.md FR-5; PRD addendum §B (GATE-006, INGEST-045); docs/DESIGN.md §2 contract rule 4
+
+### DL-143 — A policy registry as a governed table was never built
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) There is no policy registry table. Advisory flags and charter text
+  carry what a registry would; the concrete form of the idea is the scoped
+  gate override on a grant (PRD FR-4).
+- **Why:** The founding design imagined policy as governed data. It was never built
+  because advisory flags and charter text sufficed in practice, and a table
+  nothing consults would be exactly the unverified claim AGENTS.md warns
+  against. Review ruling GATE-010 retired the claim and put the real need,
+  per-grant overrides with an operator-authored scope, on the roadmap as
+  FR-4.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/PRD.md FR-4; PRD addendum §B (GATE-010)
+
+### DL-144 — Not every write produces a proposal: an ungated write stamps an override instead of auto-approving as system
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) An ungated write (an operator-authored override, or the two
+  deliberate exceptions of DL-003) creates no proposal and carries an
+  override stamp. The design where every write produces a proposal and
+  ungated ones auto-approve as "system" is rejected.
+- **Why:** "Every write produces a proposal; ungated classes auto-approve as
+  system" would give a gate-shaped record to writes that no gate decided,
+  and it conflicts with DL-003 (ungated by design, no agent judgment in the
+  path) and with the overrides requirement (FR-4), whose record is the
+  stamp, not a fake approval. Review ruling GATE-060 retired the idea.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/PRD.md FR-2, FR-4; PRD addendum §B (GATE-060); DL-003
+
+### DL-145 — Event-subscription agent wakes and agent.request/response events were never built
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) Agents wake from three sources only: the heartbeat scheduler, the
+  ledger dispatcher and direct tasking. There is no event-subscription wake
+  and no agent.request/agent.response event; collaboration is consults (the
+  asker parked awaiting agents) and tasks.
+- **Why:** The founding eventing design had agents subscribing to log events.
+  It was never built, and the three real wake sources are each traceable to
+  a row or an operator click, which keeps "why did this agent run" an
+  answerable question. Review rulings RUNTIME-003/004 confirmed the
+  three-source doctrine.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/PRD.md FR-17; PRD addendum §A and §B (RUNTIME-003/004)
+
+### DL-146 — DBOS was never adopted; durability is the deferred-tool pattern plus the persisted message history
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) Durable pause and resume is pydantic-ai's deferred tool call plus the
+  project's own persisted message history. DBOS (named in the founding
+  runtime decision D22) was never adopted and is not a dependency.
+- **Why:** D22 chose Pydantic AI 2.0 with DBOS for durable execution (a library
+  over Postgres, no separate cluster, as against Temporal). The build found
+  the deferred-tool primitive and the Postgres spine already gave the
+  durability the design needed, so the extra layer never arrived. Review
+  rulings RUNTIME-013/014 recorded the divergence; see DL-161 for the
+  founding runtime comparison this narrows.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/PRD.md FR-18; PRD addendum §A and §B (RUNTIME-013/014)
+
+### DL-147 — Classifier-driven model routing and the LiteLLM adaptive router are rejected; routing is the operator's, inside LiteLLM
+
+- **Status:** active
+- **Date:** 2026-07-26
+- **Rule:** (recorded here) No routing logic (quality router, complexity classifier, Auto Router)
+  is built into Central Command. Per-agent pinning (`CC_MODEL_<AGENT_ID>`)
+  is the primary routing lever and keywords the only lexical override.
+- **Why:** Measured, not assumed. On 283 real emails the complexity classifier sent
+  75% to COMPLEX and its correlation with difficulty was inverted (dismissed
+  mail 79% COMPLEX, acted-on mail 7%), so tier assignment cannot come from
+  it. The adaptive bandit's only positive signal is a regex over human
+  thanks, so agent runs decay every model, and in the deployed LiteLLM
+  version the adaptive router is config-file-only (DB-created routers are
+  absent from state and return HTTP 400). The default alias is a deployment
+  row rather than a `model_group_alias`, so an Auto Router can later replace
+  it with one API call if the operator chooses. Review rulings MODELS-013/015
+  confirmed the rejection.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-26-adaptive-routing-that-learns-design.md; docs/superpowers/specs/2026-07-26-quality-router-migration-design.md; docs/superpowers/specs/2026-07-27-default-alias-seam-design.md; PRD addendum §B (MODELS-013/015)
+
+### DL-148 — The dispatch token-budget valve and the enterprise LiteLLM features are not adopted
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) Dispatch carries no token-budget valve (the existing one is to be
+  removed), and no enterprise-licensed LiteLLM feature is used.
+- **Why:** The valve was judged unnecessary (review ruling MODELS-018, removal owed
+  in PRD §6.1). The enterprise features are unlicensed here and, checked
+  against LiteLLM's current documentation, give one operator nothing the
+  open features do not (MODELS-024).
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** PRD addendum §B and §E (MODELS-018, MODELS-024)
+
+### DL-149 — Embedding changes: per-vector stamps, a keyword-only freeze, a Postgres embedder record, a heartbeat re-embed, in-place rewrite and a second graph are rejected
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) The embedding model changes only through the FR-33 migration, and an
+  embedding never falls back to a model with different weights. Rejected,
+  each with its reason: per-vector embedding stamps; a keyword-only read
+  mode during a freeze; an embedder record in Postgres; re-embedding as a
+  heartbeat action; an in-place vector rewrite; a second graph built and cut
+  over.
+- **Why:** From the embedding-model-change research (PRD addendum §B). Stamps
+  leaked into agent results and extraction never wrote them, so they were a
+  claim, not a measurement. A keyword-only mode is a fail-soft fallback,
+  which a standing ruling forbids (see DL-140). The embedder record belongs
+  with the graph, because separate stores restore separately and a graph
+  restore would contradict a Postgres record. A heartbeat re-embed is a
+  one-shot that needs its own state. An in-place rewrite leaves mixed
+  vectors visible to live search for the whole run, and a second graph
+  doubles storage for one operator. The local-serving record adds that
+  vectors from different weights are incompatible, so a failed embedding
+  write fails and retries; a second embedding host is legitimate only if it
+  passes the same-weights checklist (model and revision, pooling, L2
+  normalisation, output dimensions, instruction prefix, precision); the
+  re-embed is a tracked, resumable script, and the graph write path accepting
+  a workstation dependency was the operator's explicit availability trade.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-26-local-serving-and-embedding-migration-design.md; docs/PRD.md FR-33, FR-34; PRD addendum §B (embedding rows)
+
+### DL-150 — Provisional write-now-veto-later memory and Letta-style agent self-editing are rejected
+
+- **Status:** active
+- **Date:** 2026-08-01
+- **Rule:** (recorded here) Every write to any memory scope is a gated `graph.add_episode`
+  proposal. Rejected: provisional or expiry-based memory ("write now, veto
+  within N days") and agent self-editing of memory outside the gate.
+- **Why:** Revised D11 (D11-r1): agents get a private graph partition, but a lesson
+  the operator never saw would shape later behaviour unreviewed, which is
+  the failure the gate exists to prevent. Provisional writes would put
+  unreviewed content in the memory every agent reads, and self-editing
+  outside the gate removes the review altogether. The target scope is a
+  visible field on each episode proposal and the Executor writes the
+  operator-approved scope, never the agent's own arguments; session-close
+  reflection yields at most one coaching self-nomination per closed session,
+  as a signal, never a charter edit.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-01-self-directed-learning-design.md; PRD addendum §B (GRAPH-028/029)
+
+### DL-151 — Graphiti communities, sagas, triplet writes and bulk ingest are not adopted; no fork of graphiti-core
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** (recorded here) One proposal is one episode. Not adopted: communities, sagas,
+  `add_triplet`, message and JSON sources, bulk ingest. graphiti-core is not
+  forked; two fixes ride as patches (DL-132).
+- **Why:** Communities cost one LLM call per member with a long-open clustering bug
+  and no evidence of value. Sagas' summaries were never exercised end to end
+  and do not affect extraction. `add_triplet` creates bare nodes with no
+  type, summary or provenance, and bulk ingest has the same shape problem.
+  Per-episode extraction instructions and excluded entity types stay a
+  deferred, benchmarked experiment.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md; PRD addendum §B (GRAPH-044..047)
+
+### DL-152 — The D16 guaranteed backlog trickle was never built; bulk dismissal drains a backlog by pattern
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) No guaranteed-trickle mechanism exists for a large backlog. A backlog
+  is drained by bulk dismissal over a pinned set resolved at propose time.
+- **Why:** The founding D16 trickle was never built. Bulk dismissal does the job
+  with a human decision in the path: a pinned set resolved to ids at propose
+  or claim time, never a standing rule, with a preview-then-execute step that
+  refuses if the set drifted. Review ruling INGEST-003.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-17-bulk-dismissal-design.md; PRD addendum §B (INGEST-003)
+
+### DL-153 — The surveyed Exchange feature set and a provider abstraction are cut; Exchange is a native client at the seam
+
+- **Status:** active
+- **Date:** 2026-09-25
+- **Rule:** (recorded here) The mail and calendar façades route to Exchange when configured, else
+  to n8n, with signatures and callers unchanged. Not adopted: a provider
+  interface class, autodiscover, Kerberos/SSPI, attachments, classification
+  filtering before real fixtures exist. New gated writes `mail.send` and
+  `mail.move` pin recipients and body at propose time.
+- **Why:** The surveyed feature list was a wishlist never revised; the design cut
+  the native client to the seam. The client uses `exchangelib` (synchronous,
+  run through `asyncio.to_thread`, a core dependency) rather than hand-rolled
+  SOAP, one query language per provider is translated at the seam, and
+  `mail.unsubscribe` is withheld on Exchange until its DKIM verdict can be
+  verified (and send and move on Gmail) using provider membership, the Jira
+  flavour mechanism generalised. Data Center epic structure, rate limiting
+  and `X-Atlassian-Token` stay out of scope until a probe reports.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-09-25-exchange-native-client-design.md; docs/superpowers/specs/2026-09-23-jira-data-center-flavor-design.md; PRD addendum §B (INGEST-006..030)
+
+### DL-154 — Ready-made installers and air-gap tools are not adopted; the per-step ledger and one answer file won
+
+- **Status:** active
+- **Date:** 2026-09-23
+- **Rule:** (recorded here) The installer is a deterministic driver over a per-step ledger
+  (`steps.tsv`) and one answer file. Not adopted: Zarf, Hauler, KOTS, goss,
+  Replicated troubleshoot, Ansible, bats, regctl/crane/skopeo, gum/whiptail,
+  bundles, a TUI or a Python installer.
+- **Why:** None has an installer precedent for this shape, and each needs an
+  interpreter, a Windows support level or a vendor/customer split the target
+  site does not guarantee: Zarf and Hauler are k8s-only transport tools
+  solving a problem the site lacks, and KOTS's embedded-database appliance
+  conflicts with Postgres and Neo4j. The agent-conducted loop and per-step
+  ledger are kept despite having no precedent (2026-09-23 design record,
+  D8). Digest pinning is a preference, not a requirement, and a tag
+  substituted from an enterprise mirror is trusted.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md; docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md; PRD addendum §B (DEPLOY-SINGLE-029)
+
+### DL-155 — Flux GitOps for k3s is not adopted; the deployment is numbered manifests with a trigger-file updater
+
+- **Status:** active
+- **Date:** 2026-09-03
+- **Rule:** (recorded here) The k3s deployment is applied by the release updater, not by an
+  auto-syncing GitOps controller.
+- **Why:** Flux was assessed and deferred (DEPLOY-K3S-020): auto-sync clashes with
+  the approval-gate culture, where nothing changes a running system without
+  an operator deciding. The phase-3 design chose a Helm umbrella with
+  `values.yaml` as the configuration surface instead.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-09-03-deploy-refactor-design.md; PRD addendum §B (DEPLOY-K3S-020)
+
+### DL-156 — Out-of-cockpit notification (email, push) is out of scope
+
+- **Status:** active
+- **Date:** 2026-10-19
+- **Rule:** (recorded here) Notification tiers are in-app only: interrupt (approvals, errors,
+  agent-initiated conversations), badge (unread and aging items) and digest
+  (everything else, batched daily). Email and push are out of scope for the
+  current version, with no plans.
+- **Why:** The discussion-stall record and the teaming doctrine both chose to
+  notify inside the cockpit and nowhere else; the review confirmed it as the
+  current position (COCKPIT-010). Reversible only by a new operator
+  decision.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-27-discussion-stall-escalation-design.md; docs/superpowers/specs/2026-07-29-teaming-consultation-doctrine-design.md; PRD addendum §B (COCKPIT-010)
+
+### DL-157 — Build the control plane, adopt the runtime, buy nothing: why not OpenClaw, LangGraph, CrewAI and the rest
+
+- **Status:** active
+- **Date:** 2026-07-18
+- **Rule:** (recorded here) The control plane is built here; the agent runtime is adopted. Scored
+  against five requirements (R1 per-agent supervision with mid-task
+  redirect; R2 approval gates and agent-initiated questions; R3 a feedback
+  loop that durably tunes standing guidance; R4 agent-to-agent delegation;
+  R5 fully self-hosted, open source, modifiable), thirteen candidates were
+  assessed and none was adopted as the platform.
+- **Why:** "Owning it is the point": the supervision experience is the part no
+  off-the-shelf tool gets right for a single self-hosting operator. Per
+  candidate, as recorded at the time (first-party READMEs, none functionally
+  tested): OpenClaw+Nerve is the UX reference only: a 2026 CVE record, an
+  unfenced marketplace, approvals that lean post-hoc rather than blocking,
+  no durable feedback-to-guidance loop, and a very large foreign codebase
+  (Nerve is vendored under `web/` as the cockpit's base; OpenClaw was not
+  adopted). LangGraph as a library is the documented fallback because its
+  Studio/inbox server is not open source. CrewAI's open-source human input
+  blocks on stdin, with async approval a paid product. AutoGen/AG2 is
+  maintenance-mode and superseded. Microsoft Agent Framework's centre of
+  gravity is Azure/OpenAI with a non-production dev UI. HumanLayer's SDK is
+  deprecated with a closed successor (the `require_approval` idea was kept).
+  Archon pivoted to a CI/CD harness for AI coding with no agent-to-agent
+  delegation. FleetQ has all five requirements verified in source but is
+  AGPL, Laravel and single-maintainer, so its design was mined, not its code.
+  Mission Control is alpha (re-check later). Langfuse was noted for tracing.
+  Patterns taken: control plane as proxy, a proposal inbox, a thinker/executor
+  credential split, session trees, durable serialisable interrupts, and
+  LLM-proposed human-approved guidance evolution.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
+
+### DL-158 — The operator's earlier n8n project could not host the vision; n8n stays a façade, not the platform
+
+- **Status:** active
+- **Date:** 2026-07-18
+- **Rule:** (recorded here) n8n holds the Gmail credential and the `lib-*` provider façades;
+  agent-shaped work is not built in n8n.
+- **Why:** The earlier n8n-based pipeline was finished and disciplined but opaque to
+  steer: the AI-agent node is one opaque invocation whose only intervention
+  is kill, prompts are string literals in workflow JSON, and session memory
+  is unreliable in queue mode. "Pipeline-shaped workloads fit n8n;
+  agent-shaped workloads don't." What carried over: Graphiti/Neo4j and
+  Postgres, the facade idea (reads free, mutations only after approval,
+  credentials staying in n8n) and the security patterns (credential split,
+  idempotency, provenance, a poisoning boundary). The 60-node approval bridge
+  was retired but its behaviour (quiet-period re-ping, free text routes to
+  clarification and never a silent reject, outcome postback) was kept as
+  requirements. The "lost" feeling traced to process-artifact weight and a
+  fenced reactive-only assistant.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
+
+### DL-159 — The nine-row failure-mode catalogue: assume the agent is wrong before assuming it is attacked
+
+- **Status:** active
+- **Date:** 2026-07-18
+- **Rule:** (recorded here) Treat every agent conclusion as unverified until independently
+  checked, and design so that a wrong agent cannot corrupt anything without
+  the error being caught at the gate. Each failure mode below is mapped to
+  the controls that catch it.
+- **Why:** The founding trust record catalogued nine failure modes, ranked by
+  expected frequency: (1) a hallucinated claim (the top concern, for example
+  a quoted date the email does not contain), (2) misreading or
+  misattribution, (3) a wrong-target mutation, (4) compounding memory
+  corruption, (5) content misdirection taken as benign error (a forwarded
+  thread's "please close the old tickets" is data, not a command), (6)
+  duplicate or skipped work, (7) runaway cost, (8) a bad skill or bad update
+  (curated, versioned skills; no auto-install; review on update; revert) and
+  (9) the malicious cases, out of scope by construction. The framing wins
+  because it contains the blast radius of error rather than trying to make
+  the model infallible, which is impossible; the boundary also neutralising
+  the malicious case is a bonus, not the driver. The honest trade in the
+  first release was to lean on propose-only tools, the gateway chokepoint and
+  total human approval so the auditor and isolation could wait, sound only
+  while human approval stays meaningful; the named mitigations for approval
+  fatigue are backpressure paced to review capacity, proposals that say what
+  will happen, irreversible actions made visually distinct, and the auditor
+  in shadow mode first. The non-negotiable minimum before real mail: curated
+  skills only and internal services bound to loopback. Host security (disk
+  encryption, hardening, backups of trusted stores) was assumed, not solved.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record); docs/PRD.md §1
+
+### DL-160 — The threat model is error, not malice, for a single operator; sandboxes, egress allowlists, a vault and anomaly detection were cut
+
+- **Status:** active
+- **Date:** 2026-07-19
+- **Rule:** (recorded here) The recalibration to error-not-malice was the operator's call, resting
+  on a single operator, no exfiltration-capable tools, sole access to the
+  work systems and an air-gapped work target. It stands only while the tool
+  surface stays as designed or the system stays single-user. Sandboxing,
+  egress allowlists, a secrets vault and anomaly detection (D19-D21) were
+  cut, to be revisited if the tool surface gains exfiltration ability.
+- **Why:** The prior draft's adversarial framing was judged overweight. D19 chose
+  process isolation and a credential split over containers or OS-user
+  separation, D20 no egress-allowlist infrastructure, D21 reuse of n8n's
+  credential isolation through the façade with no vault. Several premises
+  have since moved and the review recorded it: mail send is now a gated step
+  (FR-27), outward gates can be overridden by the operator (FR-4), and sandbox
+  egress is open by decision (DL-005); the founding "no exfiltration-capable
+  tools" premise is NARROWED, not wrong: the gate, not tool absence,
+  contains the error. The MVP defence in depth (propose-only tools, a gateway
+  chokepoint, human approval of everything, data-not-commands, least-privilege
+  grants, executor-held secrets, a memory write-gate with trust levels,
+  budgets) stands; the later controls (an independent auditor starting with
+  low-risk graph writes, capability stripping by delegation depth) arrived as
+  DL-002 and the consult bounds.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record); docs/PRD.md §1; PRD addendum §C (founding premise NARROWED); review rulings GATE-017..019
+
+### DL-161 — Pydantic AI plus Claude was chosen over the Claude Agent SDK, Temporal and microservices; the runtime stays swappable
+
+- **Status:** active
+- **Date:** 2026-07-19
+- **Rule:** (recorded here) The runtime is Pydantic AI with Claude models behind one seam
+  (`runtime/models.py:resolve_model()`); the system is a modular monolith.
+- **Why:** D22 was framed as the one decision to make explicit before code. The
+  Claude Agent SDK was the live alternative for Claude-nativeness at the cost
+  of building durability by hand; Pydantic AI's deferred-tool protocol
+  (typed, serialisable pauses that can park for days) met the two settling
+  requirements, durability everywhere and proposals as typed objects.
+  "Pydantic AI is not 'not Claude'". Temporal needs a cluster to run, so
+  DBOS (a library over Postgres) was named, then never needed (DL-146).
+  Microservices were rejected for a single homelab: module boundaries are
+  splittable later. Python was chosen for one language across runtime,
+  gateway, dispatcher and API (a TypeScript choice would reopen the runtime
+  question). A thin runtime interface keeps the choice from being a one-way
+  door. Phase 1 existed to prove the spine end to end: read an email, propose
+  a Jira change with evidence, restart the server while it waits, approve,
+  and see the ticket updated once with provenance.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
+
+### DL-162 — Approval attaches to what work does, never to how it was started; scheduled work is born disabled
+
+- **Status:** active
+- **Date:** 2026-07-23
+- **Rule:** (recorded here) The heartbeat neither bypasses a gate that exists nor adds one that
+  does not. A schedule changes when work runs, not its permission level.
+  Schedules are governed rows with `cron | every | at`; one heartbeat runs
+  per database behind an advisory lock; missed fires are skipped and
+  recorded, never replayed; run history is the event log, not a second
+  table.
+- **Why:** Everything proactive had been operator-initiated; recurring work should
+  be visible data with an on/off switch, not shell scripts or hidden loops.
+  Whether a scheduled agent ever touches approval is decided at creation by
+  the packs it holds (a read-only analyst completes a nightly schedule with
+  zero approvals; granting a propose pack makes its writes park). Six
+  decision points were answered: in-process timers over external ones,
+  `croniter` over `every`/`at` only, seeded schedules DISABLED so nothing
+  quietly burns tokens (amended since: internal housekeeping such as
+  `mail-poll` may seed enabled and is listed, PRD FR-41), skip rather than
+  replay (a box that was off overnight must not burst stale sweeps at boot),
+  keep the feed poller, and run history in the event log. The same principle
+  shut the coach out of the heartbeat: coaching is triggered only by the
+  operator.
+- **Enforced:** test: `tests/test_heartbeat.py::test_action_registry_parity_with_the_lever_allowlist` pins the registry's levers
+- **Source:** docs/PRD.md FR-41; heartbeat design proposal (founding artifact, 2026-07-23; D27); docs/ARCHITECTURE.md heartbeat section
+
+### DL-163 — The orchestrator orchestrates: plan review on, stall detection not budgets, questions parked for the operator, capability gaps are answers
+
+- **Status:** active
+- **Date:** 2026-07-24
+- **Rule:** (recorded here) The orchestrator is a role that runs a durable plan, assign, receive,
+  decide loop; the gate applies only where the work changes the world.
+  Decisions of 2026-07-24: D7-P plan review ON before round one; D7-B stall
+  detection, not budgets; D7-Q `ask_operator` parks a question whose answer
+  is trusted operator evidence; D7-E a cockpit entry point to assign a
+  project. Capability gaps are first-class answers.
+- **Why:** The operator's scope correction: v1 was a fire-and-visible fan-out; the
+  orchestrator "must orchestrate", and an agent answering a question or
+  reviewing makes no external change, so its response flows back ungated.
+  Plan review parks the plan (sub-tasks, assignees, order, what it will NOT
+  do) for approve or revise, and a stall-triggered replan re-parks. Time is
+  not the constraint, stuck-ness is: two stalls park with `ask_operator` and
+  the ledger attached, and the round and fan-out limits are runaway
+  safety nets, not pacing. Agents may say they lack knowledge, tools or
+  current reference material and request the remedy instead of guessing: a
+  declared gap is reviewable, a guessed-past gap is buried until it surfaces
+  as mistakes. Rejected: one long run calling children in-tool (dies with
+  the process and blocks for days at a gate), handoff or mesh orchestration
+  (dissolves the single accountable context the operator supervises),
+  pydantic-graph (no self-persistence in v2) and Temporal/DBOS. Amended
+  2026-10-19: FR-19 reverses the founding star shape so any agent may create
+  and assign tasks; the orchestrator's plan-assign loop and the operator
+  checkpoint stand.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** D7 phase 2 design v2 (founding artifact, 2026-07-24); docs/PRD.md FR-19; PRD addendum §C (D7 REVERSED)
+
+### DL-164 — Model facts live in one tracked file, applied by script; an absent cost is not zero; routing preferences and cost have fixed homes
+
+- **Status:** active
+- **Date:** 2026-07-26
+- **Rule:** (recorded here) Declared model facts (tiers, costs, fallbacks) live in one tracked file
+  applied idempotently by a script, with `verify.sh` failing if the live
+  state drifts. Every model declares an explicit cost. Routing preferences
+  live in `model_info` and cost in `litellm_params`. Policy writes go through
+  `PATCH /model/{id}/update` with `model_info.id` explicit.
+- **Why:** Putting either preference or cost in the wrong home fails silently (a
+  coin flip with no error), and `POST /model/update` silently drops
+  `model_info`. An undeclared cost read as zero is the same silent failure
+  DL-064 records for capability flags. Retired models (`qwen3.6-35b`,
+  `north-mini-code`) must not be re-registered. Background health checks stay
+  off until the empty-messages probe is verified. The default-alias seam
+  work was scoped to the seam only: the operator cut it with "I don't want
+  to redesign anything at all".
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-26-adaptive-routing-that-learns-design.md; docs/superpowers/specs/2026-07-27-default-alias-seam-design.md
+
+### DL-165 — The default alias is a deployment row; a verified fallback is not exercised; self-hosted-as-policy is retired
+
+- **Status:** active
+- **Date:** 2026-07-27
+- **Rule:** (recorded here) No Central Command request may use a non-self-hosted model unless a
+  fallback triggers (the spec's constraint 2; its enforcing test was
+  explicitly rejected). A fallback verified present in configuration is
+  deliberately not exercised with a dead-port test: the first real outage is
+  the first test.
+- **Why:** The seam spec recorded a `cc-default` to hosted-model fallback, which
+  DL-067 later removed (2026-07-31); the spec still reads "implemented", so
+  treat DL-067 as the in-force position. The related founding position that
+  agents run self-hosted, including the graduated auditor, as standing
+  policy is RETIRED (PRD FR-36): placement is the operator's choice.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-27-default-alias-seam-design.md; docs/PRD.md FR-36; DL-067
+
+### DL-166 — A skill is subject knowledge only; skills are database rows; every agent capability must be declared in the registry
+
+- **Status:** active
+- **Date:** 2026-07-26
+- **Rule:** (recorded here) Vocabulary is fixed: a capability is a gated write, a pack is a bundle
+  of tool grants, a skill is subject knowledge. Tool grants stay in packs.
+  Skills are database rows delivered through the framework's capability
+  loading, not a file-read tool. Anything an agent can do must be declared
+  in the registry ("no undeclared surface", which is not "everything is
+  gated").
+- **Why:** The runtime tier has no filesystem access, because an agent that can
+  read files can read `.env`. Only current skill versions are searchable;
+  superseded versions stay in history and never reach an agent as fact.
+  Reference search is Postgres full-text, not embeddings, because the target
+  is air-gapped and no extra model dependency is wanted (an embeddings
+  backend can sit behind the same seam). Freshness metadata (`describes`,
+  `captured_at`, `source_url`) reaches the agent with every loaded skill;
+  `stale_knowledge` is rejected unless it cites `doc_id`, `doc_says` and
+  `observed`, replacing a substring match on "CAPABILITY GAP"; the catalog
+  lists ungranted skills by title so a gap reads "needs access to X". Skill
+  authoring and grants are direct operator actions that each emit an event,
+  and a run that does not use a skill carries none of its guidance text.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-26-skills-library-design.md
+
+### DL-167 — The coach has full read access, runs through the normal build path, and is triggered only by the operator
+
+- **Status:** active
+- **Date:** 2026-07-27
+- **Rule:** (recorded here) The coach's selection is foregrounded context, not a fence; a
+  discovered citation is verified as real (not as representative) and
+  marked `discovered`, and `claim_matches_source: None` still means not
+  checked. The governed charter is the system prompt. The coach holds no
+  Jira, graph or LiteLLM grant. There is no team-wide coaching page.
+  Self-coaching is ordinary. The heartbeat may not start a coach session.
+- **Why:** Approval attaches to what work does, not to its trigger (DL-162), so a
+  scheduled coach would need no more approval than a typed one, yet
+  coaching changes standing guidance and stays with the operator. Positive
+  signal is needed to avoid a timid-drift failure, so thumbs must be able to
+  record good work as well as failures (not built). This predates and
+  narrows AGENTS.md's "Nothing feeds coaching automatically; the operator
+  curates signals case by case" (see the spec's Decision 2).
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-27-coaching-experiences-design.md
+
+### DL-168 — A discussion stall is typed by who spoke last; nothing auto-concludes a discussion
+
+- **Status:** active
+- **Date:** 2026-07-27
+- **Rule:** (recorded here) S1 (the last turn is the agent's, so the operator is blocking) gets an
+  amber flag; S2 (the last turn is the operator's, so the agent is blocking)
+  gets a nudge. "Has the operator ever spoken" is not the test. The sweep is
+  one idempotent heartbeat action (`stalled_at`, `nudged_at`); the threshold
+  is `CC_DISCUSSION_STALL_HOURS` (default 24) from the session's
+  `updated_at`.
+- **Why:** Auto-concluding on the agent's behalf is out of scope: the summary is an
+  agent claim, and synthesising one would fabricate the record. Every close
+  path goes through one seam that marks the session done and emits
+  `conversation.ended` with a stored `closed_reason`, and a concluded
+  discussion is read-only. Seeded governed schedules are born disabled, and
+  notifying outside the cockpit is out of scope (DL-156).
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-27-discussion-stall-escalation-design.md
+
+### DL-169 — Knowledge layers: packs permit, skills instruct, the graph holds what is true, MCP is transport
+
+- **Status:** active
+- **Date:** 2026-07-29
+- **Rule:** (recorded here) Capability packs say what an agent may do (permissions only, never
+  knowledge); skills say how; the graph and knowledge base say what is true;
+  MCP is transport. Operator standards are skills if stable and graph facts
+  if they evolve. Every agent reads one shared store: there is no private
+  per-agent memory.
+- **Why:** The steward triages its own confidence: high-confidence routine facts
+  batch into bulk-approval digests and only flagged items escalate.
+  Contradictions surface as gated steward proposals, never silent mutations
+  (the invalidation decision is itself untrusted). Confluence change capture
+  is hybrid: webhooks accelerate and periodic CQL incremental crawls are
+  ground truth. Ingestion is batched and finalised per run, relation
+  extraction is held to a stricter confidence bar than entity extraction,
+  direct graph reads stay ungated and LLM-free with judgment-heavy
+  synthesis going through a librarian consult, and a Confluence supersede is
+  a convention (status metadata plus a link) written as a gated action. Graph
+  content stays disposable until the steward mechanism is judged sound; the
+  mechanism is evaluated, not the corpus (amended: PRD FR-32). Note the
+  private-memory ban was refined by DL-173 into governed private partitions.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-29-knowledge-layer-routing-design.md; docs/PRD.md FR-32
+
+### DL-170 — Teaming doctrine: consult bounds are enforced by the runtime, handoffs go through task proposals, the roster grows on observed failure
+
+- **Status:** active
+- **Date:** 2026-07-29
+- **Rule:** (recorded here) Consult bounds are enforced by the runtime, not charter wording: depth
+  cap of 2, cycle refusal, budget propagation and size-capped distillation.
+  The specialist drafts and parks its own proposal with the consult chain in
+  provenance. Consult when you need an answer; hand off a task when the work
+  belongs to the other agent, through `task-propose`, never peer to peer. A
+  task proposal may declare await-result, parking the proposer
+  `AWAITING_AGENTS`. Consulted specialists run read-only by construction.
+- **Why:** Free-form peer messaging stays struck, and the supervised star shape of
+  the founding doctrine was reversed by FR-19 (any agent may now create and
+  assign tasks), with the consult and await-result machinery kept. Agents
+  may contact the operator on an attention budget (passive capture first,
+  about two to three contacts a day, digest by default, the dial the
+  operator's). The roster grows with the work: agents are hired only at the
+  operator's origination on observed failure, there is no fixed target size,
+  and a roster change never requires recoaching. Consults stay single-shot
+  with continuity caller-carried; chained consult waits nest and persist in
+  `run_state` (2026-08-23). Capability stripping for consults is deferred.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-29-teaming-consultation-doctrine-design.md; docs/superpowers/specs/2026-08-22-expert-team-scaling-design.md; docs/PRD.md FR-19
+
+### DL-171 — The graduation ladder: typed judgments, a pure pairing function, nothing tunes itself, and post-graduation starvation is a known blind spot
+
+- **Status:** active
+- **Date:** 2026-07-30
+- **Rule:** (recorded here) Rung 0 judgments are typed, stated before the operator decides, and
+  independently derived from the raw source; an absent judgment is counted
+  separately and never defaulted to low. Rung 1 is a pure pairing function
+  over event rows with four quadrants, per agent and per class, the last
+  decision winning, reports computed fresh on every call. Disagreements are
+  coaching inputs with event-id-backed citations. Nothing tunes a threshold
+  on its own.
+- **Why:** Auto-handled cases are tallied separately and never counted as
+  agreement, and graduation is not retroactive. After graduation the
+  evidence dries up (post-graduation starvation), so before any class whose
+  blast radius is a world change graduates, sampled human spot-checks must
+  exist (see DL-020; PRD FR-10). The three pairing functions are not
+  generalised into a framework at n=3; only the ladder's conventions are
+  shared. The dangerous quadrant is listed case by case, not as a rate.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-30-trust-tier-graduation-design.md; DL-002; DL-020
+
+### DL-172 — Outage equivalence: an outage delays but never loses, degrades or requires re-creation
+
+- **Status:** active
+- **Date:** 2026-07-31
+- **Rule:** (recorded here) A transient failure never produces a terminal state: it produces a
+  retryable one (`AWAITING_RESUME`, `RETRY_PENDING`, or `UNPROCESSED`).
+  Retries are health-gated: the dependency is probed cheaply and the sweep is
+  skipped while it is down, so the attempt budget is never spent against a
+  dead provider. The operator's own approvals never retry silently: an
+  approved-but-pending execution shows in the Inbox with no re-approval.
+- **Why:** Fail fast beats degrade: the full-size context bound was chosen over a
+  servable smaller-model fallback so the failure lands retryable at full
+  quality ("degrade never, delay freely, converge always"; see DL-067).
+  Executor replay is cursor-based (the `completed` list), so a half-landed
+  non-idempotent write may be applied twice; the residual risk is recorded
+  and façade idempotency keys are the owed fix. Heartbeat windowing is house
+  style: prefer designs where the next natural occurrence absorbs a gap over
+  explicit retry machinery. Attempt-exhaustion promotion to FAILED for a
+  DOWN dependency was RETIRED by FR-40: nothing terminal comes from DOWN.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-07-31-outage-equivalence-design.md; docs/PRD.md FR-40
+
+### DL-173 — No ungoverned private agent memory: private graph partitions, every write gated, the scope visible on the proposal
+
+- **Status:** active
+- **Date:** 2026-08-01
+- **Rule:** (recorded here) Revised D11 (D11-r1): agents get a private graph partition, but every
+  write to any scope is a gated `graph.add_episode` proposal; a `private`
+  episode may name `for_agent` (DL-061). Private and shared episode writes
+  are separate action classes, private graduating first, the operator
+  flipping each. Demo mode: reflection produces nothing.
+- **Why:** Role-specific lessons should persist without the operator noticing every
+  mistake, which does not scale, yet unreviewed memory is the compounding
+  corruption failure (DL-159). So the target scope is a visible field on the
+  proposal and the Executor writes the operator-approved scope. The
+  rejected alternatives are DL-150. A later cross-session reviewer slice is
+  a heartbeat action seeded disabled that emits the same proposal
+  vocabulary.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-01-self-directed-learning-design.md; DL-061
+
+### DL-174 — Graph inspection, activity coverage and bulk dismissal: read-only browser, session as the unit, pinned sets
+
+- **Status:** active
+- **Date:** 2026-08-09
+- **Rule:** (recorded here) The browser never talks to Neo4j; the API tier's bolt client is
+  read-only with canned queries and no raw-Cypher endpoint. The session is
+  the complete unit of activity, so a faceted session list covers all agent
+  activity by construction, backed by a guard test. A bulk dismissal is a
+  pinned set resolved to ids at propose or claim time, never a standing
+  rule, and new arrivals are not covered.
+- **Why:** Refinding uses server-side paging with "Load more", never infinite
+  scroll, and the sidebar filter ships last. Deliberately not built until
+  evidence: a work-item ledger screen, full-text transcript search, saved
+  views, virtualized rendering. Bulk dismissal is two-step, preview then
+  execute, and execute refuses if the resolved set drifted past a digest;
+  the 2,500-reference cap is stated, never silently truncated. The graph
+  visualiser seam has three states (disabled, unreachable, live); the UI
+  believes the probe, not the flag, and the API never starts or stops the
+  visualiser container. Operator curation writes are DL-003.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-09-graph-inspection-design.md; docs/superpowers/specs/2026-08-11-activity-coverage-design.md; docs/superpowers/specs/2026-08-17-bulk-dismissal-design.md
+
+### DL-175 — The graph auditor is read-only and judges from the raw rows; remediation is a separate agent and never re-ingests
+
+- **Status:** active
+- **Date:** 2026-08-19
+- **Rule:** (recorded here) There is no auditor on the operator path (operator input is trusted
+  evidence). Mechanical checks run in code before any judgment, and a
+  mechanical failure is an ERROR item for the operator, never a question put
+  to the auditor. The auditor judges from the approved episode text and the
+  actual graph rows, never the extractor's summary, and is read-only before
+  and after graduation. Remediation is a separate hired agent
+  (graph-curator), opt-out by default-on checkbox; it never re-ingests an
+  episode, and a re-check keeps the original marker with a `remediation_of`
+  link.
+- **Why:** A fix is never the auditor's job; it goes only through the operator's
+  curation path. Every verdict, ALIGNED included, goes on the event log;
+  auto-closed cases are tallied separately, never counted as agreement; and
+  a sweep tick that finds nothing writes nothing. Rejected: auto-fix,
+  two-phase staging ingestion, batching verifications, and re-ingestion as a
+  fix because it re-rolls extraction. A verification row whose episode was
+  deleted is parked as `episode_deleted` with history kept, and reworking an
+  episode is a deletion plus a new proposal, never an edit in place.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-19-graph-verification-auditor-design.md; docs/superpowers/specs/2026-08-20-graph-remediation-loop-design.md; docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md
+
+### DL-176 — Staffing, onboarding and scaling: the human roster is graph data, capacity is read live, experts are hired only by the operator
+
+- **Status:** active
+- **Date:** 2026-08-21
+- **Rule:** (recorded here) The human roster is graph data (`Person` entities, reports-to edges)
+  with no parallel table; capacity is read live from Jira at decision time,
+  never tracked as graph facts; assignment is one staffing agent proposing
+  through the gate; the onboarding flow seeds the org chart and competency
+  map as episodes. LiteLLM is mandatory (detect an existing proxy or
+  provision one). The catalog is enumerated from the pack registry, never
+  hard-coded. Draft-first defaults map to propose, the explicit send is its
+  own gated capability, and deletions default soft.
+- **Why:** Outlook COM is an optional adapter, never a dependency. Central Command is
+  a client of forges, never a host (GitHub and GitLab as named instances with
+  one token each). Experts are hired by the operator only, on observed
+  evidence, and the "~9-10 agents" target was deleted; the YOUR TEAM
+  discovery section is generated from the live roster. Expert knowledge
+  lives in per-domain graph groups within the shared read set, carrying a
+  steward attribution stamp and governed by visibility, not read
+  restriction. The giftable target is the single-node profile; the two-node
+  deployment is the operator's instance, not the profile (amended by PRD §2:
+  giftable is a consequence, not a goal). The operator's name is asked in
+  the cockpit, and the assistant-hosted tour records team and environment
+  facts as gated episodes.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-21-human-team-staffing-design.md; docs/superpowers/specs/2026-08-21-setup-onboarding-design.md; docs/superpowers/specs/2026-08-21-work-transition-compatibility-design.md; docs/superpowers/specs/2026-08-22-expert-team-scaling-design.md
+
+### DL-177 — The onboarding tour is product machinery: each agent introduces itself through a real task and calibration goes through the gate
+
+- **Status:** active
+- **Date:** 2026-08-23
+- **Rule:** (recorded here) The tour is an `ea.contact` kind `onboarding_tour`, re-runnable and
+  independent of Claude Code. The assistant brokers the arc; each agent
+  introduces itself in its own lane through a real intro task ending in
+  `ask_operator`. Calibration is proposed by the intro agent and approved by
+  the operator; charter-worthy items go to the coach loop and are never
+  written by the intro agent. A guard test checks every toured agent holds
+  the episode-propose capability before its prompt promises one.
+- **Why:** Introductions are generated from charter, grants and skills, so a weak
+  intro is a finding about the charter. The arc is the core five, then the
+  rest on demand, and it is resumable because tour state is the set of intro
+  tasks that exist. Three of the core five are non-taskable, so their intros
+  route through the cockpit chat lane; making the arc purely task-based
+  needs granting them `taskable`, an operator governance call. Deferred with
+  triggers: a full-roster tour mode, re-tour diffing and tour analytics.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-23-ea-hosted-team-tour-design.md
+
+### DL-178 — The sources catalog is a Postgres table; claims carry versioned evidence pointers; staleness is a deterministic comparison
+
+- **Status:** active
+- **Date:** 2026-08-23
+- **Rule:** (recorded here) The catalog is a Postgres table; Confluence is not the system of
+  record. Sources are first-class governed rows (kind, scope, lookback,
+  cursor, pacing, pause). Extraction happens at watcher time; the content
+  hash is of the extracted text; an exact duplicate is a location link with
+  no enrollment. Documents ride the existing ledger with one work item per
+  version. Every proposal citation becomes a claim row with a versioned
+  evidence pointer; staleness is a deterministic version comparison with no
+  model call and no stored stale flag.
+- **Why:** Three problems, three layers: inventory is deterministic (no LLM),
+  judgment flows through the existing ledger, and publication renders views
+  under the gate. Diffs carry temporality (document-stated dates win, the
+  publish date is the fallback) and supersession lives in episode text,
+  never Graphiti's automatic invalidation. Repair is scheduled by a
+  `wiki.freshness` heartbeat and never event-triggered. Rescission is a
+  catalog tag, never a deletion, and operator statements go stale only
+  through a later superseding statement. Page annotations are a fixed
+  template owned by the renderer and form their own action class. The
+  core layers are never homelab-shaped: per-environment variance lives only
+  in the watcher registry. The portability format (OKF) was deliberately
+  skipped.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-23-sources-catalog-design.md; DL-003
+
+### DL-179 — No deployment profile ships less than another: single-node gets the sandbox and crawler, with disclosed weaker isolation
+
+- **Status:** active
+- **Date:** 2026-08-21
+- **Rule:** (recorded here) No deployment profile ships less capability than another unless
+  literally impossible; the single-node exclusion of sandbox and crawler was
+  an undisclosed scope cut and ended. The single-node sandbox is rootless
+  podman, not gVisor, and the weaker isolation is disclosed in the
+  capability manifest and README. `CC_SANDBOX_BACKEND` selects kubectl
+  (default) or podman, and the podman backend holds no kubeconfig.
+- **Why:** Crawler parity: enabled by default on single node with a loopback host
+  port, and the verifier skips it when disabled and fails when enabled and
+  dead. The log console is deferred on single node (the log shipper's CRI
+  input does not fit podman); `podman logs` plus the diagnose output
+  substitute. The compose service for the removed Graphiti server and its
+  base-image row are gone, and the stack phase removes a leftover container
+  by name.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-21-work-transition-compatibility-design.md; docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md
+
+### DL-180 — One tool installs and updates; a running process never replaces its own code; backups track reversibility
+
+- **Status:** active
+- **Date:** 2026-08-27
+- **Rule:** (recorded here) No install means fresh, same version means repair, older means upgrade,
+  newer means refuse. Upgrade is stop, backup, replace, migrate, restart
+  (automatic for daemons). An automatic checkpoint is taken on every update
+  and a database dump before any apply, on by default, with an explicit skip
+  (`CC_SKIP_DB_BACKUP`). The in-app update check is notify-only and the apply
+  is performed by an external updater.
+- **Why:** A running process never replaces its own code or migrates its own
+  database. Non-goals kept dead: in-process self-update from the web UI, a
+  wipe-and-recover update path, general multi-node topology elicitation and
+  policy elicitation. The connected check is notify-only against releases,
+  with an in-process one-hour cache added later (an accepted divergence).
+  Rollback re-applies the previous manifests and the previous image is left
+  on the nodes for that reason.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-08-27-setup-update-contract.md; docs/superpowers/specs/2026-08-25-deterministic-setup.md
+
+### DL-181 — Setup design details: the k3s driver shares the single-node phases, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling
+
+- **Status:** active
+- **Date:** 2026-09-23
+- **Rule:** (recorded here) `deploy/k3s/setup.sh` runs the same phases and output protocol as
+  single node, with targets and paths from the answer file, not inline
+  literals. A locked-mirror digest mismatch is a WARN on a configured mirror
+  and a FAIL on the public host (a mirror re-serialises manifests). The
+  fetch phase returns 1 on FAIL and USERACTION is reserved for the seam the
+  operator must fill. `diagnose` leads with the ledger and then the whole
+  last-run log.
+- **Why:** `check` cannot prove a local image build succeeds, and cannot measure the
+  embedding dimension without the embedder, so the target is "no
+  configuration failure", not "no failure". The Windows/Podman Desktop
+  target is a design input, not a port: loopback addressing and no reliance
+  on POSIX file modes for secrets. The operator name, install directory and
+  feature flags are configure questions with the cockpit's first-run prompt
+  as the fallback. Acceptance is execution tests on Linux and a real Windows
+  laptop on the tagged tree before the tag. The original record kept k3s out
+  of scope with a follow-on owed.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md; docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md
+
+### DL-182 — The graphiti-core migration: one LiteLLM key, failure classes without exhaustion, verification by recorded episode, benchmarked reranker
+
+- **Status:** active
+- **Date:** 2026-10-04
+- **Rule:** (recorded here) The application uses one LiteLLM virtual key; the three Graphiti-only
+  keys and their minting are retired. `add_episode` never calls the
+  cross-encoder; only agent search does. Transient failures re-queue with
+  backoff and no exhaustion; permanent failures become FAILED with the error
+  parked for the operator; nothing is acknowledged and then dropped.
+  Verification audits DONE jobs by their recorded episode uuid.
+- **Why:** The absence deadline, the queue-depth estimate and resubmission are
+  retired. The reranker decision is measured on the operator's own models
+  with `scripts/graph_rerank_bench.py` because latency is one model's
+  (DL-139). Release gating is the suite plus one live episode through
+  approval, extraction, verification and search before the cutover tag, in
+  a two-release sequence accepted by a prompt-parity test and a live episode
+  on a non-production graph.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Source:** docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md; DL-129; DL-130

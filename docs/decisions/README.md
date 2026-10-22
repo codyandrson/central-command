@@ -39,7 +39,7 @@ once, linked from both sides.
 | [models.md](models.md) | LiteLLM registration, capability/price sourcing, alias naming, autodiscovery memory, fleet architecture |
 | [deploy.md](deploy.md) | the k3s multi-node deployment, the single-node Compose profile, the release/update surface |
 | [cockpit.md](cockpit.md) | the React/Hono cockpit: container queries, the RPC wire contract, live-state UI |
-| [process.md](process.md) | repo/release/branch policy, schema hygiene, test-writing conventions |
+| [process.md](process.md) | repo/release/branch policy, schema hygiene, test-writing conventions; and, from DL-141, entries of any area recording rejected alternatives, founding decisions and design-record decisions (ids must follow area-file order, so late entries are appended here) |
 
 ## Entry format
 
@@ -90,7 +90,7 @@ recorded in-repo." rather than inventing one.
 | DL-004 | The trust boundary is the import graph: runtime never imports gateway | active | undated | test: `tests/test_governance.py::test_runtime_never_imports_the_gateway_tier` | [trust-gate.md](trust-gate.md) |
 | DL-005 | The agent sandbox is containment, not restriction | active | 2026-08-04 | discipline only | [trust-gate.md](trust-gate.md) |
 | DL-006 | The sandbox's only exit is mcp.sync_source, and content is captured at propose time | active | undated | test: `tests/test_mcp_sync.py::test_servers_root_is_the_same_path_on_both_sides` | [trust-gate.md](trust-gate.md) |
-| DL-007 | srt stays dormant in the sandbox image; bwrap-fs-only ships instead | active | 2026-08-03 | discipline only | [trust-gate.md](trust-gate.md) |
+| DL-007 | srt stays dormant in the sandbox image; bwrap-fs-only ships instead | superseded | 2026-08-03 | discipline only | [trust-gate.md](trust-gate.md) |
 | DL-008 | A proposal's arguments arrive flattened from real Claude, nested from the demo model | active | undated | code structure only | [trust-gate.md](trust-gate.md) |
 | DL-009 | A proposal's agent_id is the drafter, never the subject | active | 2026-07-29 | test: `tests/test_executor_provenance.py::test_the_handler_is_handed_the_gateways_proposer_not_the_agents` | [trust-gate.md](trust-gate.md) |
 | DL-010 | A proposal's argument shape is checked in both tiers from one list | active | 2026-08-29 | code structure only | [trust-gate.md](trust-gate.md) |
@@ -224,3 +224,45 @@ recorded in-repo." rather than inventing one.
 | DL-138 | A date filter carries at most one parameter-bearing OR group per field | active | 2026-10-05 | test: `tests/test_graph_search_filters.py::test_a_date_field_never_has_two_parameter_carrying_or_groups` | [process.md](process.md) |
 | DL-139 | Graph search reranks through one optional alias, the best kind the environment has, and the installers probe which | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_the_chat_question_is_upstreams_verbatim` | [process.md](process.md) |
 | DL-140 | A reranker that fails raises; there is no fallback order and no time budget | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_an_http_failure_raises_and_is_classified_by_its_status` | [process.md](process.md) |
+| DL-141 | The deterministic model is test-only and the dry-run executor mode is removed | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-142 | The read-version stale bounce at propose time is retired; world-state checks at execution replace it | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-143 | A policy registry as a governed table was never built | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-144 | Not every write produces a proposal: an ungated write stamps an override instead of auto-approving as system | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-145 | Event-subscription agent wakes and agent.request/response events were never built | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-146 | DBOS was never adopted; durability is the deferred-tool pattern plus the persisted message history | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-147 | Classifier-driven model routing and the LiteLLM adaptive router are rejected; routing is the operator's, inside LiteLLM | active | 2026-07-26 | discipline only | [process.md](process.md) |
+| DL-148 | The dispatch token-budget valve and the enterprise LiteLLM features are not adopted | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-149 | Embedding changes: per-vector stamps, a keyword-only freeze, a Postgres embedder record, a heartbeat re-embed, in-place rewrite and a second graph are rejected | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-150 | Provisional write-now-veto-later memory and Letta-style agent self-editing are rejected | active | 2026-08-01 | discipline only | [process.md](process.md) |
+| DL-151 | Graphiti communities, sagas, triplet writes and bulk ingest are not adopted; no fork of graphiti-core | active | 2026-10-04 | discipline only | [process.md](process.md) |
+| DL-152 | The D16 guaranteed backlog trickle was never built; bulk dismissal drains a backlog by pattern | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-153 | The surveyed Exchange feature set and a provider abstraction are cut; Exchange is a native client at the seam | active | 2026-09-25 | discipline only | [process.md](process.md) |
+| DL-154 | Ready-made installers and air-gap tools are not adopted; the per-step ledger and one answer file won | active | 2026-09-23 | discipline only | [process.md](process.md) |
+| DL-155 | Flux GitOps for k3s is not adopted; the deployment is numbered manifests with a trigger-file updater | active | 2026-09-03 | discipline only | [process.md](process.md) |
+| DL-156 | Out-of-cockpit notification (email, push) is out of scope | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-157 | Build the control plane, adopt the runtime, buy nothing: why not OpenClaw, LangGraph, CrewAI and the rest | active | 2026-07-18 | discipline only | [process.md](process.md) |
+| DL-158 | The operator's earlier n8n project could not host the vision; n8n stays a façade, not the platform | active | 2026-07-18 | discipline only | [process.md](process.md) |
+| DL-159 | The nine-row failure-mode catalogue: assume the agent is wrong before assuming it is attacked | active | 2026-07-18 | discipline only | [process.md](process.md) |
+| DL-160 | The threat model is error, not malice, for a single operator; sandboxes, egress allowlists, a vault and anomaly detection were cut | active | 2026-07-19 | discipline only | [process.md](process.md) |
+| DL-161 | Pydantic AI plus Claude was chosen over the Claude Agent SDK, Temporal and microservices; the runtime stays swappable | active | 2026-07-19 | discipline only | [process.md](process.md) |
+| DL-162 | Approval attaches to what work does, never to how it was started; scheduled work is born disabled | active | 2026-07-23 | test: lever allowlist | [process.md](process.md) |
+| DL-163 | The orchestrator orchestrates: plan review on, stall detection not budgets, questions parked for the operator, capability gaps are answers | active | 2026-07-24 | discipline only | [process.md](process.md) |
+| DL-164 | Model facts live in one tracked file, applied by script; an absent cost is not zero; routing preferences and cost have fixed homes | active | 2026-07-26 | discipline only | [process.md](process.md) |
+| DL-165 | The default alias is a deployment row; a verified fallback is not exercised; self-hosted-as-policy is retired | active | 2026-07-27 | discipline only | [process.md](process.md) |
+| DL-166 | A skill is subject knowledge only; skills are database rows; every agent capability must be declared in the registry | active | 2026-07-26 | discipline only | [process.md](process.md) |
+| DL-167 | The coach has full read access, runs through the normal build path, and is triggered only by the operator | active | 2026-07-27 | discipline only | [process.md](process.md) |
+| DL-168 | A discussion stall is typed by who spoke last; nothing auto-concludes a discussion | active | 2026-07-27 | discipline only | [process.md](process.md) |
+| DL-169 | Knowledge layers: packs permit, skills instruct, the graph holds what is true, MCP is transport | active | 2026-07-29 | discipline only | [process.md](process.md) |
+| DL-170 | Teaming doctrine: consult bounds are enforced by the runtime, handoffs go through task proposals, the roster grows on observed failure | active | 2026-07-29 | discipline only | [process.md](process.md) |
+| DL-171 | The graduation ladder: typed judgments, a pure pairing function, nothing tunes itself, and post-graduation starvation is a known blind spot | active | 2026-07-30 | discipline only | [process.md](process.md) |
+| DL-172 | Outage equivalence: an outage delays but never loses, degrades or requires re-creation | active | 2026-07-31 | discipline only | [process.md](process.md) |
+| DL-173 | No ungoverned private agent memory: private graph partitions, every write gated, the scope visible on the proposal | active | 2026-08-01 | discipline only | [process.md](process.md) |
+| DL-174 | Graph inspection, activity coverage and bulk dismissal: read-only browser, session as the unit, pinned sets | active | 2026-08-09 | discipline only | [process.md](process.md) |
+| DL-175 | The graph auditor is read-only and judges from the raw rows; remediation is a separate agent and never re-ingests | active | 2026-08-19 | discipline only | [process.md](process.md) |
+| DL-176 | Staffing, onboarding and scaling: the human roster is graph data, capacity is read live, experts are hired only by the operator | active | 2026-08-21 | discipline only | [process.md](process.md) |
+| DL-177 | The onboarding tour is product machinery: each agent introduces itself through a real task and calibration goes through the gate | active | 2026-08-23 | discipline only | [process.md](process.md) |
+| DL-178 | The sources catalog is a Postgres table; claims carry versioned evidence pointers; staleness is a deterministic comparison | active | 2026-08-23 | discipline only | [process.md](process.md) |
+| DL-179 | No deployment profile ships less than another: single-node gets the sandbox and crawler, with disclosed weaker isolation | active | 2026-08-21 | discipline only | [process.md](process.md) |
+| DL-180 | One tool installs and updates; a running process never replaces its own code; backups track reversibility | active | 2026-08-27 | discipline only | [process.md](process.md) |
+| DL-181 | Setup design details: the k3s driver shares the single-node phases, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling | active | 2026-09-23 | discipline only | [process.md](process.md) |
+| DL-182 | The graphiti-core migration: one LiteLLM key, failure classes without exhaustion, verification by recorded episode, benchmarked reranker | active | 2026-10-04 | discipline only | [process.md](process.md) |

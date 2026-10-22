@@ -16,7 +16,7 @@ how to add one.
   relationship as truth and the properties stay as the bulk shape's copy).
   Neo4j cannot repoint a relationship in place, so a repoint is
   copy-then-delete.
-- **Enforced:** discipline only — no guard test located this pass
+- **Enforced:** test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape` (named in the rule file) pins the hand-made write's shape against the installed bulk path, and `tests/test_graph_embedding_width.py` pins the writer's behaviour; corrected 2026-10-21, the earlier "discipline only" understated this (see also DL-137)
 - **Source:** .claude/rules/graph.md
 
 ### DL-052 — Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped
