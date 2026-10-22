@@ -22,7 +22,7 @@ plumbing — not upstream MCP or LiteLLM documentation.
 - You are naming a server, wondering why a tool call 401s or comes back
   empty, or touching the LiteLLM key/proxy side — `naming-and-plumbing-gotchas`.
 - You are authoring a new server's code, or deciding whether `servers/echo-demo/`
-  is something to copy — `echo-demo-and-image-lessons`.
+  (the hand-committed exception, not a sync product) is something to copy — `echo-demo-and-image-lessons`.
 
 ## Four things to hold even without loading a reference
 
@@ -43,7 +43,10 @@ plumbing — not upstream MCP or LiteLLM documentation.
    `_mcp_deployment_manifest`/`_mcp_service_manifest`). A server bound to any
    other port deploys and answers nothing.
 4. **Never trust training data about a library's API — introspect the
-   installed version first.** `servers/echo-demo/` was written from memory
+   installed version first.** `servers/echo-demo/` (the one hand-committed
+   exception in `servers/`: everything else there arrives only through an
+   approved `mcp.sync_source`, and echo-demo is a verification fixture, not
+   a sync product) was written from memory
    against `mcp.server.fastmcp`, crashed on deploy, and had to be rewritten
    against the real `mcp==2.0.0` API (`mcp.server.mcpserver.MCPServer`) once
    the agent actually checked what was installed. That habit — read the real

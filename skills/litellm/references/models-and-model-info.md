@@ -117,8 +117,10 @@ tracking: `runtime/context.py` discovers `CC_CONTEXT_WINDOW` from
 falling back to 200000 if absent. That is why `cc-default` carries the field
 directly and not only its underlying deployment — see below.
 
-`CC_MAX_OUTPUT_TOKENS` is 262144 on the Central Command side, sized to the
-workstation. That is a client-side setting, not a `model_info` one.
+`CC_MAX_OUTPUT_TOKENS` is set on the Central Command side, sized to the
+local model server (the figure is an instance fact). That is a client-side
+setting, not a `model_info` one.
+<!-- overlay: model_server_max_output_tokens — moved to the instance overlay by epic-instance-facts-relocation -->
 
 ### `supports_vision` — capability is declared, never guessed
 
@@ -127,10 +129,11 @@ The attachment gate (`litellm.model_accepts_images`) reads
 **`None`/absent means "nobody said", never "yes"** — an undeclared model is
 treated as text-only, refusing image attachments even if the underlying
 server can actually see. `cc-default` declares `supports_vision: true` (the
-workstation server loads a vision projector for `qwen3.8-27b`); the judge
-models (`gpt-oss-20b`, `gemma-4-31b`) do not — neither has a vision encoder,
-so their entries omit the field rather than assert false capability that
+local model server loads a vision projector for its default model); the judge
+models, where the deployment has any, may not — a model with no vision encoder
+omit the field rather than assert false capability that
 happens to read the same either way.
+<!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
 
 ## The declared policy file and `policy.py`
 
@@ -161,10 +164,11 @@ both read from the wrong (undeclared) place and silently fail closed. If you
 add a new capability-bearing field to the schema, check whether `cc-default`
 needs its own copy in addition to the underlying model's.
 
-Timeouts on the workstation-backed entries (`qwen3.8-27b`, `cc-default`,
-`gpt-oss-20b`, `gemma-4-31b`) are large **on purpose** — see
-`routing-doctrine`'s llama-swap section for why (FIFO queueing, not slow
-compute).
+Timeouts on the local-model-server entries are large **on purpose** — see
+`routing-doctrine`'s local-model-server section for why (FIFO queueing, not
+slow compute).
+<!-- overlay: model_server_timeouts — moved to the instance overlay by epic-instance-facts-relocation -->
+(Which entries those are is an instance fact.)
 
 ## Model autodiscovery (`litellm.discovery` heartbeat action, 2026-08-20/21)
 
@@ -182,7 +186,7 @@ lands on your board.
 - **Ownership is credential-tied, not marker-tied**: a deployment belongs to
   autodiscovery iff its `litellm_params.litellm_credential_name` references a
   stored credential. There is no `cc_managed` flag — a hand-tuned or
-  env-keyed model (like the workstation entries) is structurally invisible to
+  env-keyed model (like the local-model-server entries) is structurally invisible to
   discovery and will never be touched or flagged by it.
 - **On real drift it hands you small tasks** — a maintenance task first
   (stale / unhealthy / changed / undeclared), then per credential ONE
@@ -217,7 +221,7 @@ Always call `litellm_list_models` first, so the proposal names a real
   verbatim** — quotes are re-checked and drift is flagged) and the proxy state
   you read (`kind='litellm'`, `source_ref='litellm:list_models'`).
 - `expected_effect` should be checkable: `alias cc-default re-points to
-  openai/chat_completions/qwen3.8-27b, credential preserved`.
+  openai/<model-id>, credential preserved`.
 - **Say in the intent whether Central Command routes to it.** Deleting or
   re-pointing `cc-default` changes what every agent runs on. The operator
   decides with eyes open.

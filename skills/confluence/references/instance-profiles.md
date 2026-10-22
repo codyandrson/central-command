@@ -8,77 +8,34 @@ names which allowlist is live for the instance you're currently talking to.
 — never a guess to try and see what happens**, because a wrong guess doesn't
 error, it just sits broken on the page (`storage-format`).
 
-## Profile: `cloud-free`
+## Profiles are per instance
 
-The dev instance — Confluence Cloud, free plan (10 users, 2GB).
+A profile is a named allowlist of the macros one instance really has. The
+profile names the deployment ships, and each one's macro inventory (the
+instance's edition, its installed marketplace apps, which categories exist),
+are instance facts: they are read from the instance overlay, not from this
+file.
 
-**Have:** the built-in Cloud macro set — panels (info/note/warning/tip),
-Table of Contents, Expand, Status, Children Display, Page Properties +
-Report, Excerpt/Excerpt Include, Code Block, Section/Column, Attachments,
-Labels List, layout macros (Section, Column, Div), Jira macro (single issue
-and JQL table — needs an app link to the Jira Cloud site), and **draw.io**
-once the app is installed (it has a generous free tier and installs cleanly
-on a free-plan Cloud site).
+<!-- overlay: confluence_profile_cloud — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: confluence_profile_server — moved to the instance overlay by epic-instance-facts-relocation -->
 
-**Do NOT have:** Table Filter, Forms, any Scroll export macro, Epic Sum Up
-gadgets, or any test-management (Xray/Zephyr-style) report macro — none of
-these ship free-plan-compatible on a fresh Cloud dev site, and a free plan
-in particular won't have paid marketplace apps installed. Advanced Roadmaps
-embed likewise requires a paid plan tier this instance doesn't have.
+What does hold for every instance of a flavor, and stays here as generic
+guidance:
 
-## Profile: `work-server-9.2`
-
-The WORK instance — Confluence Server/DC 9.x. Distilled from the full
-macro browser inventory in `docs/reference/work-environment-compatibility.md`
-(lines 239–964) into grouped categories. Treat that doc as the authoritative
-list for anything not named here; this is a working summary, not a
-substitute.
-
-- **Layout** — Section, Column, Div, Span, Center, Align, Anchor, Tabs
-  Container/Page, Horizontal Navigation Bar(+Page), Round Rectangle, Dialog.
-- **Panels & callouts** — Info, Note, Warning, Tip, Panel, Message Box,
-  Highlight, Background Color, Alert, Status, Lozenge.
-- **Tables & data apps** (marketplace) — Table Filter, Table from CSV, Table
-  from JSON, Table Spreadsheet(+Include), Table Excerpt(+Include), Table
-  Transformer, Pivot Table, Spreadsheet from Table, Chart from Table, AI
-  Table, BibTeX Display Table/Referencing.
-- **Jira & gadget embeds** — Jira (issue/JQL), Jira Charts, JIRA Issues
-  Calendar, Jira Road Map, Filter Results, Pie Chart, Created vs. Resolved
-  Chart, Two Dimensional Filter Statistics, Heat Map, Resolution Time,
-  Average/Recently Created/Time Since charts, Version Report, Sprint
-  Burndown/Health, Labels Gadget, Issue Statistics, Activity Stream, Agile
-  Wallboard Gadget, **Advanced Roadmaps for Jira in Confluence** (the roadmap
-  substitute — see `storage-format`), (Epic Sum Up) Filter Results/Grid
-  Gadget. **All of these need the Confluence↔Jira application link already
-  configured on this instance** — an empty/erroring embed may mean the link
-  is missing, not that the macro syntax is wrong.
-- **draw.io** — draw.io Diagram, draw.io Board Diagram, Embed draw.io
-  Diagram. **DO NOT USE Diagramly** — the instance's own macro description
-  reads "DO NOT USE, this is a legacy macro. Please use drawio macro
-  instead." It is present in the macro browser but explicitly deprecated.
-- **Forms** — Forms (container) plus its field macros (Input, Dropdown,
-  Checkbox/Radio button group, Datepicker, Textarea, User Picker, Star
-  rating, …) and Forms Responses Table for reading submissions back.
-- **Scroll export** (Scroll Exporter product) — Scroll Bookmark, Scroll
-  Content Block, Scroll Export Button, Scroll Ignore(+inline), Scroll
-  Indexterm, Scroll Landscape/Portrait, Scroll Only(+inline), Scroll
-  Pagebreak, Scroll Pagetitle, Scroll Table Layout, Scroll Title — these
-  only matter when the deliverable is an exported document (PDF/Word), not
-  the live wiki page.
-- **Test-management reports** (Xray/Zephyr-style app) — the large "Test
-  cases by …", "Test execution … by …", and "Issues reported during testing
-  …" families. Use these only when the task is genuinely a QA/test-coverage
-  report; they are numerous but narrow-purpose.
-- **Core built-ins present on essentially every Confluence** — Table of
-  Contents, Table of Content Zone, Children Display, Page Tree(+Search),
-  Page Index, Content by Label/User, Content Report Table, Recently
-  Updated(+Dashboard), Attachments, Gallery, Multimedia, Excerpt(+Include),
-  Multiexcerpt(+Include), Include Page, Page Properties(+Report), Labels
-  List, Popular/Recently Used/Related Labels, Change History,
-  Contributors(+Summary), Code Block, Markdown(+From URL), HTML
-  Table/Image/Comment, Numbered Headings, Task report, Countdown, Team
-  Calendars, PDF, Office Word/Excel/Powerpoint, User Profile/List, Spaces
-  List, Create from Template.
+- **Cloud, free plan:** the built-in Cloud macro set (panels, Table of
+  Contents, Expand, Status, Children Display, Page Properties + Report,
+  Excerpt/Excerpt Include, Code Block, layout macros, Attachments, Labels
+  List, the Jira macro once an application link exists) plus whichever
+  marketplace apps the site installed. A free plan does not carry paid apps
+  (Table Filter, Forms, Scroll export, test-management reports), and Advanced
+  Roadmaps embeds need a paid plan tier.
+- **Server/Data Center:** the built-ins above plus the large marketplace
+  surface that edition's site has installed. Every Jira and gadget embed
+  needs the Confluence↔Jira application link already configured — an
+  empty or erroring embed may mean the link is missing, not that the macro
+  syntax is wrong. An instance's macro browser can list a macro its own
+  description marks deprecated (a legacy draw.io macro is the usual case):
+  prefer the current macro it names.
 
 ## Which families need discovery, not a recipe
 

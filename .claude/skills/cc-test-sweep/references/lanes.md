@@ -58,7 +58,7 @@ names. Self-clean to exact baseline counts even on failure paths.
 
 ## Phase 1/2 — cockpit direct routes (sonnet, needs auth per SKILL.md)
 
-Login, then: workspace/kanban/transcribe/tts/language config GET→PUT→verify→
+Login with a password the operator gave you, then: workspace/kanban/transcribe/tts/language config GET→PUT→verify→
 RESTORE roundtrips (restore mandatory even on failure); files API in a
 `testrun-<date>/` subdir only, full write/rename/move/trash/restore cycle;
 path-traversal probes on files/read + resolve (`../../etc/hostname`,
@@ -138,13 +138,16 @@ catch RUNNING). orchestration/sweep idempotence. Auditor: read the
 concurrence surfaces; drive dismissals/audit only against disposable backlog
 items, else negatives only.
 
-## Phase 4 — resilience (orchestrator does this directly, not a sub-agent)
+## Phase 4 — resilience (orchestrator does this directly, operator restarts)
 
-Pre-capture proposal/session status buckets. Attach SSE client. Restart
-cc-uvicorn. Verify: buckets byte-identical, graceful shutdown in journal
-(no SIGKILL, no TimeoutStopSec hang), zero stuck RUNNING, SSE client exited
-cleanly. Confirm PID actually changed — a failed wrapper can no-op the
-restart and everything "passes".
+The session never restarts a live unit. Pre-capture proposal/session status
+buckets and the backend's PID. Attach SSE client. Ask the operator to restart
+the backend through their usual path and wait for them to say it is done.
+Verify: buckets byte-identical, graceful shutdown in journal (no SIGKILL, no
+TimeoutStopSec hang), zero stuck RUNNING, SSE client exited cleanly. Confirm
+the PID actually changed — a restart that no-ops makes everything "pass". If
+the operator does not want a restart this run, skip the phase and record that
+the coverage is the pytest suite's.
 
 ## Phase 6 — verification (fresh-context sonnet, adversarial)
 

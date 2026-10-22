@@ -70,8 +70,8 @@ form an isolated graph that can be queried independently.
 | **read groups** | `main, central_command` (`CC_GRAPH_READ_GROUPS`) |
 | **write group** | `central_command` (`CC_GRAPH_WRITE_GROUP`) |
 
-`main` is the **preserved homelab graph** inherited from before this system
-existed. Reads span both so agents get the full picture; writes land only in
+`main` is the **preserved inherited graph** from before this system
+existed <!-- overlay: graph_main_group_origin — moved to the instance overlay by epic-instance-facts-relocation -->. Reads span both so agents get the full picture; writes land only in
 `central_command`, so the inherited graph is never polluted by Central Command's
 proposals. Do not propose writing to `main`, and do not treat a `main` fact as
 something this system produced.

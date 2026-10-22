@@ -9,8 +9,10 @@ default_agents: graph-curator, ea, inbox-triage, jira-expert
 Central Command's shared memory is a **Graphiti** temporal knowledge graph over
 Neo4j, run in-process through the `graphiti-core` library (reads in
 `central_command/integrations/graphiti.py`; approved episodes are extracted by
-a durable ingest queue). There is **no private agent memory** (D11) — every agent reads
-the same store, so what you commit becomes what the whole team believes.
+a durable ingest queue). There is **no ungoverned private agent memory** (design decision D11, revised
+by D11-r1 in `docs/ARCHITECTURE.md`: a *gated* per-agent partition,
+`central_command_<agent_id>`, is allowed) — by default every agent reads the
+same store, so what you commit becomes what the whole team believes.
 
 **Reading is layered and ungated. Writing is gated.** You search freely; a graph
 write is a `graph.add_episode` action inside a proposal the operator approves
@@ -38,7 +40,8 @@ before the Executor commits it.
    self-contained sentences naming people, keys and dates. The graph stores
    refs, not bodies (D13).
 3. **Reads span `main` + `central_command`; writes land only in `central_command`.**
-   The inherited homelab graph is never polluted by this system's proposals.
+   The inherited `main` graph is never polluted by this system's proposals.
+   <!-- overlay: graph_main_group_origin — moved to the instance overlay by epic-instance-facts-relocation -->
 4. **Be stricter about relationships than about things.** Naming an entity the
    document names is usually safe. Asserting that A blocks B, C owns D, or X
    caused Y is where extraction breaks — a relationship you inferred rather

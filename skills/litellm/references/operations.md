@@ -10,11 +10,11 @@ Two different reads, do not conflate them:
 - **`litellm_check_model_health`** — expensive. A **real provider call per
   model** (under the hood `/health`), for diagnosing an actual outage. Don't
   call this as a routine check — it spends real money/quota per model probed.
-  **On the workstation models this is worse than just cost**: a whole-fleet
-  sweep would hit `cc-default`, `gpt-oss-20b` and `gemma-4-31b` in sequence,
-  and each of those lives on the same `llama-swap` slot — probing all three
-  forces two live GPU model swaps (~10s each) and can time the sweep out
-  entirely. Probe **one model alias at a time**, and prefer probing only the
+  **On the local-model-server models this is worse than just cost**: a
+  whole-fleet sweep would hit each model that lives on the same swapper
+  slot in sequence — probing several forces live GPU model swaps (seconds
+  each) and can time the sweep out entirely.
+  <!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation --> Probe **one model alias at a time**, and prefer probing only the
   one you actually suspect is unhealthy.
 - **`litellm_probe_model`** — a different kind of expensive: not a liveness
   check but a **capability measurement**, ~10 short real requests (chat,
@@ -44,9 +44,11 @@ assumed to be on by default.
 Per-model `timeout` is part of the declared policy
 (`model-preferences.yaml`), not something to invent per call. If a model is
 timing out, check its declared timeout and the actual upstream latency before
-proposing a change. On the workstation-backed models, a long declared timeout
-(6000s / 18000s) is deliberate FIFO-queue policy, not slack to trim — see
-`routing-doctrine`'s llama-swap section. A request can legitimately wait
+proposing a change. On the local-model-server models, a long declared timeout
+is deliberate FIFO-queue policy, not slack to trim — see
+`routing-doctrine`'s local-model-server section.
+<!-- overlay: model_server_timeouts — moved to the instance overlay by epic-instance-facts-relocation -->
+(The declared figures are instance facts.) A request can legitimately wait
 behind an entire swap-queue drain before it even starts.
 
 ## The salt key — an operations-critical gotcha, not just a config note
@@ -105,6 +107,6 @@ reader not provisioned", the operator needs to run
 - **Enterprise-gated endpoints returning 400** (`/global/spend/report`, the
   UI's top-level key `tags` field) — this deployment is not Enterprise
   licensed. See `keys-and-teams`.
-- **A 404 on a workstation-backed model** — check `api_base` ends in `/v1`.
+- **A 404 on a local-model-server-backed model** — check `api_base` ends in `/v1`.
   `llama-swap` answers only `/v1/*` paths; anything else 404s regardless of
   whether the model itself is healthy.

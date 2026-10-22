@@ -3,7 +3,7 @@
 Two instance flavors sit behind the same tool names. `cloud` calls
 `/wiki/api/v2` for CRUD and `/wiki/rest/api/search` (v1) for search — v2 has
 no search endpoint, and that's permanent, not a gap to watch for. `server`
-(the WORK instance, Confluence Server/DC 9.x) calls `/rest/api` (v1) for
+(Confluence Server/DC 9.x) calls `/rest/api` (v1) for
 everything — v2 never existed on Server/DC. Which flavor is live follows
 `CC_CONFLUENCE_PROFILE`; don't assume one flavor's pagination or auth style
 on the other.

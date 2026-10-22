@@ -52,10 +52,16 @@ Record the answer. The **podman substrate** below is the default path; the
   for the operator to confirm instead of recall, and `DISCO_TLS_INTERCEPT=1`
   means the CA story must be settled before the images are fetched. It is
   EVIDENCE informing what you propose for `.env` — never source it or copy it
-  wholesale, and a `CC_TLS_INSECURE=1` diagnostic never becomes disabled
-  verification: the fix it indicates is trusting the corporate root CA. No
-  discovery and a failure that smells like a restricted network: the proposal
-  to surface is "run /discover".
+  wholesale. **Insecure TLS is supported and always warned.** Prefer the
+  corporate root CA (`CC_CA_BUNDLE`), which keeps the supply chain verifiable;
+  `CC_TLS_INSECURE=1` is the other supported answer for a site that relies on
+  isolation instead — the operator's decision to make, since v2.43.0
+  (`deploy/AIRGAP.md`, the TLS section). If the operator chooses it, write the
+  key and carry on; never set it unprompted, and never present it as a PASS:
+  every command that sees it prints one `WARN tls-insecure:` line naming what
+  it covers, so surface that WARN each time. No discovery and a failure that
+  smells like a restricted network: the proposal to surface is "run
+  /discover".
 - **Capability manifest and vlogs disclosure are mandatory.** The `verify`
   phase prints what this profile installed against the k3s deployment, naming
   vlogs (the log console) as the one deliberate omission — podman does not
@@ -78,9 +84,11 @@ The procedure is [`deploy/single/CHECKLIST.md`](../../../deploy/single/CHECKLIST
 generated from `deploy/single/steps.tsv` — read it before the first run. Your
 part of it is three sentences (design record
 `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`, D3):
-run `./setup.sh` (from `deploy/single/`); read the ledger it prints; either
-change a `.env` key the FAIL line names and run `./setup.sh` again, or report
-the ledger row as a repository defect.
+run `./setup.sh`; read the ledger it prints; either change a `.env` key the
+FAIL line names and run `./setup.sh` again, or report the ledger row as a
+repository defect. Every `./setup.sh` and `./update.sh` in this file is the
+script in `deploy/single/` — there is none at the repository root, so run them
+from that directory (the `.env` they read is the repo-root one).
 
 You may change `.env`. You may run `./setup.sh`, `./setup.sh status` and `./setup.sh report`. Everything else is a finding.
 
@@ -125,10 +133,12 @@ the folder, which is a step of the checklist's **Before you start**.)
 
 - **Is this already a deployment?** Run `./setup.sh status`: it prints the
   ledger and changes nothing (its self-check spends two small model requests).
-  A tree with an imported but unapplied update stops `./setup.sh` with
-  `USERACTION existing-install` naming `./update.sh plan` — that is the
-  operator's update, never a fresh install, and never a zip extracted over the
-  tree.
+  A tree with an imported but unapplied update no longer stops `./setup.sh`
+  (the `existing-install` stop was retired in v2.58.2): it runs the installed
+  release, prints one note naming `./update.sh apply`, and goes on. The
+  update is the operator's — apply it with `./update.sh`, never treat it as a
+  fresh install, and never extract a zip over the tree. Only a half-finished
+  merge (`MERGE_HEAD`) is refused.
 - **Walk the operator through the checklist's Before you start** — the
   prerequisites `check` will verify, the one-time `init` and `configure`, and
   the trust dialog — and read the discovery evidence if there is any.
@@ -305,18 +315,20 @@ answer in conversation (then you write the answer into `.env`).
     `CC_CONFLUENCE_EMAIL` / `CC_CONFLUENCE_API_TOKEN` /
     `CC_CONFLUENCE_API_FLAVOR` / `CC_CONFLUENCE_AUTH_MODE`. Ask which macro
     profile matches their instance
-    (`skills/confluence/references/instance-profiles.md`: `cloud-free` or
-    `work-server-9.2`) — if neither matches, record `CC_CONFLUENCE_PROFILE`
-    empty rather than guessing a macro that might not exist on their
-    instance.
+    (`skills/confluence/references/instance-profiles.md` lists the profiles
+    the deployment ships)
+    <!-- overlay: confluence_profile_names — moved to the instance overlay by epic-instance-facts-relocation -->
+    — if none matches, record `CC_CONFLUENCE_PROFILE` empty rather than
+    guessing a macro that might not exist on their instance.
   - **Email** — Gmail (needs `CC_ENABLE_N8N=1`, wired in the n8n UI on
     `http://127.0.0.1:5678` once the stack is up — a credential named exactly
     `Gmail account`; or, migrating from a prior instance, decrypt-under-old-key
     and re-import as the operator-assisted alternative to redoing OAuth),
-    Exchange (no native adapter yet — say so before asking anything else;
-    elicit specifics about their existing PowerShell tools per
-    `docs/reference/work-environment-compatibility.md` §2.3/§7 as design
-    input, don't invent config), or manual-feed/none (`POST /api/emails` with
+    Exchange (a native EWS-over-NTLM client, `integrations/exchange.py`,
+    configured through the `CC_EXCHANGE_*` keys in `.env.example` — an
+    on-premises mailbox, no Graph and no OAuth; ask for the EWS URL and the
+    account, and for the client certificate and CA bundle under **Network
+    trust** above; don't invent config), or manual-feed/none (`POST /api/emails` with
     a raw message; `fixtures/emails/` has samples).
   - Further integrations ship as capability packs — list what
     `central_command/runtime/packs.py` actually defines rather than promising
@@ -343,9 +355,10 @@ Onboarding is the product's job (2026-09-18); nothing here is an interview.
   agents say "the operator" until it is answered. Say this out loud: it is the
   one thing the operator must do before anything reads their name. Be honest
   about what renders it: the founding agents seeded by `schema.sql` and the
-  five template hires made at startup (EA, editor, steward, MCP manager, graph
-  curator) bake the name in ONCE, so naming yourself after first boot leaves
-  them saying "the operator" until coached; an agent hired from the menu, every
+  agents the API registers at startup (`central_command/api/app.py`: the Jira
+  and Confluence experts, the wiki agent, the MCP manager, the editor, the
+  accountability agent) bake the name in ONCE, so naming yourself after first
+  boot leaves them saying "the operator" until coached; an agent hired from the menu, every
   `_v0` founder (rendered on READ) and the provenance actor on every decision
   (`human:<name-slug>`) use it.
 - **Integration proof.** If Jira and/or Confluence are configured, the first
@@ -419,7 +432,8 @@ substrates at the top of this file apply UNCHANGED: stop and end your turn on an
 non-zero exit; exit 3 gates are the operator's move; never compose a
 mutating command — every mechanical step in `deploy/k3s/README.md` §1–§6
 and §9 is a phase of the driver now. The README remains the reference for
-the *why*, the placement table, §8's instance-data decisions and rollback.
+the *why*, the placement table and §8's instance-data decisions; rollback is
+its §10.
 
 > **Before you wipe or deploy anything:** if the operator's Claude Code CLI
 > routes through this stack's LiteLLM `/anthropic` passthrough, re-point it
@@ -433,7 +447,9 @@ the *why*, the placement table, §8's instance-data decisions and rollback.
   Topology: placement is the role labels `cc-role/anchor` /
   `cc-role/compute` (preflight names the label commands if missing), and
   `CC_COMPUTE_SSH` is the compute node's ssh target (defaults to the
-  homelab chromebox). `CC_COCKPIT_ORIGIN` is the cockpit's tailnet URL —
+  compute node's address in `deploy/k3s/setup.sh`)
+  <!-- overlay: compute_ssh_default — moved to the instance overlay by epic-instance-facts-relocation -->.
+  `CC_COCKPIT_ORIGIN` is the cockpit's tailnet URL —
   without it, tailnet browsers 403 on the WS upgrade (README §6).
   On a RESTORE, the two never-rotate keys (`LITELLM_SALT_KEY`,
   `N8N_ENCRYPTION_KEY`) must carry their existing values BEFORE init-env
@@ -461,7 +477,8 @@ probes `cc-default`, `graphiti-llm` (a structured chat/completions round
 trip), `cc-rerank` (its kind: `/rerank`, else a True/False chat answer with
 logprobs — written to `CC_GRAPH_RERANK_KIND`) and `cc-embedding` through the
 proxy — a probe failure is the same exit-3 gate.
-`stack` builds the per-arch images only if missing and rolls out every
+`stack` builds the two local images (sandbox and crawler, amd64, natively
+with podman on the compute node) only if missing and rolls out every
 manifest. `app` installs the venv/cockpit and the systemd units and **enables
 and starts `cc-uvicorn` with the rest of them** (2026-09-18) — there is no
 first-boot gate any more, because there is no interview to land before the API

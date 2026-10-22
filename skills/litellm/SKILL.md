@@ -1,6 +1,6 @@
 ---
 name: LiteLLM
-description: Central Command's self-hosted LiteLLM proxy — the one-alias routing doctrine, the local-only fallback decision and how to reverse it, the workstation's llama-swap slot (one model at a time, FIFO queue), model_info fields native vs invented, virtual keys and the Enterprise-tags 403, the salt-key rule, and health endpoints. Load before reading proxy state, advising on routing, or proposing any litellm.* change.
+description: Central Command's self-hosted LiteLLM proxy — the one-alias routing doctrine, the local-only fallback decision and how to reverse it, the local model server's swapper slot (one model at a time, FIFO queue), model_info fields native vs invented, virtual keys and the Enterprise-tags 403, the salt-key rule, and health endpoints. Load before reading proxy state, advising on routing, or proposing any litellm.* change.
 default_agents: litellm-manager
 ---
 
@@ -43,10 +43,11 @@ approves, the Executor applies.
    dropped the encrypted per-model api_keys and left every Claude model
    unauthenticated. `update_model` is a partial merge and preserves what you
    omit.
-5. **The workstation slot (`:8081`) serves one big model at a time via
-   llama-swap.** `cc-default`/`graphiti-llm` and the judge models
-   (`gpt-oss-20b`, `gemma-4-31b`) all share it — a role decision or a model
-   change there affects the others. See `routing-doctrine`.
+5. **The local model server's slot serves one big model at a time via a
+   swapper (llama-swap style).** `cc-default`/`graphiti-llm` and any judge
+   models all share it — a role decision or a model change there affects the
+   others. See `routing-doctrine`.
+   <!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
 
 ## References
 

@@ -20,7 +20,15 @@ encode the safety rules and known API shapes.
 - **Report-only by default.** Findings go in the report; fixes are a separate,
   operator-approved step. Confirm scope with the operator before starting:
   what's disposable (graph/backlog/sessions?), whether external writes
-  (Jira) are allowed, whether restarts are allowed.
+  (Jira) are allowed, and whether the operator will restart a unit for the
+  resilience phase.
+- **A session never restarts a live `cc-*` unit.** The operator deploys and
+  restarts through the cockpit updater (release discipline: a bare unit
+  restart skips the checkpoint, the dumps and the rollback). The sweep
+  observes; where a phase needs a restart (resilience, a temp cockpit
+  password) it asks the operator to do it, or skips that phase and leans on
+  the pytest coverage — it never runs one itself, and no sub-agent brief
+  contains a restart command.
 - **NEVER approve a proposal that sends email.** Reject/dismiss those as part
   of verdict testing instead.
 - **At most ONE external-write approval per run** (Jira create), and only
@@ -39,7 +47,7 @@ encode the safety rules and known API shapes.
   restore-on-failure too.** Applies to MCP tool gates, heartbeat engine
   state, cockpit configs, and the auth hash (below).
 - **Don't** start dispatch/feed continuous loops, provision a sandbox, or
-  touch `/api/gateway/restart` outside the resilience phase.
+  touch `/api/gateway/restart` at all.
 - **Models:** every sub-agent gets an explicit model — haiku for mechanical
   sweeps (GET sweep, inventory, snapshots), sonnet for judgment lanes.
   Never let a lane inherit the orchestrator model.
@@ -48,20 +56,22 @@ encode the safety rules and known API shapes.
 ## Environment facts (verified 2026-08-20 — re-verify if stale)
 
 - FastAPI :8080, routes under `/api` EXCEPT health at `/health`.
-  Cockpit (Hono) :3080; its health also `/health`, plus `/api/version` and
-  `/api/auth/status` are the only public routes.
+  Cockpit (Hono) :3080; its health also `/health`. The cockpit's public
+  routes are five (`PUBLIC_ROUTES` in `web/server/middleware/auth.ts`):
+  `/health`, `/api/version`, `/api/auth/status`, `/api/auth/login` and
+  `/api/auth/logout`.
 - Postgres DSN `postgresql://central_command:central_command@localhost:5442/central_command`.
-- Restarts: `sudo systemctl restart cc-uvicorn` (backend),
-  `(cd web && npm run build) && sudo systemctl restart cc-nerve` (cockpit).
+- Restarts are the operator's, never the session's (see Ground rules): a
+  backend or cockpit change goes live through the updater.
 - Direct-task body field is `instruction` (singular). Hire: omit `packs`
   or pass a non-empty list.
 - **Cockpit auth cannot be minted**: `NERVE_SESSION_SECRET` is ephemeral
-  (in-memory). To test authed surfaces, ASK THE OPERATOR, then either get
-  the password or (with approval) install a temp `NERVE_PASSWORD_HASH`:
-  back up `web/.env` into the run dir first, generate a scrypt hash
-  (`crypto.scrypt(pw, salt, 64)` → `salthex:keyhex`), restart cc-nerve.
-  **Cleanup MUST restore the original `.env`, restart cc-nerve, and confirm
-  the temp password now 401s.**
+  (in-memory). To test authed surfaces, ASK THE OPERATOR for the password,
+  or skip the authed lanes. A temp `NERVE_PASSWORD_HASH` needs the cockpit
+  unit restarted to take effect, and again to undo it, so it is only ever
+  done by the operator themselves (they back up `web/.env`, set a scrypt
+  hash `salthex:keyhex`, restart, and restore and confirm the temp password
+  401s afterwards) — never by the session.
 
 ## Phases
 
@@ -81,14 +91,16 @@ created), `findings/`, `baseline/`, `verify/`.
    folds→valves; agent hire→grants→charter→coach→retire; skills import;
    chat+attachments; heartbeat schedules; MCP governance + sync_source
    (source-verify, don't provision); orchestrator+auditor.
-4. **Resilience** — restart cc-uvicorn with an SSE client attached and
-   (ideally) a RUNNING session in flight; verify parked/awaiting state is
+4. **Resilience (operator-run)** — the session never restarts the unit: it
+   pre-captures state, attaches an SSE client and (ideally) starts a RUNNING
+   session, then asks the operator to restart the backend through their usual
+   path and says when it is ready; afterwards verify parked/awaiting state is
    byte-identical across the restart, shutdown is graceful (~11s, no
    SIGKILL), nothing stuck RUNNING after.
 5. **Cleanup + proof** — work through CLEANUP.md; retire `testrun-` agents
    (skills need a DB purge — no delete endpoint: skill_chunk via doc_id →
-   skill_doc → agent_skill_grant → skill); delete the Jira issue; restore
-   auth; then DIFF live roster/grants vs `baseline/` and record: N real
+   skill_doc → agent_skill_grant → skill); delete the Jira issue; confirm with
+   the operator that any temp cockpit password was undone; then DIFF live roster/grants vs `baseline/` and record: N real
    agents unchanged, zero field drift, only `testrun-*` differ.
    **Graph writes leave TWO halves**: every hand-made node/edge ALSO writes
    an `operator manual entry` Episodic wrapper the entity delete does not

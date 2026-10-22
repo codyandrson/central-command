@@ -59,7 +59,7 @@ Tool: `propose_mcp_build(server_id, rationale)` — a "simple shape" proposal
   once. Also requires `settings.mcp_build_host` configured and
   `servers/<server_id>/Dockerfile` to exist.
 - Build is **single-arch, pinned to one build host** (`settings.mcp_build_host`
-  — the chromebox today): `tar -C <server_dir> -cf - . | ssh <host> podman
+  — the compute node today <!-- overlay: compute_node_name — moved to the instance overlay by epic-instance-facts-relocation -->): `tar -C <server_dir> -cf - . | ssh <host> podman
   build -t <ref> -f Dockerfile -`. No cross-arch build, no multi-arch
   manifest — per the design's §9.3 ratified decision, a newly agent-built
   server defaults to no-failover until an operator deliberately escalates it.
@@ -87,7 +87,7 @@ Tool: `propose_mcp_deploy(server_id, rationale)` — same simple shape.
 - Applies a `Deployment` + `Service` (as one `kind: List`) to namespace
   **`cc-mcp`**: 1 replica, `runtimeClassName: gvisor`,
   `automountServiceAccountToken: false`, **required** (not preferred) node
-  affinity pinning to `chromebox` (the image was built single-arch there —
+  affinity pinning to the build host's node (the image was built single-arch there —
   no fallback node exists), `imagePullPolicy: IfNotPresent`, container port
   **8000**, `ClusterIP` Service on 8000.
 - **Mandatory resource limits, refused even against its own generated

@@ -13,11 +13,12 @@ never write directly.
 
 Two real instance flavors exist and they are **not interchangeable**:
 
-- **cloud** — dev instance, free plan. CRUD via `/wiki/api/v2`; search has no
+- **cloud** — Confluence Cloud (the deployment's cloud instance and its plan are instance facts). CRUD via `/wiki/api/v2`; search has no
   v2 equivalent and stays on v1 CQL (`/wiki/rest/api/search`), permanently.
   Cursor pagination. Basic auth (email + API token). ~65k API points/hour,
-  10-user/2GB plan caps.
-- **server** — the WORK instance, Confluence Server/DC 9.x. **v1
+  plan caps vary by tier.
+  <!-- overlay: confluence_instances — moved to the instance overlay by epic-instance-facts-relocation -->
+- **server** — Confluence Server/DC 9.x (which site that is, is an instance fact). **v1
   `/rest/api` only** — v2 does not exist on Server/DC, ever. start/limit
   pagination. PAT-as-Bearer auth.
 
@@ -82,7 +83,8 @@ versa; check which instance you're actually talking to.
   their parameters are app-version-specific and not safely guessable — plus
   a macro-selection decision table for common authoring intents.
 - `instance-profiles` — the per-instance macro allowlist concept: what
-  `cloud-free` and `work-server-9.2` actually have, and the rule that
+  each profile the deployment ships actually has (its definitions are
+  instance facts, loaded from the instance overlay), and the rule that
   `CC_CONFLUENCE_PROFILE` names which one is live.
 - `errors-and-limits` — status codes per flavor, rate limits, the
   `X-Atlassian-Token` header, and CQL pitfalls that produce a wrong answer

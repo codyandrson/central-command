@@ -1,10 +1,17 @@
 # echo-demo and image lessons
 
-Source: `servers/echo-demo/README.md`, `docs/STATUS.md`,
+Source: `servers/echo-demo/README.md`,
 `central_command/gateway/executor.py` (`_mcp_deployment_manifest`,
 `_mcp_build_image`).
 
 ## `servers/echo-demo/` is a verification artifact, NOT a template
+
+It is also the one **hand-committed exception** under `servers/`: every other
+directory there arrives only through an approved `mcp.sync_source` (an agent's
+files, captured at propose time and written by the Executor), and the rule
+that nothing under `servers/` is hand-created has exactly this one carve-out.
+Its source was committed by hand after the pipeline produced it; do not read
+its presence as a sync product or as precedent for committing another.
 
 It is the first server the pipeline ever produced — a single tool,
 `echo(text) -> "echo: {text}"` — written from scratch by the (now retired)

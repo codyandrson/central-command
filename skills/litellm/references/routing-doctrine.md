@@ -55,7 +55,7 @@ true now, and the two paths (agent traffic vs. the CLI) are unrelated.
 ## Fallbacks: LOCAL-ONLY as of 2026-07-31 (operator decision, reversible)
 
 `fallbacks: {}`. The `claude-haiku-4-5` fallbacks previously declared for
-`cc-default` (and now-retired local models) were **removed**, so a workstation
+`cc-default` (and now-retired local models) were **removed**, so a local-server
 outage now fails fast instead of silently reaching for a Claude model.
 
 This is **configuration, not a rule.** Provider models are expected back later
@@ -67,10 +67,11 @@ that key regardless of what the file says.
 
 Side effect worth knowing: **this deleted the `max_tokens` failure class.** All
 366 of those errors in the four days to 2026-07-31 were the second half of a
-two-step failure — workstation unreachable → fall back to haiku → haiku rejects
+two-step failure — local server unreachable → fall back to haiku → haiku rejects
 `max_tokens: 262144 > 64000`. No separate fix was needed.
-`CC_MAX_OUTPUT_TOKENS` stays at 262144, sized to the workstation, which is now
-the only target.
+`CC_MAX_OUTPUT_TOKENS` stays at its configured ceiling, sized to the local
+server, which is now the only target.
+<!-- overlay: model_server_max_output_tokens — moved to the instance overlay by epic-instance-facts-relocation -->
 
 **To reverse it:** add the keys back to
 `deploy/shared/litellm/model-preferences.yaml` and run `policy.py --apply`, or
@@ -78,7 +79,7 @@ propose `litellm.set_fallbacks` per alias. **The bite mark: the ALIAS needs its
 own fallback key**, not just the member deployment. When the alias's single
 deployment is in cooldown the router 429s on `cc-default` before any call
 happens, and the lookup finds nothing declared there (found 2026-07-29, the
-first real workstation outage).
+first real local-server outage).
 
 ## Cooldown is 0 on purpose
 
@@ -88,7 +89,7 @@ Every alias here has a **single deployment**. LiteLLM's default 60s cooldown
 therefore converted one failed request into a **total outage**, reported as the
 misleading `No deployments available for selected model`. With cooldown at 0,
 failures surface as the real upstream error (`Connection error`) immediately —
-which is what makes a workstation outage diagnosable.
+which is what makes a local-server outage diagnosable.
 
 Do not propose re-enabling cooldown while aliases have one deployment each.
 
@@ -113,57 +114,62 @@ silently scores every model identically. That was exactly the state found on
 keys — see `models-and-model-info` for why they must live on `cc-default`
 itself, not only on the underlying deployment alias.
 
-## The workstation: one llama.cpp server, two aliases, llama-swap
+## The local model server: one slot, two aliases, a swapper
 
-- **`cc-default` and `graphiti-llm` are answered by the SAME `:8081` server.**
+<!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
+(Its host, port, swapper container, swapper config path and the model-to-slot
+layout with each model's served context are instance facts; read them from the
+instance overlay, not from this file.)
+
+- **`cc-default` and `graphiti-llm` are answered by the SAME server slot.**
   A model change for one is a model change for both — re-point them together,
-  and remember graphiti's structured extraction needs the
-  `openai/chat_completions/` prefix (below) regardless of which underlying
-  model answers.
-- **The `:8081` slot is `llama-swap`** (container `cc-swap`,
-  `~/QWEN/llama-swap.yaml` on the workstation): it serves **one big model at a
-  time**, swapped on demand by the request's `model` field, with requests
-  **QUEUED** through the swap (~10s: 8s cold load, 11s queued swap-back,
-  measured). Models on this slot: `qwen3.8-27b` (the default-serving model,
-  ctx 81920), `gpt-oss-20b` (ctx 131072, a graph-judgment second opinion, ttl
-  600), `gemma-4-31b` (ctx 65536, its KV ceiling, a second decorrelated
-  judge candidate). `cc-default` is a full DB deployment pointing at
-  `qwen3.8-27b`, not just an alias — see `models-and-model-info`.
-- **FIFO with big timeouts is deliberate operator policy (2026-08-20), not
+  and check both workloads before you change what the slot serves.
+- **The slot is a swapper (llama-swap style):** it serves **one big model at
+  a time**, swapped on demand by the request's `model` field, with requests
+  **QUEUED** through the swap (seconds, cold load plus swap-back). The models
+  on the slot, each one's served context and which are graph-judgment second
+  opinions are instance facts. `cc-default` is a full DB deployment pointing
+  at the default-serving model, not just an alias — see
+  `models-and-model-info`.
+- **FIFO with big timeouts is deliberate operator policy, not
   under-tuning.** A swap request waits behind the whole current drain, so
-  timeouts are sized for waiting, not for compute: 6000s on the
-  `qwen3.8-27b`/`cc-default` entries, 18000s on both judge models (×10'd by
-  operator decision — "much rather long running processes than crashing
-  processes just because they were waiting"). Do not propose shortening these
-  as a fix for slowness; a dead workstation still refuses the TCP connection
+  timeouts are sized for waiting, not for compute. Do not propose shortening
+  them as a fix for slowness; a dead server still refuses the TCP connection
   instantly, so outage detection is unaffected.
-- **`llama-swap`'s internal `concurrencyLimit` is overridden to 250 per
-  model** (default 10 bit agents with 429s during a drain burst).
-- **Two traps specific to this slot:** (1) llama-swap answers only `/v1/*`
+  <!-- overlay: model_server_timeouts — moved to the instance overlay by epic-instance-facts-relocation -->
+  (The declared figures, their decision date and the operator's rationale are
+  instance facts.)
+- **The swapper's per-model concurrency limit may need raising** (its default
+  bites with 429s during a drain burst); the deployed value is an instance
+  fact.
+- **Two traps specific to a swapper slot:** (1) it answers only `/v1/*`
   paths — a LiteLLM entry pointed at it needs `api_base` ending `/v1`, or
-  every call 404s. (2) A config reload on `cc-swap` restarts its child
-  processes, killing in-flight requests — push any config change to it in a
-  traffic gap, never blind.
-- **`qwen3-embedding-local`** (`:8083`) and **`qwen3-rerank-local`** (`:8082`)
-  are co-resident and **always on**, not competing for the swap slot. Since
-  2026-08-30 CC's consumers address them through the ROLE aliases
-  `cc-embedding` and `cc-rerank` (separate proxy rows onto the same
-  upstreams, mirroring cc-default / qwen3.8-27b).
+  every call 404s. (2) A config reload restarts its child processes, killing
+  in-flight requests — push any config change to it in a traffic gap, never
+  blind.
+- **The embedder and the reranker are co-resident and always on**, not
+  competing for the swap slot. Consumers address them through the ROLE
+  aliases `cc-embedding` and `cc-rerank` (separate proxy rows onto the same
+  upstreams, mirroring cc-default). Their upstream names and ports are
+  instance facts.
   Graphiti has **no embedding fallback** (dimensions differ from OpenAI's), so
   an embedder outage is a graph **write outage**, not a degraded capability.
   The LLM being down is the degradable case; the embedder being down is not.
-- **`graphiti-llm` = `openai/chat_completions/qwen3.8-27b`.** The
-  `openai/chat_completions/` prefix is **required, not cosmetic**: it forces
-  LiteLLM's Responses→chat-completions bridge so graphiti's structured
-  extraction receives a real `response_format: json_schema`. Without it the
-  request passes through to llama.cpp, which ignores `text.format` and answers
-  with prose — every extraction fails.
-- **Retired 2026-08-01, deliberately:** `qwen3.6-35b` (:8080) and
-  `north-mini-code` (:8082, the old rerank port). Never routed to, never given
-  a role. Do not re-register them; if a second local LLM role is wanted,
-  decide its role first.
+- **`graphiti-llm` is a PLAIN `openai/<model>` alias, exactly like
+  `cc-default`.** The graph client is graphiti-core's chat-completions client
+  (`OpenAIGenericClient`), which sends a real `response_format: json_schema`
+  to `/v1/chat/completions`; LiteLLM forwards it and the backend enforces it.
+  The old `openai/chat_completions/` prefix (in use 2026-08-01 until the
+  client changed) is now **wrong**: it forces LiteLLM's Responses→chat bridge,
+  which sends `chat_completions/<model>` upstream, and the backend 404s. The
+  setup probes assert the prefix is ABSENT. Do not reintroduce it or a
+  Responses client.
+- **Models retired from the fleet stay retired.** Never route to one or give
+  it a role; if a second local LLM role is wanted, decide its role first.
+  <!-- overlay: retired_local_models — moved to the instance overlay by epic-instance-facts-relocation -->
+  (Which models were retired, and when, are instance facts.)
 
-If the workstation's default-serving model changes, **re-point `cc-default`**
+If the server's default-serving model changes, **re-point `cc-default`**
 (one API call) rather than editing anything in Central Command — but check
 whether `graphiti-llm` should move with it, since they share the server.
 

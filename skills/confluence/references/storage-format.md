@@ -248,7 +248,7 @@ expecting it to render.
   authorable end to end.
 - A **status + table layout** — a table with columns for phase/quarter and
   `status` macro lozenges per cell, built from the recipes above.
-- A **Jira macro with a chart-capable JQL view**, or (work-server-9.2 only)
+- A **Jira macro with a chart-capable JQL view**, or (Server/Data Center only)
   the **Advanced Roadmaps for Jira in Confluence** embed macro, if the
   active profile lists it — see `instance-profiles`.
 
@@ -441,7 +441,7 @@ storage form.
 describe the storage format for Appfire's commercial "MultiExcerpt" app
 (`ac:name="multiexcerpt-macro"`, parameters `name` and `hidden`), which is a
 different product from whatever ships bundled as "Multiexcerpt" /
-"Multiexcerpt include" in the work instance's macro browser
+"Multiexcerpt include" in the instance's macro browser
 (`instance-profiles`). The two may or may not share a macro name and
 parameter set on this instance. Treat Multiexcerpt/Multiexcerpt Include as a
 **discovery-first** macro (see `macro-discovery.md`): find a page on the

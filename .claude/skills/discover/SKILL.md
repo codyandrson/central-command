@@ -44,21 +44,31 @@ Boundaries that hold for the whole run:
   in `~/.netrc` (mode 600), switched on with `CC_NETRC=1`. If the
   operator pastes a secret at you, tell them where it belongs; don't echo
   it back.
-- **`CC_TLS_INSECURE=1` is a diagnostic, never a fix.** You may propose ONE
-  diagnostic run with it to confirm a TLS-interception hypothesis — the
-  prober prints a WARN on every run that sees it, by design; the fix you
-  recommend is always the corporate root CA via `CC_CA_BUNDLE`.
+- **`CC_TLS_INSECURE=1` is a supported operator decision, always warned.**
+  Since v2.43.0 it is the deployment's real insecure knob, not a probe-only
+  diagnostic (`deploy/AIRGAP.md`, the TLS section): the same key turns
+  verification off for the acquisition toolchain, podman and LiteLLM. Recommend
+  the corporate root CA via `CC_CA_BUNDLE` first — it keeps the chain
+  verifiable — and offer `CC_TLS_INSECURE=1` as the other supported answer
+  for a site that relies on isolation, naming the trade (a working supply
+  chain instead of a verifiable one). The choice is the operator's; never set
+  it unprompted. The prober prints a WARN on every run that sees it, naming
+  what it covers, and never a PASS — relay that WARN, don't argue it away.
 - **Exit 3 is a gate, not an error.** Surface the USERACTION lines, conduct
   the elicitation below, and END YOUR TURN when the answer is something
-  only the operator (or their platform team) can supply. Exit 1 means the
-  run itself broke (no curl, unwritable out dir) — diagnose that before
-  anything else. Autonomous continuation is for exit 0 only.
+  only the operator (or their platform team) can supply. Exit codes are 0
+  clean, 1 hard failure (any FAIL line — a broken run such as no curl or an
+  unwritable out dir, but also a probe that failed outright), 2 warnings, 3
+  user action required; precedence is 3 > 1 > 2 > 0. Diagnose a 1 from the
+  FAIL lines before anything else. Re-run on your own only after writing an
+  answer the operator gave you; the loop ends at exit 0 or 2 (below).
 
 ## The loop
 
 1. **Run** `./deploy/discover.sh` (from the repo root; `--out` only if the
    operator wants output elsewhere). First run on a new machine: mention it
-   probes ~70 public endpoints — on a monitored network the operator may
+   probes about sixty public endpoints (the catalog in `discover.sh`, plus any
+   configured mirrors) — on a monitored network the operator may
    want to warn their security team first.
 2. **Read** the console: every `FAIL`/`WARN` line, and the one `USERACTION`
    per distinct failure class. The class in parentheses is the diagnosis;
@@ -77,8 +87,9 @@ Boundaries that hold for the whole run:
    section documents every key).
 5. **Re-run** the same command. It is idempotent; configured mirrors are
    probed alongside the public endpoints and working ones demote failures
-   to nuances. Repeat until exit 0/2, or until every remaining USERACTION
-   is a documented "this environment genuinely does not have it".
+   to nuances. Repeat until exit 0 (clean) or 2 (warnings only — relay them),
+   or until every remaining USERACTION is a documented "this environment
+   genuinely does not have it".
 6. **Land it.** Walk the operator from the final report to the deploy
    seams: each resource the report marks mirror-only maps to a `.env`
    variable in `deploy/AIRGAP.md`'s seam table (PyPI mirror →
@@ -116,7 +127,9 @@ value is a HOST PREFIX, never a URL; the prober expands it to that registry's
   host-side acquisition trust.
   Warn that anything with its own root pool (Go binaries, containers not
   mounting the host bundle, pinned clients) still breaks until configured —
-  the report's CA block lists the per-toolchain lines.
+  the report's CA block lists the per-toolchain lines. If no CA can be had,
+  `CC_TLS_INSECURE=1` is the other supported answer (see Boundaries) — the
+  operator's call, always warned.
 - **`proxy-auth`** — the proxy wants credentials (a 407, or a refused
   CONNECT tunnel surfacing as curl exit 56). Credentials → `~/.netrc` +
   `CC_NETRC=1`, or a `CC_PROXY` URL the platform team supplies.
@@ -126,6 +139,16 @@ value is a HOST PREFIX, never a URL; the prober expands it to that registry's
   `raw/<key>.body` often names the policy category. The question is "what
   is the sanctioned source for <resource>?" — there is no `.env` key that
   fixes a policy.
+- **`proxy-dns`** — the configured proxy's own name does not resolve. Check
+  the spelling of `CC_PROXY` (and `http_proxy`/`https_proxy`) and ask whether
+  the operator's resolver knows the proxy host.
+- **`tls-other` / `tls-cert`** — the handshake failed for a reason the
+  `-k` re-probe does not explain (a certificate the prober could not classify
+  as interception, or a protocol-level failure). Read `raw/<key>.err` for
+  curl's words and take it to the network team; there is no `.env` key that
+  fixes it.
+- **`error`** — the endpoint answered 5xx: transient, or an unhealthy mirror in
+  front of it. Re-run before escalating.
 - **`throttled` / `portal` / `softfail`** — nuances, not outages. Relay
   the report's explanation; nothing to elicit unless the operator wants
   the underlying fix (auth for rate limits, portal login, OCSP allowlist).
@@ -134,7 +157,8 @@ value is a HOST PREFIX, never a URL; the prober expands it to that registry's
 
 A resource the operator cares about that discover.sh does not probe, or an
 endpoint that has moved upstream (dead hosts get dropped, not guessed —
-see the `hf-lfs` comment in the catalog), is a change to `discover.sh`'s
+see the comment above the `ai` group in the catalog: the Hugging Face LFS/CDN
+hostname churned and is deliberately not probed), is a change to `discover.sh`'s
 catalog: raise it with the operator as a code change with a matching
 selftest expectation if the classifier is touched. Never bolt a one-off
 probe onto the conversation instead.

@@ -22,10 +22,13 @@ right.
 - **`openai/chat_completions/<model>`** — forces LiteLLM's Responses→chat
   bridge. Needed for any caller that always drives extraction through the
   Responses API (`client.responses.parse`) against a backend that only
-  implements `/v1/chat/completions` — see CLAUDE.md's graphiti-llm bite mark
-  for the concrete failure this fixes (a plain `openai/` prefix passes the
+  implements `/v1/chat/completions` (a plain `openai/` prefix passes the
   request through and the `text.format` json_schema is silently dropped;
-  prose comes back with HTTP 200). Response API background:
+  prose comes back with HTTP 200). **Central Command's own graph client no
+  longer needs it** — it calls chat-completions directly, so `graphiti-llm`
+  is a plain `openai/<model>` alias and the prefix on it is wrong (see the
+  litellm skill's `routing-doctrine`); reach for this prefix only for a
+  caller that really drives the Responses API. Response API background:
   <https://docs.litellm.ai/docs/response_api>.
 - **`hosted_vllm/<model>`** — a self-hosted vLLM OpenAI-compatible server.
   Same shape as `openai/` but keeps vLLM-specific defaults distinct in

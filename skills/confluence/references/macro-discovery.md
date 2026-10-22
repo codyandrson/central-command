@@ -13,7 +13,7 @@ silently, on a page someone may already be reading.**
 
 ## Which macros this applies to
 
-From `instance-profiles.md`'s `work-server-9.2` categories:
+From the Server/Data Center profile's categories (`instance-profiles.md`):
 
 - **Tables & data apps** — Table Filter, Table from CSV, Table from JSON,
   Table Spreadsheet(+Include), Table Excerpt(+Include), Table Transformer,
@@ -43,6 +43,13 @@ this class — those have verified recipes in `storage-format.md`.
 
 ## The discovery procedure
 
+**Discovery is CQL-first; the sampler page covers what CQL cannot find.**
+Ask CQL which pages already use the macro (steps 1–4). When no page does —
+CQL returns nothing for every name the macro could carry, or the account
+cannot see one — do not guess: the macro goes on the operator-built sampler
+page and is harvested from there (next section), and is re-harvested when
+its app is upgraded.
+
 1. **Find a page that already uses the macro**, via CQL's `macro` field
    (confirmed against Atlassian's CQL field reference for Server/Data
    Center, not Cloud-only):
@@ -56,8 +63,8 @@ this class — those have verified recipes in `storage-format.md`.
    `ac:name` verbatim (compare `chart` vs. "Chart from Table"'s own name).
    If a guessed name comes back empty, that's weak evidence only — try the
    display-name-derived slug, and if still empty, search the macro's usage
-   report in Confluence admin (`instance-profiles.md` notes this exists) or
-   fall back to a plain `text ~` search for pages likely to use it.
+   report in Confluence admin or fall back to a plain `text ~` search for
+   pages likely to use it. Still nothing: it is a sampler-page macro (below).
 
 2. **Read that page's real body**, not a search snippet:
    `confluence_get_page(..., expand="body.storage")`. CQL search results
@@ -76,7 +83,8 @@ this class — those have verified recipes in `storage-format.md`.
    a computed column, a form validation rule) is just absent.
 
 5. **If no existing page uses the macro anywhere the calling account can
-   see**, that is a capability gap, not a green light to guess:
+   see**, that is a capability gap, not a green light to guess: put it on
+   the sampler page (below) if the operator is available to author it, else
    `declare_gap` and let the operator author the first instance by hand (or
    confirm the app is even installed and configured) — the same escalation
    this skill already prescribes for a macro outside the active profile.
@@ -85,9 +93,10 @@ this class — those have verified recipes in `storage-format.md`.
 
 The per-use procedure above assumes some page somewhere already uses the
 macro. Onboarding is the moment to stop depending on that: a **macro sampler
-page** turns the whole marketplace surface into instance-verified recipes in
-one sitting (operator-proposed 2026-08-25; wired into `/setup`'s Phase 6
-Confluence step).
+page** turns the macros CQL cannot find into instance-verified recipes in
+one sitting (operator-proposed 2026-08-25). It is a separate, optional
+session after the install — the setup skill offers it — not a step of the
+install itself.
 
 Why the operator authors it and not the agent: the Confluence macro browser
 UI generates **correct-by-construction** storage XML — real parameter names,
@@ -115,7 +124,7 @@ whole doctrine exists to prevent. The division of labor:
    sampler page and harvest again. The stamp from step 3 is what tells you
    the recipe predates the app version you're now on.
 
-Governance: during `/setup` this runs as the operator's own hands (Claude
+Governance: at onboarding this runs as the operator's own hands (Claude
 Code + operator present, before any agent exists). After onboarding, an
 agent refreshing the harvest creates pages through `confluence-propose` like
 any other write — the sampler page is not an exception to the gate.
