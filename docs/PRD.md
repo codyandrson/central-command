@@ -9,7 +9,7 @@ updated: 2026-10-21
 
 ## 0. Document Purpose
 
-This is the top layer of Central Command's master documentation: the why, the who, and the capabilities the product must have, as decided by the operator. It was produced on 2026-10-18/21 by extracting and code-checking every claim in the existing documentation and reviewing each discrepancy with the operator; the rulings are in `rulings/*.md` and `.memlog.md` beside this file.
+This is the top layer of Central Command's master documentation: the why, the who, and the capabilities the product must have, as decided by the operator. It was produced on 2026-10-18/21 by extracting and code-checking every claim in the existing documentation and reviewing each discrepancy with the operator; the full review record (rulings, decision trail, addendum) is kept with the operator's private records.
 
 It describes the product as it is **and** the requirements decided during that review (the AB and NEW marks are defined in §4). Architecture mechanics belong to the architecture document; the reasons behind individual rules belong to the decision log; operational procedure belongs to the runbooks. Where this document and the code disagree, the code is what runs and this document is what was intended; the discrepancy is a defect in one of them, never a licence.
 

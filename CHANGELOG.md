@@ -4,6 +4,14 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-21 — v2.67.2: the PRD lands in the public tree as docs/PRD.md
+
+docs: the product requirements document (status final, 2026-10-21) is now
+`docs/PRD.md`, the top layer of the master documentation set: the why, the
+who and the capabilities, as decided by the operator. Documentation only;
+nothing the updater rebuilds or re-applies. **Still requires v2.66.0**
+(`min_upgrade_from` unchanged).
+
 ## 2026-10-18 — v2.67.1: the split's retrospective closes its open items
 
 The deploy/pi split's retrospective, written after v2.67.0 was applied, found
