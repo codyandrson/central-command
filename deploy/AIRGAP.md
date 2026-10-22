@@ -6,7 +6,7 @@ anything. It is not a mirroring project.
 
 ## Why this document exists
 
-The work-site installs did not fail on reachability: the site has mirrors for
+The first restricted-site installs did not fail on reachability: the site had mirrors for
 container images, PyPI, npm and Debian, and images pull. They failed on two
 things. **A specific image tag was missing from the mirror** and a nearby one
 had to be used. And **finding where that tag — or a CA, a proxy, an index — was
@@ -83,7 +83,9 @@ One function does the host side — `deploy/env-lib.sh`'s `cc_export_tls_env`,
 called by every command in the profile — so a consumer cannot lose its variable
 in one script and keep it in another
 (`tests/test_single_airgap_seams.py` walks the table). The CA reaches a BUILD as
-a `--secret`, never a build-arg (build-args show in `podman history`). The two
+a staged `cc-ca.crt` file in the build context, never as a `--secret` (broken on
+a Windows podman machine) and never as a build-arg (build-args show in `podman
+history`). The two
 values compose reads (`CC_LITELLM_SSL_VERIFY`, `CC_CA_BUNDLE_IN_CONTAINER`) are
 EXPORTED by `setup.sh` and never written into `.env`: they are composed from the
 two keys above, and one fact has one key.
@@ -122,7 +124,10 @@ lets `configure` ask for it and `check` validate it — except the three Atlassi
 keys that are not questions on purpose (`CC_JIRA_AUTH_MODE` and
 `CC_CONFLUENCE_AUTH_MODE` DERIVE from their flavor, and `CC_CONFLUENCE_PROFILE`
 is informational), which stay `.env.example` lines. Adding a seam means adding
-that row (`tests/test_single_questions_schema.py` fails otherwise).
+that row, its `.env.example` line and its consumer (`.claude/rules/deploy-single.md`).
+`tests/test_single_questions_schema.py` enforces only the reverse — every row's
+key must be declared in `.env.example` — so a seam with no row passes the suite
+and is caught by review.
 
 ## Two host prerequisites the air gap cannot download for you
 
@@ -133,8 +138,8 @@ before the install, and `check` now says so instead of finding out later.
   floor). Below it the profile does not work: `up --wait` — how the deploy
   phases wait on `compose.yaml`'s healthchecks — arrived in 1.6.0, and so did
   the config-hash change that made a second `up -d` idempotent, without which
-  every re-run fails with `container name ... is already in use`. The work
-  site ran 1.5.0 (2026-09-25). `check`'s `compose-version` line is the gate;
+  every re-run fails with `container name ... is already in use`. A
+  restricted site ran 1.5.0 (2026-09-25). `check`'s `compose-version` line is the gate;
   the fix is `uv tool install podman-compose==1.6.0` or
   `pip install podman-compose==1.6.0` from the PyPI mirror
   (`CC_PYPI_INDEX_URL`).
@@ -162,8 +167,9 @@ it on a mirrored or no-egress site.
 **`./setup.sh configure`** (v2.45.0, design record D6) asks every question in
 `deploy/single/questions.tsv` that `.env` does not answer yet — plain
 `read -rp` prompts, grouped (`identity`, `features`, `network`, `mirrors`,
-`llm`, `paths`; `--all` adds the ports and re-asks everything with the current
-value as the default). It is the ONE command that creates `.env` from
+`llm`, `paths`; `--all` adds a seventh group, `advanced` — the ten ports and the
+two `CC_JIRA_API_FLAVOR` / `CC_CONFLUENCE_API_FLAVOR` rows — and re-asks
+everything with the current value as the default). It is the ONE command that creates `.env` from
 `.env.example`. It prints the diff it will write (`set` / `keep`, secrets by
 name only), writes nothing but `.env`, then runs `make-secrets.sh` so the
 generated credentials exist too, and ends by pointing at `check`.
@@ -329,10 +335,12 @@ drop-ins inside the machine is not doc-verified and is an open item below.
   with `curl -v` reporting `schannel: added 1 certificate(s) from CA file`. The
   earlier note here said the CA therefore had to be in the Windows Root store;
   **that was wrong.** It only has to reach curl as an OPTION, so `CC_CA_BUNDLE`
-  is written as a `cacert` line into the setup-owned `.curlrc`. Putting the CA in
-  the Root store still works and is usually there by policy anyway (as
-  Administrator, `certutil -addstore Root <ca.cer>`; the `ca-windows-store` check
-  names it), but it is no longer REQUIRED;
+  is written as a `cacert` line into the setup-owned `.curlrc`, which is all curl
+  needs. The Windows Root store is still checked, though: the OS trust store is
+  what schannel curl and `podman.exe` consult, so `check`'s `ca-windows-store` row
+  raises a `USERACTION` (exit 3, which blocks the gate) when the CA is not there
+  — as Administrator, `certutil -addstore Root <ca.cer>`. On Git Bash that makes
+  the Root store effectively required for `check` to pass, though not for curl;
 * it checks revocation, which an intercepting proxy cannot answer
   (`CRYPT_E_REVOCATION_OFFLINE`), so the same `.curlrc` carries
   `ssl-revoke-best-effort` on Windows unconditionally.
@@ -364,13 +372,18 @@ are reachable and which mirrors can stand in.
 **digest**. `fetch` runs `resolve-images.sh`, which asks the mirror's
 `/v2/<path>/tags/list` what it actually has:
 
-* the locked tag → PASS, and its digest is verified (a mismatch FAILS: drifted
-  or poisoned). A rolling series or channel tag (`16`, `7-alpine`,
+* the locked tag → PASS, and its digest is verified: a mismatch on the public
+  registry FAILS (drifted or poisoned), but on a configured mirror it is a WARN
+  naming both digests (v2.45.4 — a mirror seeded by push re-serialises
+  manifests, so the tag is the pin there). A rolling series or channel tag (`16`, `7-alpine`,
   `main-stable`) carries `-` instead of a digest and is pinned by the tag alone;
 * otherwise the newest tag satisfying the constraint, with a WARN naming the
   substitution and no digest check — deliberate: the digest pin defended against
   public-registry tag poisoning, a threat a mirrored air gap does not carry;
-* otherwise a FAIL naming the constraint and what the mirror has, so you can pin.
+* otherwise a tag the mirror lacks is the seam only the operator can fill: a
+  `USERACTION` (exit 3) naming the constraint and what the mirror has, so you
+  can pin. Any other fetch failure — an unreachable registry, a pin that does not
+  exist, a failed build — is a `FAIL` (exit 1) naming its `.env` seam.
 
 A mirror serving no tags-list API still works: resolution falls back to a blind
 pull of the locked tag, with a WARN. Resolved refs are written to `.env` as
@@ -390,7 +403,7 @@ that is the point. The knowledge-graph client (graphiti-core) is a Python
 dependency of the app, so it arrives through the PyPI seam with everything
 else in `requirements.lock`.
 
-## Open items (copied from the design record)
+## Open items (owed — to be decided on the testbed)
 
 * The LiteLLM and speech containers get the CA and the insecure flag but NOT
   `CC_PROXY`: the machine drop-in sets the ENGINE's proxy (pulls and builds), and
@@ -406,7 +419,7 @@ else in `requirements.lock`.
 
 ## The k3s profile
 
-The two-node deployment keeps its own seams: `deploy/k3s/registries.yaml.example`
+The multi-node deployment keeps its own seams: `deploy/k3s/registries.yaml.example`
 (containerd mirrors; add `--disable-default-registry-endpoint` so a miss fails
 loud), `deploy/airgap.env.example` (pip/uv), and `web/.npmrc.example` (npm). It
 also still needs the k3s install script vendored and the NodeSource apt repo

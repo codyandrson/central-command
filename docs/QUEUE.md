@@ -1,7 +1,7 @@
 # QUEUE.md — operating the inbox queue
 
 The operator's guide to the Work Ledger: how to read it, tune it, reach
-further back into mailbox history, and swap the email provider. For the
+further back into mailbox history, and choose the email provider. For the
 design rationale see DESIGN.md §4; for the incident history behind the rules,
 the instance repo's JOURNAL.md. Nothing here duplicates live numbers — the
 commands below read
@@ -68,9 +68,14 @@ no runtime API to change them — one process's config governs the whole queue
 
 ```bash
 $EDITOR .env                                # repo root
-sudo systemctl restart cc-uvicorn
+# restart the API — the operator's act (see below)
 curl localhost:8080/api/dispatch            # confirm the new values took
 ```
+
+The restart is the operator's: on the k3s profile that is a `systemctl restart`
+of the `cc-uvicorn` unit, on the single-node profile `./setup.sh` (it resumes
+at `boot`). A coding agent's session never restarts a live `cc-*` unit —
+releases go live through the updater (`deploy/k3s/README.md` §6).
 
 ### The backpressure valves
 
@@ -103,8 +108,7 @@ Two intake loops, two knobs:
   #    The sweep refuses to start without one.
   CC_BACKLOG_CUTOFF_DATE=2026-04-20
 
-  # 2. Restart, then trigger the sweep:
-  sudo systemctl restart cc-uvicorn
+  # 2. Restart the API (the operator's act, as above), then trigger the sweep:
   curl -XPOST localhost:8080/api/feed/backlog/start -H 'content-type: application/json' -d '{}'
 
   # Watch it walk (one backlog.window event per 30-day window). NOTE: this
@@ -134,40 +138,45 @@ Two intake loops, two knobs:
   enrollment dedupes on message id, so extending the cutoff only adds the
   older mail.
 
-## Swapping the email provider (Gmail → Outlook/Exchange)
+## The mail provider: two behind one seam
 
-Central Command has no Gmail code. The entire provider contract is the two
-functions in `central_command/integrations/email_facade.py`:
+Central Command has no mail-provider code in the app beyond one seam,
+`central_command/integrations/email_facade.py`, with two functions:
 
-- `list_refs(query)` → `[{uuid, conversation_id}]` — references matching a search
+- `list_refs(query)` → `[{uuid, conversation_id}]` (the Exchange provider adds
+  `message_id`) — references matching a search
 - `get_message(uuid)` → one normalized envelope: `from / subject / date /
   body_text / body_html / snippet`
 
-Credentials live only inside the provider façade (today an n8n workflow
-holding the Gmail OAuth); Central Command authenticates to the façade with
-`CC_EMAIL_FACADE_URL` + `CC_EMAIL_FACADE_TOKEN` and never sees the mailbox
-credential. The boundary is read-only by construction.
+Each function first asks `integrations/exchange.py:configured()` and routes to
+the native Exchange client when it is true, else to the n8n façade; callers
+never know which. **Which provider is configuration, not code:**
 
-To move to Exchange, build a provider that answers those two calls and point
-the two env vars at it. What actually changes:
+| | n8n Gmail façade (default) | Native Exchange client |
+|---|---|---|
+| Selected by | `CC_EXCHANGE_*` unset | `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME` and `CC_EXCHANGE_PASSWORD` all set (`CC_EXCHANGE_EMAIL` optional) |
+| Where it runs | an n8n workflow holding the Gmail OAuth | `integrations/exchange.py` — EWS over NTLM, no Graph, no OAuth |
+| Credentials | only inside the façade; the app authenticates with `CC_EMAIL_FACADE_URL` + `CC_EMAIL_FACADE_TOKEN` and never sees the mailbox credential | held by the app itself in the root `.env` (`CC_EXCHANGE_*`); trust rides `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` or `CC_TLS_INSECURE` |
+| Ledger id | `<gmail-msg-{uuid}@central_command.feed>`, source `gmail` | the RFC 822 `InternetMessageId`, source `exchange` |
+| Query dialect | Gmail search, passed through | the same Gmail-shaped string, translated by `translate_query` to EWS filters or AQS |
 
-1. **The provider** — either a new n8n workflow (n8n's Microsoft
-   Outlook/Graph nodes fit the "n8n where it already solved a hard
-   integration problem" rule: OAuth against Exchange is that problem), or a
-   native client like `integrations/jira.py` if the target Exchange is
-   on-prem EWS where cloud-Graph nodes don't apply. On-prem vs Graph is the
-   one real unknown for the air-gapped work deployment — settle it first.
-2. **The two query strings** — `CC_FEED_QUERY` and `CC_BACKLOG_QUERY` pass
-   through verbatim to the provider and are Gmail search dialect today. The
-   new provider either accepts its own dialect there (config-only change) or
-   translates internally.
-3. **Cosmetics** — `ledger.provider_message_id` stamps ids as
-   `<gmail-msg-{uuid}@central_command.feed>` and `source="gmail"`. The id only
-   needs to be stable and unique per message (Exchange message ids and
-   `ConversationId` map one-to-one onto `uuid`/`conversation_id`), so this is
-   a small rename. A fresh work-deployment database means no dedupe collision
-   with old Gmail rows.
+Nothing in the app is Gmail- or Exchange-specific beyond that. The boundary is
+read-only in both cases: `report_spam`, `send`, `move` and the calendar writes
+are called by the Executor alone, after approval.
+
+Two rules follow from the table:
+
+1. **The two query strings** — `CC_FEED_QUERY` and `CC_BACKLOG_QUERY` — are
+   written in Gmail dialect on both providers; the Exchange client translates
+   them.
+2. **The ledger id is not a cosmetic choice.** Gmail's message id is immutable,
+   so enrollment keys on it. EWS's `ItemId` CHANGES when a message moves
+   folder, so on Exchange the idempotency key is the RFC 822
+   `InternetMessageId` (`ledger.ref_message_id` is the one place that picks).
+   Changing provider on a live database therefore does not dedupe against the
+   old provider's rows: start the new provider on a fresh ledger, or accept the
+   re-enrollment.
 
 Everything downstream — the ledger, dispatcher, valves, retry machinery,
-thread folding, provenance — never knew the provider existed and carries
-over untouched.
+thread folding, provenance — never knew the provider existed and carries over
+untouched. Prove an Exchange configuration with `python scripts/exchange_smoke.py`.

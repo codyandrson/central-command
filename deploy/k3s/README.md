@@ -6,7 +6,7 @@
 > exit 3 = stopped for your action, `diagnose` for a support bundle. It
 > mechanizes §1–§6 and §9 below by CALLING the same scripts they describe.
 > This file remains the reference — the *why* behind each step, the placement
-> table, phase 8's instance-data decisions, and the rollback path.
+> table, §8's instance-data decisions, and §10's rollback path.
 
 From bare cluster to a running Central Command. Every command is
 copy-pasteable and every `apply`/`make-*` step is idempotent, so a re-run
@@ -97,7 +97,10 @@ unmoved file only means every reader keeps using the old path). Check with
 second a symlink to `../k3s/.env`. The two keys inside never change; compare
 `sha256sum` of the file before and after if in doubt. Rollback matrix: a
 failed v2.66.0 apply lands on v2.65.x with nothing moved; a failed v2.67.0
-apply lands on v2.66.0, which reads the new path first. The symlink is
+apply lands on v2.66.0, which reads the new path first. v2.67.0 deleted the
+tracked files only, so the untracked symlink and the `__pycache__` survive on
+an install that took the update (a fresh clone has neither, and `ls deploy/pi`
+there fails — nothing to do). The symlink is
 removed by hand after v2.67.0 is accepted (`rm -r deploy/pi/litellm/__pycache__
 && rmdir deploy/pi/litellm && rm deploy/pi/.env && rmdir deploy/pi`); nothing
 automated needs it then. Run that only when `ls -la deploy/pi/.env` shows a
@@ -110,11 +113,15 @@ removing anything), or the `rm` deletes the only copy of the keys.
 
 Assumed already true before phase 2:
 
-- **k3s v1.34+** installed: `raspberrypi` (arm64, control plane) and `chromebox`
-  (amd64, agent). `sudo k3s kubectl get nodes` shows both `Ready`.
-- **Tailscale** up on both; the Pi can `ssh chromebox_admin@100.113.118.28`
-  without a password prompt (every build script shells over that).
-- Repo cloned at **`/home/codyslab/central-command`**.
+- **k3s v1.34+** installed: an arm64 **anchor** node (control plane) and an
+  amd64 **compute** node (agent). `sudo k3s kubectl get nodes` shows both
+  `Ready`. The anchor/compute roles are node labels (§3a), never hostnames.
+- **A private network** (a tailnet, for instance) between the two; the anchor
+  can `ssh <user>@<compute-address>` without a password prompt (every build
+  script shells over that). Set the target as `CC_COMPUTE_SSH` in
+  `deploy/k3s/.env`; the real value belongs to your private instance docs.
+- Repo cloned at **`<checkout>`** (any path; the units and scripts below are
+  run from it).
 - **`deploy/k3s/.env`** populated — run **`./deploy/k3s/init-env.sh`**: it copies
   the template, generates every **GENERATED** variable that is empty, and
   prints the **ELICITED** ones you must supply yourself. It
@@ -126,23 +133,24 @@ Assumed already true before phase 2:
   present and undecryptable. Generate them only on a fully-clean deployment that
   restores neither.
 - **Repo-root `.env`** populated (see `.env.example`). Different audience: the
-  app's own `CC_*` settings. Both files are gitignored.
-- **uv-managed CPython 3.12** and **NodeSource 22** on the Pi.
-- **`socat`** on the Pi (`sudo apt install socat`) — the loopback relay
+  app's own `CC_*` settings. Secrets live only in gitignored environment files:
+these two plus `web/.env` (§6) — all three are gitignored.
+- **uv-managed CPython 3.12** and **NodeSource 22** on the anchor node.
+- **`socat`** on the anchor node (`sudo apt install socat`) — the loopback relay
   `cc-graph-bolt` runs on it (§6).
 - **No arm64 image builder.** Both locally built images (sandbox, crawler)
   are compute-node-only and built there with podman. Docker on the anchor was
   the arm64 half of the retired Graphiti image and is no longer required.
-- **gVisor (`runsc`) on the chromebox** — installed by
+- **gVisor (`runsc`) on the compute node** — installed by
   `./deploy/k3s/install-gvisor.sh` (idempotent: reports-and-exits when already
   present). Without it, sandbox Jobs never start — the `gvisor` RuntimeClass
   applies fine and the failure only shows at first use, which is why verify.sh
   asserts it too. Run the script again after phase 4 for its pod-level proof.
-- **The k3s server drop-in** on the Pi (v2.39.2; moved under `host/` in
+- **The k3s server drop-in** on the anchor node (v2.39.2; moved under `host/` in
   v2.39.3 — `apply -f deploy/k3s/` reads every top-level yaml as a manifest)
   — `sudo cp deploy/k3s/host/10-central-command.yaml
   /etc/rancher/k3s/config.yaml.d/` then `sudo systemctl restart k3s`. It sets `terminated-pod-gc-threshold`, which
-  Kubernetes defaults to 12500: every Pi reboot otherwise leaves a generation
+  Kubernetes defaults to 12500: every anchor-node reboot otherwise leaves a generation
   of Succeeded/Failed pod records behind forever (and a LiteLLM failover pod
   killed by a reboot reads "Error" in every pod listing). Hand-installed
   because a k3s restart is not the updater's to perform; `setup.sh preflight`
@@ -229,12 +237,12 @@ Assumed already true before phase 2:
     runs it on every update.
 - Air-gapped site only: copy `registries.yaml.example` to
   `/etc/rancher/k3s/registries.yaml` on **both** nodes first, fill `MIRROR_HOST`,
-  then `systemctl restart k3s` (Pi) / `k3s-agent` (chromebox).
+  then `systemctl restart k3s` (anchor) / `k3s-agent` (compute).
 
 ## 2. Secrets and ConfigMaps
 
 ```bash
-cd /home/codyslab/central-command
+cd <checkout>
 ./deploy/k3s/init-env.sh        # bootstraps deploy/k3s/.env (idempotent)
 ./deploy/k3s/make-secrets.sh
 ```
@@ -255,12 +263,12 @@ Run this **before** phase 4 — pods that reference a missing Secret sit in
 Two images are built here, not pulled. Everything else is multi-arch upstream.
 
 ```bash
-./deploy/k3s/build-sandbox-image.sh     # chromebox only
-./deploy/k3s/build-crawler-image.sh     # chromebox only — slow, installs Chromium
+./deploy/k3s/build-sandbox-image.sh     # compute node only
+./deploy/k3s/build-crawler-image.sh     # compute node only — slow, installs Chromium
 ```
 
 - (The Graphiti image and its build script left in v2.61.0 — see §0a.)
-- `cc-sandbox` and `cc-crawler` are chromebox-**required** (gVisor and Chromium
+- `cc-sandbox` and `cc-crawler` are compute-node-**required** (gVisor and Chromium
   live there), so they are single-arch by design.
 - **The `localhost/` trap:** podman tags local builds `localhost/<name>`; the
   kubelet looks up `docker.io/library/<name>` and then tries to pull a tag no
@@ -278,8 +286,8 @@ an unlabeled cluster leaves its pinned/preferred pods `Pending` with no event
 naming why.
 
 ```bash
-sudo k3s kubectl label node <raspberrypi-node-name> cc-role/anchor=true
-sudo k3s kubectl label node <chromebox-node-name> cc-role/compute=true
+sudo k3s kubectl label node <anchor-node-name> cc-role/anchor=true
+sudo k3s kubectl label node <compute-node-name> cc-role/compute=true
 ```
 
 ## 4. Apply the manifests
@@ -295,20 +303,27 @@ hand-installed files under `host/` are ignored. Every top-level yaml must
 therefore be a Kubernetes manifest (a guard test pins it — v2.39.2 shipped a
 k3s drop-in there and the updater died on it).
 
+`apply` also never PRUNES: a resource whose manifest was deleted keeps
+running. A removed manifest is therefore tombstoned in
+`deploy/k3s/removed.txt` (`<namespace> <kind> <name>`), which `cc-update.sh`
+deletes in its manifests phase. `setup.sh` is a first install and does not
+read it, and a resource whose manifest was removed without a tombstone is
+still there until someone deletes it by hand.
+
 Expected placement once settled:
 
 | Workload | Node | Why | Host exposure |
 |---|---|---|---|
-| `cc-postgres` | raspberrypi (pinned) | stateful (`cc-pgdata`) | `hostPort` 127.0.0.1:**5442** |
-| `cc-litellm-db` | raspberrypi (pinned) | stateful (`cc-litellm-pgdata`) | `hostPort` 127.0.0.1:5443 |
-| `cc-litellm-redis` | raspberrypi (pinned) | stateful | none |
-| `cc-n8n`, `cc-n8n-db` | raspberrypi (pinned) | stateful | `hostPort` 127.0.0.1:5678 (n8n) |
-| `cc-neo4j` | chromebox (pinned) | stateful (`cc-neo4j-data`) | **ClusterIP only** |
-| `cc-vlogs` | chromebox (pinned) | stateful (`cc-vlogs-data`) | ServiceLB :9428 |
-| `cc-pgweb` | raspberrypi (pinned) | stateless zero-login DB UI for the spine | `hostPort` 127.0.0.1:8092 |
-| `cc-crawler` | chromebox (**required**) | Chromium stays off the Pi | ServiceLB :8091 |
-| `cc-speech` | chromebox (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models` | ServiceLB :8093 |
-| `cc-litellm` | **floats** (prefers chromebox) | stateless, the arm64 memory hog | ServiceLB :4000 |
+| `cc-postgres` | anchor (pinned) | stateful (`cc-pgdata`) | `hostPort` 127.0.0.1:**5442** |
+| `cc-litellm-db` | anchor (pinned) | stateful (`cc-litellm-pgdata`) | `hostPort` 127.0.0.1:5443 |
+| `cc-litellm-redis` | anchor (pinned) | stateful | none |
+| `cc-n8n`, `cc-n8n-db` | anchor (pinned) | stateful | `hostPort` 127.0.0.1:5678 (n8n) |
+| `cc-neo4j` | compute (pinned) | stateful (`cc-neo4j-data`) | **ClusterIP only** |
+| `cc-vlogs` | compute (pinned) | stateful (`cc-vlogs-data`) | ServiceLB :9428 |
+| `cc-pgweb` | anchor (pinned) | stateless zero-login DB UI for the spine | `hostPort` 127.0.0.1:8092 |
+| `cc-crawler` | compute (**required**) | Chromium stays off the anchor | ServiceLB :8091 |
+| `cc-speech` | compute (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models` | ServiceLB :8093 |
+| `cc-litellm` | **floats** (prefers compute) | stateless, the arm64 memory hog | ServiceLB :4000 |
 | `cc-fluentbit` | DaemonSet, both nodes | log collection | none |
 
 Pinned is not a preference: `local-path` stamps a *required* hostname
@@ -324,7 +339,7 @@ each reads a ServiceAccount token Secret the manifests create:
 ./deploy/k3s/make-litellm-kubeconfig.sh    # -> ~/.cc-litellm-operator.kubeconfig + ~/.cc-litellm-logreader.kubeconfig
 ```
 
-If the chromebox is freshly built (or you skipped the gVisor prerequisite):
+If the compute node is freshly built (or you skipped the gVisor prerequisite):
 
 ```bash
 ./deploy/k3s/install-gvisor.sh   # idempotent; with the RuntimeClass now applied it also runs the pod-level proof
@@ -338,7 +353,7 @@ by re-running the script, never by editing the file.
 ## 5. Python and web builds
 
 ```bash
-cd /home/codyslab/central-command
+cd <checkout>
 python3 -m venv .venv && source .venv/bin/activate   # uv-managed CPython 3.12
 pip install -e ".[dev,runtime]"
 python scripts/apply_graphiti_patches.py             # AFTER every install
@@ -375,7 +390,7 @@ never Central Command's own API on **8080**. Minimal, at least these two lines:
 cat > web/.env <<'ENVEOF'
 PORT=3080
 GATEWAY_URL=http://127.0.0.1:8080
-ALLOWED_ORIGINS=https://raspberrypi.tail2ae84b.ts.net
+ALLOWED_ORIGINS=https://cockpit.example.com
 ENVEOF
 chmod 600 web/.env
 ```
@@ -384,8 +399,8 @@ chmod 600 web/.env
 the WS upgrade checks the browser's Origin header against localhost plus this
 list (`web/server/lib/origin-utils.ts`), so without it every tailnet browser
 loads the page fine and then fails the WebSocket with a 403 you only see in
-the server log (found 2026-08-26 — the old instance's web/.env had the line
-and web/.env was never in the backup set; it is now three lines, not two).
+the server log (web/.env was once missing from the backup set; the line is
+part of the minimum now, so it is three lines, not two).
 
 ```bash
 sudo cp deploy/k3s/cc-uvicorn.service       /etc/systemd/system/
@@ -414,7 +429,7 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   failed build then costs no downtime at all — dumps the spine/litellm/n8n DBs
   plus their decryption keys (Neo4j is out of scope — nightly
   `cc-backup.timer` covers it), stops the services, merges the release
-  tag, applies schema, rebuilds AS codyslab (venv, cockpit — and, when the
+  tag, applies schema, rebuilds AS the checkout's owner (venv, cockpit — and, when the
   release ships `scripts/apply_graphiti_patches.py`, graphiti-core's carried
   fixes right after the install), **applies changed `deploy/k3s/`
   manifests and installs changed unit files (`daemon-reload`; a changed
@@ -427,7 +442,8 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   **rolls back automatically** if the new version is unhealthy — reset to the
   pre-update tag + rebuild, plus re-applying the checkpoint's manifests and
   retagging each node's preserved `…:pre-update-<stamp>` image back, for
-  whatever the forward pass actually touched. Status: `/var/lib/cc-update/status.json` (what
+  whatever the forward pass actually touched; the status then reads
+  `rolled_back`, so an undone update never reads as succeeded. Status: `/var/lib/cc-update/status.json` (what
   the UI polls); full log: `journalctl -u cc-update`. No sudoers/polkit —
   the web process's only privileged act is writing a file in a tmpfs dir.
 - **cc-update-stage** (v2.19.0) — the automatic PREPARE step. The moment a
@@ -494,13 +510,20 @@ early under the rehearsal persona. It stays dropped.)
   every time the nightly backup replaces the Neo4j pod (v2.36.1).
 - **cc-sandbox-runner** — needs `make-sandbox-kubeconfig.sh` to have run first.
 - **cc-backup** — `deploy/k3s/cc-backup.service` runs `deploy/k3s/backup.sh` as
-  **root** (k3s's kubeconfig is root-owned 0600; under `User=codyslab` every
+  **root** (k3s's kubeconfig is root-owned 0600; under a non-root `User=` every
   dump fails silently while the timer still reads `active (waiting)`).
   Check it: `systemctl list-units --failed` and `journalctl -u cc-backup -n 50`.
 
-**A merged change is not live until its process restarts:** backend →
-`sudo systemctl restart cc-uvicorn`; cockpit → `(cd web && npm run build)` then
-`sudo systemctl restart cc-nerve`.
+**Releases go live through the updater, never a hand restart.** The cockpit's
+"Apply update now" (or `deploy/k3s/cc-update.sh`) fetches the tag, rebuilds the
+venv and the cockpit, applies manifests and units, restarts and health-checks,
+and rolls back on failure; a bare `systemctl restart` skips every one of
+those. The cockpit is never updated by `git pull` plus `npm run build` on a
+running checkout, and a coding agent's session never restarts a live `cc-*`
+unit or moves the live checkout's branch — a merge or reset there is a
+deployment, armed for the next restart. Restarting by hand is the operator's
+act, for a change the updater does not carry, such as an edited `.env`:
+`sudo systemctl restart cc-uvicorn` (backend) or `cc-nerve` (cockpit).
 
 ## 7. Fresh-database facts
 
@@ -530,20 +553,23 @@ instance.
 
 Corollary for later: an additive column added to `schema.sql` must be applied by
 hand to the running database in the same change — the test DB re-executes the
-file every run, so the suite stays green while the live Pi throws an
+file every run, so the suite stays green while the live database throws an
 undefined-column error that reads like a code bug.
 
 ## 8. INSTANCE DATA — what a clean install does NOT restore
 
-Everything in phases 1–7 rebuilds the **system**. None of it restores **this
+Everything in §§1–7 rebuilds the **system**. None of it restores **this
 instance's** accumulated data. Decide each of these deliberately.
 
-Backups live in `/home/codyslab/cc-backups` (0600 in a 0700 dir, outside the
+Backups live in the backup directory (`CC_BACKUP_DIR` in the backup
+script's environment; its default is the operator's, see your private docs; 0600 in a 0700 dir, outside the
 repo). Full commands are in the **RESTORE section at the bottom of
 `deploy/k3s/backup.sh`** — read it there, it is the authority.
 
 1. **n8n workflows + the encrypted Gmail OAuth credential — REQUIRED for the
-   email feed.** Nothing else holds the Gmail OAuth. Either restore
+   Gmail email feed.** Nothing else holds the Gmail OAuth. (With the native
+   Exchange provider configured, the mailbox credentials live in the app's
+   `.env` instead and n8n is not on the mail path; see `docs/QUEUE.md`.) Either restore
    `n8n_<stamp>.sql.gz` into `cc-n8n-db` (scale `cc-n8n` to 0 first; it holds
    workflow rows open), or set it up fresh: open the n8n UI
    (`tailscale serve --bg --https=8443 http://127.0.0.1:5678`), create the
@@ -571,7 +597,7 @@ repo). Full commands are in the **RESTORE section at the bottom of
 2. **The knowledge graph — optional.** A fresh instance starts with an empty
    graph by design and works fine. To carry it over, restore
    `neo4j_<stamp>.dump.gz` via the dumper-pod cycle in backup.sh's RESTORE
-   section (chromebox, offline load, `--overwrite-destination=true`). The
+   section (compute node, offline load, `--overwrite-destination=true`). The
    `chown -R 7474:7474 /data` afterwards is **not optional** — the dumper runs
    as root, the neo4j pod as 7474, and root-owned store files fail to start with
    an error that reads like corruption.
@@ -703,7 +729,7 @@ The flag changes only section **B**: it asserts the stores are alive,
 authenticated and schema-loaded (roster seeded, event log queryable, neo4j
 answering cypher) instead of asserting *migrated instance data* (`audit_event >
 100`, the n8n façade active, the Gmail credential decrypting, graph non-empty).
-The two n8n instance checks are printed as `skip`. After the phase-8 restore
+The two n8n instance checks are printed as `skip`. After the §8 restore
 choices, run it again **without** the flag — that is the full assertion
 suite and the steady-state nightly truth.
 
@@ -717,14 +743,15 @@ curl -fsS http://127.0.0.1:5678/healthz             # n8n
 sudo k3s kubectl -n central-command get pods -o wide    # placement, all Running 1/1
 ```
 
-Cockpit: https://raspberrypi.tail2ae84b.ts.net · logs:
-https://raspberrypi.tail2ae84b.ts.net:9428/select/vmui/
+Cockpit: `https://<cockpit-host>` (the `tailscale serve` front for port 3080) ·
+logs: `http://<tailnet-name>:9428/select/vmui/` (plain http — a ServiceLB port,
+§6). The real hosts are in your private instance docs.
 
 ## 10. Rollback
 
 - **Data:** the RESTORE section at the bottom of `deploy/k3s/backup.sh`, against
-  the **pre-clean-install** dump set in `/home/codyslab/cc-backups` (take one
-  before wiping: `sudo /home/codyslab/central-command/deploy/k3s/backup.sh`, and
+  the **pre-clean-install** dump set in `$CC_BACKUP_DIR` (take one
+  before wiping: `sudo <checkout>/deploy/k3s/backup.sh`, and
   confirm the `keys_<stamp>.env` beside it — without those two keys the dumps
   are ciphertext).
 - **Whole stack:** the pre-k3s Docker Compose stack was deleted from the tree

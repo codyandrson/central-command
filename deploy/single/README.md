@@ -4,10 +4,10 @@ Central Command's core spine on **one machine**, via **Compose** (`podman
 compose`; `docker compose` on a dev box). This is the profile you hand to
 someone who has an LLM API key and nothing else.
 
-It is **derived from `deploy/k3s/`, not a replacement for it.** the operator's two-node
-k3s cluster stays what it is; everything homelab-specific — two-node
-placement, Tailscale, the workstation llama fleet, the sandbox, the crawler,
-the log console — is factored out here.
+It is **derived from `deploy/k3s/`, not a replacement for it.** The multi-node
+k3s deployment stays what it is; what is specific to it — two-node placement,
+Tailscale, the local llama fleet, the log console — is factored out
+here. The sandbox and the crawler are NOT: both ship as flags (see below).
 
 **The install procedure is [`CHECKLIST.md`](CHECKLIST.md)** — what the host
 must already have, every step in the order `./setup.sh` runs it, the rows that
@@ -154,8 +154,9 @@ that creates the answer file, and `chmod 600` is its job too.
 **`./setup.sh configure`** (v2.45.0, design record D6) asks every question in
 `deploy/single/questions.tsv` that `.env` does not answer yet — plain prompts,
 no TUI, grouped as `identity`, `features`, `network`, `mirrors`, `llm`, `paths`
-(`--all` adds the ports and re-asks everything with the current value as the
-default). One schema, read twice: `configure` ASKS from it and `check`
+(`--all` adds a seventh group, `advanced` — the ten ports and the two
+`CC_JIRA_API_FLAVOR` / `CC_CONFLUENCE_API_FLAVOR` rows — and re-asks everything
+with the current value as the default). One schema, read twice: `configure` ASKS from it and `check`
 VALIDATES from it, so a new seam is a new row rather than a new prompt in one
 place and a new check in another.
 
@@ -278,8 +279,11 @@ release supports (`16`, `5.26`, `7`) alongside the tested tag and digest; a
 substitute must keep the locked tag's FLAVOUR (`7-alpine` admits `7.4-alpine`,
 never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `resolve-images.sh` asks the registry what it has:
 
-- the locked tag → `PASS`, and its digest is verified against `images.txt`
-  (a mismatch is a `FAIL` — that tag has drifted or been poisoned). A tag that
+- the locked tag → `PASS`, and its digest is verified against `images.txt`.
+  A mismatch on the PUBLIC registry is a `FAIL` (that tag has drifted or been
+  poisoned); on a configured mirror it is a `WARN` naming both digests, because
+  a mirror seeded by push re-serialises manifests (v2.45.4) — the tag is the
+  pin there. A tag that
   is a series or a channel (`16`, `7-alpine`, `main-stable`) is declared
   ROLLING with a `-` in the digest column: it moves on every upstream rebuild,
   so the tag is the pin and the observed digest is recorded as provenance;
@@ -287,7 +291,10 @@ never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `re
   substitution, no digest check (a substituted tag is trusted from the
   enterprise mirror deliberately: the digest pin defended against
   public-registry tag poisoning, a threat the mirrored air gap does not carry);
-- nothing satisfying it → `FAIL` naming the constraint and what the mirror has.
+- nothing satisfying it → a tag the mirror lacks is the seam only you can fill:
+  a `USERACTION` (exit 3) naming the constraint and what the mirror has, so you
+  can pin one. An unreachable registry, a pin that does not exist and a failed
+  build are `FAIL`s (exit 1).
 
 The resolved refs are written to `.env` as `CC_IMG_*` (compose.yaml reads
 them) and recorded in `$CC_STATE_DIR/installed.manifest`. **A `WARN`-level substitution plus
@@ -483,9 +490,8 @@ Center; the auth mode follows the flavor unless you name one.
 
 **`configure` asks for these, and `check` probes them (v2.53.0).** Nothing used
 to: the keys existed in `.env.example` and nowhere else, so an install reached
-the cockpit with no Jira and nobody noticed until an agent tried to work (the
-reference deployment found out mid-tour, against a Confluence token nobody had
-ever exercised). The rows are `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`,
+the cockpit with no Jira and nobody noticed until an agent tried to work (a
+Confluence token nobody had ever exercised was found out mid-tour). The rows are `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`,
 `CC_JIRA_API_TOKEN` in the `features` group — the last two asked only when the
 base URL is answered — then `CC_CONFLUENCE_BASE_URL` and its pair, and the two
 `*_API_FLAVOR` rows under `advanced` (default `cloud`). **Blank is a valid
@@ -690,7 +696,9 @@ model prefix itself should match `cc-default`'s pattern now.
 the pause process dies when your last login session ends and takes every
 container with it. Hit during validation over SSH.
 
-**Secrets live in the repo-root `.env` and nowhere else.** Compose reads that
+**Secrets live only in gitignored environment files — on this profile, the
+repo-root `.env` alone** (the k3s profile has three: the root `.env`,
+`web/.env` and `deploy/k3s/.env`). Compose reads that
 file natively (`--env-file`), so the old rendered `secrets.yaml` is gone — and
 since v2.42.0 there is no second `.env` either. Where a credential is also the
 app's, it has ONE key, the `CC_` one: `CC_LLM_PROXY_ADMIN_KEY` (the proxy's
@@ -795,8 +803,10 @@ A development checkout runs the script by hand after `pip install`.
 
 Designed for a single node, no hostPath, no GPU, loopback ports only.
 **Validated on Windows 11 + podman 5.8.6 (WSL2) + Git Bash, 2026-08-21,
-end-to-end with live inference** — on the kube-play substrate; the Compose
-refactor (2026-09-03) is pending its own Windows validation. The `.sh` scripts
+end-to-end with live inference** — on the kube-play substrate. The Compose
+refactor (2026-09-03) has since run on Windows (the 2026-09-17, 2026-09-24 and
+2026-10-02 runs found the fixes recorded above); no end-to-end validation record
+of the Compose profile on Windows has been written down. The `.sh` scripts
 need a bash (Git Bash or WSL); `compose.yaml` itself is shell-independent.
 
 Two things measured on that run, both already reflected in the scripts/docs

@@ -1,5 +1,18 @@
 # Work environment — external development compatibility profile
 
+> **Record, not current guidance (marked 2026-10-22).** This is a survey of one
+> restricted environment as it was described on 2026-08-21; it is read as a
+> dated record and its body is not revised. What Central Command requires and
+> how it is built now is [`docs/PRD.md`](../PRD.md) (why and what) and
+> [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) (as built); the runbooks beside
+> the code (`deploy/AIRGAP.md`, `deploy/single/README.md`) carry the operating
+> detail. Where this record and those disagree, they win. Known since the
+> survey: certificate selection is by file path only (`CC_CLIENT_CERT` /
+> `CC_CLIENT_KEY` / `CC_CA_BUNDLE`) — there is no certificate-store or
+> thumbprint selection; and Exchange is served by a native EWS client
+> (`integrations/exchange.py`) behind the existing mail and calendar seams, not
+> by a new n8n workflow.
+
 > Provided by the operator 2026-08-21, transcribed from a printed/scanned document
 > produced IN the work environment (sanitized there by design — no internal
 > endpoints, hostnames, cert details). The scan triplicated its pages; this
