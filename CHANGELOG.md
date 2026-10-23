@@ -4,6 +4,72 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-22 — v2.68.0: the documentation set is layered, true and guarded
+
+docs: the documentation-rewrite epic lands. Nine commits since v2.67.2
+(`84346d68..2cbdc13b`) revise the documentation set so each layer owns its
+content and points to the others for the rest, every surviving document says
+only what is true, and a guard fails when the architecture document and the
+tree disagree. Documents and the tests that guard them only; no runtime,
+schema, image, configmap or unit input changes, so the apply is the updater's
+normal merge. **Still requires v2.66.0** (`min_upgrade_from` unchanged).
+
+- **Product requirements.** `docs/PRD.md` (the why, the who and the
+  capabilities) already shipped in v2.67.2; it is the top layer the rest cite.
+- **Architecture, and the drift guard.** `docs/ARCHITECTURE.md` is rewritten
+  to the current version: package map, state sets, capabilities, events,
+  heartbeat actions, `cc-*` routes and k3s manifests, with the rule that a
+  change which invalidates a row fixes the row in the same change, and a
+  closing "Where to read next" that names the other layers.
+  `tests/test_architecture_doc.py` (new) ties the document to the tree: a
+  renamed module, a missing path or a changed count fails it.
+- **Rules.** `AGENTS.md` and the six `.claude/rules/*.md` files are corrected
+  per the documentation rulings; lead sentences that overclaimed (schema
+  loading, graphiti imports, the model-policy apply, exit codes) are
+  reworded, one dead path glob dropped, and one bite mark added for the
+  retry sweep.
+- **Decision log.** Stale cites in `docs/decisions/` are corrected (DL-002,
+  003, 005, 007, 011, 021, 025, 036, 037, 038, 047, 051, 065, 067, 079, 088,
+  096, and the DL-098/DL-129 rule quotes) and **DL-141..DL-185** are added:
+  the unabsorbed design-record decisions, the founding rejected alternatives
+  and the failure-mode catalogue, so every rejected alternative has a home.
+  `tests/test_decision_log.py` passes against the revised rules.
+- **Founding record.** `docs/DESIGN.md` is frozen as the founding record:
+  a frozen marker and dated superseded notes point at the decisions that
+  replaced its inline text. `README.md`'s purpose section cites the PRD and
+  its stale "status at a glance" prose is gone.
+- **Runbooks.** `deploy/k3s/README.md`, `deploy/single/README.md`,
+  `deploy/AIRGAP.md` and `docs/QUEUE.md` are corrected, with deployment
+  specifics (hosts, addresses, users, paths) replaced by placeholders that
+  each deployment resolves in its own private guidance;
+  `docs/reference/work-environment-compatibility.md` is marked a record.
+- **Roadmap.** `docs/ROADMAP.md` is regenerated from the PRD's roadmap:
+  eleven items, each traceable to its PRD item; the older items were dropped
+  with a dated reason apiece.
+- **Skills.** The conventions skill cites the PRD glossary, and 21 skill
+  files (`setup`, `discover`, `cc-test-sweep` and the bundled `confluence`,
+  `graphiti`, `litellm`, `mcp`, `model-evaluation` skills) are corrected;
+  deployment-specific facts in them carry `<!-- overlay: -->` markers for
+  the instance-facts overlay to take over.
+- **Fresh-context review.** Seven reviewers with no prior context read every
+  tracked document outside `docs/vendor/` and `web/` (85 files, plus the 58
+  design records' Status and As-built headers) against the PRD,
+  `docs/ARCHITECTURE.md` and the code each names: about 150 stale claims
+  fixed in place across 65 files, 8 findings on dated history answered with
+  a dated note rather than a rewrite.
+- **Sweep.** Duplicated layer pointers, a repeated heading and dead
+  allowlist entries in two guard tests removed.
+- **No document was deleted.** Every one kept live content; the deletion
+  inventory (each path a test, script or hook names, with its guard) held,
+  and no pinning test needed to change.
+- **Private repo.** The private instance repo's status record and session
+  guidance were rewritten in the same epic; nothing from it crosses into the
+  public tree.
+
+After applying through the cockpit updater, the operator runs
+`pytest -q tests/test_architecture_doc.py tests/test_decision_log.py` on the
+deployed tree: both guards pass there.
+
 ## 2026-10-21 — v2.67.2: the PRD lands in the public tree as docs/PRD.md
 
 docs: the product requirements document (status final, 2026-10-21) is now
