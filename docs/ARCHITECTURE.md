@@ -8,12 +8,9 @@
 > the *founding* design, frozen; where it and this file disagree, the code and
 > this file win.
 >
-> **What this is not.** A rulebook. The operative rules are
-> [`AGENTS.md`](../AGENTS.md) and the path-scoped files under
-> [`.claude/rules/`](../.claude/rules/); the *why* behind each rule is indexed in
-> [`decisions/`](decisions/README.md); what each design record became is in
-> [`superpowers/README.md`](superpowers/README.md); unfinished work is in
-> [`ROADMAP.md`](ROADMAP.md). This file links to those rather than restating them.
+> **What this is not.** A rulebook. The rules, the decision log, the design
+> records and the unfinished work are each routed in §8; this file links to
+> them rather than restating them.
 >
 > **Keeping it true.** Every row below names a path. When you move or rename a
 > seam, **fix the row in the same change.** That is enforced, not hoped for:
@@ -509,7 +506,7 @@ New work should cite a decision-log id (`DL-nnn`) or a record path, not mint
 another D-number.
 
 
-## 8. Where to go next
+## 8. Where to read next
 
 | You want | Read |
 |---|---|

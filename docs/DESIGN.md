@@ -53,10 +53,7 @@ generated index hasn't drifted. That index is
 `scripts/gen_records_index.py` from those headers — regenerate it after
 changing one.
 
-For the living, current picture of the system (as opposed to the history of
-how it got there), see [`ARCHITECTURE.md`](ARCHITECTURE.md); the vision and the
-requirements are in [`PRD.md`](PRD.md); individual decisions are recorded under
-[`decisions/`](decisions/README.md).
+The living picture, the vision and the decisions are routed in the header above.
 
 The experiment scripts behind the routing evidence are
 [`docs/experiments/`](experiments/) — kept so a claim in those specs can be

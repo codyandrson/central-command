@@ -64,8 +64,7 @@ def test_every_asbuilt_path_exists_in_the_repo():
 
     assert not missing, (
         "As-built path(s) that do not exist in the repo — fix the record's "
-        "header or add the file (docs/ROADMAP.md not existing yet is the one "
-        "known, expected exception until it is added):\n"
+        "header or add the file:\n"
         + "\n".join(f"  - {m}" for m in missing)
     )
 
