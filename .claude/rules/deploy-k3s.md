@@ -9,7 +9,7 @@ Rules below exist because a real failure produced them. Trust the rule even
 where the story is gone. Moved verbatim from the root instructions; they load
 when a matching file is read.
 
-- **`deploy/k3s/`** — the multi-node reference deployment (two-node k3s:
+- **`deploy/k3s/`** — the multi-node deployment, the operator's instance of the single-node profile (two-node k3s:
   an arm64 "anchor" node and an amd64 "compute" node). `README.md` there is
   the clean-install runbook the /setup skill conducts phase-by-phase;
   `setup.sh` is the driver, `verify.sh` the assertion suite, `cc-update.sh`

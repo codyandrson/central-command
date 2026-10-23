@@ -5,7 +5,7 @@
 Two different reads, do not conflate them:
 
 - **`litellm_get_health`** — cheap. Proxy status/db/cache/version, under the
-  hood `/health/readiness` and `/health/details`. Safe to call often; use this
+  hood `/health/readiness/details`. Safe to call often; use this
   first when something looks off.
 - **`litellm_check_model_health`** — expensive. A **real provider call per
   model** (under the hood `/health`), for diagnosing an actual outage. Don't
@@ -20,7 +20,7 @@ Two different reads, do not conflate them:
   check but a **capability measurement**, ~10 short real requests (chat,
   system message, tool_choice, tool calling, structured output, vision,
   reasoning, output ceiling, streaming) against ONE model. Cheap in tokens
-  per request, but on a queued local model (llama-swap FIFO) it's minutes,
+  per request, but on a queued local model (swapper FIFO) it's minutes,
   not milliseconds, because each of the ~10 requests waits its turn. Passing
   `measure_context=True` adds up to 10 MORE requests (a context-length
   bisect) and is far more expensive — opt-in for exactly that reason. See
@@ -53,13 +53,9 @@ behind an entire swap-queue drain before it even starts.
 
 ## The salt key — an operations-critical gotcha, not just a config note
 
-`LITELLM_SALT_KEY` encrypts every stored provider credential and virtual key.
-**Never propose changing it while models exist.** A restore or re-key under a
-different salt leaves the rows present in Postgres but permanently
-undecryptable — this is a deployment-wide rule (`deploy/k3s/`), not specific
-to any one model.
+Never propose changing `LITELLM_SALT_KEY` (see `keys-and-teams`).
 
-The same encryption applies to the **credential store** that model
+That key also encrypts the **credential store** that model
 autodiscovery reads from directly (`integrations/litellm_credstore.py`) — its
 decryption scheme is **coupled to a specific LiteLLM proxy version**, so a
 proxy upgrade is a re-verify point for that integration, not just for the

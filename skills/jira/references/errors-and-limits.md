@@ -8,7 +8,7 @@ All are `JiraError`. The message tells you which half of the system failed.
 
 - `bad issue_key '<x>' — must match [A-Z][A-Z0-9_]*-<number>`
 - `createIssue — bad project_key '<x>' — must match [A-Z][A-Z0-9_]*`
-- `createIssue — summary must be a non-empty string under 255 chars`
+- `createIssue — summary must be a non-empty string under 255 chars` (255 itself is accepted)
 - `createIssue — bad issue_type '<x>' (must be one of Task, Bug, Story, Epic, Subtask, Sub-task)`
 - `<op> for <KEY> — due_date '<x>' must be strict YYYY-MM-DD`
 - `<op> for <KEY> — due_date '<x>' is not a real calendar date`
@@ -26,11 +26,24 @@ Retrying the same arguments cannot succeed. Fix the argument or declare a gap.
 | status | message | what it means |
 |---|---|---|
 | 404 | `<op> — not found for <KEY>` | the issue does not exist **or you cannot see it** — Jira deliberately conflates the two so a 404 is never proof of non-existence |
-| 401 / 403 | `<op> — auth failed (<code>) — check CC_JIRA_EMAIL/CC_JIRA_API_TOKEN` | 401 = credentials rejected; 403 = authenticated but **not permitted** for this issue or this operation |
+| 401 / 403 | `<op> — auth failed (<code>) for <KEY> — check CC_JIRA_EMAIL/CC_JIRA_API_TOKEN` | 401 = credentials rejected; 403 = authenticated but **not permitted** for this issue or this operation |
 | 429 | `<op> — rate limited — retry later` | back off; do not hammer |
-| other | `<op> — provider rejected the request (<code>): <first 300 chars>` | read the body — Jira's `errorMessages`/`errors` usually names the exact field |
+| other | `<op> — provider rejected the request (<code>) for <KEY>: <first 300 chars>` | read the body — Jira's `errorMessages`/`errors` usually names the exact field |
 
-Every request has a **30-second timeout**.
+(`for <KEY>` is omitted on calls that name no issue.) Every request has a
+**30-second timeout**.
+
+Two more messages come from the client's own pre-checks, once per process, before
+the first call goes out:
+
+- `Jira token invalid/expired (<code> from <myself path>) — …` — the identity
+  check refused the credential. Jira Cloud degrades a dead token to an
+  anonymous caller that gets a 200 and an empty list, so the client refuses
+  rather than let "no results" read as "nothing exists".
+- `Jira flavor mismatch — CC_JIRA_API_FLAVOR is … but this instance reports
+  deploymentType …` — the flavor switch points at the other product (Cloud
+  serves `/rest/api/3`, Data Center only `/rest/api/2`). The message names the
+  value to set.
 
 ## Recovering from a 400 naming a field
 
@@ -78,7 +91,9 @@ Cost control is mostly about not asking for too much:
 - Then use `get_issue` for the handful of issues you actually need links or
   description for. That two-step is why search rows carry `link_count` instead
   of full links.
-- The search path crawls at most 10 pages; passing `limit` stops it at one.
+- The search path crawls at most 10 pages (about 1000 rows) and stops sooner
+  once `limit` rows are in hand; `truncated: true` in the result means rows
+  were left behind.
 - Nothing in this client polls. If you find yourself wanting to loop until a
   state changes, that is a gap to declare, not a loop to write.
 

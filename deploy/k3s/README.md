@@ -134,7 +134,7 @@ Assumed already true before phase 2:
   restores neither.
 - **Repo-root `.env`** populated (see `.env.example`). Different audience: the
   app's own `CC_*` settings. Secrets live only in gitignored environment files:
-these two plus `web/.env` (§6) — all three are gitignored.
+  these two plus `web/.env` (§6) — all three are gitignored.
 - **uv-managed CPython 3.12** and **NodeSource 22** on the anchor node.
 - **`socat`** on the anchor node (`sudo apt install socat`) — the loopback relay
   `cc-graph-bolt` runs on it (§6).
@@ -543,18 +543,21 @@ Further grants are made in the cockpit's Agents view.
 
 `cc-postgres` mounts the `cc-schema-sql` ConfigMap at
 `/docker-entrypoint-initdb.d`. Postgres runs it **only when the data directory
-is empty** — i.e. only on a fresh `cc-pgdata` PVC. Nothing applies `schema.sql`
-at runtime, ever.
+is empty** — i.e. only on a fresh `cc-pgdata` PVC. After that the updater
+applies `schema.sql` to the live database at each release (§6), before the new
+code starts; the API never applies it at process start.
 
 So a clean install boots with the **founding roster at v0 charters** (the seeds
 in `central_command/db/schema.sql`, plus the founding capability grants and the
 founding schedules, seeded DISABLED). That is the product baseline, not the operator's
 instance.
 
-Corollary for later: an additive column added to `schema.sql` must be applied by
-hand to the running database in the same change — the test DB re-executes the
-file every run, so the suite stays green while the live database throws an
-undefined-column error that reads like a code bug.
+Corollary for development: an additive column added to `schema.sql` reaches the
+live database with the release that carries it. Code run against a live
+database before that release must have the column applied by hand in the same
+change — the test DB re-executes the file every run, so the suite stays green
+while the live database throws an undefined-column error that reads like a
+code bug.
 
 ## 8. INSTANCE DATA — what a clean install does NOT restore
 
@@ -625,7 +628,7 @@ answers):
   still be there from before that release: `deploy/single/.env`,
   `deploy/single/{secrets,stack,stack-llm,optional-*}.yaml`,
   `deploy/single/setup-diagnostics.txt`. Back `deploy/single/.env` up to
-  `~/cc-backups/` first — it may hold that profile's never-rotate keys.
+  the backup directory (above) first — it may hold that profile's never-rotate keys.
 - The instance env files (`.env`, `web/.env`, `deploy/k3s/.env`) — usually
   already backed up and removed by the teardown, but verify rather than
   assume.
@@ -731,7 +734,8 @@ answering cypher) instead of asserting *migrated instance data* (`audit_event >
 100`, the n8n façade active, the Gmail credential decrypting, graph non-empty).
 The two n8n instance checks are printed as `skip`. After the §8 restore
 choices, run it again **without** the flag — that is the full assertion
-suite and the steady-state nightly truth.
+suite and the steady-state check (nothing runs it on a timer; run it after
+any change).
 
 Quick smoke checks:
 

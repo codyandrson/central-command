@@ -1,7 +1,8 @@
 # JQL, against the endpoint we actually call
 
 `jira_search_issues` posts to `/rest/api/3/search/jql` (the "enhanced search"
-endpoint). Everything here is written for that endpoint.
+endpoint) on Jira Cloud; on Data Center the client posts to `/rest/api/2/search`
+instead. Everything here is written for the Cloud endpoint.
 
 ## Shape
 
@@ -37,10 +38,10 @@ redraft got it right:
 
 - **`issueFunction`** — a ScriptRunner (marketplace app) function. Not
   installed. Any JQL using it is rejected with "Field 'issueFunction' does
-  not exist".
+  not exist". <!-- overlay: jira_installed_apps — moved to the instance overlay by epic-instance-facts-relocation -->
 - **`"Epic Link"`** — the classic-Jira epic field. This instance expresses
   hierarchy as `parent`; write `parent = TASKS-20`, exactly as the epic row
-  in the table above.
+  in the table above. <!-- overlay: jira_hierarchy_field — moved to the instance overlay by epic-instance-facts-relocation -->
 
 The general rule: use only fields you have SEEN — in the clauses table above
 or in real issues you read. If you are unsure a field exists, that is what
@@ -68,7 +69,8 @@ was never pre-flighted is a guess wearing a name.
   one (a status literally named "In Progress", a label "order") needs quoting:
   `status = "In Progress"`. Fetch the authoritative list from
   `GET /rest/api/3/jql/autocompletedata` (`jqlReservedWords`) if you need to be
-  certain.
+  certain (no tool here fetches it; it is a pointer for the operator, not a call
+  you can make).
 - **Quote anything with a space, a hyphen or punctuation.** `"is blocked by"`,
   `"Won't Do"`. Escape an embedded quote with `\"`. This includes
   `statusCategory`: `statusCategory = "In Progress"` runs clean, the unquoted

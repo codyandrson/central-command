@@ -11,8 +11,10 @@ hygiene, and how the test suite itself must be written. See
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "Secrets live only in `.env`"
 - **Why:** Not recorded beyond the stated policy itself: nothing sensitive
   or personal belongs in tracked files — no real operator identity, no real
-  mail/issue content, no deployment facts.
-- **Enforced:** script: `scripts/prepush-scan.sh` (pre-push hook, confirmed present)
+  mail/issue content, no deployment facts. The rule covers every gitignored
+  env file, not only the root one (`deploy/k3s/.env` and `web/.env` are
+  ignored too; PRD FR-47, review ruling PROCESS-004).
+- **Enforced:** script: `scripts/prepush-scan.sh` (pre-push hook, confirmed present); it scans the added lines of the pushed commit range, and scanning a NEW tag or branch is owed (PRD §6.1 item 9, review ruling PROCESS-030)
 - **Source:** AGENTS.md Policy
 
 ### DL-093 — master is the only branch
@@ -75,17 +77,19 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** sql: `central_command/db/schema.sql:77,81,85,89,93,97,101,104` (`where id = '...' and role = ''` guards, confirmed present)
 - **Source:** AGENTS.md bite marks
 
-### DL-098 — schema.sql is auto-loaded on a fresh database only
+### DL-098 — schema.sql is applied on a fresh database and by the updater at release, never at process start
 
 - **Status:** active
 - **Date:** undated
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**`schema.sql` is applied on a FRESH database and by the updater at release — never at process start.**"
 - **Why:** The test DB re-executes `schema.sql` on every run, so a new column
-  passes the whole suite and then breaks a live deployment with an
-  undefined-column error that reads like a code bug; additive columns must
-  be applied to the running database (as `add column if not exists`) in the
-  same change that adds them to the file.
-- **Enforced:** code structure only — `tests/conftest.py` re-executes `central_command/db/schema.sql` every test run; no guard exists for the prod-apply gap this rule warns about
+  passes the whole suite and then breaks a dev or hand-run database with an
+  undefined-column error that reads like a code bug. The original rule said
+  nothing applies the file at runtime and additive columns had to be applied
+  by hand; the updater's `schema` phase now re-runs the whole file against
+  the live database on every update (PRD FR-48), which is why every
+  statement must stay additive and idempotent (`add column if not exists`).
+- **Enforced:** code structure only — `tests/conftest.py` re-executes `central_command/db/schema.sql` every test run, and the updater applies it (`deploy/k3s/cc-update.sh`, `deploy/single/update.sh`); no guard checks that a new statement is idempotent
 - **Source:** AGENTS.md bite marks
 
 ### DL-099 — Tests must pin demo_mode=True when they hit resolve_model()
@@ -118,9 +122,7 @@ hygiene, and how the test suite itself must be written. See
   historical identifiers were removed in a single breaking, by-hand release.
 - **Why:** CHANGELOG `2026-08-29 — v2.0.0: one name everywhere — the
   historical identifiers are gone`: "This release is applied BY HAND, not by
-  the cockpit updater" because of its breaking scope. MEMORY.md records the
-  exhaustive removal (the "GV-rename lineage") as still ongoing for full
-  identifier cleanup.
+  the cockpit updater" because of its breaking scope.
 - **Enforced:** discipline only — a naming convention, not independently guarded
 - **Source:** CHANGELOG v2.0.0
 
@@ -155,17 +157,20 @@ hygiene, and how the test suite itself must be written. See
   says nothing about the clients the runtime legitimately imports for its
   reads — and every one of those modules exposes its reads and its writes side
   by side. `jira.get_issue` and `jira.transition_issue` are one import apart;
-  so are `confluence.get_page`/`trash_page`, `graphiti.search_facts`/
-  `add_episode`, `email_facade.get_message`/`report_spam`,
-  `litellm.list_models`/`delete_model`. A `propose_*` tool "simplified" into
-  the write it was drafting would pass the import ban (the module is already
+  so are `confluence.get_page`/`trash_page`, `email_facade.get_message`/
+  `report_spam` and `litellm.list_models`/`delete_model`. (The graph was
+  another such pair until the 2026-10-04 library migration split it:
+  `graphiti.search_facts` is now read-only and `add_episode` lives in
+  `graphiti_client`, which DL-134 bans from `runtime/`.) A `propose_*` tool
+  "simplified" into the write it was drafting would pass the import ban (the module is already
   imported) and never reach the approval gate, leaving the operator clicking
   approve on something that had already happened.
-  `docs/ARCHITECTURE.md` recorded the property as verified by call-site
+  `docs/ARCHITECTURE.md` once recorded the property as verified by call-site
   enumeration rather than by a guard test; this entry records the decision to
-  freeze the enumeration as an allowlist instead.
+  freeze the enumeration as an allowlist instead, and ARCHITECTURE now cites
+  the guard.
 - **Enforced:** test: `tests/test_runtime_integration_reads.py::test_runtime_reaches_only_read_functions_on_credentialed_clients`, with test: `tests/test_runtime_integration_reads.py::test_the_raw_litellm_transport_is_only_ever_asked_to_GET`, test: `tests/test_runtime_integration_reads.py::test_runtime_never_imports_a_write_only_integration` and test: `tests/test_runtime_integration_reads.py::test_a_write_function_imported_by_name_is_caught_too` closing the three bypasses
-- **Source:** `docs/ARCHITECTURE.md`
+- **Source:** `docs/ARCHITECTURE.md` section 1 (what each tier holds)
 
 ### DL-104 — Graphiti's LLM client is upstream's; graphiti-llm is a plain alias and the built-in docstrings are the guidance
 
@@ -794,17 +799,20 @@ hygiene, and how the test suite itself must be written. See
 - **Date:** 2026-10-19
 - **Rule:** (recorded here) A proposal is not bounced at propose time for a stale read-version.
   World-state checks happen at execution, and a world that changed between
-  propose and approve produces the world-changed redraft (PRD FR-5, FR-24).
+  propose and approve produces the world-changed redraft (PRD FR-9; not yet
+  built, PRD §6.1 item 5).
 - **Why:** The design contract's rule 4 had a proposal carry the version of what it
   read, to be compared at propose time. In practice the field was written
   "unknown" and nothing read it, while the checks that matter (the ticket is
   still in the state the draft assumed) can only run at execution because
   the world can change between propose and approve. Review ruling GATE-006
-  retired the bounce and dropped the field from drafting guidance; the
-  world-changed redraft (INGEST-045) is the mechanism that replaces it. This
+  retired the bounce; dropping the field from drafting guidance is owed
+  (the charter-update and reflection prompts in `runtime/` still name
+  `read_version`). The world-changed redraft (INGEST-045; PRD
+  §6.1 item 5, not yet built) is the mechanism that replaces it. This
   is also why `contract.ARG_SPECS` checks SHAPE only (AGENTS.md).
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/PRD.md FR-5; PRD addendum §B (GATE-006, INGEST-045); docs/DESIGN.md §2 contract rule 4
+- **Source:** docs/PRD.md FR-5, FR-9; PRD addendum §B (GATE-006, INGEST-045); docs/DESIGN.md §2 contract rule 4
 
 ### DL-143 — A policy registry as a governed table was never built
 
@@ -817,8 +825,8 @@ hygiene, and how the test suite itself must be written. See
   because advisory flags and charter text sufficed in practice, and a table
   nothing consults would be exactly the unverified claim AGENTS.md warns
   against. Review ruling GATE-010 retired the claim and put the real need,
-  per-grant overrides with an operator-authored scope, on the roadmap as
-  FR-4.
+  per-grant overrides with an operator-authored scope, into the
+  requirements as FR-4 (PRD §6.1 item 3; not yet built).
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/PRD.md FR-4; PRD addendum §B (GATE-010)
 
@@ -826,9 +834,9 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-10-19
-- **Rule:** (recorded here) An ungated write (an operator-authored override, or the two
-  deliberate exceptions of DL-003) creates no proposal and carries an
-  override stamp. The design where every write produces a proposal and
+- **Rule:** (recorded here) An ungated write (an operator-authored override,
+  once FR-4 is built, or the two deliberate exceptions of DL-003) creates no
+  proposal and carries an override stamp. The design where every write produces a proposal and
   ungated ones auto-approve as "system" is rejected.
 - **Why:** "Every write produces a proposal; ungated classes auto-approve as
   system" would give a gate-shaped record to writes that no gate decided,
@@ -852,7 +860,7 @@ hygiene, and how the test suite itself must be written. See
   answerable question. Review rulings RUNTIME-003/004 confirmed the
   three-source doctrine.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/PRD.md FR-17; PRD addendum §A and §B (RUNTIME-003/004)
+- **Source:** docs/PRD.md FR-13, FR-19, FR-24, FR-41; docs/ARCHITECTURE.md section 3 (Wake sources); PRD addendum §A and §B (RUNTIME-003/004)
 
 ### DL-146 — DBOS was never adopted; durability is the deferred-tool pattern plus the persisted message history
 
@@ -868,7 +876,7 @@ hygiene, and how the test suite itself must be written. See
   rulings RUNTIME-013/014 recorded the divergence; see DL-161 for the
   founding runtime comparison this narrows.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/PRD.md FR-18; PRD addendum §A and §B (RUNTIME-013/014)
+- **Source:** docs/PRD.md FR-17; docs/ARCHITECTURE.md section 7 (D22) and `runtime/durable.py`; PRD addendum §A and §B (RUNTIME-013/014)
 
 ### DL-147 — Classifier-driven model routing and the LiteLLM adaptive router are rejected; routing is the operator's, inside LiteLLM
 
@@ -876,7 +884,8 @@ hygiene, and how the test suite itself must be written. See
 - **Date:** 2026-07-26
 - **Rule:** (recorded here) No routing logic (quality router, complexity classifier, Auto Router)
   is built into Central Command. Per-agent pinning (`CC_MODEL_<AGENT_ID>`)
-  is the primary routing lever and keywords the only lexical override.
+  is the primary routing lever. The withdrawn quality-router design's
+  `keywords` override was never built.
 - **Why:** Measured, not assumed. On 283 real emails the complexity classifier sent
   75% to COMPLEX and its correlation with difficulty was inverted (dismissed
   mail 79% COMPLEX, acted-on mail 7%), so tier assignment cannot come from
@@ -907,7 +916,8 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-10-19
-- **Rule:** (recorded here) The embedding model changes only through the FR-33 migration, and an
+- **Rule:** (recorded here) The embedding model changes only through the FR-33
+  migration (PRD §6.1 item 6; not yet built), and an
   embedding never falls back to a model with different weights. Rejected,
   each with its reason: per-vector embedding stamps; a keyword-only read
   mode during a freeze; an embedder record in Postgres; re-embedding as a
@@ -1026,8 +1036,9 @@ hygiene, and how the test suite itself must be written. See
   auto-syncing GitOps controller.
 - **Why:** Flux was assessed and deferred (DEPLOY-K3S-020): auto-sync clashes with
   the approval-gate culture, where nothing changes a running system without
-  an operator deciding. The phase-3 design chose a Helm umbrella with
-  `values.yaml` as the configuration surface instead.
+  an operator deciding. The phase-3 design proposed a Helm umbrella with
+  `values.yaml` as the configuration surface instead; it is not built (no
+  chart in `deploy/k3s/`; roadmap, PRD §6.2).
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-09-03-deploy-refactor-design.md; PRD addendum §B (DEPLOY-K3S-020)
 
@@ -1146,7 +1157,7 @@ hygiene, and how the test suite itself must be written. See
   separation, D20 no egress-allowlist infrastructure, D21 reuse of n8n's
   credential isolation through the façade with no vault. Several premises
   have since moved and the review recorded it: mail send is now a gated step
-  (FR-27), outward gates can be overridden by the operator (FR-4), and sandbox
+  (FR-27), outward gates can be overridden by the operator (FR-4, not yet built), and sandbox
   egress is open by decision (DL-005); the founding "no exfiltration-capable
   tools" premise is NARROWED, not wrong: the gate, not tool absence,
   contains the error. The MVP defence in depth (propose-only tools, a gateway
@@ -1205,7 +1216,7 @@ hygiene, and how the test suite itself must be written. See
   shut the coach out of the heartbeat: coaching is triggered only by the
   operator.
 - **Enforced:** test: `tests/test_heartbeat.py::test_action_registry_parity_with_the_lever_allowlist` pins the registry's levers
-- **Source:** docs/PRD.md FR-41; heartbeat design proposal (founding artifact, 2026-07-23; D27); docs/ARCHITECTURE.md heartbeat section
+- **Source:** docs/PRD.md FR-41; heartbeat design proposal (founding artifact, 2026-07-23; D27); docs/ARCHITECTURE.md section 4 (Heartbeat)
 
 ### DL-163 — The orchestrator orchestrates: plan review on, stall detection not budgets, questions parked for the operator, capability gaps are answers
 
@@ -1232,7 +1243,8 @@ hygiene, and how the test suite itself must be written. See
   (dissolves the single accountable context the operator supervises),
   pydantic-graph (no self-persistence in v2) and Temporal/DBOS. Amended
   2026-10-19: FR-19 reverses the founding star shape so any agent may create
-  and assign tasks; the orchestrator's plan-assign loop and the operator
+  and assign tasks (the `task.create` gate is still in place until PRD §6.1
+  item 2 drops it); the orchestrator's plan-assign loop and the operator
   checkpoint stand.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** D7 phase 2 design v2 (founding artifact, 2026-07-24); docs/PRD.md FR-19; PRD addendum §C (D7 REVERSED)
@@ -1241,7 +1253,7 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-07-26
-- **Rule:** (recorded here) Declared model facts (tiers, costs, fallbacks) live in one tracked file
+- **Rule:** (recorded here) Declared model facts (tiers, costs; `fallbacks: {}` while DL-067 holds) live in one tracked file
   applied idempotently by a script, with `verify.sh` failing if the live
   state drifts. Every model declares an explicit cost. Routing preferences
   live in `model_info` and cost in `litellm_params`. Policy writes go through
@@ -1261,11 +1273,12 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-07-27
-- **Rule:** (recorded here) No Central Command request may use a non-self-hosted model unless a
-  fallback triggers (the spec's constraint 2; its enforcing test was
-  explicitly rejected). A fallback verified present in configuration is
-  deliberately not exercised with a dead-port test: the first real outage is
-  the first test.
+- **Rule:** (recorded here) The default alias is a deployment row. The seam
+  spec's constraint 2, "no Central Command request may use a non-self-hosted
+  model unless a fallback triggers", is retired (see below); its enforcing
+  test was explicitly rejected. A fallback verified present in configuration
+  is deliberately not exercised with a dead-port test: the first real outage
+  is the first test.
 - **Why:** The seam spec recorded a `cc-default` to hosted-model fallback, which
   DL-067 later removed (2026-07-31); the spec still reads "implemented", so
   treat DL-067 as the in-force position. The related founding position that
@@ -1375,8 +1388,9 @@ hygiene, and how the test suite itself must be written. See
   task proposal may declare await-result, parking the proposer
   `AWAITING_AGENTS`. Consulted specialists run read-only by construction.
 - **Why:** Free-form peer messaging stays struck, and the supervised star shape of
-  the founding doctrine was reversed by FR-19 (any agent may now create and
-  assign tasks), with the consult and await-result machinery kept. Agents
+  the founding doctrine was reversed by FR-19 (any agent may create and
+  assign tasks once PRD §6.1 item 2 drops the `task.create` gate), with the
+  consult and await-result machinery kept. Agents
   may contact the operator on an attention budget (passive capture first,
   about two to three contacts a day, digest by default, the dial the
   operator's). The roster grows with the work: agents are hired only at the
@@ -1426,7 +1440,8 @@ hygiene, and how the test suite itself must be written. See
   and façade idempotency keys are the owed fix. Heartbeat windowing is house
   style: prefer designs where the next natural occurrence absorbs a gap over
   explicit retry machinery. Attempt-exhaustion promotion to FAILED for a
-  DOWN dependency was RETIRED by FR-40: nothing terminal comes from DOWN.
+  DOWN dependency was RETIRED by FR-40: nothing terminal comes from DOWN (build
+  owed, PRD §6.1 item 4).
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-07-31-outage-equivalence-design.md; docs/PRD.md FR-40
 
@@ -1610,12 +1625,13 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-08-27-setup-update-contract.md; docs/superpowers/specs/2026-08-25-deterministic-setup.md
 
-### DL-181 — Setup design details: the k3s driver shares the single-node phases, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling
+### DL-181 — Setup design details: the k3s driver shares the single-node output protocol, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling
 
 - **Status:** active
 - **Date:** 2026-09-23
-- **Rule:** (recorded here) `deploy/k3s/setup.sh` runs the same phases and output protocol as
-  single node, with targets and paths from the answer file, not inline
+- **Rule:** (recorded here) `deploy/k3s/setup.sh` runs its own phases under the same output
+  protocol and exit codes as single node (there is no per-step ledger on k3s
+  yet; PRD §6.2), with targets and paths from the answer file, not inline
   literals. A locked-mirror digest mismatch is a WARN on a configured mirror
   and a FAIL on the public host (a mirror re-serialises manifests). The
   fetch phase returns 1 on FAIL and USERACTION is reserved for the seam the

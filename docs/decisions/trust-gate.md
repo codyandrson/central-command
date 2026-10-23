@@ -12,7 +12,10 @@ for the entry format and how to add one.
 - **Why:** The risk model is error, not malice (AGENTS.md's own framing), so no
   world-changing capability is left to an unsupervised agent by default; the
   boundary is enforced architecturally (the import graph, DL-004) rather than
-  by per-call discipline.
+  by per-call discipline. The PRD (FR-4) restates the rule as a DEFAULT: the
+  operator may later relax a gate per capability and agent by a scoped
+  override (specified there, not yet built); today's closed exemption list is
+  the two writes in DL-003.
 - **Enforced:** code structure only (`central_command/runtime/`, `central_command/gateway/`) — no single test asserts the aggregate rule; DL-004 pins the import boundary it depends on
 - **Source:** AGENTS.md Policy
 
@@ -39,8 +42,8 @@ for the entry format and how to add one.
   source — but only on recorded agreement evidence, one class at a time, and
   revocably: "graduation is configuration, never code." A fresh install is
   fully human-gated. Doctrine: the trust-tier graduation spec.
-- **Enforced:** code structure only — `central_command/gateway/auditor.py:1-50` (doctrine docstring and class constants) and `:285-340` (`approve_and_execute` call site, `approver="auditor"` at `:328`); `central_command/config.py:469-483,503-515` (`auditor_enabled`/`auditor_mode`/`auditor_document_mode`/`graph_auditor_enabled`/`graph_auditor_mode`, all default off/"shadow"); test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` pins the invalidation carve-out
-- **Source:** code comment `central_command/gateway/auditor.py:1-50`; code comment `central_command/config.py:469-483,503-515`
+- **Enforced:** code structure only — `central_command/gateway/auditor.py:1-50` (doctrine docstring and class constants) and `:285-340` (`approve_and_execute` call site, `approver="auditor"` at `:328`); `central_command/config.py:468-483,500-515` (`auditor_enabled`/`auditor_mode`/`auditor_document_mode`/`graph_auditor_enabled`/`graph_auditor_mode`, all default off/"shadow"); test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` pins the invalidation carve-out
+- **Source:** code comment `central_command/gateway/auditor.py:1-50`; code comment `central_command/config.py:468-483,500-515`
 
 ### DL-003 — Some deterministic writes are gated by the operator's own click, not by propose/approve
 
@@ -61,8 +64,8 @@ for the entry format and how to add one.
   review — gating it would review nothing.
   `docs/superpowers/specs/2026-08-09-graph-inspection-design.md` records this
   explicitly as a deliberate exception to the general approval-gate rule.
-- **Enforced:** code structure only — `central_command/api/routes.py` (`_curate()` and its six call sites); `central_command/config.py:498` (`wiki_annotation_mode`, default `"off"`); `central_command/ingest/wiki_freshness.py:229`
-- **Source:** `docs/superpowers/specs/2026-08-09-graph-inspection-design.md` §5-7,72,154; code comment `central_command/config.py:495-498`
+- **Enforced:** code structure only — `central_command/api/routes.py` (`_curate()` and its seven call sites: the six writes named above plus `merge_nodes`); `central_command/config.py:498` (`wiki_annotation_mode`, default `"off"`); `central_command/ingest/wiki_freshness.py:229`
+- **Source:** `docs/superpowers/specs/2026-08-09-graph-inspection-design.md` ("Recorded next increments", item 1); code comment `central_command/config.py:495-498`
 
 ### DL-004 — The trust boundary is the import graph: runtime never imports gateway
 
@@ -230,11 +233,11 @@ for the entry format and how to add one.
   `dismiss_proposal`) records the origin: resuming on dismiss "turned
   'Close, don't ask again' into another proposal on the reject path"
   (2026-08-04 — predates the public CHANGELOG's 2026-08-27 start, so datable
-  only from the code comment). A second, later fix at line 1141 made a
+  only from the code comment). A second, later fix at line 1140 made a
   dismissed proposal terminal rather than stuck ("three coach tasks stuck in
   REVIEW forever, 2026-08-16").
 - **Enforced:** test: `tests/test_dismiss.py::test_dismiss_withdraws_closes_session_and_never_resumes_the_agent`
-- **Source:** code comment `central_command/gateway/gateway.py:1134,1141`
+- **Source:** code comment `central_command/gateway/gateway.py:1134,1140`
 
 ### DL-016 — No agent claim is trusted unverified; claim_matches_source: None means NOT CHECKED
 

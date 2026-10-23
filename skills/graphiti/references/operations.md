@@ -9,7 +9,9 @@ Never guess a uuid; read it here.
 
 - `search_knowledge_graph(query)` — relationships. Up to 25 hits, rendered
   `- <uuid> | <fact> (<RELATION_TYPE>) [valid from …]` /
-  `- <uuid> | <fact> (<RELATION_TYPE>) [SUPERSEDED as of …]`. The endpoints are
+  `- <uuid> | <fact> (<RELATION_TYPE>) [SUPERSEDED as of …, was valid from … —
+  historical, no longer current]`, each with a trailing `[group: …]` (or
+  `[domain: … — steward: …]`) note naming its partition. The endpoints are
   not named, so the relation type is all the naming you get.
 - `search_knowledge_graph_entities(query)` — entities. Up to 15, rendered
   `- <uuid> | <name>: <summary>`. Ask this when the question is about a *thing*
@@ -79,6 +81,11 @@ knowledge graph unavailable (<ErrorType>); proceed without it
 
 An empty result returns `no relevant facts in the knowledge graph`.
 
+This is the behaviour of the code today. The outage doctrine (PRD FR-40; build
+list §6.1 item 4) replaces it: a DOWN graph read will **park the session**
+rather than hand the agent "proceed without it". Until that ships the string
+stands: say the check could not be made and draw no conclusion from it.
+
 **These two are different answers and you must not conflate them.**
 "Unavailable" is *no information*; "no relevant facts" is *evidence of
 absence*, weakly. Never report "the team has no knowledge of X" on the back of
@@ -117,10 +124,12 @@ the graph, to learn whether it ran.
 
 ## Latency you should expect
 
-- **~56 seconds per episode** for extraction on this deployment (background
-  work), since the extraction LLM moved to the local Qwen on 2026-08-01. On the
-  previous cloud model it was a few seconds. This is acceptable for queue
-  processing and worth knowing before you assert a write "did not land".
+- **Roughly a minute per episode** for extraction when the extraction LLM is a
+  local model (background work); a hosted model takes a few seconds. This is
+  acceptable for queue processing and worth knowing before you assert a write
+  "did not land".
+  <!-- overlay: graph_extraction_latency — moved to the instance overlay by epic-instance-facts-relocation -->
+  (The measured figure for this deployment is an instance fact.)
 
 ## The one configuration that must not be "simplified"
 
@@ -151,12 +160,13 @@ ingestion-dated facts and is never relied on.
 
 ## The embedder is not optional
 
-Graphiti has **no embedding fallback** — OpenAI cannot substitute because the
-dimensions differ. So an outage of the local embedder
-(role alias `cc-embedding`, over `qwen3-embedding-local`) is a graph
-**write outage**, not a degraded
-capability: ingest jobs cannot complete until it is back. The LLM being down is the degradable case; the embedder being down
-is not. Report them differently.
+Graphiti has **no embedding fallback** — another provider cannot substitute
+because the dimensions differ (PRD FR-34). So an outage of the embedder (role
+alias `cc-embedding`, over whatever upstream the deployment runs
+<!-- overlay: embedder_upstream — moved to the instance overlay by epic-instance-facts-relocation -->)
+is a graph **write outage**, not a degraded capability: ingest jobs cannot
+complete until it is back. The LLM being down is the degradable case; the
+embedder being down is not. Report them differently.
 
 ## Changing the embedding model (a migration, never a swap)
 
@@ -182,9 +192,14 @@ returning plausible-looking nonsense with no error anywhere. Investigated
 1. Re-point `cc-embedding` in the LiteLLM UI (or register the new model and
    re-point the role at it). The application sends only the alias name, so no
    name or dimension declaration changes.
-2. Re-embed everything — NOT optional:
+2. Re-embed everything — NOT optional. Today that is
    `python3 scripts/oneoff/reembed_graph.py` (dry run) → `--apply` →
-   `--verify`. On the host the app runs on; needs `NEO4J_PASSWORD` and
+   `--verify`, the interim procedure: PRD FR-33 replaces it with an
+   operator-run module that records the embedder in the graph itself, fails
+   closed on a mismatch, gives each model its own alias and fixes the
+   text recipe in the same change (build list §6.1 item 6, which retires the
+   script). Until that ships, a same-width model swap that skips the re-embed is
+   not detected. On the host the app runs on; needs `NEO4J_PASSWORD` and
    `EMBEDDER_API_KEY` set in the shell — the latter is any LiteLLM key that
    reaches `cc-embedding` (the app's `CC_LLM_API_KEY` does — export it under
    that name for the run). Neo4j HTTP is loopback-only.
@@ -218,8 +233,10 @@ Sources → the **work ledger** → dispatch → a steward agent proposes → th
 the same idempotent-consumer shape whether the work item is an email, a
 document, or a change event. Don't imagine a second ingestion route.
 
-## The graph's content is disposable during build
+## The graph's content is disposable — for now
 
-Judge the **mechanism**, not the facts currently in it — graph content gets
-wiped before real use, scoped to the `central_command` group. Do not build
-reasoning that depends on a specific stored fact still being there.
+Judge the **mechanism**, not the facts currently in it. During the current
+shake-out phase graph content may be wiped, scoped to the `central_command`
+group, so do not build reasoning that depends on a specific stored fact still
+being there. Once the deployment is in long-term use, disposing becomes
+non-viable (PRD FR-32).

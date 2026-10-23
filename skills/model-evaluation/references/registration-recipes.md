@@ -51,8 +51,9 @@ is LiteLLM's format prefix and is stripped before the request leaves; what
 reaches the gateway must be the catalog id. A doubled `openai/openai/` looks
 wrong and is right. Stripping the vendor because it "repeats" sends the
 gateway a bare `gpt-5.6-sol`, which it may 404 — or may silently resolve to
-whatever it aliases that name to (2026-09-17: 14 of 121 registrations,
-five 404s, the rest routed on a guess). And `anthropic/<id>` is LiteLLM's
+whatever it aliases that name to (an observed bulk registration: a slice of
+the rows 404ed and the rest routed on a guess
+<!-- overlay: gateway_registration_incident — moved to the instance overlay by epic-instance-facts-relocation -->). And `anthropic/<id>` is LiteLLM's
 NATIVE Anthropic provider, not a gateway path — it authenticates against
 api.anthropic.com with the gateway's key and is rejected on the spot.
 
@@ -110,7 +111,7 @@ Distinct from `litellm_probe_model` — these govern LiteLLM's own periodic
 cheap-vs-expensive health reads):
 
 - **`mode`** — what kind of health check applies (`chat`, `embedding`,
-  `rerank`, …); `model-preferences.yaml`'s `qwen3-rerank-local` sets
+  `rerank`, …); the declared policy file's `cc-rerank` registration sets
   `mode: rerank` for exactly this reason.
 - **`health_check_max_tokens`**, **`health_check_reasoning_effort`**,
   **`health_check_timeout`** — override the health check's own request

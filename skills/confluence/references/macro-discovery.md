@@ -13,7 +13,8 @@ silently, on a page someone may already be reading.**
 
 ## Which macros this applies to
 
-From the Server/Data Center profile's categories (`instance-profiles.md`):
+From the Server/Data Center profile's categories (kept in the instance
+overlay; `instance-profiles.md` explains the concept):
 
 - **Tables & data apps** — Table Filter, Table from CSV, Table from JSON,
   Table Spreadsheet(+Include), Table Excerpt(+Include), Table Transformer,
@@ -67,8 +68,9 @@ its app is upgraded.
    pages likely to use it. Still nothing: it is a sampler-page macro (below).
 
 2. **Read that page's real body**, not a search snippet:
-   `confluence_get_page(..., expand="body.storage")`. CQL search results
-   don't reliably include the raw macro XML — go to the direct read.
+   `confluence_get_page(page_id)` — its `body` is the storage-format XML. CQL
+   search results don't reliably include the raw macro XML — go to the direct
+   read.
 
 3. **Copy the whole `<ac:structured-macro>` block**, including its
    `ac:schema-version` and `ac:local-id`/`ac:macro-id` attributes if
@@ -106,7 +108,8 @@ whole doctrine exists to prevent. The division of labor:
 
 1. **Agent/Claude Code self-serves the built-ins**: author the verified
    `storage-format.md` recipes onto one test page in a scratch space, then
-   round-trip `expand=body.view` and scan the rendered HTML for
+   round-trip the rendered view (REST `expand=body.view`, a read Claude Code
+   makes itself — the agent tools return storage only) and scan the HTML for
    unknown-macro placeholder markup. This catches *unrenderable* macros
    only — a macro that renders wrong (empty grid, ignored parameter) passes
    this check, which is exactly why it doesn't extend to marketplace guesses.
@@ -114,8 +117,8 @@ whole doctrine exists to prevent. The division of labor:
    list of macros with no verified recipe (the families above), they insert
    each via the macro browser with simple defaults onto one page ("Central Command Macro
    Sampler"), and name the page.
-3. **Harvest**: `confluence_get_page(..., expand="body.storage")` on the
-   sampler; extract every `<ac:structured-macro>` block whole (schema
+3. **Harvest**: `confluence_get_page(page_id)` on the sampler (its `body` is
+   storage format); extract every `<ac:structured-macro>` block whole (schema
    version and all); record each as an instance-verified recipe — in an
    instance-profile note or a skill doc — stamped with the harvest date and
    the instance version it came from.

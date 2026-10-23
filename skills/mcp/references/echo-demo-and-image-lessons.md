@@ -34,9 +34,10 @@ day with one particular pip-installed version. A new server build should
 repeat the introspection step, not trust that `echo-demo`'s imports are
 still current.
 
-## Why it's still deployed
+## Why it was left deployed
+<!-- overlay: mcp_echo_demo_live_state — moved to the instance overlay by epic-instance-facts-relocation -->
 
-It stays up as a live fixture for two things that needed a real registered
+It was left up as a live fixture for two things that needed a real registered
 server to test against: an **ungated** MCP tool as a direct callable (proved
 2026-08-05 via a temporary grant on `jira-expert`, then revoked), and
 **server removal with coupled deregistration** (`mcp.server_remove`, built
@@ -49,17 +50,18 @@ actually does.
 - **`imagePullPolicy: IfNotPresent` is baked into every deploy manifest**
   (`_mcp_deployment_manifest`) — never `Always`. An agent-built image lives
   only on the single build host it was built for (single-arch by default,
-  per §9.3 of the design); `Always` would try to pull it from a registry
+  per §9.3 of the design doc, `docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md`); `Always` would try to pull it from a registry
   that doesn't have it and CrashLoop.
 - **Fully-qualified image refs, always.** `mcp.build_image` tags with
   `docker.io/library/cc-mcp-<server_id>:<prop12>` explicitly — not a bare
   name. A podman-built local image tagged only `localhost/<name>` is
   invisible to containerd's lookup path once imported under a different
   namespace convention; the fully-qualified `docker.io/library/...` form is
-  what the kubelet actually resolves. This mirrors the same bite mark
-  documented for the Graphiti and sandbox-runner images elsewhere in this
-  deployment (`CLAUDE.md`) — it is a general k3s/podman fact, not something
-  specific to MCP, but every MCP build hits the same seam.
+  what the kubelet actually resolves. This is the same bite mark the sandbox
+  and crawler image builds guard against (`.claude/rules/deploy-k3s.md`, and
+  `deploy/k3s/README.md`'s "The `localhost/` trap") — it is a general
+  k3s/podman fact, not something specific to MCP, but every MCP build hits
+  the same seam.
 - **Single-arch build is pinned to one build host.** There is no cross-arch
   step here — `mcp.build_image` builds and imports on exactly
   `settings.mcp_build_host`, and `mcp.server_deploy`'s manifest carries a
@@ -71,5 +73,5 @@ actually does.
   for an agent-built server.
 - **Verify image presence with an exact match on a captured list, never a
   piped grep** — see `naming-and-plumbing-gotchas.md`'s `ctr images ls`
-  note; the same `pipefail` trap that broke `migrate-from-docker.sh`'s
-  preflight is exactly what `_mcp_build_image`'s verification step avoids.
+  note; the same `pipefail` trap (`.claude/rules/deploy-k3s.md`) is exactly what
+  `_mcp_build_image`'s verification step avoids.

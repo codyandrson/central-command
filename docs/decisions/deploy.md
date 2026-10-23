@@ -25,7 +25,7 @@ the entry format and how to add one.
 - **Why:** The real port binds on every node and follows the pod, so a
   hard-coded node address works today and silently breaks failover; pinned
   services use `hostPort` on `hostIP: 127.0.0.1`.
-- **Enforced:** script: `deploy/k3s/verify.sh` (checks `127.0.0.1:5442/4000/8000` etc.)
+- **Enforced:** script: `deploy/k3s/verify.sh` (checks the loopback endpoints, `127.0.0.1:5442/4000/5678/8080` etc.)
 - **Source:** .claude/rules/deploy-k3s.md
 
 ### DL-076 — A floating pod needs its image on both nodes
@@ -115,7 +115,7 @@ the entry format and how to add one.
   v2.45.0 put `configure` in front of THAT (D6), so the driver now covers the
   whole loop — ask, prove, triage, prove, install — and the operator never has to
   know that `cp .env.example .env` was ever a step.
-- **Enforced:** script: `deploy/single/setup.sh` (`phase_check...phase_demo`, `run_phase()` returns 0-3)
+- **Enforced:** script: `deploy/single/setup.sh` (`run_phase()` returns 0-3) over the `phase_<name>()` functions in `deploy/single/phases/*.sh`
 - **Source:** .claude/rules/deploy-single.md
 
 ### DL-083 — The single-node install acquires before it deploys, and never falls back on its own
@@ -141,8 +141,9 @@ the entry format and how to add one.
   upstream registry, rather than one generic `CC_REGISTRY`.
 - **Why:** CHANGELOG `2026-08-30 — v2.2.0: the single-node setup acquires
   every dependency up front, from mirrors or an explicit bundle` — "One
-  answer file for every seam (`deploy/single/env.example`, whose keys v2.42.0
-  merged into the repo-root `.env.example`'s deployment section):
+  answer file for every seam (`deploy/single/env.example`, since removed:
+  v2.42.0 merged its keys into the repo-root `.env.example`'s deployment
+  section):
   `CC_REGISTRY_{DOCKERIO,GHCR,MCR}`...".
 - **Enforced:** test: `tests/test_single_airgap_seams.py::test_images_txt_is_well_formed` (validates `images.txt` format against the registry keys)
 - **Source:** CHANGELOG v2.2.0

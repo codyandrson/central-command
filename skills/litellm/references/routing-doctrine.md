@@ -23,7 +23,8 @@ true now, and the two paths (agent traffic vs. the CLI) are unrelated.
 - Changing the model behind every agent is one `litellm.update_model` on the
   alias's deployment — no Central Command edit, no restart, no deploy.
 - There is **no router in Central Command and none is wanted**. Measured agent
-  traffic was **$4.69 over 14 days** — less than a router's own upkeep.
+  traffic cost less than a router's own upkeep.
+  <!-- overlay: agent_traffic_cost — moved to the instance overlay by epic-instance-facts-relocation -->
 - Provider config is **presence-is-enablement**: `CC_LLM_BASE_URL` +
   `CC_LLM_API_KEY`. `base_url` is always passed explicitly so no ambient env
   var can redirect agent traffic. Missing either in live mode raises
@@ -59,18 +60,21 @@ true now, and the two paths (agent traffic vs. the CLI) are unrelated.
 outage now fails fast instead of silently reaching for a Claude model.
 
 This is **configuration, not a rule.** Provider models are expected back later
-to make the system more robust; the `claude-*` entries stay registered and
-**dormant** for exactly that — do not read them as unused/deletable. State it
-that way if asked. **A reappearing `fallbacks:` block in `config.yaml` fails
+to make the system more robust; any `claude-*` entries the operator keeps
+registered stay **dormant** for exactly that — do not read them as
+unused/deletable (the declared policy file carries the retired ones as comments
+so re-adding is a paste). State it that way if asked. **A reappearing `fallbacks:` block in `config.yaml` fails
 `tests/test_litellm_policy.py`** — with `store_model_in_db: true` the DB wins
 that key regardless of what the file says.
 
-Side effect worth knowing: **this deleted the `max_tokens` failure class.** All
-366 of those errors in the four days to 2026-07-31 were the second half of a
-two-step failure — local server unreachable → fall back to haiku → haiku rejects
-`max_tokens: 262144 > 64000`. No separate fix was needed.
-`CC_MAX_OUTPUT_TOKENS` stays at its configured ceiling, sized to the local
-server, which is now the only target.
+Side effect worth knowing: **this deleted the `max_tokens` failure class.**
+Every one of those errors (a count the instance overlay holds) was the second
+half of a two-step failure — local server unreachable → fall back to haiku →
+haiku rejects a `max_tokens` above its cap. No separate fix was needed.
+`CC_MAX_OUTPUT_TOKENS` is the ceiling for a model that declares no
+`max_output_tokens`; a model that declares one is clamped to it per request
+(`runtime/context.py::output_cap_for`), so never lower the ceiling for one
+model's sake — declare that model's cap on its entry.
 <!-- overlay: model_server_max_output_tokens — moved to the instance overlay by epic-instance-facts-relocation -->
 
 **To reverse it:** add the keys back to
@@ -110,7 +114,8 @@ Do not propose re-enabling cooldown while aliases have one deployment each.
 `adaptive_router_preferences` → `model_info`; `input_cost_per_token` →
 `litellm_params`. Put either in the wrong home and nothing errors — the router
 silently scores every model identically. That was exactly the state found on
-2026-07-26. `supports_vision` and `max_input_tokens` are also `model_info`
+2026-07-26. (The adaptive router itself is deleted, see above; `policy.py` still
+declares and checks both halves as model metadata.) `supports_vision` and `max_input_tokens` are also `model_info`
 keys — see `models-and-model-info` for why they must live on `cc-default`
 itself, not only on the underlying deployment alias.
 
@@ -140,30 +145,35 @@ instance overlay, not from this file.)
   (The declared figures, their decision date and the operator's rationale are
   instance facts.)
 - **The swapper's per-model concurrency limit may need raising** (its default
-  bites with 429s during a drain burst); the deployed value is an instance
-  fact.
+  bites with 429s during a drain burst).
+  <!-- overlay: model_server_concurrency — moved to the instance overlay by epic-instance-facts-relocation -->
+  (The deployed value is an instance fact.)
 - **Two traps specific to a swapper slot:** (1) it answers only `/v1/*`
   paths — a LiteLLM entry pointed at it needs `api_base` ending `/v1`, or
   every call 404s. (2) A config reload restarts its child processes, killing
   in-flight requests — push any config change to it in a traffic gap, never
   blind.
-- **The embedder and the reranker are co-resident and always on**, not
-  competing for the swap slot. Consumers address them through the ROLE
-  aliases `cc-embedding` and `cc-rerank` (separate proxy rows onto the same
-  upstreams, mirroring cc-default). Their upstream names and ports are
-  instance facts.
+- **Embedder and reranker, where the deployment runs them locally, are
+  separate resident servers**, not competing for the swap slot.
+  <!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
+  (Their upstream names, ports and hardware are instance facts.) Consumers
+  address them through the ROLE aliases `cc-embedding` and `cc-rerank`
+  (separate proxy rows onto the same upstreams, mirroring cc-default); the
+  reranker is optional.
   Graphiti has **no embedding fallback** (dimensions differ from OpenAI's), so
-  an embedder outage is a graph **write outage**, not a degraded capability.
-  The LLM being down is the degradable case; the embedder being down is not.
+  an embedder outage is a graph **write outage**, not a degraded capability
+  (PRD FR-34). The LLM being down is the degradable case; the embedder being
+  down is not.
 - **`graphiti-llm` is a PLAIN `openai/<model>` alias, exactly like
   `cc-default`.** The graph client is graphiti-core's chat-completions client
   (`OpenAIGenericClient`), which sends a real `response_format: json_schema`
   to `/v1/chat/completions`; LiteLLM forwards it and the backend enforces it.
   The old `openai/chat_completions/` prefix (in use 2026-08-01 until the
   client changed) is now **wrong**: it forces LiteLLM's Responses→chat bridge,
-  which sends `chat_completions/<model>` upstream, and the backend 404s. The
-  setup probes assert the prefix is ABSENT. Do not reintroduce it or a
-  Responses client.
+  which sends `chat_completions/<model>` upstream, and the backend 404s.
+  `register-models.py` reports DRIFT on a bridged `graphiti-llm` and setup's
+  structured-output probe fails on it. Do not reintroduce it or a Responses
+  client.
 - **Models retired from the fleet stay retired.** Never route to one or give
   it a role; if a second local LLM role is wanted, decide its role first.
   <!-- overlay: retired_local_models — moved to the instance overlay by epic-instance-facts-relocation -->
@@ -175,8 +185,5 @@ whether `graphiti-llm` should move with it, since they share the server.
 
 ## Reading a proxy version
 
-**Do not state the proxy's version from memory or from stale doc text.**
-Read the deployed image tag in `deploy/k3s/30-litellm.yaml` (via
-`litellm_read_config`) when a version matters — for example before relying on
-version-coupled internals like the credential-store decryption scheme (see
-`models-and-model-info`'s autodiscovery section).
+Never state the proxy's version from memory — read the deployed image tag; see
+`operations`' "Reading the proxy version".

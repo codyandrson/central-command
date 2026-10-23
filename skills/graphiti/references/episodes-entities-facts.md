@@ -11,16 +11,17 @@ Every entity identified during ingestion is linked back to the episode by a
 "what did we believe at time T".
 
 You create episodes by proposing `graph.add_episode`; its arguments (`name`,
-`episode_body`, `source_description`, the required `scope`, optional
-`for_agent`) are in `what-belongs`. It lands with `source: "text"` in the
+`episode_body`, `source_description`, the required `reference_time` and
+`scope`, optional `for_agent`) are in `what-belongs`. It lands with `source: "text"` in the
 group the scope selects.
 
 **Ingestion is asynchronous, and durable.** Approval records the episode as a
 job on the ingest queue; extraction runs afterwards, one episode at a time
 within a group. Approval is **not the finished graph state**. An episode you
-just committed will not be searchable as facts immediately — on this
-deployment extraction has taken **~56 seconds per episode**, and a burst in one
-group waits its turn. Do not conclude the write failed because a search a
+just committed will not be searchable as facts immediately — with a local
+extraction model it takes on the order of a minute per episode
+<!-- overlay: graph_extraction_latency — moved to the instance overlay by epic-instance-facts-relocation -->,
+and a burst in one group waits its turn. Do not conclude the write failed because a search a
 moment later found nothing: a job that fails is retried (transient causes) or
 parked for the operator with its error (permanent ones), never silently
 dropped.
@@ -43,8 +44,9 @@ Facts carry validity timestamps, and the read tool surfaces them:
 
 - `- <fact> [valid from <valid_at>]` — the graph believes this held from that
   time.
-- `- <fact> [SUPERSEDED as of <invalid_at>]` — **this edge was invalidated**. It
-  is history, not current belief.
+- `- <fact> [SUPERSEDED as of <invalid_at>, was valid from <valid_at> — historical,
+  no longer current]` — **this edge was invalidated**. It is history, not
+  current belief.
 
 Graphiti's own contradiction handling is **bi-temporal edge invalidation**: a
 new edge that contradicts a semantically-related old one causes the old edge to
@@ -76,9 +78,14 @@ existed <!-- overlay: graph_main_group_origin — moved to the instance overlay 
 proposals. Do not propose writing to `main`, and do not treat a `main` fact as
 something this system produced.
 
+Beyond those two, an agent's reads also span its **own** gated private
+partition, `central_command_<agent_id>` (`scope: private`; D11-r1): it can
+recall its own private episodes but never another agent's. The curator's
+`graph-curate` tools are the only reads that see every partition.
+
 ## The rule that keeps the graph small
 
 **The graph never ingests raw email or document text — only distilled claims**
-(D13: store refs, not bodies). An episode body is 1–3 self-contained sentences.
+(PRD FR-30). An episode body is 1–3 self-contained sentences.
 If you find yourself pasting a paragraph from the source, you are writing the
 wrong thing: quote the source in your *evidence*, and distil it in the episode.

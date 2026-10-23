@@ -3,8 +3,9 @@
 Source of truth: `central_command/runtime/tools.py` (the `propose_mcp_*` tools
 that build each `Proposal`) and `central_command/gateway/executor.py` (the
 handlers that actually perform the write on approval). Pack: `mcp-propose`
-(`central_command/runtime/packs.py`, 5 tool names) — granted to nobody by
-default.
+(`central_command/runtime/packs.py`, 5 tool names) — held by `mcp-manager`
+(its hire template's default pack) and by no other agent unless the operator
+grants it.
 
 ## The state machine
 
@@ -61,7 +62,7 @@ Tool: `propose_mcp_build(server_id, rationale)` — a "simple shape" proposal
 - Build is **single-arch, pinned to one build host** (`settings.mcp_build_host`
   — the compute node today <!-- overlay: compute_node_name — moved to the instance overlay by epic-instance-facts-relocation -->): `tar -C <server_dir> -cf - . | ssh <host> podman
   build -t <ref> -f Dockerfile -`. No cross-arch build, no multi-arch
-  manifest — per the design's §9.3 ratified decision, a newly agent-built
+  manifest — per the design doc's §9.3 ratified decision, a newly agent-built
   server defaults to no-failover until an operator deliberately escalates it.
 - **Immutable per-proposal image tag**: `docker.io/library/cc-mcp-<server_id>:<prop12>`
   where `<prop12>` is the last 12 hex characters of the executing proposal id
@@ -87,8 +88,10 @@ Tool: `propose_mcp_deploy(server_id, rationale)` — same simple shape.
 - Applies a `Deployment` + `Service` (as one `kind: List`) to namespace
   **`cc-mcp`**: 1 replica, `runtimeClassName: gvisor`,
   `automountServiceAccountToken: false`, **required** (not preferred) node
-  affinity pinning to the build host's node (the image was built single-arch there —
-  no fallback node exists), `imagePullPolicy: IfNotPresent`, container port
+  affinity pinning to one node name hard-coded in `_mcp_deployment_manifest`
+  (the image was built single-arch on the build host and no fallback node has
+  it — but the pin is NOT derived from `settings.mcp_build_host`, so the two
+  must be kept aligned by hand), `imagePullPolicy: IfNotPresent`, container port
   **8000**, `ClusterIP` Service on 8000.
 - **Mandatory resource limits, refused even against its own generated
   manifest**: `_mcp_deployment_manifest` raises `ExecutorError` before apply
@@ -135,15 +138,18 @@ Tool: `propose_mcp_remove(server_id, rationale)`.
   "key permission cleanup FAILED" note on failure, non-fatal to the removal).
 - Flips `status='retired'` + `retired_at` — the row is **never deleted**.
   `mcp_tool` rows and any `mcp:<id>` grants are left untouched (inert by
-  construction: a retired server's tools can't be reached because the
-  `mcp_toolsets_for` wiring re-checks `status` via `list_mcp_tools`/gates at
-  build time, not by deleting the grant).
+  construction: the proxy no longer serves a retired server — it was
+  deregistered and stripped from the shared key — so its tools can't be
+  reached. `mcp_toolsets_for` does NOT re-check `mcp_server.status`; it builds
+  from the grant and the `mcp_tool` rows, which is why they are left as they
+  are rather than deleted).
 - Archive-in-place: `servers/<id>/` source and built image tags are **never
   touched** — a later `mcp.server_deploy` (re-approved) can bring the same
   server back.
 - A separate "deregister-only, keep the pod running" capability is discussed
-  in the design doc for the debugging case but was **not built** as of
-  2026-08-05 (`docs/STATUS.md`) — don't propose it as if it exists.
+  in the design doc
+  (`docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md`) for
+  the debugging case but was **not built** — don't propose it as if it exists.
 
 ## `mcp.tool_call` — the one gated wrapper for every server's gated tools
 

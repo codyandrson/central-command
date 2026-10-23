@@ -48,10 +48,12 @@ when a matching file is read.
 - **Trust for an integration client comes from the GLOBAL knobs, never a
   per-integration one.** `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and
   `CC_TLS_INSECURE` are one surface an operator configures once
-  (`integrations/http.py:client_kwargs()`); the Exchange client injects them
+  (`integrations/http.py:client_kwargs()` carries the first two; the Exchange
+  client reads `CC_TLS_INSECURE` itself today, and moving that read into
+  `client_kwargs()` is owed); the Exchange client injects them
   into exchangelib through an `HTTPAdapter` subclass rather than growing
   `CC_EXCHANGE_CERT_PATH`/`CC_EXCHANGE_VERIFY_TLS` of its own, which is what
-  the site's own notes proposed. A second knob for the same fact is a second
+  a deployment's own notes proposed. A second knob for the same fact is a second
   place to be wrong about it, and the operator decided (2026-09-23) there is
   exactly one.
 - **A Jira gadget's config keys are declared BY THE GADGET — read its XML,

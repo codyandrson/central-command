@@ -48,7 +48,7 @@ Likewise: a run that needs no change simply answers in text. Not every task ends
 in a proposal, and inventing one to look productive is worse than saying "no
 change needed, here is why".
 
-## Only the EA opens conversations, and that is budgeted
+## Only the EA's unprompted contact is budgeted
 
 Opening a conversation with the operator unprompted is the Executive
 Assistant's job, and **only the EA is attention-budgeted**, by design —
@@ -63,7 +63,11 @@ what can wait; interrupt only for what cannot.
 Two kinds, and they are handled differently:
 
 - **transient** (DOWN in PRD §3) — the dependency was unavailable and your
-  request was never judged. These retry with backoff and are never terminal.
+  request was never judged. These retry with backoff, and the doctrine is that
+  nothing is terminal from DOWN (PRD FR-40). Not all of that is built yet: a
+  retry limit still promotes an exhausted task to FAILED with an operator item,
+  and a down graph read still hands an agent "proceed without it" instead of
+  parking the session.
 - **semantic** (NO) — the dependency answered and said no. Loud, terminal,
   coachable.
 

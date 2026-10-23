@@ -3,7 +3,7 @@
 These are the facts that cost a live 401, a silently-empty tools list, or a
 false-negative test before they were understood. Source:
 `central_command/gateway/executor.py`, `central_command/runtime/packs.py`,
-`central_command/integrations/litellm.py`, `docs/STATUS.md`.
+`central_command/integrations/litellm.py`.
 
 This file is deliberately **thin on generic virtual-key doctrine** — budgets,
 `create_key`/`update_key`/`delete_key` semantics, the Enterprise-tags 403,
@@ -110,6 +110,7 @@ ls -q` into a variable **first**, then checks membership in Python
 (`ref not in ls_out.splitlines()`), rather than piping to `grep -q`. Under
 `set -o pipefail`, `grep -q` exits at its first match and SIGPIPEs `ctr`,
 which then reports failure — so a naive pipe would report "not found" even
-when the image demonstrably was. This exact bug broke
-`migrate-from-docker.sh`'s own preflight once; the MCP build handler avoids
-it by construction. Don't reintroduce the piped form if you touch this code.
+when the image demonstrably was. This exact bug broke an earlier
+migration script's preflight (since removed) and is a standing rule in
+`.claude/rules/deploy-k3s.md`; the MCP build handler avoids it by
+construction. Don't reintroduce the piped form if you touch this code.

@@ -16,7 +16,7 @@ for the entry format and how to add one.
   container queries correctly targeted it) grew to sizes the never-resized
   parent could not contain, collapsing an entire pane's visible height with no
   visible error.
-- **Enforced:** test: `web/src/features/container-query-scope.test.ts` (file confirmed to exist; content not opened this pass — TS/vitest test outside the Python suite)
+- **Enforced:** test: `web/src/features/container-query-scope.test.ts` (a vitest source-reader: it fails when `@container` and an `@<bp>:` variant share one className; outside the Python suite)
 - **Source:** .claude/rules/cockpit.md
 
 ### DL-088 — tsc does not delete removed sources from server-dist
@@ -66,5 +66,5 @@ for the entry format and how to add one.
   the panel updates on `cc.conversation.ended`/`cc.session.*` events; a new
   turn/close path that does not push the frame leaves the UI lying about
   live state.
-- **Enforced:** UNVERIFIED — no guard test located this pass
+- **Enforced:** no universal guard; per-path regression: test: `tests/test_discussion_stall.py::test_concluding_a_discussion_emits_conversation_ended`
 - **Source:** .claude/rules/cockpit.md

@@ -1,11 +1,11 @@
 # QUEUE.md — operating the inbox queue
 
 The operator's guide to the Work Ledger: how to read it, tune it, reach
-further back into mailbox history, and choose the email provider. For the
-design rationale see DESIGN.md §4; for the incident history behind the rules,
-the instance repo's JOURNAL.md. Nothing here duplicates live numbers — the
-commands below read
-them from the running system.
+further back into mailbox history, and choose the email provider. For how the
+ingest path is built see [`ARCHITECTURE.md`](ARCHITECTURE.md) §4 and the
+requirements FR-24 to FR-27 in [`PRD.md`](PRD.md); for why the rules are what
+they are, the [decision log](decisions/README.md). Nothing here duplicates live
+numbers — the commands below read them from the running system.
 
 ## How it works (one paragraph)
 
@@ -84,7 +84,7 @@ releases go live through the updater (`deploy/k3s/README.md` §6).
 | `CC_DISPATCH_ENABLED` | false | autostart the drain loop with the API |
 | `CC_DISPATCH_CONCURRENCY` | 1 | max work items in flight at once |
 | `CC_DISPATCH_APPROVAL_LIMIT` | 3 | pause dispatch while this many proposals + unconfirmed dismissals await review — the "agents can't outrun the human" valve |
-| `CC_DISPATCH_TOKEN_BUDGET` | 0 (unlimited) | per-process token ceiling |
+| `CC_DISPATCH_TOKEN_BUDGET` | 0 (unlimited) | per-process token ceiling — retired by decision (PRD FR-24); leave it at 0, the knob goes when its removal ships |
 | `CC_DISPATCH_MAX_ATTEMPTS` | 3 | semantic failures before a row parks FAILED |
 | `CC_DISPATCH_POLL_SECONDS` | 2.0 | drain-loop poll interval |
 
@@ -141,7 +141,7 @@ Two intake loops, two knobs:
 ## The mail provider: two behind one seam
 
 Central Command has no mail-provider code in the app beyond one seam,
-`central_command/integrations/email_facade.py`, with two functions:
+`central_command/integrations/email_facade.py`. Its two read functions are:
 
 - `list_refs(query)` → `[{uuid, conversation_id}]` (the Exchange provider adds
   `message_id`) — references matching a search
@@ -160,9 +160,10 @@ never know which. **Which provider is configuration, not code:**
 | Ledger id | `<gmail-msg-{uuid}@central_command.feed>`, source `gmail` | the RFC 822 `InternetMessageId`, source `exchange` |
 | Query dialect | Gmail search, passed through | the same Gmail-shaped string, translated by `translate_query` to EWS filters or AQS |
 
-Nothing in the app is Gmail- or Exchange-specific beyond that. The boundary is
-read-only in both cases: `report_spam`, `send`, `move` and the calendar writes
-are called by the Executor alone, after approval.
+Nothing in the app is Gmail- or Exchange-specific beyond that. The read
+boundary is read-only in both cases: the seam's write functions (`report_spam`,
+`send`, `move`) and the calendar writes are called by the Executor alone, after
+approval.
 
 Two rules follow from the table:
 

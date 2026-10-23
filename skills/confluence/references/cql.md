@@ -1,6 +1,6 @@
 # CQL, against the endpoint we actually call
 
-`confluence_search` posts to the **v1** search endpoint
+`confluence_search` calls (GET) the **v1** search endpoint
 (`/wiki/rest/api/search` on Cloud, `/rest/api/search` on Server) on **both**
 flavors — Cloud's v2 API has no search of its own, and that gap is
 permanent, not a version lag to wait out.
@@ -28,7 +28,7 @@ type = page and space = OPS and text ~ "onboarding" order by lastmodified desc
 | exact title | `title = "Q3 Onboarding"` |
 | full-text | `text ~ "onboarding"` — CONTAINS, tokenised like Jira's `~`, not a substring match |
 | by label | `label = "runbook"` |
-| by creator | `creator = "jsmith"` |
+| by creator | `creator = "jdoe"` |
 | created recently | `created >= "2026-08-01"` |
 | edited recently | `lastmodified >= now("-14d")` |
 | combine | `type = page and space = OPS and label = "runbook"` |

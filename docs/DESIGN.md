@@ -276,12 +276,21 @@ MVP = you) → decide (triage, not yes/no; reversibility is first-class) → exe
 action-class, revocable. The auditor is itself fallible → risk reduction, never the
 sole guard for irreversible actions.
 
+> **Superseded 2026-10-22 (reversibility triage).** Reversibility is recorded
+> per Action but nothing reads it: the inbox does not triage on it and it bars
+> no class from auditor graduation. Surfacing it in the inbox and barring
+> irreversible classes from graduation is PRD FR-15 (not yet built).
+
 **Governed asset registries:** Agents; Skills (shared/versioned, each with a
 gateway-enforced risk+approval flag); Policies (scope human/agent/both; **enforced**
 [gateway checks] vs **advisory** [injected into guidance]); Knowledge (graph + docs).
 **Systems of record:** Jira + Confluence stay authoritative; the framework reads +
 proposes writes; internal store holds agent-operational state; deliverable tasks
 mirror to Jira (gated). *[D9]*
+
+> **Superseded 2026-10-22 (Skills).** A skill is subject knowledge delivered as
+> database rows, never a permission; the risk and approval flag lives on the
+> registry's capability row (DL-166; PRD §3).
 
 > **Superseded 2026-10-21 (Policies).** The policy registry as a governed table
 > was never built; policy flags in code are advisory and the retired claim is

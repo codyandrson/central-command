@@ -81,7 +81,7 @@ resilience, and the runtime's context/window handling. See
   — so the system now either delivers attachment content as real text the
   agent can act on, or refuses before the turn runs at all, rather than risk a
   silent, invisible drop.
-- **Enforced:** discipline only — no guard test located
+- **Enforced:** test: `tests/test_attachments.py::test_a_scan_is_refused_rather_than_delivered_as_an_empty_document`, `::test_one_bad_file_refuses_the_WHOLE_send`, `::test_a_refused_attachment_starts_no_turn_and_mutates_nothing`
 - **Source:** .claude/rules/runtime-resilience.md
 
 ### DL-027 — A failed=True session must record why
@@ -144,7 +144,9 @@ resilience, and the runtime's context/window handling. See
   it — the park that would have recorded the death is written in an `except`
   block a dead process never reaches. FAILED, never retry-parked: a restart
   is not a dependency outage, and silently re-running whatever was in flight
-  spends tokens on work the operator never re-issued.
+  spends tokens on work the operator never re-issued. (PRD FR-40 changes this:
+  restart orphans park and nothing terminal comes from DOWN; the FAILED
+  landing is today's behaviour until that ships.)
 - **Enforced:** test: `tests/test_outage_requeue.py::test_the_orphan_sweep_lands_the_task_not_just_the_session`
 - **Source:** .claude/rules/runtime-resilience.md
 
@@ -167,13 +169,17 @@ resilience, and the runtime's context/window handling. See
 - **Status:** active
 - **Date:** 2026-09-18
 - **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A failed compaction degrades to the clip, never to the raw record.**"
-- **Why:** CHANGELOG-adjacent incident (v2.37.2, per MEMORY.md): a
+- **Why:** CHANGELOG v2.37.2 records the incident: a
   compaction summary is itself a model call and can die like any other (a
   reasoning model spending its output cap thinking); sending raw history
   "rather than a dead run" IS the dead run once the record is bigger than
-  the window (2026-09-18: 607k tokens against a 262k window).
-- **Enforced:** discipline only — no guard test located this pass
-- **Source:** .claude/rules/runtime-resilience.md
+  the window (2026-09-18: 607k tokens against a 262k window). The summary
+  call is guarded on its own since v2.37.2, but `prepare_window`'s outer
+  guard (`central_command/runtime/context.py`) still sends the raw history if
+  the window step itself breaks: a known violation of this rule (PRD FR-43),
+  owed a fix.
+- **Enforced:** test: `tests/test_context_overflow.py::test_a_dead_summarizer_still_ends_in_the_clip_not_raw_history` pins the summary-failure path; the outer-guard fallback has no test
+- **Source:** CHANGELOG v2.37.2; .claude/rules/runtime-resilience.md
 
 ### DL-034 — A status-code sniff must match a token, not a substring
 
@@ -181,9 +187,9 @@ resilience, and the runtime's context/window handling. See
 - **Date:** 2026-09-18
 - **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A status-code sniff must match a TOKEN.**"
 - **Why:** `"429" in text` fired inside a model uuid and retried a 404 as an
-  outage five times (v2.37.2, per MEMORY.md).
-- **Enforced:** discipline only — no dedicated guard test confirmed by name this pass
-- **Source:** .claude/rules/runtime-resilience.md
+  outage five times (CHANGELOG v2.37.2).
+- **Enforced:** test: `tests/test_failure_taxonomy.py::test_text_sniffing` (includes the 2026-09-18 uuid-contains-"429" case)
+- **Source:** CHANGELOG v2.37.2; .claude/rules/runtime-resilience.md
 
 ### DL-035 — A heartbeat action never awaits agent work; the retry sweep dispatches detached
 

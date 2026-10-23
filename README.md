@@ -54,7 +54,8 @@ each one by name. Beyond the host:
 claude        # from the repo root, then type:  /setup
 ```
 
-`/setup` conducts one loop: the operator answers the questions once
+`/setup` conducts one loop (every `./setup.sh` here is the one in
+`deploy/single/`): the operator answers the questions once
 (`./setup.sh configure`, which creates the one answer file, the repo-root
 `.env`), then `./setup.sh` runs, records every step in a ledger as it
 completes, and prints one `PASS|WARN|FAIL|USERACTION` line per check (exit
@@ -81,7 +82,8 @@ approve one by one, which is also how you learn the propose→approve loop.
 The executor is **live** from the start: every approval performs the real
 write. The approval gate is the safety, not a simulation mode. What still
 ships OFF, each an explicit flip when you decide: the mail feed, the dispatch
-drain, and every recurring schedule.
+drain, and every recurring schedule except the outage-recovery retry sweep
+(which only re-drives work already authorised).
 
 ## Updating a deployment
 
@@ -141,10 +143,12 @@ approval and survive a restart. The full, as-built picture is
 
 | Doc | What it is |
 |-----|------------|
-| [`CLAUDE.md`](CLAUDE.md) | Orientation — read this first: what the system is, how to run it, conventions and hard-won gotchas |
+| [`AGENTS.md`](AGENTS.md) (loaded by [`CLAUDE.md`](CLAUDE.md)) | Orientation — read this first: what the system is, how to run it, conventions and hard-won gotchas |
 | [`CHANGELOG.md`](CHANGELOG.md) | What changed, release by release (the operator's live status and development journal are private instance documents) |
 | [`docs/PRD.md`](docs/PRD.md) | The vision: why this exists, who it is for, and what it must do |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the system is built, as built |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | What is kept for later, not scheduled (the build list is PRD §6.1) |
+| [`docs/QUEUE.md`](docs/QUEUE.md) | Operating the inbox queue: reading it, tuning it, choosing the mail provider |
 | [`docs/decisions/`](docs/decisions/README.md) | Why each rule exists: the decision log, with stable ids |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | The founding design, frozen as a record (read the PRD for the vision) |
 
@@ -168,26 +172,25 @@ cp .env.example .env                 # fill CC_LLM_BASE_URL + CC_LLM_API_KEY for
 (cd web && npm install && npm run build)
 CC_DEMO_MODE=true CC_EXECUTOR_MODE=dry_run uvicorn central_command.api.app:app --port 8080
 
-pytest                               # offline suite (contract + durable + orchestration)
+pytest -q                            # the full suite; needs the dev Postgres below, makes no live model calls
 ```
 
 Postgres for the spine: `docker compose up -d postgres` (podman works) — starts
 `cc-postgres` on **127.0.0.1:5442** with the schema auto-loaded. For live UI dev
 with hot-reload, run the API on :8080 and `cd web && npm run dev` (Vite proxies
-`/api`). See `CLAUDE.md` for live-mode flags, ingestion, and audit-trail endpoints.
+`/api`). See `AGENTS.md` for the rules and `docs/QUEUE.md` for ingestion and
+audit-trail endpoints.
 
-## Status at a glance
+## Status
 
-Phases 1–3 are built and human-verified; Phase 4 is underway. The full spine runs
-end-to-end on real Claude — email ingestion at scale, a knowledge-graph write
-path, governed charters, a graduated independent auditor, a coaching loop, native
-Jira, capability packs, a governed heartbeat scheduler, and (newest) a **D7
-orchestration runtime**: the orchestrator runs multi-agent projects as a durable
-plan → assign → receive → decide loop, with the human gate exactly where it
-belongs. See [`CHANGELOG.md`](CHANGELOG.md) for what has landed so far.
+What is built is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); what is next is
+the build list in [`docs/PRD.md`](docs/PRD.md) §6.1, and what is kept for later is
+[`docs/ROADMAP.md`](docs/ROADMAP.md). [`CHANGELOG.md`](CHANGELOG.md) is what has
+landed, release by release.
 
 ## Secrets
 
-All credentials live only in `.env` (git-ignored; plus `web/.env` on the k3s
-profile, where the cockpit runs as its own unit) — never in
-the repo or its history. The tracked `.env.example` files are empty placeholders.
+All credentials live only in `.env` (git-ignored; plus `web/.env` and
+`deploy/k3s/.env` on the k3s profile, where the cockpit and the containers have
+their own files) — never in the repo or its history. The tracked `.env.example`
+files carry placeholders and non-secret local defaults, never a real secret.

@@ -1,13 +1,15 @@
-# deploy/single — the single-node, giftable profile
+# deploy/single — the single-node profile
 
 Central Command's core spine on **one machine**, via **Compose** (`podman
-compose`; `docker compose` on a dev box). This is the profile you hand to
-someone who has an LLM API key and nothing else.
+compose`; `docker compose` on a dev box). It is the reference capability set
+(PRD FR-46) and exists for the work deployment: an air-gapped, locked-down
+workstation. That someone holding only an LLM API key can also install it is a
+consequence of building it cleanly, not a goal (PRD §2).
 
-It is **derived from `deploy/k3s/`, not a replacement for it.** The multi-node
-k3s deployment stays what it is; what is specific to it — two-node placement,
-Tailscale, the local llama fleet, the log console — is factored out
-here. The sandbox and the crawler are NOT: both ship as flags (see below).
+`deploy/k3s/` is the operator's multi-node instance of this profile, never a
+superset of it. What is specific to k3s — two-node placement, Tailscale, the
+local llama fleet, the log console — is not here. The sandbox and the crawler
+are: both ship as flags (see below).
 
 **The install procedure is [`CHECKLIST.md`](CHECKLIST.md)** — what the host
 must already have, every step in the order `./setup.sh` runs it, the rows that
@@ -570,7 +572,7 @@ asks): download the release zip, then
 
 ```bash
 cd deploy/single
-./update.sh ~/Downloads/central-command-1.0.2.zip
+./update.sh ~/Downloads/central-command-<version>.zip
 ```
 
 That inits the repo on first use, imports the zip, shows the version gate +

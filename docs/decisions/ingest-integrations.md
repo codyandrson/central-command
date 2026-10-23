@@ -15,7 +15,7 @@ one.
   kept "successfully" configuring gadgets that stayed blank. The fix reads
   each widget's own declared configuration schema instead of trusting a hand-
   written map.
-- **Enforced:** code structure only — `_prepare_gadget_configs`; no pytest guard named this pass
+- **Enforced:** code structure only — `_prepare_gadget_configs` in `central_command/integrations/jira.py`; test: `tests/test_jira_client.py::test_a_pref_the_gadget_does_not_declare_fails_loudly`
 - **Source:** .claude/rules/integrations.md
 
 ### DL-042 — n8n import:workflow never activates outside queue mode; the canvas is not the source of truth
@@ -54,11 +54,11 @@ one.
   time; it is never re-fetched from the provider on every subsequent read.
 - **Why:** CHANGELOG `2026-09-19 — v2.37.13: a mail body is converted, not
   tag-stripped`. This reverses founding-design D13, which said a mail body
-  would be left unstored; `docs/DESIGN.md` now carries an explicit
-  correction: "not re-fetched on every read, and not left unstored as D13
-  originally said (corrected 2026-09-20)."
-- **Enforced:** test: `tests/test_mailtext.py::test_nothing_reads_a_mail_body_except_through_the_converter`
-- **Source:** CHANGELOG v2.37.13; docs/DESIGN.md (corrected 2026-09-20)
+  would be left unstored; `docs/DESIGN.md` §6 carries a "Superseded
+  2026-09-20" note: "a mail body is fetched once, converted, and persisted at
+  claim time".
+- **Enforced:** test: `tests/test_backlog.py::test_refs_enroll_without_content_and_hydrate_at_claim` (exactly one fetch, at claim time)
+- **Source:** CHANGELOG v2.37.13; docs/DESIGN.md §6 (superseded note, 2026-09-20)
 - **Supersedes:** founding-design D13 (docs/DESIGN.md, frozen)
 
 ### DL-045 — An unsubscribe URL is derived from the mailbox, never from the proposal
@@ -71,7 +71,7 @@ one.
   was changed to always recompute the unsubscribe target itself from the real,
   verified email headers, rather than trust a URL supplied inside the
   proposal.
-- **Enforced:** code structure only — `central_command/contract/mail.py`; the RFC 8058 logic is not independently pinned to a named test this pass
+- **Enforced:** code structure only — `central_command/contract/mail.py`; test: `tests/test_mail_actions.py::test_executor_refuses_a_url_the_message_does_not_carry`
 - **Source:** .claude/rules/integrations.md
 
 ### DL-046 — Ledger invariants live in SQL, not Python, and are never mocked in tests

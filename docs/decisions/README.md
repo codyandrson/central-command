@@ -71,6 +71,11 @@ come from in-repo evidence (the rule text's own story, the CHANGELOG, a code
 comment, or a design record); if the repo gives no reason, write "Not
 recorded in-repo." rather than inventing one.
 
+The 2026-10 documentation review's entries (DL-141 onward) also cite its
+rulings and addendum (`PRD addendum §B`, ids such as `GATE-006`). That record
+is kept privately (PRD §0) and is not in this tree, so such an entry's `Why`
+must stand on its own; the cite names where the operator's ruling is filed.
+
 ## Status vocabulary
 
 - **active** — the rule is in force today.
@@ -109,15 +114,15 @@ recorded in-repo." rather than inventing one.
 | DL-023 | system_prompt= is load-bearing; never modernise it to instructions= | active | undated | test: `tests/test_agent_construction_guards.py::test_no_agent_is_built_with_instructions` | [runtime.md](runtime.md) |
 | DL-024 | Agents take deps | active | 2026-07-19 | test: `tests/test_agent_run_contract.py::test_every_agent_run_passes_deps` | [runtime.md](runtime.md) |
 | DL-025 | Sessions are never destroyed; agent:<id>:main means the current lane only | active | 2026-07-23 | code structure only | [runtime.md](runtime.md) |
-| DL-026 | An attachment reaches the agent as content, or the send fails — no third state | active | undated | discipline only | [runtime.md](runtime.md) |
+| DL-026 | An attachment reaches the agent as content, or the send fails — no third state | active | undated | test: `tests/test_attachments.py::test_a_scan_is_refused_rather_than_delivered_as_an_empty_document` | [runtime.md](runtime.md) |
 | DL-027 | A failed=True session must record why | active | undated | test: `tests/test_session_failure_reason.py::test_every_failed_session_records_why` | [runtime.md](runtime.md) |
 | DL-028 | A failure-landing guard that lives in one wrapper is not a landing | active | 2026-09-14 | discipline only | [runtime.md](runtime.md) |
 | DL-029 | A shutdown hook in the FastAPI lifespan runs too late; release from SIGTERM instead | active | 2026-08-15 | discipline only | [runtime.md](runtime.md) |
 | DL-030 | A resume must arm its park record before it runs, not only in the except | active | undated | code structure only | [runtime.md](runtime.md) |
 | DL-031 | The orphan sweep must land the task, not just the session | active | undated | test: `tests/test_outage_requeue.py::test_the_orphan_sweep_lands_the_task_not_just_the_session` | [runtime.md](runtime.md) |
 | DL-032 | A tool result is bounded by the input window, not the output cap | active | 2026-09-16 | test: `tests/test_context_overflow.py::test_tool_result_ceiling_follows_the_smallest_discovered_window` | [runtime.md](runtime.md) |
-| DL-033 | A failed compaction degrades to the clip, never to the raw record | active | 2026-09-18 | discipline only | [runtime.md](runtime.md) |
-| DL-034 | A status-code sniff must match a token, not a substring | active | 2026-09-18 | discipline only | [runtime.md](runtime.md) |
+| DL-033 | A failed compaction degrades to the clip, never to the raw record | active | 2026-09-18 | test: `tests/test_context_overflow.py::test_a_dead_summarizer_still_ends_in_the_clip_not_raw_history` | [runtime.md](runtime.md) |
+| DL-034 | A status-code sniff must match a token, not a substring | active | 2026-09-18 | test: `tests/test_failure_taxonomy.py::test_text_sniffing` | [runtime.md](runtime.md) |
 | DL-035 | A heartbeat action never awaits agent work; the retry sweep dispatches detached | active | 2026-09-11 | test: `tests/test_retry_sweep.py::test_the_sweep_returns_while_an_agent_lane_is_busy` | [runtime.md](runtime.md) |
 | DL-036 | The event log is append-only, so write order is read order forever | active | undated | test: `tests/test_eventlog.py::test_decision_is_logged_before_execution` | [events-data.md](events-data.md) |
 | DL-037 | ActionSpec.material is an explicit, non-authorising and self-recording allowlist | active | undated | code structure only | [events-data.md](events-data.md) |
@@ -134,7 +139,7 @@ recorded in-repo." rather than inventing one.
 | DL-048 | Dispatch is opt-in; the drain loop never starts by surprise | active | 2026-07-18 | test: `tests/test_dispatch_one_path.py::test_app_startup_starts_no_loop_that_was_not_asked_for` | [ingest-integrations.md](ingest-integrations.md) |
 | DL-049 | A fold is a claim of coverage, not an outcome; it goes terminal only on covering-approval | active | undated | test: `tests/test_dismiss.py::test_dismissing_a_covering_proposal_releases_its_folds` | [ingest-integrations.md](ingest-integrations.md) |
 | DL-050 | Every email takes one path: dispatcher.process_claimed() | active | 2026-07-20 | test: `tests/test_dispatch_one_path.py::test_nothing_outside_the_dispatcher_starts_a_work_item_run` | [ingest-integrations.md](ingest-integrations.md) |
-| DL-051 | A Graphiti entity and edge each store their identity twice | active | undated | discipline only | [graph.md](graph.md) |
+| DL-051 | A Graphiti entity and edge each store their identity twice | active | undated | test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape` | [graph.md](graph.md) |
 | DL-052 | Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped | active | 2026-08-21 | test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_dropped_not_stored` | [graph.md](graph.md) |
 | DL-053 | The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1 | active | undated | test: `tests/conftest.py::no_live_graph_writes` | [graph.md](graph.md) |
 | DL-054 | An async bolt driver cached at module scope is loop-bound | active | undated | discipline only | [graph.md](graph.md) |
@@ -144,7 +149,7 @@ recorded in-repo." rather than inventing one.
 | DL-058 | Episodes name the operator; "the operator" is not a graph subject | active | 2026-09-16 | test: `tests/test_context_overflow.py::test_graph_propose_notes_tell_the_agent_to_name_the_operator` | [graph.md](graph.md) |
 | DL-059 | An edge with expired_at is not necessarily a retired fact | active | 2026-09-15 | discipline only | [graph.md](graph.md) |
 | DL-060 | The ontology needs somewhere for every category; declare high-priority types first | active | 2026-08-15 | discipline only | [graph.md](graph.md) |
-| DL-061 | The curator can see the patient: graph.add_episode takes for_agent | active | 2026-09-01 | code structure only | [graph.md](graph.md) |
+| DL-061 | The curator can see the patient: graph.add_episode takes for_agent | active | 2026-09-01 | test: `tests/test_graph_scope.py::test_executor_private_for_agent_targets_that_agents_partition` | [graph.md](graph.md) |
 | DL-062 | An embedding is never served from memory | active | 2026-09-01 | code structure only | [graph.md](graph.md) |
 | DL-063 | Models live in LiteLLM's database and belong to the operator; setup pauses for them | active | undated | script: `register-models.py` | [models.md](models.md) |
 | DL-064 | A model's capabilities are measured, never guessed; an undeclared flag is not neutral | active | undated | discipline only | [models.md](models.md) |
@@ -171,17 +176,17 @@ recorded in-repo." rather than inventing one.
 | DL-085 | An update waits for the agents to finish | active | 2026-09-13 | test: `tests/test_update_hold.py::test_engage_waits_while_runs_are_live_then_triggers_unforced` | [deploy.md](deploy.md) |
 | DL-086 | Removing a k3s manifest means adding its tombstone | active | 2026-09-01 | script: `deploy/k3s/cc-update.sh` | [deploy.md](deploy.md) |
 | DL-087 | @container must sit on a parent of whatever uses @3xl: | active | 2026-08-10 | test: `web/src/features/container-query-scope.test.ts` | [cockpit.md](cockpit.md) |
-| DL-088 | tsc does not delete removed sources from server-dist | active | undated | discipline only | [cockpit.md](cockpit.md) |
+| DL-088 | tsc does not delete removed sources from server-dist | active | undated | code structure only | [cockpit.md](cockpit.md) |
 | DL-089 | The cockpit hand-declares its own wire interfaces; the defence is a backend wire-shape test | active | undated | test: `tests/test_cc_routes_wire.py::test_tasks_list_carries_every_field_mapTask_reads` | [cockpit.md](cockpit.md) |
 | DL-090 | _COMPOSER_DISABLING is an allowlist, not a check; a new refusal code needs its own guard | active | 2026-07-29 | test: `tests/test_composer_refusal_codes.py::test_every_refusal_code_is_classified` | [cockpit.md](cockpit.md) |
-| DL-091 | The cockpit believes push frames, not hope | active | undated | UNVERIFIED | [cockpit.md](cockpit.md) |
+| DL-091 | The cockpit believes push frames, not hope | active | undated | test: `tests/test_discussion_stall.py::test_concluding_a_discussion_emits_conversation_ended` (per path; no universal guard) | [cockpit.md](cockpit.md) |
 | DL-092 | Secrets live only in .env | active | undated | script: `scripts/prepush-scan.sh` | [process.md](process.md) |
 | DL-093 | master is the only branch | active | undated | discipline only | [process.md](process.md) |
 | DL-094 | A release is three things: a CHANGELOG entry, a VERSION bump, and a tag | active | 2026-08-30 | test: `tests/test_version_file.py::test_version_file_matches_the_newest_changelog_release` | [process.md](process.md) |
 | DL-095 | Never change LITELLM_SALT_KEY or N8N_ENCRYPTION_KEY | active | undated | discipline only | [process.md](process.md) |
 | DL-096 | Never edit docs/vendor/ or hand-create anything in servers/ | active | undated | script: `scripts/vendor_docs_fetch.sh` | [process.md](process.md) |
 | DL-097 | A fresh database must reproduce the roster | active | undated | sql: `central_command/db/schema.sql:77,81,85,89,93,97,101,104` | [process.md](process.md) |
-| DL-098 | schema.sql is auto-loaded on a fresh database only | active | undated | code structure only | [process.md](process.md) |
+| DL-098 | schema.sql is applied on a fresh database and by the updater at release, never at process start | active | undated | code structure only | [process.md](process.md) |
 | DL-099 | Tests must pin demo_mode=True when they hit resolve_model() | active | undated | discipline only | [process.md](process.md) |
 | DL-100 | Assert on rows your test created, never on global counts | active | undated | code structure only | [process.md](process.md) |
 | DL-101 | One name everywhere: the historical identifiers are gone | active | 2026-08-29 | discipline only | [process.md](process.md) |
@@ -264,7 +269,7 @@ recorded in-repo." rather than inventing one.
 | DL-178 | The sources catalog is a Postgres table; claims carry versioned evidence pointers; staleness is a deterministic comparison | active | 2026-08-23 | discipline only | [process.md](process.md) |
 | DL-179 | No deployment profile ships less than another: single-node gets the sandbox and crawler, with disclosed weaker isolation | active | 2026-08-21 | discipline only | [process.md](process.md) |
 | DL-180 | One tool installs and updates; a running process never replaces its own code; backups track reversibility | active | 2026-08-27 | discipline only | [process.md](process.md) |
-| DL-181 | Setup design details: the k3s driver shares the single-node phases, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling | active | 2026-09-23 | discipline only | [process.md](process.md) |
+| DL-181 | Setup design details: the k3s driver shares the single-node output protocol, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling | active | 2026-09-23 | discipline only | [process.md](process.md) |
 | DL-182 | The graphiti-core migration: one LiteLLM key, failure classes without exhaustion, verification by recorded episode, benchmarked reranker | active | 2026-10-04 | discipline only | [process.md](process.md) |
 | DL-183 | The design-record index is generated from each record's own Status header, never hand-maintained | active | 2026-09-20 | test: `tests/test_design_record_headers.py::test_readme_matches_the_generator` | [process.md](process.md) |
 | DL-184 | Jira is a native client; an unconfigured client fails loudly and never routes to a webhook | active | 2026-09-26 | test: `tests/test_jira_client.py::test_unconfigured_client_fails_loudly_instead_of_routing_anywhere` | [process.md](process.md) |

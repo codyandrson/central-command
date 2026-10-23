@@ -28,7 +28,9 @@ memory (PRD §3). It carries:
   a lever.
 - `evidence[]` — see `evidence-and-claims`.
 - `expected_effect` — what the operator should see afterwards if this worked.
-- `confidence` — optional. Say how sure you are when it matters.
+- `confidence` — `{level: high|medium|low, rationale}`. State it on every
+  proposal: the schema still accepts its absence, but PRD FR-5 makes a missing
+  value a rejection, and an absent confidence is never read as a low one.
 
 `target_ref` names what an action is about. There is no stale-state bounce at
 propose time: the Executor checks the world when it performs the write, and a

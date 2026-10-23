@@ -2,7 +2,10 @@
 
 The map of every external source Central Command touches, the `.env` key that
 redirects each one, and the loop you run to prove them all before installing
-anything. It is not a mirroring project.
+anything. It is not a mirroring project. A "mirror" here is an internal or
+pre-staged source on the site's own network (or a `file://` directory); on a
+site with no egress at all, everything from outside is brought in by hand
+(PRD §2).
 
 ## Why this document exists
 
@@ -85,10 +88,10 @@ in one script and keep it in another
 (`tests/test_single_airgap_seams.py` walks the table). The CA reaches a BUILD as
 a staged `cc-ca.crt` file in the build context, never as a `--secret` (broken on
 a Windows podman machine) and never as a build-arg (build-args show in `podman
-history`). The two
-values compose reads (`CC_LITELLM_SSL_VERIFY`, `CC_CA_BUNDLE_IN_CONTAINER`) are
-EXPORTED by `setup.sh` and never written into `.env`: they are composed from the
-two keys above, and one fact has one key.
+history`). The three
+values compose reads (`CC_LITELLM_SSL_VERIFY`, `CC_CA_BUNDLE_IN_CONTAINER`,
+`CC_CA_BUNDLE_MOUNT_SRC`) are EXPORTED by `setup.sh` and never written into
+`.env`: they are composed from the two keys above, and one fact has one key.
 
 ## Every external source, and its seam
 
@@ -110,21 +113,24 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 | python-build-standalone | uv, only when the host has no CPython 3.12 | `CC_PYTHON_MIRROR` | `UV_PYTHON_INSTALL_MIRROR`; a `file://` directory works |
 | registry.npmjs.org | the cockpit build (`npm ci`), `sandbox-runtime` inside the sandbox build | `CC_NPM_REGISTRY` | `NPM_CONFIG_REGISTRY`; the lockfile's `resolved` URLs point at npmjs and npm rewrites them to the configured registry (its `replace-registry-host` default) — a lock regenerated AGAINST a mirror would not be rewritten back |
 | huggingface.co | the speech engine's models (Kokoro TTS + faster-whisper STT), fetched by `cc-speech` when the `llm` phase installs them | `CC_HF_ENDPOINT`, or pre-place the hub snapshots in the `speech-models` volume | `HF_HUB_CACHE` is the volume; a present snapshot is not re-fetched. `CC_ENABLE_SPEECH=0` removes the source entirely (point `cc-tts`/`cc-stt` at your own engines) |
-| huggingface.co | Whisper STT for the cockpit's *local* engine (k3s Node server only) | `WHISPER_MODELS_BASE_URL`, or pre-place `ggml-*.bin` in `config.whisperModelDir` | `whisper-local.ts` checks the local file first; unused once `cc-stt` is registered |
-| the upstream LLM endpoint | LiteLLM — and `check`, directly from the host | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0. One base, one key, one upstream model id per alias (the alias upper-cased, every non-alphanumeric `_`). `cc_required_aliases` in `deploy/env-lib.sh` decides which aliases this deployment needs — the four core ones always, `cc-tts`/`cc-stt` only with `CC_ENABLE_SPEECH=1`. **All three families are OPTIONAL** (v2.45.1): blank is the normal case and means the catalog is entered in the LiteLLM UI at the `llm` phase's deliberate pause; see below |
-| an on-premises Exchange server (EWS) | the mail feed, the ledger's hydration, the mail tools and the Executor's mail/calendar writes, via `integrations/exchange.py` | `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`, `CC_EXCHANGE_PASSWORD`, `CC_EXCHANGE_EMAIL` | INTERNAL — there is no mirror seam and nothing to stage: it is a service on the site's own network, reached at install time and at run time alike. Trust rides the rows below: the internal CA in `CC_CA_BUNDLE`, the PKI client certificate in `CC_CLIENT_CERT`/`CC_CLIENT_KEY`, `CC_TLS_INSECURE=1` as the other answer. Blank everywhere = no Exchange, and the n8n Gmail façade is the mail path. Prove it with `python scripts/exchange_smoke.py` |
-| a Jira / Confluence site (Cloud or Data Center) | every Jira and Confluence read and the Executor's Jira writes, via `integrations/jira.py` and `integrations/confluence.py` | `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`, `CC_JIRA_API_TOKEN`, `CC_JIRA_API_FLAVOR`, `CC_JIRA_AUTH_MODE`, `CC_CONFLUENCE_BASE_URL`, `CC_CONFLUENCE_EMAIL`, `CC_CONFLUENCE_API_TOKEN`, `CC_CONFLUENCE_API_FLAVOR`, `CC_CONFLUENCE_AUTH_MODE`, `CC_CONFLUENCE_PROFILE` | v2.53.0 — ASKED at `configure` and PROBED by `check`'s `integrations` section and by both profiles' `verify.sh` (`python scripts/atlassian_probe.py --quiet`), so a stale token is found before the UI rather than mid-tour. No mirror seam and nothing to stage: on an internal Data Center it is a service on the site's own network, and trust rides the CA/insecure rows below. Blank `CC_JIRA_BASE_URL` = NO Jira, and an agent holding a `jira`/`confluence` capability then fails at execution with "Jira is not configured"; blank `CC_CONFLUENCE_BASE_URL` = no Confluence, never "the same site as Jira". A CLOUD API token is ACCOUNT-scoped, so one token serves both products on one site |
+| huggingface.co | Whisper STT for the cockpit's *local* engine (k3s Node server only) | `WHISPER_MODELS_BASE_URL`, or pre-place `ggml-*.bin` in `WHISPER_MODEL_DIR` (default `~/.nerve/models`) | `whisper-local.ts` checks the local file first; unused once `cc-stt` is registered |
+| the upstream LLM endpoint | LiteLLM — and `check`, directly from the host | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0. One base, one key, one upstream model id per alias (the alias upper-cased, every non-alphanumeric `_`). `cc_required_aliases` in `deploy/env-lib.sh` decides which aliases this deployment needs — the three core ones (`cc-default`, `graphiti-llm`, `cc-embedding`) always, `cc-tts`/`cc-stt` only with `CC_ENABLE_SPEECH=1`. **All three families are OPTIONAL** (v2.45.1): blank is the normal case and means the catalog is entered in the LiteLLM UI at the `llm` phase's deliberate pause; see below |
+| an on-premises Exchange server (EWS) | the mail feed, the ledger's hydration, the mail tools and the Executor's mail/calendar writes, via `central_command/integrations/exchange.py` | `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`, `CC_EXCHANGE_PASSWORD`, `CC_EXCHANGE_EMAIL` | INTERNAL — there is no mirror seam and nothing to stage: it is a service on the site's own network, reached at install time and at run time alike. Trust rides the rows below: the internal CA in `CC_CA_BUNDLE`, the PKI client certificate in `CC_CLIENT_CERT`/`CC_CLIENT_KEY`, `CC_TLS_INSECURE=1` as the other answer. Blank everywhere = no Exchange, and the n8n Gmail façade is the mail path. Prove it with `python scripts/exchange_smoke.py` |
+| a Jira / Confluence site (Cloud or Data Center) | every Jira and Confluence read and the Executor's Jira writes, via `central_command/integrations/jira.py` and `central_command/integrations/confluence.py` | `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`, `CC_JIRA_API_TOKEN`, `CC_JIRA_API_FLAVOR`, `CC_JIRA_AUTH_MODE`, `CC_CONFLUENCE_BASE_URL`, `CC_CONFLUENCE_EMAIL`, `CC_CONFLUENCE_API_TOKEN`, `CC_CONFLUENCE_API_FLAVOR`, `CC_CONFLUENCE_AUTH_MODE`, `CC_CONFLUENCE_PROFILE` | v2.53.0 — ASKED at `configure` and PROBED by `check`'s `integrations` section and by both profiles' `verify.sh` (`python scripts/atlassian_probe.py --quiet`), so a stale token is found before the UI rather than mid-tour. No mirror seam and nothing to stage: on an internal Data Center it is a service on the site's own network, and trust rides the CA/insecure rows below. Blank `CC_JIRA_BASE_URL` = NO Jira, and an agent holding a `jira`/`confluence` capability then fails at execution with "Jira is not configured"; blank `CC_CONFLUENCE_BASE_URL` = no Confluence, never "the same site as Jira". A CLOUD API token is ACCOUNT-scoped, so one token serves both products on one site |
 | a private/corporate CA (TLS interception, a self-signed mirror) | everything: host acquisition, the local image builds, podman pulls, LiteLLM, the speech engine | `CC_CA_BUNDLE` | one key, fanned out — the table above |
 | a mandatory egress proxy | every host-side acquisition, and (inside a podman machine) pulls and builds | `CC_PROXY` | fanned out to `http(s)_proxy` in both cases, `no_proxy` pinned to loopback; `./setup.sh machine` writes the machine's `containers.conf` `[engine] env` drop-in |
 | — (verification off) | everything the CA row covers, except the speech engine | `CC_TLS_INSECURE=1` | the other supported answer to interception |
 | — (credentials) | `deploy/discover.sh`'s probes | `CC_NETRC=1` | `--netrc`, so credentials stay in `~/.netrc` and never in `.env` |
 
-Every key above is also a ROW in `deploy/single/questions.tsv`, which is what
-lets `configure` ask for it and `check` validate it — except the three Atlassian
-keys that are not questions on purpose (`CC_JIRA_AUTH_MODE` and
-`CC_CONFLUENCE_AUTH_MODE` DERIVE from their flavor, and `CC_CONFLUENCE_PROFILE`
-is informational), which stay `.env.example` lines. Adding a seam means adding
-that row, its `.env.example` line and its consumer (`.claude/rules/deploy-single.md`).
+Every key above that an operator answers is a ROW in
+`deploy/single/questions.tsv`, which is what lets `configure` ask for it and
+`check` validate it. Three kinds are not asked, on purpose, and stay
+`.env.example` lines: `CC_JIRA_AUTH_MODE` and `CC_CONFLUENCE_AUTH_MODE` DERIVE
+from their flavor, `CC_CONFLUENCE_PROFILE` is informational, and `CC_IMG_<NAME>`
+is written by the resolver. `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and `CC_NETRC` are
+the real gaps: they are answered by hand today and their rows are owed. Adding
+a seam means adding that row, its `.env.example` line and its consumer
+(`.claude/rules/deploy-single.md`).
 `tests/test_single_questions_schema.py` enforces only the reverse — every row's
 key must be declared in `.env.example` — so a seam with no row passes the suite
 and is caught by review.
@@ -363,7 +369,7 @@ are reachable and which mirrors can stand in.
 | PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror — it must carry every pin in `requirements.lock`, graphiti-core (the graph client, in the app's venv since 2026-10-04) among them; the pip install inside the crawler build rides the same seam as a build-arg. |
 | A container registry | `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` at the registry mirror. A mirror that renames PATHS, or one tag that is simply absent: `CC_IMG_<NAME>`. |
 | python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. Under `CC_AIRGAP=1` neither being true is a `check` FAIL, not a warning — the download is known to be impossible. |
-| huggingface.co | Speech: `CC_HF_ENDPOINT` at an HF mirror, or pre-place the two hub snapshots in the `speech-models` volume, or `CC_ENABLE_SPEECH=0` and register `cc-tts`/`cc-stt` at engines you already have. Cockpit-local Whisper (k3s only): pre-place `ggml-*.bin` in `config.whisperModelDir`, or set `WHISPER_MODELS_BASE_URL`. |
+| huggingface.co | Speech: `CC_HF_ENDPOINT` at an HF mirror, or pre-place the two hub snapshots in the `speech-models` volume, or `CC_ENABLE_SPEECH=0` and register `cc-tts`/`cc-stt` at engines you already have. Cockpit-local Whisper (k3s only): pre-place `ggml-*.bin` in `WHISPER_MODEL_DIR` (default `~/.nerve/models`), or set `WHISPER_MODELS_BASE_URL`. |
 
 ## Versions: a constraint, a lock, a resolution
 

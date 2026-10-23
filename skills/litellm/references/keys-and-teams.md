@@ -45,8 +45,8 @@ A model authenticates by **referencing** a stored credential by name:
 litellm_params.litellm_credential_name = '<credential name>'
 ```
 
-The stored credential SET changes over time (the 2026-08-29 clean install
-recreated the proxy database, taking the old `anthropic-main` with it), so
+The stored credential SET changes over time (a clean install recreates the
+proxy database and every credential in it), so
 **always read `litellm_list_credentials` for the current names** — never a
 remembered one. The key-safe way to register or re-point a model against a
 stored credential is:
@@ -84,13 +84,17 @@ don't touch keys.
 
 ## Spend attribution
 
-- Central Command's traffic is attributed to a virtual key aliased **`central_command`**.
-- **Per-agent keys** are the designed refinement: `create_key` with a clear
+- Central Command's own traffic is attributed to the virtual keys the installer
+  mints, scoped per model group: **`cc-spine`** for the app (agents, graph
+  extraction, embeddings, speech) and **`cc-cockpit`** for the cockpit's voice
+  calls (`deploy/k3s/mint-keys.sh`).
+- **Per-agent keys** are a low-priority roadmap refinement (PRD §6.2), with the
+  mechanism already in place: `create_key` with a clear
   alias (e.g. `cc-inbox-triage`) scoped to the models that agent uses; the
   **operator** then captures the plaintext once and sets
   `CC_LLM_PROXY_KEY_<AGENT_ID>` in Central Command's env, and the runtime picks it
   up. You propose the key; the operator wires it. Until then all agents share
-  the `central_command` key.
+  the `cc-spine` key.
 - `litellm_get_spend` reads recent spend aggregated per (model, key) from the
   request log — a **rolling window, not a ledger**.
 - Underneath it is `/spend/logs` (filter by date/request_id). `api_key`/
@@ -102,6 +106,7 @@ don't touch keys.
 - Cost comes from LiteLLM's model-price map unless overridden by custom pricing
   in `model_info`.
 
-Measured context: agent traffic was **$4.69 over 14 days**. Cost is not the
-constraint here; loops and context are. Don't propose spend controls as if it
-were.
+Measured context: agent traffic cost is small (the figure is an instance
+fact). Cost is not the constraint here; loops and context are. Don't propose
+spend controls as if it were.
+<!-- overlay: agent_traffic_cost — moved to the instance overlay by epic-instance-facts-relocation -->

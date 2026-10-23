@@ -37,8 +37,8 @@ before the Executor commits it.
    Graphiti extracts entities and relationships from it asynchronously. You are
    writing the source, and the graph derives the rest.
 2. **Never paste source text.** The episode body is a distilled claim of 1–3
-   self-contained sentences naming people, keys and dates. The graph stores
-   refs, not bodies (D13).
+   self-contained sentences naming people, keys and dates. The graph holds
+   distilled claims, never source bodies (PRD FR-30).
 3. **Reads span `main` + `central_command`; writes land only in `central_command`.**
    The inherited `main` graph is never polluted by this system's proposals.
    <!-- overlay: graph_main_group_origin — moved to the instance overlay by epic-instance-facts-relocation -->

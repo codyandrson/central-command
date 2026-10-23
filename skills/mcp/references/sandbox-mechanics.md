@@ -3,7 +3,7 @@
 Source: `central_command/runtime/tools.py` (the 5 sandbox tools),
 `central_command/runtime/packs.py` (pack `sandbox`), `central_command/sandbox/runner.py`
 (the credential-free runner service), `db/schema.sql`
-(`agent_sandbox_source`), `docs/STATUS.md` (live-verification notes).
+(`agent_sandbox_source`), `deploy/k3s/60-sandbox.yaml` (the namespace's NetworkPolicies).
 
 ## The 5 tools (pack `sandbox`, ungated)
 
@@ -44,10 +44,12 @@ every other `agent_grant`-shaped table (revoke-as-timestamp, `granted_by`).
 ## Containment, not restriction
 
 The sandbox exists to contain **effects on the operator's system**, not to limit
-what an agent can reach. Concretely (per the ratified design doc, §11.2, and
-`docs/STATUS.md`'s sandbox-slice-1 entry):
+what an agent can reach. Concretely (per the ratified design doc,
+`docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md` §11.2,
+and `deploy/k3s/60-sandbox.yaml`):
 
-- **Egress is OPEN to the internet** — an agent must be able to `pip`/`npm`
+- **Egress is OPEN to the internet and internal services alike** (only
+  link-local `169.254.0.0/16` is excluded) — an agent must be able to `pip`/`npm`
   install, fetch real docs, and actually run what it writes, or it ships
   code written against stale training data. This was proved the hard way:
   `echo-demo`'s first draft was authored against `mcp.server.fastmcp` from
@@ -68,8 +70,9 @@ what an agent can reach. Concretely (per the ratified design doc, §11.2, and
 - Residual note from the live drill: `srt` (the userspace egress-controlling
   proxy meant to run as defense-in-depth) cannot actually run under gVisor —
   its netns removal trips gVisor's netstack, no off switch — so it ships
-  dormant in the sandbox image. The two layers actually live are gVisor
-  itself and the CNI-level deny-all NetworkPolicy.
+  dormant in the sandbox image. The layers actually live are gVisor itself
+  and the namespace NetworkPolicy, which denies INGRESS only (egress is open,
+  above); decision-log DL-007 records this.
 
 ## Gate resolution happens outside the sandbox pack entirely
 

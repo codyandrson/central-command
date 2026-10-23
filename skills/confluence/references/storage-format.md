@@ -16,7 +16,6 @@ A macro is:
     <p>Body content, itself storage-format XHTML.</p>
   </ac:rich-text-body>
 </ac:structured-macro>
-</ac:structured-macro>
 ```
 
 Plain XHTML — `<p>`, `<h1>`–`<h6>`, `<table>`/`<tr>`/`<td>`, `<a href="...">`,
@@ -24,17 +23,18 @@ Plain XHTML — `<p>`, `<h1>`–`<h6>`, `<table>`/`<tr>`/`<td>`, `<a href="...">
 
 **A macro name the active instance doesn't have renders as an "unknown
 macro" placeholder — the write itself succeeds with a 200.** There is no
-write-time validation of macro names. Compose only from the profile named by
-`CC_CONFLUENCE_PROFILE` (`instance-profiles`); anything else is a capability
+write-time validation of macro names. Compose only from the allowlist the
+operator's profile names (`instance-profiles`); anything else is a capability
 gap to declare, not a guess to test live.
 
 ## Version-increment rule
 
-Every `confluence.update_page` must carry `version = current_version + 1`,
-where `current_version` comes from a `confluence_get_page` or
-`confluence_page_versions` read taken **this turn**. This is Confluence's
-built-in optimistic-concurrency guard — send the wrong number and the write
-is rejected outright, not silently applied over someone else's edit.
+Every `confluence.update_page` must carry `expected_version`, the
+`current_version` from a `confluence_get_page` or `confluence_page_versions`
+read taken **this turn**; the Executor itself writes `expected_version + 1`.
+The Executor re-reads the page first and refuses the write if the live
+version differs — an optimistic-concurrency guard, so a stale number is
+rejected outright, never silently applied over someone else's edit.
 
 ## Table of Contents
 
@@ -178,7 +178,7 @@ report macro can find it:
   <ac:rich-text-body>
     <table>
       <tbody>
-        <tr><th>Owner</th><td>Jane Smith</td></tr>
+        <tr><th>Owner</th><td>Jane Doe</td></tr>
         <tr><th>Team</th><td>Platform</td></tr>
         <tr><th>Status</th><td>Active</td></tr>
       </tbody>
@@ -248,8 +248,8 @@ expecting it to render.
   authorable end to end.
 - A **status + table layout** — a table with columns for phase/quarter and
   `status` macro lozenges per cell, built from the recipes above.
-- A **Jira macro with a chart-capable JQL view**, or (Server/Data Center only)
-  the **Advanced Roadmaps for Jira in Confluence** embed macro, if the
+- A **Jira macro with a chart-capable JQL view**, or the
+  **Advanced Roadmaps for Jira in Confluence** embed macro, if the
   active profile lists it — see `instance-profiles`.
 
 ## Panel

@@ -2,8 +2,8 @@
 
 ## What a "model" is here
 
-An **alias** (the `model_name` callers use — `cc-default`, `claude-sonnet-5`,
-`graphiti-llm`, `gpt-oss-20b`, `gemma-4-31b`) mapped to a provider model string
+An **alias** (the `model_name` callers use — `cc-default`, `graphiti-llm`,
+`cc-embedding`, or a vendor-style name such as `claude-sonnet-5`) mapped to a provider model string
 via `litellm_params.model` (`anthropic/…`, `openai/…`, `openai/chat_completions/…`,
 `gemini/…`, `ollama/…`). Two `model_list` entries sharing one `model_name` form
 a load-balanced **group**.
@@ -63,11 +63,11 @@ does not render. Fix such a model by populating the native `created_at` (and
 `created_by`) with an in-place update.
 
 Three writers stamp these fields, each only for its own action: the **Executor**
-sets `created_by`/`updated_by` to the proposer and `updated_by`/`updated_at` to
-the approver on every gated add/update; `register-models.py` stamps itself
+sets `created_by`/`updated_by` to the proposer (the approver when there is no
+proposer) on a gated add and `updated_by` likewise on a gated update; `register-models.py` stamps itself
 (`created_by`/`created_at`/`updated_by`/`updated_at` = `"register-models.py"` and
-the creation time) when it creates a skeleton, and never touches an existing
-row; `policy.py --apply` stamps `updated_by`/`updated_at` = `"policy.py"` on
+the time) when it creates a skeleton, and stamps `updated_by`/`updated_at` when
+it completes a still-`PLACEHOLDER` one; it never overwrites a filled-in row; `policy.py --apply` stamps `updated_by`/`updated_at` = `"policy.py"` on
 every model it patches. A model with **all four fields `None`** predates
 2026-08-30's v2.5.0, when neither script set them — it is not evidence of a
 manual edit. Fix it with any later gated update, or a re-run of `policy.py
@@ -112,14 +112,17 @@ that is **not** set in this deployment's `config.yaml`, so treat
 you verify otherwise. Say that plainly rather than promising enforcement.
 
 Separately, Central Command's own runtime **reads** this field for context-pressure
-tracking: `runtime/context.py` discovers `CC_CONTEXT_WINDOW` from
-`cc-default`'s `max_input_tokens` at process start (cached, not re-read live),
-falling back to 200000 if absent. That is why `cc-default` carries the field
-directly and not only its underlying deployment — see below.
+tracking: `runtime/context.py::window_for` discovers a model's window from its
+proxy entry's `max_input_tokens` the first time it is needed (cached per
+model name, not re-read live), falling back to `CC_CONTEXT_WINDOW` (default
+200000) if absent. That is why `cc-default` carries the field directly and not
+only its underlying deployment — see below.
 
-`CC_MAX_OUTPUT_TOKENS` is set on the Central Command side, sized to the
-local model server (the figure is an instance fact). That is a client-side
-setting, not a `model_info` one.
+`CC_MAX_OUTPUT_TOKENS` is the client-side output ceiling, sized to the local
+model server (the figure is an instance fact). A model that declares
+`max_output_tokens` in `model_info` is clamped to the lower of the two per
+request (`runtime/context.py::output_cap_for`), so declare a hosted model's
+cap on its own entry rather than lowering the ceiling.
 <!-- overlay: model_server_max_output_tokens — moved to the instance overlay by epic-instance-facts-relocation -->
 
 ### `supports_vision` — capability is declared, never guessed
@@ -128,11 +131,11 @@ The attachment gate (`litellm.model_accepts_images`) reads
 `model_info.supports_vision` through the calling agent's own key.
 **`None`/absent means "nobody said", never "yes"** — an undeclared model is
 treated as text-only, refusing image attachments even if the underlying
-server can actually see. `cc-default` declares `supports_vision: true` (the
-local model server loads a vision projector for its default model); the judge
-models, where the deployment has any, may not — a model with no vision encoder
-omit the field rather than assert false capability that
-happens to read the same either way.
+server can actually see. `cc-default` declares `supports_vision: true` where the
+local model server loads a vision projector for its default model; a model
+with no vision encoder (a judge model, where the deployment has any) omits the
+field rather than asserting a false capability that happens to read the same
+either way.
 <!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
 
 ## The declared policy file and `policy.py`
@@ -148,12 +151,12 @@ one place: `adaptive_router_preferences` lives in `model_info`,
 `input_cost_per_token` lives in `litellm_params` — put either in the wrong
 LiteLLM object and nothing errors, the router just silently scores every model
 identically (the state found 2026-07-26: `model_costs {}`, every cell at the
-uninformed α=5/β=5 prior).
+uninformed α=5/β=5 prior). The adaptive router that read them is deleted
+(`routing-doctrine`); the declarations remain as checked model metadata.
 
 `policy.py --check` prints drift lines; note two of them are about *absence*:
-an absent `adaptive_router_preferences` means the cell falls back to the
-uninformed prior, and an absent `input_cost_per_token` is **not zero to the
-router**.
+an absent `adaptive_router_preferences` and an absent `input_cost_per_token`
+are both reported as drift — absent is **not zero**, it is undeclared.
 
 **`cc-default` is a full declared entry, not just an alias pointer, since
 2026-08-19.** It used to live only under `aliases:` (a bare DB pointer with no
@@ -207,7 +210,7 @@ lands on your board.
   (`supports_vision`, etc.) — the same fields this document already covers,
   not custom keys.
 - **Health probing here is per-managed-alias only.** A whole-fleet `/health`
-  sweep would swap GPU models on the shared llama-swap slot and time out — see
+  sweep would swap GPU models on a shared swapper slot and time out — see
   `operations` for why `litellm_check_model_health` is expensive and scoped.
 
 ## Proposing a model change

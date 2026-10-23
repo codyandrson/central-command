@@ -1,7 +1,7 @@
 # Errors, permissions and limits
 
 Two flavors, two API generations, and error semantics that don't always
-match Jira's. Check which instance you're on (`CC_CONFLUENCE_PROFILE`)
+match Jira's. Check which instance you're on (`CC_CONFLUENCE_API_FLAVOR`)
 before interpreting a status code.
 
 ## Status codes, per flavor
@@ -11,8 +11,8 @@ before interpreting a status code.
 | 401 | credentials rejected — check the configured email + API token | credentials rejected — check the configured PAT |
 | 403 | authenticated but not permitted for this space/page/operation | same — Server permission schemes are per-space and can be finer-grained than Cloud's |
 | 404 | page/space not found **or not visible to this account** — Confluence conflates the two, exactly like Jira does; never report a 404 as proof something doesn't exist | same conflation |
-| 409 | version conflict on `update_page` — the `version` you sent doesn't match `current + 1`; re-read the page and retry with the fresh version, don't just increment your stale guess again | same |
-| 429 | rate limited — see below; **Cloud only**, and it carries a `Retry-After` header — respect it, don't hammer | Server has no documented per-request rate limit of this kind; a 429 here would be unusual and worth reporting as-is rather than assumed-transient |
+| 409 | version conflict on `update_page`. The Executor normally catches it first: it reads the live page and, if the version differs from your `expected_version`, fails with `updatePage — stale version for page <id>: this proposal was approved against version N, but the current version is M` before any write. Either way: re-read the page and redraft with the fresh version, don't reuse the stale one | same |
+| 429 | rate limited — see below; **Cloud only**, and it carries a `Retry-After` header — the client already waits (up to 30 s) and retries once; a 429 that reaches you after that means back off, don't hammer | Server has no documented per-request rate limit of this kind; a 429 here would be unusual and worth reporting as-is rather than assumed-transient |
 
 ## Auth mechanism per flavor
 
@@ -24,16 +24,17 @@ before interpreting a status code.
 
 ## Rate limiting (Cloud only)
 
-Cloud enforces roughly **65k API points/hour** on this plan tier, tracked
-per-request-cost rather than per-request-count (some endpoints cost more
-points than others). A 429 carries `Retry-After` — back off for that many
+Cloud enforces an API-points-per-hour quota that depends on the plan tier
+<!-- overlay: confluence_plan_limits — moved to the instance overlay by epic-instance-facts-relocation -->,
+tracked per-request-cost rather than per-request-count (some endpoints cost
+more points than others). A 429 carries `Retry-After` — back off for that many
 seconds; don't retry immediately. Cost control:
 
 - Prefer one `confluence_search` with a precise CQL scope over many
   `confluence_get_page` calls to find something.
 - Then use `confluence_get_page` for the specific pages you actually need
   the body or version of.
-- The free plan also caps total users (10) and storage (2GB) — an upload
+- A free plan also caps total users and storage <!-- overlay: confluence_plan_limits — moved to the instance overlay by epic-instance-facts-relocation --> — an upload
   that fails on Cloud with a space/quota-flavored error may be the plan cap,
   not a bug; check remaining space before assuming the request was malformed.
 

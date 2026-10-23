@@ -7,8 +7,8 @@ Paths below are written as Jira **Cloud** serves them (`/rest/api/3`). On a Jira
 **Data Center / Server** deployment (`CC_JIRA_API_FLAVOR=server`) every one is
 `/rest/api/2`, rich text is wiki markup instead of ADF, and users are identified
 by **username** instead of account id — the client handles all of it; the
-arguments you propose are the same on both. Tools marked Cloud-only are simply
-not offered on Data Center.
+arguments you propose are the same on both. Tools marked Cloud-only (the filter,
+dashboard and gadget tools) are simply not offered on Data Center.
 
 ## Reads (ungated — call them freely, before every proposal)
 
@@ -39,7 +39,7 @@ Returns one flat `issue` object:
 read the dependency the way `relation` states it. `type` + `direction` are what
 a `jira.link_issues` proposal needs.
 
-### `jira_search_issues(jql, limit=None)` → `POST /rest/api/3/search/jql`
+### `jira_search_issues(jql, limit=10)` → `POST /rest/api/3/search/jql` (Data Center: `POST /rest/api/2/search`)
 
 Per-issue rows are deliberately **cheaper** than `get_issue`: `issue_key`,
 `summary`, `status`, `issue_type`, `labels`, `due_date`, `updated`, `assignee`,
@@ -55,9 +55,13 @@ Per-issue rows are deliberately **cheaper** than `get_issue`: `issue_key`,
   row. Absent here means empty, never "no such field". Which fields *exist* is
   `jira_list_fields`'s question, and `get_issue` shows all of them, empties and
   internals included.
-- Default page size 50, capped at 100 (`limit` above 100 is clamped down).
-- Paginates with `nextPageToken` up to **10 pages**, then stops. Passing an
-  explicit `limit` stops after the first page.
+- The agent tool's `limit` defaults to **10**. Each request asks for
+  `min(limit, 100)` rows (50 when no limit reaches the client), and the client
+  keeps paging with `nextPageToken` until `limit` rows are in hand, the results
+  end, or **10 pages** have been read (about 1000 rows at most).
+- The result carries `count` and `truncated`: `truncated: true` means rows
+  exist that you did not get. Narrow the JQL or raise `limit`; never conclude
+  from a cut result.
 - `jql` must be a non-empty string **under 2000 characters**.
 
 ### `jira_get_transitions(issue_key)` → `GET /rest/api/3/issue/{key}/transitions`
@@ -71,8 +75,9 @@ source for what a transition proposal may name.
 Every **custom** field this instance declares: `{id, name, type, writable}`.
 `type` is the customfield type key (`textarea`, `datepicker`, `select`, …), and
 `writable` says whether a `jira.set_fields` proposal can set it — fields Jira or
-a plugin owns (`Rank`, `Development`, `Team`, `Agent Sessions`, …) come back
+a plugin owns (`Rank`, `Development`, `Team`, …) come back
 `writable: false` and are refused before any request goes out.
+<!-- overlay: jira_readonly_field_names — moved to the instance overlay by epic-instance-facts-relocation -->
 
 Custom fields are **per-instance**: `customfield_10075` means nothing on another
 Jira, which is why you address them **by name** everywhere — in this list, in
@@ -83,9 +88,9 @@ the issue reads already carry these fields by name.
 The list is cached for 5 minutes, so a field the operator creates in the UI
 appears within that window with nothing restarted.
 
-### `jira_list_projects()` → `GET /rest/api/3/project`
+### `jira_list_projects()` → `GET /rest/api/3/project/search` (Data Center: `GET /rest/api/2/project`)
 
-Every Jira project — key, name, type. Read this **before** proposing any
+Every Jira project — `{key, name, id, type}`, all pages. Read this **before** proposing any
 `jira.create_issue`: the project key is the one argument you cannot infer
 from an email, and a key that does not exist here fails the write. Never
 invent a plausible-sounding key — the real list is short and this tool is the
@@ -101,18 +106,18 @@ who can be assigned issues in that project (without it: `/user/search`). Cloud
 may hide `email`. An empty result means no match for those words; try a shorter
 fragment before concluding the person has no account.
 
-### `jira_list_filters(query="")` → `GET /rest/api/3/filter/search`
+### `jira_list_filters(query="")` → `GET /rest/api/3/filter/search` (Cloud-only)
 
 Saved filters: `{id, name, jql, description, owner}`. First page only. Call
 before proposing `jira.create_filter` — a duplicate filter is a rejected
 proposal. `query` narrows by filter name.
 
-### `jira_list_dashboards(query="")` → `GET /rest/api/3/dashboard/search`
+### `jira_list_dashboards(query="")` → `GET /rest/api/3/dashboard/search` (Cloud-only)
 
 Dashboards: `{id, name, description, view}`. First page only. Call before
 proposing `jira.create_dashboard`.
 
-### `jira_list_gadgets()` → `GET /rest/api/3/dashboard/gadgets`
+### `jira_list_gadgets()` → `GET /rest/api/3/dashboard/gadgets` (Cloud-only)
 
 Every gadget a dashboard can host: `{title, uri, module_key}` — each gadget
 carries **exactly one** of `uri`/`module_key` (built-ins like Filter Results
@@ -123,19 +128,19 @@ an identifier that appears in this list. Never guess one.
 
 | capability | endpoint | notes |
 |---|---|---|
-| `jira.create_issue` | `POST /rest/api/3/issue` | `project_key` must match `[A-Z][A-Z0-9_]*`; `summary` non-empty and **< 255 chars**; `issue_type` is one of **Task, Bug, Story, Epic, Subtask** (`Sub-task` also accepted for company-managed projects — types are per-project, and Jira's own 400 is the final validator); optional `parent` (issue key — REQUIRED for Subtask, names the Epic for a Story/Task under one), `due_date`, `labels`, `assignee` (a `user_id` from `jira_find_users` — on the create, because a follow-up action cannot name the new key) |
+| `jira.create_issue` | `POST /rest/api/3/issue` | `project_key` must match `[A-Z][A-Z0-9_]*`; `summary` non-empty and **at most 255 chars**; `issue_type` is one of **Task, Bug, Story, Epic, Subtask** (`Sub-task` also accepted for company-managed projects — types are per-project, and Jira's own 400 is the final validator); optional `description` (plain text), `parent` (issue key — REQUIRED for Subtask, names the Epic for a Story/Task under one), `due_date`, `labels`, `custom_fields` (`{field name: value}`, resolved and shape-checked exactly like `jira.set_fields` — on the create, so one approval makes the complete issue), `assignee` (a `user_id` from `jira_find_users` — on the create, because a follow-up action cannot name the new key) |
 | `jira.set_due_date` | `PUT /rest/api/3/issue/{key}` | sets `duedate` only |
 | `jira.update_attributes` | `PUT /rest/api/3/issue/{key}` | a **partial** edit of `priority`, `due_date`, `labels` — name only what you mean to change (at least one); an attribute you leave out is untouched. **`labels` is the FULL replacement list, not a merge** (`[]` clears); `due_date: null` clears the date; priority can be changed, not cleared |
-| `jira.set_fields` | `PUT /rest/api/3/issue/{key}` | sets **custom** fields, given as `fields: {"<field name>": value}`. Names come from `jira_list_fields` or a read's `custom_fields` (matched case-insensitively) — **never a `customfield_NNNNN` id**, and never a name you have not seen there: an unknown name is refused here with the real list, because Jira answers an unknown field key with **200 and binds nothing**. The value shape follows the field's declared type: a string for text and rich text (wrapped into ADF for you), a number for numeric, `YYYY-MM-DD` for a date, the option name for a select, a list of names for a multi-select, `null` to clear. `writable: false` fields are refused. Priority, labels and due date are NOT here — those are `jira.update_attributes`. Native-only |
+| `jira.set_fields` | `PUT /rest/api/3/issue/{key}` | sets **custom** fields, given as `fields: {"<field name>": value}`. Names come from `jira_list_fields` or a read's `custom_fields` (matched case-insensitively) — **never a `customfield_NNNNN` id**, and never a name you have not seen there: an unknown name is refused here with the real list, because Jira answers an unknown field key with **200 and binds nothing**. The value shape follows the field's declared type: a string for text and rich text (wrapped into ADF for you), a number for numeric, `YYYY-MM-DD` for a date, the option name for a select, a list of names for a multi-select, `null` to clear. `writable: false` fields are refused. Priority, labels and due date are NOT here — those are `jira.update_attributes` |
 | `jira.add_comment` | `POST /rest/api/3/issue/{key}/comment` | plain text is converted to ADF for you; body must be non-empty |
-| `jira.link_issues` | `POST /rest/api/3/issueLink` | `link_type` is one of **Blocks, Relates, Duplicate**; `from_key` is the **OUTWARD** side (for Blocks: from BLOCKS to — the prerequisite is `from_key`); self-links are refused. The Executor reads the stored link back and fails (removing it) if Jira stored it the other way round — links made before 2026-09-29 were all stored inverted |
+| `jira.link_issues` | `POST /rest/api/3/issueLink` | `link_type` is one of **Blocks, Relates, Duplicate**; `from_key` is the **OUTWARD** side (for Blocks: from BLOCKS to — the prerequisite is `from_key`); self-links are refused. The Executor reads the stored link back and fails (removing it) if Jira stored it the other way round — links made before 2026-09-29 were all stored inverted <!-- overlay: jira_inverted_links_history — moved to the instance overlay by epic-instance-facts-relocation --> |
 | `jira.delete_link` | `DELETE /rest/api/3/issueLink/{id}` | same three arguments as `link_issues`, naming the link **as you read it** on `from_key` (direction `outward`); only a link stored in that direction is removed — no link ids. Correct an inverted link with `delete_link` (as stored) + `link_issues` (as meant) in one proposal |
 | `jira.assign_issue` | `PUT /rest/api/3/issue/{key}/assignee` | `assignee` is a `user_id` from `jira_find_users`, or `null` to unassign; `-1` (project default) is refused |
 | `jira.delete_issue` | `DELETE /rest/api/3/issue/{key}` | **irreversible on Cloud and Data Center** — its own pack (`jira-delete-propose`), jira-expert only. Requires a `reason`; the result records a snapshot of the issue. An issue with subtasks is refused: delete each subtask by its own action first. Finished work is **transitioned**, not deleted |
 | `jira.transition_issue` | `POST /rest/api/3/issue/{key}/transitions` | takes a transition **NAME**, case-insensitive; the client resolves it against `get_transitions` first and fails with the available set if it does not match — it never guesses an id |
-| `jira.create_filter` | `POST /rest/api/3/filter` | `name` non-empty < 255 chars; `jql` non-empty under 2000 chars; optional `description`. Native-only — no façade counterpart |
-| `jira.create_dashboard` | `POST /rest/api/3/dashboard` + `POST .../gadget` per gadget | creates a **private** dashboard (empty share/edit permissions), then adds up to **10** gadgets. Each gadget spec: exactly one of `uri`/`module_key` (from `jira_list_gadgets`), optional `title`, `color`, `position {row, column}`, and `config`. A gadget's failure does not undo the dashboard or earlier gadgets — per-gadget outcomes come back in the result. To bind a saved filter to a gadget, set `config: {"filterId": "filter-<id>"}` — **string values, `filter-` prefix** — or `config: {"filterName": "<exact name>"}` when the filter is created in the same proposal (the name is resolved to the real id at execution time; exactly-one match required, and the whole write fails before anything is created if it cannot resolve). Give exactly ONE filter key. **You do not need to know which pref the gadget binds under** — the client reads the gadget's own XML and rewrites your binding to `filterId` or `projectOrFilterId`, whichever that gadget declares, and sets `isConfigured` for you. Every OTHER key in `config` must be a pref that gadget declares, or the whole write is refused with the accepted list (a gadget silently ignores prefs it does not declare, which is how four gadgets came back reading "hasn't been configured yet"). A placeholder filterId is refused outright. Native-only |
-| `jira.create_project` | `POST /rest/api/3/project` | `key` must be 2–10 chars, uppercase letters/digits only, starting with a letter; `name` non-empty under 255 chars; optional `project_type_key` (defaults `software`). The lead is always the credential's own account (fetched fresh via `/myself`, never hardcoded). Native-only — no façade counterpart |
+| `jira.create_filter` | `POST /rest/api/3/filter` | `name` non-empty, at most 255 chars; `jql` non-empty under 2000 chars; optional `description` |
+| `jira.create_dashboard` | `POST /rest/api/3/dashboard` + `POST .../gadget` per gadget | **Cloud-only.** Creates a **private** dashboard (empty share/edit permissions), then adds up to **10** gadgets. Each gadget spec: exactly one of `uri`/`module_key` (from `jira_list_gadgets`), optional `title`, `color`, `position {row, column}`, and `config`. A gadget's failure does not undo the dashboard or earlier gadgets — per-gadget outcomes come back in the result. To bind a saved filter to a gadget, set `config: {"filterId": "filter-<id>"}` — **string values, `filter-` prefix** — or `config: {"filterName": "<exact name>"}` when the filter is created in the same proposal (the name is resolved to the real id at execution time; exactly-one match required, and the whole write fails before anything is created if it cannot resolve). Give exactly ONE filter key. **You do not need to know which pref the gadget binds under** — the client reads the gadget's own XML and rewrites your binding to `filterId` or `projectOrFilterId`, whichever that gadget declares, and sets `isConfigured` for you. Every OTHER key in `config` must be a pref that gadget declares, or the whole write is refused with the accepted list (a gadget silently ignores prefs it does not declare, which is how four gadgets came back reading "hasn't been configured yet"). A placeholder filterId is refused outright |
+| `jira.create_project` | `POST /rest/api/3/project` | `key` must be 2–10 chars, uppercase letters/digits only, starting with a letter; `name` non-empty, at most 255 chars; optional `project_type_key` (defaults `software`). The lead is always the credential's own account (fetched fresh via `/myself`, never hardcoded). Its own pack (`jira-project-propose`), jira-expert only |
 
 ## Validation that happens before the provider ever sees your arguments
 

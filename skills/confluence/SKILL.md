@@ -22,9 +22,11 @@ Two real instance flavors exist and they are **not interchangeable**:
   `/rest/api` only** — v2 does not exist on Server/DC, ever. start/limit
   pagination. PAT-as-Bearer auth.
 
-The active flavor and its macro allowlist are named by `CC_CONFLUENCE_PROFILE`
-— see `instance-profiles`. Don't assume Cloud behaviour on Server or vice
-versa; check which instance you're actually talking to.
+The active flavor is `CC_CONFLUENCE_API_FLAVOR` (`cloud`, the default, or
+`server`). `CC_CONFLUENCE_PROFILE` is only an informational label for the macro
+allowlist in force — nothing parses or enforces it; see `instance-profiles`.
+Don't assume Cloud behaviour on Server or vice versa; check which instance
+you're actually talking to.
 
 ## Load this skill when
 
@@ -47,12 +49,12 @@ versa; check which instance you're actually talking to.
 2. **Never guess a space key.** Verify with `confluence_list_spaces` before
    any `confluence.create_page` or CQL `space = ` clause — a wrong key is a
    silent zero-result search or a create against the wrong space.
-3. **A page update needs the CURRENT version number, not the next one you
-   invent.** Read the page (`confluence_get_page` or
-   `confluence_page_versions`) immediately before proposing
-   `confluence.update_page`, and send `version = current + 1`. This is the
-   built-in conflict guard — get it wrong and the write is rejected, not
-   silently overwritten.
+3. **A page update needs the CURRENT version number, not a guess.** Read the
+   page (`confluence_get_page` or `confluence_page_versions`) immediately
+   before proposing `confluence.update_page`, and send that number as
+   `expected_version` (the version you READ — the Executor adds the 1). This is
+   the built-in conflict guard — if the live version has moved past it the
+   write is refused, not silently overwritten.
 4. **An attachment must exist before a macro references it.** A draw.io
    macro names its diagram by the attachment's filename; check with
    `confluence_list_attachments` (or your own prior `upload_attachment`
@@ -84,8 +86,9 @@ versa; check which instance you're actually talking to.
   a macro-selection decision table for common authoring intents.
 - `instance-profiles` — the per-instance macro allowlist concept: what
   each profile the deployment ships actually has (its definitions are
-  instance facts, loaded from the instance overlay), and the rule that
-  `CC_CONFLUENCE_PROFILE` names which one is live.
+  instance facts that belong in the gitignored instance overlay, whose loader
+  is not built yet), and the rule that `CC_CONFLUENCE_PROFILE` is an
+  informational label naming which one the operator means.
 - `errors-and-limits` — status codes per flavor, rate limits, the
   `X-Atlassian-Token` header, and CQL pitfalls that produce a wrong answer
   rather than an error.

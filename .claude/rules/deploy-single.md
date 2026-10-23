@@ -94,7 +94,7 @@ when a matching file is read.
   the key. The `*-base` rows reach the builds through the same keys, and
   each Dockerfile's `ARG CC_IMG_*` default must equal its `images.txt` row.
 - **A provider that ANSWERS can still be too old — podman-compose 1.6.0 is a
-  FLOOR** (v2.47.0). The work site ran 1.5.0 and `check` said PASS, because
+  FLOOR** (v2.47.0). A restricted-network install ran 1.5.0 and `check` said PASS, because
   `compose-provider` only ever asked whether something answered. Two things
   this profile depends on first shipped in 1.6.0 (2026-06-03): `up --wait` (the
   deploy phases wait on `compose.yaml`'s healthchecks instead of polling) and
@@ -134,10 +134,13 @@ when a matching file is read.
   commands read it: `configure` ASKS from it and `check`'s answers section
   VALIDATES from it. So adding a dependency is **a row in `questions.tsv` + a
   line in `.env.example` + its consumer**, and
-  `tests/test_single_questions_schema.py` fails the suite otherwise (an
-  undeclared key, a validator that does not exist, a `when` the expression
-  language cannot parse, a `CC_LLM_UPSTREAM_MODEL_*` row that does not match
-  `models.json`'s aliases). The validators live in
+  `tests/test_single_questions_schema.py` fails the suite on a row whose key
+  has no `.env.example` line, a validator that does not exist, a `when` the
+  expression language cannot parse, or a `CC_LLM_UPSTREAM_MODEL_*` row that
+  does not match `models.json`'s aliases. Two families are written by a
+  resolver, not asked, and so have no row: `CC_IMG_<NAME>` (`resolve-images.sh`)
+  and `CC_GRAPH_RERANK_ALIAS`/`_KIND` (the `llm` probe). A test that a consumer
+  never reads a key without a row is owed. The validators live in
   `deploy/single/questions-lib.sh`, print ONE line of reason, and may never
   write — `check` reaches them. `when` is `KEY=value` / `KEY!=value`,
   comma-separated ANDs, evaluated against the answers so far: a tiny expression
@@ -188,8 +191,10 @@ when a matching file is read.
   into each seam.
   Adding an image means adding its constraint/lock line to `images.txt` — the
   seam test fails otherwise. **Version flexibility is for third-party
-  dependencies only:** the locked digest is verified when the mirror serves
-  the locked tag, a same-series substitution is a WARN the operator lives
+  dependencies only:** the locked digest is verified when the registry serves
+  the locked tag (a mismatch is a FAIL on the public host and a WARN on a
+  configured mirror, whose push-seeded manifests are re-serialised), a
+  same-series substitution is a WARN the operator lives
   with, and our own (locally built) images stay exact — the release is one
   tested unit.
 - **A new `.env` writer is a ROW, not a line of bash, and a phase's `probe`
@@ -215,8 +220,10 @@ when a matching file is read.
   `.env` carries `CC_EXECUTOR_MODE=live`.
 - **One exit-code rule, everywhere** (v2.55.0, D5). `cc_exit_code <fails>
   <warns> <actions>` in `deploy/env-lib.sh`, precedence `FAIL > USERACTION >
-  WARN` — `run_phase`, the `machine` subcommand and both `update.sh` entry
-  points call it, so a FAIL is never reported as "stopped for your action."
+  WARN` — `run_phase`, the `machine` subcommand, `resolve-images.sh` and
+  `update.sh` call it, so a FAIL is never reported as "stopped for your action."
+  (`update-run.sh` still relays `update.sh`'s code by hand; adopting
+  `cc_exit_code` there is owed.)
   `phase_fetch` returns 1 on a FAIL now; `USERACTION` is reserved for a seam
   only the operator can fill.
 - **The tree is pristine, or the driver refuses — there is no flag past it**

@@ -77,7 +77,7 @@ Boundaries that hold for the whole run:
    that the operator questions, read the evidence:
    `<state>/discovery/raw/<key>.result` (the classified record; the prober
    prints its output path at the end of a run, and `./deploy/single/setup.sh
-   diagnose` prints the state dir),
+   report` prints the state dir),
    `raw/<key>.err` (curl's own words), `raw/<key>.head` / `raw/<key>.body`
    (what actually came back — a proxy block page names its policy here),
    `raw/tls-issuers.txt` (who is signing what). Reason from these files,
@@ -132,7 +132,9 @@ value is a HOST PREFIX, never a URL; the prober expands it to that registry's
   operator's call, always warned.
 - **`proxy-auth`** — the proxy wants credentials (a 407, or a refused
   CONNECT tunnel surfacing as curl exit 56). Credentials → `~/.netrc` +
-  `CC_NETRC=1`, or a `CC_PROXY` URL the platform team supplies.
+  `CC_NETRC=1`; `CC_PROXY` carries only the credential-free proxy URL the
+  platform team supplies (the prober's own prescription still says "with
+  credentials"; the `.netrc` rule wins until that is fixed).
 - **`auth`** — the endpoint itself wants credentials (typical for a
   private mirror). `~/.netrc` + `CC_NETRC=1`.
 - **`denied`** — reachable but policy-blocked; the block page in

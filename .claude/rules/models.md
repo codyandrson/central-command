@@ -51,8 +51,9 @@ when a matching file is read.
   (registered / skipped / pending). A skip is inferred from a DONE task that
   registered nothing — the agent never bookkeeps it — and a skipped id with
   an unchanged fingerprint is never shown again. "Any change" means exactly
-  those fields: a provider catalog carries no price, context or description,
-  so a fingerprint cannot see them. `reconcile_snapshot` is pure; keep it so.
+  those fields (`id`, `shutdown_date`, `display_name`, and `pricing` where a
+  gateway's catalog carries it): a provider catalog carries no context or
+  description, so a fingerprint cannot see them. `reconcile_snapshot` is pure; keep it so.
 - **Graph search's reranker is ONE optional alias with three tiers, best
   first — and a chat reranker needs logprobs and a NON-thinking alias; the
   probe is the judge** (v2.62.0, design record 2026-10-04 D3 as rebuilt).

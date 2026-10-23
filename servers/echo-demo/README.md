@@ -18,15 +18,16 @@ building a new server should install the library in its sandbox and check the
 real API, exactly as this one eventually did. That habit is the point; this
 file is just what it produced.
 
-**Why it is still deployed.** It runs in `cc-mcp` (gVisor, resource-limited,
-reachable only from LiteLLM) and is registered with the proxy as `echo_demo`
-— LiteLLM forbids `-` in server names where Kubernetes requires it, so the
-canonical id here stays hyphenated and the Executor translates at the
-boundary. Leaving it up makes it the fixture for the two checks the arc has
-not yet made: an UNGATED MCP tool as a live direct callable, and server
-removal with coupled deregistration.
+**Why it was left deployed.** On the deployment that produced it, it ran in
+`cc-mcp` (gVisor, resource-limited, reachable only from LiteLLM), registered
+with the proxy as `echo_demo` — LiteLLM forbids `-` in server names where
+Kubernetes requires it, so the canonical id here stays hyphenated and the
+Executor translates at the boundary. Whether any given deployment still runs it
+is that deployment's state, not this file's claim. Left up, it is the fixture
+for exercising an UNGATED MCP tool as a live direct callable and server removal
+with coupled deregistration.
 
-**Removing it** is an operator decision, not a cleanup chore: delete the
-Deployment/Service in `cc-mcp`, `DELETE /v1/mcp/server/{id}` on the proxy,
-and retire the `mcp_server` row. The gated capability that does this in one
-approved action is designed but not built.
+**Removing it** is an operator decision, not a cleanup chore. The gated
+capability that does it in one approved action is `mcp.server_remove` (deletes
+the Deployment/Service in `cc-mcp`, deregisters from the proxy, retires the
+`mcp_server` row; `servers/echo-demo/` itself is left in place).

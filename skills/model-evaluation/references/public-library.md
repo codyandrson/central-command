@@ -59,7 +59,7 @@ probed model, keyed by its alias:
 
 - **Alias**: <the model_name callers use>
 - **Gateway format**: openai | anthropic | responses-bridge
-- **Registration prefix**: e.g. `openai/chat_completions/<model>`
+- **Registration prefix**: e.g. `openai/<model>`
 - **api_base**: <the gateway host/path, no secrets>
 - **Credential**: <named credential, never a raw key>
 - **Declared `model_info`** (as of this record):

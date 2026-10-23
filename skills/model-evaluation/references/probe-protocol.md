@@ -101,12 +101,12 @@ thinking_levels: ["off", "low", "medium", "xhigh"]
 ```
 
 (the exact vocabulary `runtime/models.py::_thinking_body` reads — see its
-`_ANTHROPIC_EFFORT` map and the `qwen_template` branch, and
-`deploy/shared/litellm/model-preferences.yaml`'s comments on `qwen3.8-27b`/
-`cc-default`: their chat template takes `enable_thinking`/`reasoning_effort`
-through `chat_template_kwargs`, and there is **no** `reasoning_effort: "none"`
-for that template — the template raises and every request 500s, so `"off"`
-must mean `enable_thinking: false`, not an omitted field). If instead the
+`_ANTHROPIC_EFFORT` map and the `qwen_template` branch. A Qwen-style chat
+template takes `enable_thinking`/`reasoning_effort` through
+`chat_template_kwargs`, and there is **no** `reasoning_effort: "none"` for it —
+the template raises and every request 500s, so `"off"` must mean
+`enable_thinking: false`, not an omitted field; the declared policy file's
+comments on the `cc-default` entry carry the worked case). If instead the
 gateway is genuinely OpenAI-`reasoning_effort`-native (Anthropic-style), the
 matching declaration is `thinking_mechanism: anthropic` with
 `thinking_levels: ["off", "low", "medium", "xhigh"]` (`"off"` **quoted** —
@@ -139,9 +139,13 @@ its absence):
   accepted — no request-time ceiling; declare from the model card"* — i.e.
   the endpoint enforces no request-side cap, so `max_output_tokens` has to
   come from the model card or the operator, not from this probe.
-- **non-200**: the error text is scraped for 3+ digit numbers (excluding the
-  1,000,000 you sent) and the largest is reported as `value` — often the
-  real ceiling the gateway just told you in its rejection message.
+- **non-200**: the error text is scraped for 3+ digit numbers below the
+  1,000,000 you sent (anything at or above is your own request echoed back)
+  and the largest is reported as `value` — often the real ceiling the gateway
+  just told you in its rejection message. A gateway that counts requested
+  output against its context window refuses with the CONTEXT length instead;
+  that is reported with no `value` (no request can isolate the output cap
+  there) — declare it from the model card.
 
 ### The context bisect (`measure_context=True`)
 
@@ -153,7 +157,7 @@ tokens (`"0 " * mid`) for the largest prompt the endpoint accepts. Reports
 filler tokens (ceiling searched: M)"}` — `ok` is always `None` here too,
 because this is a measurement, not a verdict. **Expensive on a queued local
 model**: up to 10 full requests against whatever is behind the gateway, which
-on a shared llama-swap-style slot means up to 10 turns through the FIFO
+on a shared swapper-style slot means up to 10 turns through the FIFO
 queue. Only ask for it when the input ceiling is actually in question.
 
 ## `suggested_model_info` — the declared→observed diff
@@ -190,9 +194,11 @@ proposal (and the operator's approval) is the write.
 
 ## A probe is evidence, never a write
 
-`probe_model` calls nothing but `GET /model/info` and `POST
-/v1/chat/completions` under the admin key — no `add_model`, `update_model`,
-or `delete_model` call anywhere in it. Running the probe as often as needed
+`probe_model` calls nothing but `GET /model/info` and a `POST` to the
+probed model's own `/v1/*` endpoint (chat completions, or the embeddings,
+rerank, audio, images, moderations or completions path of a non-chat battery)
+under the admin key — no `add_model`, `update_model`, or `delete_model` call
+anywhere in it. Running the probe as often as needed
 costs tokens and provider calls, never proxy state. What you do with its
 output — declare it via `litellm.update_model` — still goes through the
 normal propose → operator-approves → Executor-applies gate like every other
@@ -260,12 +266,14 @@ request:
 
 ## Aliases the chat battery cannot probe
 
-- **A Responses-bridge alias** (`openai/chat_completions/<model>`, e.g.
-  `graphiti-llm`) serves only `/v1/responses` — the plain chat check 404s
-  with "no router for requested model" and the probe's note says so. Probe
-  the underlying model's own alias; the bridge alias inherits its answers.
+- **A Responses-bridge alias** (`openai/chat_completions/<model>`) serves only
+  `/v1/responses` — the plain chat check 404s with "no router for requested
+  model" and the probe's note says so. Probe the underlying model's own
+  alias; the bridge alias inherits its answers. (`graphiti-llm` must NOT be
+  one: it is a plain `openai/<model>` alias, and the probe's note says to
+  remove the prefix if it finds one there.)
 - **A registered-but-unauthenticated model** fails the chat gate with a 401
   naming the missing provider key — a credential problem, not a capability
-  one (the dormant `claude-*` entries read exactly this way on a fresh
-  install until an Anthropic credential is stored).
+  one (a registered `claude-*` entry reads exactly this way until an Anthropic
+  credential is stored).
 

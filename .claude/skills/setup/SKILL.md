@@ -14,7 +14,7 @@ sub-agent, and never end a turn with no text.
 ## Substrate — ask this once, up front
 
 > Will Central Command run on **this machine alone** (podman — the default, and
-> the giftable profile), or across the operator's **multi-node k3s cluster**
+> the reference profile), or across the operator's **multi-node k3s cluster**
 > (`deploy/k3s/`)?
 
 Record the answer. The **podman substrate** below is the default path; the
@@ -509,7 +509,7 @@ editing `.env` alone does nothing; verify via the `status` RPC's
 
 **Uninstalling (k3s).** Per-manifest: `sudo k3s kubectl delete -f
 deploy/k3s/<file>.yaml` for each of `20-postgres`, `40-graph`, `50-n8n`,
-`60-sandbox`, `61-mcp`, `70-crawler`, `80-vlogs` (add `30-litellm` +
+`60-sandbox`, `61-mcp`, `70-crawler`, `80-vlogs`, `85-pgweb`, `90-speech` (add `30-litellm` +
 `31-litellm-rbac` only for a FULL wipe — deleting a manifest's PVCs deletes
 the data), plus `sudo systemctl disable --now cc-uvicorn cc-nerve
 cc-graph-bolt cc-sandbox-runner cc-backup.timer`. Same `.env`-backup

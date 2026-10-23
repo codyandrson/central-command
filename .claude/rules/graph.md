@@ -30,7 +30,7 @@ when a matching file is read.
   split, found on a scratch graph 2026-10-05). And **a node with no
   `name_embedding` is invisible to the semantic half of hybrid search** while
   still turning up in keyword hits — every write re-embeds through the
-  `cc-embedding` alias at exactly 1024 dimensions; a mis-sized vector is
+  `cc-embedding` alias at the configured width (`CC_EMBED_DIM`, default 1024); a mis-sized vector is
   dropped rather than stored (nothing schema-side enforces the width). Neo4j
   5.x has no parameterized labels, hence the closed `ENTITY_TYPES` allowlist
   mirroring `integrations/graph_ontology.py` (a test pins the two equal).

@@ -27,7 +27,7 @@ This indexes the design records under `docs/superpowers/`: specs, plans, and res
 | 2026-08-22 | [Expert team scaling](specs/2026-08-22-expert-team-scaling-design.md) | implemented | `central_command/runtime/consult.py` |
 | 2026-08-21 | [Work-transition compatibility — Exchange via the internal automation toolset, and what must be true before on-site](specs/2026-08-21-work-transition-compatibility-design.md) | partial | `central_command/integrations/jira.py`, `central_command/integrations/webfetch.py`, `deploy/AIRGAP.md` |
 | 2026-08-21 | [Setup & onboarding — zero to functioning from an API key and Claude Code](specs/2026-08-21-setup-onboarding-design.md) | superseded | `deploy/single/`, `central_command/runtime/tour.py` |
-| 2026-08-21 | [Human-team staffing — the humans are graph data, the staffing is an agent](specs/2026-08-21-human-team-staffing-design.md) | open | `docs/ROADMAP.md` |
+| 2026-08-21 | [Human-team staffing — the humans are graph data, the staffing is an agent](specs/2026-08-21-human-team-staffing-design.md) | open | `docs/decisions/process.md` (DL-176), `docs/PRD.md` |
 | 2026-08-20 | [Graph remediation loop — a PROBLEM verdict becomes a proposed fix](specs/2026-08-20-graph-remediation-loop-design.md) | implemented | `central_command/runtime/graph_curator_profile.py` |
 | 2026-08-19 | [Graph verification auditor — closing the loop after `graph.add_episode`](specs/2026-08-19-graph-verification-auditor-design.md) | implemented | `central_command/runtime/graph_auditor_profile.py` |
 | 2026-08-17 | [Bulk dismissal — chewing the 105k archive without 105k decisions](specs/2026-08-17-bulk-dismissal-design.md) | implemented | `central_command/runtime/tools.py` |

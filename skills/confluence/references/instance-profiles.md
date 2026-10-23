@@ -2,8 +2,10 @@
 
 Confluence has no universal macro set. What renders on one instance is an
 "unknown macro" placeholder on another — installed marketplace apps differ,
-and even built-ins vary by edition and version. `CC_CONFLUENCE_PROFILE`
-names which allowlist is live for the instance you're currently talking to.
+and even built-ins vary by edition and version. `CC_CONFLUENCE_PROFILE` is an
+informational label the operator sets to name the allowlist that applies to
+the instance you're talking to; nothing in the code reads or enforces it, so
+the allowlist is a rule you follow, not a check the system makes.
 **A macro outside the active profile is a capability gap to `declare_gap` on
 — never a guess to try and see what happens**, because a wrong guess doesn't
 error, it just sits broken on the page (`storage-format`).
@@ -13,8 +15,9 @@ error, it just sits broken on the page (`storage-format`).
 A profile is a named allowlist of the macros one instance really has. The
 profile names the deployment ships, and each one's macro inventory (the
 instance's edition, its installed marketplace apps, which categories exist),
-are instance facts: they are read from the instance overlay, not from this
-file.
+are instance facts: they belong in the gitignored instance overlay, not in
+this file (the overlay loader is not built yet, so until it is the operator
+supplies the allowlist).
 
 <!-- overlay: confluence_profile_cloud — moved to the instance overlay by epic-instance-facts-relocation -->
 <!-- overlay: confluence_profile_server — moved to the instance overlay by epic-instance-facts-relocation -->
@@ -53,7 +56,7 @@ amount of correct XML substitutes for.
 
 ## The rule
 
-`CC_CONFLUENCE_PROFILE` names the active profile. Compose a macro body only
+`CC_CONFLUENCE_PROFILE` labels the active profile. Compose a macro body only
 from that profile's allowlist. A macro that would be useful but isn't listed
 for the active instance is a capability gap — `declare_gap`, name the macro
 and the need, and let the operator decide whether to install the app or

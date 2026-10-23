@@ -34,13 +34,13 @@ encode the safety rules and known API shapes.
 - **At most ONE external-write approval per run** (Jira create), and only
   with summary/description `CC TESTRUN <date> - delete me` +
   label `cc-test`. Record the issue key in CLEANUP.md immediately.
-  Delete it in cleanup via `jira._call("DELETE", "/rest/api/3/issue/<KEY>")`.
+  Delete it in cleanup via `jira._call("DELETE", jira._api("/issue/<KEY>"))`
+  (`_api()` picks the REST version the configured flavor speaks).
 - **Mutate only artifacts you create, prefixed `testrun-`.** Real roster
   agents may be TASKED (tiny, "TESTRUN"-labeled tasks) but never
   charter-saved, coached, granted/revoked, retired, or model-changed.
-  Pre-existing test-ish agents (smoke-test-agent, test-intern-1,
-  sandbox-tester or successors) are also off-limits — only clean up what
-  THIS run created.
+  Any pre-existing test-ish agents the roster already holds are also
+  off-limits — only clean up what THIS run created.
 - **Only decide proposals/operator-items your run created** — capture each
   id at creation. Never probe (even 422 probes) against real pending items.
 - **Any config you change: GET/save the original FIRST, restore after,
@@ -79,7 +79,7 @@ Create `drafts/test-run-<date>/` with `REPORT.md` (findings, ranked),
 `CLEANUP.md` (started at phase 0, updated the moment any artifact is
 created), `findings/`, `baseline/`, `verify/`.
 
-0. **Baseline** — full offline `pytest -q`; snapshot roster/grants/charters/
+0. **Baseline** — full `pytest -q` (it needs the dev Postgres, and its live graph reads skip when the backend is down); snapshot roster/grants/charters/
    skills/schedules/dispatch (API JSON + DB CSVs) into `baseline/`; build a
    route inventory from SOURCE (see Lessons). Haiku agents.
 1. **API surface** — 4 parallel lanes: read-only GET sweep (haiku);

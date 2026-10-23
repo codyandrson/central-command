@@ -118,7 +118,7 @@ how to add one.
 - **Status:** active
 - **Date:** 2026-09-15
 - **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**An edge with `expired_at` is not necessarily a retired fact.**"
-- **Why:** CHANGELOG-adjacent incident (v2.35.0): Graphiti expires a NEW edge
+- **Why:** CHANGELOG v2.35.0 records the incident: Graphiti expires a NEW edge
   at birth whenever the extractor supplied an `invalid_at` — a deadline, a
   "through <date>" range, even a future date — which is upstream intent
   (its own test asserts it). A retirement is an edge that PRE-DATES the
@@ -126,7 +126,7 @@ how to add one.
   entries were reader artifacts of a fixed attribution window, not real
   retirements (2026-09-15).
 - **Enforced:** discipline only — not independently pinned to a named test this pass
-- **Source:** .claude/rules/graph.md
+- **Source:** .claude/rules/graph.md; CHANGELOG v2.35.0
 
 ### DL-060 — The ontology needs somewhere for every category; declare high-priority types first
 
@@ -157,7 +157,7 @@ how to add one.
   to fix it, the graph curator could neither read that partition nor
   propose a move. `graph.rescope_episode` was added alongside as the gated
   curation capability to move an episode between partitions.
-- **Enforced:** code structure only — `for_agent` argument on `graph.add_episode`; no dedicated test confirmed by name this pass
+- **Enforced:** test: `tests/test_graph_scope.py::test_executor_private_for_agent_targets_that_agents_partition` and `::test_executor_private_for_agent_must_be_an_active_roster_member`
 - **Source:** CHANGELOG v2.20.0
 
 ### DL-062 — An embedding is never served from memory
@@ -170,5 +170,5 @@ how to add one.
 - **Why:** CHANGELOG `2026-09-01 — v2.19.1: an embedding is never served from
   memory`: LiteLLM's redis response cache no longer covers `/v1/embeddings`
   in either direction.
-- **Enforced:** code structure only — LiteLLM cache configuration; no dedicated test confirmed by name this pass
+- **Enforced:** code structure only — LiteLLM cache configuration (`deploy/shared/litellm/config.yaml`); guarded by `tests/test_litellm_cache_call_types.py`
 - **Source:** CHANGELOG v2.19.1

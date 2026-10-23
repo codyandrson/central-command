@@ -29,7 +29,7 @@ performs it.
 - You are **structuring work** — an epic, a dependency, a risk, a board, or
   filling this instance's cost/benefit fields — `practice-patterns`.
 
-## Four things to hold even without loading a reference
+## Five things to hold even without loading a reference
 
 1. **Read before you propose.** `jira_get_issue` / `jira_search_issues` /
    `jira_get_transitions` are free. A proposal that names a status, transition

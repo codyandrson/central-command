@@ -57,6 +57,10 @@ choose the one that matters most and **say in your intent what you left out**.
   reader who never sees the source. Never pasted source text.
 - `source_description` — where it came from (e.g. `email <message-id>`, the
   document id, or the operator).
+- `reference_time` — **required**, the ISO-8601 instant the source material is
+  from (the mail's sent date, the event's timestamp, the moment the operator
+  said it), read from the material and never "now": the graph anchors every
+  present-tense fact to it and the Executor refuses a proposal without one.
 - `scope` — **required**, exactly `shared` or `private`; nothing defaults,
   because the partition is part of what the operator approves. `shared` is
   the team graph (a domain steward's write lands in its domain group, still
@@ -75,14 +79,14 @@ is knowledge-only.
 ### Good
 
 > "TASKS-12's due date moved from 2026-08-06 to 2026-08-07 after Dana
-> superseded her own morning message on 2026-07-02; the vendor invoice
+> Rivers superseded her own morning message on 2026-07-02; the vendor invoice
 > INV-4471 payment date is unchanged."
 
 Names the issue, both dates, the person, and the supersession.
 
 ### Bad
 
-> "Dana sent an email about the deadline."
+> "Dana Rivers sent an email about the deadline."
 
 Not a fact anyone acts on. Names no date. Restates that a message existed.
 
@@ -94,6 +98,11 @@ Speculation, unnamed entities, unfalsifiable.
 
 For a triage agent this is explicit: **before you propose, answer one question —
 does this source change what the team believes about the world?** If yes, the
-proposal MUST include the `graph.add_episode` action alongside the other change.
-It is not optional garnish. Only skip the episode for trivia, newsletters, or
-facts you are unsure actually happened.
+proposal should include the `graph.add_episode` action alongside the other
+change, or stand alone when the source is knowledge-only. But the graph's
+failure mode is over-inclusion, so the retention test applies strictly and
+**when in doubt, do not propose the episode**: skip it for trivia, newsletters,
+sender dispositions ("mail from Y is expected no-action mail" is triage policy,
+not world knowledge), process state (where a run got to, what is still open),
+and facts you are unsure actually happened — an uncertain fact goes to the
+operator as a question, not to the graph.

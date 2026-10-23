@@ -82,7 +82,7 @@ to add one.
   at full quality rather than degraded, fallbacks stay off by operator
   decision, and only the operator reverses that.
 - **Enforced:** code structure only — an empty YAML block (`fallbacks: {}`); no test asserts fallbacks stay empty
-- **Source:** code comment `deploy/shared/litellm/model-preferences.yaml:413-432`
+- **Source:** code comment `deploy/shared/litellm/model-preferences.yaml:414-432`
 
 ### DL-068 — The router-mode serving unit was never built; model swapping lives outside this repo
 
@@ -118,8 +118,7 @@ to add one.
 - **Date:** 2026-09-13
 - **Rule:** (recorded here) A per-backend, per-alias-pool admission gate
   bounds how many model turns run concurrently; it is explicitly never a
-  global concurrency limit (an operator decision recorded elsewhere too, see
-  MEMORY "Per-model limits, never global").
+  global concurrency limit (PRD FR-35: limits are per model; admission is per backend and pool).
 - **Why:** CHANGELOG `2026-09-13 — v2.28.1: model turns are admitted, not
   just submitted`: an afternoon of approving a hundred autodiscovery
   proposals left 40 sessions competing for the same backend.

@@ -10,7 +10,7 @@
 
 ## Central Command
 
-A human-supervised agentic-team framework: a control plane where the operator tasks Claude agents and approves, by default, every action that changes the world. Python 3.12 (FastAPI, Pydantic AI) with a React/Hono cockpit in `web/`, Postgres as the spine, Graphiti/Neo4j, LiteLLM, n8n. Single-operator and self-hosted, with an air-gapped deployment target; the risk model is error, not malice. Full design: `docs/DESIGN.md`; what changed: `CHANGELOG.md`; design records: `docs/superpowers/`.
+A human-supervised agentic-team framework: a control plane where the operator tasks Claude agents and approves, by default, every action that changes the world. Python 3.12 (FastAPI, Pydantic AI) with a React/Hono cockpit in `web/`, Postgres as the spine, Graphiti/Neo4j, LiteLLM, n8n. Single-operator and self-hosted, with an air-gapped deployment target; the risk model is error, not malice. Why and what: `docs/PRD.md`; how, as built: `docs/ARCHITECTURE.md`; why behind each rule: `docs/decisions/`; what changed: `CHANGELOG.md`; design records: `docs/superpowers/`; the founding design, frozen: `docs/DESIGN.md`.
 
 ## Policy
 
@@ -24,7 +24,7 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 
 ## Where things are
 
-- `web/` is a vendored fork of openclaw-nerve; ours are `web/server/routes/cc-*.ts`, `web/server/lib/gateway-*.ts` and `web/src/features/`. Ignore `web/vendor-unused/`, `web/docs/` and `web/.github/` — upstream leftovers; see `web/VENDORED.md`.
+- `web/` is a vendored fork of openclaw-nerve; ours are `web/server/routes/cc-*.ts`, the `/ws` relay `web/server/lib/ws-proxy.ts` and the Central Command screens under `web/src/features/` (`web/server/lib/gateway-rpc.ts` is upstream's). Ignore `web/vendor-unused/`, `web/docs/` and `web/.github/` — upstream leftovers; see `web/VENDORED.md`.
 - Touching `deploy/`? `deploy/k3s/README.md` is the multi-node runbook, `deploy/single/` the Compose profile, and read `deploy/AIRGAP.md` FIRST for any mirrored or no-egress install.
 - Queue operations (enrolling the fixture backlog, stepping the dispatcher, reading the audit trail): `docs/QUEUE.md`.
 - Subtree bite marks load from `.claude/rules/` when a matching file is read: `graph`, `deploy-k3s`, `deploy-single`, `models`, `cockpit`, `integrations`, `runtime-resilience`, `tests`. Working in one of those areas without having opened its files? Read the rule file first.

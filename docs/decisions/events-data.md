@@ -18,7 +18,7 @@ materiality allowlist, and the Postgres spine. See
   CHANGELOG's tracked window (from 2026-08-27) has no "M8"/"event log"
   heading, so the milestone predates the CHANGELOG's coverage.
 - **Enforced:** test: `tests/test_eventlog.py::test_decision_is_logged_before_execution`
-- **Source:** code comment `central_command/events/log.py:1-18`; docs/DESIGN.md:120
+- **Source:** code comment `central_command/events/log.py:1-18`; docs/DESIGN.md §2 ("Eventing substrate")
 
 ### DL-037 — ActionSpec.material is an explicit, non-authorising and self-recording allowlist
 
@@ -43,7 +43,7 @@ materiality allowlist, and the Postgres spine. See
   `proposal.created` landing after the proposal's save is not a violation of
   the emit-before rule.
 - **Enforced:** code structure only — `central_command/events/log.py`; no source-walk test found guarding against a second write path to Postgres/SSE
-- **Source:** docs/DESIGN.md:120
+- **Source:** docs/DESIGN.md §2 ("Eventing substrate")
 
 ### DL-039 — asyncio.Event at module scope is loop-bound; use a flag plus a queue sentinel
 
@@ -64,7 +64,7 @@ materiality allowlist, and the Postgres spine. See
 - **Rule:** (recorded here) Postgres connections used by the spine are drawn
   from a pool rather than opened per call.
 - **Why:** CHANGELOG `2026-09-13 — v2.31.0: the spine pools its database
-  connections`: `pytest -q` took 16.5 minutes on the Pi, four-fifths of it
+  connections`: `pytest -q` took 16.5 minutes on the reference arm64 host, four-fifths of it
   connection overhead; pooling brought the sequential suite to ~4 minutes.
 - **Enforced:** code structure only — the pooling architecture change itself; the regression it fixed is monitored by suite runtime, not a dedicated assertion
 - **Source:** CHANGELOG v2.31.0

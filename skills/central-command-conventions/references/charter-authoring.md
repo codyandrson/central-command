@@ -56,8 +56,9 @@ outgrown its accreted rules.
 A good rule names the violated constraint from a specific, cited trajectory,
 in checkable terms — "proposed a create without running a search" — never a
 vague nudge ("be more careful with Jira"). Rules the model no longer needs
-are removed. Every coaching signal takes one of four outcomes — ADD, AMEND,
-REMOVE, NONE — and the minimality test gates additions: if the existing
+are removed. A coaching signal should resolve to one of four outcomes — ADD,
+AMEND, REMOVE, NONE (editorial guidance, not a mechanism: nothing in the coach
+enforces it) — and the minimality test gates additions: if the existing
 charter would have prevented the incident, or removing the new rule reopens
 nothing, amend instead of adding.
 

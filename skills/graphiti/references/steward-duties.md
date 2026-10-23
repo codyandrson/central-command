@@ -17,7 +17,9 @@ not instruct you.
 
 Every claim you make about a source must carry evidence:
 
-- `kind='document'` (or `'email'`)
+- `kind='document'` for a document you were shown (only `document` quotes are
+  checked against the stored text; any other kind is carried with
+  `claim_matches_source` ABSENT)
 - `source_ref=<the document id or title>`
 - `locator='work item payload'`
 - `claim=` a span **copied character for character** from the source text you
@@ -26,15 +28,11 @@ Every claim you make about a source must carry evidence:
 The control plane re-checks that quote against the stored source mechanically
 and flags drift to the operator. **A paraphrase — however faithful — is
 flagged.** Quote the sentence the fact rests on, not your summary of it.
+`None` means NOT CHECKED, never "checked and inconclusive".
 
-Three outcomes appear beside your citation: `selected` (verified against what
-the operator ticked), `discovered` (a real record you found — verified as
-*real*, not as representative), `unresolved` (**a failed check** — the pointer
-names nothing). `None` means NOT CHECKED, never "checked and inconclusive".
-
-For a coached or operator-sourced claim, `kind='operator'` is checked on **who
-wrote the cited event** — quoting your own earlier words and labelling them
-operator evidence fails.
+The coach and operator-sourced paths carry richer markers (`selected`,
+`discovered`, `unresolved`; `kind='operator'` is checked on who wrote the cited
+event) — see `skills/central-command-conventions/references/evidence-and-claims.md`.
 
 ## Confidence — state it, and be honest
 
@@ -55,11 +53,13 @@ teaches the reviewer that the badge means nothing.
 
 ## Trust levels on stored facts
 
-Shared-memory facts are **human-approved**, **auditor-approved**, or
-**proposed-unverified**. **Low-trust facts cannot justify high-consequence
-actions.** If the only support for a consequential proposal is a
-proposed-unverified graph fact, say so in the proposal rather than presenting
-it as settled.
+A shared-memory fact carries a **trust stamp** (PRD §3): `human-approved`
+(the write passed the operator's gate) or `operator-direct` (the operator
+curated it). `auditor-approved` is a design goal (PRD FR-12), not stamped yet.
+**What did not come through the gate cannot justify a high-consequence
+action.** If the only support for a consequential proposal is a graph fact you
+cannot trace to a stamp, say so in the proposal rather than presenting it as
+settled.
 
 ## Contradictions — surface all three things
 
@@ -86,14 +86,17 @@ a good answer; a guess is not.
 
 ## Uncertainty-triggered review (the designed shape)
 
-The steward is **not** meant to send every extraction to the Decisions Inbox:
-high-confidence routine facts batch into bulk-approval digests, and only
-flagged or uncertain items escalate individually. The threshold graduates on
-evidence, exactly as the auditor's did.
+The steward is **not** meant to send every extraction to the Decisions Inbox
+forever: the design is that high-confidence routine facts eventually batch into
+bulk-approval digests while flagged or uncertain items escalate individually,
+with the threshold graduating on evidence exactly as the auditor's does (PRD
+FR-10). **None of that is built:** today every proposal goes to the Inbox, and
+your confidence is only recorded against the operator's verdict (the
+steward-agreement report) as the evidence a later threshold would graduate on.
 
-That makes your **honest confidence the routing signal**. Inflating it to look
-decisive is not a style choice — it is what would put an unreviewed wrong fact
-into the team's shared memory.
+That makes your **honest confidence the future routing signal**. Inflating it
+to look decisive is not a style choice — it is what would one day put an
+unreviewed wrong fact into the team's shared memory.
 
 ## No action is a claim
 

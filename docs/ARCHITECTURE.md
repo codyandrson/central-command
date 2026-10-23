@@ -132,7 +132,7 @@ Rows for the same package are grouped by what the modules are for.
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (97 capabilities), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
-| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (deterministic model for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
+| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The agents, one module per entry point and one per built-in charter ("v0"). Several agents have no run path of their own: they are tasked (`run_task`), conversed with or consulted. Agents: EA, knowledge steward, editor, Jira expert, Confluence expert, LiteLLM manager, MCP manager, wiki agent, coach, orchestrator (a router; holds no `propose_*` tools), and the two auditors and the graph curator (charters only) | `ea.py`, `ea_profile.py`, `steward.py`, `steward_profile.py`, `editor.py`, `editor_profile.py`, `jira_expert.py`, `confluence_expert.py`, `litellm_manager.py`, `litellm_manager_profile.py`, `mcp_manager.py`, `mcp_manager_profile.py`, `wiki_agent.py`, `coach_profile.py`, `orchestrator.py`, `orchestrator_profile.py`, `auditor_profile.py`, `graph_auditor_profile.py`, `graph_curator_profile.py` | [models](../.claude/rules/models.md) |
@@ -327,13 +327,16 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   dispatcher claim → `dispatcher.process_claimed()` → agent run → terminal
   state; standing mail rules (`ingest/mail_rules.py`) run before any model
   call. Valves: concurrency, the approval-coupled throttle (don't outrun
-  review), token budget, max attempts. Dispatch is opt-in. Operations and
+  review), token budget (retired by decision, PRD FR-24; the knob stays until its removal ships), max attempts. Dispatch is opt-in. Operations and
   defaults: [`QUEUE.md`](QUEUE.md).
 - **Outage equivalence.** A dependency that is DOWN costs latency, never work:
   `contract/failures.py` classifies, sessions park `AWAITING_RESUME`,
   proposals park `RETRY_PENDING`, tasks retry-park, and the health-gated
   `retry.sweep` converges all three
-  ([spec](superpowers/specs/2026-07-31-outage-equivalence-design.md)).
+  ([spec](superpowers/specs/2026-07-31-outage-equivalence-design.md)). That
+  holds for model calls and approved executions. A DOWN *live read* by an agent
+  (graph, calendar, Jira) is still best-effort today and degrades inside the
+  tool result; PRD FR-40 makes it park, which is on the build list (§6.1).
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).
@@ -420,8 +423,8 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 **The k3s updater** (`cc-update.sh`), in order: resolve → version gate
 (`min_upgrade_from`) → busy check → rollback checkpoint → prebuild changed
 images (services stay up) → database dumps → stop → merge → additive schema →
-rebuild venv and cockpit → manifests and units → n8n workflows → restart →
-reconcile app config → health → roll back on failure. It reads `VERSION` for
+rebuild venv and cockpit → manifests and units → n8n workflows → reconcile app
+config → start services → health → roll back on failure. It reads `VERSION` for
 the installed version, not git. `kubectl apply` never deletes, so a removed
 manifest must be tombstoned in `deploy/k3s/removed.txt`; a changed updater unit
 takes effect on the *next* run.
@@ -465,13 +468,13 @@ Code comments cite these; this is where they resolve.
 |---|---|---|
 | D1 | Employment models: EA / standing-guidance / direct-tasked | standing |
 | D5 | The coaching loop: charter edits are proposed and gated | standing, built (stage 5a) |
-| D7 | Orchestration is a role, not the EA | standing, built; auto-assign not graduated |
+| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 (not yet built; DL-170) |
 | D8 | The independent auditor | standing, built |
 | D9 | Jira and Confluence stay the systems of record | standing |
 | D11 → D11-r1 | No ungoverned private agent memory; revised 2026-08-01 to allow a *gated* per-agent graph partition | revised |
 | D12 | Auditor rollout: shadow first, graduate per action class | standing, built |
 | D13 | Mail bodies referenced and re-fetched, never stored | **reversed** — converted once and persisted ([decision log](decisions/ingest-integrations.md)) |
-| D15–D16 | Dispatcher valves | standing, built |
+| D15–D16 | Dispatcher valves | D15 standing, built; D16's guaranteed backlog trickle was never built (DL-152) and the token-budget valve is retired (PRD FR-24; DL-148) |
 | D17 | Thread-aware batching and folds | standing, built |
 | D18 | Agent-version lifecycle and replay | deferred, not built |
 | D19–D21 | Sandboxing / egress allowlists / vault / anomaly detection cut from the MVP | cut — though an agent sandbox was later built as *containment* |
