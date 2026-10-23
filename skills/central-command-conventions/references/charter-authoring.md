@@ -29,10 +29,9 @@ only the second:
 ## The length budget, and why it is not taste
 
 Instruction-following degrades measurably as instructions stack: ~96%
-compliance at one instruction falls to 20-60% by twenty, and perfect
+compliance at one instruction falls to as low as 20% by twenty, and perfect
 compliance reaches zero near eighty rules — on every model, format, and
-placement tested. Negative constraints ("never X") degrade independently
-beyond about five per prompt. The budget:
+placement tested. The budget:
 
 - **150-400 words of role doctrine**, hard ceiling ~500.
 - **At most a handful of hard "never" rules**, reserved for trust-boundary
@@ -48,8 +47,10 @@ update or replace an example so it portrays the correct behavior — not to
 append a rule. Curated examples generalize; rule-per-incident accretion
 produces the checklist failure mode this standard exists to prevent, and the
 strongest published precedent is deletion, not reorganization: Anthropic cut
-over 80% of a production system prompt with no regression once the model had
-outgrown its accreted rules.
+over 80% of Claude Code's system prompt with no measurable loss on its coding
+evaluations once the models had outgrown its accreted rules (Thariq Shihipar,
+"The new rules of context engineering for Claude 5 generation models",
+2026-07-24, https://claude.com/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models).
 
 ## What a good rule looks like
 

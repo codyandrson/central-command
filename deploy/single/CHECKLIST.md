@@ -108,7 +108,7 @@ marked *yours* is a thing only you can do, recorded once its effect is present.
 Everything else the run does itself. A step that a flag turns off counts as
 done without doing anything — its sentence names the flag. The `check` phase is
 the dry gate: it runs nine sections that change nothing (`./setup.sh check
---list` names them), and the ledger records its rows below.
+--list` names them); its three ledger rows appear below.
 
 ### `check`
 

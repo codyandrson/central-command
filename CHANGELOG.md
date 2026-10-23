@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-22 — v2.68.1: close-out of the documentation rewrite
+
+docs: three close-out items from the v2.68.0 documentation rewrite. Two
+documents, one template, one generated file and one test; no runtime, schema,
+image, configmap or unit input changes, so the apply is the updater's normal
+merge. **Still requires v2.66.0** (`min_upgrade_from` unchanged).
+
+- **Checklist wording.** `scripts/checklist_template.md` said the `check`
+  phase's nine sections were what "the ledger records its rows below", which
+  conflated the nine dry sections with ledger rows. It now reads "it runs nine
+  sections that change nothing (`./setup.sh check --list` names them); its
+  three ledger rows appear below" (the rows are tree-pristine, ca-bundle and
+  linger in `deploy/single/steps.tsv`). `deploy/single/CHECKLIST.md` is
+  regenerated with `scripts/render_checklist.py`, not hand-edited.
+- **Charter-authoring figures.** Three claims in
+  `skills/central-command-conventions/references/charter-authoring.md` were
+  checked against their sources. "Falls to 20-60% by twenty" is now "falls to as
+  low as 20% by twenty": the abstract of arXiv 2608.02639 says the follow rate
+  falls from ~96% to as low as 20% at up to twenty stacked instructions. The
+  sentence that negative constraints degrade independently beyond about five
+  per prompt is deleted: neither arXiv 2608.02639 nor 2607.19257 contains that
+  finding in its full text. The "over 80% of a system prompt cut" precedent is
+  kept and now cites its source, Anthropic's "The new rules of context
+  engineering for Claude 5 generation models" (2026-07-24), which states that
+  over 80% of Claude Code's system prompt was removed with no measurable loss
+  on its coding evaluations.
+- **Test flake.** `tests/test_tasks.py::test_unassigned_task_parks_awaiting_orchestrator`
+  let the route's detached `orchestrator.recommend(...)` task run for real, so
+  it sometimes outlived the event loop and tripped the 120 s timeout at
+  teardown. The test now replaces `recommend` with a recording no-op, yields
+  once, and asserts it was scheduled once with the task row; its other
+  assertions are unchanged.
+
 ## 2026-10-22 — v2.68.0: the documentation set is layered, true and guarded
 
 docs: the documentation-rewrite epic lands. Nine commits since v2.67.2

@@ -42,10 +42,25 @@ async def test_unassigned_task_parks_awaiting_orchestrator(monkeypatch):
         raise AssertionError("an unassigned task must not run an agent")
 
     monkeypatch.setattr(routes, "resolve_model", explode)
+
+    # The route fires `orchestrator.recommend` as a detached background task and
+    # returns; left real, it could still be running when the loop closed and
+    # pytest-timeout fired at teardown. Replace it with a recording no-op and
+    # yield once so the scheduled task completes inside the test.
+    from central_command.runtime import orchestrator
+
+    recommended: list[dict] = []
+
+    async def record(task_row):
+        recommended.append(task_row)
+
+    monkeypatch.setattr(orchestrator, "recommend", record)
     since = await repo.latest_event_id()
 
     out = await create_task(TaskCreateIn(instructions="Audit the TASKS board weekly."))
     assert out == {"deferred": False, "task_id": out["task_id"], "status": "NEW"}
+    await asyncio.sleep(0)
+    assert [r["id"] for r in recommended] == [out["task_id"]]
 
     task = await repo.get_task(out["task_id"])
     assert task["status"] == "NEW" and task["agent_id"] is None
