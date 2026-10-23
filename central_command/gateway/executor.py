@@ -994,6 +994,7 @@ async def _task_create(args: dict, approver: str, proposer: str | None) -> str:
         actor=approver,
         background=True,
         parent_session_id=parent_session_id,
+        approved_by=approver,
     )
     note = ""
     if args.get("await_result"):

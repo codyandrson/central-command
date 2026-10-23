@@ -3370,18 +3370,23 @@ TASK_TERMINAL = ("DONE", "FAILED", "CANCELLED")
 async def create_task(
     task_id: str, title: str, instructions: str, agent_id: str | None,
     parent_session_id: str | None = None,
+    created_by: str | None = None, approved_by: str | None = None,
+    parent_task_id: str | None = None,
+    creator_chain: list[str] | None = None,
 ) -> None:
     conn = await _conn()
     try:
         await conn.execute(
             """
             insert into task (id, title, instructions, agent_id, status,
-                              parent_session_id)
-            values ($1, $2, $3, $4, $5, $6)
+                              parent_session_id, created_by, approved_by,
+                              parent_task_id, creator_chain)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             task_id, title, instructions, agent_id,
             "ASSIGNED" if agent_id else "NEW",
-            parent_session_id,
+            parent_session_id, created_by, approved_by, parent_task_id,
+            list(creator_chain or []),
         )
     finally:
         await conn.close()

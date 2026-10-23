@@ -582,6 +582,21 @@ create index if not exists session_parent_idx on session (parent_session_id);
 alter table task add column if not exists parent_session_id text;
 create index if not exists task_parent_session_idx on task (parent_session_id);
 
+-- Task provenance and backstops (epic-task-backstops). Written ONCE at the one
+-- create path (routes.create_and_run_task) from server-side facts, never from an
+-- agent-supplied argument: created_by is 'operator' | 'heartbeat:<schedule>' |
+-- 'agent:<id>' (NULL on rows that predate it, which read as operator-created);
+-- approved_by is the approver of an approved task.create while that capability
+-- is gated; parent_task_id is the creating session's own task; creator_chain is
+-- the agents that created each hop, root first, INCLUDING the immediate creator
+-- (empty for an operator or heartbeat task). Stored on the row so it survives
+-- retry-park and resume.
+alter table task add column if not exists created_by text;
+alter table task add column if not exists approved_by text;
+alter table task add column if not exists parent_task_id text;
+alter table task add column if not exists creator_chain text[] not null default '{}';
+create index if not exists task_parent_task_idx on task (parent_task_id);
+
 -- Operator items: the orchestrator's asks OF the operator — plan reviews and
 -- questions — reviewed in the Decisions Inbox next to proposals and dismissal
 -- claims. The ANSWER is trusted operator input (recorded here AND on the event

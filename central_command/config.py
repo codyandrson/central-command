@@ -465,6 +465,13 @@ class Settings(BaseSettings):
     orch_max_rounds: int = 50
     orch_fanout_limit: int = 25
 
+    # Task backstops (epic-task-backstops). An agent-created task records its
+    # creator chain; a creation that would make the chain longer than this is
+    # refused at `routes.create_and_run_task` with a `task.refused` event.
+    #   task_max_depth -> agent-created tasks in the lineage INCLUDING the new
+    #                     one (operator task -> T1 -> T2 -> T3 allowed, T4 not)
+    task_max_depth: int = 3
+
     # Auditor (Phase 4, D8/D12) — independent re-verification of agent claims.
     #   auditor_enabled -> off by default; the human gate is the baseline
     #   auditor_mode    -> "shadow" records verdicts without changing any gate;

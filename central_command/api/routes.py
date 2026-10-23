@@ -781,6 +781,7 @@ async def create_and_run_task(
     attachments: list[dict] | None = None,
     model_name: str | None = None,
     thinking: str | None = None,
+    approved_by: str | None = None,
 ) -> dict:
     """THE task-create path — the Task Board REST route, the "+" dialog's
     assign flow, direct tasking sugar, the heartbeat's `task.create` action,
@@ -789,7 +790,13 @@ async def create_and_run_task(
     initiated (operator | heartbeat:<schedule_id> | agent:orchestrator);
     `parent_session_id` links a child task to the orchestrator session it
     reports back to. `attachments` is the Task Board's create-dialog path only
-    — every other caller passes none."""
+    — every other caller passes none.
+
+    Provenance and the backstops (`api/backstops.py`) are decided HERE: creator,
+    parent task and chain are derived from `parent_session_id`, never from an
+    argument. `approved_by` is the one caller-stated fact, and only the Executor
+    states it (the approver of a gated task.create; `actor` stays the approver)."""
+    from central_command.api import backstops
     from central_command.runtime.roster import taskable_agent_ids
 
     instructions = instructions.strip()
@@ -803,6 +810,16 @@ async def create_and_run_task(
         if thinking not in THINKING_LEVELS:
             raise HTTPException(
                 422, f"thinking must be one of {THINKING_LEVELS} (got {thinking!r})")
+    try:
+        prov = await backstops.derive_provenance(actor, parent_session_id)
+    except LookupError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    refusal = backstops.check(prov, agent_id)
+    if refusal:
+        # Loud, and no task row: the event is written before anything runs.
+        await backstops.refuse(prov, agent_id, refusal, actor)
+        raise HTTPException(422, f"task refused ({refusal.reason}): {refusal.message}")
+
     # ponytail: model_name/thinking ride the RUN, not the task row, so a
     # retry-parked task re-runs on the agent's own setting. Persist them on
     # `task` if a schedule's override needs to survive a provider outage.
@@ -842,7 +859,10 @@ async def create_and_run_task(
     task_id = "task_" + uuid.uuid4().hex[:12]
     title = (title or "").strip() or instructions[:80]
     await repo.create_task(task_id, title, instructions, agent_id,
-                           parent_session_id=parent_session_id)
+                           parent_session_id=parent_session_id,
+                           created_by=prov.created_by, approved_by=approved_by,
+                           parent_task_id=prov.parent_task_id,
+                           creator_chain=list(prov.chain))
     await events.emit(
         "task.created",
         ref_id=task_id,

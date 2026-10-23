@@ -127,7 +127,7 @@ Rows for the same package are grouped by what the modules are for.
 
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
-| `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
+| `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (97 capabilities), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
@@ -155,6 +155,19 @@ from the command line (`python -m central_command.selfcheck`) and from
 
 ### The parts `DESIGN.md` does not describe
 
+- **`api/backstops.py` is the task-create seam's provenance and loop breaker.**
+  `routes.create_and_run_task` is the one task-create path; the `task` row
+  records `created_by` (`operator` | `heartbeat:<schedule>` | `agent:<id>`;
+  NULL on older rows, read as operator), `approved_by` (the approver of a
+  gated `task.create`; the event `actor` stays the approver), `parent_task_id`
+  and `creator_chain` (agent ids, root first, including the immediate creator).
+  All are derived server-side from `parent_session_id` — the creator from the
+  session row, the parent task from `repo.task_for_session` — never from tool
+  arguments. A creation whose chain would exceed `task_max_depth` (default 3:
+  agent-created tasks in the lineage including the new one), or an
+  agent-created task naming no assignee, writes no row, emits `task.refused`
+  (`ref_id` the parent task, else the creating session; payload `reason`,
+  `chain`, `creator`, `agent_id`) and returns a 422 naming the reason.
 - **`api/orchestration.py` is a driver; `runtime/orchestrator.py` is an agent.**
   The agent holds no `propose_*` tools — it recommends routing and changes
   nothing. The driver (tier ②) runs multi-agent *projects* as a durable plan →
@@ -308,7 +321,7 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
 - **Event log.** `events.emit()` writes the row to Postgres, then fans out to
   in-process subscribers; the SSE stream (`GET` stream route in
   `api/routes.py`) and the cockpit's `/ws` push frames are projections of the
-  table, never a parallel channel. 166 distinct event types are emitted today
+  table, never a parallel channel. 167 distinct event types are emitted today
   (recounted from `emit(...)` call sites by the guard; dynamic kinds such as
   bridged log records are not counted). Ordering rule: an event that
   *authorises* something is written before the thing it authorises.
