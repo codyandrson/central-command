@@ -29,6 +29,8 @@ AGENT_PREFIX = "agent:"
 HEARTBEAT_PREFIX = "heartbeat:"
 
 DEPTH = "depth"
+CYCLE = "cycle"
+SELF = "self"
 NO_ASSIGNEE = "no-assignee"
 
 
@@ -83,12 +85,48 @@ async def derive_provenance(actor: str, parent_session_id: str | None) -> Proven
     if parent:
         chain = tuple(parent.get("creator_chain") or ()) + (creator,)
         return Provenance(f"{AGENT_PREFIX}{creator}", parent["id"], chain, parent["id"])
-    return Provenance(f"{AGENT_PREFIX}{creator}", None, (creator,), parent_session_id)
+    # A task-less session (chat, triage, a consult specialist) inherits the chain
+    # of the nearest ancestor session that has a task, so a consult inside a
+    # task chain cannot reset the depth or cycle count. No such ancestor: it
+    # starts a chain of its own.
+    inherited = await _inherited_chain(parent_session_id)
+    return Provenance(f"{AGENT_PREFIX}{creator}", None, inherited + (creator,),
+                      parent_session_id)
 
 
-def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
+_ANCESTOR_HOPS = 16
+
+
+async def _inherited_chain(session_id: str) -> tuple[str, ...]:
+    """The stored chain of the nearest ancestor session that runs a task, or ().
+
+    Ancestry is `session.parent_session_id` (an orchestrated child) and, for a
+    consult specialist's session, the asking session stamped on its proposal's
+    `origin`. Bounded and cycle-safe: the walk is over server-side rows only.
+    """
+    seen = {session_id}
+    current = session_id
+    for _ in range(_ANCESTOR_HOPS):
+        row = await repo.get_session(current)
+        nxt = (row or {}).get("parent_session_id") or (
+            await repo.consult_caller_session(current))
+        if not nxt or nxt in seen:
+            return ()
+        seen.add(nxt)
+        task = await repo.task_for_session(nxt)
+        if task:
+            return tuple(task.get("creator_chain") or ())
+        current = nxt
+    return ()
+
+
+async def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
     """The first backstop the creation trips, or None. Operator and heartbeat
-    creations are roots and are never refused here."""
+    creations are roots and are never refused here.
+
+    Every refusal that has an alternative names it: the taskable teammates the
+    creator may use instead, from the same roster source the seam's taskable
+    check reads, minus the creator and everyone already in the chain."""
     if not prov.agent_created:
         return None
     if agent_id is None:
@@ -96,6 +134,20 @@ def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
             NO_ASSIGNEE,
             "an agent-created task must name an assignee; an unassigned task "
             "is the operator's to route",
+        )
+    creator = prov.creator_agent
+    if agent_id == creator:
+        return Refusal(
+            SELF,
+            f"you ARE {agent_id} — a task assigned to yourself adds nothing. "
+            + await _alternatives(prov),
+        )
+    if agent_id in prov.chain:
+        return Refusal(
+            CYCLE,
+            f"{agent_id!r} is already in this task chain "
+            f"({' -> '.join(prov.chain)}) — assigning back to it would cycle. "
+            + await _alternatives(prov),
         )
     cap = settings.task_max_depth
     if len(prov.chain) > cap:
@@ -107,6 +159,16 @@ def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
             f"a fresh task.",
         )
     return None
+
+
+async def _alternatives(prov: Provenance) -> str:
+    from central_command.runtime.roster import taskable_agent_ids
+
+    options = [a for a in await taskable_agent_ids() if a not in prov.chain]
+    if not options:
+        return ("No other taskable teammate is outside this chain: do the "
+                "work yourself or report back.")
+    return "Taskable teammates you may assign instead: " + ", ".join(options) + "."
 
 
 async def refuse(prov: Provenance, agent_id: str | None, refusal: Refusal,

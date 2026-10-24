@@ -1142,6 +1142,21 @@ async def save_proposal(
         await conn.close()
 
 
+async def consult_caller_session(session_id: str) -> str | None:
+    """The asking session of a consult specialist's session, from the `origin`
+    on its proposal (stamped by `runtime/consult.py`), or None."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            "select origin->>'caller_session_id' from proposal "
+            "where session_id = $1 and origin->>'caller_session_id' is not null "
+            "limit 1",
+            session_id,
+        )
+    finally:
+        await conn.close()
+
+
 async def live_consult_draft(caller_session_id: str, agent_id: str) -> dict | None:
     """The surviving side effect of a consult that already DRAFTED for this
     caller session: the specialist's still-undecided proposal, or None.

@@ -240,3 +240,148 @@ async def test_a_creating_session_that_does_not_exist_is_refused_without_a_row()
             "x", None, AGENTS[1], parent_session_id="sess_missing")
     assert exc.value.status_code == 422
     assert len(await repo.list_tasks()) == before
+
+
+# --- story 2: cycle and self ------------------------------------------------
+
+
+def _teammates(detail: str) -> list[str]:
+    """The ids a refusal names after 'instead:'."""
+    return [t.strip() for t in detail.split("instead:")[1].rstrip(".").split(",")]
+
+
+async def test_a_to_b_to_a_is_refused_as_a_cycle_naming_teammates():
+    a, b, c, d = AGENTS[:4]
+    root = await _operator_root(a)
+    t1 = await _approve_task_create(await _running(a, root), a, b)
+    before = len(await repo.list_tasks())
+    since = await repo.latest_event_id()
+
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(await _running(b, t1), b, a)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail.startswith("task refused (cycle):")
+    named = _teammates(exc.value.detail)
+    assert c in named and d in named
+    assert a not in named and b not in named
+    assert len(await repo.list_tasks()) == before
+    (refused,) = await _refusals(since)
+    assert refused["ref_id"] == t1
+    assert refused["payload"]["reason"] == "cycle"
+    assert refused["payload"]["chain"] == [a, b]
+    assert refused["payload"]["agent_id"] == a
+    assert not [e for e in await repo.list_events(since_id=since, kind="task")
+                if e["kind"] == "task.created"]
+
+
+async def test_a_to_a_is_refused_as_self_naming_teammates():
+    a, b = AGENTS[:2]
+    root = await _operator_root(a)
+    before = len(await repo.list_tasks())
+    since = await repo.latest_event_id()
+
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(await _running(a, root), a, a)
+
+    assert exc.value.detail.startswith("task refused (self):")
+    named = _teammates(exc.value.detail)
+    assert b in named and a not in named
+    assert len(await repo.list_tasks()) == before
+    (refused,) = await _refusals(since)
+    assert refused["payload"]["reason"] == "self"
+    assert refused["payload"]["chain"] == [a]
+
+
+async def test_orchestrator_to_orchestrator_is_refused_as_self():
+    since = await repo.latest_event_id()
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(await _running("orchestrator"),
+                                   "orchestrator", "orchestrator")
+    assert exc.value.detail.startswith("task refused (self):")
+    assert "orchestrator" not in _teammates(exc.value.detail)
+    (refused,) = await _refusals(since)
+    assert refused["payload"]["reason"] == "self"
+    assert refused["payload"]["creator"] == "agent:orchestrator"
+
+
+async def test_the_orchestrator_in_the_chain_is_refused_as_a_cycle():
+    a = AGENTS[0]
+    t1 = await _approve_task_create(await _running("orchestrator"), "orchestrator", a)
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(await _running(a, t1), a, "orchestrator")
+    assert exc.value.detail.startswith("task refused (cycle):")
+
+
+async def test_b_to_c_both_new_to_the_chain_is_not_refused():
+    a, b, c = AGENTS[:3]
+    root = await _operator_root(a)
+    t1 = await _approve_task_create(await _running(a, root), a, b)
+    since = await repo.latest_event_id()
+
+    t2 = await _approve_task_create(await _running(b, t1), b, c)
+
+    assert (await repo.get_task(t2))["creator_chain"] == [a, b]
+    assert not await _refusals(since)
+
+
+async def test_operator_and_heartbeat_tasks_to_any_agent_are_never_cycles():
+    a = AGENTS[0]
+    since = await repo.latest_event_id()
+    for actor in ("operator", "heartbeat:nightly"):
+        out = await routes.create_and_run_task("work", None, a, actor=actor)
+        assert out["task_id"]
+        out = await routes.create_and_run_task("again", None, a, actor=actor)
+        assert out["task_id"]
+    assert not await _refusals(since)
+
+
+async def test_a_consult_specialist_inherits_the_asking_tasks_chain():
+    """A task-less specialist session drafts a task from inside a task chain:
+    the chain carries on from the asker's task, so the count cannot reset."""
+    a, b, c, d = AGENTS[:4]
+    root = await _operator_root(a)
+    t1 = await _approve_task_create(await _running(a, root), a, b)  # chain [a]
+    asker = await _running(b, t1)
+    specialist = await _running(c)
+    await repo.save_proposal(
+        _uid("prop"), specialist, c, "consulted", [], [], "",
+        idempotency_key=_uid("key"),
+        origin={"consulted_by": b, "caller_session_id": asker},
+    )
+
+    t2 = await _approve_task_create(specialist, c, d)
+
+    assert (await repo.get_task(t2))["creator_chain"] == [a, c]
+
+    # ...and the inherited chain is what the cycle check reads.
+    specialist2 = await _running(c)
+    await repo.save_proposal(
+        _uid("prop"), specialist2, c, "consulted", [], [], "",
+        idempotency_key=_uid("key"),
+        origin={"consulted_by": b, "caller_session_id": asker},
+    )
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(specialist2, c, a)
+    assert exc.value.detail.startswith("task refused (cycle):")
+
+
+async def test_a_specialist_inside_a_depth_two_chain_is_counted_at_depth_three():
+    a, b, c, e, d = AGENTS  # d (inbox-triage) only creates, e is taskable
+    root = await _operator_root(a)
+    t1 = await _approve_task_create(await _running(a, root), a, b)
+    t2 = await _approve_task_create(await _running(b, t1), b, c)  # chain [a, b]
+    asker = await _running(c, t2)
+    specialist = await _running(d)
+    await repo.save_proposal(
+        _uid("prop"), specialist, d, "consulted", [], [], "",
+        idempotency_key=_uid("key"),
+        origin={"consulted_by": c, "caller_session_id": asker},
+    )
+
+    t3 = await _approve_task_create(specialist, d, e)
+
+    assert (await repo.get_task(t3))["creator_chain"] == [a, b, d]  # depth 3: allowed
+    with pytest.raises(HTTPException) as exc:  # its next hop is depth 4
+        await _approve_task_create(await _running(e, t3), e, c)
+    assert exc.value.detail.startswith("task refused (depth):")

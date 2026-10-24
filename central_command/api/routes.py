@@ -814,7 +814,7 @@ async def create_and_run_task(
         prov = await backstops.derive_provenance(actor, parent_session_id)
     except LookupError as exc:
         raise HTTPException(422, str(exc)) from exc
-    refusal = backstops.check(prov, agent_id)
+    refusal = await backstops.check(prov, agent_id)
     if refusal:
         # Loud, and no task row: the event is written before anything runs.
         await backstops.refuse(prov, agent_id, refusal, actor)

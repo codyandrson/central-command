@@ -163,11 +163,19 @@ from the command line (`python -m central_command.selfcheck`) and from
   and `creator_chain` (agent ids, root first, including the immediate creator).
   All are derived server-side from `parent_session_id` — the creator from the
   session row, the parent task from `repo.task_for_session` — never from tool
-  arguments. A creation whose chain would exceed `task_max_depth` (default 3:
-  agent-created tasks in the lineage including the new one), or an
-  agent-created task naming no assignee, writes no row, emits `task.refused`
-  (`ref_id` the parent task, else the creating session; payload `reason`,
-  `chain`, `creator`, `agent_id`) and returns a 422 naming the reason.
+  arguments; a creating session with no task of its own (chat, a consult
+  specialist) inherits the chain of its nearest task-bearing ancestor session
+  (`parent_session_id`, or the asking session on a consult proposal's
+  `origin`). A creation is refused, with reason `self` (the assignee is the
+  creator), `cycle` (the assignee is already in the chain, the orchestrator
+  included), `depth` (the chain would exceed `task_max_depth`, default 3:
+  agent-created tasks in the lineage including the new one) or `no-assignee`
+  (an agent-created task must name one): it writes no row, emits
+  `task.refused` (`ref_id` the parent task, else the creating session; payload
+  `reason`, `chain`, `creator`, `agent_id`) and returns a 422 naming the
+  reason; `self` and `cycle` refusals also name the taskable teammates (the
+  roster's `taskable_agent_ids()`, minus the chain) the creator may use
+  instead. Operator and heartbeat creations are roots and never trip these.
 - **`api/orchestration.py` is a driver; `runtime/orchestrator.py` is an agent.**
   The agent holds no `propose_*` tools — it recommends routing and changes
   nothing. The driver (tier ②) runs multi-agent *projects* as a durable plan →

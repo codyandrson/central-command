@@ -163,7 +163,7 @@ async def test_await_result_is_ignored_on_a_consult_drafted_proposal(monkeypatch
     )
 
     outcome = await executor.execute(
-        [_action(await_result=True)], approver="human:lee", source_refs=[],
+        [_action(agent_id="litellm-manager", await_result=True)], approver="human:lee", source_refs=[],
         proposer="jira-expert", proposal_id=pid,
     )
     assert outcome.task_wait is None
