@@ -126,13 +126,18 @@ async def _inherited_chain(session_id: str) -> tuple[tuple[str, ...], str | None
     return (), None
 
 
-async def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
+async def check(prov: Provenance, agent_id: str | None, *,
+                pending: int = 0) -> Refusal | None:
     """The first backstop the creation trips, or None. Operator and heartbeat
     creations are roots and are never refused here.
 
     Every refusal that has an alternative names it: the taskable teammates the
     creator may use instead, from the same roster source the seam's taskable
-    check reads, minus the creator and everyone already in the chain."""
+    check reads, minus the creator and everyone already in the chain.
+
+    `pending` is the number of sibling creations a caller has planned but not
+    yet made (the orchestration driver's batch): they count toward fan-out as
+    if they existed, so a batch is judged as the whole it would become."""
     if not prov.agent_created:
         return None
     if agent_id is None:
@@ -173,14 +178,17 @@ async def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
         parent_task_id=prov.parent_task_id,
         parent_session_id=None if prov.parent_task_id else prov.ref_id,
     )
-    if created >= limit:
+    if created + pending >= limit:
         scope = "task" if prov.parent_task_id else "conversation"
+        made = (f"has already created {created} tasks" if not pending else
+                f"has created {created} tasks and this batch plans {pending} "
+                f"before this one")
         return Refusal(
             FAN_OUT,
-            f"this {scope} has already created {created} tasks — fan-out is "
+            f"this {scope} {made} — fan-out is "
             f"capped at {limit}. Do the rest yourself or report back; the "
             f"operator can create a fresh task.",
-            {"limit": limit, "created": created},
+            {"limit": limit, "created": created + pending},
         )
     return None
 

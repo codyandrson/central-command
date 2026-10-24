@@ -6,7 +6,9 @@ What these tests lock in:
   ungated text answer flows back WITHOUT approval → final report);
 - the gated path (a child's proposal parks in the Decisions Inbox; the loop
   resumes only after the operator's decision);
-- the mechanical guards: star shape / depth-1, plan-before-assign, stall
+- the mechanical guards: the task backstops over the orchestrator's batch
+  (an agent-created project runs; depth, cycle and fan-out refuse before any
+  child exists), plan-before-assign, stall
   escalation (The operator: pause when stuck, never budgets), batch rejection bounded;
 - restart-proofness: resume works purely from persisted state (M2's
   two-process property, orchestration edition);
@@ -182,7 +184,7 @@ async def test_gated_child_parks_proposal_and_resumes_after_approval(monkeypatch
 # --- mechanical guards ---------------------------------------------------------
 
 
-async def test_star_shape_self_assignment_is_rejected():
+async def test_orchestrator_self_assignment_is_refused_as_a_cycle():
     r = await _start_project("Demo project: try to self-delegate.")
     # bad-target model: plan → (approve) → assigns to the orchestrator itself
     sid = r["session_id"]
@@ -200,7 +202,7 @@ async def test_star_shape_self_assignment_is_rejected():
     assert out is not None
     rejected = await repo.list_events_of_kinds(["orchestration.batch_rejected"])
     mine = [e for e in rejected if e["ref_id"] == sid]
-    assert mine and any("not an ACTIVE taskable" in p
+    assert mine and any("is yourself" in p and "cycle" in p
                         for p in mine[0]["payload"]["problems"])
     children = [t for t in await repo.list_tasks()
                 if t.get("parent_session_id") == sid]
@@ -306,21 +308,208 @@ async def test_assign_work_children_count_against_the_project_task():
     assert await repo.count_child_tasks(parent_task_id=r["task_id"]) == 1
 
 
-async def test_depth1_agent_created_task_refused():
-    task = {"id": "task_x", "instructions": "x", "title": "x",
-            "agent_id": "orchestrator", "parent_session_id": "sess_parent"}
-    with pytest.raises(ValueError, match="depth-1"):
-        await orchestration.run_project(task)
+def _assigning_model(*targets: str):
+    """plan → (approved) → one assign_work per target in ONE round → text
+    surrender once the batch comes back rejected, quoting the rejection."""
+    from pydantic_ai.messages import (
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+    )
+    from pydantic_ai.models.function import FunctionModel
+
+    def respond(messages, info):
+        returns = {p.tool_name: str(p.content) for m in messages
+                   for p in getattr(m, "parts", [])
+                   if isinstance(p, ToolReturnPart)}
+        if "BATCH REJECTED" in returns.get("assign_work", ""):
+            return ModelResponse(parts=[TextPart(
+                content="Rejected: " + returns["assign_work"])])
+        if "submit_plan" in returns:
+            return ModelResponse(parts=[
+                ToolCallPart(tool_name="assign_work", args={
+                    "agent_id": t, "title": f"job {i}",
+                    "instructions": f"Demo: job {i}."})
+                for i, t in enumerate(targets)])
+        return ModelResponse(parts=[ToolCallPart(
+            tool_name="submit_plan", args={"plan": "PLAN: delegate."})])
+
+    return FunctionModel(respond)
 
 
-async def test_create_path_refuses_orchestrator_as_child_target():
-    from fastapi import HTTPException
+async def _start_agent_project(creator: str = "jira-expert") -> tuple[dict, str]:
+    """An agent-created project, the way an approved task.create makes one: the
+    creating session is the parent. Returns (run result, creating session)."""
+    creating = "sess_" + __import__("uuid").uuid4().hex[:12]
+    await repo.create_running_session(creating, creator)
+    r = await routes.create_and_run_task(
+        "Demo project: review TASKS-12.", "Agent project", "orchestrator",
+        actor="human:lee", background=False, parent_session_id=creating)
+    return r, creating
 
-    with pytest.raises(HTTPException) as e:
-        await routes.create_and_run_task(
-            "x", None, "orchestrator", actor="agent:orchestrator",
-            parent_session_id="sess_parent")
-    assert e.value.status_code == 422
+
+async def _approve_plan(sid: str, model) -> None:
+    item = await _open_item(sid, "plan_review")
+    await repo.answer_operator_item(item["id"], "", "approved")
+    await orchestration.maybe_resume(sid, model=model)
+
+
+async def test_agent_created_project_reaches_its_plan_review_park():
+    r, creating = await _start_agent_project()
+
+    # The orchestrator is a valid assignee for an agent creator: it ran as a
+    # project and parked on the operator's plan review before round one.
+    assert r["parked"] is True
+    assert await repo.session_status(r["session_id"]) == "AWAITING_AGENTS"
+    await _open_item(r["session_id"], "plan_review")
+    project = await repo.get_task(r["task_id"])
+    assert project["status"] == "IN_PROGRESS"
+    assert project["parent_session_id"] == creating
+    assert project["created_by"] == "agent:jira-expert"
+    assert project["creator_chain"] == ["jira-expert"]
+    # Nothing was assigned before the plan was approved.
+    assert [t for t in await repo.list_tasks()
+            if t.get("parent_session_id") == r["session_id"]] == []
+
+
+async def test_an_agent_projects_children_carry_the_orchestrator_in_their_chain(
+        monkeypatch):
+    monkeypatch.setattr(
+        routes, "resolve_model",
+        aresolve(lambda *a, **k: _text_model("Done.")))
+    r, _ = await _start_agent_project()
+    await _approve_plan(r["session_id"], _assigning_model("litellm-manager"))
+
+    (child,) = [t for t in await repo.list_tasks()
+                if t.get("parent_session_id") == r["session_id"]]
+    assert child["parent_task_id"] == r["task_id"]
+    assert child["creator_chain"] == ["jira-expert", "orchestrator"]
+    assert child["created_by"] == "agent:orchestrator"
+
+
+async def test_the_orchestrators_child_past_the_depth_cap_is_refused(monkeypatch):
+    # operator-less chain: jira-expert -> project -> child makes two hops.
+    monkeypatch.setattr(settings, "task_max_depth", 1)
+    r, _ = await _start_agent_project()
+    sid = r["session_id"]
+    since = await repo.latest_event_id()
+    await _approve_plan(sid, _assigning_model("litellm-manager"))
+
+    assert [t for t in await repo.list_tasks()
+            if t.get("parent_session_id") == sid] == []
+    (rej,) = [e for e in await repo.list_events_of_kinds(
+        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    assert any("(depth)" in p for p in rej["payload"]["problems"])
+    (refused,) = [e for e in await repo.list_events(since_id=since, kind="task")
+                  if e["kind"] == "task.refused"]
+    assert refused["ref_id"] == r["task_id"]
+    assert refused["payload"]["reason"] == "depth"
+    assert refused["payload"]["chain"] == ["jira-expert", "orchestrator"]
+
+
+async def test_the_orchestrator_cannot_hand_work_back_to_its_creator():
+    r, _ = await _start_agent_project("jira-expert")
+    sid = r["session_id"]
+    since = await repo.latest_event_id()
+    await _approve_plan(sid, _assigning_model("jira-expert"))
+
+    (rej,) = [e for e in await repo.list_events_of_kinds(
+        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    assert any("(cycle)" in p for p in rej["payload"]["problems"])
+    (refused,) = [e for e in await repo.list_events(since_id=since, kind="task")
+                  if e["kind"] == "task.refused"]
+    assert refused["payload"]["reason"] == "cycle"
+
+
+async def test_a_batch_whose_third_assignment_exceeds_the_cap_creates_none(
+        monkeypatch):
+    monkeypatch.setattr(settings, "task_fanout_limit", 2)
+    r = await _start_project()
+    sid = r["session_id"]
+    since = await repo.latest_event_id()
+    await _approve_plan(sid, _assigning_model(
+        "jira-expert", "litellm-manager", "confluence-expert"))
+
+    # All-or-nothing: the first two (individually fine) were NOT created.
+    assert [t for t in await repo.list_tasks()
+            if t.get("parent_session_id") == sid] == []
+    (rej,) = [e for e in await repo.list_events_of_kinds(
+        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    (line,) = rej["payload"]["problems"]
+    assert "confluence-expert" in line and "(fan-out)" in line
+    # The refusal reached the orchestrator in its tool result.
+    assert "(fan-out)" in (await repo.get_task(r["task_id"]))["outcome"]
+    # Recorded once, for the one refused assignment — not per retry or sibling.
+    (refused,) = [e for e in await repo.list_events(since_id=since, kind="task")
+                  if e["kind"] == "task.refused"]
+    assert refused["ref_id"] == r["task_id"]
+    assert refused["payload"]["reason"] == "fan-out"
+    assert refused["payload"]["limit"] == 2 and refused["payload"]["created"] == 2
+
+
+async def test_the_batch_precheck_counts_children_that_already_exist(monkeypatch):
+    monkeypatch.setattr(settings, "task_fanout_limit", 2)
+    r = await _start_project()
+    sid = r["session_id"]
+    await repo.create_task("task_prior", "p", "prior", "jira-expert",
+                           parent_session_id=sid, parent_task_id=r["task_id"])
+    await _approve_plan(sid, _assigning_model("litellm-manager", "wiki-agent"))
+
+    # One existing child + a batch of two reaches the cap at the second.
+    assert [t["id"] for t in await repo.list_tasks()
+            if t.get("parent_session_id") == sid] == ["task_prior"]
+    (rej,) = [e for e in await repo.list_events_of_kinds(
+        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    (line,) = rej["payload"]["problems"]
+    assert "wiki-agent" in line and "(fan-out)" in line
+
+
+async def test_two_agents_creating_tasks_for_each_other_do_not_deadlock(
+        monkeypatch):
+    """A and B each hold their own per-agent task lock while creating a task
+    for the other. Creation is background, so neither waits on the other's
+    lock; a timeout makes a deadlock fail instead of hang."""
+    import uuid
+
+    from central_command.runtime import run as run_mod
+
+    a, b = "jira-expert", "litellm-manager"
+    inside: set[str] = set()
+    both_inside = asyncio.Event()
+    created: list[str] = []
+
+    async def fake_run_task(agent_id, instructions, model=None,
+                            parent_session_id=None, task_id=None, **_kw):
+        sess = "sess_" + uuid.uuid4().hex[:12]
+        await repo.create_running_session(sess, agent_id)
+        await repo.start_task(task_id, sess)
+        if instructions.startswith("root"):
+            inside.add(agent_id)
+            if len(inside) == 2:
+                both_inside.set()
+            await both_inside.wait()  # both locks are held at this point
+            other = b if agent_id == a else a
+            out = await routes.create_and_run_task(
+                f"made by {agent_id}", None, other, actor=f"agent:{agent_id}",
+                background=True, parent_session_id=sess)
+            created.append(out["task_id"])
+        return {"deferred": False, "output": "ok", "session_id": sess}
+
+    monkeypatch.setattr(run_mod, "run_task", fake_run_task)
+
+    async def scenario():
+        for agent in (a, b):
+            await routes.create_and_run_task(
+                f"root for {agent}", None, agent, background=True)
+        async def all_done():
+            if len(created) < 2:
+                return False
+            return all([(await repo.get_task(t))["status"] == "DONE"
+                        for t in created])
+        await _settle(all_done, timeout=8.0)
+
+    await asyncio.wait_for(scenario(), timeout=15.0)
 
 
 async def test_orchestrate_pack_is_orchestrator_only():
@@ -332,7 +521,7 @@ async def test_orchestrate_pack_is_orchestrator_only():
     for t in TEMPLATES.values():
         assert "orchestrate" not in t.default_packs, (
             "hire templates must not hand out the orchestrate pack — "
-            "star shape is a structural property")
+            "the orchestrator loop is a structural property")
 
 
 # --- restart-proofness + capability gaps ---------------------------------------

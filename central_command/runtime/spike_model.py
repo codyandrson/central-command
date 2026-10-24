@@ -924,7 +924,7 @@ def make_stalling_project_model() -> FunctionModel:
 
 
 def _respond_project_bad_target(messages, info: AgentInfo) -> ModelResponse:
-    """Assigns to the orchestrator itself (star-shape violation), then gives
+    """Assigns to the orchestrator itself (a cycle), then gives
     up in text when the batch is rejected — the sanitization driver test."""
     r = _latest_returns(messages)
     if "assign_work" in r and "BATCH REJECTED" in r["assign_work"]:

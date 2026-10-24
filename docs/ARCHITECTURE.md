@@ -183,6 +183,15 @@ from the command line (`python -m central_command.selfcheck`) and from
   reason; `self` and `cycle` refusals also name the taskable teammates (the
   roster's `taskable_agent_ids()`, minus the chain) the creator may use
   instead. Operator and heartbeat creations are roots and never trip these.
+  The founding star-shape guards are gone: an agent-created task may be
+  assigned to the orchestrator and runs as a project (its plan parks for the
+  operator before round one); its children carry the project task as parent
+  and the chain plus the orchestrator, so depth, cycle and fan-out hold. The
+  driver pre-checks a whole `assign_work` batch against these (the i-th
+  assignment judged with the i before it counted toward fan-out) before any
+  child is created; a refusal is a problem line in the batch's tool result
+  and one `task.refused`, and the orchestrator assigning to itself is
+  refused early as a cycle.
 - **`api/orchestration.py` is a driver; `runtime/orchestrator.py` is an agent.**
   The agent holds no `propose_*` tools — it recommends routing and changes
   nothing. The driver (tier ②) runs multi-agent *projects* as a durable plan →
@@ -493,7 +502,7 @@ Code comments cite these; this is where they resolve.
 |---|---|---|
 | D1 | Employment models: EA / standing-guidance / direct-tasked | standing |
 | D5 | The coaching loop: charter edits are proposed and gated | standing, built (stage 5a) |
-| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 (not yet built; DL-170) |
+| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 — the star guards are replaced by the task backstops (an agent-created task may run the orchestrator); `task.create` is still gated (DL-170) |
 | D8 | The independent auditor | standing, built |
 | D9 | Jira and Confluence stay the systems of record | standing |
 | D11 → D11-r1 | No ungoverned private agent memory; revised 2026-08-01 to allow a *gated* per-agent graph partition | revised |

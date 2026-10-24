@@ -575,9 +575,9 @@ REGISTRY: list[Capability] = [
             "acts on Central Command's own work queue rather than an external "
             "system. `agent_id` is the assignee (The operator, 2026-07-25): an agent "
             "may propose work FOR another agent, and the operator's approval "
-            "is the delegation — a deliberate widening of D7's star shape, "
-            "where agent-to-agent delegation otherwise runs only through the "
-            "orchestrator. `await_result` (Decision 5, 2026-08-22): when true, "
+            "is the delegation — a deliberate widening of D7's star shape "
+            "(which the task backstops now bound), where agent-to-agent "
+            "delegation otherwise runs only through the orchestrator. `await_result` (Decision 5, 2026-08-22): when true, "
             "the drafter's session parks AWAITING_AGENTS on the created task "
             "and is resumed with its distilled outcome once it goes terminal, "
             "instead of being resumed immediately with the bare 'task created' "
@@ -1798,12 +1798,13 @@ POLICIES: list[Policy] = [
         ),
     ),
     Policy(
-        name="Orchestration is star-shaped, plan-gated, and stall-escalating",
+        name="Orchestration is plan-gated, backstop-bounded, and stall-escalating",
         status="enforced",
         enforced_at=(
-            "driver batch validation: depth-1 (an agent-created task is "
-            "refused orchestration; the orchestrator is never an assignment "
-            "target), assign_work refused before an operator-APPROVED plan "
+            "driver batch validation: the batch is pre-checked against the "
+            "task backstops (depth, cycle, fan-out; api/backstops.py) before "
+            "any child is created, and the orchestrator assigning to itself "
+            "is refused as a cycle; assign_work refused before an operator-APPROVED plan "
             "(D7-P), consecutive no-progress rounds park an operator question "
             "instead of another round (The operator 2026-07-24: stall detection, not "
             "budgets; caps are runaway backstops only)"
@@ -1811,9 +1812,14 @@ POLICIES: list[Policy] = [
         guard="tests/test_orchestration.py::test_stall_escalates_to_operator_instead_of_looping",
         description=(
             "Only the orchestrator holds the orchestrate pack; children "
-            "answer, never re-delegate. Every project's plan is reviewed "
-            "before work is assigned, and a stuck loop escalates to the "
-            "operator with its progress ledger rather than silently retrying."
+            "answer, never re-delegate. While task.create is gated, an "
+            "agent-created task may be assigned to the orchestrator through an "
+            "approved task.create: it runs as a project, parks its plan for "
+            "the operator before round one, and its children count toward the "
+            "depth cap and the creating task's fan-out. Every project's plan "
+            "is reviewed before work is assigned, and a stuck loop escalates "
+            "to the operator with its progress ledger rather than silently "
+            "retrying."
         ),
     ),
     Policy(

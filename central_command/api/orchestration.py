@@ -13,9 +13,14 @@ Inbox first, and the loop resumes only after the operator's decision.
 Approval attaches to what work DOES, never to the trigger.
 
 Mechanical guards (all tested):
-- STAR SHAPE / DEPTH 1: a task carrying a parent_session_id is itself a child
-  and is refused orchestration; assign targets must be ACTIVE taskable roster
-  agents and never the orchestrator itself.
+- BACKSTOPS, NOT A STAR: an agent-created task may be assigned to the
+  orchestrator and run as a project (its plan still parks for the operator
+  before round one). Its children are created through the one seam, so they
+  carry the project task as parent and its chain plus the orchestrator, and
+  the depth, cycle and fan-out backstops (`api/backstops.py`) bound them. The
+  batch is pre-checked against them before any child exists. Assign targets
+  must be ACTIVE taskable roster agents; the orchestrator itself is refused
+  early, as the cycle it is.
 - PLAN FIRST: assign_work is refused until a submitted plan is APPROVED
   (The operator, 2026-07-24: plan review ON).
 - STALL, NOT BUDGETS (The operator, 2026-07-24): consecutive no-progress/looping
@@ -137,12 +142,6 @@ async def run_project(task: dict, model=None) -> dict:
     """Entry point: run the orchestration loop for a project task assigned to
     the orchestrator. Returns when the loop parks (children/operator pending)
     or finishes; the caller's detached wrapper records any exception FAILED."""
-    if task.get("parent_session_id"):
-        # DEPTH 1, mechanically: an agent-created task is itself a child.
-        raise ValueError(
-            "depth-1 guard: an agent-created (child) task cannot be orchestrated"
-        )
-
     from central_command.runtime.run import RunWindowExhausted, _run_live
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
@@ -298,6 +297,31 @@ async def _park_stalled(
             "task_id": task["id"], "item_id": item_id}
 
 
+async def _precheck_backstops(session_id: str, assigns) -> list[str]:
+    """The task backstops, applied to the WHOLE batch before any child exists.
+
+    The create seam would refuse a bad assignment too, but mid-loop, after the
+    earlier children were already created and running. Judging here keeps the
+    batch all-or-nothing like the rest of its validation, and a refusal comes
+    back as a problem line so the orchestrator retargets. Provenance is the one
+    the seam will derive for these children (the project task as parent, its
+    chain plus the orchestrator); the i-th assignment is judged with the i
+    before it counted toward fan-out. Each refusal is recorded once, as
+    `task.refused`, when the batch is judged."""
+    from central_command.api import backstops
+
+    prov = await backstops.derive_provenance(f"agent:{AGENT_ID}", session_id)
+    lines: list[str] = []
+    for i, c in enumerate(assigns):
+        target = _call_args(c).get("agent_id")
+        refusal = await backstops.check(prov, target, pending=i)
+        if refusal:
+            await backstops.refuse(prov, target, refusal, f"agent:{AGENT_ID}")
+            lines.append(f"assign_work to {target!r} refused "
+                         f"({refusal.reason}): {refusal.message}")
+    return lines
+
+
 async def _process(task, session_id: str, result, state: dict, deps, model) -> dict:
     from pydantic_ai import DeferredToolRequests
 
@@ -349,7 +373,14 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
     for c in assigns:
         args = _call_args(c)
         target = args.get("agent_id")
-        if target not in taskable:
+        if target == AGENT_ID:
+            # The early, clearer message for the one target the seam would
+            # also refuse: assigning to yourself is a cycle.
+            problems.append(
+                f"assign_work target {target!r} is yourself — a task assigned "
+                f"back into its own chain is a cycle and is refused (choose "
+                f"from: {taskable})")
+        elif target not in taskable:
             problems.append(
                 f"assign_work target {target!r} is not an ACTIVE taskable roster "
                 f"agent (choose from: {taskable})")
@@ -361,6 +392,8 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
     for c in asks:
         if not str(_call_args(c).get("question", "")).strip():
             problems.append("ask_operator requires a non-empty question")
+    if assigns and not problems:
+        problems += await _precheck_backstops(session_id, assigns)
     if problems:
         return await _reject_batch(task, session_id, result, state, deps, model,
                                    calls, problems)

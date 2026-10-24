@@ -521,12 +521,16 @@ def _agent_task_lock(agent_id: str) -> "asyncio.Lock":
     reused across loops) is what avoids that, the same fix as the driver
     cache.
 
-    Deadlock safety: no path ever nests two acquisitions for the same
-    agent_id. `create_and_run_task` refuses an orchestrator-targeted child
-    assignment (the star-shape guard above), so the orchestrator can never
-    assign itself a task while already holding its own lock; a heartbeat
-    action creates tasks from OUTSIDE any task run, never from within one
-    this lock is held for.
+    Deadlock safety: holding this lock while WAITING on another agent's lock
+    would let two agents wait on each other, and nothing here does. An
+    agent-created task is created with `background=True`, so the creator's
+    run returns the moment the task is launched and never blocks on the
+    created task's run (the creator's lock is free before the created task
+    ever contends for its own), and `backstops.check` refuses any creation
+    that returns to an agent already in the chain, the orchestrator
+    assigning to itself included, so no chain of creations can come back to
+    a lock one of its own runs is holding. A heartbeat action creates tasks
+    from OUTSIDE any task run.
     """
     import asyncio
 
@@ -825,12 +829,6 @@ async def create_and_run_task(
     # `task` if a schedule's override needs to survive a provider outage.
     if agent_id is not None and agent_id not in await taskable_agent_ids():
         raise HTTPException(422, f"agent {agent_id!r} is not directly taskable")
-    if parent_session_id and agent_id == "orchestrator":
-        # Star shape, mechanically: the orchestrator never assigns to itself,
-        # and no child chain can re-enter orchestration (depth-1).
-        raise HTTPException(422, "the orchestrator cannot be the target of an "
-                                 "orchestrated assignment")
-
     # Resolved and validated BEFORE `repo.create_task` — a refusal here must
     # leave no task row, same invariant as chat's `attachments.prepare()`
     # before the turn exists (see api/attachments.py).
