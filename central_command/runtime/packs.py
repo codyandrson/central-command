@@ -767,46 +767,30 @@ PACKS: dict[str, Pack] = {
             "would not unblock you."
         ),
     ),
-    "task-propose": Pack(
-        name="task-propose",
+    # task-create replaced task-propose at story 4.7 (GATE-032, FR-19): task
+    # creation is a trigger, not a gated write. The pack holds its one tool
+    # ALONE because `advisory_packs` drops whole packs and the tool is in
+    # NON_ADVISORY_TOOLS: a consulted specialist answers, it never starts work.
+    "task-create": Pack(
+        name="task-create",
         description=(
-            "Propose a task for a teammate (created by the control plane after "
-            "the operator approves)."
+            "Create a task for a teammate directly: it runs at once, and any "
+            "gated change that run reaches still waits for the operator."
         ),
-        tool_names=("propose_action",),
+        tool_names=("create_task",),
         guidance=(
-            "Proposing work for the team: when something needs doing that is "
+            "Creating work for the team: when something needs doing that is "
             "not yours — or is yours but belongs on the board rather than in "
-            "this conversation — propose a task.create action naming the agent "
-            "who should do it. You are asking, not assigning: the operator "
-            "approves, and the task is created and runs at that moment. Name "
-            "an agent that actually exists and is taskable, and write "
-            "instructions that stand on their own — whoever picks it up will "
-            "not see this conversation.\n\n"
-            "AWAIT_RESULT: set it true only when YOU need the outcome to "
-            "continue your own judgment — your run pauses until the task "
-            "finishes and you are resumed with its status and outcome text. "
-            "Leave it false (the default) when the work genuinely belongs in "
-            "the other agent's hands and nothing you are doing depends on how "
-            "it turns out — a handoff, not a question. Ignored (with a note) "
-            "if this proposal was itself drafted while you were being "
-            "consulted: that turn already ends the consultation."
-        ),
-        capabilities=(
-            GatedCapability(
-                name="task.create",
-                arguments=("{'agent_id': '<the agent who should do it>', "
-                           "'instructions': '<self-contained brief>', "
-                           "'title'?: '<short label>', "
-                           "'await_result'?: '<true to pause and be resumed "
-                           "with this task's outcome; false/omitted to hand it "
-                           "off and continue>'}"),
-                notes=("target_ref = {'system': 'central_command', 'id': '<agent_id>', "
-                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
-                       "This creates real work for a teammate — propose it when "
-                       "the work is genuinely needed, not to acknowledge a "
-                       "request. On approval the task runs immediately."),
-            ),
+            "this conversation — call create_task naming the agent who should "
+            "do it. No approval is asked: the task is created and starts "
+            "running at once, and the operator still approves every gated "
+            "change that run reaches. So create a task only when the work is "
+            "genuinely needed, never to acknowledge a request. Name an agent "
+            "that actually exists and is taskable, and write instructions that "
+            "stand on their own — whoever picks it up will not see this "
+            "conversation. The control plane refuses a task that would loop "
+            "back to an agent already in its chain, go too deep, or fan out "
+            "too far; a refusal tells you why."
         ),
     ),
     "record-read": Pack(
@@ -1749,7 +1733,7 @@ PACKS: dict[str, Pack] = {
 # agent, the DB is the only truth — including "all revoked" = no tools.
 DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     "inbox-triage": ("jira-read", "jira-propose", "graph-read", "graph-propose",
-                     "consult", "task-propose", "ask-operator",
+                     "consult", "task-create", "ask-operator",
                      "bulk-dismiss-propose", "mail-read",
                      "mail-spam-propose", "mail-unsubscribe-propose",
                      "mail-rule-propose",
@@ -1759,27 +1743,28 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "jira-delete-propose",
                     "graph-read", "graph-propose",
-                    "consult", "task-propose", "ask-operator", "web-read",
+                    "consult", "task-create", "ask-operator", "web-read",
                     "loe-read"),
     "litellm-manager": ("litellm-read", "litellm-admin-propose", "consult",
-                        "graph-read", "graph-propose", "task-propose",
+                        "graph-read", "graph-propose", "task-create",
                         "ask-operator", "web-read", "skill-propose"),
     # confluence-space-propose is the expert's ALONE (the jira-project-propose
     # precedent): wiki-agent also holds confluence-propose but must not gain
     # space creation.
     "confluence-expert": ("confluence-read", "confluence-propose",
                           "confluence-space-propose", "graph-read",
-                          "graph-propose", "task-propose", "ask-operator",
+                          "graph-propose", "task-create", "ask-operator",
                           "consult", "web-read"),
     # catalog-read added 2026-08-30 (sources-catalog slice 7): the catalog is
     # the system of record and a Confluence index page is a rendered VIEW of
     # it (Decision 3) — the producer could not see the library it renders.
     "wiki-agent": ("confluence-read", "confluence-propose", "jira-read",
-                   "graph-read", "graph-propose", "task-propose",
+                   "graph-read", "graph-propose", "task-create",
                    "ask-operator", "consult", "catalog-read"),
-    # No task-propose for the orchestrator: it creates work through assign_work
-    # after an approved plan, and a second differently-governed path to the
-    # same act is a governance trap. The auditor holds no packs at all
+    # No task-create for the orchestrator (it held no task-propose either): it
+    # creates work through assign_work after an approved plan. The operator's
+    # 2026-10-22 ruling grants it task-create with every other active agent
+    # but the auditor; that widening is its own change. The auditor holds no packs at all
     # (output_type=AuditVerdict, no toolsets). Both reasons are recorded as
     # `deviations` on the agent row — see schema.sql.
     #
@@ -1888,8 +1873,9 @@ def toolset_for(pack_names) -> FunctionToolset:
     for pack in _packs(pack_names):
         for tool_name in _offered(pack)[0]:
             fn = getattr(tools_mod, tool_name)
-            if tool_name.startswith("propose_"):
-                # Every propose tool hands a bad draft back to the model
+            if tool_name.startswith("propose_") or tool_name == "create_task":
+                # Every propose tool (and create_task, which checks the same
+                # ARG_SPECS shape) hands a bad draft back to the model
                 # (ModelRetry: invented capability, malformed arguments, an
                 # unsizable bulk-dismiss query) and pydantic-ai's default
                 # budget is ONE — the second bad draft failed whole sessions
@@ -1920,6 +1906,11 @@ def toolset_for(pack_names) -> FunctionToolset:
 # new deferral tool added to a pack fails the suite instead of surfacing as a
 # UserError mid-consult.
 NON_ADVISORY_TOOLS = frozenset({
+    # create_task is not a deferral at all — it is the one DIRECT trigger tool
+    # (story 4.7) — and it is here unconditionally: an advisory answer proposes
+    # nothing and starts nothing (FR-20). It sits alone in `task-create` so
+    # dropping that pack drops nothing else.
+    "create_task",
     "submit_plan",
     "assign_work",
     "ask_operator",

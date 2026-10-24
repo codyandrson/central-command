@@ -1,12 +1,20 @@
-"""await-result task proposals (doctrine Decision 5, 2026-08-22).
+"""await-result: a creator waiting on the task it created (doctrine Decision 5,
+2026-08-22).
 
-`task.create`'s `await_result=True` lets the proposer park on the task it just
-had approved, instead of being resumed the instant the task exists — the same
+It began as `task.create`'s `await_result=True`: the proposer parked on the task
+the operator approved instead of being resumed the instant it existed — the
 "wait for the teammate's answer" shape consult-and-wait gave specialists,
 pointed at a created task rather than a specialist's session.
 
-Mirrors `tests/test_consult_wait.py` (the sibling feature) and
-`tests/test_task_propose.py` (the capability this extends).
+Since story 4.7 task creation is the direct `create_task` trigger and there is
+no proposal to approve, so the half that SET the wait (the Executor's handler
+and the gateway's approve tail) went with the gate. The flag on the new tool is
+story 8; its tests are below as strict xfails, so they turn red the moment it
+lands and must be unmarked then. The half that ENDS the wait — `task_wait` in
+`run_state`, `resume_task_wait`, the sweep — still stands, and is pinned here
+on a session parked the way `consult.park_task_wait` parks it.
+
+Mirrors `tests/test_consult_wait.py` (the sibling feature).
 """
 
 from __future__ import annotations
@@ -15,12 +23,16 @@ import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from central_command.api import orchestration
+import uuid
+from types import SimpleNamespace
+
+from central_command.api import orchestration, routes
 from central_command.config import settings
-from central_command.contract.models import Action, Reversibility
 from central_command.db import repo
-from central_command.gateway import executor, gateway
+from central_command.runtime.consult import park_task_wait
+from central_command.runtime.deps import TriageDeps
 from central_command.runtime.run import ingest_and_propose
+from central_command.runtime.tools import create_task
 from tests.conftest import needs_pg
 
 pytestmark = needs_pg
@@ -30,12 +42,6 @@ pytestmark = needs_pg
 def pinned(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
-    # The whole feature only exists in the LIVE executor path — `dry_run` logs
-    # `task.create` instead of running it, so no task and no `task_wait` ever
-    # exist and every assertion here is vacuous. Pinned for the file rather
-    # than per-test: the ambient `CC_EXECUTOR_MODE` in `.env` is dry_run, and
-    # the four gateway-path tests inherited it (green only on a live-mode box).
-    monkeypatch.setattr(settings, "executor_mode", "live")
 
 
 @pytest.fixture(autouse=True)
@@ -50,29 +56,22 @@ def no_detached_runs(monkeypatch):
     monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
 
 
-def _action(agent_id="jira-expert", await_result=True) -> Action:
-    args = {"agent_id": agent_id, "instructions": "Check TASKS-9 for a due date."}
-    if await_result is not None:
-        args["await_result"] = await_result
-    return Action(
-        capability="task.create",
-        arguments=args,
-        target_ref={"system": "central_command", "id": agent_id, "read_version": "unknown"},
-        reversibility=Reversibility.reversible,
-    )
+_STORY_8 = pytest.mark.xfail(
+    strict=True, raises=TypeError,
+    reason="await_result on the direct create_task tool is story 8 of "
+           "epic-task-backstops; until then the tool takes no such argument",
+)
 
 
-def _proposal(agent_id="jira-expert", await_result=True) -> dict:
+def _proposal() -> dict:
+    """A gated draft the triage agent holds: the run pauses at this call, which
+    is where a creator waiting on its task sits."""
     return {
-        "intent": f"ask {agent_id} to check TASKS-9 and wait for the answer",
+        "intent": "comment on TASKS-9 once jira-expert has checked its due date",
         "actions": [{
-            "capability": "task.create",
-            "arguments": {
-                "agent_id": agent_id,
-                "instructions": "Check TASKS-9 for a due date.",
-                "await_result": await_result,
-            },
-            "target_ref": {"system": "central_command", "id": agent_id, "read_version": "unknown"},
+            "capability": "jira.add_comment",
+            "arguments": {"issue_key": "TASKS-9", "body": "Due date checked."},
+            "target_ref": {"system": "jira", "id": "TASKS-9", "read_version": "unknown"},
             "reversibility": "reversible",
         }],
         "evidence": [{
@@ -80,16 +79,15 @@ def _proposal(agent_id="jira-expert", await_result=True) -> dict:
             "locator": "email.get_message(msg_1)",
             "claim": "Sender asks whether TASKS-9 has a due date.",
         }],
-        "expected_effect": f"{agent_id} reports TASKS-9's due date",
+        "expected_effect": "TASKS-9 carries the answer",
     }
 
 
-def _make_task_wait_model(agent_id="jira-expert", await_result=True) -> FunctionModel:
-    """First call proposes `task.create`; once resumed with the propose call's
-    result (approval outcome, or the distilled task-wait outcome), closes out
-    in text quoting it — so a test can assert on what the agent was actually
-    told."""
-    proposal = _proposal(agent_id, await_result)
+def _make_task_wait_model() -> FunctionModel:
+    """First call pauses on `propose_action`; once resumed with that call's
+    result (here: the distilled task-wait outcome), closes out in text quoting
+    it — so a test can assert on what the agent was actually told."""
+    proposal = _proposal()
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         for m in messages:
@@ -103,114 +101,68 @@ def _make_task_wait_model(agent_id="jira-expert", await_result=True) -> Function
     return FunctionModel(_respond)
 
 
-def _make_redraft_refusing_model(agent_id="jira-expert") -> FunctionModel:
-    """Proposes once, then closes out in text on ANY resume — used to prove
-    the reject path is unaffected (no redraft, no task ever created)."""
-    proposal = _proposal(agent_id, await_result=True)
-
-    def _respond(messages, info: AgentInfo) -> ModelResponse:
-        proposed = any(
-            isinstance(p, ToolCallPart) and p.tool_name == "propose_action"
-            for m in messages for p in getattr(m, "parts", [])
-        )
-        if not proposed:
-            return ModelResponse(
-                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
-            )
-        return ModelResponse(parts=[TextPart(content="Understood, closing out.")])
-
-    return FunctionModel(_respond)
-
-
-# --- the Executor: setting (and ignoring) the wait -----------------------------
-
-
-async def test_await_result_sets_task_wait_on_the_outcome(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    outcome = await executor.execute(
-        [_action(await_result=True)], approver="human:lee", source_refs=[],
-    )
-    assert outcome.task_wait
-    task = await repo.get_task(outcome.task_wait["task_id"])
-    assert task["agent_id"] == "jira-expert"
-
-
-async def test_without_the_flag_behaves_exactly_as_before(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    outcome = await executor.execute(
-        [_action(await_result=None)], approver="human:lee", source_refs=[],
-    )
-    assert outcome.task_wait is None
-    assert "created and assigned to jira-expert" in outcome.result_text
-
-
-async def test_await_result_is_ignored_on_a_consult_drafted_proposal(monkeypatch):
-    """The acceptable simplification the design calls out: a task.create drafted
-    DURING a consultation cannot also park that same turn — the consultation
-    already ends on this decision."""
-    import uuid
-
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    suffix = uuid.uuid4().hex[:8]
-    sid, pid = f"sess_specialist_{suffix}", f"prop_specialist_{suffix}"
-    await repo.upsert_agent("jira-expert", "jira-expert", "demo", "test charter")
-    await repo.save_paused_session(sid, "jira-expert", {})
-    await repo.save_proposal(
-        proposal_id=pid, session_id=sid, agent_id="jira-expert",
-        intent="drafted while consulted", actions=[], evidence=[],
-        expected_effect="", idempotency_key=f"{pid}:0",
-        origin={"consulted_by": "inbox-triage", "caller_session_id": "sess_asker"},
-    )
-
-    outcome = await executor.execute(
-        [_action(agent_id="litellm-manager", await_result=True)], approver="human:lee", source_refs=[],
-        proposer="jira-expert", proposal_id=pid,
-    )
-    assert outcome.task_wait is None
-    assert "await_result ignored" in outcome.result_text
-
-
-# --- the gateway: parking the proposer, and waking it back up -----------------
-
-
-async def _propose_and_approve(model):
+async def _parked_on_a_task(model):
+    """A session paused at its call and parked on a task, the way
+    `park_task_wait` parks one: AWAITING_AGENTS, `run_state.task_wait` keyed on
+    the task id and the paused call."""
     run = await ingest_and_propose(
         "Please have jira-expert check TASKS-9 and tell me its due date.",
         model=model,
     )
-    out = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model,
+    task_id = (await routes.create_and_run_task(
+        "Check TASKS-9 for a due date.", None, "jira-expert", background=True,
+    ))["task_id"]
+    run_state = await repo.load_paused_session(run["session_id"])
+    await park_task_wait(
+        session_id=run["session_id"], agent_id="inbox-triage",
+        tool_call_id=run_state["tool_call_id"], task_id=task_id,
     )
-    return run, out
+    return run, task_id
 
 
-async def test_approve_with_await_result_parks_the_proposer_not_resumes_it():
-    model = _make_task_wait_model()
-    run, out = await _propose_and_approve(model)
+# --- story 8: the creator asks to wait (pending) -------------------------------
 
-    assert out["task_waiting"] is True
+
+@_STORY_8
+async def test_await_result_parks_the_creator_on_its_task():
+    session = f"sess_wait_{uuid.uuid4().hex[:8]}"
+    await repo.create_running_session(session, "inbox-triage")
+    ctx = SimpleNamespace(deps=TriageDeps(agent_id="inbox-triage", session_id=session))
+    await create_task(ctx, "jira-expert", "Check TASKS-9 for a due date.",
+                      await_result=True)
+    rs = await repo.get_session_run_state(session)
+    assert "task_wait" in rs
+
+
+@_STORY_8
+async def test_await_result_is_ignored_for_a_consulted_specialist():
+    """A specialist answering a consult cannot also wait: the consultation
+    already ends its turn (the gated path ignored the flag with a note)."""
+    session = f"sess_wait_{uuid.uuid4().hex[:8]}"
+    await repo.create_running_session(session, "jira-expert")
+    ctx = SimpleNamespace(deps=TriageDeps(
+        agent_id="jira-expert", session_id=session, consult_chain=("inbox-triage",)))
+    out = await create_task(ctx, "litellm-manager", "Check spend.", await_result=True)
+    assert "await_result ignored" in out
+
+
+# --- the wait itself: woken when the task goes terminal ------------------------
+
+
+async def test_a_parked_creator_is_awaiting_agents_on_its_task():
+    run, task_id = await _parked_on_a_task(_make_task_wait_model())
+
     assert await repo.session_status(run["session_id"]) == "AWAITING_AGENTS"
     rs = await repo.get_session_run_state(run["session_id"])
-    assert "task_wait" in rs
-    assert rs["task_wait"]["proposal_id"] == run["proposal_id"]
-
-    task = await repo.get_task(rs["task_wait"]["task_id"])
-    assert task["agent_id"] == "jira-expert"
-    assert task["status"] == "ASSIGNED"
-
-    # The proposal itself is EXECUTED — the decision is not what is deferred.
-    assert (await repo.load_proposal(run["proposal_id"]))["status"] == "EXECUTED"
-    # And the session did NOT get a final closing turn yet.
+    assert rs["task_wait"]["task_id"] == task_id
     kinds = [e["kind"] for e in await repo.list_events(ref_id=run["session_id"])]
-    assert "session.completed" not in kinds
     assert "agent.task_waiting" in kinds
+    assert "session.completed" not in kinds
 
 
 async def test_task_completion_resumes_the_waiter_with_the_distilled_outcome():
     model = _make_task_wait_model()
-    run, _ = await _propose_and_approve(model)
-    rs = await repo.get_session_run_state(run["session_id"])
-    task_id = rs["task_wait"]["task_id"]
+    run, task_id = await _parked_on_a_task(model)
 
     await repo.resolve_task(task_id, "DONE", outcome="TASKS-9 is due 2026-08-30.")
 
@@ -224,31 +176,28 @@ async def test_task_completion_resumes_the_waiter_with_the_distilled_outcome():
 
 async def test_resume_task_wait_keeps_waiting_while_the_task_is_still_running():
     model = _make_task_wait_model()
-    run, _ = await _propose_and_approve(model)
+    run, _ = await _parked_on_a_task(model)
 
     out = await orchestration.resume_task_wait(run["session_id"], model=model)
     assert out is None
     assert await repo.session_status(run["session_id"]) == "AWAITING_AGENTS"
 
 
-# --- reject / dismiss are unaffected -------------------------------------------
+async def test_a_task_create_draft_is_refused_in_run_as_no_capability():
+    """There is nothing left to reject: a model that still drafts a gated
+    `task.create` is handed it back in-run as an invented capability, so no
+    such proposal ever reaches the inbox."""
+    from pydantic_ai import ModelRetry
 
+    from central_command.contract.models import Proposal
+    from central_command.runtime.tools import _validate_proposal
 
-async def test_reject_still_redrafts_and_never_creates_the_task():
-    model = _make_redraft_refusing_model()
-    run = await ingest_and_propose(
-        "Please have jira-expert check TASKS-9.", model=model,
-    )
-    before = len(await repo.list_tasks())
-
-    out = await gateway.reject_with_feedback(
-        run["session_id"], run["proposal_id"], "Not needed after all.", model=model,
-    )
-
-    assert (await repo.load_proposal(run["proposal_id"]))["status"] == "REJECTED"
-    assert len(await repo.list_tasks()) == before  # the Executor never ran
-    assert await repo.session_status(run["session_id"]) == "DONE"
-    assert out["final_output"] == "Understood, closing out."
+    draft = _proposal()
+    draft["actions"][0].update(capability="task.create", arguments={
+        "agent_id": "jira-expert", "instructions": "Check TASKS-9."})
+    ctx = SimpleNamespace(deps=TriageDeps(agent_id="inbox-triage", session_id=None))
+    with pytest.raises(ModelRetry, match="not a real capability"):
+        await _validate_proposal(ctx, Proposal.model_validate(draft))
 
 
 # --- restart resilience: the sweep -----------------------------------------
@@ -266,9 +215,7 @@ async def test_sweep_wakes_a_waiter_whose_task_went_terminal_offline():
     exists; `resume_sweep`'s AWAITING_AGENTS worklist is what actually wakes
     it, on the very next sweep — durable, no polling loop."""
     model = _make_task_wait_model()
-    run, _ = await _propose_and_approve(model)
-    rs = await repo.get_session_run_state(run["session_id"])
-    task_id = rs["task_wait"]["task_id"]
+    run, task_id = await _parked_on_a_task(model)
 
     # Simulate the orphan sweep landing the child task's own dead run FAILED —
     # exactly what `repo.fail_stale_running_sessions` does, without needing a

@@ -386,7 +386,7 @@ async def test_the_agent_is_hired_idempotently_with_its_packs():
     # jira-read + calendar-read (2026-08-18): evidence at check-in time —
     # ungated reads so the agent can cite what the calendar and board show.
     assert grants == ["ask-operator", "calendar-read", "consult", "jira-read",
-                      "loe-propose", "task-propose"]
+                      "loe-propose", "task-create"]
 
     current = await repo.current_charter(accountability.AGENT_ID)
     assert current and current["content"].strip()

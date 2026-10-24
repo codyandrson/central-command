@@ -2508,6 +2508,58 @@ async def loe_list(ctx: RunContext) -> str:
     return _clip(json.dumps(out, default=str))
 
 
+async def create_task(
+    ctx: RunContext[TriageDeps], agent_id: str, instructions: str, title: str = "",
+) -> str:
+    """Create a task on the board and assign it to a teammate — it starts
+    running at once. No approval: assigning work is a trigger, and every gated
+    change that teammate's run reaches still waits for the operator.
+
+    `agent_id` must be a taskable teammate (your roster or briefing names who
+    is). Write `instructions` that stand on their own — the assignee will not
+    see this conversation. `title` is an optional short label.
+    """
+    # The one direct trigger tool (story 4.7, GATE-032): it holds no credential
+    # and performs no world write — it reaches THE one create path, where the
+    # backstops (depth, cycle, self, fan-out) and the provenance live. A late
+    # import of the api tier, as `questions.py` reaches it: the guarded ban is
+    # runtime→gateway/executor, and this is neither.
+    deps = getattr(ctx, "deps", None)
+    creator = getattr(deps, "agent_id", None)
+    session_id = getattr(deps, "session_id", None)
+    if not creator or not session_id:
+        # Provenance is derived from the running session; without one the task
+        # would be an unattributed creation.
+        return ("Task NOT created: this run has no agent session to record as "
+                "the task's creator. Say in your reply what needs doing and "
+                "for whom instead.")
+    args = {"agent_id": agent_id, "instructions": instructions}
+    if title:
+        args["title"] = title
+    problems = validate_action_args("task.create", args)
+    if problems:
+        raise ModelRetry(
+            "The task cannot be created as drafted — fix EVERY problem below "
+            "and call create_task again:\n- " + "\n- ".join(problems)
+        )
+    from fastapi import HTTPException
+
+    from central_command.api.routes import create_and_run_task
+
+    try:
+        out = await create_and_run_task(
+            instructions, title or None, agent_id,
+            actor=f"agent:{creator}", background=True,
+            parent_session_id=session_id,
+        )
+    except HTTPException as exc:
+        # A backstop refusal (already on the record as task.refused) or a
+        # non-taskable assignee: the agent is told why, never retried.
+        return f"Task NOT created — {exc.detail}"
+    return (f"task {out['task_id']} created and assigned to {agent_id}; it is "
+            "running now and its outcome lands on the board.")
+
+
 # --- D7 phase 2: the orchestration loop's tools --------------------------------
 # All three deferred tools end the run with a DeferredToolRequests; the
 # orchestration driver (api/orchestration.py) validates the batch, creates the

@@ -1433,3 +1433,24 @@ insert into heartbeat_schedule
      '{"at": "2000-01-01T00:00:00+00:00"}', 'ea.contact',
      '{"kind": "onboarding_tour"}', 'seed:heartbeat')
 on conflict (id) do nothing;
+
+-- task.create comes off the gate (story 4.7, GATE-032 / FR-19, the operator's
+-- ruling of 2026-10-19): task creation is a trigger, not a gated write. The
+-- `task-propose` pack (propose a gated task.create) is replaced by `task-create`
+-- (the direct `create_task` tool, through the one create seam and its
+-- backstops), for exactly the agents holding `task-propose` when this runs —
+-- the founding seeds above and any hired agent alike. The old grant is REVOKED
+-- by timestamp, never deleted: the seeds above stay as written, so a re-run
+-- inserts nothing new for them (`on conflict do nothing` meets the revoked
+-- row) and this block, reading only ACTIVE `task-propose` rows, finds none.
+-- Additive and idempotent; a fresh database runs the seeds, then this.
+insert into agent_grant (agent_id, pack, granted_by)
+select agent_id, 'task-create', 'seed:task-create'
+  from agent_grant
+ where pack = 'task-propose' and revoked_at is null
+on conflict (agent_id, pack) do nothing;
+
+update agent_grant
+   set revoked_at = now(),
+       revoked_reason = 'superseded by task-create: task.create is no longer a gated proposal'
+ where pack = 'task-propose' and revoked_at is null;

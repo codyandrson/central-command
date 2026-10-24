@@ -172,6 +172,8 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "calendar.delete_event": ArgSpec(required=("event_id", "reason")),
     "charter.update": ArgSpec(required=("agent_id", "content")),
     "skill.doc_add": ArgSpec(required=("skill_id",)),
+    # Not a gated write since story 4.7: task creation is a trigger, and the
+    # direct `create_task` tool checks its shape here — the one list.
     "task.create": ArgSpec(required=("agent_id", "instructions")),
     "litellm.create_key": ArgSpec(required=("key_alias",)),
     "litellm.update_key": ArgSpec(required=("key",)),

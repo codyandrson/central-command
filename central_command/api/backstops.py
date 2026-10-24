@@ -70,11 +70,12 @@ class Refusal:
 async def derive_provenance(actor: str, parent_session_id: str | None) -> Provenance:
     """Creator, parent task and chain from server-side facts only.
 
-    A creating session means an agent made this task (the Executor's proposing
-    session, the orchestration driver's session): the creator is that session's
-    agent, whatever `actor` says — while the gate is on `actor` is the approver
-    (GATE-033). With no session the caller is the operator or a heartbeat and
-    `actor` names which; either starts a chain at the root.
+    A creating session means an agent made this task (the session that called
+    `create_task`, the orchestration driver's session): the creator is that
+    session's agent, whatever `actor` says (rows created while task.create was
+    gated carry the approver as `actor`, GATE-033). With no session the caller
+    is the operator or a heartbeat and `actor` names which; either starts a
+    chain at the root.
     """
     if not parent_session_id:
         return Provenance(created_by=actor)

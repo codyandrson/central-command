@@ -44,7 +44,7 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 Modular monolith, 4 tiers:
 1. **Control Plane UI** — React (`web/`)
 2. **Control Plane API & Services** — FastAPI (`central_command/api`, `central_command/gateway`)
-3. **Agent Runtime** — Pydantic AI + Claude (`central_command/runtime`) — can **only propose + read**
+3. **Agent Runtime** — Pydantic AI + Claude (`central_command/runtime`) — can **only propose + read**, with one exception: task creation is the one direct trigger tool (`create_task`), holding no credential
 4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph — graphiti-core runs in
    the API process, no server), n8n
    (email façade holding the Gmail OAuth; Jira is a native client in
@@ -52,8 +52,9 @@ Modular monolith, 4 tiers:
    problem)
 
 **The trust boundary is the import graph:** `runtime/` must never import
-`gateway`/`executor`. Agents hold only `propose_*` tools; the credentialed
-Executor performs writes *after* approval. Keep it that way.
+`gateway`/`executor`. Agents hold only `propose_*` tools (plus `create_task`,
+a trigger through the one task-create seam and its backstops, not a write);
+the credentialed Executor performs writes *after* approval. Keep it that way.
 
 ## Conventions & gotchas (bite marks)
 

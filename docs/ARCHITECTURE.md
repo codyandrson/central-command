@@ -111,11 +111,11 @@ runtime tier fails the suite in the commit that adds it (DL-103).
 
 **Two intentional package cycles**, both broken with function-scoped imports
 and neither crossing the forbidden edge: `api ⇄ gateway` (`api/routes.py`
-imports the gateway at module level; `gateway/gateway.py` and
-`gateway/executor.py` reach back into `api.orchestration` /
-`api.routes.create_and_run_task` lazily) and `api ⇄ runtime` (`runtime/questions.py`
+imports the gateway at module level; `gateway/gateway.py` reaches back into
+`api.orchestration` lazily) and `api ⇄ runtime` (`runtime/questions.py`
 and `runtime/converse.py` lazily import resume callbacks from
-`api/orchestration.py`). `heartbeat/` reaches `api/` the same lazy way but may
+`api/orchestration.py`, and `runtime/tools.py`'s `create_task` lazily calls
+`api.routes.create_and_run_task`). `heartbeat/` reaches `api/` the same lazy way but may
 never import the gate. `contract/` imports nothing from `api`, `gateway` or
 `runtime`; `sandbox/` and `crawler/` import nothing from `central_command` at all.
 
@@ -128,8 +128,8 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (97 capabilities), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
-| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The agents, one module per entry point and one per built-in charter ("v0"). Several agents have no run path of their own: they are tasked (`run_task`), conversed with or consulted. Agents: EA, knowledge steward, editor, Jira expert, Confluence expert, LiteLLM manager, MCP manager, wiki agent, coach, orchestrator (a router; holds no `propose_*` tools), and the two auditors and the graph curator (charters only) | `ea.py`, `ea_profile.py`, `steward.py`, `steward_profile.py`, `editor.py`, `editor_profile.py`, `jira_expert.py`, `confluence_expert.py`, `litellm_manager.py`, `litellm_manager_profile.py`, `mcp_manager.py`, `mcp_manager_profile.py`, `wiki_agent.py`, `coach_profile.py`, `orchestrator.py`, `orchestrator_profile.py`, `auditor_profile.py`, `graph_auditor_profile.py`, `graph_curator_profile.py` | [models](../.claude/rules/models.md) |
@@ -158,8 +158,9 @@ from the command line (`python -m central_command.selfcheck`) and from
 - **`api/backstops.py` is the task-create seam's provenance and loop breaker.**
   `routes.create_and_run_task` is the one task-create path; the `task` row
   records `created_by` (`operator` | `heartbeat:<schedule>` | `agent:<id>`;
-  NULL on older rows, read as operator), `approved_by` (the approver of a
-  gated `task.create`; the event `actor` stays the approver), `parent_task_id`
+  NULL on older rows, read as operator), `approved_by` (the approver, on a task
+  created while `task.create` was gated; NULL since it left the gate),
+  `parent_task_id`
   and `creator_chain` (agent ids, root first, including the immediate creator).
   All are derived server-side from `parent_session_id` — the creator from the
   session row, the parent task from `repo.task_for_session` — never from tool
@@ -226,8 +227,10 @@ from the command line (`python -m central_command.selfcheck`) and from
 An agent run starts from exactly **three** sources: the **heartbeat** scheduler
 (`heartbeat/engine.py` firing a governed schedule row), the **ledger
 dispatcher** (`ingest/dispatcher.py` claiming a work item), and **direct
-tasking** (the operator, or a task created by an action, through
-`create_and_run_task`). There is no event-subscription wake and no
+tasking** (the operator, a heartbeat action, the orchestration driver, or an
+agent's own `create_task` call, all through `create_and_run_task`). An agent
+creating a task is a trigger, not a gated write: no proposal and no inbox item;
+the run it starts gates its own world changes like any other. There is no event-subscription wake and no
 agent-to-agent request event: collaboration is a **consult** (the asker parks
 `AWAITING_AGENTS`) or a **task**.
 
@@ -508,7 +511,7 @@ Code comments cite these; this is where they resolve.
 |---|---|---|
 | D1 | Employment models: EA / standing-guidance / direct-tasked | standing |
 | D5 | The coaching loop: charter edits are proposed and gated | standing, built (stage 5a) |
-| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 — the star guards are replaced by the task backstops (an agent-created task may run the orchestrator); `task.create` is still gated (DL-170) |
+| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 — the star guards are replaced by the task backstops (an agent-created task may run the orchestrator); `task.create` left the gate (story 4.7): agents create tasks directly with `create_task` (the `task-create` pack), bounded by the backstops |
 | D8 | The independent auditor | standing, built |
 | D9 | Jira and Confluence stay the systems of record | standing |
 | D11 → D11-r1 | No ungoverned private agent memory; revised 2026-08-01 to allow a *gated* per-agent graph partition | revised |

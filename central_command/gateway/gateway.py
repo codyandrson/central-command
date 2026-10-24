@@ -575,7 +575,7 @@ async def approve_and_execute(
     return await _record_execution_success(
         session_id, proposal_id, prop_row["agent_id"],
         outcome.result_text, outcome.provenance.model_dump(mode="json"),
-        approver, model=model, task_wait=outcome.task_wait, detach=detach,
+        approver, model=model, detach=detach,
     )
 
 
@@ -587,7 +587,6 @@ async def _record_execution_success(
     provenance: dict,
     approver: str,
     model=None,
-    task_wait: dict | None = None,
     detach: bool = False,
 ) -> dict:
     """Everything that follows a successful execution — for the approve path AND
@@ -627,29 +626,6 @@ async def _record_execution_success(
         await events.emit(
             "work.folded", ref_id=proposal_id, payload={"count": folded}, actor="system",
         )
-
-    if task_wait:
-        # `task.create`'s `await_result=True`: the decision is already fully
-        # recorded above (executed, folds committed) — what is deferred is only
-        # the closing turn this session still owes its own propose call. Park
-        # it on the task instead of resuming with the bare "task X created"
-        # text; `api.orchestration.resume_task_wait` (live hook + sweep) wakes
-        # it once the task goes terminal.
-        run_state = await repo.load_paused_session(session_id)
-        if run_state is not None and run_state.get("tool_call_id"):
-            from central_command.runtime.consult import park_task_wait
-
-            parked = await park_task_wait(
-                session_id=session_id, agent_id=agent_id,
-                tool_call_id=run_state["tool_call_id"],
-                task_id=task_wait["task_id"], proposal_id=proposal_id,
-            )
-            return {
-                "ok": True, "final_output": None, "result_text": result_text,
-                "provenance": provenance, **parked,
-            }
-        # No paused session to park (should not happen for an approved propose
-        # call) — fall through to the normal resume below as a safe degrade.
 
     # --- resume the paused agent with the real Executor result ---
     # Best-effort AFTER a successful execution: the world already changed and is
@@ -991,7 +967,6 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
     out = await _record_execution_success(
         session_id, proposal_id, agent_id, result_text,
         outcome.provenance.model_dump(mode="json"), approver, model=model,
-        task_wait=outcome.task_wait,
     )
     return {**out, "retried": True, "attempts": attempts}
 

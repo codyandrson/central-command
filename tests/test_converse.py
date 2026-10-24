@@ -313,12 +313,12 @@ async def test_the_conversation_path_dispatches_on_the_deferred_tool():
     assert "stringified?" in as_string["reply"]
 
 
-async def test_the_orchestrator_swaps_project_tools_for_task_propose_in_chat():
+async def test_the_orchestrator_swaps_project_tools_for_task_create_in_chat():
     """C: in a conversation the orchestrator loses `orchestrate` (its tools are
     deferred and driven by a project driver that does not exist here) and gains
-    `task-propose`.
+    `task-create` (`task-propose` until task.create came off the gate).
 
-    The reason task-propose is withheld from its PROJECT runs does not apply in
+    The reason task-create is withheld from its PROJECT runs does not apply in
     chat: the objection was two differently-governed paths to the same act, and
     a conversation has no `assign_work` at all.
     """
@@ -326,11 +326,11 @@ async def test_the_orchestrator_swaps_project_tools_for_task_propose_in_chat():
 
     chat_packs = _conversational_packs("orchestrator", ("orchestrate", "graph-read"))
     assert "orchestrate" not in chat_packs
-    assert "task-propose" in chat_packs
+    assert "task-create" in chat_packs
     assert "graph-read" in chat_packs, "reads are the point of talking to it"
 
     # Every other agent is untouched — this is one agent's quirk, not a rule.
-    same = ("jira-read", "jira-propose", "task-propose")
+    same = ("jira-read", "jira-propose", "task-create")
     assert _conversational_packs("jira-expert", same) == same
 
 

@@ -188,7 +188,7 @@ TEMPLATES: dict[str, HireTemplate] = {
         ),
         charter=HIRED_AGENT_CHARTER,
         default_packs=("jira-read", "jira-propose", "graph-read",
-                       "graph-propose", "consult", "task-propose",
+                       "graph-propose", "consult", "task-create",
                        "ask-operator"),
     ),
     "analyst": HireTemplate(
@@ -197,11 +197,11 @@ TEMPLATES: dict[str, HireTemplate] = {
         description=(
             "A read-only starting loadout: reads Jira and the knowledge "
             "graph and answers in text. It changes nothing itself — the one "
-            "thing it may propose is a task for a teammate, which only exists "
-            "once you approve it. Taskable and conversational."
+            "thing it may start is a task for a teammate, whose gated changes "
+            "still wait for your approval. Taskable and conversational."
         ),
         charter=HIRED_AGENT_CHARTER,
-        default_packs=("jira-read", "graph-read", "task-propose", "ask-operator"),
+        default_packs=("jira-read", "graph-read", "task-create", "ask-operator"),
     ),
 }
 
@@ -214,7 +214,7 @@ TEMPLATES: dict[str, HireTemplate] = {
 #
 # It deliberately does NOT live in TEMPLATES above. That dict is the operator's
 # hire menu, and every entry in it is a general starting loadout: the parity
-# tests require task-propose on each (slice 1 grants the steward none), the
+# tests require task-create on each (slice 1 grants the steward none), the
 # charter here is a finished document rather than a {name}/{mission} skeleton,
 # and hiring a SECOND steward under an operator-chosen name would be a
 # different agent id doing the one job the ledger routes to a fixed one.
@@ -293,7 +293,7 @@ EA_TEMPLATE = HireTemplate(
     # mail must be re-derived from the record, not from memory of the brief.
     default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
                    "ask-operator", "consult", "calendar-read", "calendar-propose",
-                   "loe-read", "task-propose", "mail-read"),
+                   "loe-read", "task-create", "mail-read"),
     taskable=True,
     conversational=True,
 )
@@ -372,7 +372,7 @@ ACCOUNTABILITY_TEMPLATE = HireTemplate(
     # jira-read + calendar-read added 2026-08-18 (evidence at check-in time,
     # The operator): the agent reads what the calendar and the board actually show for
     # a line before asking, and cites it — ungated reads, no new writes.
-    default_packs=("loe-propose", "ask-operator", "task-propose", "consult",
+    default_packs=("loe-propose", "ask-operator", "task-create", "consult",
                    "jira-read", "calendar-read"),
     taskable=True,
     conversational=True,

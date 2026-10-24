@@ -317,10 +317,11 @@ async def park_task_wait(
     `park_consult_wait`, keyed on the created task id rather than a
     specialist's session.
 
-    Reached from the gateway's approve tail, never from a fresh agent run:
-    by this point the proposal is already EXECUTED and recorded (the task
-    exists), and the session is still sitting exactly where the original
-    `propose_action` call paused it. Nothing here re-runs the agent — it only
+    It was reached from the gateway's approve tail for an approved gated
+    `task.create`; that caller went when task creation left the gate, and
+    `await_result` on the direct `create_task` tool is to give it its next
+    one. The shape it assumes: the task already exists, and the session is
+    still sitting exactly where the call that created it paused it. Nothing here re-runs the agent — it only
     swaps what that pause is waiting for, the same way a redraft swaps
     `pending_resume`'s marker without touching the messages already parked.
 

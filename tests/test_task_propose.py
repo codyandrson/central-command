@@ -1,20 +1,31 @@
-"""`task.create` — an agent proposing work for a teammate (stage 4, 2026-07-25).
+"""Task creation by an agent — the direct `create_task` trigger (story 4.7).
 
-The first gated capability that acts on Central Command's own work queue rather
-than an external system, and the first time an agent can put work on another
-agent's board. The operator's call: the proposal NAMES its assignee, and the operator's
-approval is the delegation.
+Stage 4 (2026-07-25) made `task.create` a gated capability: an agent proposed a
+task for a teammate and the operator's approval was the delegation. The
+operator's ruling of 2026-10-19 (GATE-032, FR-19) reversed it once the task
+backstops shipped: task creation is a TRIGGER, not a write. An agent creates and
+assigns a task directly, with no proposal and no inbox item; the run it starts
+is governed like any other, so every gated change that run reaches still parks
+for the operator. The file keeps its name: it pins what replaced the proposal.
 """
 
 from __future__ import annotations
 
-import pytest
+import asyncio
+import uuid
+from types import SimpleNamespace
 
+import pytest
+from pydantic_ai import ModelRetry
+
+from central_command.api import routes
 from central_command.config import settings
-from central_command.contract.models import Action, Reversibility
 from central_command.db import repo
 from central_command.gateway import executor
-from tests.conftest import needs_pg
+from central_command.runtime import packs
+from central_command.runtime.deps import TriageDeps
+from central_command.runtime.tools import create_task
+from tests.conftest import aresolve, needs_pg
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +33,7 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def no_detached_runs(monkeypatch):
     """Create the task, but never let a real agent run detach from the test.
 
@@ -30,182 +41,194 @@ def no_detached_runs(monkeypatch):
     would put an uncontrolled agent session into the suite — which is the exact
     shape of the task-test flakes already root-caused twice.
     """
-    from central_command.api import routes
-
     async def noop(task, actor, **_kw):
         return None
 
     monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
 
 
-def _action(agent_id="jira-expert", instructions="Check TASKS-12 for a due date.",
-            title=None) -> Action:
-    args = {"agent_id": agent_id, "instructions": instructions}
-    if title:
-        args["title"] = title
-    return Action(
-        capability="task.create",
-        arguments=args,
-        target_ref={"system": "central_command", "id": agent_id, "read_version": "unknown"},
-        reversibility=Reversibility.reversible,
-    )
+def _ctx(agent_id: str | None, session_id: str | None) -> SimpleNamespace:
+    return SimpleNamespace(deps=TriageDeps(agent_id=agent_id, session_id=session_id))
 
 
-def test_task_create_is_a_registered_gated_write():
-    """It must be in the registry to be proposable and in HANDLERS to be
-    executable. The M16 parity test enforces the set equality; this pins the
-    specific entry so a rename can't quietly drop it from both at once."""
+async def _running(agent_id: str) -> str:
+    session_id = f"sess_create_{uuid.uuid4().hex[:8]}"
+    await repo.create_running_session(session_id, agent_id)
+    return session_id
+
+
+async def _created_since(since: int) -> list[dict]:
+    return [e for e in await repo.list_events(since_id=since, kind="task")
+            if e["kind"] == "task.created"]
+
+
+def test_task_create_is_no_longer_a_gated_write():
+    """No registry entry and no handler survive (the operator's 2026-10-22
+    decision: no deprecated handler), so the registry/HANDLERS parity holds and
+    a draft naming it is an invented capability, refused in-run."""
     from central_command.gateway.capabilities import gated_write_names
 
-    assert "task.create" in gated_write_names()
-    assert "task.create" in executor.HANDLERS
+    assert "task.create" not in gated_write_names()
+    assert "task.create" not in executor.HANDLERS
+    assert "task.create" not in packs.known_capability_names()
+    assert "task-propose" not in packs.PACKS
 
 
-@needs_pg
-async def test_dry_run_creates_nothing(monkeypatch):
-    """The dry-run rule holds for a capability that writes to Central Command's own
-    tables, not just for external systems — otherwise "safe mode" would still
-    put real work on a teammate's board."""
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-    before = len(await repo.list_tasks())
-
-    await executor.execute([_action()], approver="human:lee", source_refs=[])
-
-    assert len(await repo.list_tasks()) == before
+def test_the_agents_that_proposed_tasks_now_create_them():
+    """Story 4.7 grants `task-create` to exactly the agents that held
+    `task-propose`; the orchestrator and the auditor are untouched here (the
+    widening to every active agent but the auditor is its own change)."""
+    for agent_id in ("inbox-triage", "jira-expert", "litellm-manager",
+                     "confluence-expert", "wiki-agent"):
+        assert "task-create" in packs.DEFAULT_PACKS[agent_id]
+    assert "task-create" not in packs.DEFAULT_PACKS["orchestrator"]
 
 
-@needs_pg
-async def test_approval_creates_the_task_assigned_to_the_named_agent(monkeypatch):
-    """The proposal names the assignee and approval is the delegation.
-
-    Actor is the APPROVER: the agent asked, the operator's approval is what
-    brought the task into existence. An actor the agent could name would be an
-    agent-authored claim about provenance.
-    """
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    since = await repo.latest_event_id()
-
-    outcome = await executor.execute(
-        [_action(agent_id="jira-expert", instructions="Audit TASKS-12 links.",
-                 title="Link audit")],
-        approver="human:lee", source_refs=[],
-    )
-    # What the proposing agent is told on resume must name the assignee — it
-    # asked for a teammate to do something and deserves to learn who got it.
-    assert "jira-expert" in outcome.result_text
-
-    created = [
-        e for e in await repo.list_events(since_id=since, kind="task")
-        if e["kind"] == "task.created"
-    ]
-    assert len(created) == 1
-    assert created[0]["actor"] == "human:lee"
-    assert created[0]["payload"]["agent_id"] == "jira-expert"
-
-    task = await repo.get_task(created[0]["ref_id"])
-    assert task["agent_id"] == "jira-expert"
-    assert task["title"] == "Link audit"
-    # It went through THE one create path, so it is a normal board task.
-    assert task["instructions"] == "Audit TASKS-12 links."
-
-
-@needs_pg
-async def test_a_task_for_a_non_taskable_agent_fails_loudly(monkeypatch):
-    """Naming an agent that cannot take tasks fails the execution rather than
-    creating an orphan. The auditor is the live example — it is deliberately
-    not taskable because it is part of the gate."""
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    before = len(await repo.list_tasks())
-
-    with pytest.raises(Exception) as exc:
-        await executor.execute(
-            [_action(agent_id="auditor")], approver="human:lee", source_refs=[],
-        )
-    assert "auditor" in str(exc.value)
-    assert len(await repo.list_tasks()) == before
-
-
-@needs_pg
-async def test_the_agents_that_can_propose_a_task_can_actually_hold_the_tool():
-    """"Every agent can propose a task" — as far as it is TRUE.
-
-    Two agents are deliberately excluded and their reasons are recorded on the
-    agent row, because a grant an agent cannot use is a lie on its profile:
-    the auditor takes no toolsets at all (output_type=AuditVerdict), and the
-    orchestrator already creates work through assign_work after an approved
-    plan. This asserts the exclusions stay explained rather than becoming
-    folklore.
-    """
-    from central_command.runtime import packs
-
-    for agent_id in ("inbox-triage", "jira-expert", "litellm-manager"):
-        assert "task-propose" in packs.DEFAULT_PACKS[agent_id]
-
-    assert "task-propose" not in packs.DEFAULT_PACKS["orchestrator"]
-    for agent_id in ("auditor", "orchestrator"):
-        row = await repo.get_agent(agent_id)
-        assert "no task-propose grant" in (row["deviations"] or ""), (
-            f"{agent_id} lacks the pack with no recorded reason"
-        )
-
-
-def test_every_template_can_propose_a_task():
+def test_every_template_can_create_a_task():
     """A newly hired agent gets the pack, including the read-only analyst —
     it changes nothing itself, and raising work for someone else is the one
-    thing it may ask for."""
+    thing it may start."""
     from central_command.runtime.templates import TEMPLATES
 
     for t in TEMPLATES.values():
-        assert "task-propose" in t.default_packs, f"{t.id} cannot propose a task"
+        assert "task-create" in t.default_packs, f"{t.id} cannot create a task"
+
+
+def test_the_tool_is_offered_with_the_propose_tools_retry_budget():
+    toolset = packs.toolset_for(("task-create",))
+    (tool,) = [t for t in toolset.tools.values() if t.name == "create_task"]
+    assert tool.max_retries == 10
 
 
 @needs_pg
-async def test_approval_stamps_the_proposing_session_as_parent(monkeypatch):
-    """A task created from an approved task.create proposal links back to the
-    session that DRAFTED it (`parent_session_id`) — the board's route to the
-    email that triggered the proposal, via `work_items_for_sessions`. Read
-    from the PROPOSAL row server-side (never from `args`): an agent-writable
-    field would be an agent-authored claim about its own provenance."""
-    import uuid
+@pytest.mark.usefixtures("no_detached_runs")
+async def test_an_agent_creates_a_task_with_no_proposal_and_no_inbox_item():
+    creator = "inbox-triage"
+    session = await _running(creator)
+    since = await repo.latest_event_id()
+    items_before = len(await repo.list_operator_items(status=None))
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    proposer_agent = "inbox-triage"
-    suffix = uuid.uuid4().hex[:8]
-    sid, pid = f"sess_propose_{suffix}", f"prop_propose_{suffix}"
-    await repo.upsert_agent(proposer_agent, proposer_agent, "demo", "test charter")
-    await repo.save_paused_session(sid, proposer_agent, {})
-    await repo.save_proposal(
-        proposal_id=pid, session_id=sid, agent_id=proposer_agent,
-        intent="ask jira-expert to follow up", actions=[], evidence=[],
-        expected_effect="", idempotency_key=f"{pid}:0",
-    )
+    out = await create_task(_ctx(creator, session), "jira-expert",
+                            "Audit TASKS-12 links.", "Link audit")
+
+    assert "created and assigned to jira-expert" in out
+    (created,) = await _created_since(since)
+    # The actor is the creating agent, derived from the running session.
+    assert created["actor"] == f"agent:{creator}"
+    task = await repo.get_task(created["ref_id"])
+    assert task["agent_id"] == "jira-expert"
+    assert task["title"] == "Link audit"
+    assert task["instructions"] == "Audit TASKS-12 links."
+    assert task["created_by"] == f"agent:{creator}"
+    assert task["approved_by"] is None  # nobody approved: there was no gate
+    assert task["parent_session_id"] == session
+    assert task["creator_chain"] == [creator]
+    assert not [p for p in await repo.list_proposals() if p["session_id"] == session]
+    assert len(await repo.list_operator_items(status=None)) == items_before
+
+
+@needs_pg
+async def test_the_created_tasks_gated_proposal_still_parks_in_the_inbox(monkeypatch):
+    """Assignment is a trigger: the gate attaches to what the work does, never
+    to how it was started. The child runs a model that proposes a Jira write,
+    and that proposal waits for the operator exactly as if the operator had
+    created the task."""
+    from central_command.runtime.spike_model import make_jira_task_model
+
+    monkeypatch.setattr(routes, "resolve_model",
+                        aresolve(lambda *a, **k: make_jira_task_model()))
+    creator = "inbox-triage"
+    session = await _running(creator)
     since = await repo.latest_event_id()
 
-    await executor.execute(
-        [_action(agent_id="jira-expert", instructions="Follow up on TASKS-9.")],
-        approver="human:lee", source_refs=[], proposer=proposer_agent,
-        proposal_id=pid,
-    )
+    await create_task(_ctx(creator, session), "jira-expert",
+                      "Comment on TASKS-12 with the due date.")
+    (created,) = await _created_since(since)
+    task_id = created["ref_id"]
 
-    created = [
-        e for e in await repo.list_events(since_id=since, kind="task")
-        if e["kind"] == "task.created"
-    ]
-    assert len(created) == 1
-    task = await repo.get_task(created[0]["ref_id"])
-    assert task["parent_session_id"] == sid
+    for _ in range(250):
+        task = await repo.get_task(task_id)
+        if task["status"] == "REVIEW":
+            break
+        await asyncio.sleep(0.02)
+    assert task["status"] == "REVIEW"
+    props = [p for p in await repo.list_proposals()
+             if p["session_id"] == task["session_id"]]
+    assert len(props) == 1 and props[0]["status"] == "AWAITING_HUMAN"
+    assert not [p for p in await repo.list_proposals() if p["session_id"] == session]
 
 
 @needs_pg
-async def test_approval_with_no_proposal_id_leaves_parent_session_null(monkeypatch):
-    """Calling the executor without a `proposal_id` (e.g. a direct test call,
-    or any future caller that doesn't route through the gateway) must not
-    blow up looking one up — the created task simply has no parent session,
-    same as an operator-created task."""
-    monkeypatch.setattr(settings, "executor_mode", "live")
+@pytest.mark.usefixtures("no_detached_runs")
+async def test_a_backstop_refusal_comes_back_to_the_agent_as_text(monkeypatch):
+    """The seam's 422 is the agent's answer, never a crashed run: a chain past
+    the depth cap is refused with the reason, recorded as task.refused, and
+    leaves no task row."""
+    a, b = "jira-expert", "litellm-manager"
+    root = (await routes.create_and_run_task("root work", None, a))["task_id"]
+    session = await _running(a)
+    await repo.start_task(root, session)
+    since = await repo.latest_event_id()
+    before = len(await repo.list_tasks())
 
-    outcome = await executor.execute(
-        [_action(agent_id="jira-expert", instructions="Untraceable follow-up.")],
-        approver="human:lee", source_refs=[],
-    )
-    assert "jira-expert" in outcome.result_text
+    monkeypatch.setattr(settings, "task_max_depth", 0)
+    out = await create_task(_ctx(a, session), b, "one hop too many")
+
+    assert out.startswith("Task NOT created")
+    assert "depth" in out
+    assert len(await repo.list_tasks()) == before
+    refused = [e for e in await repo.list_events(since_id=since, kind="task")
+               if e["kind"] == "task.refused"]
+    assert len(refused) == 1 and refused[0]["ref_id"] == root
+    assert not await _created_since(since)
+
+
+@needs_pg
+@pytest.mark.usefixtures("no_detached_runs")
+async def test_a_task_for_a_non_taskable_agent_is_refused_with_no_row():
+    """The auditor is deliberately not taskable — it is part of the gate."""
+    session = await _running("inbox-triage")
+    before = len(await repo.list_tasks())
+
+    out = await create_task(_ctx("inbox-triage", session), "auditor", "audit yourself")
+
+    assert out.startswith("Task NOT created") and "auditor" in out
+    assert len(await repo.list_tasks()) == before
+
+
+@needs_pg
+@pytest.mark.usefixtures("no_detached_runs")
+async def test_a_malformed_draft_is_handed_back_with_every_problem():
+    session = await _running("inbox-triage")
+    before = len(await repo.list_tasks())
+
+    with pytest.raises(ModelRetry) as exc:
+        await create_task(_ctx("inbox-triage", session), "", "")
+
+    assert "agent_id" in str(exc.value) and "instructions" in str(exc.value)
+    assert len(await repo.list_tasks()) == before
+
+
+@needs_pg
+@pytest.mark.usefixtures("no_detached_runs")
+@pytest.mark.parametrize("agent_id,has_session", [(None, True), ("inbox-triage", False)])
+async def test_a_run_with_no_agent_or_session_cannot_create(agent_id, has_session):
+    """Provenance is the running session's; a run that carries none would make
+    an unattributed task, so the tool refuses before it reaches the seam."""
+    session = await _running("inbox-triage") if has_session else None
+    since = await repo.latest_event_id()
+
+    out = await create_task(_ctx(agent_id, session), "jira-expert", "do it")
+
+    assert out.startswith("Task NOT created")
+    assert not await _created_since(since)
+
+
+def test_the_tool_takes_no_provenance_argument():
+    """Creator, parent task and chain are derived at the seam from the running
+    session — a value an agent can write is an agent claim, so the tool offers
+    no parameter to write one."""
+    import inspect
+
+    params = set(inspect.signature(create_task).parameters) - {"ctx"}
+    assert params == {"agent_id", "instructions", "title"}

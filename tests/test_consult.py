@@ -159,19 +159,20 @@ def test_advisory_packs_keep_the_propose_packs_and_the_consult_pack():
     ride into its consults — `consult()` is their driver — and so does the
     `consult` pack itself now, since a consulted specialist may open one
     consult of its own. What still goes is every deferral the sub-run cannot
-    host: an operator question, a project tool."""
+    host — an operator question, a project tool — and the one direct trigger,
+    task creation: an advisory answer starts no work (FR-20)."""
     granted = ("jira-read", "jira-propose", "graph-read", "graph-propose",
-               "consult", "task-propose", "ask-operator")
+               "consult", "task-create", "ask-operator")
     assert packs_mod.advisory_packs(granted) == (
         "jira-read", "jira-propose", "graph-read", "graph-propose",
-        "consult", "task-propose",
+        "consult",
     )
     assert packs_mod.advisory_packs(("orchestrate", "graph-read")) == ("graph-read",)
 
 
 async def test_the_advisory_toolset_holds_propose_and_consult_but_never_ask():
     granted = ("jira-read", "jira-propose", "graph-read", "graph-propose",
-               "consult", "task-propose", "ask-operator")
+               "consult", "task-create", "ask-operator")
     advisory = packs_mod.advisory_packs(granted)
     agent = await consult_mod.build_advisory_agent(
         "jira-expert", "You are the Jira expert.", packs=advisory,
@@ -185,6 +186,9 @@ async def test_the_advisory_toolset_holds_propose_and_consult_but_never_ask():
     assert "consult_agent" in names, (
         "depth 2 (2026-08-22): a consulted specialist may open one consult "
         "of its own — refused mechanically past that, not by a missing tool"
+    )
+    assert "create_task" not in names, (
+        "a consulted specialist answers; it never starts work (FR-20)"
     )
     for deferring in ("ask_operator", "conclude_discussion", "submit_plan",
                       "assign_work"):
@@ -246,6 +250,19 @@ def test_every_deferral_tool_is_classified_from_the_tools_source():
     from central_command.runtime.durable import PROPOSE_TOOLS
 
     assert packs_mod.ADVISORY_DEFERRAL_TOOLS <= PROPOSE_TOOLS
+
+
+def test_the_create_tool_is_barred_from_consults_and_alone_in_its_pack():
+    """Story 4.7: `create_task` is the one direct trigger tool, so it is barred
+    from advisory sub-runs unconditionally — not as a deferral (it defers
+    nothing) but because an advisory answer starts no work. `advisory_packs`
+    keeps or drops a pack WHOLE, so the tool sits alone in `task-create`:
+    barring it drops nothing else."""
+    assert "create_task" in packs_mod.NON_ADVISORY_TOOLS
+    holders = [p.name for p in packs_mod.PACKS.values() if "create_task" in p.tool_names]
+    assert holders == ["task-create"]
+    assert packs_mod.PACKS["task-create"].tool_names == ("create_task",)
+    assert packs_mod.advisory_packs(("task-create", "graph-read")) == ("graph-read",)
 
 
 async def test_an_advisory_agent_cannot_be_built_without_a_charter():

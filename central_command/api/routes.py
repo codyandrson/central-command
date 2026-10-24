@@ -785,7 +785,6 @@ async def create_and_run_task(
     attachments: list[dict] | None = None,
     model_name: str | None = None,
     thinking: str | None = None,
-    approved_by: str | None = None,
 ) -> dict:
     """THE task-create path — the Task Board REST route, the "+" dialog's
     assign flow, direct tasking sugar, the heartbeat's `task.create` action,
@@ -798,8 +797,10 @@ async def create_and_run_task(
 
     Provenance and the backstops (`api/backstops.py`) are decided HERE: creator,
     parent task and chain are derived from `parent_session_id`, never from an
-    argument. `approved_by` is the one caller-stated fact, and only the Executor
-    states it (the approver of a gated task.create; `actor` stays the approver)."""
+    argument. An agent's own creation arrives from the direct `create_task`
+    tool (runtime/tools.py) with `actor=agent:<creator>` and its running session
+    as `parent_session_id`. `approved_by` is left NULL: it was set only for a
+    gated task.create, which no longer exists (rows approved before keep it)."""
     from central_command.api import backstops
     from central_command.runtime.roster import taskable_agent_ids
 
@@ -858,7 +859,7 @@ async def create_and_run_task(
     title = (title or "").strip() or instructions[:80]
     await repo.create_task(task_id, title, instructions, agent_id,
                            parent_session_id=parent_session_id,
-                           created_by=prov.created_by, approved_by=approved_by,
+                           created_by=prov.created_by,
                            parent_task_id=prov.parent_task_id,
                            creator_chain=list(prov.chain))
     await events.emit(

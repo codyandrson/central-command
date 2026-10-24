@@ -558,36 +558,6 @@ REGISTRY: list[Capability] = [
         ),
     ),
     Capability(
-        name="task.create",
-        kind="write",
-        gate="human approval",
-        risk=(
-            "internal, reversible — a wrongly created task can be cancelled; "
-            "but the task RUNS on approval, and its own gated writes park in "
-            "the Decisions Inbox like any others"
-        ),
-        holder="Executor",
-        route="api/routes.py → create_and_run_task (THE one task-create path)",
-        arguments=["agent_id", "instructions", "title?", "await_result?"],
-        description=(
-            "Create a first-class Task assigned to a named agent, proposed by "
-            "an agent and approved by the operator. The first capability that "
-            "acts on Central Command's own work queue rather than an external "
-            "system. `agent_id` is the assignee (The operator, 2026-07-25): an agent "
-            "may propose work FOR another agent, and the operator's approval "
-            "is the delegation — a deliberate widening of D7's star shape "
-            "(which the task backstops now bound), where agent-to-agent "
-            "delegation otherwise runs only through the orchestrator. `await_result` (Decision 5, 2026-08-22): when true, "
-            "the drafter's session parks AWAITING_AGENTS on the created task "
-            "and is resumed with its distilled outcome once it goes terminal, "
-            "instead of being resumed immediately with the bare 'task created' "
-            "text — the same wait shape a consultation uses, keyed on the task "
-            "id rather than a specialist's session. Ignored on a proposal "
-            "drafted during a consultation (that session already ends on this "
-            "decision)."
-        ),
-    ),
-    Capability(
         name="litellm.add_model",
         kind="write",
         gate="human approval",
@@ -1812,9 +1782,9 @@ POLICIES: list[Policy] = [
         guard="tests/test_orchestration.py::test_stall_escalates_to_operator_instead_of_looping",
         description=(
             "Only the orchestrator holds the orchestrate pack; children "
-            "answer, never re-delegate. While task.create is gated, an "
-            "agent-created task may be assigned to the orchestrator through an "
-            "approved task.create: it runs as a project, parks its plan for "
+            "answer, never re-delegate. An agent-created task (the direct "
+            "create_task trigger) may be assigned to the orchestrator: it "
+            "runs as a project, parks its plan for "
             "the operator before round one, and its children count toward the "
             "depth cap and the creating task's fan-out. Every project's plan "
             "is reviewed before work is assigned, and a stuck loop escalates "

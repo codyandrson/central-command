@@ -45,12 +45,12 @@ def _conversational_packs(agent_id: str, packs: tuple[str, ...]) -> tuple[str, .
     a chat `submit_plan`/`assign_work` gives it tools nothing can execute,
     which is exactly what broke the first time the operator talked to it.
 
-    So in chat it swaps project-running for `task-propose`. The reason that
-    pack is withheld from its project runs does NOT apply here: the objection
-    was two differently-governed paths to the same act (`assign_work` ungated
-    after an approved plan, vs a gated proposal), and in a conversation there
-    is no `assign_work` at all. One path, gated, which is the right one for a
-    surface with no approved plan behind it.
+    So in chat it swaps project-running for `task-create` (`task-propose`
+    until task.create came off the gate, story 4.7). The reason that pack is
+    withheld from its project runs does NOT apply here: the objection was two
+    differently-governed paths to the same act, and in a conversation there
+    is no `assign_work` at all — one path, through the one create seam and its
+    backstops.
 
     Reads are untouched — the point of talking to the orchestrator is to ask
     what the team is doing.
@@ -58,7 +58,7 @@ def _conversational_packs(agent_id: str, packs: tuple[str, ...]) -> tuple[str, .
     if agent_id != "orchestrator":
         return packs
     kept = tuple(p for p in packs if p != "orchestrate")
-    return kept + ("task-propose",) if "task-propose" not in kept else kept
+    return kept + ("task-create",) if "task-create" not in kept else kept
 
 
 async def _build(agent_id: str, model, charter: str | None):

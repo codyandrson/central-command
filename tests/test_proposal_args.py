@@ -40,11 +40,26 @@ def _proposal(arguments: dict, capability: str = "graph.add_episode") -> Proposa
     )
 
 
+# The one spec that is not a gated write: task creation is a TRIGGER (story
+# 4.7, GATE-032), done directly by the `create_task` tool, which validates
+# through this same list rather than a second one. Adding a name here is a
+# governance change, not a test fix.
+UNGATED_TRIGGER_SPECS = {"task.create"}
+
+
 def test_every_spec_names_a_real_gated_write():
     """A spec for a capability the Executor does not dispatch is a check on
     nothing — and the seven curation handlers READ their required keys from
-    the spec, so a missing one fails at import."""
-    assert set(ARG_SPECS) <= gated_write_names()
+    the spec, so a missing one fails at import. The declared trigger specs are
+    the one exception, and each must really be ungated and really be checked
+    by the tool that performs it."""
+    assert set(ARG_SPECS) - UNGATED_TRIGGER_SPECS <= gated_write_names()
+    assert UNGATED_TRIGGER_SPECS <= set(ARG_SPECS)
+    assert not UNGATED_TRIGGER_SPECS & gated_write_names()
+    assert not UNGATED_TRIGGER_SPECS & set(executor.HANDLERS)
+    import inspect
+
+    assert '"task.create"' in inspect.getsource(tools_mod.create_task)
 
 
 def _subscripted_keys(fn) -> set[str]:

@@ -53,11 +53,6 @@ class ExecutionFailed(ExecutorError):
 class ExecutionOutcome:
     result_text: str          # what the agent is told on resume
     provenance: Provenance
-    # Set only by a `task.create` action whose `await_result` was honoured
-    # (never on a consult-drafted proposal — see `_task_create`). Carries
-    # `{"task_id": ...}`; the gateway parks the drafter on it instead of
-    # resuming with `result_text`.
-    task_wait: dict | None = None
 
 
 async def _jira_set_due_date(args: dict, approver: str, proposer: str | None) -> str:
@@ -940,78 +935,6 @@ async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str
     return f"skill {skill_id} document '{doc_key}' added as v{doc['version']}"
 
 
-async def _task_create(args: dict, approver: str, proposer: str | None) -> str:
-    """An agent-PROPOSED task, created only after approval (stage 4).
-
-    Routed through THE one task-create path — the same function the Task Board,
-    the heartbeat and the orchestration driver use — so validation, events and
-    the run cannot diverge for this fifth caller. (A late import of the api
-    tier, exactly as `heartbeat/actions.py` reaches it; the guarded ban is
-    runtime→gateway, and this is neither.)
-
-    `actor` is the APPROVER, not the proposing agent: the agent asked, but the
-    operator's approval is what brought the task into existence — and an actor
-    the agent could name would be an agent-authored claim about provenance.
-    The proposal record is what ties the request back to who made it.
-
-    Background, because the created task runs an agent: a synchronous run would
-    block the approval response for as long as the work takes, and the run's
-    own outcome already lands on the record through the normal paths.
-
-    `parent_session_id` links the created task back to the session that
-    proposed it (so the board can later resolve its source email via
-    `work_items_for_sessions`) — read from the PROPOSAL row server-side, never
-    from `args`, per the doctrine that an agent-writable field is an
-    agent-authored provenance claim.
-
-    `args["await_result"]` (Decision 5, 2026-08-22) is the proposer asking to
-    PARK on this task's outcome rather than being resumed the moment it is
-    created. Recorded on `_current_task_wait` for `execute()` to carry out —
-    never acted on here, because acting on it means parking the DRAFTER's
-    session, and that is the gateway's concern, not the Executor's.
-
-    Ignored — with a note in the result text — on a CONSULT-drafted proposal
-    (`origin.consulted_by` set): that session is the specialist's own, and it
-    already ends the consultation on this decision (`consult.py`'s
-    `_DRAFTED_TEMPLATE` path) — it has no further turn of its own to park.
-    """
-    from central_command.api.routes import create_and_run_task
-    from central_command.db import repo as db_repo
-
-    proposal_id = _current_proposal_id.get()
-    parent_session_id = None
-    origin = None
-    if proposal_id:
-        row = await db_repo.load_proposal(proposal_id)
-        if row:
-            parent_session_id = row.get("session_id")
-            origin = row.get("origin")
-
-    result = await create_and_run_task(
-        args["instructions"],
-        args.get("title"),
-        args["agent_id"],
-        actor=approver,
-        background=True,
-        parent_session_id=parent_session_id,
-        approved_by=approver,
-    )
-    note = ""
-    if args.get("await_result"):
-        if origin and origin.get("consulted_by"):
-            note = (
-                " (await_result ignored: this proposal was drafted during a "
-                "consultation, and the specialist's session ends on this "
-                "decision — it cannot also wait on the task it just created)"
-            )
-        else:
-            _current_task_wait.set({"task_id": result["task_id"]})
-    return (
-        f"task {result['task_id']} created and assigned to {args['agent_id']}"
-        + note
-    )
-
-
 async def _jira_link_issues(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.link_issues(args["from_key"], args["to_key"], args["link_type"])
     checked = ("direction verified" if out["link"]["direction_verified"]
@@ -1391,16 +1314,6 @@ _MCP_SERVER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 # Task), reset in a finally so it never leaks past this call.
 _current_proposal_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_current_proposal_id", default=None
-)
-
-# Same shape, for `task.create`'s `await_result` flag (Decision 5, 2026-08-22):
-# `_task_create` sets it when the proposer asked to wait on the task it just
-# created, and `execute()` carries it out on `ExecutionOutcome` so the gateway
-# can park the drafter's OWN session instead of resuming it with the bare
-# "task X created" text. None on every other capability, and on a
-# consult-drafted task.create (the flag is ignored there — see `_task_create`).
-_current_task_wait: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
-    "_current_task_wait", default=None
 )
 
 
@@ -2334,7 +2247,6 @@ HANDLERS = {
     "catalog.tag": _catalog_tag,
     "skill.create": _skill_create,
     "skill.doc_add": _skill_doc_add,
-    "task.create": _task_create,
     "litellm.add_model": _litellm_add_model,
     "litellm.update_model": _litellm_update_model,
     "litellm.delete_model": _litellm_delete_model,
@@ -2403,7 +2315,6 @@ async def execute(
         if problems:
             raise ExecutionFailed(a.capability, "; ".join(problems), [])
     token = _current_proposal_id.set(proposal_id)
-    wait_token = _current_task_wait.set(None)
     try:
         results: list[str] = []
         for a in actions:
@@ -2411,15 +2322,13 @@ async def execute(
                 results.append(await _execute_action(a, approver, proposer))
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
                 raise ExecutionFailed(a.capability, str(e), results) from e
-        task_wait = _current_task_wait.get()
     finally:
         _current_proposal_id.reset(token)
-        _current_task_wait.reset(wait_token)
     provenance = Provenance(
         approver=approver,
         source_refs=source_refs,
         executed_at=datetime.now(timezone.utc),
     )
     return ExecutionOutcome(
-        result_text="; ".join(results), provenance=provenance, task_wait=task_wait,
+        result_text="; ".join(results), provenance=provenance,
     )

@@ -81,15 +81,16 @@ async def test_the_ea_is_hired_as_a_full_roster_member():
     # loe-read granted 2026-08-18 (goals drive work): goal-AWARE, never
     # goal-driving.
     # task-propose granted 2026-08-18, same day, by operator decision
-    # revisiting that line: gates are review, not a ceiling — every proposed
-    # task still waits on the operator, and usage is steered by coaching (or
-    # revocation). Goal->work origination from check-in evidence stays with
+    # revisiting that line: gates are review, not a ceiling, and usage is
+    # steered by coaching (or revocation). It became task-create when
+    # task.create came off the gate: the task runs at once and every gated
+    # change it reaches still waits on the operator. Goal->work origination from check-in evidence stays with
     # the accountability agent and its citation duty.
     # mail-read granted 2026-09-02 (declared gap): a digest of dismissed mail
     # is re-derived from the record, never from memory.
     assert grants == ["activity-read", "ask-operator", "calendar-propose",
                       "calendar-read", "consult", "graph-propose", "graph-read",
-                      "loe-read", "mail-read", "record-read", "task-propose"]
+                      "loe-read", "mail-read", "record-read", "task-create"]
     assert "jira-propose" not in grants
 
     current = await repo.current_charter(AGENT_ID)
