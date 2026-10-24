@@ -141,4 +141,56 @@ describe('cc-kanban adapter — operator stop/resume', () => {
     expect(body.items).toHaveLength(1);
     expect(body.items[0].status).toBe('CANCELLED');
   });
+
+  describe('provenance and the refusal mark', () => {
+    const AGENT_TASK = {
+      ...RUNNING_TASK, id: 'child', title: 'Child work',
+      created_by: 'agent:jira-expert', approved_by: 'human:lee',
+      parent_task_id: 't1',
+      refusals: { count: 2, latest_reason: 'depth', latest_at: '2026-10-23T10:00:00Z' },
+    };
+
+    it('returns the creator, the approver, the parent link and the refusal mark', async () => {
+      const app = await buildApp();
+      routeFetch({ '/api/tasks': () => respond({ tasks: [RUNNING_TASK, AGENT_TASK] }) });
+
+      const body = await (await app.request('/api/kanban/tasks')).json();
+      const child = body.items.find((t: { id: string }) => t.id === 'child');
+      expect(child.createdBy).toBe('agent:jira-expert');
+      expect(child.approvedBy).toBe('human:lee');
+      expect(child.parentTaskId).toBe('t1');
+      expect(child.parentTaskTitle).toBe('Do the thing');
+      expect(child.refusals).toEqual({
+        count: 2, latestReason: 'depth', latestAt: Date.parse('2026-10-23T10:00:00Z'),
+      });
+    });
+
+    it('reads a row with no stored creator as operator-created, unmarked', async () => {
+      const app = await buildApp();
+      routeFetch({ '/api/tasks': () => respond({ tasks: [{ ...RUNNING_TASK, created_by: null, refusals: null }] }) });
+
+      const [t] = (await (await app.request('/api/kanban/tasks')).json()).items;
+      expect(t.createdBy).toBe('operator');
+      expect(t.approvedBy).toBeUndefined();
+      expect(t.parentTaskId).toBeUndefined();
+      expect(t.refusals).toBeUndefined();
+    });
+
+    it('passes a heartbeat creator through', async () => {
+      const app = await buildApp();
+      routeFetch({ '/api/tasks': () => respond({ tasks: [{ ...RUNNING_TASK, created_by: 'heartbeat:nightly' }] }) });
+
+      const [t] = (await (await app.request('/api/kanban/tasks')).json()).items;
+      expect(t.createdBy).toBe('heartbeat:nightly');
+    });
+
+    it('GET /tasks/:id carries the same provenance', async () => {
+      const app = await buildApp();
+      routeFetch({ '/api/tasks': () => respond({ tasks: [RUNNING_TASK, AGENT_TASK] }) });
+
+      const t = await (await app.request('/api/kanban/tasks/child')).json();
+      expect(t.createdBy).toBe('agent:jira-expert');
+      expect(t.parentTaskTitle).toBe('Do the thing');
+    });
+  });
 });

@@ -520,3 +520,43 @@ async def test_a_mid_chain_consult_session_finds_its_askers_task_chain(monkeypat
     with pytest.raises(HTTPException) as exc:
         await _approve_task_create(asker, b, d)  # t1's count is now 1 of 1
     assert exc.value.detail.startswith("task refused (fan-out):")
+
+
+async def test_a_refusal_is_in_the_activity_feed_and_marks_the_board_card(monkeypatch):
+    """Story 5: GET /events?kind=task.refused returns the refusal and the board's
+    task payload carries the creator, the approver, the parent and the mark."""
+    monkeypatch.setattr(settings, "task_max_depth", 1)
+    root = await _operator_root(AGENTS[0])
+    first = await _approve_task_create(await _running(AGENTS[0], root), AGENTS[0], AGENTS[1])
+    since = await repo.latest_event_id()
+    with pytest.raises(HTTPException):
+        await _approve_task_create(await _running(AGENTS[1], first), AGENTS[1], AGENTS[2])
+
+    feed = await routes.get_events(since=since, kind="task.refused")
+    (refused,) = feed["events"]
+    assert refused["ref_id"] == first and refused["payload"]["reason"] == "depth"
+
+    board = {t["id"]: t for t in (await routes.list_tasks())["tasks"]}
+    assert board[first]["refusals"]["count"] == 1
+    assert board[first]["refusals"]["latest_reason"] == "depth"
+    assert board[first]["created_by"] == f"agent:{AGENTS[0]}"
+    assert board[first]["approved_by"] == "human:lee"
+    assert board[first]["parent_task_id"] == root
+    assert board[root]["refusals"] is None  # only the refusing task is marked
+    assert board[root]["created_by"] == "operator"
+
+
+async def test_the_mark_counts_every_refusal_and_names_the_latest_reason(monkeypatch):
+    task = await _operator_root(AGENTS[0])
+    session = await _running(AGENTS[0], task)
+    monkeypatch.setattr(settings, "task_max_depth", 0)
+    for assignee in (AGENTS[1], AGENTS[2]):
+        with pytest.raises(HTTPException):
+            await _approve_task_create(session, AGENTS[0], assignee)
+    with pytest.raises(HTTPException):
+        await _approve_task_create(session, AGENTS[0], AGENTS[0])  # self
+
+    mark = {t["id"]: t for t in await repo.list_tasks()}[task]["refusals"]
+    assert mark["count"] == 3
+    assert mark["latest_reason"] == "self"
+    assert mark["latest_at"]

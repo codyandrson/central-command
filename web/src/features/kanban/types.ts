@@ -36,7 +36,7 @@ export const COLUMN_LABELS: Record<string, string> = {
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
 };
-export type TaskActor = 'operator' | `agent:${string}`;
+export type TaskActor = 'operator' | `agent:${string}` | `heartbeat:${string}`;
 
 export interface TaskFeedback {
   at: number;
@@ -100,6 +100,16 @@ export interface KanbanTask {
   estimateMin?: number;
   actualMin?: number;
   feedback: TaskFeedback[];
+  /** Who approved the creation while the task.create gate was on, e.g.
+   *  `human:lee`; absent for operator/heartbeat tasks and once ungated. */
+  approvedBy?: string;
+  /** The task whose run created this one (agent-created tasks only), and its
+   *  title when the same list carried it. */
+  parentTaskId?: string;
+  parentTaskTitle?: string;
+  /** The board's refusal mark: the task.refused events recorded against this
+   *  task (a creation under it was stopped by a backstop). Absent = none. */
+  refusals?: { count: number; latestReason?: string; latestAt?: number };
   /** D7 phase 2 — the run session this task's transcript lives in. */
   sessionId?: string;
   /** D7 phase 2 — set on a sub-task: the orchestration session that owns it. */

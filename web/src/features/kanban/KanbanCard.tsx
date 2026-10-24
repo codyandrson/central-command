@@ -1,5 +1,5 @@
 import { memo, useState, useEffect } from 'react';
-import { Clock, Play, CheckCircle2, AlertCircle, XCircle, Compass, CornerDownRight, StopCircle, Ban } from 'lucide-react';
+import { Clock, Play, CheckCircle2, AlertCircle, XCircle, Compass, CornerDownRight, StopCircle, Ban, ShieldAlert } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { KanbanTask } from './types';
@@ -46,6 +46,37 @@ function SubtaskDelegationRow({ agent, parentTitle }: { agent?: string; parentTi
         {parentTitle ? `part of “${parentTitle}”` : 'linked to a parent session'}
       </span>
     </div>
+  );
+}
+
+/** Creator (and approver when the gate was on) plus the parent link. Operator
+ * tasks, the common case, stay unmarked. */
+function ProvenanceRow({ task }: { task: KanbanTask }) {
+  if (task.createdBy === 'operator' && !task.approvedBy && !task.parentTaskId) return null;
+  return (
+    <div className="mt-2 ml-4 flex flex-wrap items-center gap-x-1.5 text-[0.667rem] text-muted-foreground">
+      <span title="Who created this task">
+        by <span className="font-semibold">{agentLabel(task.createdBy).replace('heartbeat:', '⏱ ')}</span>
+      </span>
+      {task.approvedBy && <span title="Who approved the creation">· approved by {task.approvedBy.replace(/^human:/, '')}</span>}
+      {task.parentTaskId && (
+        <span className="truncate" title={`Created from task ${task.parentTaskId}`} data-parent-task={task.parentTaskId}>
+          · from {task.parentTaskTitle ? `“${task.parentTaskTitle}”` : task.parentTaskId}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** A creation under this task was refused by a backstop (depth, cycle, …). */
+function RefusalMark({ count, reason }: { count: number; reason?: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[0.667rem] font-semibold text-orange"
+      title={`${count} task creation${count === 1 ? '' : 's'} under this task refused${reason ? ` (latest: ${reason})` : ''} — see Activity`}
+    >
+      <ShieldAlert size={10} /> {count} refused{reason ? ` · ${reason}` : ''}
+    </span>
   );
 }
 
@@ -205,6 +236,8 @@ function CardContent({
         <SubtaskDelegationRow agent={task.assignee} parentTitle={task.delegation.parentTitle} />
       )}
 
+      <ProvenanceRow task={task} />
+
       {/* Row 3: meta line (assignee, run status, time) */}
       <div className="flex items-center gap-2 mt-1.5 ml-4 text-[0.733rem] text-muted-foreground">
         {task.assignee && task.delegation?.role !== 'subtask' && (
@@ -214,6 +247,8 @@ function CardContent({
         )}
 
         {task.run && <RunBadge status={task.run.status} />}
+
+        {task.refusals && <RefusalMark count={task.refusals.count} reason={task.refusals.latestReason} />}
 
         {task.stopped && (
           <span className="inline-flex items-center gap-1 text-[0.667rem] font-semibold text-orange">

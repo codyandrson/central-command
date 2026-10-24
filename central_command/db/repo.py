@@ -3620,6 +3620,14 @@ def _task_row(row) -> dict:
             d[k] = json.loads(v)
     if "session_status" in d:
         d["stopped"] = d["session_status"] == "STOPPED"
+    if "refusal_count" in d:
+        # Only the board's list query joins the refusals; null = never refused.
+        n = d.pop("refusal_count")
+        reason, at = d.pop("refusal_reason"), d.pop("refusal_at")
+        d["refusals"] = (
+            {"count": n, "latest_reason": reason, "latest_at": at.isoformat()}
+            if n else None
+        )
     return d
 
 
@@ -3660,8 +3668,21 @@ async def list_tasks(
                 select id from task where status = any($4::text[])
                 order by created_at desc limit $2
             )
-            select t.*, s.status as session_status
+            select t.*, s.status as session_status,
+                   r.refusal_count, r.refusal_reason, r.refusal_at
               from task t left join session s on s.id = t.session_id
+              left join (
+                    -- The refusal mark: one grouped pass over task.refused
+                    -- events, joined by ref_id (the parent task) - not a
+                    -- query per card.
+                    select ref_id,
+                           count(*) as refusal_count,
+                           (array_agg(payload ->> 'reason' order by id desc))[1]
+                               as refusal_reason,
+                           max(created_at) as refusal_at
+                      from audit_event where kind = 'task.refused'
+                     group by ref_id
+              ) r on r.ref_id = t.id
             where ($1::text is null or t.status = $1)
               and ($3::text is null or t.agent_id = $3)
               and (t.status <> all($4::text[]) or t.id in (select id from recent_terminal))

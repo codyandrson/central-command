@@ -62,6 +62,23 @@ interface CcTask {
   // so it can't drift from the session's actual status.
   session_status: string | null;
   stopped: boolean;
+  // Backstops provenance (stored on the row). NULL created_by is a row from
+  // before the columns existed and reads as operator-created.
+  created_by?: string | null;
+  approved_by?: string | null;
+  parent_task_id?: string | null;
+  // Null/absent = never refused; else the task.refused events whose ref_id is
+  // this task (repo.list_tasks, one grouped query).
+  refusals?: { count: number; latest_reason: string | null; latest_at: string | null } | null;
+}
+
+/** The stored creator as the board's actor: operator | heartbeat:<schedule> | agent:<id>. */
+function creatorOf(t: CcTask): 'operator' | `heartbeat:${string}` | `agent:${string}` {
+  const c = t.created_by;
+  if (c && (c.startsWith('agent:') || c.startsWith('heartbeat:'))) {
+    return c as `heartbeat:${string}` | `agent:${string}`;
+  }
+  return 'operator';
 }
 
 function toMs(iso: string | null): number {
@@ -69,14 +86,25 @@ function toMs(iso: string | null): number {
   return Number.isFinite(t) ? t : Date.now();
 }
 
-function mapTask(t: CcTask) {
+/** `titles` (id -> title) lets a list response resolve the parent link's label. */
+function mapTask(t: CcTask, titles?: Map<string, string>) {
   return {
     id: t.id,
     title: t.title,
     description: t.instructions,
     status: t.status,
     priority: 'normal' as const,
-    createdBy: 'operator' as const,
+    createdBy: creatorOf(t),
+    approvedBy: t.approved_by ?? undefined,
+    parentTaskId: t.parent_task_id ?? undefined,
+    parentTaskTitle: t.parent_task_id ? titles?.get(t.parent_task_id) : undefined,
+    refusals: t.refusals
+      ? {
+          count: t.refusals.count,
+          latestReason: t.refusals.latest_reason ?? undefined,
+          latestAt: t.refusals.latest_at ? toMs(t.refusals.latest_at) : undefined,
+        }
+      : undefined,
     createdAt: toMs(t.created_at),
     updatedAt: toMs(t.terminal_at ?? t.started_at ?? t.created_at),
     version: 1,
@@ -156,6 +184,7 @@ app.get('/api/kanban/tasks', rateLimitGeneral, async (c) => {
     // bare id, so it goes to the source rather than being sliced out here.
     const assignee = c.req.query('assignee') || '';
     const fetched = await fetchGvTasksPage(assignee.replace(/^agent:/, '') || undefined);
+    const titles = new Map(fetched.tasks.map(t => [t.id, t.title] as const));
     let tasks = fetched.tasks;
     const q = (c.req.query('q') || '').toLowerCase();
     if (q) {
@@ -166,7 +195,7 @@ app.get('/api/kanban/tasks', rateLimitGeneral, async (c) => {
     const offset = Math.max(0, Number(c.req.query('offset')) || 0);
     const page = tasks.slice(offset, offset + limit);
     return c.json({
-      items: page.map(mapTask),
+      items: page.map(t => mapTask(t, titles)),
       total: tasks.length,
       limit,
       offset,
@@ -180,9 +209,10 @@ app.get('/api/kanban/tasks', rateLimitGeneral, async (c) => {
 
 app.get('/api/kanban/tasks/:id', rateLimitGeneral, async (c) => {
   try {
-    const task = (await fetchGvTasks()).find(t => t.id === c.req.param('id'));
+    const all = await fetchGvTasks();
+    const task = all.find(t => t.id === c.req.param('id'));
     if (!task) return c.json({ error: 'task not found' }, 404);
-    return c.json(mapTask(task));
+    return c.json(mapTask(task, new Map(all.map(t => [t.id, t.title] as const))));
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }

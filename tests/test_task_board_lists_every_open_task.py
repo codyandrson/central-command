@@ -20,3 +20,16 @@ async def test_open_tasks_survive_the_terminal_cap():
     ids = [r["id"] for r in await repo.list_tasks(limit=2, agent_id=agent_id)]
     assert old_open in ids
     assert [i for i in ids if i in terminal_ids] == terminal_ids[-2:][::-1]  # newest two only
+
+
+async def test_an_old_row_reads_as_unrefused_and_operator_created():
+    """A row from before the backstops has no creator (NULL reads as operator
+    in the cockpit) and no refusal mark."""
+    agent_id = f"board-test-{uuid.uuid4().hex[:6]}"
+    await repo.upsert_agent(agent_id, "Board test", "", "")
+    tid = f"task_board_old_{uuid.uuid4().hex[:8]}"
+    await repo.create_task(tid, "old", "x", agent_id)
+    (row,) = [r for r in await repo.list_tasks(agent_id=agent_id) if r["id"] == tid]
+    assert row["created_by"] is None and row["approved_by"] is None
+    assert row["parent_task_id"] is None
+    assert row["refusals"] is None
