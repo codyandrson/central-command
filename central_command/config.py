@@ -470,7 +470,13 @@ class Settings(BaseSettings):
     # refused at `routes.create_and_run_task` with a `task.refused` event.
     #   task_max_depth -> agent-created tasks in the lineage INCLUDING the new
     #                     one (operator task -> T1 -> T2 -> T3 allowed, T4 not)
+    #   task_fanout_limit -> tasks one creating TASK may create (counted by
+    #                     parent task id, so a retry-parked re-run in a new
+    #                     session continues the count; a creator with no task is
+    #                     counted by its session). The orchestrator's assign_work
+    #                     lands here too, against its project task
     task_max_depth: int = 3
+    task_fanout_limit: int = 25
 
     # Auditor (Phase 4, D8/D12) — independent re-verification of agent claims.
     #   auditor_enabled -> off by default; the human gate is the baseline

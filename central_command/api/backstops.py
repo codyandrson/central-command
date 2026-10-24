@@ -31,6 +31,7 @@ HEARTBEAT_PREFIX = "heartbeat:"
 DEPTH = "depth"
 CYCLE = "cycle"
 SELF = "self"
+FAN_OUT = "fan-out"
 NO_ASSIGNEE = "no-assignee"
 
 
@@ -43,7 +44,9 @@ class Provenance:
     # Agent ids, root first, including the immediate creator; empty for an
     # operator or heartbeat creation.
     chain: tuple[str, ...] = ()
-    # The row a refusal hangs on: the parent task, else the creating session.
+    # The row a refusal hangs on, and the key the fan-out count is read by: the
+    # parent task (the creator's own, or the ancestor an inherited chain runs
+    # under), else the creating session.
     ref_id: str | None = None
 
     @property
@@ -89,16 +92,19 @@ async def derive_provenance(actor: str, parent_session_id: str | None) -> Proven
     # of the nearest ancestor session that has a task, so a consult inside a
     # task chain cannot reset the depth or cycle count. No such ancestor: it
     # starts a chain of its own.
-    inherited = await _inherited_chain(parent_session_id)
-    return Provenance(f"{AGENT_PREFIX}{creator}", None, inherited + (creator,),
-                      parent_session_id)
+    # The ancestor task is also the parent: the specialist's creations count
+    # toward that task's fan-out and a refusal hangs on it.
+    inherited, ancestor_task = await _inherited_chain(parent_session_id)
+    return Provenance(f"{AGENT_PREFIX}{creator}", ancestor_task,
+                      inherited + (creator,), ancestor_task or parent_session_id)
 
 
 _ANCESTOR_HOPS = 16
 
 
-async def _inherited_chain(session_id: str) -> tuple[str, ...]:
-    """The stored chain of the nearest ancestor session that runs a task, or ().
+async def _inherited_chain(session_id: str) -> tuple[tuple[str, ...], str | None]:
+    """The stored chain and id of the nearest ancestor session's task, or
+    `((), None)` when no ancestor runs one.
 
     Ancestry is `session.parent_session_id` (an orchestrated child) and, for a
     consult specialist's session, the asking session stamped on its proposal's
@@ -111,13 +117,13 @@ async def _inherited_chain(session_id: str) -> tuple[str, ...]:
         nxt = (row or {}).get("parent_session_id") or (
             await repo.consult_caller_session(current))
         if not nxt or nxt in seen:
-            return ()
+            return (), None
         seen.add(nxt)
         task = await repo.task_for_session(nxt)
         if task:
-            return tuple(task.get("creator_chain") or ())
+            return tuple(task.get("creator_chain") or ()), task["id"]
         current = nxt
-    return ()
+    return (), None
 
 
 async def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
@@ -157,6 +163,24 @@ async def check(prov: Provenance, agent_id: str | None) -> Refusal | None:
             f"deep ({' -> '.join(prov.chain)}) — depth is capped at {cap}. "
             f"Do the work yourself or report back; the operator can create "
             f"a fresh task.",
+        )
+    limit = settings.task_fanout_limit
+    # Counted by the creating TASK, so a retry-parked re-run in a new session
+    # continues the count; a creator with no task (chat, triage) is counted by
+    # its session. Every row counts, whatever its status: a runaway's children
+    # that already failed are still children.
+    created = await repo.count_child_tasks(
+        parent_task_id=prov.parent_task_id,
+        parent_session_id=None if prov.parent_task_id else prov.ref_id,
+    )
+    if created >= limit:
+        scope = "task" if prov.parent_task_id else "conversation"
+        return Refusal(
+            FAN_OUT,
+            f"this {scope} has already created {created} tasks — fan-out is "
+            f"capped at {limit}. Do the rest yourself or report back; the "
+            f"operator can create a fresh task.",
+            {"limit": limit, "created": created},
         )
     return None
 

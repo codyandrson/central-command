@@ -385,3 +385,138 @@ async def test_a_specialist_inside_a_depth_two_chain_is_counted_at_depth_three()
     with pytest.raises(HTTPException) as exc:  # its next hop is depth 4
         await _approve_task_create(await _running(e, t3), e, c)
     assert exc.value.detail.startswith("task refused (depth):")
+
+
+# --- fan-out (story 3) ---------------------------------------------------------
+
+
+async def _created_under(parent_task: str) -> int:
+    return await repo.count_child_tasks(parent_task_id=parent_task)
+
+
+async def test_the_limit_plus_one_creation_from_one_task_is_refused(monkeypatch):
+    monkeypatch.setattr(settings, "task_fanout_limit", 3)
+    a, b = AGENTS[:2]
+    root = await _operator_root(a)
+    session = await _running(a, root)
+
+    for _ in range(3):  # the first `limit` are not refused
+        assert await _approve_task_create(session, a, b)
+    assert await _created_under(root) == 3
+
+    before = len(await repo.list_tasks())
+    since = await repo.latest_event_id()
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(session, a, b)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail.startswith("task refused (fan-out):")
+    assert len(await repo.list_tasks()) == before  # no row for the refused one
+    (refused,) = await _refusals(since)
+    assert refused["ref_id"] == root
+    assert refused["payload"]["reason"] == "fan-out"
+    assert refused["payload"]["chain"] == [a]
+    assert refused["payload"]["limit"] == 3 and refused["payload"]["created"] == 3
+    assert not [e for e in await repo.list_events(since_id=since, kind="task")
+                if e["kind"] == "task.created"]
+
+
+async def test_the_fan_out_limit_defaults_to_25():
+    assert settings.task_fanout_limit == 25
+
+
+async def test_the_count_survives_a_retry_parked_rerun_in_a_new_session(monkeypatch):
+    """A retry-parked task re-runs in a NEW session (run.py re-links the task to
+    it): the count is by task, so the new session continues it and the old
+    session's creations still count."""
+    monkeypatch.setattr(settings, "task_fanout_limit", 3)
+    a, b = AGENTS[:2]
+    root = await _operator_root(a)
+    first = await _running(a, root)
+    for _ in range(2):
+        assert await _approve_task_create(first, a, b)
+
+    second = await _running(a, root)  # the re-run: same task, new session
+    assert await _approve_task_create(second, a, b)  # the 3rd of 3
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(second, a, b)
+    assert exc.value.detail.startswith("task refused (fan-out):")
+    assert await _created_under(root) == 3
+
+
+async def test_two_tasks_count_separately(monkeypatch):
+    monkeypatch.setattr(settings, "task_fanout_limit", 1)
+    a, b = AGENTS[:2]
+    root1, root2 = await _operator_root(a), await _operator_root(a)
+    assert await _approve_task_create(await _running(a, root1), a, b)
+    assert await _approve_task_create(await _running(a, root2), a, b)
+    with pytest.raises(HTTPException):
+        await _approve_task_create(await _running(a, root1), a, b)
+
+
+async def test_a_creator_with_no_task_is_counted_by_its_session(monkeypatch):
+    monkeypatch.setattr(settings, "task_fanout_limit", 2)
+    a, b = AGENTS[:2]
+    session = await _running(a)
+    for _ in range(2):
+        assert await _approve_task_create(session, a, b)
+    since = await repo.latest_event_id()
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(session, a, b)
+    assert exc.value.detail.startswith("task refused (fan-out):")
+    (refused,) = await _refusals(since)
+    assert refused["ref_id"] == session
+    # Another conversation starts its own count.
+    assert await _approve_task_create(await _running(a), a, b)
+
+
+async def test_an_inherited_chain_counts_toward_the_ancestor_task(monkeypatch):
+    """A task-less specialist inside a task chain gets the ancestor as its
+    parent task, so its creations and the asker's share one count — and the
+    refusal hangs on the ancestor task."""
+    monkeypatch.setattr(settings, "task_fanout_limit", 2)
+    a, b, c, d = AGENTS[:4]
+    root = await _operator_root(a)
+    t1 = await _approve_task_create(await _running(a, root), a, b)
+    asker = await _running(b, t1)
+    assert await _approve_task_create(asker, b, d)  # 1 under t1
+
+    specialist = await _running(c)
+    await repo.save_proposal(
+        _uid("prop"), specialist, c, "consulted", [], [], "",
+        idempotency_key=_uid("key"),
+        origin={"consulted_by": b, "caller_session_id": asker},
+    )
+    t3 = await _approve_task_create(specialist, c, d)  # 2 under t1
+    row = await repo.get_task(t3)
+    assert row["parent_task_id"] == t1
+    assert await _created_under(t1) == 2
+
+    since = await repo.latest_event_id()
+    with pytest.raises(HTTPException) as exc:  # the asker's next is the 3rd
+        await _approve_task_create(asker, b, d)
+    assert exc.value.detail.startswith("task refused (fan-out):")
+    (refused,) = await _refusals(since)
+    assert refused["ref_id"] == t1
+
+
+async def test_a_mid_chain_consult_session_finds_its_askers_task_chain(monkeypatch):
+    """`consult._park_mid_chain` mints the session with the asker as its
+    `parent_session_id`: such a specialist, resumed as a full agent, creates a
+    task inside the asker's chain rather than a fresh one."""
+    monkeypatch.setattr(settings, "task_fanout_limit", 1)
+    a, b, c, d = AGENTS[:4]
+    root = await _operator_root(a)
+    t1 = await _approve_task_create(await _running(a, root), a, b)
+    asker = await _running(b, t1)
+    mid = _uid("sess")
+    await repo.create_running_session(mid, c, parent_session_id=asker)
+
+    t2 = await _approve_task_create(mid, c, d)
+
+    row = await repo.get_task(t2)
+    assert row["creator_chain"] == [a, c]
+    assert row["parent_task_id"] == t1
+    with pytest.raises(HTTPException) as exc:
+        await _approve_task_create(asker, b, d)  # t1's count is now 1 of 1
+    assert exc.value.detail.startswith("task refused (fan-out):")

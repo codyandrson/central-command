@@ -3407,6 +3407,25 @@ async def create_task(
         await conn.close()
 
 
+async def count_child_tasks(
+    *, parent_task_id: str | None = None, parent_session_id: str | None = None,
+) -> int:
+    """How many tasks one creator has made: by `parent_task_id` when it has a
+    task (the indexed column, so a new session for the same task continues the
+    count), else by the creating session."""
+    conn = await _conn()
+    try:
+        if parent_task_id:
+            return await conn.fetchval(
+                "select count(*) from task where parent_task_id = $1",
+                parent_task_id)
+        return await conn.fetchval(
+            "select count(*) from task where parent_session_id = $1 "
+            "and parent_task_id is null", parent_session_id)
+    finally:
+        await conn.close()
+
+
 async def assign_task(task_id: str, agent_id: str) -> bool:
     """Assign an unassigned task. Only NEW tasks are assignable — once a run
     has started, the assignment is history, not a mutable field."""

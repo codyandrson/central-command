@@ -164,15 +164,22 @@ from the command line (`python -m central_command.selfcheck`) and from
   All are derived server-side from `parent_session_id` — the creator from the
   session row, the parent task from `repo.task_for_session` — never from tool
   arguments; a creating session with no task of its own (chat, a consult
-  specialist) inherits the chain of its nearest task-bearing ancestor session
-  (`parent_session_id`, or the asking session on a consult proposal's
-  `origin`). A creation is refused, with reason `self` (the assignee is the
+  specialist) inherits the chain, and takes as its parent task the task, of its
+  nearest task-bearing ancestor session (`parent_session_id` — a mid-chain
+  consult session is minted with its asker as parent — or the asking session
+  on a consult proposal's `origin`). A creation is refused, with reason `self` (the assignee is the
   creator), `cycle` (the assignee is already in the chain, the orchestrator
   included), `depth` (the chain would exceed `task_max_depth`, default 3:
   agent-created tasks in the lineage including the new one) or `no-assignee`
-  (an agent-created task must name one): it writes no row, emits
+  (an agent-created task must name one) or `fan-out` (the creating task has
+  already made `task_fanout_limit` tasks, default 25, counted by
+  `parent_task_id` so a retry-parked re-run in a new session continues the
+  count; a creator with no task is counted by its session; the orchestration
+  driver's `assign_work` lands on the same seam, counted against its project
+  task, beside its own `orch_fanout_limit` park): it writes no row, emits
   `task.refused` (`ref_id` the parent task, else the creating session; payload
-  `reason`, `chain`, `creator`, `agent_id`) and returns a 422 naming the
+  `reason`, `chain`, `creator`, `agent_id`; plus `limit`, `created` on a
+  fan-out) and returns a 422 naming the
   reason; `self` and `cycle` refusals also name the taskable teammates (the
   roster's `taskable_agent_ids()`, minus the chain) the creator may use
   instead. Operator and heartbeat creations are roots and never trip these.

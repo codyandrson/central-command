@@ -257,6 +257,9 @@ async def test_the_whole_chain_parks_and_unwinds_on_the_decision(monkeypatch, wo
         # The mid-chain session belongs to B — the drafter/owner rule one level
         # up: a rejection or a coaching signal here is B's, never A's.
         assert b_row["agent_id"] == B_ID
+        # ...and it hangs under its asker, so a task B creates on resume finds
+        # A's task chain (api/backstops.py walks `parent_session_id`).
+        assert b_row["parent_session_id"] == chain.a
         b_state = await repo.get_session_run_state(chain.b)
         assert b_state["consult_wait"]["target"] == C_ID
         # ...and it carries B's chain, which its resume rebuilds deps from.

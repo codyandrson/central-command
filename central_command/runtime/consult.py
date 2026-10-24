@@ -245,6 +245,7 @@ async def park_consult_wait(
 
 async def _park_mid_chain(
     *, agent_id: str, result, call, chain: tuple[str, ...],
+    caller_session_id: str | None = None,
 ) -> dict | None:
     """Persist a consulted specialist that is itself waiting one level deeper,
     as a durable session of its OWN parked AWAITING_AGENTS on the inner one.
@@ -267,7 +268,11 @@ async def _park_mid_chain(
     inner = consult_wait_of(result, call) or {}
     mid_session = "sess_" + uuid.uuid4().hex[:12]
     try:
-        await repo.create_running_session(mid_session, agent_id)
+        # Linked to the asking session so a task this specialist later creates
+        # (it resumes as a full agent) finds the asker's task chain
+        # (`api/backstops.py` walks `session.parent_session_id`).
+        await repo.create_running_session(
+            mid_session, agent_id, parent_session_id=caller_session_id)
         await park_consult_wait(
             session_id=mid_session, agent_id=agent_id, result=result, call=call,
             chain=chain,
@@ -629,6 +634,7 @@ async def consult(
         # does, so our caller parks on US with the existing machinery.
         parked = await _park_mid_chain(
             agent_id=agent_id, result=result, call=call, chain=new_chain,
+            caller_session_id=session_id,
         )
         if parked is not None:
             if outcome is not None:

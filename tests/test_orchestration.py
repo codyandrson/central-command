@@ -257,6 +257,55 @@ async def test_stall_escalates_to_operator_instead_of_looping(monkeypatch):
     assert stalled and "without progress" in stalled[0]["payload"]["reason"]
 
 
+async def test_project_exceeding_orch_fanout_limit_parks_an_operator_question(
+        monkeypatch):
+    """The orchestrator's own fan-out ceiling (not the task backstop's count,
+    which lives at the create seam) pauses the loop for the operator: nothing
+    is assigned and the question names the fan-out backstop."""
+    monkeypatch.setattr(settings, "orch_fanout_limit", 0)
+    r = await _start_project()
+    sid = r["session_id"]
+    plan = await _open_item(sid, "plan_review")
+
+    await orchestration.answer_item(plan["id"], "", "approved")
+
+    async def parked():
+        return any(i["session_id"] == sid and i["kind"] == "stall"
+                   for i in await repo.list_operator_items("OPEN"))
+    await _settle(parked)
+
+    item = await _open_item(sid, "stall")
+    assert "PAUSED by the control plane" in item["body"]
+    assert "fan-out backstop" in item["body"]
+    assert "were NOT executed" in item["body"]
+    stalled = [e for e in await repo.list_events_of_kinds(["orchestration.stalled"])
+               if e["ref_id"] == sid]
+    assert stalled and "fan-out backstop" in stalled[0]["payload"]["reason"]
+    # The batch did not run: no child task hangs off the orchestrator session.
+    assert [t for t in await repo.list_tasks()
+            if t.get("parent_session_id") == sid] == []
+    assert await repo.session_status(sid) == "AWAITING_AGENTS"
+
+
+async def test_assign_work_children_count_against_the_project_task():
+    """The driver's assign_work lands on the create seam, so its children are
+    counted by the project task, not a second check in the driver."""
+    r = await _start_project()
+    sid = r["session_id"]
+    plan = await _open_item(sid, "plan_review")
+    await orchestration.answer_item(plan["id"], "", "approved")
+
+    async def assigned():
+        return any(t.get("parent_session_id") == sid
+                   for t in await repo.list_tasks())
+    await _settle(assigned)
+
+    (child,) = [t for t in await repo.list_tasks()
+                if t.get("parent_session_id") == sid]
+    assert child["parent_task_id"] == r["task_id"]
+    assert await repo.count_child_tasks(parent_task_id=r["task_id"]) == 1
+
+
 async def test_depth1_agent_created_task_refused():
     task = {"id": "task_x", "instructions": "x", "title": "x",
             "agent_id": "orchestrator", "parent_session_id": "sess_parent"}
