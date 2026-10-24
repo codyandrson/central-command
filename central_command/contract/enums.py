@@ -44,6 +44,15 @@ class ProposalStatus(str, Enum):
     withdrawn = "WITHDRAWN"
 
 
+# Before a verdict: the operator can still approve, reject or dismiss it. The
+# updater's removed-capability check (deploy/k3s/cc-update.sh) reads THIS set.
+# RETRY_PENDING is not here: the operator already decided it.
+PRE_VERDICT_PROPOSAL_STATUSES: tuple[str, ...] = (
+    ProposalStatus.proposed.value,
+    ProposalStatus.awaiting_human.value,
+)
+
+
 class SessionStatus(str, Enum):
     """The session lifecycle (design: contracts §2)."""
 

@@ -1,0 +1,11 @@
+# Capabilities a release REMOVES, one name per line (e.g. task.create).
+# cc-update.sh reads this file from the TARGET tag in a pre-apply check, before
+# anything stops, and refuses the apply while any proposal of a listed
+# capability is still undecided (PROPOSED or AWAITING_HUMAN) or a session is
+# parked waiting on one (task.create: run_state.task_wait). The operator clears
+# them through the normal verdicts (approve, reject, dismiss); nothing here
+# decides or withdraws anything, and "Update anyway" does not bypass it.
+# A release that removes a capability adds its name here IN THE SAME CHANGE.
+# The check ships one release EARLIER than the first entry, because the update
+# into a release is run by the installed tree's updater. Blank lines and lines
+# starting with # are ignored.

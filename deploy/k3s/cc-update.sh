@@ -316,6 +316,31 @@ refuse_if_busy() { # <phase> — the request's force:true is the operator's "upd
   [[ "$n" == 0 ]] || note "WARNING: forced — $n in-flight run(s) will be killed and swept FAILED at startup (${out#* })"
 }
 
+# ── removed capabilities ─────────────────────────────────────────────────────
+# A release that REMOVES a capability lists its name in the TARGET tree's
+# deploy/k3s/removed-capabilities.txt (one per line, empty today). The update
+# INTO that release is run by the INSTALLED tree's copy of this script, so the
+# check has to ship one release earlier — which is why it reads the list from
+# the target tag and the query from the installed tree. Refused while any
+# proposal of a listed capability is still pre-verdict or a session is parked
+# waiting on one: applying would leave an undecidable proposal under a name no
+# handler knows. The check DECIDES NOTHING (a proposal has three verdicts and
+# no code picks one): it names the ids and the operator clears them through
+# approve, reject or dismiss. Deliberately NOT bypassed by FORCE ("Update
+# anyway" is for in-flight runs, which a restart sweeps FAILED and can retry;
+# a stranded proposal cannot be decided at all). Fails closed: a list that
+# names a capability and a query that cannot run refuses, never passes.
+refuse_if_capability_pending() { # <phase>
+  local list rc=0 out
+  list="$("${RUNAS[@]}" git -C "$REPO" show "v$TARGET_VERSION:deploy/k3s/removed-capabilities.txt" 2>/dev/null)" || list=""
+  grep -qvE '^[[:space:]]*(#|$)' <<<"$list" || return 0
+  # shellcheck disable=SC2016  # $1 is for the inner bash
+  out="$("${RUNAS[@]}" bash -c 'cd "$1" && .venv/bin/python scripts/removed_capability_check.py -' _ "$REPO" <<<"$list" 2>&1)" || rc=$?
+  [[ $rc -eq 0 ]] && return 0
+  note "$out"
+  die "$1" "v$TARGET_VERSION removes a capability that still has undecided work — decide it first (approve, reject or dismiss in the cockpit), then apply again; 'Update anyway' does not apply to this"
+}
+
 # A SIGTERM (TimeoutStartSec) must not leave a silent corpse.
 trap 'write_status failed "${PHASE_NOW:-unknown}" "terminated (timeout or stop)"; exit 143' TERM
 # The build worktree must not survive ANY exit path, TERM included (the TERM
@@ -363,6 +388,8 @@ main() {
   # the stop, because prebuild + dumps leave a window a new run can start in.
   PHASE_NOW=busy; phase "checking for in-flight agent runs"
   refuse_if_busy busy
+  PHASE_NOW=capabilities; phase "checking removed capabilities for undecided work"
+  refuse_if_capability_pending capabilities
 
   PHASE_NOW=checkpoint; phase "tagging rollback checkpoint"
   # One stamp names both rollback records: the git tag and the containerd tags
@@ -480,6 +507,7 @@ main() {
     || note "WARNING: a decryption key is missing from deploy/k3s/.env — the litellm/n8n dumps above would not be restorable"
 
   PHASE_NOW=busy; refuse_if_busy busy
+  PHASE_NOW=capabilities; refuse_if_capability_pending capabilities
 
   PHASE_NOW=stop; phase "stopping cc-uvicorn and cc-sandbox-runner"
   STOPPED=1

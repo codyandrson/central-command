@@ -462,6 +462,12 @@ config → start services → health → roll back on failure. It reads `VERSION
 the installed version, not git. `kubectl apply` never deletes, so a removed
 manifest must be tombstoned in `deploy/k3s/removed.txt`; a changed updater unit
 takes effect on the *next* run.
+A capability a release removes is named in `deploy/k3s/removed-capabilities.txt`
+(read from the *target* tag); the busy-check phase, repeated just before the
+stop, refuses the apply while a proposal of that capability is undecided
+(`PROPOSED`/`AWAITING_HUMAN`) or a session is parked on `task_wait`
+(`scripts/removed_capability_check.py`). It decides nothing, and "Update anyway"
+does not bypass it; the operator clears the list by the normal verdicts.
 
 Other top-level directories: `scripts/` (pre-push guard, vendored-docs and
 model-library fetchers, `graph_inspect.py`, `render_checklist.py`, the M2

@@ -310,6 +310,19 @@ deletes in its manifests phase. `setup.sh` is a first install and does not
 read it, and a resource whose manifest was removed without a tombstone is
 still there until someone deletes it by hand.
 
+A release that REMOVES a capability names it in
+`deploy/k3s/removed-capabilities.txt` (one name per line; empty today). Before
+anything stops, `cc-update.sh` reads that file from the *target* tag and refuses
+the apply while any proposal of a listed capability is still before a verdict
+(`PROPOSED` or `AWAITING_HUMAN`, `contract.enums.PRE_VERDICT_PROPOSAL_STATUSES`)
+or a session is parked on `task_wait` (`task.create`), listing the capability, the
+proposal ids and the session ids (`scripts/removed_capability_check.py`, run with
+the installed tree's venv). It decides nothing: clear the list through the normal
+verdicts (approve, reject, dismiss) and apply again. "Update anyway" does not
+bypass it, because a proposal stranded under a name no handler knows could never
+be decided. Because the update *into* a release runs the installed tree's
+updater, the check ships one release before the first entry.
+
 Expected placement once settled:
 
 | Workload | Node | Why | Host exposure |
