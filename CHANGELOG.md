@@ -4,6 +4,92 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-24 — v2.69.0: agent-created tasks are bounded by backstops; task.create stays gated
+
+epic-task-backstops, release A. Six commits since v2.68.1 (`761ce0eb..5b6a3750`)
+make every task record who created it and put hard limits on chains of
+agent-created tasks, so a runaway stops loudly instead of spinning. **`task.create`
+is unchanged: it is still a gated capability (`gate="human approval"`, an
+Executor handler, a proposal the operator approves), and nothing in this release
+changes who may create a task.** The ungating is the next release (release B); it
+needs this one applied first, because the updater that applies B is the one this
+release installs. **Still requires v2.66.0** (`min_upgrade_from` unchanged; release
+B raises it).
+
+- **Provenance, derived on the server.** `task` gains four columns: `created_by`
+  (`operator`, `heartbeat:<schedule>` or `agent:<id>`; NULL on older rows, which
+  read as operator-created), `approved_by` (the approver of a gated `task.create`;
+  the event `actor` stays the approver), `parent_task_id` and `creator_chain`
+  (agent ids, root first, including the immediate creator). All four are written
+  once at `routes.create_and_run_task` from the creating session
+  (`parent_session_id`), never from tool arguments. A creating session with no
+  task of its own (chat, triage, a consulted specialist) inherits the chain and
+  parent task of its nearest task-bearing ancestor session, through
+  `parent_session_id` or the consult proposal's origin; a mid-chain consult
+  session is now minted under its asker, so a specialist consulted inside a chain
+  cannot reset the depth count.
+- **Five refusals, all loud.** A creation is refused, writing no task row, when the
+  assignee is the creator (`self`), is already in the creator chain, the
+  orchestrator included (`cycle`), when the chain would exceed `task_max_depth`
+  (`depth`), when the creating task already made `task_fanout_limit` tasks
+  (`fan-out`), or when an agent-created task names no assignee (`no-assignee`).
+  Each emits a **`task.refused`** event (`ref_id` the parent task, else the
+  creating session; payload `reason`, `chain`, `creator`, `agent_id`, plus `limit`
+  and `created` on a fan-out) before anything runs, returns a 422 `task refused
+  (<reason>): …` to the caller, and for `self` and `cycle` names the taskable
+  teammates the creator may use instead. No inbox item. Operator and heartbeat
+  creations are roots and never trip these.
+- **Two settings.** `task_max_depth` (env `CC_TASK_MAX_DEPTH`, default 3: agent-
+  created tasks in the lineage including the new one, so operator task → T1 → T2
+  → T3 is allowed and T4 is refused) and `task_fanout_limit`
+  (`CC_TASK_FANOUT_LIMIT`, default 25, counted per creating task by
+  `parent_task_id`, so a retry-parked re-run in a new session continues the count;
+  a creator with no task is counted by its session). Both are commented in
+  `.env.example`. The count is check-then-insert, so parallel creations may
+  overshoot by a few.
+- **The star-shape guards are replaced.** The three founding guards (the
+  orchestrator refused as the target of any agent-created task, `run_project`
+  refusing to orchestrate one, and the orchestrator dropped from batch targets) are
+  gone. An agent-created task, created through an approved `task.create`, may now
+  be assigned to the orchestrator and run as a project; its plan still parks for
+  the operator before round one, and its children count toward the depth cap and
+  the project task's fan-out. The orchestration driver pre-checks a whole
+  `assign_work` batch against the backstops, all-or-nothing, before creating any
+  child: a refusal is a problem line in the batch's tool result and one
+  `task.refused` per refused assignment. The orchestrator assigning to itself is
+  refused early as a cycle. The policy is renamed "Orchestration is plan-gated,
+  backstop-bounded, and stall-escalating"; the orchestrator's own round, stall and
+  fan-out limits are unchanged.
+- **The board shows it.** Each card shows its creator and, for a task approved
+  while the gate was on, the approver beside it (replacing the hard-coded
+  "operator"), links an agent-created task to its parent task, and carries an
+  orange mark when a creation from that task was refused. `TaskActor` admits
+  heartbeat creators. A refusal whose reference is a session with no task shows
+  only in the Activity feed.
+- **The updater refuses to remove a capability under undecided work.**
+  `deploy/k3s/cc-update.sh` gains a pre-apply check, phase `capabilities`, run
+  after the busy gate and again after the database dumps, before anything stops.
+  It reads `deploy/k3s/removed-capabilities.txt` from the TARGET tag and, for each
+  name listed, refuses the apply while a proposal of that capability is still
+  before a verdict (`PROPOSED` or `AWAITING_HUMAN`) or a session is parked on
+  `task_wait` (`task.create`), naming the proposal and session ids. It decides
+  nothing: the operator clears them with approve, reject or dismiss. "Update
+  anyway" does not bypass it, and a check that cannot run refuses (fails closed).
+  **The list ships empty in this release**, so the check does nothing yet. It is in
+  force only once this release is installed, because an update runs the INSTALLED
+  tree's updater: this release must be applied before the one that removes
+  `task.create`.
+- **What the apply does.** The updater's schema phase adds the four `task` columns
+  and `task_parent_task_idx` (additive, idempotent; `ADD COLUMN IF NOT EXISTS`, no
+  data rewritten), the cockpit is rebuilt for the board changes, and the new
+  settings take their defaults. No image, manifest or unit changes. Existing task
+  rows have `created_by` NULL, an empty chain and no parent, and read as
+  operator-created.
+- **After the apply, the operator checks:** `GET /api/heartbeat` is healthy; the
+  cockpit shows v2.69.0; and on the deployed tree
+  `pytest -q tests/test_task_propose.py tests/test_task_backstops.py` passes
+  (`tests/test_task_propose.py` pins `task.create` as a gated write).
+
 ## 2026-10-22 — v2.68.1: close-out of the documentation rewrite
 
 docs: three close-out items from the v2.68.0 documentation rewrite. Two
