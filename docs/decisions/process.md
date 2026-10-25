@@ -1385,8 +1385,8 @@ hygiene, and how the test suite itself must be written. See
   cap of 2, cycle refusal, budget propagation and size-capped distillation.
   The specialist drafts and parks its own proposal with the consult chain in
   provenance. Consult when you need an answer; hand off a task when the work
-  belongs to the other agent, through `task-propose`, never peer to peer. A
-  task proposal may declare await-result, parking the proposer
+  belongs to the other agent, through `task-create`, never peer to peer. A
+  `create_task` call may declare await-result, parking the creator
   `AWAITING_AGENTS`. Consulted specialists run read-only by construction.
 - **Why:** Free-form peer messaging stays struck, and the supervised star shape of
   the founding doctrine was reversed by FR-19 (any agent may create and

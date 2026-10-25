@@ -33,20 +33,6 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
 
 
-@pytest.fixture
-def no_detached_runs(monkeypatch):
-    """Create the task, but never let a real agent run detach from the test.
-
-    The create path is what is under test; letting it spawn a background run
-    would put an uncontrolled agent session into the suite — which is the exact
-    shape of the task-test flakes already root-caused twice.
-    """
-    async def noop(task, actor, **_kw):
-        return None
-
-    monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
-
-
 def _ctx(agent_id: str | None, session_id: str | None) -> SimpleNamespace:
     return SimpleNamespace(deps=TriageDeps(agent_id=agent_id, session_id=session_id))
 

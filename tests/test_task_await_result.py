@@ -46,15 +46,8 @@ def pinned(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_detached_runs(monkeypatch):
-    """The created child task must never actually run in this suite — same
-    guard `test_task_propose.py` uses, for the same reason."""
-    from central_command.api import routes
-
-    async def noop(task, actor, **_kw):
-        return None
-
-    monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
+def _no_detached_runs(no_detached_runs):
+    """The created child task must never actually run in this suite."""
 
 
 def _proposal() -> dict:

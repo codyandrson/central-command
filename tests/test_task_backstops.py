@@ -33,15 +33,9 @@ AGENTS = ["jira-expert", "litellm-manager", "confluence-expert", "wiki-agent",
 
 
 @pytest.fixture(autouse=True)
-def pinned(monkeypatch):
+def pinned(monkeypatch, no_detached_runs):
     monkeypatch.setattr(settings, "demo_mode", True)
     monkeypatch.setattr(settings, "executor_mode", "live")
-
-    async def noop(task, actor, **_kw):
-        return None
-
-    # The create path is under test; never let a real run detach from the test.
-    monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
 
 
 def _uid(prefix: str) -> str:

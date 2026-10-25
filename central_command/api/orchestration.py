@@ -598,9 +598,9 @@ async def child_resolved(task: dict) -> None:
     on its assigned children (`orch` in run_state — `maybe_resume`), an asker
     waiting on a consulted specialist's SESSION (`consult_wait` — reached via
     the specialist's own session going terminal, never through this hook), and
-    — since Decision 5 (2026-08-22) — a creator calling `create_task(await_result=True)` waiting
-    on the TASK it just created (`task_wait`). Dispatch on the parent's run_state, the
-    same way `resume_sweep` does, so a task_wait parent is never silently
+    — since Decision 5 (2026-08-22) — a creator calling `create_task(await_result=True)`
+    waiting on the TASK it just created (`task_wait`). Dispatch on the parent's
+    run_state, the same way `resume_sweep` does, so a task_wait parent is never silently
     handed to `maybe_resume` (which no-ops for anything without `orch`)."""
     parent = task.get("parent_session_id")
     if not parent:
@@ -690,8 +690,8 @@ async def resume_sweep() -> dict:
         # AWAITING_AGENTS carries three shapes — an orchestration waiting on its
         # children, an asker waiting on a specialist it consulted, and (Decision
         # 5, 2026-08-22) a `create_task(await_result=True)` creator waiting on
-        # the task it just created. Dispatch on the run state, because `maybe_resume` returns
-        # None for anything without `orch` and either wait would otherwise sit
+        # the task it just created. Dispatch on the run state, because
+        # `maybe_resume` returns None for anything without `orch` and either wait would otherwise sit
         # in this worklist forever, reported as "still parked" on every sweep.
         rs = await repo.get_session_run_state(sid)
         if rs and "consult_wait" in rs:
@@ -1247,7 +1247,7 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
 
 
 def _task_wait_outcome_text(t: dict) -> str:
-    """What the proposer is told when the task it awaited finishes — the same
+    """What the creator is told when the task it awaited finishes — the same
     distillation `_child_result` gives an orchestrator, in prose rather than
     JSON since this is a normal tool-result turn, not a batch collection."""
     outcome = (t.get("outcome") or "")[:_OUTCOME_CHARS]
@@ -1267,9 +1267,8 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
     the AWAITING_AGENTS→RUNNING flip is the lock), same shape of resume (feed
     the distilled outcome in as the deferred call's result and let the run
     continue), same tail (`gateway.finish_decision_resume` with `after=
-    "approved"` — the decision was already recorded when the task was
-    created; this only supplies the closing turn that decision owed the
-    drafter). Returns None when the task has not gone terminal yet — the
+    "approved"`: the task's outcome is already recorded, so this only
+    supplies the closing turn the creator was waiting on). Returns None when the task has not gone terminal yet — the
     normal "keep waiting" answer, not an error.
     """
     from pydantic_ai import UsageLimits
@@ -1326,7 +1325,7 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
         )
     except Exception as e:  # noqa: BLE001
         # Outage equivalence: the task's own outcome is already recorded, so a
-        # provider that is down costs the drafter a DELAY, not its run.
+        # provider that is down costs the creator a DELAY, not its run.
         parked = await resume_park.park_if_transient(session_id, e, pending)
         if parked:
             return {"parked": True, "session_id": session_id}

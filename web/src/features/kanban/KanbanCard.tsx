@@ -31,9 +31,10 @@ function ProjectDelegationRow({ count, done }: { count: number; done: number }) 
 }
 
 /** Sub-task card: a task fanned out from a parent session (an orchestrator
- * delegation, or — since a task created from an approved task.create
- * proposal also carries `parentSessionId`, pointing at the PROPOSING session
- * — a task created off the back of another agent's proposal). The parent's
+ * delegation, or a task another agent created: an agent's own `create_task`,
+ * or — before task creation was ungated — an approved task.create proposal;
+ * both carry `parentSessionId`, pointing at the CREATING (or proposing)
+ * session). The parent's
  * title is shown when known; without it the copy stays source-agnostic
  * rather than assuming "orchestrator". */
 function SubtaskDelegationRow({ agent, parentTitle }: { agent?: string; parentTitle?: string }) {

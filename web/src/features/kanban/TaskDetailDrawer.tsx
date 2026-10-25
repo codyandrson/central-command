@@ -393,8 +393,9 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
               )}
 
               {/* D7 phase 2: a sub-task's origin. `parentSessionId` also rides on
-                  a task created from an approved task.create proposal (linking
-                  back to the proposing session, not necessarily the
+                  a task an agent created with `create_task`, or, in old rows,
+                  from an approved task.create proposal (linking back to the
+                  creating or proposing session, not necessarily the
                   orchestrator), so the copy names the source only when known. */}
               {task.delegation?.role === 'subtask' && (
                 <div className="cockpit-note">

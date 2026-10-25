@@ -390,3 +390,35 @@ async def isolated_queue():
         # loop right after us — release the connections while it still runs,
         # or every test leaves its members open until the GC gets to them.
         await repo.close_pool()
+
+
+@pytest.fixture
+def no_detached_runs(monkeypatch):
+    """Create tasks, but never let a real agent run detach from the test.
+
+    The create path is what is under test; a background run would put an
+    uncontrolled agent session into the suite — the shape of the task-test
+    flakes already root-caused twice.
+    """
+    from central_command.api import routes
+
+    async def noop(task, actor, **_kw):
+        return None
+
+    monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
+
+
+@pytest.fixture
+def no_detached_runs(monkeypatch):
+    """Create tasks, but never let a real agent run detach from the test.
+
+    The create path is what is under test; a background run would put an
+    uncontrolled agent session into the suite — the shape of the task-test
+    flakes already root-caused twice.
+    """
+    from central_command.api import routes
+
+    async def noop(task, actor, **_kw):
+        return None
+
+    monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
