@@ -676,16 +676,37 @@ insert into agent_grant (agent_id, pack, granted_by) values
     ('litellm-manager', 'ask-operator', 'seed:ask')
 on conflict (agent_id, pack) do nothing;
 
+-- Deviation texts after story 4.9 (GATE-032 / FR-19): the pack they name is
+-- gone. The auditor's stays in substance (it holds neither pack: FR-11 — it
+-- takes no toolsets); the orchestrator's "no task-propose grant" is replaced by
+-- a note that it HOLDS task-create like every active agent but the auditor and
+-- that its assignment loop is unchanged. The replace() statements rewrite a
+-- live row carrying the old wording; on a fresh database they match nothing
+-- and the guarded appends below add the new wording. Idempotent.
+update agent set deviations = replace(deviations,
+        'no task-propose grant: output_type=AuditVerdict, takes no toolsets',
+        'no task-create grant: output_type=AuditVerdict, takes no toolsets')
+ where id = 'auditor'
+   and deviations like '%no task-propose grant: output_type=AuditVerdict%';
+
+update agent set deviations = replace(deviations,
+        'no task-propose grant: creates work via assign_work after an approved plan',
+        'holds task-create like every active agent but the auditor; its assignment loop (assign_work, plan review) is unchanged')
+ where id = 'orchestrator'
+   and deviations like '%no task-propose grant: creates work via assign_work%';
+
 update agent set deviations = trim(both ' ; ' from
         coalesce(nullif(deviations, ''), '') || '; ' ||
-        'no task-propose grant: output_type=AuditVerdict, takes no toolsets')
+        'no task-create grant: output_type=AuditVerdict, takes no toolsets')
  where id = 'auditor'
+   and deviations not like '%no task-create grant%'
    and deviations not like '%no task-propose grant%';
 
 update agent set deviations = trim(both ' ; ' from
         coalesce(nullif(deviations, ''), '') || '; ' ||
-        'no task-propose grant: creates work via assign_work after an approved plan')
+        'holds task-create like every active agent but the auditor; its assignment loop (assign_work, plan review) is unchanged')
  where id = 'orchestrator'
+   and deviations not like '%holds task-create%'
    and deviations not like '%no task-propose grant%';
 
 -- Tier 3 (2026-07-25): existing deployments get the column too.
@@ -1454,3 +1475,26 @@ update agent_grant
    set revoked_at = now(),
        revoked_reason = 'superseded by task-create: task.create is no longer a gated proposal'
  where pack = 'task-propose' and revoked_at is null;
+
+-- task-create for every active agent but the auditor (story 4.9, the operator's
+-- ruling of 2026-10-22): the 4.7 block above moved the task-propose holders
+-- over; this one widens the grant to the rest of the roster that takes
+-- toolsets — the orchestrator and the coach among them, and any hired agent
+-- (the steward, the curator, the editor...) whose row already exists. "Takes
+-- toolsets" = holds at least one ACTIVE grant, so the auditor (output_type=
+-- AuditVerdict, no grants) is skipped by construction and by name. The role
+-- guard is respected: this reads only rows the seeds above produced and
+-- touches no agent column, and `role <> ''` admits exactly the roster. A
+-- revoked task-create row is never resurrected (`on conflict do nothing`
+-- meets it), a later re-run finds nothing new, and a hired agent born after
+-- this runs gets the pack from its template. Applied by the updater's schema
+-- phase at release; nothing in the app process runs it.
+insert into agent_grant (agent_id, pack, granted_by)
+select distinct g.agent_id, 'task-create', 'seed:task-create-all'
+  from agent_grant g
+  join agent a on a.id = g.agent_id
+ where g.revoked_at is null
+   and a.status = 'ACTIVE'
+   and a.role <> ''
+   and a.id <> 'auditor'
+on conflict (agent_id, pack) do nothing;

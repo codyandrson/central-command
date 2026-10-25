@@ -128,9 +128,10 @@ async def test_ensure_registered_is_idempotent_and_hires_a_full_roster_member():
     # catalog-propose added 2026-08-30 (sources-catalog slice 6): the steward
     # reads every catalog version off the ledger, so it is the agent that KNOWS
     # which lineage a new one supersedes — gated like everything else.
+    # task-create added at story 4.9 (every active agent but the auditor).
     assert sorted(grants) == ["ask-operator", "catalog-propose", "consult",
                               "graph-propose", "graph-read", "skill-propose",
-                              "web-read", "web-search"]
+                              "task-create", "web-read", "web-search"]
     # Slice 1 grants no task-propose and no jira packs.
     assert "task-propose" not in grants
 

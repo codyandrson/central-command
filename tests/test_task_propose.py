@@ -76,12 +76,11 @@ def test_task_create_is_no_longer_a_gated_write():
 
 def test_the_agents_that_proposed_tasks_now_create_them():
     """Story 4.7 grants `task-create` to exactly the agents that held
-    `task-propose`; the orchestrator and the auditor are untouched here (the
-    widening to every active agent but the auditor is its own change)."""
+    `task-propose`; story 4.9 widened it to the rest (test_task_create_grants)."""
     for agent_id in ("inbox-triage", "jira-expert", "litellm-manager",
                      "confluence-expert", "wiki-agent"):
         assert "task-create" in packs.DEFAULT_PACKS[agent_id]
-    assert "task-create" not in packs.DEFAULT_PACKS["orchestrator"]
+    assert "task-create" in packs.DEFAULT_PACKS["orchestrator"]
 
 
 def test_every_template_can_create_a_task():

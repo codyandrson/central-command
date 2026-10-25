@@ -82,6 +82,12 @@ async def _build_agent(model=None):
         raise RuntimeError(
             "the orchestrator's 'orchestrate' pack grant is missing or revoked"
         )
+    # The orchestrator holds task-create like every active agent but the
+    # auditor (story 4.9), but a PROJECT run creates work through assign_work
+    # after an approved plan and nothing else: its assignment loop is unchanged.
+    # The chat lane, which has no assign_work, is where create_task is offered
+    # (converse._conversational_packs).
+    packs = tuple(p for p in packs if p != "task-create")
     governed = await repo.current_charter(AGENT_ID)
     caps, catalog = await skills_mod.loadout(AGENT_ID)
     from central_command.runtime.roster import team_section

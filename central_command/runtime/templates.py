@@ -214,8 +214,8 @@ TEMPLATES: dict[str, HireTemplate] = {
 #
 # It deliberately does NOT live in TEMPLATES above. That dict is the operator's
 # hire menu, and every entry in it is a general starting loadout: the parity
-# tests require task-create on each (slice 1 grants the steward none), the
-# charter here is a finished document rather than a {name}/{mission} skeleton,
+# tests require task-create on each, and so does every purpose-built loadout
+# below since story 4.9; the charter here is a finished document rather than a {name}/{mission} skeleton,
 # and hiring a SECOND steward under an operator-chosen name would be a
 # different agent id doing the one job the ledger routes to a fixed one.
 GRAPH_CURATOR_TEMPLATE = HireTemplate(
@@ -228,7 +228,7 @@ GRAPH_CURATOR_TEMPLATE = HireTemplate(
         "never re-ingestion."
     ),
     charter="",  # unused: the curator's charter is a finished document
-    default_packs=("graph-read", "graph-curate", "ask-operator"),
+    default_packs=("graph-read", "graph-curate", "ask-operator", "task-create"),
     taskable=True,
     conversational=True,
 )
@@ -256,7 +256,8 @@ STEWARD_TEMPLATE = HireTemplate(
     # else; Decision 7's auditor-agreement autonomy for this class graduates
     # later, on evidence.
     default_packs=("graph-read", "graph-propose", "consult", "ask-operator",
-                   "web-read", "web-search", "skill-propose", "catalog-propose"),
+                   "web-read", "web-search", "skill-propose", "catalog-propose",
+                   "task-create"),
     taskable=False,
     conversational=True,
 )
@@ -315,7 +316,8 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
         "mcp.server_remove. Taskable and conversational."
     ),
     charter="",  # unused: the MCP manager's charter is a finished document
-    default_packs=("sandbox", "mcp-propose", "ask-operator", "web-read", "consult"),
+    default_packs=("sandbox", "mcp-propose", "ask-operator", "web-read", "consult",
+                   "task-create"),
     taskable=True,
     conversational=True,
 )
@@ -329,6 +331,9 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
 # no propose packs (a critic that can propose could become the drafter it
 # reviews) and no `consult` pack (would muddy independence from the drafter
 # it critiques). No web-read in v1 (operator decision 2026-08-06).
+# task-create added at story 4.9 (the operator, 2026-10-22: every active agent
+# but the auditor): creating a task changes nothing and writes no draft, so it
+# does not break the editor's independence.
 EDITOR_TEMPLATE = HireTemplate(
     id="editor",
     label="Editor",
@@ -339,7 +344,8 @@ EDITOR_TEMPLATE = HireTemplate(
         "conversational."
     ),
     charter="",  # unused: the editor's charter is a finished document
-    default_packs=("jira-read", "graph-read", "record-read", "ask-operator"),
+    default_packs=("jira-read", "graph-read", "record-read", "ask-operator",
+                   "task-create"),
     taskable=True,
     conversational=True,
 )
@@ -361,14 +367,14 @@ ACCOUNTABILITY_TEMPLATE = HireTemplate(
         "and any recalibration. Taskable and conversational."
     ),
     charter="",  # unused: the accountability agent's charter is a finished document
-    # task-propose + consult added 2026-08-18 (goals drive work, the operator:
+    # task-create + consult (task-create was task-propose until task.create came
+    # off the gate, story 4.7) added 2026-08-18 (goals drive work, the operator:
     # "accountability as driver"): when the check-in history shows a goal is
-    # not turning into action, accountability may propose a gated task.create
-    # for the teammate whose job the work is (EA for calendar time,
-    # jira-expert for board work), consulting them first when the shape of the
-    # work is unclear. (The EA gained its own task-propose 2026-08-18 by
-    # operator decision — but goal->work origination from check-in evidence
-    # remains THIS agent's job, with its citation duty.)
+    # not turning into action, accountability may create a task for the
+    # teammate whose job the work is (EA for calendar time, jira-expert for
+    # board work), consulting them first when the shape of the work is
+    # unclear. Goal->work origination from check-in evidence remains THIS
+    # agent's job, with its citation duty.
     # jira-read + calendar-read added 2026-08-18 (evidence at check-in time,
     # The operator): the agent reads what the calendar and the board actually show for
     # a line before asking, and cites it — ungated reads, no new writes.

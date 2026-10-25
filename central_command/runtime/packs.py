@@ -1763,11 +1763,13 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     "wiki-agent": ("confluence-read", "confluence-propose", "jira-read",
                    "graph-read", "graph-propose", "task-create",
                    "ask-operator", "consult", "catalog-read"),
-    # No task-create for the orchestrator (it held no task-propose either): it
-    # creates work through assign_work after an approved plan. The operator's
-    # 2026-10-22 ruling grants it task-create with every other active agent
-    # but the auditor; that widening is its own change. The auditor holds no packs at all
-    # (output_type=AuditVerdict, no toolsets). Both reasons are recorded as
+    # The orchestrator holds task-create like every active agent but the
+    # auditor (the operator's 2026-10-22 ruling, story 4.9), and gains nothing
+    # else: its PROJECT runs drop the pack (api/orchestration._build_agent) so
+    # the one path to creating work there stays assign_work after an approved
+    # plan, while its chat lane — which has no assign_work — uses create_task
+    # (converse._conversational_packs). The auditor holds no packs at all
+    # (output_type=AuditVerdict, no toolsets). Both are recorded as
     # `deviations` on the agent row — see schema.sql.
     #
     # `consult` added 2026-09-10: in CHAT the orchestrator has no assign_work
@@ -1778,7 +1780,7 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     # guidance a mechanism. Consult is advice, assign_work is work — the pack
     # guidance keeps them distinct in project runs.
     "orchestrator": ("orchestrate", "graph-read", "loe-read", "record-read",
-                     "consult"),
+                     "consult", "task-create"),
 }
 
 

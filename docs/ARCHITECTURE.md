@@ -527,7 +527,7 @@ Code comments cite these; this is where they resolve.
 |---|---|---|
 | D1 | Employment models: EA / standing-guidance / direct-tasked | standing |
 | D5 | The coaching loop: charter edits are proposed and gated | standing, built (stage 5a) |
-| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 — the star guards are replaced by the task backstops (an agent-created task may run the orchestrator); `task.create` left the gate (story 4.7): agents create tasks directly with `create_task` (the `task-create` pack), bounded by the backstops |
+| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 — the star guards are replaced by the task backstops (an agent-created task may run the orchestrator); `task.create` left the gate (story 4.7): agents create tasks directly with `create_task` (the `task-create` pack), bounded by the backstops; every active agent except the auditor holds the pack (story 4.9, the orchestrator included — its project runs drop it and keep `assign_work` after an approved plan, its chat lane uses `create_task`) |
 | D8 | The independent auditor | standing, built |
 | D9 | Jira and Confluence stay the systems of record | standing |
 | D11 → D11-r1 | No ungoverned private agent memory; revised 2026-08-01 to allow a *gated* per-agent graph partition | revised |
