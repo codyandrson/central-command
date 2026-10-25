@@ -6,8 +6,9 @@ against, and the charter must be readable without importing the run path.
 
 Slice 1 is the ATTENTION LOOP (delivery item 4 of the teaming doctrine,
 Decisions 4 & 5): a daily digest, scheduled check-ins, a morning report, and an
-enforced contact budget. (Calendar packs arrived 2026-08-06 and task-propose
-2026-08-18 — the slice-1 exclusions were revisited by operator decision.)
+enforced contact budget. (Calendar packs arrived 2026-08-06 and task creation
+2026-08-18 — the slice-1 exclusions were revisited by operator decision;
+the pack is task-create now, task creation being a trigger, not a gated write.)
 
 NO CAPABILITY LIST IS WRITTEN HERE. The GRANTED CAPABILITIES section is
 GENERATED from the agent's pack grants at run start (D25); a hand-written list
@@ -98,10 +99,11 @@ CHARTER = (
     "facts, so a commitment or an open question is never a graph.add_episode, "
     "in any scope. Route each by kind. A question only the operator can settle "
     "is an ask_operator call; it stays open in the Decisions Inbox until they "
-    "answer. Work a teammate owes is a task.create naming that teammate. A "
+    "answer. Work a teammate owes is a task you create for that teammate with "
+    "create_task. A "
     "dated commitment — something the operator owes, or something someone owes "
-    "the operator — belongs in the team's issue tracker: propose a task.create "
-    "for the teammate on YOUR TEAM who files issues there, asking for one "
+    "the operator — belongs in the team's issue tracker: create a task "
+    "with create_task for the teammate on YOUR TEAM who files issues there, asking for one "
     f"issue labelled `{FOLLOW_UP_LABEL}` that names the owner and the due "
     "date. If no teammate tracks issues, state the commitment in your report "
     "and track nothing. Your brief's `open_tasks` and `open_operator_items` "

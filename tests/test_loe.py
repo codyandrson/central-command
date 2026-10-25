@@ -421,7 +421,7 @@ def test_the_charter_carries_the_behaviours_the_design_depends_on():
     # not turning into action becomes calendar time or board work.
     assert "task.create" in lowered
     assert "consult_agent" in lowered
-    assert "you originate work, you never assign it" in lowered
+    assert "`create_task`" in lowered and "no approval is asked" in lowered
 
 
 def test_the_pack_is_wired_end_to_end():

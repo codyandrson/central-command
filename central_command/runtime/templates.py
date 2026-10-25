@@ -269,10 +269,11 @@ STEWARD_TEMPLATE = HireTemplate(
 # defines. TASKABLE unlike the steward — the heartbeat drives it through
 # `create_and_run_task`, which refuses a non-taskable agent.
 #
-# task-propose granted 2026-08-18 (operator decision, revisiting the slice-1
+# Task creation granted 2026-08-18 (operator decision, revisiting the slice-1
 # "attention loop only" line and the goals-slice reaffirmation): the EA may
-# now PROPOSE tasks for teammates — every one still rides the approval gate,
-# and the operator steers usage through coaching (or revokes) rather than a ceiling.
+# now create tasks for teammates — a trigger, bounded by the task backstops,
+# with every gated change the task's run reaches still waiting for the
+# operator; the operator steers usage through coaching (or revokes) rather than a ceiling.
 # Goal->work origination from check-in evidence stays accountability's job.
 EA_TEMPLATE = HireTemplate(
     id="executive-assistant",
@@ -367,8 +368,7 @@ ACCOUNTABILITY_TEMPLATE = HireTemplate(
         "and any recalibration. Taskable and conversational."
     ),
     charter="",  # unused: the accountability agent's charter is a finished document
-    # task-create + consult (task-create was task-propose until task.create came
-    # off the gate, story 4.7) added 2026-08-18 (goals drive work, the operator:
+    # task-create + consult added 2026-08-18 (goals drive work, the operator:
     # "accountability as driver"): when the check-in history shows a goal is
     # not turning into action, accountability may create a task for the
     # teammate whose job the work is (EA for calendar time, jira-expert for

@@ -5,7 +5,7 @@ Spec: `docs/superpowers/specs/2026-08-23-ea-hosted-team-tour-design.md`.
 
 NO new runtime machinery, deliberately. The tour is an `ea.contact` kind whose
 brief tells the EA to broker introductions using tools it already holds:
-`task-propose` for the intro tasks, `ask-operator` for the lane, `graph-propose`
+`task-create` for the intro tasks, `ask-operator` for the lane, `graph-propose`
 for the closing summary. Each introduction is a real turn by the real agent,
 which is the whole point — the EA never describes a colleague.
 
@@ -125,9 +125,9 @@ async def arc() -> list[dict]:
     """The arc, filtered to agents actually on the roster, each annotated with
     how the EA can reach it.
 
-    `taskable` is the load-bearing annotation: `task.create` refuses a
-    non-taskable agent AT EXECUTION, so an intro task proposed for one would be
-    approved by the operator and then fail. Those introductions happen in the
+    `taskable` is the load-bearing annotation: the task seam refuses a
+    non-taskable agent when the task is created, so an intro task for one
+    would only come back as a refusal. Those introductions happen in the
     cockpit's chat instead — every active roster agent is chattable
     (`roster.conversational_agent_ids`), so nothing in the arc is unreachable.
     """
@@ -287,16 +287,17 @@ async def brief() -> str:
         lines.append(f"   {i}. {e['agent_id']} — {e['role']}")
         if e["taskable"]:
             lines.append(
-                "      Reachable by TASK: propose a `task.create` naming "
-                f"`{e['agent_id']}` with the instructions below. The operator "
-                "approves it in the Decisions Inbox and it runs at that "
-                "moment — that approval IS part of the tour, so tell them "
-                "what they are about to see."
+                "      Reachable by TASK: call `create_task` naming "
+                f"`{e['agent_id']}` with the instructions below. No approval "
+                "is asked for the task: it starts at once and shows on the "
+                "board, and any gated change the introduction reaches still "
+                "waits in the Decisions Inbox — tell them what they are "
+                "about to see."
             )
         else:
             lines.append(
-                "      NOT TASKABLE — a `task.create` for this agent would be "
-                "approved and then fail at execution, so do not propose one. "
+                "      NOT TASKABLE — a task for this agent would be "
+                "refused when you create it, so do not create one. "
                 "Tell the operator to open a chat with it in the cockpit and "
                 "paste the brief below as their opening message. Say plainly "
                 "why the route differs; it is a real limit of the system, not "

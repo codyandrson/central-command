@@ -184,7 +184,7 @@ from the command line (`python -m central_command.selfcheck`) and from
   reason; `self` and `cycle` refusals also name the taskable teammates (the
   roster's `taskable_agent_ids()`, minus the chain) the creator may use
   instead. Operator and heartbeat creations are roots and never trip these.
-  The founding star-shape guards are gone: an agent-created task may be
+  The three founding guards that kept the orchestrator out of agent-created work are gone: an agent-created task may be
   assigned to the orchestrator and runs as a project (its plan parks for the
   operator before round one); its children carry the project task as parent
   and the chain plus the orchestrator, so depth, cycle and fan-out hold. The
@@ -245,8 +245,11 @@ An agent run starts from exactly **three** sources: the **heartbeat** scheduler
 dispatcher** (`ingest/dispatcher.py` claiming a work item), and **direct
 tasking** (the operator, a heartbeat action, the orchestration driver, or an
 agent's own `create_task` call, all through `create_and_run_task`). An agent
-creating a task is a trigger, not a gated write: no proposal and no inbox item;
-the run it starts gates its own world changes like any other. There is no event-subscription wake and no
+creating a task is a trigger, not a gated write and not a gate exemption: no
+proposal and no inbox item; any active agent but the auditor may create and
+assign one to any agent, the orchestrator included, bounded by depth 3, self/
+cycle and fan-out 25, with a refusal returned as text and recorded loudly as
+`task.refused`; the run it starts gates its own world changes like any other. There is no event-subscription wake and no
 agent-to-agent request event: collaboration is a **consult** (the asker parks
 `AWAITING_AGENTS`) or a **task**.
 
@@ -444,7 +447,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 
 | Cockpit route | Proxies to (FastAPI) |
 |---|---|
-| `cc-kanban` | tasks (`/api/kanban/*`) |
+| `cc-kanban` | tasks (`/api/kanban/*`); each card carries `createdBy` (operator, `heartbeat:<schedule>` or the creating agent), `approvedBy`, `parentTaskId`/`parentTaskTitle` and `refusals` (count, latest reason and time of the `task.refused` events on that task) |
 | `cc-crons` | heartbeat schedules (`/api/crons*`) |
 | `cc-memories` | graph episodes |
 | `cc-tokens` | usage |
@@ -527,7 +530,7 @@ Code comments cite these; this is where they resolve.
 |---|---|---|
 | D1 | Employment models: EA / standing-guidance / direct-tasked | standing |
 | D5 | The coaching loop: charter edits are proposed and gated | standing, built (stage 5a) |
-| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding star shape (only the operator delegates) is reversed by PRD FR-19 — the star guards are replaced by the task backstops (an agent-created task may run the orchestrator); `task.create` left the gate (story 4.7): agents create tasks directly with `create_task` (the `task-create` pack), bounded by the backstops; every active agent except the auditor holds the pack (story 4.9, the orchestrator included — its project runs drop it and keep `assign_work` after an approved plan, its chat lane uses `create_task`) |
+| D7 | Orchestration is a role, not the EA | the role stands and is built; the founding rule that only the operator delegates is reversed by PRD FR-19 (DL-186) — the three founding guards are replaced by the task backstops (an agent-created task may run the orchestrator); `task.create` left the gate (story 4.7): agents create tasks directly with `create_task` (the `task-create` pack), bounded by the backstops; every active agent except the auditor holds the pack (story 4.9, the orchestrator included — its project runs drop it and keep `assign_work` after an approved plan, its chat lane uses `create_task`) |
 | D8 | The independent auditor | standing, built |
 | D9 | Jira and Confluence stay the systems of record | standing |
 | D11 → D11-r1 | No ungoverned private agent memory; revised 2026-08-01 to allow a *gated* per-agent graph partition | revised |

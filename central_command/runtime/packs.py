@@ -786,11 +786,17 @@ PACKS: dict[str, Pack] = {
             "running at once, and the operator still approves every gated "
             "change that run reaches. So create a task only when the work is "
             "genuinely needed, never to acknowledge a request. Name an agent "
-            "that actually exists and is taskable, and write instructions that "
-            "stand on their own — whoever picks it up will not see this "
-            "conversation. The control plane refuses a task that would loop "
-            "back to an agent already in its chain, go too deep, or fan out "
-            "too far; a refusal tells you why. Pass await_result=true only "
+            "that actually exists and is taskable (any agent but the auditor can "
+            "create a task, and any agent can be given one, the orchestrator "
+            "included — a task for the orchestrator runs as a project and its "
+            "plan parks for the operator before round one), and write "
+            "instructions that stand on their own — whoever picks it up will "
+            "not see this conversation. Task creation is a trigger, not a "
+            "write: every task is bounded — at most 3 agent-created tasks deep "
+            "in a chain, never back to an agent already in the chain or to "
+            "yourself, and at most 25 from one task. A refusal comes back as "
+            "text telling you why (and is recorded loudly); do not retry it "
+            "unchanged. Pass await_result=true only "
             "when your very next step needs the task's outcome: your run "
             "pauses until it finishes and the call then returns that outcome."
         ),
@@ -1407,8 +1413,8 @@ PACKS: dict[str, Pack] = {
         name="orchestrate",
         description=(
             "Run a project: plan review, assign work to roster agents, ask the "
-            "operator (D7 phase 2 — the orchestrator's loop; STAR-SHAPED: "
-            "agents this pack's holder assigns never hold it themselves)."
+            "operator (D7 phase 2 — the orchestrator's loop; the "
+            "project runner; agents it assigns never hold it themselves)."
         ),
         tool_names=("submit_plan", "assign_work", "ask_operator", "record_progress"),
         guidance=(
@@ -1774,7 +1780,7 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     #
     # `consult` added 2026-09-10: in CHAT the orchestrator has no assign_work
     # (converse._conversational_packs), so a read-only question for a
-    # specialist had exactly one vehicle — a gated task.create the operator
+    # specialist had exactly one vehicle — a gated task proposal the operator
     # rejected as "why a task for a read?". Its own charter already says
     # "consult a teammate" when it lacks a capability; the grant makes that
     # guidance a mechanism. Consult is advice, assign_work is work — the pack

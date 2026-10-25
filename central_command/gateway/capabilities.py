@@ -500,9 +500,9 @@ REGISTRY: list[Capability] = [
             "the SUBJECT of the edit, not the drafter (stage 5a): since the "
             "coach drafts edits for other agents, the two differ, and the "
             "drafter is supplied server-side from the proposal row — never as "
-            "an argument the agent writes. A deliberate widening of the same "
-            "shape as task.create naming an assignee, and the sharper one: it "
-            "acts on how a teammate thinks, not on what is on its board."
+            "an argument the agent writes. Its subject is another agent, "
+            "and the effect is sharper than any task: it acts on how a teammate "
+            "thinks, not on what is on its board."
         ),
     ),
     Capability(
@@ -1781,9 +1781,15 @@ POLICIES: list[Policy] = [
         ),
         guard="tests/test_orchestration.py::test_stall_escalates_to_operator_instead_of_looping",
         description=(
-            "Only the orchestrator holds the orchestrate pack; children "
-            "answer, never re-delegate. An agent-created task (the direct "
-            "create_task trigger) may be assigned to the orchestrator: it "
+            "Only the orchestrator holds the orchestrate pack, and its project "
+            "runs still assign through assign_work; children answer the "
+            "orchestrator, and any further work they start is a task they "
+            "create with create_task, bounded by the same backstops. Task "
+            "creation is a trigger, not a write and not a gate exemption: any "
+            "active agent except the auditor may create and assign a task to "
+            "any agent, the orchestrator included, without approval. A task "
+            "created that way (the direct create_task trigger) may be "
+            "assigned to the orchestrator: it "
             "runs as a project, parks its plan for "
             "the operator before round one, and its children count toward the "
             "depth cap and the creating task's fan-out. Every project's plan "

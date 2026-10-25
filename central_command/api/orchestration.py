@@ -598,8 +598,8 @@ async def child_resolved(task: dict) -> None:
     on its assigned children (`orch` in run_state — `maybe_resume`), an asker
     waiting on a consulted specialist's SESSION (`consult_wait` — reached via
     the specialist's own session going terminal, never through this hook), and
-    — since Decision 5 (2026-08-22) — a `task.create` proposer waiting on the
-    TASK it just created (`task_wait`). Dispatch on the parent's run_state, the
+    — since Decision 5 (2026-08-22) — a creator calling `create_task(await_result=True)` waiting
+    on the TASK it just created (`task_wait`). Dispatch on the parent's run_state, the
     same way `resume_sweep` does, so a task_wait parent is never silently
     handed to `maybe_resume` (which no-ops for anything without `orch`)."""
     parent = task.get("parent_session_id")
@@ -689,8 +689,8 @@ async def resume_sweep() -> dict:
     for sid in await repo.sessions_awaiting_agents():
         # AWAITING_AGENTS carries three shapes — an orchestration waiting on its
         # children, an asker waiting on a specialist it consulted, and (Decision
-        # 5, 2026-08-22) a `task.create` proposer waiting on the task it just
-        # created. Dispatch on the run state, because `maybe_resume` returns
+        # 5, 2026-08-22) a `create_task(await_result=True)` creator waiting on
+        # the task it just created. Dispatch on the run state, because `maybe_resume` returns
         # None for anything without `orch` and either wait would otherwise sit
         # in this worklist forever, reported as "still parked" on every sweep.
         rs = await repo.get_session_run_state(sid)

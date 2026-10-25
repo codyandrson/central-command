@@ -1385,9 +1385,10 @@ async def _validate_proposal(ctx: RunContext, proposal: Proposal) -> None:
 
 async def propose_action(ctx: RunContext, proposal: ProposalArg) -> str:
     """Propose one or more gated actions. Each action's `capability` names what
-    it does (a Jira write, a graph episode, a task, a charter edit, …). The
+    it does (a Jira write, a graph episode, a charter edit, …). The
     proposal is reviewed and, once approved, executed by the control plane —
-    this tool does not perform the write.
+    this tool does not perform the write. Creating a task is not a proposal:
+    task creation is a trigger, done directly with `create_task`.
     """
     # Raising CallDeferred ends the run with a DeferredToolRequests carrying this
     # call. The control plane persists the proposal, routes it for approval, and

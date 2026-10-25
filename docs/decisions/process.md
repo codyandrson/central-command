@@ -1245,7 +1245,8 @@ hygiene, and how the test suite itself must be written. See
   2026-10-19: FR-19 reverses the founding star shape so any agent may create
   and assign tasks (the `task.create` gate is still in place until PRD §6.1
   item 2 drops it); the orchestrator's plan-assign loop and the operator
-  checkpoint stand.
+  checkpoint stand. Note 2026-10-24: the gate is off and the star shape is
+  replaced by the task backstops; see DL-186.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** D7 phase 2 design v2 (founding artifact, 2026-07-24); docs/PRD.md FR-19; PRD addendum §C (D7 REVERSED)
 
@@ -1390,7 +1391,8 @@ hygiene, and how the test suite itself must be written. See
 - **Why:** Free-form peer messaging stays struck, and the supervised star shape of
   the founding doctrine was reversed by FR-19 (any agent may create and
   assign tasks once PRD §6.1 item 2 drops the `task.create` gate), with the
-  consult and await-result machinery kept. Agents
+  consult and await-result machinery kept (note 2026-10-24: handoffs are now
+  a direct `create_task` rather than a proposal; see DL-186). Agents
   may contact the operator on an attention budget (passive capture first,
   about two to three contacts a day, digest by default, the dial the
   operator's). The roster grows with the work: agents are hired only at the
@@ -1716,3 +1718,26 @@ hygiene, and how the test suite itself must be written. See
   exemption".
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/PRD.md FR-49; PRD addendum §C (SHARPENED) and §D (founding record)
+
+### DL-186 — Task creation is a trigger, not a write and not a gate exemption; the star shape is reversed and every created task is bounded
+
+- **Status:** active
+- **Date:** 2026-10-24
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**Task creation is a trigger, not a write and not a gate exemption.**"
+- **Why:** The operator's ruling GATE-032 (2026-10-19) and PRD FR-19 reverse the
+  founding star shape: any agent may create a task and assign it to any agent,
+  the orchestrator included, without approval, because approval attaches to what
+  work does, never to how it was started — the run a task starts parks every
+  gated change it reaches. A free trigger needs a bound, so the precondition
+  ran in two releases: the backstops first (depth 3, self and cycle, fan-out
+  25, an assignee required, loud `task.refused` events and board marks, no
+  inbox item — release A, applied before anything was ungated), then the
+  ungating (release B: the direct `create_task` tool, `await_result`, the
+  `task-create` grants for every active agent except the auditor). An
+  agent-created project still parks its plan for the operator before round one,
+  and the orchestrator's project runs keep `assign_work`. It is not a third
+  exemption on FR-4's closed list and has no row in the default-gate table.
+  Supersedes the star-shape wording of DL-163 and DL-170, which keep their
+  dated text.
+- **Enforced:** test: `tests/test_task_propose.py::test_task_create_is_no_longer_a_gated_write`, `tests/test_task_backstops.py::test_a_chain_of_agent_created_tasks_stops_at_the_cap`
+- **Source:** docs/PRD.md FR-19, FR-13, FR-4; the epic-task-backstops epic (rulings of 2026-10-22); GATE-032

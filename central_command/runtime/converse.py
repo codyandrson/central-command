@@ -12,9 +12,10 @@ conversation CONTINUES (Option C). The operator ends the conversation explicitly
 EVERY active roster agent has this lane (The operator, 2026-07-25): the chat page is
 where you talk to the team, and talking changes nothing on its own. The trust
 boundary holds: this module never imports the gateway; a mid-conversation
-proposal is decided through the same gated route as everything else — including
-`task.create`, so a conversation CAN end in work for a teammate, once you
-approve it.
+proposal is decided through the same gated route as everything else; task
+creation is the one direct trigger (`create_task`, no approval, bounded by the
+task backstops), so a conversation CAN end in work for a teammate at once —
+though any gated change that work reaches still waits for the operator.
 """
 
 from __future__ import annotations
@@ -45,8 +46,7 @@ def _conversational_packs(agent_id: str, packs: tuple[str, ...]) -> tuple[str, .
     a chat `submit_plan`/`assign_work` gives it tools nothing can execute,
     which is exactly what broke the first time the operator talked to it.
 
-    So in chat it swaps project-running for `task-create` (`task-propose`
-    until task.create came off the gate, story 4.7). The reason that pack is
+    So in chat it swaps project-running for `task-create`. The reason that pack is
     withheld from its project runs does NOT apply here: the objection was two
     differently-governed paths to the same act, and in a conversation there
     is no `assign_work` at all — one path, through the one create seam and its
@@ -255,8 +255,8 @@ async def _handle_non_proposal_deferral(
                 f"(I reached for `{tool}`, which only works while I am running "
                 "a project — a conversation has no plan to approve and no child "
                 "tasks to create. Assign me a project from the Tasks page for "
-                "that. Here, ask me anything, or I can propose a task for a "
-                "teammate for you to approve.)"
+                "that. Here, ask me anything, or I can create a task for a "
+                "teammate.)"
             ),
             "awaiting": "operator",
             "refused_tool": tool,

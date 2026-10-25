@@ -43,8 +43,9 @@ interface SpawnAgentDialogProps {
  *    and the create path. Chatting and tasking are genuinely different acts: a
  *    task is work on the board with an assignee and a lifecycle; a
  *    conversation is a conversation. A chat can still END in work — the agent
- *    proposes `task.create` and the operator approves it in the Decisions
- *    Inbox — but that is the agent asking, not the operator filing.
+ *    calls `create_task` (a trigger, no approval; any gated change the task's
+ *    run reaches still waits in the Decisions Inbox) — but that is the agent
+ *    filing, not the operator.
  *
  * The vendored sub-agent card is gone with them rather than left disabled: the
  * capability it stood for shipped as D7 orchestration, and it is reached by

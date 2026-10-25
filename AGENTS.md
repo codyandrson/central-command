@@ -173,6 +173,19 @@ where the story is gone.
   what was already authorised); `schema.sql` records the deviation where it
   is seeded. Seeding another enabled schedule means adding it to this list
   in the same change.
+- **Task creation is a trigger, not a write and not a gate exemption.** Any
+  active agent except the auditor may create a task and assign it to any agent,
+  the orchestrator included, with `create_task` and no approval — no proposal,
+  no inbox item (`await_result` waits on the outcome). Every created task is
+  bounded at the one create seam (`api/backstops.py`): depth 3, no self or
+  cycle, fan-out 25, an assignee required; a refusal comes back to the agent as
+  text and is loud on the record (`task.refused`), never an inbox item. The run
+  a task starts gates its own world changes like any other, an agent-created
+  project parks its plan for the operator before round one, and the
+  orchestrator's project runs still assign through `assign_work`. Orchestration
+  is not star-shaped any more; never reintroduce a guard that keeps the
+  orchestrator out of agent-created work. (The heartbeat action kind named
+  `task.create` is a different thing: a schedule's lever, not an agent tool.)
 - **Agents take `deps`** (`runtime/deps.py`). Every `agent.run()` needs
   `deps=TriageDeps(...)`; resume paths pass a fresh one on purpose.
 - **Every proposal takes one path too:**
