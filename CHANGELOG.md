@@ -4,6 +4,84 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-24 — v2.70.0: task.create comes off the gate; agent-created tasks are a bounded trigger
+
+epic-task-backstops, release B. Six commits since v2.69.0 (`0a00d160..25f595fb`)
+remove `task.create` from the gated capabilities: an agent now creates a task and
+assigns it directly, with no proposal and no inbox item, inside the depth, cycle
+and fan-out backstops v2.69.0 shipped. Task creation is a trigger, not a write and
+not a third exemption on the approval-gate list: the run it starts is governed like
+any other, so every gated capability that run reaches still parks for the operator.
+**Requires v2.69.0** (`min_upgrade_from` is raised from 2.66.0): the update into
+this release is run by the installed updater, and only v2.69.0's carries the
+pre-apply check below. An install on an earlier release takes v2.69.0 first.
+Release A (v2.69.0) was applied before this cut: its tag precedes this one on
+origin, and the private JOURNAL records the apply on 2026-10-24.
+
+- **Operator checklist BEFORE apply.** Decide every pending `task.create` proposal
+  (approve, reject or dismiss) and let every session parked on `task_wait` finish
+  or dismiss it, by the normal verdicts. This release lists `task.create` in
+  `deploy/k3s/removed-capabilities.txt`; v2.69.0's updater reads that list from this
+  tag and refuses the apply, listing the proposal and session ids, while any
+  proposal of that capability is `PROPOSED` or `AWAITING_HUMAN` or any session is
+  parked on `task_wait`. "Update anyway" does not bypass it, and nothing decides or
+  withdraws anything for you. No deprecated handler is kept: a proposal stranded
+  under a removed name could never be decided.
+- **The gate is off, the registry row and handler are gone.** The `task.create`
+  registry row, its Executor handler and the gateway's approve-tail park are
+  removed together (the governance parity test holds), as is the `task-propose`
+  pack. `ARG_SPECS['task.create']` stays: the new tool validates through it.
+- **`create_task`, a direct tool in the new `task-create` pack.**
+  `create_task(agent_id, instructions, title)` creates and assigns a task through
+  the one create seam (`routes.create_and_run_task`, background), with actor
+  `agent:<creator>` derived from the running session, never from arguments. A
+  refused creation comes back to the agent as text. The pack is granted to every
+  active roster agent except the auditor, the orchestrator's chat lane included; its
+  project runs keep `assign_work` and plan review unchanged and do not get the tool.
+  A consulted specialist (advisory) cannot start work.
+- **`await_result`.** `create_task(await_result=True)` parks the creating session
+  on the new task (`task_wait`, via `CallDeferred`) and resumes it when the task
+  reaches a terminal state; a child already terminal wakes the park at once.
+- **The fan-out count is exact.** The fan-out count and the task insert run under a
+  transaction-scoped advisory lock per creating task, and `create_task` is
+  sequential, so parallel creations can no longer overshoot `task_fanout_limit`.
+- **Grants migrate in the schema phase.** `schema.sql`'s trailing blocks seed
+  `task-create` for every active roster agent with a role except the auditor
+  (`on conflict do nothing`) and revoke `task-propose` by timestamp, never deleted.
+  Idempotent; a fresh database reproduces the roster. The updater's schema phase
+  applies it to the live database.
+- **Guidance and documents.** New `AGENTS.md` bite mark "Task creation is a
+  trigger, not a write and not a gate exemption"; DL-186 in
+  `docs/decisions/process.md` reverses the star shape, with dated notes on DL-163
+  and DL-170; ARCHITECTURE (wake sources, the cockpit kanban row, the capability and
+  pack rows), the policy registry, and the pack, charter, tour, EA and accountability
+  text no longer tell agents to "propose a task.create". The board's wording covers
+  tasks created either way.
+- **End-to-end proof.** `tests/test_task_backstops_e2e.py` (seven scenarios, scripted
+  models that fail on any real-model request): a self-perpetuating chain stops at
+  depth 3 with four rows and one refusal; an A↔B cycle; fan-out limit with a
+  surplus; ten concurrent creations against limit 4 give exactly 4 rows; an inherited
+  chain refused on the ancestor task; an agent-created project parks on plan review;
+  an over-limit batch creates no children.
+- **What the apply does.** The schema phase applies the grant blocks above; the
+  cockpit is rebuilt (comment and wording changes only). No image, manifest, unit or
+  setting changes: `git diff --stat 0a00d160..HEAD -- deploy/` shows only the list
+  entry and a comment/doc line, and no new setting is introduced.
+- **Rollback caveat.** If the post-update health check fails, `cc-update.sh` rolls
+  back by `git reset --hard` to its checkpoint tag, a rebuild, and restoring images
+  and manifests it changed; it does **not** restore the database dumps it took
+  (`central_command_pre-update_<stamp>.sql.gz` in the backup directory), and keeps
+  additive schema changes. A rollback to 2.69.0 after the schema phase therefore
+  leaves `task-create` grants (and revoked `task-propose` grants) that the 2.69.0
+  code does not know: its agents lose the task tools and its gated `task.create`
+  has no holder. Restoring that stamp's `central_command_pre-update_<stamp>.sql.gz`
+  (via `backup.sh`'s restore procedure) returns the grants to the 2.69.0 state, at
+  the cost of anything written to the database since the dump.
+- **After the apply, the operator checks:** the cockpit shows v2.70.0;
+  `GET /api/heartbeat` is healthy; an agent-created task shows its creator on the
+  live board; and on the deployed tree
+  `pytest -q tests/test_task_backstops.py tests/test_update_precondition.py` passes.
+
 ## 2026-10-24 — v2.69.0: agent-created tasks are bounded by backstops; task.create stays gated
 
 epic-task-backstops, release A. Six commits since v2.68.1 (`761ce0eb..5b6a3750`)

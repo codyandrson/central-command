@@ -318,7 +318,7 @@ refuse_if_busy() { # <phase> — the request's force:true is the operator's "upd
 
 # ── removed capabilities ─────────────────────────────────────────────────────
 # A release that REMOVES a capability lists its name in the TARGET tree's
-# deploy/k3s/removed-capabilities.txt (one per line, empty today). The update
+# deploy/k3s/removed-capabilities.txt (one per line; task.create since v2.70.0). The update
 # INTO that release is run by the INSTALLED tree's copy of this script, so the
 # check has to ship one release earlier — which is why it reads the list from
 # the target tag and the query from the installed tree. Refused while any

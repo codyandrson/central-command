@@ -9,3 +9,4 @@
 # The check ships one release EARLIER than the first entry, because the update
 # into a release is run by the installed tree's updater. Blank lines and lines
 # starting with # are ignored.
+task.create

@@ -180,17 +180,18 @@ def test_the_rules_glob_follows_the_files():
 
 
 def test_the_floor_is_release_a():
-    """The update INTO a release is run by the installed updater. Only
-    v2.66.x's names the new paths; a v2.65.x updater's configmap row would die
-    on deploy/pi/litellm/config.yaml against the merged tree, after the merge
-    and without a rollback. So B's floor is A: an install on v2.65.x takes
-    v2.66.0 first. Only the floor is pinned here: the version line belongs to
-    tests/test_version_file.py (VERSION against the newest CHANGELOG
-    heading), and an earlier form that also pinned `version=2.67.x` would
-    have failed the first 2.68.0 bump at the gate for no reason. The floor
-    stays 2.66.0 until a release deliberately raises it."""
+    """The update INTO a release is run by the installed updater. v2.70.0
+    removes the `task.create` capability and its pre-apply check
+    (deploy/k3s/removed-capabilities.txt, refuse_if_capability_pending) lives
+    only in v2.69.0's updater and later; a v2.66-v2.68 updater would apply the
+    removal with proposals still pending and sessions still parked. So the
+    floor is 2.69.0: an install below it takes v2.69.0 first. (The earlier
+    floor, 2.66.0, had the same reason for the deploy/pi paths.) Only the floor
+    is pinned here: the version line belongs to tests/test_version_file.py
+    (VERSION against the newest CHANGELOG heading). The floor stays 2.69.0
+    until a release deliberately raises it."""
     text = (ROOT / "VERSION").read_text(encoding="utf-8")
-    assert re.search(r"^min_upgrade_from=2\.66\.0$", text, re.M), text
+    assert re.search(r"^min_upgrade_from=2\.69\.0$", text, re.M), text
 
 
 # ── nothing in the tree names deploy/pi outside history and the kept seam ───

@@ -54,8 +54,9 @@ def _fn(name: str) -> str:
 # ── the shipped list and the status set ─────────────────────────────────────
 
 
-def test_the_shipped_list_is_empty_apart_from_comments():
-    assert check.parse_list(LIST_FILE.read_text(encoding="utf-8")) == []
+def test_the_shipped_list_names_exactly_task_create():
+    # Release B removes task.create; release A shipped the list empty.
+    assert check.parse_list(LIST_FILE.read_text(encoding="utf-8")) == ["task.create"]
 
 
 def test_pending_means_before_a_verdict():
@@ -96,6 +97,22 @@ async def test_a_pending_task_create_proposal_is_refused_and_listed(capsys):
     assert "REFUSED: capability task.create" in out
     assert pid in out
     assert "approve, reject or dismiss" in out.lower()
+
+
+@needs_pg
+async def test_the_shipped_list_refuses_a_pending_task_create_then_passes_once_dismissed(capsys):
+    """The release gate for R12: the list the tag ACTUALLY ships (not a temp
+    one), a pending task.create proposal planted, then decided through the
+    normal verdict path (dismiss), not by editing the row."""
+    from central_command.gateway import gateway
+
+    shipped = LIST_FILE.read_text(encoding="utf-8")
+    pid, sid = await _plant("task.create")
+    assert await _main_async(shipped) == 1
+    assert pid in capsys.readouterr().out
+    await gateway.dismiss_proposal(sid, pid, "release B clearing")
+    await _main_async(shipped)
+    assert pid not in capsys.readouterr().out
 
 
 @needs_pg

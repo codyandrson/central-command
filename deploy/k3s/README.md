@@ -311,7 +311,7 @@ read it, and a resource whose manifest was removed without a tombstone is
 still there until someone deletes it by hand.
 
 A release that REMOVES a capability names it in
-`deploy/k3s/removed-capabilities.txt` (one name per line; empty today). Before
+`deploy/k3s/removed-capabilities.txt` (one name per line; `task.create` since v2.70.0). Before
 anything stops, `cc-update.sh` reads that file from the *target* tag and refuses
 the apply while any proposal of a listed capability is still before a verdict
 (`PROPOSED` or `AWAITING_HUMAN`, `contract.enums.PRE_VERDICT_PROPOSAL_STATUSES`)
