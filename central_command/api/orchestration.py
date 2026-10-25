@@ -1253,8 +1253,9 @@ def _task_wait_outcome_text(t: dict) -> str:
 
 
 async def resume_task_wait(session_id: str, model=None) -> dict | None:
-    """Resume a `task.create` proposer parked on its own `await_result` task
-    (doctrine Decision 5, 2026-08-22) once that task reaches a TERMINAL status.
+    """Resume a creator parked on its own `create_task(await_result=True)` task
+    (doctrine Decision 5; the park is `consult.park_task_wait_deferred`) once
+    that task reaches a TERMINAL status.
 
     Sibling of `resume_consult_wait`: same claim (`claim_parked_orchestration`,
     the AWAITING_AGENTS→RUNNING flip is the lock), same shape of resume (feed
@@ -1412,6 +1413,12 @@ async def _settle_consult_resume(
         return await park_consult_wait(
             session_id=session_id, agent_id=agent_id, result=final, call=call,
             task_id=task_id, chain=chain,
+        )
+    if kind == "task_wait":
+        from central_command.runtime.consult import park_task_wait_deferred
+
+        return await park_task_wait_deferred(
+            session_id=session_id, agent_id=agent_id, result=final, call=call,
         )
     await land_session(session_id, agent_id=agent_id)
     return {

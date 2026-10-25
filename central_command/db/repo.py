@@ -11,6 +11,7 @@ connects per test that handshake was ~80% of the suite's 16.5 minutes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from datetime import datetime
@@ -3407,6 +3408,34 @@ async def create_task(
         await conn.close()
 
 
+@contextlib.asynccontextmanager
+async def fanout_lock(ref: str):
+    """Serialise one creator's fan-out count and task insert (story 4.8).
+
+    A transaction-scoped Postgres advisory lock (`pg_advisory_xact_lock`) keyed
+    on the fan-out reference — the creating TASK id, else the creating session
+    id, exactly the key `count_child_tasks` counts by — hashed server-side to a
+    bigint with `hashtextextended('task-fanout:' || ref, 0)`. Everything between
+    entering and leaving runs with the lock held; the lock is released when the
+    transaction ends, whether it commits or the body raises, and a crashed
+    process loses it with its connection.
+
+    The lock rides a DEDICATED connection, never one from the pool: the body
+    runs its count and insert on pooled connections, and a pool whose members
+    were all taken by creators waiting for this lock could never hand the holder
+    the connection it needs to finish.
+    """
+    conn = await asyncpg.connect(settings.database_url)
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"task-fanout:{ref}")
+            yield
+    finally:
+        await conn.close()
+
+
 async def count_child_tasks(
     *, parent_task_id: str | None = None, parent_session_id: str | None = None,
 ) -> int:
@@ -3460,7 +3489,8 @@ async def park_task_review(task_id: str, session_id: str) -> None:
     try:
         await conn.execute(
             "update task set status = 'REVIEW', session_id = $2, "
-            "started_at = coalesce(started_at, now()) where id = $1",
+            "started_at = coalesce(started_at, now()) where id = $1 "
+            "and status not in ('DONE', 'FAILED', 'CANCELLED')",
             task_id, session_id,
         )
     finally:

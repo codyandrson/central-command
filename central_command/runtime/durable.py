@@ -69,10 +69,16 @@ PROJECT_TOOLS = frozenset({"submit_plan", "assign_work", "record_progress"})
 # turn) exactly as `ask_operator` waits for the operator: a consult that
 # returned before the answer existed was not a collaboration (The operator, 2026-08-13).
 CONSULT_TOOLS = frozenset({"consult_agent"})
+# `create_task` defers ONLY when called with `await_result=True`: the task is
+# already created, and the creator waits for it exactly as an asker waits for a
+# specialist's session. Without the flag it returns text inline and never
+# reaches here.
+TASK_WAIT_TOOLS = frozenset({"create_task"})
 
 
 def classify_deferred(call) -> str:
-    """'proposal' | 'ask' | 'consult' | 'project' | 'unknown' for a deferred call."""
+    """'proposal' | 'ask' | 'consult' | 'task_wait' | 'project' | 'unknown' for a
+    deferred call."""
     tool = getattr(call, "tool_name", "") or ""
     if tool in PROPOSE_TOOLS:
         return "proposal"
@@ -80,6 +86,8 @@ def classify_deferred(call) -> str:
         return "ask"
     if tool in CONSULT_TOOLS:
         return "consult"
+    if tool in TASK_WAIT_TOOLS:
+        return "task_wait"
     if tool in CONCLUDE_TOOLS:
         return "conclude"
     if tool in PROJECT_TOOLS:

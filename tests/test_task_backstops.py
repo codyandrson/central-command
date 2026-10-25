@@ -151,7 +151,7 @@ async def test_provenance_is_never_taken_from_the_tool_call():
     import inspect
 
     assert set(inspect.signature(create_task).parameters) == {
-        "ctx", "agent_id", "instructions", "title"}
+        "ctx", "agent_id", "instructions", "title", "await_result"}
     seam = set(inspect.signature(routes.create_and_run_task).parameters)
     assert not seam & {"created_by", "creator_chain", "parent_task_id", "approved_by"}
 
@@ -429,6 +429,58 @@ async def test_the_limit_plus_one_creation_from_one_task_is_refused(monkeypatch)
     assert refused["payload"]["limit"] == 3 and refused["payload"]["created"] == 3
     assert not [e for e in await repo.list_events(since_id=since, kind="task")
                 if e["kind"] == "task.created"]
+
+
+async def test_concurrent_creations_from_one_creator_hit_the_limit_exactly(monkeypatch):
+    """The count and the insert are one critical section (`repo.fanout_lock`):
+    limit+1 creations fired at once from ONE creating task leave exactly
+    `limit` rows and exactly one `task.refused` — an exact bound, where the
+    check-then-insert seam used to allow a few too many."""
+    import asyncio
+
+    limit = 6
+    monkeypatch.setattr(settings, "task_fanout_limit", limit)
+    a, b = AGENTS[:2]
+    root = await _operator_root(a)
+    session = await _running(a, root)
+    since = await repo.latest_event_id()
+
+    ctx = SimpleNamespace(deps=TriageDeps(agent_id=a, session_id=session))
+    outs = await asyncio.gather(*[
+        create_task(ctx, b, f"do thing {i}") for i in range(limit + 1)])
+
+    created = [o for o in outs if not o.startswith(_REFUSED)]
+    refused = [o for o in outs if o.startswith(_REFUSED)]
+    assert (len(created), len(refused)) == (limit, 1)
+    assert await _created_under(root) == limit
+    (event,) = await _refusals(since)
+    assert event["payload"]["reason"] == "fan-out"
+    assert event["payload"]["created"] == limit
+
+
+async def test_concurrent_creations_from_a_taskless_session_are_counted_exactly(monkeypatch):
+    import asyncio
+
+    limit = 4
+    monkeypatch.setattr(settings, "task_fanout_limit", limit)
+    a, b = AGENTS[:2]
+    session = await _running(a)
+    ctx = SimpleNamespace(deps=TriageDeps(agent_id=a, session_id=session))
+    outs = await asyncio.gather(*[
+        create_task(ctx, b, f"do thing {i}") for i in range(limit + 2)])
+    assert sum(not o.startswith(_REFUSED) for o in outs) == limit
+    assert await repo.count_child_tasks(parent_session_id=session) == limit
+
+
+async def test_the_fan_out_lock_is_per_creator(monkeypatch):
+    """Two creators do not serialise on each other: the key is the fan-out
+    reference, so holding one creator's lock never blocks another's."""
+    import asyncio
+
+    async with repo.fanout_lock("creator-one"):
+        async with asyncio.timeout(5):
+            async with repo.fanout_lock("creator-two"):
+                pass
 
 
 async def test_the_fan_out_limit_defaults_to_25():

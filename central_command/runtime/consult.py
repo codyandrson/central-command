@@ -308,22 +308,34 @@ async def _park_mid_chain(
     }
 
 
+def task_wait_of(result, call) -> dict | None:
+    """The `task_wait` block a deferred `create_task(await_result=True)` carries
+    (`{"task_id": ...}`), or None. Shipped by the tool through
+    `CallDeferred(metadata=...)`, never through `call.args`: the task id is a
+    fact the control plane learned AFTER the model spoke, and an agent cannot
+    author its own wait target (the same reason as `consult_wait_of`)."""
+    from pydantic_ai import DeferredToolRequests
+
+    if not isinstance(result.output, DeferredToolRequests):
+        return None
+    meta = result.output.metadata.get(call.tool_call_id)
+    block = meta.get("task_wait") if isinstance(meta, dict) else None
+    return block if isinstance(block, dict) and block.get("task_id") else None
+
+
 async def park_task_wait(
     *, session_id: str, agent_id: str, tool_call_id: str, task_id: str,
-    proposal_id: str | None = None,
+    proposal_id: str | None = None, run_state: dict | None = None,
 ) -> dict:
-    """THE park path for a proposer awaiting the result of its OWN
-    `task.create` (`await_result=True`, doctrine Decision 5) — sibling of
+    """The low-level park for a creator awaiting the result of the task it
+    created (`await_result=True`, doctrine Decision 5) — sibling of
     `park_consult_wait`, keyed on the created task id rather than a
     specialist's session.
 
-    It was reached from the gateway's approve tail for an approved gated
-    `task.create`; that caller went when task creation left the gate, and
-    `await_result` on the direct `create_task` tool is to give it its next
-    one. The shape it assumes: the task already exists, and the session is
-    still sitting exactly where the call that created it paused it. Nothing here re-runs the agent — it only
-    swaps what that pause is waiting for, the same way a redraft swaps
-    `pending_resume`'s marker without touching the messages already parked.
+    Callers: `park_task_wait_deferred` (a running agent's `create_task`, with
+    the paused run's `run_state`) and the tests, which park a session already
+    sitting at a paused call (no `run_state`: only the wait block is swapped in,
+    the way a redraft swaps `pending_resume`'s marker).
 
     Same status, same worklist, third shape: `run_state.task_wait` sits beside
     `orch` and `consult_wait` in `AWAITING_AGENTS`, and `resume_sweep` /
@@ -336,13 +348,56 @@ async def park_task_wait(
         "tool_call_id": tool_call_id, "task_id": task_id,
         "proposal_id": proposal_id,
     }
-    await repo.park_session_awaiting_agents(session_id, {"task_wait": block})
+    await repo.park_session_awaiting_agents(
+        session_id, {**(run_state or {}), "task_wait": block})
+    # A wait finished earlier on this session leaves its key behind (run_state
+    # merges); the sweep dispatches on the first key it finds, so clear it.
+    await repo.drop_session_run_state_keys(session_id, ["consult_wait"])
     await events.emit(
         "agent.task_waiting", ref_id=session_id,
         payload={"agent_id": agent_id, **block}, actor=f"agent:{agent_id}",
     )
     return {"deferred": True, "task_waiting": True, "session_id": session_id,
-            "task_id": task_id}
+            "task_id": task_id, "proposal_id": None,
+            "intent": f"waiting on task {task_id}"}
+
+
+async def park_task_wait_deferred(
+    *, session_id: str, agent_id: str, result, call,
+) -> dict:
+    """THE park path for a running agent that called `create_task(
+    await_result=True)` — the non-gateway entry (story 4.8). The tool created
+    the task and ended the run with a deferral; this persists the paused run
+    (`dump_run_state`) with `task_wait` keyed on the created task and the call,
+    so a fresh process resumes it with the task's outcome as the tool result.
+
+    The wake is the existing one: the task going terminal fires
+    `orchestration.child_resolved` (the task's `parent_session_id` is this
+    session) and `resume_sweep` catches a lost hook. The one window those cannot
+    cover is a task that went terminal BEFORE this park committed (the child
+    runs detached while the creator's turn is still ending), so the terminal
+    check below dispatches the same hook once.
+    """
+    from central_command.runtime.durable import dump_run_state
+
+    block = task_wait_of(result, call)
+    if block is None:
+        raise ValueError("a deferred create_task carried no task_wait block")
+    parked = await park_task_wait(
+        session_id=session_id, agent_id=agent_id,
+        tool_call_id=call.tool_call_id, task_id=block["task_id"],
+        run_state=dump_run_state(result, call.tool_call_id),
+    )
+    from central_command.db import repo
+
+    task = await repo.get_task(block["task_id"])
+    if task is not None and task["status"] in repo.TASK_TERMINAL:
+        # Lazy api import, as `create_task` reaches the create seam: runtime
+        # may not import gateway/executor, and this is neither.
+        from central_command.api import orchestration
+
+        orchestration.spawn_child_resolved(task)
+    return parked
 
 
 async def consultable_ids() -> tuple[str, ...]:

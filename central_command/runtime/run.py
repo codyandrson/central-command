@@ -345,6 +345,13 @@ async def ingest_and_propose(
             session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
         )
         return {**waited, "tokens": tokens}
+    if kind == "task_wait":
+        from central_command.runtime.consult import park_task_wait_deferred
+
+        waited = await park_task_wait_deferred(
+            session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+        )
+        return {**waited, "tokens": tokens}
     if kind != "proposal":
         # A deferral this path cannot drive. `deferred: False` sends the item
         # to DISMISS_PENDING with this text as the rationale — parked in front
@@ -844,6 +851,14 @@ async def run_coach(
         )
         return {**waited, "tokens": tokens, "target": agent_id,
                 "signals": len(signals)}
+    if kind == "task_wait":
+        from central_command.runtime.consult import park_task_wait_deferred
+
+        waited = await park_task_wait_deferred(
+            session_id=session_id, agent_id=COACH_ID, result=result, call=call,
+        )
+        return {**waited, "tokens": tokens, "target": agent_id,
+                "signals": len(signals)}
     if kind != "proposal":
         from central_command.runtime.converse import land_session
 
@@ -1039,6 +1054,14 @@ async def _land(
         waited = await park_consult_wait(
             session_id=session_id, agent_id=agent_id, result=result, call=call,
             task_id=task_id,
+        )
+        return {**waited, "tokens": tokens}
+    if kind == "task_wait":
+        # The agent created a task and asked to wait on it (story 4.8).
+        from central_command.runtime.consult import park_task_wait_deferred
+
+        waited = await park_task_wait_deferred(
+            session_id=session_id, agent_id=agent_id, result=result, call=call,
         )
         return {**waited, "tokens": tokens}
     if kind != "proposal":

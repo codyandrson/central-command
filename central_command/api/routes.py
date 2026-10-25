@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import io
 import json
@@ -642,6 +643,14 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         # otherwise be resolved DONE with "stopped by the operator" as its
         # answer, which is the loudest possible lie about what happened.
         return {**result, "task_id": task_id}
+    if result.get("task_waiting"):
+        # The agent created a task and is waiting on its outcome
+        # (`create_task(await_result=True)`): the run is parked AWAITING_AGENTS
+        # and nothing awaits the operator, so the task holds in REVIEW with its
+        # session linked and no `task.review` frame (there is no proposal). The
+        # session's own landing resolves it when the awaited task finishes.
+        await repo.park_task_review(task_id, result["session_id"])
+        return {**result, "task_id": task_id}
     if result["deferred"]:
         await repo.park_task_review(task_id, result["session_id"])
         await events.emit(
@@ -819,49 +828,56 @@ async def create_and_run_task(
         prov = await backstops.derive_provenance(actor, parent_session_id)
     except LookupError as exc:
         raise HTTPException(422, str(exc)) from exc
-    refusal = await backstops.check(prov, agent_id)
-    if refusal:
-        # Loud, and no task row: the event is written before anything runs.
-        await backstops.refuse(prov, agent_id, refusal, actor)
-        raise HTTPException(422, f"task refused ({refusal.reason}): {refusal.message}")
+    # The fan-out count and the insert are ONE critical section per creator: two
+    # concurrent creations from one creator must not both read N-1 and both
+    # insert. The lock is transaction-scoped on a dedicated connection, keyed on
+    # the fan-out reference (the parent task, else the creating session) — see
+    # `repo.fanout_lock`. Only agent creations are bounded, so only they pay.
+    async with (repo.fanout_lock(prov.ref_id) if prov.agent_created
+                else contextlib.nullcontext()):
+        refusal = await backstops.check(prov, agent_id)
+        if refusal:
+            # Loud, and no task row: the event is written before anything runs.
+            await backstops.refuse(prov, agent_id, refusal, actor)
+            raise HTTPException(422, f"task refused ({refusal.reason}): {refusal.message}")
 
-    # ponytail: model_name/thinking ride the RUN, not the task row, so a
-    # retry-parked task re-runs on the agent's own setting. Persist them on
-    # `task` if a schedule's override needs to survive a provider outage.
-    if agent_id is not None and agent_id not in await taskable_agent_ids():
-        raise HTTPException(422, f"agent {agent_id!r} is not directly taskable")
-    # Resolved and validated BEFORE `repo.create_task` — a refusal here must
-    # leave no task row, same invariant as chat's `attachments.prepare()`
-    # before the turn exists (see api/attachments.py).
-    attachment_manifest: list[dict] | None = None
-    if attachments:
-        if agent_id is None:
-            raise HTTPException(422, "attachments require an assignee — an "
-                                     "unassigned task has no model to deliver them to")
-        from central_command.api import attachments as attachments_mod
+        # ponytail: model_name/thinking ride the RUN, not the task row, so a
+        # retry-parked task re-runs on the agent's own setting. Persist them on
+        # `task` if a schedule's override needs to survive a provider outage.
+        if agent_id is not None and agent_id not in await taskable_agent_ids():
+            raise HTTPException(422, f"agent {agent_id!r} is not directly taskable")
+        # Resolved and validated BEFORE `repo.create_task` — a refusal here must
+        # leave no task row, same invariant as chat's `attachments.prepare()`
+        # before the turn exists (see api/attachments.py).
+        attachment_manifest: list[dict] | None = None
+        if attachments:
+            if agent_id is None:
+                raise HTTPException(422, "attachments require an assignee — an "
+                                         "unassigned task has no model to deliver them to")
+            from central_command.api import attachments as attachments_mod
 
-        for att in attachments:
-            media_type = str((att or {}).get("mimeType") or (att or {}).get("media_type") or "").lower()
-            if media_type.startswith(attachments_mod.IMAGE_PREFIX):
-                raise HTTPException(422, "task attachments must be documents — "
-                                         "images are not supported here")
-        try:
-            block, attachment_manifest = await attachments_mod.prepare(
-                attachments,
-                model_id=await attachments_mod.session_model_id(None, agent_id),
-            )
-        except attachments_mod.AttachmentRefused as exc:
-            raise HTTPException(422, exc.message) from exc
-        if block:
-            instructions = f"{instructions}\n\n{block}"
+            for att in attachments:
+                media_type = str((att or {}).get("mimeType") or (att or {}).get("media_type") or "").lower()
+                if media_type.startswith(attachments_mod.IMAGE_PREFIX):
+                    raise HTTPException(422, "task attachments must be documents — "
+                                             "images are not supported here")
+            try:
+                block, attachment_manifest = await attachments_mod.prepare(
+                    attachments,
+                    model_id=await attachments_mod.session_model_id(None, agent_id),
+                )
+            except attachments_mod.AttachmentRefused as exc:
+                raise HTTPException(422, exc.message) from exc
+            if block:
+                instructions = f"{instructions}\n\n{block}"
 
-    task_id = "task_" + uuid.uuid4().hex[:12]
-    title = (title or "").strip() or instructions[:80]
-    await repo.create_task(task_id, title, instructions, agent_id,
-                           parent_session_id=parent_session_id,
-                           created_by=prov.created_by,
-                           parent_task_id=prov.parent_task_id,
-                           creator_chain=list(prov.chain))
+        task_id = "task_" + uuid.uuid4().hex[:12]
+        title = (title or "").strip() or instructions[:80]
+        await repo.create_task(task_id, title, instructions, agent_id,
+                               parent_session_id=parent_session_id,
+                               created_by=prov.created_by,
+                               parent_task_id=prov.parent_task_id,
+                               creator_chain=list(prov.chain))
     await events.emit(
         "task.created",
         ref_id=task_id,

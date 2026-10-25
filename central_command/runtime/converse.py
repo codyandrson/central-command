@@ -191,6 +191,26 @@ async def _handle_non_proposal_deferral(
             "awaiting": "agents",
             **{k: v for k, v in waited.items() if k not in ("session_id",)},
         }
+    if tool == "create_task" and result is not None:
+        # The agent created a task and asked to wait on its outcome. The
+        # operator is right here, but the reply they are owed depends on that
+        # task: the conversation holds AWAITING_AGENTS and picks up when it ends.
+        from central_command.runtime.consult import park_task_wait_deferred
+
+        waited = await park_task_wait_deferred(
+            session_id=session_id, agent_id=agent_id, result=result, call=call,
+        )
+        return {
+            "session_id": session_id,
+            "reply": (
+                f"I've handed this to a teammate as task {waited['task_id']} and "
+                "I'm holding here until it finishes; I'll pick up with its "
+                "outcome."
+            ),
+            "task_waiting": True,
+            "awaiting": "agents",
+            "task_id": waited["task_id"],
+        }
     if tool == "conclude_discussion":
         # Tier 3: this conversation exists to unblock a paused task. Concluding
         # it hands the agent's summary back to that run — checked against what

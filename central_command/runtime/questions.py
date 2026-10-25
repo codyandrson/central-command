@@ -475,6 +475,13 @@ async def _settle(
             session_id=session_id, agent_id=agent_id, result=final, call=call,
             task_id=item.get("task_id"),
         )
+    if kind == "task_wait":
+        # Or to create a task and wait on its outcome.
+        from central_command.runtime.consult import park_task_wait_deferred
+
+        return await park_task_wait_deferred(
+            session_id=session_id, agent_id=agent_id, result=final, call=call,
+        )
     if kind == "conclude":
         # Observed live 2026-07-30 (EA digest, sess_bbc8e24e7324): the resumed
         # run reached for `conclude_discussion` believing it held a lane. It did

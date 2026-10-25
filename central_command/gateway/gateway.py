@@ -104,6 +104,13 @@ async def _drive_past_non_proposals(
             "conversation, so there is nobody to route it to. Redraft the "
             "proposal or close out in text."
         )
+        if classify_deferred(call) == "task_wait":
+            denial = (
+                "The task WAS created and is running, but you cannot wait for "
+                "its outcome on this turn — this is the operator's decision on "
+                "your proposal coming back to you. Carry on without it: its "
+                "outcome lands on the board. Do NOT invent the outcome."
+            )
         if classify_deferred(call) == "consult":
             denial = (
                 "You cannot consult a teammate on this turn — this is the "
@@ -340,6 +347,17 @@ async def finish_decision_resume(
         nxt = extract_deferred(final)
         if nxt is not None and classify_deferred(nxt) == "proposal":
             call = nxt
+        elif nxt is not None and classify_deferred(nxt) == "task_wait":
+            # A creator resumed with one task's outcome created ANOTHER and
+            # asked to wait on it: park on that one (a chain of waits, story
+            # 4.8) rather than closing the session under a task still running.
+            from central_command.runtime.consult import park_task_wait_deferred
+
+            waited = await park_task_wait_deferred(
+                session_id=session_id, agent_id=agent_id, result=final, call=nxt,
+            )
+            out.update({"task_waiting": True, "task_id": waited["task_id"]})
+            return out
 
     if call is not None and after == "approved":
         # Park the follow-on and keep the session open; the task (if any)

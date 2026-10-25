@@ -2510,6 +2510,7 @@ async def loe_list(ctx: RunContext) -> str:
 
 async def create_task(
     ctx: RunContext[TriageDeps], agent_id: str, instructions: str, title: str = "",
+    await_result: bool = False,
 ) -> str:
     """Create a task on the board and assign it to a teammate — it starts
     running at once. No approval: assigning work is a trigger, and every gated
@@ -2518,6 +2519,10 @@ async def create_task(
     `agent_id` must be a taskable teammate (your roster or briefing names who
     is). Write `instructions` that stand on their own — the assignee will not
     see this conversation. `title` is an optional short label.
+
+    Set `await_result` true when your next step depends on the outcome: your
+    run then pauses until the task finishes and this call returns its outcome.
+    Leave it false (the default) to carry on while the task runs.
     """
     # The one direct trigger tool (story 4.7, GATE-032): it holds no credential
     # and performs no world write — it reaches THE one create path, where the
@@ -2556,8 +2561,20 @@ async def create_task(
         # A backstop refusal (already on the record as task.refused) or a
         # non-taskable assignee: the agent is told why, never retried.
         return f"Task NOT created — {exc.detail}"
-    return (f"task {out['task_id']} created and assigned to {agent_id}; it is "
-            "running now and its outcome lands on the board.")
+    created = (f"task {out['task_id']} created and assigned to {agent_id}; it is "
+               "running now and its outcome lands on the board.")
+    if not await_result:
+        return created
+    if getattr(deps, "consult_chain", ()):
+        # A consulted specialist's turn ends with its answer; it cannot also
+        # park on a task (a consult sub-run is advisory and never holds this
+        # tool, so this is the belt for a resumed specialist).
+        return created + " (await_result ignored: you are answering a consult.)"
+    # The wait is the DRIVER's to persist: the run's messages exist only once the
+    # run has paused, so the tool ends the run with a deferral that carries the
+    # task id (control-plane fact, never an argument) and the driver parks the
+    # session AWAITING_AGENTS on it (`consult.park_task_wait_deferred`).
+    raise CallDeferred(metadata={"task_wait": {"task_id": out["task_id"]}})
 
 
 # --- D7 phase 2: the orchestration loop's tools --------------------------------

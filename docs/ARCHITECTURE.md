@@ -192,7 +192,23 @@ from the command line (`python -m central_command.selfcheck`) and from
   assignment judged with the i before it counted toward fan-out) before any
   child is created; a refusal is a problem line in the batch's tool result
   and one `task.refused`, and the orchestrator assigning to itself is
-  refused early as a cycle.
+  refused early as a cycle. **The fan-out count and the task insert are one
+  critical section:** for an agent creator `create_and_run_task` holds a
+  transaction-scoped Postgres advisory lock (`repo.fanout_lock`, on a dedicated
+  connection, keyed `hashtextextended('task-fanout:' || ref, 0)` where `ref` is
+  the creating task, else the creating session — the key `count_child_tasks`
+  counts by) from the backstop check to the insert, so N+1 simultaneous
+  creations from one creator leave exactly N rows and one `task.refused`; the
+  `create_task` tool is also `sequential`, so one run cannot race itself.
+  **A creator may wait on the task it created** (`create_task(await_result=
+  true)`): the tool creates and launches the task, then ends the run with a
+  deferral carrying the task id; the driver parks the session `AWAITING_AGENTS`
+  with `run_state.task_wait` through `consult.park_task_wait_deferred` (no
+  gateway in the path). The task going terminal wakes it (`child_resolved`
+  → `resume_task_wait`, the task's distilled outcome as the tool result), and
+  so does the restart sweep; a task already terminal when the park commits is
+  woken by the park itself. A refused creation (cycle, depth, fan-out) never
+  parks, and a consulted specialist neither holds the tool nor parks.
 - **`api/orchestration.py` is a driver; `runtime/orchestrator.py` is an agent.**
   The agent holds no `propose_*` tools — it recommends routing and changes
   nothing. The driver (tier ②) runs multi-agent *projects* as a durable plan →

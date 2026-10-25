@@ -231,4 +231,4 @@ def test_the_tool_takes_no_provenance_argument():
     import inspect
 
     params = set(inspect.signature(create_task).parameters) - {"ctx"}
-    assert params == {"agent_id", "instructions", "title"}
+    assert params == {"agent_id", "instructions", "title", "await_result"}

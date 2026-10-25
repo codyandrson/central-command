@@ -790,7 +790,9 @@ PACKS: dict[str, Pack] = {
             "stand on their own — whoever picks it up will not see this "
             "conversation. The control plane refuses a task that would loop "
             "back to an agent already in its chain, go too deep, or fan out "
-            "too far; a refusal tells you why."
+            "too far; a refusal tells you why. Pass await_result=true only "
+            "when your very next step needs the task's outcome: your run "
+            "pauses until it finishes and the call then returns that outcome."
         ),
     ),
     "record-read": Pack(
@@ -1881,7 +1883,11 @@ def toolset_for(pack_names) -> FunctionToolset:
                 # budget is ONE — the second bad draft failed whole sessions
                 # live (2026-08-18). Exhausting this budget still fails the
                 # session, loudly and with the last problem as its reason.
-                fn = Tool(fn, max_retries=10)
+                # create_task is also `sequential`: a barrier that runs alone,
+                # so one run cannot race its own fan-out count (the create
+                # seam's advisory lock closes the race ACROSS runs).
+                sequential = tool_name == "create_task"
+                fn = Tool(fn, max_retries=10, sequential=sequential)
             seen.setdefault(tool_name, fn)
     return FunctionToolset(list(seen.values()), id="granted-packs")
 
