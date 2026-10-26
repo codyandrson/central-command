@@ -17,24 +17,40 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 
+# The closed vocabulary of a capability's default gate (FR-4). `human`: the
+# operator decides. `auditor`: the capability's action class is one a graduated
+# auditor MAY confirm, when its own CC_AUDITOR_* switch is active — it records
+# that fact and changes no behaviour; it is pinned one-to-one to
+# auditor.BULK_AUDIT_ACTION_CLASS (tests/test_gate_overrides.py). `none`:
+# nothing gates it (reads and the in-sandbox writes). A registry COLUMN, never
+# a database table (DL-143, PRD §5).
+DEFAULT_GATES = ("human", "auditor", "none")
+
+# The two deterministic writes that never pass the gate because no agent is in
+# their path (AGENTS.md Policy). A CLOSED, named list: code, not registry rows
+# and not overridable; adding to it is the operator's call, never an agent's.
+# Task creation is NOT here and has no row: it is a trigger (DL-186).
+EXEMPT_WRITES = (
+    "operator graph curation",     # integrations/neo4j_writer.py, the operator's own edits
+    "wiki annotation (auto)",      # wiki_annotation_mode="auto": template over claim rows, no model
+)
+
+
 @dataclass(frozen=True)
 class Capability:
     name: str          # the wire name a proposal Action carries (version-stripped)
     kind: str          # "write" | "read"
     gate: str          # "human approval" | "ungated read" | "ungated" (in-sandbox writes, D-sandbox)
+    default_gate: str  # DEFAULT_GATES: who decides when no override applies (FR-4) — declared on every row
     risk: str          # what a wrong use costs, in plain words
     holder: str        # which component invokes it
     route: str         # the concrete path to the world
     arguments: list[str]
     description: str
 
-    @property
-    def default_gate(self) -> str:
-        """The gate that applies when no override does (FR-4): `human` for a
-        gated write, `none` for an ungated read or in-sandbox write. Derived
-        from `gate`, so the two can never disagree; `gateway/overrides.resolve`
-        is its reader."""
-        return "human" if self.gate == "human approval" else "none"
+    def __post_init__(self) -> None:
+        if self.default_gate not in DEFAULT_GATES:
+            raise ValueError(f"{self.name}: default_gate {self.default_gate!r} not in {DEFAULT_GATES}")
 
 
 REGISTRY: list[Capability] = [
@@ -43,6 +59,7 @@ REGISTRY: list[Capability] = [
         name="jira.set_due_date",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — a wrong date can be set back",
         holder="Executor",
         route="integrations/jira.py → Jira REST setDueDate (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -53,6 +70,7 @@ REGISTRY: list[Capability] = [
         name="jira.create_issue",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — a wrongly created issue can be closed or deleted in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST createIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -68,6 +86,7 @@ REGISTRY: list[Capability] = [
         name="jira.add_comment",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, append-only — visible to others; lib-jira has no delete op",
         holder="Executor",
         route="integrations/jira.py → Jira REST addComment (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -78,6 +97,7 @@ REGISTRY: list[Capability] = [
         name="jira.update_attributes",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — priority/labels/due date can be restored",
         holder="Executor",
         route="integrations/jira.py → Jira REST updateAttributes (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -94,6 +114,7 @@ REGISTRY: list[Capability] = [
         name="jira.set_fields",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — a custom field's previous value can be restored in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST editIssue, fields resolved through /rest/api/3/field (native only — no façade counterpart)",
@@ -114,6 +135,7 @@ REGISTRY: list[Capability] = [
         name="graph.add_episode",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, append-only — a wrong fact is supersedable, never silently edited",
         holder="Executor",
         route="graphiti-core add_episode, in-process, via the durable ingest queue → group central_command (tenanted; never `main`)",
@@ -135,6 +157,7 @@ REGISTRY: list[Capability] = [
         name="graph.create_node",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="reversible — a new entity, embedded at write time, with its own provenance episode",
         holder="Executor",
         route="neo4j_writer.create_node (bolt)",
@@ -145,6 +168,7 @@ REGISTRY: list[Capability] = [
         name="graph.create_edge",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="reversible — a new relationship with an explicit validity window, with its own provenance episode",
         holder="Executor",
         route="neo4j_writer.create_edge (bolt)",
@@ -156,6 +180,7 @@ REGISTRY: list[Capability] = [
         name="graph.merge_nodes",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="irreversible — every edge and mention of the dropped node moves to the kept one",
         holder="Executor",
         route="neo4j_writer.merge_nodes (bolt; identity kept whole in both halves)",
@@ -166,6 +191,7 @@ REGISTRY: list[Capability] = [
         name="graph.update_node",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="reversible — rename/re-summarise/re-type, re-embedded when the text changed",
         holder="Executor",
         route="neo4j_writer.update_node (bolt)",
@@ -176,6 +202,7 @@ REGISTRY: list[Capability] = [
         name="graph.delete_node",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="irreversible — DETACH DELETE removes the node and every edge touching it",
         holder="Executor",
         route="neo4j_writer.delete_node (bolt)",
@@ -186,6 +213,7 @@ REGISTRY: list[Capability] = [
         name="graph.update_edge",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="reversible — wording, endpoints (repoint), or validity window; restore clears invalid_at AND expired_at",
         holder="Executor",
         route="neo4j_writer.update_edge (bolt; repoint is copy-then-delete)",
@@ -198,6 +226,7 @@ REGISTRY: list[Capability] = [
         name="graph.delete_edge",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="irreversible — the relationship is removed outright",
         holder="Executor",
         route="neo4j_writer.delete_edge (bolt)",
@@ -208,6 +237,7 @@ REGISTRY: list[Capability] = [
         name="graph.rescope_episode",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="reversible — an episode and what it produced move to another group; shared entities/edges are split (copied), nothing deleted",
         holder="Executor",
         route="neo4j_writer.rescope_episode (bolt; the episode is the unit of scope)",
@@ -218,6 +248,7 @@ REGISTRY: list[Capability] = [
         name="graph.delete_episode",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "IRREVERSIBLE — the episode's text is deleted, with the facts it was "
             "first to create, the entities no other episode mentions, and every "
@@ -243,6 +274,7 @@ REGISTRY: list[Capability] = [
         name="catalog.tag",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, reversible — a tag is curation metadata on a catalog "
             "lineage; a wrong one is re-tagged, and nothing is ever deleted"
@@ -262,6 +294,7 @@ REGISTRY: list[Capability] = [
         name="jira.link_issues",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — a wrong link is removed with jira.delete_link",
         holder="Executor",
         route="integrations/jira.py → Jira REST linkIssues, then a read-back of the stored direction (native, Cloud v3 + Data Center v2)",
@@ -280,6 +313,7 @@ REGISTRY: list[Capability] = [
         name="jira.delete_link",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — a removed link can be created again",
         holder="Executor",
         route="integrations/jira.py → Jira REST issueLink DELETE, the link resolved from from_key's stored links (native, Cloud v3 + Data Center v2)",
@@ -296,6 +330,7 @@ REGISTRY: list[Capability] = [
         name="jira.assign_issue",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — reassign or unassign; the assignee is notified",
         holder="Executor",
         route="integrations/jira.py → Jira REST issue/{key}/assignee PUT — accountId on Cloud, username on Data Center (native)",
@@ -312,6 +347,7 @@ REGISTRY: list[Capability] = [
         name="jira.delete_issue",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external, IRREVERSIBLE — neither Jira Cloud nor Data Center can "
             "restore a deleted issue (Data Center's restore is for ARCHIVED "
@@ -336,6 +372,7 @@ REGISTRY: list[Capability] = [
         name="jira.transition_issue",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, usually reversible — workflows can gate reverse transitions",
         holder="Executor",
         route="integrations/jira.py → Jira REST transitionIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -350,6 +387,7 @@ REGISTRY: list[Capability] = [
         name="jira.create_filter",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — deletable in the Jira UI (and via REST)",
         holder="Executor",
         route="integrations/jira.py → Jira REST createFilter (native only — no façade counterpart)",
@@ -360,6 +398,7 @@ REGISTRY: list[Capability] = [
         name="jira.create_dashboard",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — deletable in the Jira UI (and via REST)",
         holder="Executor",
         route="integrations/jira.py → Jira REST createDashboard (native only — no façade counterpart)",
@@ -379,6 +418,7 @@ REGISTRY: list[Capability] = [
         name="jira.create_project",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external, IRREVERSIBLE in effect — deleting a project deletes "
             "every issue inside it; this is the most conservative class in "
@@ -402,6 +442,7 @@ REGISTRY: list[Capability] = [
         name="confluence.create_page",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — trash_page moves a wrongly created page to the trash, recoverable",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST createPage (v2 on Cloud, v1 content on Server/DC)",
@@ -412,6 +453,7 @@ REGISTRY: list[Capability] = [
         name="confluence.update_page",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external, reversible — versioned, so a previous revision can be "
             "restored in the Confluence UI; the write itself refuses to "
@@ -433,6 +475,7 @@ REGISTRY: list[Capability] = [
         name="confluence.move_page",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — the page can be moved back to its old parent",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST updatePage, repointing the parent/ancestor",
@@ -443,6 +486,7 @@ REGISTRY: list[Capability] = [
         name="confluence.trash_page",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — trashed pages remain recoverable from Confluence's trash until purged",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST deletePage (moves to trash, not a permanent delete)",
@@ -453,6 +497,7 @@ REGISTRY: list[Capability] = [
         name="confluence.upload_attachment",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — a wrongly uploaded attachment can be deleted from the page in the UI",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST addAttachment (v1 multipart, both flavors)",
@@ -468,6 +513,7 @@ REGISTRY: list[Capability] = [
         name="confluence.set_labels",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="external, reversible — labels can be removed again (integrations/confluence.py's remove_labels)",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST addLabels (v1, add-only on both flavors)",
@@ -478,6 +524,7 @@ REGISTRY: list[Capability] = [
         name="confluence.create_space",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external, IRREVERSIBLE — no delete-space capability is exposed "
             "here; a mistaken space stays until removed by hand in the "
@@ -497,6 +544,7 @@ REGISTRY: list[Capability] = [
         name="charter.update",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, versioned — a bad charter is one revert away (history is append-only)",
         holder="Executor",
         route="guidance_version table via repo.save_charter_version (D5 coaching loop)",
@@ -517,6 +565,7 @@ REGISTRY: list[Capability] = [
         name="skill.create",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, versioned — documents are append-only versions and a "
             "skill can be retired; a wrong skill teaches nobody until an "
@@ -542,6 +591,7 @@ REGISTRY: list[Capability] = [
         name="skill.doc_add",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, versioned — a new version supersedes the current "
             "document and the prior one stays readable forever; never an "
@@ -569,6 +619,7 @@ REGISTRY: list[Capability] = [
         name="litellm.add_model",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible — a wrong model can be deleted; a wrong mapping re-pointed",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /model/new (self-hosted proxy)",
@@ -589,6 +640,7 @@ REGISTRY: list[Capability] = [
         name="litellm.update_model",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible — an in-place field edit; the stored provider key is preserved by the proxy's PATCH merge",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin PATCH /model/{model_id}/update (self-hosted proxy)",
@@ -608,6 +660,7 @@ REGISTRY: list[Capability] = [
         name="litellm.delete_model",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible but LIVE — deleting an alias Central Command routes to breaks runs until re-added",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /model/delete (self-hosted proxy)",
@@ -622,6 +675,7 @@ REGISTRY: list[Capability] = [
         name="litellm.create_key",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible — a virtual key can be deleted; issuing one changes nothing Central Command routes through yet",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /key/generate (self-hosted proxy)",
@@ -639,6 +693,7 @@ REGISTRY: list[Capability] = [
         name="litellm.update_key",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible — edits a key's scope/metadata/alias in place; no secret involved",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /key/update (self-hosted proxy)",
@@ -653,6 +708,7 @@ REGISTRY: list[Capability] = [
         name="litellm.create_team",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible — a team can be deleted; creating one changes nothing Central Command routes through",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /team/new (self-hosted proxy)",
@@ -666,6 +722,7 @@ REGISTRY: list[Capability] = [
         name="litellm.delete_team",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible but LIVE — the team's keys lose their team scope until re-created",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /team/delete (self-hosted proxy)",
@@ -676,6 +733,7 @@ REGISTRY: list[Capability] = [
         name="litellm.delete_key",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible but LIVE — deleting a key Central Command routes through breaks that traffic until re-issued",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /key/delete (self-hosted proxy)",
@@ -690,6 +748,7 @@ REGISTRY: list[Capability] = [
         name="litellm.set_fallbacks",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible but LIVE — changes router behavior for that model on approval",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /fallback (self-hosted proxy)",
@@ -706,6 +765,7 @@ REGISTRY: list[Capability] = [
         name="litellm.delete_fallbacks",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk="internal, reversible but LIVE — that model loses its fallback behavior on approval",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin DELETE /fallback/{model} (self-hosted proxy)",
@@ -719,6 +779,7 @@ REGISTRY: list[Capability] = [
         name="litellm.apply_config_change",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, HIGHEST BLAST RADIUS in the registry — a bad config "
             "takes ALL inference down for the whole team; the arc RESTARTS the "
@@ -753,6 +814,7 @@ REGISTRY: list[Capability] = [
         name="calendar.create_event",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external, reversible — a wrongly created event can be deleted, but "
             "any invited attendee has already been notified"
@@ -771,6 +833,7 @@ REGISTRY: list[Capability] = [
         name="calendar.update_event",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external, reversible — a PATCH, so omitted fields keep their values "
             "and a wrong change can be changed back; attendees are re-notified"
@@ -789,6 +852,7 @@ REGISTRY: list[Capability] = [
         name="calendar.delete_event",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external, IRREVERSIBLE in effect — cancelling notifies every "
             "attendee and a recreated event does not restore their acceptances "
@@ -812,6 +876,7 @@ REGISTRY: list[Capability] = [
         name="loe.record_checkin",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, append-only — a check-in row is never updated or "
             "deleted, so a wrong one is corrected by the NEXT check-in saying "
@@ -833,6 +898,7 @@ REGISTRY: list[Capability] = [
         name="loe.create",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, reversible — a line of effort that should not exist is "
             "retired through loe.update, which keeps its whole history"
@@ -859,6 +925,7 @@ REGISTRY: list[Capability] = [
         name="loe.update",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, reversible — a recalibration is another update away, "
             "and retire is a status flip that keeps the whole history"
@@ -881,6 +948,7 @@ REGISTRY: list[Capability] = [
         name="work.bulk_dismiss",
         kind="write",
         gate="human approval",
+        default_gate="auditor",
         risk=(
             "internal, reversible — the covered emails land FOLDED, and a "
             "FOLDED item is reopened from the cockpit (POST /api/work/{id}/"
@@ -916,6 +984,7 @@ REGISTRY: list[Capability] = [
         name="mail.create_rule",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "internal, reversible — a standing rule keeps folding matching "
             "mail at intake until revoked (POST /api/mail/rules/{id}/revoke), "
@@ -953,6 +1022,7 @@ REGISTRY: list[Capability] = [
         name="mail.report_spam",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external but reversible — the message moves to Gmail's Spam folder, "
             "which the operator undoes from Gmail within 30 days; a wrong report "
@@ -976,6 +1046,7 @@ REGISTRY: list[Capability] = [
         name="mail.unsubscribe",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external and IRREVERSIBLE — nobody can re-subscribe on the "
             "operator's behalf, and the POST confirms the address to the "
@@ -1006,6 +1077,7 @@ REGISTRY: list[Capability] = [
         name="mail.send",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external and IRREVERSIBLE — a sent message cannot be recalled, it "
             "reaches a real person, and it arrives AS THE OPERATOR: a wrong "
@@ -1034,6 +1106,7 @@ REGISTRY: list[Capability] = [
         name="mail.move",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "external but reversible — the message changes folder and the "
             "operator can move it back from their mail client; nothing is "
@@ -1061,6 +1134,7 @@ REGISTRY: list[Capability] = [
         name="autodiscovery.skip",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "none to the world — a control-plane bookkeeping write; a wrong "
             "skip hides a catalog model from autodiscovery until the operator "
@@ -1090,6 +1164,7 @@ REGISTRY: list[Capability] = [
         name="loe.list",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — reads the operator's own goal records",
         holder="agent (loe_list tool)",
         route="db/repo.py → list_loes + list_loe_checkins (read-only)",
@@ -1105,6 +1180,7 @@ REGISTRY: list[Capability] = [
         name="graph.search_facts",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — facts are data to the agent, never instructions",
         holder="agent (search_knowledge_graph tool)",
         route="graphiti-core search (in-process), facts, groups main + central_command",
@@ -1115,6 +1191,7 @@ REGISTRY: list[Capability] = [
         name="graph.search_nodes",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="control plane",
         route="graphiti-core search (in-process), entities, groups main + central_command",
@@ -1125,6 +1202,7 @@ REGISTRY: list[Capability] = [
         name="graph.get_status",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="control plane",
         route="Neo4j ping (in-process)",
@@ -1135,6 +1213,7 @@ REGISTRY: list[Capability] = [
         name="calendar.list_events",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — a list; changing the calendar is a separate, gated capability",
         holder="agent (read_calendar tool) + control plane (the EA's brief block)",
         route=("n8n cc-calendar-facade webhook (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set — "
@@ -1152,6 +1231,7 @@ REGISTRY: list[Capability] = [
         name="jira.get_issue",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_get_issue tool) + control plane (verification reads)",
         route="integrations/jira.py → Jira REST getIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -1169,6 +1249,7 @@ REGISTRY: list[Capability] = [
         name="jira.search_issues",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_search_issues tool) + control plane",
         route="integrations/jira.py → Jira REST searchIssues (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -1184,6 +1265,7 @@ REGISTRY: list[Capability] = [
         name="jira.find_users",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_find_users tool)",
         route="integrations/jira.py → Jira REST user/assignable/search (with a project) or user/search — `query` on Cloud, `username` on Data Center",
@@ -1198,6 +1280,7 @@ REGISTRY: list[Capability] = [
         name="jira.get_transitions",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_get_transitions tool)",
         route="integrations/jira.py → Jira REST getTransitions (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -1211,6 +1294,7 @@ REGISTRY: list[Capability] = [
         name="jira.list_fields",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_list_fields tool)",
         route="integrations/jira.py → Jira REST /rest/api/3/field (native only — no façade counterpart)",
@@ -1228,6 +1312,7 @@ REGISTRY: list[Capability] = [
         name="jira.list_filters",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_list_filters tool)",
         route="integrations/jira.py → Jira REST filter/search (native only — no façade counterpart)",
@@ -1242,6 +1327,7 @@ REGISTRY: list[Capability] = [
         name="jira.list_dashboards",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_list_dashboards tool)",
         route="integrations/jira.py → Jira REST dashboard/search (native only — no façade counterpart)",
@@ -1255,6 +1341,7 @@ REGISTRY: list[Capability] = [
         name="jira.list_gadgets",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agents (jira_list_gadgets tool)",
         route="integrations/jira.py → Jira REST dashboard/gadgets (native only — no façade counterpart)",
@@ -1269,6 +1356,7 @@ REGISTRY: list[Capability] = [
         name="litellm.list_models",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — the proxy never returns provider keys (encrypted)",
         holder="agent (litellm_list_models tool)",
         route="integrations/litellm.py → LiteLLM admin GET /model/info (self-hosted proxy)",
@@ -1282,6 +1370,7 @@ REGISTRY: list[Capability] = [
         name="litellm.list_credentials",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — the proxy never returns credential secret values (encrypted)",
         holder="agent (litellm_list_credentials tool)",
         route="integrations/litellm.py → LiteLLM admin GET /credentials (self-hosted proxy)",
@@ -1297,6 +1386,7 @@ REGISTRY: list[Capability] = [
         name="litellm.list_keys",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — the proxy returns key HASHES + spend, never a usable secret",
         holder="agent (litellm_list_keys tool)",
         route="integrations/litellm.py → LiteLLM admin GET /key/list (self-hosted proxy)",
@@ -1310,6 +1400,7 @@ REGISTRY: list[Capability] = [
         name="litellm.get_routing",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — read-only routing config",
         holder="agent (litellm_get_routing tool)",
         route="integrations/litellm.py → LiteLLM admin GET /router/settings (self-hosted proxy)",
@@ -1323,6 +1414,7 @@ REGISTRY: list[Capability] = [
         name="litellm.list_teams",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agent (litellm_list_teams tool)",
         route="integrations/litellm.py → LiteLLM admin GET /team/list (self-hosted proxy)",
@@ -1336,6 +1428,7 @@ REGISTRY: list[Capability] = [
         name="litellm.get_health",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — reads proxy status, no provider calls",
         holder="agent (litellm_get_health tool)",
         route="integrations/litellm.py → LiteLLM admin GET /health/readiness/details (self-hosted proxy)",
@@ -1349,6 +1442,7 @@ REGISTRY: list[Capability] = [
         name="litellm.check_model_health",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="internal — makes a REAL provider call per model checked (tokens + latency), never a world write",
         holder="agent (litellm_check_model_health tool)",
         route="integrations/litellm.py → LiteLLM admin GET /health (self-hosted proxy)",
@@ -1363,6 +1457,7 @@ REGISTRY: list[Capability] = [
         name="litellm.get_spend",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world",
         holder="agent (litellm_get_spend tool)",
         route="integrations/litellm.py → LiteLLM admin GET /spend/logs (self-hosted proxy)",
@@ -1376,6 +1471,7 @@ REGISTRY: list[Capability] = [
         name="litellm.read_config",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk=(
             "none to the world — reads three tracked repo files; config.yaml/"
             "model-preferences.yaml reference env vars never raw secrets, and "
@@ -1402,6 +1498,7 @@ REGISTRY: list[Capability] = [
         name="litellm.read_logs",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk=(
             "none to the world — logs may carry request metadata but never "
             "virtual-key plaintext (LiteLLM masks keys in its own logs)"
@@ -1423,6 +1520,7 @@ REGISTRY: list[Capability] = [
         name="litellm.list_mcp_servers",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — reads registration rows, no provider calls",
         holder="agent (litellm_list_mcp_servers tool)",
         route="integrations/litellm.py → LiteLLM admin GET /v1/mcp/server (self-hosted proxy)",
@@ -1437,6 +1535,7 @@ REGISTRY: list[Capability] = [
         name="email.list_refs",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — read-only by construction",
         holder="feed poller / backlog sweeper",
         route=f"n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
@@ -1452,6 +1551,7 @@ REGISTRY: list[Capability] = [
         name="web.fetch",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk=(
             "none to the world — a GET, converted to text/markdown; the only "
             "state it touches is the far server's own access log"
@@ -1474,6 +1574,7 @@ REGISTRY: list[Capability] = [
         name="email.get_message",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none to the world — the façade refuses attachments (D13: text only)",
         holder="dispatcher (hydrate at claim)",
         route=f"n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
@@ -1492,6 +1593,7 @@ REGISTRY: list[Capability] = [
         name="sandbox.exec",
         kind="write",
         gate="ungated",
+        default_gate="none",
         risk=(
             "none outside the agent's own ephemeral pod — gVisor-isolated, "
             "no network egress (default-deny NetworkPolicy), no Central Command "
@@ -1507,6 +1609,7 @@ REGISTRY: list[Capability] = [
         name="sandbox.write_file",
         kind="write",
         gate="ungated",
+        default_gate="none",
         risk="none outside the agent's own ephemeral pod — same containment as sandbox.exec",
         holder="agent (sandbox_write_file tool), granted only via the sandbox pack",
         route="central_command/sandbox/runner.py → kubectl exec (base64 write) into the session's Job pod",
@@ -1520,6 +1623,7 @@ REGISTRY: list[Capability] = [
         name="sandbox.read_file",
         kind="read",
         gate="ungated read",
+        default_gate="none",
         risk="none — a read of the agent's own ephemeral pod",
         holder="agent (sandbox_read_file tool), granted only via the sandbox pack",
         route="central_command/sandbox/runner.py → kubectl exec (base64 read) from the session's Job pod",
@@ -1530,6 +1634,7 @@ REGISTRY: list[Capability] = [
         name="sandbox.copy_in",
         kind="write",
         gate="ungated",
+        default_gate="none",
         risk=(
             "none outside the agent's own ephemeral pod, AND the source is "
             "restricted by operator grant — `agent_sandbox_source` decides "
@@ -1553,6 +1658,7 @@ REGISTRY: list[Capability] = [
         name="sandbox.reset",
         kind="write",
         gate="ungated",
+        default_gate="none",
         risk="none outside the agent's own ephemeral pod — deletes it, nothing more",
         holder="agent (sandbox_reset tool), granted only via the sandbox pack",
         route="central_command/sandbox/runner.py → kubectl delete job (cascade=foreground)",
@@ -1565,6 +1671,7 @@ REGISTRY: list[Capability] = [
         name="mcp.sync_source",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "writes into this repo's servers/<id>/ tree and commits (and "
             "pushes) to master — reversible via git, but it is the seam "
@@ -1590,6 +1697,7 @@ REGISTRY: list[Capability] = [
         name="mcp.build_image",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "builds a container image (nothing running anywhere yet) from "
             "already-reviewed source only; the build host runs a shell "
@@ -1618,6 +1726,7 @@ REGISTRY: list[Capability] = [
         name="mcp.server_deploy",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "a namespace-scoped k8s object (Deployment+Service in cc-mcp), "
             "never cluster-scoped — applied via a SCOPED kubeconfig, "
@@ -1650,6 +1759,7 @@ REGISTRY: list[Capability] = [
         name="litellm.register_mcp_server",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "makes a deployed server's tools reachable through the LiteLLM "
             "MCP gateway to any agent later granted access — no credentials "
@@ -1682,6 +1792,7 @@ REGISTRY: list[Capability] = [
         name="mcp.server_remove",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "tears down the running Deployment+Service in cc-mcp and "
             "deregisters from LiteLLM's MCP gateway — one intent, one "
@@ -1714,6 +1825,7 @@ REGISTRY: list[Capability] = [
         name="mcp.tool_call",
         kind="write",
         gate="human approval",
+        default_gate="human",
         risk=(
             "whatever the invoked TOOL does — unknown in general, which is "
             "exactly why a tool defaults to this gate; a per-agent operator "

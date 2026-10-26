@@ -10,6 +10,8 @@ row here is inserted by the test itself (`repo.create_gate_override`).
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import uuid
 
 import pytest
@@ -18,7 +20,9 @@ from central_command.api import routes
 from central_command.config import settings
 from central_command.db import repo
 from central_command.gateway import overrides
-from central_command.gateway.capabilities import REGISTRY
+from central_command.gateway.capabilities import (
+    DEFAULT_GATES, EXEMPT_WRITES, REGISTRY, gated_write_names, registry_as_dict,
+)
 from central_command.gateway.steward_agreement import pair_confidence
 from central_command.runtime.spike_model import make_deferred_tool_model
 from tests.conftest import needs_pg
@@ -30,12 +34,65 @@ OTHER = "litellm-manager"
 # --- pure ---------------------------------------------------------------------
 
 
-def test_default_gate_is_derived_from_the_gate_string():
+def test_every_row_declares_a_default_gate_from_the_closed_vocabulary():
+    assert DEFAULT_GATES == ("human", "auditor", "none")
     for c in REGISTRY:
-        expected = "human" if c.gate == "human approval" else "none"
-        assert c.default_gate == expected, c.name
-    by_name = {c.name: c for c in REGISTRY}
-    assert by_name["catalog.tag"].default_gate == "human"
+        assert c.default_gate in DEFAULT_GATES, c.name
+        if c.default_gate != "auditor":
+            assert c.default_gate == ("human" if c.gate == "human approval" else "none"), c.name
+    counts = {v: sum(c.default_gate == v for c in REGISTRY) for v in DEFAULT_GATES}
+    assert counts == {"human": 63, "auditor": 1, "none": 32}
+    assert gated_write_names() == {c.name for c in REGISTRY if c.default_gate != "none" and c.kind == "write"}
+    with pytest.raises(ValueError):
+        dataclasses.replace(REGISTRY[0], default_gate="maybe")
+
+
+def test_the_sandbox_writes_and_the_reads_default_to_none():
+    for c in REGISTRY:
+        if c.gate in ("ungated", "ungated read"):
+            assert c.default_gate == "none", c.name
+
+
+def test_auditor_is_pinned_one_to_one_to_the_graduated_class():
+    from central_command.gateway.auditor import BULK_AUDIT_ACTION_CLASS
+
+    covered = {c.name for c in REGISTRY if c.default_gate == "auditor"}
+    assert covered == {BULK_AUDIT_ACTION_CLASS} == {"work.bulk_dismiss"}
+
+
+def test_task_creation_has_no_row_and_no_exemption():
+    names = {c.name for c in REGISTRY}
+    assert not {"task.create", "create_task"} & names
+    assert not any("task" in e for e in EXEMPT_WRITES)
+
+
+def test_the_exemptions_are_a_closed_named_list_and_not_rows():
+    assert EXEMPT_WRITES == ("operator graph curation", "wiki annotation (auto)")
+    for c in REGISTRY:
+        text = " ".join([c.name, c.description]).lower()
+        assert "operator graph curation" not in text and "wiki annotation" not in text, c.name
+        assert not c.name.startswith(("wiki.annotat", "operator."))
+
+
+def test_the_default_gate_reaches_the_wire_on_every_row():
+    wire = registry_as_dict()["capabilities"]
+    assert len(wire) == len(REGISTRY)
+    assert all(r["default_gate"] in DEFAULT_GATES for r in wire)
+    assert {r["name"]: r["default_gate"] for r in wire}["work.bulk_dismiss"] == "auditor"
+
+
+def test_get_capabilities_serves_default_gate_on_every_row():
+    import asyncio
+
+    body = asyncio.run(routes.get_capabilities())
+    rows = body["capabilities"]
+    assert len(rows) == len(REGISTRY)
+    assert all(r["default_gate"] in DEFAULT_GATES for r in rows)
+    assert json.loads(json.dumps(body))["capabilities"][0]["default_gate"]
+
+
+def test_an_auditor_default_gate_resolves_like_human():
+    assert overrides._DEFAULT_GATES["work.bulk_dismiss"] == "auditor"
 
 
 def test_the_tracer_allowlist_is_catalog_tag_only():

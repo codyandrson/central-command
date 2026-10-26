@@ -75,7 +75,9 @@ async def resolve(proposal_row: dict) -> Decision:
     action decides the proposal; anything less leaves the default gate."""
     actions = proposal_row.get("actions") or []
     caps = [_capability(a) for a in actions]
-    default = "human" if any(_DEFAULT_GATES.get(c, "human") == "human" for c in caps) \
+    # `auditor` records that a graduated class MAY be auditor-confirmed; at this
+    # seam it gates exactly like `human` (it changes no behaviour).
+    default = "human" if any(_DEFAULT_GATES.get(c, "human") != "none" for c in caps) \
         else "none"
     if not caps:
         return Decision(default)
