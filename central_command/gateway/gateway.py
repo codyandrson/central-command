@@ -24,7 +24,7 @@ from central_command.contract import (
     classify_failure_text,
 )
 from central_command.db import repo
-from central_command.gateway import executor, policy
+from central_command.gateway import executor, overrides, policy
 from central_command.runtime import resume_park
 from central_command.runtime.agent import build_agent_for
 from central_command.runtime.deps import TriageDeps
@@ -546,6 +546,10 @@ async def approve_and_execute(
     # flag was there — an approval with a visible hazard is a different record
     # than a clean one.
     flags = policy.check_actions(prop_row["actions"])
+    # An `override:<id>` approver is the operator's standing rule deciding the
+    # proposal (FR-4): the event names it, so every reader can tell it from an
+    # operator's own verdict — it never counts as operator agreement.
+    override_id = overrides.override_id_of(approver)
 
     # Record the decision BEFORE acting on it. The log is append-only, so the
     # order it is written in is the order it will be read in forever — an audit
@@ -557,6 +561,7 @@ async def approve_and_execute(
             "verdict": "approved",
             "session_id": session_id,
             **({"policy_flags": flags} if flags else {}),
+            **({"override_id": override_id} if override_id else {}),
         },
         actor=approver,
     )

@@ -180,6 +180,14 @@ alter table proposal add column if not exists origin jsonb;
 -- failed_capability, parked_at}. Null on every proposal that never outaged.
 alter table proposal add column if not exists retry_state jsonb;
 
+-- Gate overrides (epic-gate-overrides story 1, 2026-10-25): the durable,
+-- once-only record of the override evaluation a parked proposal received —
+-- {override_id, outcome: decided | shadow | parked, reason, at}. Written by a
+-- compare-and-set where null (`repo.record_override_eval`), so a proposal is
+-- evaluated exactly once whatever calls the hook. Null = no override was in
+-- play when it parked (or the hook never reached it).
+alter table proposal add column if not exists override_eval jsonb;
+
 -- Work Ledger (Phase 2, M6). Durable per-email work item; the source of truth for
 -- "what still needs doing". Enrollment is idempotent on message_id; the claim is
 -- atomic; a row only goes terminal on a committed outcome. See DESIGN.md §4.
@@ -910,6 +918,32 @@ create table if not exists agent_mcp_gate_override (
     revoked_at      timestamptz,
     primary key (agent_id, server_id, tool_name)
 );
+
+-- Gate overrides (epic-gate-overrides, FR-4; story 1, 2026-10-25): the
+-- operator's per-agent relaxation of a capability's default gate to 'none'.
+-- `agent_id` is the DRAFTER whose proposals it decides (proposal.agent_id,
+-- never the subject). A different mechanism from agent_mcp_gate_override
+-- above (that one is a direct call with no proposal): an override-decided
+-- write is still a proposal, decided at the gateway with approver
+-- 'override:<id>'. Revocation is a timestamp and a row is never deleted or
+-- edited — a scope change is a revoke plus a new row, so an id names exactly
+-- one scope. No row is seeded: a fresh database holds none.
+create table if not exists agent_gate_override (
+    id                            text primary key,           -- govr_<hex>
+    agent_id                      text not null references agent (id),
+    capability                    text not null,
+    scope                         jsonb not null default '{}'::jsonb,
+    gate                          text not null default 'none',
+    granted_by                    text not null default 'operator',
+    granted_at                    timestamptz not null default now(),
+    revoked_at                    timestamptz,
+    revoked_reason                text,
+    shadow_runs                   integer not null default 0,
+    acknowledged_irreversible_at  timestamptz
+);
+
+create index if not exists agent_gate_override_agent_cap_idx
+    on agent_gate_override (agent_id, capability);
 
 -- Roster review (2026-08-06, operator decision): jira-expert and
 -- litellm-manager were consult TARGETS but held no `consult` pack themselves

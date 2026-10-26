@@ -612,10 +612,11 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
             # escape would have `_run_assigned_task_detached` fail the project.
             return {"task_id": task_id, "stopped": True,
                     "session_id": e.session_id}
+    model = await resolve_model(agent_id=agent_id, model_name=model_name,
+                                thinking=thinking)
     result = await run_task(
         agent_id, task["instructions"],
-        model=await resolve_model(agent_id=agent_id, model_name=model_name,
-                                  thinking=thinking),
+        model=model,
         parent_session_id=task.get("parent_session_id"),
         task_id=task_id,
     )
@@ -663,6 +664,17 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
             },
             actor=f"agent:{agent_id}",
         )
+        # The gate-override decide hook (FR-4), AFTER the task has landed in
+        # REVIEW with its session linked — never a `proposal.created`
+        # subscriber, which would race this bookkeeping. A covering override
+        # of the drafter decides the proposal through `approve_and_execute`
+        # (approver `override:<id>`), whose tail resolves the task; anything
+        # else leaves it in the inbox exactly as before.
+        from central_command.gateway import overrides
+
+        evaluated = await overrides.decide_on_park(result["proposal_id"], model=model)
+        if evaluated is not None:
+            result = {**result, "override_eval": evaluated}
     else:
         # A text answer completes the task on the spot: the operator asked,
         # the operator reads the answer — no dismissal review needed. (For an

@@ -1215,7 +1215,7 @@ async def load_proposal(proposal_id: str) -> dict | None:
             select p.id, p.session_id, p.agent_id, p.intent, p.actions,
                    p.evidence, p.expected_effect, p.status, p.provenance,
                    p.created_at, p.decided_at, p.confidence, p.origin,
-                   p.retry_state, {_SIMULATED_SQL}
+                   p.retry_state, p.override_eval, {_SIMULATED_SQL}
             from proposal p where p.id = $1
             """,
             proposal_id,
@@ -1224,7 +1224,7 @@ async def load_proposal(proposal_id: str) -> dict | None:
             return None
         d = dict(row)
         for k in ("actions", "evidence", "provenance", "confidence", "origin",
-                  "retry_state"):
+                  "retry_state", "override_eval"):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d
@@ -4668,6 +4668,119 @@ async def list_agent_mcp_overrides(agent_id: str) -> list[dict]:
             agent_id,
         )
         return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# --- gate overrides (epic-gate-overrides, FR-4) -------------------------------
+# The operator's per-agent relaxation of a capability's default gate. Read by
+# `gateway/overrides.resolve`; a row is never deleted or edited in place
+# (revoke = timestamp; a scope change is a revoke plus a new row). Nothing but
+# tests calls the writer yet: the operator's authoring route is a later story.
+
+
+_OVERRIDE_COLS = """id, agent_id, capability, scope, gate, granted_by, granted_at,
+                    revoked_at, revoked_reason, shadow_runs,
+                    acknowledged_irreversible_at"""
+
+
+def _override_row(row) -> dict:
+    d = dict(row)
+    if isinstance(d.get("scope"), str):
+        d["scope"] = json.loads(d["scope"])
+    return d
+
+
+async def create_gate_override(
+    agent_id: str, capability: str, *, scope: dict | None = None,
+    granted_by: str = "operator", shadow_runs: int = 0,
+    acknowledged_irreversible: bool = False,
+) -> dict:
+    """Insert a new override row (always a NEW id — never an upsert, so a
+    re-grant after a revoke is a second row and the first keeps its history)."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            insert into agent_gate_override
+                (id, agent_id, capability, scope, granted_by, shadow_runs,
+                 acknowledged_irreversible_at)
+            values ($1, $2, $3, $4::jsonb, $5, $6,
+                    case when $7 then now() end)
+            returning {_OVERRIDE_COLS}
+            """,
+            f"govr_{uuid.uuid4().hex[:12]}", agent_id, capability,
+            json.dumps(scope or {}), granted_by, shadow_runs,
+            acknowledged_irreversible,
+        )
+        return _override_row(row)
+    finally:
+        await conn.close()
+
+
+async def revoke_gate_override(override_id: str, reason: str | None = None) -> bool:
+    """Revoke = timestamp the row, never delete it. False if it was already
+    revoked or does not exist."""
+    conn = await _conn()
+    try:
+        result = await conn.execute(
+            """
+            update agent_gate_override
+               set revoked_at = now(), revoked_reason = $2
+             where id = $1 and revoked_at is null
+            """,
+            override_id, reason,
+        )
+        return result.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def live_gate_overrides(agent_id: str, capability: str) -> list[dict]:
+    """The unrevoked overrides of one agent on one capability, oldest first."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select {_OVERRIDE_COLS} from agent_gate_override
+             where agent_id = $1 and capability = $2 and revoked_at is null
+             order by granted_at, id
+            """,
+            agent_id, capability,
+        )
+        return [_override_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def record_override_eval(proposal_id: str, record: dict) -> bool:
+    """Write a proposal's override evaluation ONCE: compare-and-set where null.
+    False means another caller already recorded one — that caller owns the
+    decision, and this one must do nothing."""
+    conn = await _conn()
+    try:
+        result = await conn.execute(
+            """
+            update proposal set override_eval = $2::jsonb
+             where id = $1 and override_eval is null
+            """,
+            proposal_id, json.dumps(record),
+        )
+        return result.endswith(" 1")
+    finally:
+        await conn.close()
+
+
+async def amend_override_eval(proposal_id: str, record: dict) -> None:
+    """Correct a recorded `decided` evaluation whose decision could not be
+    carried out (the operator claimed the proposal first, or the approval
+    crashed) — the record must say the override did NOT decide it."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            "update proposal set override_eval = $2::jsonb where id = $1",
+            proposal_id, json.dumps(record),
+        )
     finally:
         await conn.close()
 

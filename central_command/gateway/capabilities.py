@@ -28,6 +28,14 @@ class Capability:
     arguments: list[str]
     description: str
 
+    @property
+    def default_gate(self) -> str:
+        """The gate that applies when no override does (FR-4): `human` for a
+        gated write, `none` for an ungated read or in-sandbox write. Derived
+        from `gate`, so the two can never disagree; `gateway/overrides.resolve`
+        is its reader."""
+        return "human" if self.gate == "human approval" else "none"
+
 
 REGISTRY: list[Capability] = [
     # --- gated writes: Executor-only, after operator approval -----------------

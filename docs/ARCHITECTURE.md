@@ -128,7 +128,7 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`resolve`, `decide_on_park`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
@@ -230,7 +230,9 @@ from the command line (`python -m central_command.selfcheck`) and from
   cockpit server (`web/server/routes/cc-update.ts`) through systemd path units.
 - **`gateway/capabilities.py`** is "executable truth": each `Capability` row
   carries `kind`, `gate`, `risk` (free text — what a wrong use costs),
-  `holder`, `route` and `arguments`. Agent charters' capability sections are
+  `holder`, `route` and `arguments`, plus the derived `default_gate`
+  (`human` for a gated write, `none` otherwise) that gate overrides resolve
+  against. Agent charters' capability sections are
   *generated* from pack grants over this registry at run start.
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
@@ -280,6 +282,25 @@ stateDiagram-v2
   re-runs the same shape validation over every action before the first one
   runs, then world-state checks, then the handlers; `proposer` comes from the
   gateway, never from the agent's arguments.
+- **Gate overrides (FR-4, being built).** An `agent_gate_override` row
+  (`govr_<hex>` id; the DRAFTER as `agent_id`, a capability, a `scope` jsonb,
+  `gate` `none`, `granted_by`/`granted_at`, `revoked_at`/`revoked_reason` —
+  revocation is a timestamp and a row is never deleted — `shadow_runs`,
+  `acknowledged_irreversible_at`) relaxes a capability's default gate for one
+  agent. Resolution is override, then default (`gateway/overrides.py`
+  `resolve`): the drafter's live override covering EVERY action decides, and
+  only for a proposal created after the override was granted. The decide hook
+  (`overrides.decide_on_park`) runs at the task-run landing
+  (`api/routes.py::_run_one_assigned_task`, after the task lands in REVIEW),
+  records the evaluation once on `proposal.override_eval`
+  (`{override_id, outcome: decided | shadow | parked, reason, at}`,
+  compare-and-set where null) and, when decided, calls `approve_and_execute`
+  with approver `override:<id>`: `proposal.decided` carries `override_id` and
+  still precedes the Executor. A decision that could not run is amended to
+  `parked` and logged as `override.error`. An override decision is never
+  operator agreement: `steward_agreement.pair_confidence` and the coaching
+  reader skip it. No override is seeded and no authoring path exists yet; only
+  `catalog.tag` is on the tracer's `OVERRIDABLE` allowlist.
 - **Operator routes.** `POST /proposals/{id}/approve | reject | dismiss`
   (`api/routes.py`); the cockpit reaches the same gateway functions over `/ws`.
 - **Folds.** Sibling work items folded into a proposal sit in `FOLD_PENDING`;
@@ -301,6 +322,7 @@ What varies is the approver.
 |---|---|---|---|
 | **Human gate** — the baseline for everything | the operator | every capability whose `gate` is human approval: Jira, Confluence, calendar, mail, graph episodes and curation proposals, charter edits, MCP sync, model configuration, … | — |
 | **Graduated class** — the independent auditor re-derives the judgment from the raw source; a **CONCUR** executes with `approver="auditor"`, a **CHALLENGE** or an auditor error parks for the operator | the auditor, per class, revocable | `dismissal.confirm` (email dismissals) and `work.bulk_dismiss`; `dismissal.confirm.document`; graph-verification rows that are aligned, mechanically clean and addition-only (invalidations always park) | `CC_AUDITOR_ENABLED` (false) + `CC_AUDITOR_MODE` (shadow); `CC_AUDITOR_DOCUMENT_MODE` (shadow); `CC_GRAPH_AUDITOR_ENABLED` (false) + `CC_GRAPH_AUDITOR_MODE` (shadow) |
+| **Gate override** — the operator's standing rule for one agent and one capability; the proposal is still decided at the seam | `override:<id>` | none reachable yet: rows exist only where a test inserts one, `catalog.tag` only | no authoring path yet |
 | **Ungated deterministic write** — exactly two, no proposal, because there is no agent judgment to review | code, or the operator's own click | (1) operator graph curation: a closed write set in `integrations/neo4j_writer.py`, called from `api/routes.py` for the operator's own edits; (2) wiki stale-page annotation: a deterministic template over claim rows, no model in the path, whose Confluence write is made by `ingest/wiki_freshness.py` | — ; `CC_WIKI_ANNOTATION_MODE` (off) |
 
 These two are the closed exemption list the PRD's override requirement (FR-4)

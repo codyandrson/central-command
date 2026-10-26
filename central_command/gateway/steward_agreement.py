@@ -40,9 +40,16 @@ def pair_confidence(proposals: list[dict], decided: list[dict]) -> dict:
     that stated NO confidence is counted separately, because absent is not low.
     """
     verdicts: dict[str, dict] = {}
+    # A proposal an override decided is not a case the operator judged (FR-10:
+    # auto-handled cases never count): it leaves BOTH counts — skipping it
+    # from agreement alone would leave it counted as awaiting forever.
+    override_decided: set[str] = set()
     for e in decided:
         payload = e.get("payload") or {}
         verdict = payload.get("verdict")
+        if payload.get("override_id"):
+            override_decided.add(e["ref_id"])
+            continue
         if verdict in ("approved", "rejected"):
             # Last decision wins: a redraft cycle decides the same id once each
             # time, and the operator's latest word is the standing one.
@@ -53,6 +60,8 @@ def pair_confidence(proposals: list[dict], decided: list[dict]) -> dict:
     pairs: list[dict] = []
     awaiting = unstated = 0
     for p in proposals:
+        if p["id"] in override_decided:
+            continue
         conf = p.get("confidence") or None
         level = (conf or {}).get("level")
         if level not in LEVELS:

@@ -534,6 +534,10 @@ async def read_agent_record(ctx: RunContext, agent_id: str, limit: int = 500) ->
         if e["ref_id"] not in props:
             continue
         payload = e.get("payload") or {}
+        if payload.get("override_id"):
+            # Decided by an operator-authored gate override, not by the
+            # operator looking at it: no verdict on the agent's judgment.
+            continue
         note = f" — “{payload['feedback']}”" if payload.get("feedback") else ""
         matched.append(
             f"- (event:{e['id']}) {payload.get('verdict', '?')}: "
