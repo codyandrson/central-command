@@ -478,6 +478,15 @@ class Settings(BaseSettings):
     task_max_depth: int = 3
     task_fanout_limit: int = 25
 
+    # Gate overrides, safeguard 3 (epic-gate-overrides story 5.7): the shadow
+    # period a NEW override runs — how many matching proposals the operator
+    # must approve (as ordinary proposals, created after the override was
+    # granted) before the override decides one itself. 0 turns it off, except
+    # on a class that requires acknowledgement (irreversible / LIVE), which is
+    # floored at 1. Copied onto the override row at authoring: changing this
+    # later never alters an override already authored.
+    gate_override_shadow_runs: int = 5
+
     # Auditor (Phase 4, D8/D12) — independent re-verification of agent claims.
     #   auditor_enabled -> off by default; the human gate is the baseline
     #   auditor_mode    -> "shadow" records verdicts without changing any gate;

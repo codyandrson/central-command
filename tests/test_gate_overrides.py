@@ -231,6 +231,9 @@ async def granted():
             had_row = any(r["pack"] == pack for r in await repo.list_grants(agent_id))
             await repo.grant_pack(agent_id, pack)
             packs.append((agent_id, pack, had_row))
+        # The shadow period is off unless a test asks for one (story 5.7): the
+        # default of 5 would park every proposal these tests expect decided.
+        kw.setdefault("shadow_runs", 0)
         row = await repo.create_gate_override(agent_id, capability, **kw)
         made.append(row["id"])
         return row
@@ -485,9 +488,12 @@ async def test_an_unacknowledged_or_unshadowed_override_on_mail_send_is_never_ho
     bare = await granted(agent, "mail.send")
     assert (await overrides.resolve(_row(agent, "mail.send"))).gate == "human"
     await repo.revoke_gate_override(bare["id"])
+    # Acknowledged with no shadow period asked for: the class is floored at one
+    # approval (story 5.7), and the acknowledgement alone no longer decides.
     no_shadow = await granted(agent, "mail.send", acknowledged_irreversible=True)
+    assert no_shadow["shadow_runs"] == 1
     d = await overrides.resolve(_row(agent, "mail.send"))
-    assert d.gate == "human" and "acknowledgement" in d.reason
+    assert d.gate == "human" and d.shadowed and "0 of 1" in d.reason
     await repo.revoke_gate_override(no_shadow["id"])
     no_tick = await granted(agent, "mail.send", shadow_runs=1)
     d = await overrides.resolve(_row(agent, "mail.send"))
@@ -495,7 +501,9 @@ async def test_an_unacknowledged_or_unshadowed_override_on_mail_send_is_never_ho
     await repo.revoke_gate_override(no_tick["id"])
     both = await granted(agent, "mail.send", acknowledged_irreversible=True, shadow_runs=1)
     d = await overrides.resolve(_row(agent, "mail.send"))
-    assert (d.gate, d.override_id) == ("none", both["id"])
+    assert d.gate == "human" and d.shadowed and "0 of 1" in d.reason
+    assert [m.as_mark() for m in d.shadow] == [
+        {"override_id": both["id"], "k": 0, "n": 1, "complete": False}]
 
 
 @needs_pg
@@ -524,7 +532,14 @@ async def test_a_planted_requirement_on_catalog_tag_parks_then_decides(
     assert row["override_eval"]["outcome"] == "parked" and row["override_eval"]["reason"]
     await repo.revoke_gate_override(bare["id"])
     ovr = await granted(DRAFTER, acknowledged_irreversible=True, shadow_runs=1)
+    # The class waits its one approval like any other: the first parks shadowed,
+    # the operator approves it, the second runs by the override.
     out = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag with the tick"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "AWAITING_HUMAN"
+    assert row["override_eval"]["outcome"] == "shadow"
+    await gateway_mod.approve_and_execute(out["session_id"], out["proposal_id"])
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag after one approval"))
     row = await repo.load_proposal(out["proposal_id"])
     assert row["status"] == "EXECUTED"
     assert row["provenance"]["approver"] == f"override:{ovr['id']}"
@@ -1529,3 +1544,192 @@ async def test_an_executed_episode_carries_the_trust_of_its_approver(
         {"name": "n", "episode_body": "b", "scope": "shared", "source_description": "s",
          "reference_time": "2026-05-12"}, approver, None)
     assert f" | trust={trust} | approver={approver} | " in sent[0]
+
+
+# --- safeguard 3: the shadow period (story 5.7) --------------------------------
+
+
+async def _shadow_events(kind: str, ref_id: str) -> list[dict]:
+    return await repo.list_events(kind=kind, ref_id=ref_id, limit=100)
+
+
+async def _approve(out: dict) -> None:
+    """The operator's own approval of a parked proposal."""
+    await gateway_mod.approve_and_execute(out["session_id"], out["proposal_id"])
+    assert (await repo.load_proposal(out["proposal_id"]))["status"] == "EXECUTED"
+
+
+def test_the_setting_defaults_to_five():
+    assert settings.__class__.model_fields["gate_override_shadow_runs"].default == 5
+
+
+@needs_pg
+async def test_n_matching_approvals_end_the_shadow_period(demo, granted, monkeypatch):
+    monkeypatch.setattr(settings, "gate_override_shadow_runs", 5)
+    ovr = await granted(DRAFTER, shadow_runs=None)
+    assert ovr["shadow_runs"] == 5
+    for k in range(5):
+        out = await _run(monkeypatch, DRAFTER, _tag_proposal(f"Shadow {k}"))
+        pid = out["proposal_id"]
+        row = await repo.load_proposal(pid)
+        assert row["status"] == "AWAITING_HUMAN"
+        assert row["override_eval"]["outcome"] == "shadow"
+        assert row["override_eval"]["shadow"] == [
+            {"override_id": ovr["id"], "k": k, "n": 5, "complete": False}]
+        shadowed = await _shadow_events("override.shadowed", pid)
+        assert len(shadowed) == 1
+        assert (shadowed[0]["payload"]["k"], shadowed[0]["payload"]["n"]) == (k, 5)
+        assert not await _shadow_events("override.live", ovr["id"])
+        await _approve(out)
+        assert await overrides.shadow_progress(ovr) == k + 1
+
+    sixth = await _run(monkeypatch, DRAFTER, _tag_proposal("Sixth runs by the override"))
+    row = await repo.load_proposal(sixth["proposal_id"])
+    assert row["status"] == "EXECUTED"
+    assert row["provenance"]["approver"] == f"override:{ovr['id']}"
+    live = await _shadow_events("override.live", ovr["id"])
+    assert len(live) == 1 and live[0]["payload"]["shadow_runs"] == 5
+    decided = [e for e in await _events_for(sixth["proposal_id"])
+               if e["kind"] == "proposal.decided"]
+    assert live[0]["id"] < decided[0]["id"], "override.live precedes the first decision"
+    # An override's own approval is never a shadow approval.
+    assert await overrides.shadow_progress(ovr) == 5
+
+    seventh = await _run(monkeypatch, DRAFTER, _tag_proposal("Seventh"))
+    assert (await repo.load_proposal(seventh["proposal_id"]))["status"] == "EXECUTED"
+    assert len(await _shadow_events("override.live", ovr["id"])) == 1, "emitted once"
+
+
+@needs_pg
+async def test_only_a_humans_approval_of_a_proposal_created_after_the_grant_counts(
+    demo, granted, monkeypatch,
+):
+    early = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Created before the grant"))
+    ovr = await granted(DRAFTER, shadow_runs=3)
+    rejected = await _run(monkeypatch, DRAFTER, _tag_proposal("Will be dismissed"))
+    assert (await repo.load_proposal(rejected["proposal_id"]))["override_eval"]["outcome"] == "shadow"
+    await gateway_mod.dismiss_proposal(rejected["session_id"], rejected["proposal_id"], "no")
+    assert await overrides.shadow_progress(ovr) == 0
+
+    # created before granted_at, approved after: not in the pinned window
+    await _approve(early)
+    assert await overrides.shadow_progress(ovr) == 0
+
+    ok = await _run(monkeypatch, DRAFTER, _tag_proposal("Counts"))
+    await _approve(ok)
+    assert await overrides.shadow_progress(ovr) == 1
+
+    # a redraft or a follow-on is not an ordinary proposal
+    redraft = await _run(monkeypatch, DRAFTER, _tag_proposal("A redraft"))
+    await repo.amend_override_eval(redraft["proposal_id"], {
+        "override_id": None, "outcome": "parked", "reason": "redraft", "at": "now"})
+    await _approve(redraft)
+    assert await overrides.shadow_progress(ovr) == 1
+
+
+@needs_pg
+async def test_a_proposal_evaluated_while_the_override_was_suspended_counts_nothing(
+    demo, granted, monkeypatch,
+):
+    ovr = await granted(DRAFTER, shadow_runs=2)
+    await repo.revoke_pack(DRAFTER, _pack_for("catalog.tag"), reason="test")
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Parked suspended"))
+    assert ovr["id"] in (await repo.load_proposal(out["proposal_id"]))["override_eval"]["suspended"]
+    await repo.grant_pack(DRAFTER, _pack_for("catalog.tag"))
+    await _approve(out)
+    assert await overrides.shadow_progress(ovr) == 0
+
+
+@needs_pg
+async def test_off_means_the_first_decides_on_a_reversible_class_but_not_an_irreversible_one(
+    demo, granted, monkeypatch, exchange_mailbox,
+):
+    monkeypatch.setattr(settings, "gate_override_shadow_runs", 0)
+    reversible = await granted(DRAFTER, shadow_runs=None)
+    irreversible = await granted(DRAFTER, "mail.send", shadow_runs=None,
+                                 acknowledged_irreversible=True)
+    assert (reversible["shadow_runs"], irreversible["shadow_runs"]) == (0, 1)
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("First, shadow off"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "EXECUTED"
+    assert row["provenance"]["approver"] == f"override:{reversible['id']}"
+
+    d = await overrides.resolve(_row(DRAFTER, "mail.send"))
+    assert d.gate == "human" and d.shadowed and "0 of 1" in d.reason
+
+
+@needs_pg
+async def test_a_later_change_of_the_setting_never_alters_an_authored_override(granted, monkeypatch):
+    monkeypatch.setattr(settings, "gate_override_shadow_runs", 5)
+    ovr = await granted(DRAFTER, shadow_runs=None)
+    monkeypatch.setattr(settings, "gate_override_shadow_runs", 2)
+    other = await granted(DRAFTER, "jira.add_comment", shadow_runs=None)
+    monkeypatch.setattr(settings, "gate_override_shadow_runs", 0)
+    assert (await repo.get_gate_override(ovr["id"]))["shadow_runs"] == 5
+    assert (await repo.get_gate_override(other["id"]))["shadow_runs"] == 2
+    assert (await overrides.shadow_state(await repo.get_gate_override(ovr["id"]))).n == 5
+
+
+@needs_pg
+async def test_the_gateway_pre_check_and_the_executor_refuse_an_override_in_its_shadow_period(
+    demo, granted, monkeypatch,
+):
+    ovr = await granted(DRAFTER, shadow_runs=2)
+    out = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Shadowed, forced"))
+    pid = out["proposal_id"]
+    row = await repo.load_proposal(pid)
+    approver = overrides.approver_for(ovr["id"])
+
+    calls = _action_spy(monkeypatch)
+    with pytest.raises(executor_mod.OverrideRefused) as info:
+        await executor_mod.execute(_actions_of(row), approver=approver, source_refs=[],
+                                   proposer=DRAFTER, proposal_id=pid)
+    assert "shadow period" in info.value.reason and "0 of 2" in info.value.reason
+    with pytest.raises(overrides.OverrideRefused):
+        await gateway_mod.approve_and_execute(out["session_id"], pid, approver=approver)
+    refused = await _assert_handed_back(pid)
+    assert "shadow period" in refused["payload"]["reason"]
+    assert calls == []
+
+
+@needs_pg
+async def test_several_overrides_decide_only_when_every_one_is_past_its_shadow_period(
+    demo, granted, monkeypatch,
+):
+    live = await granted(DRAFTER, "catalog.tag")                    # shadow 0
+    shadowed = await granted(DRAFTER, "jira.add_comment", shadow_runs=5)
+    for k in range(2):
+        out = await _run(monkeypatch, DRAFTER, _comment_proposal(f"Comment {k}"))
+        assert (await repo.load_proposal(out["proposal_id"]))["override_eval"]["outcome"] == "shadow"
+        await _approve(out)
+    assert await overrides.shadow_progress(shadowed) == 2
+
+    out = await _run(monkeypatch, DRAFTER, _two_action_proposal("Covered by both"))
+    pid = out["proposal_id"]
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "AWAITING_HUMAN"
+    assert row["override_eval"]["outcome"] == "shadow"
+    marks = {m["override_id"]: m for m in row["override_eval"]["shadow"]}
+    assert marks[live["id"]]["complete"] is True
+    assert (marks[shadowed["id"]]["k"], marks[shadowed["id"]]["n"]) == (2, 5)
+    assert f"{shadowed['id']} 2 of 5" in row["override_eval"]["reason"]
+    events = await _shadow_events("override.shadowed", pid)
+    assert [e["payload"]["override_id"] for e in events] == [shadowed["id"]]
+
+    await _approve(out)
+    # the approval advances the shadowed override and counts for the live one too
+    assert await overrides.shadow_progress(shadowed) == 3
+    assert await overrides.shadow_progress(live) == 1
+
+
+@needs_pg
+async def test_two_overrides_on_one_action_wait_for_the_slower(demo, granted, monkeypatch):
+    everything = await granted(DRAFTER)
+    narrow = await granted(DRAFTER, shadow_runs=3,
+                           scope={"argument": {"name": "tags", "values": ["draft"]}})
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Both cover this tag"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "AWAITING_HUMAN"
+    assert {m["override_id"] for m in row["override_eval"]["shadow"]} == {
+        everything["id"], narrow["id"]}
+    assert f"{narrow['id']} 0 of 3" in row["override_eval"]["reason"]

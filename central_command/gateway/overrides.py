@@ -21,13 +21,18 @@ The hook runs at every API-tier landing point AFTER the caller's bookkeeping
 (`PARK_SITES` below maps each `park_proposal` site to its caller; the startup
 `override_sweep` is the guarantee behind them); it is not a `proposal.created`
 subscriber, because a subscriber would race fold reservation and task landing.
+A NEW override is shadowed (safeguard 3, below): a proposal it covers parks
+until the operator has approved N matching proposals; with several
+overrides covering one proposal, ALL must be past their shadow period.
 An override approval is never operator agreement: `steward_agreement` and the
 coaching reader skip a `proposal.decided` whose payload carries `override_id`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import weakref
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -35,7 +40,7 @@ from central_command import events
 from central_command.db import repo
 from central_command.contract import ARG_SPECS, validate_action_args
 from central_command.gateway.capabilities import (
-    REGISTRY, requires_acknowledgement, target_args_of,
+    REGISTRY, effective_shadow_runs, requires_acknowledgement, target_args_of,
 )
 
 APPROVER_PREFIX = "override:"
@@ -67,6 +72,13 @@ class Decision:
     # grant). Computed fresh on each evaluation; a re-grant lifts it.
     suspended: tuple[str, ...] = ()
     action_map: dict[int, str] | None = None
+    # Every override that covers a gated action of the proposal, with its
+    # shadow mark ({override_id, k, n, complete}) — the proposal is decided
+    # only when ALL of them are complete (several overrides: the operator's
+    # ruling of 2026-10-26). `shadowed` says the park reason IS the shadow
+    # period (the record's outcome is then `shadow`, not `parked`).
+    shadow: tuple[dict, ...] = ()
+    shadowed: bool = False
 
     @property
     def override_id(self) -> str | None:
@@ -290,6 +302,73 @@ def scope_text(override: dict) -> str:
     return "; and ".join(parts)
 
 
+# --- safeguard 3: the shadow period (story 7) --------------------------------
+#
+# A new override is shadowed: a proposal it covers parks for the operator until
+# the operator has approved N matching proposals. Progress is computed
+# FRESH from the proposal rows (`repo.shadow_approval_candidates`) — no counter
+# column — over a PINNED window: proposals of the override's agent CREATED after
+# its `granted_at`, EXECUTED with a human approver (an override's, the
+# auditor's, `system`'s approval never counts), not a redraft or a follow-on,
+# carrying an action the override's capability and scope cover (`scope_covers`,
+# the matcher the decision uses). A rejected, dismissed or withdrawn proposal
+# never reaches EXECUTED, so it advances nothing; a proposal created before the
+# grant and approved after does not either. A proposal evaluated while the
+# override was SUSPENDED (recorded in its `override_eval.suspended`) counts
+# nothing for it. N is the row's `shadow_runs`, copied at authoring, floored at
+# 1 for a class that requires acknowledgement.
+
+
+@dataclass(frozen=True)
+class ShadowState:
+    override_id: str
+    k: int          # matching proposals the operator has approved so far
+    n: int          # the override's shadow period
+
+    @property
+    def complete(self) -> bool:
+        return self.k >= self.n
+
+    def as_mark(self) -> dict:
+        return {"override_id": self.override_id, "k": self.k, "n": self.n,
+                "complete": self.complete}
+
+
+async def shadow_progress(override: dict) -> int:
+    """How many matching proposals the operator has approved inside this
+    override's pinned window (see the section comment)."""
+    count = 0
+    ctx_needed = bool((override.get("scope") or {}).get("schedule"))
+    for p in await repo.shadow_approval_candidates(
+            override["agent_id"], override["capability"], override["granted_at"]):
+        if override["id"] in ((p.get("override_eval") or {}).get("suspended") or []):
+            continue
+        ctx = None
+        if ctx_needed:
+            sid = p.get("session_id")
+            ctx = {"task": await repo.task_for_session(sid) if sid else None}
+        if any(_capability(a) == override["capability"] and scope_covers(override, a, ctx)
+               for a in p["actions"] or []):
+            count += 1
+    return count
+
+
+async def shadow_state(override: dict) -> ShadowState:
+    """THE shadow reading, applied per override by `resolve` and
+    `check_override_approval` alike. N is floored at read as well as at
+    authoring, so a row that was not authored through the repo cannot skip the
+    floor of an acknowledgement class."""
+    n = effective_shadow_runs(override["capability"], int(override["shadow_runs"]))
+    if n <= 0:
+        return ShadowState(override["id"], 0, 0)
+    return ShadowState(override["id"], await shadow_progress(override), n)
+
+
+def shadow_text(states) -> str:
+    return "shadow period: " + "; ".join(
+        f"override {s.override_id} {s.k} of {s.n}" for s in states)
+
+
 async def resolve(proposal_row: dict) -> Decision:
     """Override, then default. The drafter's live override covering EVERY
     gated action decides the proposal; anything less leaves the default gate.
@@ -308,8 +387,10 @@ async def resolve(proposal_row: dict) -> Decision:
     created_at = proposal_row["created_at"]
     action_map: dict[int, str] = {}
     considered = False
+    shadow_open = False
     reason = ""
     live_by_cap: dict[str, list[dict]] = {}
+    marks: dict[str, ShadowState] = {}
     ctx: dict | None = None
     for index, (action, cap) in enumerate(zip(actions, caps)):
         if _DEFAULT_GATES.get(cap, "human") == "none" and cap in _DEFAULT_GATES:
@@ -330,23 +411,20 @@ async def resolve(proposal_row: dict) -> Decision:
             continue
         # A capability whose registry row requires acknowledgement (irreversible
         # or LIVE / highest blast radius) is honoured only with the operator's
-        # recorded acknowledgement AND a non-zero shadow period. The mark is the
-        # server-held registry field; the agent-written `Action.reversibility`
-        # is never read here. Until story 7 counts shadow runs, such a row with
-        # both present is the one shadowed row that decides.
+        # recorded acknowledgement, and then waits its shadow period like any
+        # other (floored at 1: `shadow_state`). The mark is the server-held
+        # registry field; the agent-written `Action.reversibility` is never
+        # read here.
         ack = requires_acknowledgement(cap)
         if ack:
-            lacking = [o for o in live
-                       if not o["acknowledged_irreversible_at"] or o["shadow_runs"] < 1]
+            lacking = [o for o in live if not o["acknowledged_irreversible_at"]]
             if lacking and len(lacking) == len(live):
-                reason = reason or (f"{cap} requires an acknowledgement and a shadow "
-                                    "period the override lacks")
+                reason = reason or f"{cap} requires an acknowledgement the override lacks"
                 continue
             live = [o for o in live if o not in lacking]
-        eligible = [o for o in live
-                    if o["gate"] == "none" and (ack or o["shadow_runs"] == 0)]
+        eligible = [o for o in live if o["gate"] == "none"]
         if live and not eligible:
-            reason = reason or "the override is shadowed"
+            reason = reason or "the override's gate is not none"
             continue
         if eligible and ctx is None and any((o["scope"] or {}).get("schedule") for o in eligible):
             sid = proposal_row.get("session_id")
@@ -362,6 +440,14 @@ async def resolve(proposal_row: dict) -> Decision:
         if not current:
             reason = reason or f"no live override covers {cap}"
             continue
+        # Every override covering this action is involved: it is decided only
+        # when ALL of them are past their shadow period.
+        for o in current:
+            if o["id"] not in marks:
+                marks[o["id"]] = await shadow_state(o)
+        if not all(marks[o["id"]].complete for o in current):
+            shadow_open = True
+            continue
         action_map[index] = current[0]["id"]
 
     if not considered:
@@ -375,13 +461,20 @@ async def resolve(proposal_row: dict) -> Decision:
     # The operator reopened the work item with a note — "I want eyes on this"
     # (the auditor reads the same note and never auto-confirms under it).
     reason = reason or await operator_hold_reason(proposal_row)
+    shadow = tuple(marks[i] for i in sorted(marks))
+    open_marks = [m for m in shadow if not m.complete]
+    # Nothing else stops it, so the shadow period is the reason it parks.
+    shadowed = bool(shadow_open and not reason)
+    if shadowed:
+        reason = shadow_text(open_marks)
     if not reason and not action_map:
         reason = "no gated action is covered"
     if reason:
         return Decision(default, reason=reason, considered=True,
-                        suspended=tuple(suspended))
+                        suspended=tuple(suspended), shadow=shadow,
+                        shadowed=shadowed)
     return Decision("none", override_ids=tuple(sorted(set(action_map.values()))),
-                    considered=True, action_map=action_map)
+                    considered=True, action_map=action_map, shadow=shadow)
 
 
 async def _granted_capabilities(agent_id: str) -> set[str]:
@@ -459,6 +552,31 @@ async def record_unevaluated_park(proposal_id: str, kind: str) -> bool:
     })
 
 
+_live_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+    weakref.WeakKeyDictionary())
+
+
+async def _announce_live(decision: Decision, proposal_id: str) -> None:
+    """`override.live`: an override past its shadow period is about to make its
+    first decision. Emitted ONCE per override (the log is the memory), BEFORE
+    the `proposal.decided` that decision writes — write order is read order.
+    The lock is per event loop (a module-level lock binds to the first loop
+    that contends on it) and makes check-then-emit atomic in this process."""
+    lock = _live_locks.setdefault(asyncio.get_running_loop(), asyncio.Lock())
+    async with lock:
+        for mark in decision.shadow:
+            if mark.override_id not in decision.override_ids:
+                continue
+            if await repo.count_events("override.live", mark.override_id):
+                continue
+            await events.emit(
+                "override.live", ref_id=mark.override_id,
+                payload={"override_id": mark.override_id, "shadow_runs": mark.n,
+                         "progress": mark.k, "proposal_id": proposal_id},
+                actor="gateway",
+            )
+
+
 async def decide_on_park(proposal_id: str, model=None) -> dict | None:
     """The decide hook: evaluate a freshly parked proposal once and, when
     overrides cover it, decide it through the one seam.
@@ -477,10 +595,15 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
         return None
     record = {
         "override_id": decision.override_id,
-        "outcome": "decided" if decision.override_ids else "parked",
+        "outcome": ("decided" if decision.override_ids
+                    else "shadow" if decision.shadowed else "parked"),
         "reason": decision.reason or None,
         "at": _now(),
     }
+    open_marks = [m for m in decision.shadow if not m.complete]
+    if open_marks:
+        # Every involved override's k of N, live ones too (several overrides).
+        record["shadow"] = [m.as_mark() for m in decision.shadow]
     if decision.override_ids:
         record["override_ids"] = list(decision.override_ids)
         record["action_map"] = {str(i): o for i, o in sorted(decision.action_map.items())}
@@ -489,7 +612,18 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
     if not await repo.record_override_eval(proposal_id, record):
         return None
     if not decision.override_ids:
+        # The mark is on the proposal before anything but the log hears of it.
+        if decision.shadowed:
+            for m in open_marks:
+                await events.emit(
+                    "override.shadowed", ref_id=proposal_id,
+                    payload={"override_id": m.override_id, "k": m.k, "n": m.n,
+                             "proposal_id": proposal_id,
+                             "overrides": [x.as_mark() for x in decision.shadow]},
+                    actor="gateway",
+                )
         return record
+    await _announce_live(decision, proposal_id)
 
     from central_command.gateway import gateway
 
@@ -554,12 +688,11 @@ async def check_override_approval(
     them in the proposal, so each is checked against ITS mapped override.
 
     Each named override: unrevoked, its agent the drafter (and not the
-    auditor), its shadow period complete (no shadow counting until story 7:
-    `shadow_runs == 0`, or an acknowledgement-class row with its floor of one,
-    exactly as `resolve` reads it), not suspended (its capability inside the
+    auditor), its shadow period complete (`shadow_state`, the one reading
+    `resolve` also makes), not suspended (its capability inside the
     drafter's live pack grants). Each gated action: its mapped override's
     capability is the action's, `scope_covers` holds, an acknowledgement class
-    has `acknowledged_irreversible_at` and `shadow_runs >= 1`. With the row:
+    has `acknowledged_irreversible_at`. With the row:
     the proposal postdates every override, nothing a reviewer would see
     flagged (`review_flags`, grants fresh) and no operator reopen note."""
     ids = override_ids_of(approver)
@@ -578,9 +711,10 @@ async def check_override_approval(
                                        f"not the drafter {proposer}")
         if o["gate"] != "none":
             raise OverrideRefused(oid, f"the override's gate is {o['gate']}")
-        ack = requires_acknowledgement(o["capability"])
-        if not ack and o["shadow_runs"] != 0:
-            raise OverrideRefused(oid, "the override is still in its shadow period")
+        state = await shadow_state(o)
+        if not state.complete:
+            raise OverrideRefused(oid, "the override is still in its shadow period "
+                                       f"({state.k} of {state.n})")
         if o["capability"] not in granted:
             raise OverrideRefused(oid, f"the override is suspended: {o['capability']} "
                                        "is outside the agent's live pack grants")
@@ -601,10 +735,9 @@ async def check_override_approval(
         if o["capability"] != cap:
             raise OverrideRefused(oid, f"action {index} is {cap}, the override "
                                        f"covers {o['capability']}")
-        if requires_acknowledgement(cap) and (
-                not o["acknowledged_irreversible_at"] or o["shadow_runs"] < 1):
-            raise OverrideRefused(oid, f"{cap} requires an acknowledgement and a "
-                                       "shadow period the override lacks")
+        if requires_acknowledgement(cap) and not o["acknowledged_irreversible_at"]:
+            raise OverrideRefused(oid, f"{cap} requires an acknowledgement the "
+                                       "override lacks")
         if ctx is None and (o["scope"] or {}).get("schedule"):
             sid = (proposal_row or {}).get("session_id")
             ctx = {"task": await repo.task_for_session(sid) if sid else None}

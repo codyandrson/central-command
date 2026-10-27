@@ -4693,11 +4693,21 @@ def _override_row(row) -> dict:
 
 async def create_gate_override(
     agent_id: str, capability: str, *, scope: dict | None = None,
-    granted_by: str = "operator", shadow_runs: int = 0,
+    granted_by: str = "operator", shadow_runs: int | None = None,
     acknowledged_irreversible: bool = False,
 ) -> dict:
     """Insert a new override row (always a NEW id — never an upsert, so a
-    re-grant after a revoke is a second row and the first keeps its history)."""
+    re-grant after a revoke is a second row and the first keeps its history).
+
+    The shadow period is COPIED onto the row here (safeguard 3): `shadow_runs`
+    is the setting `gate_override_shadow_runs` when omitted, floored for a
+    class that requires acknowledgement, so a later change to the setting never
+    alters an override already authored."""
+    from central_command.gateway.capabilities import effective_shadow_runs
+
+    if shadow_runs is None:
+        shadow_runs = settings.gate_override_shadow_runs
+    shadow_runs = effective_shadow_runs(capability, shadow_runs)
     conn = await _conn()
     try:
         row = await conn.fetchrow(
@@ -4763,6 +4773,58 @@ async def get_gate_override(override_id: str) -> dict | None:
             override_id,
         )
         return _override_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def shadow_approval_candidates(
+    agent_id: str, capability: str, granted_at,
+) -> list[dict]:
+    """The proposals that may count as one shadow approval for an override of
+    `agent_id` on `capability` granted at `granted_at` — the pinned window,
+    computed from the proposal rows alone (no counter column): drafted by the
+    agent, CREATED after the grant, EXECUTED with a human approver (an
+    override's, the auditor's or `system`'s approval never counts), carrying an
+    action of the capability, and not a redraft or a follow-on (parked
+    unevaluated, so not an ordinary proposal). A rejected, dismissed or
+    withdrawn proposal never reaches EXECUTED. The caller applies the scope."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select p.id, p.session_id, p.actions, p.override_eval
+              from proposal p
+             where p.agent_id = $1 and p.status = 'EXECUTED'
+               and p.created_at > $3
+               and p.provenance ->> 'approver' like 'human:%'
+               and coalesce(p.override_eval ->> 'reason', '') not in ('redraft', 'follow_on')
+               and exists (select 1 from jsonb_array_elements(p.actions) a
+                            where split_part(a ->> 'capability', '@', 1) = $2)
+             order by p.created_at, p.id
+            """,
+            agent_id, capability, granted_at,
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("actions", "override_eval"):
+                if isinstance(d.get(k), str):
+                    d[k] = json.loads(d[k])
+            out.append(d)
+        return out
+    finally:
+        await conn.close()
+
+
+async def count_events(kind: str, ref_id: str) -> int:
+    """How many events of `kind` the log holds for `ref_id` (the once-only
+    check for an event that must be emitted a single time)."""
+    conn = await _conn()
+    try:
+        return int(await conn.fetchval(
+            "select count(*) from audit_event where kind = $1 and ref_id = $2",
+            kind, ref_id,
+        ))
     finally:
         await conn.close()
 

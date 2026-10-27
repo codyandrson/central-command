@@ -303,7 +303,8 @@ stateDiagram-v2
   bookkeeping (table below), never as a `proposal.created` subscriber, and
   records the evaluation once on `proposal.override_eval`
   (`{override_id, outcome: decided | shadow | parked, reason, at}`, plus
-  `suspended: [ids]` when an override is suspended, and, when decided,
+  `shadow: [{override_id, k, n, complete}]` when an override is in its shadow
+  period, `suspended: [ids]` when an override is suspended, and, when decided,
   `override_ids` and `action_map` — `{action index: override id}` for every
   gated action; `override_id` is the id when exactly one decided, else null;
   compare-and-set where null) and, when decided, calls `approve_and_execute`
@@ -317,11 +318,10 @@ stateDiagram-v2
   pre-check and the backstop.** Before `proposal.decided`,
   `approve_and_execute` runs `overrides.check_override_approval` read-only
   against fresh rows: each named override unrevoked, its agent the drafter,
-  its gate `none`, its shadow period complete (until shadow runs are counted:
-  `shadow_runs` 0, or an acknowledgement-class row with its floor of one), not
-  suspended; each gated action's mapped override on that action's capability,
-  `scope_covers` true, an acknowledgement class acknowledged with
-  `shadow_runs >= 1`; the proposal created after every override; no
+  its gate `none`, its shadow period complete (`overrides.shadow_state`, the one reading
+  `resolve` also makes — safeguard 3 below), not suspended; each gated
+  action's mapped override on that action's capability, `scope_covers` true,
+  an acknowledgement class acknowledged; the proposal created after every override; no
   `review_flags` flag; no operator reopen note. A failure emits
   `override.refused` (`{override_id, override_ids, reason, proposal_id,
   stage: decision | execution | retry}`, actor the approver) and hands the
@@ -362,10 +362,42 @@ stateDiagram-v2
   reader skip it. `resolve` honours a live override on a capability whose row
   sets `acknowledge` (every `irreversible` row, `mcp.tool_call`, and the six
   LIVE / highest-blast-radius `litellm` rows) only when it carries
-  `acknowledged_irreversible_at` and `shadow_runs >= 1`
-  (`capabilities.requires_acknowledgement`, `effective_shadow_runs`), and
+  `acknowledged_irreversible_at`, and then it waits its shadow period like
+  any other, floored at 1 (`capabilities.requires_acknowledgement`,
+  `effective_shadow_runs`), and
   never for the auditor, the one hard exclusion. No override is seeded and no authoring path exists yet; any
   capability whose default gate is `human` or `auditor` may be overridden.
+  **Safeguard 3, the shadow period.** A NEW override is shadowed: a proposal
+  it covers parks for the operator until the operator has approved N matching
+  proposals. N is the setting `gate_override_shadow_runs`
+  (`CC_GATE_OVERRIDE_SHADOW_RUNS`, default 5; 0 turns the period off, except
+  that a class requiring acknowledgement is floored at 1,
+  `capabilities.effective_shadow_runs`), COPIED onto the row's `shadow_runs`
+  when it is authored (`repo.create_gate_override`), so changing the setting
+  never alters an override already authored. Progress is computed fresh from
+  the proposal rows, no counter column (`overrides.shadow_progress`,
+  `repo.shadow_approval_candidates`) over a window pinned to the override: a
+  proposal drafted by its agent, **created after its `granted_at`**, matching
+  its capability and scope (`scope_covers`, the matcher the decision uses),
+  **EXECUTED with a human approver** (`provenance.approver` `human:*` — an
+  override's, the auditor's or `system`'s approval never counts), and not a
+  redraft or a follow-on (recorded unevaluated). Rejected, dismissed and
+  withdrawn proposals never reach EXECUTED; a proposal created before the
+  grant and approved after does not count; a proposal evaluated while the
+  override was suspended (`override_eval.suspended`) counts nothing for it.
+  While k < N the hook parks the proposal with `override_eval` outcome
+  `shadow` and `shadow` marks, written before anything but the log hears of
+  it, then emits `override.shadowed` per shadowing override (`{override_id, k,
+  n, proposal_id, overrides}`, ref the proposal). When an override that has
+  completed its period is about to make its first decision the hook emits
+  `override.live` once (`{override_id, shadow_runs, progress, proposal_id}`,
+  ref the override, deduplicated on the log), before that decision's
+  `proposal.decided`. **Several overrides:** a proposal is decided only when
+  EVERY override covering one of its gated actions is past its period;
+  otherwise it parks marked with each override's k of N, and the operator's
+  approval of it counts toward every override it matched. The pre-check and
+  the Executor's backstop refuse an override still in its period (`k of N` in
+  the reason).
   **Scope.** A row's `scope` is `{}` (every use) or any of three forms, ANDed,
   with no regex and no time windows: `argument` (`{name, values}`: exact
   values of one named argument, which must exist in `contract.ARG_SPECS` for
