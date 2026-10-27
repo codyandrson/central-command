@@ -27,6 +27,7 @@ from central_command.contract import ARG_SPECS, Action, Provenance, validate_act
 from central_command.contract.args import COST_FIELDS
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
+from central_command.gateway.overrides import OverrideRefused  # noqa: F401 — the backstop's typed refusal
 
 
 log = logging.getLogger(__name__)
@@ -2283,6 +2284,7 @@ async def _execute_action(action: Action, approver: str, proposer: str | None) -
 async def execute(
     actions: list[Action], approver: str, source_refs: list[str],
     proposer: str | None = None, proposal_id: str | None = None,
+    action_offset: int = 0,
 ) -> ExecutionOutcome:
     """Execute a proposal's actions in order. Provenance is stamped from the
     approver and the evidence source refs. A failing action raises
@@ -2304,6 +2306,15 @@ async def execute(
     (`proposal.idempotency_key` exists and is unused end-to-end), deferred until
     a façade can honour one; a client-side dedup guess would be worse, because
     guessing wrong drops a real write.
+
+    **An override approver is checked again here — the BACKSTOP** (safeguard 1).
+    After the shape pass and before the first action, an `override:<id>`
+    approver re-reads every override it names and re-runs the gateway's
+    pre-check (`overrides.check_override_approval`) on THESE actions —
+    `action_offset` is the first one's index in the proposal, so each is
+    checked against its mapped override. A failure raises `OverrideRefused`
+    (not `ExecutionFailed`): nothing ran, nothing was written. An operator's
+    approver is never checked.
     """
     # The propose-time shape check, run again here: the Executor never assumes
     # the runtime validated anything (an API-submitted proposal skips the tool
@@ -2314,6 +2325,16 @@ async def execute(
         problems = validate_action_args(a.capability, a.arguments)
         if problems:
             raise ExecutionFailed(a.capability, "; ".join(problems), [])
+    from central_command.gateway import overrides
+
+    if overrides.override_ids_of(approver):
+        from central_command.db import repo
+
+        row = await repo.load_proposal(proposal_id) if proposal_id else None
+        await overrides.check_override_approval(
+            approver, [a.model_dump(mode="json") for a in actions],
+            proposer=proposer, proposal_row=row, offset=action_offset,
+        )
     token = _current_proposal_id.set(proposal_id)
     try:
         results: list[str] = []

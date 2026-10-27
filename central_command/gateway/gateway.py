@@ -557,10 +557,24 @@ async def approve_and_execute(
     # flag was there — an approval with a visible hazard is a different record
     # than a clean one.
     flags = policy.check_actions(prop_row["actions"])
-    # An `override:<id>` approver is the operator's standing rule deciding the
-    # proposal (FR-4): the event names it, so every reader can tell it from an
-    # operator's own verdict — it never counts as operator agreement.
-    override_id = overrides.override_id_of(approver)
+    # An `override:<id>` (or `override:<id1>+<id2>`) approver is the operator's
+    # standing rule deciding the proposal (FR-4): the event names it, so every
+    # reader can tell it from an operator's own verdict — it never counts as
+    # operator agreement.
+    override_ids = overrides.override_ids_of(approver)
+    if override_ids:
+        # Safeguard 1: the read-only pre-check, BEFORE `proposal.decided`. A
+        # refusal is logged first and the claim handed back, so the log never
+        # says "approved" for a proposal the operator then decides.
+        try:
+            await overrides.check_override_approval(
+                approver, prop_row["actions"], proposer=prop_row["agent_id"],
+                proposal_row=prop_row,
+            )
+        except overrides.OverrideRefused as refused:
+            await overrides.emit_refused(proposal_id, approver, refused, "decision")
+            await repo.set_proposal_status(proposal_id, prop_row["status"])
+            raise
 
     # Record the decision BEFORE acting on it. The log is append-only, so the
     # order it is written in is the order it will be read in forever — an audit
@@ -572,7 +586,8 @@ async def approve_and_execute(
             "verdict": "approved",
             "session_id": session_id,
             **({"policy_flags": flags} if flags else {}),
-            **({"override_id": override_id} if override_id else {}),
+            **({"override_ids": override_ids} if override_ids else {}),
+            **({"override_id": override_ids[0]} if len(override_ids) == 1 else {}),
         },
         actor=approver,
     )
@@ -583,6 +598,14 @@ async def approve_and_execute(
             proposal.actions, approver=approver, source_refs=source_refs,
             proposer=prop_row["agent_id"], proposal_id=proposal_id,
         )
+    except overrides.OverrideRefused as refused:
+        # The Executor's backstop refused before the first action ran — a
+        # revoke (or a grant change) in the window after the decision event.
+        # Nothing was written: the claim goes back to the operator, the same
+        # handback as the crash path below, with the refusal on the log first.
+        await overrides.emit_refused(proposal_id, approver, refused, "execution")
+        await repo.set_proposal_status(proposal_id, prop_row["status"])
+        raise
     except executor.ExecutionFailed as failure:
         # Outage equivalence slice 3: WAS THE DEPENDENCY DOWN, OR DID IT SAY NO?
         # A transient failure never makes an approved proposal terminal — the
@@ -969,10 +992,40 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
 
     source_refs = [e["source_ref"] for e in row["evidence"]]
     try:
+        if overrides.override_ids_of(approver):
+            # The same pre-check an override decision passed, on the REMAINING
+            # actions: a retry re-executes work under the stored approver, and
+            # the override may have been revoked since.
+            await overrides.check_override_approval(
+                approver, [a.model_dump(mode="json") for a in remaining],
+                proposer=agent_id, proposal_row=row, offset=index,
+            )
         outcome = await executor.execute(
             remaining, approver=approver, source_refs=source_refs,
-            proposer=agent_id, proposal_id=proposal_id,
+            proposer=agent_id, proposal_id=proposal_id, action_offset=index,
         )
+    except overrides.OverrideRefused as refused:
+        await overrides.emit_refused(proposal_id, approver, refused, "retry")
+        if index or completed:
+            # A completed prefix: handing it back to AWAITING_HUMAN would let a
+            # later approval re-run finished actions. The world is half-changed,
+            # so it is a FAILED execution with its partial results on the log,
+            # and the operator decides the rest by hand.
+            failed = executor.ExecutionFailed(
+                remaining[0].capability if remaining else "override",
+                f"override refused: {refused.reason}", completed,
+            )
+            out = await _record_execution_failure(
+                session_id, proposal_id, agent_id, failed, model
+            )
+            return {**out, "attempts": attempts, "override_refused": refused.reason}
+        await repo.set_proposal_status(proposal_id, "AWAITING_HUMAN")
+        record = row.get("override_eval") or {}
+        await repo.amend_override_eval(proposal_id, {
+            **record, "outcome": "parked", "reason": f"refused: {refused.reason}",
+        })
+        return {"ok": False, "override_refused": refused.reason,
+                "status": "AWAITING_HUMAN", "attempts": attempts}
     except executor.ExecutionFailed as failure:
         # The honest partial record spans ATTEMPTS, not just this one: splice
         # what earlier attempts landed in front of what this one did.

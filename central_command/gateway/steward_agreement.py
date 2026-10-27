@@ -26,6 +26,7 @@ The quadrants that matter, by analogy with the auditor's:
 from __future__ import annotations
 
 from central_command.db import repo
+from central_command.gateway import overrides
 from central_command.runtime.steward_profile import AGENT_ID
 
 LEVELS = ("high", "medium", "low")
@@ -47,7 +48,7 @@ def pair_confidence(proposals: list[dict], decided: list[dict]) -> dict:
     for e in decided:
         payload = e.get("payload") or {}
         verdict = payload.get("verdict")
-        if payload.get("override_id"):
+        if overrides.decided_by_override(e):
             override_decided.add(e["ref_id"])
             continue
         if verdict in ("approved", "rejected"):

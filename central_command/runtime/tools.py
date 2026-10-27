@@ -534,9 +534,12 @@ async def read_agent_record(ctx: RunContext, agent_id: str, limit: int = 500) ->
         if e["ref_id"] not in props:
             continue
         payload = e.get("payload") or {}
-        if payload.get("override_id"):
-            # Decided by an operator-authored gate override, not by the
-            # operator looking at it: no verdict on the agent's judgment.
+        if (str(e.get("actor") or "").startswith("override:")
+                or payload.get("override_id") or payload.get("override_ids")):
+            # Decided by one or more operator-authored gate overrides, not by
+            # the operator looking at it: no verdict on the agent's judgment.
+            # The bare prefix test is `gateway/overrides.override_ids_of`'s own
+            # rule — runtime/ may not import the gateway.
             continue
         note = f" — “{payload['feedback']}”" if payload.get("feedback") else ""
         matched.append(

@@ -1105,3 +1105,314 @@ async def test_a_hook_error_leaves_the_proposal_for_the_operator_loudly(
     errors = [e for e in await _events_for(out["proposal_id"]) if e["kind"] == "override.error"]
     assert errors and errors[-1]["payload"]["stage"] == "evaluate"
     assert "resolver down" in errors[-1]["payload"]["error"]
+
+
+# --- story 5: the gateway pre-check, the Executor backstop, several overrides --
+
+from central_command.gateway import executor as executor_mod  # noqa: E402
+from central_command.gateway import gateway as gateway_mod  # noqa: E402
+from central_command.contract import Action  # noqa: E402
+
+
+def _action_spy(monkeypatch, *, fail_at: int | None = None,
+                error: str = "Connection refused talking to the n8n façade") -> list[str]:
+    """Every action the Executor reaches records itself here; `fail_at` makes
+    that call (0-based) raise — a transient outage by default."""
+    calls: list[str] = []
+
+    async def spy(action, approver, proposer):
+        n = len(calls)
+        calls.append(action.capability)
+        if fail_at is not None and n == fail_at:
+            raise RuntimeError(error)
+        return f"done {action.capability} #{n}"
+
+    monkeypatch.setattr(executor_mod, "_execute_action", spy)
+    return calls
+
+
+def _two_action_proposal(intent: str, caps=("catalog.tag", "jira.add_comment")) -> dict:
+    tag, comment = _tag_proposal(intent), _comment_proposal(intent)
+    by_cap = {"catalog.tag": tag["actions"][0], "jira.add_comment": comment["actions"][0]}
+    actions = []
+    for cap in caps:
+        a = json.loads(json.dumps(by_cap[cap]))
+        if cap == "catalog.tag":
+            doc = f"doc_{uuid.uuid4().hex[:8]}"
+            a["arguments"]["document_id"] = doc
+            a["target_ref"]["id"] = doc
+        actions.append(a)
+    return {**tag, "actions": actions, "expected_effect": "both happen"}
+
+
+async def _refused_events(pid: str) -> list[dict]:
+    return [e for e in await _events_for(pid) if e["kind"] == "override.refused"]
+
+
+async def _assert_handed_back(pid: str, *, decided: bool = False) -> dict:
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "AWAITING_HUMAN"
+    kinds = [e["kind"] for e in await _events_for(pid)]
+    assert ("proposal.decided" in kinds) is decided
+    assert "proposal.executed" not in kinds
+    refused = await _refused_events(pid)
+    assert refused, kinds
+    return refused[-1]
+
+
+def _actions_of(out_row: dict) -> list[Action]:
+    return [Action(**a) for a in out_row["actions"]]
+
+
+@needs_pg
+@pytest.mark.parametrize("case", ["scope", "revoked", "pack_revoked", "unacknowledged"])
+async def test_the_gateway_pre_check_refuses_before_any_decision(
+    case, demo, granted, monkeypatch,
+):
+    """Override in place before the proposal (so the hook WOULD have decided
+    it), then the world changes before the approval: the pre-check refuses,
+    `override.refused` is logged, no `proposal.decided` exists, and the claim
+    goes back to the operator."""
+    kw = {"scope": {"argument": {"name": "tags", "values": ["final"]}}} if case == "scope" else {}
+    if case == "unacknowledged":
+        monkeypatch.setattr(overrides, "requires_acknowledgement",
+                            lambda cap: cap == "catalog.tag")
+    ovr = await granted(DRAFTER, **kw)
+    out = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal(f"Tag pre-check {case}"))
+    pid = out["proposal_id"]
+    if case == "revoked":
+        await repo.revoke_gate_override(ovr["id"], reason="test")
+    if case == "pack_revoked":
+        await repo.revoke_pack(DRAFTER, _pack_for("catalog.tag"), reason="test")
+
+    calls = _action_spy(monkeypatch)
+    with pytest.raises(overrides.OverrideRefused):
+        await gateway_mod.approve_and_execute(
+            out["session_id"], pid, approver=overrides.approver_for(ovr["id"]))
+    refused = await _assert_handed_back(pid)
+    assert refused["payload"]["override_id"] == ovr["id"]
+    assert refused["payload"]["proposal_id"] == pid
+    assert refused["payload"]["stage"] == "decision"
+    assert refused["payload"]["reason"]
+    assert calls == []
+
+    # The operator's own approval is never affected.
+    if case == "pack_revoked":
+        return  # an operator approval of an ungranted capability is policy's call
+    await gateway_mod.approve_and_execute(out["session_id"], pid)
+    assert (await repo.load_proposal(pid))["status"] == "EXECUTED"
+
+
+@needs_pg
+@pytest.mark.parametrize("case", ["scope", "revoked", "pack_revoked",
+                                  "unacknowledged", "not_the_drafter"])
+async def test_the_executor_backstop_refuses_with_nothing_written(
+    case, demo, granted, monkeypatch,
+):
+    kw = {"scope": {"argument": {"name": "tags", "values": ["final"]}}} if case == "scope" else {}
+    ovr = await granted(DRAFTER, **kw)
+    out = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal(f"Tag backstop {case}"))
+    row = await repo.load_proposal(out["proposal_id"])
+    proposer = DRAFTER
+    if case == "revoked":
+        await repo.revoke_gate_override(ovr["id"], reason="test")
+    if case == "pack_revoked":
+        await repo.revoke_pack(DRAFTER, _pack_for("catalog.tag"), reason="test")
+    if case == "unacknowledged":
+        monkeypatch.setattr(overrides, "requires_acknowledgement",
+                            lambda cap: cap == "catalog.tag")
+    if case == "not_the_drafter":
+        proposer = OTHER
+
+    calls = _action_spy(monkeypatch)
+    with pytest.raises(executor_mod.OverrideRefused) as info:
+        await executor_mod.execute(
+            _actions_of(row), approver=overrides.approver_for(ovr["id"]),
+            source_refs=[], proposer=proposer, proposal_id=out["proposal_id"])
+    assert not isinstance(info.value, executor_mod.ExecutionFailed)
+    assert calls == [], "nothing ran, nothing was written"
+    # An operator approver is never checked.
+    await executor_mod.execute(_actions_of(row), approver="human:operator",
+                               source_refs=[], proposer=proposer)
+    assert calls == ["catalog.tag"]
+
+
+@needs_pg
+async def test_a_revoke_between_the_decision_and_execution_hands_it_back(
+    demo, granted, monkeypatch,
+):
+    ovr = await granted(DRAFTER)
+    out = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Tag revoked mid-flight"))
+    pid = out["proposal_id"]
+    real = executor_mod.execute
+
+    async def revoke_then_execute(*a, **kw):
+        await repo.revoke_gate_override(ovr["id"], reason="revoked in the window")
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(executor_mod, "execute", revoke_then_execute)
+    calls = _action_spy(monkeypatch)
+    record = await overrides.decide_landed(out)
+    assert record["outcome"] == "parked" and "revoked" in record["reason"]
+    refused = await _assert_handed_back(pid, decided=True)
+    assert refused["payload"]["stage"] == "execution"
+    assert calls == []
+    evs = await _events_for(pid)
+    ids = {e["kind"]: e["id"] for e in evs}
+    assert ids["proposal.decided"] < ids["override.refused"]
+    assert (await repo.load_proposal(pid))["override_eval"]["outcome"] == "parked"
+
+
+@needs_pg
+async def test_a_retry_with_a_completed_prefix_and_a_revoked_override_fails_without_rerunning(
+    demo, granted, monkeypatch,
+):
+    a = await granted(DRAFTER, "catalog.tag")
+    b = await granted(DRAFTER, "jira.add_comment")
+    out = await _run_unhooked(monkeypatch, DRAFTER, _two_action_proposal("Two actions, retried"))
+    pid = out["proposal_id"]
+    calls = _action_spy(monkeypatch, fail_at=1)  # the second action hits an outage
+    record = await overrides.decide_landed(out)
+    assert record["outcome"] == "decided"
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "RETRY_PENDING", row["status"]
+    assert calls == ["catalog.tag", "jira.add_comment"]
+
+    await repo.revoke_gate_override(b["id"], reason="revoked before the retry")
+    calls.clear()
+    model = make_deferred_tool_model("propose_action", {"proposal": _tag_proposal("x")})
+    result = await gateway_mod.retry_execution(pid, model=model)
+    assert result["override_refused"]
+    assert calls == [], "action one never re-runs, action two never runs"
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "FAILED"
+    failed = [e for e in await _events_for(pid) if e["kind"] == "proposal.failed"]
+    assert failed[-1]["payload"]["completed_actions"] == ["done catalog.tag #0"]
+    refused = await _refused_events(pid)
+    assert refused[-1]["payload"]["override_id"] == b["id"]
+    assert refused[-1]["payload"]["stage"] == "retry"
+    assert sorted(refused[-1]["payload"]["override_ids"]) == sorted([a["id"], b["id"]])
+
+
+@needs_pg
+async def test_a_proposal_covered_by_two_different_overrides_is_decided_by_both(
+    demo, granted, monkeypatch,
+):
+    a = await granted(DRAFTER, "catalog.tag")
+    b = await granted(DRAFTER, "jira.add_comment")
+    intent = f"Tag and comment ({uuid.uuid4().hex[:6]})"
+    calls = _action_spy(monkeypatch)
+    out = await _run(monkeypatch, DRAFTER, _two_action_proposal(intent))
+    pid = out["proposal_id"]
+    combined = "override:" + "+".join(sorted([a["id"], b["id"]]))
+    assert overrides.approver_for([b["id"], a["id"], b["id"]]) == combined
+    assert overrides.override_ids_of(combined) == sorted([a["id"], b["id"]])
+    assert overrides.override_id_of(combined) is None
+
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "EXECUTED"
+    assert row["provenance"]["approver"] == combined
+    assert row["override_eval"]["action_map"] == {"0": a["id"], "1": b["id"]}
+    assert row["override_eval"]["override_ids"] == sorted([a["id"], b["id"]])
+    assert calls == ["catalog.tag", "jira.add_comment"]
+    decided = [e for e in await _events_for(pid) if e["kind"] == "proposal.decided"]
+    assert len(decided) == 1
+    assert decided[0]["actor"] == combined
+    assert decided[0]["payload"]["override_ids"] == sorted([a["id"], b["id"]])
+    assert "override_id" not in decided[0]["payload"]
+
+    # Never operator agreement — the combined approver included.
+    report = pair_confidence(
+        [{**row, "confidence": {"level": "high", "rationale": "sure"}}],
+        [{**decided[0], "payload": {"verdict": "approved"}}],  # actor alone suffices
+    )
+    assert report["total_paired"] == 0 and report["awaiting_decision"] == 0
+    from central_command.runtime import tools
+
+    record = await tools.read_agent_record(None, DRAFTER)
+    assert intent not in record
+
+
+@needs_pg
+@pytest.mark.parametrize("which", [0, 1])
+async def test_revoking_either_of_two_overrides_refuses_the_whole_proposal(
+    which, demo, granted, monkeypatch,
+):
+    pair = [await granted(DRAFTER, "catalog.tag"), await granted(DRAFTER, "jira.add_comment")]
+    out = await _run_unhooked(monkeypatch, DRAFTER, _two_action_proposal(f"Revoke {which}"))
+    pid = out["proposal_id"]
+    # Record the evaluation the hook would have written, then revoke one.
+    decision = await overrides.resolve(await repo.load_proposal(pid))
+    assert decision.gate == "none" and len(decision.override_ids) == 2
+    await repo.record_override_eval(pid, {
+        "override_id": None, "outcome": "decided", "override_ids": list(decision.override_ids),
+        "action_map": {str(k): v for k, v in decision.action_map.items()}, "at": "now",
+    })
+    await repo.revoke_gate_override(pair[which]["id"], reason="test")
+    approver = overrides.approver_for(decision.override_ids)
+    row = await repo.load_proposal(pid)
+
+    calls = _action_spy(monkeypatch)
+    with pytest.raises(executor_mod.OverrideRefused) as info:
+        await executor_mod.execute(_actions_of(row), approver=approver, source_refs=[],
+                                   proposer=DRAFTER, proposal_id=pid)
+    assert info.value.override_id == pair[which]["id"]
+    assert calls == []
+
+    with pytest.raises(overrides.OverrideRefused):
+        await gateway_mod.approve_and_execute(out["session_id"], pid, approver=approver)
+    refused = await _assert_handed_back(pid)
+    assert refused["payload"]["override_id"] == pair[which]["id"]
+    assert calls == []
+
+
+@needs_pg
+async def test_one_uncovered_action_still_parks_the_whole_proposal(demo, granted, monkeypatch):
+    await granted(DRAFTER, "catalog.tag")
+    out = await _run(monkeypatch, DRAFTER, _two_action_proposal("Only the tag is covered"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "AWAITING_HUMAN"
+    assert row["override_eval"]["outcome"] == "parked"
+    assert "jira.add_comment" in row["override_eval"]["reason"]
+
+
+def test_pair_confidence_skips_a_combined_override_approver():
+    proposals = [{"id": "p_two", "intent": "x", "confidence": {"level": "high"}}]
+    decided = [{"id": 1, "ref_id": "p_two", "actor": "override:govr_a+govr_b",
+                "payload": {"verdict": "approved", "override_ids": ["govr_a", "govr_b"]}}]
+    report = pair_confidence(proposals, decided)
+    assert report["pairs"] == [] and report["awaiting_decision"] == 0
+
+
+@needs_pg
+async def test_a_covered_proposal_on_a_reopened_work_item_parks_with_its_reason(
+    demo, granted, monkeypatch,
+):
+    from central_command.ingest import ledger
+
+    await granted(DRAFTER)
+    out = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Tag on a reopened item"))
+    enrolled = await ledger.enroll_provider_ref(
+        {"uuid": f"govr-note-{uuid.uuid4().hex[:6]}", "conversation_id": "c"})
+    message_id = enrolled["message_id"]
+    conn = await repo._conn()
+    try:
+        # PROCESSED with the run's session, carrying the reopen note — the
+        # shape a reopened, re-run item leaves (never claimable by a dispatch).
+        await conn.execute(
+            """update work_item set session_id = $2, state = 'PROCESSED',
+                      payload = coalesce(payload, '{}'::jsonb) || '{"operator_note": "look again"}'
+                where message_id = $1""", message_id, out["session_id"])
+    finally:
+        await conn.close()
+    try:
+        record = await overrides.decide_landed(out)
+        assert record["outcome"] == "parked"
+        assert record["reason"] == overrides.OPERATOR_HOLD_REASON
+        assert (await repo.load_proposal(out["proposal_id"]))["status"] == "AWAITING_HUMAN"
+    finally:
+        conn = await repo._conn()
+        try:
+            await conn.execute("delete from work_item where message_id = $1", message_id)
+        finally:
+            await conn.close()

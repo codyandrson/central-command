@@ -292,17 +292,56 @@ stateDiagram-v2
   revocation is a timestamp and a row is never deleted — `shadow_runs`,
   `acknowledged_irreversible_at`) relaxes a capability's default gate for one
   agent. Resolution is override, then default (`gateway/overrides.py`
-  `resolve`): the drafter's live override covering EVERY action decides, and
-  only for a proposal created after the override was granted. The decide hook
+  `resolve`): the drafter's live overrides covering EVERY gated action decide
+  — one override, or several different ones (the operator's ruling of
+  2026-10-26: a proposal 100% covered by overrides needs no review) — and only
+  for a proposal created after each was granted; one uncovered gated action
+  parks the whole proposal, and an action whose default gate is `none` needs
+  no cover. The decide hook
   (`overrides.decide_on_park`, called through `overrides.decide_landed`) runs
   at every API-tier landing point of a parked proposal, after the caller's own
   bookkeeping (table below), never as a `proposal.created` subscriber, and
   records the evaluation once on `proposal.override_eval`
   (`{override_id, outcome: decided | shadow | parked, reason, at}`, plus
-  `suspended: [ids]` when an override is suspended,
+  `suspended: [ids]` when an override is suspended, and, when decided,
+  `override_ids` and `action_map` — `{action index: override id}` for every
+  gated action; `override_id` is the id when exactly one decided, else null;
   compare-and-set where null) and, when decided, calls `approve_and_execute`
-  with approver `override:<id>`: `proposal.decided` carries `override_id` and
-  still precedes the Executor. A decision that could not run is amended to
+  with approver `override:<id>` for one override or `override:<id1>+<id2>`
+  (sorted, unique) for several: `proposal.decided` carries `override_ids`
+  (and `override_id` when there is one) and still precedes the Executor.
+  `overrides.override_ids_of` is the one parser of an override approver
+  (`approver_for` the one writer, `decided_by_override` the event test the
+  agreement readers use; the runtime coaching reader, which may not import the
+  gateway, uses the same bare `override:` prefix test). **Safeguard 1, the
+  pre-check and the backstop.** Before `proposal.decided`,
+  `approve_and_execute` runs `overrides.check_override_approval` read-only
+  against fresh rows: each named override unrevoked, its agent the drafter,
+  its gate `none`, its shadow period complete (until shadow runs are counted:
+  `shadow_runs` 0, or an acknowledgement-class row with its floor of one), not
+  suspended; each gated action's mapped override on that action's capability,
+  `scope_covers` true, an acknowledgement class acknowledged with
+  `shadow_runs >= 1`; the proposal created after every override; no
+  `review_flags` flag; no operator reopen note. A failure emits
+  `override.refused` (`{override_id, override_ids, reason, proposal_id,
+  stage: decision | execution | retry}`, actor the approver) and hands the
+  claim back to AWAITING_HUMAN before raising `overrides.OverrideRefused` —
+  no `proposal.decided` naming the override exists for it.
+  `executor.execute` repeats the check as the BACKSTOP for an override
+  approver, after its shape pass and before the first action, re-reading the
+  overrides (`action_offset` maps a retry's remaining actions to their
+  indices); it raises the typed `OverrideRefused` (re-exported as
+  `executor.OverrideRefused`, never an `ExecutionFailed`) with nothing
+  written, and the gateway emits `override.refused` and hands the claim back
+  (a revoke in the window after the decision event). A retry of a
+  RETRY_PENDING proposal approved by an override runs the check on the
+  REMAINING actions; refused with a completed prefix, it never returns to
+  AWAITING_HUMAN (that would re-run finished actions) and is recorded through
+  the failure path as FAILED with the partial results on `proposal.failed`.
+  An operator's approval is never checked. **The reopen note.** A proposal
+  whose session's work item carries the operator's `operator_note` (the hold
+  the auditor honours) is never decided by an override: `resolve` parks it
+  with `overrides.OPERATOR_HOLD_REASON`. A decision that could not run is amended to
   `parked` and logged as `override.error`. An override decision is never
   operator agreement: `steward_agreement.pair_confidence` and the coaching
   reader skip it. `resolve` honours a live override on a capability whose row

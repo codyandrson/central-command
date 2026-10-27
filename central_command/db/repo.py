@@ -1306,7 +1306,7 @@ async def claim_proposal_retry(proposal_id: str) -> dict | None:
              where id = $1 and status = 'RETRY_PENDING'
             returning id, session_id, agent_id, intent, actions, evidence,
                       expected_effect, status, provenance, created_at,
-                      decided_at, confidence, origin, retry_state
+                      decided_at, confidence, origin, retry_state, override_eval
             """,
             proposal_id,
         )
@@ -1314,7 +1314,7 @@ async def claim_proposal_retry(proposal_id: str) -> dict | None:
             return None
         d = dict(row)
         for k in ("actions", "evidence", "provenance", "confidence", "origin",
-                  "retry_state"):
+                  "retry_state", "override_eval"):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d
@@ -4749,6 +4749,36 @@ async def live_gate_overrides(agent_id: str, capability: str) -> list[dict]:
             agent_id, capability,
         )
         return [_override_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_gate_override(override_id: str) -> dict | None:
+    """One override row by id, revoked or not — the pre-check and the
+    Executor's backstop re-read it fresh at decision and execution time."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            f"select {_OVERRIDE_COLS} from agent_gate_override where id = $1",
+            override_id,
+        )
+        return _override_row(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def session_has_operator_note(session_id: str) -> bool:
+    """Does a work item of this session carry the operator's reopen note?
+    The same test `unaudited_bulk_proposal_ids` makes for the auditor's hold."""
+    conn = await _conn()
+    try:
+        return bool(await conn.fetchval(
+            """
+            select exists (select 1 from work_item w
+                            where w.session_id = $1 and w.payload ? 'operator_note')
+            """,
+            session_id,
+        ))
     finally:
         await conn.close()
 

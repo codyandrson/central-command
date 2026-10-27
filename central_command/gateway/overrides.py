@@ -4,8 +4,10 @@ A capability's default gate lives on its registry row (`Capability.default_gate`
 an override is the operator's per-agent row (`agent_gate_override`) relaxing it
 to `none`. An override never writes anything itself: a proposal it covers is
 still a proposal, decided at the ONE seam (`gateway.approve_and_execute`) with
-approver `override:<id>`, so `proposal.decided` names the override and lands
-before the Executor runs (DL-144's rejection of "auto-approve as system"
+approver `override:<id>` (`override:<id1>+<id2>` when several different
+overrides cover its actions), so `proposal.decided` names the override(s) and
+lands before the Executor runs — after a read-only pre-check the Executor
+repeats as its backstop (`check_override_approval`) (DL-144's rejection of "auto-approve as system"
 stands: the approver names the operator-authored rule, never `system`).
 
 Two rules make a decision here safe to take without the operator watching:
@@ -48,29 +50,67 @@ _DEFAULT_GATES = {c.name: c.default_gate for c in REGISTRY if c.kind == "write"}
 @dataclass(frozen=True)
 class Decision:
     """`gate` is what applies to the whole proposal: `none` with the deciding
-    `override_id`, or the default (`human`) with `override_id` None. `reason`
-    says why an override in play did not decide it; `considered` is False when
-    no override of the drafter touched any of its capabilities at all."""
+    `override_ids` (one or several — the operator's ruling of 2026-10-26: a
+    proposal 100% covered by overrides, the same or different, is decided like
+    a single-override one), or the default (`human`) with none. `action_map`
+    is {action index -> override id} for every GATED action (an action whose
+    default gate is `none` needs no cover and has no entry). `reason` says why
+    an override in play did not decide it; `considered` is False when no
+    override of the drafter touched any of its capabilities at all."""
 
     gate: str
-    override_id: str | None = None
+    override_ids: tuple[str, ...] = ()
     reason: str = ""
     considered: bool = False
     # Overrides of the drafter that are SUSPENDED: their capability is outside
     # every live pack grant of the agent (FR-4: an override is carried on a
     # grant). Computed fresh on each evaluation; a re-grant lifts it.
     suspended: tuple[str, ...] = ()
+    action_map: dict[int, str] | None = None
+
+    @property
+    def override_id(self) -> str | None:
+        """The deciding override when exactly one decided it."""
+        return self.override_ids[0] if len(self.override_ids) == 1 else None
 
 
-def approver_for(override_id: str) -> str:
-    return f"{APPROVER_PREFIX}{override_id}"
+OVERRIDE_JOIN = "+"
+
+
+def approver_for(override_ids) -> str:
+    """`override:<id>` for one override, `override:<id1>+<id2>` (sorted,
+    unique) for several."""
+    ids = [override_ids] if isinstance(override_ids, str) else list(override_ids)
+    return APPROVER_PREFIX + OVERRIDE_JOIN.join(sorted(set(ids)))
+
+
+def override_ids_of(approver: str | None) -> list[str]:
+    """THE parser of an override approver: the overrides it names, sorted, or
+    [] for every other decider (an operator, the auditor, `system`). Every
+    reader that recognises an override approver goes through this (the
+    runtime's coaching reader, which may not import the gateway, uses the
+    bare `override:` prefix test — the same rule)."""
+    if not approver or not approver.startswith(APPROVER_PREFIX):
+        return []
+    ids = [i for i in approver[len(APPROVER_PREFIX):].split(OVERRIDE_JOIN) if i]
+    return sorted(set(ids))
 
 
 def override_id_of(approver: str | None) -> str | None:
-    """The override an approver string names, or None for every other decider."""
-    if approver and approver.startswith(APPROVER_PREFIX):
-        return approver[len(APPROVER_PREFIX):] or None
-    return None
+    """The one override an approver names, or None for every other decider
+    (and for a combined approver, which names several)."""
+    ids = override_ids_of(approver)
+    return ids[0] if len(ids) == 1 else None
+
+
+def decided_by_override(event: dict) -> bool:
+    """Was this `proposal.decided` row an override's decision? Read from the
+    actor (the approver) and from the payload, so a row carrying either form
+    — `override_id` for one, `override_ids` for several — never counts as
+    operator agreement."""
+    payload = event.get("payload") or {}
+    return bool(override_ids_of(event.get("actor")) or payload.get("override_id")
+                or payload.get("override_ids"))
 
 
 def _capability(action: dict) -> str:
@@ -266,12 +306,12 @@ async def resolve(proposal_row: dict) -> Decision:
     granted: set[str] | None = None
     suspended: list[str] = []
     created_at = proposal_row["created_at"]
-    covering: set[str] = set()
+    action_map: dict[int, str] = {}
     considered = False
     reason = ""
     live_by_cap: dict[str, list[dict]] = {}
     ctx: dict | None = None
-    for action, cap in zip(actions, caps):
+    for index, (action, cap) in enumerate(zip(actions, caps)):
         if _DEFAULT_GATES.get(cap, "human") == "none" and cap in _DEFAULT_GATES:
             continue            # nothing gates this action; there is nothing to cover
         if cap not in live_by_cap:
@@ -322,7 +362,7 @@ async def resolve(proposal_row: dict) -> Decision:
         if not current:
             reason = reason or f"no live override covers {cap}"
             continue
-        covering.add(current[0]["id"])
+        action_map[index] = current[0]["id"]
 
     if not considered:
         return Decision(default)
@@ -332,12 +372,16 @@ async def resolve(proposal_row: dict) -> Decision:
     # usefully.
     flagged = await review_flags(proposal_row, granted)
     reason = (reason if suspended else "") or flagged or reason
-    if not reason and len(covering) != 1:
-        reason = "the actions are covered by different overrides"
+    # The operator reopened the work item with a note — "I want eyes on this"
+    # (the auditor reads the same note and never auto-confirms under it).
+    reason = reason or await operator_hold_reason(proposal_row)
+    if not reason and not action_map:
+        reason = "no gated action is covered"
     if reason:
         return Decision(default, reason=reason, considered=True,
                         suspended=tuple(suspended))
-    return Decision("none", override_id=covering.pop(), considered=True)
+    return Decision("none", override_ids=tuple(sorted(set(action_map.values()))),
+                    considered=True, action_map=action_map)
 
 
 async def _granted_capabilities(agent_id: str) -> set[str]:
@@ -382,6 +426,19 @@ async def review_flags(proposal_row: dict, granted: set[str] | None = None) -> s
     return ""
 
 
+OPERATOR_HOLD_REASON = ("the operator reopened this work item with a note "
+                        "(eyes on it), so no override decides it")
+
+
+async def operator_hold_reason(proposal_row: dict) -> str:
+    """The reopen-note hold, read the way the auditor reads it: a work item of
+    the proposal's session whose payload carries `operator_note`."""
+    sid = proposal_row.get("session_id")
+    if sid and await repo.session_has_operator_note(sid):
+        return OPERATOR_HOLD_REASON
+    return ""
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -403,8 +460,8 @@ async def record_unevaluated_park(proposal_id: str, kind: str) -> bool:
 
 
 async def decide_on_park(proposal_id: str, model=None) -> dict | None:
-    """The decide hook: evaluate a freshly parked proposal once and, when an
-    override covers it, decide it through the one seam.
+    """The decide hook: evaluate a freshly parked proposal once and, when
+    overrides cover it, decide it through the one seam.
 
     Called only after the caller's bookkeeping has landed. Records the
     evaluation on the proposal by compare-and-set (`override_eval`), so a
@@ -420,24 +477,32 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
         return None
     record = {
         "override_id": decision.override_id,
-        "outcome": "decided" if decision.override_id else "parked",
+        "outcome": "decided" if decision.override_ids else "parked",
         "reason": decision.reason or None,
         "at": _now(),
     }
+    if decision.override_ids:
+        record["override_ids"] = list(decision.override_ids)
+        record["action_map"] = {str(i): o for i, o in sorted(decision.action_map.items())}
     if decision.suspended:
         record["suspended"] = list(decision.suspended)
     if not await repo.record_override_eval(proposal_id, record):
         return None
-    if decision.override_id is None:
+    if not decision.override_ids:
         return record
 
     from central_command.gateway import gateway
 
+    approver = approver_for(decision.override_ids)
     try:
         await gateway.approve_and_execute(
-            row["session_id"], proposal_id,
-            approver=approver_for(decision.override_id), model=model,
+            row["session_id"], proposal_id, approver=approver, model=model,
         )
+    except OverrideRefused as e:
+        # The pre-check (or the Executor's backstop) refused and handed the
+        # proposal back; `override.refused` is already on the log.
+        record = {**record, "outcome": "parked", "reason": f"refused: {e.reason}"}
+        await repo.amend_override_eval(proposal_id, record)
     except Exception as e:  # noqa: BLE001 — the operator's gate takes it back, loudly
         # The claim lost to an operator click, or the approval crashed before
         # the Executor ran (the gateway handed the claim back): the override
@@ -450,10 +515,124 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
             await repo.amend_override_eval(proposal_id, record)
         await events.emit(
             "override.error", ref_id=proposal_id,
-            payload={"override_id": decision.override_id, "error": str(e)},
-            actor=approver_for(decision.override_id),
+            payload={"override_id": decision.override_id,
+                     "override_ids": list(decision.override_ids), "error": str(e)},
+            actor=approver,
         )
     return record
+
+
+# --- safeguard 1: the pre-check and the Executor's backstop (story 5) ---------
+
+
+class OverrideRefused(Exception):
+    """An override approval failed its check at decision or execution time.
+    Not an `ExecutionFailed`: nothing ran, nothing was written, and the
+    operator's gate takes the proposal back (or, on a retry with a completed
+    prefix, the failure path records it — see `gateway.retry_execution`)."""
+
+    def __init__(self, override_id: str | None, reason: str):
+        super().__init__(f"override {override_id or '?'} refused: {reason}")
+        self.override_id = override_id
+        self.reason = reason
+
+
+def _stored_map(proposal_row: dict | None) -> dict[int, str]:
+    record = (proposal_row or {}).get("override_eval") or {}
+    return {int(k): v for k, v in (record.get("action_map") or {}).items()}
+
+
+async def check_override_approval(
+    approver: str, actions: list[dict], *, proposer: str | None,
+    proposal_row: dict | None = None, offset: int = 0,
+) -> None:
+    """Re-check an override approval against FRESH server-held state; raise
+    `OverrideRefused` naming the failing override, or return. Read-only. The
+    gateway runs it before `proposal.decided`; the Executor runs it again as
+    the backstop before the first action. `actions` are the ones about to run
+    (on a retry, the REMAINING ones); `offset` is the index of the first of
+    them in the proposal, so each is checked against ITS mapped override.
+
+    Each named override: unrevoked, its agent the drafter (and not the
+    auditor), its shadow period complete (no shadow counting until story 7:
+    `shadow_runs == 0`, or an acknowledgement-class row with its floor of one,
+    exactly as `resolve` reads it), not suspended (its capability inside the
+    drafter's live pack grants). Each gated action: its mapped override's
+    capability is the action's, `scope_covers` holds, an acknowledgement class
+    has `acknowledged_irreversible_at` and `shadow_runs >= 1`. With the row:
+    the proposal postdates every override, nothing a reviewer would see
+    flagged (`review_flags`, grants fresh) and no operator reopen note."""
+    ids = override_ids_of(approver)
+    if not ids:
+        return
+    rows = {i: await repo.get_gate_override(i) for i in ids}
+    stored = _stored_map(proposal_row)
+    granted = await _granted_capabilities(proposer) if proposer else set()
+    for oid, o in rows.items():
+        if o is None:
+            raise OverrideRefused(oid, "the override does not exist")
+        if o["revoked_at"] is not None:
+            raise OverrideRefused(oid, "the override was revoked")
+        if o["agent_id"] != proposer or o["agent_id"] == AUDITOR_ID:
+            raise OverrideRefused(oid, f"the override belongs to {o['agent_id']}, "
+                                       f"not the drafter {proposer}")
+        if o["gate"] != "none":
+            raise OverrideRefused(oid, f"the override's gate is {o['gate']}")
+        ack = requires_acknowledgement(o["capability"])
+        if not ack and o["shadow_runs"] != 0:
+            raise OverrideRefused(oid, "the override is still in its shadow period")
+        if o["capability"] not in granted:
+            raise OverrideRefused(oid, f"the override is suspended: {o['capability']} "
+                                       "is outside the agent's live pack grants")
+        if proposal_row is not None and not proposal_row["created_at"] > o["granted_at"]:
+            raise OverrideRefused(oid, "the proposal predates the override")
+
+    ctx: dict | None = None
+    for i, action in enumerate(actions):
+        index = offset + i
+        cap = _capability(action)
+        if _DEFAULT_GATES.get(cap, "human") == "none" and cap in _DEFAULT_GATES:
+            continue
+        oid = stored.get(index) or (ids[0] if len(ids) == 1 else None)
+        if oid not in rows:
+            raise OverrideRefused(oid, f"action {index} ({cap}) has no override "
+                                       "of this approval mapped to it")
+        o = rows[oid]
+        if o["capability"] != cap:
+            raise OverrideRefused(oid, f"action {index} is {cap}, the override "
+                                       f"covers {o['capability']}")
+        if requires_acknowledgement(cap) and (
+                not o["acknowledged_irreversible_at"] or o["shadow_runs"] < 1):
+            raise OverrideRefused(oid, f"{cap} requires an acknowledgement and a "
+                                       "shadow period the override lacks")
+        if ctx is None and (o["scope"] or {}).get("schedule"):
+            sid = (proposal_row or {}).get("session_id")
+            ctx = {"task": await repo.task_for_session(sid) if sid else None}
+        if not scope_covers(o, action, ctx):
+            raise OverrideRefused(oid, f"action {index} ({cap}) is outside the "
+                                       "override's scope")
+
+    if proposal_row is not None:
+        flagged = await review_flags({**proposal_row, "actions": actions}, granted)
+        if flagged:
+            raise OverrideRefused(ids[0] if len(ids) == 1 else None, flagged)
+        hold = await operator_hold_reason(proposal_row)
+        if hold:
+            raise OverrideRefused(ids[0] if len(ids) == 1 else None, hold)
+
+
+async def emit_refused(proposal_id: str, approver: str, refused: OverrideRefused,
+                       stage: str) -> None:
+    """`override.refused`: which override, why, for which proposal — written
+    BEFORE the proposal is handed back, so the log reads in the right order."""
+    await events.emit(
+        "override.refused", ref_id=proposal_id,
+        payload={"override_id": refused.override_id,
+                 "override_ids": override_ids_of(approver),
+                 "reason": refused.reason, "proposal_id": proposal_id,
+                 "stage": stage},
+        actor=approver,
+    )
 
 
 async def decide_landed(out: dict | None, model=None) -> dict | None:
