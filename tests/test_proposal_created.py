@@ -117,3 +117,71 @@ def test_no_other_module_emits_proposal_created():
 def test_every_known_creation_path_imports_the_seam(module, path):
     src = (SRC / path).read_text(encoding="utf-8")
     assert "park_proposal" in src, f"{module} no longer routes through the seam"
+
+
+# --- every park site is mapped to its decide hook (epic-gate-overrides story 17)
+
+
+def _park_sites(sources: dict[str, str]) -> list[str]:
+    """`module:function` for every `park_proposal(...)` call, one per call."""
+    found: list[str] = []
+    for rel, src in sources.items():
+        tree = ast.parse(src)
+
+        def visit(node, fn: str | None) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    visit(child, child.name)
+                    continue
+                if isinstance(child, ast.Call):
+                    f = child.func
+                    name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+                    if name == "park_proposal":
+                        found.append(f"{rel}:{fn}")
+                visit(child, fn)
+
+        visit(tree, None)
+    return sorted(found)
+
+
+def _unmapped(found: list[str]) -> list[str]:
+    from central_command.gateway.overrides import PARK_SITES
+
+    return sorted(set(found) - set(PARK_SITES)) + sorted(
+        s for s in set(found) if found.count(s) > 1)
+
+
+def _tree_sources() -> dict[str, str]:
+    return {p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8")
+            for p in SRC.rglob("*.py")}
+
+
+def test_the_park_site_table_equals_the_source_walk():
+    """A source walk cannot see the API-tier caller of a `runtime/` site, so
+    `overrides.PARK_SITES` names it by hand — and this keeps the table honest:
+    every site mapped exactly once, and no mapping for a site that is gone."""
+    from central_command.gateway.overrides import EXEMPT, HOOK, PARK_SITES, SWEEP_ONLY
+
+    found = _park_sites(_tree_sources())
+    assert found == sorted(PARK_SITES), (
+        "park_proposal call sites and overrides.PARK_SITES disagree — map the "
+        f"new site to the caller that runs the decide hook: {found}")
+    assert all(kind in (HOOK, EXEMPT, SWEEP_ONLY) and why for kind, why in PARK_SITES.values())
+    assert len(found) == 12
+
+
+def test_an_unmapped_park_site_fails_the_walk():
+    sources = _tree_sources()
+    sources["runtime/new_lane.py"] = (
+        "async def land_new_lane(result, call):\n"
+        "    return await park_proposal(session_id='s', agent_id='a',\n"
+        "                               result=result, call=call)\n"
+    )
+    assert _unmapped(_park_sites(sources)) == ["runtime/new_lane.py:land_new_lane"]
+    # A second call inside a mapped function is a new site too.
+    sources = _tree_sources()
+    sources["runtime/run.py"] += (
+        "\n\nasync def run_coach(result, call):\n"
+        "    await park_proposal(result=result, call=call)\n"
+    )
+    assert "runtime/run.py:run_coach" in _unmapped(_park_sites(sources))

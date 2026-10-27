@@ -777,6 +777,21 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
                     actor="auditor",
                 )
 
+    # The gate-override decide hook (FR-4), at FUNCTION scope: after the fold
+    # reservation and the auditor's bulk hook above, so it sees every parked
+    # proposal (folded siblings or none) and only once its folds are reserved.
+    # `decide_on_park` evaluates only a proposal still AWAITING_HUMAN: an
+    # auditor CONCUR that already executed leaves nothing to decide; a
+    # CHALLENGE (or an audit error) that fell to the operator may be decided
+    # by a covering override — the operator's standing decision. A consult
+    # wait carries the specialist's proposal, decided the same way.
+    if result.get("proposal_id"):
+        from central_command.gateway import overrides
+
+        evaluated = await overrides.decide_landed(result, model=model)
+        if evaluated is not None:
+            result = {**result, "override_eval": evaluated}
+
     await events.emit(
         "work.processed",
         ref_id=item["id"],

@@ -128,7 +128,7 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`resolve`, `decide_on_park`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
@@ -294,8 +294,9 @@ stateDiagram-v2
   agent. Resolution is override, then default (`gateway/overrides.py`
   `resolve`): the drafter's live override covering EVERY action decides, and
   only for a proposal created after the override was granted. The decide hook
-  (`overrides.decide_on_park`) runs at the task-run landing
-  (`api/routes.py::_run_one_assigned_task`, after the task lands in REVIEW),
+  (`overrides.decide_on_park`, called through `overrides.decide_landed`) runs
+  at every API-tier landing point of a parked proposal, after the caller's own
+  bookkeeping (table below), never as a `proposal.created` subscriber, and
   records the evaluation once on `proposal.override_eval`
   (`{override_id, outcome: decided | shadow | parked, reason, at}`, plus
   `suspended: [ids]` when an override is suspended,
@@ -344,6 +345,39 @@ stateDiagram-v2
   after a Reject or a failed execution, and a redraft of a redraft) never
   auto-executes under an override; a **follow-on** parked on the approved leg
   (context `follow_on_of`) goes to the operator by default.
+  **Where the hook runs.** Every `park_proposal` call site, mapped to the
+  caller that runs the hook (`overrides.PARK_SITES`; a source walk in
+  `tests/test_gate_overrides.py` fails the suite on an unmapped site — the walk
+  cannot see the API caller of a `runtime/` site, hence the table):
+
+  | Park site | Hook runs in |
+  |---|---|
+  | `runtime/run.py` `ingest_and_propose` | `ingest/dispatcher.py::process_claimed`, at function scope after the fold reservation and the auditor's bulk hook, before `work.processed` |
+  | `runtime/steward.py` `run_document` | the dispatcher, same place |
+  | `runtime/wiki_agent.py` `run_repair` | the dispatcher, same place |
+  | `runtime/run.py` `_land` | `api/routes.py::_run_one_assigned_task` (after `task.review`); `orchestration._land_task_question_outcome` for `continue_session` / `resume_stopped_session` |
+  | `runtime/run.py` `run_coach` | `routes.coach_agent` (synchronous) and `routes._run_coach_detached` (after `task.review`) |
+  | `runtime/converse.py` `_land_turn` | the chat lane `api/nerve_gateway.py::_chat_send` (after the turn's end frame); the heartbeat nudge `heartbeat/actions.py::_nudge_discussion` (detached, via `orchestration.decide_landed_detached`); the converse branches of `continue_session` / `resume_stopped_session` |
+  | `runtime/questions.py` `_settle` | `orchestration._land_task_question_outcome` (every answered-question resume) |
+  | `runtime/consult.py` `consult` | the asker's own landing: the consult-wait result carries the specialist's `proposal_id`, decided once the asker is parked |
+  | `api/orchestration.py` `_settle_consult_resume` | `orchestration.resume_consult_wait` and `resume_parked_session` (`after=consulted`) |
+  | `runtime/reflection.py` `_propose_episode` | none inline (a background task off `close_session` with no API-tier landing): the startup sweep |
+  | `gateway/gateway.py` `_park_redraft` | exempt: recorded unevaluated (`redraft`) |
+  | `gateway/gateway.py` `finish_decision_resume` | exempt: recorded unevaluated (`follow_on`) |
+
+  For `work.bulk_dismiss` the override hook runs after the auditor's: a CONCUR
+  that already executed leaves nothing AWAITING_HUMAN to decide, and a
+  CHALLENGE or audit error that fell to the operator may be decided by a
+  covering override. An error inside the hook never fails its caller: the
+  proposal stays AWAITING_HUMAN and `override.error` is written
+  (`stage: "evaluate"` when the evaluation itself raised). **Startup sweep.**
+  `overrides.override_sweep` runs at startup in `api/app.py`, after
+  `auditor.audit_sweep` in the same background task, over
+  `repo.override_sweep_candidates`: AWAITING_HUMAN proposals with a null
+  `override_eval`, created after the `granted_at` of a live override of their
+  drafter, in a session that is not RUNNING — so an item the operator could
+  already see before the override existed is never decided, and a caller still
+  doing its bookkeeping is never raced.
 - **Operator routes.** `POST /proposals/{id}/approve | reject | dismiss`
   (`api/routes.py`); the cockpit reaches the same gateway functions over `/ws`.
 - **Folds.** Sibling work items folded into a proposal sit in `FOLD_PENDING`;

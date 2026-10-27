@@ -741,9 +741,9 @@ async def _chat_send(params: dict, notify) -> dict:
         await lifecycle("start")
         try:
             if opener_agent:
-                await start_conversation(opener_agent, message=text)
+                out = await start_conversation(opener_agent, message=text)
             else:
-                await conversation_turn(target_session, text)
+                out = await conversation_turn(target_session, text)
         except Exception as exc:  # surfaced to this cockpit, never swallowed
             await notify(
                 {
@@ -755,6 +755,14 @@ async def _chat_send(params: dict, notify) -> dict:
             await lifecycle("error")
         else:
             await lifecycle("end")
+            # The decide hook (FR-4) after the turn has landed: a proposal the
+            # agent parked mid-conversation (or a consulted specialist's) may
+            # be decided by a covering override. After the end frame, so the
+            # spinner does not wait on the drafter's resumed turn; errors land
+            # as `override.error` inside the hook.
+            from central_command.gateway import overrides
+
+            await overrides.decide_landed(out)
 
     asyncio.create_task(_run())
     return {"runId": target_session or f"new:{opener_agent}", "status": "started"}

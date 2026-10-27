@@ -211,9 +211,18 @@ async def lifespan(app: FastAPI):
         # Same guarantee for audits: the inline hooks a restart's
         # CancelledError killed (or a transient 5xx degraded) re-run here,
         # so a parked dismissal never waits on the human gate by accident.
-        from central_command.gateway import auditor
+        from central_command.gateway import auditor, overrides
 
-        asyncio.create_task(auditor.audit_sweep())
+        # Then the gate-override sweep (FR-4), AFTER the audit sweep, the same
+        # order the dispatcher keeps: a re-audited bulk dismissal is decided by
+        # an override only once the auditor has had its turn.
+        async def _audit_then_overrides() -> None:
+            try:
+                await auditor.audit_sweep()
+            finally:
+                await overrides.override_sweep()
+
+        asyncio.create_task(_audit_then_overrides())
     except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
         pass
     # The application self-check (central_command/selfcheck.py): one READINESS

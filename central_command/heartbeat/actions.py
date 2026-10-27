@@ -294,7 +294,13 @@ async def _nudge_discussion(row: dict, task_title: str) -> None:
         "`conclude_discussion` with your summary. If you do not, say plainly "
         "what is still missing."
     )
-    await converse.conversation_turn(row["discussion_session_id"], message)
+    out = await converse.conversation_turn(row["discussion_session_id"], message)
+    # The decide hook (FR-4) for a proposal the nudged agent parked, detached:
+    # a heartbeat action never awaits agent work (the passthrough lives in
+    # api/orchestration because this package may never import the gate).
+    from central_command.api import orchestration
+
+    orchestration.decide_landed_detached(out)
 
 
 async def _discussion_sweep(schedule_id: str, params: dict) -> dict:

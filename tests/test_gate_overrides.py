@@ -860,3 +860,248 @@ async def test_a_follow_on_on_the_approved_leg_parks_unevaluated(granted, demo):
                                     "reason": "follow_on", "override_id": None}
     assert await overrides.decide_on_park(fid, model=model) is None
     assert row["status"] == "AWAITING_HUMAN"
+
+
+# --- story 17: the hook at every landing point, and the startup sweep ----------
+
+TRIAGE = "inbox-triage"
+_BD_UUIDS = ["govr-bd-1", "govr-bd-2", "govr-bd-3"]
+_BD_QUERY = "from:news@shop.example"
+
+
+@pytest.fixture()
+async def ledger_rows(monkeypatch):
+    """Bulk-dismissal plumbing: real ledger rows (the reservation is SQL), a
+    monkeypatched mail façade, and a live executor because the fold commit IS
+    the effect. Rows this fixture enrolls are removed afterwards."""
+    from central_command.integrations import email_facade
+
+    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
+    monkeypatch.setattr(settings, "dispatch_concurrency", 1)
+    monkeypatch.setattr(settings, "auditor_enabled", False)
+
+    async def wipe():
+        conn = await repo._conn()
+        try:
+            await conn.execute(
+                "delete from work_item where message_id like '<gmail-msg-govr-bd-%'")
+        finally:
+            await conn.close()
+
+    def facade(uuids, body="Deals inside. Unsubscribe at the bottom."):
+        async def fake_list_refs(query):
+            return [{"uuid": u, "conversation_id": u} for u in uuids]
+
+        async def fake_get_message(uuid):
+            return {"uuid": uuid, "conversation_id": uuid,
+                    "from": "news@shop.example", "subject": "Your weekly digest",
+                    "date": "2026-08-01T09:00:00+00:00", "body_text": body}
+
+        monkeypatch.setattr(email_facade, "list_refs", fake_list_refs)
+        monkeypatch.setattr(email_facade, "get_message", fake_get_message)
+
+    async def propose(uuids=_BD_UUIDS, **kw) -> dict:
+        from central_command.ingest import dispatcher, ledger
+        from tests.test_bulk_dismiss_agent import _bulk_model
+
+        for u in uuids:
+            await ledger.enroll_provider_ref({"uuid": u, "conversation_id": u})
+        facade(uuids, **kw)
+        result = await dispatcher.dispatch_once(model=_bulk_model(_BD_QUERY))
+        assert result and result.get("proposal_id"), result
+        return result
+
+    async def enroll(uuids) -> None:
+        from central_command.ingest import ledger
+
+        for u in uuids:
+            await ledger.enroll_provider_ref({"uuid": u, "conversation_id": u})
+        facade(uuids)
+
+    propose.enroll = enroll
+    await wipe()
+    yield propose
+    await wipe()
+
+
+async def _fold_states(proposal_id: str) -> set[str]:
+    conn = await repo._conn()
+    try:
+        rows = await conn.fetch(
+            "select state from work_item where message_id like '<gmail-msg-govr-bd-%' "
+            "and folded_into = $1", proposal_id)
+    finally:
+        await conn.close()
+    return {r["state"] for r in rows}
+
+
+@needs_pg
+async def test_a_covered_proposal_with_folds_reserves_them_before_the_override_decides(
+    ledger_rows, granted,
+):
+    ovr = await granted(TRIAGE, "work.bulk_dismiss")
+    result = await ledger_rows()
+    pid = result["proposal_id"]
+    assert result["folded_message_ids"], "the bulk proposal folded its siblings"
+
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "EXECUTED"
+    assert row["provenance"]["approver"] == f"override:{ovr['id']}"
+    assert result["override_eval"]["outcome"] == "decided"
+
+    evs = await _events_for(pid)
+    ids = {e["kind"]: e["id"] for e in evs}
+    assert ids["work.fold_pending"] < ids["proposal.decided"] < ids["proposal.executed"], (
+        "the folds are reserved before the override decides")
+    # The normal tail committed them: none left pending.
+    assert await _fold_states(pid) == {"FOLDED"}
+
+
+@needs_pg
+async def test_a_covered_proposal_with_no_folded_siblings_is_decided_too(
+    ledger_rows, granted, monkeypatch,
+):
+    """F1: the hook sat inside the fold-only branch and missed every proposal
+    without folded siblings — here a triage run on one email proposing a
+    comment, with nothing folded."""
+    from central_command.ingest import dispatcher
+
+    monkeypatch.setattr(settings, "executor_mode", "dry_run")  # no Jira call
+    ovr = await granted(TRIAGE, "jira.add_comment")
+    await ledger_rows.enroll(_BD_UUIDS[:1])
+    model = make_deferred_tool_model(
+        "propose_action", {"proposal": _comment_proposal("Comment on one email")})
+    result = await dispatcher.dispatch_once(model=model)
+    assert result and result.get("proposal_id"), result
+    assert not result.get("folded_message_ids")
+    row = await repo.load_proposal(result["proposal_id"])
+    assert row["agent_id"] == TRIAGE
+    assert row["status"] == "EXECUTED", row["override_eval"]
+    assert row["provenance"]["approver"] == f"override:{ovr['id']}"
+
+
+@needs_pg
+async def test_an_auditor_concur_that_executed_is_not_re_decided(
+    ledger_rows, granted, monkeypatch,
+):
+    monkeypatch.setattr(settings, "auditor_enabled", True)
+    monkeypatch.setattr(settings, "auditor_mode", "active")
+    await granted(TRIAGE, "work.bulk_dismiss")
+    result = await ledger_rows()
+    pid = result["proposal_id"]
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "EXECUTED"
+    assert row["provenance"]["approver"] == "auditor"
+    assert row["override_eval"] is None, "the hook saw it was no longer AWAITING_HUMAN"
+    assert "override_eval" not in result
+    decided = [e for e in await _events_for(pid) if e["kind"] == "proposal.decided"]
+    assert len(decided) == 1 and decided[0]["actor"] == "auditor"
+
+
+@needs_pg
+async def test_an_auditor_challenge_that_fell_to_the_operator_is_decided_by_the_override(
+    ledger_rows, granted, monkeypatch,
+):
+    monkeypatch.setattr(settings, "auditor_enabled", True)
+    monkeypatch.setattr(settings, "auditor_mode", "active")
+    ovr = await granted(TRIAGE, "work.bulk_dismiss")
+    result = await ledger_rows(body="ACTION REQUIRED: confirm your delivery address today.")
+    pid = result["proposal_id"]
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "EXECUTED"
+    assert row["provenance"]["approver"] == f"override:{ovr['id']}"
+
+    evs = await _events_for(pid)
+    verdict = next(e for e in evs if e["kind"] == "audit.verdict")
+    decided = next(e for e in evs if e["kind"] == "proposal.decided")
+    assert verdict["payload"]["verdict"] == "challenge"
+    assert verdict["id"] < decided["id"], "the override hook ran after the auditor's"
+    assert await _fold_states(pid) == {"FOLDED"}
+
+
+async def _run_unhooked(monkeypatch, agent_id: str, proposal: dict) -> dict:
+    """`_run`, with the landing hook muted — the shape a restart leaves behind
+    when it kills the hook between the park and the decision."""
+    async def muted(out, model=None):
+        return None
+
+    real = overrides.decide_landed
+    overrides.decide_landed = muted
+    try:
+        return await _run(monkeypatch, agent_id, proposal)
+    finally:
+        overrides.decide_landed = real
+
+
+@needs_pg
+async def test_the_startup_sweep_decides_only_what_was_created_after_the_grant(
+    demo, granted, monkeypatch,
+):
+    before = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag parked before the grant"))
+    ovr = await granted(DRAFTER)
+    after = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Tag after the grant"))
+    running = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Tag mid-run"))
+    conn = await repo._conn()
+    try:
+        await conn.execute("update session set status = 'RUNNING' where id = $1",
+                           running["session_id"])
+    finally:
+        await conn.close()
+
+    candidates = await repo.override_sweep_candidates()
+    assert after["proposal_id"] in candidates
+    assert before["proposal_id"] not in candidates
+    assert running["proposal_id"] not in candidates
+
+    swept = await overrides.override_sweep()
+    assert swept["decided"] >= 1
+    decided = await repo.load_proposal(after["proposal_id"])
+    assert decided["status"] == "EXECUTED"
+    assert decided["provenance"]["approver"] == f"override:{ovr['id']}"
+    for untouched in (before, running):
+        row = await repo.load_proposal(untouched["proposal_id"])
+        assert row["status"] == "AWAITING_HUMAN" and row["override_eval"] is None
+
+    # A late hook on the pre-grant proposal does not decide it either.
+    late = await overrides.decide_landed(before)
+    assert late is not None and late["outcome"] == "parked"
+    assert (await repo.load_proposal(before["proposal_id"]))["status"] == "AWAITING_HUMAN"
+    conn = await repo._conn()
+    try:
+        await conn.execute("update session set status = 'AWAITING_HUMAN' where id = $1",
+                           running["session_id"])
+    finally:
+        await conn.close()
+
+
+@needs_pg
+async def test_calling_the_hook_twice_executes_once(demo, granted, monkeypatch):
+    await granted(DRAFTER)
+    out = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Tag hooked twice"))
+    first = await overrides.decide_landed(out)
+    second = await overrides.decide_landed(out)
+    assert first["outcome"] == "decided" and second is None
+    kinds = [e["kind"] for e in await _events_for(out["proposal_id"])]
+    assert kinds.count("proposal.decided") == 1
+    assert kinds.count("proposal.executed") == 1
+
+
+@needs_pg
+async def test_a_hook_error_leaves_the_proposal_for_the_operator_loudly(
+    demo, granted, monkeypatch,
+):
+    await granted(DRAFTER)
+    out = await _run_unhooked(monkeypatch, DRAFTER, _tag_proposal("Tag whose hook breaks"))
+
+    async def broken(_row):
+        raise RuntimeError("resolver down")
+
+    monkeypatch.setattr(overrides, "resolve", broken)
+    assert await overrides.decide_landed(out) is None
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "AWAITING_HUMAN"
+    errors = [e for e in await _events_for(out["proposal_id"]) if e["kind"] == "override.error"]
+    assert errors and errors[-1]["payload"]["stage"] == "evaluate"
+    assert "resolver down" in errors[-1]["payload"]["error"]

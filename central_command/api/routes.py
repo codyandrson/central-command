@@ -672,7 +672,7 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         # else leaves it in the inbox exactly as before.
         from central_command.gateway import overrides
 
-        evaluated = await overrides.decide_on_park(result["proposal_id"], model=model)
+        evaluated = await overrides.decide_landed(result, model=model)
         if evaluated is not None:
             result = {**result, "override_eval": evaluated}
     else:
@@ -1230,7 +1230,13 @@ async def coach_agent(agent_id: str, body: CoachIn, *, background: bool = True) 
         "signals": signals,
     }
     if not background:
-        return await run_coach(agent_id, **kwargs)
+        result = await run_coach(agent_id, **kwargs)
+        # The decide hook (FR-4) for a coach draft: the run has landed and
+        # there is no task row to book, so it runs on the returned result.
+        from central_command.gateway import overrides
+
+        evaluated = await overrides.decide_landed(result)
+        return {**result, "override_eval": evaluated} if evaluated else result
 
     # The task record IS the progress surface. Created here rather than through
     # `create_and_run_task` because a coach run is not a `run_task` run: it
@@ -1318,6 +1324,10 @@ async def _run_coach_detached(task_id: str, agent_id: str, kwargs: dict) -> None
                      "session_id": session_id, "intent": result["intent"]},
             actor=f"agent:{COACH_ID}",
         )
+        # The decide hook (FR-4), after the task landed in REVIEW.
+        from central_command.gateway import overrides
+
+        await overrides.decide_landed(result)
         return
     # No edit proposed — the coach answered in text, or nothing was selected.
     # That completes the task: the operator asked, the operator reads it.

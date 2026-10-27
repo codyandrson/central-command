@@ -15,8 +15,9 @@ Two rules make a decision here safe to take without the operator watching:
   already see before the override existed is never decided by it, whatever
   calls the hook.
 
-The hook runs at a landing point AFTER the caller's bookkeeping (the task-run
-landing in `api/routes._run_one_assigned_task`); it is not a `proposal.created`
+The hook runs at every API-tier landing point AFTER the caller's bookkeeping
+(`PARK_SITES` below maps each `park_proposal` site to its caller; the startup
+`override_sweep` is the guarantee behind them); it is not a `proposal.created`
 subscriber, because a subscriber would race fold reservation and task landing.
 An override approval is never operator agreement: `steward_agreement` and the
 coaching reader skip a `proposal.decided` whose payload carries `override_id`.
@@ -453,3 +454,109 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
             actor=approver_for(decision.override_id),
         )
     return record
+
+
+async def decide_landed(out: dict | None, model=None) -> dict | None:
+    """The hook as a landing point calls it: decide the proposal a landing
+    result names (`out["proposal_id"]` — the drafter's own, or a consulted
+    specialist's when the run parked on a consult wait), once the caller's
+    bookkeeping is done. A result with no proposal is a no-op.
+
+    A hook error never breaks the caller and is never silent: an approval
+    that fails is handled inside `decide_on_park` (eval amended to parked,
+    `override.error`); anything else that raises here — loading the row,
+    resolving the override — leaves the proposal AWAITING_HUMAN for the
+    operator and writes `override.error` with `stage: "evaluate"`."""
+    proposal_id = (out or {}).get("proposal_id")
+    if not proposal_id:
+        return None
+    try:
+        return await decide_on_park(proposal_id, model=model)
+    except Exception as e:  # noqa: BLE001 — the operator's gate takes it back, loudly
+        await events.emit(
+            "override.error", ref_id=proposal_id,
+            payload={"override_id": None, "error": str(e), "stage": "evaluate"},
+            actor="gateway",
+        )
+        return None
+
+
+async def override_sweep(model=None) -> dict:
+    """The startup guarantee behind the landing hooks: a hook that a restart
+    killed (a `CancelledError` sails past every `except Exception`) left a
+    proposal no override ever evaluated. Runs at startup AFTER `audit_sweep`,
+    so a bulk dismissal the auditor re-audits is decided by an override only
+    once the auditor has had its turn — the same order the dispatcher keeps.
+
+    Evaluates only proposals that are unresolved (`override_eval` null,
+    AWAITING_HUMAN), created after the granted_at of a live override of their
+    drafter, in a session that is no longer RUNNING (`repo.
+    override_sweep_candidates`). The filter is applied here, not trusted to
+    `resolve()`, because the hook records nothing when no override is in play:
+    a null `override_eval` does not mean "never looked at"."""
+    decided = parked = 0
+    for proposal_id in await repo.override_sweep_candidates():
+        record = await decide_landed({"proposal_id": proposal_id}, model=model)
+        if record is None:
+            continue
+        if record["outcome"] == "decided":
+            decided += 1
+        else:
+            parked += 1
+    return {"decided": decided, "parked": parked}
+
+
+# --- where the hook runs (story 17) -------------------------------------------
+#
+# Every `park_proposal(...)` call site, keyed `module:function`, mapped to the
+# API-tier caller that runs the decide hook after its own bookkeeping — or to
+# the reason no hook runs there. A source walk can find the call sites but not
+# the API caller of a `runtime/` site (runtime may never import the gateway,
+# so its hook lives a tier up); `tests/test_gate_overrides.py` checks this
+# table against the walk, so a new site fails the suite until it is mapped.
+# `docs/ARCHITECTURE.md` carries the same table in prose.
+
+HOOK = "hook"
+EXEMPT = "exempt"
+SWEEP_ONLY = "sweep only"
+
+PARK_SITES: dict[str, tuple[str, str]] = {
+    "runtime/run.py:ingest_and_propose": (HOOK,
+        "ingest/dispatcher.process_claimed, at function scope after the fold "
+        "reservation and the auditor's bulk hook, before work.processed"),
+    "runtime/steward.py:run_document": (HOOK,
+        "ingest/dispatcher.process_claimed (the document handler), same place"),
+    "runtime/wiki_agent.py:run_repair": (HOOK,
+        "ingest/dispatcher.process_claimed (the wiki-repair handler), same place"),
+    "runtime/run.py:_land": (HOOK,
+        "api/routes._run_one_assigned_task (run_task, after task.review); "
+        "api/orchestration._land_task_question_outcome for continue_session "
+        "and resume_stopped_session"),
+    "runtime/run.py:run_coach": (HOOK,
+        "api/routes.coach_agent (synchronous) and routes._run_coach_detached "
+        "(after task.review)"),
+    "runtime/converse.py:_land_turn": (HOOK,
+        "the chat lane api/nerve_gateway._chat_send; the heartbeat discussion "
+        "nudge heartbeat/actions._nudge_discussion; the converse branches of "
+        "api/orchestration.continue_session and resume_stopped_session"),
+    "runtime/questions.py:_settle": (HOOK,
+        "api/orchestration._land_task_question_outcome (every answered-question "
+        "resume: _resume_task_question, _retry_answered_question, "
+        "_finish_answered_resume)"),
+    "runtime/consult.py:consult": (HOOK,
+        "the asker's own landing: the consult wait result carries the "
+        "specialist's proposal_id, so whichever caller lands the asker's run "
+        "(rows above) decides it once the asker is parked AWAITING_AGENTS"),
+    "api/orchestration.py:_settle_consult_resume": (HOOK,
+        "api/orchestration.resume_consult_wait and resume_parked_session "
+        "(after=consulted), after the settle returns"),
+    "runtime/reflection.py:_propose_episode": (SWEEP_ONLY,
+        "a reflection runs as a background task off runtime's close_session "
+        "with no API-tier landing; its proposal is evaluated by the startup "
+        "override_sweep"),
+    "gateway/gateway.py:_park_redraft": (EXEMPT,
+        "a redraft is recorded unevaluated at the park (story 16)"),
+    "gateway/gateway.py:finish_decision_resume": (EXEMPT,
+        "a follow-on on the approved leg is recorded unevaluated at the park "
+        "(story 16)"),
+}

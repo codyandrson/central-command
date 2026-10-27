@@ -1028,6 +1028,7 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
             agent_id=agent_id, task_id=pending.get("task_id"),
             chain=_parked_chain(claimed), proposal_id=pending.get("proposal_id"),
         )
+        await decide_landed(out, model=model)
         return {"resumed": True, "session_id": session_id,
                 "after": "consulted", **out}
 
@@ -1243,6 +1244,7 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
         agent_id=agent_id, task_id=wait.get("task_id"),
         chain=_parked_chain(claimed), proposal_id=(prop or {}).get("id"),
     )
+    await decide_landed(out, model=model)
     return {"resumed": True, "session_id": session_id, "target": target, **out}
 
 
@@ -1824,6 +1826,7 @@ async def continue_session(item_id: str, model=None) -> dict | None:
         return {"continued": True, "window": window, **out}
     if after == "converse":
         out = await converse_mod._land_turn(session_id, agent_id, result)
+        await decide_landed(out, model=model)
         return {"continued": True, "window": window, **out}
 
     out = await run_mod._land(
@@ -1930,8 +1933,9 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
         return {"resumed": True, **await _process(task, session_id, result, state,
                                                   deps, model)}
     if after == "converse":
-        return {"resumed": True,
-                **await converse_mod._land_turn(session_id, agent_id, result)}
+        out = await converse_mod._land_turn(session_id, agent_id, result)
+        await decide_landed(out, model=model)
+        return {"resumed": True, **out}
 
     out = await run_mod._land(
         result, session_id=session_id, agent_id=agent_id, task_id=task_id,
@@ -2142,11 +2146,33 @@ async def _resume_task_question(item_id: str, answer: str) -> None:
     await _land_task_question_outcome(task_id, out)
 
 
+async def decide_landed(out: dict | None, model=None) -> dict | None:
+    """The gate-override decide hook (FR-4) for a landing in this module —
+    and the passthrough the heartbeat uses, since that package may never
+    import the gate. Runs after the caller's bookkeeping; a no-op for a
+    result that names no proposal."""
+    from central_command.gateway import overrides
+
+    return await overrides.decide_landed(out, model=model)
+
+
+def decide_landed_detached(out: dict | None) -> None:
+    """`decide_landed` off the caller's await: a heartbeat action never
+    awaits agent work, and an override decision resumes the drafter."""
+    proposal_id = (out or {}).get("proposal_id")
+    if proposal_id:
+        _spawn_detached("override", proposal_id, lambda: decide_landed(out))
+
+
 async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
     """What a resumed question-run's outcome means for its task row — shared by
     the live path and the parked-resume driver, so a retried run lands its
-    result exactly as a no-outage run would have."""
+    result exactly as a no-outage run would have. A parked proposal then goes
+    through the decide hook, after the task row is booked (or at once when
+    the run has no task)."""
     if not task_id:
+        if out.get("deferred"):
+            await decide_landed(out)
         return
     if out.get("asked"):
         await events.emit(
@@ -2164,6 +2190,7 @@ async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
                      "session_id": out["session_id"]},
             actor="system",
         )
+        await decide_landed(out)
         return
     await repo.resolve_task(task_id, "DONE", outcome=str(out.get("output", "")))
     await events.emit(

@@ -4785,6 +4785,34 @@ async def amend_override_eval(proposal_id: str, record: dict) -> None:
         await conn.close()
 
 
+async def override_sweep_candidates() -> list[str]:
+    """The proposals the startup override sweep may evaluate, oldest first:
+    unresolved (AWAITING_HUMAN, `override_eval` null), created after the
+    granted_at of a LIVE override of their drafter — so an item the operator
+    could already see before the override existed is never even looked at —
+    and in a session that is no longer RUNNING, so a caller that has not
+    finished its bookkeeping is never raced (a proposal whose session row is
+    missing counts as not running). `resolve()` re-applies every rule."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select p.id from proposal p
+              left join session s on s.id = p.session_id
+             where p.status = 'AWAITING_HUMAN' and p.override_eval is null
+               and s.status is distinct from 'RUNNING'
+               and exists (select 1 from agent_gate_override o
+                            where o.agent_id = p.agent_id
+                              and o.revoked_at is null
+                              and p.created_at > o.granted_at)
+             order by p.created_at, p.id
+            """
+        )
+        return [r["id"] for r in rows]
+    finally:
+        await conn.close()
+
+
 async def get_app_setting(key: str, default: dict | list) -> dict | list:
     """Small key/value settings store (see schema.sql's app_setting). Absent
     row = default — settings persist only once an operator actually sets one."""
