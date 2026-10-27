@@ -338,6 +338,21 @@ stateDiagram-v2
   REMAINING actions; refused with a completed prefix, it never returns to
   AWAITING_HUMAN (that would re-run finished actions) and is recorded through
   the failure path as FAILED with the partial results on `proposal.failed`.
+  **The trust stamp (safeguard 2).** Provenance is the Executor's record, never
+  a caller's. The stamp vocabulary: `trust=human-approved` (an operator's
+  approval; `approver=<operator>`), `trust=operator-direct` (the operator's own
+  graph curation, `neo4j_writer`), and `trust=override:<id>` (a write an
+  override decided; `executor.episode_source_description`, the one composition
+  `graph_auditor.enqueue_cutover` also uses, so the cutover's description is
+  byte-identical to the Executor's). `Provenance.approver` and the
+  `proposal.executed` actor stay the proposal-level approver. Under SEVERAL
+  overrides the Executor reads the stored `override_eval.action_map` itself and
+  hands each handler the `override:<id>` of the override covering THAT action,
+  so each write (episode source, Jira/other record) names its own override, and
+  `Provenance.action_approvers` (`{"<action index>": "override:<id>"}`,
+  present only under a combined approver, also on `proposal.executed`'s
+  provenance) records it; an action with no mapped override (default gate
+  `none`) keeps the combined approver.
   An operator's approval is never checked. **The reopen note.** A proposal
   whose session's work item carries the operator's `operator_note` (the hold
   the auditor honours) is never decided by an override: `resolve` parks it

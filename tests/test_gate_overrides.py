@@ -1416,3 +1416,116 @@ async def test_a_covered_proposal_on_a_reopened_work_item_parks_with_its_reason(
             await conn.execute("delete from work_item where message_id = $1", message_id)
         finally:
             await conn.close()
+
+
+# --- story 6: the trust stamp names the override --------------------------------
+
+
+def test_the_episode_stamp_names_the_override_and_a_human_one_is_unchanged():
+    f = executor_mod.episode_source_description
+    assert f("src", "human:operator", "proposal=p1") == (
+        "src | trust=human-approved | approver=human:operator | proposal=p1")
+    assert f("src", "override:govr_a", "proposal=p1") == (
+        "src | trust=override:govr_a | approver=override:govr_a | proposal=p1")
+
+
+@pytest.mark.parametrize("approver", ["human:operator", "override:govr_a"])
+async def test_the_cutover_composes_the_executors_description(approver, monkeypatch):
+    from central_command.gateway import graph_auditor
+
+    args = {"name": "n", "episode_body": "b", "source_description": "src",
+            "reference_time": "2026-05-12"}
+
+    async def approved(_row):
+        return args, approver
+
+    sent: list[dict] = []
+
+    async def create(**kw):
+        sent.append(kw["payload"])
+
+    monkeypatch.setattr(graph_auditor, "_approved_episode", approved)
+    monkeypatch.setattr(graph_auditor.repo, "create_ingest_job", create)
+    row = {"id": "v1", "proposal_id": "p1", "group_id": "g", "marker": "proposal=p1"}
+    assert await graph_auditor._enqueue_from_proposal(row) is None
+    assert sent[0]["source_description"] == executor_mod.episode_source_description(
+        "src", approver, "proposal=p1")
+
+
+def test_a_provenance_without_per_action_approvers_serialises_as_before():
+    from central_command.contract import Provenance
+
+    p = Provenance(approver="human:operator", source_refs=[],
+                   executed_at=datetime.now(timezone.utc))
+    assert "action_approvers" not in p.model_dump(mode="json")
+
+
+@needs_pg
+async def test_an_override_write_records_the_override_in_provenance_and_the_event(
+    demo, granted, monkeypatch,
+):
+    ovr = await granted(DRAFTER, "jira.add_comment")
+    out = await _run_unhooked(monkeypatch, DRAFTER, _comment_proposal("Comment stamp"))
+    pid = out["proposal_id"]
+    seen: list[str] = []
+
+    async def spy(action, approver, proposer):
+        seen.append(approver)
+        return "ok"
+
+    monkeypatch.setattr(executor_mod, "_execute_action", spy)
+    assert (await overrides.decide_landed(out))["outcome"] == "decided"
+    want = overrides.approver_for(ovr["id"])
+    row = await repo.load_proposal(pid)
+    assert row["provenance"]["approver"] == want and seen == [want]
+    assert "action_approvers" not in row["provenance"]
+    executed = [e for e in await _events_for(pid) if e["kind"] == "proposal.executed"]
+    assert executed[-1]["actor"] == want
+
+
+@needs_pg
+async def test_under_several_overrides_each_write_is_stamped_with_its_covering_one(
+    demo, granted, monkeypatch,
+):
+    a = await granted(DRAFTER, "catalog.tag")
+    b = await granted(DRAFTER, "jira.add_comment")
+    out = await _run_unhooked(monkeypatch, DRAFTER, _two_action_proposal("Two stamps"))
+    pid = out["proposal_id"]
+    seen: list[tuple[str, str]] = []
+
+    async def spy(action, approver, proposer):
+        seen.append((action.capability, approver))
+        return "ok"
+
+    monkeypatch.setattr(executor_mod, "_execute_action", spy)
+    assert (await overrides.decide_landed(out))["outcome"] == "decided"
+    assert seen == [("catalog.tag", overrides.approver_for(a["id"])),
+                    ("jira.add_comment", overrides.approver_for(b["id"]))]
+    row = await repo.load_proposal(pid)
+    assert row["provenance"]["approver"] == overrides.approver_for([a["id"], b["id"]])
+    assert row["provenance"]["action_approvers"] == {
+        "0": overrides.approver_for(a["id"]), "1": overrides.approver_for(b["id"])}
+    executed = [e for e in await _events_for(pid) if e["kind"] == "proposal.executed"]
+    assert executed[-1]["payload"]["provenance"]["action_approvers"] == (
+        row["provenance"]["action_approvers"])
+
+
+@needs_pg
+@pytest.mark.parametrize("approver,trust", [
+    ("override:govr_a", "override:govr_a"), ("human:operator", "human-approved")])
+async def test_an_executed_episode_carries_the_trust_of_its_approver(
+    approver, trust, monkeypatch,
+):
+    from central_command.integrations import graphiti_ingest
+
+    sent: list[str] = []
+
+    async def enqueue(name, body, source_description, *a, **kw):
+        sent.append(source_description)
+        return {"job": {"id": 1}}
+
+    monkeypatch.setattr(graphiti_ingest, "enqueue", enqueue)
+    await executor_mod._graph_add_episode(
+        {"name": "n", "episode_body": "b", "scope": "shared", "source_description": "s",
+         "reference_time": "2026-05-12"}, approver, None)
+    assert f" | trust={trust} | approver={approver} | " in sent[0]

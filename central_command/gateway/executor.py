@@ -400,7 +400,21 @@ def episode_source_description(source_description: str, approver: str, marker: s
     composition, shared with the ingest cutover (`graph_auditor.enqueue_cutover`)
     so an episode enqueued from its proposal is byte-identical to the one the
     Executor would have sent."""
+    ids = _override_ids_of(approver)
+    if ids:
+        # An override's write is stamped with the override that decided it —
+        # the Executor hands each action its covering `override:<id>`, so a
+        # combined approver only reaches here from the cutover's stored
+        # (proposal-level) approver, where it is named whole.
+        trust = f"override:{ids[0]}" if len(ids) == 1 else approver
+        return f"{source_description} | trust={trust} | approver={approver} | {marker}"
     return f"{source_description} | trust=human-approved | approver={approver} | {marker}"
+
+
+def _override_ids_of(approver: str) -> list[str]:
+    from central_command.gateway.overrides import override_ids_of
+
+    return override_ids_of(approver)
 
 
 async def _reverify_after_curation(args: dict) -> None:
@@ -2327,6 +2341,7 @@ async def execute(
             raise ExecutionFailed(a.capability, "; ".join(problems), [])
     from central_command.gateway import overrides
 
+    row = None
     if overrides.override_ids_of(approver):
         from central_command.db import repo
 
@@ -2335,12 +2350,26 @@ async def execute(
             approver, [a.model_dump(mode="json") for a in actions],
             proposer=proposer, proposal_row=row, offset=action_offset,
         )
+    # Per-action approver: under several overrides each write is stamped with
+    # the override that covered THAT action (the stored action map, read here,
+    # never a caller's or an agent's value); the proposal-level approver stays
+    # the combined string. One override or none: every action keeps `approver`.
+    covering: dict[int, str] = {}
+    ids = overrides.override_ids_of(approver)
+    if len(ids) > 1:
+        stored = overrides._stored_map(row)
+        # From index 0: a retry's completed prefix ran under its overrides too.
+        for i in range(action_offset + len(actions)):
+            oid = stored.get(i)
+            if oid in ids:
+                covering[i] = overrides.approver_for(oid)
     token = _current_proposal_id.set(proposal_id)
     try:
         results: list[str] = []
-        for a in actions:
+        for n, a in enumerate(actions):
             try:
-                results.append(await _execute_action(a, approver, proposer))
+                results.append(await _execute_action(
+                    a, covering.get(action_offset + n, approver), proposer))
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
                 raise ExecutionFailed(a.capability, str(e), results) from e
     finally:
@@ -2349,6 +2378,7 @@ async def execute(
         approver=approver,
         source_refs=source_refs,
         executed_at=datetime.now(timezone.utc),
+        action_approvers={str(i): v for i, v in sorted(covering.items())},
     )
     return ExecutionOutcome(
         result_text="; ".join(results), provenance=provenance,

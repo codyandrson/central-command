@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from .enums import ConfidenceLevel, ProposalStatus, Reversibility
 
@@ -106,6 +106,18 @@ class Provenance(BaseModel):
     approver: str
     source_refs: list[str]
     executed_at: datetime
+    # Under a MULTI-override approver (`override:<a>+<b>`): the approver each
+    # action was stamped with, by its index in the proposal — the covering
+    # `override:<id>`. Composed by the Executor from the stored action map,
+    # never supplied by a caller; omitted from the record otherwise.
+    action_approvers: dict[str, str] = {}
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_action_approvers(self, handler):
+        data = handler(self)
+        if not data.get("action_approvers"):
+            data.pop("action_approvers", None)
+        return data
 
 
 class ProposalRecord(BaseModel):
