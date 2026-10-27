@@ -109,21 +109,38 @@ async def test_a_semantic_failure_is_not_retried_at_all(monkeypatch, no_wait):
 
 
 async def test_the_graph_and_litellm_reads_carry_the_same_bound(monkeypatch, no_wait):
-    """The wrapper rides every read that calls out of the box, not just Jira —
-    each keeping its OWN degradation wording (an agent reads these)."""
+    """The wrapper rides every read that calls out of the box, not just Jira.
+    The bound is the same everywhere — two attempts — but what happens after it
+    is not: the graph search is under the outage doctrine (FR-40, epic-outage-
+    doctrine story 1) and no longer degrades into "proceed without it". With no
+    landing tail (`ctx` None here, so `park_reads` is False) the ORIGINAL
+    transient failure re-raises into the unit's own DOWN path; the parking half
+    is `tests/test_outage_doctrine.py`'s."""
     graph = _Spy(_transient(), _transient())
     monkeypatch.setattr(graphiti, "search_facts", graph)
     models = _Spy(_transient(), [{"model_name": "cc-default"}])
     monkeypatch.setattr(litellm_client, "list_models", models)
 
-    graph_out = await tools.search_knowledge_graph(None, "renewal")
+    with pytest.raises(httpx.ConnectError):
+        await tools.search_knowledge_graph(None, "renewal")
     models_out = await tools.litellm_list_models(None)
 
     assert graph.calls == 2
-    assert graph_out == (
-        "knowledge graph unavailable (ConnectError) after 2 attempts; "
-        "proceed without it"
-    )
     assert models.calls == 2
     assert "cc-default" in models_out and "unavailable" not in models_out
     assert no_wait == [0.5, 0.5]
+
+
+async def test_a_semantic_graph_failure_still_returns_the_honest_text(
+    monkeypatch, no_wait
+):
+    """A NO from the graph is the graph answering: one call, no retry, and the
+    same text as before the doctrine — only an OUTAGE stopped degrading."""
+    graph = _Spy(_semantic())
+    monkeypatch.setattr(graphiti, "search_facts", graph)
+
+    out = await tools.search_knowledge_graph(None, "renewal")
+
+    assert graph.calls == 1
+    assert out == "knowledge graph unavailable (ValueError); proceed without it"
+    assert no_wait == []

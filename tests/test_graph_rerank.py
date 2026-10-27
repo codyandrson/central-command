@@ -358,10 +358,25 @@ async def _search_with(monkeypatch, handler):
 
 
 async def test_a_transient_reranker_failure_is_retried_once_then_reported(monkeypatch, no_wait):
-    fake, out = await _search_with(monkeypatch, lambda r: httpx.Response(503, json={"error": "down"}))
+    """Retried once, then — under the outage doctrine (FR-40, epic-outage-
+    doctrine story 1) — no "proceed without it": with no landing tail (`ctx`
+    None) the transient failure re-raises into the unit's own DOWN path, as
+    the typed `openai.APIStatusError` the one status rule judges."""
+    import openai
+
+    monkeypatch.setattr(settings, "graph_rerank_alias", "cc-rerank")
+    _mock_httpx(monkeypatch, lambda r: httpx.Response(503, json={"error": "down"}))
+    fake = _SearchingGraphiti()
+    monkeypatch.setattr(graphiti_client, "get_graphiti", lambda: fake)
+
+    async def groups(_agent):
+        return ["central_command"]
+
+    monkeypatch.setattr(graphiti, "groups_for", groups)
+    with pytest.raises(openai.APIStatusError) as raised:
+        await tools.search_knowledge_graph(None, "who leads")
+    assert raised.value.status_code == 503
     assert fake.searches == 2 and no_wait == [0.5]
-    assert out == ("knowledge graph unavailable (RerankHTTPError) after 2 attempts; "
-                   "proceed without it")
 
 
 async def test_a_malformed_reranker_answer_is_reported_at_once(monkeypatch, no_wait):

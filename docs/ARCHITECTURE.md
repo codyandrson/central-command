@@ -628,9 +628,19 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   proposals park `RETRY_PENDING`, tasks retry-park, and the health-gated
   `retry.sweep` converges all three
   ([spec](superpowers/specs/2026-07-31-outage-equivalence-design.md)). That
-  holds for model calls and approved executions. A DOWN *live read* by an agent
-  (graph, calendar, Jira) is still best-effort today and degrades inside the
-  tool result; PRD FR-40 makes it park, which is on the build list (§6.1).
+  holds for model calls and approved executions. A DOWN *live read* parks the
+  run mid-turn (PRD FR-40): the tool raises the deferred-call pause
+  (`CallDeferred`, the one way a tool may pause a run) when the run's entry set
+  `TriageDeps.park_reads`, and the session parks `AWAITING_RESUME` with a
+  `pending_resume` of kind `'read'` (tool call id, tool, arguments, the
+  dependencies it waits on, `after` = the landing tail); `retry.sweep` gates it
+  on every recorded dependency plus `llm`, re-executes the read in the runtime
+  (`tools.run_read_by_name`) and resumes the run through that tail with the
+  real result (`orchestration.resume_parked_read`). Today that covers
+  `search_knowledge_graph` under the task-run tail; a run with no tail to
+  re-enter re-raises into its unit's own DOWN path, and the other readers
+  (calendar, Jira, Confluence, mail) still degrade inside the tool result until
+  the rest of §6.1's build list lands.
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).

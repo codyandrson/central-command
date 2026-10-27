@@ -36,6 +36,25 @@ import socket
 TRANSIENT = "transient"
 SEMANTIC = "semantic"
 
+
+class DependencyDown(Exception):
+    """A live read found its dependencies DOWN on its last attempt (FR-40).
+
+    Typed so the decision is made ONCE, where the read ran: `_read_with_retry`
+    raises it only after `classify_failure` said TRANSIENT, and the tool turns
+    it into the run's pause (`CallDeferred`) or re-raises `original` for a run
+    with no landing tail. `dependencies` is a tuple because a read can need
+    several (a graph search embeds its query: `graph` and `embedder`), and the
+    sweep waits on every one of them before it re-executes the read.
+    """
+
+    def __init__(self, dependencies: tuple[str, ...], tool_name: str | None,
+                 original: BaseException):
+        super().__init__(f"{tool_name or 'read'}: {type(original).__name__}: {original}")
+        self.dependencies = tuple(dependencies)
+        self.tool_name = tool_name
+        self.original = original
+
 # HTTP status codes that mean "come back later", not "no".
 #
 # 408 request timeout, 429 too many requests (LiteLLM's cooldown/no-deployment
@@ -131,6 +150,9 @@ def classify_failure(exc: BaseException | None) -> str:
     """
     if exc is None:
         return SEMANTIC
+    # Already classified where it was raised — the type IS the verdict.
+    if isinstance(exc, DependencyDown):
+        return TRANSIENT
 
     # --- pydantic_ai: the model provider seam (the one that bit first) --------
     try:

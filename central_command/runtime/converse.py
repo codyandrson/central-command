@@ -284,6 +284,8 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
     try:
         result = await _run_live(
             agent, prompt, model=model,
+            # `park_reads` stays False until story 6 of epic-outage-doctrine
+            # wires the chat turn's parked-read landing; a DOWN read re-raises.
             deps=TriageDeps(agent_id=agent_id, session_id=session_id),
             agent_id=agent_id, session_id=session_id, message_history=history,
             continuable=True, after="converse",

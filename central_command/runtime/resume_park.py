@@ -33,7 +33,7 @@ from central_command.db import repo
 def pending_resume(
     *,
     kind: str,
-    text: str,
+    text: str | None,
     tool_call_id: str,
     after: str,
     proposal_id: str | None = None,
@@ -44,9 +44,12 @@ def pending_resume(
     """The stored description of the deferred result the run is still owed.
 
     `kind` is `"result"` (a ToolReturn: an Executor outcome, a failure report,
-    an operator's answer) or `"denial"` (a ToolDenied: rejection feedback).
+    an operator's answer), `"denial"` (a ToolDenied: rejection feedback) or
+    `"read"` (a live read whose dependency was DOWN — no result exists yet, so
+    `text` is None and the driver re-executes the read; see `read_pending`).
     `after` names the decision that produced it — approved | failed | rejected |
-    answered — and is what the driver dispatches on.
+    answered — or, for a read, the landing tail to re-enter (task | converse |
+    orchestrator), and is what the driver dispatches on.
 
     `extra` carries the few facts the ORIGINAL path had in scope and the retry
     would otherwise have to re-derive: the rejected path's authoritative
@@ -55,7 +58,7 @@ def pending_resume(
     """
     out = {
         "kind": kind,
-        "text": text,
+        **({"text": text} if text is not None else {}),
         "tool_call_id": tool_call_id,
         "after": after,
         "attempts": attempts,
@@ -66,6 +69,50 @@ def pending_resume(
         out["item_id"] = item_id
     out.update({k: v for k, v in extra.items() if v is not None})
     return out
+
+
+def read_pending(*, call, metadata: dict, after: str,
+                 task_id: str | None = None) -> dict:
+    """The pending record of a PARKED READ (FR-40): everything the resume
+    driver needs to re-execute it — the tool, its arguments as the model sent
+    them, the dependencies it waits on — and nothing of the turn's text (the
+    history already holds the turn; the read's result does not exist yet).
+    `not_before` is null until story 4's backoff fills it."""
+    return {
+        **pending_resume(
+            kind="read", text=None, tool_call_id=call.tool_call_id, after=after,
+            tool=metadata.get("tool") or call.tool_name,
+            args=metadata.get("args") or {},
+            dependencies=list(metadata.get("dependencies") or []),
+            task_id=task_id,
+        ),
+        "not_before": None,
+    }
+
+
+async def park_read(
+    *, session_id: str, result, call, metadata: dict, after: str = "task",
+    task_id: str | None = None,
+) -> dict:
+    """Park a run whose read found its dependencies DOWN: AWAITING_RESUME with
+    the pending read, announced by the same `session.resume_parked` every
+    resume park emits. Returns the stored record.
+
+    Order is the arm discipline: the history (up to the model's tool-call
+    request, the siblings' results included) is written FIRST, then the status
+    and the pending record land in ONE update — so there is no instant at
+    which the session reads parked without the record that drives it, nor a
+    record pointing at a history that was never persisted.
+    """
+    from central_command.runtime.durable import dump_run_state
+
+    await repo.update_session_run_state(
+        session_id, dump_run_state(result, call.tool_call_id)
+    )
+    pending = read_pending(call=call, metadata=metadata, after=after, task_id=task_id)
+    return await park_resume(
+        session_id, pending, metadata.get("error") or "dependency down"
+    )
 
 
 def framed_denial(feedback: str) -> str:
@@ -134,6 +181,9 @@ async def park_resume(session_id: str, pending: dict, error: BaseException | str
             "error": stored["last_error"],
             "transient": True,
             "attempts": stored["attempts"],
+            # What the park waits on — a read's tuple; None for a decision
+            # resume until story 3 records one on every park writer.
+            "dependencies": stored.get("dependencies"),
         },
         actor="system",
     )

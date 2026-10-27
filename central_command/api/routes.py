@@ -619,7 +619,18 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         model=model,
         parent_session_id=task.get("parent_session_id"),
         task_id=task_id,
+        # The task run has a landing tail to re-enter through (`run._land`),
+        # so a DOWN read parks it in place instead of failing it (FR-40).
+        park_reads=True,
     )
+    if result.get("parked"):
+        # A read found its dependency DOWN: the session is AWAITING_RESUME
+        # with the pending read, and the task stays IN_PROGRESS on it (linked
+        # at run start by `_run_live`) — not retry-parked fresh, not failed.
+        # The retry sweep re-executes the read and lands the task through the
+        # same tail an uninterrupted run takes. Checked BEFORE `deferred`, for
+        # the reason the stopped branch below gives.
+        return {**result, "task_id": task_id}
     if result.get("asked"):
         # The agent is blocked on an ambiguity and asked rather than guessing.
         # The task waits in REVIEW like any other operator-blocking outcome —

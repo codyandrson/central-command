@@ -9,6 +9,7 @@ from .args import ARG_SPECS, ArgSpec, validate_action_args
 from .failures import (
     RETRY_BACKOFF_CAP_SECONDS,
     SEMANTIC,
+    DependencyDown,
     TRANSIENT,
     classify_failure,
     classify_failure_text,
@@ -51,6 +52,7 @@ __all__ = [
     "ProposalRecord",
     "TRANSIENT",
     "SEMANTIC",
+    "DependencyDown",
     "classify_failure",
     "classify_failure_text",
     "is_context_overflow",

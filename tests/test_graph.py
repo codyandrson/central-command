@@ -115,10 +115,25 @@ async def test_read_tools_lead_every_line_with_the_uuid(monkeypatch):
 
 
 async def test_read_tool_degrades_when_graph_is_down(monkeypatch):
+    """A DOWN graph no longer degrades into "proceed without it" (FR-40): with
+    no landing tail the outage re-raises; under one it parks the run
+    (`tests/test_outage_doctrine.py`). A NO still degrades honestly."""
+    async def _no_wait(delay):
+        return None
+
+    monkeypatch.setattr(tools, "_sleep", _no_wait)
+
     async def broken(query, max_facts=8, agent_id=None):
         raise ConnectionError("nope")
 
     monkeypatch.setattr(graphiti, "search_facts", broken)
+    with pytest.raises(ConnectionError):
+        await tools.search_knowledge_graph(None, "anything")
+
+    async def refused(query, max_facts=8, agent_id=None):
+        raise ValueError("not a node")
+
+    monkeypatch.setattr(graphiti, "search_facts", refused)
     out = await tools.search_knowledge_graph(None, "anything")
     assert "unavailable" in out and "proceed without it" in out
 

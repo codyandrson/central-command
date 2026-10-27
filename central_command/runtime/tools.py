@@ -15,8 +15,8 @@ from pydantic_ai import CallDeferred, ModelRetry, RunContext
 
 from central_command.config import settings as _settings
 from central_command.contract import (
-    Action, Evidence, Proposal, Reversibility, TRANSIENT, classify_failure,
-    validate_action_args,
+    Action, DependencyDown, Evidence, Proposal, Reversibility, TRANSIENT,
+    classify_failure, validate_action_args,
 )
 from central_command.integrations import confluence, forge, graphiti, jira, litellm_credstore
 from central_command.integrations import litellm as litellm_client
@@ -171,8 +171,10 @@ async def search_knowledge_graph(
       the graph — the uuid that leads a line of search_knowledge_graph_entities.
       Never invent one: search for the entity first.
     """
-    # Reads are ungated by design, and best-effort by necessity: a down graph
-    # must degrade triage, never wedge it — after one bounded retry.
+    # Reads are ungated by design. A DOWN graph (or embedder: the query is
+    # embedded) PARKS the run where it can be re-entered, and otherwise
+    # re-raises into the unit's own DOWN path — never "proceed without it"
+    # for an outage (FR-40). A NO is the graph answering: honest text.
     agent_id = getattr(getattr(ctx, "deps", None), "agent_id", None)
     when = _window(as_of, after, before)
     center = _center(center_entity_uuid)
@@ -182,9 +184,15 @@ async def search_knowledge_graph(
     try:
         facts = await _read_with_retry(
             lambda: graphiti.search_facts(query, max_facts=_GRAPH_MAX_FACTS, agent_id=agent_id,
-                                          **filters)
+                                          **filters),
+            dependency=_GRAPH_SEARCH_DEPENDENCIES, tool="search_knowledge_graph",
         )
-    except Exception as e:  # noqa: BLE001 — any transport failure = "no context"
+    except DependencyDown as down:
+        _park_read_or_reraise(ctx, down, {
+            "query": query, "as_of": as_of, "after": after, "before": before,
+            "center_entity_uuid": center_entity_uuid,
+        })
+    except Exception as e:  # noqa: BLE001 — a NO from the graph: say so honestly
         return (
             f"knowledge graph unavailable ({type(e).__name__})"
             f"{_attempts_note(e)}; proceed without it"
@@ -739,20 +747,30 @@ _sleep = asyncio.sleep
 _ATTEMPTS_ATTR = "_cc_read_attempts"
 
 
-async def _read_with_retry(op, *, attempts: int = 2, delay: float = 0.5):
+async def _read_with_retry(
+    op, *, attempts: int = 2, delay: float = 0.5,
+    dependency: tuple[str, ...] | None = None, tool: str | None = None,
+):
     """One bounded retry for a TRANSIENT read failure — a blip should not degrade
     a turn that a half-second's patience would have saved.
 
-    One retry only: a real outage must degrade fast (the run is live and the
-    operator may be watching), and a live turn is not rewindable, so the most a
-    read can do is try briefly and then say honestly that it could not. The
-    UNIT-level machinery (a released work item, a requeued task) is what waits an
-    outage OUT; a live turn never does.
+    One retry only: a real outage must not hold the turn (the run is live and
+    the operator may be watching). What happens after it depends on whether the
+    caller named the read's `dependency` (a tuple of dependency names):
+
+    - named (the outage doctrine, FR-40 — `search_knowledge_graph` since story
+      1, every other mapped reader from story 2): a last attempt that is still
+      TRANSIENT raises `DependencyDown`, and the tool PARKS the run mid-turn
+      (`_park_read_or_reraise`); the sweep re-executes the read when the
+      dependencies' probes pass. A live turn IS rewindable to the tool call.
+    - not named (`fetch_url`, `propose_skill_doc` and the readers story 2 has
+      not reached): the last failure is re-raised for the caller's own
+      `_read_failed`-style degradation, exactly as before.
 
     A SEMANTIC failure is the dependency answering — it returns immediately,
-    because re-sending the same request gets the same "no". `op` is a zero-arg
-    coroutine function; the last failure is re-raised for the caller's own
-    `_read_failed`-style degradation, carrying how many attempts it took.
+    because re-sending the same request gets the same "no", and it is always
+    re-raised as itself. `op` is a zero-arg coroutine function; the raised
+    failure carries how many attempts it took.
     """
     n = 0
     while True:
@@ -760,11 +778,92 @@ async def _read_with_retry(op, *, attempts: int = 2, delay: float = 0.5):
         try:
             return await op()
         except Exception as e:  # the CALLER decides how to degrade; we re-raise
-            if n >= attempts or classify_failure(e) != TRANSIENT:
+            transient = classify_failure(e) == TRANSIENT
+            if n >= attempts or not transient:
                 if hasattr(e, "__dict__"):  # an exotic exception may have none
                     e.__dict__[_ATTEMPTS_ATTR] = n
+                if dependency and transient:
+                    raise DependencyDown(dependency, tool, e) from e
                 raise
             await _sleep(delay)
+
+
+# A graph search embeds its query before it reaches Neo4j, so it is DOWN when
+# either is (validator F2). Kept literal here until story 3 moves the names and
+# the tool map into `contract/dependencies.py`.
+_GRAPH_SEARCH_DEPENDENCIES = ("graph", "embedder")
+
+
+def _park_read_or_reraise(ctx, down: DependencyDown, args: dict):
+    """THE one way a read pauses a run: raise `CallDeferred` — pydantic-ai's
+    only seam for a tool to end a run without failing it (any other exception
+    cancels the sibling tool calls and fails the run) — exactly as the
+    `propose_*` tools do. The run ends with the history persisted up to this
+    tool call, the siblings' results included; `run._land` parks the session
+    AWAITING_RESUME with the pending read, and `orchestration.resume_parked_read`
+    re-executes it through `run_read_by_name` and feeds the result back as this
+    call's return.
+
+    Only when the run's entry set `deps.park_reads` (it has a landing tail to
+    re-enter through). Otherwise the ORIGINAL transient failure is re-raised, so
+    the unit's own DOWN path (an ingest release, a task retry-park) handles it
+    — never a "proceed without it" text for an outage. `args` are the tool's
+    own arguments as the model sent them, re-validated on re-execution.
+    """
+    if getattr(getattr(ctx, "deps", None), "park_reads", False):
+        original = down.original
+        raise CallDeferred(metadata={
+            "kind": "read",
+            "tool": down.tool_name,
+            "args": args,
+            "dependencies": list(down.dependencies),
+            "error": f"{type(original).__name__}: {original}"[:500],
+        }) from down
+    raise down.original
+
+
+# The reads a parked run can re-execute by name. A tool is listed here in the
+# same change that makes it pass `dependency=` to `_read_with_retry` (story 2
+# widens it) and in `durable.READ_TOOLS`, which classifies its pause; a parity
+# test (`tests/test_outage_doctrine.py`) holds the two equal.
+def _parkable_reads() -> dict:
+    return {"search_knowledge_graph": search_knowledge_graph}
+
+
+async def run_read_by_name(name: str, args: dict, deps: TriageDeps) -> str:
+    """Re-execute a parked read in the runtime, for the API tier's resume
+    driver (which may not hold a tool itself — the resume is a runtime act).
+
+    The stored `args` are re-validated through the tool's OWN signature (a
+    pydantic model built from its annotations), so a record that no longer
+    fits the tool fails loudly here rather than calling it with garbage. The
+    stub context carries `deps`; a parked read's tools read nothing from the
+    context but `deps`. Returns the tool's text; a read that is STILL down
+    raises `DependencyDown` (the driver re-parks), anything else propagates.
+    """
+    import inspect
+    from types import SimpleNamespace
+
+    from pydantic import create_model
+
+    fn = _parkable_reads().get(name)
+    if fn is None:
+        raise ValueError(f"{name!r} is not a parkable read")
+    params = list(inspect.signature(fn).parameters.values())[1:]  # drop ctx
+    fields = {
+        p.name: (p.annotation, ... if p.default is inspect.Parameter.empty else p.default)
+        for p in params
+    }
+    validated = create_model(f"{name}_args", **fields).model_validate(args or {})
+    ctx = SimpleNamespace(deps=deps)
+    try:
+        return await fn(ctx, **validated.model_dump())
+    except CallDeferred as paused:
+        # `deps.park_reads` is set on a resume, so a still-down read pauses
+        # again: hand the driver the typed failure it re-parks on.
+        if isinstance(paused.__cause__, DependencyDown):
+            raise paused.__cause__ from None
+        raise
 
 
 def _attempts_note(e: Exception) -> str:

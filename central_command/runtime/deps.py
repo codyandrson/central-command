@@ -46,3 +46,12 @@ class TriageDeps:
     # consult_agent/refusal_for to refuse mechanically past depth 2 or back
     # into an agent already in the chain (runtime/consult.py).
     consult_chain: tuple[str, ...] = ()
+    # The outage doctrine (FR-40, epic-outage-doctrine story 1): may a read
+    # whose dependency is DOWN PAUSE this run (`CallDeferred`, kind 'read')
+    # rather than fail it? True only where an entry has a landing tail to
+    # re-enter through after the sweep re-executes the read — today the task
+    # run (`routes._run_one_assigned_task`) and the parked-read resume itself.
+    # Everywhere else (ingest, coach, steward, wiki, reflection, a consult's
+    # sub-run, and — until story 6 — the chat turn and the orchestrator round)
+    # the read re-raises its transient failure into the unit's own DOWN path.
+    park_reads: bool = False

@@ -74,11 +74,16 @@ CONSULT_TOOLS = frozenset({"consult_agent"})
 # specialist's session. Without the flag it returns text inline and never
 # reaches here.
 TASK_WAIT_TOOLS = frozenset({"create_task"})
+# A READ defers only when its dependency is DOWN and the run's entry set
+# `deps.park_reads` (the outage doctrine, FR-40): the run parks AWAITING_RESUME
+# with the pending read and the retry sweep re-executes it when the probes pass.
+# Equal to `tools._parkable_reads()`'s keys (parity-tested); story 2 widens both.
+READ_TOOLS = frozenset({"search_knowledge_graph"})
 
 
 def classify_deferred(call) -> str:
-    """'proposal' | 'ask' | 'consult' | 'task_wait' | 'project' | 'unknown' for a
-    deferred call."""
+    """'proposal' | 'ask' | 'consult' | 'task_wait' | 'read' | 'project' |
+    'unknown' for a deferred call."""
     tool = getattr(call, "tool_name", "") or ""
     if tool in PROPOSE_TOOLS:
         return "proposal"
@@ -88,6 +93,8 @@ def classify_deferred(call) -> str:
         return "consult"
     if tool in TASK_WAIT_TOOLS:
         return "task_wait"
+    if tool in READ_TOOLS:
+        return "read"
     if tool in CONCLUDE_TOOLS:
         return "conclude"
     if tool in PROJECT_TOOLS:

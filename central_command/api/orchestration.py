@@ -152,6 +152,9 @@ async def run_project(task: dict, model=None) -> dict:
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
     agent = await _build_agent(model)
+    # `park_reads` stays False until story 6 of epic-outage-doctrine wires the
+    # orchestrator round's parked-read landing (`_process`); a DOWN read
+    # re-raises into the project's own failure path.
     deps = TriageDeps(session_id=session_id, agent_id=AGENT_ID)
     state = {
         "task_id": task["id"], "round": 0, "stalls": 0, "assigns": 0,
@@ -756,6 +759,20 @@ async def sweep_settle() -> None:
         await asyncio.gather(*list(_sweep_inflight), return_exceptions=True)
 
 
+# A recorded dependency name → the probe that answers it. `graph` is the
+# graphiti bolt probe; `embedder` has no probe until story 3 of
+# epic-outage-doctrine (`contract/dependencies.py`, which moves this map), so
+# it maps to None — "no probe defined, attempt anyway", the cache's UNKNOWN —
+# and a still-down embedder simply re-parks the read on the attempt.
+_PROBE_FOR_DEPENDENCY = {"graph": "graphiti", "embedder": None}
+
+
+def _probe_name(dependency: str | None) -> str | None:
+    if dependency in _PROBE_FOR_DEPENDENCY:
+        return _PROBE_FOR_DEPENDENCY[dependency]
+    return dependency
+
+
 async def retry_sweep(cache=None) -> dict:
     """Drive every parked unit whose dependency is UP — the cadence half of
     outage equivalence, called by the `retry.sweep` heartbeat action.
@@ -806,9 +823,15 @@ async def retry_sweep(cache=None) -> dict:
 
     async def _drive(unit: str, unit_id: str, dependency, driver, landed: list,
                      *, detached: bool = False):
-        if not await cache.healthy(dependency):
+        # One dependency name, or a TUPLE of them (a parked read waits on all
+        # it recorded): every one must probe up, and the skip names the down.
+        names = dependency if isinstance(dependency, tuple) else (dependency,)
+        down = [d for d in names if not await cache.healthy(_probe_name(d))]
+        if down:
             skipped_gated.append(
-                {"unit": unit, "id": unit_id, "dependency": dependency}
+                {"unit": unit, "id": unit_id,
+                 "dependency": down[0] if len(names) == 1 else list(names),
+                 **({"down": down} if len(names) > 1 else {})}
             )
             return
         if detached:
@@ -838,6 +861,15 @@ async def retry_sweep(cache=None) -> dict:
     # than the startup sweep can ever see.
     orphaned = await park_orphaned_resumes()
     for sid in await repo.sessions_awaiting_resume():
+        read = _parked_read(await repo.get_session_run_state(sid))
+        if read is not None:
+            # A parked READ waits on EVERY dependency it recorded, plus the
+            # LLM — its resume is a model turn (FR-40).
+            dependencies = (*(read.get("dependencies") or ()), probes.LLM)
+            await _drive("session", sid, dependencies,
+                         lambda sid=sid: resume_parked_read(sid), resumed,
+                         detached=True)
+            continue
         await _drive("session", sid, probes.LLM,
                      lambda sid=sid: resume_parked_session(sid), resumed,
                      detached=True)
@@ -923,6 +955,12 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
     session = await repo.get_session(session_id)
     if session is None or session["status"] != "AWAITING_RESUME":
         return None
+    if _parked_read(await repo.get_session_run_state(session_id)):
+        # A parked READ has no decision to finish: it re-executes the read and
+        # re-enters through a continuation tail (`resume_parked_read`). Routed
+        # here so every AWAITING_RESUME driver — the startup sweep included —
+        # reaches it without knowing the kinds apart.
+        return await resume_parked_read(session_id, model=model)
     claimed = await repo.claim_parked_resume(session_id)
     if claimed is None:
         return None  # a concurrent sweep won the claim
@@ -1046,6 +1084,145 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         # when it is the DRIVE step that keeps failing.
         pending=None if exhausted else {**pending, "attempts": attempts},
     )
+    return {"resumed": True, "session_id": session_id, "after": after,
+            "attempts": attempts, **out}
+
+
+def _parked_read(run_state: dict | None) -> dict | None:
+    """The pending READ a session is parked on, or None for any other park."""
+    pending = (run_state or {}).get("pending_resume") or {}
+    return pending if pending.get("kind") == "read" else None
+
+
+async def resume_parked_read(session_id: str, model=None) -> dict | None:
+    """Drive a session parked AWAITING_RESUME on a DOWN read (FR-40).
+
+    Not `finish_decision_resume`: a read has no decision. The session re-enters
+    through a CONTINUATION tail, the stop/continue precedent — the claim is the
+    SQL flip (`claim_parked_resume`, the same lock every resume park uses), the
+    stored read is re-executed IN THE RUNTIME by name
+    (`tools.run_read_by_name`, its arguments re-validated through the tool's
+    own signature), its text is fed back as the ToolReturn for the parked
+    `tool_call_id` (`durable.deferred_results`), and the run continues on the
+    persisted history through `_run_live` and lands through the stored
+    `after`'s tail — so the agent's next step is the one it would have taken
+    had the dependency never been down, and the task resolves as a no-outage
+    run would. Never a re-run of the turn from zero.
+
+    A read that is STILL down re-parks with `attempts + 1` (no limit: nothing
+    is terminal from DOWN). The pending record is never cleared — it is the
+    record that an outage happened, like every resume park's. None means the
+    session is not parked on a read, or someone else won the claim.
+    """
+    from central_command.runtime import resume_park
+    from central_command.runtime import run as run_mod
+    from central_command.runtime import tools as tools_mod
+    from central_command.runtime import converse as converse_mod
+    from central_command.runtime.durable import deferred_results, load_messages
+
+    session = await repo.get_session(session_id)
+    if session is None or session["status"] != "AWAITING_RESUME":
+        return None
+    peek = _parked_read(await repo.get_session_run_state(session_id))
+    if peek is None:
+        return None
+    if (peek.get("after") or "task") not in ("task", "converse"):
+        # Only the task tail parks reads today; story 6 wires the orchestrator
+        # round. Left parked and visible rather than driven down a tail that
+        # cannot land it.
+        log.warning("parked read on %s names tail %r, which has no read landing "
+                    "yet", session_id, peek.get("after"))
+        return None
+    claimed = await repo.claim_parked_resume(session_id)
+    if claimed is None:
+        return None  # a concurrent sweep won the claim
+    pending = _parked_read(claimed)
+    if pending is None:
+        return None
+    agent_id = session["agent_id"]
+    after = pending.get("after") or "task"
+    task_id = pending.get("task_id")
+    attempts = int(pending.get("attempts", 0)) + 1
+    # Arm the record the drive is working from BEFORE it runs: a resume that
+    # dies with its process leaves the attempt it was on, not the one before.
+    await resume_park.arm(session_id, {**pending, "attempts": attempts})
+
+    await events.emit(
+        "session.resume_retried", ref_id=session_id,
+        payload={"after": after, "attempt": attempts, "kind": "read",
+                 "tool": pending.get("tool"),
+                 "dependencies": pending.get("dependencies")},
+        actor="system",
+    )
+
+    from central_command.contract import DependencyDown
+
+    try:
+        text = await tools_mod.run_read_by_name(
+            pending["tool"], pending.get("args") or {},
+            TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True),
+        )
+    except DependencyDown as down:
+        stored = await resume_park.park_resume(
+            session_id, {**pending, "attempts": attempts}, down.original,
+        )
+        return {"parked": True, "session_id": session_id, "attempts": attempts,
+                "dependencies": stored.get("dependencies")}
+    except Exception as e:  # noqa: BLE001 — a record the tool no longer accepts
+        # Not an outage: the stored call cannot be re-run at all (its
+        # arguments no longer fit the tool). Loud, with the reason, and the
+        # task lands like any resumed run that died semantically.
+        await converse_mod.land_session(
+            session_id, failed=True, agent_id=agent_id,
+            reason=f"parked read could not be re-executed: {type(e).__name__}: {e}",
+        )
+        await _land_resumed_run_failure(task_id, e, after=after)
+        raise
+
+    messages = load_messages(claimed)
+    results = await deferred_results(
+        messages, pending["tool_call_id"], text,
+        session_id=session_id, agent_id=agent_id,
+    )
+    agent, run_model = await _continue_agent(after, agent_id, model)
+    deps = TriageDeps(agent_id=agent_id, session_id=session_id,
+                      park_reads=after == "task")
+    try:
+        result = await run_mod._run_live(
+            agent, None, model=run_model, deps=deps,
+            agent_id=agent_id, session_id=session_id,
+            message_history=messages, deferred_tool_results=results,
+            task_id=None if after == "orchestrator" else task_id,
+            continuable=True, after=after,
+        )
+    except run_mod.RunStopped:
+        return {"resumed": True, "stopped": True, "session_id": session_id}
+    except run_mod.RunWindowExhausted as e:
+        out = run_mod.window_outcome(e)
+        if after == "task" and task_id:
+            await repo.park_task_review(task_id, session_id)
+            await _land_task_question_outcome(task_id, out)
+        return out
+    except Exception as e:  # the task must not outlive its run ownerless
+        await _land_resumed_run_failure(task_id, e, after=after)
+        raise
+
+    if after == "converse":
+        out = await converse_mod._land_turn(session_id, agent_id, result)
+        await decide_landed(out, model=model)
+        return {"resumed": True, "after": after, **out}
+    out = await run_mod._land(
+        result, session_id=session_id, agent_id=agent_id, task_id=task_id,
+        tokens=run_mod._total_tokens(result),
+    )
+    await _land_task_question_outcome(task_id, out)
+    if task_id and not out.get("parked"):
+        # A task run that finished after an outage tells a waiting
+        # orchestrator, exactly as an uninterrupted one does
+        # (`routes._run_one_assigned_task`).
+        task = await repo.get_task(task_id)
+        if task and task.get("status") in ("DONE", "FAILED"):
+            spawn_child_resolved(task)
     return {"resumed": True, "session_id": session_id, "after": after,
             "attempts": attempts, **out}
 
@@ -1785,7 +1962,11 @@ async def continue_session(item_id: str, model=None) -> dict | None:
     )
 
     agent, run_model = await _continue_agent(after, agent_id, model)
-    deps = TriageDeps(agent_id=agent_id, session_id=session_id)
+    # The task tail lands a parked read (`run._land` → `parked_outcome`), so a
+    # DOWN read in a continued task run parks in place (FR-40); the other two
+    # tails wait for story 6.
+    deps = TriageDeps(agent_id=agent_id, session_id=session_id,
+                      park_reads=after == "task")
     try:
         result = await run_mod._run_live(
             agent, None, model=run_model, deps=deps,
@@ -1899,7 +2080,11 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
     )
 
     agent, run_model = await _continue_agent(after, agent_id, model)
-    deps = TriageDeps(agent_id=agent_id, session_id=session_id)
+    # The task tail lands a parked read (`run._land` → `parked_outcome`), so a
+    # DOWN read in a continued task run parks in place (FR-40); the other two
+    # tails wait for story 6.
+    deps = TriageDeps(agent_id=agent_id, session_id=session_id,
+                      park_reads=after == "task")
     try:
         result = await run_mod._run_live(
             agent, None, model=run_model, deps=deps,
@@ -2173,6 +2358,10 @@ async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
     if not task_id:
         if out.get("deferred"):
             await decide_landed(out)
+        return
+    if out.get("parked"):
+        # A read parked the run again (FR-40): the task stays IN_PROGRESS on
+        # its AWAITING_RESUME session, exactly as after the first park.
         return
     if out.get("asked"):
         await events.emit(

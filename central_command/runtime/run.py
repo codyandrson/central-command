@@ -884,7 +884,7 @@ async def run_coach(
 
 async def run_task(
     agent_id: str, instruction: str, model=None, parent_session_id: str | None = None,
-    task_id: str | None = None,
+    task_id: str | None = None, park_reads: bool = False,
 ) -> dict:
     """An operator-tasked run (Phase 4): the operator's instruction is trusted
     input, and any proposal the agent makes goes through the SAME gate as
@@ -895,6 +895,10 @@ async def run_task(
     inbox-triage's work arrives through the ledger by design (tasking it would
     bypass thread claims). Founders keep their special builders; agents hired
     through a template (D24) run on the generic pack-built agent.
+
+    `park_reads` lets a DOWN read pause this run in place (`TriageDeps.
+    park_reads`); the task-run entry (`routes._run_one_assigned_task`) sets it,
+    because it lands a parked outcome and the resume re-enters through `_land`.
     """
     if agent_id not in await taskable_agent_ids():
         raise ValueError(f"agent {agent_id!r} is not directly taskable")
@@ -977,7 +981,8 @@ async def run_task(
     try:
         result = await _run_live(
             agent, prompt, model=model,
-            deps=TriageDeps(session_id=session_id, agent_id=agent_id),
+            deps=TriageDeps(session_id=session_id, agent_id=agent_id,
+                            park_reads=park_reads),
             agent_id=agent_id, session_id=session_id,
             parent_session_id=parent_session_id, task_id=task_id,
             continuable=True,
@@ -1015,6 +1020,19 @@ def stopped_outcome(e: RunStopped, tokens: int = 0) -> dict:
     not finished, and resuming continues it in the same session."""
     return {"deferred": False, "stopped": True, "session_id": e.session_id,
             "output": "stopped by the operator", "tokens": tokens}
+
+
+def parked_outcome(stored: dict, *, session_id: str, tokens: int = 0) -> dict:
+    """What a PARKED READ means to the caller (FR-40) — shaped like
+    `stopped_outcome` and for the same reasons: RETURNED, never raised, so every
+    landing still pushes its END frame; not `deferred` (no proposal) and not
+    `asked` (nothing is in the Inbox), so no caller resolves the task DONE or
+    moves it to REVIEW. The task stays IN_PROGRESS on this session; the retry
+    sweep resumes it when every dependency in `dependencies` probes up."""
+    return {"deferred": False, "parked": True, "session_id": session_id,
+            "tool": stored.get("tool"),
+            "dependencies": list(stored.get("dependencies") or []),
+            "output": "waiting on a dependency outage", "tokens": tokens}
 
 
 async def _land(
@@ -1064,6 +1082,18 @@ async def _land(
             session_id=session_id, agent_id=agent_id, result=result, call=call,
         )
         return {**waited, "tokens": tokens}
+    if kind == "read":
+        # A read found its dependency DOWN and paused the run (FR-40). Park it
+        # in place; the retry sweep re-executes the read and re-enters here.
+        from central_command.runtime.resume_park import park_read
+
+        metadata = (getattr(result.output, "metadata", None) or {}).get(
+            call.tool_call_id) or {}
+        stored = await park_read(
+            session_id=session_id, result=result, call=call, metadata=metadata,
+            after="task", task_id=task_id,
+        )
+        return parked_outcome(stored, session_id=session_id, tokens=tokens)
     if kind != "proposal":
         # A project tool on a plain task has no driver here. Fail loudly with
         # the run's own words rather than mis-parsing it into a proposal.
