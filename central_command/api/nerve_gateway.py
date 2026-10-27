@@ -928,6 +928,8 @@ async def _decisions_list() -> dict:
     consistent (never a proposal list from one instant and a dismissal list
     from another).
     """
+    from central_command.api import routes as rest
+
     items = await repo.list_operator_items("OPEN")
     # The item carries a task_id; without its TITLE the inbox shows a question
     # with nothing connecting it to the work it blocks (2026-07-25: the operator had a
@@ -951,8 +953,10 @@ async def _decisions_list() -> dict:
     lane_statuses = await repo.session_statuses(
         [i["discussion_session_id"] for i in items if i.get("discussion_session_id")]
     )
+    proposals = await repo.list_proposals("AWAITING_HUMAN")
+    await rest.annotate_gate_facts(proposals)
     return {
-        "proposals": await repo.list_proposals("AWAITING_HUMAN"),
+        "proposals": proposals,
         "dismissals": await repo.list_work_items("DISMISS_PENDING", include_payload=True),
         # Asks OF the operator — plan reviews, questions, stall escalations.
         # Since tier 2 (2026-07-25) ANY agent can ask, not just the orchestrator.
@@ -982,9 +986,12 @@ async def _decisions_history(limit: int, offset: int) -> dict:
     from the UI on confirm with no other history surface. Unpaginated (its
     own fixed recent slice): the operator asked for "findable again", not a
     second load-more control."""
+    from central_command.api import routes as rest
+
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     proposals, has_more = await repo.list_decided_proposals(limit, offset)
+    await rest.annotate_gate_facts(proposals)
     processed_items = await repo.list_processed_work_items(50)
     return {"proposals": proposals, "hasMore": has_more, "processedItems": processed_items}
 

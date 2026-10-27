@@ -62,6 +62,24 @@ export interface ProposalOrigin {
   caller_session_id?: string | null;
 }
 
+/** Who decided a proposal (server-derived from the `proposal.decided` event and
+ *  the provenance approver). `overrides` lists EVERY deciding override with the
+ *  server's own `scope_text` — the cockpit renders it and builds none. An
+ *  override approval is never `operator`. Pinned by tests/test_overrides_wire.py. */
+export interface DecidedBy {
+  kind: 'operator' | 'auditor' | 'override';
+  overrides: { override_id: string; scope_text: string }[];
+}
+
+/** One override a pending proposal is parked behind in its shadow period. `k`
+ *  is read fresh by the server. */
+export interface ShadowMark {
+  override_id: string;
+  k: number;
+  n: number;
+  complete: boolean;
+}
+
 /** Row from proposals list (decisions.list). */
 export interface ProposalSummary {
   id: string;
@@ -76,6 +94,10 @@ export interface ProposalSummary {
    *  from the `proposal.executed` event's "[dry-run]" result, so it stays true
    *  of the decision even after the deployment switches to live. */
   simulated?: boolean;
+  /** Null/absent while undecided. */
+  decided_by?: DecidedBy | null;
+  /** Non-empty only on a pending proposal in an override's shadow period. */
+  shadow?: ShadowMark[];
 }
 
 export interface JiraIssueSnapshot {

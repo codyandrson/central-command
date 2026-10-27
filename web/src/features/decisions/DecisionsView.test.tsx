@@ -507,3 +507,86 @@ describe('DecisionsView Jira issue cards', () => {
     await waitFor(() => expect(screen.getAllByText('changed since proposed')).toHaveLength(1));
   });
 });
+
+describe('DecisionsView says which gate decided', () => {
+  // Shapes mirror tests/test_overrides_wire.py, which pins them from the backend.
+  const hist = (id: string, decided_by: unknown) => ({
+    id, agent_id: 'ea', intent: `intent ${id}`, status: 'EXECUTED',
+    decided_at: hoursAgo(2), decided_by,
+  });
+
+  it('renders all three deciders on decided rows', async () => {
+    state.history = [
+      hist('h1', { kind: 'operator', overrides: [] }),
+      hist('h2', { kind: 'auditor', overrides: [] }),
+      hist('h3', { kind: 'override', overrides: [{ override_id: 'ovr_a', scope_text: 'every use' }] }),
+    ];
+    render(<DecisionsView />);
+    await userEvent.click(screen.getByLabelText('Show decision history'));
+
+    const labels = screen.getAllByTestId('decided-by').map((e) => e.textContent);
+    expect(labels).toEqual([
+      'decided by you',
+      'decided by the auditor',
+      'decided by override ovr_a (every use)',
+    ]);
+  });
+
+  it('lists every override of a multi-override decision, never as the operator', async () => {
+    state.history = [hist('h1', {
+      kind: 'override',
+      overrides: [
+        { override_id: 'ovr_a', scope_text: 'every use' },
+        { override_id: 'ovr_b', scope_text: 'only where target is in Jira project TASKS' },
+      ],
+    })];
+    render(<DecisionsView />);
+    await userEvent.click(screen.getByLabelText('Show decision history'));
+
+    const label = screen.getByTestId('decided-by');
+    expect(label).toHaveAttribute('data-kind', 'override');
+    expect(label).toHaveTextContent('override ovr_a (every use)');
+    expect(label).toHaveTextContent('override ovr_b (only where target is in Jira project TASKS)');
+    expect(label).not.toHaveTextContent('decided by you');
+  });
+
+  it('shows a shadow badge per shadowing override on a pending proposal', () => {
+    state.proposals = [{
+      id: 'p1', agent_id: 'jira-expert', intent: 'Tag it', created_at: hoursAgo(1),
+      decided_by: null,
+      shadow: [
+        { override_id: 'ovr_a', k: 2, n: 5, complete: false },
+        { override_id: 'ovr_b', k: 1, n: 3, complete: false },
+      ],
+    }];
+    render(<DecisionsView />);
+
+    expect(screen.getAllByTestId('shadow-badge').map((e) => e.textContent)).toEqual([
+      'shadow 2 of 5 of override ovr_a',
+      'shadow 1 of 3 of override ovr_b',
+    ]);
+    expect(screen.queryByTestId('decided-by')).not.toBeInTheDocument();
+  });
+
+  it('shows no badge on a pending proposal outside a shadow period', () => {
+    state.proposals = [{
+      id: 'p1', agent_id: 'jira-expert', intent: 'Tag it', created_at: hoursAgo(1),
+      decided_by: null, shadow: [],
+    }];
+    render(<DecisionsView />);
+    expect(screen.queryByTestId('shadow-badge')).not.toBeInTheDocument();
+  });
+
+  it('says who decided in the detail pane of a decided proposal', async () => {
+    state.history = [hist('h1', { kind: 'auditor', overrides: [] })];
+    state.detail = {
+      id: 'h1', agent_id: 'ea', intent: 'intent h1', status: 'EXECUTED', created_at: hoursAgo(3),
+      decided_at: hoursAgo(2), actions: [], evidence: [],
+      decided_by: { kind: 'auditor', overrides: [] },
+    };
+    render(<DecisionsView />);
+    await userEvent.click(screen.getByLabelText('Show decision history'));
+    await userEvent.click(screen.getByText('intent h1'));
+    await waitFor(() => expect(screen.getAllByTestId('decided-by')).toHaveLength(2));
+  });
+});

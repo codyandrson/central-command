@@ -118,3 +118,139 @@ async def test_every_capability_row_carries_the_override_facts():
         assert ("argument" in row["scope_forms"]) == (row["name"] in ARG_SPECS), row["name"]
         assert ("target" in row["scope_forms"]) == bool(row["target_args"]), row["name"]
         assert row["scope_forms"][-1] == "schedule"
+
+
+# --- story 10: which gate decided a write -------------------------------------
+#
+# `decided_by` (None while undecided, else {kind: operator | auditor | override,
+# overrides: [{override_id, scope_text}]}) and `shadow` ([{override_id, k, n,
+# complete}] on a pending proposal in a shadow period, else []) ride the
+# proposal detail (GET /proposals/{id}, the proposals.get RPC), the pending list
+# (decisions.list) and the history (decisions.history).
+
+import json  # noqa: E402
+
+from central_command.api import nerve_gateway  # noqa: E402
+from central_command.config import settings  # noqa: E402
+from central_command.db import repo  # noqa: E402
+from tests.test_gate_overrides import (  # noqa: E402,F401 — fixtures
+    TRIAGE, _approve, _comment_proposal, _run, _tag_proposal, _two_action_proposal,
+    demo, granted, ledger_rows,
+)
+
+DECIDED_FIELDS = {"kind", "overrides"}
+MARK_FIELDS = {"override_id", "k", "n", "complete"}
+
+
+async def _detail(pid: str) -> dict:
+    return jsonable_encoder(await routes.get_proposal(pid))
+
+
+async def _rpc_list_row(pid: str) -> dict:
+    rows = (await nerve_gateway._decisions_list())["proposals"]
+    return next(r for r in jsonable_encoder(rows) if r["id"] == pid)
+
+
+async def _rpc_history_row(pid: str) -> dict:
+    offset = 0
+    while True:
+        page = await nerve_gateway._decisions_history(200, offset)
+        for r in jsonable_encoder(page["proposals"]):
+            if r["id"] == pid:
+                return r
+        assert page["hasMore"], f"{pid} not in history"
+        offset += 200
+
+
+@needs_pg
+async def test_an_override_decided_proposal_names_the_override_and_its_scope_text(
+    demo, granted, monkeypatch,  # noqa: F811
+):
+    ovr = await granted(DRAFTER, "jira.add_comment", scope={"target": ["TASKS"]})
+    out = await _run(monkeypatch, DRAFTER, _comment_proposal("Override decides"))
+    pid = out["proposal_id"]
+    want = {"kind": "override", "overrides": [
+        {"override_id": ovr["id"], "scope_text": overrides.scope_text(ovr)}]}
+    assert want["overrides"][0]["scope_text"] != ""
+    for row in (await _detail(pid), await _rpc_history_row(pid)):
+        assert set(row["decided_by"]) == DECIDED_FIELDS
+        assert row["decided_by"] == want
+        assert row["shadow"] == []
+
+
+@needs_pg
+async def test_an_operator_decided_proposal_says_so(demo, granted, monkeypatch):  # noqa: F811
+    await granted(DRAFTER, shadow_runs=3)
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Operator decides"))
+    pending = await _rpc_list_row(out["proposal_id"])
+    assert pending["decided_by"] is None
+    await _approve(out)
+    for row in (await _detail(out["proposal_id"]), await _rpc_history_row(out["proposal_id"])):
+        assert row["decided_by"] == {"kind": "operator", "overrides": []}
+
+
+@needs_pg
+async def test_an_auditor_decided_proposal_says_so(ledger_rows, granted, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(settings, "auditor_enabled", True)
+    monkeypatch.setattr(settings, "auditor_mode", "active")
+    await granted(TRIAGE, "work.bulk_dismiss")
+    pid = (await ledger_rows())["proposal_id"]
+    for row in (await _detail(pid), await _rpc_history_row(pid)):
+        assert row["decided_by"] == {"kind": "auditor", "overrides": []}
+
+
+@needs_pg
+async def test_a_pending_shadowed_proposal_names_the_override_it_is_shadowing(
+    demo, granted, monkeypatch,  # noqa: F811
+):
+    ovr = await granted(DRAFTER, shadow_runs=3)
+    first = await _run(monkeypatch, DRAFTER, _tag_proposal("Shadowed 0"))
+    second = await _run(monkeypatch, DRAFTER, _tag_proposal("Shadowed 1"))
+    mark = {"override_id": ovr["id"], "k": 0, "n": 3, "complete": False}
+    for row in (await _detail(first["proposal_id"]),
+                await _rpc_list_row(first["proposal_id"])):
+        assert row["decided_by"] is None
+        assert row["shadow"] == [mark]
+        assert set(row["shadow"][0]) == MARK_FIELDS
+    # k is read fresh: approving the first advances the second's badge
+    await _approve(first)
+    row = await _rpc_list_row(second["proposal_id"])
+    assert row["shadow"] == [{**mark, "k": 1}]
+
+
+@needs_pg
+async def test_a_proposal_decided_by_two_overrides_lists_both(
+    demo, granted, monkeypatch,  # noqa: F811
+):
+    tag = await granted(DRAFTER, "catalog.tag")
+    comment = await granted(DRAFTER, "jira.add_comment", scope={"target": ["TASKS"]})
+    out = await _run(monkeypatch, DRAFTER, _two_action_proposal("Two overrides decide"))
+    pid = out["proposal_id"]
+    row = await _detail(pid)
+    assert row["decided_by"]["kind"] == "override"
+    assert row["decided_by"]["overrides"] == sorted(
+        [{"override_id": o["id"], "scope_text": overrides.scope_text(o)}
+         for o in (tag, comment)], key=lambda m: m["override_id"])
+    assert row["decided_by"] == (await _rpc_history_row(pid))["decided_by"]
+
+
+@needs_pg
+async def test_a_pending_proposal_shadowed_by_two_overrides_lists_each(
+    demo, granted, monkeypatch,  # noqa: F811
+):
+    a = await granted(DRAFTER, "catalog.tag", shadow_runs=2)
+    b = await granted(DRAFTER, "jira.add_comment", shadow_runs=4)
+    out = await _run(monkeypatch, DRAFTER, _two_action_proposal("Two shadows"))
+    row = await _rpc_list_row(out["proposal_id"])
+    assert {m["override_id"]: (m["k"], m["n"], m["complete"]) for m in row["shadow"]} == {
+        a["id"]: (0, 2, False), b["id"]: (0, 4, False)}
+
+
+@needs_pg
+async def test_get_events_returns_the_override_live_event(demo, granted, monkeypatch):  # noqa: F811
+    ovr = await granted(DRAFTER, shadow_runs=1)
+    await _approve(await _run(monkeypatch, DRAFTER, _tag_proposal("Shadow")))
+    await _run(monkeypatch, DRAFTER, _tag_proposal("Live now"))
+    got = await routes.get_events(kind="override.live", ref_id=ovr["id"])
+    assert [e["kind"] for e in got["events"]] == ["override.live"]
+    assert got["events"][0]["ref_id"] == ovr["id"]

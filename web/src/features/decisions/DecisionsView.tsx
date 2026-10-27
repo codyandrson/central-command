@@ -14,7 +14,7 @@ import { BulkDismissDialog } from './BulkDismissDialog';
 import { agingLevel, ageOf, oldestAge, STALE_HOURS, type OldestAge } from './aging';
 import { ListDetailSplit } from '@/components/Splitter';
 import type {
-  DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, WorkItem,
+  DecidedBy, DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, ShadowMark, WorkItem,
 } from './types';
 
 /* The panes used to call `useDecisions()` themselves, which meant three live
@@ -140,6 +140,46 @@ function OriginChip({ p }: { p: Pick<ProposalSummary, 'agent_id' | 'origin'> }) 
   );
 }
 
+/* ── Which gate decided ── */
+function decidedByText(d: DecidedBy): string {
+  if (d.kind === 'auditor') return 'decided by the auditor';
+  if (d.kind === 'operator') return 'decided by you';
+  return `decided by ${d.overrides
+    .map((o) => `override ${o.override_id}${o.scope_text ? ` (${o.scope_text})` : ''}`)
+    .join(' and ')}`;
+}
+
+function DecidedByLabel({ decidedBy }: { decidedBy?: DecidedBy | null }) {
+  if (!decidedBy) return null;
+  return (
+    <span
+      data-testid="decided-by"
+      data-kind={decidedBy.kind}
+      className="text-[0.667rem] text-muted-foreground"
+    >
+      {decidedByText(decidedBy)}
+    </span>
+  );
+}
+
+function ShadowBadges({ shadow }: { shadow?: ShadowMark[] }) {
+  if (!shadow?.length) return null;
+  return (
+    <>
+      {shadow.map((m) => (
+        <span
+          key={m.override_id}
+          data-testid="shadow-badge"
+          title="This write would run by an override but is still in its shadow period: you decide it, and your approvals count toward the override going live."
+          className="cockpit-badge"
+        >
+          shadow {m.k} of {m.n} of override {m.override_id}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /* ── List rows ── */
 function ProposalRowItem({ p, active, onSelect }: {
   p: ProposalSummary; active: boolean; onSelect: () => void;
@@ -156,6 +196,9 @@ function ProposalRowItem({ p, active, onSelect }: {
         <p className="mt-0.5 truncate text-[0.667rem] text-muted-foreground">
           {p.origin?.consulted_by ? `${p.agent_id} · asked by ${p.origin.consulted_by}` : p.agent_id}
         </p>
+        {!!p.shadow?.length && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1"><ShadowBadges shadow={p.shadow} /></div>
+        )}
       </div>
       <AgeChip iso={p.created_at} />
       <RelativeTime iso={p.created_at} />
@@ -214,6 +257,7 @@ function HistoryRowItem({ p, active, onSelect }: {
           <StatusBadge status={p.status} />
           {p.simulated && <SimulatedBadge />}
         </div>
+        <DecidedByLabel decidedBy={p.decided_by} />
       </div>
       <RelativeTime iso={p.decided_at} />
     </button>
@@ -1024,6 +1068,7 @@ function ProposalPane({
         <div className="mb-1 flex items-center gap-2">
           <span className="cockpit-badge">{detail.agent_id}</span>
           <OriginChip p={detail} />
+          <ShadowBadges shadow={detail.shadow} />
           <RelativeTime iso={detail.created_at} />
           {/* The run that DRAFTED this. `agent_id` is the drafter, never the
               subject (CLAUDE.md), so the session key is built from it — the
@@ -1250,6 +1295,7 @@ function ProposalPane({
           <div className="flex items-center gap-2">
             <StatusBadge status={detail.status} />
             {detail.simulated && <SimulatedBadge />}
+            <DecidedByLabel decidedBy={detail.decided_by} />
             {detail.decided_at && (
               <span className="text-[0.667rem] text-muted-foreground">
                 decided <RelativeTime iso={detail.decided_at} />

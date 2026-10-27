@@ -425,6 +425,18 @@ stateDiagram-v2
   approval of it counts toward every override it matched. The pre-check and
   the Executor's backstop refuse an override still in its period (`k of N` in
   the reason).
+  **Which gate decided (story 10).** The proposal detail (`GET /proposals/{id}`,
+  `proposals.get`), the pending list (`decisions.list`) and the history
+  (`decisions.history`) carry two derived fields (`routes.annotate_gate_facts`,
+  pinned by `tests/test_overrides_wire.py`): `decided_by`, null while undecided,
+  else `{kind: operator | auditor | override, overrides: [{override_id,
+  scope_text}]}`, read from the newest `proposal.decided` actor (provenance
+  approver as fallback) and parsed only by `overrides.override_ids_of`, so a
+  multi-override decision lists every override and an override is never shown
+  as the operator; and `shadow`, `[{override_id, k, n, complete}]` on a pending
+  proposal in a shadow period (else `[]`), with k recomputed fresh by
+  `overrides.shadow_state` because the stored mark is as of the evaluation. The
+  cockpit renders `scope_text` and builds none.
   **Scope.** A row's `scope` is `{}` (every use) or any of three forms, ANDed,
   with no regex and no time windows: `argument` (`{name, values}`: exact
   values of one named argument, which must exist in `contract.ARG_SPECS` for

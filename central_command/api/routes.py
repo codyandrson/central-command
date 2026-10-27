@@ -2202,6 +2202,69 @@ async def _jira_issues_for(actions: list[dict]) -> dict[str, dict]:
     return dict(zip(keys, await asyncio.gather(*(one(k) for k in keys))))
 
 
+_PENDING_STATUSES = ("AWAITING_HUMAN", "PROPOSED")
+
+
+async def annotate_gate_facts(rows: list[dict]) -> None:
+    """Stamp each proposal row with the two gate signals the cockpit renders
+    (epic-gate-overrides story 10), in place. The cockpit renders them and
+    builds neither:
+
+    - `decided_by` — None while undecided, else `{kind: operator | auditor |
+      override, overrides: [{override_id, scope_text}]}`; `overrides` lists
+      every override that decided it (empty unless kind is `override`). The
+      override ids come ONLY from `overrides.override_ids_of`; an override
+      approval is never presented as the operator's.
+    - `shadow` — `[{override_id, k, n, complete}]` for a pending proposal
+      parked in an override's shadow period, else `[]`. k is recomputed FRESH
+      (`overrides.shadow_state`): the stored value is as of the evaluation and
+      the operator's later approvals advance it. A revoked override no longer
+      shadows, so it is dropped.
+    """
+    from central_command.gateway import overrides
+
+    facts = await repo.proposal_gate_facts([r["id"] for r in rows])
+    cache: dict[str, dict | None] = {}
+
+    async def override_row(oid: str) -> dict | None:
+        if oid not in cache:
+            cache[oid] = await repo.get_gate_override(oid)
+        return cache[oid]
+
+    for row in rows:
+        f = facts.get(row["id"])
+        row["decided_by"], row["shadow"] = None, []
+        if f is None:
+            continue
+        status = row.get("status") or f["status"]
+        if status in _PENDING_STATUSES:
+            ev = f["override_eval"] or {}
+            if ev.get("outcome") == "shadow":
+                for mark in ev.get("shadow") or []:
+                    o = await override_row(mark["override_id"])
+                    if o is None or o.get("revoked_at"):
+                        continue
+                    row["shadow"].append(
+                        (await overrides.shadow_state(o)).as_mark())
+            continue
+        actor = f["decided_actor"] or f["provenance_approver"]
+        if not actor:
+            continue
+        ids = overrides.override_ids_of(actor)
+        if ids:
+            ovs = []
+            for oid in ids:
+                o = await override_row(oid)
+                ovs.append({"override_id": oid,
+                            "scope_text": overrides.scope_text(o) if o else ""})
+            row["decided_by"] = {"kind": "override", "overrides": ovs}
+        else:
+            row["decided_by"] = {
+                "kind": "auditor" if actor == "auditor" else "operator",
+                "overrides": [],
+            }
+
+
 @router.get("/proposals/{proposal_id}")
 async def get_proposal(proposal_id: str) -> dict:
     row = await repo.load_proposal(proposal_id)
@@ -2347,6 +2410,7 @@ async def get_proposal(proposal_id: str) -> dict:
     )
     if verdicts:
         row["audit"] = verdicts[0]["payload"]
+    await annotate_gate_facts([row])
     return row
 
 

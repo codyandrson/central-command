@@ -1232,6 +1232,36 @@ async def load_proposal(proposal_id: str) -> dict | None:
         await conn.close()
 
 
+async def proposal_gate_facts(proposal_ids: list[str]) -> dict[str, dict]:
+    """Per proposal, the three facts the cockpit's "which gate decided" signal
+    reads, in one query for a whole page: the newest `proposal.decided` event's
+    actor, the provenance approver, and `override_eval`. Read-only."""
+    if not proposal_ids:
+        return {}
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select p.id, p.status, p.override_eval,
+                   p.provenance ->> 'approver' as provenance_approver,
+                   (select e.actor from audit_event e
+                     where e.ref_id = p.id and e.kind = 'proposal.decided'
+                     order by e.id desc limit 1) as decided_actor
+              from proposal p where p.id = any($1::text[])
+            """,
+            proposal_ids,
+        )
+        out = {}
+        for r in rows:
+            d = dict(r)
+            v = d["override_eval"]
+            d["override_eval"] = json.loads(v) if isinstance(v, str) else v
+            out[d["id"]] = d
+        return out
+    finally:
+        await conn.close()
+
+
 async def set_proposal_executed(proposal_id: str, provenance: dict) -> None:
     conn = await _conn()
     try:
