@@ -1118,7 +1118,11 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     from central_command.runtime import run as run_mod
     from central_command.runtime import tools as tools_mod
     from central_command.runtime import converse as converse_mod
-    from central_command.runtime.durable import deferred_results, load_messages
+    from pydantic_ai import CallDeferred
+
+    from central_command.runtime.durable import (
+        deferred_results, load_messages, unanswered_calls,
+    )
 
     session = await repo.get_session(session_id)
     if session is None or session["status"] != "AWAITING_RESUME":
@@ -1157,11 +1161,39 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
 
     from central_command.contract import DependencyDown
 
+    messages = load_messages(claimed)
     try:
         text = await tools_mod.run_read_by_name(
             pending["tool"], pending.get("args") or {},
             TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True),
         )
+    except CallDeferred as paused:
+        # The only read that can pause for another reason: a consult re-run
+        # whose specialist now DRAFTED (the outage is over and it did its
+        # work). The asker waits on that proposal exactly as it would have
+        # with no outage — parked through the same consult-wait seam, from the
+        # history it was paused with.
+        from pydantic_ai import DeferredToolRequests
+        from types import SimpleNamespace
+
+        from central_command.runtime import consult as consult_mod
+
+        meta = paused.metadata or {}
+        call = next((c for c in unanswered_calls(messages)
+                     if c.tool_call_id == pending["tool_call_id"]), None)
+        if "consult_wait" not in meta or call is None:
+            raise
+        shim = SimpleNamespace(
+            output=DeferredToolRequests(calls=[call], metadata={call.tool_call_id: meta}),
+            all_messages=lambda: messages,
+        )
+        waited = await consult_mod.park_consult_wait(
+            session_id=session_id, agent_id=agent_id, result=shim, call=call,
+            task_id=task_id,
+        )
+        await _land_task_question_outcome(task_id, waited)
+        return {"resumed": True, "session_id": session_id, "after": after,
+                "attempts": attempts, **waited}
     except DependencyDown as down:
         stored = await resume_park.park_resume(
             session_id, {**pending, "attempts": attempts}, down.original,
@@ -1179,7 +1211,6 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         await _land_resumed_run_failure(task_id, e, after=after)
         raise
 
-    messages = load_messages(claimed)
     results = await deferred_results(
         messages, pending["tool_call_id"], text,
         session_id=session_id, agent_id=agent_id,

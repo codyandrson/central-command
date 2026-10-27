@@ -413,16 +413,30 @@ async def test_a_fixable_read_error_reaches_the_agent(monkeypatch):
 
 
 async def test_a_read_failure_still_degrades_rather_than_raising(monkeypatch):
-    """Best-effort stays best-effort: a down provider degrades the run, never
-    wedges it — the reason is added, the swallow is not."""
+    """A NO stays best-effort: the provider answered, so the reason is added to
+    honest text, not swallowed. An OUTAGE no longer degrades (FR-40): with no
+    landing tail it re-raises, stamped with what was down."""
+    import pytest
+
     from central_command.runtime import tools
+
+    async def _no(issue_key):
+        raise RuntimeError("issue key is malformed")
+
+    monkeypatch.setattr(tools.jira, "get_issue", _no)
+    out = await tools.jira_get_issue(None, "TASKS-12")
+    assert "malformed" in out and "RuntimeError" in out
 
     async def _down(issue_key):
         raise RuntimeError("connection refused")
 
+    async def _no_wait(delay):
+        return None
+
+    monkeypatch.setattr(tools, "_sleep", _no_wait)
     monkeypatch.setattr(tools.jira, "get_issue", _down)
-    out = await tools.jira_get_issue(None, "TASKS-12")
-    assert "connection refused" in out and "RuntimeError" in out
+    with pytest.raises(RuntimeError, match="connection refused"):
+        await tools.jira_get_issue(None, "TASKS-12")
 
 
 def test_tool_results_are_truncated_honestly():

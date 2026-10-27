@@ -575,9 +575,12 @@ async def test_sandbox_exec_degrades_when_the_runner_is_down(monkeypatch):
         raise httpx.ConnectError("connection refused")
 
     _patch_runner_http(monkeypatch, handler)
-    out = await tools_mod.sandbox_exec(_Ctx(), "echo hi")
-    assert "failed" in out.lower()
-    assert "ConnectError" in out
+    # An outage no longer degrades into text (FR-40): a run with no landing
+    # tail re-raises it (under one it parks, tests/test_outage_doctrine.py),
+    # stamped with the dependency that was down.
+    with pytest.raises(httpx.ConnectError) as raised:
+        await tools_mod.sandbox_exec(_Ctx(), "echo hi")
+    assert getattr(raised.value, tools_mod._DEPENDENCIES_ATTR) == ("sandbox",)
 
 
 async def test_sandbox_write_and_read_round_trip(monkeypatch):

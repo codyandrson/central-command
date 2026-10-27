@@ -77,20 +77,45 @@ async def test_transient_then_success_retries_once_and_returns_the_result(
     assert no_wait == [0.5]
 
 
-async def test_transient_twice_degrades_honestly_after_exactly_two_attempts(
+async def test_transient_twice_is_an_outage_not_a_degradation_text(
     monkeypatch, no_wait
 ):
+    """Two attempts, then the OUTAGE doctrine (FR-40, epic-outage-doctrine): no
+    "proceed without it" for a DOWN dependency. With no landing tail (`ctx`
+    None here) the original transient failure re-raises into the unit's own
+    DOWN path, stamped with what was down; under a tail it parks the run
+    (`tests/test_outage_doctrine.py`)."""
     spy = _Spy(_transient(), _transient())
     monkeypatch.setattr(jira, "get_issue", spy)
 
-    out = await tools.jira_get_issue(None, "TASKS-1")
+    with pytest.raises(httpx.ConnectError) as raised:
+        await tools.jira_get_issue(None, "TASKS-1")
 
     assert spy.calls == 2
-    # Today's honest degradation, unchanged, plus the count.
-    assert out.startswith("jira read failed (ConnectError) after 2 attempts.")
-    assert "Connection refused" in out
-    assert "proceed without it and say so" in out
+    assert getattr(raised.value, tools._DEPENDENCIES_ATTR) == ("jira",)
     assert no_wait == [0.5]
+
+
+async def test_a_page_that_is_not_a_dependency_keeps_its_degradation_text(
+    monkeypatch, no_wait
+):
+    """`fetch_url` reads the open web: a 503 from a site is that site's answer,
+    not an outage of anything we probe, so its text stays — even in a run that
+    may park."""
+    from types import SimpleNamespace
+
+    from central_command.integrations import webfetch
+    from central_command.runtime.deps import TriageDeps
+
+    spy = _Spy(_transient(), _transient())
+    monkeypatch.setattr(webfetch, "fetch", spy)
+    ctx = SimpleNamespace(deps=TriageDeps(agent_id="jira-expert", park_reads=True))
+
+    out = await tools.fetch_url(ctx, "https://example.com/page")
+
+    assert spy.calls == 2
+    assert out.startswith("web fetch failed (ConnectError) after 2 attempts.")
+    assert "proceed without it and say so" in out
 
 
 async def test_a_semantic_failure_is_not_retried_at_all(monkeypatch, no_wait):
@@ -110,22 +135,20 @@ async def test_a_semantic_failure_is_not_retried_at_all(monkeypatch, no_wait):
 
 async def test_the_graph_and_litellm_reads_carry_the_same_bound(monkeypatch, no_wait):
     """The wrapper rides every read that calls out of the box, not just Jira.
-    The bound is the same everywhere — two attempts — but what happens after it
-    is not: the graph search is under the outage doctrine (FR-40, epic-outage-
-    doctrine story 1) and no longer degrades into "proceed without it". With no
-    landing tail (`ctx` None here, so `park_reads` is False) the ORIGINAL
-    transient failure re-raises into the unit's own DOWN path; the parking half
-    is `tests/test_outage_doctrine.py`'s."""
+    The bound is the same everywhere — two attempts — and so is what follows it
+    (the outage doctrine): with no landing tail the transient failure re-raises
+    stamped with the tool's own dependencies."""
     graph = _Spy(_transient(), _transient())
     monkeypatch.setattr(graphiti, "search_facts", graph)
-    models = _Spy(_transient(), [{"model_name": "cc-default"}])
+    models = _Spy(_transient(), [{"model_name": "cc-default"}], _transient())
     monkeypatch.setattr(litellm_client, "list_models", models)
 
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(httpx.ConnectError) as raised:
         await tools.search_knowledge_graph(None, "renewal")
     models_out = await tools.litellm_list_models(None)
 
     assert graph.calls == 2
+    assert getattr(raised.value, tools._DEPENDENCIES_ATTR) == ("graph", "embedder")
     assert models.calls == 2
     assert "cc-default" in models_out and "unavailable" not in models_out
     assert no_wait == [0.5, 0.5]
@@ -134,13 +157,13 @@ async def test_the_graph_and_litellm_reads_carry_the_same_bound(monkeypatch, no_
 async def test_a_semantic_graph_failure_still_returns_the_honest_text(
     monkeypatch, no_wait
 ):
-    """A NO from the graph is the graph answering: one call, no retry, and the
-    same text as before the doctrine — only an OUTAGE stopped degrading."""
+    """A NO from the graph is the graph answering: one call, no retry, and an
+    honest text that quotes what it said — only an OUTAGE stopped degrading."""
     graph = _Spy(_semantic())
     monkeypatch.setattr(graphiti, "search_facts", graph)
 
     out = await tools.search_knowledge_graph(None, "renewal")
 
     assert graph.calls == 1
-    assert out == "knowledge graph unavailable (ValueError); proceed without it"
+    assert out.startswith("knowledge graph search failed (ValueError). The provider said:")
     assert no_wait == []

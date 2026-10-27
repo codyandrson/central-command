@@ -135,7 +135,8 @@ async def test_read_tool_degrades_when_graph_is_down(monkeypatch):
 
     monkeypatch.setattr(graphiti, "search_facts", refused)
     out = await tools.search_knowledge_graph(None, "anything")
-    assert "unavailable" in out and "proceed without it" in out
+    assert out.startswith("knowledge graph search failed (ValueError)")
+    assert "not a node" in out
 
 
 # --- executor write mapping (graph faked; always runs) -------------------------

@@ -180,7 +180,10 @@ def test_every_parkable_read_classifies_as_a_read_park():
     re-executable reads (what the resume can run) are one list."""
     assert durable.READ_TOOLS == frozenset(tools._parkable_reads())
     for name in durable.READ_TOOLS:
-        assert durable.classify_deferred(ToolCallPart(tool_name=name, args={})) == "read"
+        call = ToolCallPart(tool_name=name, args={})
+        # The tool ships `kind: 'read'` with its pause: that beats the name
+        # (`consult_agent` is both a consult wait and a read).
+        assert durable.classify_deferred(call, {"kind": "read"}) == "read"
 
 
 def test_runtime_never_imports_the_heartbeat_tier():
@@ -224,7 +227,7 @@ async def test_a_no_from_the_graph_still_returns_honest_text(monkeypatch):
 
     ctx = SimpleNamespace(deps=TriageDeps(agent_id="jira-expert", park_reads=True))
     out = await tools.search_knowledge_graph(ctx, "contract renewal")
-    assert out == "knowledge graph unavailable (ValueError); proceed without it"
+    assert out.startswith("knowledge graph search failed (ValueError)")
 
 
 async def test_run_read_by_name_re_validates_the_stored_arguments(graph):
@@ -444,3 +447,360 @@ async def test_an_ingest_runs_down_read_re_raises_and_the_item_releases(
     # The ORIGINAL Neo4j failure reached the dispatcher, not a wrapper.
     assert "Couldn't connect to graph:7687" in released[-1]["payload"]["error"]
     assert graph.calls == 2
+
+
+# ═══ story 2: every live read tool parks on DOWN, answers a NO honestly ═══════
+
+import re  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+import httpx  # noqa: E402
+from pydantic_ai import CallDeferred  # noqa: E402
+
+from central_command.contract.dependencies import (  # noqa: E402
+    NOT_READS,
+    TOOL_DEPENDENCY,
+    is_parkable,
+)
+from central_command.integrations import (  # noqa: E402
+    confluence,
+    email_facade,
+    forge,
+    jira,
+)
+from central_command.integrations import litellm as litellm_client  # noqa: E402
+from central_command.runtime import consult as consult_mod  # noqa: E402
+from central_command.runtime import packs as packs_mod  # noqa: E402
+from central_command.runtime.deps import TriageDeps  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def _park_ctx(agent_id: str = "jira-expert", park: bool = True):
+    return SimpleNamespace(deps=TriageDeps(agent_id=agent_id, park_reads=park))
+
+
+def _outage() -> Exception:
+    return httpx.ConnectError("[Errno 111] Connection refused")
+
+
+def _facade_outage() -> Exception:
+    try:
+        raise email_facade.EmailFacadeError("email façade list unreachable at x: ") \
+            from httpx.ConnectTimeout("")
+    except email_facade.EmailFacadeError as e:
+        return e
+
+
+def _facade_no() -> Exception:
+    return email_facade.EmailFacadeError("email façade list failed: HTTP 400 bad query")
+
+
+async def _raising(exc):
+    async def _fn(*a, **kw):
+        raise exc
+
+    return _fn
+
+
+# (dependency, tool, call, patcher(monkeypatch, exc), the tuple a park records)
+def _graph(mp, exc):
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(graphiti, "search_facts", _boom)
+
+
+def _jira(mp, exc):
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(jira, "get_issue", _boom)
+
+
+def _confluence(mp, exc):
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(confluence, "get_page", _boom)
+
+
+def _forge(mp, exc):
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(forge, "list_instances", _boom)
+
+
+def _calendar(mp, exc):
+    from central_command.reports import ea_calendar
+
+    mp.setattr(settings, "calendar_facade_token", "token")
+
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(ea_calendar, "day", _boom)
+
+
+def _mail(mp, exc):
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(email_facade, "list_refs", _boom)
+
+
+def _litellm(mp, exc):
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(litellm_client, "list_models", _boom)
+
+
+def _sandbox(mp, exc):
+    from central_command.integrations import sandbox_client
+
+    mp.setattr(settings, "demo_mode", False)
+
+    async def _id(ctx):
+        return "sb-1"
+
+    async def _boom(*a, **k):
+        raise exc
+
+    mp.setattr(tools, "_sandbox_id_for", _id)
+    mp.setattr(sandbox_client, "exec_cmd", _boom)
+
+
+_CASES = {
+    "graph": (tools.search_knowledge_graph, ("contract renewal",), _graph, _outage,
+              ValueError, ["graph", "embedder"]),
+    "jira": (tools.jira_get_issue, ("TASKS-1",), _jira, _outage,
+             ValueError, ["jira"]),
+    "confluence": (tools.confluence_get_page, ("1001",), _confluence, _outage,
+                   ValueError, ["confluence"]),
+    "forge": (tools.forge_list_instances, (), _forge, _outage,
+              ValueError, ["forge"]),
+    "calendar": (tools.read_calendar, (1,), _calendar, _outage,
+                 ValueError, ["calendar"]),
+    "n8n": (tools.mail_search, ("from:jane.doe@example.com",), _mail, _facade_outage,
+            _facade_no, ["n8n"]),
+    "litellm": (tools.litellm_list_models, (), _litellm, _outage,
+                ValueError, ["litellm"]),
+    "sandbox": (tools.sandbox_exec, ("ls",), _sandbox, _outage,
+                ValueError, ["sandbox"]),
+}
+
+
+@pytest.mark.parametrize("dep", sorted(_CASES))
+async def test_each_dependencys_reader_parks_on_down(monkeypatch, dep):
+    """One reader per dependency, under a tail (`park_reads`): a transient
+    failure pauses the run with the tool's tuple — and, with no tail, re-raises
+    the original failure stamped with that tuple instead."""
+    fn, args, patch, outage, _no, expected = _CASES[dep]
+
+    patch(monkeypatch, outage())
+    with pytest.raises(CallDeferred) as paused:
+        await fn(_park_ctx(), *args)
+    meta = paused.value.metadata
+    assert meta["kind"] == "read" and meta["tool"] == fn.__name__
+    assert meta["dependencies"] == expected
+    assert DEGRADED not in json.dumps(meta)
+
+    patch(monkeypatch, outage())
+    with pytest.raises(Exception) as raised:
+        await fn(_park_ctx(park=False), *args)
+    assert not isinstance(raised.value, CallDeferred)
+    assert getattr(raised.value, tools._DEPENDENCIES_ATTR) == tuple(expected)
+
+
+@pytest.mark.parametrize("dep", sorted(_CASES))
+async def test_each_dependencys_reader_answers_a_no_with_honest_text(monkeypatch, dep):
+    fn, args, patch, _outage_, no, _expected = _CASES[dep]
+
+    patch(monkeypatch, no("the service said no") if no is ValueError else no())
+    out = await fn(_park_ctx(), *args)
+
+    assert isinstance(out, str) and out
+    assert "failed" in out or "unavailable" in out
+
+
+async def test_a_calendar_that_is_not_configured_stays_text(monkeypatch):
+    monkeypatch.setattr(settings, "calendar_facade_token", "")
+    out = await tools.read_calendar(_park_ctx(), 0)
+    assert out == "calendar unavailable (not configured)"
+
+
+async def test_a_local_reader_never_parks(monkeypatch):
+    """Postgres-only work has nothing to wait for: nothing probes `local`, so a
+    failure there propagates or degrades as it always has — under a tail too."""
+
+    async def _boom():
+        raise _outage()
+
+    monkeypatch.setattr(repo, "list_loes", _boom)
+    out = await tools.loe_list(_park_ctx())
+    assert isinstance(out, str) and "lines of effort read failed" in out
+
+    down = DependencyDown(("local",), "x", _outage())
+    with pytest.raises(httpx.ConnectError):
+        tools._park_read_or_reraise(_park_ctx(), down, {})
+    assert not is_parkable(TOOL_DEPENDENCY["loe_list"])
+    assert "loe_list" not in durable.READ_TOOLS
+
+
+async def test_a_web_page_is_not_a_dependency():
+    assert TOOL_DEPENDENCY["fetch_url"] == () and TOOL_DEPENDENCY["search_web"] == ()
+    assert "fetch_url" not in durable.READ_TOOLS
+
+
+def _registry_tool_names() -> set[str]:
+    src = (REPO / "central_command/gateway/capabilities.py").read_text()
+    return set(re.findall(r'holder="[^"]*?\((\w+) tool\)', src))
+
+
+def test_every_read_tool_reachable_from_a_pack_has_a_dependency_entry():
+    """The map cannot fall behind the tools: every non-propose tool a pack
+    offers is a key of TOOL_DEPENDENCY or a named non-read, and so is every
+    tool the capability registry's read rows name as their holder."""
+    pack_tools = {t for p in packs_mod.PACKS.values() for t in p.tool_names
+                  if not t.startswith("propose_")}
+    missing = sorted(pack_tools - set(TOOL_DEPENDENCY) - NOT_READS)
+    assert not missing, f"read tools with no TOOL_DEPENDENCY entry: {missing}"
+
+    registry = _registry_tool_names()
+    assert registry, "the registry's holders no longer name tools — update this scan"
+    assert not sorted(registry - set(TOOL_DEPENDENCY) - NOT_READS)
+
+    # …and nothing in the map names a tool that is gone.
+    assert not sorted(n for n in TOOL_DEPENDENCY if not hasattr(tools, n))
+    assert not (set(TOOL_DEPENDENCY) & NOT_READS)
+
+
+def test_every_parkable_tool_is_wrapped_and_the_two_lists_agree():
+    for name in durable.READ_TOOLS:
+        assert hasattr(getattr(tools, name), "__wrapped__"), name
+    assert durable.READ_TOOLS == frozenset(tools._parkable_reads())
+
+
+def test_no_outage_path_says_proceed_without_it():
+    """The wording survives only where the dependency ANSWERED (a NO), where
+    nothing probed is involved (a web page), and in comments."""
+    allowed_tools = {"def _read_failed"}
+    for rel in ("central_command/runtime/tools.py", "central_command/runtime/consult.py"):
+        tree = ast.parse((REPO / rel).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if re.search(r"proceed without (it|them)", node.value):
+                    # Docstrings are prose; a string that is returned is a text.
+                    if len(node.value) > 120 and "\n" in node.value:
+                        continue
+                    owner = _owner(tree, node)
+                    assert owner in allowed_tools | {"_degraded"}, (rel, owner, node.value[:80])
+
+
+def _owner(tree, target) -> str:
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if any(n is target for n in ast.walk(fn)):
+                return f"def {fn.name}" if fn.name == "_read_failed" else fn.name
+    return "<module>"
+
+
+async def test_two_pausing_reads_in_one_turn_tell_the_second_to_call_again():
+    """A turn that pauses on two reads parks one; the other is answered with
+    text that says to simply call it again — not "the decision you just
+    received is about the other call"."""
+    messages = [
+        ModelRequest(parts=[]),
+        ModelResponse(parts=[
+            ToolCallPart(tool_name="search_knowledge_graph", args={}, tool_call_id="a"),
+            ToolCallPart(tool_name="jira_get_issue", args={}, tool_call_id="b"),
+        ]),
+    ]
+    results = await durable.deferred_results(messages, "a", "the result")
+    assert results.calls["a"] == "the result"
+    assert "call it again" in str(results.calls["b"])
+    assert "operator" not in str(results.calls["b"])
+
+
+async def test_a_reranker_outage_is_blamed_on_litellm_not_the_graph():
+    class RerankHTTPError(Exception):
+        pass
+
+    err = RerankHTTPError("503")
+    assert tools._attributed(("graph", "embedder"), err) == ("litellm",)
+    assert tools._attributed(("graph", "embedder"), _outage()) == ("graph", "embedder")
+
+
+# --- a consult whose specialist is DOWN parks the ASKER -----------------------
+
+
+def _asker_model() -> FunctionModel:
+    def _respond(messages, info) -> ModelResponse:
+        for m in messages:
+            if isinstance(m, ModelRequest):
+                for p in m.parts:
+                    if isinstance(p, ToolReturnPart) and p.tool_name == "consult_agent":
+                        return ModelResponse(parts=[TextPart(content=f"Advice: {p.content}")])
+        return ModelResponse(parts=[ToolCallPart(
+            tool_name="consult_agent",
+            args={"agent_id": "jira-expert", "question": "When is the renewal due?"},
+            tool_call_id="call_consult",
+        )])
+
+    return FunctionModel(_respond)
+
+
+def _specialist_model() -> FunctionModel:
+    def _respond(messages, info) -> ModelResponse:
+        ret = _graph_return(messages)
+        if ret is not None:
+            return ModelResponse(parts=[TextPart(content=f"Specialist: {ret.content}")])
+        return ModelResponse(parts=[ToolCallPart(
+            tool_name="search_knowledge_graph", args={"query": "renewal"},
+            tool_call_id="call_inner")])
+
+    return FunctionModel(_respond)
+
+
+@needs_pg
+async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(
+    monkeypatch, graph
+):
+    real = consult_mod.consult
+
+    async def with_specialist_model(*a, **kw):
+        return await real(*a, model=_specialist_model(), **kw)
+
+    monkeypatch.setattr(consult_mod, "consult", with_specialist_model)
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _asker_model()))
+    task_id = "task_" + uuid.uuid4().hex[:12]
+    await repo.create_task(task_id, "Ask the Jira specialist", "Consult jira-expert.",
+                           "litellm-manager")
+
+    out = await routes._run_assigned_task(await repo.get_task(task_id))
+
+    assert out["parked"] is True
+    session_id = out["session_id"]
+    pending = (await repo.get_session_run_state(session_id))["pending_resume"]
+    assert pending["kind"] == "read" and pending["tool"] == "consult_agent"
+    assert pending["tool_call_id"] == "call_consult"
+    assert pending["dependencies"] == ["graph", "embedder"]
+    assert pending["args"] == {"agent_id": "jira-expert",
+                               "question": "When is the renewal due?"}
+    assert (await repo.get_task(task_id))["status"] == "IN_PROGRESS"
+    assert await repo.session_status(session_id) == "AWAITING_RESUME"
+
+    # The graph comes back: the sweep re-runs the WHOLE consult and the asker
+    # finishes with the specialist's real answer.
+    graph.down = False
+    monkeypatch.setattr(models, "resolve_model", aresolve(lambda *a, **k: _asker_model()))
+    result = await orchestration.retry_sweep(cache=_Probes())
+    await orchestration.sweep_settle()
+    assert session_id in result["resumed"]
+
+    row = await repo.get_task(task_id)
+    assert row["status"] == "DONE"
+    assert FACT in row["outcome"]
+    assert await repo.session_status(session_id) == "DONE"

@@ -1057,7 +1057,9 @@ async def _land(
     # which held only while the orchestrator was the sole agent that could
     # `ask_operator`; the moment every agent could, a question here would have
     # been handed to the Proposal validator — the same break the operator hit in chat.
-    kind = classify_deferred(call)
+    metadata = (getattr(result.output, "metadata", None) or {}).get(
+        call.tool_call_id) or {}
+    kind = classify_deferred(call, metadata)
     if kind == "ask":
         from central_command.runtime.questions import park_question
 
@@ -1087,8 +1089,6 @@ async def _land(
         # in place; the retry sweep re-executes the read and re-enters here.
         from central_command.runtime.resume_park import park_read
 
-        metadata = (getattr(result.output, "metadata", None) or {}).get(
-            call.tool_call_id) or {}
         stored = await park_read(
             session_id=session_id, result=result, call=call, metadata=metadata,
             after="task", task_id=task_id,

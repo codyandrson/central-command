@@ -23,6 +23,7 @@ from pydantic_ai.messages import (
 )
 
 from central_command.contract import Proposal
+from central_command.contract import dependencies as _dependencies
 
 
 def extract_deferred(result) -> ToolCallPart | None:
@@ -77,13 +78,22 @@ TASK_WAIT_TOOLS = frozenset({"create_task"})
 # A READ defers only when its dependency is DOWN and the run's entry set
 # `deps.park_reads` (the outage doctrine, FR-40): the run parks AWAITING_RESUME
 # with the pending read and the retry sweep re-executes it when the probes pass.
-# Equal to `tools._parkable_reads()`'s keys (parity-tested); story 2 widens both.
-READ_TOOLS = frozenset({"search_knowledge_graph"})
+# One list with `tools._parkable_reads()`: both derive from
+# `contract.dependencies.TOOL_DEPENDENCY` (parity-tested).
+READ_TOOLS = _dependencies.parkable_reads()
 
 
-def classify_deferred(call) -> str:
+def classify_deferred(call, metadata: dict | None = None) -> str:
     """'proposal' | 'ask' | 'consult' | 'task_wait' | 'read' | 'project' |
-    'unknown' for a deferred call."""
+    'unknown' for a deferred call.
+
+    `metadata` is what the tool shipped with its `CallDeferred`
+    (`DeferredToolRequests.metadata[call.tool_call_id]`). A READ pause says so
+    there (`kind: 'read'`), and that beats the tool name: `consult_agent` is
+    both a consult wait (its specialist drafted) and a read (its specialist
+    was DOWN), and only the metadata tells the two apart."""
+    if isinstance(metadata, dict) and metadata.get("kind") == "read":
+        return "read"
     tool = getattr(call, "tool_name", "") or ""
     if tool in PROPOSE_TOOLS:
         return "proposal"
@@ -194,6 +204,13 @@ SIBLING_NOT_PARKED = (
 )
 
 
+SIBLING_READ_NOT_RUN = (
+    "`{tool}` was NOT run: this turn paused on another read whose dependency "
+    "was down, and the run was resumed with that read's result instead. If "
+    "you still need this one, simply call it again now."
+)
+
+
 def unanswered_calls(messages) -> list[ToolCallPart]:
     """Every tool call in the LAST model response that nothing has answered —
     the set pydantic-ai requires a result for on resume.
@@ -221,6 +238,15 @@ def unanswered_calls(messages) -> list[ToolCallPart]:
         part for part in messages[last].parts
         if isinstance(part, ToolCallPart) and part.tool_call_id not in answered
     ]
+
+
+def tool_call_id_is_read(messages, tool_call_id: str) -> bool:
+    """Is the call this resume decides one of the READ tools? (The sibling's
+    reword depends on what the DECIDED call was, not only on the sibling.)"""
+    for call in unanswered_calls(messages):
+        if call.tool_call_id == tool_call_id:
+            return call.tool_name in READ_TOOLS
+    return False
 
 
 async def deferred_results(
@@ -254,9 +280,14 @@ async def deferred_results(
     for call in unanswered_calls(messages):
         if call.tool_call_id == tool_call_id:
             continue
-        results.calls[call.tool_call_id] = ToolFailed(
-            SIBLING_NOT_PARKED.format(tool=call.tool_name)
-        )
+        # A PARKED READ resumes with the read's own result, and a sibling that
+        # also paused was never about an operator's decision: tell it to call
+        # the read again, not that "the decision you just received" is about
+        # another call.
+        text = SIBLING_READ_NOT_RUN if (
+            call.tool_name in READ_TOOLS and tool_call_id_is_read(messages, tool_call_id)
+        ) else SIBLING_NOT_PARKED
+        results.calls[call.tool_call_id] = ToolFailed(text.format(tool=call.tool_name))
         bounced.append(call.tool_name)
     if bounced and session_id:
         from central_command import events

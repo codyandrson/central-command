@@ -4,7 +4,10 @@ mutation later (after approval) and supplies the result on resume.
 """
 
 import asyncio
+import contextvars
 import difflib
+import functools
+import inspect
 import json
 import re
 from pathlib import Path, PurePosixPath
@@ -18,9 +21,66 @@ from central_command.contract import (
     Action, DependencyDown, Evidence, Proposal, Reversibility, TRANSIENT,
     classify_failure, validate_action_args,
 )
+from central_command.contract.dependencies import TOOL_DEPENDENCY, is_parkable, parkable_reads
+from central_command.contract.failures import TRANSIENT_STATUS
 from central_command.integrations import confluence, forge, graphiti, jira, litellm_credstore
 from central_command.integrations import litellm as litellm_client
 from central_command.runtime.deps import ThreadDecision, TriageDeps
+
+
+# The tool whose body is running, as (its dependency tuple, its name) — set by
+# `@parkable_read` so a body's `_read_with_retry` / `_read_failed` know what
+# they are standing in for without every call site being told. A ContextVar,
+# so concurrent tool calls (pydantic-ai runs siblings as tasks) never see each
+# other's. Undecorated tools (`fetch_url`, the propose tools) see None and keep
+# their text.
+_READ_CTX: contextvars.ContextVar[tuple[tuple[str, ...], str] | None] = (
+    contextvars.ContextVar("cc_read_ctx", default=None)
+)
+
+def parkable_read(fn=None, *, context: bool = True):
+    """Mark a read tool as one the outage doctrine can park (FR-40).
+
+    The tool's dependency tuple is its entry in `TOOL_DEPENDENCY` — a read
+    without an entry fails at import, so the map cannot fall behind the tools.
+    The wrapper has two jobs, both so no tool body repeats them:
+
+    - it makes the tuple available to the body (`_READ_CTX`), so the body's
+      retry wrapper and its failure text raise `DependencyDown` for an outage
+      and keep the honest text for a NO;
+    - it turns a `DependencyDown` leaving the body into the run's pause
+      (`_park_read_or_reraise`), with the call's arguments as the model sent
+      them, which `run_read_by_name` re-validates on re-execution.
+
+    A tool whose tuple is not parkable (`local`: Postgres-only work, or empty)
+    is returned unchanged: its failures propagate or degrade as they always
+    have. `context=False` is for `consult_agent`, whose sub-run executes OTHER
+    tools inside the call and must not lend them this tool's tuple.
+    """
+    def wrap(fn):
+        deps = TOOL_DEPENDENCY[fn.__name__]
+        if not is_parkable(deps):
+            return fn
+        sig = inspect.signature(fn)
+        first = next(iter(sig.parameters))
+
+        @functools.wraps(fn)
+        async def wrapper(ctx, *args, **kwargs):
+            token = _READ_CTX.set((deps, fn.__name__)) if context else None
+            try:
+                return await fn(ctx, *args, **kwargs)
+            except DependencyDown as down:
+                bound = sig.bind(ctx, *args, **kwargs)
+                given = {k: v for k, v in bound.arguments.items() if k != first}
+                _park_read_or_reraise(ctx, down, given)
+            finally:
+                if token is not None:
+                    _READ_CTX.reset(token)
+
+        return wrapper
+
+    return wrap(fn) if fn is not None else wrap
+
 
 
 def current_time() -> str:
@@ -148,6 +208,7 @@ def _window_note(when: dict) -> str:
     return f" (true at some point {' and '.join(parts)})" if parts else ""
 
 
+@parkable_read
 async def search_knowledge_graph(
     ctx: RunContext, query: str, as_of: str | None = None, after: str | None = None,
     before: str | None = None, center_entity_uuid: str | None = None,
@@ -172,9 +233,10 @@ async def search_knowledge_graph(
       Never invent one: search for the entity first.
     """
     # Reads are ungated by design. A DOWN graph (or embedder: the query is
-    # embedded) PARKS the run where it can be re-entered, and otherwise
-    # re-raises into the unit's own DOWN path — never "proceed without it"
-    # for an outage (FR-40). A NO is the graph answering: honest text.
+    # embedded) parks the run where it can be re-entered — `@parkable_read`
+    # turns the `DependencyDown` this raises into the pause — and otherwise
+    # re-raises into the unit's own DOWN path; never "proceed without it" for
+    # an outage (FR-40). A NO is the graph answering: honest text.
     agent_id = getattr(getattr(ctx, "deps", None), "agent_id", None)
     when = _window(as_of, after, before)
     center = _center(center_entity_uuid)
@@ -184,19 +246,10 @@ async def search_knowledge_graph(
     try:
         facts = await _read_with_retry(
             lambda: graphiti.search_facts(query, max_facts=_GRAPH_MAX_FACTS, agent_id=agent_id,
-                                          **filters),
-            dependency=_GRAPH_SEARCH_DEPENDENCIES, tool="search_knowledge_graph",
+                                          **filters)
         )
-    except DependencyDown as down:
-        _park_read_or_reraise(ctx, down, {
-            "query": query, "as_of": as_of, "after": after, "before": before,
-            "center_entity_uuid": center_entity_uuid,
-        })
-    except Exception as e:  # noqa: BLE001 — a NO from the graph: say so honestly
-        return (
-            f"knowledge graph unavailable ({type(e).__name__})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+    except Exception as e:  # noqa: BLE001 — an outage raised DependencyDown above
+        return _read_failed("knowledge graph search", e)
     if not facts:
         return f"no relevant facts in the knowledge graph{_window_note(when)}"
     stewards = await _steward_attribution()
@@ -245,6 +298,7 @@ def _steward_note(item: dict, stewards: dict[str, str]) -> str:
     return f" [group: {group_id}]"
 
 
+@parkable_read
 async def search_knowledge_graph_entities(
     ctx: RunContext, query: str, entity_types: list[str] | None = None,
     center_entity_uuid: str | None = None,
@@ -279,10 +333,7 @@ async def search_knowledge_graph_entities(
                                           **filters)
         )
     except Exception as e:  # noqa: BLE001 — any transport failure = "no context"
-        return (
-            f"knowledge graph unavailable ({type(e).__name__})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("knowledge graph entity search", e)
     if not nodes:
         return "no relevant entities in the knowledge graph"
     stewards = await _steward_attribution()
@@ -301,6 +352,7 @@ async def search_knowledge_graph_entities(
 # nothing gated.
 
 
+@parkable_read
 async def list_graph_groups(ctx: RunContext) -> str:
     """Every knowledge-graph group Central Command writes to: the shared team
     graph, each steward's domain group, and one private partition per roster
@@ -311,7 +363,7 @@ async def list_graph_groups(ctx: RunContext) -> str:
         groups = await graphiti.known_groups()
         stewards = await graphiti.steward_map()
     except Exception as e:  # noqa: BLE001
-        return f"knowledge graph unavailable ({type(e).__name__}); proceed without it"
+        return _read_failed("knowledge graph read", e)
     lines = []
     for g in groups:
         if g in stewards:
@@ -323,6 +375,7 @@ async def list_graph_groups(ctx: RunContext) -> str:
     return "\n".join(lines)
 
 
+@parkable_read
 async def list_graph_group_episodes(ctx: RunContext, group_id: str, limit: int = 50) -> str:
     """Inventory ONE group: its episodes, newest first — uuid, name, when it
     was committed, and the head of its body. The episode is the unit of
@@ -335,7 +388,7 @@ async def list_graph_group_episodes(ctx: RunContext, group_id: str, limit: int =
             lambda: graphiti.get_group_episodes([group_id], last_n=max(1, min(limit, 200)))
         )
     except Exception as e:  # noqa: BLE001
-        return f"knowledge graph unavailable ({type(e).__name__}){_attempts_note(e)}; proceed without it"
+        return _read_failed("knowledge graph read", e)
     if not episodes:
         return f"no episodes in group {group_id}"
     episodes.sort(key=lambda e: e.get("created_at") or "", reverse=True)
@@ -349,6 +402,7 @@ async def list_graph_group_episodes(ctx: RunContext, group_id: str, limit: int =
     return _clip("\n".join(lines))
 
 
+@parkable_read
 async def search_graph_group(
     ctx: RunContext, group_id: str, query: str, as_of: str | None = None,
     after: str | None = None, before: str | None = None,
@@ -382,7 +436,7 @@ async def search_graph_group(
                                           **node_kw)
         )
     except Exception as e:  # noqa: BLE001
-        return f"knowledge graph unavailable ({type(e).__name__}){_attempts_note(e)}; proceed without it"
+        return _read_failed("knowledge graph read", e)
     lines = [f"facts in {group_id}:"] if facts else [f"no matching facts in {group_id}"]
     for f in facts:
         rel = f" ({f['name']})" if f.get("name") else ""
@@ -633,6 +687,7 @@ async def read_team_activity(ctx: RunContext, since_hours: int = 24) -> str:
     return _clip("\n".join(lines))
 
 
+@parkable_read
 async def read_calendar(ctx: RunContext, day_offset: int = 0) -> str:
     """The operator's calendar for ONE day: 0 = today, 1 = tomorrow, up to 7.
 
@@ -751,47 +806,116 @@ async def _read_with_retry(
     op, *, attempts: int = 2, delay: float = 0.5,
     dependency: tuple[str, ...] | None = None, tool: str | None = None,
 ):
-    """One bounded retry for a TRANSIENT read failure — a blip should not degrade
+    """One bounded retry for a TRANSIENT read failure — a blip should not hold
     a turn that a half-second's patience would have saved.
 
-    One retry only: a real outage must not hold the turn (the run is live and
-    the operator may be watching). What happens after it depends on whether the
-    caller named the read's `dependency` (a tuple of dependency names):
+    The outage doctrine (FR-40): the retry is only the first, cheap rung. A
+    read that is STILL transient on its last attempt means its dependencies are
+    DOWN, and a DOWN dependency never becomes "proceed without it" for the
+    agent. Under a `@parkable_read` tool (the dependencies come from the tool's
+    own entry in `contract.dependencies.TOOL_DEPENDENCY`, or from `dependency=`
+    named here) the last failure raises `DependencyDown`, the tool's wrapper
+    PARKS the run mid-turn (`_park_read_or_reraise`), and the retry sweep
+    re-executes the read when the dependencies' probes pass — a live turn IS
+    rewindable to the tool call, because the tool call is where the run
+    paused. A run with no landing tail re-raises the failure into its unit's
+    own DOWN path.
 
-    - named (the outage doctrine, FR-40 — `search_knowledge_graph` since story
-      1, every other mapped reader from story 2): a last attempt that is still
-      TRANSIENT raises `DependencyDown`, and the tool PARKS the run mid-turn
-      (`_park_read_or_reraise`); the sweep re-executes the read when the
-      dependencies' probes pass. A live turn IS rewindable to the tool call.
-    - not named (`fetch_url`, `propose_skill_doc` and the readers story 2 has
-      not reached): the last failure is re-raised for the caller's own
-      `_read_failed`-style degradation, exactly as before.
+    A caller under NO parkable tool (`fetch_url`, whose web page is not a
+    dependency, and `propose_skill_doc`) names nothing, and the last failure is
+    re-raised as itself for the caller's own `_read_failed`-style text, exactly
+    as before the doctrine.
 
     A SEMANTIC failure is the dependency answering — it returns immediately,
     because re-sending the same request gets the same "no", and it is always
     re-raised as itself. `op` is a zero-arg coroutine function; the raised
     failure carries how many attempts it took.
     """
+    if dependency is None:
+        current = _READ_CTX.get()
+        if current is not None:
+            dependency, tool = current[0], tool or current[1]
     n = 0
     while True:
         n += 1
         try:
             return await op()
         except Exception as e:  # the CALLER decides how to degrade; we re-raise
-            transient = classify_failure(e) == TRANSIENT
-            if n >= attempts or not transient:
+            down = _is_down(e)
+            if n >= attempts or not down:
                 if hasattr(e, "__dict__"):  # an exotic exception may have none
                     e.__dict__[_ATTEMPTS_ATTR] = n
-                if dependency and transient:
-                    raise DependencyDown(dependency, tool, e) from e
+                if dependency and down:
+                    raise DependencyDown(_attributed(dependency, e), tool, e) from e
                 raise
             await _sleep(delay)
 
 
-# A graph search embeds its query before it reaches Neo4j, so it is DOWN when
-# either is (validator F2). Kept literal here until story 3 moves the names and
-# the tool map into `contract/dependencies.py`.
-_GRAPH_SEARCH_DEPENDENCIES = ("graph", "embedder")
+_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
+
+
+def _is_down(e: BaseException) -> bool:
+    """Was a dependency DOWN, judged by `contract.classify_failure` on the
+    error and on the chain of errors it wraps?
+
+    A façade error (`EmailFacadeError`, `CalendarFacadeError`) is the
+    integration's own type around the httpx failure that caused it, and its
+    message does not always carry a marker (a `ConnectTimeout` stringifies to
+    nothing) — so the cause chain is the evidence, and a façade's
+    `HTTP 5xx`/429 status, spelled in its message, counts as the status it
+    is. One classifier: this widens what reaches it, it adds no second policy.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = e
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if classify_failure(cur) == TRANSIENT:
+            return True
+        if type(cur).__name__.endswith("FacadeError"):
+            m = _HTTP_STATUS.search(str(cur))
+            if m and int(m.group(1)) in TRANSIENT_STATUS:
+                return True
+        cur = cur.__cause__
+    return False
+
+
+def _attributed(dependencies: tuple[str, ...], e: BaseException) -> tuple[str, ...]:
+    """The dependencies an outage is BLAMED on. Usually the tool's own tuple;
+    but a graph search whose RERANKER failed (`RerankHTTPError`: LiteLLM's
+    `/rerank` answered 5xx) was not stopped by Neo4j or the embedder, it was
+    stopped by the proxy, and the sweep should wait on the proxy. Matched by
+    class name because `runtime/` may not import the graph client (it holds the
+    write path); the error type is the evidence, as everywhere else here."""
+    cur: BaseException | None = e
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if type(cur).__name__ == "RerankHTTPError":
+            return ("litellm",)
+        cur = cur.__cause__
+    return dependencies
+
+
+def _raise_if_down(e: BaseException, dependencies: tuple[str, ...] | None = None,
+                   tool: str | None = None) -> None:
+    """Raise `DependencyDown` for an outage, else return (the caller then gives
+    its honest NO text). Dependencies come from the running `@parkable_read`
+    tool unless the caller names them (`_mail_target`, a helper of tools that
+    are not themselves reads)."""
+    if isinstance(e, DependencyDown):
+        raise e
+    if dependencies is None:
+        current = _READ_CTX.get()
+        if current is None:
+            return
+        dependencies, tool = current[0], tool or current[1]
+    if dependencies and _is_down(e):
+        raise DependencyDown(_attributed(dependencies, e), tool, e) from e
+
+
+# Stamped on the ORIGINAL exception a no-tail run re-raises, so an inline
+# sub-run that fails (a consult's specialist) can tell its asker what was down.
+_DEPENDENCIES_ATTR = "_cc_read_dependencies"
 
 
 def _park_read_or_reraise(ctx, down: DependencyDown, args: dict):
@@ -805,13 +929,18 @@ def _park_read_or_reraise(ctx, down: DependencyDown, args: dict):
     call's return.
 
     Only when the run's entry set `deps.park_reads` (it has a landing tail to
-    re-enter through). Otherwise the ORIGINAL transient failure is re-raised, so
-    the unit's own DOWN path (an ingest release, a task retry-park) handles it
-    — never a "proceed without it" text for an outage. `args` are the tool's
-    own arguments as the model sent them, re-validated on re-execution.
+    re-enter through) and the read waits on something that can be probed
+    (`local` never parks: nothing probes Postgres, nothing waits for it).
+    Otherwise the ORIGINAL transient failure is re-raised, so the unit's own
+    DOWN path (an ingest release, a task retry-park) handles it — never a
+    "proceed without it" text for an outage. The re-raised error carries the
+    dependency tuple (`_DEPENDENCIES_ATTR`) for a consult's asker to park on.
+    `args` are the tool's own arguments as the model sent them.
     """
-    if getattr(getattr(ctx, "deps", None), "park_reads", False):
-        original = down.original
+    original = down.original
+    if is_parkable(down.dependencies) and getattr(
+        getattr(ctx, "deps", None), "park_reads", False
+    ):
         raise CallDeferred(metadata={
             "kind": "read",
             "tool": down.tool_name,
@@ -819,15 +948,20 @@ def _park_read_or_reraise(ctx, down: DependencyDown, args: dict):
             "dependencies": list(down.dependencies),
             "error": f"{type(original).__name__}: {original}"[:500],
         }) from down
-    raise down.original
+    if hasattr(original, "__dict__"):
+        original.__dict__.setdefault(_DEPENDENCIES_ATTR, down.dependencies)
+    raise original
 
 
-# The reads a parked run can re-execute by name. A tool is listed here in the
-# same change that makes it pass `dependency=` to `_read_with_retry` (story 2
-# widens it) and in `durable.READ_TOOLS`, which classifies its pause; a parity
-# test (`tests/test_outage_doctrine.py`) holds the two equal.
 def _parkable_reads() -> dict:
-    return {"search_knowledge_graph": search_knowledge_graph}
+    """The reads a parked run can re-execute by name: every parkable key of
+    `TOOL_DEPENDENCY`, resolved to its tool here. `durable.READ_TOOLS`
+    (what classifies the pause) derives from the same map; a parity test holds
+    them equal."""
+    import sys
+
+    module = sys.modules[__name__]
+    return {name: getattr(module, name) for name in parkable_reads()}
 
 
 async def run_read_by_name(name: str, args: dict, deps: TriageDeps) -> str:
@@ -841,7 +975,6 @@ async def run_read_by_name(name: str, args: dict, deps: TriageDeps) -> str:
     context but `deps`. Returns the tool's text; a read that is STILL down
     raises `DependencyDown` (the driver re-parks), anything else propagates.
     """
-    import inspect
     from types import SimpleNamespace
 
     from pydantic import create_model
@@ -873,7 +1006,13 @@ def _attempts_note(e: Exception) -> str:
 
 
 def _read_failed(what: str, e: Exception) -> str:
-    """Degrade a best-effort read WITHOUT hiding why it failed.
+    """Degrade a best-effort read WITHOUT hiding why it failed — for a NO.
+
+    An OUTAGE does not come through here as text: inside a `@parkable_read`
+    tool it raises `DependencyDown` first (the run parks, or the unit's own
+    DOWN path takes it), and the "proceed without it" wording below is only
+    ever the answer to a dependency that ANSWERED, or to a read that depends
+    on nothing the system probes (`fetch_url`).
 
     The 2026-07-25 hygiene run: jira-expert asked for `order by updated asc`,
     Jira answered 400 "Unbounded JQL queries are not allowed here. Please add a
@@ -883,6 +1022,7 @@ def _read_failed(what: str, e: Exception) -> str:
     capability gap. The provider's words are DATA (quoted, bounded), never
     instructions to follow.
     """
+    _raise_if_down(e)
     reason = str(e).strip() or type(e).__name__
     return (
         f"{what} failed ({type(e).__name__}){_attempts_note(e)}. The provider said: "
@@ -892,6 +1032,7 @@ def _read_failed(what: str, e: Exception) -> str:
     )
 
 
+@parkable_read
 async def jira_get_issue(ctx: RunContext, issue_key: str) -> str:
     """Read one Jira issue's current state — summary, status, due date, labels,
     `assignee` (null means genuinely unassigned), `updated` (for staleness),
@@ -907,8 +1048,9 @@ async def jira_get_issue(ctx: RunContext, issue_key: str) -> str:
     answer reflects reality rather than assumption — and ALWAYS before proposing
     jira.link_issues, to check the link does not already exist. Read-only.
     """
-    # Reads are ungated by design and best-effort by necessity — a down façade
-    # degrades the answer (after one bounded retry), never wedges the run.
+    # Reads are ungated by design. After one bounded retry a DOWN dependency
+    # PARKS the run here (`@parkable_read`, FR-40) rather than degrading the
+    # answer; only a NO from Jira comes back as text.
     try:
         data = await _read_with_retry(lambda: jira.get_issue(issue_key))
     except Exception as e:  # noqa: BLE001
@@ -916,6 +1058,7 @@ async def jira_get_issue(ctx: RunContext, issue_key: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_search_issues(ctx: RunContext, jql: str, limit: int = 10) -> str:
     """Search Jira with a bounded JQL query (e.g. "project = TASKS AND status
     != Done"). Use for questions about sets of issues — dependencies, blocked
@@ -955,6 +1098,7 @@ async def jira_search_issues(ctx: RunContext, jql: str, limit: int = 10) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_list_projects(ctx: RunContext) -> str:
     """List every Jira project — key, name, type. Read this BEFORE proposing
     any `jira.create_issue`: the project key is the one argument you cannot
@@ -971,6 +1115,7 @@ async def jira_list_projects(ctx: RunContext) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_list_fields(ctx: RunContext) -> str:
     """List the custom fields this Jira instance declares — name, type, and
     whether a jira.set_fields proposal can write it.
@@ -987,6 +1132,7 @@ async def jira_list_fields(ctx: RunContext) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_find_users(ctx: RunContext, query: str, project_key: str = "") -> str:
     """Find Jira users by a name or email fragment. Each row carries the
     `user_id` that jira.assign_issue and jira.create_issue's `assignee` take —
@@ -1004,6 +1150,7 @@ async def jira_find_users(ctx: RunContext, query: str, project_key: str = "") ->
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_get_transitions(ctx: RunContext, issue_key: str) -> str:
     """Read the legal next statuses for a Jira issue. Always check this before
     proposing a jira.transition_issue action — proposals must name a transition
@@ -1016,6 +1163,7 @@ async def jira_get_transitions(ctx: RunContext, issue_key: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_list_filters(ctx: RunContext, query: str = "") -> str:
     """List saved Jira filters (id, name, jql, description, owner). Read this
     BEFORE proposing jira.create_filter — never propose a duplicate of an
@@ -1031,6 +1179,7 @@ async def jira_list_filters(ctx: RunContext, query: str = "") -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_list_dashboards(ctx: RunContext, query: str = "") -> str:
     """List Jira dashboards (id, name, description, view path). Read this
     BEFORE proposing jira.create_dashboard — never propose a duplicate of an
@@ -1044,6 +1193,7 @@ async def jira_list_dashboards(ctx: RunContext, query: str = "") -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def jira_list_gadgets(ctx: RunContext) -> str:
     """List every gadget Jira dashboards can host (title, uri, module_key —
     each gadget carries exactly one of uri/module_key). A jira.create_dashboard
@@ -1064,6 +1214,7 @@ async def jira_list_gadgets(ctx: RunContext) -> str:
 # normalized shape across both kinds, so charters never fork on provider.
 
 
+@parkable_read
 async def forge_list_instances(ctx: RunContext) -> str:
     """List every configured git-hosting instance (name + kind: github or
     gitlab) — names, never tokens. Call this first: `instance` in every other
@@ -1075,6 +1226,7 @@ async def forge_list_instances(ctx: RunContext) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def forge_search_repos(ctx: RunContext, instance: str, query: str) -> str:
     """Search repositories on a git-hosting instance by name/description.
     `repo` for every other forge_* tool is the result's `full_name`
@@ -1086,6 +1238,7 @@ async def forge_search_repos(ctx: RunContext, instance: str, query: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def forge_read_file(
     ctx: RunContext, instance: str, repo: str, path: str, ref: str = ""
 ) -> str:
@@ -1100,6 +1253,7 @@ async def forge_read_file(
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def forge_list_issues(ctx: RunContext, instance: str, repo: str, state: str = "open") -> str:
     """List a repository's issues. `state` is 'open' (default), 'closed', or
     'all'. Read-only."""
@@ -1110,6 +1264,7 @@ async def forge_list_issues(ctx: RunContext, instance: str, repo: str, state: st
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def forge_get_issue(ctx: RunContext, instance: str, repo: str, number: int) -> str:
     """Read one issue's full state, including its body. `number` is the issue
     number shown in the forge_list_issues result. Read-only."""
@@ -1120,6 +1275,7 @@ async def forge_get_issue(ctx: RunContext, instance: str, repo: str, number: int
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def forge_list_merge_requests(ctx: RunContext, instance: str, repo: str, state: str = "open") -> str:
     """List a repository's pull requests (GitHub) or merge requests (GitLab) —
     one tool covers both under a neutral name. `state` is 'open' (default),
@@ -1131,6 +1287,7 @@ async def forge_list_merge_requests(ctx: RunContext, instance: str, repo: str, s
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def forge_get_merge_request(ctx: RunContext, instance: str, repo: str, number: int) -> str:
     """Read one pull/merge request's full state, including its body.
     Read-only."""
@@ -1141,6 +1298,7 @@ async def forge_get_merge_request(ctx: RunContext, instance: str, repo: str, num
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def forge_list_commits(
     ctx: RunContext, instance: str, repo: str, ref: str = "", limit: int = 20
 ) -> str:
@@ -1161,6 +1319,7 @@ async def forge_list_commits(
 # representation, not rendered view HTML).
 
 
+@parkable_read
 async def confluence_list_spaces(ctx: RunContext) -> str:
     """List Confluence spaces (id, key, name, type, status, url). Verify a
     space KEY here before citing it in a search or a proposal — never guess
@@ -1172,6 +1331,7 @@ async def confluence_list_spaces(ctx: RunContext) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def confluence_get_page(ctx: RunContext, page_id: str) -> str:
     """Read one page's full state: title, space, version number, storage-format
     body (the HTML that carries macros — not rendered view HTML), url.
@@ -1184,6 +1344,7 @@ async def confluence_get_page(ctx: RunContext, page_id: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def confluence_search(ctx: RunContext, cql: str, limit: int = 25) -> str:
     """Search Confluence with CQL — Confluence's query language — e.g.
     `type=page and space=OPS and title ~ 'roadmap'`. Verify a space key via
@@ -1195,6 +1356,7 @@ async def confluence_search(ctx: RunContext, cql: str, limit: int = 25) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def confluence_list_children(ctx: RunContext, page_id: str) -> str:
     """List a page's direct child pages (id, title, space, version, url).
     Read-only."""
@@ -1205,6 +1367,7 @@ async def confluence_list_children(ctx: RunContext, page_id: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def confluence_list_attachments(ctx: RunContext, page_id: str) -> str:
     """List a page's attachments (id, title, media_type, file_size, url).
     Read-only."""
@@ -1215,6 +1378,7 @@ async def confluence_list_attachments(ctx: RunContext, page_id: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def confluence_list_labels(ctx: RunContext, page_id: str) -> str:
     """List a page's labels (id, name, prefix). Read-only."""
     try:
@@ -1224,6 +1388,7 @@ async def confluence_list_labels(ctx: RunContext, page_id: str) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def confluence_page_versions(ctx: RunContext, page_id: str) -> str:
     """List a page's version history (number, when, by, message) — newest
     first as the provider returns it. Read-only."""
@@ -1291,6 +1456,33 @@ async def catalog_get_document(ctx: RunContext, document_id: str) -> str:
     return _clip(json.dumps(row, default=str))
 
 
+def _consult_down(e: BaseException) -> tuple[str, ...] | None:
+    """What a consult's sub-run was DOWN on, or None when it was not an outage.
+
+    A read inside the specialist's run re-raised its transient failure stamped
+    with the dependencies it needed (`_park_read_or_reraise`); a model failure
+    carries no stamp and means `llm`. Several leaves (a task group) union their
+    tuples. One classifier decides whether it was an outage at all."""
+    if not _is_down(e):
+        return None
+    seen: set[int] = set()
+    found: list[str] = []
+
+    def walk(x: BaseException | None) -> None:
+        while x is not None and id(x) not in seen:
+            seen.add(id(x))
+            for name in getattr(x, _DEPENDENCIES_ATTR, ()) or ():
+                if name not in found:
+                    found.append(name)
+            for inner in getattr(x, "exceptions", ()) or ():
+                walk(inner)
+            x = x.__cause__
+
+    walk(e)
+    return tuple(found) or ("llm",)
+
+
+@parkable_read(context=False)
 async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
     """Ask a consultable teammate a specific question and get their distilled
     answer — the way to use expertise you do not hold (Jira structure and
@@ -1329,8 +1521,9 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
     if refusal:
         return refusal
 
-    # Best-effort otherwise: a down specialist degrades the run, never wedges
-    # it. The consulting run's usage accumulator rides along (agent-delegation
+    # A specialist that ANSWERED badly degrades the run (a NO); a specialist
+    # that was DOWN parks the asker (below, FR-40). Neither wedges it.
+    # The consulting run's usage accumulator rides along (agent-delegation
     # pattern), so the specialist's tokens count toward this run's budget.
     #
     # `outcome` is filled only when the specialist DRAFTED (doctrine Decision
@@ -1352,7 +1545,16 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
             chain=chain,
         )
     except Exception as e:  # noqa: BLE001
-        return f"{agent_id} unavailable ({type(e).__name__}); proceed without them"
+        # An OUTAGE inside the specialist's run (its model, or a read it made
+        # that re-raised a DependencyDown) is a DOWN read in the ASKER's run
+        # (FR-40): it parks the asker like any read, on what the sub-run was
+        # waiting on, and the whole consult re-runs on resume. Only a NO — the
+        # specialist ANSWERED badly or not at all — degrades to text.
+        dependencies = _consult_down(e)
+        if dependencies:
+            raise DependencyDown(dependencies, "consult_agent", e) from e
+        return (f"{agent_id} unavailable ({type(e).__name__}): the consult "
+                "failed, so say plainly that you have no specialist answer")
     # The consult is already in this session's transcript (M15); the event
     # makes cross-agent flow visible on the audit trail too. The actor is the
     # REAL caller — it was hardcoded to `agent:inbox-triage` until 2026-07-29,
@@ -1558,6 +1760,7 @@ async def propose_delete_episode(ctx: RunContext, episode_uuid: str, rationale: 
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
+@parkable_read
 async def litellm_list_models(ctx: RunContext, name: str | None = None) -> str:
     """List the models the LiteLLM proxy serves, with alias, model_id and
     provider mapping. Call this before proposing any proxy change, so your
@@ -1566,15 +1769,12 @@ async def litellm_list_models(ctx: RunContext, name: str | None = None) -> str:
     alias, model_id or provider model) to get just the rows you need. Never
     guess a model_id: read it here. Read-only.
     """
-    # Reads are ungated and best-effort — a down/unconfigured proxy degrades the
-    # answer, never wedges the run.
+    # Reads are ungated. A DOWN proxy parks the run (`@parkable_read`, FR-40);
+    # an unconfigured or refusing one comes back as honest text.
     try:
         data = await _read_with_retry(litellm_client.list_models)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm read unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm read", e)
     # The filter exists because the unfiltered list did not fit the tool
     # ceiling at 318 models, and an agent that could not find its own row
     # in the truncated text invented a model_id (seven sessions, 2026-09-18).
@@ -1586,6 +1786,7 @@ async def litellm_list_models(ctx: RunContext, name: str | None = None) -> str:
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_provider_catalog(ctx: RunContext, provider: str) -> str:
     """The provider's LIVE model catalog (e.g. 'anthropic'), fetched directly
     from the provider — NOT the proxy's configured deployments (use
@@ -1599,10 +1800,7 @@ async def litellm_provider_catalog(ctx: RunContext, provider: str) -> str:
     try:
         creds = await _read_with_retry(litellm_credstore.list_provider_credentials)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm provider catalog unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm provider catalog", e)
     match = next((c for c in creds if c.get("provider") == provider), None)
     if match is None:
         return f"litellm provider catalog unavailable: no stored credential for provider {provider!r}"
@@ -1614,13 +1812,11 @@ async def litellm_provider_catalog(ctx: RunContext, provider: str) -> str:
             )
         )
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm provider catalog unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm provider catalog", e)
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_get_spend(ctx: RunContext) -> str:
     """Read recent LiteLLM spend, aggregated per model and key — the 'what is
     costing money' view. Use it when the task is about cost or usage. Best-effort
@@ -1629,13 +1825,11 @@ async def litellm_get_spend(ctx: RunContext) -> str:
     try:
         data = await _read_with_retry(litellm_client.get_spend)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm spend unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm spend", e)
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_list_credentials(ctx: RunContext) -> str:
     """List the NAMED credentials stored in the LiteLLM proxy. A model can
     authenticate by referencing one (litellm_params.litellm_credential_name)
@@ -1646,13 +1840,11 @@ async def litellm_list_credentials(ctx: RunContext) -> str:
     try:
         data = await _read_with_retry(litellm_client.list_credentials)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm credentials read unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm credentials read", e)
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_list_keys(ctx: RunContext) -> str:
     """List the LiteLLM proxy's virtual keys — alias, model scope, spend, and id.
     Read this before proposing to create or delete a key, so proposals name real
@@ -1662,13 +1854,11 @@ async def litellm_list_keys(ctx: RunContext) -> str:
     try:
         data = await _read_with_retry(litellm_client.list_keys)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm keys read unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm keys read", e)
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_get_routing(ctx: RunContext) -> str:
     """Read the LiteLLM proxy's routing picture — routing strategy + retry count
     (advisory) and configured fallback chains (which you CAN change). Read before
@@ -1677,13 +1867,11 @@ async def litellm_get_routing(ctx: RunContext) -> str:
     try:
         data = await _read_with_retry(litellm_client.get_routing)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm routing read unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm routing read", e)
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_list_teams(ctx: RunContext) -> str:
     """List the LiteLLM proxy's teams — alias, id, model scope. Read before
     proposing to create or delete a team, so proposals name real team_ids.
@@ -1692,13 +1880,11 @@ async def litellm_list_teams(ctx: RunContext) -> str:
     try:
         data = await _read_with_retry(litellm_client.list_teams)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm teams read unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm teams read", e)
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_list_mcp_servers(ctx: RunContext) -> str:
     """List the MCP servers registered on the LiteLLM proxy — id, alias, url,
     transport. Read-only, for diagnosis and reporting: registering, removing
@@ -1708,10 +1894,7 @@ async def litellm_list_mcp_servers(ctx: RunContext) -> str:
     try:
         data = await _read_with_retry(litellm_client.list_mcp_servers)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm mcp-servers read unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; proceed without it"
-        )
+        return _read_failed("litellm mcp-servers read", e)
     return _clip(json.dumps(data, default=str))
 
 
@@ -1801,6 +1984,7 @@ async def litellm_read_logs(
     return _clip(out)
 
 
+@parkable_read
 async def litellm_get_health(ctx: RunContext) -> str:
     """Read the LiteLLM proxy's own health — status, DB, cache, version, callbacks.
     Cheap (no provider calls). Use it to confirm the proxy is up and configured
@@ -1809,10 +1993,7 @@ async def litellm_get_health(ctx: RunContext) -> str:
     try:
         data = await _read_with_retry(litellm_client.get_health)
     except Exception as e:  # noqa: BLE001
-        return (
-            f"litellm health read unavailable ({type(e).__name__}: {e})"
-            f"{_attempts_note(e)}; the proxy may be down"
-        )
+        return _read_failed("litellm health read", e)
     return _clip(json.dumps(data, default=str))
 
 
@@ -1916,6 +2097,7 @@ async def declare_gap(
     )
 
 
+@parkable_read
 async def litellm_check_model_health(ctx: RunContext, model: str | None = None) -> str:
     """Check whether the proxy's MODELS actually answer — healthy vs failing
     deployments, with the error on failures. EXPENSIVE: the proxy makes a real
@@ -1929,10 +2111,11 @@ async def litellm_check_model_health(ctx: RunContext, model: str | None = None) 
     try:
         data = await litellm_client.check_model_health(model=model)
     except Exception as e:  # noqa: BLE001
-        return f"litellm model-health check unavailable ({type(e).__name__}: {e})"
+        return _read_failed("litellm model-health check", e)
     return _clip(json.dumps(data, default=str))
 
 
+@parkable_read
 async def litellm_probe_model(
     ctx: RunContext, model: str, measure_context: bool = False,
     battery: str | None = None,
@@ -1964,7 +2147,7 @@ async def litellm_probe_model(
         data = await litellm_client.probe_model(
             model, measure_context=measure_context, battery=battery)
     except Exception as e:  # noqa: BLE001
-        return f"litellm model probe unavailable ({type(e).__name__}: {e})"
+        return _read_failed("litellm model probe", e)
     return _clip(json.dumps(data, default=str))
 
 
@@ -2029,6 +2212,7 @@ def _mail_line(row: dict) -> str:
             f"{locator}{why}")
 
 
+@parkable_read
 async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     """Search the mailbox with a Gmail query and see what the QUEUE knows about
     each match: its work-item id, state (UNPROCESSED / PROCESSED / FOLDED …),
@@ -2053,6 +2237,7 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     try:
         refs = await email_facade.list_refs(query)
     except email_facade.EmailFacadeError as e:
+        _raise_if_down(e)  # the façade is DOWN (n8n): park, never degrade
         return (f"mail search failed ({e}). If the query matched too many "
                 "messages, narrow it with an explicit after:/before: window.")
     ids = [ref_message_id(r) for r in refs]
@@ -2071,6 +2256,7 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     return _clip("\n".join([head, *lines]))
 
 
+@parkable_read
 async def mail_read(ctx: RunContext, ref: str) -> str:
     """Read one mail record from the queue: the email exactly as it was fed to
     the agent that handled it (headers and body), its current state, the
@@ -2093,6 +2279,7 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
         try:
             msg = await email_facade.get_message(ref)
         except email_facade.EmailFacadeError as e:
+            _raise_if_down(e)
             return f"{ref!r} is not in the queue and the mailbox could not return it ({e})"
         return _clip(
             f"NOT ENROLLED in the queue (read from the mailbox)\n"
@@ -2123,6 +2310,7 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
             text = ("ENROLLED, not yet fetched by the queue (read from the mailbox)\n"
                     + ledger.agent_input(ledger._provider_parsed(msg)))
         except email_facade.EmailFacadeError as e:
+            _raise_if_down(e)
             text = f"(not yet fetched by the queue, and the mailbox could not return it: {e})"
     parts.append(_clip(text or "(no message text recorded)", _MAIL_BODY_CEILING))
     return _clip("\n".join(parts))
@@ -2366,6 +2554,10 @@ async def _mail_target(ctx: RunContext, ref: str) -> tuple[str, str, str]:
     try:
         msg = await email_facade.get_message(ref)
     except email_facade.EmailFacadeError as e:
+        # Not a read tool, so no parked read: a DOWN façade escapes as a
+        # transient `DependencyDown` and the run's own unit-level DOWN path
+        # takes it, rather than the model being asked to retry a dead mailbox.
+        _raise_if_down(e, ("n8n",), "mail_target")
         raise ModelRetry(
             f"{ref!r} is neither a queue item nor a mailbox message ({e}); pass "
             "the work-item id (wi_…) or Message-ID as mail_search / mail_read "
@@ -2427,6 +2619,7 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
     try:
         msg = await email_facade.get_message(uuid)
     except email_facade.EmailFacadeError as e:
+        _raise_if_down(e, ("n8n",), "propose_unsubscribe")
         return f"could not read the message from the mailbox ({e}); nothing proposed"
     url, verdict = one_click_unsubscribe(msg)
     if url is None:
@@ -2452,6 +2645,7 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
+@parkable_read
 async def mail_list_folders(ctx: RunContext) -> str:
     """List the mailbox's folders with their item counts, so a folder you name
     in `propose_mail_move` is one that exists. Never guess a folder name: read
@@ -2473,6 +2667,7 @@ async def mail_list_folders(ctx: RunContext) -> str:
     try:
         folders = await email_facade.list_folders()
     except email_facade.EmailFacadeError as e:
+        _raise_if_down(e)
         return f"could not list the mailbox's folders ({e})"
     if not folders:
         return "the mailbox reports no folders"
@@ -2611,7 +2806,7 @@ async def loe_list(ctx: RunContext) -> str:
                 "history": history,
             })
     except Exception as e:  # noqa: BLE001 — reads degrade the answer, never wedge the run
-        return f"lines of effort unavailable ({type(e).__name__}: {e}); proceed without it"
+        return _read_failed("lines of effort read", e)
     return _clip(json.dumps(out, default=str))
 
 
@@ -2817,6 +3012,7 @@ async def _sandbox_id_for(ctx: RunContext) -> str:
     return result["sandbox_id"]
 
 
+@parkable_read
 async def sandbox_exec(ctx: RunContext, command: str) -> str:
     """Run a shell command inside YOUR OWN ephemeral sandbox (a real Linux
     container, gVisor-isolated, no network egress) and get back its exit
@@ -2845,6 +3041,7 @@ async def sandbox_exec(ctx: RunContext, command: str) -> str:
     )
 
 
+@parkable_read
 async def sandbox_write_file(ctx: RunContext, path: str, content: str) -> str:
     """Write `content` to `path` inside your sandbox workspace (`/workspace` is
     home; a relative path lands there, an absolute path must already be under
@@ -2862,6 +3059,7 @@ async def sandbox_write_file(ctx: RunContext, path: str, content: str) -> str:
     return f"wrote {result.get('path', path)}"
 
 
+@parkable_read
 async def sandbox_read_file(ctx: RunContext, path: str) -> str:
     """Read a file back from your sandbox workspace. Capped at 200,000 bytes;
     a truncated read says so rather than silently handing back a partial
@@ -2881,6 +3079,7 @@ async def sandbox_read_file(ctx: RunContext, path: str) -> str:
     return text
 
 
+@parkable_read
 async def sandbox_copy_in(ctx: RunContext, source_path: str) -> str:
     """Copy a file or directory from the OPERATOR-GRANTED sources into your
     sandbox workspace. `source_path` is relative to the repo root, and only
@@ -2932,6 +3131,7 @@ def _sandbox_source_granted(source_path: str, grants: list[dict]) -> bool:
     return False
 
 
+@parkable_read
 async def sandbox_reset(ctx: RunContext) -> str:
     """Destroy your current sandbox session (deletes its Job and everything in
     its workspace). Your NEXT sandbox tool call creates a fresh, empty one —

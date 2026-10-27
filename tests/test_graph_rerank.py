@@ -382,7 +382,7 @@ async def test_a_transient_reranker_failure_is_retried_once_then_reported(monkey
 async def test_a_malformed_reranker_answer_is_reported_at_once(monkeypatch, no_wait):
     fake, out = await _search_with(monkeypatch, lambda r: httpx.Response(200, json={"oops": 1}))
     assert fake.searches == 1 and no_wait == []
-    assert out == "knowledge graph unavailable (RerankError); proceed without it"
+    assert out.startswith("knowledge graph search failed (RerankError)")
 
 
 async def test_a_working_reranker_is_not_an_error(monkeypatch, no_wait):
