@@ -647,7 +647,8 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
   (auth, files, workspace, TTS and transcription, and others) are not ours.
 - **Feature directories** under `web/src/features/`: `activity`, `agents`,
   `attention`, `auth`, `beads`, `charts`, `chat`, `command-palette`, `connect`,
-  `dashboard`, `decisions`, `file-browser`, `graph`, `graph-verifications`,
+  `dashboard`, `decisions`, `file-browser`, `gates` (the gate-override hooks and
+  the capabilities view), `graph`, `graph-verifications`,
   `kanban`, `loe`, `markdown`, `memory`, `notifications`, `sessions`,
   `settings`, `skills`, `sources`, `systems`, `tts`, `voice`, `workspace`.
 - **Two channels to the API.** (1) Every `cc-*` route is a thin HTTP proxy:

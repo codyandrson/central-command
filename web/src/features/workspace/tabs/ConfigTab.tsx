@@ -16,6 +16,7 @@ import { RefreshCw, Pencil, Save, X, CheckCircle, AlertCircle } from 'lucide-rea
 import { Button } from '@/components/ui/button';
 import { clearPersistedDraft, readPersistedDraft, writePersistedDraft } from '../persistedDrafts';
 import { apiFetch } from '@/lib/apiFetch';
+import { CapabilitiesView } from '../../gates';
 
 const DRAFT_KIND = 'charter-editor';
 
@@ -51,6 +52,8 @@ export function ConfigTab({ agentId }: ConfigTabProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const requestVersionRef = useRef(0);
   const agentIdRef = useRef(agentId);
+
+  const [showCaps, setShowCaps] = useState(false);
 
   const content = charter?.current.content ?? null;
 
@@ -267,6 +270,12 @@ export function ConfigTab({ agentId }: ConfigTabProps) {
             </div>
           </div>
         )}
+      </div>
+      <div className="border-t border-border/40">
+        <Button variant="ghost" size="sm" onClick={() => setShowCaps((v) => !v)}>
+          {showCaps ? 'Hide capabilities' : 'Capabilities and gate overrides'}
+        </Button>
+        {showCaps && <CapabilitiesView />}
       </div>
     </div>
   );
