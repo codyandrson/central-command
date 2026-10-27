@@ -147,3 +147,54 @@ export interface AgentDetail {
   sessions: SessionRow[];
   signals: CoachingSignal[];
 }
+
+/* ── Gate overrides (epic-gate-overrides story 8's wire; pinned by tests/test_overrides_wire.py) ── */
+
+export type OverrideState = 'shadow' | 'live' | 'suspended' | 'revoked';
+export type ScopeForm = 'argument' | 'target' | 'schedule';
+
+/** The scope as authored: any of the three forms, ANDed. `{}` is every use. */
+export interface OverrideScope {
+  argument?: { name: string; values: string[] };
+  target?: string[];
+  schedule?: string;
+}
+
+export interface GateOverride {
+  id: string;
+  agent_id: string;
+  capability: string;
+  scope: OverrideScope;
+  /** The server's one plain-words rendering of the scope. */
+  scope_text: string;
+  state: OverrideState;
+  shadow: { k: number; n: number };
+  matches: number;
+  last_match: string | null;
+  granted_by: string;
+  granted_at: string;
+  revoked_at: string | null;
+  reversibility: string;
+  requires_acknowledgement: boolean;
+}
+
+/** A `capabilities.list` row — the dataclass fields plus the override facts. */
+export interface CapabilityRow {
+  name: string;
+  kind: string;
+  default_gate: string;
+  risk: string;
+  arguments: string[];
+  description: string;
+  reversibility: string;
+  requires_acknowledgement: boolean;
+  scope_forms: ScopeForm[];
+  overridable: boolean;
+  overridable_reason: string;
+}
+
+export interface AuthorOverrideResult {
+  override: GateOverride;
+  warnings: string[];
+  overrides: GateOverride[];
+}

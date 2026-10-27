@@ -7,7 +7,7 @@ import { InlineSelect } from '@/components/ui/InlineSelect';
 import type { InlineSelectOption } from '@/components/ui/InlineSelect';
 import { useGateway } from '@/contexts/GatewayContext';
 import type {
-  AgentRow, CharterVersion, CoachingSignal, Grant, PackInfo,
+  AgentRow, AuthorOverrideResult, CapabilityRow, OverrideScope, CharterVersion, CoachingSignal, Grant, PackInfo,
   SkillCatalogEntry, SkillGrant,
 } from './types';
 
@@ -920,6 +920,243 @@ export function HireDialog({ open, onOpenChange, onHire }: {
           >
             {busy ? 'Hiring…' : 'Hire'}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+/* ── Author a gate override ── */
+
+const splitValues = (text: string) =>
+  text.split(/[\n,]/).map((v) => v.trim()).filter(Boolean);
+
+/**
+ * Relaxes one capability's gate to none for ONE agent, optionally narrowed.
+ * Only the operator authors; the dialog offers only overridable capabilities,
+ * only the scope forms the capability supports, and never the auditor as the
+ * holder. An acknowledgement-class capability (irreversible, or the
+ * highest-blast-radius one) shows its risk text and will not submit until the
+ * operator ticks the box. The server re-checks every one of these.
+ */
+export function AuthorOverrideDialog({ agent, capabilities, open, onOpenChange, onAuthor }: {
+  agent: AgentRow;
+  capabilities: CapabilityRow[];
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onAuthor: (
+    capability: string, scope: OverrideScope, acknowledgeIrreversible: boolean,
+  ) => Promise<AuthorOverrideResult>;
+}) {
+  const options = useMemo(() => capabilities.filter((c) => c.overridable), [capabilities]);
+  const [capability, setCapability] = useState('');
+  const [useArgument, setUseArgument] = useState(false);
+  const [argName, setArgName] = useState('');
+  const [argValues, setArgValues] = useState('');
+  const [useTarget, setUseTarget] = useState(false);
+  const [targetValues, setTargetValues] = useState('');
+  const [useSchedule, setUseSchedule] = useState(false);
+  const [schedule, setSchedule] = useState('');
+  const [ack, setAck] = useState(false);
+  const [result, setResult] = useState<AuthorOverrideResult | null>(null);
+  const { busy, error, run } = useAsyncAction();
+  useEffect(() => {
+    if (!open) return;
+    setCapability(''); setUseArgument(false); setArgName(''); setArgValues('');
+    setUseTarget(false); setTargetValues(''); setUseSchedule(false); setSchedule('');
+    setAck(false); setResult(null);
+  }, [open]);
+
+  const cap = options.find((c) => c.name === capability);
+  const forms = new Set(cap?.scope_forms ?? []);
+  const isAuditor = agent.id === 'auditor';
+  const needsAck = !!cap?.requires_acknowledgement;
+
+  const scope: OverrideScope = {};
+  if (cap && forms.has('argument') && useArgument) {
+    scope.argument = { name: argName, values: splitValues(argValues) };
+  }
+  if (cap && forms.has('target') && useTarget) scope.target = splitValues(targetValues);
+  if (cap && forms.has('schedule') && useSchedule) scope.schedule = schedule.trim();
+
+  const scopeIncomplete =
+    (scope.argument !== undefined && (!scope.argument.name || scope.argument.values.length === 0))
+    || (scope.target !== undefined && scope.target.length === 0)
+    || (scope.schedule !== undefined && !scope.schedule);
+  const canSubmit = !!cap && !isAuditor && !scopeIncomplete && (!needsAck || ack) && !busy;
+
+  const pickCapability = (name: string) => {
+    setCapability(name); setUseArgument(false); setArgName(''); setArgValues('');
+    setUseTarget(false); setTargetValues(''); setUseSchedule(false); setSchedule('');
+    setAck(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-[1.2rem] font-semibold text-foreground">
+            Author a gate override
+          </DialogTitle>
+          <DialogDescription className="text-sm leading-6 text-muted-foreground">
+            Lets {agent.name || agent.id} perform this capability without
+            coming to your inbox. You can revoke it at any time.
+          </DialogDescription>
+        </DialogHeader>
+
+        {result ? (
+          <div className="space-y-2 text-[0.733rem]">
+            <p>
+              Override authored: {result.override.capability} —{' '}
+              {result.override.scope_text}, in shadow {result.override.shadow.k} of{' '}
+              {result.override.shadow.n}.
+            </p>
+            {result.warnings.map((w) => (
+              <p key={w} className="cockpit-note" data-tone="warn">{w}</p>
+            ))}
+          </div>
+        ) : isAuditor ? (
+          <p className="cockpit-note" data-tone="danger">
+            The auditor is never given an override.
+          </p>
+        ) : options.length === 0 ? (
+          <p className="cockpit-note">No capability in the catalog can be overridden.</p>
+        ) : (
+          <>
+            <div>
+              <label className="cockpit-field-label mb-2 block">Capability</label>
+              <InlineSelect
+                value={capability}
+                onChange={pickCapability}
+                options={[{ value: '', label: 'Choose a capability…' },
+                  ...options.map((c) => ({ value: c.name, label: c.name }))]}
+                ariaLabel="Capability to override"
+                inline
+              />
+            </div>
+            {cap && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-border/50 bg-muted/20 p-3 text-[0.733rem]">
+                  <p>
+                    <span className="text-muted-foreground">default gate: </span>{cap.default_gate}
+                    {' · '}
+                    <span className="text-muted-foreground">reversibility: </span>
+                    {cap.reversibility || 'n/a'}
+                  </p>
+                  {needsAck && (
+                    <p className="mt-2" data-testid="override-risk">
+                      <span className="text-muted-foreground">risk: </span>{cap.risk}
+                    </p>
+                  )}
+                </div>
+
+                {forms.has('argument') && (
+                  <div className="space-y-1.5 text-[0.733rem]">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={useArgument}
+                        onChange={(e) => setUseArgument(e.target.checked)} />
+                      Only when an argument has exact values
+                    </label>
+                    {useArgument && (
+                      <>
+                        <InlineSelect
+                          value={argName}
+                          onChange={setArgName}
+                          options={[{ value: '', label: 'Argument…' },
+                            ...cap.arguments.map((a) => ({ value: a, label: a }))]}
+                          ariaLabel="Argument to match"
+                          inline
+                        />
+                        <input
+                          className="cockpit-input w-full"
+                          aria-label="Argument values"
+                          placeholder="exact values, comma-separated"
+                          value={argValues}
+                          onChange={(e) => setArgValues(e.target.value)}
+                        />
+                      </>
+                    )}
+                  </div>
+                )}
+                {forms.has('target') && (
+                  <div className="space-y-1.5 text-[0.733rem]">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={useTarget}
+                        onChange={(e) => setUseTarget(e.target.checked)} />
+                      Only for named targets
+                    </label>
+                    {useTarget && (
+                      <input
+                        className="cockpit-input w-full"
+                        aria-label="Target values"
+                        placeholder="targets, comma-separated"
+                        value={targetValues}
+                        onChange={(e) => setTargetValues(e.target.value)}
+                      />
+                    )}
+                  </div>
+                )}
+                {forms.has('schedule') && (
+                  <div className="space-y-1.5 text-[0.733rem]">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={useSchedule}
+                        onChange={(e) => setUseSchedule(e.target.checked)} />
+                      Only for work started by one schedule
+                    </label>
+                    {useSchedule && (
+                      <input
+                        className="cockpit-input w-full"
+                        aria-label="Schedule id"
+                        placeholder="schedule id"
+                        value={schedule}
+                        onChange={(e) => setSchedule(e.target.value)}
+                      />
+                    )}
+                  </div>
+                )}
+
+                <p className="text-[0.733rem] text-muted-foreground">
+                  What will happen: the first {needsAck ? 'few (at least 1)' : 'N'} matching
+                  proposals still come to your inbox, as a shadow period; after that
+                  matching proposals run without asking. The server sets N
+                  (default 5{needsAck ? '; the floor here is 1' : ''}).
+                </p>
+
+                {needsAck && (
+                  <label className="flex items-start gap-2 text-[0.733rem]">
+                    <input type="checkbox" checked={ack}
+                      onChange={(e) => setAck(e.target.checked)} />
+                    <span>
+                      I understand {cap.name} {cap.reversibility === 'irreversible'
+                        ? 'cannot be undone' : 'carries the highest blast radius'} and
+                      acknowledge the risk above.
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
+          </>
+        )}
+        {error && <p className="cockpit-note" data-tone="danger">{error}</p>}
+        <DialogFooter>
+          {result ? (
+            <Button onClick={() => onOpenChange(false)}>Done</Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button
+                disabled={!canSubmit}
+                onClick={() => run(async () => {
+                  setResult(await onAuthor(capability, scope, needsAck && ack));
+                })}
+              >
+                {busy ? 'Authoring…' : 'Author override'}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

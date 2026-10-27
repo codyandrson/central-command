@@ -1,17 +1,19 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Users, RefreshCw, FileText, KeyRound, Activity, MessageSquareQuote,
-  ChevronDown, BookOpen,
+  ChevronDown, BookOpen, ShieldCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAgents } from './useAgents';
 import { proposalStatusLabel } from './proposalStatus';
 import {
   HireDialog, RetireDialog, GrantDialog, RevokeDialog, CharterEditor, RevertDialog,
-  CoachDialog, SkillGrantDialog, SkillRevokeDialog,
+  CoachDialog, SkillGrantDialog, SkillRevokeDialog, AuthorOverrideDialog,
 } from './AgentDialogs';
+import { useOverrides, useCapabilityCatalog } from '../gates/useOverrides';
 import { AgentModelEffort } from './AgentModelEffort';
 import type {
+  GateOverride,
   AgentDetail, AgentRow, CharterVersion, Grant, PackInfo, SkillGrant,
 } from './types';
 import type { ProposalDetail } from '../decisions/types';
@@ -294,6 +296,65 @@ function CharterPanel({ charter, onRevert, getProposal }: {
                 </div>
               )}
             </Collapsible>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function overrideStateLabel(o: GateOverride) {
+  if (o.state === 'shadow') return `in shadow ${o.shadow.k} of ${o.shadow.n}`;
+  return o.state;
+}
+
+export function OverridesPanel({ overrides, onAuthor, onRevoke }: {
+  overrides: GateOverride[];
+  onAuthor: () => void;
+  onRevoke: (overrideId: string) => void;
+}) {
+  const open = overrides.filter((o) => o.state !== 'revoked');
+  const revoked = overrides.filter((o) => o.state === 'revoked');
+  return (
+    <div className="space-y-2 px-4">
+      {overrides.length === 0 && (
+        <p className="text-[0.733rem] text-muted-foreground">
+          No gate overrides — every gated action this agent proposes comes to your inbox.
+        </p>
+      )}
+      {open.map((o) => (
+        <div key={o.id} className="rounded-lg border border-border/40 p-2 text-[0.7rem]">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="cockpit-badge">{o.capability}</span>
+            <span className="cockpit-badge">{overrideStateLabel(o)}</span>
+            <span className="min-w-0 wrap-anywhere">{o.scope_text}</span>
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            by {o.granted_by} · {fmtDate(o.granted_at)} · {o.matches} matches
+            {o.last_match ? ` · last ${fmtDate(o.last_match)}` : ' · never matched'}
+          </div>
+          <div className="mt-1.5">
+            <Button size="sm" variant="outline" onClick={() => onRevoke(o.id)}>
+              Revoke
+            </Button>
+          </div>
+        </div>
+      ))}
+      <div className="pt-1">
+        <Button size="sm" variant="outline" onClick={onAuthor}>Author an override</Button>
+      </div>
+      {revoked.length > 0 && (
+        <div className="pt-2">
+          <div className="pb-1 text-[0.667rem] uppercase tracking-[0.14em] text-muted-foreground">
+            Revoked — kept on the record, never deleted
+          </div>
+          {revoked.map((o) => (
+            <div key={o.id} className="flex min-w-0 flex-wrap items-center gap-2 py-0.5 text-[0.7rem] text-muted-foreground">
+              <span className="cockpit-badge line-through">{o.capability}</span>
+              <span className="cockpit-badge">revoked</span>
+              <span className="min-w-0 wrap-anywhere">{o.scope_text}</span>
+              <span>{fmtDate(o.revoked_at)} · {o.matches} matches</span>
+            </div>
           ))}
         </div>
       )}
@@ -602,6 +663,7 @@ type DialogState =
   | { kind: 'retire' }
   | { kind: 'grant' }
   | { kind: 'revoke'; pack: string }
+  | { kind: 'authorOverride' }
   | { kind: 'grantSkill' }
   | { kind: 'revokeSkill'; skillId: string }
   | { kind: 'charter' }
@@ -621,6 +683,8 @@ export function AgentsView({ onOpenDecisions, onOpenTask }: {
   } = useAgents();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  const overridesApi = useOverrides({ agentId: selectedId ?? undefined });
+  const catalog = useCapabilityCatalog(dialog?.kind === 'authorOverride');
   const closeDialog = useCallback(() => setDialog(null), []);
 
   // Select the first agent once the roster arrives, but never re-select on a
@@ -706,6 +770,17 @@ export function AgentsView({ onOpenDecisions, onOpenTask }: {
               onRevoke={(pack) => setDialog({ kind: 'revoke', pack })}
             />
             <SectionLabel
+              icon={<ShieldCheck size={11} />}
+              count={overridesApi.overrides.filter((o) => o.state !== 'revoked').length}
+            >
+              Gate overrides
+            </SectionLabel>
+            <OverridesPanel
+              overrides={overridesApi.overrides}
+              onAuthor={() => setDialog({ kind: 'authorOverride' })}
+              onRevoke={(id) => overridesApi.revoke(detail.agent.id, id)}
+            />
+            <SectionLabel
               icon={<BookOpen size={11} />}
               count={(detail.skills ?? []).filter((s) => !s.revoked_at).length}
             >
@@ -742,6 +817,14 @@ export function AgentsView({ onOpenDecisions, onOpenTask }: {
             open={dialog?.kind === 'retire'}
             onOpenChange={(v) => !v && closeDialog()}
             onRetire={(reason) => retire(detail.agent.id, reason)}
+          />
+          <AuthorOverrideDialog
+            agent={detail.agent}
+            capabilities={catalog.capabilities}
+            open={dialog?.kind === 'authorOverride'}
+            onOpenChange={(v) => !v && closeDialog()}
+            onAuthor={(cap, scope, ack) =>
+              overridesApi.author(detail.agent.id, cap, scope, ack)}
           />
           <GrantDialog
             agent={detail.agent}
