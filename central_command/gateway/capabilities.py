@@ -265,7 +265,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.update_edge",
-        target_args=("source_uuid", "target_uuid"),
+        target_args=("uuid", "source_uuid", "target_uuid"),
         kind="write",
         gate="human approval",
         default_gate="human",

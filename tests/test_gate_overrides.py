@@ -645,3 +645,12 @@ async def test_a_schedule_scoped_override_reads_the_task_row(granted, demo, monk
     # a ledger-sourced proposal (no session) never matches either
     d = await overrides.resolve(_prow(DRAFTER, [_act("catalog.tag", document_id="d", tags=["x"])]))
     assert d.gate == "human"
+
+
+def test_graph_update_edge_target_scope_also_requires_the_edge_being_edited():
+    o = _ovr("graph.update_edge", {"target": ["n1", "n2"]})
+    assert not overrides.scope_covers(
+        o, _act("graph.update_edge", uuid="e_other", source_uuid="n1", target_uuid="n2"), {})
+    assert overrides.scope_covers(
+        _ovr("graph.update_edge", {"target": ["e1", "n1", "n2"]}),
+        _act("graph.update_edge", uuid="e1", source_uuid="n1", target_uuid="n2"), {})
