@@ -334,21 +334,31 @@ class ShadowState:
                 "complete": self.complete}
 
 
+async def _schedule_ctx(session_id: str | None) -> dict:
+    """The context `scope_covers` reads for a schedule scope: the task the
+    proposal's session belongs to."""
+    return {"task": await repo.task_for_session(session_id) if session_id else None}
+
+
+async def _proposal_covered(override: dict, proposal: dict) -> bool:
+    """True when one of the proposal's actions is the override's capability and
+    inside its scope (the walk `shadow_progress` and `match_stats` share)."""
+    ctx = None
+    if (override.get("scope") or {}).get("schedule"):
+        ctx = await _schedule_ctx(proposal.get("session_id"))
+    return any(_capability(a) == override["capability"] and scope_covers(override, a, ctx)
+               for a in proposal["actions"] or [])
+
+
 async def shadow_progress(override: dict) -> int:
     """How many matching proposals the operator has approved inside this
     override's pinned window (see the section comment)."""
     count = 0
-    ctx_needed = bool((override.get("scope") or {}).get("schedule"))
     for p in await repo.shadow_approval_candidates(
             override["agent_id"], override["capability"], override["granted_at"]):
         if override["id"] in ((p.get("override_eval") or {}).get("suspended") or []):
             continue
-        ctx = None
-        if ctx_needed:
-            sid = p.get("session_id")
-            ctx = {"task": await repo.task_for_session(sid) if sid else None}
-        if any(_capability(a) == override["capability"] and scope_covers(override, a, ctx)
-               for a in p["actions"] or []):
+        if await _proposal_covered(override, p):
             count += 1
     return count
 
@@ -427,8 +437,7 @@ async def resolve(proposal_row: dict) -> Decision:
             reason = reason or "the override's gate is not none"
             continue
         if eligible and ctx is None and any((o["scope"] or {}).get("schedule") for o in eligible):
-            sid = proposal_row.get("session_id")
-            ctx = {"task": await repo.task_for_session(sid) if sid else None}
+            ctx = await _schedule_ctx(proposal_row.get("session_id"))
         scoped = [o for o in eligible if scope_covers(o, action, ctx)]
         if eligible and not scoped:
             reason = reason or f"{cap} is outside the override's scope"
@@ -739,8 +748,7 @@ async def check_override_approval(
             raise OverrideRefused(oid, f"{cap} requires an acknowledgement the "
                                        "override lacks")
         if ctx is None and (o["scope"] or {}).get("schedule"):
-            sid = (proposal_row or {}).get("session_id")
-            ctx = {"task": await repo.task_for_session(sid) if sid else None}
+            ctx = await _schedule_ctx((proposal_row or {}).get("session_id"))
         if not scope_covers(o, action, ctx):
             raise OverrideRefused(oid, f"action {index} ({cap}) is outside the "
                                        "override's scope")
@@ -934,17 +942,11 @@ async def match_stats(override: dict) -> tuple[int, datetime | None]:
     """How many proposals this override's capability and scope have covered
     while it was unrevoked (whatever decided them: the override, the operator
     in its shadow period, or a park), and when the last was created."""
-    ctx_needed = bool((override.get("scope") or {}).get("schedule"))
     count, last = 0, None
     for p in await repo.override_match_candidates(
             override["agent_id"], override["capability"], override["granted_at"],
             override.get("revoked_at")):
-        ctx = None
-        if ctx_needed:
-            sid = p.get("session_id")
-            ctx = {"task": await repo.task_for_session(sid) if sid else None}
-        if any(_capability(a) == override["capability"] and scope_covers(override, a, ctx)
-               for a in p["actions"] or []):
+        if await _proposal_covered(override, p):
             count += 1
             last = p["created_at"]
     return count, last

@@ -1,11 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { useCapabilityCatalog, useOverrides } from './useOverrides';
-import type { CapabilityRow, GateOverride } from '../agents/types';
-
-function stateLabel(o: GateOverride) {
-  return o.state === 'shadow' ? `in shadow ${o.shadow.k} of ${o.shadow.n}` : o.state;
-}
+import { overrideStateLabel, useCapabilityCatalog, useOverrides } from './useOverrides';
+import type { CapabilityRow } from '../agents/types';
 
 /** The overrides on one capability, across agents — the same facts and one-click revoke as the agent page. */
 function CapabilityOverrides({ capability }: { capability: string }) {
@@ -20,7 +16,7 @@ function CapabilityOverrides({ capability }: { capability: string }) {
       {open.map((o) => (
         <div key={o.id} className="flex min-w-0 flex-wrap items-center gap-2 text-[0.7rem]">
           <span className="cockpit-badge">{o.agent_id}</span>
-          <span className="cockpit-badge">{stateLabel(o)}</span>
+          <span className="cockpit-badge">{overrideStateLabel(o)}</span>
           <span className="min-w-0 wrap-anywhere">{o.scope_text}</span>
           <span className="text-muted-foreground">by {o.granted_by}</span>
           <Button size="sm" variant="outline" onClick={() => revoke(o.agent_id, o.id)}>

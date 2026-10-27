@@ -4,6 +4,11 @@ import type {
   AuthorOverrideResult, CapabilityRow, GateOverride, OverrideScope,
 } from '../agents/types';
 
+/** The state badge both override views show: "in shadow k of n", live, suspended or revoked. */
+export function overrideStateLabel(o: GateOverride) {
+  return o.state === 'shadow' ? `in shadow ${o.shadow.k} of ${o.shadow.n}` : o.state;
+}
+
 /**
  * An agent's gate overrides (or, with `capability`, every override on one
  * capability — story 11's view). The operator's direct actions: `author` and

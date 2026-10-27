@@ -10,7 +10,7 @@ import {
   HireDialog, RetireDialog, GrantDialog, RevokeDialog, CharterEditor, RevertDialog,
   CoachDialog, SkillGrantDialog, SkillRevokeDialog, AuthorOverrideDialog,
 } from './AgentDialogs';
-import { useOverrides, useCapabilityCatalog } from '../gates/useOverrides';
+import { useOverrides, useCapabilityCatalog, overrideStateLabel } from '../gates/useOverrides';
 import { AgentModelEffort } from './AgentModelEffort';
 import type {
   GateOverride,
@@ -301,11 +301,6 @@ function CharterPanel({ charter, onRevert, getProposal }: {
       )}
     </div>
   );
-}
-
-function overrideStateLabel(o: GateOverride) {
-  if (o.state === 'shadow') return `in shadow ${o.shadow.k} of ${o.shadow.n}`;
-  return o.state;
 }
 
 export function OverridesPanel({ overrides, onAuthor, onRevoke }: {
