@@ -65,6 +65,12 @@ class Capability:
     description: str
     reversibility: str = ""   # REVERSIBILITIES on every write row, "" on a read (server-held; never the agent's claim)
     acknowledge: bool = False  # an override here needs the operator's acknowledgement + a shadow floor of 1
+    # The arguments that name the world target of a write, declared by the operator's
+    # code (never read from the agent's `target_ref`). A target scope on an override
+    # must match ALL of them; () means the row has no world target and takes no
+    # target scope. Every name is an argument of the row and an `ARG_SPECS` entry
+    # exists for the row (a row without one takes no argument or target scope).
+    target_args: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.default_gate not in DEFAULT_GATES:
@@ -82,6 +88,7 @@ REGISTRY: list[Capability] = [
     # --- gated writes: Executor-only, after operator approval -----------------
     Capability(
         name="jira.set_due_date",
+        target_args=("issue_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -94,6 +101,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.create_issue",
+        target_args=("project_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -111,6 +119,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.add_comment",
+        target_args=("issue_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -123,6 +132,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.update_attributes",
+        target_args=("issue_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -141,6 +151,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.set_fields",
+        target_args=("issue_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -186,6 +197,7 @@ REGISTRY: list[Capability] = [
     # read-back of the same episode into the Verify tab.
     Capability(
         name="graph.create_node",
+        target_args=("group_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -198,6 +210,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.create_edge",
+        target_args=("source_uuid", "target_uuid"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -211,6 +224,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.merge_nodes",
+        target_args=("keep_uuid", "drop_uuid"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -224,6 +238,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.update_node",
+        target_args=("uuid",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -236,6 +251,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.delete_node",
+        target_args=("uuid",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -249,6 +265,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.update_edge",
+        target_args=("source_uuid", "target_uuid"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -263,6 +280,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.delete_edge",
+        target_args=("uuid",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -276,6 +294,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.rescope_episode",
+        target_args=("episode_uuid", "group_id"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -288,6 +307,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="graph.delete_episode",
+        target_args=("episode_uuid",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -316,6 +336,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="catalog.tag",
+        target_args=("document_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -337,6 +358,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.link_issues",
+        target_args=("from_key", "to_key"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -357,6 +379,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.delete_link",
+        target_args=("from_key", "to_key"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -375,6 +398,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.assign_issue",
+        target_args=("issue_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -393,6 +417,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.delete_issue",
+        target_args=("issue_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -420,6 +445,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.transition_issue",
+        target_args=("issue_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -469,6 +495,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="jira.create_project",
+        target_args=("key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -495,6 +522,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="confluence.create_page",
+        target_args=("space_id_or_key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -507,6 +535,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="confluence.update_page",
+        target_args=("page_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -530,6 +559,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="confluence.move_page",
+        target_args=("page_id", "new_parent_id"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -542,6 +572,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="confluence.trash_page",
+        target_args=("page_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -554,6 +585,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="confluence.upload_attachment",
+        target_args=("page_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -571,6 +603,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="confluence.set_labels",
+        target_args=("page_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -583,6 +616,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="confluence.create_space",
+        target_args=("key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -605,6 +639,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="charter.update",
+        target_args=("agent_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -654,6 +689,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="skill.doc_add",
+        target_args=("skill_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -683,6 +719,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.add_model",
+        target_args=("model_name",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -705,6 +742,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.update_model",
+        target_args=("model_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -726,6 +764,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.delete_model",
+        target_args=("model_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -743,6 +782,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.create_key",
+        target_args=("key_alias",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -762,6 +802,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.update_key",
+        target_args=("key",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -778,6 +819,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.create_team",
+        target_args=("team_alias",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -793,6 +835,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.delete_team",
+        target_args=("team_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -823,6 +866,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.set_fallbacks",
+        target_args=("model",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -842,6 +886,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="litellm.delete_fallbacks",
+        target_args=("model",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -915,6 +960,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="calendar.update_event",
+        target_args=("event_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -935,6 +981,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="calendar.delete_event",
+        target_args=("event_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1112,6 +1159,7 @@ REGISTRY: list[Capability] = [
     # MAILBOX itself — until now every mail capability changed only the queue.
     Capability(
         name="mail.report_spam",
+        target_args=("provider_uuid",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1137,6 +1185,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="mail.unsubscribe",
+        target_args=("provider_uuid",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1170,6 +1219,7 @@ REGISTRY: list[Capability] = [
     # Withheld on Gmail by `packs._offered()` — the n8n façade has neither mode.
     Capability(
         name="mail.send",
+        target_args=("to", "cc"),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1201,6 +1251,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="mail.move",
+        target_args=("provider_uuid",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1230,6 +1281,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="autodiscovery.skip",
+        target_args=("credential_name",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1772,6 +1824,7 @@ REGISTRY: list[Capability] = [
     # --- mcp.sync_source (D-sandbox slice 2): the one gated exit -------------
     Capability(
         name="mcp.sync_source",
+        target_args=("server_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1799,6 +1852,7 @@ REGISTRY: list[Capability] = [
     # --- mcp.build_image / mcp.server_deploy (D-sandbox slice 3) -------------
     Capability(
         name="mcp.build_image",
+        target_args=("server_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1829,6 +1883,7 @@ REGISTRY: list[Capability] = [
     ),
     Capability(
         name="mcp.server_deploy",
+        target_args=("server_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1863,6 +1918,7 @@ REGISTRY: list[Capability] = [
     # --- litellm.register_mcp_server (D-sandbox slice 4) ---------------------
     Capability(
         name="litellm.register_mcp_server",
+        target_args=("server_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1897,6 +1953,7 @@ REGISTRY: list[Capability] = [
     # --- mcp.server_remove (operator decision 2026-08-03) ---------------------
     Capability(
         name="mcp.server_remove",
+        target_args=("server_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -1931,6 +1988,7 @@ REGISTRY: list[Capability] = [
     # --- mcp.tool_call (D-sandbox slice 5) ------------------------------------
     Capability(
         name="mcp.tool_call",
+        target_args=("server_id",),
         kind="write",
         gate="human approval",
         default_gate="human",
@@ -2467,6 +2525,13 @@ def registry_as_dict() -> dict:
 def gated_write_names() -> set[str]:
     """The exact set the Executor must (and may only) dispatch."""
     return {c.name for c in REGISTRY if c.kind == "write" and c.gate == "human approval"}
+
+
+def target_args_of(capability: str) -> tuple[str, ...]:
+    """The registry's declared target arguments of a capability, () when it has
+    none or is unknown. Reads the row, never an agent's claim."""
+    row = _BY_NAME.get(capability.split("@", 1)[0])
+    return row.target_args if row else ()
 
 
 def requires_acknowledgement(capability: str) -> bool:

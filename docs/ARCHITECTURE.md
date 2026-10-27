@@ -128,7 +128,7 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`resolve`, `decide_on_park`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`resolve`, `decide_on_park`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
@@ -232,7 +232,8 @@ from the command line (`python -m central_command.selfcheck`) and from
   carries `kind`, `gate`, `risk` (free text — what a wrong use costs),
   `holder`, `route` and `arguments`, plus `default_gate` that gate overrides
   resolve against, and, on every write, the server-held `reversibility`
-  (`reversible | irreversible`) and `acknowledge` (an override on it needs the
+  (`reversible | irreversible`), `target_args` (the arguments naming the write's
+  world target, empty when it has none) and `acknowledge` (an override on it needs the
   operator's recorded acknowledgement and a shadow period of at least 1). The
   mark informs and forbids nothing; it is never read from the proposing
   agent's own `Action.reversibility`. Agent charters' capability sections are
@@ -307,8 +308,23 @@ stateDiagram-v2
   LIVE / highest-blast-radius `litellm` rows) only when it carries
   `acknowledged_irreversible_at` and `shadow_runs >= 1`
   (`capabilities.requires_acknowledgement`, `effective_shadow_runs`), and
-  never for the auditor, the one hard exclusion. No override is seeded and no authoring path exists yet; only
-  `catalog.tag` is on the tracer's `OVERRIDABLE` allowlist.
+  never for the auditor, the one hard exclusion. No override is seeded and no authoring path exists yet; any
+  capability whose default gate is `human` or `auditor` may be overridden.
+  **Scope.** A row's `scope` is `{}` (every use) or any of three forms, ANDed,
+  with no regex and no time windows: `argument` (`{name, values}`: exact
+  values of one named argument, which must exist in `contract.ARG_SPECS` for
+  the capability; the seven gated writes with no `ARG_SPECS` entry take none),
+  `target` (a list of values matched against the registry's
+  `Capability.target_args`, ALL of which must match; Jira by project prefix of
+  the issue key; a row declaring none takes no target scope) and `schedule` (a
+  heartbeat schedule id, matched against the drafting task's
+  `created_by = heartbeat:<id>` via `repo.task_for_session`; a ledger-sourced
+  proposal has no task and never matches). `overrides.scope_covers` is the pure
+  match, read from the arguments the Executor will use, `proposal.agent_id` and
+  the task row, never the agent-written `target_ref`; a proposal is decided
+  only if every gated action is covered, else the whole proposal parks.
+  `validate_scope` is the authoring check and `scope_text` the one plain-words
+  rendering every screen shows.
 - **Operator routes.** `POST /proposals/{id}/approve | reject | dismiss`
   (`api/routes.py`); the cockpit reaches the same gateway functions over `/ws`.
 - **Folds.** Sibling work items folded into a proposal sit in `FOLD_PENDING`;

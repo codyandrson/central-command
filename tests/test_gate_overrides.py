@@ -98,8 +98,8 @@ def test_an_auditor_default_gate_resolves_like_human():
     assert overrides._DEFAULT_GATES["work.bulk_dismiss"] == "auditor"
 
 
-def test_the_tracer_allowlist_is_catalog_tag_only():
-    assert overrides.OVERRIDABLE == frozenset({"catalog.tag"})
+def test_the_tracer_allowlist_is_gone():
+    assert not hasattr(overrides, "OVERRIDABLE")
 
 
 def test_the_approver_string_names_the_override_and_nothing_else():
@@ -436,11 +436,8 @@ def _row(agent_id: str, cap: str, *, claimed: str = "reversible") -> dict:
 
 @needs_pg
 async def test_an_unacknowledged_or_unshadowed_override_on_mail_send_is_never_honoured(
-    granted, monkeypatch,
+    granted,
 ):
-    # mail.send is not on the tracer allowlist; extending it in the test only
-    # makes the refusal below the acknowledgement rule's, not the allowlist's.
-    monkeypatch.setattr(overrides, "OVERRIDABLE", frozenset({"catalog.tag", "mail.send"}))
     agent = DRAFTER
     bare = await granted(agent, "mail.send")
     assert (await overrides.resolve(_row(agent, "mail.send"))).gate == "human"
@@ -459,8 +456,7 @@ async def test_an_unacknowledged_or_unshadowed_override_on_mail_send_is_never_ho
 
 
 @needs_pg
-async def test_the_agent_written_reversibility_is_never_read(granted, monkeypatch):
-    monkeypatch.setattr(overrides, "OVERRIDABLE", frozenset({"catalog.tag", "mail.send"}))
+async def test_the_agent_written_reversibility_is_never_read(granted):
     agent = DRAFTER
     await granted(agent, "mail.send")
     planted = await overrides.resolve(_row(agent, "mail.send", claimed="reversible"))
@@ -497,3 +493,155 @@ async def test_a_row_naming_the_auditor_is_never_honoured(granted):
     d = await overrides.resolve(_row("auditor", "catalog.tag"))
     assert d.gate == "human" and d.override_id is None and not d.considered
     assert row["id"]
+
+
+# --- scope: argument, target, schedule (story 5.4) ----------------------------
+
+from central_command.contract import ARG_SPECS  # noqa: E402
+
+_NO_ARG_SPECS = ["work.bulk_dismiss", "litellm.apply_config_change", "litellm.delete_key",
+                 "loe.create", "loe.record_checkin", "loe.update", "skill.create"]
+# Gated writes with no world target (nothing they name is a thing in the world):
+# they take no target scope.
+_NO_TARGET = {
+    "graph.add_episode", "jira.create_filter", "jira.create_dashboard",
+    "calendar.create_event", "mail.create_rule", "work.bulk_dismiss",
+    "litellm.apply_config_change", "litellm.delete_key", "loe.create",
+    "loe.record_checkin", "loe.update", "skill.create",
+}
+
+
+def _act(cap, **args):
+    return {"capability": cap, "arguments": args,
+            "target_ref": {"system": "x", "id": "FORGED-1"}}
+
+
+def _ovr(cap, scope, **kw):
+    return {"capability": cap, "scope": scope, "gate": "none", "shadow_runs": 0,
+            "acknowledged_irreversible_at": None, "granted_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
+            "id": "govr_x", **kw}
+
+
+def test_the_seven_writes_without_arg_specs_are_exactly_these():
+    gated = {c.name for c in REGISTRY if c.kind == "write" and c.default_gate != "none"}
+    assert sorted(n for n in gated if n not in ARG_SPECS) == sorted(_NO_ARG_SPECS)
+
+
+def test_every_gated_write_declares_target_args_or_is_named_as_having_none():
+    gated = [c for c in REGISTRY if c.kind == "write" and c.default_gate != "none"]
+    undeclared = {c.name for c in gated if not c.target_args}
+    assert undeclared == _NO_TARGET, sorted(undeclared ^ _NO_TARGET)
+    for c in gated:
+        assert c.name in ARG_SPECS or not c.target_args, c.name
+        known = {a.split(" ")[0].rstrip("?") for a in c.arguments}
+        assert set(c.target_args) <= known, (c.name, c.target_args)
+        for cap in undeclared:
+            assert overrides.validate_scope(cap, {"target": ["x"]}), cap
+    # reads and sandbox rows declare nothing
+    assert not any(c.target_args for c in REGISTRY if c.default_gate == "none")
+
+
+@pytest.mark.parametrize("scope,args,expect", [
+    ({"argument": {"name": "link_type", "values": ["Relates"]}},
+     dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), True),
+    ({"argument": {"name": "link_type", "values": ["Relates"]}},
+     dict(from_key="DOE-1", to_key="DOE-2", link_type="Blocks"), False),
+    ({"argument": {"name": "link_type", "values": ["Relates"]}},
+     dict(from_key="DOE-1", to_key="DOE-2"), False),
+    ({"target": ["DOE"]}, dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), True),
+    ({"target": ["DOE"]}, dict(from_key="DOE-1", to_key="RIV-1", link_type="Relates"), False),
+    ({"target": ["DOE", "RIV"]}, dict(from_key="DOE-1", to_key="RIV-1", link_type="Relates"), True),
+    ({"target": ["DOE"], "argument": {"name": "link_type", "values": ["Blocks"]}},
+     dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), False),
+    ({}, dict(from_key="RIV-1", to_key="RIV-2", link_type="Relates"), True),
+    ({"regex": ".*"}, dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), False),
+])
+def test_scope_covers_table(scope, args, expect):
+    assert overrides.scope_covers(_ovr("jira.link_issues", scope), _act("jira.link_issues", **args), {}) is expect
+
+
+def test_a_jira_project_scope_decides_doe_and_parks_riv():
+    o = _ovr("jira.add_comment", {"target": ["DOE"]})
+    assert overrides.scope_covers(o, _act("jira.add_comment", issue_key="DOE-1", body="x"), {})
+    assert not overrides.scope_covers(o, _act("jira.add_comment", issue_key="RIV-1", body="x"), {})
+
+
+def test_a_forged_target_ref_does_not_widen_a_target_scope():
+    o = _ovr("jira.add_comment", {"target": ["DOE"]})
+    a = _act("jira.add_comment", issue_key="RIV-1", body="x")
+    a["target_ref"] = {"system": "jira", "id": "DOE-1"}
+    assert not overrides.scope_covers(o, a, {})
+
+
+def test_graph_create_edge_with_an_endpoint_outside_the_scope_parks():
+    o = _ovr("graph.create_edge", {"target": ["n1", "n2"]})
+    base = dict(name="r", fact="f", valid_at="unbounded")
+    assert overrides.scope_covers(o, _act("graph.create_edge", source_uuid="n1", target_uuid="n2", **base), {})
+    assert not overrides.scope_covers(o, _act("graph.create_edge", source_uuid="n1", target_uuid="n9", **base), {})
+
+
+def test_a_capability_without_target_args_or_arg_specs_covers_no_scoped_action():
+    assert not overrides.scope_covers(_ovr("jira.create_filter", {"target": ["x"]}),
+                                      _act("jira.create_filter", name="n", jql="j"), {})
+    assert not overrides.scope_covers(_ovr("loe.create", {"argument": {"name": "loe_id", "values": ["a"]}}),
+                                      _act("loe.create", loe_id="a"), {})
+
+
+def test_a_schedule_scope_matches_only_that_schedules_task():
+    o = _ovr("catalog.tag", {"schedule": "mail-poll"})
+    a = _act("catalog.tag", document_id="d", tags=["x"])
+    assert overrides.scope_covers(o, a, {"task": {"created_by": "heartbeat:mail-poll"}})
+    assert not overrides.scope_covers(o, a, {"task": {"created_by": "operator"}})
+    assert not overrides.scope_covers(o, a, {"task": {"created_by": "heartbeat:other"}})
+    assert not overrides.scope_covers(o, a, {"task": None}), "a ledger-sourced proposal has no task"
+    assert not overrides.scope_covers(o, a, None)
+
+
+def test_validate_scope_refuses():
+    assert overrides.validate_scope("jira.link_issues", {"argument": {"name": "link_type", "values": ["Relates"]}}) == []
+    assert overrides.validate_scope("jira.link_issues", {"argument": {"name": "nope", "values": ["x"]}})
+    for cap in _NO_ARG_SPECS:
+        assert overrides.validate_scope(cap, {"argument": {"name": "loe_id", "values": ["a"]}}), cap
+    assert overrides.validate_scope("jira.link_issues", {"regex": "x"})
+    assert overrides.validate_scope("jira.link_issues", {"target": []})
+    assert overrides.validate_scope("catalog.tag", {"schedule": "mail-poll"}) == []
+    assert overrides.validate_scope("jira.get_issue", {})
+
+
+def test_scope_text_renders_each_form_in_words():
+    assert overrides.scope_text(_ovr("catalog.tag", {})) == "every use"
+    t = overrides.scope_text(_ovr("jira.link_issues", {
+        "argument": {"name": "link_type", "values": ["Relates", "Blocks"]},
+        "target": ["DOE"], "schedule": "mail-poll"}))
+    assert "link_type is Relates or Blocks" in t
+    assert "from_key and to_key are all in Jira project DOE" in t
+    assert "mail-poll schedule" in t and t.count("; and ") == 2
+
+
+def _prow(agent, actions):
+    return {"agent_id": agent, "status": "AWAITING_HUMAN", "session_id": None,
+            "created_at": datetime.now(timezone.utc) + timedelta(seconds=5), "actions": actions}
+
+
+@needs_pg
+async def test_in_scope_decides_out_of_scope_parks_and_a_partial_cover_parks_whole(granted):
+    ovr = await granted(DRAFTER, "jira.add_comment", scope={"target": ["DOE"]})
+    inside = _act("jira.add_comment", issue_key="DOE-1", body="x")
+    outside = _act("jira.add_comment", issue_key="RIV-1", body="x")
+    d = await overrides.resolve(_prow(DRAFTER, [inside]))
+    assert (d.gate, d.override_id) == ("none", ovr["id"])
+    d = await overrides.resolve(_prow(DRAFTER, [outside]))
+    assert d.gate == "human" and d.considered and "scope" in d.reason
+    d = await overrides.resolve(_prow(DRAFTER, [inside, outside]))
+    assert d.gate == "human" and d.considered
+
+
+@needs_pg
+async def test_a_schedule_scoped_override_reads_the_task_row(granted, demo, monkeypatch):
+    await granted(DRAFTER, scope={"schedule": "mail-poll"})
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag by the operator's task"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "AWAITING_HUMAN" and "scope" in row["override_eval"]["reason"]
+    # a ledger-sourced proposal (no session) never matches either
+    d = await overrides.resolve(_prow(DRAFTER, [_act("catalog.tag", document_id="d", tags=["x"])]))
+    assert d.gate == "human"

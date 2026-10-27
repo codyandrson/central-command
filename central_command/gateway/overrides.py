@@ -24,18 +24,16 @@ coaching reader skip a `proposal.decided` whose payload carries `override_id`.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from central_command import events
 from central_command.db import repo
-from central_command.gateway.capabilities import REGISTRY, requires_acknowledgement
-
-# The capabilities an override may decide at all. A deliberately tiny tracer
-# allowlist: until the scope forms, the reviewer-would-have-seen checks and
-# the Executor's scope check exist, only one reversible internal write is
-# eligible. Deleted when those land.
-OVERRIDABLE: frozenset[str] = frozenset({"catalog.tag"})
+from central_command.contract import ARG_SPECS
+from central_command.gateway.capabilities import (
+    REGISTRY, requires_acknowledgement, target_args_of,
+)
 
 APPROVER_PREFIX = "override:"
 
@@ -73,32 +71,209 @@ def override_id_of(approver: str | None) -> str | None:
 def _capability(action: dict) -> str:
     return str(action.get("capability", "")).split("@", 1)[0]
 
+# --- scope ------------------------------------------------------------------
+#
+# An override row's `scope` is `{}` (every use) or any of three forms, ANDed:
+#
+#   {"argument": {"name": "link_type", "values": ["Relates"]},   # exact values
+#    "target": ["DOE"],                                          # registry target args
+#    "schedule": "mail-poll"}                                    # heartbeat schedule id
+#
+# No regex and no time windows. Every form is matched against SERVER-HELD
+# facts only: the action arguments the Executor will use, `proposal.agent_id`
+# and the drafting session's task row. The agent-written `target_ref` and
+# `Action.reversibility` are never read. Anything the matcher cannot verify
+# (an unknown key, a missing required argument, a capability with no target
+# declaration) is NOT covered: a scope can only narrow.
+
+SCOPE_FORMS = ("argument", "target", "schedule")
+SCHEDULE_CREATOR_PREFIX = "heartbeat:"
+
+
+def _scalar(v) -> str | None:
+    if isinstance(v, bool) or isinstance(v, (int, float)):
+        return json.dumps(v)
+    return v if isinstance(v, str) else None
+
+
+def _flat(v) -> list | None:
+    """An argument's values as scalars: a list contributes every element, an
+    empty one or a nested structure is None (nothing exact to compare)."""
+    items = v if isinstance(v, list) else [v]
+    if not items:
+        return None
+    out = [_scalar(i) for i in items]
+    return None if any(i is None for i in out) else out
+
+
+def _target_key(capability: str, value: str) -> str:
+    """What a target value is compared as: a Jira issue key by its project
+    prefix (`DOE-1` -> `DOE`; a bare project key is itself), everything else
+    exactly."""
+    return value.split("-", 1)[0] if capability.startswith("jira.") else value
+
+
+def _arg_names(capability: str) -> set[str]:
+    spec = ARG_SPECS.get(capability)
+    if spec is None:
+        return set()
+    names = set(spec.required) | set(spec.enums)
+    for group in (*spec.any_of, *spec.any_present):
+        names |= set(group)
+    return names
+
+
+def scope_covers(override: dict, action: dict, ctx: dict | None = None) -> bool:
+    """Does the override's scope cover this action? Pure: `ctx["task"]` is the
+    drafting session's task row (None for a ledger-sourced proposal, which
+    therefore never matches a schedule scope)."""
+    scope = override.get("scope") or {}
+    if isinstance(scope, str):
+        scope = json.loads(scope)
+    capability = _capability(action)
+    if override.get("capability") not in (None, capability):
+        return False
+    if not scope:
+        return True
+    if not isinstance(scope, dict) or set(scope) - set(SCOPE_FORMS):
+        return False
+    args = action.get("arguments") or {}
+    spec = ARG_SPECS.get(capability)
+
+    if "argument" in scope:
+        form = scope["argument"]
+        if spec is None or not isinstance(form, dict):
+            return False
+        have = _flat(args.get(form.get("name")))
+        allowed = [_scalar(v) for v in form.get("values") or []]
+        if have is None or not allowed or any(h not in allowed for h in have):
+            return False
+
+    if "target" in scope:
+        declared = target_args_of(capability)
+        allowed = scope["target"]
+        if spec is None or not declared or not isinstance(allowed, list) or not allowed:
+            return False
+        seen = 0
+        for name in declared:
+            value = args.get(name)
+            if value in (None, "", []):
+                if name in spec.required:
+                    return False
+                continue            # an optional target not named is not a target
+            vals = _flat(value)
+            if vals is None:
+                return False
+            if any(_target_key(capability, v) not in allowed for v in vals):
+                return False
+            seen += 1
+        if not seen:
+            return False
+
+    if "schedule" in scope:
+        task = (ctx or {}).get("task")
+        want = scope["schedule"]
+        if not task or not isinstance(want, str) or not want:
+            return False
+        if task.get("created_by") != f"{SCHEDULE_CREATOR_PREFIX}{want}":
+            return False
+    return True
+
+
+def validate_scope(capability: str, scope: dict | None) -> list[str]:
+    """Every reason a scope may not be authored for this capability, one
+    message each; empty means it is well-formed. The authoring path calls this
+    before it inserts a row."""
+    capability = capability.split("@", 1)[0]
+    problems: list[str] = []
+    if _DEFAULT_GATES.get(capability, "none") == "none":
+        problems.append(f"{capability} has no gate to relax, so it takes no override")
+    scope = scope or {}
+    if not isinstance(scope, dict):
+        return problems + ["scope must be an object"]
+    for key in sorted(set(scope) - set(SCOPE_FORMS)):
+        problems.append(f"unknown scope form {key!r} (forms: {', '.join(SCOPE_FORMS)})")
+    if "argument" in scope:
+        form = scope["argument"]
+        if capability not in ARG_SPECS:
+            problems.append(f"{capability} has no argument shape, so it takes no argument scope")
+        elif not isinstance(form, dict) or not isinstance(form.get("name"), str):
+            problems.append("an argument scope is {name, values}")
+        elif form["name"] not in _arg_names(capability):
+            problems.append(f"{capability} has no argument {form['name']!r} "
+                            f"(known: {', '.join(sorted(_arg_names(capability)))})")
+        if isinstance(form, dict) and not (
+                isinstance(form.get("values"), list) and form["values"]
+                and all(_scalar(v) is not None for v in form["values"])):
+            problems.append("an argument scope needs a non-empty list of exact values")
+    if "target" in scope:
+        values = scope["target"]
+        if not target_args_of(capability):
+            problems.append(f"{capability} declares no target argument, so it takes no target scope")
+        if not (isinstance(values, list) and values
+                and all(isinstance(v, str) and v for v in values)):
+            problems.append("a target scope needs a non-empty list of target values")
+    if "schedule" in scope and not (isinstance(scope["schedule"], str) and scope["schedule"]):
+        problems.append("a schedule scope names one heartbeat schedule id")
+    return problems
+
+
+def scope_text(override: dict) -> str:
+    """The one plain-words rendering of an override's scope; every screen shows
+    this string, none composes its own."""
+    scope = override.get("scope") or {}
+    if isinstance(scope, str):
+        scope = json.loads(scope)
+    capability = override.get("capability", "")
+    if not scope:
+        return "every use"
+    parts: list[str] = []
+    if "argument" in scope:
+        f = scope["argument"]
+        vals = " or ".join(str(v) for v in f.get("values", []))
+        parts.append(f"only where {f.get('name')} is {vals}")
+    if "target" in scope:
+        declared = target_args_of(capability)
+        names = " and ".join(declared) or "the target"
+        where = "Jira project" if capability.startswith("jira.") else "the target"
+        vals = " or ".join(str(v) for v in scope["target"])
+        verb = "are all" if len(declared) > 1 else "is"
+        parts.append(f"only where {names} {verb} in {where} {vals}" if where != "the target"
+                     else f"only where {names} {verb} {vals}")
+    if "schedule" in scope:
+        parts.append(f"only in work started by the {scope['schedule']} schedule")
+    return "; and ".join(parts)
+
 
 async def resolve(proposal_row: dict) -> Decision:
     """Override, then default. The drafter's live override covering EVERY
-    action decides the proposal; anything less leaves the default gate."""
+    gated action decides the proposal; anything less leaves the default gate.
+    An override's scope is evaluated per action (`scope_covers`)."""
     actions = proposal_row.get("actions") or []
     caps = [_capability(a) for a in actions]
     # `auditor` records that a graduated class MAY be auditor-confirmed; at this
     # seam it gates exactly like `human` (it changes no behaviour).
     default = "human" if any(_DEFAULT_GATES.get(c, "human") != "none" for c in caps) \
         else "none"
-    if not caps or proposal_row.get("agent_id") == AUDITOR_ID:
+    if default == "none" or proposal_row.get("agent_id") == AUDITOR_ID:
         return Decision(default)
 
     created_at = proposal_row["created_at"]
     covering: set[str] = set()
     considered = False
     reason = ""
-    for cap in caps:
-        live = await repo.live_gate_overrides(proposal_row["agent_id"], cap)
+    live_by_cap: dict[str, list[dict]] = {}
+    ctx: dict | None = None
+    for action, cap in zip(actions, caps):
+        if _DEFAULT_GATES.get(cap, "human") == "none" and cap in _DEFAULT_GATES:
+            continue            # nothing gates this action; there is nothing to cover
+        if cap not in live_by_cap:
+            live_by_cap[cap] = await repo.live_gate_overrides(proposal_row["agent_id"], cap)
+        live = live_by_cap[cap]
         considered = considered or bool(live)
-        if cap not in OVERRIDABLE:
+        if cap not in _DEFAULT_GATES:
             reason = reason or f"{cap} is not overridable"
             continue
-        # Only an unscoped, no-shadow relaxation to `none` is honoured until
-        # the scope forms and the shadow period exist: a row that asks for
-        # either is never treated as wider than it says.
         # A capability whose registry row requires acknowledgement (irreversible
         # or LIVE / highest blast radius) is honoured only with the operator's
         # recorded acknowledgement AND a non-zero shadow period. The mark is the
@@ -115,13 +290,19 @@ async def resolve(proposal_row: dict) -> Decision:
                 continue
             live = [o for o in live if o not in lacking]
         eligible = [o for o in live
-                    if o["gate"] == "none" and not o["scope"]
-                    and (ack or o["shadow_runs"] == 0)]
+                    if o["gate"] == "none" and (ack or o["shadow_runs"] == 0)]
         if live and not eligible:
-            reason = reason or "the override is scoped or shadowed"
+            reason = reason or "the override is shadowed"
             continue
-        current = [o for o in eligible if created_at > o["granted_at"]]
-        if eligible and not current:
+        if eligible and ctx is None and any((o["scope"] or {}).get("schedule") for o in eligible):
+            sid = proposal_row.get("session_id")
+            ctx = {"task": await repo.task_for_session(sid) if sid else None}
+        scoped = [o for o in eligible if scope_covers(o, action, ctx)]
+        if eligible and not scoped:
+            reason = reason or f"{cap} is outside the override's scope"
+            continue
+        current = [o for o in scoped if created_at > o["granted_at"]]
+        if scoped and not current:
             reason = reason or "the proposal predates the override"
             continue
         if not current:
