@@ -4,6 +4,90 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-26 — v2.71.0: gate overrides — the operator relaxes a capability's default gate for one agent, scoped, stamped and shadowed
+
+epic-gate-overrides. Seventeen commits since v2.70.0 (`4ef24f32..bfc154de`) build
+FR-4: every capability declares a default gate, and the operator may relax it to
+none for ONE agent and ONE capability, narrowed by argument, target or schedule.
+**No override ships and none is seeded.** The first override on a deployment is the
+operator's own act, authored in the cockpit after the apply. A write an override
+decides is still a proposal: the gateway decides it, `proposal.decided` names the
+override and lands before the Executor writes, and the write carries the override's
+trust stamp (DL-187). Nothing that was gated stops being gated until the operator
+authors an override.
+
+- **Default gates.** Every registry row declares `default_gate` from a closed
+  vocabulary, served on `GET /capabilities`. `EXEMPT_WRITES` names the two writes
+  with no agent in the path (the operator's graph curation and the deterministic
+  wiki annotation) as a closed list, not rows; task creation has no row. A
+  server-held reversibility mark per write replaces reading the agent's own claim;
+  an irreversible or LIVE class requires the operator's recorded acknowledgement and
+  a shadow floor of one.
+- **Scoped overrides, checked twice.** A scope is argument, target or schedule,
+  matched only against server-held facts (a forged `target_ref` never widens one;
+  `graph.update_edge` also requires the edge being edited). The gateway pre-checks
+  before `proposal.decided` and the Executor checks again before the first action;
+  a failed check hands the proposal back to the inbox with `override.refused`. The
+  auditor never holds one: a row naming it is never honoured and the Executor
+  refuses a forced approval.
+- **Never decided by an override.** A proposal a reviewer would have seen flagged,
+  one with an unverified claim (`claim_matches_source` false; unchecked is decided),
+  a redraft after Reject, a follow-on, one outside the agent's live pack grants (the
+  override reads as suspended), one created before the override, and a proposal
+  whose work item carries the operator's reopen note all park.
+- **Shadow period.** A new override parks its first N matching proposals marked
+  `shadow` while the operator decides them; N counts only the operator's own
+  approvals and defaults to the new setting `CC_GATE_OVERRIDE_SHADOW_RUNS` (5),
+  copied onto the override at authoring so a later change alters nothing already
+  authored. `override.live` is emitted once, before the first decision.
+- **Several overrides may decide one proposal** (operator ruling, 2026-10-26). The
+  approver is `override:<a>+<b>` (sorted, parsed only by `override_ids_of`),
+  `proposal.decided` carries `override_ids`, and each write is stamped with its own
+  covering override (`Provenance.action_approvers`). The proposal waits until every
+  covering override is past its shadow period.
+- **Trust stamp and the pairing.** An override write's episode source description
+  reads `trust=override:<id> | approver=override:<id>`; a human-approved one is
+  byte-identical to before. The steward's agreement pairing and the coaching record
+  never count an override-decided write as operator agreement.
+- **Operator-only authoring.** `PUT/DELETE /agents/{id}/gate-overrides`,
+  `GET /capabilities/{name}/gate-overrides` and the RPCs `overrides.list|author|revoke`
+  and `capabilities.list` are the only writers; a source walk pins one caller, and
+  `runtime/` imports neither the authoring path nor the writer. Revocation is a
+  timestamp. `mcp.tool_call` stays overridable with the acknowledgement and shadow
+  floor; the MCP direct-call gate is separate and unchanged (operator ruling,
+  2026-10-26).
+- **The decide hook runs at every landing point** a parked proposal can reach
+  (task run, ingest dispatch, coach, chat lane, orchestration resumes, consult
+  settle), mapped site by site in `overrides.PARK_SITES` and pinned to a source walk;
+  a startup sweep decides what a restart interrupted. An evaluation error leaves the
+  proposal for the operator with `override.error`.
+- **The cockpit.** The agent page lists the agent's overrides (shadow k of n, live,
+  suspended, revoked) and the operator authors one from a dialog; the capability
+  page shows each default gate, whether an override may relax it, and the overrides
+  on it; the inbox and Decisions history say which gate decided a write (you, the
+  auditor, or override `<id>`) and badge a pending proposal's shadow progress.
+- **New events.** `override.created`, `override.revoked`, `override.refused`,
+  `override.shadowed`, `override.live`, `override.error`.
+- **Documents.** ARCHITECTURE "Who may approve what", the `AGENTS.md` Policy text
+  and PRD FR-4 (dated amendment) say overrides are built; DL-187 is the successor to
+  DL-143/144 (an override-decided write is a proposal the gateway decides, never
+  operator agreement).
+- **End-to-end proof.** `tests/test_gate_overrides_e2e.py` (17 tests on the demo
+  model through the real RPC and gateway): five shadow approvals, the sixth decided
+  by the override with no inbox item and decision before write, the pairing counting
+  five, every park case above, revocation and pack revocation, auditor and
+  acknowledgement refusals, two overrides on one proposal, and the chat-lane landing.
+- **What the apply does.** The schema phase adds the `agent_gate_override` table and
+  its `(agent_id, capability)` index and the `proposal.override_eval` column: additive,
+  idempotent, no seed rows. The new setting has a default; no image, manifest or unit
+  changes. No capability is removed, so `deploy/k3s/removed-capabilities.txt` gets no
+  entry and the pre-apply check has nothing to stop on. `min_upgrade_from` stays 2.69.0:
+  nothing here needs a newer installed updater than v2.70.0's predecessor.
+- **After the apply, the operator checks:** the cockpit shows v2.71.0;
+  `GET /api/heartbeat` is healthy; `GET /capabilities` returns `default_gate` on every
+  row; the overrides list is empty. The first override is the operator's own act, in
+  the cockpit.
+
 ## 2026-10-24 — v2.70.0: task.create comes off the gate; agent-created tasks are a bounded trigger
 
 epic-task-backstops, release B. Six commits since v2.69.0 (`0a00d160..25f595fb`)
