@@ -128,7 +128,7 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic demo and test doubles `resolve_model` swaps in under `CC_DEMO_MODE`; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
@@ -365,8 +365,35 @@ stateDiagram-v2
   `acknowledged_irreversible_at`, and then it waits its shadow period like
   any other, floored at 1 (`capabilities.requires_acknowledgement`,
   `effective_shadow_runs`), and
-  never for the auditor, the one hard exclusion. No override is seeded and no authoring path exists yet; any
+  never for the auditor, the one hard exclusion. No override is seeded; any
   capability whose default gate is `human` or `auditor` may be overridden.
+  **Authoring is the operator's alone** (`overrides.author` / `overrides.revoke`,
+  reached only from the REST routes `GET|PUT|DELETE /agents/{id}/gate-overrides`
+  and `GET /capabilities/{name}/gate-overrides`, and the cockpit RPC
+  `overrides.list` / `overrides.author` / `overrides.revoke`; a source walk pins
+  those callers, and no agent tool, pack, capability, heartbeat action, chat
+  lane or charter text names an override). `author` refuses an unknown agent
+  or capability (404), the auditor as the override's agent, a default gate of
+  `none`, a scope `validate_scope` rejects, an acknowledgement class without
+  `acknowledge_irreversible` (422) and a second live override on the same
+  agent, capability and scope (409); it writes through
+  `repo.create_gate_override(shadow_runs=None)` (the setting, floored) and
+  stamps `acknowledged_irreversible_at` when the class requires it. An agent
+  with no pack covering the capability still gets the override, born
+  suspended, and the response's `warnings` says so. `revoke` timestamps the
+  row (409 when already revoked); a scope change is a revoke plus a new id
+  with a fresh shadow period. `override.created` / `override.revoked` follow
+  their writes (bookkeeping). The listing row (`overrides.describe`, pinned by
+  `tests/test_overrides_wire.py`) carries `id, agent_id, capability, scope,
+  scope_text, state (shadow | live | suspended | revoked), shadow {k, n},
+  matches, last_match, granted_by, granted_at, revoked_at, reversibility,
+  requires_acknowledgement`; `matches` counts the agent's proposals the
+  override's capability and scope covered while it was unrevoked
+  (`repo.override_match_candidates`, any status, redrafts and follow-ons
+  excluded). `GET /capabilities` (and RPC `capabilities.list`) adds per row
+  `requires_acknowledgement`, `scope_forms` (`argument` only with an
+  `ARG_SPECS` entry, `target` only with `target_args`, `schedule` always),
+  `overridable` and `overridable_reason` (`capabilities.registry_as_dict`).
   **Safeguard 3, the shadow period.** A NEW override is shadowed: a proposal
   it covers parks for the operator until the operator has approved N matching
   proposals. N is the setting `gate_override_shadow_runs`

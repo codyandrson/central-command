@@ -1217,6 +1217,30 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
             str(params.get("pack") or ""),
             rest.RevokeIn(reason=params.get("reason")),
         )
+    # Gate overrides (FR-4): the operator's own direct action, through the
+    # REST handlers (the refusals and the events live there). Only these and
+    # the REST routes reach `overrides.author` / `overrides.revoke`.
+    if method == "capabilities.list":
+        return await rest.get_capabilities()
+    if method == "overrides.list":
+        if params.get("capability"):
+            return await rest.list_capability_gate_overrides(str(params["capability"]))
+        return await rest.list_agent_gate_overrides(str(params.get("agentId") or ""))
+    if method == "overrides.author":
+        return await rest.author_gate_override(
+            str(params.get("agentId") or ""),
+            rest.GateOverrideIn(
+                capability=str(params.get("capability") or ""),
+                scope=params.get("scope") or {},
+                acknowledge_irreversible=bool(params.get("acknowledgeIrreversible")),
+            ),
+        )
+    if method == "overrides.revoke":
+        return await rest.revoke_agent_gate_override(
+            str(params.get("agentId") or ""),
+            str(params.get("overrideId") or ""),
+            params.get("reason"),
+        )
     if method == "agents.charter.save":
         # Returns `warnings` — a charter quoting a capability the registry
         # doesn't have is the charter-v2 incident, and the operator sees it at

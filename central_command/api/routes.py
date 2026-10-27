@@ -2694,6 +2694,71 @@ async def graph_audit_agreement() -> dict:
     return await graph_auditor.agreement_report()
 
 
+# --- gate overrides (epic-gate-overrides, FR-4) --------------------------------
+# The operator's per-agent relaxation of a capability's default gate to none.
+# Like the MCP tool overrides above, a direct operator action: no propose path,
+# agent tool, pack, heartbeat action or chat lane writes one. These routes and
+# the cockpit RPC (`overrides.*` in nerve_gateway) are the only callers of
+# `overrides.author` / `overrides.revoke`, which emit their events after the
+# write. A scope change is a revoke plus a new override; rows are never edited.
+
+
+class GateOverrideIn(BaseModel):
+    capability: str
+    scope: dict = {}
+    acknowledge_irreversible: bool = False
+
+
+def _refused(e) -> HTTPException:
+    return HTTPException(e.status, "; ".join(e.problems))
+
+
+@router.get("/agents/{agent_id}/gate-overrides")
+async def list_agent_gate_overrides(agent_id: str) -> dict:
+    from central_command.gateway import overrides
+
+    return {"overrides": await overrides.list_for(agent_id=agent_id)}
+
+
+@router.get("/capabilities/{capability}/gate-overrides")
+async def list_capability_gate_overrides(capability: str) -> dict:
+    from central_command.gateway import overrides
+
+    return {"overrides": await overrides.list_for(capability=capability)}
+
+
+@router.put("/agents/{agent_id}/gate-overrides")
+async def author_gate_override(agent_id: str, body: GateOverrideIn) -> dict:
+    """Author a new override; the response carries the new row, any warning
+    (an agent holding no pack for the capability gets it born suspended) and
+    the agent's whole list."""
+    from central_command.gateway import overrides
+
+    try:
+        out = await overrides.author(
+            agent_id, body.capability, body.scope,
+            acknowledge_irreversible=body.acknowledge_irreversible, by="operator",
+        )
+    except overrides.AuthoringRefused as e:
+        raise _refused(e) from e
+    return {**out, "overrides": await overrides.list_for(agent_id=agent_id)}
+
+
+@router.delete("/agents/{agent_id}/gate-overrides")
+async def revoke_agent_gate_override(agent_id: str, override_id: str,
+                                     reason: str | None = None) -> dict:
+    from central_command.gateway import overrides
+
+    row = await repo.get_gate_override(override_id)
+    if row is None or row["agent_id"] != agent_id:
+        raise HTTPException(404, f"{agent_id!r} holds no override {override_id!r}")
+    try:
+        revoked = await overrides.revoke(override_id, reason, by="operator")
+    except overrides.AuthoringRefused as e:
+        raise _refused(e) from e
+    return {"override": revoked, "overrides": await overrides.list_for(agent_id=agent_id)}
+
+
 @router.get("/capabilities")
 async def get_capabilities() -> dict:
     """The governed catalog: every capability and its gate, plus the policy

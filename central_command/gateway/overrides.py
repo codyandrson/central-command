@@ -40,7 +40,8 @@ from central_command import events
 from central_command.db import repo
 from central_command.contract import ARG_SPECS, validate_action_args
 from central_command.gateway.capabilities import (
-    REGISTRY, effective_shadow_runs, requires_acknowledgement, target_args_of,
+    REGISTRY, SCOPE_FORMS, effective_shadow_runs, requires_acknowledgement,
+    target_args_of,
 )
 
 APPROVER_PREFIX = "override:"
@@ -143,7 +144,6 @@ def _capability(action: dict) -> str:
 # (an unknown key, a missing required argument, a capability with no target
 # declaration) is NOT covered: a scope can only narrow.
 
-SCOPE_FORMS = ("argument", "target", "schedule")
 SCHEDULE_CREATOR_PREFIX = "heartbeat:"
 
 
@@ -816,6 +816,186 @@ async def override_sweep(model=None) -> dict:
         else:
             parked += 1
     return {"decided": decided, "parked": parked}
+
+
+# --- authoring and revocation: the operator only (story 8) -------------------
+#
+# The one way an override row comes to exist. `author` and `revoke` are called
+# from exactly two places, both the operator's own direct actions: the REST
+# routes (`api/routes.py`, PUT/DELETE /agents/{id}/gate-overrides) and the
+# cockpit RPC (`api/nerve_gateway.py`, overrides.author / overrides.revoke). No
+# agent tool, pack, capability, propose_* path, heartbeat action or chat lane
+# reaches them (a source walk in tests/test_gate_overrides.py pins the callers),
+# and nothing tells an agent an override exists. `override.created` and
+# `override.revoked` are bookkeeping: each follows its write.
+
+
+class AuthoringRefused(Exception):
+    """An override the operator asked for that may not be authored. `status`
+    is the HTTP code the route answers with (404 unknown, 409 duplicate or
+    already revoked, 422 otherwise); `problems` says every reason."""
+
+    def __init__(self, status: int, problems: list[str]):
+        super().__init__("; ".join(problems))
+        self.status = status
+        self.problems = problems
+
+
+_WRITE_ROWS = {c.name: c for c in REGISTRY if c.kind == "write"}
+_ALL_ROWS = {c.name: c for c in REGISTRY}
+
+_author_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+    weakref.WeakKeyDictionary())
+
+
+def _same_scope(a, b) -> bool:
+    return json.dumps(a or {}, sort_keys=True) == json.dumps(b or {}, sort_keys=True)
+
+
+async def author(agent_id: str, capability: str, scope: dict | None = None,
+                 acknowledge_irreversible: bool = False, by: str = "operator") -> dict:
+    """Write a new override (always a new id; the gate relaxes to `none`
+    only) and return `{"override": <listing row>, "warnings": [...]}`.
+
+    Refused: an unknown agent or capability; the auditor as the override's
+    agent (the one hard exclusion); a capability whose default gate is none;
+    a scope `validate_scope` rejects; an acknowledgement class (irreversible,
+    or LIVE / highest blast radius: `requires_acknowledgement`) without
+    `acknowledge_irreversible`; a live override already on the same agent,
+    capability and scope. The shadow period is the setting, floored for an
+    acknowledgement class (`repo.create_gate_override(shadow_runs=None)`).
+    An agent holding no pack that covers the capability gets the override
+    anyway, born suspended, with a warning saying so."""
+    capability = str(capability or "").split("@", 1)[0]
+    scope = scope or {}
+    if not agent_id or await repo.get_agent(agent_id) is None:
+        raise AuthoringRefused(404, [f"unknown agent {agent_id!r}"])
+    if capability not in _ALL_ROWS:
+        raise AuthoringRefused(404, [f"unknown capability {capability!r}"])
+    if agent_id == AUDITOR_ID:
+        raise AuthoringRefused(422, ["the auditor never holds an override"])
+    problems = validate_scope(capability, scope)
+    ack_required = requires_acknowledgement(capability)
+    if ack_required and not acknowledge_irreversible:
+        row = _WRITE_ROWS[capability]
+        problems.append(
+            f"{capability} is {row.reversibility}"
+            + ("" if row.reversibility == "irreversible" else " but LIVE or of the highest blast radius")
+            + ": an override on it needs the operator's explicit acknowledgement")
+    if problems:
+        raise AuthoringRefused(422, problems)
+
+    lock = _author_locks.setdefault(asyncio.get_running_loop(), asyncio.Lock())
+    async with lock:
+        if any(_same_scope(o["scope"], scope)
+               for o in await repo.live_gate_overrides(agent_id, capability)):
+            raise AuthoringRefused(409, [
+                f"{agent_id} already holds a live override on {capability} with this "
+                "scope; revoke it first (a scope change is a revoke plus a new override)"])
+        row = await repo.create_gate_override(
+            agent_id, capability, scope=scope, granted_by=by, shadow_runs=None,
+            acknowledged_irreversible=bool(ack_required and acknowledge_irreversible),
+        )
+    await events.emit(
+        "override.created", ref_id=row["id"],
+        payload={"override_id": row["id"], "agent_id": agent_id,
+                 "capability": capability, "scope": scope,
+                 "scope_text": scope_text(row), "shadow_runs": row["shadow_runs"],
+                 "acknowledged_irreversible": row["acknowledged_irreversible_at"] is not None},
+        actor=by,
+    )
+    warnings = []
+    if capability not in await _granted_capabilities(agent_id):
+        warnings.append(
+            f"{agent_id} holds no live pack that covers {capability}: the override is "
+            "suspended until a pack grant covers it")
+    return {"override": await describe(row), "warnings": warnings}
+
+
+async def revoke(override_id: str, reason: str | None = None, by: str = "operator") -> dict:
+    """Revoke = a timestamp on the row, never a delete or an edit; the next
+    matching proposal parks for the operator. Returns the listing row."""
+    if await repo.get_gate_override(override_id) is None:
+        raise AuthoringRefused(404, [f"no override {override_id!r}"])
+    reason = (reason or "").strip() or None
+    if not await repo.revoke_gate_override(override_id, reason):
+        raise AuthoringRefused(409, [f"override {override_id!r} is already revoked"])
+    row = await repo.get_gate_override(override_id)
+    await events.emit(
+        "override.revoked", ref_id=override_id,
+        payload={"override_id": override_id, "agent_id": row["agent_id"],
+                 "capability": row["capability"], "reason": reason},
+        actor=by,
+    )
+    return await describe(row)
+
+
+async def match_stats(override: dict) -> tuple[int, datetime | None]:
+    """How many proposals this override's capability and scope have covered
+    while it was unrevoked (whatever decided them: the override, the operator
+    in its shadow period, or a park), and when the last was created."""
+    ctx_needed = bool((override.get("scope") or {}).get("schedule"))
+    count, last = 0, None
+    for p in await repo.override_match_candidates(
+            override["agent_id"], override["capability"], override["granted_at"],
+            override.get("revoked_at")):
+        ctx = None
+        if ctx_needed:
+            sid = p.get("session_id")
+            ctx = {"task": await repo.task_for_session(sid) if sid else None}
+        if any(_capability(a) == override["capability"] and scope_covers(override, a, ctx)
+               for a in p["actions"] or []):
+            count += 1
+            last = p["created_at"]
+    return count, last
+
+
+OVERRIDE_STATES = ("shadow", "live", "suspended", "revoked")
+
+
+async def describe(override: dict, granted: set[str] | None = None) -> dict:
+    """The one listing row both entry points serve (pinned field by field by
+    tests/test_overrides_wire.py). `state` is revoked, else suspended (no live
+    pack grant of the agent covers the capability), else shadow (k of N not
+    reached), else live."""
+    row = _WRITE_ROWS.get(override["capability"])
+    shadow = await shadow_state(override)
+    if override["revoked_at"] is not None:
+        state = "revoked"
+    else:
+        if granted is None:
+            granted = await _granted_capabilities(override["agent_id"])
+        state = ("suspended" if override["capability"] not in granted
+                 else "shadow" if not shadow.complete else "live")
+    matches, last_match = await match_stats(override)
+    return {
+        "id": override["id"],
+        "agent_id": override["agent_id"],
+        "capability": override["capability"],
+        "scope": override["scope"] or {},
+        "scope_text": scope_text(override),
+        "state": state,
+        "shadow": {"k": shadow.k, "n": shadow.n},
+        "matches": matches,
+        "last_match": last_match,
+        "granted_by": override["granted_by"],
+        "granted_at": override["granted_at"],
+        "revoked_at": override["revoked_at"],
+        "reversibility": row.reversibility if row else "",
+        "requires_acknowledgement": requires_acknowledgement(override["capability"]),
+    }
+
+
+async def list_for(agent_id: str | None = None, capability: str | None = None) -> list[dict]:
+    """Every override of one agent, or on one capability, revoked included."""
+    rows = await repo.list_gate_overrides(agent_id=agent_id, capability=capability)
+    granted: dict[str, set[str]] = {}
+    out = []
+    for o in rows:
+        if o["revoked_at"] is None and o["agent_id"] not in granted:
+            granted[o["agent_id"]] = await _granted_capabilities(o["agent_id"])
+        out.append(await describe(o, granted.get(o["agent_id"])))
+    return out
 
 
 # --- where the hook runs (story 17) -------------------------------------------

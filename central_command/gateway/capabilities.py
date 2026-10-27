@@ -2515,9 +2515,58 @@ POLICIES: list[Policy] = [
 ]
 
 
+# The forms an override scope can take, beyond the required agent and
+# capability (`gateway/overrides.scope_covers` matches them). Declared here so
+# the catalog wire can say which forms each capability supports.
+SCOPE_FORMS = ("argument", "target", "schedule")
+
+
+def scope_forms_of(capability: str) -> tuple[str, ...]:
+    """The scope forms an override on `capability` can be authored with:
+    `argument` only when the contract has an ARG_SPECS entry for it, `target`
+    only when its row declares target arguments, `schedule` always."""
+    from central_command.contract import ARG_SPECS
+
+    name = capability.split("@", 1)[0]
+    forms = []
+    if name in ARG_SPECS:
+        forms.append("argument")
+    if target_args_of(name):
+        forms.append("target")
+    forms.append("schedule")
+    return tuple(forms)
+
+
+def overridable(c: Capability) -> tuple[bool, str]:
+    """Whether an operator override can relax this row's default gate, and
+    why, in words. A default gate of `human` or `auditor` can be relaxed; `none`
+    has nothing to relax. Who may HOLD an override (never the auditor agent)
+    is decided at authoring, not here."""
+    if c.default_gate == "none":
+        return False, "nothing gates it (default gate none), so there is nothing to relax"
+    if c.default_gate == "auditor":
+        return True, ("the operator decides it by default (a graduated auditor may "
+                      "confirm it); an override relaxes it to none for one agent")
+    return True, "the operator decides it by default; an override relaxes it to none for one agent"
+
+
+def _wire_row(c: Capability) -> dict:
+    """One catalog row on the wire: the dataclass fields as declared plus the
+    computed facts the override dialog needs (a dataclass carries no
+    computed fields through `asdict`)."""
+    can, why = overridable(c)
+    return {
+        **asdict(c),
+        "requires_acknowledgement": requires_acknowledgement(c.name),
+        "scope_forms": list(scope_forms_of(c.name)),
+        "overridable": can,
+        "overridable_reason": why,
+    }
+
+
 def registry_as_dict() -> dict:
     return {
-        "capabilities": [asdict(c) for c in REGISTRY],
+        "capabilities": [_wire_row(c) for c in REGISTRY],
         "policies": [asdict(p) for p in POLICIES],
     }
 

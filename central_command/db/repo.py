@@ -4675,8 +4675,10 @@ async def list_agent_mcp_overrides(agent_id: str) -> list[dict]:
 # --- gate overrides (epic-gate-overrides, FR-4) -------------------------------
 # The operator's per-agent relaxation of a capability's default gate. Read by
 # `gateway/overrides.resolve`; a row is never deleted or edited in place
-# (revoke = timestamp; a scope change is a revoke plus a new row). Nothing but
-# tests calls the writer yet: the operator's authoring route is a later story.
+# (revoke = timestamp; a scope change is a revoke plus a new row). The writer's
+# one caller is `gateway/overrides.author`, reached only from the operator's
+# REST route and cockpit RPC (a source walk in tests/test_gate_overrides.py
+# pins it); no agent path writes a row.
 
 
 _OVERRIDE_COLS = """id, agent_id, capability, scope, gate, granted_by, granted_at,
@@ -4759,6 +4761,63 @@ async def live_gate_overrides(agent_id: str, capability: str) -> list[dict]:
             agent_id, capability,
         )
         return [_override_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def list_gate_overrides(
+    agent_id: str | None = None, capability: str | None = None,
+) -> list[dict]:
+    """Every override row of one agent or on one capability, revoked included
+    (the history is the record), oldest first."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select {_OVERRIDE_COLS} from agent_gate_override
+             where ($1::text is null or agent_id = $1)
+               and ($2::text is null or capability = $2)
+             order by granted_at, id
+            """,
+            agent_id, capability,
+        )
+        return [_override_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def override_match_candidates(
+    agent_id: str, capability: str, granted_at, revoked_at=None,
+) -> list[dict]:
+    """The proposals an override of `agent_id` on `capability` may have
+    matched while it was unrevoked: drafted by the agent, created after the
+    grant (and before the revoke), carrying an action of the capability, not a
+    redraft or a follow-on (never evaluated). Any status. The caller applies
+    the scope — the same window `shadow_approval_candidates` narrows to the
+    operator's approvals."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select p.id, p.session_id, p.actions, p.created_at
+              from proposal p
+             where p.agent_id = $1
+               and p.created_at > $3
+               and ($4::timestamptz is null or p.created_at < $4)
+               and coalesce(p.override_eval ->> 'reason', '') not in ('redraft', 'follow_on')
+               and exists (select 1 from jsonb_array_elements(p.actions) a
+                            where split_part(a ->> 'capability', '@', 1) = $2)
+             order by p.created_at, p.id
+            """,
+            agent_id, capability, granted_at, revoked_at,
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("actions"), str):
+                d["actions"] = json.loads(d["actions"])
+            out.append(d)
+        return out
     finally:
         await conn.close()
 

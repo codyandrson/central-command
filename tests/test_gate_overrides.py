@@ -15,6 +15,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -215,32 +216,19 @@ async def demo(monkeypatch):
     yield
 
 
-@pytest.fixture()
-async def granted():
-    """Override rows this test creates, revoked afterwards so no live override
-    outlives its test (a row is never deleted — the schema's own rule)."""
-    made: list[str] = []
-    packs: list[tuple[str, str]] = []
+async def _ensure_pack(agent_id: str, capability: str, packs: list) -> None:
+    """An override is carried on a live pack grant (story 5.16): give the
+    agent the pack that covers the capability when it lacks one, remembering
+    it in `packs` for `_drop_packs`."""
+    held = await packs_mod.granted_packs(agent_id)
+    if capability not in packs_mod.granted_capability_names(held):
+        pack = _pack_for(capability)
+        had_row = any(r["pack"] == pack for r in await repo.list_grants(agent_id))
+        await repo.grant_pack(agent_id, pack)
+        packs.append((agent_id, pack, had_row))
 
-    async def grant(agent_id: str, capability: str = "catalog.tag", **kw) -> dict:
-        # An override is carried on a live pack grant (story 5.16): give the
-        # agent the pack that covers the capability when it lacks one.
-        held = await packs_mod.granted_packs(agent_id)
-        if capability not in packs_mod.granted_capability_names(held):
-            pack = _pack_for(capability)
-            had_row = any(r["pack"] == pack for r in await repo.list_grants(agent_id))
-            await repo.grant_pack(agent_id, pack)
-            packs.append((agent_id, pack, had_row))
-        # The shadow period is off unless a test asks for one (story 5.7): the
-        # default of 5 would park every proposal these tests expect decided.
-        kw.setdefault("shadow_runs", 0)
-        row = await repo.create_gate_override(agent_id, capability, **kw)
-        made.append(row["id"])
-        return row
 
-    yield grant
-    for oid in made:
-        await repo.revoke_gate_override(oid, reason="test teardown")
+async def _drop_packs(packs: list) -> None:
     for agent_id, pack, had_row in packs:
         if had_row:
             await repo.revoke_pack(agent_id, pack, reason="test teardown")
@@ -253,6 +241,58 @@ async def granted():
                 "delete from agent_grant where agent_id = $1 and pack = $2", agent_id, pack)
         finally:
             await conn.close()
+
+
+@pytest.fixture()
+async def granted():
+    """Override rows this test creates, revoked afterwards so no live override
+    outlives its test (a row is never deleted — the schema's own rule)."""
+    made: list[str] = []
+    packs: list[tuple[str, str, bool]] = []
+
+    async def grant(agent_id: str, capability: str = "catalog.tag", **kw) -> dict:
+        await _ensure_pack(agent_id, capability, packs)
+        # The shadow period is off unless a test asks for one (story 5.7): the
+        # default of 5 would park every proposal these tests expect decided.
+        kw.setdefault("shadow_runs", 0)
+        row = await repo.create_gate_override(agent_id, capability, **kw)
+        made.append(row["id"])
+        return row
+
+    yield grant
+    for oid in made:
+        await repo.revoke_gate_override(oid, reason="test teardown")
+    await _drop_packs(packs)
+
+
+@pytest.fixture()
+async def authored(monkeypatch):
+    """Overrides authored through the operator's path (`overrides.author`,
+    story 8), revoked afterwards. `shadow` is the setting at authoring time;
+    `pack=False` leaves the agent without a covering pack (born suspended).
+    `authored.track(id)` adopts a row a route or RPC call made."""
+    made: list[str] = []
+    packs: list[tuple[str, str, bool]] = []
+
+    async def author(agent_id: str, capability: str = "catalog.tag", scope=None, *,
+                     ack: bool = False, pack: bool = True, shadow: int = 0) -> dict:
+        monkeypatch.setattr(settings, "gate_override_shadow_runs", shadow)
+        if pack:
+            await _ensure_pack(agent_id, capability, packs)
+        out = await overrides.author(agent_id, capability, scope,
+                                     acknowledge_irreversible=ack)
+        made.append(out["override"]["id"])
+        return out
+
+    async def ensure_pack(agent_id: str, capability: str) -> None:
+        await _ensure_pack(agent_id, capability, packs)
+
+    author.track = made.append
+    author.ensure_pack = ensure_pack
+    yield author
+    for oid in made:
+        await repo.revoke_gate_override(oid, reason="test teardown")
+    await _drop_packs(packs)
 
 
 @pytest.fixture()
@@ -1733,3 +1773,286 @@ async def test_two_overrides_on_one_action_wait_for_the_slower(demo, granted, mo
     assert {m["override_id"] for m in row["override_eval"]["shadow"]} == {
         everything["id"], narrow["id"]}
     assert f"{narrow['id']} 0 of 3" in row["override_eval"]["reason"]
+
+
+# --- story 8: only the operator authors or revokes an override ------------------
+
+SANDBOX_WRITE = "sandbox.exec"   # a write whose default gate is none
+
+
+async def _refusal(coro) -> overrides.AuthoringRefused:
+    with pytest.raises(overrides.AuthoringRefused) as e:
+        await coro
+    return e.value
+
+
+@needs_pg
+@pytest.mark.parametrize("agent_id,capability,scope,status,needle", [
+    ("auditor", "catalog.tag", None, 422, "auditor"),
+    (DRAFTER, "catalog.retag_everything", None, 404, "unknown capability"),
+    ("no-such-agent-xyz", "catalog.tag", None, 404, "unknown agent"),
+    (DRAFTER, "jira.add_comment", {"argument": {"name": "colour", "values": ["red"]}},
+     422, "has no argument 'colour'"),
+    (DRAFTER, SANDBOX_WRITE, None, 422, "no gate to relax"),
+    (DRAFTER, "jira.list_fields", None, 422, "no gate to relax"),
+    (DRAFTER, "mail.send", None, 422, "acknowledgement"),
+    (DRAFTER, "litellm.apply_config_change", None, 422, "acknowledgement"),
+    (DRAFTER, "work.bulk_dismiss", {"argument": {"name": "ids", "values": ["x"]}},
+     422, "no argument shape"),
+])
+async def test_authoring_refuses(agent_id, capability, scope, status, needle):
+    before = await repo.list_gate_overrides()
+    e = await _refusal(overrides.author(agent_id, capability, scope))
+    assert e.status == status and any(needle in p for p in e.problems), e.problems
+    assert len(await repo.list_gate_overrides()) == len(before), "a refusal writes nothing"
+
+
+@needs_pg
+@pytest.mark.parametrize("capability", ["mail.send", "litellm.apply_config_change"])
+async def test_an_acknowledgement_class_is_authored_with_the_tick_and_a_shadow_floor(
+        authored, capability):
+    out = await authored(DRAFTER, capability, ack=True, pack=False, shadow=0)
+    row = await repo.get_gate_override(out["override"]["id"])
+    assert row["acknowledged_irreversible_at"] is not None
+    assert row["shadow_runs"] >= 1, "the floor holds even when the setting is 0"
+    assert out["override"]["requires_acknowledgement"] is True
+    assert out["override"]["state"] == "suspended" and out["warnings"], \
+        "an agent with no covering pack gets it born suspended, with a warning"
+
+
+@needs_pg
+async def test_an_ordinary_class_copies_the_setting_and_stamps_no_tick(authored):
+    out = await authored(DRAFTER, "catalog.tag", ack=True, shadow=3)
+    row = await repo.get_gate_override(out["override"]["id"])
+    assert row["shadow_runs"] == 3 and row["acknowledged_irreversible_at"] is None
+    assert row["gate"] == "none" and row["granted_by"] == "operator"
+    assert out["override"]["state"] == "shadow" and out["override"]["shadow"] == {"k": 0, "n": 3}
+    assert not out["warnings"]
+
+
+@needs_pg
+async def test_the_auditor_gated_class_is_overridable(authored):
+    out = await authored(DRAFTER, "work.bulk_dismiss", pack=False)
+    assert out["override"]["capability"] == "work.bulk_dismiss"
+
+
+@needs_pg
+async def test_a_duplicate_live_override_is_refused_and_another_scope_is_not(authored):
+    await authored(DRAFTER, "jira.add_comment", {"target": ["DOE"]})
+    e = await _refusal(overrides.author(DRAFTER, "jira.add_comment", {"target": ["DOE"]}))
+    assert e.status == 409
+    await authored(DRAFTER, "jira.add_comment", {"target": ["RIV"]})
+
+
+@needs_pg
+async def test_created_and_revoked_follow_their_writes(authored):
+    out = await authored(DRAFTER)
+    oid = out["override"]["id"]
+    created = await repo.list_events(ref_id=oid, limit=10)
+    assert [e["kind"] for e in created] == ["override.created"]
+    assert created[0]["payload"]["capability"] == "catalog.tag"
+    assert created[0]["actor"] == "operator"
+    await overrides.revoke(oid, "done with it")
+    kinds = [e["kind"] for e in sorted(await repo.list_events(ref_id=oid, limit=10),
+                                       key=lambda e: e["id"])]
+    assert kinds == ["override.created", "override.revoked"]
+    e = await _refusal(overrides.revoke(oid))
+    assert e.status == 409
+    e = await _refusal(overrides.revoke("govr_nothing_here"))
+    assert e.status == 404
+
+
+@needs_pg
+async def test_a_revoke_sets_revoked_at_and_the_next_matching_proposal_parks(authored):
+    out = await authored(DRAFTER, "catalog.tag")
+    oid = out["override"]["id"]
+    tag = _act("catalog.tag", document_id="doc_1", tags=["draft"])
+    d = await overrides.resolve(_prow(DRAFTER, [tag]))
+    assert (d.gate, d.override_id) == ("none", oid)
+    revoked = await overrides.revoke(oid, "operator changed their mind")
+    assert revoked["state"] == "revoked" and revoked["revoked_at"] is not None
+    row = await repo.get_gate_override(oid)
+    assert row["revoked_at"] is not None and row["revoked_reason"] == "operator changed their mind"
+    assert (await overrides.resolve(_prow(DRAFTER, [tag]))).gate == "human"
+
+
+@needs_pg
+async def test_re_authoring_after_a_revoke_is_a_new_id_with_a_fresh_shadow(authored):
+    first = (await authored(DRAFTER, "catalog.tag", shadow=2))["override"]
+    await overrides.revoke(first["id"])
+    second = (await authored(DRAFTER, "catalog.tag", shadow=2))["override"]
+    assert second["id"] != first["id"]
+    assert second["shadow"] == {"k": 0, "n": 2} and second["state"] == "shadow"
+    assert (await repo.get_gate_override(first["id"]))["revoked_at"] is not None
+
+
+@needs_pg
+async def test_the_route_refuses_with_the_authoring_status(authored):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as e:
+        await routes.author_gate_override("auditor", routes.GateOverrideIn(capability="catalog.tag"))
+    assert e.value.status_code == 422
+    with pytest.raises(HTTPException) as e:
+        await routes.revoke_agent_gate_override(OTHER, "govr_nothing_here")
+    assert e.value.status_code == 404
+    mine = (await authored(DRAFTER))["override"]["id"]
+    with pytest.raises(HTTPException) as e:
+        await routes.revoke_agent_gate_override(OTHER, mine)
+    assert e.value.status_code == 404, "an override is revoked through its own agent"
+
+
+@needs_pg
+async def test_the_route_and_the_rpc_author_revoke_and_list_the_same(authored):
+    from fastapi.encoders import jsonable_encoder
+
+    from central_command.api.nerve_gateway import _dispatch
+
+    await authored.ensure_pack(DRAFTER, "catalog.tag")
+    out = await routes.author_gate_override(
+        DRAFTER, routes.GateOverrideIn(capability="catalog.tag", scope={}))
+    authored.track(out["override"]["id"])
+    rpc = await _dispatch("overrides.author", {
+        "agentId": DRAFTER, "capability": "jira.add_comment",
+        "scope": {"target": ["DOE"]}}, None)
+    authored.track(rpc["override"]["id"])
+    assert rpc["override"]["scope_text"] == "only where issue_key is in Jira project DOE"
+
+    rest = jsonable_encoder(await routes.list_agent_gate_overrides(DRAFTER))
+    via_rpc = jsonable_encoder(await _dispatch("overrides.list", {"agentId": DRAFTER}, None))
+    assert rest == via_rpc
+    ids = {o["id"] for o in rest["overrides"]}
+    assert {out["override"]["id"], rpc["override"]["id"]} <= ids
+    by_cap = jsonable_encoder(await routes.list_capability_gate_overrides("catalog.tag"))
+    assert by_cap == jsonable_encoder(
+        await _dispatch("overrides.list", {"capability": "catalog.tag"}, None))
+    assert all(o["capability"] == "catalog.tag" for o in by_cap["overrides"])
+
+    revoked = await _dispatch("overrides.revoke", {
+        "agentId": DRAFTER, "overrideId": rpc["override"]["id"], "reason": "x"}, None)
+    assert revoked["override"]["state"] == "revoked"
+    assert jsonable_encoder(await _dispatch("capabilities.list", {}, None)) == \
+        jsonable_encoder(await routes.get_capabilities())
+
+
+@needs_pg
+async def test_matches_count_the_proposals_the_override_covered(authored, demo, monkeypatch):
+    out = await authored(DRAFTER, "catalog.tag", shadow=5)
+    oid = out["override"]["id"]
+    assert (out["override"]["matches"], out["override"]["last_match"]) == (0, None)
+    ran = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag while shadowed"))
+    row = next(o for o in await overrides.list_for(agent_id=DRAFTER) if o["id"] == oid)
+    assert row["matches"] == 1 and row["last_match"] is not None
+    assert row["state"] == "shadow" and row["shadow"] == {"k": 0, "n": 5}
+    assert (await repo.load_proposal(ran["proposal_id"]))["status"] == "AWAITING_HUMAN"
+
+
+# --- the no-agent-path guards ---------------------------------------------------
+
+_PKG = Path(__file__).resolve().parents[1] / "central_command"
+
+
+def _callers(attr: str, owner: str | None = None, root: Path = _PKG) -> set[tuple[str, str]]:
+    """Every (module path, enclosing function) in central_command/ that calls
+    `<owner>.<attr>(...)` (or `<attr>(...)` when owner is None and bare)."""
+    import ast
+
+    found: set[tuple[str, str]] = set()
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        rel = path.relative_to(root).as_posix()
+
+        def walk(node, fn):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    walk(child, child.name)
+                    continue
+                if isinstance(child, ast.Call):
+                    f = child.func
+                    if isinstance(f, ast.Attribute) and f.attr == attr and (
+                            owner is None or (isinstance(f.value, ast.Name) and f.value.id == owner)):
+                        found.add((rel, fn))
+                    elif isinstance(f, ast.Name) and f.id == attr:
+                        found.add((rel, fn))
+                walk(child, fn)
+
+        walk(tree, "<module>")
+    return found
+
+
+def test_the_override_writer_has_one_caller_and_it_is_the_operators():
+    assert _callers("create_gate_override") == {("gateway/overrides.py", "author")}
+    assert _callers("revoke_gate_override") == {("gateway/overrides.py", "revoke")}
+    assert _callers("author", "overrides") == {("api/routes.py", "author_gate_override")}
+    assert _callers("revoke", "overrides") == {("api/routes.py", "revoke_agent_gate_override")}
+    assert _callers("author_gate_override") == {("api/nerve_gateway.py", "_dispatch")}
+    assert _callers("revoke_agent_gate_override") == {("api/nerve_gateway.py", "_dispatch")}
+
+
+def test_the_caller_walk_sees_a_second_caller(tmp_path):
+    """The guard above fails when a second caller of the writer appears: the
+    same walk over a tree holding one more caller finds it."""
+    (tmp_path / "runtime").mkdir()
+    (tmp_path / "runtime" / "sneak.py").write_text(
+        "from central_command.db import repo\n\n"
+        "async def sneak():\n    await repo.create_gate_override('x', 'catalog.tag')\n",
+        encoding="utf-8")
+    assert _callers("create_gate_override", root=tmp_path) == {("runtime/sneak.py", "sneak")}
+
+
+def test_runtime_imports_neither_the_authoring_path_nor_the_writer():
+    for path in sorted((_PKG / "runtime").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for needle in ("gateway.overrides", "gateway import overrides",
+                       "create_gate_override", "revoke_gate_override", "agent_gate_override"):
+            assert needle not in text, f"{path.name} mentions {needle}"
+
+
+def test_no_capability_pack_tool_or_heartbeat_action_names_an_override():
+    from central_command.heartbeat.actions import ACTIONS
+    from central_command.runtime import tools as runtime_tools
+
+    assert not [c.name for c in REGISTRY if "override" in c.name]
+    for pack in packs_mod.PACKS.values():
+        assert not [t for t in pack.tool_names if "override" in t], pack.name
+        assert "gate override" not in (pack.guidance + pack.description).lower(), pack.name
+    assert not [k for k in ACTIONS if "override" in k]
+    assert not [n for n in dir(runtime_tools) if "gate_override" in n or n.endswith("_override")]
+
+
+def test_the_generated_charter_never_mentions_an_override():
+    text = packs_mod.charter_section(tuple(packs_mod.PACKS)).lower()
+    for needle in ("gate override", "agent_gate_override", "override:", "govr_",
+                   "shadow period", "overrides.", "relax"):
+        assert needle not in text, needle
+
+
+@needs_pg
+async def test_a_fresh_database_holds_zero_overrides():
+    """A brand-new database (schema.sql alone, as initdb loads it) seeds no
+    override; the test database is recreated the same way, but other tests
+    write rows, so this applies the schema to a scratch database of its own."""
+    import asyncpg
+
+    base = settings.database_url.rsplit("/", 1)[0]
+    name = f"cc_fresh_{uuid.uuid4().hex[:8]}"
+    admin = await asyncpg.connect(base + "/postgres")
+    try:
+        await admin.execute(f'create database "{name}"')
+    finally:
+        await admin.close()
+    try:
+        conn = await asyncpg.connect(f"{base}/{name}")
+        try:
+            await conn.execute((_PKG / "db" / "schema.sql").read_text(encoding="utf-8"))
+            assert await conn.fetchval("select count(*) from agent_gate_override") == 0
+        finally:
+            await conn.close()
+    finally:
+        admin = await asyncpg.connect(base + "/postgres")
+        try:
+            await admin.execute(f'drop database if exists "{name}" with (force)')
+        finally:
+            await admin.close()
+    assert "insert into agent_gate_override" not in \
+        (_PKG / "db" / "schema.sql").read_text(encoding="utf-8").lower()

@@ -241,6 +241,11 @@ async def test_capabilities_route_serves_the_registry():
     out = await routes.get_capabilities()
     names = {c["name"] for c in out["capabilities"]}
     assert "jira.set_due_date" in names and "graph.add_episode" in names
+    # The override facts the authoring dialog reads ride on every row
+    # (epic-gate-overrides story 8; the full shape: tests/test_overrides_wire.py).
+    for c in out["capabilities"]:
+        assert {"default_gate", "requires_acknowledgement", "scope_forms",
+                "overridable", "overridable_reason"} <= set(c), c["name"]
     assert out["policies"] and all(
         p["status"] in ("enforced", "planned") for p in out["policies"]
     )
