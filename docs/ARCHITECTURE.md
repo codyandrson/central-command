@@ -297,7 +297,8 @@ stateDiagram-v2
   (`overrides.decide_on_park`) runs at the task-run landing
   (`api/routes.py::_run_one_assigned_task`, after the task lands in REVIEW),
   records the evaluation once on `proposal.override_eval`
-  (`{override_id, outcome: decided | shadow | parked, reason, at}`,
+  (`{override_id, outcome: decided | shadow | parked, reason, at}`, plus
+  `suspended: [ids]` when an override is suspended,
   compare-and-set where null) and, when decided, calls `approve_and_execute`
   with approver `override:<id>`: `proposal.decided` carries `override_id` and
   still precedes the Executor. A decision that could not run is amended to
@@ -325,6 +326,24 @@ stateDiagram-v2
   only if every gated action is covered, else the whole proposal parks.
   `validate_scope` is the authoring check and `scope_text` the one plain-words
   rendering every screen shows.
+  **What a reviewer would have seen flagged is never decided by an override.**
+  `resolve` parks a covered proposal (reason recorded) on any
+  `policy.check_actions` flag, any `policy.check_grants` flag, any
+  `policy.check_charter_content` flag on a `charter.update`'s content (the same
+  calls the Inbox review makes in `api/routes.py`), any
+  `contract.validate_action_args` problem, and any evidence item whose recorded
+  `claim_matches_source` is `false` (`null`, not checked, does not park):
+  `overrides.review_flags`. An override is carried on the agent's live pack
+  grant: one whose capability no live grant covers
+  (`packs.granted_capability_names(granted_packs(agent))`) is **suspended**,
+  computed fresh on every evaluation and lifted by a re-grant; `resolve`
+  reports it (`Decision.suspended`, `override_eval.suspended`). Two parks are
+  never evaluated and are recorded at the park itself
+  (`overrides.record_unevaluated_park`, `override_eval` reason `redraft` or
+  `follow_on`, outcome `parked`): a **redraft** (`gateway._park_redraft`,
+  after a Reject or a failed execution, and a redraft of a redraft) never
+  auto-executes under an override; a **follow-on** parked on the approved leg
+  (context `follow_on_of`) goes to the operator by default.
 - **Operator routes.** `POST /proposals/{id}/approve | reject | dismiss`
   (`api/routes.py`); the cockpit reaches the same gateway functions over `/ws`.
 - **Folds.** Sibling work items folded into a proposal sit in `FOLD_PENDING`;

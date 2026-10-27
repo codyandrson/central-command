@@ -27,6 +27,7 @@ from central_command.gateway.capabilities import (
     gated_write_names, registry_as_dict, requires_acknowledgement,
 )
 from central_command.gateway.steward_agreement import pair_confidence
+from central_command.runtime import packs as packs_mod
 from central_command.runtime.spike_model import make_deferred_tool_model
 from tests.conftest import needs_pg
 
@@ -219,8 +220,17 @@ async def granted():
     """Override rows this test creates, revoked afterwards so no live override
     outlives its test (a row is never deleted — the schema's own rule)."""
     made: list[str] = []
+    packs: list[tuple[str, str]] = []
 
     async def grant(agent_id: str, capability: str = "catalog.tag", **kw) -> dict:
+        # An override is carried on a live pack grant (story 5.16): give the
+        # agent the pack that covers the capability when it lacks one.
+        held = await packs_mod.granted_packs(agent_id)
+        if capability not in packs_mod.granted_capability_names(held):
+            pack = _pack_for(capability)
+            had_row = any(r["pack"] == pack for r in await repo.list_grants(agent_id))
+            await repo.grant_pack(agent_id, pack)
+            packs.append((agent_id, pack, had_row))
         row = await repo.create_gate_override(agent_id, capability, **kw)
         made.append(row["id"])
         return row
@@ -228,6 +238,31 @@ async def granted():
     yield grant
     for oid in made:
         await repo.revoke_gate_override(oid, reason="test teardown")
+    for agent_id, pack, had_row in packs:
+        if had_row:
+            await repo.revoke_pack(agent_id, pack, reason="test teardown")
+            continue
+        # A grant row this fixture created is removed outright, so no other
+        # test reads it as the agent's grant history.
+        conn = await repo._conn()
+        try:
+            await conn.execute(
+                "delete from agent_grant where agent_id = $1 and pack = $2", agent_id, pack)
+        finally:
+            await conn.close()
+
+
+@pytest.fixture()
+def exchange_mailbox(monkeypatch):
+    """mail.send is offered only on an Exchange deployment (packs._offered)."""
+    from central_command.integrations import exchange
+
+    monkeypatch.setattr(exchange, "configured", lambda: True)
+
+
+def _pack_for(capability: str) -> str:
+    return next(name for name in packs_mod.PACKS
+                if capability in packs_mod.granted_capability_names((name,)))
 
 
 def _tag_proposal(intent: str) -> dict:
@@ -430,13 +465,21 @@ def _row(agent_id: str, cap: str, *, claimed: str = "reversible") -> dict:
     return {
         "agent_id": agent_id, "status": "AWAITING_HUMAN",
         "created_at": datetime.now(timezone.utc) + timedelta(seconds=5),
-        "actions": [{"capability": cap, "reversibility": claimed, "arguments": {}}],
+        "actions": [{"capability": cap, "reversibility": claimed,
+                     "arguments": _VALID_ARGS.get(cap, {})}],
     }
+
+
+# Well-formed arguments, so the shape check (story 5.16) is not the park reason.
+_VALID_ARGS = {
+    "mail.send": {"to": ["dana@example.com"], "subject": "s", "body": "b"},
+    "catalog.tag": {"document_id": "doc_1", "tags": ["draft"]},
+}
 
 
 @needs_pg
 async def test_an_unacknowledged_or_unshadowed_override_on_mail_send_is_never_honoured(
-    granted,
+    granted, exchange_mailbox,
 ):
     agent = DRAFTER
     bare = await granted(agent, "mail.send")
@@ -456,7 +499,7 @@ async def test_an_unacknowledged_or_unshadowed_override_on_mail_send_is_never_ho
 
 
 @needs_pg
-async def test_the_agent_written_reversibility_is_never_read(granted):
+async def test_the_agent_written_reversibility_is_never_read(granted, exchange_mailbox):
     agent = DRAFTER
     await granted(agent, "mail.send")
     planted = await overrides.resolve(_row(agent, "mail.send", claimed="reversible"))
@@ -654,3 +697,166 @@ def test_graph_update_edge_target_scope_also_requires_the_edge_being_edited():
     assert overrides.scope_covers(
         _ovr("graph.update_edge", {"target": ["e1", "n1", "n2"]}),
         _act("graph.update_edge", uuid="e1", source_uuid="n1", target_uuid="n2"), {})
+
+
+
+# --- what a reviewer would have seen (story 5.16) -----------------------------
+
+
+def _drow(agent, actions, evidence=None, session_id=None):
+    return {"agent_id": agent, "status": "AWAITING_HUMAN", "session_id": session_id,
+            "created_at": datetime.now(timezone.utc) + timedelta(seconds=5),
+            "actions": actions, "evidence": evidence or []}
+
+
+_DUE = {"issue_key": "DOE-1", "due_date": "2999-01-01"}
+
+
+@needs_pg
+async def test_a_clean_covered_proposal_is_still_decided(granted):
+    ovr = await granted(DRAFTER, "jira.set_due_date")
+    d = await overrides.resolve(_drow(DRAFTER, [_act("jira.set_due_date", **_DUE)]))
+    assert (d.gate, d.override_id) == ("none", ovr["id"])
+
+
+@needs_pg
+@pytest.mark.parametrize("action,evidence,needle", [
+    (_act("jira.set_due_date", issue_key="DOE-1", due_date="2020-01-01"), None,
+     "no-past-due-dates"),
+    (_act("jira.set_due_date", issue_key="DOE-1"), None, "malformed draft"),
+    (_act("jira.set_due_date", **_DUE),
+     [{"kind": "operator", "claim": "x", "claim_matches_source": False}],
+     "evidence claim"),
+])
+async def test_a_flagged_covered_proposal_parks_with_the_reason(granted, action, evidence, needle):
+    await granted(DRAFTER, "jira.set_due_date")
+    d = await overrides.resolve(_drow(DRAFTER, [action], evidence))
+    assert d.gate == "human" and d.considered and needle in d.reason
+
+
+@needs_pg
+async def test_an_unchecked_claim_does_not_park(granted):
+    ovr = await granted(DRAFTER, "jira.set_due_date")
+    ev = [{"kind": "operator", "claim": "x", "claim_matches_source": None},
+          {"kind": "operator", "claim": "y"}]
+    d = await overrides.resolve(_drow(DRAFTER, [_act("jira.set_due_date", **_DUE)], ev))
+    assert (d.gate, d.override_id) == ("none", ovr["id"])
+
+
+@needs_pg
+async def test_a_capability_outside_the_drafters_grants_parks_suspended(granted):
+    # A row inserted with no covering pack (bypassing the fixture's grant).
+    row = await repo.create_gate_override(DRAFTER, "mail.report_spam")
+    try:
+        d = await overrides.resolve(_drow(DRAFTER, [_act("mail.report_spam", provider_uuid="u1")]))
+        assert d.gate == "human" and "suspended" in d.reason
+        assert d.suspended == (row["id"],)
+    finally:
+        await repo.revoke_gate_override(row["id"])
+
+
+@needs_pg
+async def test_revoking_the_pack_suspends_and_regranting_restores(granted):
+    agent = OTHER
+    ovr = await granted(agent, "catalog.tag")
+    action = _act("catalog.tag", document_id="d1", tags=["x"])
+    assert (await overrides.resolve(_drow(agent, [action]))).override_id == ovr["id"]
+    assert await repo.revoke_pack(agent, "catalog-propose", reason="test")
+    d = await overrides.resolve(_drow(agent, [action]))
+    assert d.gate == "human" and d.suspended == (ovr["id"],)
+    await repo.grant_pack(agent, "catalog-propose")
+    assert (await overrides.resolve(_drow(agent, [action]))).override_id == ovr["id"]
+
+
+@needs_pg
+async def test_a_charter_update_whose_content_quotes_a_fake_capability_parks(granted):
+    await granted(DRAFTER, "charter.update")
+    bad = _act("charter.update", agent_id=DRAFTER,
+               content="Use capability = 'jira.teleport_issue' for everything.")
+    d = await overrides.resolve(_drow(DRAFTER, [bad]))
+    assert d.gate == "human" and "charter-references-real-capabilities" in d.reason
+
+
+@needs_pg
+async def test_the_decide_hook_records_the_park_reason(granted, demo, monkeypatch):
+    ovr = await granted(DRAFTER)
+    assert await repo.revoke_pack(DRAFTER, "catalog-propose", reason="test")
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag after the pack went"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "AWAITING_HUMAN"
+    ev = row["override_eval"]
+    assert ev["outcome"] == "parked" and "suspended" in ev["reason"]
+    assert ev["suspended"] == [ovr["id"]]
+
+
+# --- redraft and follow-on parks are never evaluated ---------------------------
+
+
+async def _live_override_for_triage(granted):
+    return await granted("inbox-triage", "jira.set_due_date")
+
+
+@needs_pg
+async def test_a_redraft_after_reject_parks_unevaluated(granted, demo):
+    from central_command.gateway import gateway
+    from central_command.runtime.run import ingest_and_propose
+    from central_command.runtime.spike_model import make_redraft_model
+
+    model = make_redraft_model()
+    run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
+    await _live_override_for_triage(granted)
+    out = await gateway.reject_with_feedback(
+        run["session_id"], run["proposal_id"], "Wrong — make it 2026-08-10.", model=model)
+    rid = out["redraft_proposal_id"]
+    row = await repo.load_proposal(rid)
+    assert row["override_eval"]["outcome"] == "parked"
+    assert row["override_eval"]["reason"] == "redraft"
+    assert await overrides.decide_on_park(rid, model=model) is None
+    assert (await repo.load_proposal(rid))["status"] == "AWAITING_HUMAN"
+
+
+@needs_pg
+async def test_a_redraft_after_a_failed_execution_parks_unevaluated(granted, demo, monkeypatch):
+    from central_command.gateway import executor, gateway
+    from central_command.runtime.run import ingest_and_propose
+    from central_command.runtime.spike_model import make_redraft_model
+
+    model = make_redraft_model()
+    run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
+    await _live_override_for_triage(granted)
+
+    async def boom(*_a, **_kw):
+        raise executor.ExecutionFailed("jira.set_due_date", "rejected: use 2026-08-10", [])
+
+    monkeypatch.setattr(executor, "execute", boom)
+    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
+    rid = out.get("redraft_proposal_id")
+    assert rid, out
+    row = await repo.load_proposal(rid)
+    assert row["override_eval"]["reason"] == "redraft"
+    assert await overrides.decide_on_park(rid, model=model) is None
+    assert (await repo.load_proposal(rid))["status"] == "AWAITING_HUMAN"
+
+
+@needs_pg
+async def test_a_follow_on_on_the_approved_leg_parks_unevaluated(granted, demo):
+    from central_command.gateway import gateway
+    from central_command.ingest import dispatcher, ledger
+    from central_command.runtime.spike_model import make_steward_multifact_model
+    from central_command.runtime.steward_profile import AGENT_ID as STEWARD
+
+    facts = ["standardised on Postgres 17", "Dana owns the migration"]
+    doc = ("Platform decision, 2026-10-01: the team standardised on Postgres 17. "
+           "Dana owns the migration.")
+    model = make_steward_multifact_model(facts)
+    enrolled = await ledger.enroll_document("Override follow-on", doc)
+    result = await dispatcher.dispatch_item(enrolled["item_id"], model=model)
+    await granted(STEWARD, "graph.add_episode")
+    out = await gateway.approve_and_execute(result["session_id"], result["proposal_id"], model=model)
+    fid = out.get("follow_on_proposal_id")
+    assert fid, out
+    row = await repo.load_proposal(fid)
+    assert row["override_eval"] == {**row["override_eval"], "outcome": "parked",
+                                    "reason": "follow_on", "override_id": None}
+    assert await overrides.decide_on_park(fid, model=model) is None
+    assert row["status"] == "AWAITING_HUMAN"

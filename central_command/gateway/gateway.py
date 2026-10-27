@@ -57,6 +57,11 @@ async def _park_redraft(
         session_id=session_id, agent_id=agent_id, result=final, call=call,
         evidence=evidence, context={"redraft_of": redraft_of},
     )
+    # Never decided by an override, however it was resumed (Reject or a failed
+    # execution) and however many redrafts deep: recorded at the park.
+    from central_command.gateway import overrides
+
+    await overrides.record_unevaluated_park(parked["proposal_id"], "redraft")
     return {"redraft_proposal_id": parked["proposal_id"], "intent": parked["proposal"].intent}
 
 
@@ -388,6 +393,12 @@ async def finish_decision_resume(
             session_id=session_id, agent_id=agent_id, result=final, call=call,
             evidence=evidence, context={"follow_on_of": proposal_id},
         )
+        # The follow-on on the approved leg is not a redraft, but it parks for
+        # the operator by default: a follow-on of an override-decided proposal
+        # is never auto-decided (evaluating it would be a one-line change here).
+        from central_command.gateway import overrides
+
+        await overrides.record_unevaluated_park(parked["proposal_id"], "follow_on")
         out.update({
             "follow_on_proposal_id": parked["proposal_id"],
             "intent": parked["proposal"].intent,

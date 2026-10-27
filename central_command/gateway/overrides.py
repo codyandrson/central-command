@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 
 from central_command import events
 from central_command.db import repo
-from central_command.contract import ARG_SPECS
+from central_command.contract import ARG_SPECS, validate_action_args
 from central_command.gateway.capabilities import (
     REGISTRY, requires_acknowledgement, target_args_of,
 )
@@ -55,6 +55,10 @@ class Decision:
     override_id: str | None = None
     reason: str = ""
     considered: bool = False
+    # Overrides of the drafter that are SUSPENDED: their capability is outside
+    # every live pack grant of the agent (FR-4: an override is carried on a
+    # grant). Computed fresh on each evaluation; a re-grant lifts it.
+    suspended: tuple[str, ...] = ()
 
 
 def approver_for(override_id: str) -> str:
@@ -258,6 +262,8 @@ async def resolve(proposal_row: dict) -> Decision:
     if default == "none" or proposal_row.get("agent_id") == AUDITOR_ID:
         return Decision(default)
 
+    granted: set[str] | None = None
+    suspended: list[str] = []
     created_at = proposal_row["created_at"]
     covering: set[str] = set()
     considered = False
@@ -273,6 +279,13 @@ async def resolve(proposal_row: dict) -> Decision:
         considered = considered or bool(live)
         if cap not in _DEFAULT_GATES:
             reason = reason or f"{cap} is not overridable"
+            continue
+        if live and granted is None:
+            granted = await _granted_capabilities(proposal_row["agent_id"])
+        if live and cap not in granted:
+            suspended += [o["id"] for o in live if o["id"] not in suspended]
+            reason = reason or (f"the override is suspended: {cap} is outside the "
+                                "agent's live pack grants")
             continue
         # A capability whose registry row requires acknowledgement (irreversible
         # or LIVE / highest blast radius) is honoured only with the operator's
@@ -312,16 +325,80 @@ async def resolve(proposal_row: dict) -> Decision:
 
     if not considered:
         return Decision(default)
+    # What the reviewer would have seen flagged parks it, whatever covers it:
+    # an override relaxes WHO decides, never what the decider is shown.
+    # A suspension names itself first: the grant flag says the same thing less
+    # usefully.
+    flagged = await review_flags(proposal_row, granted)
+    reason = (reason if suspended else "") or flagged or reason
+    if not reason and len(covering) != 1:
+        reason = "the actions are covered by different overrides"
     if reason:
-        return Decision(default, reason=reason, considered=True)
-    if len(covering) != 1:
-        return Decision(default, reason="the actions are covered by different overrides",
-                        considered=True)
+        return Decision(default, reason=reason, considered=True,
+                        suspended=tuple(suspended))
     return Decision("none", override_id=covering.pop(), considered=True)
+
+
+async def _granted_capabilities(agent_id: str) -> set[str]:
+    """The gated capabilities the agent's LIVE pack grants cover — the same
+    computation the reviewer's within-granted-capabilities flag uses
+    (`api/routes.get_proposal`). An unknown pack name covers nothing."""
+    # gateway → runtime is the allowed import direction.
+    from central_command.runtime.packs import granted_capability_names, granted_packs
+
+    try:
+        return granted_capability_names(await granted_packs(agent_id))
+    except ValueError:
+        return set()
+
+
+async def review_flags(proposal_row: dict, granted: set[str] | None = None) -> str:
+    """Why a reviewer would have seen this proposal flagged, as the park
+    reason, or "" when it is clean. Calls the SAME checks the Inbox shows
+    (`policy.check_actions`, `check_grants`, `check_charter_content`), the
+    contract's shape check, and the evidence's RECORDED quote verdict:
+    `claim_matches_source` False parks, None (not checked) does not."""
+    from central_command.gateway import policy
+
+    actions = proposal_row.get("actions") or []
+    if granted is None:
+        granted = await _granted_capabilities(proposal_row["agent_id"])
+    flags = policy.check_actions(actions) + policy.check_grants(actions, granted)
+    for a in actions:
+        if _capability(a) == "charter.update":
+            flags += policy.check_charter_content(
+                str((a.get("arguments") or {}).get("content", "")))
+    if flags:
+        f = flags[0]
+        return f"policy flag {f['policy']}: {f['problem']}"
+    for a in actions:
+        problems = validate_action_args(str(a.get("capability", "")), a.get("arguments"))
+        if problems:
+            return f"malformed draft: {problems[0]}"
+    for e in proposal_row.get("evidence") or []:
+        if isinstance(e, dict) and e.get("claim_matches_source") is False:
+            return "an evidence claim does not match its recorded source"
+    return ""
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# The parks that are never evaluated (the operator's ruling, 2026-10-25): a REDRAFT — after a
+# Reject or a failed execution, and a redraft of a redraft — never auto-executes
+# under an override; a FOLLOW-ON parked on the approved leg goes to the operator
+# by default. Each is recorded at the park itself, so no later hook or sweep
+# evaluates it (`override_eval` is compare-and-set where null).
+UNEVALUATED_PARKS = ("redraft", "follow_on")
+
+
+async def record_unevaluated_park(proposal_id: str, kind: str) -> bool:
+    if kind not in UNEVALUATED_PARKS:
+        raise ValueError(f"{kind!r} is not an unevaluated park")
+    return await repo.record_override_eval(proposal_id, {
+        "override_id": None, "outcome": "parked", "reason": kind, "at": _now(),
+    })
 
 
 async def decide_on_park(proposal_id: str, model=None) -> dict | None:
@@ -346,6 +423,8 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
         "reason": decision.reason or None,
         "at": _now(),
     }
+    if decision.suspended:
+        record["suspended"] = list(decision.suspended)
     if not await repo.record_override_eval(proposal_id, record):
         return None
     if decision.override_id is None:
