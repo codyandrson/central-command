@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -21,7 +23,8 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.gateway import overrides
 from central_command.gateway.capabilities import (
-    DEFAULT_GATES, EXEMPT_WRITES, REGISTRY, gated_write_names, registry_as_dict,
+    DEFAULT_GATES, EXEMPT_WRITES, REGISTRY, REVERSIBILITIES, effective_shadow_runs,
+    gated_write_names, registry_as_dict, requires_acknowledgement,
 )
 from central_command.gateway.steward_agreement import pair_confidence
 from central_command.runtime.spike_model import make_deferred_tool_model
@@ -121,6 +124,82 @@ def test_pair_confidence_counts_an_override_approval_nowhere():
     assert [p["proposal_id"] for p in report["pairs"]] == ["p_op"]
     assert report["awaiting_decision"] == 0
     assert report["by_level"]["high"]["approved"] == 1
+
+
+# --- the server-held reversibility mark (story 5.3) ---------------------------
+
+_TEN = {"graph.merge_nodes", "graph.delete_node", "graph.delete_edge",
+        "graph.delete_episode", "jira.delete_issue", "jira.create_project",
+        "confluence.create_space", "calendar.delete_event", "mail.unsubscribe",
+        "mail.send"}
+_LIVE_SIX = {"litellm.delete_model", "litellm.delete_team", "litellm.delete_key",
+             "litellm.set_fallbacks", "litellm.delete_fallbacks",
+             "litellm.apply_config_change"}
+
+
+def _writes():
+    return [c for c in REGISTRY if c.kind == "write"]
+
+
+def test_every_write_row_has_a_mark_and_no_read_does():
+    for c in REGISTRY:
+        if c.kind == "write":
+            assert c.reversibility in REVERSIBILITIES, c.name
+        else:
+            assert c.reversibility == "" and not c.acknowledge, c.name
+    for bad in ("", "hard", "maybe"):
+        with pytest.raises(ValueError):
+            dataclasses.replace(_writes()[0], reversibility=bad)
+    irr = next(c for c in _writes() if c.reversibility == "irreversible")
+    with pytest.raises(ValueError):
+        dataclasses.replace(irr, acknowledge=False)
+    with pytest.raises(ValueError):
+        dataclasses.replace(next(c for c in REGISTRY if c.kind == "read"), acknowledge=True)
+
+
+def test_the_marks_follow_the_risk_text():
+    for c in _writes():
+        if re.search("irreversible", c.risk, re.I):
+            assert c.reversibility == "irreversible", c.name
+        if re.search(r"\bLIVE\b|blast radius", c.risk, re.I):
+            assert c.acknowledge, c.name
+    irreversible = {c.name for c in _writes() if c.reversibility == "irreversible"}
+    assert irreversible == _TEN | {"mcp.tool_call"}
+    assert {c.name for c in _writes() if c.acknowledge} == _TEN | {"mcp.tool_call"} | _LIVE_SIX
+    # reversible-but-LIVE stays marked reversible: the mark informs, it is not the rule
+    assert all(c.reversibility == "reversible" for c in _writes() if c.name in _LIVE_SIX)
+    assert {c.name: c.reversibility for c in _writes()}["jira.add_comment"] == "reversible"
+    assert {c.name: c.reversibility for c in _writes()}["jira.transition_issue"] == "reversible"
+
+
+def test_the_acknowledgement_set_is_printed_for_the_operator(capsys):
+    rows = [c for c in _writes() if c.acknowledge]
+    with capsys.disabled():
+        print(f"\nacknowledgement required: {len(rows)} rows "
+              f"({sum(c.reversibility == 'irreversible' for c in rows)} irreversible, "
+              f"{sum(c.reversibility == 'reversible' for c in rows)} LIVE/blast)")
+        for c in rows:
+            print(f"  {c.name:34} {c.reversibility:13} {c.risk[:70]}")
+    assert len(rows) == 17
+
+
+def test_requires_acknowledgement_and_the_shadow_floor():
+    for name in ("mail.send", "graph.delete_node", "mcp.tool_call", *_LIVE_SIX):
+        assert requires_acknowledgement(name), name
+    assert not requires_acknowledgement("catalog.tag")
+    assert not requires_acknowledgement("no.such.capability")
+    assert requires_acknowledgement("mail.send@2")
+    assert effective_shadow_runs("mail.send", 0) == 1
+    assert effective_shadow_runs("litellm.apply_config_change", 0) == 1
+    assert effective_shadow_runs("mail.send", 5) == 5
+    assert effective_shadow_runs("catalog.tag", 0) == 0
+    assert effective_shadow_runs("catalog.tag", 5) == 5
+
+
+def test_the_mark_and_the_flag_reach_the_wire():
+    wire = {r["name"]: r for r in registry_as_dict()["capabilities"]}
+    assert wire["mail.send"]["reversibility"] == "irreversible" and wire["mail.send"]["acknowledge"] is True
+    assert wire["catalog.tag"]["reversibility"] == "reversible" and wire["catalog.tag"]["acknowledge"] is False
 
 
 # --- through the database -----------------------------------------------------
@@ -342,3 +421,79 @@ async def test_an_operator_approval_carries_no_override_id(demo, monkeypatch):
                if e["kind"] == "proposal.decided"]
     assert decided and "override_id" not in decided[0]["payload"]
     assert decided[0]["actor"].startswith("human:")
+
+
+# --- acknowledgement, the shadow floor and the auditor (story 5.3) -------------
+
+
+def _row(agent_id: str, cap: str, *, claimed: str = "reversible") -> dict:
+    return {
+        "agent_id": agent_id, "status": "AWAITING_HUMAN",
+        "created_at": datetime.now(timezone.utc) + timedelta(seconds=5),
+        "actions": [{"capability": cap, "reversibility": claimed, "arguments": {}}],
+    }
+
+
+@needs_pg
+async def test_an_unacknowledged_or_unshadowed_override_on_mail_send_is_never_honoured(
+    granted, monkeypatch,
+):
+    # mail.send is not on the tracer allowlist; extending it in the test only
+    # makes the refusal below the acknowledgement rule's, not the allowlist's.
+    monkeypatch.setattr(overrides, "OVERRIDABLE", frozenset({"catalog.tag", "mail.send"}))
+    agent = DRAFTER
+    bare = await granted(agent, "mail.send")
+    assert (await overrides.resolve(_row(agent, "mail.send"))).gate == "human"
+    await repo.revoke_gate_override(bare["id"])
+    no_shadow = await granted(agent, "mail.send", acknowledged_irreversible=True)
+    d = await overrides.resolve(_row(agent, "mail.send"))
+    assert d.gate == "human" and "acknowledgement" in d.reason
+    await repo.revoke_gate_override(no_shadow["id"])
+    no_tick = await granted(agent, "mail.send", shadow_runs=1)
+    d = await overrides.resolve(_row(agent, "mail.send"))
+    assert d.gate == "human" and "acknowledgement" in d.reason
+    await repo.revoke_gate_override(no_tick["id"])
+    both = await granted(agent, "mail.send", acknowledged_irreversible=True, shadow_runs=1)
+    d = await overrides.resolve(_row(agent, "mail.send"))
+    assert (d.gate, d.override_id) == ("none", both["id"])
+
+
+@needs_pg
+async def test_the_agent_written_reversibility_is_never_read(granted, monkeypatch):
+    monkeypatch.setattr(overrides, "OVERRIDABLE", frozenset({"catalog.tag", "mail.send"}))
+    agent = DRAFTER
+    await granted(agent, "mail.send")
+    planted = await overrides.resolve(_row(agent, "mail.send", claimed="reversible"))
+    honest = await overrides.resolve(_row(agent, "mail.send", claimed="irreversible"))
+    assert planted == honest and planted.gate == "human"
+    # and the inverse: an agent claiming 'irreversible' does not make catalog.tag need a tick
+    await granted(agent, "catalog.tag")
+    assert (await overrides.resolve(_row(agent, "catalog.tag", claimed="irreversible"))).gate == "none"
+
+
+@needs_pg
+async def test_a_planted_requirement_on_catalog_tag_parks_then_decides(
+    demo, granted, monkeypatch,
+):
+    # The full run on the one overridable capability, with the requirement
+    # planted in the module (mail.send cannot run end to end here).
+    monkeypatch.setattr(overrides, "requires_acknowledgement", lambda cap: cap == "catalog.tag")
+    bare = await granted(DRAFTER)
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag without a tick"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "AWAITING_HUMAN"
+    assert row["override_eval"]["outcome"] == "parked" and row["override_eval"]["reason"]
+    await repo.revoke_gate_override(bare["id"])
+    ovr = await granted(DRAFTER, acknowledged_irreversible=True, shadow_runs=1)
+    out = await _run(monkeypatch, DRAFTER, _tag_proposal("Tag with the tick"))
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["status"] == "EXECUTED"
+    assert row["provenance"]["approver"] == f"override:{ovr['id']}"
+
+
+@needs_pg
+async def test_a_row_naming_the_auditor_is_never_honoured(granted):
+    row = await granted("auditor", "catalog.tag")
+    d = await overrides.resolve(_row("auditor", "catalog.tag"))
+    assert d.gate == "human" and d.override_id is None and not d.considered
+    assert row["id"]

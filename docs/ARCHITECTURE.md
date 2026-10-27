@@ -230,9 +230,12 @@ from the command line (`python -m central_command.selfcheck`) and from
   cockpit server (`web/server/routes/cc-update.ts`) through systemd path units.
 - **`gateway/capabilities.py`** is "executable truth": each `Capability` row
   carries `kind`, `gate`, `risk` (free text — what a wrong use costs),
-  `holder`, `route` and `arguments`, plus the derived `default_gate`
-  (`human` for a gated write, `none` otherwise) that gate overrides resolve
-  against. Agent charters' capability sections are
+  `holder`, `route` and `arguments`, plus `default_gate` that gate overrides
+  resolve against, and, on every write, the server-held `reversibility`
+  (`reversible | irreversible`) and `acknowledge` (an override on it needs the
+  operator's recorded acknowledgement and a shadow period of at least 1). The
+  mark informs and forbids nothing; it is never read from the proposing
+  agent's own `Action.reversibility`. Agent charters' capability sections are
   *generated* from pack grants over this registry at run start.
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
@@ -299,7 +302,12 @@ stateDiagram-v2
   still precedes the Executor. A decision that could not run is amended to
   `parked` and logged as `override.error`. An override decision is never
   operator agreement: `steward_agreement.pair_confidence` and the coaching
-  reader skip it. No override is seeded and no authoring path exists yet; only
+  reader skip it. `resolve` honours a live override on a capability whose row
+  sets `acknowledge` (every `irreversible` row, `mcp.tool_call`, and the six
+  LIVE / highest-blast-radius `litellm` rows) only when it carries
+  `acknowledged_irreversible_at` and `shadow_runs >= 1`
+  (`capabilities.requires_acknowledgement`, `effective_shadow_runs`), and
+  never for the auditor, the one hard exclusion. No override is seeded and no authoring path exists yet; only
   `catalog.tag` is on the tracer's `OVERRIDABLE` allowlist.
 - **Operator routes.** `POST /proposals/{id}/approve | reject | dismiss`
   (`api/routes.py`); the cockpit reaches the same gateway functions over `/ws`.

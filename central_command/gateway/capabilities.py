@@ -26,6 +26,22 @@ from dataclasses import asdict, dataclass
 # a database table (DL-143, PRD §5).
 DEFAULT_GATES = ("human", "auditor", "none")
 
+# The server-held reversibility mark of a WRITE row (FR-4 as amended
+# 2026-10-25). It INFORMS and never forbids: it is what the override authoring
+# dialog and the inbox show, and it decides whether an override needs the
+# operator's acknowledgement and a non-zero shadow period. It is declared here,
+# on the row, by the operator's code — never read from the proposing agent's
+# `Action.reversibility`, which is the agent's own claim and could pick its own
+# exclusion. `irreversible` rows (the ten whose `risk` says so, plus
+# `mcp.tool_call`, whose effect is unknown) always set `acknowledge`; `acknowledge`
+# is also set on the LIVE / highest-blast-radius class (six litellm rows), which
+# is `reversible` and still needs the tick and the shadow floor.
+REVERSIBILITIES = ("reversible", "irreversible")
+
+# The shadow period's floor for a class that requires acknowledgement (epic
+# R7): the setting may be 0, such a class still runs one shadowed proposal.
+ACKNOWLEDGED_SHADOW_FLOOR = 1
+
 # The two deterministic writes that never pass the gate because no agent is in
 # their path (AGENTS.md Policy). A CLOSED, named list: code, not registry rows
 # and not overridable; adding to it is the operator's call, never an agent's.
@@ -47,10 +63,19 @@ class Capability:
     route: str         # the concrete path to the world
     arguments: list[str]
     description: str
+    reversibility: str = ""   # REVERSIBILITIES on every write row, "" on a read (server-held; never the agent's claim)
+    acknowledge: bool = False  # an override here needs the operator's acknowledgement + a shadow floor of 1
 
     def __post_init__(self) -> None:
         if self.default_gate not in DEFAULT_GATES:
             raise ValueError(f"{self.name}: default_gate {self.default_gate!r} not in {DEFAULT_GATES}")
+        if self.kind == "write":
+            if self.reversibility not in REVERSIBILITIES:
+                raise ValueError(f"{self.name}: reversibility {self.reversibility!r} not in {REVERSIBILITIES}")
+            if self.reversibility == "irreversible" and not self.acknowledge:
+                raise ValueError(f"{self.name}: an irreversible capability must require acknowledgement")
+        elif self.reversibility or self.acknowledge:
+            raise ValueError(f"{self.name}: only a write carries a reversibility mark or acknowledgement")
 
 
 REGISTRY: list[Capability] = [
@@ -60,6 +85,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — a wrong date can be set back",
         holder="Executor",
         route="integrations/jira.py → Jira REST setDueDate (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -71,6 +97,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — a wrongly created issue can be closed or deleted in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST createIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -87,6 +114,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, append-only — visible to others; lib-jira has no delete op",
         holder="Executor",
         route="integrations/jira.py → Jira REST addComment (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -98,6 +126,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — priority/labels/due date can be restored",
         holder="Executor",
         route="integrations/jira.py → Jira REST updateAttributes (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -115,6 +144,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — a custom field's previous value can be restored in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST editIssue, fields resolved through /rest/api/3/field (native only — no façade counterpart)",
@@ -136,6 +166,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="internal, append-only — a wrong fact is supersedable, never silently edited",
         holder="Executor",
         route="graphiti-core add_episode, in-process, via the durable ingest queue → group central_command (tenanted; never `main`)",
@@ -158,6 +189,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="reversible — a new entity, embedded at write time, with its own provenance episode",
         holder="Executor",
         route="neo4j_writer.create_node (bolt)",
@@ -169,6 +201,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="reversible — a new relationship with an explicit validity window, with its own provenance episode",
         holder="Executor",
         route="neo4j_writer.create_edge (bolt)",
@@ -181,6 +214,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk="irreversible — every edge and mention of the dropped node moves to the kept one",
         holder="Executor",
         route="neo4j_writer.merge_nodes (bolt; identity kept whole in both halves)",
@@ -192,6 +227,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="reversible — rename/re-summarise/re-type, re-embedded when the text changed",
         holder="Executor",
         route="neo4j_writer.update_node (bolt)",
@@ -203,6 +239,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk="irreversible — DETACH DELETE removes the node and every edge touching it",
         holder="Executor",
         route="neo4j_writer.delete_node (bolt)",
@@ -214,6 +252,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="reversible — wording, endpoints (repoint), or validity window; restore clears invalid_at AND expired_at",
         holder="Executor",
         route="neo4j_writer.update_edge (bolt; repoint is copy-then-delete)",
@@ -227,6 +266,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk="irreversible — the relationship is removed outright",
         holder="Executor",
         route="neo4j_writer.delete_edge (bolt)",
@@ -238,6 +279,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="reversible — an episode and what it produced move to another group; shared entities/edges are split (copied), nothing deleted",
         holder="Executor",
         route="neo4j_writer.rescope_episode (bolt; the episode is the unit of scope)",
@@ -249,6 +291,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "IRREVERSIBLE — the episode's text is deleted, with the facts it was "
             "first to create, the entities no other episode mentions, and every "
@@ -275,6 +319,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "internal, reversible — a tag is curation metadata on a catalog "
             "lineage; a wrong one is re-tagged, and nothing is ever deleted"
@@ -295,6 +340,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — a wrong link is removed with jira.delete_link",
         holder="Executor",
         route="integrations/jira.py → Jira REST linkIssues, then a read-back of the stored direction (native, Cloud v3 + Data Center v2)",
@@ -314,6 +360,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — a removed link can be created again",
         holder="Executor",
         route="integrations/jira.py → Jira REST issueLink DELETE, the link resolved from from_key's stored links (native, Cloud v3 + Data Center v2)",
@@ -331,6 +378,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — reassign or unassign; the assignee is notified",
         holder="Executor",
         route="integrations/jira.py → Jira REST issue/{key}/assignee PUT — accountId on Cloud, username on Data Center (native)",
@@ -348,6 +396,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "external, IRREVERSIBLE — neither Jira Cloud nor Data Center can "
             "restore a deleted issue (Data Center's restore is for ARCHIVED "
@@ -373,6 +423,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, usually reversible — workflows can gate reverse transitions",
         holder="Executor",
         route="integrations/jira.py → Jira REST transitionIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
@@ -388,6 +439,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — deletable in the Jira UI (and via REST)",
         holder="Executor",
         route="integrations/jira.py → Jira REST createFilter (native only — no façade counterpart)",
@@ -399,6 +451,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — deletable in the Jira UI (and via REST)",
         holder="Executor",
         route="integrations/jira.py → Jira REST createDashboard (native only — no façade counterpart)",
@@ -419,6 +472,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "external, IRREVERSIBLE in effect — deleting a project deletes "
             "every issue inside it; this is the most conservative class in "
@@ -443,6 +498,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — trash_page moves a wrongly created page to the trash, recoverable",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST createPage (v2 on Cloud, v1 content on Server/DC)",
@@ -454,6 +510,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "external, reversible — versioned, so a previous revision can be "
             "restored in the Confluence UI; the write itself refuses to "
@@ -476,6 +533,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — the page can be moved back to its old parent",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST updatePage, repointing the parent/ancestor",
@@ -487,6 +545,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — trashed pages remain recoverable from Confluence's trash until purged",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST deletePage (moves to trash, not a permanent delete)",
@@ -498,6 +557,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — a wrongly uploaded attachment can be deleted from the page in the UI",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST addAttachment (v1 multipart, both flavors)",
@@ -514,6 +574,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="external, reversible — labels can be removed again (integrations/confluence.py's remove_labels)",
         holder="Executor",
         route="integrations/confluence.py → Confluence REST addLabels (v1, add-only on both flavors)",
@@ -525,6 +586,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "external, IRREVERSIBLE — no delete-space capability is exposed "
             "here; a mistaken space stays until removed by hand in the "
@@ -545,6 +608,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="internal, versioned — a bad charter is one revert away (history is append-only)",
         holder="Executor",
         route="guidance_version table via repo.save_charter_version (D5 coaching loop)",
@@ -566,6 +630,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "internal, versioned — documents are append-only versions and a "
             "skill can be retired; a wrong skill teaches nobody until an "
@@ -592,6 +657,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "internal, versioned — a new version supersedes the current "
             "document and the prior one stays readable forever; never an "
@@ -620,6 +686,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="internal, reversible — a wrong model can be deleted; a wrong mapping re-pointed",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /model/new (self-hosted proxy)",
@@ -641,6 +708,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="internal, reversible — an in-place field edit; the stored provider key is preserved by the proxy's PATCH merge",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin PATCH /model/{model_id}/update (self-hosted proxy)",
@@ -661,6 +729,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
+        acknowledge=True,
         risk="internal, reversible but LIVE — deleting an alias Central Command routes to breaks runs until re-added",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /model/delete (self-hosted proxy)",
@@ -676,6 +746,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="internal, reversible — a virtual key can be deleted; issuing one changes nothing Central Command routes through yet",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /key/generate (self-hosted proxy)",
@@ -694,6 +765,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="internal, reversible — edits a key's scope/metadata/alias in place; no secret involved",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /key/update (self-hosted proxy)",
@@ -709,6 +781,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk="internal, reversible — a team can be deleted; creating one changes nothing Central Command routes through",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /team/new (self-hosted proxy)",
@@ -723,6 +796,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
+        acknowledge=True,
         risk="internal, reversible but LIVE — the team's keys lose their team scope until re-created",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /team/delete (self-hosted proxy)",
@@ -734,6 +809,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
+        acknowledge=True,
         risk="internal, reversible but LIVE — deleting a key Central Command routes through breaks that traffic until re-issued",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /key/delete (self-hosted proxy)",
@@ -749,6 +826,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
+        acknowledge=True,
         risk="internal, reversible but LIVE — changes router behavior for that model on approval",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin POST /fallback (self-hosted proxy)",
@@ -766,6 +845,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
+        acknowledge=True,
         risk="internal, reversible but LIVE — that model loses its fallback behavior on approval",
         holder="Executor",
         route="integrations/litellm.py → LiteLLM admin DELETE /fallback/{model} (self-hosted proxy)",
@@ -780,6 +861,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
+        acknowledge=True,
         risk=(
             "internal, HIGHEST BLAST RADIUS in the registry — a bad config "
             "takes ALL inference down for the whole team; the arc RESTARTS the "
@@ -815,6 +898,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "external, reversible — a wrongly created event can be deleted, but "
             "any invited attendee has already been notified"
@@ -834,6 +918,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "external, reversible — a PATCH, so omitted fields keep their values "
             "and a wrong change can be changed back; attendees are re-notified"
@@ -853,6 +938,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "external, IRREVERSIBLE in effect — cancelling notifies every "
             "attendee and a recreated event does not restore their acceptances "
@@ -877,6 +964,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "internal, append-only — a check-in row is never updated or "
             "deleted, so a wrong one is corrected by the NEXT check-in saying "
@@ -899,6 +987,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "internal, reversible — a line of effort that should not exist is "
             "retired through loe.update, which keeps its whole history"
@@ -926,6 +1015,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "internal, reversible — a recalibration is another update away, "
             "and retire is a status flip that keeps the whole history"
@@ -949,6 +1039,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="auditor",
+        reversibility="reversible",
         risk=(
             "internal, reversible — the covered emails land FOLDED, and a "
             "FOLDED item is reopened from the cockpit (POST /api/work/{id}/"
@@ -985,6 +1076,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "internal, reversible — a standing rule keeps folding matching "
             "mail at intake until revoked (POST /api/mail/rules/{id}/revoke), "
@@ -1023,6 +1115,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "external but reversible — the message moves to Gmail's Spam folder, "
             "which the operator undoes from Gmail within 30 days; a wrong report "
@@ -1047,6 +1140,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "external and IRREVERSIBLE — nobody can re-subscribe on the "
             "operator's behalf, and the POST confirms the address to the "
@@ -1078,6 +1173,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "external and IRREVERSIBLE — a sent message cannot be recalled, it "
             "reaches a real person, and it arrives AS THE OPERATOR: a wrong "
@@ -1107,6 +1204,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "external but reversible — the message changes folder and the "
             "operator can move it back from their mail client; nothing is "
@@ -1135,6 +1233,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "none to the world — a control-plane bookkeeping write; a wrong "
             "skip hides a catalog model from autodiscovery until the operator "
@@ -1594,6 +1693,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="ungated",
         default_gate="none",
+        reversibility="reversible",
         risk=(
             "none outside the agent's own ephemeral pod — gVisor-isolated, "
             "no network egress (default-deny NetworkPolicy), no Central Command "
@@ -1610,6 +1710,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="ungated",
         default_gate="none",
+        reversibility="reversible",
         risk="none outside the agent's own ephemeral pod — same containment as sandbox.exec",
         holder="agent (sandbox_write_file tool), granted only via the sandbox pack",
         route="central_command/sandbox/runner.py → kubectl exec (base64 write) into the session's Job pod",
@@ -1635,6 +1736,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="ungated",
         default_gate="none",
+        reversibility="reversible",
         risk=(
             "none outside the agent's own ephemeral pod, AND the source is "
             "restricted by operator grant — `agent_sandbox_source` decides "
@@ -1659,6 +1761,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="ungated",
         default_gate="none",
+        reversibility="reversible",
         risk="none outside the agent's own ephemeral pod — deletes it, nothing more",
         holder="agent (sandbox_reset tool), granted only via the sandbox pack",
         route="central_command/sandbox/runner.py → kubectl delete job (cascade=foreground)",
@@ -1672,6 +1775,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "writes into this repo's servers/<id>/ tree and commits (and "
             "pushes) to master — reversible via git, but it is the seam "
@@ -1698,6 +1802,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "builds a container image (nothing running anywhere yet) from "
             "already-reviewed source only; the build host runs a shell "
@@ -1727,6 +1832,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "a namespace-scoped k8s object (Deployment+Service in cc-mcp), "
             "never cluster-scoped — applied via a SCOPED kubeconfig, "
@@ -1760,6 +1866,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "makes a deployed server's tools reachable through the LiteLLM "
             "MCP gateway to any agent later granted access — no credentials "
@@ -1793,6 +1900,7 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="reversible",
         risk=(
             "tears down the running Deployment+Service in cc-mcp and "
             "deregisters from LiteLLM's MCP gateway — one intent, one "
@@ -1826,6 +1934,8 @@ REGISTRY: list[Capability] = [
         kind="write",
         gate="human approval",
         default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
         risk=(
             "whatever the invoked TOOL does — unknown in general, which is "
             "exactly why a tool defaults to this gate; a per-agent operator "
@@ -2357,3 +2467,22 @@ def registry_as_dict() -> dict:
 def gated_write_names() -> set[str]:
     """The exact set the Executor must (and may only) dispatch."""
     return {c.name for c in REGISTRY if c.kind == "write" and c.gate == "human approval"}
+
+
+def requires_acknowledgement(capability: str) -> bool:
+    """Does an override on this capability need the operator's acknowledgement
+    and the shadow floor? Reads the registry row, never an agent's claim; an
+    unknown name (an MCP tool's own gate, a typo) requires nothing here."""
+    row = _BY_NAME.get(capability.split("@", 1)[0])
+    return bool(row and row.acknowledge)
+
+
+def effective_shadow_runs(capability: str, setting: int) -> int:
+    """The shadow period an override on `capability` actually runs: the
+    setting, floored at 1 for a class that requires acknowledgement."""
+    if requires_acknowledgement(capability):
+        return max(setting, ACKNOWLEDGED_SHADOW_FLOOR)
+    return setting
+
+
+_BY_NAME = {c.name: c for c in REGISTRY}

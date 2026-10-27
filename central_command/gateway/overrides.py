@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 
 from central_command import events
 from central_command.db import repo
-from central_command.gateway.capabilities import REGISTRY
+from central_command.gateway.capabilities import REGISTRY, requires_acknowledgement
 
 # The capabilities an override may decide at all. A deliberately tiny tracer
 # allowlist: until the scope forms, the reviewer-would-have-seen checks and
@@ -38,6 +38,10 @@ from central_command.gateway.capabilities import REGISTRY
 OVERRIDABLE: frozenset[str] = frozenset({"catalog.tag"})
 
 APPROVER_PREFIX = "override:"
+
+# The one hard exclusion (FR-4 as amended 2026-10-25): the auditor never holds
+# an override, so a row naming it is never honoured, whoever inserted it.
+AUDITOR_ID = "auditor"
 
 _DEFAULT_GATES = {c.name: c.default_gate for c in REGISTRY if c.kind == "write"}
 
@@ -79,7 +83,7 @@ async def resolve(proposal_row: dict) -> Decision:
     # seam it gates exactly like `human` (it changes no behaviour).
     default = "human" if any(_DEFAULT_GATES.get(c, "human") != "none" for c in caps) \
         else "none"
-    if not caps:
+    if not caps or proposal_row.get("agent_id") == AUDITOR_ID:
         return Decision(default)
 
     created_at = proposal_row["created_at"]
@@ -95,8 +99,24 @@ async def resolve(proposal_row: dict) -> Decision:
         # Only an unscoped, no-shadow relaxation to `none` is honoured until
         # the scope forms and the shadow period exist: a row that asks for
         # either is never treated as wider than it says.
+        # A capability whose registry row requires acknowledgement (irreversible
+        # or LIVE / highest blast radius) is honoured only with the operator's
+        # recorded acknowledgement AND a non-zero shadow period. The mark is the
+        # server-held registry field; the agent-written `Action.reversibility`
+        # is never read here. Until story 7 counts shadow runs, such a row with
+        # both present is the one shadowed row that decides.
+        ack = requires_acknowledgement(cap)
+        if ack:
+            lacking = [o for o in live
+                       if not o["acknowledged_irreversible_at"] or o["shadow_runs"] < 1]
+            if lacking and len(lacking) == len(live):
+                reason = reason or (f"{cap} requires an acknowledgement and a shadow "
+                                    "period the override lacks")
+                continue
+            live = [o for o in live if o not in lacking]
         eligible = [o for o in live
-                    if o["gate"] == "none" and not o["scope"] and o["shadow_runs"] == 0]
+                    if o["gate"] == "none" and not o["scope"]
+                    and (ack or o["shadow_runs"] == 0)]
         if live and not eligible:
             reason = reason or "the override is scoped or shadowed"
             continue
