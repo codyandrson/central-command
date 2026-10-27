@@ -185,9 +185,11 @@ REGISTRY: list[Capability] = [
                    "scope", "for_agent"],
         description=(
             "Commit a distilled, human-approved claim to the team knowledge "
-            "graph. The Executor stamps trust=human-approved and the approver "
-            "into the episode source, so pedigree is queryable forever (D13: "
-            "distilled claims only, never pasted email text)."
+            "graph. The Executor stamps the trust level (trust=human-approved, or "
+            "trust=override:<id> when an operator-authored override decided the "
+            "write) and the approver into the episode source, so pedigree is "
+            "queryable forever (D13: distilled claims only, never pasted email "
+            "text)."
         ),
     ),
     # Graph curation (the remediation loop, 2026-08-20): gated wrappers around
@@ -2249,11 +2251,16 @@ POLICIES: list[Policy] = [
     Policy(
         name="Graph write pedigree",
         status="enforced",
-        enforced_at="executor stamps trust=human-approved | approver=… into episode source",
+        enforced_at=(
+            "executor stamps trust=human-approved | approver=… into episode "
+            "source, or trust=override:<id> | approver=override:<id> when an "
+            "override decided the write (executor.episode_source_description)"
+        ),
         guard="tests/test_graph.py::test_executor_stamps_trust_and_approver_into_the_episode",
         description=(
             "Every fact that enters the knowledge graph carries who approved it "
-            "and at what trust level, queryable forever."
+            "and at what trust level (an operator approval or the override that "
+            "decided the write), queryable forever."
         ),
     ),
     Policy(
@@ -2510,6 +2517,44 @@ POLICIES: list[Policy] = [
             "path creates that row). Gated tools ride ONE static capability, "
             "mcp.tool_call, across every registered server; ungated tools "
             "attach as direct MCP callables at toolset build."
+        ),
+    ),
+    Policy(
+        name="Overrides are authored only by the operator",
+        status="enforced",
+        enforced_at=(
+            "gateway/overrides.py author / revoke, reached only from the "
+            "operator's REST routes and cockpit RPC in api/routes.py and "
+            "api/nerve_gateway.py; no agent tool, pack, capability, heartbeat "
+            "action or chat lane writes an override row, and runtime/ imports "
+            "neither the module nor the writer; the auditor is refused as an "
+            "override's agent"
+        ),
+        guard="tests/test_gate_overrides.py::test_the_override_writer_has_one_caller_and_it_is_the_operators",
+        description=(
+            "A gate override relaxes a capability's default gate for one agent "
+            "and is the operator's standing rule, never an agent's: only the "
+            "operator authors or revokes one, in the cockpit (revocation is a "
+            "timestamp, the row stays). Agents are not told overrides exist."
+        ),
+    ),
+    Policy(
+        name="The Executor checks an override's scope",
+        status="enforced",
+        enforced_at=(
+            "gateway/overrides.check_override_approval, run read-only by "
+            "gateway.approve_and_execute before proposal.decided and again by "
+            "executor.execute after the shape pass and before the first action "
+            "(typed OverrideRefused, nothing written)"
+        ),
+        guard="tests/test_gate_overrides.py::test_the_executor_backstop_refuses_with_nothing_written",
+        description=(
+            "An override-decided write is honoured only for the actions its "
+            "override's scope covers, while the override is unrevoked, "
+            "unsuspended and past its shadow period (and acknowledged, for an "
+            "irreversible or LIVE class). The Executor re-reads the override "
+            "fresh and refuses with nothing written; the proposal returns to "
+            "the operator."
         ),
     ),
 ]

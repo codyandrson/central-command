@@ -13,11 +13,11 @@ for the entry format and how to add one.
   world-changing capability is left to an unsupervised agent by default; the
   boundary is enforced architecturally (the import graph, DL-004) rather than
   by per-call discipline. The PRD (FR-4) restates the rule as a DEFAULT: the
-  operator may later relax a gate per capability and agent by a scoped
-  override (specified there, not yet built); today's closed exemption list is
-  the two writes in DL-003.
+  operator may relax a gate per capability and agent by a scoped override
+  (built; DL-187); the closed exemption list is the two writes in DL-003.
 - **Enforced:** code structure only (`central_command/runtime/`, `central_command/gateway/`) — no single test asserts the aggregate rule; DL-004 pins the import boundary it depends on
 - **Source:** AGENTS.md Policy
+- **Note (2026-10-26):** An operator-authored gate override relaxes the default for one agent and capability and is still decided at this gate; see DL-187.
 
 ### DL-002 — The gate is singular, human by default; graduation is per-class and revocable
 
@@ -44,6 +44,7 @@ for the entry format and how to add one.
   fully human-gated. Doctrine: the trust-tier graduation spec.
 - **Enforced:** code structure only — `central_command/gateway/auditor.py:1-50` (doctrine docstring and class constants) and `:285-340` (`approve_and_execute` call site, `approver="auditor"` at `:328`); `central_command/config.py:468-483,500-515` (`auditor_enabled`/`auditor_mode`/`auditor_document_mode`/`graph_auditor_enabled`/`graph_auditor_mode`, all default off/"shadow"); test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` pins the invalidation carve-out
 - **Source:** code comment `central_command/gateway/auditor.py:1-50`; code comment `central_command/config.py:468-483,500-515`
+- **Note (2026-10-26):** A gate override is a third decider beside the operator and the auditor, but it is never graduation: it is the operator's own standing rule, and an override approval never counts as operator agreement; see DL-187.
 
 ### DL-003 — Some deterministic writes are gated by the operator's own click, not by propose/approve
 

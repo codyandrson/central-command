@@ -826,18 +826,20 @@ hygiene, and how the test suite itself must be written. See
   nothing consults would be exactly the unverified claim AGENTS.md warns
   against. Review ruling GATE-010 retired the claim and put the real need,
   per-grant overrides with an operator-authored scope, into the
-  requirements as FR-4 (PRD §6.1 item 3; not yet built).
+  requirements as FR-4 (PRD §6.1 item 3; built, DL-187).
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/PRD.md FR-4; PRD addendum §B (GATE-010)
+- **Note (2026-10-26):** The default gate is a registry column (`Capability.default_gate`), the override a per-grant row; there is still no policy-registry table. See DL-187.
 
 ### DL-144 — Not every write produces a proposal: an ungated write stamps an override instead of auto-approving as system
 
 - **Status:** active
 - **Date:** 2026-10-19
-- **Rule:** (recorded here) An ungated write (an operator-authored override,
-  once FR-4 is built, or the two deliberate exceptions of DL-003) creates no
-  proposal and carries an override stamp. The design where every write produces a proposal and
-  ungated ones auto-approve as "system" is rejected.
+- **Rule:** (recorded here) An ungated write (the two deliberate exceptions
+  of DL-003) creates no proposal. A write an operator-authored override
+  decides is a proposal decided by the gateway and stamped with the override
+  (DL-187). The design where every write produces a proposal and ungated ones
+  auto-approve as "system" is rejected.
 - **Why:** "Every write produces a proposal; ungated classes auto-approve as
   system" would give a gate-shaped record to writes that no gate decided,
   and it conflicts with DL-003 (ungated by design, no agent judgment in the
@@ -845,6 +847,7 @@ hygiene, and how the test suite itself must be written. See
   stamp, not a fake approval. Review ruling GATE-060 retired the idea.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/PRD.md FR-2, FR-4; PRD addendum §B (GATE-060); DL-003
+- **Note (2026-10-26):** "Creates no proposal" holds for the exemption list; an override-decided write is a proposal (PRD FR-2), and this entry's rejection of auto-approving as `system` stands. See DL-187.
 
 ### DL-145 — Event-subscription agent wakes and agent.request/response events were never built
 
@@ -1157,7 +1160,7 @@ hygiene, and how the test suite itself must be written. See
   separation, D20 no egress-allowlist infrastructure, D21 reuse of n8n's
   credential isolation through the façade with no vault. Several premises
   have since moved and the review recorded it: mail send is now a gated step
-  (FR-27), outward gates can be overridden by the operator (FR-4, not yet built), and sandbox
+  (FR-27), outward gates can be overridden by the operator (FR-4, built; DL-187), and sandbox
   egress is open by decision (DL-005); the founding "no exfiltration-capable
   tools" premise is NARROWED, not wrong: the gate, not tool absence,
   contains the error. The MVP defence in depth (propose-only tools, a gateway
@@ -1741,3 +1744,13 @@ hygiene, and how the test suite itself must be written. See
   dated text.
 - **Enforced:** test: `tests/test_task_propose.py::test_task_create_is_no_longer_a_gated_write`, `tests/test_task_backstops.py::test_a_chain_of_agent_created_tasks_stops_at_the_cap`
 - **Source:** docs/PRD.md FR-19, FR-13, FR-4; the epic-task-backstops epic (rulings of 2026-10-22); GATE-032
+
+### DL-187 — A gate override is the operator's standing rule: an override-decided write is a proposal the gateway decides, never operator agreement
+
+- **Status:** active
+- **Date:** 2026-10-26
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**A gate override is the operator's standing decision, not an exemption.**"
+- **Why:** FR-4 relaxes a capability's default gate for one agent by an operator-authored, scoped override, and the sources disagreed on what such a write is. DL-144 and the old AGENTS.md Policy read "creates no proposal, carries an override stamp"; PRD FR-2 reads "the gateway decides the proposal". The operator's ruling (2026-10-25) follows FR-2: an override-decided write stays a proposal, decided at the one seam (`gateway.approve_and_execute`) with approver `override:<id>`, run by the same Executor, with the decision event naming the override before the write; for a proposal covered by several overrides, `override:<a>+<b>` (sorted, unique) with a per-action map and a per-action stamp (ruling 2026-10-26: a proposal 100% covered by overrides needs no review, decided only when every involved override is past its shadow period). DL-144's "creates no proposal" holds for the exemption list (DL-003) and its rejection of auto-approving as `system` stands: the approver names the operator-authored rule, not a fake operator. An override approval is never operator agreement for graduation (FR-10), so the agreement and coaching readers skip it. Three safeguards: the gateway pre-checks and the Executor re-checks the scope; writes carry `trust=override:<id>`; a shadow period counts the operator's own approvals of matching proposals created after the grant (`gate_override_shadow_runs`, default 5, copied onto the override at authoring). Never decided by an override: anything a reviewer would have seen flagged (`claim_matches_source` false parks, `None` does not), a redraft after Reject, a follow-on, a proposal whose work item carries the operator's reopen note (the auditor's own rule, mirrored). The auditor never authors one. FR-4 is amended (operator, 2026-10-25): the irreversible-class exclusion becomes an explicit acknowledgement at authoring plus a non-zero shadow period, and the same for the LIVE / highest-blast-radius class (17 acknowledgement rows: 11 irreversible incl. `mcp.tool_call`, 6 LiteLLM); the reversibility mark informs, never forbids. `mcp.tool_call` stays overridable under that tick and floor (operator, 2026-10-26); the MCP direct-call gate (`agent_mcp_gate_override`) is a separate form and is unchanged. The default gate is a registry column, not a table (DL-143).
+- **Enforced:** test: `tests/test_gate_overrides.py::test_the_executor_backstop_refuses_with_nothing_written`, `tests/test_gate_overrides.py::test_the_override_writer_has_one_caller_and_it_is_the_operators`, `tests/test_gate_overrides.py::test_pair_confidence_counts_an_override_approval_nowhere`, `tests/test_gate_overrides.py::test_a_row_naming_the_auditor_is_never_honoured`, `tests/test_gate_overrides.py::test_a_covered_proposal_on_a_reopened_work_item_parks_with_its_reason`, `tests/test_governance.py::test_every_enforced_policy_names_its_guard_test`
+- **Source:** docs/PRD.md FR-2, FR-4 (amended 2026-10-25), docs/ARCHITECTURE.md section 3 (Who may approve what; Gate overrides); PRD addendum §C (the FR-4 amendment row), §B (GATE-060); the epic-gate-overrides epic (rulings of 2026-10-25 and 2026-10-26); DL-001, DL-002, DL-003, DL-143, DL-144
+- **Supersedes:** (the wording of DL-143 and DL-144 for overrides; their dated text is kept, with a note each)

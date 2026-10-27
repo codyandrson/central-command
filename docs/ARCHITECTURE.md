@@ -286,7 +286,7 @@ stateDiagram-v2
   re-runs the same shape validation over every action before the first one
   runs, then world-state checks, then the handlers; `proposer` comes from the
   gateway, never from the agent's arguments.
-- **Gate overrides (FR-4, being built).** An `agent_gate_override` row
+- **Gate overrides (FR-4).** An `agent_gate_override` row
   (`govr_<hex>` id; the DRAFTER as `agent_id`, a capability, a `scope` jsonb,
   `gate` `none`, `granted_by`/`granted_at`, `revoked_at`/`revoked_reason` —
   revocation is a timestamp and a row is never deleted — `shadow_runs`,
@@ -524,11 +524,25 @@ What varies is the approver.
 |---|---|---|---|
 | **Human gate** — the baseline for everything | the operator | every capability whose `gate` is human approval: Jira, Confluence, calendar, mail, graph episodes and curation proposals, charter edits, MCP sync, model configuration, … | — |
 | **Graduated class** — the independent auditor re-derives the judgment from the raw source; a **CONCUR** executes with `approver="auditor"`, a **CHALLENGE** or an auditor error parks for the operator | the auditor, per class, revocable | `dismissal.confirm` (email dismissals) and `work.bulk_dismiss`; `dismissal.confirm.document`; graph-verification rows that are aligned, mechanically clean and addition-only (invalidations always park) | `CC_AUDITOR_ENABLED` (false) + `CC_AUDITOR_MODE` (shadow); `CC_AUDITOR_DOCUMENT_MODE` (shadow); `CC_GRAPH_AUDITOR_ENABLED` (false) + `CC_GRAPH_AUDITOR_MODE` (shadow) |
-| **Gate override** — the operator's standing rule for one agent and one capability; the proposal is still decided at the seam | `override:<id>` | none reachable yet: rows exist only where a test inserts one, `catalog.tag` only | no authoring path yet |
+| **Gate override** — the operator's standing rule for one agent and one capability, scoped and narrowable by argument, target or schedule; the proposal is still decided at the seam, by the gateway, and run by the same Executor | `override:<id>` (`override:<a>+<b>`, sorted, when several cover it) | any capability whose default gate is `human` or `auditor`, for any agent but the auditor; none exists until the operator authors one in the cockpit. Three safeguards: (1) the gateway pre-checks and the Executor re-checks the scope before the first action; (2) the write carries `trust=override:<id>`; (3) a shadow period of the operator's own approvals first, and one-click revoke on the agent's and the capability's pages. An irreversible or LIVE class also needs an acknowledgement at authoring and a shadow of at least 1. Never operator agreement for graduation | `CC_GATE_OVERRIDE_SHADOW_RUNS` (5) |
 | **Ungated deterministic write** — exactly two, no proposal, because there is no agent judgment to review | code, or the operator's own click | the closed `EXEMPT_WRITES` tuple beside `REGISTRY` names them (they are not registry rows); task creation is a trigger, has no row and is not on the list. (1) operator graph curation: a closed write set in `integrations/neo4j_writer.py`, called from `api/routes.py` for the operator's own edits; (2) wiki stale-page annotation: a deterministic template over claim rows, no model in the path, whose Confluence write is made by `ingest/wiki_freshness.py` | — ; `CC_WIKI_ANNOTATION_MODE` (off) |
 
-These two are the closed exemption list the PRD's override requirement (FR-4)
-generalises. Graduation is **configuration, never code**, one class at a time,
+**The default gate** is a registry column, `Capability.default_gate`
+(`gateway/capabilities.py`), never a table (DL-143): `human` on 63 rows (every
+gated write but one), `auditor` on one (`work.bulk_dismiss`, the class a
+graduated auditor may confirm; the `CC_AUDITOR_*` switches still decide) and
+`none` on 32 (the 28 reads and the 4 sandbox writes). An override relaxes
+`human` or `auditor` to `none`, never the reverse; relaxing to `auditor` is
+graduation's job. **The exemption list** is the two ungated deterministic writes
+above, named once in `EXEMPT_WRITES` beside the registry, closed, and growing
+only by the operator's call. An override is not a third entry on it: its write
+is a proposal (the exemptions create none), and task creation is a trigger with
+no row and no override. The MCP tool gate (`agent_mcp_gate_override`) is a
+separate, older form that governs a DIRECT tool call; it is unchanged, and
+`mcp.tool_call`, the proposal capability, is overridable like any other under
+its acknowledgement tick and shadow floor.
+
+Graduation is **configuration, never code**, one class at a time,
 on recorded agreement evidence (`gateway/auditor.py`,
 `gateway/steward_agreement.py`, `gateway/graph_auditor.py`); a fresh install is
 fully human-gated. Doctrine:
@@ -591,7 +605,7 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
 - **Event log.** `events.emit()` writes the row to Postgres, then fans out to
   in-process subscribers; the SSE stream (`GET` stream route in
   `api/routes.py`) and the cockpit's `/ws` push frames are projections of the
-  table, never a parallel channel. 167 distinct event types are emitted today
+  table, never a parallel channel. 173 distinct event types are emitted today
   (recounted from `emit(...)` call sites by the guard; dynamic kinds such as
   bridged log records are not counted). Ordering rule: an event that
   *authorises* something is written before the thing it authorises.
