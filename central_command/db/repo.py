@@ -1439,7 +1439,7 @@ async def proposal_gate_facts(proposal_ids: list[str]) -> dict[str, dict]:
     try:
         rows = await conn.fetch(
             """
-            select p.id, p.status, p.override_eval,
+            select p.id, p.status, p.override_eval, p.retry_state,
                    p.provenance ->> 'approver' as provenance_approver,
                    (select e.actor from audit_event e
                      where e.ref_id = p.id and e.kind = 'proposal.decided'
@@ -1453,6 +1453,8 @@ async def proposal_gate_facts(proposal_ids: list[str]) -> dict[str, dict]:
             d = dict(r)
             v = d["override_eval"]
             d["override_eval"] = json.loads(v) if isinstance(v, str) else v
+            rs = d.get("retry_state")
+            d["retry_state"] = json.loads(rs) if isinstance(rs, str) else rs
             out[d["id"]] = d
         return out
     finally:
@@ -1545,6 +1547,64 @@ async def claim_proposal_retry(proposal_id: str) -> dict | None:
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d
+    finally:
+        await conn.close()
+
+
+async def withdraw_proposal_if_open(proposal_id: str) -> str | None:
+    """The operator dismisses a proposal that has NOT been executed: AWAITING_HUMAN
+    (no action needed) or RETRY_PENDING (a waiting approved execution) →
+    WITHDRAWN, returning the status it held, or None if it is neither any more.
+
+    The transition IS the lock, in SQL, the way `claim_proposal_for_execution`
+    and `claim_proposal_retry` are: a dismiss racing a retry's claim (RETRY_PENDING
+    → EXECUTING) cannot both withdraw and execute — whoever flips the row first
+    wins, and the other sees no row to flip. `retry_state` is left on the row for
+    the record. `decided_at` is not touched for a RETRY_PENDING dismiss: the
+    decision happened when the operator approved, and only the execution is
+    being withdrawn."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            """
+            with prior as (
+                select id, status from proposal
+                 where id = $1 and status in ('AWAITING_HUMAN', 'RETRY_PENDING')
+                 for update
+            )
+            update proposal p
+               set status = 'WITHDRAWN',
+                   decided_at = case when prior.status = 'AWAITING_HUMAN'
+                                     then now() else p.decided_at end
+              from prior where p.id = prior.id
+            returning prior.status
+            """,
+            proposal_id,
+        )
+    finally:
+        await conn.close()
+
+
+async def list_waiting_proposals() -> list[dict]:
+    """Approved proposals WAITING on an outage (RETRY_PENDING), oldest first —
+    the Decisions Inbox's waiting section. Not in `list_proposals("AWAITING_HUMAN")`
+    and not in the decided history, so without this a parked approval is
+    listed nowhere (epic-outage-doctrine story 8)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """select id, session_id, agent_id, intent, status, created_at,
+                      decided_at, origin
+               from proposal where status = 'RETRY_PENDING'
+               order by coalesce(decided_at, created_at), created_at"""
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            o = d.get("origin")
+            d["origin"] = json.loads(o) if isinstance(o, str) else o
+            out.append(d)
+        return out
     finally:
         await conn.close()
 

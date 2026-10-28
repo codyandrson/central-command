@@ -524,6 +524,28 @@ async def parked_wait_line(session_id: str) -> str:
     return f"paused — waiting on {', '.join(deps)}; retrying"
 
 
+async def parked_proposal_wait_line(proposal_id: str) -> str:
+    """The wait line for a session whose APPROVED proposal is RETRY_PENDING
+    (story 8): names what the execution waits on, the way `parked_wait_line`
+    does for a parked turn — and says plainly when a restart interrupted it."""
+    from datetime import datetime as _datetime
+
+    from central_command.api import routes as rest
+
+    row = await repo.load_proposal(proposal_id) or {}
+    probes = await repo.dependency_probe_states()
+    w = rest.waiting_facts(row.get("retry_state") or {}, probes, False)
+    if w["interrupted"]:
+        return ("paused — its approved execution was interrupted by a process "
+                "restart; retry or dismiss it in the Decisions Inbox")
+    deps = ", ".join(w["dependencies"])
+    if w["down_since"]:
+        since = _datetime.fromisoformat(w["down_since"]).astimezone().strftime("%Y-%m-%d %H:%M")
+        return (f"paused — its approved proposal is waiting on {deps} (down since "
+                f"{since}); retrying")
+    return f"paused — its approved proposal is waiting on {deps}; retrying"
+
+
 async def _with_parked_on(session: dict) -> dict:
     """The session dict `why_not_sendable` reads, with `parked_on` filled for a
     parked lane so the composer names what it waits on."""
@@ -588,13 +610,12 @@ async def _run_session_context(session: dict) -> dict:
         # unchanged) while its APPROVED proposal sits RETRY_PENDING — so this
         # branch must check the proposal, or it tells the operator a decision
         # is owed that they already made.
-        retrying = any(
-            p.get("session_id") == session_id
-            for p in await repo.list_proposals("RETRY_PENDING")
-        )
+        retrying = [
+            p for p in await repo.list_proposals("RETRY_PENDING")
+            if p.get("session_id") == session_id
+        ]
         if retrying:
-            waiting = ("paused — its approved proposal is queued for retry "
-                       "(provider outage)")
+            waiting = await parked_proposal_wait_line(retrying[0]["id"])
         else:
             waiting = "paused — its proposal is awaiting your decision"
     elif status == "RUNNING":
@@ -997,8 +1018,14 @@ async def _decisions_list() -> dict:
     )
     proposals = await repo.list_proposals("AWAITING_HUMAN")
     await rest.annotate_gate_facts(proposals)
+    # Approved proposals WAITING on an outage: a second list, deliberately NOT
+    # in `proposals` — the "needs your decision" badge counts that list, and a
+    # decision already made does not need one (epic-outage-doctrine story 8).
+    waiting = await repo.list_waiting_proposals()
+    await rest.annotate_gate_facts(waiting)
     return {
         "proposals": proposals,
+        "waiting": waiting,
         "dismissals": await repo.list_work_items("DISMISS_PENDING", include_payload=True),
         # Asks OF the operator — plan reviews, questions, stall escalations.
         # Since tier 2 (2026-07-25) ANY agent can ask, not just the orchestrator.

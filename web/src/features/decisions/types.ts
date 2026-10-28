@@ -98,6 +98,28 @@ export interface ProposalSummary {
   decided_by?: DecidedBy | null;
   /** Non-empty only on a pending proposal in an override's shadow period. */
   shadow?: ShadowMark[];
+  /** Set only on an APPROVED proposal waiting out an outage (RETRY_PENDING);
+   *  null for every other status. The server computes it
+   *  (`routes.waiting_facts`); the cockpit renders and derives nothing. */
+  waiting?: WaitingFacts | null;
+}
+
+/** What a RETRY_PENDING proposal waits on (epic-outage-doctrine story 8). */
+export interface WaitingFacts {
+  dependencies: string[];
+  /** Earliest `down_since` among the dependencies recorded down; null when
+   *  none is (the probes say it is up and the backoff has not elapsed). */
+  down_since: string | null;
+  attempts: number;
+  /** When the next retry is due (`retry_state.not_before`). */
+  next_retry: string | null;
+  /** A process restart cut the execution short: only the operator's retry or a
+   *  dismiss moves it. */
+  interrupted: boolean;
+  completed_actions: number;
+  /** Failing against a healthy probe — reported by the loud rule. */
+  failing_despite_probe: boolean;
+  last_error?: string | null;
 }
 
 export interface JiraIssueSnapshot {
@@ -220,6 +242,9 @@ export interface OperatorItem {
 
 export interface DecisionsData {
   proposals: ProposalSummary[];
+  /** Approved proposals waiting on an outage. NOT part of the "pending" count:
+   *  the decision was made; what waits is the world. */
+  waiting?: ProposalSummary[];
   dismissals: WorkItem[];
   operatorItems: OperatorItem[];
 }

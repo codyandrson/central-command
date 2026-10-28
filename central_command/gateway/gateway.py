@@ -1210,10 +1210,14 @@ async def dismiss_proposal(
     prop_row = await repo.load_proposal(proposal_id)
     if prop_row is None:
         raise GatewayError(f"no proposal {proposal_id}")
-    if prop_row["status"] != "AWAITING_HUMAN":
+    if prop_row["status"] not in ("AWAITING_HUMAN", "RETRY_PENDING"):
         raise GatewayError(
-            f"proposal {proposal_id} is not awaiting a decision (status {prop_row['status']})"
+            f"proposal {proposal_id} is not awaiting a decision or waiting on an "
+            f"outage (status {prop_row['status']})"
         )
+
+    if prop_row["status"] == "RETRY_PENDING":
+        return await _dismiss_waiting_execution(session_id, prop_row, reason)
 
     # Record the decision BEFORE acting on it — same append-only ordering rule
     # as approve/reject. Same event KIND as the other two verdicts (only the
@@ -1238,3 +1242,58 @@ async def dismiss_proposal(
     )
 
     return {"ok": True, "proposal_id": proposal_id, "status": "WITHDRAWN"}
+
+
+async def _dismiss_waiting_execution(
+    session_id: str, prop_row: dict, reason: str
+) -> dict:
+    """The operator withdraws an APPROVED proposal still WAITING on an outage
+    (RETRY_PENDING, an interrupted execution included) — epic-outage-doctrine
+    story 8. What is withdrawn is the EXECUTION, not the decision: the operator's
+    approval stands on the log, so there is no second `proposal.decided`; the
+    event is `proposal.execution_dismissed`.
+
+    The transition is guarded in SQL (`repo.withdraw_proposal_if_open`): a
+    dismiss racing a retry's claim cannot both withdraw and execute. Folds are
+    released (a withdrawn execution covered nothing), the drafter session is
+    closed through the one close seam and NEVER resumed (resuming it would hand
+    an agent the news that its approved write never happened, which is exactly
+    the loop dismiss exists to avoid), and `retry_state` stays on the row.
+
+    The task resolves FAILED, never DONE (the operator's ruling, 2026-10-27:
+    "If the operator dismisses the proposal while it shows a retry_pending
+    status, then it should be considered failed") with the honest count of what
+    had landed. The event goes BEFORE the task resolution it authorises."""
+    from central_command.runtime.converse import close_session
+
+    proposal_id = prop_row["id"]
+    if await repo.withdraw_proposal_if_open(proposal_id) != "RETRY_PENDING":
+        # Lost the race: a retry claimed it first (EXECUTING), or another
+        # dismiss won. Nothing was withdrawn; say so.
+        current = (await repo.load_proposal(proposal_id) or {}).get("status")
+        raise GatewayError(
+            f"proposal {proposal_id} is no longer waiting (status {current}) — "
+            "its execution has already started or finished"
+        )
+    state = prop_row.get("retry_state") or {}
+    landed = len(state.get("completed_results") or [])
+    total = len(prop_row.get("actions") or [])
+    await events.emit(
+        "proposal.execution_dismissed",
+        ref_id=proposal_id,
+        payload={"proposal": proposal_id, "completed_actions": landed,
+                 "actions_total": total, "reason": reason,
+                 "interrupted": bool(state.get("interrupted")),
+                 "session_id": session_id},
+        actor="operator",
+    )
+    await release_folds_for(proposal_id, "covering proposal's waiting execution dismissed")
+    await close_session(
+        session_id, agent_id=prop_row["agent_id"], reason="dismissed", actor="operator",
+    )
+    await _resolve_task_after(
+        session_id, "FAILED",
+        f"operator withdrew the waiting execution; {landed} of {total} actions had landed",
+    )
+    return {"ok": True, "proposal_id": proposal_id, "status": "WITHDRAWN",
+            "completed_actions": landed, "actions_total": total}

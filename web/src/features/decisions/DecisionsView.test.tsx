@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = {
   proposals: [] as unknown[],
+  waiting: [] as unknown[],
   dismissals: [] as unknown[],
   operatorItems: [] as unknown[],
   detail: {} as Record<string, unknown>,
@@ -67,6 +68,7 @@ const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString(
 
 beforeEach(() => {
   state.proposals = [];
+  state.waiting = [];
   state.dismissals = [];
   state.operatorItems = [];
   state.detail = {};
@@ -588,5 +590,73 @@ describe('DecisionsView says which gate decided', () => {
     await userEvent.click(screen.getByLabelText('Show decision history'));
     await userEvent.click(screen.getByText('intent h1'));
     await waitFor(() => expect(screen.getAllByTestId('decided-by')).toHaveLength(2));
+  });
+});
+
+describe('DecisionsView waiting section', () => {
+  const waitingRow = (over: Record<string, unknown>, waiting: Record<string, unknown>) => ({
+    id: 'w1', agent_id: 'jira-expert', intent: 'Create JIRA-9', status: 'RETRY_PENDING',
+    session_id: 's1', created_at: hoursAgo(2),
+    waiting: {
+      dependencies: ['jira'], down_since: null, attempts: 2, next_retry: null,
+      interrupted: false, completed_actions: 0, failing_despite_probe: false,
+      last_error: null, ...waiting,
+    },
+    ...over,
+  });
+
+  it('says what an approved proposal waits on, since when, and when it retries', () => {
+    state.waiting = [waitingRow({}, {
+      dependencies: ['graph', 'embedder'],
+      down_since: '2026-10-27T14:03:00Z', next_retry: '2026-10-27T15:03:00Z',
+    })];
+    render(<DecisionsView />);
+
+    const line = screen.getByTestId('waiting-state');
+    expect(line).toHaveTextContent('approved — waiting on graph, embedder (down since');
+    expect(line).toHaveTextContent('retry 3 at');
+  });
+
+  it('says an interrupted execution waits for the operator', () => {
+    state.waiting = [waitingRow({}, { interrupted: true })];
+    render(<DecisionsView />);
+    expect(screen.getByTestId('waiting-state'))
+      .toHaveTextContent('interrupted by a restart; retry or dismiss');
+  });
+
+  it('names the dependency and the error when it fails despite a healthy probe', () => {
+    state.waiting = [waitingRow({}, {
+      dependencies: ['jira'], failing_despite_probe: true, last_error: 'HTTP 403 forbidden',
+    })];
+    render(<DecisionsView />);
+    expect(screen.getByTestId('waiting-state'))
+      .toHaveTextContent('failing despite a healthy jira: HTTP 403 forbidden');
+  });
+
+  it('does not count waiting proposals as pending', () => {
+    state.waiting = [waitingRow({}, {}), waitingRow({ id: 'w2' }, {})];
+    render(<DecisionsView />);
+    expect(screen.getByText('0 pending')).toBeInTheDocument();
+    expect(screen.getAllByTestId('waiting-row')).toHaveLength(2);
+  });
+
+  it('enables Dismiss on a waiting proposal and offers neither Approve nor Reject', async () => {
+    const w = waitingRow({}, { interrupted: true, completed_actions: 1 });
+    state.waiting = [w];
+    state.detail = {
+      ...w, actions: [{ capability: 'jira.add_comment' }, { capability: 'graph.add_episode' }],
+      evidence: [], expected_effect: '',
+    };
+    render(<DecisionsView />);
+
+    await userEvent.click(screen.getByTestId('waiting-row'));
+    const dismiss = await screen.findByRole('button', { name: 'Dismiss' });
+    expect(dismiss).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('waiting-detail')).toHaveTextContent('1 of 2 actions had landed');
+
+    await userEvent.click(dismiss);
+    await waitFor(() => expect(state.dismiss).toHaveBeenCalledWith('w1', ''));
   });
 });

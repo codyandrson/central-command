@@ -2229,6 +2229,36 @@ async def _jira_issues_for(actions: list[dict]) -> dict[str, dict]:
 _PENDING_STATUSES = ("AWAITING_HUMAN", "PROPOSED")
 
 
+def waiting_facts(state: dict, probes: dict, failing: bool) -> dict:
+    """What a RETRY_PENDING proposal waits on, as the cockpit renders it (epic-
+    outage-doctrine story 8) — null for any other status:
+
+    - `dependencies`: what the park recorded (a row with none reads `llm`, the
+      rule every park shares; `local` is never a wait, so it is dropped);
+    - `down_since`: the EARLIEST `dependency_probe.down_since` among those
+      dependencies recorded down — null when none is down (a missing row is
+      up, so a unit waiting out its backoff against a healthy probe has none);
+    - `attempts`, `next_retry` (`not_before`), `interrupted` (a restart cut the
+      execution short — only the operator's retry or a dismiss moves it),
+      `completed_actions` (how many actions had landed), and
+      `failing_despite_probe` (the loud rule's verdict, passed in)."""
+    deps = [d for d in (state.get("dependencies") or ["llm"]) if d != "local"] or ["llm"]
+    downs = [
+        r["down_since"] for d in deps
+        if (r := probes.get(d)) and r.get("state") == "down" and r.get("down_since")
+    ]
+    return {
+        "dependencies": deps,
+        "down_since": min(downs).isoformat() if downs else None,
+        "attempts": int(state.get("attempts") or 0),
+        "next_retry": state.get("not_before"),
+        "interrupted": bool(state.get("interrupted")),
+        "completed_actions": len(state.get("completed_results") or []),
+        "failing_despite_probe": failing,
+        "last_error": state.get("last_error"),
+    }
+
+
 async def annotate_gate_facts(rows: list[dict]) -> None:
     """Stamp each proposal row with the two gate signals the cockpit renders
     (epic-gate-overrides story 10), in place. The cockpit renders them and
@@ -2255,11 +2285,32 @@ async def annotate_gate_facts(rows: list[dict]) -> None:
             cache[oid] = await repo.get_gate_override(oid)
         return cache[oid]
 
+    # The waiting facts need two more reads, so they are taken only when a
+    # RETRY_PENDING row is on the page (the common page has none).
+    any_waiting = any(
+        (r.get("status") or (facts.get(r["id"]) or {}).get("status")) == "RETRY_PENDING"
+        for r in rows)
+    failing: set[str] = set()
+    probes: dict = {}
+    if any_waiting:
+        from central_command.config import settings
+
+        failing = {
+            u["id"] for u in await repo.units_failing_despite_probe(
+                settings.retry_loud_after_attempts)
+            if u["unit"] == "proposal"
+        }
+        probes = await repo.dependency_probe_states()
+
     for row in rows:
         f = facts.get(row["id"])
         row["decided_by"], row["shadow"] = None, []
+        row["waiting"] = None
         if f is None:
             continue
+        if (row.get("status") or f["status"]) == "RETRY_PENDING":
+            row["waiting"] = waiting_facts(f.get("retry_state") or {}, probes,
+                                           row["id"] in failing)
         status = row.get("status") or f["status"]
         if status in _PENDING_STATUSES:
             ev = f["override_eval"] or {}

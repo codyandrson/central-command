@@ -391,6 +391,21 @@ async def isolated_queue():
         # dependency): a test that took a dependency down must not leave the
         # next test re-probing it. The test database is throwaway.
         await conn.execute("delete from dependency_probe")
+        # Parks left behind by EARLIER tests. The retry sweeps are GLOBAL
+        # worklists and `make_parks_due()` backdates every park in the
+        # database, so a proposal, session or task another file left parked
+        # would be driven by THIS test's sweep through its spies — invisible
+        # under `-n 4` (the files land on different workers), fatal in the
+        # release gate's sequential run. Settle them before the test parks its
+        # own; the test database is throwaway. Terminal states, never deletes
+        # (sessions and proposals are never destroyed), and a cancelled task
+        # so the startup relaunch sweep cannot mistake it for a never-started one.
+        await conn.execute("update proposal set status = 'FAILED', retry_state = null "
+                           "where status = 'RETRY_PENDING'")
+        await conn.execute("update session set status = 'DONE' "
+                           "where status = 'AWAITING_RESUME'")
+        await conn.execute("update task set status = 'CANCELLED', retry_state = null "
+                           "where status = 'ASSIGNED' and retry_state is not null")
     finally:
         await conn.close()
 

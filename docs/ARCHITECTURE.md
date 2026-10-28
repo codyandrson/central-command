@@ -805,6 +805,34 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   dependencies. The retry sweep also probes what released ledger items and
   deferred ingest jobs wait on (`repo.dependencies_waited_on_by_queues`), so
   those gates and the banner learn of an outage only the queues have met.
+- **A waiting approved proposal is listed, says what it waits on, and can be
+  dismissed (story 8 of the outage doctrine).** `decisions.list` carries a
+  second list, `waiting`: the RETRY_PENDING proposals, oldest first
+  (`repo.list_waiting_proposals`). It is NOT part of `proposals`, and the
+  "needs your decision" badge counts that list, because the decision is already
+  made. Each waiting row, and `GET /proposals/{id}`, carries a `waiting` block
+  from `routes.annotate_gate_facts` (the gate-overrides precedent; null for
+  every other status): `dependencies` (what the park recorded), `down_since`
+  (the earliest `dependency_probe.down_since` among them recorded down; null
+  when none is), `attempts`, `next_retry` (`retry_state.not_before`),
+  `interrupted` (a restart cut it short; only the operator's retry or a dismiss
+  moves it), `completed_actions`, `failing_despite_probe` (the loud rule's
+  report) and `last_error`. The cockpit renders three states from it:
+  *approved — waiting on <dependencies> (down since <t>), retry <k> at <t>*,
+  *interrupted by a restart; retry or dismiss*, and *failing despite a healthy
+  <dependency>: <last_error>*. **Dismiss accepts RETRY_PENDING as well as
+  AWAITING_HUMAN.** What it withdraws is the EXECUTION, not the decision: the
+  transition is guarded in SQL (`repo.withdraw_proposal_if_open`, a conditional
+  update returning the prior status, the way the two claims are), so a dismiss
+  racing `claim_proposal_retry` cannot both withdraw and execute; the proposal
+  goes WITHDRAWN with its `retry_state` kept, folds are released, the drafter's
+  session is closed and never resumed, and the event is a distinct
+  `proposal.execution_dismissed {proposal, completed_actions, actions_total}`
+  (the operator's approval stands on the log, so there is no second
+  `proposal.decided`), emitted before the task resolution it authorises. The
+  task resolves FAILED, never DONE, with *operator withdrew the waiting
+  execution; <k> of <n> actions had landed*. The AWAITING_HUMAN dismiss keeps
+  its DONE "no action needed" outcome.
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).

@@ -14,7 +14,7 @@ import { BulkDismissDialog } from './BulkDismissDialog';
 import { agingLevel, ageOf, oldestAge, STALE_HOURS, type OldestAge } from './aging';
 import { ListDetailSplit } from '@/components/Splitter';
 import type {
-  DecidedBy, DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, ShadowMark, WorkItem,
+  DecidedBy, DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, ShadowMark, WaitingFacts, WorkItem,
 } from './types';
 
 /* The panes used to call `useDecisions()` themselves, which meant three live
@@ -201,6 +201,62 @@ function ProposalRowItem({ p, active, onSelect }: {
         )}
       </div>
       <AgeChip iso={p.created_at} />
+      <RelativeTime iso={p.created_at} />
+    </button>
+  );
+}
+
+/* ── Waiting (approved, the world is down) ── */
+
+/** One short local time, the way the rest of this view prints an instant. */
+function waitStamp(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString([], {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+/**
+ * What an APPROVED proposal waiting on an outage is doing, in one sentence.
+ * Three states, picked from the server's `waiting` facts (the cockpit derives
+ * nothing — it renders them):
+ *   - interrupted by a restart: nothing retries it, the operator moves it;
+ *   - failing despite a healthy dependency: the loud rule's report;
+ *   - waiting on the dependency, with how long it has been down and when the
+ *     next retry is due.
+ */
+function waitingSentence(w: WaitingFacts): string {
+  const deps = w.dependencies.join(', ');
+  if (w.interrupted) return 'interrupted by a restart; retry or dismiss';
+  if (w.failing_despite_probe) {
+    return `failing despite a healthy ${deps}${w.last_error ? `: ${w.last_error}` : ''}`;
+  }
+  const down = w.down_since ? ` (down since ${waitStamp(w.down_since)})` : '';
+  const retry = w.next_retry ? `, retry ${w.attempts + 1} at ${waitStamp(w.next_retry)}` : '';
+  return `approved — waiting on ${deps}${down}${retry}`;
+}
+
+function WaitingRowItem({ p, active, onSelect }: {
+  p: ProposalSummary; active: boolean; onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      data-active={active}
+      data-testid="waiting-row"
+      className="flex w-full items-start gap-2.5 border-b border-border/40 px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/[0.04] data-[active=true]:bg-primary/[0.08]"
+    >
+      <Hourglass size={13} className="mt-0.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-foreground">{p.intent || '(no intent)'}</p>
+        <p className="mt-0.5 text-[0.667rem] text-muted-foreground">{p.agent_id}</p>
+        {p.waiting && (
+          <p className="mt-0.5 text-[0.667rem] text-muted-foreground" data-testid="waiting-state">
+            {waitingSentence(p.waiting)}
+          </p>
+        )}
+      </div>
       <RelativeTime iso={p.created_at} />
     </button>
   );
@@ -1290,6 +1346,32 @@ function ProposalPane({
             </Button>
           </div>
         </div>
+      ) : detail.status === 'RETRY_PENDING' ? (
+        <div className="shrink-0 border-t border-border/40 p-4">
+          {error && <p className="mb-2 text-[0.733rem] text-destructive">{error}</p>}
+          {detail.waiting && (
+            <p className="mb-2 text-[0.733rem] text-foreground/85" data-testid="waiting-detail">
+              {waitingSentence(detail.waiting)}
+              {detail.waiting.completed_actions > 0
+                ? ` · ${detail.waiting.completed_actions} of ${detail.actions.length} actions had landed`
+                : ''}
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            {/* The "Retry now" button belongs here (story 10; it needs story 9's
+                RPC). Left empty on purpose. */}
+            <Button
+              variant="outline"
+              onClick={() => act('dismiss')}
+              disabled={acting !== ''}
+              title="Withdraw the waiting execution. The task is marked failed with what had landed; the agent is not asked to redraft."
+              className="flex-1"
+            >
+              <Ban size={14} />
+              {acting === 'dismiss' ? 'Dismissing…' : 'Dismiss'}
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="shrink-0 border-t border-border/40 p-4">
           <div className="flex items-center gap-2">
@@ -1457,7 +1539,7 @@ export function DecisionsView({
   initialItemId, onInitialItemConsumed, onOpenTask, onOpenSession,
 }: DecisionsViewProps = {}) {
   const {
-    proposals, dismissals, operatorItems, loading, error, refresh,
+    proposals, waiting = [], dismissals, operatorItems, loading, error, refresh,
     confirmAllDismissals, getProposal, approve, reject, dismiss,
     confirmDismissal, reopenDismissal, answerOperatorItem,
     history, historyHasMore, historyLoading, showHistory, processedItems = [],
@@ -1522,7 +1604,7 @@ export function DecisionsView({
   // the operator (e.g. task cancel → WITHDRAWN); the pane refetches and shows
   // the decided record read-only instead of stale action buttons.
   const proposalPendingGone = selected?.kind === 'proposal'
-    && ![...proposals, ...history].some((p) => p.id === selected.id);
+    && ![...proposals, ...waiting, ...history].some((p) => p.id === selected.id);
 
   const pending = proposals.length + dismissals.length + operatorItems.length;
 
@@ -1586,6 +1668,25 @@ export function DecisionsView({
               onSelect={() => setSelected({ kind: 'proposal', id: p.id })}
             />
           ))}
+
+          {waiting.length > 0 && (
+            <>
+              {/* Approved, and waiting on the world: not in the "pending" count
+                  above — the decision is made. */}
+              <SectionLabel
+                count={waiting.length}
+                oldest={oldestAge(waiting.map((p) => p.created_at))}
+              >Waiting</SectionLabel>
+              {waiting.map((p) => (
+                <WaitingRowItem
+                  key={p.id}
+                  p={p}
+                  active={selected?.kind === 'proposal' && selected.id === p.id}
+                  onSelect={() => setSelected({ kind: 'proposal', id: p.id })}
+                />
+              ))}
+            </>
+          )}
 
           {operatorItems.length > 0 && (
             <>

@@ -413,4 +413,7 @@ async def test_the_cockpit_notice_tells_the_truth_about_a_parked_execution(monke
     session = await repo.get_session(parked["session_id"])
     notice = await nerve_gateway._run_session_context(session)
     assert "awaiting your decision" not in notice["message"]
-    assert "queued for retry" in notice["message"]
+    # Rewritten for outage doctrine story 8: the line used to say only "queued
+    # for retry (provider outage)" — now it names WHAT the execution waits on
+    # (the park recorded the graph write's own dependencies).
+    assert "approved proposal is waiting on graph, embedder" in notice["message"]
