@@ -28,6 +28,7 @@ from central_command.runtime import resume_park
 from central_command.runtime.agent import build_agent_for
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.durable import (
+    answer_pending_calls,
     call_args,
     classify_deferred,
     deferred_results,
@@ -328,6 +329,7 @@ async def finish_decision_resume(
     failure_summary: str | None = None,
     pending: dict | None = None,
     redraft_cause: str | None = None,
+    repaired_run_state: dict | None = None,
 ) -> dict:
     """Everything that happens AFTER a decision resume has run — for all three
     decisions, and for the retry driver.
@@ -348,6 +350,11 @@ async def finish_decision_resume(
     failed leg passes `"world_moved"` when the failure was the world moving
     (stored on the pending record so a swept resume says the same). Otherwise
     the cause is `after` itself (`failed` or `rejected`).
+
+    `repaired_run_state` is the stored transcript to rest the session on when
+    NO run happened (`final is None`) because the drafter was deliberately not
+    resumed — a world-moved chain at its limit — with its pending call already
+    answered; without it the lane would rest over an unanswered tool call.
     """
     out = dict(out or {})
     call = note = None
@@ -479,7 +486,7 @@ async def finish_decision_resume(
             try:
                 rs = {"messages": ModelMessagesTypeAdapter.dump_python(
                     final.all_messages(), mode="json",
-                )} if final is not None else None
+                )} if final is not None else repaired_run_state
             except Exception:  # noqa: BLE001 — fall back to a status-only rest
                 rs = None
             reason = failure_summary or "execution failed"
@@ -795,28 +802,50 @@ async def _record_execution_failure(
 ) -> dict:
     await repo.set_proposal_status(proposal_id, "FAILED")
 
+    # The chain's bound (R4). The count is the failed proposal's own link: how
+    # many world-moved redrafts led to it (0 for a first draft). Only a
+    # world-moved failure is measured; any other semantic failure keeps its
+    # resume and never counts, whatever the chain's count is.
+    link = ((await repo.load_proposal(proposal_id)) or {}).get("redraft") or {}
+    chain_count = int(link.get("world_moved_count") or 0)
+    chain_root = link.get("root") or proposal_id
+    from central_command.config import settings
+
+    limit = settings.world_moved_redraft_limit
+    chain_exhausted = bool(failure.world_moved) and chain_count >= limit
+
     # A failed execution covered nothing — folded siblings go back in the queue,
     # exactly as on rejection. Anything else quietly drops mail.
     await release_folds_for(proposal_id, "covering proposal failed to execute")
 
+    payload = {
+        "failed_capability": failure.failed_capability,
+        "error": failure.error,
+        # Slice 1 of outage equivalence: the label rides every error event
+        # so the record accumulates evidence before anything retries. The
+        # Executor only keeps the STRINGIFIED error, hence the _text form.
+        "transient": _execution_transient(failure),
+        "completed_actions": failure.completed,
+        "session_id": session_id,
+        # The world moved between approval and execution: the typed NO's
+        # record (target, expected, actual, what moved), else None.
+        "world_moved": failure.world_moved,
+    }
+    if chain_exhausted:
+        payload["chain_exhausted"] = True
     await events.emit(
-        "proposal.failed",
-        ref_id=proposal_id,
-        payload={
-            "failed_capability": failure.failed_capability,
-            "error": failure.error,
-            # Slice 1 of outage equivalence: the label rides every error event
-            # so the record accumulates evidence before anything retries. The
-            # Executor only keeps the STRINGIFIED error, hence the _text form.
-            "transient": _execution_transient(failure),
-            "completed_actions": failure.completed,
-            "session_id": session_id,
-            # The world moved between approval and execution: the typed NO's
-            # record (target, expected, actual, what moved), else None.
-            "world_moved": failure.world_moved,
-        },
-        actor="system",
+        "proposal.failed", ref_id=proposal_id, payload=payload, actor="system",
     )
+    if chain_exhausted:
+        # Bookkeeping after the status and the failure event; it authorises
+        # nothing. Terminal and loud: the operator's ruling of 2026-10-28.
+        await events.emit(
+            "proposal.redraft_limit_reached",
+            ref_id=proposal_id,
+            payload={"root": chain_root, "count": chain_count, "limit": limit,
+                     "proposal_id": proposal_id},
+            actor="system",
+        )
 
     # Resume the agent with the honest partial report. The failure is already
     # durably recorded above — a resume error must never mask it.
@@ -824,16 +853,26 @@ async def _record_execution_failure(
     if failure.world_moved:
         wm = failure.world_moved
         now = wm.get("actual") if wm.get("actual") is not None else "unknown"
-        report = (
+        head = (
             f"Execution FAILED at {failure.failed_capability}: the world moved "
             f"after the operator approved this proposal — {wm.get('what_moved')} "
             f"(target {wm.get('target')}: approved against {wm.get('expected')}, "
             f"now {now}). "
             f"Nothing past the completed actions was written. Actions completed "
-            f"before the failure: {done}. Read the target again and redraft "
-            f"against its current state, or close out in text if the change is "
-            f"no longer needed."
+            f"before the failure: {done}. "
         )
+        if chain_exhausted:
+            moves = chain_count + 1
+            report = head + (
+                f"The world moved {moves} time{'s' if moves != 1 else ''}; "
+                f"redraft limit {limit} reached; the operator takes it from "
+                f"here. Do not redraft this."
+            )
+        else:
+            report = head + (
+                "Read the target again and redraft against its current state, "
+                "or close out in text if the change is no longer needed."
+            )
     else:
         report = (
             f"Execution FAILED at {failure.failed_capability}: {failure.error}. "
@@ -850,6 +889,40 @@ async def _record_execution_failure(
     pending = None
     summary = f"{failure.failed_capability}: {failure.error}"
     run_state = await repo.load_paused_session(session_id)
+
+    if chain_exhausted:
+        # The drafter is NOT resumed, and nothing is armed (an armed marker
+        # would make the resume sweep run it). The stored history is repaired
+        # without a model run — the pending call answered with the terminal
+        # report — so no record, and no conversation lane's next turn, holds a
+        # tool call with no result. The landing is the one an execution
+        # failure always takes, written straight after the event: the window
+        # between the FAILED status above and this landing is unarmed, exactly
+        # the window the failure path has today before `arm` (a death in it
+        # leaves AWAITING_HUMAN over a FAILED proposal; accepted, not new).
+        repaired = None
+        if run_state is not None and run_state.get("tool_call_id"):
+            try:
+                answered = answer_pending_calls(
+                    load_messages(run_state), run_state["tool_call_id"], report,
+                )
+                if answered is not None:
+                    repaired = {"messages": ModelMessagesTypeAdapter.dump_python(
+                        answered, mode="json")}
+            except Exception:  # noqa: BLE001 — a repair failure must not mask the landing
+                repaired = None
+        out["chain_exhausted"] = True
+        return await finish_decision_resume(
+            session_id=session_id, agent_id=agent_id, proposal_id=proposal_id,
+            after="failed", final=None, agent=None, model=model, out=out,
+            failure_summary=(
+                f"{summary} (the world moved {chain_count + 1} "
+                f"time{'s' if chain_count + 1 != 1 else ''}; redraft limit "
+                f"{limit} reached)"
+            ),
+            repaired_run_state=repaired,
+        )
+
     if run_state is not None and run_state.get("tool_call_id"):
         # see the note on the approve path
         pending = resume_park.pending_resume(

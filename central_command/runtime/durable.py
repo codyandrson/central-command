@@ -249,6 +249,34 @@ def tool_call_id_is_read(messages, tool_call_id: str) -> bool:
     return False
 
 
+def answer_pending_calls(messages, tool_call_id: str, report: str) -> list | None:
+    """The stored history with every unanswered call answered WITHOUT a model
+    run: `report` is the tool return for `tool_call_id`, a sibling deferred in
+    the same response gets the not-processed text `deferred_results` would have
+    handed it (as a plain tool return — nothing is resumed here).
+
+    For the one path that ends a paused run without resuming it (a world-moved
+    chain at its limit): the drafter is not run again, but a stored history that
+    ends at an unanswered call would send a tool call with no result to the
+    model on a conversation lane's next turn. Returns the extended list, or None
+    when `tool_call_id` is not among the unanswered calls (the history already
+    answers it, or it is not this record's)."""
+    parts = []
+    found = False
+    for call in unanswered_calls(messages):
+        if call.tool_call_id == tool_call_id:
+            found = True
+            text = report
+        else:
+            text = SIBLING_NOT_PARKED.format(tool=call.tool_name)
+        parts.append(ToolReturnPart(
+            tool_name=call.tool_name, content=text, tool_call_id=call.tool_call_id,
+        ))
+    if not found:
+        return None
+    return [*messages, ModelRequest(parts=parts)]
+
+
 async def deferred_results(
     messages, tool_call_id: str, result, *, session_id: str | None = None,
     agent_id: str | None = None,

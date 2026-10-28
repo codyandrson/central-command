@@ -3,6 +3,7 @@
 import os
 
 from dotenv import load_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Pydantic's env_file populates Settings FIELDS only — it never exports to
@@ -568,6 +569,18 @@ class Settings(BaseSettings):
     # attempts the retry sweep reports it once (`retry.failing_despite_probe`)
     # and `repo.units_failing_despite_probe` lists it for the outages surface.
     retry_loud_after_attempts: int = 3
+
+    # The world-moved redraft chain's bound (epic-world-changed-redraft story
+    # 3, the operator's ruling of 2026-10-28). A write that fails because the
+    # world moved between approval and execution resumes its drafter, whose
+    # redraft parks linked to it; this many such automatic redrafts may follow
+    # ONE original. The failure after the last one is terminal and loud (FAILED
+    # with chain_exhausted, one proposal.redraft_limit_reached, the drafter not
+    # resumed, the session flagged exec_failed, the task FAILED). 0 means the
+    # first world-moved failure is terminal; there is no unlimited value, and a
+    # negative number is refused at startup. Only world-moved failures count:
+    # any other semantic failure keeps its own honest resume.
+    world_moved_redraft_limit: int = Field(default=3, ge=0)
 
     # ADMISSION CONTROL for model turns (2026-09-13, v2.28.1; per-backend in
     # v2.28.2). How many model requests Central Command lets be in flight at

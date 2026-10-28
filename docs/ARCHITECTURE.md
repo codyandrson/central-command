@@ -306,6 +306,23 @@ stateDiagram-v2
   payload (`gateway.redraft_link` builds it from the parent row; the count
   rises only for `world_moved`; a swept resume reads the cause from
   `pending_resume.redraft_cause`). `GET /proposals/{id}` returns it as stored.
+  **The chain is bounded** by `CC_WORLD_MOVED_REDRAFT_LIMIT` (default 3; 0 =
+  the first world-moved failure is terminal; a negative value is refused at
+  startup, and there is no unlimited value): when a world-moved failure lands
+  on a proposal whose `world_moved_count` has reached the limit,
+  `gateway._record_execution_failure` does NOT resume the drafter. The proposal
+  is FAILED, `proposal.failed` carries `chain_exhausted: true`, and one
+  `proposal.redraft_limit_reached {root, count, limit, proposal_id}` follows
+  it. The stored history is repaired without a model run
+  (`durable.answer_pending_calls`: the pending propose call, and any sibling
+  deferred with it, answered with the terminal report), nothing is armed (an
+  armed marker would make the resume sweep run the drafter), and the session
+  lands through the usual `exec_failed` landing: open, flagged, the task and its
+  work items FAILED naming the limit; a conversation lane stays sendable over
+  the repaired history. The window between the FAILED status and that landing
+  is unarmed, as it is before `arm` on every failure path. Only world-moved
+  failures are measured; any other semantic failure keeps its resume and never
+  counts.
 - **Gate overrides (FR-4).** An `agent_gate_override` row
   (`govr_<hex>` id; the DRAFTER as `agent_id`, a capability, a `scope` jsonb,
   `gate` `none`, `granted_by`/`granted_at`, `revoked_at`/`revoked_reason` —
@@ -626,7 +643,7 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
 - **Event log.** `events.emit()` writes the row to Postgres, then fans out to
   in-process subscribers; the SSE stream (`GET` stream route in
   `api/routes.py`) and the cockpit's `/ws` push frames are projections of the
-  table, never a parallel channel. 175 distinct event types are emitted today
+  table, never a parallel channel. 176 distinct event types are emitted today
   (recounted from `emit(...)` call sites by the guard; dynamic kinds such as
   bridged log records are not counted). Ordering rule: an event that
   *authorises* something is written before the thing it authorises.
