@@ -22,7 +22,7 @@ _PROPOSAL = {
         {
             "capability": "jira.set_due_date",
             "arguments": {"issue_key": "DEMO-1", "due_date": "2026-08-03"},
-            "target_ref": {"system": "jira", "id": "DEMO-1", "read_version": "etag:88af"},
+            "target_ref": {"system": "jira", "id": "DEMO-1"},
             "reversibility": "reversible",
         }
     ],
@@ -122,7 +122,7 @@ _SC1_PROPOSAL = {
                 "reference_time": "2026-07-20T14:02:00Z",
                 "scope": "shared",
             },
-            "target_ref": {"system": "graphiti", "id": "central_command", "read_version": "unknown"},
+            "target_ref": {"system": "graphiti", "id": "central_command"},
             "reversibility": "reversible",
         },
     ],
@@ -169,7 +169,7 @@ _REDRAFT_PROPOSAL = {
         {
             "capability": "jira.set_due_date",
             "arguments": {"issue_key": "DEMO-1", "due_date": "2026-08-10"},
-            "target_ref": {"system": "jira", "id": "DEMO-1", "read_version": "etag:88af"},
+            "target_ref": {"system": "jira", "id": "DEMO-1"},
             "reversibility": "reversible",
         }
     ],
@@ -319,7 +319,7 @@ def _respond_task(messages, info: AgentInfo) -> ModelResponse:
         "actions": [{
             "capability": "jira.add_comment",
             "arguments": {"issue_key": key, "body": "Dependency review noted."},
-            "target_ref": {"system": "jira", "id": key, "read_version": "unknown"},
+            "target_ref": {"system": "jira", "id": key},
             "reversibility": "irreversible",
         }],
         "evidence": [{
@@ -355,7 +355,7 @@ def _respond_litellm(messages, info: AgentInfo) -> ModelResponse:
         "actions": [{
             "capability": "litellm.add_model",
             "arguments": {"model_name": "cc-triage", "model": "anthropic/claude-haiku-4-5-20251001"},
-            "target_ref": {"system": "litellm", "id": "cc-triage", "read_version": "unknown"},
+            "target_ref": {"system": "litellm", "id": "cc-triage"},
             "reversibility": "reversible",
         }],
         "evidence": [{
@@ -391,7 +391,7 @@ def _respond_litellm_update(messages, info: AgentInfo) -> ModelResponse:
                 "model_info": {"created_at": "2026-07-21T00:00:00Z", "created_by": "litellm-manager"},
             },
             "target_ref": {"system": "litellm",
-                           "id": "e90b4587-804d-4b4a-8cf8-4b2e2df31ac4", "read_version": "unknown"},
+                           "id": "e90b4587-804d-4b4a-8cf8-4b2e2df31ac4"},
             "reversibility": "reversible",
         }],
         "evidence": [{
@@ -423,7 +423,7 @@ def _respond_litellm_create_key(messages, info: AgentInfo) -> ModelResponse:
         "actions": [{
             "capability": "litellm.create_key",
             "arguments": {"key_alias": "cc-triage-key", "models": ["claude-haiku-4-5"]},
-            "target_ref": {"system": "litellm", "id": "cc-triage-key", "read_version": "unknown"},
+            "target_ref": {"system": "litellm", "id": "cc-triage-key"},
             "reversibility": "reversible",
         }],
         "evidence": [{
@@ -456,7 +456,7 @@ def _respond_litellm_fallbacks(messages, info: AgentInfo) -> ModelResponse:
             "capability": "litellm.set_fallbacks",
             "arguments": {"model": "claude-sonnet-5",
                           "fallback_models": ["claude-opus-4-8"], "fallback_type": "general"},
-            "target_ref": {"system": "litellm", "id": "claude-sonnet-5", "read_version": "unknown"},
+            "target_ref": {"system": "litellm", "id": "claude-sonnet-5"},
             "reversibility": "reversible",
         }],
         "evidence": [{
@@ -488,7 +488,7 @@ _CONVERSE_PROPOSAL = {
     "actions": [{
         "capability": "litellm.add_model",
         "arguments": {"model_name": "cc-scratch", "model": "anthropic/claude-haiku-4-5-20251001"},
-        "target_ref": {"system": "litellm", "id": "cc-scratch", "read_version": "unknown"},
+        "target_ref": {"system": "litellm", "id": "cc-scratch"},
         "reversibility": "reversible",
     }],
     "evidence": [{
@@ -609,7 +609,7 @@ def _respond_coach(
                 "content": charter + "\n\nCOACHED RULE: " + claim,
                 "rationale": "Encodes recurring operator feedback as a standing rule.",
             },
-            "target_ref": {"system": "central_command", "id": agent_id, "read_version": "unknown"},
+            "target_ref": {"system": "central_command", "id": agent_id},
             "reversibility": "reversible",
         }],
         "evidence": [{
@@ -690,8 +690,7 @@ def make_steward_model(
                     "reference_time": "2026-07-20T00:00:00Z",
                     "scope": "shared",
                 },
-                "target_ref": {"system": "graphiti", "id": "central_command",
-                               "read_version": "unknown"},
+                "target_ref": {"system": "graphiti", "id": "central_command"},
                 "reversibility": "reversible",
             }],
             "evidence": [{
@@ -744,8 +743,7 @@ def make_steward_multifact_model(facts: list[str]) -> FunctionModel:
                     "reference_time": "2026-07-20T00:00:00Z",
                     "scope": "shared",
                 },
-                "target_ref": {"system": "graphiti", "id": "central_command",
-                               "read_version": "unknown"},
+                "target_ref": {"system": "graphiti", "id": "central_command"},
                 "reversibility": "reversible",
             }],
             "evidence": [{
@@ -801,8 +799,7 @@ def _respond_wiki_repair(messages, info: AgentInfo) -> ModelResponse:
                 "body_storage": "<p>Restated from the current catalog versions.</p>",
                 "expected_version": 1,
             },
-            "target_ref": {"system": "confluence", "id": page_id,
-                           "read_version": "1"},
+            "target_ref": {"system": "confluence", "id": page_id},
             "reversibility": "reversible",
         }],
         "evidence": [{
@@ -973,8 +970,7 @@ _EA_EPISODE_PROPOSAL = {
             "reference_time": "2026-07-20T09:00:00Z",
             "scope": "shared",
         },
-        "target_ref": {"system": "graphiti", "id": "central_command",
-                       "read_version": "unknown"},
+        "target_ref": {"system": "graphiti", "id": "central_command"},
         "reversibility": "reversible",
     }],
     "evidence": [{
@@ -1104,8 +1100,7 @@ _INTRO_EPISODE_PROPOSAL = {
             "reference_time": "2026-07-20T09:00:00Z",
             "scope": "shared",
         },
-        "target_ref": {"system": "graphiti", "id": "central_command",
-                       "read_version": "unknown"},
+        "target_ref": {"system": "graphiti", "id": "central_command"},
         "reversibility": "reversible",
     }],
     "evidence": [{

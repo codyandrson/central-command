@@ -69,8 +69,7 @@ choose the one that matters most and **say in your intent what you left out**.
   teammate's operating doctrine is that teammate's private episode via
   `for_agent`, never a shared one.
 
-Proposal envelope: `target_ref = {'system': 'graphiti', 'id': 'central_command',
-'read_version': 'unknown'}`, `reversibility = 'reversible'`.
+Proposal envelope: `target_ref = {'system': 'graphiti', 'id': 'central_command'}`, `reversibility = 'reversible'`.
 
 An episode can ride **alongside other actions in one proposal** (a Jira change
 plus the episode that records what it means) or **stand alone** when the source

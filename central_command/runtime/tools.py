@@ -1746,7 +1746,7 @@ async def propose_delete_episode(ctx: RunContext, episode_uuid: str, rationale: 
         actions=[Action(
             capability="graph.delete_episode@v1",
             arguments={"episode_uuid": uuid, "preview": preview},
-            target_ref={"system": "graphiti", "id": uuid, "read_version": preview["digest"]},
+            target_ref={"system": "graphiti", "id": uuid},
             reversibility=Reversibility.irreversible,
         )],
         evidence=[Evidence(
@@ -2412,8 +2412,7 @@ async def propose_bulk_dismiss(ctx: RunContext, query: str, rationale: str) -> s
                 "match_digest": pinned["match_digest"],
                 "samples": pinned["samples"],
             },
-            target_ref={"system": "work_item", "id": query,
-                        "read_version": pinned["match_digest"]},
+            target_ref={"system": "work_item", "id": query},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -2503,7 +2502,7 @@ async def propose_mail_rule(
                 "queued_matches": preview["queued_matches"],
                 "samples": preview["samples"],
             },
-            target_ref={"system": "mail_rule", "id": description, "read_version": "unknown"},
+            target_ref={"system": "mail_rule", "id": description},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -2584,7 +2583,7 @@ async def propose_report_spam(ctx: RunContext, rationale: str, message_ref: str 
         actions=[Action(
             capability="mail.report_spam@v1",
             arguments={"provider_uuid": uuid, "sender": sender, "subject": subject},
-            target_ref={"system": "mailbox", "id": uuid, "read_version": "unknown"},
+            target_ref={"system": "mailbox", "id": uuid},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -2632,7 +2631,7 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
         actions=[Action(
             capability="mail.unsubscribe@v1",
             arguments={"provider_uuid": uuid, "url": url, "sender": sender, "subject": subject},
-            target_ref={"system": "mailbox", "id": uuid, "read_version": "unknown"},
+            target_ref={"system": "mailbox", "id": uuid},
             reversibility=Reversibility.irreversible,
         )],
         evidence=[Evidence(
@@ -2724,8 +2723,7 @@ async def propose_mail_send(ctx: RunContext, to: list[str], subject: str, body: 
             capability="mail.send@v1",
             arguments={"to": recipients, "cc": copies, "subject": subject,
                        "body": body, "reply_to_ref": in_reply_to},
-            target_ref={"system": "mailbox", "id": ", ".join(recipients),
-                        "read_version": "unknown"},
+            target_ref={"system": "mailbox", "id": ", ".join(recipients)},
             reversibility=Reversibility.irreversible,
         )],
         evidence=[Evidence(
@@ -2769,7 +2767,7 @@ async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str,
             capability="mail.move@v1",
             arguments={"provider_uuid": uuid, "folder": folder.strip(),
                        "sender": sender, "subject": subject},
-            target_ref={"system": "mailbox", "id": uuid, "read_version": "unknown"},
+            target_ref={"system": "mailbox", "id": uuid},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3275,7 +3273,7 @@ async def propose_mcp_sync_source(
                 "server_id": server_id, "files": files,
                 "summary": summary, "diff": diff_text,
             },
-            target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
+            target_ref={"system": "mcp_server", "id": server_id},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3324,7 +3322,7 @@ async def propose_mcp_build(ctx: RunContext, server_id: str, rationale: str) -> 
         actions=[Action(
             capability="mcp.build_image@v1",
             arguments={"server_id": server_id},
-            target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
+            target_ref={"system": "mcp_server", "id": server_id},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3367,7 +3365,7 @@ async def propose_mcp_deploy(ctx: RunContext, server_id: str, rationale: str) ->
         actions=[Action(
             capability="mcp.server_deploy@v1",
             arguments={"server_id": server_id},
-            target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
+            target_ref={"system": "mcp_server", "id": server_id},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3421,7 +3419,7 @@ async def propose_mcp_register(
         actions=[Action(
             capability="litellm.register_mcp_server@v1",
             arguments={"server_id": server_id, "transport": transport},
-            target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
+            target_ref={"system": "mcp_server", "id": server_id},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3469,7 +3467,7 @@ async def propose_mcp_remove(ctx: RunContext, server_id: str, rationale: str) ->
         actions=[Action(
             capability="mcp.server_remove@v1",
             arguments={"server_id": server_id},
-            target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
+            target_ref={"system": "mcp_server", "id": server_id},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3548,7 +3546,7 @@ async def propose_mcp_tool_call(
                 "server_id": server_id, "tool_name": tool_name,
                 "arguments": arguments or {}, "rationale": rationale,
             },
-            target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
+            target_ref={"system": "mcp_server", "id": server_id},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3617,7 +3615,7 @@ async def propose_skill_create(
                 "guidance_content": guidance_content,
                 **({"describes": describes} if describes else {}),
             },
-            target_ref={"system": "central_command", "id": "skills", "read_version": "unknown"},
+            target_ref={"system": "central_command", "id": "skills"},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
@@ -3695,7 +3693,7 @@ async def propose_skill_doc(
         actions=[Action(
             capability="skill.doc_add@v1",
             arguments=arguments,
-            target_ref={"system": "central_command", "id": skill_id, "read_version": "unknown"},
+            target_ref={"system": "central_command", "id": skill_id},
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(

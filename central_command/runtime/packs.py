@@ -79,8 +79,8 @@ class Pack:
     guidance: str = ""                           # pack-level charter text, once per grant
 
 
-_JIRA_TARGET = ("target_ref = {'system': 'jira', 'id': '<the issue or project key>', "
-                "'read_version': 'unknown'}, reversibility = 'reversible'")
+_JIRA_TARGET = ("target_ref = {'system': 'jira', 'id': '<the issue or project key>'}, "
+                "reversibility = 'reversible'")
 
 PACKS: dict[str, Pack] = {
     "jira-read": Pack(
@@ -248,7 +248,7 @@ PACKS: dict[str, Pack] = {
         # its guidance states only the irreversible shape.
         guidance=(
             "Project creation: target_ref = {'system': 'jira', 'id': '<the "
-            "new project key>', 'read_version': 'unknown'}, reversibility = "
+            "new project key>'}, reversibility = "
             "'irreversible' — deleting a project deletes its issues. You "
             "never write to Jira directly — you only propose; a human "
             "approves and the change is executed for you."
@@ -284,7 +284,7 @@ PACKS: dict[str, Pack] = {
         # about reversibility gets whichever line the model read last.
         guidance=(
             "Issue deletion: target_ref = {'system': 'jira', 'id': '<the issue "
-            "key>', 'read_version': 'unknown'}, reversibility = 'irreversible' "
+            "key>'}, reversibility = 'irreversible' "
             "— neither Jira Cloud nor Data Center can restore a deleted issue. "
             "You never write to Jira directly — you only propose; a human "
             "approves and the change is executed for you."
@@ -343,7 +343,7 @@ PACKS: dict[str, Pack] = {
         tool_names=("propose_action",),
         guidance=(
             "Confluence actions: target_ref = {'system': 'confluence', 'id': "
-            "'<the page id>', 'read_version': 'unknown'}, reversibility = "
+            "'<the page id>'}, reversibility = "
             "'reversible'. Body is always STORAGE format — the same "
             "representation confluence_get_page returns, never rendered HTML. "
             "You never write to Confluence directly — you only propose; a "
@@ -411,7 +411,7 @@ PACKS: dict[str, Pack] = {
         tool_names=("propose_action",),
         guidance=(
             "Space creation: target_ref = {'system': 'confluence', 'id': "
-            "'<the new space key>', 'read_version': 'unknown'}, "
+            "'<the new space key>'}, "
             "reversibility = 'irreversible' — no delete-space capability "
             "exists here. You never write to Confluence directly — you only "
             "propose; a human approves and the change is executed for you."
@@ -461,8 +461,8 @@ PACKS: dict[str, Pack] = {
                            "said it; e.g. 2026-05-12T09:30:00Z>', "
                            "'scope': 'shared' | 'private', 'for_agent'?: "
                            "'<roster agent id, private scope only>'}"),
-                notes=("target_ref = {'system': 'graphiti', 'id': 'central_command', "
-                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
+                notes=("target_ref = {'system': 'graphiti', 'id': 'central_command'}, "
+                       "reversibility = 'reversible'. "
                        "reference_time is REQUIRED and is never 'now': the graph "
                        "anchors every present-tense claim to it, so it must be "
                        "the time of the SOURCE (when the mail was sent, when the "
@@ -564,8 +564,8 @@ PACKS: dict[str, Pack] = {
                 arguments=("{'document_id': '<the catalog document id>', "
                            "'tags': ['<tag>', …], "
                            "'mode': 'replace' | 'add' | 'remove'}"),
-                notes=("target_ref = {'system': 'catalog', 'id': '<document_id>', "
-                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
+                notes=("target_ref = {'system': 'catalog', 'id': '<document_id>'}, "
+                       "reversibility = 'reversible'. "
                        "`mode` is OPTIONAL and defaults to 'replace' (the whole "
                        "tag list is rewritten) — use 'add' or 'remove' when you "
                        "mean one tag and want the rest left alone. Tag from the "
@@ -628,7 +628,7 @@ PACKS: dict[str, Pack] = {
                           "'<target group, e.g. central_command_inbox-triage>', "
                           "'verification_id'?: '<…>'}",
                 notes=("target_ref = {'system': 'graphiti', 'id': "
-                       "'<episode_uuid>', 'read_version': 'unknown'}, "
+                       "'<episode_uuid>'}, "
                        "reversibility = 'reversible'. Moves the episode and "
                        "what extraction produced from it to another group: "
                        "entities and facts only this episode produced move; "
@@ -656,8 +656,8 @@ PACKS: dict[str, Pack] = {
                           "verification row's graph group>', 'summary': "
                           "'<one-line description>', 'labels': ['<Type>'], "
                           "'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': 'central_command', "
-                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
+                notes=("target_ref = {'system': 'graphiti', 'id': 'central_command'}, "
+                       "reversibility = 'reversible'. "
                        "For an entity the extraction DROPPED — state exactly what "
                        "the approved text says, nothing inferred. `labels` is "
                        "REQUIRED and every entry must be one of exactly these "
@@ -678,7 +678,7 @@ PACKS: dict[str, Pack] = {
                           "'<ISO datetime, or unbounded>', "
                           "'verification_id': '<…>'}",
                 notes=("target_ref = {'system': 'graphiti', 'id': "
-                       "'<source_uuid>', 'read_version': 'unknown'}, "
+                       "'<source_uuid>'}, "
                        "reversibility = 'reversible'. For a relationship the "
                        "extraction DROPPED. Both endpoints must be the uuids of "
                        "entities that ALREADY exist in the graph — the Executor "
@@ -701,8 +701,7 @@ PACKS: dict[str, Pack] = {
                 arguments="{'keep_uuid': '<entity to keep>', 'drop_uuid': "
                           "'<duplicate to fold in>', 'verification_id': "
                           "'<the verification row being remediated>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<keep_uuid>', "
-                       "'read_version': 'unknown'}, reversibility = "
+                notes=("target_ref = {'system': 'graphiti', 'id': '<keep_uuid>'}, reversibility = "
                        "'irreversible'. Folds a duplicate entity into the one "
                        "kept — every edge and mention moves. Name BOTH nodes in "
                        "the intent so the operator can tell them apart."),
@@ -712,16 +711,15 @@ PACKS: dict[str, Pack] = {
                 arguments="{'uuid': '<entity>', 'name': '<new name>'?, "
                           "'summary': '<new summary>'?, 'labels': ['<Type>', …]?, "
                           "'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>', "
-                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
+                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, "
+                       "reversibility = 'reversible'. "
                        "Rename / re-summarise / re-type; omit fields you are not "
                        "changing."),
             ),
             GatedCapability(
                 name="graph.delete_node",
                 arguments="{'uuid': '<entity>', 'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>', "
-                       "'read_version': 'unknown'}, reversibility = "
+                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, reversibility = "
                        "'irreversible'. DETACH DELETE — the node and every edge "
                        "touching it. Only for a hallucinated entity; a merely "
                        "mis-described one is an update or a merge."),
@@ -733,8 +731,8 @@ PACKS: dict[str, Pack] = {
                           "'valid_at'?/'invalid_at'?: '<ISO datetime>', "
                           "'clear_valid'?/'clear_invalid'?/'clear_expired'?: true, "
                           "'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>', "
-                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
+                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, "
+                       "reversibility = 'reversible'. "
                        "Fix a fact's wording, endpoints (repoint), or validity "
                        "window. RESTORING a wrongly-retired fact means "
                        "clear_invalid AND clear_expired together — one without "
@@ -743,8 +741,7 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="graph.delete_edge",
                 arguments="{'uuid': '<relationship>', 'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>', "
-                       "'read_version': 'unknown'}, reversibility = "
+                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, reversibility = "
                        "'irreversible'. For an invented relationship (a "
                        "self-loop, a fact the approved text never said)."),
             ),
@@ -892,7 +889,7 @@ PACKS: dict[str, Pack] = {
         tool_names=("propose_loe", "loe_list"),
         guidance=(
             "LINES OF EFFORT: target_ref = {'system': 'central_command', 'id': "
-            "'<the loe_id>', 'read_version': 'unknown'}, reversibility = "
+            "'<the loe_id>'}, reversibility = "
             "'reversible'. ALWAYS call loe_list first — the questions you ask "
             "and the history you reason about come from there, never from "
             "memory. A check-in is a CONVERSATION with the operator, and what "
@@ -952,8 +949,8 @@ PACKS: dict[str, Pack] = {
         tool_names=("propose_calendar_change",),
         guidance=(
             "CALENDAR CHANGES: target_ref = {'system': 'calendar', 'id': '<the "
-            "event_id, or the calendar_id for a new event>', 'read_version': "
-            "'unknown'}. reversibility = 'reversible' for create and update, "
+            "event_id, or the calendar_id for a new event>'}. "
+            "reversibility = 'reversible' for create and update, "
             "'irreversible' for delete. READ BEFORE YOU PROPOSE: an update or a "
             "delete must name a REAL event_id you have actually seen — from "
             "`read_calendar` or the `calendar` block in your brief — never one "
@@ -1073,7 +1070,7 @@ PACKS: dict[str, Pack] = {
                            "'provider_matches': <mailbox matches>, 'samples': "
                            "[{from, subject, date}]}"),
                 notes=("target_ref = {'system': 'work_item', 'id': '<the "
-                       "query>', 'read_version': '<the match digest>'}, "
+                       "query>'}, "
                        "reversibility = 'reversible'. You do not write these "
                        "arguments: you pass query + rationale to "
                        "`propose_bulk_dismiss` and the tool resolves and pins "
@@ -1206,7 +1203,7 @@ PACKS: dict[str, Pack] = {
                            "'subject': '<subject>', 'body': '<the whole "
                            "message>', 'reply_to_ref': '<pinned by the tool>'}"),
                 notes=("target_ref = {'system': 'mailbox', 'id': '<the "
-                       "recipients>', 'read_version': 'unknown'}, "
+                       "recipients>'}, "
                        "reversibility = 'irreversible'. You write `to`, "
                        "`subject`, `body` and optionally `cc`; the tool "
                        "resolves `reply_to_ref` to a message and the Executor "
@@ -1323,8 +1320,8 @@ PACKS: dict[str, Pack] = {
                 arguments=("{'title': '<the skill name>', 'summary': '<one line: "
                            "when to reach for it>', 'guidance_content': '<the full "
                            "guidance document>', 'describes'?: '<what it is about>'}"),
-                notes=("target_ref = {'system': 'central_command', 'id': 'skills', "
-                       "'read_version': 'unknown'}, reversibility = 'reversible'. "
+                notes=("target_ref = {'system': 'central_command', 'id': 'skills'}, "
+                       "reversibility = 'reversible'. "
                        "The skill id is derived from the title by the control "
                        "plane — you do not choose it, and an id that already "
                        "exists is REFUSED at execution."),
@@ -1374,8 +1371,8 @@ PACKS: dict[str, Pack] = {
                 arguments=("{'agent_id': '<the agent whose charter changes>', "
                            "'content': '<the FULL revised charter text>', "
                            "'rationale': '<1-2 sentences on what changed and why>'}"),
-                notes=("target_ref = {'system': 'central_command', 'id': '<agent_id>', "
-                       "'read_version': 'v<current version>'}, reversibility = "
+                notes=("target_ref = {'system': 'central_command', 'id': '<agent_id>'}, "
+                       "reversibility = "
                        "'reversible'. `agent_id` is the SUBJECT of the edit — the "
                        "agent being coached, which may be another agent or "
                        "yourself. You never state who drafted it: the control "
@@ -1467,8 +1464,8 @@ PACKS: dict[str, Pack] = {
         tool_names=("propose_litellm_change",),
         guidance=(
             "LiteLLM actions: target_ref = {'system': 'litellm', 'id': '<the "
-            "alias, model_id, key or team addressed>', 'read_version': "
-            "'unknown'}, reversibility = 'reversible'. ALWAYS read the live "
+            "alias, model_id, key or team addressed>'}, "
+            "reversibility = 'reversible'. ALWAYS read the live "
             "state first so proposals name real ids and aliases. NEVER put an "
             "API key or any secret in a proposal — auth comes from a named "
             "credential reference (litellm_credential_name), or the Executor "

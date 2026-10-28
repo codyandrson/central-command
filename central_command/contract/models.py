@@ -57,7 +57,7 @@ class Action(BaseModel):
     capability: str = Field(..., description="Skill@version, e.g. 'jira.update_issue@v2'")
     arguments: dict
     target_ref: dict = Field(
-        ..., description="{system, id, read_version} — read_version enables stale-detection"
+        ..., description="{system, id}"
     )
     reversibility: Reversibility
 
