@@ -792,6 +792,61 @@ async def _record_execution_success(
     return await _resume()
 
 
+def _times(n: int) -> str:
+    return f"{n} time{'s' if n != 1 else ''}"
+
+
+def _execution_failure_report(
+    failure: executor.ExecutionFailed, failed_row: dict, *,
+    chain_count: int, limit: int, chain_exhausted: bool,
+) -> str:
+    """The honest partial report a failed execution hands its drafter (and, at
+    the chain's limit, the terminal text that answers its pending call). The one
+    place the world-moved wording is built: the first-failure report, the
+    interrupted-by-a-restart line and the at-the-limit ending all live here, so
+    the three can never drift apart."""
+    done = "; ".join(failure.completed) if failure.completed else "none"
+    wm = failure.world_moved
+    if not wm:
+        return (
+            f"Execution FAILED at {failure.failed_capability}: {failure.error}. "
+            f"Actions completed before the failure: {done}."
+        )
+    now = wm.get("actual") if wm.get("actual") is not None else "unknown"
+    report = (
+        f"Execution FAILED at {failure.failed_capability}: the world moved "
+        f"after the operator approved this proposal — {wm.get('what_moved')} "
+        f"(target {wm.get('target')}: approved against {wm.get('expected')}, "
+        f"now {now}). "
+        f"Nothing past the completed actions was written. Actions completed "
+        f"before the failure: {done}. "
+    )
+    state = failed_row.get("retry_state") or {}
+    if state.get("interrupted"):
+        # A restart killed this execution mid-action and the operator
+        # retried it: the re-check cannot tell that action's own write
+        # from someone else's, so the report says so.
+        actions = failed_row.get("actions") or []
+        index = int(state.get("next_action_index") or 0)
+        in_flight = (actions[index].get("capability")
+                     if 0 <= index < len(actions) else None) or "unknown"
+        report += (
+            f"This execution was interrupted by a restart while {in_flight} "
+            f"(action {index + 1}) was in flight: that action may itself "
+            f"have landed, and be the change. "
+        )
+    if chain_exhausted:
+        return report + (
+            f"The world moved {_times(chain_count + 1)}; "
+            f"redraft limit {limit} reached; the operator takes it from "
+            f"here. Do not redraft this."
+        )
+    return report + (
+        "Read the target again and redraft against its current state, "
+        "or close out in text if the change is no longer needed."
+    )
+
+
 async def _record_execution_failure(
     session_id: str,
     proposal_id: str,
@@ -850,49 +905,10 @@ async def _record_execution_failure(
 
     # Resume the agent with the honest partial report. The failure is already
     # durably recorded above — a resume error must never mask it.
-    done = "; ".join(failure.completed) if failure.completed else "none"
-    if failure.world_moved:
-        wm = failure.world_moved
-        now = wm.get("actual") if wm.get("actual") is not None else "unknown"
-        head = (
-            f"Execution FAILED at {failure.failed_capability}: the world moved "
-            f"after the operator approved this proposal — {wm.get('what_moved')} "
-            f"(target {wm.get('target')}: approved against {wm.get('expected')}, "
-            f"now {now}). "
-            f"Nothing past the completed actions was written. Actions completed "
-            f"before the failure: {done}. "
-        )
-        state = failed_row.get("retry_state") or {}
-        if state.get("interrupted"):
-            # A restart killed this execution mid-action and the operator
-            # retried it: the re-check cannot tell that action's own write
-            # from someone else's, so the report says so.
-            actions = failed_row.get("actions") or []
-            index = int(state.get("next_action_index") or 0)
-            in_flight = (actions[index].get("capability")
-                         if 0 <= index < len(actions) else None) or "unknown"
-            head += (
-                f"This execution was interrupted by a restart while {in_flight} "
-                f"(action {index + 1}) was in flight: that action may itself "
-                f"have landed, and be the change. "
-            )
-        if chain_exhausted:
-            moves = chain_count + 1
-            report = head + (
-                f"The world moved {moves} time{'s' if moves != 1 else ''}; "
-                f"redraft limit {limit} reached; the operator takes it from "
-                f"here. Do not redraft this."
-            )
-        else:
-            report = head + (
-                "Read the target again and redraft against its current state, "
-                "or close out in text if the change is no longer needed."
-            )
-    else:
-        report = (
-            f"Execution FAILED at {failure.failed_capability}: {failure.error}. "
-            f"Actions completed before the failure: {done}."
-        )
+    report = _execution_failure_report(
+        failure, failed_row, chain_count=chain_count, limit=limit,
+        chain_exhausted=chain_exhausted,
+    )
     cause = "world_moved" if failure.world_moved else None
     out: dict = {
         "ok": False,
@@ -931,9 +947,8 @@ async def _record_execution_failure(
             session_id=session_id, agent_id=agent_id, proposal_id=proposal_id,
             after="failed", final=None, agent=None, model=model, out=out,
             failure_summary=(
-                f"{summary} (the world moved {chain_count + 1} "
-                f"time{'s' if chain_count + 1 != 1 else ''}; redraft limit "
-                f"{limit} reached)"
+                f"{summary} (the world moved {_times(chain_count + 1)}; "
+                f"redraft limit {limit} reached)"
             ),
             repaired_run_state=repaired,
         )

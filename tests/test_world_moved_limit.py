@@ -32,7 +32,7 @@ from central_command.db import repo
 from central_command.gateway import executor, gateway
 from central_command.runtime import converse
 from central_command.runtime.durable import load_messages, unanswered_calls
-from tests.test_world_moved import (  # noqa: F401 — fixtures
+from tests.world_moved_helpers import (  # noqa: F401 — pinned and confluence_grant are fixtures
     AGENT,
     _confluence_answers,
     _event,
