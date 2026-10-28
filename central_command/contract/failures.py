@@ -73,6 +73,38 @@ class ProviderStatusError(Exception):
         self.status_code = status_code
 
 
+class WorldMoved(Exception):
+    """The world moved between approval and execution: a typed NO, never DOWN.
+
+    Raised where the check runs (Confluence's version check today; a vanished
+    Jira transition and a changed deletion preview are the rest of the closed
+    set) and recognised by TYPE only, never by text, so a `what_moved` that
+    happens to say "timeout" can never make it retryable. The Executor carries
+    it on `ExecutionFailed.world_moved`; the gateway lands the proposal FAILED
+    and resumes the drafter to read the target again. `expected`/`actual` are
+    whatever the check compared (a page version, a status); `actual` is None
+    when the dependency said "conflict" without naming the current value.
+    Integration errors subclass it beside their own base, so existing
+    `except ConfluenceError` callers keep working.
+    """
+
+    # Keywords default so a cooperative subclass (`ConfluenceStale` sits
+    # behind `ProviderStatusError` in its MRO) can reach here with only the
+    # message and set the four fields itself.
+    def __init__(self, *args: object, target: str = "", expected: object = None,
+                 actual: object = None, what_moved: str = ""):
+        super().__init__(*args)
+        self.target = target
+        self.expected = expected
+        self.actual = actual
+        self.what_moved = what_moved
+
+
+def is_world_moved(exc: BaseException | None) -> bool:
+    """True when `exc` is a typed world-moved verdict. By isinstance only."""
+    return isinstance(exc, WorldMoved)
+
+
 class EmbedderDown(DependencyDown):
     """The embedder could not answer a graph write's embedding request
     (epic-outage-doctrine story 7). Raised by `neo4j_writer.embed` in place of
@@ -185,6 +217,12 @@ def classify_failure(exc: BaseException | None) -> str:
     # Already classified where it was raised — the type IS the verdict.
     if isinstance(exc, DependencyDown):
         return TRANSIENT
+    # The world moved under an approved write: the dependency ANSWERED, and a
+    # re-send meets the same moved target. Before the status branch below,
+    # because a 409 version conflict also carries a status, and before any
+    # text sniff, because `what_moved` is foreign text.
+    if isinstance(exc, WorldMoved):
+        return SEMANTIC
     # An integration error built from an HTTP response: the status is typed
     # evidence, the message a guess. A 4xx outside the set stays a judgement of
     # the request, unless its text names a misconfigured dependency.

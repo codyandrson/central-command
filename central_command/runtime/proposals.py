@@ -38,6 +38,7 @@ async def park_proposal(
     actor: str | None = None,
     context: dict | None = None,
     origin: dict | None = None,
+    redraft: dict | None = None,
 ) -> dict:
     """Pause the run at its deferred call, persist the proposal, announce it.
 
@@ -51,6 +52,11 @@ async def park_proposal(
     can render long after the event stream has scrolled away (the consult path:
     who asked, and from which session). Pass it alongside `context` so the row
     and the event never disagree.
+
+    `redraft` is the chain link of a redraft (`{of, root, cause,
+    world_moved_count}`, built by `gateway._park_redraft`): persisted on the
+    row and mirrored into `proposal.created`'s payload here, so the two can
+    never disagree. None on a first draft.
 
     `charter.update` gets its evidence checked here REGARDLESS of which door
     the agent came through. The coach's charter and the charter-propose pack
@@ -107,6 +113,7 @@ async def park_proposal(
             if proposal.confidence is not None else None
         ),
         origin=origin,
+        redraft=redraft,
     )
     await events.emit(
         "proposal.created",
@@ -115,6 +122,7 @@ async def park_proposal(
             "intent": proposal.intent,
             "session_id": session_id,
             **(context or {}),
+            **({"redraft": redraft} if redraft is not None else {}),
         },
         actor=actor or f"agent:{agent_id}",
     )

@@ -55,7 +55,9 @@ def pending_resume(
     `extra` carries the few facts the ORIGINAL path had in scope and the retry
     would otherwise have to re-derive: the rejected path's authoritative
     `decided_event_id` (operator evidence must still be re-pointed at it on a
-    retried redraft) and the failed path's `failure_summary`.
+    retried redraft), the failed path's `failure_summary`, and its
+    `redraft_cause` (`"world_moved"` when the world moved, so a swept resume
+    links the redraft exactly as the live one would).
     """
     out = {
         "kind": kind,

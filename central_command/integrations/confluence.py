@@ -44,7 +44,7 @@ from urllib.parse import urlencode
 import httpx
 
 from central_command.config import settings
-from central_command.contract.failures import ProviderStatusError
+from central_command.contract.failures import ProviderStatusError, WorldMoved
 from central_command.integrations import http as http_client
 
 ID_RE = re.compile(r"^\d+$")
@@ -59,6 +59,31 @@ _sleep = asyncio.sleep
 
 class ConfluenceError(ProviderStatusError):
     pass
+
+
+class ConfluenceStale(ConfluenceError, WorldMoved):
+    """The page moved past the version the operator approved: a typed
+    world-moved NO. Still a `ConfluenceError`, so every existing handler
+    keeps catching it; `actual` is None when a 409 named a conflict without
+    the current number."""
+
+    def __init__(self, message: str, *, page_id: str, expected: int,
+                 actual: int | None, status_code: int | None = None):
+        ConfluenceError.__init__(self, message, status_code=status_code)
+        self.target = f"confluence:page:{page_id}"
+        self.expected = expected
+        self.actual = actual
+        self.what_moved = (
+            f"page {page_id} version {expected} -> {actual}"
+            if actual is not None
+            else f"page {page_id} moved past version {expected} (409 conflict)"
+        )
+
+
+# A 409 is world-moved ONLY when the body names a version conflict ("Version
+# must be incremented on update. Current version is: 7"); a 409 for any other
+# reason (a duplicate title) stays `_check`'s generic refusal.
+_VERSION_CONFLICT = re.compile(r"\bversion\b", re.IGNORECASE)
 
 
 def auth_mode() -> str:
@@ -554,11 +579,12 @@ async def update_page(page_id: str, title: str, body_storage: str, expected_vers
     page = current["page"]
     actual = page["version"]
     if actual != ev:
-        raise ConfluenceError(
+        raise ConfluenceStale(
             f"updatePage — stale version for page {pid}: this proposal was "
             f"approved against version {ev}, but the current version is "
             f"{actual}. Read the page again and redraft — executing over a "
-            "newer version would silently overwrite an edit nobody reviewed."
+            "newer version would silently overwrite an edit nobody reviewed.",
+            page_id=pid, expected=ev, actual=actual,
         )
     new_version = ev + 1
     if _flavor() == "server":
@@ -577,6 +603,14 @@ async def update_page(page_id: str, title: str, body_storage: str, expected_vers
             "version": {"number": new_version},
         }
         resp = await _call("PUT", _crud(f"/pages/{pid}"), json=payload)
+    if resp.status_code == 409 and _VERSION_CONFLICT.search(resp.text or ""):
+        # Someone wrote between our read and our PUT.
+        raise ConfluenceStale(
+            f"updatePage — version conflict for page {pid}: this proposal was "
+            f"approved against version {ev}, and the page moved before the "
+            f"write landed: {resp.text[:300]}",
+            page_id=pid, expected=ev, actual=None, status_code=409,
+        )
     _check(resp, "updatePage", pid)
     return {"ok": True, "kind": "confluence", "operation": "updatePage", "page": _page_row(resp.json())}
 

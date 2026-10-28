@@ -642,7 +642,7 @@ async def latest_proposal_for_session(session_id: str) -> dict | None:
             return None
         d = dict(row)
         for k in ("actions", "evidence", "provenance", "confidence", "origin",
-                  "retry_state"):
+                  "retry_state", "redraft"):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d
@@ -1319,6 +1319,7 @@ async def save_proposal(
     status: str = "AWAITING_HUMAN",
     confidence: dict | None = None,
     origin: dict | None = None,
+    redraft: dict | None = None,
 ) -> None:
     conn = await _conn()
     try:
@@ -1326,9 +1327,9 @@ async def save_proposal(
             """
             insert into proposal
               (id, session_id, agent_id, intent, actions, evidence, expected_effect,
-               status, idempotency_key, confidence, origin)
+               status, idempotency_key, confidence, origin, redraft)
             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10::jsonb,
-                    $11::jsonb)
+                    $11::jsonb, $12::jsonb)
             on conflict (id) do update set status = excluded.status
             """,
             proposal_id, session_id, agent_id, intent,
@@ -1336,6 +1337,7 @@ async def save_proposal(
             status, idempotency_key,
             json.dumps(confidence) if confidence is not None else None,
             json.dumps(origin) if origin is not None else None,
+            json.dumps(redraft) if redraft is not None else None,
         )
     finally:
         await conn.close()
@@ -1413,7 +1415,7 @@ async def load_proposal(proposal_id: str) -> dict | None:
             select p.id, p.session_id, p.agent_id, p.intent, p.actions,
                    p.evidence, p.expected_effect, p.status, p.provenance,
                    p.created_at, p.decided_at, p.confidence, p.origin,
-                   p.retry_state, p.override_eval, {_SIMULATED_SQL}
+                   p.retry_state, p.override_eval, p.redraft, {_SIMULATED_SQL}
             from proposal p where p.id = $1
             """,
             proposal_id,
@@ -1422,7 +1424,7 @@ async def load_proposal(proposal_id: str) -> dict | None:
             return None
         d = dict(row)
         for k in ("actions", "evidence", "provenance", "confidence", "origin",
-                  "retry_state", "override_eval"):
+                  "retry_state", "override_eval", "redraft"):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d

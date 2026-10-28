@@ -25,6 +25,7 @@ import httpx
 from central_command.config import settings
 from central_command.contract import ARG_SPECS, TRANSIENT, Action, Provenance, classify_failure, validate_action_args
 from central_command.contract.dependencies import dependencies_for_capability, stamped_dependencies
+from central_command.contract.failures import is_world_moved
 from central_command.contract.args import COST_FIELDS
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
@@ -52,6 +53,7 @@ class ExecutionFailed(ExecutorError):
         *,
         transient: bool = False,
         dependencies: tuple[str, ...] = (),
+        world_moved: dict | None = None,
     ):
         super().__init__(f"{failed_capability}: {error}")
         self.failed_capability = failed_capability
@@ -61,13 +63,18 @@ class ExecutionFailed(ExecutorError):
         # (its type is evidence, its message a guess) — so a neo4j
         # `ServiceUnavailable` with a bare message is transient here although
         # the stringified `error` carries no marker. The gateway reads this
-        # first and the text classifier second. The field is a flag on the
-        # failure class, not on the outage: a typed "the world moved" failure
-        # (epic-world-changed-redraft) is another reason to set it.
+        # first and the text classifier second. It means DOWN and nothing
+        # else: it is never set for a world-moved failure, which is a NO.
         self.transient = transient
         # What a retry waits on: the typed error's own tuple, else the failed
         # capability's (`contract/dependencies.CAPABILITY_DEPENDENCY`).
         self.dependencies = tuple(dependencies)
+        # The world moved between approval and execution (`contract.failures.
+        # WorldMoved`, decided by type): `{capability, target, expected,
+        # actual, what_moved}`, else None. Its own field, never `transient`:
+        # the gateway lands it FAILED, never parks it, and resumes the drafter
+        # with what moved (epic-world-changed-redraft).
+        self.world_moved = world_moved
 
 
 @dataclass
@@ -2391,11 +2398,17 @@ async def execute(
                 results.append(await _execute_action(
                     a, covering.get(action_offset + n, approver), proposer))
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
+                moved = is_world_moved(e)
                 raise ExecutionFailed(
                     a.capability, str(e), results,
-                    transient=classify_failure(e) == TRANSIENT,
+                    transient=(not moved) and classify_failure(e) == TRANSIENT,
                     dependencies=(stamped_dependencies(e)
                                   or dependencies_for_capability(a.capability)),
+                    world_moved=({
+                        "capability": a.capability, "target": e.target,
+                        "expected": e.expected, "actual": e.actual,
+                        "what_moved": e.what_moved,
+                    } if moved else None),
                 ) from e
     finally:
         _current_proposal_id.reset(token)

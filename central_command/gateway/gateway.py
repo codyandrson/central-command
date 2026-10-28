@@ -46,15 +46,40 @@ class GatewayError(Exception):
     pass
 
 
+REDRAFT_CAUSES = ("world_moved", "failed", "rejected")
+
+
+async def redraft_link(parent_id: str, cause: str) -> dict:
+    """The chain link a redraft of `parent_id` carries on its row:
+    `{of, root, cause, world_moved_count}`. `root` is the parent's root (or the
+    parent itself, a first draft); the count is the parent's plus one only for
+    a world-moved failure — a Reject or a plain failed execution keeps it, so
+    the chain's world-moved bound counts only what the world did."""
+    if cause not in REDRAFT_CAUSES:
+        raise ValueError(f"unknown redraft cause {cause!r}")
+    parent = await repo.load_proposal(parent_id)
+    link = (parent or {}).get("redraft") or {}
+    count = int(link.get("world_moved_count") or 0)
+    return {
+        "of": parent_id,
+        "root": link.get("root") or parent_id,
+        "cause": cause,
+        "world_moved_count": count + 1 if cause == "world_moved" else count,
+    }
+
+
 async def _park_redraft(
-    session_id: str, agent_id: str, final, call, redraft_of: str, evidence: list[dict]
+    session_id: str, agent_id: str, final, call, redraft_of: str,
+    evidence: list[dict], cause: str,
 ) -> dict:
     """Persist a redraft the resumed agent produced: park the session again with
     the new pending call and route the new proposal for approval — the loop
-    stays closed no matter which path (rejection, execution failure) resumed it."""
+    stays closed no matter which path (rejection, execution failure) resumed it.
+    `cause` is the path that resumed the drafter; the link goes on the row."""
     parked = await park_proposal(
         session_id=session_id, agent_id=agent_id, result=final, call=call,
         evidence=evidence, context={"redraft_of": redraft_of},
+        redraft=await redraft_link(redraft_of, cause),
     )
     # Never decided by an override, however it was resumed (Reject or a failed
     # execution) and however many redrafts deep: recorded at the park.
@@ -302,6 +327,7 @@ async def finish_decision_resume(
     decided_event_id=None,
     failure_summary: str | None = None,
     pending: dict | None = None,
+    redraft_cause: str | None = None,
 ) -> dict:
     """Everything that happens AFTER a decision resume has run — for all three
     decisions, and for the retry driver.
@@ -317,6 +343,11 @@ async def finish_decision_resume(
 
     `pending` is the park record to re-park with if the DRIVE step also fails
     transiently — the same outage equivalence the initial resume gets.
+
+    `redraft_cause` names why a redraft exists when `after` alone cannot: a
+    failed leg passes `"world_moved"` when the failure was the world moving
+    (stored on the pending record so a swept resume says the same). Otherwise
+    the cause is `after` itself (`failed` or `rejected`).
     """
     out = dict(out or {})
     call = note = None
@@ -418,6 +449,7 @@ async def finish_decision_resume(
         parked = await _park_redraft(
             session_id, agent_id, final, call, proposal_id,
             await _redraft_evidence(redraft, after, feedback, decided_event_id),
+            cause=redraft_cause or after,
         )
         if after == "rejected":
             return {"final_output": None, **parked}
@@ -779,17 +811,35 @@ async def _record_execution_failure(
             "transient": _execution_transient(failure),
             "completed_actions": failure.completed,
             "session_id": session_id,
+            # The world moved between approval and execution: the typed NO's
+            # record (target, expected, actual, what moved), else None.
+            "world_moved": failure.world_moved,
         },
         actor="system",
     )
 
     # Resume the agent with the honest partial report. The failure is already
     # durably recorded above — a resume error must never mask it.
-    report = (
-        f"Execution FAILED at {failure.failed_capability}: {failure.error}. "
-        f"Actions completed before the failure: "
-        f"{'; '.join(failure.completed) if failure.completed else 'none'}."
-    )
+    done = "; ".join(failure.completed) if failure.completed else "none"
+    if failure.world_moved:
+        wm = failure.world_moved
+        now = wm.get("actual") if wm.get("actual") is not None else "unknown"
+        report = (
+            f"Execution FAILED at {failure.failed_capability}: the world moved "
+            f"after the operator approved this proposal — {wm.get('what_moved')} "
+            f"(target {wm.get('target')}: approved against {wm.get('expected')}, "
+            f"now {now}). "
+            f"Nothing past the completed actions was written. Actions completed "
+            f"before the failure: {done}. Read the target again and redraft "
+            f"against its current state, or close out in text if the change is "
+            f"no longer needed."
+        )
+    else:
+        report = (
+            f"Execution FAILED at {failure.failed_capability}: {failure.error}. "
+            f"Actions completed before the failure: {done}."
+        )
+    cause = "world_moved" if failure.world_moved else None
     out: dict = {
         "ok": False,
         "error": failure.error,
@@ -806,6 +856,7 @@ async def _record_execution_failure(
             kind="result", text=report,
             tool_call_id=run_state["tool_call_id"],
             after="failed", proposal_id=proposal_id, failure_summary=summary,
+            redraft_cause=cause,
         )
         await resume_park.arm(session_id, pending)
 
@@ -835,7 +886,7 @@ async def _record_execution_failure(
         return await finish_decision_resume(
             session_id=session_id, agent_id=agent_id, proposal_id=proposal_id,
             after="failed", final=final, agent=agent, model=model, out=out,
-            failure_summary=summary, pending=pending,
+            failure_summary=summary, pending=pending, redraft_cause=cause,
         )
 
     if detach:
@@ -852,7 +903,10 @@ def _execution_transient(failure: executor.ExecutionFailed) -> bool:
     `classify_failure` on the exception the handler raised, where the TYPE is
     evidence (a bare neo4j `ServiceUnavailable` carries no marker in its text) —
     and the text classifier second, for a failure built from a stored string
-    (the retry splice, the override refusal)."""
+    (the retry splice, the override refusal). A world-moved failure is a NO
+    whatever its text says, so it answers False before either."""
+    if failure.world_moved:
+        return False
     return bool(failure.transient) or (
         classify_failure_text(failure.error) == "transient"
     )
@@ -1028,6 +1082,7 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
             failure.failed_capability, failure.error,
             completed + list(failure.completed),
             transient=failure.transient, dependencies=failure.dependencies,
+            world_moved=failure.world_moved,
         )
         if _execution_transient(failure):
             # DOWN re-parks, one attempt older and further along the one

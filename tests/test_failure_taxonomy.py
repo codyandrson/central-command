@@ -379,3 +379,24 @@ def test_the_status_beats_misleading_text():
 def test_every_integration_error_is_a_provider_status_error_subclass():
     for cls in _PROVIDER_ERRORS:
         assert issubclass(cls, ProviderStatusError)
+
+
+# --- epic-world-changed-redraft story 1: the world moved is a typed NO ------------
+
+
+def test_a_world_moved_failure_is_semantic_whatever_its_text_or_status():
+    from central_command.contract.failures import WorldMoved, is_world_moved
+
+    # Foreign text inside what_moved can never make it an outage, and a 409
+    # carried as a typed status cannot reach the status branch's text sniff.
+    stale = confluence.ConfluenceStale(
+        "updatePage — timeout connection 429", page_id="42", expected=4, actual=6,
+        status_code=409,
+    )
+    assert is_world_moved(stale)
+    assert classify_failure(stale) == "semantic"
+    moved = WorldMoved("temporarily unavailable", target="t",
+                       what_moved="timeout connection 503")
+    assert classify_failure(moved) == "semantic"
+    # By type only: the same words on a plain error are not world-moved.
+    assert not is_world_moved(confluence.ConfluenceError("stale version 4 -> 6"))

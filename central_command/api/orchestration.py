@@ -1344,6 +1344,7 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         feedback=pending["text"] if after == "rejected" else None,
         decided_event_id=pending.get("decided_event_id"),
         failure_summary=pending.get("failure_summary"),
+        redraft_cause=pending.get("redraft_cause"),
         # A fresh park keeps the attempt count, so the backoff keeps growing
         # even when it is the DRIVE step that keeps failing.
         pending={**pending, "attempts": attempts},

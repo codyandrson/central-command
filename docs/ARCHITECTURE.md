@@ -269,7 +269,7 @@ stateDiagram-v2
     EXECUTING --> RETRY_PENDING: dependency DOWN → repo.park_proposal_retry
     RETRY_PENDING --> EXECUTING: retry sweep or the operator's retry-now → gateway.retry_execution (an interrupted one: only the operator's flag)
     RETRY_PENDING --> WITHDRAWN: gateway.dismiss_proposal — one SQL-guarded transition; the execution is withdrawn, the task FAILED
-    EXECUTING --> FAILED: the dependency said NO
+    EXECUTING --> FAILED: the dependency said NO (or the world moved: proposal.failed carries world_moved) — drafter RESUMES; a redraft parks with proposal.redraft linking it
     AWAITING_HUMAN --> REJECTED: gateway.reject_with_feedback — drafter RESUMES and may redraft a new proposal
     AWAITING_HUMAN --> WITHDRAWN: gateway.dismiss_proposal — folds released, session closed, drafter NEVER resumed
     EXECUTED --> [*]
@@ -287,6 +287,25 @@ stateDiagram-v2
   re-runs the same shape validation over every action before the first one
   runs, then world-state checks, then the handlers; `proposer` comes from the
   gateway, never from the agent's arguments.
+- **After the gate: a NO, and the world moved.** A semantic failure lands the
+  proposal FAILED, releases its folds, emits `proposal.failed`
+  (`failed_capability`, `error`, `transient`, `completed_actions`,
+  `world_moved`) and resumes the drafter with the honest partial report.
+  `world_moved` is set when the handler raised the typed verdict
+  `contract.failures.WorldMoved` (decided by type, never by text; today
+  `confluence.ConfluenceStale`, a stale page version or a 409 whose body names
+  a version conflict): `{capability, target, expected, actual, what_moved}`,
+  carried on `ExecutionFailed.world_moved` and never on `transient` — it is a
+  NO, never parked. Its resume report says what moved, that nothing past the
+  completed actions was written, and to read the target again and redraft or
+  close out in text; the resume runs under the charter the proposal was
+  drafted under (`build_agent_for` over the persisted history). A redraft
+  carries its link on the row, `proposal.redraft jsonb` — `{of, root, cause:
+  world_moved | failed | rejected, world_moved_count}`, null on a first draft,
+  written only by `park_proposal` and mirrored into `proposal.created`'s
+  payload (`gateway.redraft_link` builds it from the parent row; the count
+  rises only for `world_moved`; a swept resume reads the cause from
+  `pending_resume.redraft_cause`). `GET /proposals/{id}` returns it as stored.
 - **Gate overrides (FR-4).** An `agent_gate_override` row
   (`govr_<hex>` id; the DRAFTER as `agent_id`, a capability, a `scope` jsonb,
   `gate` `none`, `granted_by`/`granted_at`, `revoked_at`/`revoked_reason` —
@@ -671,7 +690,10 @@ An integration error built from an HTTP response carries the status TYPED:
 `ConfluenceError`, `JiraError`, `ForgeError`, `LiteLLMError` and the two façade
 errors, and `classify_failure` reads it before it sniffs text — a status in the
 DOWN set is DOWN whatever the body says, a 4xx outside it reads its text as
-before, no status falls through. The text sniff is the last resort.
+before, no status falls through. The text sniff is the last resort. A third
+typed error is a NO by type: `WorldMoved` (the world changed between approval
+and execution) is SEMANTIC ahead of the status branch and the sniff, so neither
+a 409 nor a `what_moved` that says "timeout" can park it.
 
 **Names, probes and maps.** `DEPENDENCIES` in `contract/dependencies.py` is the
 one closed vocabulary a park, a probe or an outage row uses; the probe

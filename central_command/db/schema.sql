@@ -172,6 +172,13 @@ alter table proposal add column if not exists confidence jsonb;
 -- other path.
 alter table proposal add column if not exists origin jsonb;
 
+-- The redraft link (epic-world-changed-redraft, 2026-10-28): a proposal the
+-- drafter produced after its parent was Rejected or FAILED execution carries
+-- {of: <parent id>, root: <first proposal of the chain>, cause: world_moved |
+-- failed | rejected, world_moved_count}. Written only by park_proposal, null
+-- on a first draft; the count rises only for a world-moved failure.
+alter table proposal add column if not exists redraft jsonb;
+
 -- Outage equivalence slice 3 (2026-07-31): the replay cursor for an APPROVED
 -- proposal whose execution hit a TRANSIENT dependency failure. Status
 -- RETRY_PENDING (never terminal FAILED — the operator's decision stands, the
