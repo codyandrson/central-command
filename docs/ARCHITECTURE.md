@@ -833,6 +833,45 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   task resolves FAILED, never DONE, with *operator withdrew the waiting
   execution; <k> of <n> actions had landed*. The AWAITING_HUMAN dismiss keeps
   its DONE "no action needed" outcome.
+- **The outages surface (story 9 of the outage doctrine).** `GET /api/outages`
+  (`api/outages.py`, mounted like the other routers; no auth dependency, access
+  is the private network) returns `{dependencies: [...]}` for every name in
+  `DEPENDENCIES`, each `{name, state, checked_at, down_since, waiting:
+  {sessions, proposals, tasks, work_items, ingest_jobs}, interrupted, failing:
+  [{kind, id, attempts, last_error}], total}`. `state` is `up` or `down` from
+  `dependency_probe` (a missing row is up), and n/a for `local`. **`checked_at`
+  is not a "last probed" time**: the sweep writes `dependency_probe` only on a
+  state CHANGE, so it is when the dependency last changed state (the same
+  instant as `down_since` while down), and null for one never seen down. One SQL
+  statement (`repo.parked_unit_counts`, built by `_parked_units_sql`, also behind
+  the sweep's probe of the queues) counts the parked units: sessions
+  `AWAITING_RESUME` (read and turn parks) by `pending_resume.dependencies`,
+  proposals `RETRY_PENDING` by `retry_state.dependencies`, tasks `ASSIGNED` with
+  a `retry_state` (restart parks record `['llm']`), ledger items `UNPROCESSED`
+  and ingest jobs `QUEUED` while their `not_before` is still ahead. A unit
+  recorded on two dependencies counts once under each; a record with none (or an
+  empty list) counts under `llm`; an interrupted proposal counts under
+  `interrupted` and not under `waiting`. `failing` is
+  `repo.units_failing_despite_probe(retry_loud_after_attempts)` bucketed under
+  each unit's dependencies, and `total` is every waiting unit plus the
+  interrupted ones.
+
+  `POST /api/outages/{name}/retry` (body `{include_interrupted: false}`) is the
+  operator's retry-now. (1) `outage.retry_requested {dependency,
+  include_interrupted, actor}` is written FIRST, because it authorises a
+  re-drive; (2) that one dependency is probed and persisted through the sweep's
+  own `orchestration.probe_and_record`; (3) only if it is up,
+  `retry_sweep(only=name, ignore_not_before=True, include_interrupted=…)` drives
+  the units whose park recorded it (backoff ignored; agent work detached, so the
+  call returns at once) and the ledger items and ingest jobs, which the sweep
+  never drives itself, are brought due (`repo.pull_queued_units_due`) for their
+  own loops. Interrupted proposals are driven only when asked, and resume from
+  their kept cursor. The answer is `{probe: 'up'|'down', driven: {sessions,
+  proposals, tasks, work_items, ingest_jobs}}`, all zero when down. An unknown
+  name is 404 and `local` is 400. The same two operations are the `/ws` RPC
+  methods `outages.list` and `outages.retry` (`{dependency, includeInterrupted}`)
+  with the same shapes. The event is emitted by the route, not by a heartbeat
+  action, so it is not in the heartbeat material allowlist.
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).

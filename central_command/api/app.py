@@ -351,6 +351,12 @@ from central_command.api.update import router as update_router  # noqa: E402
 
 app.include_router(update_router)
 
+# The outages surface (/api/outages): what waits and fails per dependency, and
+# the operator's retry-now (epic-outage-doctrine story 9).
+from central_command.api.outages import router as outages_router  # noqa: E402
+
+app.include_router(outages_router)
+
 # The update hold (k3s and single alike): pause, wait for the agents, trigger.
 from central_command.api.hold import router as hold_router  # noqa: E402
 from central_command.runtime.hold import RunHeld  # noqa: E402

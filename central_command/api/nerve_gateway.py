@@ -1298,6 +1298,17 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
     # the REST routes reach `overrides.author` / `overrides.revoke`.
     if method == "capabilities.list":
         return await rest.get_capabilities()
+    if method == "outages.list":
+        from central_command.api import outages
+
+        return await outages.list_outages()
+    if method == "outages.retry":
+        from central_command.api import outages
+
+        return await outages.retry_outage(
+            str(params.get("dependency") or ""),
+            bool(params.get("includeInterrupted")),
+        )
     if method == "overrides.list":
         if params.get("capability"):
             return await rest.list_capability_gate_overrides(str(params["capability"]))

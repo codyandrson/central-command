@@ -971,9 +971,36 @@ def _proposal_dependencies(state: dict) -> tuple[str, ...]:
     return ("llm",)
 
 
-async def retry_sweep(cache=None) -> dict:
+async def probe_and_record(names, cache=None):
+    """Probe `names` (concurrently, once each), persist what changed to
+    `dependency_probe` and emit `dependency.down` / `dependency.up` on a state
+    change. THE probe-and-persist step: the recurring sweep and the operator's
+    retry-now (`api/outages.py`) both go through it, so there is one place that
+    decides what a probe result writes. Returns the warmed cache."""
+    from central_command.heartbeat import probes
+
+    cache = cache or probes.ProbeCache()
+    states = await repo.dependency_probe_states()
+    await cache.warm(names)
+    await _record_probe_changes(cache, states)
+    return cache
+
+
+async def retry_sweep(cache=None, *, only: str | None = None,
+                      ignore_not_before: bool = False,
+                      include_interrupted: bool = False) -> dict:
     """Drive every parked unit whose dependency is UP — the cadence half of
     outage equivalence, called by the `retry.sweep` heartbeat action.
+
+    The three keywords are the operator's retry-now for ONE dependency
+    (`POST /api/outages/{name}/retry`): `only` keeps just the units whose park
+    RECORDED that dependency (the llm gate a model turn adds still applies);
+    `ignore_not_before` offers them regardless of their backoff, the way the
+    startup catch-up does; `include_interrupted` also drives proposals a restart
+    interrupted, which no sweep ever touches on its own — the operator's explicit
+    act on a possibly half-landed write, resuming from the kept cursor. In that
+    mode the orphan worklist, the recorded-down re-probe and the loud report are
+    left to the recurring sweep.
 
     It also carries the orphan worklist (`park_orphaned_resumes`), because a
     resume killed with its process is only FINDABLE once it is stale — later
@@ -1015,6 +1042,13 @@ async def retry_sweep(cache=None) -> dict:
     from central_command.heartbeat import probes
 
     cache = cache or probes.ProbeCache()
+    due_only = not ignore_not_before
+
+    def wanted(recorded) -> bool:
+        """Is this unit in scope — the whole sweep, or only the units whose
+        park recorded `only` (a record with none reads `llm`)."""
+        return only is None or only in (tuple(recorded or ()) or ("llm",))
+
     resumed: list[str] = []
     retried_executions: list[str] = []
     retried_tasks: list[str] = []
@@ -1064,10 +1098,12 @@ async def retry_sweep(cache=None) -> dict:
     # it is dispatched, not awaited. Orphans are parked FIRST so this same
     # pass drives them: they are only findable once stale, which is later
     # than the startup sweep can ever see.
-    orphaned = await park_orphaned_resumes()
+    orphaned = await park_orphaned_resumes() if only is None else []
     # DUE ones only (`pending_resume.not_before`, the one backoff curve, in SQL).
-    for sid in await repo.sessions_awaiting_resume(due_only=True):
+    for sid in await repo.sessions_awaiting_resume(due_only=due_only):
         pending = (await repo.get_session_run_state(sid) or {}).get("pending_resume") or {}
+        if not wanted(pending.get("dependencies")):
+            continue
         # A parked READ waits on EVERY dependency it recorded, plus the LLM —
         # its resume is a model turn (FR-40); so does a parked decision resume
         # (a row with no record reads as the model).
@@ -1090,11 +1126,13 @@ async def retry_sweep(cache=None) -> dict:
     from central_command.gateway import gateway
 
     # DUE ones only (`retry_state.not_before`, in SQL).
-    for prop in reversed(await repo.list_proposals("RETRY_PENDING", due_only=True)):
+    for prop in reversed(await repo.list_proposals("RETRY_PENDING", due_only=due_only)):
         row = await repo.load_proposal(prop["id"])
-        if _interrupted(row):
+        if _interrupted(row) and not include_interrupted:
             continue  # held for the operator — never replayed by a sweep
         state = (row or {}).get("retry_state") or {}
+        if not wanted(_proposal_dependencies(state)):
+            continue
         units.append(("proposal", prop["id"],
                       gate_names(_proposal_dependencies(state)),
                       lambda pid=prop["id"]: gateway.retry_execution(pid),
@@ -1102,8 +1140,10 @@ async def retry_sweep(cache=None) -> dict:
 
     # (c) Tasks parked for a re-run, DUE ones only (`not_before` is applied in
     # SQL) — a re-run is an agent run, so it gates on the LLM too.
-    for task in await repo.tasks_awaiting_retry(due_only=True):
+    for task in await repo.tasks_awaiting_retry(due_only=due_only):
         recorded = (task.get("retry_state") or {}).get("dependencies")
+        if not wanted(recorded):
+            continue
         units.append(("task", task["id"], gate_names(recorded, model_turn=True),
                       lambda tid=task["id"]: retry_parked_task(tid),
                       retried_tasks, True))
@@ -1112,17 +1152,20 @@ async def retry_sweep(cache=None) -> dict:
     # table records DOWN (re-probed even with no waiting work, so a banner never
     # sticks), all at once. Nothing waiting and nothing down: no probe at all.
     states = await repo.dependency_probe_states()
-    recorded_down = [n for n, r in states.items()
-                     if r.get("state") == "down" and n in PROBED]
-    # And what the queues the sweep does not drive are waiting on (a ledger
-    # item released on an embedder outage, a deferred ingest job): probed
-    # only, so their own loops' gates and the banner see the outage (story 7).
-    queued = [n for n in await repo.dependencies_waited_on_by_queues() if n in PROBED]
+    recorded_down: list[str] = []
+    queued: list[str] = []
+    if only is None:
+        recorded_down = [n for n, r in states.items()
+                         if r.get("state") == "down" and n in PROBED]
+        # And what the queues the sweep does not drive are waiting on (a ledger
+        # item released on an embedder outage, a deferred ingest job): probed
+        # only, so their own loops' gates and the banner see the outage (story 7).
+        queued = [n for n in await repo.dependencies_waited_on_by_queues() if n in PROBED]
     needed = [n for u in units for n in u[2]] + recorded_down + queued
     if needed:
         await cache.warm(needed)
     changes = await _record_probe_changes(cache, states) if cache.results else []
-    loud = await _report_failing_despite_probe()
+    loud = await _report_failing_despite_probe() if only is None else []
 
     for unit, unit_id, names, driver, landed, detached in units:
         await _drive(unit, unit_id, names, driver, landed, detached=detached)

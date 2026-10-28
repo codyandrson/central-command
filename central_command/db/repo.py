@@ -7012,28 +7012,129 @@ async def units_failing_despite_probe(n: int) -> list[dict]:
         await conn.close()
 
 
-async def dependencies_waited_on_by_queues() -> set[str]:
-    """What the units the retry sweep does NOT drive are waiting on: a work
-    item released transient (`work_item.dependencies`) and an ingest job
-    deferred by a transient failure (`graph_ingest_job.dependencies`). Their
-    own loops re-drive them; the sweep only PROBES these names, so the persisted
-    `dependency_probe` — the ingest worker's gate, the banner — learns of an
-    outage only they have met (epic-outage-doctrine story 7)."""
+def _parked_units_sql(future_only: bool) -> str:
+    """ONE statement for every parked unit, as `(kind, id, dependency,
+    interrupted)` — a unit recorded on several dependencies appears once per
+    dependency, and a record with none reads `llm` (the rule every park shares).
+    Kinds: `sessions` (AWAITING_RESUME, by `pending_resume.dependencies` — read
+    AND turn parks), `proposals` (RETRY_PENDING, by `retry_state.dependencies`;
+    `interrupted` marks a restart-cut execution; an EMPTY recorded list reads
+    `llm` too, as `gate_names` does), `tasks` (ASSIGNED with a
+    `retry_state`, restart parks included), `work_items` (UNPROCESSED, released
+    transient) and `ingest_jobs` (QUEUED, deferred). `future_only` keeps a ledger
+    item or ingest job only while its `not_before` is still ahead — what the
+    outages surface counts as WAITING; the sweep's own probe set passes False,
+    so an item whose backoff just elapsed still has its dependency probed."""
+    item_gate = "and not_before > now()" if future_only else (
+        "and not_before > now() - interval '1 day'")
+    return f"""
+        with parked as (
+            select 'sessions' as kind, id,
+                   coalesce(nullif(run_state -> 'pending_resume' -> 'dependencies', '[]'::jsonb),
+                            '["llm"]'::jsonb) as deps, false as interrupted
+              from session where status = 'AWAITING_RESUME'
+            union all
+            select 'proposals', id, coalesce(nullif(retry_state -> 'dependencies', '[]'::jsonb), '["llm"]'::jsonb),
+                   coalesce((retry_state ->> 'interrupted')::boolean, false)
+              from proposal where status = 'RETRY_PENDING'
+            union all
+            select 'tasks', id, coalesce(nullif(retry_state -> 'dependencies', '[]'::jsonb), '["llm"]'::jsonb), false
+              from task where status = 'ASSIGNED' and retry_state is not null
+            union all
+            select 'work_items', id, coalesce(nullif(dependencies, '[]'::jsonb), '["llm"]'::jsonb), false
+              from work_item
+             where state = 'UNPROCESSED' and not_before is not null {item_gate}
+            union all
+            select 'ingest_jobs', 'ingest-job-' || id::text,
+                   coalesce(nullif(dependencies, '[]'::jsonb), '["llm"]'::jsonb), false
+              from graph_ingest_job
+             where status = 'QUEUED' and not_before is not null {item_gate}
+        )
+        select p.kind, p.id, d.name as dependency, p.interrupted
+          from parked p, jsonb_array_elements_text(p.deps) as d(name)
+    """
+
+
+async def parked_unit_counts() -> dict[str, dict]:
+    """What is waiting on each dependency, counted in SQL, for GET /api/outages:
+    `{dependency: {"waiting": {kind: n}, "interrupted": n}}`. A unit recorded on
+    two dependencies counts once under each. An interrupted proposal counts
+    under `interrupted`, NOT under `proposals` — only the operator's retry or a
+    dismiss moves it, so it is not simply 'waiting'."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            """
-            select distinct jsonb_array_elements_text(dependencies) as name
-              from work_item
-             where state = 'UNPROCESSED' and dependencies is not null
-               and not_before is not null and not_before > now() - interval '1 day'
-            union
-            select distinct jsonb_array_elements_text(dependencies)
-              from graph_ingest_job
-             where status = 'QUEUED' and dependencies is not null
-               and last_error is not null
+            f"""
+            select dependency, kind, interrupted, count(*)::int as n
+              from ({_parked_units_sql(True)}) u
+             group by dependency, kind, interrupted
             """
         )
-        return {r["name"] for r in rows}
+    finally:
+        await conn.close()
+    out: dict[str, dict] = {}
+    for r in rows:
+        d = out.setdefault(r["dependency"], {"waiting": {}, "interrupted": 0})
+        if r["kind"] == "proposals" and r["interrupted"]:
+            d["interrupted"] += r["n"]
+        else:
+            d["waiting"][r["kind"]] = d["waiting"].get(r["kind"], 0) + r["n"]
+    return out
+
+
+async def dependencies_waited_on_by_queues() -> set[str]:
+    """What the units the retry sweep does NOT drive are waiting on: a work
+    item released transient and an ingest job deferred by a transient failure.
+    Their own loops re-drive them; the sweep only PROBES these names, so the
+    persisted `dependency_probe` — the ingest worker's gate, the banner — learns
+    of an outage only they have met (epic-outage-doctrine story 7). Built from
+    the same statement as `parked_unit_counts`."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select distinct dependency
+              from ({_parked_units_sql(False)}) u
+             where kind in ('work_items', 'ingest_jobs')
+            """
+        )
+        return {r["dependency"] for r in rows}
+    finally:
+        await conn.close()
+
+
+async def pull_queued_units_due(dependency: str) -> dict[str, int]:
+    """The operator's retry-now for the two queues the sweep does not drive:
+    bring every ledger item and ingest job waiting on `dependency` DUE NOW
+    (`not_before = now()`), so their own loops take them on the next poll. The
+    claim queries, not this statement, still decide when and by whom a row runs
+    — one convergence path per unit kind. Returns the counts pulled."""
+    conn = await _conn()
+    try:
+        items = await conn.fetchval(
+            """
+            with moved as (
+                update work_item set not_before = now()
+                 where state = 'UNPROCESSED' and not_before is not null
+                   and not_before > now()
+                   and coalesce(dependencies, '["llm"]'::jsonb) ? $1
+                returning 1)
+            select count(*)::int from moved
+            """,
+            dependency,
+        )
+        jobs = await conn.fetchval(
+            """
+            with moved as (
+                update graph_ingest_job set not_before = now()
+                 where status = 'QUEUED' and not_before is not null
+                   and not_before > now()
+                   and coalesce(dependencies, '["llm"]'::jsonb) ? $1
+                returning 1)
+            select count(*)::int from moved
+            """,
+            dependency,
+        )
+        return {"work_items": items, "ingest_jobs": jobs}
     finally:
         await conn.close()
