@@ -25,7 +25,7 @@ import httpx
 from central_command.config import settings
 from central_command.contract import ARG_SPECS, TRANSIENT, Action, Provenance, classify_failure, validate_action_args
 from central_command.contract.dependencies import dependencies_for_capability, stamped_dependencies
-from central_command.contract.failures import is_world_moved
+from central_command.contract.failures import WorldMoved, is_world_moved
 from central_command.contract.args import COST_FIELDS
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
@@ -497,16 +497,27 @@ async def _graph_delete_episode(args: dict, approver: str, proposer: str | None)
             f"not {episode_uuid!r}"
         )
     current = await neo4j_reader.episode_delete_preview(episode_uuid)
+    # Both refusals are the world moving under an approved deletion (typed
+    # `WorldMoved`, so the drafter is resumed with what moved): `expected` is
+    # the approved preview's digest, `actual` the recomputed one (None when
+    # the episode is gone). The worker's third comparison, inside the deleting
+    # transaction (DL-136), runs after this returned and stays an untyped job
+    # failure.
+    expected_digest = approved.get("digest")
     if current is None:
-        raise ExecutorError(
+        raise WorldMoved(
             f"graph.delete_episode: no episode with uuid {episode_uuid} — it is already "
-            "gone; nothing to delete"
+            "gone; nothing to delete",
+            target=f"graph:episode:{episode_uuid}", expected=expected_digest,
+            actual=None, what_moved=f"episode {episode_uuid} no longer exists",
         )
     changes = neo4j_reader.preview_changes(approved, current)
     if changes:
-        raise ExecutorError(
+        raise WorldMoved(
             "graph.delete_episode: the graph changed since this deletion was proposed — "
-            "nothing was deleted; re-propose to see the current set: " + "; ".join(changes)
+            "nothing was deleted; re-propose to see the current set: " + "; ".join(changes),
+            target=f"graph:episode:{episode_uuid}", expected=expected_digest,
+            actual=current.get("digest"), what_moved="; ".join(changes),
         )
     job = await graphiti_ingest.enqueue_delete(
         episode_uuid, current["episode"]["group_id"], preview=current,
@@ -1012,8 +1023,61 @@ async def _jira_delete_issue(args: dict, approver: str, proposer: str | None) ->
 
 
 async def _jira_transition_issue(args: dict, approver: str, proposer: str | None) -> str:
-    await jira.transition_issue(args["issue_key"], args["transition"])
+    try:
+        await jira.transition_issue(args["issue_key"], args["transition"])
+    except jira.TransitionUnavailable as e:
+        # The integration reports the facts and knows no proposal; deciding
+        # whether the WORLD moved is this tier's job. A name that was never
+        # available is a drafting error and stays plain; one on an issue
+        # updated after the draft (by someone else) is the world moving.
+        if await _issue_moved_since_draft(e):
+            raise jira.TransitionMoved(e) from e
+        raise
     return f"{args['issue_key']} transitioned via '{args['transition']}'"
+
+
+async def _issue_moved_since_draft(e: "jira.TransitionUnavailable") -> bool:
+    """True when the issue's `updated` is later than the proposal row's
+    `created_at` AND nothing in this proposal touched the issue itself.
+
+    Jira moves `updated` on ANY edit, including this proposal's own earlier
+    actions (an add_comment then a transition on the same issue would
+    otherwise always read as "someone else changed it"), so an issue an
+    earlier action touched is a drafting error. No proposal id, no row, or an
+    `updated` that is missing, unparseable or carries no offset cannot be
+    compared: plain semantic, today's behaviour."""
+    from central_command.db import repo
+
+    proposal_id = _current_proposal_id.get()
+    if not proposal_id or e.issue_key.upper() in _touched_issues.get():
+        return False
+    row = await repo.load_proposal(proposal_id)
+    created = (row or {}).get("created_at")
+    try:
+        updated = datetime.fromisoformat(e.updated or "")
+    except ValueError:
+        return False
+    if created is None or updated.tzinfo is None or created.tzinfo is None:
+        return False
+    return updated > created
+
+
+# Keys of the arguments that name an existing Jira issue; the `jira.*`
+# capabilities all spell them one of these ways.
+_JIRA_KEY_ARGS = ("issue_key", "from_key", "to_key", "parent")
+
+
+def _jira_keys_of(action_like) -> set[str]:
+    """The Jira issues an action names (upper-cased, as `_key` writes them).
+    `action_like` is an `Action` or a stored action dict."""
+    cap = (action_like.capability if hasattr(action_like, "capability")
+           else action_like.get("capability")) or ""
+    args = (action_like.arguments if hasattr(action_like, "arguments")
+            else action_like.get("arguments")) or {}
+    if not cap.startswith("jira."):
+        return set()
+    return {v.strip().upper() for k in _JIRA_KEY_ARGS
+            if isinstance(v := args.get(k), str) and v.strip()}
 
 
 async def _confluence_create_page(args: dict, approver: str, proposer: str | None) -> str:
@@ -1356,6 +1420,13 @@ _MCP_SERVER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 # Task), reset in a finally so it never leaks past this call.
 _current_proposal_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "_current_proposal_id", default=None
+)
+# The Jira issues earlier actions of THIS proposal have touched — the stored
+# prefix a retry resumes after, plus what this execution has completed — so a
+# transition on an issue the proposal itself edited is never read as the world
+# moving (Jira's `updated` moves on any edit). Same lifetime as the id above.
+_touched_issues: contextvars.ContextVar[set[str]] = contextvars.ContextVar(
+    "_touched_issues", default=frozenset()  # type: ignore[arg-type]
 )
 
 
@@ -2390,13 +2461,25 @@ async def execute(
             oid = stored.get(i)
             if oid in ids:
                 covering[i] = overrides.approver_for(oid)
+    touched: set[str] = set()
+    if action_offset and proposal_id:
+        # A retry resumes after the completed prefix, which `actions` no
+        # longer carries: read it from the stored proposal.
+        if row is None:
+            from central_command.db import repo
+
+            row = await repo.load_proposal(proposal_id)
+        for stored in ((row or {}).get("actions") or [])[:action_offset]:
+            touched |= _jira_keys_of(stored)
     token = _current_proposal_id.set(proposal_id)
+    touched_token = _touched_issues.set(touched)
     try:
         results: list[str] = []
         for n, a in enumerate(actions):
             try:
                 results.append(await _execute_action(
                     a, covering.get(action_offset + n, approver), proposer))
+                touched |= _jira_keys_of(a)
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
                 moved = is_world_moved(e)
                 raise ExecutionFailed(
@@ -2412,6 +2495,7 @@ async def execute(
                 ) from e
     finally:
         _current_proposal_id.reset(token)
+        _touched_issues.reset(touched_token)
     provenance = Provenance(
         approver=approver,
         source_refs=source_refs,

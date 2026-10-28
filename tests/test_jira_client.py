@@ -11,6 +11,7 @@ import json
 import pytest
 
 from central_command.config import settings
+from central_command.contract.failures import WorldMoved
 from central_command.integrations import jira
 
 
@@ -97,10 +98,22 @@ async def test_transition_resolves_by_name_case_insensitively(monkeypatch):
 
 
 async def test_unavailable_transition_fails_with_the_available_set(monkeypatch):
-    _fake_call(monkeypatch, [FakeResponse(200, {"transitions": [
-        {"id": "11", "name": "To Do", "to": {"name": "To Do"}}]})])
-    with pytest.raises(jira.JiraError, match="available: To Do"):
+    calls = _fake_call(monkeypatch, [
+        FakeResponse(200, {"transitions": [
+            {"id": "11", "name": "To Do", "to": {"name": "To Do"}}]}),
+        FakeResponse(200, {"fields": {"status": {"name": "To Do"},
+                                      "updated": "2026-10-28T12:00:00.000+0000"}}),
+    ])
+    with pytest.raises(jira.JiraError, match="available: To Do") as ei:
         await jira.transition_issue("TASKS-12", "Ship It")
+    # The integration reports the facts and knows no proposal: it is NOT a
+    # world-moved verdict (the Executor decides that against created_at).
+    e = ei.value
+    assert isinstance(e, jira.TransitionUnavailable)
+    assert not isinstance(e, WorldMoved)
+    assert (e.issue_key, e.transition, e.available) == ("TASKS-12", "Ship It", ["To Do"])
+    assert (e.status, e.updated) == ("To Do", "2026-10-28T12:00:00.000+0000")
+    assert calls[1][1].endswith("/issue/TASKS-12?fields=status,updated")
 
 
 def _links_body(*links):

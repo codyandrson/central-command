@@ -40,6 +40,7 @@ import pytest
 from pydantic_ai import CallDeferred, ModelRetry
 
 from central_command import events
+from central_command.contract.failures import WorldMoved
 from central_command.db import repo
 from central_command.gateway import executor
 from central_command.integrations import graphiti, graphiti_ingest, neo4j_reader, neo4j_writer
@@ -333,17 +334,23 @@ async def test_the_executor_refuses_when_the_set_changed(preview_now):
     approved = await neo4j_reader.compute_delete_preview(g.run, "X")
     g.mentions.append(("Y", "A"))
     preview_now["preview"] = await neo4j_reader.compute_delete_preview(g.run, "X")
-    with pytest.raises(executor.ExecutorError, match="changed since"):
+    with pytest.raises(WorldMoved, match="changed since") as ei:
         await executor._graph_delete_episode(
             {"episode_uuid": "X", "preview": approved}, "human:doe", "graph-curator")
     assert preview_now["queued"] == []
+    # The typed verdict carries both digests: what was approved, what is there now.
+    assert ei.value.target == "graph:episode:X"
+    assert ei.value.expected == approved["digest"]
+    assert ei.value.actual == preview_now["preview"]["digest"] != approved["digest"]
 
 
 async def test_the_executor_refuses_an_episode_that_is_already_gone(preview_now):
     approved = await neo4j_reader.compute_delete_preview(_fixture().run, "X")
-    with pytest.raises(executor.ExecutorError, match="already"):
+    with pytest.raises(WorldMoved, match="already") as ei:
         await executor._graph_delete_episode(
             {"episode_uuid": "X", "preview": approved}, "human:doe", None)
+    assert preview_now["queued"] == []
+    assert (ei.value.expected, ei.value.actual) == (approved["digest"], None)
 
 
 async def test_the_executor_queues_an_unchanged_deletion_on_the_episodes_group(preview_now):

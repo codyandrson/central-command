@@ -38,7 +38,7 @@ from urllib.parse import urlencode
 import httpx
 
 from central_command.config import settings
-from central_command.contract.failures import ProviderStatusError
+from central_command.contract.failures import ProviderStatusError, WorldMoved
 from central_command.integrations import http as http_client
 
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}-[1-9][0-9]{0,9}$")
@@ -110,6 +110,51 @@ MAX_CUSTOM_CHARS = 500
 
 class JiraError(ProviderStatusError):
     pass
+
+
+class TransitionUnavailable(JiraError):
+    """The named transition is not available from the issue's current status.
+
+    A plain `JiraError` carrying the facts, NOT a `WorldMoved`: the
+    integration knows no proposal, so it cannot tell a drafting error (the
+    name was never available) from a moved world (the issue changed since the
+    draft). The Executor decides, against the proposal's `created_at`, and
+    upgrades to `TransitionMoved` only then — so `is_world_moved` stays
+    honest for every other caller of `transition_issue`. `updated` is the
+    issue's own stamp as Jira wrote it (None when the read carried none)."""
+
+    def __init__(self, message: str, *, issue_key: str, transition: str,
+                 available: list[str], status: str | None, updated: str | None,
+                 status_code: int | None = None):
+        super().__init__(message, status_code=status_code)
+        self.issue_key = issue_key
+        self.transition = transition
+        self.available = list(available)
+        self.status = status
+        self.updated = updated
+
+
+class TransitionMoved(TransitionUnavailable, WorldMoved):
+    """A `TransitionUnavailable` the Executor has judged world-moved: the
+    issue was updated after the proposal was drafted, so the draft was written
+    against a status that no longer holds. A typed NO (still a `JiraError`)."""
+
+    def __init__(self, unavailable: TransitionUnavailable):
+        TransitionUnavailable.__init__(
+            self, str(unavailable), issue_key=unavailable.issue_key,
+            transition=unavailable.transition, available=unavailable.available,
+            status=unavailable.status, updated=unavailable.updated,
+            status_code=unavailable.status_code)
+        self.target = f"jira:issue:{unavailable.issue_key}"
+        self.expected = unavailable.transition
+        self.actual = {"available": list(unavailable.available),
+                       "status": unavailable.status}
+        names = ", ".join(unavailable.available) or "(none)"
+        self.what_moved = (
+            f"issue {unavailable.issue_key} is now {unavailable.status!r} "
+            f"(updated {unavailable.updated}); transition "
+            f"{unavailable.transition!r} is not among its available ones: {names}"
+        )
 
 
 def _flavor() -> str:
@@ -1034,6 +1079,15 @@ async def delete_issue(issue_key: str) -> dict:
     return {"ok": True, "kind": "jira", "operation": "deleteIssue", "issue": snapshot}
 
 
+async def _status_and_updated(key: str) -> dict:
+    """The two facts `TransitionUnavailable` carries, from one narrow read —
+    `get_issue` would also run custom-field discovery on a failure path."""
+    resp = await _call("GET", _api(f"/issue/{key}?fields=status,updated"))
+    _check(resp, "getIssue", key)
+    f = resp.json().get("fields") or {}
+    return {"status": (f.get("status") or {}).get("name"), "updated": f.get("updated")}
+
+
 @_requires_native
 async def transition_issue(issue_key: str, transition: str) -> dict:
     """Move an issue by transition NAME, resolved against what is actually
@@ -1048,9 +1102,15 @@ async def transition_issue(issue_key: str, transition: str) -> dict:
     )
     if match is None:
         names = ", ".join(t["name"] for t in avail) or "(none)"
-        raise JiraError(
+        # Read the issue for the facts the Executor needs to tell a drafting
+        # error from a moved world; a failing read propagates like any read.
+        issue = await _status_and_updated(key)
+        raise TransitionUnavailable(
             f"transitionIssue for {key} — transition {transition!r} is not available "
-            f"from the issue's current status (available: {names})"
+            f"from the issue's current status (available: {names})",
+            issue_key=key, transition=transition.strip(),
+            available=[t["name"] for t in avail],
+            status=issue.get("status"), updated=issue.get("updated"),
         )
     resp = await _call("POST", _api(f"/issue/{key}/transitions"),
                        {"transition": {"id": match["id"]}})
