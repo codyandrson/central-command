@@ -72,13 +72,63 @@ when a matching file is read.
   issued it and can cancel it), and its transcript closes STOPPED naming the
   task — never a mid-turn resume, because a kill during tool execution leaves
   calls nothing answered and the tool may already have fired; a chat lane is
-  landed by its record's tail; anything else closes STOPPED and its own next
+  landed by its record's tail (an unsent request parks a `turn`, due now);
+  anything else closes STOPPED and its own next
   occurrence absorbs the gap. A restart-closed STOPPED run that cannot be
   re-entered is refused by the Resume lever and counts as finished for
   whoever waits on it. An EXECUTING proposal parks RETRY_PENDING
   `interrupted`, its retry_state MERGED (the known-complete prefix kept), and
   no sweep moves it — an INTERIM hold until reconciliation can ask the
   service whether the in-flight action landed.
+- **A live read parks under a landing tail; it never degrades to "proceed
+  without it".** A DOWN read raises `CallDeferred` (below) when its run's entry
+  set `TriageDeps.park_reads`, and the session resumes in place when the
+  dependency is back. The discipline that keeps it total is parity, not
+  memory: every read tool has an entry in `contract/dependencies.TOOL_DEPENDENCY`
+  and every Executor registry row has one in `CAPABILITY_DEPENDENCY`; the
+  `@parkable_read` decorator looks the tool up when the module imports, so a
+  read with no map entry FAILS AT IMPORT, and a parity test walks the packs, the
+  registry, the handler table and the probe table. Why: a read that answered
+  "unavailable, proceed without it" made the agent reason about an absence that
+  was only an outage; PRD FR-40 retired that reading (the old RUNTIME-047
+  "degrade, never wedge" position). A read
+  the dependency ANSWERED with a no still returns honest text — that is a NO,
+  not a DOWN — and `local` and `()` entries never park.
+- **A tool pauses a run only through `CallDeferred`.** pydantic-ai lets any
+  other exception cancel the sibling tools and fail the run, so a DOWN read that
+  raised something else would turn an outage into a FAILED session. Anything
+  that needs to wait raises `CallDeferred` with `kind: 'read'` metadata, and
+  `classify_deferred` lets that metadata beat the tool-name classification (a
+  consult is both a consult wait and, when its specialist is DOWN, a read).
+- **A parked turn re-enters on an unsent request only.** `run._run_live` parks
+  a DOWN model call (`pending_resume.kind = 'turn'`) only when the persisted
+  record ENDS IN THE UNSENT REQUEST, the one shape `agent.iter(None,
+  message_history=…)` re-sends without copying a word. A record ending in a
+  response whose tool calls were executing cannot be re-entered without
+  re-running them (a tool may already have fired), so that rare case keeps its
+  FAILED landing with its reason. Why: the duplicated operator turn and the
+  re-spent tool batch are exactly the evidence of an outage the standard forbids.
+  `park_reads` therefore means "this entry has a landing tail", and
+  `orchestration._drive_tail` is the one driver for read and turn resumes.
+- **A probe-gated skip spends nothing.** The retry sweep skips a unit whose
+  recorded dependency (plus `llm`, for a model turn) probes down BEFORE calling
+  its driver, so there is no path on which an outage can advance `attempts` or
+  `not_before`. Attempts are spent only when the probe said healthy and the call
+  still failed, and a unit that keeps doing that is reported once
+  (`retry.failing_despite_probe`) rather than failed: there is no attempt limit.
+  Why: with limits, a two-hour outage at a five-minute cadence exhausted every
+  parked unit in 25 minutes and promoted a storm of operator items. One curve
+  (`contract.retry_backoff_seconds`) and one cap setting now set the patience.
+- **The waiting dismiss is one SQL-guarded transition, and it resolves the task
+  FAILED.** Dismissing an approved proposal that waits on an outage
+  (`RETRY_PENDING`) goes through `repo.withdraw_proposal_if_open`, a conditional
+  update that returns the prior status, so it cannot race
+  `claim_proposal_retry` into both withdrawing and executing. It withdraws the
+  EXECUTION, not the decision: no second `proposal.decided`, a distinct
+  `proposal.execution_dismissed` emitted before the task resolution it
+  authorises, the drafter never resumed, `retry_state` kept. The task resolves
+  FAILED with how many actions had landed, never DONE "no action needed"
+  (the operator, 2026-10-27).
 - **A tool result is bounded by the INPUT window, and mail tokenises at ~2
   chars/token.** `tools._clip` derives its ceiling from the smallest
   discovered input window (`context.tool_result_ceiling`), never from the

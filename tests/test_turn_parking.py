@@ -367,9 +367,12 @@ def _walk(callee: str, *, failed_only: bool = False) -> set[str]:
 
 
 def _section() -> str:
+    """The outage doctrine section of the architecture document (it is one
+    section since story 11; the no-tail table and the list of semantic
+    landings live in it)."""
     text = (ROOT / "docs" / "ARCHITECTURE.md").read_text()
-    start = text.index("A model DOWN mid-turn parks the turn")
-    return text[start:text.index("- **Durability.**", start)]
+    start = text.index("### The outage doctrine")
+    return text[start:text.index("\n## 5.", start)]
 
 
 def test_the_no_tail_table_matches_the_runs_that_cannot_park():
@@ -378,7 +381,7 @@ def test_the_no_tail_table_matches_the_runs_that_cannot_park():
     run)."""
     no_tail = _walk("_run_live") - _PARKING_CALLERS - {"run._run_live"}
     section = _section()
-    rows = set(re.findall(r"^  \| [^|]+ \| `([a-z_]+\.[A-Za-z_]+)` \|", section, re.M))
+    rows = set(re.findall(r"^ {0,2}\| [^|]+ \| `([a-z_]+\.[A-Za-z_]+)` \|", section, re.M))
     assert rows - {"tools.consult_agent"} == no_tail
 
 

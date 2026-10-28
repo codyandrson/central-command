@@ -30,8 +30,15 @@ when a matching file is read.
   split, found on a scratch graph 2026-10-05). And **a node with no
   `name_embedding` is invisible to the semantic half of hybrid search** while
   still turning up in keyword hits — every write re-embeds through the
-  `cc-embedding` alias at the configured width (`CC_EMBED_DIM`, default 1024); a mis-sized vector is
-  dropped rather than stored (nothing schema-side enforces the width). Neo4j
+  `cc-embedding` alias at the configured width (`CC_EMBED_DIM`, default 1024).
+  **Nothing lands without its vector** (epic-outage-doctrine story 7): an
+  embedder that is DOWN raises `contract.EmbedderDown` BEFORE anything is
+  written (a gated write parks, the operator's direct write is refused 503 and
+  the panel keeps its form, the dispatcher releases the item, the ingest worker
+  waits), a mis-sized vector is refused loudly (`EmbedWidthError`; nothing
+  schema-side enforces the width), and there is no second embedder to fall back
+  on — the old best-effort "degraded write" that stored a node invisible to
+  semantic search is gone. `embed()` returns `None` only for empty text. Neo4j
   5.x has no parameterized labels, hence the closed `ENTITY_TYPES` allowlist
   mirroring `integrations/graph_ontology.py` (a test pins the two equal).
 - **The bulk path's shape is canonical; a model's `save()` writes a different
@@ -48,14 +55,14 @@ when a matching file is read.
   difference not in its WHY-annotated allowlist — so a fact we create carries
   `expired_at` (null) and `reference_time` like an extracted one, and vectors
   go through `db.create.setNodeVectorProperty` / `setRelationshipVectorProperty`
-  like the bulk path's (the procedure REFUSES a null vector, so a degraded
-  write clears the property instead). No `embedding_model`/`embedding_dimensions`
+  like the bulk path's (the procedure REFUSES a null vector, so an update to
+  EMPTY text clears the property instead). No `embedding_model`/`embedding_dimensions`
   stamp: upstream's readers turn any unknown property into an entity
   ATTRIBUTE, which reached agents' fact results; old stamped rows are stripped
   in `graphiti.fact_result`/`node_result`. Embeddings stay OUR request, not the
   library's embedder: `OpenAIEmbedder.create` slices the vector to
   `embedding_dim`, so a wrong-width model would be truncated into a
-  meaningless vector instead of being dropped.
+  meaningless vector instead of refused.
 - **Deleting an episode is upstream's rule, in ONE transaction of ours,
   through the group's queue, against the set the operator approved**
   (`graph.delete_episode`, v2.61.0). The rule is `Graphiti.remove_episode`'s:

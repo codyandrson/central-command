@@ -15,9 +15,11 @@ twice. A single drain loop (the dispatcher) pulls one item at a time: it
 asks the valves "may I take one more?", claims the row atomically
 (`FOR UPDATE SKIP LOCKED`, thread-locked so one session owns a thread), runs
 the agent, and lands the row terminal (PROCESSED / FOLDED / FAILED) or
-releases it for retry. Transient failures (provider down) cost nothing and
-back off; semantic failures spend attempts and park FAILED at the cap for a
-human to look at. Everything emits events, so the Activity screen and
+releases it for retry. A DOWN dependency (the model, the embedder, anything the
+item needs) costs nothing: the item is released with its attempt handed back,
+backs off, and waits for as long as the outage lasts; semantic failures spend
+attempts and park FAILED at the cap for a human to look at (see "When a
+dependency is down" below). Everything emits events, so the Activity screen and
 `/api/events` are the audit trail.
 
 ## Reading the queue
@@ -76,6 +78,30 @@ The restart is the operator's: on the k3s profile that is a `systemctl restart`
 of the `cc-uvicorn` unit, on the single-node profile `./setup.sh` (it resumes
 at `boot`). A coding agent's session never restarts a live `cc-*` unit —
 releases go live through the updater (`deploy/k3s/README.md` §6).
+
+### When a dependency is down
+
+A failure that classifies as the dependency being DOWN never spends an attempt
+and never fails the row (the outage doctrine, [ARCHITECTURE](ARCHITECTURE.md#the-outage-doctrine)):
+
+- the row goes back to `UNPROCESSED` with `work_item.not_before` set on the one
+  backoff curve (60 s, doubling per release, up to `CC_RETRY_BACKOFF_CAP_SECONDS`,
+  default 3600) and `work_item.dependencies` recording what it waited on
+  (`embedder` when the semantic freeze or the pending-proposals context could not
+  embed; `llm` for a model failure). The claim query skips it until `not_before`.
+  **There is no attempt ceiling on this path** — mail queued during a long
+  outage is processed afterwards, however long.
+- the retry sweep does not drive these rows (the dispatcher's own loop does);
+  it only PROBES what they wait on, so the banner and the ingest worker's gate
+  learn of the outage. `POST /api/outages/{name}/retry` brings the rows waiting
+  on a dependency due now when the operator asks.
+- a row that keeps failing while everything it waits on probes UP (a revoked
+  key, a firewall deny) is reported once after `CC_RETRY_LOUD_AFTER_ATTEMPTS`
+  failures (`retry.failing_despite_probe`) and appears under `failing` in
+  `GET /api/outages`; it keeps retrying.
+
+A SEMANTIC failure — the dependency answered and refused — still spends an
+attempt and parks `FAILED` at `CC_DISPATCH_MAX_ATTEMPTS`.
 
 ### The backpressure valves
 

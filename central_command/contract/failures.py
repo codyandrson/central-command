@@ -80,9 +80,10 @@ class EmbedderDown(DependencyDown):
 # Kilo.ai) denies a whole egress IP for ~6 minutes with a bare 403, and a
 # task whose first model turn met that deny was FAILED on the spot — seven
 # times in one day. The retry window (1, 2, 4 min…) outlasts the deny. The
-# cost is that a genuinely revoked key fails a few minutes later than it did,
-# through exhaustion, still loudly. 401 stays semantic: no credential is
-# going to appear by waiting.
+# cost is that a genuinely revoked key now retries instead of failing (there
+# is no attempt limit); it is reported once after `retry_loud_after_attempts`
+# failures with its probe healthy (`retry.failing_despite_probe`), so it is
+# still loud. 401 stays semantic: no credential is going to appear by waiting.
 TRANSIENT_STATUS = frozenset({403, 408, 429, 500, 502, 503, 504, 529})
 
 # Last-resort sniffing, for errors that reach a seam already stringified (the

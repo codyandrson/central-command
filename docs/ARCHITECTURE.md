@@ -267,7 +267,8 @@ stateDiagram-v2
     AWAITING_HUMAN --> EXECUTING: gateway.approve_and_execute → repo.claim_proposal_for_execution
     EXECUTING --> EXECUTED: repo.set_proposal_executed (provenance stamped)
     EXECUTING --> RETRY_PENDING: dependency DOWN → repo.park_proposal_retry
-    RETRY_PENDING --> EXECUTING: retry sweep → gateway.retry_execution
+    RETRY_PENDING --> EXECUTING: retry sweep or the operator's retry-now → gateway.retry_execution (an interrupted one: only the operator's flag)
+    RETRY_PENDING --> WITHDRAWN: gateway.dismiss_proposal — one SQL-guarded transition; the execution is withdrawn, the task FAILED
     EXECUTING --> FAILED: the dependency said NO
     AWAITING_HUMAN --> REJECTED: gateway.reject_with_feedback — drafter RESUMES and may redraft a new proposal
     AWAITING_HUMAN --> WITHDRAWN: gateway.dismiss_proposal — folds released, session closed, drafter NEVER resumed
@@ -564,8 +565,9 @@ stateDiagram-v2
     AWAITING_OPERATOR --> DONE: conversation ended (status flip; transcript kept)
     RUNNING --> AWAITING_AGENTS: waiting on child tasks or a consult
     AWAITING_AGENTS --> RUNNING: children landed
-    RUNNING --> AWAITING_RESUME: resume leg failed transiently (resume_park)
-    AWAITING_RESUME --> RUNNING: retry sweep, health-gated
+    RUNNING --> AWAITING_RESUME: a read, a turn or a resume leg met a DOWN dependency (resume_park)
+    AWAITING_RESUME --> RUNNING: retry sweep, health-gated and on the backoff curve
+    AWAITING_RESUME --> STOPPED: the operator closes a parked chat lane
     RUNNING --> AWAITING_CONTINUE: request window spent — never auto-driven
     RUNNING --> STOPPED: operator stop — never auto-driven
     AWAITING_CONTINUE --> RUNNING: operator continues
@@ -605,7 +607,7 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
 - **Event log.** `events.emit()` writes the row to Postgres, then fans out to
   in-process subscribers; the SSE stream (`GET` stream route in
   `api/routes.py`) and the cockpit's `/ws` push frames are projections of the
-  table, never a parallel channel. 173 distinct event types are emitted today
+  table, never a parallel channel. 175 distinct event types are emitted today
   (recounted from `emit(...)` call sites by the guard; dynamic kinds such as
   bridged log records are not counted). Ordering rule: an event that
   *authorises* something is written before the thing it authorises.
@@ -623,255 +625,10 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   call. Valves: concurrency, the approval-coupled throttle (don't outrun
   review), token budget (retired by decision, PRD FR-24; the knob stays until its removal ships), max attempts. Dispatch is opt-in. Operations and
   defaults: [`QUEUE.md`](QUEUE.md).
-- **Outage equivalence.** A dependency that is DOWN costs latency, never work:
-  `contract/failures.py` classifies, sessions park `AWAITING_RESUME`,
-  proposals park `RETRY_PENDING`, tasks retry-park, and the health-gated
-  `retry.sweep` converges all three
-  ([spec](superpowers/specs/2026-07-31-outage-equivalence-design.md)). That
-  holds for model calls and approved executions. A DOWN *live read* parks the
-  run mid-turn (PRD FR-40): the tool raises the deferred-call pause
-  (`CallDeferred`, the one way a tool may pause a run) when the run's entry set
-  `TriageDeps.park_reads`, and the session parks `AWAITING_RESUME` with a
-  `pending_resume` of kind `'read'` (tool call id, tool, arguments, the
-  dependencies it waits on, `after` = the landing tail); `retry.sweep` gates it
-  on every recorded dependency plus `llm`, re-executes the read in the runtime
-  (`tools.run_read_by_name`) and resumes the run through that tail with the
-  real result (`orchestration.resume_parked_read`). Today that covers
-  every live read tool whose
-  entry in `contract/dependencies.py` (`TOOL_DEPENDENCY`) names probed
-  dependencies (the graph readers on `graph` and `embedder` or `graph`, Jira,
-  Confluence, the forge, the calendar, mail on `n8n`, LiteLLM, the sandbox)
-  under the task-run tail, and a consult whose specialist is DOWN parks the
-  ASKER (the whole consult re-runs on resume). A Postgres-only read
-  (`local`) never parks and a web page is not a dependency; a run with no tail
-  to re-enter re-raises into its unit's own DOWN path; a read the dependency
-  *answered* with a no still returns honest text.
-- **Dependencies, probes and the banner (story 3 of the outage doctrine).** One
-  closed list of names, `DEPENDENCIES` in `contract/dependencies.py`, is the only
-  vocabulary a park, a probe or an outage row uses:
-
-  | Name | What it is | Probe (unauthenticated, 5 s, concurrent per sweep) |
-  |---|---|---|
-  | `llm` | the agent model chain | a 1-token completion on the default alias |
-  | `embedder` | the embedding alias | one embedding of one word on `CC_EMBED_ALIAS` |
-  | `graph` | Neo4j (graphiti-core runs in-process) | a TCP connect to the bolt port |
-  | `litellm` | the proxy's admin plane | `GET /health/liveliness` |
-  | `n8n` | the mail façade host | `GET /healthz` |
-  | `calendar` | the calendar façade (same host) | the n8n health |
-  | `jira`, `confluence` | the configured instance | a bare `GET <base>/status`; any non-transient answer is up |
-  | `forge` | every `CC_FORGE_INSTANCES` entry | the same GET on each; up when any answers |
-  | `sandbox` | the sandbox runner | a bare `GET` of the runner (it has no health route) |
-  | `local` | Postgres | never probed, never gated, never parks |
-
-  `TOOL_DEPENDENCY` maps every read tool to a tuple of these;
-  `CAPABILITY_DEPENDENCY` maps every row of the Executor's registry the same
-  way (graph writes need `graph` and `embedder`; `jira.*`, `confluence.*`,
-  `calendar.*`, `mail.*`/`email.*` on `n8n`, `litellm.*` and `autodiscovery.*`,
-  `sandbox.*`/`mcp.*`; `catalog`, `charter`, `skill`, `loe`, `work` on `local`;
-  `web.*` on none). A parity test pins both against the tool packs, the
-  registry, the handler table and the probe table.
-
-  Every park records what it waited on: `pending_resume.dependencies` (a model
-  DOWN records `['llm']`), `proposal.retry_state.dependencies` (the typed
-  error's own tuple, else the failed capability's),
-  `task.retry_state.dependencies`, and the two new columns
-  `work_item.dependencies` (a transient ledger release) and
-  `graph_ingest_job.dependencies` (`embedder`, `graph` or `llm`, by the failing
-  call). A row with none reads as `['llm']`. The sweep gates a unit on every
-  recorded dependency plus `llm` where its re-drive is a model turn, drops
-  `local`, probes each name once and concurrently, and a gated skip spends no
-  attempt. The Executor sets `ExecutionFailed.transient` and `.dependencies`
-  from `classify_failure` on the exception the handler raised (a bare
-  `ServiceUnavailable` is transient), and the gateway reads the flag before the
-  text classifier. The startup `resume_sweep` gates `RETRY_PENDING` proposals on
-  the same probes.
-
-  The sweep persists what it saw in `dependency_probe` (name, `state` up|down,
-  `checked_at`, `error`, `down_since`), writing a row and emitting
-  `dependency.down` or `dependency.up` only when the state *changes* (no
-  debounce; a steady state writes nothing). Every dependency recorded down is
-  re-probed on every sweep, even with no waiting work, so a banner never
-  sticks. The table is additive in `schema.sql`; the updater's schema phase
-  applies it at release.
-- **One backoff curve, no limits, and the loud rule (story 4 of the outage
-  doctrine).** Every parked surface waits `min(60 s * 2^n, cap)` after its n-th
-  transient failure (`contract.retry_backoff_seconds`), where the cap is
-  `CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600): a session resume
-  (`pending_resume.not_before`, every kind, reads included), an approved
-  execution (`proposal.retry_state.not_before`), a task re-run, a ledger item
-  (`work_item.not_before`) and an ingest job. The recurring sweep offers only
-  DUE units, in SQL, on all three of its worklists; a probe-gated skip changes
-  neither `attempts` nor `not_before`. There is **no attempt limit**: a unit
-  parked on a DOWN dependency retries for as long as the outage lasts, and DOWN
-  never promotes anything to FAILED (the operator's ruling of 2026-10-27; a
-  semantic failure still lands FAILED at once, and `dispatch_max_attempts`
-  still caps a ledger item's semantic attempts). Removed with the limits: the
-  settings `CC_RESUME_RETRY_LIMIT`, `CC_EXECUTION_RETRY_LIMIT` and
-  `CC_TASK_RETRY_LIMIT` (a value left in a deployment's `.env` is ignored with
-  one warning at startup), and the events `session.resume_exhausted`,
-  `proposal.execution_exhausted` and `task.run_exhausted` with the operator
-  items they raised. The loudness the limits used to give comes from
-  `CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3): a unit that has failed that many
-  times while every dependency it recorded probes up (a revoked key answering
-  403, a firewall deny) is listed by `repo.units_failing_despite_probe` and
-  reported once by the sweep as `retry.failing_despite_probe`; it keeps
-  retrying.
-- **Startup: a restart lands nothing FAILED (story 5 of the outage doctrine).**
-  The lifespan in `api/app.py` runs, in order and before anything new runs:
-  (1) `orchestration.land_orphans_at_startup` — every RUNNING session lands by
-  what it owes (`repo.park_orphaned_sessions`): a killed resume back to
-  `AWAITING_RESUME` due now; a killed task run's task back to `ASSIGNED` with
-  `retry_state.kind = 'restart'` due now (re-run fresh whatever its age) and
-  its transcript closed `STOPPED` with the reason `process restarted; re-run
-  queued as a new session of task <id>`; a chat lane by its record's tail
-  (finished turn → `AWAITING_OPERATOR`, unsent request → `AWAITING_RESUME`
-  kind `turn` due now, unanswered calls → `DONE` with `session.turn_lost`); anything else
-  `STOPPED`. Every `EXECUTING` proposal parks `RETRY_PENDING` with
-  `retry_state.interrupted` (merged: a retry's known-complete prefix is kept;
-  a fresh execution is seeded at action 0) and `proposal.execution_interrupted`;
-  (2) `routes.startup_task_sweep` — a sessionless `IN_PROGRESS` task re-parks
-  the same way, and a never-started `ASSIGNED` task is relaunched;
-  (3) the ledger reclaim (`CLAIMED` → `UNPROCESSED`); then the loops; then the
-  background `resume_sweep`, which re-drives the owed resumes and re-runs the
-  restart-parked tasks. `Dispatcher.start` no longer sweeps sessions at all
-  (a run in a live process is alive). No sweep moves an `interrupted`
-  proposal: only the operator's retry-now or a dismiss does. That hold is an
-  **interim**, by the operator's decision of 2026-10-27; the end state is
-  reconciliation, where the Executor's record of the in-flight action is
-  enough to ask the service whether it landed and resume past it or re-run it
-  with no operator click (DL-188).
-- **A model DOWN mid-turn parks the turn (story 6 of the outage doctrine).** A
-  run whose entry has a landing tail (`TriageDeps.park_reads`: the task run,
-  the chat turn, the orchestrator round, and every continuation of them) does
-  not land FAILED when a dependency is DOWN mid-turn: `run._run_live` parks the
-  session `AWAITING_RESUME` with `pending_resume.kind = 'turn'` (the tail in
-  `after`, the orchestrator's loop counters in `state`, `dependencies`
-  `['llm']` or the typed error's own) and raises `RunParked`, which each tail
-  returns as the same parked outcome a parked read has (`run.parked_outcome`).
-  The persisted record ends in the unsent request, so
-  `orchestration.resume_parked_turn` re-enters with
-  `agent.iter(None, message_history=…)` through `_drive_tail`, the read and
-  turn resumes' one tail driver: the request is re-sent, nothing is copied (no
-  duplicated operator turn, no re-spent earlier turn), and a second outage on
-  the resumed run parks in place again. A transient error out of a non-read
-  TOOL leaves a record ending in a response whose calls were executing; that
-  cannot be re-entered, so it keeps the FAILED landing. A parked chat lane
-  disables the composer (`awaiting_resume`), the notice reads `paused —
-  <dependency> is down since <t>; retrying` (no time when `dependency_probe`
-  has no down row), and closing the lane cancels the wait: `STOPPED`, park
-  cleared, transcript kept. Runs with no landing tail keep their unit-level
-  DOWN path:
-
-  | Run (no landing tail) | Entry | Its DOWN path |
-  |---|---|---|
-  | Inbox triage | `run.ingest_and_propose` | the dispatcher's transient release of the work item (`work_item.not_before`) |
-  | Coach | `run.run_coach` | the heartbeat's next occurrence |
-  | Steward | `steward.run_document` | the heartbeat's next occurrence |
-  | Wiki repair | `wiki_agent.run_repair` | the heartbeat's next occurrence |
-  | Reflection | `reflection._reflect` | the next closed conversation reflects again |
-  | Reflection episode | `reflection._propose_episode` | the startup audit/reflection sweep |
-  | Routing recommendation | `orchestrator.recommend` | the operator asks again; nothing is lost |
-  | Consult sub-run | `tools.consult_agent` | not a `_run_live` run: the outage re-raises and the ASKER parks (story 2) |
-
-  Every other `land_session(failed=True)` site is a semantic landing, reached
-  only after the transient branch parked: `run._run_live` (a no-tail run, or a
-  record that cannot be re-entered), `orchestration._fail`,
-  `orchestration.resume_parked_session`, `orchestration.resume_parked_read`,
-  `orchestration.resume_consult_wait`, `orchestration.resume_task_wait`,
-  `orchestration._finish_answered_resume`, `orchestration._decline_continue`
-  (the operator declined), and `nerve_gateway._close_conversation_for_key`
-  (the operator closed a failed execution). `tests/test_turn_parking.py`
-  walks the source against both lists.
-- **An embedder outage parks graph writes (story 7 of the outage doctrine).**
-  Nothing lands without its vector. `neo4j_writer.embed` raises
-  `contract.EmbedderDown` (a `DependencyDown` on `('graph', 'embedder')`,
-  transient by type, carrying the original) before anything is written; it
-  returns `None` only for empty text, and a wrong-width vector is a loud
-  semantic `EmbedWidthError`. The old "degraded write" (a node stored with no
-  vector, `embedded: False`) is gone, and there is no fallback embedder. A
-  gated curation write parks `RETRY_PENDING` with
-  `retry_state.dependencies = ['graph', 'embedder']` through the Executor's
-  typed classification. The operator's direct write (`routes._curate`, behind
-  the cockpit Graph panel) is refused `503 {error: 'embedder down',
-  dependency: 'embedder'}`, writing nothing; the panel shows the refusal and
-  keeps the unsaved form filled, so the write is one click once the embedder
-  is back. The dispatcher's embedder calls (the semantic freeze, the item and
-  intent vectors behind the pending-proposals context) no longer fail open: an
-  outage releases the claimed item transient with `work_item.dependencies =
-  ['embedder']` and `not_before` on the curve, and it is not run unguarded.
-  The ingest worker reads `dependency_probe` before claiming: while `graph` is
-  down it takes nothing, while `embedder` is down it takes only the bolt-only
-  deletions, and a transient failure still defers the job stamped with its
-  dependencies. The retry sweep also probes what released ledger items and
-  deferred ingest jobs wait on (`repo.dependencies_waited_on_by_queues`), so
-  those gates and the banner learn of an outage only the queues have met.
-- **A waiting approved proposal is listed, says what it waits on, and can be
-  dismissed (story 8 of the outage doctrine).** `decisions.list` carries a
-  second list, `waiting`: the RETRY_PENDING proposals, oldest first
-  (`repo.list_waiting_proposals`). It is NOT part of `proposals`, and the
-  "needs your decision" badge counts that list, because the decision is already
-  made. Each waiting row, and `GET /proposals/{id}`, carries a `waiting` block
-  from `routes.annotate_gate_facts` (the gate-overrides precedent; null for
-  every other status): `dependencies` (what the park recorded), `down_since`
-  (the earliest `dependency_probe.down_since` among them recorded down; null
-  when none is), `attempts`, `next_retry` (`retry_state.not_before`),
-  `interrupted` (a restart cut it short; only the operator's retry or a dismiss
-  moves it), `completed_actions`, `failing_despite_probe` (the loud rule's
-  report) and `last_error`. The cockpit renders three states from it:
-  *approved — waiting on <dependencies> (down since <t>), retry <k> at <t>*,
-  *interrupted by a restart; retry or dismiss*, and *failing despite a healthy
-  <dependency>: <last_error>*. **Dismiss accepts RETRY_PENDING as well as
-  AWAITING_HUMAN.** What it withdraws is the EXECUTION, not the decision: the
-  transition is guarded in SQL (`repo.withdraw_proposal_if_open`, a conditional
-  update returning the prior status, the way the two claims are), so a dismiss
-  racing `claim_proposal_retry` cannot both withdraw and execute; the proposal
-  goes WITHDRAWN with its `retry_state` kept, folds are released, the drafter's
-  session is closed and never resumed, and the event is a distinct
-  `proposal.execution_dismissed {proposal, completed_actions, actions_total}`
-  (the operator's approval stands on the log, so there is no second
-  `proposal.decided`), emitted before the task resolution it authorises. The
-  task resolves FAILED, never DONE, with *operator withdrew the waiting
-  execution; <k> of <n> actions had landed*. The AWAITING_HUMAN dismiss keeps
-  its DONE "no action needed" outcome.
-- **The outages surface (story 9 of the outage doctrine).** `GET /api/outages`
-  (`api/outages.py`, mounted like the other routers; no auth dependency, access
-  is the private network) returns `{dependencies: [...]}` for every name in
-  `DEPENDENCIES`, each `{name, state, checked_at, down_since, waiting:
-  {sessions, proposals, tasks, work_items, ingest_jobs}, interrupted, failing:
-  [{kind, id, attempts, last_error}], total}`. `state` is `up` or `down` from
-  `dependency_probe` (a missing row is up), and n/a for `local`. **`checked_at`
-  is not a "last probed" time**: the sweep writes `dependency_probe` only on a
-  state CHANGE, so it is when the dependency last changed state (the same
-  instant as `down_since` while down), and null for one never seen down. One SQL
-  statement (`repo.parked_unit_counts`, built by `_parked_units_sql`, also behind
-  the sweep's probe of the queues) counts the parked units: sessions
-  `AWAITING_RESUME` (read and turn parks) by `pending_resume.dependencies`,
-  proposals `RETRY_PENDING` by `retry_state.dependencies`, tasks `ASSIGNED` with
-  a `retry_state` (restart parks record `['llm']`), ledger items `UNPROCESSED`
-  and ingest jobs `QUEUED` while their `not_before` is still ahead. A unit
-  recorded on two dependencies counts once under each; a record with none (or an
-  empty list) counts under `llm`; an interrupted proposal counts under
-  `interrupted` and not under `waiting`. `failing` is
-  `repo.units_failing_despite_probe(retry_loud_after_attempts)` bucketed under
-  each unit's dependencies, and `total` is every waiting unit plus the
-  interrupted ones.
-
-  `POST /api/outages/{name}/retry` (body `{include_interrupted: false}`) is the
-  operator's retry-now. (1) `outage.retry_requested {dependency,
-  include_interrupted, actor}` is written FIRST, because it authorises a
-  re-drive; (2) that one dependency is probed and persisted through the sweep's
-  own `orchestration.probe_and_record`; (3) only if it is up,
-  `retry_sweep(only=name, ignore_not_before=True, include_interrupted=…)` drives
-  the units whose park recorded it (backoff ignored; agent work detached, so the
-  call returns at once) and the ledger items and ingest jobs, which the sweep
-  never drives itself, are brought due (`repo.pull_queued_units_due`) for their
-  own loops. Interrupted proposals are driven only when asked, and resume from
-  their kept cursor. The answer is `{probe: 'up'|'down', driven: {sessions,
-  proposals, tasks, work_items, ingest_jobs}}`, all zero when down. An unknown
-  name is 404 and `local` is 400. The same two operations are the `/ws` RPC
-  methods `outages.list` and `outages.retry` (`{dependency, includeInterrupted}`)
-  with the same shapes. The event is emitted by the route, not by a heartbeat
-  action, so it is not in the heartbeat material allowlist.
+- **Outage equivalence.** A dependency that is DOWN costs latency, never work
+  (PRD FR-34 and FR-40): the sweep, the parks, the backoff, the banner and
+  their rules are one section, [The outage doctrine](#the-outage-doctrine),
+  at the end of this chapter.
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).
@@ -890,6 +647,274 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   lives under is that it holds no WRITE path — not that it holds no bolt
   (DL-134). See [graph rules](../.claude/rules/graph.md).
 
+### The outage doctrine
+
+*PRD FR-34 and FR-40; DL-172 (as amended) and DL-189; the founding design is
+[the outage-equivalence spec](superpowers/specs/2026-07-31-outage-equivalence-design.md)
+with the as-built note at its head.* The rule: **nothing is terminal from a
+DOWN dependency, and the operator sees a banner, not a failure.** The standard
+every park is held to (the operator, 2026-10-27): resume once the service is
+back, leave no evidence of the outage beyond the banner and the logs, and end
+with the same result as if the service had never been offline.
+
+**DOWN versus NO.** `contract/failures.py` is the one classifier
+(`classify_failure`; unknown is NO). A DOWN failure — a transport error, a 408,
+429, 5xx or 403 (403 stays DOWN: an edge firewall denies with it), a neo4j
+`ServiceUnavailable` — parks the unit and retries. A NO — the dependency
+answered and refused — keeps today's behaviour: the semantic branch of every
+landing still lands FAILED at once with its reason, and `dispatch_max_attempts`
+still caps a ledger item's semantic attempts. Two typed errors carry their
+dependencies: `DependencyDown` (a read, raised once, where the read ran) and
+`EmbedderDown` (a subclass, on `graph` and `embedder`).
+
+**Names, probes and maps.** `DEPENDENCIES` in `contract/dependencies.py` is the
+one closed vocabulary a park, a probe or an outage row uses; the probe
+functions live in `heartbeat/probes.py` (config, httpx and the standard library
+only). Every probe is unauthenticated and capped at 5 s, and the sweep runs
+them concurrently, once per name per sweep:
+
+| Name | What it is | Probe |
+|---|---|---|
+| `llm` | the agent model chain | a 1-token completion on the default alias |
+| `embedder` | the embedding alias | one embedding of one word on `CC_EMBED_ALIAS` |
+| `graph` | Neo4j (graphiti-core runs in-process) | a TCP connect to the bolt port |
+| `litellm` | the proxy's admin plane | `GET /health/liveliness` |
+| `n8n` | the mail façade host | `GET /healthz` |
+| `calendar` | the calendar façade | the n8n host's health (also when the native Exchange client is configured: a stated limit) |
+| `jira`, `confluence` | the configured instance | a bare `GET <base>/status`; any non-transient answer is up |
+| `forge` | every `CC_FORGE_INSTANCES` entry | the same GET on each; up when any answers |
+| `sandbox` | the sandbox runner | a bare `GET` of the runner (it has no health route) |
+| `local` | Postgres | never probed, never gated, never parks |
+
+A service that is not configured probes up (nothing to wait for). `TOOL_DEPENDENCY`
+maps every read tool to a tuple of these and `CAPABILITY_DEPENDENCY` maps every
+row of the Executor's registry the same way (graph writes need `graph` and
+`embedder`; `jira.*`, `confluence.*`, `calendar.*`; `mail.*` and `email.*` on
+`n8n`; `litellm.*` and `autodiscovery.*`; `sandbox.*` and `mcp.*`; `catalog`,
+`charter`, `skill`, `loe`, `work` on `local`; `web.*` on none). A read tool
+without a map entry fails at import, and a parity test pins both maps against
+the tool packs, the registry, the handler table and the probe table. The sweep
+persists what the probes said in `dependency_probe` (name, `state` up|down,
+`checked_at`, `error`, `down_since`), writing a row and emitting
+`dependency.down` or `dependency.up` only on a state CHANGE (no debounce; a
+steady state writes nothing), and re-probes every dependency recorded down on
+every sweep, even with no waiting work, so a banner never sticks. **`checked_at`
+is when the dependency last changed state, not when it was last probed**; a
+name with no row has never been seen down (up, `checked_at` null).
+
+**What parks, and the record it keeps.** Every park records what it waited on;
+a record with none (or an empty list) reads as `['llm']`, and `local` is
+recorded but never gated.
+
+| Park | Where | Dependencies recorded in |
+|---|---|---|
+| a live read, a model turn, a decision resume | session `AWAITING_RESUME`, `run_state.pending_resume` of kind `read`, `turn` or a decision kind | `pending_resume.dependencies` |
+| an approved execution | proposal `RETRY_PENDING`, `retry_state` | `retry_state.dependencies` (the typed error's own tuple, else the failed capability's) |
+| a task run | task `ASSIGNED` with `retry_state` | `task.retry_state.dependencies` |
+| a mail item released transient | `work_item` `UNPROCESSED` with `not_before` | `work_item.dependencies` (new column) |
+| a graph ingest job deferred | `graph_ingest_job` `QUEUED` with `not_before` | `graph_ingest_job.dependencies` (new column; `embedder`, `graph` or `llm` by the failing call) |
+
+**Reads park under a landing tail.** A DOWN live read raises the deferred-call
+pause (`CallDeferred`, the one way a tool may pause a run) when the run's entry
+set `TriageDeps.park_reads`, which means "this entry has a landing tail to
+re-enter": the task run, the chat turn, the orchestrator round and every
+continuation of them. The session parks with a `pending_resume` of kind `read`
+(tool call id, tool, arguments, dependencies, `after` = the landing tail,
+`attempts`, `not_before`, `last_error`, `parked_at`); the sweep re-executes the
+read in the runtime (`tools.run_read_by_name`) and resumes the run through that
+tail with the real result. A consult whose specialist is DOWN parks the ASKER
+(the whole consult re-runs on resume). A Postgres-only read (`local`) never
+parks and a web page is not a dependency; a read the dependency *answered* with
+a no still returns honest text; a run with no tail re-raises into its unit's
+own DOWN path.
+
+**A model DOWN mid-turn parks the turn.** The same entries park when the model
+(or another dependency) is DOWN mid-turn: `run._run_live` parks the session
+with `pending_resume.kind = 'turn'` (the tail in `after`, the orchestrator's
+loop counters in `state`, `dependencies` `['llm']` or the typed error's own)
+and raises `RunParked`, which each tail RETURNS as the same parked outcome a
+parked read has (`run.parked_outcome`), so the chat's END frame still clears
+the spinner. A turn parks **only when its persisted record ends in the unsent
+request**, the one shape `agent.iter(None, message_history=…)` re-sends; a
+transient error out of a non-read TOOL leaves a response whose calls were
+executing, which cannot be re-entered without re-running them, so it keeps the
+FAILED landing. `orchestration._drive_tail` is the one tail driver for read and
+turn resumes: the request is re-sent, nothing is copied (no duplicated
+operator turn, no re-spent earlier turn), and a second outage on a resumed run
+parks in place again. A parked chat lane disables the composer
+(`awaiting_resume`), its notice reads `paused — <dependency> is down since
+<t>; retrying` (no time when `dependency_probe` has no down row), and closing
+the lane cancels the wait (`STOPPED`, park cleared, transcript kept).
+
+Runs with no landing tail keep their unit-level DOWN path:
+
+| Run (no landing tail) | Entry | Its DOWN path |
+|---|---|---|
+| Inbox triage | `run.ingest_and_propose` | the dispatcher's transient release of the work item (`work_item.not_before`) |
+| Coach | `run.run_coach` | the heartbeat's next occurrence |
+| Steward | `steward.run_document` | the heartbeat's next occurrence |
+| Wiki repair | `wiki_agent.run_repair` | the heartbeat's next occurrence |
+| Reflection | `reflection._reflect` | the next closed conversation reflects again |
+| Reflection episode | `reflection._propose_episode` | the startup audit/reflection sweep |
+| Routing recommendation | `orchestrator.recommend` | the operator asks again; nothing is lost |
+| Consult sub-run | `tools.consult_agent` | not a `_run_live` run: the outage re-raises and the ASKER parks |
+
+Every other `land_session(failed=True)` site is a semantic landing, reached
+only after the transient branch parked: `run._run_live` (a no-tail run, or a
+record that cannot be re-entered), `orchestration._fail`,
+`orchestration.resume_parked_session`, `orchestration.resume_parked_read`,
+`orchestration.resume_consult_wait`, `orchestration.resume_task_wait`,
+`orchestration._finish_answered_resume`, `orchestration._decline_continue`
+(the operator declined), and `nerve_gateway._close_conversation_for_key` (the
+operator closed a failed execution). `tests/test_turn_parking.py` walks the
+source against both lists.
+
+**One curve, no limits, and the loud rule.** Every parked surface waits
+`min(60 s * 2^n, cap)` after its n-th transient failure
+(`contract.retry_backoff_seconds`), the cap being
+`CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600): a session resume
+(`pending_resume.not_before`, every kind), an approved execution
+(`retry_state.not_before`), a task re-run, a ledger item (`work_item.not_before`)
+and an ingest job. The recurring sweep offers only DUE units, in SQL, on all
+three of its worklists. There is **no attempt limit**: a unit parked on a DOWN
+dependency retries for as long as the outage lasts, and DOWN never promotes
+anything to FAILED (the operator's ruling, 2026-10-27). The three limits
+(`CC_RESUME_RETRY_LIMIT`, `CC_EXECUTION_RETRY_LIMIT`, `CC_TASK_RETRY_LIMIT`)
+and the events `session.resume_exhausted`, `proposal.execution_exhausted` and
+`task.run_exhausted`, with the operator items they raised, are gone; a stale
+key left in a deployment's `.env` is ignored with one warning at startup. **A
+probe-gated skip spends nothing**: the sweep gates each unit on every
+dependency it recorded, plus `llm` where its re-drive is a model turn, and a
+skip changes neither `attempts` nor `not_before`. The loudness the limits used
+to give comes from `CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3): a unit that has
+failed that many times while every dependency it recorded probes up (a revoked
+key answering 403, a firewall deny) is listed by
+`repo.units_failing_despite_probe` and reported once per unit id by the sweep
+as `retry.failing_despite_probe`; it keeps retrying. Agent work is dispatched
+detached and never awaited, so a tick returns at once.
+
+**A restart lands nothing FAILED.** The lifespan in `api/app.py` runs, before
+anything new runs: (1) `orchestration.land_orphans_at_startup`, which lands
+each RUNNING session by what it owes (`repo.park_orphaned_sessions`): a killed
+resume back to `AWAITING_RESUME` due now (recognised only when its
+`pending_resume` call is still the record's unanswered tail); a killed task
+run's task back to `ASSIGNED` with `retry_state.kind = 'restart'`, due now and
+re-run fresh whatever its age, its transcript closed `STOPPED` with the reason
+`process restarted; re-run queued as a new session of task <id>` (never a
+mid-turn resume: a kill during tool execution may have fired the tool); a chat
+lane by its record's tail (a finished turn → `AWAITING_OPERATOR`, an unsent
+request → `AWAITING_RESUME` kind `turn` due now, unanswered calls → `DONE` with
+`session.turn_lost`); anything else `STOPPED`. A restart-closed run that cannot
+be re-entered is refused by the Resume lever and counts as finished for whoever
+waits on it. (2) `routes.startup_task_sweep` re-parks a sessionless
+`IN_PROGRESS` task the same way and relaunches a never-started `ASSIGNED` one.
+(3) the ledger reclaim (`CLAIMED` → `UNPROCESSED`); then the loops; then the
+background `resume_sweep`. `Dispatcher.start` no longer sweeps sessions at all
+(a run in a live process is alive). Every `EXECUTING` proposal parks
+`RETRY_PENDING` with `retry_state.interrupted` (merged: a retry's
+known-complete prefix is kept; a fresh execution is seeded at action 0) and
+`proposal.execution_interrupted`; no sweep moves it, only the operator's retry
+or a dismiss. **That hold is an INTERIM, not the desired end state** (the
+operator, 2026-10-27): the end state is reconciliation, where the Executor's
+record of the in-flight action is enough to ask the service whether it landed
+(was the Jira issue created?) and resume past it or re-run it with no operator
+click. Not built; it is in the epic's deferred work (DL-188).
+
+**An embedder outage parks graph writes.** Nothing lands without its vector.
+`neo4j_writer.embed` raises `contract.EmbedderDown` before anything is written;
+it returns `None` only for empty text, a wrong-width vector is a loud semantic
+`EmbedWidthError`, and there is no second embedder to fall back on. A gated
+curation write parks `RETRY_PENDING` on `['graph', 'embedder']` through the
+Executor's typed classification (`ExecutionFailed.transient` and
+`.dependencies`, read before the text classifier). The operator's direct write
+(`routes._curate`, behind the Graph panel) is refused `503 {error: 'embedder
+down', dependency: 'embedder'}` and writes nothing; the panel shows the
+refusal and keeps the unsaved form filled, so the write is one click once the
+embedder is back. The dispatcher's embedder calls (the semantic freeze, the
+item and intent vectors behind the pending-proposals context) no longer fail
+open: an outage releases the claimed item transient with
+`work_item.dependencies = ['embedder']` and it is not run unguarded. The ingest
+worker reads `dependency_probe` before claiming: `graph` down takes nothing,
+`embedder` down takes only the bolt-only deletions.
+
+**What the operator sees.** *The waiting section.* `decisions.list` carries a
+second list, `waiting`: the `RETRY_PENDING` proposals, oldest first. It is not
+part of `proposals`, and the "needs your decision" badge does not count it (the
+decision is made). Each waiting row, and `GET /proposals/{id}`, carries a
+`waiting` block from `routes.annotate_gate_facts` (null for every other
+status): `dependencies`, `down_since` (the earliest recorded down among them),
+`attempts`, `next_retry`, `interrupted`, `completed_actions`,
+`failing_despite_probe` and `last_error`. The cockpit renders three states:
+*approved — waiting on <dependencies> (down since <t>), retry <k> at <t>*,
+*interrupted by a restart; retry or dismiss*, and *failing despite a healthy
+<dependency>: <last_error>*. **Dismiss accepts `RETRY_PENDING` as well as
+`AWAITING_HUMAN`** and withdraws the EXECUTION, not the decision: one
+SQL-guarded transition (`repo.withdraw_proposal_if_open`, a conditional update
+returning the prior status, the way the two claims are), so a dismiss racing
+`claim_proposal_retry` cannot both withdraw and execute. The proposal goes
+`WITHDRAWN` with its `retry_state` kept, folds are released, the drafter's
+session is closed and never resumed, and the event is a distinct
+`proposal.execution_dismissed {proposal, completed_actions, actions_total}`
+(the approval stands on the log, so there is no second `proposal.decided`),
+emitted before the task resolution it authorises. The task resolves **FAILED**,
+never DONE: *operator withdrew the waiting execution; <k> of <n> actions had
+landed*. The `AWAITING_HUMAN` dismiss keeps its DONE "no action needed".
+
+*The outages API.* `GET /api/outages` (`api/outages.py`; no auth dependency,
+access is the private network) returns `{dependencies: [...]}` for every name
+in `DEPENDENCIES`, each `{name, state, checked_at, down_since, waiting:
+{sessions, proposals, tasks, work_items, ingest_jobs}, interrupted, failing:
+[{kind, id, attempts, last_error}], total}`; `state` is `up`, `down` or n/a for
+`local`. One SQL statement (`repo.parked_unit_counts`, built by
+`_parked_units_sql`, also behind the sweep's probe of the queues) counts the
+parked units: a unit recorded on two dependencies counts once under each, a
+record with none counts under `llm`, an interrupted proposal counts under
+`interrupted` and not under `waiting`, a ledger item or ingest job counts only
+while its `not_before` is ahead. `failing` is
+`repo.units_failing_despite_probe(retry_loud_after_attempts)` bucketed under
+each unit's dependencies; `total` is every waiting unit plus the interrupted.
+`POST /api/outages/{name}/retry` (body `{include_interrupted: false}`) is the
+operator's retry-now: (1) `outage.retry_requested {dependency,
+include_interrupted, actor}` is written FIRST, because it authorises a
+re-drive; (2) that one dependency is probed and persisted through the sweep's
+own `orchestration.probe_and_record`; (3) only if it is up,
+`retry_sweep(only=name, ignore_not_before=True, include_interrupted=…)` drives
+the units whose park recorded it (backoff ignored; agent work detached), and
+the ledger items and ingest jobs, which the sweep never drives itself, are
+brought due (`repo.pull_queued_units_due`) for their own loops. **Interrupted
+proposals are driven only on the explicit flag** and resume from their kept
+cursor. The answer is `{probe: 'up'|'down', driven: {...}}`, all zero when
+down; an unknown name is 404 and `local` is 400. The same two operations are
+the `/ws` RPC methods `outages.list` and `outages.retry` (`{dependency,
+includeInterrupted}`). The event is emitted by the route, not by a heartbeat
+action, so it is not in the heartbeat material allowlist.
+
+*The banner.* `web/src/features/outages/` (`useOutages`, `OutageBanners`)
+mounts in `App.tsx` beside the other persistent banners: one banner per DOWN
+dependency (its name, how long, the items waiting with the per-kind breakdown
+and the interrupted count on expand, and **Retry now**) and one per dependency
+with work failing against a healthy one. The relay pushes every durable event
+as `cc.<kind>`; the list refreshes on load, every 30 s, and on thirteen pushes:
+`cc.dependency.down`, `cc.dependency.up`, `cc.session.resume_parked`,
+`cc.proposal.execution_parked`, `cc.proposal.execution_interrupted`,
+`cc.task.run_parked`, `cc.work.released`, `cc.retry.failing_despite_probe`, and
+the five that take work back out (`cc.session.resume_retried`,
+`cc.proposal.execution_retried`, `cc.proposal.execution_dismissed`,
+`cc.task.run_retried`, `cc.outage.retry_requested`). The waiting pane's button
+is scoped honestly, because the RPC retries the whole dependency: **Retry
+waiting work on <dependency>**, and for an interrupted proposal **Retry
+interrupted work on <dependency>**, which sends `includeInterrupted` only after
+a confirm that a prefix of its actions may already have landed.
+
+**Schema, events and settings.** Additive in `schema.sql` (applied by the
+updater's schema phase at release, never at process start): the table
+`dependency_probe` and the columns `work_item.dependencies` and
+`graph_ingest_job.dependencies`. Events: `dependency.down`, `dependency.up`,
+`proposal.execution_interrupted`, `proposal.execution_dismissed`,
+`retry.failing_despite_probe`, `outage.retry_requested`, `session.turn_lost`.
+Settings: `CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600) and
+`CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3); the three limits are gone.
+
 ## 5. The cockpit (`web/`)
 
 A vendored fork of openclaw-nerve (React client, Hono server); provenance and
@@ -904,7 +929,8 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
   `attention`, `auth`, `beads`, `charts`, `chat`, `command-palette`, `connect`,
   `dashboard`, `decisions`, `file-browser`, `gates` (the gate-override hooks and
   the capabilities view), `graph`, `graph-verifications`,
-  `kanban`, `loe`, `markdown`, `memory`, `notifications`, `sessions`,
+  `kanban`, `loe`, `markdown`, `memory`, `notifications`, `outages` (the
+  outage banners, see [The outage doctrine](#the-outage-doctrine)), `sessions`,
   `settings`, `skills`, `sources`, `systems`, `tts`, `voice`, `workspace`.
 - **Two channels to the API.** (1) Every `cc-*` route is a thin HTTP proxy:
   `fetch(config.gatewayUrl + "/api" + path)`. (2) Chat, sessions and all live

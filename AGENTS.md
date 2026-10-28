@@ -170,8 +170,9 @@ where the story is gone.
   `drain-window`, the graph verification sweep, the Jira hygiene task) is an
   operator click on the event log; the table default is `enabled false`.
   The only internal sweep seeded enabled is `retry-sweep` (outage
-  convergence — a strict no-op when nothing is parked, it re-drives only
-  what was already authorised); `schema.sql` records the deviation where it
+  convergence — a strict no-op when nothing is parked and no dependency is
+  recorded down, it re-drives only what was already authorised, and its only
+  other writes are the probe results it records on a state change); `schema.sql` records the deviation where it
   is seeded. Seeding another enabled schedule means adding it to this list
   in the same change.
 - **Task creation is a trigger, not a write and not a gate exemption.** Any

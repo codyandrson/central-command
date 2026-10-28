@@ -455,10 +455,11 @@ async def _land_run_failure(task: dict, exc: BaseException) -> bool:
     transient errors the retry machinery would have re-run had it been asked.
 
     NOT used by `orchestration.retry_parked_task`: a retry carries attempt
-    bookkeeping and an exhaustion promotion this landing knows nothing about, so
-    it keeps its own handler and calls `_run_assigned_task_inner` directly.
-    Parking here from underneath it would reset `attempts` to 1 every round —
-    a retry loop that never exhausts.
+    bookkeeping this landing knows nothing about (the attempts that grow its
+    backoff along the one curve), so it keeps its own handler and calls
+    `_run_assigned_task_inner` directly. Parking here from underneath it would
+    reset `attempts` to 1 every round — the backoff would never grow past its
+    first step.
     """
     from central_command.api import orchestration
 
@@ -475,7 +476,9 @@ async def _land_run_failure(task: dict, exc: BaseException) -> bool:
     # A FAILED child still resumes its waiting orchestrator — the failure
     # IS the result the loop needs to decide on (D7 phase 2). A PARKED
     # child, by contrast, has simply not resolved yet, so the parent is
-    # told nothing until it converges (or exhausts, which lands here).
+    # told nothing until it converges (there is no exhaustion: a DOWN
+    # dependency retries for as long as the outage lasts; a semantic failure
+    # lands here at once).
     orchestration.spawn_child_resolved(task)
     return False
 

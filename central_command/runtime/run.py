@@ -102,7 +102,7 @@ async def _run_live(
     `task_id` links that session to the task HERE, at run start, rather than at
     the landing paths — a run that dies on its first turn used to leave the task
     with no session at all, and `operator_item.session_id` is NOT NULL, so the
-    slice-4 exhaustion promotion had nothing to hang the operator's item on.
+    operator item a task escalation raises had nothing to hang on.
     Link once the session row exists (the FK is real) and every later outcome
     just overwrites the same column.
 

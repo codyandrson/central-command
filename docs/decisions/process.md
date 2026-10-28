@@ -1447,7 +1447,8 @@ hygiene, and how the test suite itself must be written. See
   explicit retry machinery. Attempt-exhaustion promotion to FAILED for a
   DOWN dependency was RETIRED by FR-40: nothing terminal comes from DOWN (build
   owed, PRD §6.1 item 4).
-- **Amended 2026-10-27 (epic-outage-doctrine story 4):** the build is done. The
+- **Amended 2026-10-27 (epic-outage-doctrine story 4):** the build is done, and
+  the rung-3 promotion this rule's "Why" calls retired is retired AS BUILT. The
   three attempt limits (resume, execution, task) and their exhaustion
   promotions are removed outright, by the operator's ruling of 2026-10-27:
   DOWN never promotes anything to FAILED, and a parked unit retries for as
@@ -1786,3 +1787,12 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_restart_landing.py::test_a_restart_lands_nothing_failed`, `tests/test_outage_requeue.py::test_the_orphan_sweep_lands_the_task_not_just_the_session`
 - **Source:** code comment `central_command/db/repo.py` (`park_orphaned_sessions`, `park_interrupted_executions`); _bmad-output/initiative-central-command/deferred-work.md (reconciliation, kept privately)
 - **Supersedes:** DL-031
+
+### DL-189 — Outage doctrine: nothing is terminal from DOWN; the operator sees a banner, not a failure
+
+- **Status:** active
+- **Date:** 2026-10-27
+- **Rule:** (recorded here) A DOWN dependency never lands anything terminal: reads, model turns, approved executions, tasks, mail items and graph ingest jobs park where they stopped and retry on one backoff curve, with no attempt limit, until the dependency is back; a NO (the dependency answered and refused) still lands FAILED at once. The operator sees a banner per down dependency with its count of waiting work and a retry-now, never a failed run. Only a unit failing against a healthy probe is reported (after `retry_loud_after_attempts`), and it keeps retrying.
+- **Why:** PRD FR-40 (the outage doctrine) and FR-34 (an embedder outage is a graph-write outage; embeddings never fall back to another model, and writes park rather than fail open). They retire the RUNTIME-047 reading that a live read degrades ("proceed without it", never wedge), the attempt-exhaustion promotion of DL-172, and the semantic-freeze fail-open. The operator's standard for every park (2026-10-27), in his words: "I expect these processes to resume once the service is available again, with no long term evidence of this outage (other than the immediate existence of the banner, and any logs). Once completed, the session/run should result in the same results as if the service was never offline." That is why a parked turn re-sends its unsent request rather than re-running (no duplicated operator turn, no re-spent tool batch), why a restart lands nothing FAILED (DL-188), and why the one concession, an interrupted execution held for the operator, is recorded as an INTERIM with reconciliation as the end state. The ruling record is kept privately (PRD §0); this entry stands on its own.
+- **Enforced:** test: `tests/test_outage_doctrine.py::test_a_down_graph_search_parks_the_task_run_mid_turn`, `tests/test_turn_parking.py::test_a_chat_turn_whose_model_is_down_parks_and_lands_the_reply`, `tests/test_outage_backoff.py::test_a_task_backs_off_and_never_exhausts`, `tests/test_embedder_outage.py::test_a_create_node_proposal_parks_retry_pending_and_writes_nothing`
+- **Source:** docs/PRD.md FR-34, FR-40; docs/ARCHITECTURE.md "The outage doctrine"; docs/superpowers/specs/2026-07-31-outage-equivalence-design.md (as-built note)
