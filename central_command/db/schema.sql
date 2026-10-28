@@ -1532,3 +1532,23 @@ select distinct g.agent_id, 'task-create', 'seed:task-create-all'
    and a.role <> ''
    and a.id <> 'auditor'
 on conflict (agent_id, pack) do nothing;
+
+-- Outage doctrine story 3 (epic-outage-doctrine, 2026-10-27). The persisted
+-- result of the retry sweep's per-dependency probes: one row per dependency
+-- name (`contract/dependencies.DEPENDENCIES`), written ONLY when the state
+-- CHANGES (a steady state writes nothing, no debounce). `down_since` is the
+-- first sweep that saw it down in this stretch and is cleared on recovery.
+-- A missing row reads as up. Additive and idempotent, like everything here.
+create table if not exists dependency_probe (
+    name        text primary key,
+    state       text not null check (state in ('up', 'down')),
+    checked_at  timestamptz not null default now(),
+    error       text,
+    down_since  timestamptz
+);
+
+-- What a parked unit waits on, where the park lives in a column (the other
+-- park records carry `dependencies` inside their own jsonb). A row with none
+-- reads as ['llm'], the dependency every park waited on before this column.
+alter table work_item add column if not exists dependencies jsonb;
+alter table graph_ingest_job add column if not exists dependencies jsonb;

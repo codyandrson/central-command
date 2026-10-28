@@ -103,6 +103,19 @@ def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
         assert due_only is True, "the sweep must respect the backoff"
         return list(tasks)
 
+    table: dict[str, dict] = {}
+
+    async def _states():
+        return dict(table)
+
+    async def _record(name, up, error=None):
+        before = table.get(name)
+        table[name] = {"name": name, "state": "up" if up else "down",
+                       "error": error, "down_since": datetime.now(timezone.utc)}
+        return before
+
+    monkeypatch.setattr(repo, "dependency_probe_states", _states)
+    monkeypatch.setattr(repo, "record_dependency_probe", _record)
     monkeypatch.setattr(repo, "sessions_awaiting_resume", _sessions)
     monkeypatch.setattr(repo, "sessions_with_orphaned_resume", _orphans)
     monkeypatch.setattr(repo, "list_proposals", _proposals)
@@ -171,7 +184,8 @@ async def test_a_gated_skip_never_calls_the_driver(monkeypatch):
     assert [s["id"] for s in result["skipped_gated"]] == ["sess_gated", "task_gated"]
     assert {s["dependency"] for s in result["skipped_gated"]} == {probes.LLM}
     assert result["probes"] == {probes.LLM: False}
-    assert rec.kinds == ["touch:last_fired"]
+    # The edge is the only thing written: one dependency.down, once.
+    assert rec.kinds == ["touch:last_fired", "dependency.down"]
 
 
 @needs_pg
@@ -225,7 +239,7 @@ async def test_a_tick_that_skipped_and_errored_is_recorded(monkeypatch):
     proposal whose retry raised: the firing lands on the log carrying both."""
     rec = _Recorder(monkeypatch)
     _no_touch(monkeypatch, rec)
-    _no_probes(monkeypatch, llm=False, n8n=True)
+    _no_probes(monkeypatch, llm=False, jira=True)
     _empty_worklists(
         monkeypatch, sessions=["sess_gated"], proposals=[{"id": "prop_boom"}]
     )
@@ -251,39 +265,40 @@ async def test_a_tick_that_skipped_and_errored_is_recorded(monkeypatch):
     assert len(result["errors"]) == 1
     assert result["errors"][0]["id"] == "prop_boom"
     assert "500" in result["errors"][0]["error"]
-    assert rec.kinds == ["touch:last_fired", "heartbeat.completed"]
+    assert rec.kinds == ["touch:last_fired", "dependency.down", "heartbeat.completed"]
 
 
 # --- 7: the gating map ---------------------------------------------------------
 
 
-def test_the_capability_gating_map_is_by_prefix():
-    """A retry's gate is the system the FAILED capability talks to."""
-    assert probes.dependency_for_capability("jira.set_due_date") == probes.N8N
-    assert probes.dependency_for_capability("graph.add_episode@v1") == probes.GRAPHITI
-    assert probes.dependency_for_capability("litellm.add_model") == probes.LITELLM
-    # task.create's handler is a local DB write + an agent run — its retry
-    # gates on the LLM, not n8n (plan error, corrected in review).
-    assert probes.dependency_for_capability("task.create") == probes.LLM
-    # UNKNOWN is not DOWN: no probe defined means attempt anyway — the attempt
-    # is the probe, bounded by the attempt budget.
-    assert probes.dependency_for_capability("charter.update") is None
-    assert probes.dependency_for_capability(None) is None
-    assert probes.dependency_for_capability("brand.new_capability") is None
-    # Every mapped dependency must have a probe, or the map would gate on
-    # something that always answers "healthy".
-    for dependency in probes.CAPABILITY_DEPENDENCY.values():
-        assert dependency in probes.PROBES
+def test_the_capability_gating_map_is_by_capability():
+    """A retry's gate is the systems the FAILED capability talks to — a TUPLE
+    (story 3: a graph write embeds, so it needs the graph AND the embedder)."""
+    from central_command.contract.dependencies import (
+        PROBED, dependencies_for_capability as deps_of,
+    )
+
+    assert deps_of("jira.set_due_date") == (probes.JIRA,)
+    assert deps_of("graph.add_episode@v1") == (probes.GRAPH, probes.EMBEDDER)
+    assert deps_of("litellm.add_model") == (probes.LITELLM,)
+    assert deps_of("mail.send") == (probes.N8N,)
+    # `local` is never probed and never gated; the unknown reads as local too.
+    assert deps_of("charter.update") == ("local",)
+    assert deps_of(None) == ("local",)
+    assert deps_of("brand.new_capability") == ("local",)
+    # Every probed name must have a probe, or the map would gate on something
+    # that always answers "healthy".
+    assert set(probes.PROBES) == set(PROBED)
 
 
-async def test_a_jira_proposal_gates_on_n8n_not_on_the_llm(monkeypatch):
+async def test_a_jira_proposal_gates_on_jira_not_on_the_llm(monkeypatch):
     """The blocked call is the EXECUTOR's, so the LLM's health is irrelevant to
     it — and consulting the LLM probe costs money, so it must not be asked. (The
     post-execution resume IS agent work, but slice 2 parks that leg on its own.)
     """
     _Recorder(monkeypatch)
     _no_touch(monkeypatch)
-    asked = _no_probes(monkeypatch, n8n=False)  # the llm probe would raise
+    asked = _no_probes(monkeypatch, jira=False)  # the llm probe would raise
     _empty_worklists(monkeypatch, proposals=[{"id": "prop_jira"}])
 
     async def _load(proposal_id):
@@ -301,8 +316,8 @@ async def test_a_jira_proposal_gates_on_n8n_not_on_the_llm(monkeypatch):
 
     out = await fire(SWEEP_SCHEDULE)
 
-    assert asked == [probes.N8N], "only the failed capability's system is probed"
-    assert [s["dependency"] for s in out["result"]["skipped_gated"]] == [probes.N8N]
+    assert asked == [probes.JIRA], "only the failed capability's system is probed"
+    assert [s["dependency"] for s in out["result"]["skipped_gated"]] == [probes.JIRA]
 
 
 async def test_probes_are_asked_once_per_sweep(monkeypatch):
@@ -447,7 +462,8 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
 
     # The dependencies are back.
     down["on"] = False
-    _no_probes(monkeypatch, llm=True, n8n=True, graphiti=True, litellm=True)
+    _no_probes(monkeypatch, llm=True, n8n=True, graph=True, embedder=True,
+               jira=True, litellm=True)
     monkeypatch.setattr(
         routes, "resolve_model", aresolve(lambda *a, **k: _advice_model()),
     )

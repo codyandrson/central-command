@@ -21,6 +21,7 @@ from central_command.contract import (
     Action, DependencyDown, Evidence, Proposal, Reversibility, TRANSIENT,
     classify_failure, validate_action_args,
 )
+from central_command.contract import dependencies as _dependencies
 from central_command.contract.dependencies import TOOL_DEPENDENCY, is_parkable, parkable_reads
 from central_command.contract.failures import TRANSIENT_STATUS
 from central_command.integrations import confluence, forge, graphiti, jira, litellm_credstore
@@ -915,7 +916,7 @@ def _raise_if_down(e: BaseException, dependencies: tuple[str, ...] | None = None
 
 # Stamped on the ORIGINAL exception a no-tail run re-raises, so an inline
 # sub-run that fails (a consult's specialist) can tell its asker what was down.
-_DEPENDENCIES_ATTR = "_cc_read_dependencies"
+_DEPENDENCIES_ATTR = _dependencies.DEPENDENCIES_ATTR
 
 
 def _park_read_or_reraise(ctx, down: DependencyDown, args: dict):

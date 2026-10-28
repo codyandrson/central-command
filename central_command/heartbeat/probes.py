@@ -11,26 +11,42 @@ called, so nothing can spend one. Attempts are spent only when the dependency
 LOOKED healthy and the real call still failed — genuine flappiness, which is
 what the budget is for.
 
-**Cheap, and only when needed.** One probe per dependency per sweep
-(`ProbeCache`), and a dependency nothing is parked on is never probed at all —
-so the common tick, with nothing parked, makes zero network calls.
+**Cheap.** One probe per dependency per sweep (`ProbeCache`), run CONCURRENTLY
+(`ProbeCache.warm`), and a dependency nothing is parked on and nothing records
+down is never probed at all — so the common tick makes zero network calls. Every
+probe is a raw, UNAUTHENTICATED request (operator ruling 2026-10-27): the sweep
+never spends a credential or a provider call asking whether a service is there.
+A jira / confluence / forge probe is a bare GET of the configured instance's
+status route; ANY answer short of the transient statuses (the same set the
+failure taxonomy uses, 403 included) means the instance is up. Calendar and mail
+ride the n8n façade, so they are asked of its health.
 
 **The LLM probe is the one that costs anything** (a 1-token completion, fractions
 of a cent). `litellm_check_model_health` is deliberately NOT used: its own
 docstring says it makes a real provider call PER REGISTERED MODEL, which is a
 health check that costs more than the work it guards.
 
-Endpoints verified against the live Pi stack on 2026-07-31 (read-only GETs):
-  n8n       GET  http://127.0.0.1:5678/healthz          -> 200 {"status":"ok"}
-  graphiti  TCP  the bolt port of CC_NEO4J_URL          (since 2026-10-04: graphiti-core
-            runs in-process, so the graph's dependency is Neo4j itself)
-  litellm   GET  http://127.0.0.1:4000/health/liveliness -> 200 "I'm alive!"
+Endpoints (the first three verified against the live Pi stack on 2026-07-31):
+  n8n        GET  http://127.0.0.1:5678/healthz          -> 200 {"status":"ok"}
+  calendar   the same n8n health (the façade host)
+  graph      TCP  the bolt port of CC_NEO4J_URL          (since 2026-10-04: graphiti-core
+             runs in-process, so the graph's dependency is Neo4j itself)
+  litellm    GET  http://127.0.0.1:4000/health/liveliness -> 200 "I'm alive!"
+  llm        POST a 1-token completion on the default alias
+  embedder   POST one embedding of one word on CC_EMBED_ALIAS
+  jira       GET  <CC_JIRA_BASE_URL>/status    (unauthenticated)
+  confluence GET  <CC_CONFLUENCE_BASE_URL>/status
+  forge      GET  each CC_FORGE_INSTANCES base url; up when any answers
+  sandbox    GET  CC_SANDBOX_RUNNER_URL (no /health route; a bare GET proves it
+             is listening, as `api/systems.py` does)
 Each is derived from the SAME setting the real client uses, so a redeployment
-that moves a service moves its probe with it.
+that moves a service moves its probe with it. A service that is NOT configured
+(no Jira URL, no forge instance, demo mode for the model chain) has nothing to
+wait for and probes UP.
 
-UNKNOWN is not DOWN: a dependency with no probe defined (`dependency_for_
-capability` returning None) is attempted anyway — there the attempt IS the
-probe, bounded by the budget.
+The names are `contract/dependencies.DEPENDENCIES` (without `local`, which is
+never probed); `PROBES` is keyed by exactly those, pinned by a parity test.
+There is no UNKNOWN: a name with no probe cannot be recorded by any park.
 
 Tier note: this module imports config, httpx and the standard library and
 nothing else. It must stay that way — `heartbeat/` may never reach the gate
@@ -53,38 +69,25 @@ log = logging.getLogger(__name__)
 # sweep's purposes, down — and the sweep's own cadence is the schedule row.
 PROBE_TIMEOUT_SECONDS = 5.0
 
-# The dependency names. Strings rather than an enum so a result dict is JSON.
+# The dependency names (the vocabulary lives in `contract/dependencies.py`,
+# which this module may not import; a parity test keeps the two equal). Strings
+# rather than an enum so a result dict is JSON.
 LLM = "llm"
-N8N = "n8n"
-GRAPHITI = "graphiti"
+EMBEDDER = "embedder"
+GRAPH = "graph"
 LITELLM = "litellm"
+N8N = "n8n"
+CALENDAR = "calendar"
+JIRA = "jira"
+CONFLUENCE = "confluence"
+FORGE = "forge"
+SANDBOX = "sandbox"
 
-# Which system a FAILED capability's retry depends on. Keyed by the capability's
-# prefix (`jira.set_due_date` -> `jira`), since that is what the Executor's
-# dispatch table is organised by.
-#
-# `charter.*` is deliberately absent: it writes to Postgres, which the sweep is
-# already talking to — no probe, attempt anyway.
-#
-# `task.*` gates on the LLM, not n8n: its executor handler
-# (`routes.create_and_run_task`) is a local DB write plus an agent run — the
-# slice-5 plan said n8n and the plan was WRONG about where that handler's
-# dependency lives (implementer flag, corrected in review 2026-07-31).
-CAPABILITY_DEPENDENCY: dict[str, str] = {
-    "jira": N8N,
-    "task": LLM,
-    "graph": GRAPHITI,
-    "litellm": LITELLM,
-}
-
-
-def dependency_for_capability(capability: str | None) -> str | None:
-    """The dependency a retry of `capability` needs, or None for "no probe
-    defined — attempt anyway". Tolerates the `@version` suffix and None."""
-    if not capability:
-        return None
-    prefix = str(capability).split("@", 1)[0].split(".", 1)[0]
-    return CAPABILITY_DEPENDENCY.get(prefix)
+# A response with one of these statuses is the dependency being unavailable, not
+# answering. The same set as `contract.failures.TRANSIENT_STATUS` (pinned equal
+# by a test), copied because this module may import config, httpx and the
+# standard library only.
+_DOWN_STATUS = frozenset({403, 408, 429, 500, 502, 503, 504, 529})
 
 
 def _root(url: str) -> str:
@@ -100,12 +103,89 @@ async def _get_ok(url: str) -> bool:
     return resp.status_code == 200
 
 
+async def _answers(url: str) -> bool:
+    """An UNAUTHENTICATED GET: any response that is not a transient status means
+    the service is there and talking (a 401 or 404 is an answer). Raises on a
+    transport failure — the cache reads a raise as DOWN."""
+    async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
+        resp = await client.get(url)
+    return resp.status_code not in _DOWN_STATUS
+
+
 async def probe_n8n() -> bool:
     """The n8n façade host (the email and calendar façades ride it)."""
     return await _get_ok(_root(settings.email_facade_url) + "/healthz")
 
 
-async def probe_graphiti() -> bool:
+async def probe_calendar() -> bool:
+    """The calendar façade is a webhook on the same n8n host; its health IS the
+    host's. (When the native Exchange client is configured the façade routes
+    there instead, and this still asks n8n — a stated limit, see the epic.)"""
+    return await _get_ok(_root(settings.calendar_facade_url) + "/healthz")
+
+
+async def probe_jira() -> bool:
+    """The configured Jira instance's status route, unauthenticated. Unset means
+    nothing to wait for."""
+    if not settings.jira_base_url:
+        return True
+    return await _answers(settings.jira_base_url.rstrip("/") + "/status")
+
+
+async def probe_confluence() -> bool:
+    if not settings.confluence_base_url:
+        return True
+    return await _answers(settings.confluence_base_url.rstrip("/") + "/status")
+
+
+async def probe_forge() -> bool:
+    """Every configured forge instance is asked at once; the forge is up when
+    ANY answers (a unit parked on one instance re-parks cheaply if it was the
+    other that fell). No instance configured: nothing to wait for."""
+    raw = [e.split(":", 1)[1].strip() for e in settings.forge_instances.split(",")
+           if "=" in e and ":" in e.split("=", 1)[1]]
+    if not raw:
+        return True
+
+    async def _one(url: str) -> bool:
+        try:
+            return await _answers(url)
+        except Exception:  # noqa: BLE001 — an unreachable instance is one "no"
+            return False
+
+    return any(await asyncio.gather(*(_one(u) for u in raw)))
+
+
+async def probe_sandbox() -> bool:
+    """The sandbox runner: it has no /health route (api/systems.py does the same
+    bare GET), so reaching it at all is the proof."""
+    if not settings.sandbox_runner_url:
+        return True
+    async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
+        await client.get(settings.sandbox_runner_url)
+    return True
+
+
+async def probe_embedder() -> bool:
+    """One embedding of a one-word input on the configured alias, through the
+    same base URL and key the graph's embedder uses. Demo mode has no provider;
+    an unconfigured live one is DOWN. Only a transient status counts as down."""
+    if settings.demo_mode:
+        return True
+    base_url, api_key = settings.llm_base_url, settings.llm_api_key
+    if not base_url or not api_key:
+        return False
+    async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
+        resp = await client.post(
+            base_url.rstrip("/") + "/v1/embeddings",
+            headers={"Authorization": f"Bearer {api_key}",
+                     "content-type": "application/json"},
+            json={"model": settings.embed_alias, "input": "ping"},
+        )
+    return resp.status_code not in _DOWN_STATUS
+
+
+async def probe_graph() -> bool:
     """The knowledge graph: graphiti-core runs in this process, so what a
     retried `graph.*` action needs is Neo4j's bolt port (curation writes over
     it; an add_episode only enqueues, and the ingest worker retries its own
@@ -165,44 +245,71 @@ async def probe_llm() -> bool:
 
 PROBES = {
     LLM: probe_llm,
-    N8N: probe_n8n,
-    GRAPHITI: probe_graphiti,
+    EMBEDDER: probe_embedder,
+    GRAPH: probe_graph,
     LITELLM: probe_litellm,
+    N8N: probe_n8n,
+    CALENDAR: probe_calendar,
+    JIRA: probe_jira,
+    CONFLUENCE: probe_confluence,
+    FORGE: probe_forge,
+    SANDBOX: probe_sandbox,
 }
 
 
 class ProbeCache:
     """One answer per dependency per sweep.
 
-    Deliberately lazy: nothing is probed until a parked unit actually gates on
-    it, so a tick with nothing parked makes no network calls at all. A probe
-    that RAISES is a down dependency — an unreachable service is the case the
-    gate exists for, and letting the exception escape would fail the whole
-    sweep instead of deferring one worklist.
+    `warm()` probes a set of names CONCURRENTLY (the sweep calls it once, with
+    every name a waiting unit or a recorded-down row needs), so a sweep over
+    five dependencies costs the slowest probe, not the sum. Nothing is probed
+    that nobody asked about, so a tick with nothing parked and nothing recorded
+    down makes no network calls at all. A probe that RAISES (or times out) is a
+    down dependency — an unreachable service is the case the gate exists for,
+    and letting the exception escape would fail the whole sweep instead of
+    deferring one worklist.
     """
 
     def __init__(self) -> None:
         self._results: dict[str, bool] = {}
+        self._errors: dict[str, str] = {}
 
-    async def healthy(self, dependency: str | None) -> bool:
-        if dependency is None:
-            return True  # UNKNOWN is not DOWN: the attempt is the probe.
-        if dependency in self._results:
-            return self._results[dependency]
+    async def _probe_one(self, dependency: str) -> None:
         probe = PROBES.get(dependency)
-        if probe is None:
+        if probe is None:  # `local`, or a name nothing can record
             self._results[dependency] = True
-            return True
+            return
         try:
-            ok = bool(await probe())
+            ok = bool(await asyncio.wait_for(probe(), PROBE_TIMEOUT_SECONDS + 1))
+            if not ok:
+                self._errors[dependency] = "probe answered unhealthy"
         except Exception as e:  # noqa: BLE001 — an unreachable probe IS the signal
             log.info("probe %s failed: %s", dependency, e)
             ok = False
+            self._errors[dependency] = (str(e) or type(e).__name__)[:300]
         self._results[dependency] = ok
-        return ok
+
+    async def warm(self, dependencies) -> None:
+        """Probe every not-yet-probed name in `dependencies`, all at once."""
+        todo = [d for d in dict.fromkeys(dependencies or ())
+                if d and d not in self._results]
+        if todo:
+            await asyncio.gather(*(self._probe_one(d) for d in todo))
+
+    async def healthy(self, dependency: str | None) -> bool:
+        if dependency is None:
+            return True
+        if dependency not in self._results:
+            await self._probe_one(dependency)
+        return self._results[dependency]
 
     @property
     def results(self) -> dict[str, bool]:
         """What was probed this sweep, and what it said — for the sweep result,
         so a skipped tick that IS material says which dependency was down."""
         return dict(self._results)
+
+    @property
+    def errors(self) -> dict[str, str]:
+        """Why each DOWN probe said no (an exception's text, or "unhealthy")."""
+        return dict(self._errors)

@@ -712,9 +712,26 @@ async def resume_sweep() -> dict:
 
     retried, still_pending = [], []
     # Oldest first: a queue that starves its oldest entry is not convergence.
+    # Gated on the probes like the recurring sweep (story 3): a startup that
+    # finds the dependency still down leaves the proposal RETRY_PENDING and
+    # spends no attempt — replaying it into a dead service would only re-park
+    # it one attempt older.
+    from central_command.contract.dependencies import gate_names
+    from central_command.heartbeat import probes
+
+    waiting = []
     for prop in reversed(await repo.list_proposals("RETRY_PENDING")):
-        r = await gateway.retry_execution(prop["id"])
-        (retried if r is not None else still_pending).append(prop["id"])
+        row = await repo.load_proposal(prop["id"])
+        waiting.append((prop["id"], gate_names(_proposal_dependencies(
+            (row or {}).get("retry_state") or {}))))
+    cache = probes.ProbeCache()
+    await cache.warm([n for _pid, names in waiting for n in names])
+    for pid, names in waiting:
+        if any([not await cache.healthy(n) for n in names]):
+            still_pending.append(pid)
+            continue
+        r = await gateway.retry_execution(pid)
+        (retried if r is not None else still_pending).append(pid)
 
     tasks_retried, tasks_still_parked = [], []
     for task in await repo.tasks_awaiting_retry(due_only=True):
@@ -759,18 +776,52 @@ async def sweep_settle() -> None:
         await asyncio.gather(*list(_sweep_inflight), return_exceptions=True)
 
 
-# A recorded dependency name → the probe that answers it. `graph` is the
-# graphiti bolt probe; `embedder` has no probe until story 3 of
-# epic-outage-doctrine (`contract/dependencies.py`, which moves this map), so
-# it maps to None — "no probe defined, attempt anyway", the cache's UNKNOWN —
-# and a still-down embedder simply re-parks the read on the attempt.
-_PROBE_FOR_DEPENDENCY = {"graph": "graphiti", "embedder": None}
+async def _record_probe_changes(cache, states: dict[str, dict]) -> list[dict]:
+    """Persist what the probes said and announce only what CHANGED.
+
+    `states` is `dependency_probe` as it stood before the probes ran; a name
+    with no row reads as up. A steady state — still up, or still down — writes
+    nothing and emits nothing (no debounce: the first sweep to see a different
+    answer is the edge). `dependency.down` carries the error the probe gave;
+    `dependency.up` carries how long it was down, from the row's `down_since`,
+    so the banner and the log agree."""
+    errors = getattr(cache, "errors", {}) or {}
+    changes: list[dict] = []
+    for name, up in sorted(cache.results.items()):
+        before = states.get(name) or {}
+        was_up = before.get("state", "up") == "up"
+        if up == was_up:
+            continue
+        error = None if up else errors.get(name) or "probe failed"
+        prior = await repo.record_dependency_probe(name, up, error)
+        down_since = (prior or {}).get("down_since")
+        if up:
+            seconds = None
+            if down_since is not None:
+                seconds = round((datetime.now(timezone.utc) - down_since).total_seconds())
+            payload = {"dependency": name,
+                       "down_since": down_since.isoformat() if down_since else None,
+                       "down_seconds": seconds}
+        else:
+            payload = {"dependency": name, "error": error}
+        await events.emit("dependency.up" if up else "dependency.down",
+                          ref_id=name, payload=payload, actor="system")
+        changes.append({"dependency": name, "state": "up" if up else "down"})
+    return changes
 
 
-def _probe_name(dependency: str | None) -> str | None:
-    if dependency in _PROBE_FOR_DEPENDENCY:
-        return _PROBE_FOR_DEPENDENCY[dependency]
-    return dependency
+def _proposal_dependencies(state: dict) -> tuple[str, ...]:
+    """What a parked execution waits on: the tuple its park recorded, else the
+    failed capability's own (a park written before the record), else the model
+    (a row with none reads as `llm`)."""
+    from central_command.contract.dependencies import dependencies_for_capability
+
+    recorded = state.get("dependencies")
+    if recorded:
+        return tuple(recorded)
+    if state.get("failed_capability"):
+        return dependencies_for_capability(state["failed_capability"])
+    return ("llm",)
 
 
 async def retry_sweep(cache=None) -> dict:
@@ -812,6 +863,7 @@ async def retry_sweep(cache=None) -> dict:
     (tests/test_heartbeat.py). The action is the trigger; this is the lever, the
     same shape as `task.create` calling `routes.create_and_run_task`.
     """
+    from central_command.contract.dependencies import PROBED, gate_names
     from central_command.heartbeat import probes
 
     cache = cache or probes.ProbeCache()
@@ -820,13 +872,15 @@ async def retry_sweep(cache=None) -> dict:
     retried_tasks: list[str] = []
     skipped_gated: list[dict] = []
     errors: list[dict] = []
+    # (unit, id, names it is gated on, driver, landed list, detached)
+    units: list[tuple] = []
 
-    async def _drive(unit: str, unit_id: str, dependency, driver, landed: list,
-                     *, detached: bool = False):
-        # One dependency name, or a TUPLE of them (a parked read waits on all
-        # it recorded): every one must probe up, and the skip names the down.
-        names = dependency if isinstance(dependency, tuple) else (dependency,)
-        down = [d for d in names if not await cache.healthy(_probe_name(d))]
+    async def _drive(unit: str, unit_id: str, names: tuple[str, ...], driver,
+                     landed: list, *, detached: bool = False):
+        # Every dependency the unit recorded (plus the model, when its re-drive
+        # is a model turn) must probe up; the skip names the down ones. `local`
+        # never appears here — `gate_names` drops it.
+        down = [d for d in names if not await cache.healthy(d)]
         if down:
             skipped_gated.append(
                 {"unit": unit, "id": unit_id,
@@ -855,27 +909,29 @@ async def retry_sweep(cache=None) -> dict:
         if out is not None:  # None = someone else holds the claim, or it moved
             landed.append(unit_id)
 
+    # The worklists are READ first and DRIVEN after the probes, so the probes of
+    # every dependency anyone waits on run at once, once.
+    #
     # (a) Sessions parked AWAITING_RESUME — their retry IS an agent run, so
     # it is dispatched, not awaited. Orphans are parked FIRST so this same
     # pass drives them: they are only findable once stale, which is later
     # than the startup sweep can ever see.
     orphaned = await park_orphaned_resumes()
     for sid in await repo.sessions_awaiting_resume():
-        read = _parked_read(await repo.get_session_run_state(sid))
-        if read is not None:
-            # A parked READ waits on EVERY dependency it recorded, plus the
-            # LLM — its resume is a model turn (FR-40).
-            dependencies = (*(read.get("dependencies") or ()), probes.LLM)
-            await _drive("session", sid, dependencies,
-                         lambda sid=sid: resume_parked_read(sid), resumed,
-                         detached=True)
-            continue
-        await _drive("session", sid, probes.LLM,
-                     lambda sid=sid: resume_parked_session(sid), resumed,
-                     detached=True)
+        pending = (await repo.get_session_run_state(sid) or {}).get("pending_resume") or {}
+        # A parked READ waits on EVERY dependency it recorded, plus the LLM —
+        # its resume is a model turn (FR-40); so does a parked decision resume
+        # (a row with no record reads as the model).
+        names = gate_names(pending.get("dependencies"), model_turn=True)
+        if pending.get("kind") == "read":
+            units.append(("session", sid, names,
+                          lambda sid=sid: resume_parked_read(sid), resumed, True))
+        else:
+            units.append(("session", sid, names,
+                          lambda sid=sid: resume_parked_session(sid), resumed, True))
 
     # (b) Approved proposals parked RETRY_PENDING — the blocked call is the
-    # EXECUTOR's, so the gate is the failed capability's own system. NOT also
+    # EXECUTOR's, so the gate is what the failed capability needs. NOT also
     # gated on the LLM: the post-execution resume is agent work, but slice 2
     # parks that leg independently, so double-gating would only delay a write
     # the Executor could land right now.
@@ -884,17 +940,32 @@ async def retry_sweep(cache=None) -> dict:
     for prop in reversed(await repo.list_proposals("RETRY_PENDING")):
         row = await repo.load_proposal(prop["id"])
         state = (row or {}).get("retry_state") or {}
-        dependency = probes.dependency_for_capability(state.get("failed_capability"))
-        await _drive("proposal", prop["id"], dependency,
-                     lambda pid=prop["id"]: gateway.retry_execution(pid),
-                     retried_executions)
+        units.append(("proposal", prop["id"],
+                      gate_names(_proposal_dependencies(state)),
+                      lambda pid=prop["id"]: gateway.retry_execution(pid),
+                      retried_executions, False))
 
     # (c) Tasks parked for a re-run, DUE ones only (`not_before` is applied in
-    # SQL) — a re-run is an agent run, so it gates on the LLM.
+    # SQL) — a re-run is an agent run, so it gates on the LLM too.
     for task in await repo.tasks_awaiting_retry(due_only=True):
-        await _drive("task", task["id"], probes.LLM,
-                     lambda tid=task["id"]: retry_parked_task(tid), retried_tasks,
-                     detached=True)
+        recorded = (task.get("retry_state") or {}).get("dependencies")
+        units.append(("task", task["id"], gate_names(recorded, model_turn=True),
+                      lambda tid=task["id"]: retry_parked_task(tid),
+                      retried_tasks, True))
+
+    # The probes: every name a waiting unit needs, plus every dependency the
+    # table records DOWN (re-probed even with no waiting work, so a banner never
+    # sticks), all at once. Nothing waiting and nothing down: no probe at all.
+    states = await repo.dependency_probe_states()
+    recorded_down = [n for n, r in states.items()
+                     if r.get("state") == "down" and n in PROBED]
+    needed = [n for u in units for n in u[2]] + recorded_down
+    if needed:
+        await cache.warm(needed)
+    changes = await _record_probe_changes(cache, states) if cache.results else []
+
+    for unit, unit_id, names, driver, landed, detached in units:
+        await _drive(unit, unit_id, names, driver, landed, detached=detached)
 
     result = {"resumed": resumed, "orphaned": orphaned,
               "retried_executions": retried_executions,
@@ -902,6 +973,8 @@ async def retry_sweep(cache=None) -> dict:
               "errors": errors}
     if cache.results:
         result["probes"] = cache.results
+    if changes:
+        result["dependency_changes"] = changes
     return result
 
 
@@ -1730,9 +1803,14 @@ async def park_task_retry(
         return None
     backoff = retry_backoff_seconds(attempts - 1)
     now = datetime.now(timezone.utc)
+    from central_command.contract.dependencies import LLM, stamped_dependencies
+
     state = {
         "kind": kind,
         "attempts": attempts,
+        # What the re-run waits on: the typed error's own tuple, else the
+        # model (a task run that died transiently died on its model turn).
+        "dependencies": list(stamped_dependencies(exc) or (LLM,)),
         "last_error": str(exc)[:500],
         "parked_at": now.isoformat(),
         "not_before": (now + timedelta(seconds=backoff)).isoformat(),
@@ -1747,6 +1825,7 @@ async def park_task_retry(
         "task.run_parked", ref_id=task_id,
         payload={"transient": True, "attempts": attempts, "kind": kind,
                  "error": state["last_error"], "item_id": item_id,
+                 "dependencies": state["dependencies"],
                  "backoff_seconds": backoff,
                  "not_before": state["not_before"]},
         actor="system",

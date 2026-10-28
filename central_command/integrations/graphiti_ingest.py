@@ -238,6 +238,24 @@ async def _run_remove(job: dict) -> dict:
     )
 
 
+def _failing_dependencies(exc: BaseException) -> tuple[str, ...]:
+    """What the failing call needed, for the park record: `graph` for a bolt
+    failure, `embedder` when the request that failed was an embedding, else the
+    extraction model (`llm`) — the only other thing an ingest calls. The cause
+    chain is walked because graphiti-core re-raises through its own frames."""
+    cur, seen = exc, set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if type(cur).__module__.startswith("neo4j"):
+            return ("graph",)
+        request = getattr(cur, "request", None)
+        url = str(getattr(request, "url", "") or "")
+        if url.rstrip("/").endswith("/embeddings"):
+            return ("embedder",)
+        cur = cur.__cause__ or cur.__context__
+    return ("llm",)
+
+
 async def run_job(job: dict) -> str:
     """Run one CLAIMED (RUNNING) job to its next state. Returns
     'done' | 'deferred' | 'failed'. A CancelledError leaves the job RUNNING on
@@ -271,7 +289,9 @@ async def run_job(job: dict) -> str:
     except Exception as exc:  # noqa: BLE001 — every failure lands somewhere
         if classify(exc) == TRANSIENT:
             delay = retry_backoff_seconds(max(0, int(job.get("attempts") or 1) - 1))
-            await repo.defer_ingest_job(job["id"], error=_error_text(exc), delay_seconds=delay)
+            await repo.defer_ingest_job(job["id"], error=_error_text(exc),
+                                        delay_seconds=delay,
+                                        dependencies=_failing_dependencies(exc))
             log.info("graph ingest job %s deferred %ss: %s", job["id"], delay, exc)
             if int(job.get("attempts") or 1) <= 1:
                 await events.emit(

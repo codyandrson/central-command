@@ -135,6 +135,9 @@ class _Probes:
         self.up = up
         self.asked: list[str | None] = []
 
+    async def warm(self, dependencies):
+        pass
+
     async def healthy(self, dependency):
         self.asked.append(dependency)
         if dependency is None:
@@ -301,14 +304,14 @@ async def test_the_sweep_skips_a_read_park_while_the_graph_is_down(monkeypatch, 
     session_id = out["session_id"]
     calls = graph.calls
 
-    probes = _Probes(graphiti=False)
+    probes = _Probes(graph=False)
     result = await orchestration.retry_sweep(cache=probes)
     await orchestration.sweep_settle()
 
     skipped = [s for s in result["skipped_gated"] if s["id"] == session_id]
     assert len(skipped) == 1 and skipped[0]["down"] == ["graph"]
     assert skipped[0]["dependency"] == ["graph", "embedder", "llm"]
-    assert "graphiti" in probes.asked and "llm" in probes.asked
+    assert "graph" in probes.asked and "llm" in probes.asked
     assert session_id not in result["resumed"]
     assert graph.calls == calls, "a gated skip never touches the dependency"
     assert await repo.session_status(session_id) == "AWAITING_RESUME"

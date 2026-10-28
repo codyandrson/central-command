@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 
 from central_command import events
 from central_command.contract import classify_failure
+from central_command.contract.dependencies import LLM, stamped_dependencies
 from central_command.db import repo
 
 
@@ -165,8 +166,16 @@ async def arm(session_id: str, pending: dict | None) -> None:
 async def park_resume(session_id: str, pending: dict, error: BaseException | str) -> dict:
     """Park the session AWAITING_RESUME and announce it. Returns the stored
     pending record (with `last_error`/`parked_at` filled in)."""
+    # What the park waits on: a read's own tuple, else the typed error's, else
+    # the model — a resume is a model turn, and a model DOWN records ['llm'].
+    dependencies = list(
+        pending.get("dependencies")
+        or stamped_dependencies(error if isinstance(error, BaseException) else None)
+        or (LLM,)
+    )
     stored = {
         **pending,
+        "dependencies": dependencies,
         "last_error": str(error)[:500],
         "parked_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -181,9 +190,8 @@ async def park_resume(session_id: str, pending: dict, error: BaseException | str
             "error": stored["last_error"],
             "transient": True,
             "attempts": stored["attempts"],
-            # What the park waits on — a read's tuple; None for a decision
-            # resume until story 3 records one on every park writer.
-            "dependencies": stored.get("dependencies"),
+            # What the park waits on (always recorded since story 3).
+            "dependencies": stored["dependencies"],
         },
         actor="system",
     )

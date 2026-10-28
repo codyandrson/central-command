@@ -610,7 +610,7 @@ async def approve_and_execute(
         # Outage equivalence slice 3: WAS THE DEPENDENCY DOWN, OR DID IT SAY NO?
         # A transient failure never makes an approved proposal terminal — the
         # operator's decision stands and the world-change queues (RETRY_PENDING).
-        if classify_failure_text(failure.error) == "transient":
+        if _execution_transient(failure):
             return await _park_execution_retry(
                 session_id, prop_row, failure, approver
             )
@@ -777,7 +777,7 @@ async def _record_execution_failure(
             # Slice 1 of outage equivalence: the label rides every error event
             # so the record accumulates evidence before anything retries. The
             # Executor only keeps the STRINGIFIED error, hence the _text form.
-            "transient": classify_failure_text(failure.error) == "transient",
+            "transient": _execution_transient(failure),
             "completed_actions": failure.completed,
             "session_id": session_id,
         },
@@ -848,6 +848,27 @@ async def _record_execution_failure(
 # --- retryable executions (outage equivalence, slice 3) -----------------------
 
 
+def _execution_transient(failure: executor.ExecutionFailed) -> bool:
+    """Was the dependency DOWN? The Executor's flag first — it is
+    `classify_failure` on the exception the handler raised, where the TYPE is
+    evidence (a bare neo4j `ServiceUnavailable` carries no marker in its text) —
+    and the text classifier second, for a failure built from a stored string
+    (the retry splice, the override refusal)."""
+    return bool(failure.transient) or (
+        classify_failure_text(failure.error) == "transient"
+    )
+
+
+def _execution_dependencies(failure: executor.ExecutionFailed) -> list[str]:
+    """What the parked execution waits on: the typed error's own tuple, else the
+    failed capability's. `local` is kept in the record (it is the truth) and
+    dropped at the gate."""
+    from central_command.contract.dependencies import dependencies_for_capability
+
+    return list(failure.dependencies
+                or dependencies_for_capability(failure.failed_capability))
+
+
 async def _park_execution_retry(
     session_id: str,
     prop_row: dict,
@@ -877,6 +898,7 @@ async def _park_execution_retry(
         "approver": approver,
         "attempts": attempts,
         "failed_capability": failure.failed_capability,
+        "dependencies": _execution_dependencies(failure),
         "last_error": failure.error[:500],
         "parked_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -890,6 +912,7 @@ async def _park_execution_retry(
             "error": state["last_error"],
             "transient": True,
             "attempts": attempts,
+            "dependencies": state["dependencies"],
             "completed_actions": completed,
             "session_id": session_id,
         },
@@ -1032,8 +1055,9 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
         spliced = executor.ExecutionFailed(
             failure.failed_capability, failure.error,
             completed + list(failure.completed),
+            transient=failure.transient, dependencies=failure.dependencies,
         )
-        transient = classify_failure_text(failure.error) == "transient"
+        transient = _execution_transient(failure)
         if transient and attempts < settings.execution_retry_limit:
             return await _park_execution_retry(
                 session_id, row, spliced, approver, attempts=attempts + 1

@@ -638,9 +638,12 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             releases = int(item.get("transient_releases") or 0)
             backoff = retry_backoff_seconds(releases)
             not_before = datetime.now(timezone.utc) + timedelta(seconds=backoff)
+            from central_command.contract.dependencies import LLM, stamped_dependencies
+
             await repo.release_work_item(
                 item["id"], error=str(e), count_attempt=False,
                 not_before=not_before,
+                dependencies=stamped_dependencies(e) or (LLM,),
             )
             await events.emit(
                 "work.released",

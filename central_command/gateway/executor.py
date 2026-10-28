@@ -23,7 +23,8 @@ from pathlib import Path, PurePosixPath
 import httpx
 
 from central_command.config import settings
-from central_command.contract import ARG_SPECS, Action, Provenance, validate_action_args
+from central_command.contract import ARG_SPECS, TRANSIENT, Action, Provenance, classify_failure, validate_action_args
+from central_command.contract.dependencies import dependencies_for_capability, stamped_dependencies
 from central_command.contract.args import COST_FIELDS
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
@@ -43,11 +44,30 @@ class ExecutionFailed(ExecutorError):
     system transactions, so the world may be half-changed and the reviewer
     must be able to see exactly which half."""
 
-    def __init__(self, failed_capability: str, error: str, completed: list[str]):
+    def __init__(
+        self,
+        failed_capability: str,
+        error: str,
+        completed: list[str],
+        *,
+        transient: bool = False,
+        dependencies: tuple[str, ...] = (),
+    ):
         super().__init__(f"{failed_capability}: {error}")
         self.failed_capability = failed_capability
         self.error = error
         self.completed = completed
+        # The verdict of `classify_failure` on the EXCEPTION the handler raised
+        # (its type is evidence, its message a guess) — so a neo4j
+        # `ServiceUnavailable` with a bare message is transient here although
+        # the stringified `error` carries no marker. The gateway reads this
+        # first and the text classifier second. The field is a flag on the
+        # failure class, not on the outage: a typed "the world moved" failure
+        # (epic-world-changed-redraft) is another reason to set it.
+        self.transient = transient
+        # What a retry waits on: the typed error's own tuple, else the failed
+        # capability's (`contract/dependencies.CAPABILITY_DEPENDENCY`).
+        self.dependencies = tuple(dependencies)
 
 
 @dataclass
@@ -2371,7 +2391,12 @@ async def execute(
                 results.append(await _execute_action(
                     a, covering.get(action_offset + n, approver), proposer))
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
-                raise ExecutionFailed(a.capability, str(e), results) from e
+                raise ExecutionFailed(
+                    a.capability, str(e), results,
+                    transient=classify_failure(e) == TRANSIENT,
+                    dependencies=(stamped_dependencies(e)
+                                  or dependencies_for_capability(a.capability)),
+                ) from e
     finally:
         _current_proposal_id.reset(token)
     provenance = Provenance(

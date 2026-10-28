@@ -1989,8 +1989,13 @@ async def release_work_item(
     *,
     count_attempt: bool = True,
     not_before: datetime | None = None,
+    dependencies: tuple[str, ...] | list[str] | None = None,
 ) -> None:
     """Hand a claimed item back to the queue (crash/transient failure).
+
+    `dependencies` is what a TRANSIENT release waited on (`work_item.
+    dependencies`, jsonb); None leaves the column as it was, and a reader takes
+    a row with none to mean `llm`.
 
     `count_attempt=False` is the outage-equivalence release: the CLAIM already
     incremented `attempts`, so a run that died because the PROVIDER was down
@@ -2014,10 +2019,12 @@ async def release_work_item(
                                    else greatest(attempts - 1, 0) end,
                    transient_releases = case when $3 then transient_releases
                                              else transient_releases + 1 end,
-                   not_before = coalesce($4, not_before)
+                   not_before = coalesce($4, not_before),
+                   dependencies = coalesce($5::jsonb, dependencies)
              where id = $1 and state = 'CLAIMED'
             """,
             item_id, error, count_attempt, not_before,
+            None if dependencies is None else json.dumps(list(dependencies)),
         )
     finally:
         await conn.close()
@@ -5343,19 +5350,26 @@ async def finish_ingest_job(job_id: int, *, episode_uuid: str, result: dict) -> 
         await conn.close()
 
 
-async def defer_ingest_job(job_id: int, *, error: str, delay_seconds: int) -> bool:
+async def defer_ingest_job(
+    job_id: int, *, error: str, delay_seconds: int,
+    dependencies: tuple[str, ...] | list[str] | None = None,
+) -> bool:
     """A transient failure: back to QUEUED, not eligible for `delay_seconds`.
-    The group waits behind it (strict FIFO)."""
+    The group waits behind it (strict FIFO). `dependencies` names what the
+    failing call needed (`embedder`, `llm`, `graph`); a row with none reads as
+    `llm`."""
     conn = await _conn()
     try:
         r = await conn.execute(
             """
             update graph_ingest_job
                set status = 'QUEUED', last_error = $2,
-                   not_before = now() + make_interval(secs => $3)
+                   not_before = now() + make_interval(secs => $3),
+                   dependencies = coalesce($4::jsonb, dependencies)
              where id = $1 and status = 'RUNNING'
             """,
             job_id, error, float(delay_seconds),
+            None if dependencies is None else json.dumps(list(dependencies)),
         )
         return r.endswith(" 1")
     finally:
@@ -6536,5 +6550,53 @@ async def reopen_rule_folded(item_id: str, note: str | None) -> str | None:
             item_id, note,
         )
         return row["rule_id"] if row else None
+    finally:
+        await conn.close()
+
+
+# --- dependency_probe (outage doctrine story 3) --------------------------------
+
+
+async def dependency_probe_states() -> dict[str, dict]:
+    """Every recorded dependency's row, by name. A name with no row has never
+    been seen down (read it as up)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select name, state, checked_at, error, down_since from dependency_probe"
+        )
+        return {r["name"]: dict(r) for r in rows}
+    finally:
+        await conn.close()
+
+
+async def record_dependency_probe(name: str, up: bool, error: str | None = None) -> dict | None:
+    """Record a CHANGE of state, returning the row before it (None if there was
+    none). The caller only calls this when the state differs from what
+    `dependency_probe_states` said; the statement is still safe to repeat —
+    `down_since` is set on the first down write and cleared on recovery, and an
+    already-down row keeps its original `down_since`."""
+    conn = await _conn()
+    try:
+        before = await conn.fetchrow(
+            "select name, state, checked_at, error, down_since "
+            "from dependency_probe where name = $1", name,
+        )
+        await conn.execute(
+            """
+            insert into dependency_probe (name, state, checked_at, error, down_since)
+            values ($1, $2, now(), $3, case when $2 = 'down' then now() end)
+            on conflict (name) do update
+               set state = excluded.state,
+                   checked_at = now(),
+                   error = excluded.error,
+                   down_since = case
+                       when excluded.state = 'down'
+                         then coalesce(dependency_probe.down_since, now())
+                       else null end
+            """,
+            name, "up" if up else "down", None if up else (error or "")[:500] or None,
+        )
+        return dict(before) if before else None
     finally:
         await conn.close()

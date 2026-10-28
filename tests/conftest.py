@@ -354,6 +354,20 @@ needs_pg = pytest.mark.skipif(
 
 
 @pytest.fixture(autouse=True)
+def no_live_probes(monkeypatch):
+    """The offline suite never asks a real service whether it is up. Every
+    dependency probe answers "up" unless the test installs its own table (the
+    sweep tests monkeypatch `probes.PROBES` themselves, which wins over this).
+    The probe FUNCTIONS are still importable and testable directly."""
+    from central_command.heartbeat import probes
+
+    async def _up() -> bool:
+        return True
+
+    monkeypatch.setattr(probes, "PROBES", {name: _up for name in probes.PROBES})
+
+
+@pytest.fixture(autouse=True)
 async def isolated_queue():
     """Hide any queued work that this test did not create, then give it back.
 
@@ -373,6 +387,10 @@ async def isolated_queue():
         await conn.execute(
             f"update work_item set state = '{PARKED}' where state = 'UNPROCESSED'"
         )
+        # The retry sweep persists probe results (a global table, one row per
+        # dependency): a test that took a dependency down must not leave the
+        # next test re-probing it. The test database is throwaway.
+        await conn.execute("delete from dependency_probe")
     finally:
         await conn.close()
 
@@ -384,6 +402,7 @@ async def isolated_queue():
             await conn.execute(
                 f"update work_item set state = 'UNPROCESSED' where state = '{PARKED}'"
             )
+            await conn.execute("delete from dependency_probe")
         finally:
             await conn.close()
         # The pool is per event loop and pytest-asyncio closes this test's
