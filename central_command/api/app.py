@@ -153,17 +153,20 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
         pass
     try:
-        # Runs are in-process and nothing has run in THIS process yet, so any
-        # RUNNING session is an orphan of a dead process — age 0, same argument
-        # as the dispatcher's reclaim. Unconditional (not gated on dispatch):
-        # conversation and task runs orphan the same way, and the dispatcher's
-        # own sweep uses the 900s threshold, which let an 8-minute-old zombie
-        # survive both restarts on 2026-08-17.
-        from central_command.ingest.dispatcher import sweep_orphaned_sessions
+        # Runs and executions are in-process and nothing has run in THIS
+        # process yet, so any RUNNING session and any EXECUTING proposal is an
+        # orphan of a dead process — age 0, same argument as the dispatcher's
+        # reclaim. Unconditional (not gated on dispatch), and the ONLY place
+        # sessions are swept: a mid-life sweep cannot tell a dead run from a
+        # long one. Nothing lands FAILED (epic-outage-doctrine story 5): a
+        # killed resume is owed again, a killed task run is re-run fresh, an
+        # interrupted execution waits for the operator. Before the resume
+        # sweep below, so the owed turns are on its worklist.
+        from central_command.api import orchestration as _orch
 
-        await sweep_orphaned_sessions(0)
+        await _orch.land_orphans_at_startup()
     except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
-        pass
+        logging.getLogger(__name__).exception("startup: landing orphaned work failed")
     try:
         # Startup-only re-launch of tasks queued but never started before the
         # process died (`routes.startup_task_sweep` — see its docstring for

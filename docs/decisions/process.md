@@ -1766,3 +1766,23 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_gate_overrides.py::test_the_executor_backstop_refuses_with_nothing_written`, `tests/test_gate_overrides.py::test_the_override_writer_has_one_caller_and_it_is_the_operators`, `tests/test_gate_overrides.py::test_pair_confidence_counts_an_override_approval_nowhere`, `tests/test_gate_overrides.py::test_a_row_naming_the_auditor_is_never_honoured`, `tests/test_gate_overrides.py::test_a_covered_proposal_on_a_reopened_work_item_parks_with_its_reason`, `tests/test_governance.py::test_every_enforced_policy_names_its_guard_test`
 - **Source:** docs/PRD.md FR-2, FR-4 (amended 2026-10-25), docs/ARCHITECTURE.md section 3 (Who may approve what; Gate overrides); PRD addendum §C (the FR-4 amendment row), §B (GATE-060); the epic-gate-overrides epic (rulings of 2026-10-25 and 2026-10-26); DL-001, DL-002, DL-003, DL-143, DL-144
 - **Supersedes:** (the wording of DL-143 and DL-144 for overrides; their dated text is kept, with a note each)
+
+### DL-188 — A restart lands nothing FAILED; the startup landing re-parks what each orphan owes
+
+- **Status:** active
+- **Date:** 2026-10-27
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A restart lands nothing FAILED: the startup landing re-parks what each
+  orphan owes, and it lands the TASK, not just the session.**"
+- **Why:** The operator's ruling of 2026-10-27 (epic-outage-doctrine story 5):
+  a restart is not the work's fault, so a killed resume is owed again, a
+  killed task run is re-run fresh whatever its age (the operator issued it
+  and can cancel it), and the dead transcript is kept, closed STOPPED and
+  linked to the re-run. An interrupted execution is held for the operator,
+  and that hold is INTERIM by the operator's own words: "this is not the
+  desired end state; it is simply a functional interim solution" — the end
+  state is reconciliation, where the Executor's record of the in-flight
+  action is enough to query the service (was the Jira issue created?) and
+  resume past it or re-run it with no operator click; not built yet.
+- **Enforced:** test: `tests/test_restart_landing.py::test_a_restart_lands_nothing_failed`, `tests/test_outage_requeue.py::test_the_orphan_sweep_lands_the_task_not_just_the_session`
+- **Source:** code comment `central_command/db/repo.py` (`park_orphaned_sessions`, `park_interrupted_executions`); _bmad-output/initiative-central-command/deferred-work.md (reconciliation, kept privately)
+- **Supersedes:** DL-031

@@ -777,12 +777,12 @@ async def startup_task_sweep() -> None:
     tell "orphaned" apart from "queued in memory, its turn hasn't come yet"
     and would double-launch a task already in flight.
 
-    Deliberate contrast with the orphan-SESSION sweep (`sweep_orphaned_sessions`,
-    called just above in the lifespan): an interrupted RUN is FAILED, never
-    re-run — the operator didn't re-issue it. A task that never got past
-    ASSIGNED to `task.started` is different: it WAS issued and simply never
-    began, so launching it now honours the original authorization rather than
-    replaying unrequested work.
+    The startup landing just above it in the lifespan
+    (`orchestration.land_orphans_at_startup`) re-parks a task whose RUN a
+    restart killed, for a fresh re-run (epic-outage-doctrine story 5: the
+    operator issued it and can cancel it); a task that never got past
+    ASSIGNED to `task.started` is relaunched here, honouring the original
+    authorization.
 
     Each relaunch goes through `_run_assigned_task_detached`, so it serializes
     on the same per-agent lock as everything else — a restart with many
@@ -792,16 +792,21 @@ async def startup_task_sweep() -> None:
     task the process died on between `start_task(id, None)` and `_run_live`'s
     session link is invisible to both the ASSIGNED relaunch and the
     session-orphan sweep (null session_id matches nothing), and was stuck on
-    the board forever (found live 2026-08-25). Ordering matters — a relaunch
-    passes through that same null-session window, so sweeping after the
-    relaunches spawn could fail a task that just legitimately restarted.
+    the board forever (found live 2026-08-25). It is re-parked for a fresh
+    re-run, due now, never FAILED. Ordering matters — a relaunch passes through
+    that same null-session window, so sweeping after the relaunches spawn could
+    re-park a task that just legitimately started.
     """
-    for task in await repo.fail_sessionless_in_progress_tasks():
+    for task in await repo.park_sessionless_in_progress_tasks():
+        state = task.get("retry_state") or {}
         await events.emit(
-            "task.run_failed",
+            "task.run_parked",
             ref_id=task["id"],
-            payload={"error": "run died with its process before its session existed",
-                     "transient": False, "swept": True},
+            payload={"restart": True, "kind": "restart", "attempts": 0,
+                     "transient": False, "session_id": None,
+                     "dependencies": state.get("dependencies"),
+                     "not_before": state.get("not_before"),
+                     "error": "run died with its process before its session existed"},
             actor="system",
         )
     for task in await repo.tasks_orphaned_at_startup():
@@ -1047,6 +1052,14 @@ async def resume_session(session_id: str) -> dict:
     out = await orchestration.resume_stopped_session(session_id)
     if out is None:
         status = await repo.session_status(session_id)
+        stop = (await repo.get_session_run_state(session_id) or {}).get("pending_stop") or {}
+        if status == "STOPPED" and stop.get("reason") == "restart":
+            raise HTTPException(
+                409,
+                f"session {session_id} was closed by a process restart and cannot "
+                "be re-entered" + (f"; its task {stop['task_id']} is re-run as a new "
+                                   "session" if stop.get("task_id") else ""),
+            )
         raise HTTPException(
             409 if status else 404,
             f"session {session_id} is {status or 'unknown'} — only a STOPPED "

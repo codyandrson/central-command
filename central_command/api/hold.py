@@ -16,8 +16,9 @@ the runs in flight):
             already running is not waited for — if the update stops it, its
             transaction never committed and the next start re-queues it.
   now     → write the trigger with `force` regardless; whatever is still
-            RUNNING dies with the process and is swept FAILED at startup, and
-            the wait screen said so.
+            RUNNING dies with the process and is landed at startup (re-parked,
+            never FAILED, since outage doctrine story 5), and the wait screen
+            said so.
   release → cancel: loops restart per settings, and the sessions the hold
             parked are resumed — the operator never pressed stop on them.
 

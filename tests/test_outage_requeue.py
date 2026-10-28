@@ -532,10 +532,12 @@ async def test_a_retry_is_not_parked_twice_by_the_fresh_run_guard(monkeypatch):
 
 # 11 — a run that died with its process (2026-08-01: a restart mid-run).
 async def test_the_orphan_sweep_lands_the_task_not_just_the_session():
-    """`fail_stale_running_sessions` flipped the SESSION and left the TASK
-    IN_PROGRESS against a FAILED transcript. The park that would have recorded
-    the death is written in an `except` a dead process never reaches, so the
-    sweep is the only thing that can land it."""
+    """The task is still LANDED by the sweep — the rule's point since
+    2026-08-01, when flipping only the session left the board IN_PROGRESS
+    forever. Rewritten for outage doctrine story 5: it lands by RETRY-PARK,
+    not FAILED. The task goes back to ASSIGNED with a `restart` retry_state due
+    now (re-run fresh, whatever its age), and the dead transcript is kept,
+    closed STOPPED with a reason naming the task."""
     agent_id = "jira-expert"
     task_id = "task_" + uuid.uuid4().hex[:12]
     session_id = "sess_" + uuid.uuid4().hex[:12]
@@ -553,18 +555,27 @@ async def test_the_orphan_sweep_lands_the_task_not_just_the_session():
     finally:
         await conn.close()
 
-    sessions, landed = await repo.fail_stale_running_sessions(60)
+    landed = {r["session_id"]: r for r in await repo.park_orphaned_sessions()}
 
-    assert sessions >= 1 and task_id in landed
-    assert await repo.session_status(session_id) == "FAILED", "transcript kept"
+    assert landed[session_id]["outcome"] == "task_rerun"
+    assert landed[session_id]["task_id"] == task_id
+    assert await repo.session_status(session_id) == "STOPPED", "transcript kept"
+    assert task_id in (await repo.get_session(session_id))["closed_reason"]
     row = await repo.get_task(task_id)
-    assert row["status"] == "FAILED"
-    assert "died with its process" in row["outcome"]
+    assert row["status"] == "ASSIGNED"
+    assert row["retry_state"]["kind"] == "restart"
+    assert row["retry_state"]["attempts"] == 0
+    assert task_id in [t["id"] for t in await repo.tasks_awaiting_retry(due_only=True)]
 
 
-async def test_the_orphan_sweep_leaves_a_live_run_alone():
-    """The scope guard: a session inside its normal run window is not an orphan,
-    and sweeping one would kill work in flight."""
+async def test_a_mid_life_dispatcher_start_leaves_a_live_run_alone(monkeypatch):
+    """Rewritten for outage doctrine story 5. The scope guard used to be an AGE
+    threshold on a mid-life sweep; now there is no mid-life session sweep at
+    all — a run in a live process is alive, however long it takes. Starting
+    dispatch mid-life (the operator may) reclaims the ledger and touches no
+    session."""
+    from central_command.ingest import dispatcher as dispatcher_mod
+
     agent_id = "jira-expert"
     task_id = "task_" + uuid.uuid4().hex[:12]
     session_id = "sess_" + uuid.uuid4().hex[:12]
@@ -572,16 +583,26 @@ async def test_the_orphan_sweep_leaves_a_live_run_alone():
     _MADE.append(task_id)
     await repo.create_running_session(session_id, agent_id)
     await repo.start_task(task_id, session_id)
-
+    conn = await repo._conn()
     try:
-        _, landed = await repo.fail_stale_running_sessions(3600)
+        await conn.execute(
+            "update session set updated_at = now() - interval '2 hours' where id = $1",
+            session_id,
+        )
+    finally:
+        await conn.close()
 
-        assert task_id not in landed
+    async def _idle(self):
+        return None
+
+    monkeypatch.setattr(dispatcher_mod.Dispatcher, "_loop", _idle)
+    d = dispatcher_mod.Dispatcher()
+    try:
+        await d.start()
         assert (await repo.get_task(task_id))["status"] == "IN_PROGRESS"
         assert await repo.session_status(session_id) == "RUNNING"
     finally:
-        # A RUNNING session left behind pollutes every test in the suite that
-        # counts sessions — the dev database is shared.
+        await d._release_lease()
         conn = await repo._conn()
         try:
             await conn.execute("delete from session where id = $1", session_id)

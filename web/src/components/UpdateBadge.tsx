@@ -260,7 +260,7 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                 ) : progress?.status?.state === 'failed' && progress.status.phase === 'busy' ? (
                   <p className="text-amber-500">
                     Not applied — {progress.status.error}. Nothing was changed; applying
-                    now would kill those runs, and they would be marked failed on restart.
+                    now would interrupt those runs: on restart their tasks re-run from the start, and an interrupted write waits for you.
                   </p>
                 ) : progress?.status?.state === 'failed' && progress.status.phase === 'operator-action' ? (
                   // A deliberate pause (update-run.sh exit 3), not a failure: the

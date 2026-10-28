@@ -524,11 +524,12 @@ async def test_run_stopped_is_never_reported_as_a_failure():
 
 async def test_stop_click_leaves_the_session_sweepable():
     """`request_session_stop` must not touch `updated_at` — that column is the
-    liveness signal `fail_stale_running_sessions` sweeps on, refreshed only by
-    the run's own snapshots. On 2026-08-17 a run died in a restart young enough
-    to survive the dispatcher's 900s sweep, and every stop click reset the
-    staleness clock, making the zombie unkillable. The startup sweep (age 0)
-    lands it; this pins that clicking stop first cannot un-land it."""
+    run's liveness signal, refreshed only by the run's own snapshots. On
+    2026-08-17 a run died in a restart young enough to survive the
+    dispatcher's old 900s sweep, and every stop click reset the staleness
+    clock, making the zombie unkillable. The startup landing (age 0) lands it
+    — STOPPED with the restart reason since story 5 of the outage doctrine,
+    never FAILED; this pins that clicking stop first cannot un-land it."""
     session_id = "sess_zombie_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(session_id, "jira-expert")
     before = (await repo.get_session(session_id))["updated_at"]
@@ -536,9 +537,9 @@ async def test_stop_click_leaves_the_session_sweepable():
     assert await repo.request_session_stop(session_id) is True
     assert (await repo.get_session(session_id))["updated_at"] == before
 
-    from central_command.ingest.dispatcher import sweep_orphaned_sessions
-    await sweep_orphaned_sessions(0)
-    assert (await repo.get_session(session_id))["status"] == "FAILED"
+    from central_command.api import orchestration
+    await orchestration.land_orphans_at_startup()
+    assert (await repo.get_session(session_id))["status"] == "STOPPED"
 
 
 # ── H: a resumed run that dies lands its task ─────────────────────────────────

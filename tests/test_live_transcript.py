@@ -157,7 +157,13 @@ async def test_a_looping_run_is_cut_off_and_keeps_its_partial_transcript(monkeyp
     assert "tool-call" in kinds and "tool-return" in kinds
 
 
-async def test_stale_running_sessions_are_swept_but_fresh_ones_are_not():
+async def test_the_startup_landing_closes_orphans_whatever_their_age_never_failed():
+    """Rewritten for outage doctrine story 5. The old test pinned an AGE
+    threshold (stale FAILED, fresh left RUNNING): the mid-life sweep that used
+    it is gone, and at startup nothing is running in the new process, so every
+    RUNNING row is an orphan whatever its age. A run with no task and no owed
+    resume closes STOPPED with the restart reason, its transcript kept, never
+    FAILED."""
     stale, fresh = "sess_livetest_stale", "sess_livetest_fresh"
     await repo.upsert_agent("inbox-triage", "Inbox Triage", "inbox-triage", "t")
     await repo.create_running_session(stale, "inbox-triage")
@@ -168,11 +174,12 @@ async def test_stale_running_sessions_are_swept_but_fresh_ones_are_not():
             "update session set updated_at = now() - interval '1 hour' where id = $1",
             stale,
         )
-        swept, landed = await repo.fail_stale_running_sessions(900)
-        assert swept >= 1
-        assert landed == [], "these sessions carry no task to land"
-        assert await repo.session_status(stale) == "FAILED"
-        assert await repo.session_status(fresh) == "RUNNING"
+        landed = {r["session_id"]: r for r in await repo.park_orphaned_sessions()}
+        for sid in (stale, fresh):
+            assert landed[sid]["outcome"] == "stopped"
+            assert landed[sid]["task_id"] is None
+            assert await repo.session_status(sid) == "STOPPED"
+            assert (await repo.get_session(sid))["closed_reason"] == repo.RESTART_REASON
     finally:
         await conn.execute(
             "delete from session where id in ($1, $2)", stale, fresh

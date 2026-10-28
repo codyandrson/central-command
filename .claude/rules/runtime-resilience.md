@@ -57,12 +57,28 @@ when a matching file is read.
   `run_state` is a key-level MERGE, so a resumed-then-re-parked session still
   carries the old marker, and driving it would hand the redraft the PREVIOUS
   decision's outcome.
-- **The orphan sweep must land the TASK, not just the session.**
-  `repo.fail_stale_running_sessions` is the only thing that CAN land it — the
-  park that would have recorded the death is written in an `except` block a
-  dead process never reaches. FAILED, never retry-parked: a restart is not a
-  dependency outage, and silently re-running whatever was in flight spends
-  tokens on work the operator never re-issued.
+- **A restart lands nothing FAILED: the startup landing re-parks what each
+  orphan owes, and it lands the TASK, not just the session.** Only a sweep
+  CAN land what a dead process left — the park that would have recorded the
+  death is written in an `except` block a dead process never reaches — and
+  only at STARTUP, age 0 (`orchestration.land_orphans_at_startup`, from the
+  lifespan, before the resume sweep): a mid-life sweep cannot tell a dead run
+  from a long one, so `Dispatcher.start` reclaims the ledger and touches no
+  session. `repo.park_orphaned_sessions` lands each RUNNING session by what it
+  owes: a killed RESUME (its `pending_resume` call still the record's
+  unanswered tail — the `tool_call_id` match again) goes back to
+  AWAITING_RESUME due now; a killed TASK RUN re-parks its task ASSIGNED with a
+  `restart` retry_state, due now, re-run FRESH whatever its age (the operator
+  issued it and can cancel it), and its transcript closes STOPPED naming the
+  task — never a mid-turn resume, because a kill during tool execution leaves
+  calls nothing answered and the tool may already have fired; a chat lane is
+  landed by its record's tail; anything else closes STOPPED and its own next
+  occurrence absorbs the gap. A restart-closed STOPPED run that cannot be
+  re-entered is refused by the Resume lever and counts as finished for
+  whoever waits on it. An EXECUTING proposal parks RETRY_PENDING
+  `interrupted`, its retry_state MERGED (the known-complete prefix kept), and
+  no sweep moves it — an INTERIM hold until reconciliation can ask the
+  service whether the in-flight action landed.
 - **A tool result is bounded by the INPUT window, and mail tokenises at ~2
   chars/token.** `tools._clip` derives its ceiling from the smallest
   discovered input window (`context.tool_result_ceiling`), never from the

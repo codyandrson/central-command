@@ -578,8 +578,19 @@ async def _run_session_context(session: dict) -> dict:
     elif status == "STOPPED":
         # Without this it fell through to "finished" — the exact silent lie the
         # read-only notice exists to prevent, and about the one state where the
-        # operator has a lever right there.
-        waiting = "stopped by you — resume it to carry on, or cancel the task"
+        # operator has a lever right there. A RESTART also closes a run STOPPED
+        # (epic-outage-doctrine story 5), and "stopped by you" would be a lie.
+        stop = ((await repo.get_session_run_state(session_id)) or {}).get("pending_stop") or {}
+        if stop.get("reason") == "restart" and stop.get("task_id"):
+            waiting = (f"closed by a process restart — its task {stop['task_id']} "
+                       "was re-run as a new session")
+        elif stop.get("reason") == "restart" and stop.get("resumable"):
+            waiting = ("interrupted by a process restart mid-turn — resume it to "
+                       "let the agent finish its turn")
+        elif stop.get("reason") == "restart":
+            waiting = "closed by a process restart"
+        else:
+            waiting = "stopped by you — resume it to carry on, or cancel the task"
     elif status == "FAILED":
         waiting = "failed"
     else:

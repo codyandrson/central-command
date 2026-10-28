@@ -14,7 +14,7 @@ import asyncio
 import contextlib
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import asyncpg
 
@@ -509,9 +509,8 @@ async def request_session_stop(session_id: str) -> bool:
     setting the flag on one would arm a trap that fires on its next resume.
     Returns False when the session is missing or not running.
 
-    Deliberately does NOT touch `updated_at`: that column is the liveness
-    signal `fail_stale_running_sessions` sweeps on, refreshed by the run's own
-    snapshots. An operator clicking stop is not evidence the run is alive —
+    Deliberately does NOT touch `updated_at`: that column is the run's
+    liveness signal, refreshed by the run's own snapshots. An operator clicking stop is not evidence the run is alive —
     on 2026-08-17, 17 stop clicks on an already-dead session each reset the
     staleness clock, hiding the zombie from the very sweep that lands it."""
     conn = await _conn()
@@ -693,10 +692,10 @@ async def sessions_with_orphaned_resume(age_seconds: int) -> list[dict]:
       in-flight resume is indistinguishable from a dead one except by clock.
       The threshold must exceed a real resume's duration.
 
-    Unlike `fail_stale_running_sessions`, which FAILS what a restart interrupted,
-    these are re-driven: there the operator never re-issued the work, whereas
-    here they answered a question or approved a proposal and the agent's turn is
-    owed to them. Losing it would discard the operator's own decision.
+    Like `park_orphaned_sessions` (which lands RUNNING sessions at startup),
+    these are re-driven, never failed: the operator answered a question or
+    approved a proposal and the agent's turn is owed to them. Losing it would
+    discard the operator's own decision.
     """
     conn = await _conn()
     try:
@@ -949,56 +948,202 @@ async def mark_session_failed(session_id: str) -> None:
         await conn.close()
 
 
-async def fail_stale_running_sessions(age_seconds: int) -> tuple[int, list[str]]:
-    """Sweep RUNNING sessions whose process died mid-run (runs are in-process,
-    so a row still RUNNING long past any real run's duration is an orphan —
-    the ledger analogue is `reclaim_stale_work_items`). Returns the number of
-    sessions flipped and the ids of the TASKS landed with them.
+RESTART_REASON = "process restarted"
 
-    Landing the task is half the sweep, not an extra: a task's run dies with the
-    same process its session does, and the park that would have recorded it is
-    written in an `except` block a dead process never reaches. Flipping only the
-    session left the board reading IN_PROGRESS against a FAILED transcript,
-    forever — one task sat that way from a restart on 2026-08-01.
 
-    FAILED rather than parked for retry, deliberately: a restart is not a
-    dependency outage, and silently re-running whatever was in flight at
-    shutdown — a stale morning report, an hours-old ask — would spend tokens on
-    work the operator never re-issued. The instructions stay on the record to
-    re-run by hand.
-    """
+def restart_reason(task_id: str | None = None) -> str:
+    """The one wording a restart-closed transcript carries. With a task, it
+    names the re-run, so the cockpit can follow the task row to it."""
+    if task_id:
+        return f"{RESTART_REASON}; re-run queued as a new session of task {task_id}"
+    return RESTART_REASON
+
+
+def record_tail(run_state: dict | None) -> str:
+    """Where a persisted record stops, read off the raw message dicts (the db
+    tier may not import the runtime): `request` — an unsent ModelRequest, the
+    stop-boundary shape a resume re-enters safely; `open` — a ModelResponse
+    whose tool calls nothing answered (the hazard `runtime/run.py` documents:
+    a tool may already have fired, and re-entering would re-run or orphan it);
+    `closed` — a ModelResponse with no calls, a turn that had finished;
+    `empty` — no record at all."""
+    messages = (run_state or {}).get("messages") or []
+    if not messages:
+        return "empty"
+    last = messages[-1]
+    if last.get("kind") == "request":
+        return "request"
+    if any(p.get("part_kind") == "tool-call" for p in last.get("parts", [])):
+        return "open"
+    return "closed"
+
+
+def _owes_pending_resume(run_state: dict | None) -> bool:
+    """A killed RESUME, not a killed run: `pending_resume` is present AND the
+    call it answers is still the unanswered tail of the record. The match is
+    load-bearing (runtime-resilience): `pending_resume` is never cleared after
+    a successful retry, so a later run of the same session still carries a
+    stale one — re-driving that would hand the run an old outcome."""
+    rs = run_state or {}
+    pending = rs.get("pending_resume") or {}
+    call_id = pending.get("tool_call_id")
+    if not call_id:
+        return False
+    messages = rs.get("messages") or []
+    if not messages or messages[-1].get("kind") != "response":
+        return False
+    return any(p.get("part_kind") == "tool-call" and p.get("tool_call_id") == call_id
+               for p in messages[-1].get("parts", []))
+
+
+def _restart_task_retry_state(now: datetime) -> dict:
+    """The park a restart leaves on a task whose run it killed: re-run FRESH,
+    due now, whatever its age (the operator's ruling of 2026-10-27: they issued
+    it and can cancel it). `kind: restart` re-enters through the plain run
+    entry; `attempts: 0` because a restart is not a failure of the task."""
+    return {"kind": "restart", "attempts": 0, "restart": True,
+            "not_before": now.isoformat(), "parked_at": now.isoformat(),
+            "dependencies": ["llm"],
+            "last_error": "the run died with its process"}
+
+
+async def park_orphaned_sessions() -> list[dict]:
+    """Land every RUNNING session a dead process left behind — STARTUP ONLY,
+    age 0: runs are in-process, so nothing is running in a process that has
+    not started one yet. A restart is not a failure, so NOTHING here lands
+    FAILED (epic-outage-doctrine story 5, the operator's ruling of 2026-10-27);
+    each session lands by what it owes:
+
+    (a) a killed RESUME (`pending_resume` still owed, `_owes_pending_resume`)
+        goes back to AWAITING_RESUME with its record intact and due now — the
+        sweep re-drives the owed turn;
+    (b) a killed TASK RUN: the IN_PROGRESS task goes back to ASSIGNED with a
+        `restart` retry_state, due now, re-run FRESH as a new session; the dead
+        transcript is closed STOPPED naming the task. Never a mid-turn resume:
+        a kill during tool execution leaves calls nothing answered, and the
+        tool may already have fired;
+    (c) a CHAT LANE killed mid-turn: a record ending in a finished response is
+        a turn that landed (the lane goes back to AWAITING_OPERATOR); one
+        ending in an unsent request is the stop-boundary shape, so the lane
+        parks STOPPED with a resumable restart marker. STORY 6 SEAM: story 6
+        re-drives this one automatically (AWAITING_RESUME kind `turn`,
+        after `converse`) instead of waiting on the operator's Resume. One
+        ending in unanswered calls cannot be re-entered (the next send would
+        carry them), so that lane closes DONE with the turn marked lost;
+    (d) anything else (coach, steward, wiki, reflection, an orchestrator round)
+        closes STOPPED with the restart reason; its own next occurrence absorbs
+        the gap.
+
+    Returns one `{session_id, agent_id, outcome, task_id, reason}` per session
+    for the caller to announce (this tier emits nothing)."""
+    now = datetime.now(timezone.utc)
+    out: list[dict] = []
     conn = await _conn()
     try:
         async with conn.transaction():
-            stale = [
-                r["id"] for r in await conn.fetch(
-                    """
-                    update session set status = 'FAILED', updated_at = now()
-                    where status = 'RUNNING'
-                      and updated_at < now() - ($1 || ' seconds')::interval
-                    returning id
-                    """,
-                    str(int(age_seconds)),
+            rows = await conn.fetch(
+                "select id, agent_id, mode, run_state from session "
+                "where status = 'RUNNING' for update"
+            )
+            for r in rows:
+                sid, agent_id = r["id"], r["agent_id"]
+                rs = r["run_state"]
+                rs = json.loads(rs) if isinstance(rs, str) else (rs or {})
+                task = await conn.fetchrow(
+                    "select id from task where session_id = $1 "
+                    "and status = 'IN_PROGRESS'", sid,
                 )
-            ]
-            if not stale:
-                return 0, []
-            # REVIEW/terminal tasks are left alone: their session is parked or
-            # done, so they are not what a dead run leaves behind.
-            landed = [
-                r["id"] for r in await conn.fetch(
-                    """
-                    update task set status = 'FAILED', terminal_at = now(),
-                           outcome = 'run died with its process (swept at startup)'
-                    where status = 'IN_PROGRESS' and session_id = any($1::text[])
-                    returning id
-                    """,
-                    stale,
-                )
-            ]
-        return len(stale), landed
+                task_id = task["id"] if task else None
+                entry = {"session_id": sid, "agent_id": agent_id,
+                         "task_id": task_id}
+                if _owes_pending_resume(rs):
+                    pending = {**rs["pending_resume"],
+                               "not_before": now.isoformat()}
+                    await conn.execute(
+                        """
+                        update session set status = 'AWAITING_RESUME',
+                               run_state = run_state || jsonb_build_object(
+                                   'pending_resume', $2::jsonb),
+                               updated_at = now()
+                         where id = $1
+                        """,
+                        sid, json.dumps(pending),
+                    )
+                    out.append({**entry, "outcome": "resume",
+                                "reason": RESTART_REASON, "pending": pending})
+                    continue
+                if task_id:
+                    state = _restart_task_retry_state(now)
+                    await conn.execute(
+                        """
+                        update task set status = 'ASSIGNED',
+                               retry_state = $2::jsonb, outcome = $3
+                         where id = $1
+                        """,
+                        task_id, json.dumps(state),
+                        "queued for re-run (process restarted)",
+                    )
+                    reason = restart_reason(task_id)
+                    await _stop_for_restart(conn, sid, reason, after="task",
+                                            task_id=task_id, resumable=False)
+                    out.append({**entry, "outcome": "task_rerun",
+                                "reason": reason, "retry_state": state})
+                    continue
+                if r["mode"] == "conversation":
+                    tail = record_tail(rs)
+                    if tail == "closed":
+                        await conn.execute(
+                            "update session set status = 'AWAITING_OPERATOR', "
+                            "updated_at = now() where id = $1", sid,
+                        )
+                        out.append({**entry, "outcome": "turn_landed",
+                                    "reason": RESTART_REASON})
+                    elif tail == "request":
+                        await _stop_for_restart(conn, sid, RESTART_REASON,
+                                                after="converse", resumable=True)
+                        out.append({**entry, "outcome": "turn_stopped",
+                                    "reason": RESTART_REASON})
+                    else:
+                        reason = "the last turn was lost to a restart; say it again"
+                        await conn.execute(
+                            "update session set status = 'DONE', "
+                            "closed_reason = $2, updated_at = now() where id = $1",
+                            sid, reason,
+                        )
+                        out.append({**entry, "outcome": "turn_lost",
+                                    "reason": reason})
+                    continue
+                await _stop_for_restart(conn, sid, RESTART_REASON, after=None,
+                                        resumable=False)
+                out.append({**entry, "outcome": "stopped",
+                            "reason": RESTART_REASON})
+        return out
     finally:
         await conn.close()
+
+
+async def _stop_for_restart(conn, session_id: str, reason: str, *, after: str | None,
+                            task_id: str | None = None, resumable: bool) -> None:
+    """Close a dead run's transcript STOPPED — kept whole, never FAILED — with a
+    `pending_stop` marker saying a restart did it. `resumable` is false unless
+    the record ends at a safe re-entry point; the resume driver refuses a
+    non-resumable restart stop (`orchestration.resume_stopped_session`), so the
+    operator's Resume lever can never re-enter a dead tool batch or race the
+    task's fresh re-run."""
+    marker = {"reason": "restart", "restart_reason": reason, "after": after,
+              "task_id": task_id, "resumable": resumable,
+              "stopped_at": datetime.now(timezone.utc).isoformat()}
+    await conn.execute(
+        """
+        update session set status = 'STOPPED', stop_requested = false,
+               closed_reason = $3,
+               run_state = coalesce(run_state, '{}'::jsonb)
+                           || jsonb_build_object('pending_stop', $2::jsonb),
+               updated_at = now()
+         where id = $1
+        """,
+        session_id, json.dumps(marker), reason,
+    )
 
 
 async def list_sessions(
@@ -3805,7 +3950,7 @@ async def tasks_orphaned_at_startup() -> list[dict]:
         await conn.close()
 
 
-async def fail_sessionless_in_progress_tasks() -> list[dict]:
+async def park_sessionless_in_progress_tasks() -> list[dict]:
     """Land tasks the process died on BETWEEN `start_task(id, None)` and the
     session actually being created — IN_PROGRESS with `session_id is null`.
 
@@ -3817,20 +3962,89 @@ async def fail_sessionless_in_progress_tasks() -> list[dict]:
     an in-process exception a hard kill never raises. Found live 2026-08-25 —
     a restart in that window left a task stuck on the board forever.
 
-    FAILED, never re-run — an interrupted RUN follows the orphan-session rule
-    (the operator didn't re-issue it), unlike the ASSIGNED sweep's relaunch."""
+    Re-run, never FAILED (epic-outage-doctrine story 5): the same `restart`
+    retry park a killed task run gets (`park_orphaned_sessions` (b)), due now."""
+    state = _restart_task_retry_state(datetime.now(timezone.utc))
     conn = await _conn()
     try:
         rows = await conn.fetch(
             """
             update task
-               set status = 'FAILED', terminal_at = now(),
-                   outcome = 'run died with its process before its session existed (swept at startup)'
+               set status = 'ASSIGNED', retry_state = $1::jsonb,
+                   outcome = 'queued for re-run (process restarted before its session existed)'
              where status = 'IN_PROGRESS' and session_id is null
             returning *
-            """
+            """,
+            json.dumps(state),
         )
         return [_task_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def park_interrupted_executions() -> list[dict]:
+    """Proposals a dead process left EXECUTING — STARTUP ONLY: nothing executes
+    in a process that has not started. Parked RETRY_PENDING with
+    `retry_state.interrupted = true`, MERGED into any existing retry_state: a
+    proposal claimed from RETRY_PENDING already carries `completed_results` and
+    `next_action_index`, the known-complete prefix, and those are kept. A fresh
+    execution (no retry_state) is seeded at action 0 with nothing complete, and
+    the approver its decision event recorded.
+
+    INTERIM, by the operator's decision of 2026-10-27: an interrupted proposal
+    waits for the operator (retry-now or dismiss); no sweep re-runs it, because
+    the action that was in flight may or may not have landed. The desired end
+    state is RECONCILIATION — the Executor's record of the in-flight action is
+    enough to ask the service (was the Jira issue created?) and resume past it
+    or re-run it with no operator click. Not built here (deferred work).
+
+    Returns `{id, session_id, agent_id, retry_state}` per proposal."""
+    from central_command.contract.dependencies import dependencies_for_capability
+
+    now = datetime.now(timezone.utc).isoformat()
+    out: list[dict] = []
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                "select id, session_id, agent_id, actions, retry_state "
+                "from proposal where status = 'EXECUTING' for update"
+            )
+            for r in rows:
+                actions = r["actions"]
+                actions = json.loads(actions) if isinstance(actions, str) else (actions or [])
+                prior = r["retry_state"]
+                prior = json.loads(prior) if isinstance(prior, str) else prior
+                state = dict(prior) if prior else {
+                    "next_action_index": 0, "completed_results": [], "attempts": 0,
+                }
+                if not state.get("approver"):
+                    approver = await conn.fetchval(
+                        "select actor from audit_event where kind = 'proposal.decided' "
+                        "and ref_id = $1 and payload->>'verdict' = 'approved' "
+                        "order by id desc limit 1", r["id"],
+                    )
+                    if approver:
+                        state["approver"] = approver
+                index = int(state.get("next_action_index") or 0)
+                capability = (actions[index].get("capability")
+                              if 0 <= index < len(actions) else None)
+                state.update({
+                    "interrupted": True,
+                    "parked_at": now,
+                    "dependencies": list(dependencies_for_capability(capability)),
+                    "last_error": "execution interrupted by a process restart",
+                })
+                if capability:
+                    state["failed_capability"] = capability
+                await conn.execute(
+                    "update proposal set status = 'RETRY_PENDING', "
+                    "retry_state = $2::jsonb where id = $1",
+                    r["id"], json.dumps(state),
+                )
+                out.append({"id": r["id"], "session_id": r["session_id"],
+                            "agent_id": r["agent_id"], "retry_state": state})
+        return out
     finally:
         await conn.close()
 

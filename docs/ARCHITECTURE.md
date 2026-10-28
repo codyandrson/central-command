@@ -716,6 +716,30 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   403, a firewall deny) is listed by `repo.units_failing_despite_probe` and
   reported once by the sweep as `retry.failing_despite_probe`; it keeps
   retrying.
+- **Startup: a restart lands nothing FAILED (story 5 of the outage doctrine).**
+  The lifespan in `api/app.py` runs, in order and before anything new runs:
+  (1) `orchestration.land_orphans_at_startup` — every RUNNING session lands by
+  what it owes (`repo.park_orphaned_sessions`): a killed resume back to
+  `AWAITING_RESUME` due now; a killed task run's task back to `ASSIGNED` with
+  `retry_state.kind = 'restart'` due now (re-run fresh whatever its age) and
+  its transcript closed `STOPPED` with the reason `process restarted; re-run
+  queued as a new session of task <id>`; a chat lane by its record's tail
+  (finished turn → `AWAITING_OPERATOR`, unsent request → `STOPPED` resumable,
+  unanswered calls → `DONE` with `session.turn_lost`); anything else
+  `STOPPED`. Every `EXECUTING` proposal parks `RETRY_PENDING` with
+  `retry_state.interrupted` (merged: a retry's known-complete prefix is kept;
+  a fresh execution is seeded at action 0) and `proposal.execution_interrupted`;
+  (2) `routes.startup_task_sweep` — a sessionless `IN_PROGRESS` task re-parks
+  the same way, and a never-started `ASSIGNED` task is relaunched;
+  (3) the ledger reclaim (`CLAIMED` → `UNPROCESSED`); then the loops; then the
+  background `resume_sweep`, which re-drives the owed resumes and re-runs the
+  restart-parked tasks. `Dispatcher.start` no longer sweeps sessions at all
+  (a run in a live process is alive). No sweep moves an `interrupted`
+  proposal: only the operator's retry-now or a dismiss does. That hold is an
+  **interim**, by the operator's decision of 2026-10-27; the end state is
+  reconciliation, where the Executor's record of the in-flight action is
+  enough to ask the service whether it landed and resume past it or re-run it
+  with no operator click (DL-188).
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).

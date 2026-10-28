@@ -137,18 +137,19 @@ resilience, and the runtime's context/window handling. See
 
 ### DL-031 — The orphan sweep must land the task, not just the session
 
-- **Status:** active
+- **Status:** superseded
 - **Date:** undated
-- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**The orphan sweep must land the TASK, not just the session.**"
-- **Why:** `repo.fail_stale_running_sessions` is the only thing that CAN land
-  it — the park that would have recorded the death is written in an `except`
-  block a dead process never reaches. FAILED, never retry-parked: a restart
-  is not a dependency outage, and silently re-running whatever was in flight
-  spends tokens on work the operator never re-issued. (PRD FR-40 changes this:
-  restart orphans park and nothing terminal comes from DOWN; the FAILED
-  landing is today's behaviour until that ships.)
-- **Enforced:** test: `tests/test_outage_requeue.py::test_the_orphan_sweep_lands_the_task_not_just_the_session`
-- **Source:** .claude/rules/runtime-resilience.md
+- **Rule:** (recorded here) The orphan sweep must land the TASK, not just the session, and it lands both FAILED: a restart is not a dependency outage, so what was in flight is never retry-parked.
+- **Why:** The sweep was the only thing that CAN land it — the park that
+  would have recorded the death is written in an `except` block a dead
+  process never reaches. FAILED, never retry-parked: silently re-running
+  whatever was in flight spends tokens on work the operator never re-issued.
+  (PRD FR-40 changed this: restart orphans park and nothing terminal comes
+  from DOWN; superseded by DL-188 on 2026-10-27, which keeps the first half —
+  the task is landed — and replaces the FAILED landing with a re-park.)
+- **Enforced:** discipline only — the FAILED landing was removed in epic-outage-doctrine story 5
+- **Source:** .claude/rules/runtime-resilience.md (the bite mark as it read before 2026-10-27)
+- **Superseded-by:** DL-188
 
 ### DL-032 — A tool result is bounded by the input window, not the output cap
 

@@ -811,33 +811,6 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
 # polling for hours — two processes split the queue safely (skip locked), but
 # the zombie ran OLD config, so its half of the work skipped the auditor. The
 # lease makes "one drain loop per database" a database invariant, not a hope.
-async def sweep_orphaned_sessions(age_seconds: int) -> int:
-    """Fail RUNNING sessions whose process died mid-run, and land their tasks.
-
-    Called with age 0 from app startup (nothing runs in this process yet, so
-    any RUNNING row is orphaned by construction — the session analogue of
-    `reclaim_stale_work_items(0)`) and with the stale threshold from
-    `Dispatcher.start`, which an operator may invoke mid-life alongside
-    legitimate live runs. Before the startup call existed, a session whose run
-    died young enough stayed RUNNING forever: unstoppable (the cooperative
-    stop flag had no reader) and uncloseable (close refuses mid-turn) —
-    jira-expert sat that way on 2026-08-17."""
-    orphaned, landed = await repo.fail_stale_running_sessions(age_seconds)
-    if orphaned:
-        log.warning("swept %d orphaned RUNNING session(s)", orphaned)
-    # The task's own record, loudly: a board that read IN_PROGRESS against a
-    # FAILED transcript is what made three dead runs look alive for days.
-    for task_id in landed:
-        await events.emit(
-            "task.run_failed",
-            ref_id=task_id,
-            payload={"error": "run died with its process",
-                     "transient": False, "swept": True},
-            actor="system",
-        )
-    return orphaned
-
-
 DISPATCH_LEASE_KEY = 0x67760001
 
 
@@ -907,12 +880,12 @@ class Dispatcher:
         recovered = await repo.reclaim_stale_work_items(0)
         if recovered:
             log.warning("dispatch: reclaimed %d stale claim(s)", recovered)
-        # Same sweep for live-transcript sessions: runs are in-process, so a
-        # session still RUNNING long past any real run's duration died with its
-        # process. The partial transcript is kept (honest record). The stale
-        # threshold (not 0) because an operator may start dispatch mid-life,
-        # with legitimate runs live in this same process.
-        await sweep_orphaned_sessions(settings.dispatch_stale_claim_seconds)
+        # Sessions are NOT swept here (epic-outage-doctrine story 5). An
+        # operator may start dispatch mid-life, with legitimate runs live in
+        # this same process, and a run in a live process is alive — however
+        # long it takes. What a DEAD process left RUNNING is landed once, at
+        # startup, by `orchestration.land_orphans_at_startup` (age 0), and
+        # nothing there lands FAILED: a restart re-parks, it never fails.
         self._stopping.clear()
         self._task = asyncio.create_task(self._loop())
         await events.emit(

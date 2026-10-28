@@ -372,9 +372,9 @@ async def test_sweep_wakes_a_waiter_whose_task_went_terminal_offline():
     model = _make_task_wait_model()
     run, task_id = await _parked_on_a_task(model)
 
-    # Simulate the orphan sweep landing the child task's own dead run FAILED —
-    # exactly what `repo.fail_stale_running_sessions` does, without needing a
-    # second live session to go stale in this test.
+    # The child task FAILED for whatever reason (a semantic failure; a
+    # restart no longer fails anything since outage doctrine story 5) —
+    # landed directly, without needing a second live run in this test.
     await repo.resolve_task(task_id, "FAILED", outcome="run died with its process")
 
     swept = await orchestration.resume_sweep()

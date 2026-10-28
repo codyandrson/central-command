@@ -658,6 +658,91 @@ async def park_orphaned_resumes() -> list[str]:
     return orphaned
 
 
+async def land_orphans_at_startup() -> dict:
+    """THE startup landing for what a dead process left mid-flight — called
+    once from the lifespan, before anything runs (age 0 by construction). A
+    restart lands NOTHING failed (epic-outage-doctrine story 5):
+
+    - RUNNING sessions land by what they owe (`repo.park_orphaned_sessions`):
+      a killed resume goes back to AWAITING_RESUME due now, a killed task run
+      re-parks its task for a fresh re-run and closes the dead transcript
+      STOPPED naming it, a chat lane is landed or stopped per its record, and
+      anything else closes STOPPED;
+    - EXECUTING proposals park RETRY_PENDING `interrupted` and wait for the
+      operator (`repo.park_interrupted_executions`) — an INTERIM: the end
+      state is reconciliation against the service, see that function.
+
+    The db tier only flips rows; the announcements are here, after the fact,
+    because they authorise nothing."""
+    landed = await repo.park_orphaned_sessions()
+    for row in landed:
+        sid, outcome = row["session_id"], row["outcome"]
+        if outcome == "resume":
+            pending = row.get("pending") or {}
+            await events.emit(
+                "session.resume_parked", ref_id=sid,
+                payload={"after": pending.get("after"), "restart": True,
+                         "attempts": pending.get("attempts"),
+                         "dependencies": pending.get("dependencies"),
+                         "not_before": pending.get("not_before"),
+                         "error": row["reason"], "transient": True},
+                actor="system",
+            )
+        elif outcome in ("task_rerun", "turn_stopped", "stopped"):
+            await events.emit(
+                "session.stopped", ref_id=sid,
+                payload={"agent_id": row["agent_id"], "task_id": row.get("task_id"),
+                         "after": {"task_rerun": "task",
+                                   "turn_stopped": "converse"}.get(outcome),
+                         "reason": "restart", "restart_reason": row["reason"]},
+                actor="system",
+            )
+            if outcome == "task_rerun":
+                state = row["retry_state"]
+                await events.emit(
+                    "task.run_parked", ref_id=row["task_id"],
+                    payload={"restart": True, "kind": "restart", "attempts": 0,
+                             "transient": False, "session_id": sid,
+                             "dependencies": state["dependencies"],
+                             "not_before": state["not_before"],
+                             "error": state["last_error"]},
+                    actor="system",
+                )
+        elif outcome == "turn_lost":
+            await events.emit(
+                "session.turn_lost", ref_id=sid,
+                payload={"agent_id": row["agent_id"], "reason": row["reason"]},
+                actor="system",
+            )
+    if landed:
+        log.warning("startup: landed %d orphaned RUNNING session(s): %s", len(landed),
+                    ", ".join(f"{r['session_id']}={r['outcome']}" for r in landed))
+
+    interrupted = await repo.park_interrupted_executions()
+    for prop in interrupted:
+        state = prop["retry_state"]
+        await events.emit(
+            "proposal.execution_interrupted", ref_id=prop["id"],
+            payload={"session_id": prop["session_id"],
+                     "next_action_index": state.get("next_action_index"),
+                     "completed_actions": state.get("completed_results") or [],
+                     "failed_capability": state.get("failed_capability"),
+                     "dependencies": state.get("dependencies")},
+            actor="system",
+        )
+    if interrupted:
+        log.warning("startup: %d execution(s) interrupted, held for the operator",
+                    len(interrupted))
+    return {"sessions": landed, "interrupted": [p["id"] for p in interrupted]}
+
+
+def _interrupted(row: dict | None) -> bool:
+    """A proposal a restart interrupted mid-execution: no sweep moves it. Only
+    the operator's retry-now (or a dismiss) does — the INTERIM hold, see
+    `repo.park_interrupted_executions`."""
+    return bool(((row or {}).get("retry_state") or {}).get("interrupted"))
+
+
 async def resume_sweep() -> dict:
     """Catch-up for parked orchestrations whose wake-up hook was lost (process
     restart between a child resolving and the resume). Run at startup and on
@@ -725,6 +810,8 @@ async def resume_sweep() -> dict:
     waiting = []
     for prop in reversed(await repo.list_proposals("RETRY_PENDING")):
         row = await repo.load_proposal(prop["id"])
+        if _interrupted(row):
+            continue  # held for the operator — never replayed by a sweep
         waiting.append((prop["id"], gate_names(_proposal_dependencies(
             (row or {}).get("retry_state") or {}))))
     cache = probes.ProbeCache()
@@ -972,6 +1059,8 @@ async def retry_sweep(cache=None) -> dict:
     # DUE ones only (`retry_state.not_before`, in SQL).
     for prop in reversed(await repo.list_proposals("RETRY_PENDING", due_only=True)):
         row = await repo.load_proposal(prop["id"])
+        if _interrupted(row):
+            continue  # held for the operator — never replayed by a sweep
         state = (row or {}).get("retry_state") or {}
         units.append(("proposal", prop["id"],
                       gate_names(_proposal_dependencies(state)),
@@ -1342,6 +1431,19 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
 _TERMINAL_SESSION = ("DONE", "FAILED")
 
 
+async def _finished_for_waiters(session: dict) -> bool:
+    """Is this session over, as far as someone waiting on it is concerned?
+    DONE and FAILED, and a run a restart closed STOPPED with no way back in
+    (`repo.park_orphaned_sessions`): nothing will ever land it, so its asker is
+    woken and told the reason rather than left waiting on it forever."""
+    if session["status"] in _TERMINAL_SESSION:
+        return True
+    if session["status"] != "STOPPED":
+        return False
+    marker = (await repo.get_session_run_state(session["id"]) or {}).get("pending_stop") or {}
+    return marker.get("reason") == "restart" and not marker.get("resumable")
+
+
 def _consult_outcome_text(
     target: str, prop: dict | None, closed_reason: str | None,
     answer: str | None = None,
@@ -1463,7 +1565,7 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
         return None
 
     spec = await repo.get_session(specialist_session)
-    if spec is None or spec["status"] not in _TERMINAL_SESSION:
+    if spec is None or not await _finished_for_waiters(spec):
         return None  # still working (or mid-redraft) — keep waiting
 
     claimed = await repo.claim_parked_orchestration(session_id)
@@ -2146,6 +2248,13 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
 
     session = await repo.get_session(session_id)
     if session is None:
+        return None
+    # A transcript a RESTART closed is resumable only where its record ends at
+    # a safe re-entry point (a chat turn's unsent request). A killed task run
+    # is never re-entered — its task is re-run fresh, and resuming the dead
+    # transcript would race that re-run or re-fire a tool batch.
+    stop = (await repo.get_session_run_state(session_id) or {}).get("pending_stop") or {}
+    if stop.get("reason") == "restart" and not stop.get("resumable"):
         return None
     claimed = await repo.claim_stopped_session(session_id)
     if claimed is None:
