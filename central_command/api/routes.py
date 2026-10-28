@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from central_command import events
 from central_command.contract import EmbedderDown, is_transient
+from central_command.contract.dependencies import waited_on
 from central_command.db import repo
 from central_command.gateway import gateway
 from central_command.ingest import bulk_dismiss, ledger
@@ -2245,7 +2246,7 @@ def waiting_facts(state: dict, probes: dict, failing: bool) -> dict:
       execution short — only the operator's retry or a dismiss moves it),
       `completed_actions` (how many actions had landed), and
       `failing_despite_probe` (the loud rule's verdict, passed in)."""
-    deps = [d for d in (state.get("dependencies") or ["llm"]) if d != "local"] or ["llm"]
+    deps = list(waited_on(state.get("dependencies")))
     downs = [
         r["down_since"] for d in deps
         if (r := probes.get(d)) and r.get("state") == "down" and r.get("down_since")

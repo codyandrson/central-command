@@ -771,7 +771,8 @@ source against both lists.
 
 **One curve, no limits, and the loud rule.** Every parked surface waits
 `min(60 s * 2^n, cap)` after its n-th transient failure
-(`contract.retry_backoff_seconds`), the cap being
+(`contract.retry_backoff_seconds`; `contract.retry_not_before` is the one place a
+`not_before` is computed from it), the cap being
 `CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600): a session resume
 (`pending_resume.not_before`, every kind), an approved execution
 (`retry_state.not_before`), a task re-run, a ledger item (`work_item.not_before`)

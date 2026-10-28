@@ -1480,7 +1480,7 @@ def _consult_down(e: BaseException) -> tuple[str, ...] | None:
             x = x.__cause__
 
     walk(e)
-    return tuple(found) or ("llm",)
+    return tuple(found) or (_dependencies.LLM,)
 
 
 @parkable_read(context=False)

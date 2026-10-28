@@ -38,7 +38,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from central_command import events
 from central_command.config import settings
@@ -46,7 +46,7 @@ from central_command.contract import (
     TRANSIENT,
     classify_failure,
     classify_failure_text,
-    retry_backoff_seconds,
+    retry_not_before,
 )
 from central_command.db import repo
 from central_command.runtime.deps import TriageDeps
@@ -961,29 +961,42 @@ def _proposal_dependencies(state: dict) -> tuple[str, ...]:
     """What a parked execution waits on: the tuple its park recorded, else the
     failed capability's own (a park written before the record), else the model
     (a row with none reads as `llm`)."""
-    from central_command.contract.dependencies import dependencies_for_capability
+    from central_command.contract.dependencies import (
+        dependencies_for_capability, recorded_dependencies,
+    )
 
     recorded = state.get("dependencies")
     if recorded:
         return tuple(recorded)
     if state.get("failed_capability"):
         return dependencies_for_capability(state["failed_capability"])
-    return ("llm",)
+    return recorded_dependencies(None)
 
 
-async def probe_and_record(names, cache=None):
+async def probe_and_record(names, cache=None, *, states=None):
     """Probe `names` (concurrently, once each), persist what changed to
     `dependency_probe` and emit `dependency.down` / `dependency.up` on a state
     change. THE probe-and-persist step: the recurring sweep and the operator's
     retry-now (`api/outages.py`) both go through it, so there is one place that
-    decides what a probe result writes. Returns the warmed cache."""
+    decides what a probe result writes (`_record_probe_changes` is its only
+    caller, and `repo.record_dependency_probe` the only writer).
+
+    `states` is `dependency_probe` as it stood before the probes ran; the sweep
+    has already read it (to find the dependencies recorded down) and passes it
+    in rather than reading twice. Returns `(cache, changes)`: the warmed cache,
+    and the state changes written (`[{dependency, state}]`).
+
+    The startup `resume_sweep` deliberately does NOT come through here: it only
+    READS the probes to gate a replay, and writing at startup would add rows
+    and events the catch-up never wrote."""
     from central_command.heartbeat import probes
 
     cache = cache or probes.ProbeCache()
-    states = await repo.dependency_probe_states()
+    if states is None:
+        states = await repo.dependency_probe_states()
     await cache.warm(names)
-    await _record_probe_changes(cache, states)
-    return cache
+    changes = await _record_probe_changes(cache, states) if cache.results else []
+    return cache, changes
 
 
 async def retry_sweep(cache=None, *, only: str | None = None,
@@ -1038,7 +1051,7 @@ async def retry_sweep(cache=None, *, only: str | None = None,
     (tests/test_heartbeat.py). The action is the trigger; this is the lever, the
     same shape as `task.create` calling `routes.create_and_run_task`.
     """
-    from central_command.contract.dependencies import PROBED, gate_names
+    from central_command.contract.dependencies import PROBED, gate_names, recorded_dependencies
     from central_command.heartbeat import probes
 
     cache = cache or probes.ProbeCache()
@@ -1047,7 +1060,7 @@ async def retry_sweep(cache=None, *, only: str | None = None,
     def wanted(recorded) -> bool:
         """Is this unit in scope — the whole sweep, or only the units whose
         park recorded `only` (a record with none reads `llm`)."""
-        return only is None or only in (tuple(recorded or ()) or ("llm",))
+        return only is None or only in recorded_dependencies(recorded)
 
     resumed: list[str] = []
     retried_executions: list[str] = []
@@ -1162,9 +1175,7 @@ async def retry_sweep(cache=None, *, only: str | None = None,
         # only, so their own loops' gates and the banner see the outage (story 7).
         queued = [n for n in await repo.dependencies_waited_on_by_queues() if n in PROBED]
     needed = [n for u in units for n in u[2]] + recorded_down + queued
-    if needed:
-        await cache.warm(needed)
-    changes = await _record_probe_changes(cache, states) if cache.results else []
+    cache, changes = await probe_and_record(needed, cache, states=states)
     loud = await _report_failing_despite_probe() if only is None else []
 
     for unit, unit_id, names, driver, landed, detached in units:
@@ -1368,7 +1379,6 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     session is not parked on a read, or someone else won the claim.
     """
     from central_command.runtime import resume_park
-    from central_command.runtime import run as run_mod
     from central_command.runtime import tools as tools_mod
     from central_command.runtime import converse as converse_mod
     from pydantic_ai import CallDeferred
@@ -2088,19 +2098,19 @@ async def park_task_retry(
     """
     if classify_failure(exc) != TRANSIENT:
         return None
-    backoff = retry_backoff_seconds(attempts - 1)
     now = datetime.now(timezone.utc)
-    from central_command.contract.dependencies import LLM, stamped_dependencies
+    backoff, not_before = retry_not_before(attempts - 1, now=now)
+    from central_command.contract.dependencies import failed_dependencies
 
     state = {
         "kind": kind,
         "attempts": attempts,
         # What the re-run waits on: the typed error's own tuple, else the
         # model (a task run that died transiently died on its model turn).
-        "dependencies": list(stamped_dependencies(exc) or (LLM,)),
+        "dependencies": list(failed_dependencies(exc)),
         "last_error": str(exc)[:500],
         "parked_at": now.isoformat(),
-        "not_before": (now + timedelta(seconds=backoff)).isoformat(),
+        "not_before": not_before.isoformat(),
     }
     if item_id:
         state["item_id"] = item_id

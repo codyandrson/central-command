@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import datetime, timedelta, timezone
 
 from central_command import events
 from central_command.config import settings
@@ -32,7 +31,7 @@ from central_command.contract import (
     TRANSIENT,
     classify_failure,
     is_context_overflow,
-    retry_backoff_seconds,
+    retry_not_before,
 )
 from central_command.db import repo
 from central_command.ingest import ledger
@@ -588,8 +587,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             freeze = await _semantic_freeze_check(item)
         if freeze is not None:
             releases = int(item.get("transient_releases") or 0)
-            backoff = retry_backoff_seconds(releases)
-            not_before = datetime.now(timezone.utc) + timedelta(seconds=backoff)
+            backoff, not_before = retry_not_before(releases)
             await repo.release_work_item(
                 item["id"], error=freeze["reason"], count_attempt=False,
                 not_before=not_before,
@@ -635,18 +633,14 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         transient = classify_failure(e) == TRANSIENT
         if transient:
             releases = int(item.get("transient_releases") or 0)
-            backoff = retry_backoff_seconds(releases)
-            not_before = datetime.now(timezone.utc) + timedelta(seconds=backoff)
+            backoff, not_before = retry_not_before(releases)
             from central_command.contract import EmbedderDown
-            from central_command.contract.dependencies import (
-                EMBEDDER, LLM, stamped_dependencies,
-            )
+            from central_command.contract.dependencies import EMBEDDER, failed_dependencies
 
             # What the item waits on. An embedder outage is the embedder's
             # alone here: the dispatcher embeds to compare, it writes nothing
             # to the graph (story 7).
-            waits_on = ((EMBEDDER,) if isinstance(e, EmbedderDown)
-                        else stamped_dependencies(e) or (LLM,))
+            waits_on = (EMBEDDER,) if isinstance(e, EmbedderDown) else failed_dependencies(e)
             await repo.release_work_item(
                 item["id"], error=str(e), count_attempt=False,
                 not_before=not_before, dependencies=waits_on,

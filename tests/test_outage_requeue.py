@@ -38,7 +38,7 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.spike_model import make_jira_task_model
-from tests.conftest import aresolve, needs_pg
+from tests.conftest import aresolve, event_kinds as _kinds, needs_pg
 
 pytestmark = needs_pg
 
@@ -54,10 +54,6 @@ def pinned(monkeypatch):
     # Proposals accumulate across the file; pin the valve open or the drain
     # blocks once three are awaiting review.
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
-
-
-async def _kinds(ref_id: str) -> list[str]:
-    return [e["kind"] for e in await repo.list_events(ref_id=ref_id)]
 
 
 async def _event(ref_id: str, kind: str) -> dict:

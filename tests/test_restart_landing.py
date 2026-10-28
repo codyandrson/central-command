@@ -33,7 +33,7 @@ from central_command.gateway import gateway
 from central_command.ingest import ledger
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model, make_spike_model
-from tests.conftest import needs_pg
+from tests.conftest import event_kinds as _kinds, needs_pg
 from tests.test_execution_retry import _graph_spy, _jira_spy, _parked_run
 from tests.test_outage_requeue import OUTAGE
 from tests.test_resume_parking import _pending
@@ -69,10 +69,6 @@ async def settle_leftovers():
     await settle()
     yield
     await settle()
-
-
-async def _kinds(ref_id: str) -> list[str]:
-    return [e["kind"] for e in await repo.list_events(ref_id=ref_id)]
 
 
 async def _sql(query: str, *args):

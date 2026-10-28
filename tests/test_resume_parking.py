@@ -35,7 +35,7 @@ from central_command.runtime.spike_model import (
     make_redraft_model,
     make_spike_model,
 )
-from tests.conftest import needs_pg
+from tests.conftest import event_kinds as _kinds, needs_pg
 
 pytestmark = needs_pg
 
@@ -81,10 +81,6 @@ def _boom_on_build(monkeypatch, module, *raises):
 
 async def _pending(session_id: str) -> dict | None:
     return (await repo.get_session_run_state(session_id) or {}).get("pending_resume")
-
-
-async def _kinds(ref_id: str) -> list[str]:
-    return [e["kind"] for e in await repo.list_events(ref_id=ref_id)]
 
 
 async def _task_for(session_id: str, agent_id: str = "inbox-triage") -> str:

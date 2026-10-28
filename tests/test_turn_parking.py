@@ -29,7 +29,7 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.runtime import converse
 from central_command.runtime import models as models_mod
-from tests.conftest import aresolve, make_parks_due, needs_pg
+from tests.conftest import event_kinds as _kinds, make_parks_due, needs_pg
 
 pytestmark = needs_pg
 
@@ -42,25 +42,6 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     monkeypatch.setattr(settings, "executor_mode", "dry_run")
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
-
-
-@pytest.fixture(autouse=True)
-async def settle_leftovers():
-    """The sweep is a GLOBAL worklist and every model resolution here is
-    patched to one script: a parked session another test left behind would be
-    driven by THIS test's sweep and eat its scripted steps. Settle them first
-    (the test database is throwaway)."""
-    conn = await repo._conn()
-    try:
-        await conn.execute("update session set status = 'DONE' "
-                           "where status = 'AWAITING_RESUME'")
-        await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                           "where status = 'RETRY_PENDING'")
-        await conn.execute("update task set retry_state = null "
-                           "where status = 'ASSIGNED' and retry_state is not null")
-    finally:
-        await conn.close()
-    yield
 
 
 class _Script:
@@ -101,10 +82,6 @@ def _route_models(monkeypatch, script: _Script) -> None:
     monkeypatch.setattr(routes, "resolve_model", _resolve)
     monkeypatch.setattr(models_mod, "resolve_model", _resolve)
     monkeypatch.setattr(models_mod, "resolve_session_model", _resolve)
-
-
-async def _kinds(ref_id: str) -> list[str]:
-    return [e["kind"] for e in await repo.list_events(ref_id=ref_id, limit=1000)]
 
 
 async def _messages(session_id: str) -> list[dict]:
@@ -260,11 +237,15 @@ async def test_a_task_run_whose_second_turn_is_down_parks_and_resumes_to_done(mo
     assert _parts(after[len(before) - 1]) == _parts(before[-1])
     assert len(after) == len(before) + 1
     # Only the outage turn was re-sent: this session's record gained exactly
-    # one response (the model double is shared with whatever runs after the
-    # task lands, so its raw call count is not this session's evidence).
+    # one response, and the model double saw exactly one more request. (An
+    # earlier version of this test could only say `>=`: the double is shared by
+    # every model resolution, and `make_parks_due()` backdates EVERY park, so a
+    # chat lane a neighbouring test left parked was driven by this sweep and
+    # consumed a call. `conftest.isolated_queue` settles leftover parks now, so
+    # the count is exact.)
     responses = lambda ms: sum(1 for m in ms if m["kind"] == "response")  # noqa: E731
     assert responses(after) == responses(before) + 1
-    assert script.calls >= calls_before + 1
+    assert script.calls == calls_before + 1
     assert "session.failed" not in await _kinds(sid)
     assert "task.run_parked" not in await _kinds(task["id"]), "parked in place, not fresh"
 

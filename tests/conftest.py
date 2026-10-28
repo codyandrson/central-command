@@ -426,6 +426,13 @@ async def isolated_queue():
         await repo.close_pool()
 
 
+async def event_kinds(ref_id: str) -> list[str]:
+    """The kinds of every event logged against `ref_id`, oldest first. Seven
+    outage-doctrine test files each defined this one-liner; the log is
+    append-only and shared, so tests compare tails or counts, never the whole."""
+    return [e["kind"] for e in await repo.list_events(ref_id=ref_id, limit=1000)]
+
+
 async def make_parks_due() -> None:
     """Backdate every parked session's and proposal's `not_before` (the one
     backoff curve) to one second ago, so a test that parks and then sweeps in

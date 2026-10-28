@@ -272,12 +272,34 @@ def dependencies_for_capability(capability: str | None) -> tuple[str, ...]:
     return CAPABILITY_DEPENDENCY.get(str(capability).split("@", 1)[0], (LOCAL,))
 
 
+def recorded_dependencies(dependencies) -> tuple[str, ...]:
+    """What a park record says it waited on. A record with none (or an empty
+    list) reads as `llm`, the dependency every park waited on before this
+    vocabulary — THE one place that default lives in Python (the SQL twin is
+    `repo._deps_sql`)."""
+    return tuple(dependencies or ()) or (LLM,)
+
+
+def waited_on(dependencies) -> tuple[str, ...]:
+    """`recorded_dependencies` as the operator reads it: `local` is Postgres,
+    never a wait, so it is dropped (and an all-`local` record reads `llm`)."""
+    return tuple(d for d in recorded_dependencies(dependencies) if d != LOCAL) or (LLM,)
+
+
+def failed_dependencies(exc: BaseException | None,
+                        default: tuple[str, ...] = (LLM,)) -> tuple[str, ...]:
+    """What a park stamps for the failure it is recording: the typed error's own
+    tuple, else `default` — the model, since a run that died transiently died
+    on its model turn. THE one place that stamping default lives."""
+    return stamped_dependencies(exc) or default
+
+
 def gate_names(dependencies, *, model_turn: bool = False) -> tuple[str, ...]:
     """The names a unit is gated on: every recorded dependency that has a probe
     (never `local`, never an unknown), plus `llm` when its re-drive is a model
     turn. Order kept, duplicates dropped. Rows that recorded none read as
     `llm` — the dependency every park was waiting on before this vocabulary."""
-    names = [d for d in (dependencies or (LLM,)) if d in PROBED]
+    names = [d for d in recorded_dependencies(dependencies) if d in PROBED]
     if model_turn and LLM not in names:
         names.append(LLM)
     return tuple(dict.fromkeys(names))

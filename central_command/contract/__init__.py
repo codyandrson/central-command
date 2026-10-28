@@ -17,6 +17,7 @@ from .failures import (
     is_context_overflow,
     is_transient,
     retry_backoff_seconds,
+    retry_not_before,
 )
 from .enums import (
     ConfidenceLevel,
@@ -60,5 +61,6 @@ __all__ = [
     "is_context_overflow",
     "is_transient",
     "retry_backoff_seconds",
+    "retry_not_before",
     "RETRY_BACKOFF_BASE_SECONDS",
 ]

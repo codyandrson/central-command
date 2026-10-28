@@ -41,6 +41,7 @@ from fastapi.encoders import jsonable_encoder
 from central_command import __version__
 from central_command.api import attachments
 from central_command.config import settings
+from central_command.contract.dependencies import waited_on
 from central_command.db import repo
 from central_command.events import log as events
 
@@ -514,7 +515,7 @@ async def parked_wait_line(session_id: str) -> str:
     dependency is up by the probes' rule (a missing row is up), so the line
     carries no time — the sweep simply has not re-driven it yet."""
     pending = ((await repo.get_session_run_state(session_id)) or {}).get("pending_resume") or {}
-    deps = [d for d in (pending.get("dependencies") or ["llm"]) if d != "local"] or ["llm"]
+    deps = list(waited_on(pending.get("dependencies")))
     states = await repo.dependency_probe_states()
     for d in deps:
         row = states.get(d) or {}
@@ -552,7 +553,7 @@ async def _with_parked_on(session: dict) -> dict:
     if session.get("status") != "AWAITING_RESUME":
         return session
     pending = ((await repo.get_session_run_state(session["id"])) or {}).get("pending_resume") or {}
-    deps = [d for d in (pending.get("dependencies") or ["llm"]) if d != "local"] or ["llm"]
+    deps = list(waited_on(pending.get("dependencies")))
     return {**session, "parked_on": ", ".join(deps)}
 
 

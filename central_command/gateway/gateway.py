@@ -8,12 +8,11 @@ returns the feedback into the agent's run for a redraft.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from pydantic_ai import DeferredToolRequests
 
 from central_command import events
-from central_command.config import settings
 from central_command.contract import (
     Action,
     Proposal,
@@ -21,7 +20,7 @@ from central_command.contract import (
     claim_supported,
     classify_failure,
     classify_failure_text,
-    retry_backoff_seconds,
+    retry_not_before,
 )
 from central_command.db import repo
 from central_command.gateway import executor, overrides, policy
@@ -891,7 +890,7 @@ async def _park_execution_retry(
     """
     completed = list(failure.completed)
     now = datetime.now(timezone.utc)
-    backoff = retry_backoff_seconds(attempts - 1)
+    backoff, not_before = retry_not_before(attempts - 1, now=now)
     state = {
         # The Executor's completed list IS the cursor: actions run in order, so
         # the first INCOMPLETE action is at index len(completed).
@@ -905,7 +904,7 @@ async def _park_execution_retry(
         "parked_at": now.isoformat(),
         # The one backoff curve over the attempts already spent: the recurring
         # sweep does not offer the proposal again before this.
-        "not_before": (now + timedelta(seconds=backoff)).isoformat(),
+        "not_before": not_before.isoformat(),
     }
     await repo.park_proposal_retry(prop_row["id"], state)
     await events.emit(

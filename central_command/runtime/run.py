@@ -287,14 +287,14 @@ async def _run_live(
             ) from exc
         if (getattr(deps, "park_reads", False) and tail_is_request
                 and classify_failure(exc) == TRANSIENT):
-            from central_command.contract.dependencies import LLM, stamped_dependencies
+            from central_command.contract.dependencies import failed_dependencies
             from central_command.runtime.resume_park import park_turn
 
             stored = await park_turn(
                 session_id=session_id, after=after, error=exc,
                 task_id=task_id or (continue_state or {}).get("task_id"),
                 state=continue_state, window=window, attempts=park_attempts,
-                dependencies=list(stamped_dependencies(exc) or (LLM,)),
+                dependencies=list(failed_dependencies(exc)),
             )
             raise RunParked(session_id, stored) from exc
         from central_command.runtime.converse import land_session

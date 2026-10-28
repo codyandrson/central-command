@@ -40,7 +40,7 @@ from central_command.integrations import graphiti_ingest
 from central_command.runtime import packs
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model
-from tests.conftest import make_parks_due, needs_pg
+from tests.conftest import event_kinds as _kinds, make_parks_due, needs_pg
 
 OUTAGE_TEXT = "Connection refused talking to the n8n façade"
 
@@ -50,32 +50,6 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
-
-
-@pytest.fixture(autouse=True)
-async def no_leftover_parks():
-    """The sweep is a GLOBAL worklist: a RETRY_PENDING proposal one test leaves
-    behind would be gated (and probed) by the next test's sweep. The test
-    database is throwaway, so settle them FAILED on the way in and out."""
-    async def settle():
-        conn = await repo._conn()
-        try:
-            await conn.execute(
-                "update proposal set status = 'FAILED', retry_state = null "
-                "where status = 'RETRY_PENDING'")
-            # Parked sessions and tasks other files left behind come due on
-            # the backoff curve; a sweep here would probe their dependencies.
-            await conn.execute(
-                "update session set status = 'FAILED' where status = 'AWAITING_RESUME'")
-            await conn.execute(
-                "update task set retry_state = null "
-                "where status = 'ASSIGNED' and retry_state is not null")
-        finally:
-            await conn.close()
-
-    await settle()
-    yield
-    await settle()
 
 
 def _probe_table(monkeypatch, **answers):
@@ -253,10 +227,6 @@ async def _jira_parked_proposal(monkeypatch) -> str:
         run["session_id"], run["proposal_id"], model=model)
     assert out["execution"] == "parked"
     return run["proposal_id"]
-
-
-async def _kinds(ref_id: str) -> list[str]:
-    return [e["kind"] for e in await repo.list_events(ref_id=ref_id)]
 
 
 @needs_pg

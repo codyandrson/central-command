@@ -30,7 +30,7 @@ from central_command.gateway import executor, gateway
 from central_command.integrations import graphiti_ingest
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model, make_spike_model
-from tests.conftest import needs_pg
+from tests.conftest import event_kinds as _kinds, needs_pg
 
 pytestmark = needs_pg
 
@@ -76,10 +76,6 @@ def _graph_spy(monkeypatch, *, fail: str | None = None) -> list[tuple]:
 
     monkeypatch.setattr(graphiti_ingest, "enqueue", enqueue)
     return calls
-
-
-async def _kinds(ref_id: str) -> list[str]:
-    return [e["kind"] for e in await repo.list_events(ref_id=ref_id)]
 
 
 async def _event(ref_id: str, kind: str) -> dict:

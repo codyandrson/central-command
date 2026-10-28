@@ -32,6 +32,7 @@ import asyncio
 import errno
 import re
 import socket
+from datetime import datetime, timedelta, timezone
 
 TRANSIENT = "transient"
 SEMANTIC = "semantic"
@@ -296,6 +297,24 @@ def is_transient(exc: BaseException | None) -> bool:
 # days, which is the point: there is no attempt limit (epic-outage-doctrine
 # story 4), DOWN waits as long as the outage lasts.
 RETRY_BACKOFF_BASE_SECONDS = 60
+
+
+def retry_not_before(
+    prior_failures: int, *, now: datetime | None = None, cap: int | None = None
+) -> tuple[int, datetime]:
+    """`(backoff_seconds, not_before)` for a unit that has failed
+    `prior_failures` times already — THE one place a `not_before` is computed.
+
+    Every parked surface passes the number of failures BEFORE the one it is
+    recording, each translating its own counter, so the first failure waits a
+    minute everywhere: a session resume passes `pending_resume.attempts` (the
+    re-drives so far; 0 on the first park), a proposal or task passes
+    `attempts - 1` (its first park is attempt 1), a ledger item passes
+    `transient_releases`, and an ingest job passes `attempts - 1`
+    (`graphiti_ingest` hands the seconds to SQL, which adds them to `now()`)."""
+    seconds = retry_backoff_seconds(prior_failures, cap)
+    base = now or datetime.now(timezone.utc)
+    return seconds, base + timedelta(seconds=seconds)
 
 
 def retry_backoff_seconds(prior_failures: int, cap: int | None = None) -> int:

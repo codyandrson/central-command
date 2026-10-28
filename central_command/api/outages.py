@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from central_command import events
 from central_command.config import settings
-from central_command.contract.dependencies import DEPENDENCIES, LOCAL
+from central_command.contract.dependencies import DEPENDENCIES, LOCAL, recorded_dependencies
 from central_command.db import repo
 
 router = APIRouter(prefix="/api")
@@ -58,7 +58,7 @@ async def list_outages() -> dict:
     for u in await repo.units_failing_despite_probe(settings.retry_loud_after_attempts):
         entry = {"kind": u["unit"], "id": u["id"], "attempts": u["failures"],
                  "last_error": u["last_error"]}
-        for dep in u["dependencies"] or ["llm"]:
+        for dep in recorded_dependencies(u["dependencies"]):
             failing.setdefault(dep, []).append(entry)
 
     out = []
@@ -112,7 +112,7 @@ async def retry_outage(name: str, include_interrupted: bool = False,
 
     from central_command.api import orchestration
 
-    cache = await orchestration.probe_and_record([name])
+    cache, _changes = await orchestration.probe_and_record([name])
     zero = {k: 0 for k in KINDS}
     if not cache.results.get(name, False):
         return {"probe": "down", "driven": zero}

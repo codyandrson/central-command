@@ -41,7 +41,7 @@ from central_command.gateway import gateway
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_spike_model
-from tests.conftest import aresolve, needs_pg
+from tests.conftest import aresolve, event_kinds as _kinds, needs_pg
 from tests.test_execution_retry import OUTAGE_TEXT, _graph_spy, _jira_spy, _parked_run
 from tests.test_outage_requeue import (
     OUTAGE, _boom_handler, _model_that_raises, _resolver_raising,
@@ -62,29 +62,17 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "retry_backoff_cap_seconds", CAP)
 
 
-_TASKS: list[str] = []
-
-
 @pytest.fixture(autouse=True)
-async def settle_leftovers():
-    """The sweeps are GLOBAL worklists: settle what this file parks so another
-    test's sweep never meets it (the test database is throwaway)."""
+async def clean_ledger_rows():
+    """The mail items this file enrolls are real rows: remove them afterwards.
+    (Leftover PARKS need no per-file settle: `conftest.isolated_queue` settles
+    every park before each test.)"""
     yield
     conn = await repo._conn()
     try:
-        await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                           "where status = 'RETRY_PENDING'")
-        if _TASKS:
-            await conn.execute("update task set retry_state = null "
-                               "where id = any($1::text[])", _TASKS)
         await conn.execute("delete from work_item where message_id like '<cc-backoff-%'")
     finally:
         await conn.close()
-    _TASKS.clear()
-
-
-async def _kinds(ref_id: str) -> list[str]:
-    return [e["kind"] for e in await repo.list_events(ref_id=ref_id)]
 
 
 async def _payloads(ref_id: str, kind: str) -> list[dict]:
@@ -183,7 +171,6 @@ async def test_a_task_backs_off_and_never_exhausts(monkeypatch):
     # (a model that dies on a persisted request parks the TURN since story 6).
     monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task_id = "task_" + uuid.uuid4().hex[:12]
-    _TASKS.append(task_id)
     await repo.create_task(task_id, "backoff test", "x", "jira-expert")
     task = await repo.get_task(task_id)
 
@@ -281,7 +268,6 @@ async def test_the_recurring_sweep_does_not_offer_a_unit_before_its_not_before(
 
 async def test_a_unit_failing_despite_a_healthy_probe_is_reported_once(monkeypatch):
     task_id = "task_" + uuid.uuid4().hex[:12]
-    _TASKS.append(task_id)
     await repo.create_task(task_id, "loud test", "x", "jira-expert")
     # Three transient failures (403 stays transient, the operator's ruling);
     # every probe answers up (the suite's default).
@@ -306,7 +292,6 @@ async def test_a_unit_failing_despite_a_healthy_probe_is_reported_once(monkeypat
 
 async def test_a_unit_whose_dependency_is_down_is_not_failing_despite_the_probe():
     task_id = "task_" + uuid.uuid4().hex[:12]
-    _TASKS.append(task_id)
     await repo.create_task(task_id, "loud test 2", "x", "jira-expert")
     for attempt in (1, 2, 3):
         assert await orchestration.park_task_retry(
@@ -319,7 +304,6 @@ async def test_a_unit_whose_dependency_is_down_is_not_failing_despite_the_probe(
 
 async def test_below_the_threshold_nothing_is_failing():
     task_id = "task_" + uuid.uuid4().hex[:12]
-    _TASKS.append(task_id)
     await repo.create_task(task_id, "loud test 3", "x", "jira-expert")
     for attempt in (1, 2):
         assert await orchestration.park_task_retry(
@@ -339,7 +323,6 @@ async def test_a_semantic_task_failure_lands_failed_on_the_first_attempt(monkeyp
     monkeypatch.setattr(routes, "resolve_model", aresolve(
         lambda *a, **k: _model_that_raises(RuntimeError("field 'due' is not a date"))))
     task_id = "task_" + uuid.uuid4().hex[:12]
-    _TASKS.append(task_id)
     await repo.create_task(task_id, "semantic test", "x", "jira-expert")
     await routes._run_assigned_task_detached(await repo.get_task(task_id), "operator")
     assert (await repo.get_task(task_id))["status"] == "FAILED"

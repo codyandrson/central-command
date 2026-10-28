@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import asyncpg
 
 from central_command.config import settings
+from central_command.contract.dependencies import LLM
 
 # ponytail: max_size=20 is a guess above anything measured; raise it if
 # `acquire` ever shows up waiting. min_size=0 so a pool costs nothing until
@@ -1028,7 +1029,7 @@ def _restart_task_retry_state(now: datetime) -> dict:
     entry; `attempts: 0` because a restart is not a failure of the task."""
     return {"kind": "restart", "attempts": 0, "restart": True,
             "not_before": now.isoformat(), "parked_at": now.isoformat(),
-            "dependencies": ["llm"],
+            "dependencies": [LLM],
             "last_error": "the run died with its process"}
 
 
@@ -1126,7 +1127,7 @@ async def park_orphaned_sessions() -> list[dict]:
                         # The parked-turn shape (`resume_park.park_turn`), due
                         # now: a restart is not an outage, nothing to wait out.
                         pending = {"kind": "turn", "after": "converse",
-                                   "attempts": 0, "dependencies": ["llm"],
+                                   "attempts": 0, "dependencies": [LLM],
                                    "window": 1, "last_error": RESTART_REASON,
                                    "parked_at": now.isoformat(),
                                    "not_before": now.isoformat()}
@@ -6936,6 +6937,14 @@ async def record_dependency_probe(name: str, up: bool, error: str | None = None)
         await conn.close()
 
 
+def _deps_sql(expr: str) -> str:
+    """The SQL twin of `contract.dependencies.recorded_dependencies`: a jsonb
+    dependency list as the outages surface and the loud rule read it — a record
+    with none (NULL or an empty list) reads as `["llm"]`. THE one place that
+    default lives in SQL; every query over parked units wraps its column in it."""
+    return f"coalesce(nullif({expr}, '[]'::jsonb), '[\"{LLM}\"]'::jsonb)"
+
+
 async def units_failing_despite_probe(n: int) -> list[dict]:
     """Parked units that have failed at least `n` times while every dependency
     they recorded probes UP (outage doctrine story 4, the loud rule).
@@ -6958,34 +6967,33 @@ async def units_failing_despite_probe(n: int) -> list[dict]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            """
+            f"""
             with parked as (
                 select 'session' as unit, id,
                        coalesce((run_state -> 'pending_resume' ->> 'attempts')::int, 0) + 1
                          as failures,
-                       coalesce(run_state -> 'pending_resume' -> 'dependencies',
-                                '["llm"]'::jsonb) as deps,
+                       {_deps_sql("run_state -> 'pending_resume' -> 'dependencies'")} as deps,
                        run_state -> 'pending_resume' ->> 'last_error' as last_error
                   from session where status = 'AWAITING_RESUME'
                 union all
                 select 'proposal', id,
                        coalesce((retry_state ->> 'attempts')::int, 1),
-                       coalesce(retry_state -> 'dependencies', '["llm"]'::jsonb),
+                       {_deps_sql("retry_state -> 'dependencies'")},
                        retry_state ->> 'last_error'
                   from proposal where status = 'RETRY_PENDING'
                 union all
                 select 'task', id,
                        coalesce((retry_state ->> 'attempts')::int, 1),
-                       coalesce(retry_state -> 'dependencies', '["llm"]'::jsonb),
+                       {_deps_sql("retry_state -> 'dependencies'")},
                        retry_state ->> 'last_error'
                   from task where status = 'ASSIGNED' and retry_state is not null
                 union all
-                select 'work_item', id, transient_releases, dependencies, last_error
+                select 'work_item', id, transient_releases, {_deps_sql("dependencies")}, last_error
                   from work_item
                  where state = 'UNPROCESSED' and dependencies is not null
                 union all
                 select 'ingest_job', 'ingest-job-' || id::text, attempts,
-                       coalesce(dependencies, '["llm"]'::jsonb), last_error
+                       {_deps_sql("dependencies")}, last_error
                   from graph_ingest_job
                  where status = 'QUEUED' and last_error is not null
                    and not_before is not null
@@ -7030,23 +7038,22 @@ def _parked_units_sql(future_only: bool) -> str:
     return f"""
         with parked as (
             select 'sessions' as kind, id,
-                   coalesce(nullif(run_state -> 'pending_resume' -> 'dependencies', '[]'::jsonb),
-                            '["llm"]'::jsonb) as deps, false as interrupted
+                   {_deps_sql("run_state -> 'pending_resume' -> 'dependencies'")} as deps, false as interrupted
               from session where status = 'AWAITING_RESUME'
             union all
-            select 'proposals', id, coalesce(nullif(retry_state -> 'dependencies', '[]'::jsonb), '["llm"]'::jsonb),
+            select 'proposals', id, {_deps_sql("retry_state -> 'dependencies'")},
                    coalesce((retry_state ->> 'interrupted')::boolean, false)
               from proposal where status = 'RETRY_PENDING'
             union all
-            select 'tasks', id, coalesce(nullif(retry_state -> 'dependencies', '[]'::jsonb), '["llm"]'::jsonb), false
+            select 'tasks', id, {_deps_sql("retry_state -> 'dependencies'")}, false
               from task where status = 'ASSIGNED' and retry_state is not null
             union all
-            select 'work_items', id, coalesce(nullif(dependencies, '[]'::jsonb), '["llm"]'::jsonb), false
+            select 'work_items', id, {_deps_sql("dependencies")}, false
               from work_item
              where state = 'UNPROCESSED' and not_before is not null {item_gate}
             union all
             select 'ingest_jobs', 'ingest-job-' || id::text,
-                   coalesce(nullif(dependencies, '[]'::jsonb), '["llm"]'::jsonb), false
+                   {_deps_sql("dependencies")}, false
               from graph_ingest_job
              where status = 'QUEUED' and not_before is not null {item_gate}
         )
@@ -7112,24 +7119,24 @@ async def pull_queued_units_due(dependency: str) -> dict[str, int]:
     conn = await _conn()
     try:
         items = await conn.fetchval(
-            """
+            f"""
             with moved as (
                 update work_item set not_before = now()
                  where state = 'UNPROCESSED' and not_before is not null
                    and not_before > now()
-                   and coalesce(dependencies, '["llm"]'::jsonb) ? $1
+                   and {_deps_sql("dependencies")} ? $1
                 returning 1)
             select count(*)::int from moved
             """,
             dependency,
         )
         jobs = await conn.fetchval(
-            """
+            f"""
             with moved as (
                 update graph_ingest_job set not_before = now()
                  where status = 'QUEUED' and not_before is not null
                    and not_before > now()
-                   and coalesce(dependencies, '["llm"]'::jsonb) ? $1
+                   and {_deps_sql("dependencies")} ? $1
                 returning 1)
             select count(*)::int from moved
             """,

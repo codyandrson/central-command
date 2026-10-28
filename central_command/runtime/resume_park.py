@@ -23,11 +23,11 @@ operator-initiated pause must not appear in the Decisions Inbox.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from central_command import events
-from central_command.contract import classify_failure, retry_backoff_seconds
-from central_command.contract.dependencies import LLM, stamped_dependencies
+from central_command.contract import classify_failure, retry_not_before
+from central_command.contract.dependencies import failed_dependencies
 from central_command.db import repo
 
 
@@ -213,17 +213,19 @@ async def park_resume(
     # the model — a resume is a model turn, and a model DOWN records ['llm'].
     dependencies = list(
         pending.get("dependencies")
-        or stamped_dependencies(error if isinstance(error, BaseException) else None)
-        or (LLM,)
+        or failed_dependencies(error if isinstance(error, BaseException) else None)
     )
     now = datetime.now(timezone.utc)
-    backoff = 0 if due_now else retry_backoff_seconds(int(pending.get("attempts") or 0))
+    if due_now:
+        backoff, not_before = 0, now
+    else:
+        backoff, not_before = retry_not_before(int(pending.get("attempts") or 0), now=now)
     stored = {
         **pending,
         "dependencies": dependencies,
         "last_error": str(error)[:500],
         "parked_at": now.isoformat(),
-        "not_before": (now + timedelta(seconds=backoff)).isoformat(),
+        "not_before": not_before.isoformat(),
     }
     await repo.park_session_awaiting_resume(session_id, stored)
     await events.emit(
