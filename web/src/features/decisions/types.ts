@@ -102,6 +102,52 @@ export interface ProposalSummary {
    *  null for every other status. The server computes it
    *  (`routes.waiting_facts`); the cockpit renders and derives nothing. */
   waiting?: WaitingFacts | null;
+  /** The chain link this proposal carries when it is a redraft (the column);
+   *  null on a first draft. Server-built (`routes.annotate_redraft_facts`). */
+  redraft?: RedraftLink | null;
+  /** The ancestors from `redraft.of` back to the root, OLDEST first; empty on
+   *  a first draft. The cockpit lists them and builds none. */
+  chain?: ChainLink[];
+  /** FAILED at the end of a chain that hit the limit (read from the
+   *  `proposal.failed` event: the row has no marker). */
+  chain_exhausted?: boolean;
+  /** `settings.world_moved_redraft_limit`, so "n of <limit>" is never derived
+   *  in the browser. */
+  redraft_limit?: number;
+}
+
+/** Why a redraft exists: the drafter was resumed after the world moved, after
+ *  the operator's rejection, or after a failed execution. */
+export type RedraftCause = 'world_moved' | 'rejected' | 'failed';
+
+/** The row's `proposal.redraft` column (epic-world-changed-redraft). */
+export interface RedraftLink {
+  of: string;
+  root: string;
+  cause: RedraftCause;
+  /** World-moved redrafts in the chain up to and including this one. */
+  world_moved_count: number;
+}
+
+/** What a failed execution recorded when the world had moved. */
+export interface WorldMoved {
+  target?: string;
+  expected?: unknown;
+  actual?: unknown;
+  what_moved?: string;
+}
+
+/** One ancestor in a redraft's chain, read from the row and its
+ *  `proposal.decided` / `proposal.failed` events. Pinned by
+ *  tests/test_world_moved_wire.py. */
+export interface ChainLink {
+  id: string;
+  status: string;
+  verdict: string | null;
+  approver: string | null;
+  decided_at: string | null;
+  failure: { capability: string | null; error: string | null; world_moved: WorldMoved | null } | null;
+  chain_exhausted: boolean;
 }
 
 /** What a RETRY_PENDING proposal waits on (epic-outage-doctrine story 8). */

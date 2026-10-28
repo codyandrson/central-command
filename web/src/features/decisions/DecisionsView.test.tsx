@@ -711,3 +711,95 @@ describe('DecisionsView waiting section', () => {
     expect(await screen.findByRole('button', { name: 'Dismiss' })).toBeEnabled();
   });
 });
+
+describe('DecisionsView redraft chain', () => {
+  // Shapes mirror tests/test_world_moved_wire.py, which pins them from the backend.
+  const link = (id: string, over: Record<string, unknown> = {}) => ({
+    id, status: 'FAILED', verdict: 'approved', approver: 'operator',
+    decided_at: hoursAgo(5), chain_exhausted: false,
+    failure: {
+      capability: 'confluence.update_page', error: 'stale version',
+      world_moved: { target: 'confluence:page:42', expected: 'v1', actual: 'v2',
+                     what_moved: `page 42 moved after ${id}` },
+    },
+    ...over,
+  });
+  const redraftRow = (over: Record<string, unknown> = {}) => ({
+    id: 'r3', agent_id: 'confluence-expert', intent: 'Update page 42', status: 'AWAITING_HUMAN',
+    session_id: 's1', created_at: hoursAgo(1),
+    redraft: { of: 'r2', root: 'r0', cause: 'world_moved', world_moved_count: 3 },
+    chain: [link('r0'), link('r1'), link('r2')],
+    chain_exhausted: false, redraft_limit: 3,
+    ...over,
+  });
+
+  it('words a world-moved redraft with its parent, what moved and n of the limit', () => {
+    state.proposals = [redraftRow()];
+    render(<DecisionsView />);
+
+    const chip = screen.getByTestId('redraft-chip');
+    expect(chip).toHaveAttribute('data-cause', 'world_moved');
+    expect(chip).toHaveTextContent('redraft of r2 · the world moved: page 42 moved after r2 · 3 of 3');
+  });
+
+  it('lists the chain in the detail pane, oldest first, with verdict, approver and what moved', async () => {
+    const row = redraftRow();
+    state.proposals = [row];
+    state.detail = { ...row, actions: [], evidence: [], expected_effect: '' };
+    render(<DecisionsView />);
+
+    await userEvent.click(screen.getByText('Update page 42'));
+    const links = await screen.findAllByTestId('chain-link');
+
+    expect(links).toHaveLength(3);
+    expect(links[0]).toHaveTextContent('first draft');
+    expect(links[0]).toHaveTextContent('r0');
+    expect(links[2]).toHaveTextContent('redraft 2');
+    expect(links[2]).toHaveTextContent('r2');
+    expect(links[1]).toHaveTextContent('approved by operator');
+    expect(links[1]).toHaveTextContent('the world moved: page 42 moved after r1');
+  });
+
+  it('names a rejected redraft by its cause', () => {
+    state.proposals = [redraftRow({
+      redraft: { of: 'r0', root: 'r0', cause: 'rejected', world_moved_count: 0 },
+      chain: [link('r0', { status: 'REJECTED', verdict: 'rejected', failure: null })],
+    })];
+    render(<DecisionsView />);
+
+    expect(screen.getByTestId('redraft-chip')).toHaveTextContent('redraft after your rejection');
+    expect(screen.getByTestId('redraft-chip')).toHaveAttribute('data-cause', 'rejected');
+  });
+
+  it('names a redraft after a failed execution by its cause', () => {
+    state.proposals = [redraftRow({
+      redraft: { of: 'r0', root: 'r0', cause: 'failed', world_moved_count: 0 },
+      chain: [link('r0', { failure: { capability: 'x', error: 'boom', world_moved: null } })],
+    })];
+    render(<DecisionsView />);
+
+    expect(screen.getByTestId('redraft-chip')).toHaveTextContent('redraft after a failed execution');
+  });
+
+  it('renders nothing for a first draft', () => {
+    state.proposals = [redraftRow({ redraft: null, chain: [] })];
+    render(<DecisionsView />);
+
+    expect(screen.queryByTestId('redraft-chip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('redraft-limit-reached')).not.toBeInTheDocument();
+  });
+
+  it('marks an exhausted chain in the history list, and only a FAILED end of one', async () => {
+    state.history = [
+      redraftRow({ id: 'r3', status: 'FAILED', decided_at: hoursAgo(1), chain_exhausted: true }),
+      redraftRow({ id: 'r2', status: 'FAILED', decided_at: hoursAgo(2), chain_exhausted: false,
+                   intent: 'Update page 42 earlier' }),
+    ];
+    render(<DecisionsView />);
+    await userEvent.click(screen.getByLabelText('Show decision history'));
+
+    const marks = screen.getAllByTestId('redraft-limit-reached');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]).toHaveTextContent('redraft limit reached');
+  });
+});

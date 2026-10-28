@@ -16,7 +16,7 @@ import { BulkDismissDialog } from './BulkDismissDialog';
 import { agingLevel, ageOf, oldestAge, STALE_HOURS, type OldestAge } from './aging';
 import { ListDetailSplit } from '@/components/Splitter';
 import type {
-  DecidedBy, DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, ShadowMark, WaitingFacts, WorkItem,
+  ChainLink, DecidedBy, DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, ShadowMark, WaitingFacts, WorkItem,
 } from './types';
 
 /* The panes used to call `useDecisions()` themselves, which meant three live
@@ -142,6 +142,79 @@ function OriginChip({ p }: { p: Pick<ProposalSummary, 'agent_id' | 'origin'> }) 
   );
 }
 
+/* ── Redraft chain ──
+   A redraft is a fresh proposal linked to the one it replaces. The server sends
+   the link, the chain behind it and the limit; the cockpit words them. */
+type RedraftFacts = Pick<ProposalSummary, 'redraft' | 'chain' | 'redraft_limit'>;
+
+function redraftChipText(p: RedraftFacts): string | null {
+  const r = p.redraft;
+  if (!r) return null;
+  if (r.cause === 'rejected') return 'redraft after your rejection';
+  if (r.cause === 'failed') return 'redraft after a failed execution';
+  const parent = p.chain?.[p.chain.length - 1];
+  const moved = parent?.failure?.world_moved?.what_moved;
+  const of = p.redraft_limit !== undefined ? `${r.world_moved_count} of ${p.redraft_limit}` : `${r.world_moved_count}`;
+  return `redraft of ${r.of} · the world moved${moved ? `: ${moved}` : ''} · ${of}`;
+}
+
+function RedraftChip({ p }: { p: RedraftFacts }) {
+  const text = redraftChipText(p);
+  if (!text) return null;
+  return (
+    <span
+      data-testid="redraft-chip"
+      data-cause={p.redraft?.cause}
+      className="cockpit-badge"
+      title="This proposal replaces an earlier one. The earlier ones are listed in the detail pane."
+    >
+      {text}
+    </span>
+  );
+}
+
+/** FAILED at the end of a chain that hit the limit: the drafter was not
+ *  resumed again. */
+function ChainExhaustedMark({ p }: { p: Pick<ProposalSummary, 'status' | 'chain_exhausted'> }) {
+  if (p.status !== 'FAILED' || !p.chain_exhausted) return null;
+  return (
+    <span
+      data-testid="redraft-limit-reached"
+      className="text-[0.667rem] font-semibold text-destructive"
+      title="The world moved again on the last allowed redraft. The drafter was not resumed."
+    >
+      redraft limit reached
+    </span>
+  );
+}
+
+function chainLinkText(l: ChainLink): string {
+  const who = l.approver ? ` by ${l.approver}` : '';
+  const verdict = l.verdict ? `${l.verdict}${who}` : l.status.toLowerCase();
+  const moved = l.failure?.world_moved?.what_moved;
+  return `${verdict} · ${l.status}${moved ? ` · the world moved: ${moved}` : l.failure?.error ? ` · ${l.failure.error}` : ''}`;
+}
+
+function RedraftChain({ chain }: { chain?: ChainLink[] }) {
+  if (!chain?.length) return null;
+  return (
+    <div data-testid="redraft-chain">
+      <DetailHeading>Redraft chain</DetailHeading>
+      <ol className="space-y-1">
+        {chain.map((l, i) => (
+          <li key={l.id} data-testid="chain-link" className="text-[0.733rem] text-foreground/85">
+            <span className="text-muted-foreground">{i === 0 ? 'first draft' : `redraft ${i}`} · </span>
+            <span className="font-mono text-[0.667rem]">{l.id}</span>
+            {' — '}
+            {chainLinkText(l)}
+            {l.decided_at && <> · <RelativeTime iso={l.decided_at} /></>}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /* ── Which gate decided ── */
 function decidedByText(d: DecidedBy): string {
   if (d.kind === 'auditor') return 'decided by the auditor';
@@ -201,6 +274,7 @@ function ProposalRowItem({ p, active, onSelect }: {
         {!!p.shadow?.length && (
           <div className="mt-0.5 flex flex-wrap items-center gap-1"><ShadowBadges shadow={p.shadow} /></div>
         )}
+        {p.redraft && <div className="mt-0.5 flex flex-wrap items-center gap-1"><RedraftChip p={p} /></div>}
       </div>
       <AgeChip iso={p.created_at} />
       <RelativeTime iso={p.created_at} />
@@ -253,6 +327,7 @@ function WaitingRowItem({ p, active, onSelect }: {
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium text-foreground">{p.intent || '(no intent)'}</p>
         <p className="mt-0.5 text-[0.667rem] text-muted-foreground">{p.agent_id}</p>
+        {p.redraft && <div className="mt-0.5 flex flex-wrap items-center gap-1"><RedraftChip p={p} /></div>}
         {p.waiting && (
           <p className="mt-0.5 text-[0.667rem] text-muted-foreground" data-testid="waiting-state">
             {waitingSentence(p.waiting)}
@@ -316,6 +391,12 @@ function HistoryRowItem({ p, active, onSelect }: {
           {p.simulated && <SimulatedBadge />}
         </div>
         <DecidedByLabel decidedBy={p.decided_by} />
+        {(p.redraft || p.chain_exhausted) && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            <RedraftChip p={p} />
+            <ChainExhaustedMark p={p} />
+          </div>
+        )}
       </div>
       <RelativeTime iso={p.decided_at} />
     </button>
@@ -1142,6 +1223,7 @@ function ProposalPane({
         <div className="mb-1 flex items-center gap-2">
           <span className="cockpit-badge">{detail.agent_id}</span>
           <OriginChip p={detail} />
+          <RedraftChip p={detail} />
           <ShadowBadges shadow={detail.shadow} />
           <RelativeTime iso={detail.created_at} />
           {/* The run that DRAFTED this. `agent_id` is the drafter, never the
@@ -1160,6 +1242,8 @@ function ProposalPane({
           <SpeakButton text={proposalSpeech(detail)} className="ml-auto" />
         </div>
         <p className="text-sm font-medium leading-snug text-foreground">{detail.intent}</p>
+
+        <RedraftChain chain={detail.chain} />
 
         {detail.confidence && (
           <div className="mt-1.5 flex items-center gap-2">
@@ -1432,6 +1516,7 @@ function ProposalPane({
             <StatusBadge status={detail.status} />
             {detail.simulated && <SimulatedBadge />}
             <DecidedByLabel decidedBy={detail.decided_by} />
+            <ChainExhaustedMark p={detail} />
             {detail.decided_at && (
               <span className="text-[0.667rem] text-muted-foreground">
                 decided <RelativeTime iso={detail.decided_at} />

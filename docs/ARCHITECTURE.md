@@ -336,6 +336,20 @@ stateDiagram-v2
   is unarmed, as it is before `arm` on every failure path. Only world-moved
   failures are measured; any other semantic failure keeps its resume and never
   counts.
+  **The operator sees the chain (story 5).** `GET /proposals/{id}`, every
+  `decisions.list` row (`proposals` and `waiting`) and `decisions.history`
+  carry four server-built fields (`routes.annotate_redraft_facts`, one batched
+  read per page through `repo.proposal_chain`, pinned by
+  `tests/test_world_moved_wire.py`): `redraft`, the column (null on a first
+  draft); `chain`, the ancestors from `redraft.of` back to the root, OLDEST
+  first (`[]` on a first draft), each `{id, status, verdict, approver,
+  decided_at, failure: {capability, error, world_moved} | null,
+  chain_exhausted}` read from the row and its newest `proposal.decided` /
+  `proposal.failed` events; `chain_exhausted`, true when this row's own
+  `proposal.failed` carries the flag (the row has no marker, so the history
+  marks a FAILED proposal "redraft limit reached" from it); and
+  `redraft_limit`, `settings.world_moved_redraft_limit`, so the cockpit's
+  "n of <limit>" is never derived in the browser. Read-only: no action, no RPC.
 - **Gate overrides (FR-4).** An `agent_gate_override` row
   (`govr_<hex>` id; the DRAFTER as `agent_id`, a capability, a `scope` jsonb,
   `gate` `none`, `granted_by`/`granted_at`, `revoked_at`/`revoked_reason` —

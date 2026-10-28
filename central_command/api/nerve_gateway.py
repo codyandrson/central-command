@@ -1019,11 +1019,13 @@ async def _decisions_list() -> dict:
     )
     proposals = await repo.list_proposals("AWAITING_HUMAN")
     await rest.annotate_gate_facts(proposals)
+    await rest.annotate_redraft_facts(proposals)
     # Approved proposals WAITING on an outage: a second list, deliberately NOT
     # in `proposals` — the "needs your decision" badge counts that list, and a
     # decision already made does not need one (epic-outage-doctrine story 8).
     waiting = await repo.list_waiting_proposals()
     await rest.annotate_gate_facts(waiting)
+    await rest.annotate_redraft_facts(waiting)
     return {
         "proposals": proposals,
         "waiting": waiting,
@@ -1062,6 +1064,7 @@ async def _decisions_history(limit: int, offset: int) -> dict:
     offset = max(0, offset)
     proposals, has_more = await repo.list_decided_proposals(limit, offset)
     await rest.annotate_gate_facts(proposals)
+    await rest.annotate_redraft_facts(proposals)
     processed_items = await repo.list_processed_work_items(50)
     return {"proposals": proposals, "hasMore": has_more, "processedItems": processed_items}
 

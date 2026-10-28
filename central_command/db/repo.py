@@ -1464,6 +1464,101 @@ async def proposal_gate_facts(proposal_ids: list[str]) -> dict[str, dict]:
         await conn.close()
 
 
+# A chain longer than this is a cycle or corruption, not a redraft history.
+_CHAIN_WALK_CAP = 50
+
+
+async def proposal_chain(proposal_ids: list[str]) -> dict[str, dict]:
+    """Per proposal, its redraft link and the chain behind it, for a whole page
+    in ONE query (epic-world-changed-redraft story 5). Read-only.
+
+    Each id maps to `{redraft, chain, chain_exhausted}`:
+
+    - `redraft` — the row's `{of, root, cause, world_moved_count}` column, None
+      for a first draft;
+    - `chain` — the ancestors from `redraft.of` back to the root, OLDEST first,
+      each `{id, status, verdict, approver, decided_at, failure, chain_exhausted}`
+      where `verdict`/`approver` come from the newest `proposal.decided` event
+      (approver falling back to the provenance's) and `failure` from the newest
+      `proposal.failed` event (`{capability, error, world_moved}`, else None);
+    - `chain_exhausted` — this row's OWN newest `proposal.failed` carries the
+      flag (the row has no marker; the event does).
+
+    The walk follows `redraft.of` links in SQL, so a mid-chain row that was
+    deleted ends the chain there rather than failing the page."""
+    if not proposal_ids:
+        return {}
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            with recursive walk as (
+                select p.id as leaf, p.id as id, p.redraft ->> 'of' as nxt, 0 as depth
+                  from proposal p where p.id = any($1::text[])
+                union all
+                select w.leaf, a.id, a.redraft ->> 'of', w.depth + 1
+                  from walk w
+                  join proposal a on a.id = w.nxt
+                 where w.depth < $2
+            )
+            select w.leaf, w.depth, p.id, p.status, p.decided_at, p.redraft,
+                   p.provenance ->> 'approver' as provenance_approver,
+                   (select e.payload from audit_event e
+                     where e.ref_id = p.id and e.kind = 'proposal.decided'
+                     order by e.id desc limit 1) as decided_payload,
+                   (select e.actor from audit_event e
+                     where e.ref_id = p.id and e.kind = 'proposal.decided'
+                     order by e.id desc limit 1) as decided_actor,
+                   (select e.payload from audit_event e
+                     where e.ref_id = p.id and e.kind = 'proposal.failed'
+                     order by e.id desc limit 1) as failed_payload
+              from walk w join proposal p on p.id = w.id
+            """,
+            proposal_ids, _CHAIN_WALK_CAP,
+        )
+    finally:
+        await conn.close()
+
+    def _j(v):
+        return json.loads(v) if isinstance(v, str) else v
+
+    by_leaf: dict[str, list[dict]] = {}
+    for r in rows:
+        by_leaf.setdefault(r["leaf"], []).append(dict(r))
+
+    out: dict[str, dict] = {}
+    for pid in proposal_ids:
+        walked = sorted(by_leaf.get(pid, []), key=lambda r: r["depth"])
+        if not walked:
+            continue
+        own = walked[0]
+        links = []
+        for r in walked[1:]:
+            decided = _j(r["decided_payload"]) or {}
+            failed = _j(r["failed_payload"])
+            links.append({
+                "id": r["id"],
+                "status": r["status"],
+                "verdict": decided.get("verdict"),
+                "approver": r["decided_actor"] or r["provenance_approver"],
+                "decided_at": r["decided_at"],
+                "failure": ({
+                    "capability": failed.get("failed_capability"),
+                    "error": failed.get("error"),
+                    "world_moved": failed.get("world_moved"),
+                } if failed else None),
+                "chain_exhausted": bool((failed or {}).get("chain_exhausted")),
+            })
+        links.reverse()  # the walk ran leaf-ward to root; the wire is oldest first
+        own_failed = _j(own["failed_payload"]) or {}
+        out[pid] = {
+            "redraft": _j(own["redraft"]),
+            "chain": links,
+            "chain_exhausted": bool(own_failed.get("chain_exhausted")),
+        }
+    return out
+
+
 async def set_proposal_executed(proposal_id: str, provenance: dict) -> None:
     conn = await _conn()
     try:

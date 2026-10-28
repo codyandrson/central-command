@@ -2263,6 +2263,33 @@ def waiting_facts(state: dict, probes: dict, failing: bool) -> dict:
     }
 
 
+async def annotate_redraft_facts(rows: list[dict]) -> None:
+    """Stamp each proposal row with the redraft facts the cockpit renders
+    (epic-world-changed-redraft story 5), in place, from ONE batched read
+    (`repo.proposal_chain`) for the whole page. The cockpit renders them and
+    derives nothing:
+
+    - `redraft` — the row's `{of, root, cause, world_moved_count}`, None for a
+      first draft;
+    - `chain` — the ancestors from `redraft.of` back to the root, oldest first
+      (`[]` for a first draft), each with its verdict, approver, time and the
+      failure's `world_moved` record;
+    - `chain_exhausted` — this proposal is the FAILED end of a chain that hit
+      the limit (read from its `proposal.failed` event: the row has no marker);
+    - `redraft_limit` — `settings.world_moved_redraft_limit`, so "n of <limit>"
+      is never computed in the browser.
+    """
+    from central_command.config import settings
+
+    facts = await repo.proposal_chain([r["id"] for r in rows])
+    for row in rows:
+        f = facts.get(row["id"]) or {}
+        row["redraft"] = f.get("redraft")
+        row["chain"] = f.get("chain") or []
+        row["chain_exhausted"] = bool(f.get("chain_exhausted"))
+        row["redraft_limit"] = settings.world_moved_redraft_limit
+
+
 async def annotate_gate_facts(rows: list[dict]) -> None:
     """Stamp each proposal row with the two gate signals the cockpit renders
     (epic-gate-overrides story 10), in place. The cockpit renders them and
@@ -2490,6 +2517,7 @@ async def get_proposal(proposal_id: str) -> dict:
     if verdicts:
         row["audit"] = verdicts[0]["payload"]
     await annotate_gate_facts([row])
+    await annotate_redraft_facts([row])
     return row
 
 
