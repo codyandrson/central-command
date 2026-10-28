@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
 import type { DecisionsData, ProposalDetail, ProposalSummary, WorkItem } from './types';
+import type { OutageRetryResult } from '@/features/outages/types';
 
 const POLL_MS = 30_000;
 const HISTORY_PAGE = 50;
@@ -103,6 +104,15 @@ export function useDecisions() {
     void refresh({ silent: true });
   }, [refresh]);
 
+  // Retry now on a waiting proposal. The server retries the WHOLE dependency
+  // (outages.retry), not one proposal, and the copy says so; an interrupted
+  // proposal moves only with includeInterrupted, the operator's explicit act.
+  const retryWaiting = useCallback(async (dependency: string, includeInterrupted = false) => {
+    const res = await rpcRef.current('outages.retry', { dependency, includeInterrupted }) as OutageRetryResult;
+    void refresh({ silent: true });
+    return res;
+  }, [refresh]);
+
   const confirmDismissal = useCallback(async (id: string) => {
     await rpcRef.current('dismissals.confirm', { id });
     void refresh({ silent: true });
@@ -176,7 +186,7 @@ export function useDecisions() {
 
   return {
     ...data, loading, error, refresh,
-    getProposal, approve, reject, dismiss,
+    getProposal, approve, reject, dismiss, retryWaiting,
     confirmDismissal, confirmAllDismissals, reopenDismissal,
     answerOperatorItem,
     history, historyHasMore, historyLoading, showHistory, processedItems,

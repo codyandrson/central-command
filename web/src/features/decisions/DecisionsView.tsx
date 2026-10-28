@@ -6,6 +6,8 @@ import {
   History, ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { retryResultText } from '@/features/outages/useOutages';
 import { SpeakButton } from '@/features/tts/SpeakButton';
 import { GoalPreviewCard } from '@/features/loe/GoalPreviewCard';
 import type { GoalPreviewData } from '@/features/loe/extractGoalPreviews';
@@ -1039,7 +1041,7 @@ function proposalSpeech(d: ProposalDetail): string {
 }
 
 function ProposalPane({
-  id, pendingGone, onDone, onOpenSession, getProposal, approve, reject, dismiss,
+  id, pendingGone, onDone, onOpenSession, getProposal, approve, reject, dismiss, retryWaiting,
 }: {
   id: string;
   /** No longer in the pending list nor history — decided out from under the
@@ -1052,11 +1054,14 @@ function ProposalPane({
   approve: Actions['approve'];
   reject: Actions['reject'];
   dismiss: Actions['dismiss'];
+  retryWaiting: Actions['retryWaiting'];
 }) {
   const [detail, setDetail] = useState<ProposalDetail | null>(null);
+  const [confirmRetry, setConfirmRetry] = useState(false);
+  const [retryNote, setRetryNote] = useState('');
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState('');
-  const [acting, setActing] = useState<'' | 'approve' | 'reject' | 'dismiss'>('');
+  const [acting, setActing] = useState<'' | 'approve' | 'reject' | 'dismiss' | 'retry'>('');
 
   useEffect(() => {
     let alive = true;
@@ -1104,6 +1109,19 @@ function ProposalPane({
       setActing('');
     }
   }, [id, feedback, approve, reject, dismiss, onDone]);
+
+  // Retry now on a waiting proposal. The server retries every unit waiting on
+  // the dependency, not just this one, so the copy says "work on <dependency>".
+  const actRetry = useCallback(async (dependency: string, includeInterrupted: boolean) => {
+    setActing('retry'); setError(''); setRetryNote('');
+    try {
+      setRetryNote(retryResultText(await retryWaiting(dependency, includeInterrupted)));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActing('');
+    }
+  }, [retryWaiting]);
 
   // Enter reject-only: reject is the one action the typed feedback is FOR, and
   // approve must never fire from the keyboard. Shift+Enter is a newline.
@@ -1357,9 +1375,30 @@ function ProposalPane({
                 : ''}
             </p>
           )}
+          {retryNote && (
+            <p className="mb-2 text-[0.733rem] text-muted-foreground" data-testid="waiting-retry-result">{retryNote}</p>
+          )}
           <div className="flex items-center gap-2">
-            {/* The "Retry now" button belongs here (story 10; it needs story 9's
-                RPC). Left empty on purpose. */}
+            {/* Retry now. The server retries the whole dependency, so the copy
+                is scoped to it. An INTERRUPTED proposal moves only on the
+                operator's explicit confirm: a prefix of its actions may already
+                have landed (the retry resumes from the last one known complete). */}
+            <Button
+              variant="outline"
+              onClick={() => (detail.waiting?.interrupted
+                ? setConfirmRetry(true)
+                : void actRetry(detail.waiting?.dependencies[0] ?? 'llm', false))}
+              disabled={acting !== ''}
+              title={`Probe ${detail.waiting?.dependencies[0] ?? 'llm'} now and retry every unit waiting on it`}
+              className="flex-1"
+            >
+              <RotateCcw size={14} />
+              {acting === 'retry'
+                ? 'Retrying…'
+                : detail.waiting?.interrupted
+                  ? `Retry interrupted work on ${detail.waiting.dependencies[0] ?? 'llm'}`
+                  : `Retry waiting work on ${detail.waiting?.dependencies[0] ?? 'llm'}`}
+            </Button>
             <Button
               variant="outline"
               onClick={() => act('dismiss')}
@@ -1371,6 +1410,21 @@ function ProposalPane({
               {acting === 'dismiss' ? 'Dismissing…' : 'Dismiss'}
             </Button>
           </div>
+          <ConfirmDialog
+            open={confirmRetry}
+            title="Retry an interrupted write?"
+            message={`A restart interrupted this proposal's execution, so a prefix of its actions may already have landed${
+              detail.waiting?.completed_actions ? ` (${detail.waiting.completed_actions} known complete)` : ''
+            } and the one in flight may or may not have. Retrying resumes from the last action known to be complete, which could repeat the one in flight. It also retries every other unit waiting on ${
+              detail.waiting?.dependencies[0] ?? 'llm'}, and any other interrupted proposal on it.`}
+            confirmLabel="Retry anyway"
+            cancelLabel="Keep waiting"
+            onConfirm={() => {
+              setConfirmRetry(false);
+              void actRetry(detail.waiting?.dependencies[0] ?? 'llm', true);
+            }}
+            onCancel={() => setConfirmRetry(false)}
+          />
         </div>
       ) : (
         <div className="shrink-0 border-t border-border/40 p-4">
@@ -1540,7 +1594,7 @@ export function DecisionsView({
 }: DecisionsViewProps = {}) {
   const {
     proposals, waiting = [], dismissals, operatorItems, loading, error, refresh,
-    confirmAllDismissals, getProposal, approve, reject, dismiss,
+    confirmAllDismissals, getProposal, approve, reject, dismiss, retryWaiting,
     confirmDismissal, reopenDismissal, answerOperatorItem,
     history, historyHasMore, historyLoading, showHistory, processedItems = [],
     toggleHistory, loadMoreHistory,
@@ -1804,6 +1858,7 @@ export function DecisionsView({
             approve={approve}
             reject={reject}
             dismiss={dismiss}
+            retryWaiting={retryWaiting}
           />
         )}
         {selectedDismissal && (

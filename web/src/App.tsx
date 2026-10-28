@@ -24,6 +24,7 @@ import { getSessionKey } from '@/types';
 import { useConnectionManager } from '@/hooks/useConnectionManager';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { ConnectDialog } from '@/features/connect/ConnectDialog';
+import { OutageBanners } from '@/features/outages/OutageBanners';
 import { TopBar } from '@/components/TopBar';
 import { StatusBar } from '@/components/StatusBar';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -1044,6 +1045,13 @@ export default function App({ onLogout }: AppProps) {
           DRY RUN — approvals are simulated, nothing is written for real
         </div>
       )}
+
+      {/* One banner per DOWN dependency (name, how long, how many wait, Retry
+          now) and one per dependency with work failing against a healthy one.
+          In the page flow beside the other persistent banners rather than an
+          overlay like 'Signal lost': it stays true until the dependency is
+          back, and several can stack. Renders nothing when all is well. */}
+      {connectionState === 'connected' && <OutageBanners />}
 
       {(!isCompactLayout || !isMobileTopBarHidden) && (
         <TopBar

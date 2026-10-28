@@ -15,6 +15,7 @@ const state = {
   operatorItems: [] as unknown[],
   detail: {} as Record<string, unknown>,
   dismiss: vi.fn(() => Promise.resolve()),
+  retryWaiting: vi.fn(() => Promise.resolve({ probe: 'up', driven: { sessions: 0, proposals: 1, tasks: 0, work_items: 0, ingest_jobs: 0 } })),
   reject: vi.fn(() => Promise.resolve()),
   approve: vi.fn(() => Promise.resolve()),
   answerOperatorItem: vi.fn(() => Promise.resolve()),
@@ -48,6 +49,7 @@ vi.mock('./useDecisions', () => {
         approve: state.approve,
         reject: state.reject,
         dismiss: state.dismiss,
+        retryWaiting: state.retryWaiting,
         confirmDismissal: () => Promise.resolve(),
         confirmAllDismissals: () => Promise.resolve(),
         reopenDismissal: state.reopenDismissal,
@@ -73,6 +75,7 @@ beforeEach(() => {
   state.operatorItems = [];
   state.detail = {};
   state.dismiss = vi.fn(() => Promise.resolve());
+  state.retryWaiting = vi.fn(() => Promise.resolve({ probe: 'up', driven: { sessions: 0, proposals: 1, tasks: 0, work_items: 0, ingest_jobs: 0 } }));
   state.reject = vi.fn(() => Promise.resolve());
   state.approve = vi.fn(() => Promise.resolve());
   state.answerOperatorItem = vi.fn(() => Promise.resolve());
@@ -658,5 +661,53 @@ describe('DecisionsView waiting section', () => {
 
     await userEvent.click(dismiss);
     await waitFor(() => expect(state.dismiss).toHaveBeenCalledWith('w1', ''));
+  });
+
+  it('offers Retry now on a plain waiting proposal, scoped to its dependency', async () => {
+    const w = waitingRow({}, { dependencies: ['jira'] });
+    state.waiting = [w];
+    state.detail = { ...w, actions: [{ capability: 'jira.add_comment' }], evidence: [], expected_effect: '' };
+    render(<DecisionsView />);
+
+    await userEvent.click(screen.getByTestId('waiting-row'));
+    const retry = await screen.findByRole('button', { name: 'Retry waiting work on jira' });
+    expect(retry).toBeEnabled();
+    await userEvent.click(retry);
+
+    await waitFor(() => expect(state.retryWaiting).toHaveBeenCalledWith('jira', false));
+    expect(await screen.findByTestId('waiting-retry-result')).toHaveTextContent('drove 1');
+    // No confirm for a plain retry.
+    expect(screen.queryByText('Retry an interrupted write?')).not.toBeInTheDocument();
+  });
+
+  it('asks before retrying an INTERRUPTED proposal and only then sends includeInterrupted', async () => {
+    const w = waitingRow({}, { dependencies: ['graph'], interrupted: true, completed_actions: 1 });
+    state.waiting = [w];
+    state.detail = { ...w, actions: [{ capability: 'a' }, { capability: 'b' }], evidence: [], expected_effect: '' };
+    render(<DecisionsView />);
+
+    await userEvent.click(screen.getByTestId('waiting-row'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry interrupted work on graph' }));
+
+    // The explicit step: nothing has been sent yet.
+    expect(await screen.findByText('Retry an interrupted write?')).toBeInTheDocument();
+    expect(screen.getByText(/may already have landed/)).toBeInTheDocument();
+    expect(state.retryWaiting).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keep waiting' }));
+    expect(state.retryWaiting).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry interrupted work on graph' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry anyway' }));
+    await waitFor(() => expect(state.retryWaiting).toHaveBeenCalledWith('graph', true));
+  });
+
+  it('keeps Dismiss beside the new button', async () => {
+    const w = waitingRow({}, {});
+    state.waiting = [w];
+    state.detail = { ...w, actions: [], evidence: [], expected_effect: '' };
+    render(<DecisionsView />);
+    await userEvent.click(screen.getByTestId('waiting-row'));
+    expect(await screen.findByRole('button', { name: 'Dismiss' })).toBeEnabled();
   });
 });
