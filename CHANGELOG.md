@@ -4,6 +4,82 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-27 — v2.72.0: outage doctrine — nothing is terminal from DOWN; the operator sees a banner, not a failure
+
+epic-outage-doctrine. Fourteen commits since v2.71.0 (`2b03b63a..ba8ecddb`, thirteen
+stories and one completion commit) replace the old per-surface retry limits with one
+doctrine. A DOWN dependency (a transient failure) parks work and retries with
+exponential backoff for as long as the outage lasts; a NO failure (semantic) is
+terminal at once; nothing is terminal from DOWN. The operator sees a banner, not a
+failure. The standard for every park is that the work resumes once the service is
+back, with no long-term evidence beyond the banner and the logs, and the same result
+as if the service had never been offline (DL-189).
+
+- **Reads and turns park in place.** A live read or a model turn that meets a DOWN
+  dependency no longer fails the run: it parks where it stopped and resumes in
+  place when the dependency is back. A read parks only under a run with a landing
+  tail (a task run, a chat turn, an orchestrator round); a consulted specialist's
+  outage parks the asker. A transient error from a non-read tool mid-record still
+  lands FAILED, because that record cannot be re-entered safely.
+- **One backoff curve.** Every parked surface (sessions, proposals, tasks, mail
+  ledger items, graph ingest jobs) backs off on the same curve: 60 s doubling to
+  `CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600), retrying for as long as the outage
+  lasts. A probe-gated skip spends no attempt.
+- **Every dependency has one name and one probe.** `llm`, `embedder`, `graph`,
+  `litellm`, `n8n`, `calendar`, `jira`, `confluence`, `forge`, `sandbox`, `local`
+  (Postgres-only work, never probed, never gated). Each has one cheap unauthenticated
+  probe; a 403 counts as down. Probe state is persisted, and `dependency.down` /
+  `dependency.up` fire on the edge only.
+- **Work failing against a healthy dependency is reported once.** A revoked key or
+  a firewall deny is not an outage: after `CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3)
+  failures against a dependency recorded up, the unit is reported once with
+  `retry.failing_despite_probe` and shown in the cockpit.
+- **A restart lands nothing FAILED** (DL-188). An owed resume is kept; a killed task
+  run re-runs fresh, its old transcript closed STOPPED and linked; a killed chat turn
+  is re-sent; an execution cut off mid-way is held as interrupted until the operator
+  retries or dismisses it. That hold is an INTERIM: the end state is reconciliation
+  from the Executor's own record of the in-flight action, deferred.
+- **An embedder outage is a graph-write outage.** Curation proposals park, nothing
+  lands without its vector, the operator's direct Graph-panel write is refused with a
+  503 and the form keeps the entry, mail items wait instead of running unguarded, and
+  the ingest worker spends no attempt while the embedder or graph is down.
+- **The Decisions Inbox gains a Waiting section** for approved proposals waiting on an
+  outage; it is not counted toward the badge. Dismiss withdraws the execution under one
+  SQL-guarded transition, emits `proposal.execution_dismissed`, never resumes the
+  drafter, and resolves the task FAILED, naming how many actions had landed.
+- **The cockpit and API.** `GET /api/outages` and `POST /api/outages/{name}/retry`
+  (and the `outages.list` / `outages.retry` cockpit RPC): one banner per down
+  dependency with its count and a Retry now, a banner for work failing against a
+  healthy dependency, and Retry now on waiting proposals, with a separate confirm for
+  an interrupted one.
+- **Documents and proof.** ARCHITECTURE gains one "The outage doctrine" section (175
+  distinct event types, was 173); DL-189 (the doctrine) and DL-188 (the interim hold)
+  are new, DL-031 is superseded, DL-172 and DL-052 are amended;
+  `tests/test_outage_doctrine_e2e.py` runs the doctrine end to end.
+- **Removed:** the settings `resume_retry_limit`, `execution_retry_limit` and
+  `task_retry_limit` (`CC_RESUME_RETRY_LIMIT`, `CC_EXECUTION_RETRY_LIMIT`,
+  `CC_TASK_RETRY_LIMIT`; a stale key in `.env` is ignored with one startup warning),
+  the exhaustion promotions and their operator items, and the events
+  `session.resume_exhausted`, `proposal.execution_exhausted` and `task.run_exhausted`.
+- **Schema** (additive, applied by the updater's schema phase): table
+  `dependency_probe` (name, state, checked_at, error, down_since); columns
+  `work_item.dependencies jsonb` and `graph_ingest_job.dependencies jsonb`.
+- **Settings:** `retry_backoff_cap_seconds` (`CC_RETRY_BACKOFF_CAP_SECONDS`, 3600) and
+  `retry_loud_after_attempts` (`CC_RETRY_LOUD_AFTER_ATTEMPTS`, 3).
+- **Events:** `dependency.down`, `dependency.up`, `proposal.execution_interrupted`,
+  `proposal.execution_dismissed`, `outage.retry_requested`,
+  `retry.failing_despite_probe`, `session.turn_lost`; `task.run_parked` now carries
+  `restart: true` for a restart re-park.
+- **What the apply does.** Nothing to do by hand. The schema phase adds the table and
+  the two columns; existing parked work is re-read as waiting on `llm`. No image,
+  manifest or unit changes, and no capability is removed, so
+  `deploy/k3s/removed-capabilities.txt` gets no entry. `min_upgrade_from` stays 2.69.0:
+  nothing here needs a newer installed updater than v2.69.0's.
+- **After the apply, the operator checks:** the cockpit shows v2.72.0;
+  `GET /api/heartbeat` is healthy; `GET /api/outages` lists every dependency with no
+  banner. Remove any retired `CC_*_RETRY_LIMIT` key from `.env` to silence the one
+  startup warning.
+
 ## 2026-10-26 — v2.71.0: gate overrides — the operator relaxes a capability's default gate for one agent, scoped, stamped and shadowed
 
 epic-gate-overrides. Seventeen commits since v2.70.0 (`4ef24f32..bfc154de`) build
