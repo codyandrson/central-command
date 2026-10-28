@@ -1,15 +1,14 @@
 """Cheap per-dependency health probes — the health gate in front of the retry
 sweep (outage equivalence, slice 5).
 
-**Why a gate at all.** Every retryable unit carries an attempt budget (5) whose
-job is to stop a silent infinite loop. A long outage must not spend it: at a
-5-minute cadence a two-hour outage would exhaust every parked unit inside 25
-minutes and promote a storm of operator items — the exact opposite of "wait as
-long as the outage lasts". So the sweep asks the dependency first, and **a gated
-skip consumes NO attempt**, by construction: skipping means the driver is never
-called, so nothing can spend one. Attempts are spent only when the dependency
-LOOKED healthy and the real call still failed — genuine flappiness, which is
-what the budget is for.
+**Why a gate at all.** There is no attempt limit (outage doctrine story 4): a
+parked unit waits as long as the outage lasts, and its attempt count drives the
+one backoff curve. Re-driving it into a dependency that is still down would only
+re-park it one step further along that curve, so the sweep asks the dependency
+first, and **a gated skip consumes NO attempt** and moves no `not_before`, by
+construction: skipping means the driver is never called. Attempts are spent
+only when the dependency LOOKED healthy and the real call still failed — and a
+unit that keeps doing that is reported (`retry.failing_despite_probe`).
 
 **Cheap.** One probe per dependency per sweep (`ProbeCache`), run CONCURRENTLY
 (`ProbeCache.warm`), and a dependency nothing is parked on and nothing records

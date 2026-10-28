@@ -393,7 +393,8 @@ async def _retry_sweep(schedule_id: str, params: dict) -> dict:
     sessions parked AWAITING_RESUME (slice 2), approved proposals parked
     RETRY_PENDING (slice 3), and due retry-parked tasks (slice 4). Each is gated
     on a cheap probe of the dependency its retry needs, and **a gated skip
-    consumes no attempt** — a long outage costs latency, never a unit's budget.
+    consumes no attempt** — a long outage costs latency, never work: there is
+    no attempt limit, and a unit failing despite healthy probes is reported.
 
     **Work ITEMS are deliberately not swept.** A transiently-released email
     converges through the normal dispatch loop (`work_item.not_before` +
@@ -1533,9 +1534,12 @@ ACTIONS: dict[str, ActionSpec] = {
             # happened, the attempts are untouched, and the outage itself is
             # already on the log from the failures that parked the units. The
             # skip list rides the result for the ticks that ARE material.
+            # A unit newly reported failing despite a healthy probe is material
+            # too: the operator should see the tick that noticed it.
             material=lambda r: bool(
                 r.get("resumed") or r.get("retried_executions")
                 or r.get("retried_tasks") or r.get("errors")
+                or r.get("failing_despite_probe")
             ),
         ),
         ActionSpec(

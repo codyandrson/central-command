@@ -23,10 +23,10 @@ operator-initiated pause must not appear in the Decisions Inbox.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from central_command import events
-from central_command.contract import classify_failure
+from central_command.contract import classify_failure, retry_backoff_seconds
 from central_command.contract.dependencies import LLM, stamped_dependencies
 from central_command.db import repo
 
@@ -78,17 +78,14 @@ def read_pending(*, call, metadata: dict, after: str,
     driver needs to re-execute it — the tool, its arguments as the model sent
     them, the dependencies it waits on — and nothing of the turn's text (the
     history already holds the turn; the read's result does not exist yet).
-    `not_before` is null until story 4's backoff fills it."""
-    return {
-        **pending_resume(
-            kind="read", text=None, tool_call_id=call.tool_call_id, after=after,
-            tool=metadata.get("tool") or call.tool_name,
-            args=metadata.get("args") or {},
-            dependencies=list(metadata.get("dependencies") or []),
-            task_id=task_id,
-        ),
-        "not_before": None,
-    }
+    `not_before` is filled by `park_resume`, like every other kind's."""
+    return pending_resume(
+        kind="read", text=None, tool_call_id=call.tool_call_id, after=after,
+        tool=metadata.get("tool") or call.tool_name,
+        args=metadata.get("args") or {},
+        dependencies=list(metadata.get("dependencies") or []),
+        task_id=task_id,
+    )
 
 
 async def park_read(
@@ -163,9 +160,21 @@ async def arm(session_id: str, pending: dict | None) -> None:
     await repo.update_session_run_state(session_id, {"pending_resume": pending})
 
 
-async def park_resume(session_id: str, pending: dict, error: BaseException | str) -> dict:
+async def park_resume(
+    session_id: str, pending: dict, error: BaseException | str, *,
+    due_now: bool = False,
+) -> dict:
     """Park the session AWAITING_RESUME and announce it. Returns the stored
-    pending record (with `last_error`/`parked_at` filled in)."""
+    pending record (with `last_error`/`parked_at`/`not_before` filled in).
+
+    `not_before` is the ONE backoff curve (`contract.retry_backoff_seconds`)
+    over the attempts this park has already had: the sweep does not offer the
+    session again before it. There is no limit — a resume parked on a DOWN
+    dependency waits as long as the outage lasts.
+
+    `due_now` is for a park that is NOT an outage: an orphaned resume (its
+    process died) has nothing to wait out, and the recurring sweep that found
+    it must drive it in the same pass."""
     # What the park waits on: a read's own tuple, else the typed error's, else
     # the model — a resume is a model turn, and a model DOWN records ['llm'].
     dependencies = list(
@@ -173,11 +182,14 @@ async def park_resume(session_id: str, pending: dict, error: BaseException | str
         or stamped_dependencies(error if isinstance(error, BaseException) else None)
         or (LLM,)
     )
+    now = datetime.now(timezone.utc)
+    backoff = 0 if due_now else retry_backoff_seconds(int(pending.get("attempts") or 0))
     stored = {
         **pending,
         "dependencies": dependencies,
         "last_error": str(error)[:500],
-        "parked_at": datetime.now(timezone.utc).isoformat(),
+        "parked_at": now.isoformat(),
+        "not_before": (now + timedelta(seconds=backoff)).isoformat(),
     }
     await repo.park_session_awaiting_resume(session_id, stored)
     await events.emit(
@@ -192,6 +204,8 @@ async def park_resume(session_id: str, pending: dict, error: BaseException | str
             "attempts": stored["attempts"],
             # What the park waits on (always recorded since story 3).
             "dependencies": stored["dependencies"],
+            "backoff_seconds": backoff,
+            "not_before": stored["not_before"],
         },
         actor="system",
     )

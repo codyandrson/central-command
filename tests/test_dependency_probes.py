@@ -40,7 +40,7 @@ from central_command.integrations import graphiti_ingest
 from central_command.runtime import packs
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model
-from tests.conftest import needs_pg
+from tests.conftest import make_parks_due, needs_pg
 
 OUTAGE_TEXT = "Connection refused talking to the n8n façade"
 
@@ -63,6 +63,13 @@ async def no_leftover_parks():
             await conn.execute(
                 "update proposal set status = 'FAILED', retry_state = null "
                 "where status = 'RETRY_PENDING'")
+            # Parked sessions and tasks other files left behind come due on
+            # the backoff curve; a sweep here would probe their dependencies.
+            await conn.execute(
+                "update session set status = 'FAILED' where status = 'AWAITING_RESUME'")
+            await conn.execute(
+                "update task set retry_state = null "
+                "where status = 'ASSIGNED' and retry_state is not null")
         finally:
             await conn.close()
 
@@ -262,6 +269,7 @@ async def test_a_down_jira_skips_the_proposal_spends_no_attempt_and_is_recorded(
 
     _probe_table(monkeypatch, jira=False)
     baseline = len(await _kinds("jira"))
+    await make_parks_due()
     result = await orchestration.retry_sweep()
 
     assert [s["id"] for s in result["skipped_gated"]] == [pid]
@@ -282,6 +290,8 @@ async def test_a_recorded_down_dependency_is_probed_with_no_waiting_work(monkeyp
     await repo.record_dependency_probe("confluence", False, "refused")
     asked = _probe_table(monkeypatch, confluence=False)
     baseline = len(await _kinds("confluence"))
+
+    await make_parks_due()
 
     await orchestration.retry_sweep()
 
@@ -313,7 +323,10 @@ async def test_a_flip_emits_exactly_one_down_then_one_up_across_three_sweeps(
     # The event log is append-only and shared with earlier tests: count from here.
     baseline = len(await _kinds("jira"))
 
+    await make_parks_due()
+
     await orchestration.retry_sweep()                      # down
+    await make_parks_due()
     await orchestration.retry_sweep()                      # still down: silent
     assert (await _kinds("jira"))[baseline:] == ["dependency.down"]
 
@@ -326,9 +339,11 @@ async def test_a_flip_emits_exactly_one_down_then_one_up_across_three_sweeps(
     from tests.test_execution_retry import _graph_spy
 
     _graph_spy(monkeypatch)
+    await make_parks_due()
     out = await orchestration.retry_sweep()                # up: the edge
     await orchestration.sweep_settle()
     assert pid in out["retried_executions"]
+    await make_parks_due()
     await orchestration.retry_sweep()                      # steady: silent
 
     assert (await _kinds("jira"))[baseline:] == ["dependency.down", "dependency.up"]

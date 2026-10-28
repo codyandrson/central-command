@@ -261,60 +261,42 @@ async def test_a_retried_execution_commits_its_folds(monkeypatch):
         await conn.close()
 
 
-# --- 4: bounded retries, then a visible promotion -------------------------------
+# --- 4: DOWN never terminates (outage doctrine story 4) ---------------------------
 
 
-async def test_retries_are_bounded_and_exhaustion_promotes(monkeypatch):
-    monkeypatch.setattr(settings, "execution_retry_limit", 2)
+async def test_retries_never_exhaust_and_converge_when_the_dependency_is_back(
+    monkeypatch,
+):
+    """Rewritten from the old "bounded, then promoted" test: the limit and the
+    promotion are gone (the operator's ruling, 2026-10-27). Past the old limit
+    of five the proposal is still RETRY_PENDING, its cursor still skips the
+    action that landed, nothing was raised to the operator, and the moment the
+    dependency answers it executes."""
     parked = await _parked_run(monkeypatch)
     model = parked["model"]
 
-    # Still down.
-    _graph_spy(monkeypatch, fail=OUTAGE_TEXT)
-    again = await gateway.retry_execution(parked["proposal_id"], model=model)
-    assert again["execution"] == "parked"
-    assert again["attempts"] == 2
+    for attempt in range(2, 8):                    # six more, past the old limit
+        _graph_spy(monkeypatch, fail=OUTAGE_TEXT)
+        again = await gateway.retry_execution(parked["proposal_id"], model=model)
+        assert again["execution"] == "parked"
+        assert again["attempts"] == attempt
     row = await repo.load_proposal(parked["proposal_id"])
     assert row["status"] == "RETRY_PENDING"
-    # The cursor still points past the action that DID land, once.
+    assert row["retry_state"]["attempts"] == 7
     assert row["retry_state"]["next_action_index"] == 1
     assert row["retry_state"]["completed_results"] == [
         "DEMO-1 due_date set to 2026-08-03"
     ]
-
-    _graph_spy(monkeypatch, fail=OUTAGE_TEXT)
-    spent = await gateway.retry_execution(parked["proposal_id"], model=model)
-    assert spent.get("execution") != "parked"      # the budget is spent
-    assert spent["exhausted"] is True
-
-    row = await repo.load_proposal(parked["proposal_id"])
-    assert row["status"] == "FAILED"               # promotion to today's terminal state
+    assert row["retry_state"]["not_before"]
     kinds = await _kinds(parked["proposal_id"])
-    assert "proposal.execution_exhausted" in kinds
-    assert "proposal.failed" in kinds
+    assert not [k for k in kinds if k.endswith("exhausted")]
+    assert "proposal.failed" not in kinds
 
-    exhausted = await _event(parked["proposal_id"], "proposal.execution_exhausted")
-    assert exhausted["payload"]["attempts"] == 2
-    item = await repo.get_operator_item(exhausted["payload"]["operator_item_id"])
-    assert item["status"] == "OPEN" and item["kind"] == "question"
-    assert parked["proposal_id"] in item["body"]
-    # Answering the notice acknowledges it. Nothing is paused on it (no
-    # tool_call_id), so no resume runs — driving one raised "not paused on a
-    # question" and emitted task.run_failed (2026-09-18).
-
-    async def must_not_resume(*a, **kw):
-        raise AssertionError("an exhaustion notice must not be resumed")
-    monkeypatch.setattr(orchestration, "_resume_task_question", must_not_resume)
-    monkeypatch.setattr(orchestration, "child_resolved", must_not_resume)
-    answered = await orchestration.answer_item(item["id"], "Dismiss")
-    await asyncio.sleep(0)  # let any create_task the answer spawned run
-    assert answered["kind"] == "question"
-    assert (await repo.get_operator_item(item["id"]))["status"] == "ANSWERED"
-    # The honest partial record names what landed across ALL attempts.
-    failed = await _event(parked["proposal_id"], "proposal.failed")
-    assert failed["payload"]["completed_actions"] == [
-        "DEMO-1 due_date set to 2026-08-03"
-    ]
+    _graph_spy(monkeypatch)                        # the dependency is back
+    done = await gateway.retry_execution(parked["proposal_id"], model=model)
+    assert done["retried"] is True
+    assert (await repo.load_proposal(parked["proposal_id"]))["status"] == "EXECUTED"
+    assert parked["jira_calls"] == [("DEMO-1", "2026-08-03")], "landed once"
 
 
 # --- 5: a semantic failure ON RETRY ends it, with the spliced record ------------
@@ -328,12 +310,9 @@ async def test_a_semantic_failure_on_retry_fails_with_the_spliced_completed_list
     _graph_spy(monkeypatch, fail="400 invalid episode body")
     out = await gateway.retry_execution(parked["proposal_id"], model=parked["model"])
 
-    assert out["ok"] is False
-    assert out["exhausted"] is False               # not the outage — the answer
+    assert out["ok"] is False                      # not the outage — the answer
     row = await repo.load_proposal(parked["proposal_id"])
     assert row["status"] == "FAILED"
-    kinds = await _kinds(parked["proposal_id"])
-    assert "proposal.execution_exhausted" not in kinds
     failed = await _event(parked["proposal_id"], "proposal.failed")
     # The Jira write from the FIRST attempt is still part of the truth.
     assert failed["payload"]["completed_actions"] == [

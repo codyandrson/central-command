@@ -693,6 +693,29 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   re-probed on every sweep, even with no waiting work, so a banner never
   sticks. The table is additive in `schema.sql`; the updater's schema phase
   applies it at release.
+- **One backoff curve, no limits, and the loud rule (story 4 of the outage
+  doctrine).** Every parked surface waits `min(60 s * 2^n, cap)` after its n-th
+  transient failure (`contract.retry_backoff_seconds`), where the cap is
+  `CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600): a session resume
+  (`pending_resume.not_before`, every kind, reads included), an approved
+  execution (`proposal.retry_state.not_before`), a task re-run, a ledger item
+  (`work_item.not_before`) and an ingest job. The recurring sweep offers only
+  DUE units, in SQL, on all three of its worklists; a probe-gated skip changes
+  neither `attempts` nor `not_before`. There is **no attempt limit**: a unit
+  parked on a DOWN dependency retries for as long as the outage lasts, and DOWN
+  never promotes anything to FAILED (the operator's ruling of 2026-10-27; a
+  semantic failure still lands FAILED at once, and `dispatch_max_attempts`
+  still caps a ledger item's semantic attempts). Removed with the limits: the
+  settings `CC_RESUME_RETRY_LIMIT`, `CC_EXECUTION_RETRY_LIMIT` and
+  `CC_TASK_RETRY_LIMIT` (a value left in a deployment's `.env` is ignored with
+  one warning at startup), and the events `session.resume_exhausted`,
+  `proposal.execution_exhausted` and `task.run_exhausted` with the operator
+  items they raised. The loudness the limits used to give comes from
+  `CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3): a unit that has failed that many
+  times while every dependency it recorded probes up (a revoked key answering
+  403, a firewall deny) is listed by `repo.units_failing_despite_probe` and
+  reported once by the sweep as `retry.failing_despite_probe`; it keeps
+  retrying.
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).

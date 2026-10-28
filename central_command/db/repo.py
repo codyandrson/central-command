@@ -645,12 +645,25 @@ async def withdraw_proposals_for_session(session_id: str) -> list[str]:
         await conn.close()
 
 
-async def sessions_awaiting_resume() -> list[str]:
-    """Parked resumes, oldest first — the resume sweep's second worklist."""
+async def sessions_awaiting_resume(due_only: bool = False) -> list[str]:
+    """Parked resumes, oldest first — the resume sweep's second worklist.
+
+    `due_only` applies the backoff in SQL (`pending_resume.not_before`, the one
+    curve), the same predicate shape as `tasks_awaiting_retry`: the recurring
+    sweep asks for due ones; the startup catch-up and a caller naming a session
+    do not. A record with no `not_before` (written before the curve) is due."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            "select id from session where status = 'AWAITING_RESUME' order by updated_at"
+            """
+            select id from session
+             where status = 'AWAITING_RESUME'
+               and (not $1
+                    or coalesce(run_state -> 'pending_resume' ->> 'not_before', '') = ''
+                    or (run_state -> 'pending_resume' ->> 'not_before')::timestamptz <= now())
+             order by updated_at
+            """,
+            due_only,
         )
         return [r["id"] for r in rows]
     finally:
@@ -1352,15 +1365,23 @@ async def claim_proposal_retry(proposal_id: str) -> dict | None:
         await conn.close()
 
 
-async def list_proposals(status: str | None = None) -> list[dict]:
+async def list_proposals(status: str | None = None, *, due_only: bool = False) -> list[dict]:
+    """Proposals, newest first, optionally of one `status`. `due_only` keeps
+    only rows whose `retry_state.not_before` has passed (or that have none) —
+    the recurring retry sweep's backoff filter for RETRY_PENDING, in SQL like
+    the task and session worklists."""
     conn = await _conn()
     try:
         if status:
             rows = await conn.fetch(
                 """select id, session_id, agent_id, intent, status, created_at,
                           decided_at, origin
-                   from proposal where status = $1 order by created_at desc""",
-                status,
+                   from proposal where status = $1
+                    and (not $2
+                         or coalesce(retry_state ->> 'not_before', '') = ''
+                         or (retry_state ->> 'not_before')::timestamptz <= now())
+                   order by created_at desc""",
+                status, due_only,
             )
         else:
             rows = await conn.fetch(
@@ -6598,5 +6619,81 @@ async def record_dependency_probe(name: str, up: bool, error: str | None = None)
             name, "up" if up else "down", None if up else (error or "")[:500] or None,
         )
         return dict(before) if before else None
+    finally:
+        await conn.close()
+
+
+async def units_failing_despite_probe(n: int) -> list[dict]:
+    """Parked units that have failed at least `n` times while every dependency
+    they recorded probes UP (outage doctrine story 4, the loud rule).
+
+    With no attempt limit, a unit whose failures classify transient but whose
+    dependencies answer the probe (a revoked key answering 403, a firewall
+    deny) would retry once an hour in silence. This lists them so the retry
+    sweep can say so once (`retry.failing_despite_probe`) and the outages
+    surface can show them. "Up" is `dependency_probe` as the sweep recorded it:
+    a name with no row is up (story 3), and `local` is never probed, so it
+    never makes a unit look down. A record with no dependencies reads `llm`.
+
+    `failures` is normalised across the surfaces, because each counts from a
+    different place: a session's `pending_resume.attempts` counts RE-DRIVES (its
+    first park is 0), so its failures are attempts + 1; a proposal's and a
+    task's first park is attempt 1; a ledger item counts `transient_releases`;
+    an ingest job counts its claims. Returns `{unit, id, failures, dependencies,
+    last_error}`, oldest kind first.
+    """
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            with parked as (
+                select 'session' as unit, id,
+                       coalesce((run_state -> 'pending_resume' ->> 'attempts')::int, 0) + 1
+                         as failures,
+                       coalesce(run_state -> 'pending_resume' -> 'dependencies',
+                                '["llm"]'::jsonb) as deps,
+                       run_state -> 'pending_resume' ->> 'last_error' as last_error
+                  from session where status = 'AWAITING_RESUME'
+                union all
+                select 'proposal', id,
+                       coalesce((retry_state ->> 'attempts')::int, 1),
+                       coalesce(retry_state -> 'dependencies', '["llm"]'::jsonb),
+                       retry_state ->> 'last_error'
+                  from proposal where status = 'RETRY_PENDING'
+                union all
+                select 'task', id,
+                       coalesce((retry_state ->> 'attempts')::int, 1),
+                       coalesce(retry_state -> 'dependencies', '["llm"]'::jsonb),
+                       retry_state ->> 'last_error'
+                  from task where status = 'ASSIGNED' and retry_state is not null
+                union all
+                select 'work_item', id, transient_releases, dependencies, last_error
+                  from work_item
+                 where state = 'UNPROCESSED' and dependencies is not null
+                union all
+                select 'ingest_job', 'ingest-job-' || id::text, attempts,
+                       coalesce(dependencies, '["llm"]'::jsonb), last_error
+                  from graph_ingest_job
+                 where status = 'QUEUED' and last_error is not null
+                   and not_before is not null
+            )
+            select unit, id, failures, deps, last_error
+              from parked
+             where failures >= $1
+               and not exists (
+                   select 1
+                     from jsonb_array_elements_text(parked.deps) d(name)
+                     join dependency_probe p on p.name = d.name
+                    where p.state = 'down')
+            """,
+            int(n),
+        )
+        out = []
+        for r in rows:
+            d = r["deps"]
+            out.append({"unit": r["unit"], "id": r["id"], "failures": r["failures"],
+                        "dependencies": json.loads(d) if isinstance(d, str) else d,
+                        "last_error": r["last_error"]})
+        return out
     finally:
         await conn.close()

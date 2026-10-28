@@ -1,6 +1,7 @@
 """The control-plane API. Serves the JSON API (central_command.api.routes), an SSE
 stream for live updates, and — when built — the React dashboard from web/dist."""
 
+import logging
 import contextlib
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -67,12 +68,30 @@ def _release_followers_on_signal() -> list:
 
 
 @asynccontextmanager
+def _warn_retired_settings() -> None:
+    """One warning naming the retired keys this process was given. The values
+    change nothing: the outage doctrine retries for as long as an outage lasts
+    (`retry_backoff_cap_seconds` sets how often), so a limit set there is not
+    honoured. Removing the lines from .env silences it."""
+    from central_command.config import retired_settings_present
+
+    present = retired_settings_present()
+    if present:
+        logging.getLogger(__name__).warning(
+            "ignored retired setting(s) %s: parked work now retries until the "
+            "dependency is back, at most once per CC_RETRY_BACKOFF_CAP_SECONDS; "
+            "remove them from .env to silence this warning", ", ".join(present),
+        )
+
+
 async def lifespan(app: FastAPI):
     event_log.opened()
     # WARNING+ log records surface in Activity → Events (log.error/log.warning
     # events). Installed here because the handler needs the serving loop.
     event_bridge.install()
     _signal_handlers = _release_followers_on_signal()
+    # Retired settings still in the deployment's .env: ignored, said ONCE.
+    _warn_retired_settings()
     # The operator's name is an app setting since v2.37.0 (set from the
     # cockpit's first-run prompt); CC_OPERATOR_NAME stays the env fallback.
     # Loaded BEFORE the startup hires below: a template hire renders the

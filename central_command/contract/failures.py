@@ -273,22 +273,33 @@ def is_transient(exc: BaseException | None) -> bool:
 
 # --- how long a retryable unit waits before it is offered again ----------------
 #
-# One curve for every surface (work items, tasks), because two copies of an
-# exponential drift and then nobody can say what the system's patience actually
-# is. `min(2^n * 60s, 30min)`: a flap costs a minute, a real outage settles into
-# a poll every half hour — cheap enough to leave running for days, which is the
-# point (a transiently-released work item has no exhaustion at all).
+# ONE curve for every surface (session resumes, executions, tasks, work items,
+# ingest jobs), because two copies of an exponential drift and then nobody can
+# say what the system's patience actually is: `min(2^n * 60s, cap)`. A flap
+# costs a minute; a real outage settles into one re-check per cap (an hour by
+# default, `CC_RETRY_BACKOFF_CAP_SECONDS`) — cheap enough to leave running for
+# days, which is the point: there is no attempt limit (epic-outage-doctrine
+# story 4), DOWN waits as long as the outage lasts.
 RETRY_BACKOFF_BASE_SECONDS = 60
-RETRY_BACKOFF_CAP_SECONDS = 30 * 60
 
 
-def retry_backoff_seconds(prior_failures: int) -> int:
+def retry_backoff_seconds(prior_failures: int, cap: int | None = None) -> int:
     """Seconds to wait after `prior_failures` transient failures (0 = the first
-    one, which waits one minute). Capped, and never negative."""
+    one, which waits one minute). Capped at `cap`, else the setting, and never
+    negative.
+
+    The setting is read here, lazily, so every caller gets the same cap without
+    passing it: `config` is the one leaf this package reads (it holds values,
+    no behaviour), and only when no cap is given."""
+    if cap is None:
+        from central_command.config import settings
+
+        cap = int(settings.retry_backoff_cap_seconds)
+    cap = max(RETRY_BACKOFF_BASE_SECONDS, int(cap))
     n = max(0, int(prior_failures))
-    if n >= 32:  # 2**32 * 60 is already centuries past the cap; don't compute it
-        return RETRY_BACKOFF_CAP_SECONDS
-    return min(RETRY_BACKOFF_BASE_SECONDS * (2**n), RETRY_BACKOFF_CAP_SECONDS)
+    if n >= 32:  # 2**32 * 60 is already centuries past any cap; don't compute it
+        return cap
+    return min(RETRY_BACKOFF_BASE_SECONDS * (2**n), cap)
 
 # The proxy's own words for "this request is bigger than the model's window".
 # Phrases, not status codes: the status is a plain 400, which says nothing.

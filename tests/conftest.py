@@ -411,6 +411,26 @@ async def isolated_queue():
         await repo.close_pool()
 
 
+async def make_parks_due() -> None:
+    """Backdate every parked session's and proposal's `not_before` (the one
+    backoff curve) to one second ago, so a test that parks and then sweeps in
+    the same instant finds the unit DUE. Tasks have their own idiom in the
+    tests that use them; due-ness is a timestamp, never a sleep."""
+    conn = await repo._conn()
+    try:
+        await conn.execute(
+            "update session set run_state = jsonb_set(run_state, "
+            "'{pending_resume,not_before}', "
+            "to_jsonb((now() - interval '1 second')::text)) "
+            "where status = 'AWAITING_RESUME' and run_state ? 'pending_resume'")
+        await conn.execute(
+            "update proposal set retry_state = jsonb_set(retry_state, "
+            "'{not_before}', to_jsonb((now() - interval '1 second')::text)) "
+            "where status = 'RETRY_PENDING' and retry_state is not null")
+    finally:
+        await conn.close()
+
+
 @pytest.fixture
 def no_detached_runs(monkeypatch):
     """Create tasks, but never let a real agent run detach from the test.

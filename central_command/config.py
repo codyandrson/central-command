@@ -26,6 +26,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 load_dotenv()
 
 
+# Settings that no longer exist. A deployment `.env` may still carry them (the
+# updater never edits it), and `extra="ignore"` would drop them silently, so the
+# app says once at startup that they are ignored (`warn_retired_settings`).
+RETIRED_ENV_KEYS = (
+    "CC_RESUME_RETRY_LIMIT",
+    "CC_EXECUTION_RETRY_LIMIT",
+    "CC_TASK_RETRY_LIMIT",
+)
+
+
+def retired_settings_present() -> list[str]:
+    """The retired keys this process was given, from the environment or `.env`
+    (`load_dotenv` above put the file's keys into the environment)."""
+    return [k for k in RETIRED_ENV_KEYS if os.environ.get(k) not in (None, "")]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_prefix="CC_", extra="ignore"
@@ -536,12 +552,22 @@ class Settings(BaseSettings):
     graph_auditor_enabled: bool = False
     graph_auditor_mode: str = "shadow"
 
-    # Outage equivalence (2026-07-31): how many times a session parked
-    # AWAITING_RESUME may be re-driven before the system admits the outage
-    # outlived its patience. Exhaustion is a PROMOTION, not a loop — the unit
-    # converts to today's terminal behaviour plus an operator item, so nothing
-    # retries forever silently.
-    resume_retry_limit: int = 5
+    # The outage doctrine's ONE backoff curve (epic-outage-doctrine story 4,
+    # 2026-10-27): every parked unit — a session resume, an approved execution,
+    # a task re-run, a ledger item, an ingest job — waits `min(60 * 2^n, cap)`
+    # seconds after its n-th transient failure (`contract.retry_backoff_seconds`)
+    # and is retried for as long as the outage lasts. There is NO attempt limit
+    # and DOWN never promotes anything to FAILED (the operator's ruling of
+    # 2026-10-27); a semantic failure still lands FAILED at once. The cap is how
+    # often a long outage is re-checked: an hour by default.
+    retry_backoff_cap_seconds: int = 3600
+
+    # LOUDNESS without a limit. A unit whose failures classify transient while
+    # every dependency it recorded probes UP (a revoked key answering 403, a
+    # firewall deny) would otherwise retry hourly in silence. From this many
+    # attempts the retry sweep reports it once (`retry.failing_despite_probe`)
+    # and `repo.units_failing_despite_probe` lists it for the outages surface.
+    retry_loud_after_attempts: int = 3
 
     # ADMISSION CONTROL for model turns (2026-09-13, v2.28.1; per-backend in
     # v2.28.2). How many model requests Central Command lets be in flight at
@@ -565,22 +591,10 @@ class Settings(BaseSettings):
     # Empty = no gate at all.
     model_concurrency: str = ""
 
-    # Outage equivalence slice 3: how many times an APPROVED proposal whose
-    # execution hit a transient dependency failure may be replayed before the
-    # same promotion applies (terminal FAILED + an operator item). The decision
-    # never re-opens — what is bounded is the system's patience with the
-    # dependency, not the operator's approval.
-    execution_retry_limit: int = 5
-
-    # Outage equivalence slice 4: how many times a TASK whose run died on a
-    # transient dependency failure may be re-run before the same promotion
-    # applies (terminal FAILED + an operator item + `task.run_exhausted`).
-    #
-    # Note what has NO limit: a transiently-released WORK ITEM. A task is a
-    # standing instruction the operator can re-issue; a queued email is a thing
-    # that happened once, so it waits out the outage however long it lasts and
-    # only its backoff grows (`work_item.not_before`).
-    task_retry_limit: int = 5
+    # (The three per-surface retry limits that stood here — sessions,
+    # executions, tasks — were removed by epic-outage-doctrine story 4; a value
+    # still in a deployment's .env is ignored with one warning at startup, see
+    # `RETIRED_ENV_KEYS`.)
 
     # LOOP BREAKER, not a budget. How many model requests one run may make
     # before pydantic-ai raises `UsageLimitExceeded`. Tokens are free here

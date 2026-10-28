@@ -648,8 +648,11 @@ async def park_orphaned_resumes() -> list[str]:
     for row in await repo.sessions_with_orphaned_resume(
         settings.dispatch_stale_claim_seconds
     ):
+        # A restart is not an outage: nothing to wait out, so due at once —
+        # the same sweep pass drives it.
         await resume_park.park_resume(
-            row["id"], row["pending"], "the resume died with its process"
+            row["id"], row["pending"], "the resume died with its process",
+            due_now=True,
         )
         orphaned.append(row["id"])
     return orphaned
@@ -673,7 +676,7 @@ async def resume_sweep() -> dict:
     Slice 4 adds the fourth: tasks parked ASSIGNED-with-`retry_state` whose run
     died transiently. Only DUE ones are offered (`repo.tasks_awaiting_retry`
     applies the backoff in SQL) — re-running a task the moment it parks would
-    burn its whole attempt budget into a dependency that is still down.
+    hammer a dependency that is still down.
 
     The fifth worklist (2026-08-15) is the one that had no park record at all:
     a resume KILLED mid-flight, whose session still reads AWAITING_HUMAN over an
@@ -810,6 +813,33 @@ async def _record_probe_changes(cache, states: dict[str, dict]) -> list[dict]:
     return changes
 
 
+async def _report_failing_despite_probe() -> list[dict]:
+    """The loud rule (outage doctrine story 4). With no attempt limit, a unit
+    whose failures classify transient while every dependency it recorded probes
+    UP — a revoked key answering 403, a firewall deny — would retry once per
+    backoff cap in silence. Once it has failed `retry_loud_after_attempts`
+    times, say so ONCE: `retry.failing_despite_probe`, keyed by the unit's id.
+
+    Bookkeeping, not authorisation: it opens no gate and changes no unit (the
+    unit keeps retrying on its curve), so it is written after the fact. "Once"
+    is per unit id, read back off the append-only log."""
+    reported: list[dict] = []
+    units = await repo.units_failing_despite_probe(settings.retry_loud_after_attempts)
+    for unit in units:
+        if await repo.list_events(kind="retry.failing_despite_probe",
+                                  ref_id=unit["id"], limit=1):
+            continue
+        await events.emit(
+            "retry.failing_despite_probe", ref_id=unit["id"],
+            payload={"unit": unit["unit"], "failures": unit["failures"],
+                     "dependencies": unit["dependencies"],
+                     "last_error": (unit["last_error"] or "")[:500]},
+            actor="system",
+        )
+        reported.append({"unit": unit["unit"], "id": unit["id"]})
+    return reported
+
+
 def _proposal_dependencies(state: dict) -> tuple[str, ...]:
     """What a parked execution waits on: the tuple its park recorded, else the
     failed capability's own (a park written before the record), else the model
@@ -845,9 +875,10 @@ async def retry_sweep(cache=None) -> dict:
 
     **A gated skip consumes NO attempt**, by construction: a skip is a `continue`
     before the driver call, so there is no code path on which a down dependency
-    can spend a unit's budget. The counterpart matters too — attempts ARE spent
-    when the probe said healthy and the call still failed, which is the
-    flappiness the budget was written for.
+    advance a unit's attempts or its `not_before`. The counterpart matters too —
+    attempts ARE spent when the probe said healthy and the call still failed,
+    and a unit that keeps doing that is reported once
+    (`retry.failing_despite_probe`); there is no limit (outage doctrine story 4).
 
     Oldest-first on every worklist: a queue that starves its oldest entry is not
     convergence.
@@ -917,7 +948,8 @@ async def retry_sweep(cache=None) -> dict:
     # pass drives them: they are only findable once stale, which is later
     # than the startup sweep can ever see.
     orphaned = await park_orphaned_resumes()
-    for sid in await repo.sessions_awaiting_resume():
+    # DUE ones only (`pending_resume.not_before`, the one backoff curve, in SQL).
+    for sid in await repo.sessions_awaiting_resume(due_only=True):
         pending = (await repo.get_session_run_state(sid) or {}).get("pending_resume") or {}
         # A parked READ waits on EVERY dependency it recorded, plus the LLM —
         # its resume is a model turn (FR-40); so does a parked decision resume
@@ -937,7 +969,8 @@ async def retry_sweep(cache=None) -> dict:
     # the Executor could land right now.
     from central_command.gateway import gateway
 
-    for prop in reversed(await repo.list_proposals("RETRY_PENDING")):
+    # DUE ones only (`retry_state.not_before`, in SQL).
+    for prop in reversed(await repo.list_proposals("RETRY_PENDING", due_only=True)):
         row = await repo.load_proposal(prop["id"])
         state = (row or {}).get("retry_state") or {}
         units.append(("proposal", prop["id"],
@@ -963,6 +996,7 @@ async def retry_sweep(cache=None) -> dict:
     if needed:
         await cache.warm(needed)
     changes = await _record_probe_changes(cache, states) if cache.results else []
+    loud = await _report_failing_despite_probe()
 
     for unit, unit_id, names, driver, landed, detached in units:
         await _drive(unit, unit_id, names, driver, landed, detached=detached)
@@ -975,37 +1009,12 @@ async def retry_sweep(cache=None) -> dict:
         result["probes"] = cache.results
     if changes:
         result["dependency_changes"] = changes
+    if loud:
+        result["failing_despite_probe"] = loud
     return result
 
 
 # --- parked decision resumes (outage equivalence, slice 2) ---------------------
-
-
-async def _promote_exhausted_resume(
-    session_id: str, pending: dict, error: str, attempts: int
-) -> None:
-    """Attempt exhaustion is a PROMOTION, not a loop: the operator learns the
-    outage outlived the system's patience. The terminal behaviour itself is the
-    caller's (it is path-specific); this adds the item that makes it visible."""
-    item_id = "oi_" + uuid.uuid4().hex[:12]
-    subject = pending.get("proposal_id") or pending.get("item_id") or "(none)"
-    await repo.create_operator_item(
-        item_id, "question", session_id, AGENT_ID,
-        (f"Session {session_id} could not be resumed after {attempts} attempts "
-         f"following the operator's decision on {subject} "
-         f"(after={pending.get('after')}). The dependency kept failing: "
-         f"{error}. The decision itself stands and is recorded; what was lost "
-         "is the agent's closing turn. Answer to acknowledge, or re-run the "
-         "resume once the dependency is healthy."),
-    )
-    await events.emit(
-        "session.resume_exhausted", ref_id=session_id,
-        payload={"attempts": attempts, "after": pending.get("after"),
-                 "proposal_id": pending.get("proposal_id"),
-                 "item_id": pending.get("item_id"),
-                 "operator_item_id": item_id, "error": error[:500]},
-        actor="system",
-    )
 
 
 async def resume_parked_session(session_id: str, model=None) -> dict | None:
@@ -1070,7 +1079,6 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
     )
     final = None
     agent = None
-    exhausted = False
     error_text = None
     try:
         agent = await build_agent_for(agent_id, model=model)
@@ -1094,15 +1102,17 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
     except Exception as e:  # noqa: BLE001 — the decision record outranks the resume
         transient = classify_failure(e) == "transient"
         error_text = str(e)
-        if transient and attempts < settings.resume_retry_limit:
+        if transient:
+            # DOWN never terminates a resume: it re-parks one attempt older and
+            # one step further along the backoff curve, for as long as the
+            # outage lasts (epic-outage-doctrine story 4 — no limit, no
+            # promotion; a unit failing against a healthy probe is reported by
+            # the sweep instead, `retry.failing_despite_probe`).
             await resume_park.park_resume(
                 session_id, {**pending, "attempts": attempts}, e
             )
             return {"parked": True, "session_id": session_id, "attempts": attempts}
-        if transient:
-            exhausted = True
-            await _promote_exhausted_resume(session_id, pending, str(e), attempts)
-        # Semantic (or exhausted): today's terminal handling for this path.
+        # Semantic: today's terminal handling for this path.
         await events.emit(
             "session.resume_failed", ref_id=session_id,
             payload={"error": str(e), "proposal_id": pending.get("proposal_id"),
@@ -1114,8 +1124,7 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
     if after == "answered":
         return await _finish_answered_resume(
             final, agent=agent, model=model, pending=pending,
-            session_id=session_id, agent_id=agent_id, exhausted=exhausted,
-            error_text=error_text,
+            session_id=session_id, agent_id=agent_id, error_text=error_text,
         )
 
     if after == "consulted":
@@ -1132,8 +1141,7 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
             await land_session(
                 session_id, failed=True, agent_id=agent_id, reason=reason,
             )
-            return {"resumed": False, "session_id": session_id,
-                    "exhausted": exhausted}
+            return {"resumed": False, "session_id": session_id}
         out = await _settle_consult_resume(
             final, agent=agent, model=model, session_id=session_id,
             agent_id=agent_id, task_id=pending.get("task_id"),
@@ -1153,9 +1161,9 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         feedback=pending["text"] if after == "rejected" else None,
         decided_event_id=pending.get("decided_event_id"),
         failure_summary=pending.get("failure_summary"),
-        # A fresh park keeps the attempt count, so retries stay bounded even
-        # when it is the DRIVE step that keeps failing.
-        pending=None if exhausted else {**pending, "attempts": attempts},
+        # A fresh park keeps the attempt count, so the backoff keeps growing
+        # even when it is the DRIVE step that keeps failing.
+        pending={**pending, "attempts": attempts},
     )
     return {"resumed": True, "session_id": session_id, "after": after,
             "attempts": attempts, **out}
@@ -1720,7 +1728,7 @@ async def _settle_consult_resume(
 
 async def _finish_answered_resume(
     final, *, agent, model, pending: dict, session_id: str, agent_id: str,
-    exhausted: bool, error_text: str | None = None,
+    error_text: str | None = None,
 ) -> dict:
     """The `after=answered` tail: `questions._settle` (the one the live path
     uses) plus the task bookkeeping `_resume_task_question` does."""
@@ -1740,15 +1748,13 @@ async def _finish_answered_resume(
             await events.emit(
                 "task.run_failed", ref_id=task_id,
                 payload={"error": reason, "item_id": item_id,
-                         "transient": classify_failure_text(reason) == "transient",
-                         "exhausted": exhausted},
+                         "transient": classify_failure_text(reason) == "transient"},
                 actor="system",
             )
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, failed=True, agent_id=agent_id, reason=reason)
-        return {"resumed": False, "session_id": session_id,
-                "exhausted": exhausted}
+        return {"resumed": False, "session_id": session_id}
     out = await questions._settle(
         final, agent=agent, model=model, item=item, session_id=session_id,
         agent_id=agent_id, may_drive=True,
@@ -1776,8 +1782,9 @@ async def _finish_answered_resume(
 # underneath it would race that protocol. The park at the task-RUN wrapper does
 # cover a child's own run (it is the same entry a plain task uses), and that is
 # safe for the opposite reason: a parked child simply has not resolved yet, so
-# the parent is not told anything at all until it converges — and exhaustion
-# still resolves it FAILED and wakes the parent, so nothing waits forever.
+# the parent is not told anything at all until it converges. A DOWN child
+# waits as long as the outage lasts (no limit since story 4 of the outage
+# doctrine); a SEMANTIC failure still resolves it FAILED and wakes the parent.
 
 RETRY_HINT = "queued for retry (provider outage)"
 
@@ -1833,42 +1840,6 @@ async def park_task_retry(
     return state
 
 
-async def _promote_exhausted_task(task: dict, error: str, attempts: int) -> None:
-    """Attempt exhaustion is a PROMOTION, not a loop: after `task_retry_limit`
-    the task converts to today's terminal FAILED and the operator learns the
-    outage outlived the system's patience, with the instructions still on the
-    record to re-issue.
-
-    The operator item needs a session to hang on (`operator_item.session_id` is
-    a NOT NULL foreign key). `_run_live` links the run's session to the task at
-    run START, so even a run that died on its first turn leaves one — but the
-    `task` dict here was read at CLAIM time, before that run, so re-read the row
-    for it. When there genuinely is no session (a failure before the session row
-    existed) the promotion is still made and still loud (terminal FAILED + this
-    event), it simply carries `operator_item_id: null`.
-    """
-    item_id = None
-    session_id = (await repo.get_task(task["id"]) or task).get("session_id")
-    if session_id:
-        item_id = "oi_" + uuid.uuid4().hex[:12]
-        await repo.create_operator_item(
-            item_id, "question", session_id, task.get("agent_id") or AGENT_ID,
-            (f"Task {task['id']} ({task.get('title') or 'untitled'}) could not "
-             f"be run after {attempts} attempts — the dependency kept failing: "
-             f"{error}. The instructions are unchanged and still on the task; "
-             "re-run it once the dependency is healthy, or answer here to "
-             "acknowledge."),
-            task_id=task["id"],
-        )
-    await events.emit(
-        "task.run_exhausted", ref_id=task["id"],
-        payload={"attempts": attempts, "error": error[:500],
-                 "operator_item_id": item_id,
-                 "agent_id": task.get("agent_id")},
-        actor="system",
-    )
-
-
 async def _retry_answered_question(state: dict) -> dict:
     """Re-enter the entry an ANSWER-parked task used: the question resume,
     carrying the operator's recorded answer (the item row is its one durable
@@ -1922,34 +1893,36 @@ async def retry_parked_task(task_id: str, model=None) -> dict | None:
             # The _inner (unguarded) body, deliberately: the failure landing
             # this `except` performs is attempt-AWARE, and the fresh-run guard
             # in `_run_assigned_task` is not. Letting both run would park with
-            # attempts=1 underneath us every round — a retry loop that never
-            # reaches the exhaustion promotion.
+            # attempts=1 underneath us every round — the backoff would never
+            # grow past its first step.
             from central_command.api.routes import _run_assigned_task_inner
 
             out = await _run_assigned_task_inner(task, actor="system")
     except Exception as e:  # noqa: BLE001 — a retry failure must reach the record
+        # DOWN re-parks, one attempt older and further along the one backoff
+        # curve, for as long as the outage lasts — no limit, no promotion
+        # (epic-outage-doctrine story 4). None = semantic (or the task went
+        # terminal underneath): today's FAILED landing, at once.
         parked = await park_task_retry(
             task_id, e, kind=kind, attempts=attempts + 1,
             item_id=state.get("item_id"),
-        ) if attempts < settings.task_retry_limit else None
+        )
         if parked is not None:
             return {"parked": True, "task_id": task_id,
                     "attempts": attempts + 1}
-        transient = classify_failure(e) == TRANSIENT
-        if transient:
-            await _promote_exhausted_task(task, str(e), attempts)
         await repo.resolve_task(task_id, "FAILED", outcome=f"run failed: {e}")
         await events.emit(
             "task.run_failed", ref_id=task_id,
-            payload={"error": str(e), "transient": transient,
-                     "exhausted": transient, "attempts": attempts},
+            payload={"error": str(e),
+                     "transient": classify_failure(e) == TRANSIENT,
+                     "attempts": attempts},
             actor=f"agent:{task.get('agent_id')}",
         )
         # A FAILED child still resumes its waiting orchestrator — the failure IS
         # the result the loop needs to decide on (D7 phase 2).
         spawn_child_resolved(task)
         return {"task_id": task_id, "ok": False, "error": str(e),
-                "exhausted": transient, "attempts": attempts}
+                "attempts": attempts}
 
     return {"task_id": task_id, "retried": True, "attempts": attempts, **out}
 
@@ -2338,10 +2311,10 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
         )
     elif item["kind"] == "question" and not await _belongs_to_a_project(item):
         # Only a question an AGENT asked has a run paused on it (its
-        # `tool_call_id`). The exhaustion notices (`_promote_exhausted_execution`,
-        # `_promote_exhausted_task`) carry none: the session already got the
-        # failure report, so the answer is the acknowledgement — resuming it
-        # raised "not paused on a question" and failed the task (2026-09-18).
+        # `tool_call_id`). A notice the SYSTEM raised (the retired exhaustion
+        # notices did, 2026-09-18) carries none: the session already got its
+        # report, so the answer is the acknowledgement — resuming it raised
+        # "not paused on a question" and failed the task.
         if item.get("tool_call_id"):
             asyncio.create_task(_resume_task_question(item_id, answer.strip()))
     else:

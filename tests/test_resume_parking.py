@@ -295,14 +295,17 @@ async def test_a_transient_answer_resume_parks_without_failing_the_task(monkeypa
     assert task["outcome"]
 
 
-# --- 6: bounded retries, then a visible promotion -------------------------------
+# --- 6: DOWN never terminates (outage doctrine story 4) ---------------------------
 
 
-async def test_retries_are_bounded_and_exhaustion_promotes(monkeypatch):
-    monkeypatch.setattr(settings, "resume_retry_limit", 2)
+async def test_a_parked_resume_never_exhausts(monkeypatch):
+    """Rewritten from the old "bounded, then promoted" test: there is no limit
+    and no promotion any more (the operator's ruling, 2026-10-27). Past the old
+    limit of five the session is still AWAITING_RESUME, a step further along
+    the backoff each time, with no operator item and no exhausted event."""
     model = make_spike_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
-    task_id = await _task_for(run["session_id"])
+    await _task_for(run["session_id"])
 
     async def resume_boom(*a, **k):
         raise OUTAGE
@@ -311,30 +314,17 @@ async def test_retries_are_bounded_and_exhaustion_promotes(monkeypatch):
     await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
     assert (await _pending(run["session_id"]))["attempts"] == 0
 
-    # The provider is still down for the driver too.
-    _boom_on_build(monkeypatch, orchestration_agent_module(), OUTAGE)
-    first = await orchestration.resume_parked_session(run["session_id"], model=model)
-    assert first["parked"] is True
+    for attempt in range(1, 7):
+        _boom_on_build(monkeypatch, orchestration_agent_module(), OUTAGE)
+        again = await orchestration.resume_parked_session(run["session_id"], model=model)
+        assert again["parked"] is True
+        pending = await _pending(run["session_id"])
+        assert pending["attempts"] == attempt
+        assert pending["not_before"]
     assert await repo.session_status(run["session_id"]) == "AWAITING_RESUME"
-    assert (await _pending(run["session_id"]))["attempts"] == 1
-
-    _boom_on_build(monkeypatch, orchestration_agent_module(), OUTAGE)
-    second = await orchestration.resume_parked_session(run["session_id"], model=model)
-    assert second.get("parked") is not True     # the budget is spent
-
-    # Promotion, not a loop: terminal state + an operator item naming the outage.
-    assert await repo.session_status(run["session_id"]) == "DONE"
     kinds = await _kinds(run["session_id"])
-    assert "session.resume_exhausted" in kinds
-    assert "session.resume_failed" in kinds
-    assert "session.completed" in kinds
-    assert (await repo.get_task(task_id))["status"] == "DONE"
-
-    exhausted = [e for e in await repo.list_events(ref_id=run["session_id"])
-                 if e["kind"] == "session.resume_exhausted"][0]
-    item = await repo.get_operator_item(exhausted["payload"]["operator_item_id"])
-    assert item["status"] == "OPEN" and item["kind"] == "question"
-    assert run["proposal_id"] in item["body"]
+    assert not [k for k in kinds if k.endswith("exhausted")]
+    assert "session.resume_failed" not in kinds
 
 
 def orchestration_agent_module():

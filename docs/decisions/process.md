@@ -1447,7 +1447,19 @@ hygiene, and how the test suite itself must be written. See
   explicit retry machinery. Attempt-exhaustion promotion to FAILED for a
   DOWN dependency was RETIRED by FR-40: nothing terminal comes from DOWN (build
   owed, PRD §6.1 item 4).
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Amended 2026-10-27 (epic-outage-doctrine story 4):** the build is done. The
+  three attempt limits (resume, execution, task) and their exhaustion
+  promotions are removed outright, by the operator's ruling of 2026-10-27:
+  DOWN never promotes anything to FAILED, and a parked unit retries for as
+  long as the outage lasts. Every surface backs off on one curve, 60 s
+  doubling to `retry_backoff_cap_seconds` (default 3600). The "attempt
+  budget" this rule protected from a dead provider no longer exists; the
+  probe gate still spends no attempt, because attempts now drive the curve.
+  What replaced the budget's loudness: a unit failing
+  `retry_loud_after_attempts` times while its probes pass is reported once
+  (`retry.failing_despite_probe`). A semantic failure still lands FAILED at
+  once. The text above is kept as it was decided.
+- **Enforced:** test: `tests/test_outage_backoff.py`
 - **Source:** docs/superpowers/specs/2026-07-31-outage-equivalence-design.md; docs/PRD.md FR-40
 
 ### DL-173 — No ungoverned private agent memory: private graph partitions, every write gated, the scope visible on the proposal

@@ -8,8 +8,7 @@ returns the feedback into the agent's run for a redraft.
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from pydantic_ai import DeferredToolRequests
 
@@ -22,6 +21,7 @@ from central_command.contract import (
     claim_supported,
     classify_failure,
     classify_failure_text,
+    retry_backoff_seconds,
 )
 from central_command.db import repo
 from central_command.gateway import executor, overrides, policy
@@ -890,6 +890,8 @@ async def _park_execution_retry(
     - **`proposal.decided` is not re-emitted.** The operator decided once.
     """
     completed = list(failure.completed)
+    now = datetime.now(timezone.utc)
+    backoff = retry_backoff_seconds(attempts - 1)
     state = {
         # The Executor's completed list IS the cursor: actions run in order, so
         # the first INCOMPLETE action is at index len(completed).
@@ -900,7 +902,10 @@ async def _park_execution_retry(
         "failed_capability": failure.failed_capability,
         "dependencies": _execution_dependencies(failure),
         "last_error": failure.error[:500],
-        "parked_at": datetime.now(timezone.utc).isoformat(),
+        "parked_at": now.isoformat(),
+        # The one backoff curve over the attempts already spent: the recurring
+        # sweep does not offer the proposal again before this.
+        "not_before": (now + timedelta(seconds=backoff)).isoformat(),
     }
     await repo.park_proposal_retry(prop_row["id"], state)
     await events.emit(
@@ -913,6 +918,8 @@ async def _park_execution_retry(
             "transient": True,
             "attempts": attempts,
             "dependencies": state["dependencies"],
+            "backoff_seconds": backoff,
+            "not_before": state["not_before"],
             "completed_actions": completed,
             "session_id": session_id,
         },
@@ -931,40 +938,6 @@ async def _park_execution_retry(
         "completed_actions": completed,
         "final_output": None,
     }
-
-
-async def _promote_exhausted_execution(
-    session_id: str,
-    prop_row: dict,
-    failure: executor.ExecutionFailed,
-    attempts: int,
-) -> None:
-    """Attempt exhaustion is a PROMOTION, not a loop (doctrine rung 3): the
-    operator learns the outage outlived the system's patience. The terminal
-    handling itself is `_record_execution_failure`'s — this adds what makes it
-    visible."""
-    item_id = "oi_" + uuid.uuid4().hex[:12]
-    await repo.create_operator_item(
-        item_id, "question", session_id, prop_row["agent_id"],
-        (f"Proposal {prop_row['id']} ({prop_row['intent']}) was approved, but "
-         f"its execution could not be completed after {attempts} attempts: "
-         f"{failure.failed_capability} kept failing with {failure.error}. The "
-         "dependency outage outlived the retry budget, so the proposal is now "
-         "recorded FAILED with what did complete: "
-         f"{'; '.join(failure.completed) if failure.completed else 'nothing'}. "
-         "Answer to acknowledge, or have the agent redraft once the dependency "
-         "is healthy."),
-    )
-    await events.emit(
-        "proposal.execution_exhausted",
-        ref_id=prop_row["id"],
-        payload={"attempts": attempts, "session_id": session_id,
-                 "failed_capability": failure.failed_capability,
-                 "error": failure.error[:500],
-                 "completed_actions": failure.completed,
-                 "operator_item_id": item_id},
-        actor="system",
-    )
 
 
 async def retry_execution(proposal_id: str, model=None) -> dict | None:
@@ -1057,17 +1030,17 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
             completed + list(failure.completed),
             transient=failure.transient, dependencies=failure.dependencies,
         )
-        transient = _execution_transient(failure)
-        if transient and attempts < settings.execution_retry_limit:
+        if _execution_transient(failure):
+            # DOWN re-parks, one attempt older and further along the one
+            # backoff curve, for as long as the outage lasts — no limit and no
+            # promotion (epic-outage-doctrine story 4). The decision stands.
             return await _park_execution_retry(
                 session_id, row, spliced, approver, attempts=attempts + 1
             )
-        if transient:
-            await _promote_exhausted_execution(session_id, row, spliced, attempts)
         out = await _record_execution_failure(
             session_id, proposal_id, agent_id, spliced, model
         )
-        return {**out, "attempts": attempts, "exhausted": transient}
+        return {**out, "attempts": attempts}
 
     # Converged. The outcome text is the FULL splice — the agent is told what
     # its proposal did, not what the last attempt did — while the provenance

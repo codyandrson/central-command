@@ -7,7 +7,7 @@ lifecycle. See the design docs (contracts artifact) for the full rationale.
 
 from .args import ARG_SPECS, ArgSpec, validate_action_args
 from .failures import (
-    RETRY_BACKOFF_CAP_SECONDS,
+    RETRY_BACKOFF_BASE_SECONDS,
     SEMANTIC,
     DependencyDown,
     TRANSIENT,
@@ -58,5 +58,5 @@ __all__ = [
     "is_context_overflow",
     "is_transient",
     "retry_backoff_seconds",
-    "RETRY_BACKOFF_CAP_SECONDS",
+    "RETRY_BACKOFF_BASE_SECONDS",
 ]

@@ -260,7 +260,7 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-169 | Knowledge layers: packs permit, skills instruct, the graph holds what is true, MCP is transport | active | 2026-07-29 | discipline only | [process.md](process.md) |
 | DL-170 | Teaming doctrine: consult bounds are enforced by the runtime, handoffs go through task proposals, the roster grows on observed failure | active | 2026-07-29 | discipline only | [process.md](process.md) |
 | DL-171 | The graduation ladder: typed judgments, a pure pairing function, nothing tunes itself, and post-graduation starvation is a known blind spot | active | 2026-07-30 | discipline only | [process.md](process.md) |
-| DL-172 | Outage equivalence: an outage delays but never loses, degrades or requires re-creation | active | 2026-07-31 | discipline only | [process.md](process.md) |
+| DL-172 | Outage equivalence: an outage delays but never loses, degrades or requires re-creation | active | 2026-07-31 | test: `tests/test_outage_backoff.py` | [process.md](process.md) |
 | DL-173 | No ungoverned private agent memory: private graph partitions, every write gated, the scope visible on the proposal | active | 2026-08-01 | discipline only | [process.md](process.md) |
 | DL-174 | Graph inspection, activity coverage and bulk dismissal: read-only browser, session as the unit, pinned sets | active | 2026-08-09 | discipline only | [process.md](process.md) |
 | DL-175 | The graph auditor is read-only and judges from the raw rows; remediation is a separate agent and never re-ingests | active | 2026-08-19 | discipline only | [process.md](process.md) |

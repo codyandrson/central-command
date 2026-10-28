@@ -37,7 +37,7 @@ from central_command.db import repo
 from central_command.heartbeat import actions as hb_actions
 from central_command.heartbeat import probes
 from central_command.heartbeat.engine import HeartbeatEngine, fire
-from tests.conftest import aresolve, needs_pg
+from tests.conftest import aresolve, needs_pg, make_parks_due
 
 OUTAGE = ModelHTTPError(429, "cc-default", body="No deployments available")
 
@@ -89,14 +89,16 @@ def _no_probes(monkeypatch, **answers):
 
 def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
                      orphans=()):
-    async def _sessions():
+    async def _sessions(due_only=False):
+        assert due_only is True, "the sweep must respect the backoff"
         return list(sessions)
 
     async def _orphans(age_seconds):
         return list(orphans)
 
-    async def _proposals(status=None):
+    async def _proposals(status=None, due_only=False):
         assert status == "RETRY_PENDING"
+        assert due_only is True, "the sweep must respect the backoff"
         return list(proposals)
 
     async def _tasks(due_only=True):
@@ -114,6 +116,10 @@ def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
                        "error": error, "down_since": datetime.now(timezone.utc)}
         return before
 
+    async def _failing(n):
+        return []
+
+    monkeypatch.setattr(repo, "units_failing_despite_probe", _failing)
     monkeypatch.setattr(repo, "dependency_probe_states", _states)
     monkeypatch.setattr(repo, "record_dependency_probe", _record)
     monkeypatch.setattr(repo, "sessions_awaiting_resume", _sessions)
@@ -468,6 +474,7 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
         routes, "resolve_model", aresolve(lambda *a, **k: _advice_model()),
     )
 
+    await make_parks_due()
     result = await orchestration.retry_sweep()
     await orchestration.sweep_settle()  # agent work is dispatched, never awaited by the tick
 

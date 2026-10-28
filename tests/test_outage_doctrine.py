@@ -48,7 +48,7 @@ from central_command.contract import TRANSIENT, DependencyDown, classify_failure
 from central_command.db import repo
 from central_command.integrations import graphiti
 from central_command.runtime import durable, models, tools
-from tests.conftest import aresolve, needs_pg
+from tests.conftest import aresolve, needs_pg, make_parks_due
 
 FACT = "Renewal of the example.com contract is due 2026-11-01"
 DEGRADED = "proceed without it"
@@ -272,7 +272,8 @@ async def test_a_down_graph_search_parks_the_task_run_mid_turn(monkeypatch, grap
     assert pending["after"] == "task"
     assert pending["args"]["query"] == "contract renewal"
     assert pending["attempts"] == 0
-    assert pending["not_before"] is None
+    # The one backoff curve: a first park waits a minute (story 4).
+    assert pending["not_before"] and pending["attempts"] == 0
     assert "ServiceUnavailable" in pending["last_error"]
     assert pending["parked_at"]
     assert "text" not in pending, "no turn text is copied into the park"
@@ -305,6 +306,7 @@ async def test_the_sweep_skips_a_read_park_while_the_graph_is_down(monkeypatch, 
     calls = graph.calls
 
     probes = _Probes(graph=False)
+    await make_parks_due()
     result = await orchestration.retry_sweep(cache=probes)
     await orchestration.sweep_settle()
 
@@ -323,6 +325,7 @@ async def test_the_sweep_skips_a_read_park_while_the_graph_is_down(monkeypatch, 
 @needs_pg
 async def test_the_sweep_skips_a_read_park_while_the_llm_is_down(monkeypatch, graph):
     _, out = await _parked_task_run(monkeypatch)
+    await make_parks_due()
     result = await orchestration.retry_sweep(cache=_Probes(llm=False))
     await orchestration.sweep_settle()
     skipped = [s for s in result["skipped_gated"] if s["id"] == out["session_id"]]
@@ -345,6 +348,7 @@ async def test_with_the_probes_up_the_read_resumes_in_place_and_the_task_lands(
 
     # The resume resolves its model per agent, like every resume leg.
     monkeypatch.setattr(models, "resolve_model", aresolve(lambda *a, **k: _model()))
+    await make_parks_due()
     result = await orchestration.retry_sweep(cache=_Probes())
     await orchestration.sweep_settle()
     assert session_id in result["resumed"]
@@ -799,6 +803,7 @@ async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(
     # finishes with the specialist's real answer.
     graph.down = False
     monkeypatch.setattr(models, "resolve_model", aresolve(lambda *a, **k: _asker_model()))
+    await make_parks_due()
     result = await orchestration.retry_sweep(cache=_Probes())
     await orchestration.sweep_settle()
     assert session_id in result["resumed"]

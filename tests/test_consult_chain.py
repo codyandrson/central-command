@@ -389,7 +389,7 @@ async def test_the_consult_chain_survives_into_the_resumed_deps(monkeypatch, wok
 @needs_pg
 async def test_a_failed_mid_chain_specialist_wakes_its_asker_honestly(monkeypatch, woken):
     """The orphan-sweep case: a mid-chain session FAILED (its process died, or
-    its resume exhausted). The asker above it must still be woken, and must be
+    its resume failed). The asker above it must still be woken, and must be
     told plainly that nothing happened — never left to infer success."""
     from central_command.runtime.converse import land_session
 

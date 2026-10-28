@@ -2217,7 +2217,7 @@ async def _litellm_rollback_incident(
     """Loud operator item for a red rollback. Best-effort by design: the event
     is the durable record, and an operator_item needs a session row to hang on
     (NOT NULL FK) — when there is none the promotion is still made and still
-    loud, it simply carries no item id (the _promote_exhausted_task idiom)."""
+    loud, it simply carries no item id."""
     import uuid
 
     from central_command.db import repo as db_repo

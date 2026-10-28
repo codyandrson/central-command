@@ -397,51 +397,24 @@ async def test_retrying_a_parked_task_runs_it_again_and_lands_the_outcome(monkey
     assert "task.completed" in kinds
 
 
-# 6
-async def test_task_retries_are_bounded_and_exhaustion_promotes(monkeypatch):
-    monkeypatch.setattr(settings, "task_retry_limit", 2)
+# 6 — rewritten for outage doctrine story 4: there is no task retry limit and
+# no promotion (the operator's ruling, 2026-10-27). The old 6b, "exhaustion
+# gives the operator an item", tested the promotion itself and went with it.
+async def test_task_retries_never_exhaust(monkeypatch):
     monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
     task = await _assigned_task()
 
     await routes._run_assigned_task_detached(task, "operator")     # attempt 1
-    again = await orchestration.retry_parked_task(task["id"])      # attempt 2
-    assert again["parked"] is True and again["attempts"] == 2
-    assert (await repo.get_task(task["id"]))["retry_state"]["attempts"] == 2
-
-    spent = await orchestration.retry_parked_task(task["id"])      # budget spent
-    assert spent["exhausted"] is True
+    for attempt in range(2, 8):                                     # past the old 5
+        again = await orchestration.retry_parked_task(task["id"])
+        assert again["parked"] is True and again["attempts"] == attempt
 
     row = await repo.get_task(task["id"])
-    assert row["status"] == "FAILED"           # promotion to today's terminal state
-    assert row["retry_state"] is None
+    assert row["status"] == "ASSIGNED"
+    assert row["retry_state"]["attempts"] == 7
     kinds = await _kinds(task["id"])
-    assert "task.run_exhausted" in kinds and "task.run_failed" in kinds
-    exhausted = await _event(task["id"], "task.run_exhausted")
-    assert exhausted["payload"]["attempts"] == 2
-
-
-# 6b
-async def test_exhaustion_gives_the_operator_an_item_even_on_a_never_answered_task(
-    monkeypatch,
-):
-    """The slice-4 residual: a task whose every run died on its first turn has
-    no session from the LANDING paths, and `operator_item.session_id` is NOT
-    NULL — so the promotion used to be an event with no item in the Inbox. The
-    session is linked at run START now, so there is always one to hang it on."""
-    monkeypatch.setattr(settings, "task_retry_limit", 1)
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
-    task = await _assigned_task()
-
-    await routes._run_assigned_task_detached(task, "operator")     # attempt 1
-    spent = await orchestration.retry_parked_task(task["id"])      # budget spent
-    assert spent["exhausted"] is True
-
-    exhausted = await _event(task["id"], "task.run_exhausted")
-    item_id = exhausted["payload"]["operator_item_id"]
-    assert item_id, "the promotion must reach the operator, not just the log"
-    item = await repo.get_operator_item(item_id)
-    assert item["task_id"] == task["id"]
-    assert item["session_id"] == (await repo.get_task(task["id"]))["session_id"]
+    assert not [k for k in kinds if k.endswith("exhausted")]
+    assert "task.run_failed" not in kinds
 
 
 # 7
@@ -546,7 +519,7 @@ async def test_a_synchronous_semantic_failure_fails_the_task(monkeypatch):
 async def test_a_retry_is_not_parked_twice_by_the_fresh_run_guard(monkeypatch):
     """The guard must not fire underneath `retry_parked_task`, whose own handler
     is attempt-AWARE: two landings would re-park at attempts=1 every round and
-    the exhaustion promotion would never be reached."""
+    the backoff would never grow past its first step."""
     monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
     task = await _assigned_task()
     await routes._run_assigned_task_detached(task, "operator")          # attempt 1
