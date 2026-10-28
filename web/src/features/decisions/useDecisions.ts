@@ -19,7 +19,7 @@ const HISTORY_PAGE = 50;
 export function useDecisions() {
   const { rpc, connectionState, subscribe } = useGateway();
   const [data, setData] = useState<DecisionsData>({
-    proposals: [], dismissals: [], operatorItems: [],
+    proposals: [], waiting: [], dismissals: [], operatorItems: [],
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -34,6 +34,8 @@ export function useDecisions() {
       // (operatorItems already arrive oldest-first from the OPEN query.)
       setData({
         proposals: [...(res.proposals ?? [])].reverse(),
+        // Already oldest-first from the server; the list never reshuffles.
+        waiting: res.waiting ?? [],
         dismissals: [...(res.dismissals ?? [])].reverse(),
         operatorItems: res.operatorItems ?? [],
       });
