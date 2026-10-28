@@ -6950,3 +6950,30 @@ async def units_failing_despite_probe(n: int) -> list[dict]:
         return out
     finally:
         await conn.close()
+
+
+async def dependencies_waited_on_by_queues() -> set[str]:
+    """What the units the retry sweep does NOT drive are waiting on: a work
+    item released transient (`work_item.dependencies`) and an ingest job
+    deferred by a transient failure (`graph_ingest_job.dependencies`). Their
+    own loops re-drive them; the sweep only PROBES these names, so the persisted
+    `dependency_probe` — the ingest worker's gate, the banner — learns of an
+    outage only they have met (epic-outage-doctrine story 7)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select distinct jsonb_array_elements_text(dependencies) as name
+              from work_item
+             where state = 'UNPROCESSED' and dependencies is not null
+               and not_before is not null and not_before > now() - interval '1 day'
+            union
+            select distinct jsonb_array_elements_text(dependencies)
+              from graph_ingest_job
+             where status = 'QUEUED' and dependencies is not null
+               and last_error is not null
+            """
+        )
+        return {r["name"] for r in rows}
+    finally:
+        await conn.close()

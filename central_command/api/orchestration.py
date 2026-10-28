@@ -1114,7 +1114,11 @@ async def retry_sweep(cache=None) -> dict:
     states = await repo.dependency_probe_states()
     recorded_down = [n for n, r in states.items()
                      if r.get("state") == "down" and n in PROBED]
-    needed = [n for u in units for n in u[2]] + recorded_down
+    # And what the queues the sweep does not drive are waiting on (a ledger
+    # item released on an embedder outage, a deferred ingest job): probed
+    # only, so their own loops' gates and the banner see the outage (story 7).
+    queued = [n for n in await repo.dependencies_waited_on_by_queues() if n in PROBED]
+    needed = [n for u in units for n in u[2]] + recorded_down + queued
     if needed:
         await cache.warm(needed)
     changes = await _record_probe_changes(cache, states) if cache.results else []

@@ -59,12 +59,34 @@ app.get('/api/graph/episodes/index', rateLimitGeneral, (c) => proxyGet(c, '/grap
 app.get('/api/graph/episodes/subgraph', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/subgraph'));
 app.get('/api/graph/episodes/delete-preview', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/delete-preview'));
 
+/**
+ * A write the backend REFUSED because a dependency is down (503 naming it —
+ * the embedder, for a curation write: nothing lands without its vector). The
+ * status and the dependency pass through, so the panel can say what is down
+ * and keep the operator's unsaved entry; every other failure keeps the 502.
+ */
+async function dependencyRefusal(c: Context, res: Response) {
+  if (res.status !== 503) return null;
+  try {
+    const body = await res.clone().json() as { detail?: string; dependency?: string };
+    if (!body.dependency) return null;
+    return c.json({ ok: false, error: body.detail || `${body.dependency} is down`,
+      dependency: body.dependency }, 503);
+  } catch {
+    return null;
+  }
+}
+
 /** Proxy a body-carrying write, forwarding the JSON verbatim. */
 async function proxyBody(c: Context, method: 'POST' | 'PATCH', backendPath: string) {
   try {
     const body = await c.req.json();
     const res = await cc(backendPath, { method, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(await gvError(res));
+    if (!res.ok) {
+      const refused = await dependencyRefusal(c, res);
+      if (refused) return refused;
+      throw new Error(await gvError(res));
+    }
     return c.json({ ok: true, result: await res.json() });
   } catch (err) {
     return fail(c, err);

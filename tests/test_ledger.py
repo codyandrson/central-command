@@ -433,8 +433,13 @@ async def test_semantic_freeze_matches_in_flight_item(clean_ledger, monkeypatch)
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_semantic_freeze_fails_open(clean_ledger, monkeypatch):
-    """An unreachable embedder must never block dispatch."""
+async def test_semantic_freeze_raises_when_the_embedder_is_down(clean_ledger, monkeypatch):
+    """Rewritten for epic-outage-doctrine story 7 (it pinned the fail-open: an
+    unreachable embedder used to let the item run unguarded). The freeze check
+    now lets the outage OUT, so the run's own handler releases the item
+    transient (tests/test_embedder_outage.py drives that end to end); empty
+    text — the only `None` `embed` gives — still proceeds."""
+    from central_command.contract import EmbedderDown
     from central_command.ingest import dispatcher
     from central_command.integrations import neo4j_writer
 
@@ -444,17 +449,18 @@ async def test_semantic_freeze_fails_open(clean_ledger, monkeypatch):
     monkeypatch.setattr(dispatcher.settings, "demo_mode", False)
     monkeypatch.setattr(dispatcher.settings, "semantic_freeze_enabled", True)
 
-    async def down(text):
+    async def no_text(text):
         return None
 
+    monkeypatch.setattr(neo4j_writer, "embed", no_text)
+    assert await dispatcher._semantic_freeze_check(item) is None
+
+    async def down(text):
+        raise EmbedderDown(ConnectionError("workstation is off"))
+
     monkeypatch.setattr(neo4j_writer, "embed", down)
-    assert await dispatcher._semantic_freeze_check(item) is None
-
-    async def boom(text):
-        raise RuntimeError("proxy exploded")
-
-    monkeypatch.setattr(neo4j_writer, "embed", boom)
-    assert await dispatcher._semantic_freeze_check(item) is None
+    with pytest.raises(EmbedderDown):
+        await dispatcher._semantic_freeze_check(item)
 
 
 @pytestmark_db

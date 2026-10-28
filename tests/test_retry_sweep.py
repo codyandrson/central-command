@@ -119,7 +119,11 @@ def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
     async def _failing(n):
         return []
 
+    async def _queued():
+        return set()
+
     monkeypatch.setattr(repo, "units_failing_despite_probe", _failing)
+    monkeypatch.setattr(repo, "dependencies_waited_on_by_queues", _queued)
     monkeypatch.setattr(repo, "dependency_probe_states", _states)
     monkeypatch.setattr(repo, "record_dependency_probe", _record)
     monkeypatch.setattr(repo, "sessions_awaiting_resume", _sessions)
@@ -405,6 +409,20 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
     from central_command.runtime.spike_model import make_sc1_model, make_spike_model
 
     monkeypatch.setattr(settings, "executor_mode", "live")  # real handlers, spied
+    # `make_parks_due()` below backdates EVERY park in the database, so a unit
+    # another file left parked would be driven by this sweep through this
+    # test's spies (sequential runs met it: an earlier file's parked proposal
+    # replayed into `graph_calls`). Settle those first; the test DB is throwaway.
+    conn = await repo._conn()
+    try:
+        await conn.execute("update proposal set status = 'FAILED', retry_state = null "
+                           "where status = 'RETRY_PENDING'")
+        await conn.execute("update session set status = 'DONE' "
+                           "where status = 'AWAITING_RESUME'")
+        await conn.execute("update task set retry_state = null "
+                           "where status = 'ASSIGNED' and retry_state is not null")
+    finally:
+        await conn.close()
     down = {"on": True}
 
     # (a) a session parked AWAITING_RESUME: the world change landed, the

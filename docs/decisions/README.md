@@ -140,7 +140,7 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-049 | A fold is a claim of coverage, not an outcome; it goes terminal only on covering-approval | active | undated | test: `tests/test_dismiss.py::test_dismissing_a_covering_proposal_releases_its_folds` | [ingest-integrations.md](ingest-integrations.md) |
 | DL-050 | Every email takes one path: dispatcher.process_claimed() | active | 2026-07-20 | test: `tests/test_dispatch_one_path.py::test_nothing_outside_the_dispatcher_starts_a_work_item_run` | [ingest-integrations.md](ingest-integrations.md) |
 | DL-051 | A Graphiti entity and edge each store their identity twice | active | undated | test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape` | [graph.md](graph.md) |
-| DL-052 | Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped | active | 2026-08-21 | test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_dropped_not_stored` | [graph.md](graph.md) |
+| DL-052 | Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped | active | 2026-08-21 | test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_refused_loudly` | [graph.md](graph.md) |
 | DL-053 | The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1 | active | undated | test: `tests/conftest.py::no_live_graph_writes` | [graph.md](graph.md) |
 | DL-054 | An async bolt driver cached at module scope is loop-bound | active | undated | discipline only | [graph.md](graph.md) |
 | DL-055 | Graphiti's extraction needs the bridged LiteLLM alias | superseded | 2026-09-19 | discipline only | [graph.md](graph.md) |

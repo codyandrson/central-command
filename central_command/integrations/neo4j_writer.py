@@ -44,9 +44,12 @@ graph quietly misbehaves:
   corrupt index, not an error. (Through our own request, not the library's
   embedder: `OpenAIEmbedder.create` slices the vector to `embedding_dim`, so
   a model answering at the wrong width would be TRUNCATED into a
-  meaningless vector instead of being dropped.) Embedding is best-effort on purpose: if the
-  workstation is off, the edit still lands (losing the operator's correction to
-  a sleeping GPU is worse) and the response says the embedding is missing.
+  meaningless vector instead of refused.) Nothing lands without its vector
+  (epic-outage-doctrine story 7, which reversed the old best-effort write): an
+  embedder that is DOWN raises `contract.EmbedderDown` before anything is
+  written — a gated write parks RETRY_PENDING, the operator's direct write is
+  refused 503 and the cockpit keeps the form — and a wrong width raises
+  `EmbedWidthError`. There is no second embedder to fall back on.
 - **`episodes` is provenance, and an operator entry gets a REAL one.** Every
   create here writes an Episodic node ("operator manual entry", timestamped,
   `trust=operator-direct` in its source_description) MENTIONS-linked to the
@@ -67,6 +70,12 @@ from datetime import datetime, timezone
 import httpx
 
 from central_command.config import settings
+from central_command.contract.failures import (
+    TRANSIENT,
+    TRANSIENT_STATUS,
+    EmbedderDown,
+    classify_failure,
+)
 from central_command.integrations import http as http_client
 from central_command.integrations import neo4j_reader
 from central_command.integrations.neo4j_reader import _get_driver
@@ -126,11 +135,10 @@ async def _write_tx(work):
 
 async def request_embedding(text: str, timeout: float = 60.0) -> list[float]:
     """The embedder round trip itself — URL, key, alias — RAISING on any
-    failure and checking no width. `embed()` below wraps it in the degrade-
-    don't-fail policy; the application self-check (`central_command/
-    selfcheck.py`, `embedding-as-app`) calls it bare, so the check proves the
-    writer's own request rather than a copy of it, and can say WHY it failed
-    where `embed()` can only log."""
+    failure and checking no width. `embed()` below types the failure and checks
+    the width; the application self-check (`central_command/selfcheck.py`,
+    `embedding-as-app`) calls it bare, so the check proves the writer's own
+    request rather than a copy of it."""
     async with httpx.AsyncClient(timeout=timeout, **http_client.client_kwargs()) as client:
         res = await client.post(
             f"{settings.llm_proxy_base_url}/v1/embeddings",
@@ -141,39 +149,56 @@ async def request_embedding(text: str, timeout: float = 60.0) -> list[float]:
         return res.json()["data"][0]["embedding"]
 
 
+class EmbedWidthError(WriteError):
+    """The embedder answered with a vector of the wrong width. A semantic
+    error, loud: Neo4j would store it and the vector index would not complain —
+    the node would silently stop answering the semantic half of hybrid search.
+    A misconfigured alias (`CC_EMBED_ALIAS` on a 768-dim model) is exactly this."""
+
+
+def _embed_down(exc: BaseException) -> bool:
+    """Was the embedder unavailable, rather than refusing the request? The
+    one taxonomy decides (`contract.classify_failure`); an HTTP status error is
+    judged by its STATUS, the way every other dependency's is."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in TRANSIENT_STATUS
+    return classify_failure(exc) == TRANSIENT
+
+
 async def embed(text: str) -> list[float] | None:
-    """Vector for `text` from the same embedder Graphiti uses, or None if the
-    workstation is unreachable. None is a degraded write, never a failed one."""
+    """Vector for `text` from the same embedder Graphiti uses.
+
+    None ONLY for empty text: no text is not an outage, and there is nothing
+    to embed. An embedder that is DOWN raises `contract.EmbedderDown` (the
+    original attached) — nothing lands without its vector (epic-outage-
+    doctrine story 7, reversing the old "degraded write" that stored a node
+    invisible to semantic search). A request the embedder REFUSED (a missing
+    alias answering 4xx) raises as it came, loud; a wrong-width vector raises
+    `EmbedWidthError`. There is no second embedder, by design."""
     if not text.strip():
         return None
     try:
         vector = await request_embedding(text)
     except Exception as exc:
-        # Degrading silently to the CALLER is deliberate (see docstring) — but
-        # a persistently-misconfigured alias looks identical to a transiently
-        # unreachable workstation from here, and only a log line tells them
-        # apart after the fact. CC_EMBED_ALIAS pointing at a nonexistent
-        # LiteLLM model is exactly this: every write "succeeds" as degraded,
-        # forever, with nothing in the API response to notice it by.
-        log.warning("embed(%r): degraded write, embedding failed: %s", _EMBED_MODEL, exc)
-        return None
-    # A wrong-width vector would corrupt the index rather than fail a query, so
-    # it is dropped: no embedding beats a mis-sized one.
+        if _embed_down(exc):
+            raise EmbedderDown(exc) from exc
+        raise
     if len(vector) != _EMBED_DIMENSIONS:
-        log.warning(
-            "embed(%r): degraded write, got %d dims, expected %d",
-            _EMBED_MODEL, len(vector), _EMBED_DIMENSIONS,
+        raise EmbedWidthError(
+            f"embedder {_EMBED_MODEL!r} returned {len(vector)} dimensions, "
+            f"expected {_EMBED_DIMENSIONS} (CC_EMBED_DIM) — a mis-sized vector "
+            "would corrupt the semantic index, so nothing was written"
         )
-        return None
     return vector
 
 
 def _vector(var: str, prop: str, kind: str, vector: list[float] | None) -> tuple[str, dict]:
     """Store a vector the way the bulk path does — `db.create.setNodeVectorProperty`
     / `setRelationshipVectorProperty` (verified on Neo4j 5.26: it replaces an
-    existing list property in place and refuses a null vector) — or, for a
-    degraded write, CLEAR it: a stale vector beside changed text keeps matching
-    the OLD text in every semantic search. Returns (cypher tail, params)."""
+    existing list property in place and refuses a null vector) — or, when the
+    new text is EMPTY (the only time `embed` returns None), CLEAR it: a stale
+    vector beside changed text keeps matching the OLD text in every semantic
+    search. Returns (cypher tail, params)."""
     if vector is None:
         return f" SET {var}.{prop} = null", {}
     proc = "setNodeVectorProperty" if kind == "node" else "setRelationshipVectorProperty"
@@ -253,7 +278,7 @@ async def create_node(
         f"{name}: {summary}" if summary else name, group_id,
         mentions=[node_uuid], entity_edges=[],
     )
-    return {"uuid": node_uuid, "embedded": vector is not None, "episode": episode}
+    return {"uuid": node_uuid, "episode": episode}
 
 
 async def update_node(
@@ -298,7 +323,7 @@ async def update_node(
     await _write(
         f"MATCH (n:Entity {{uuid: $uuid}}) SET {', '.join(sets)}{tail}", **params
     )
-    return {"uuid": uuid, "embedded": vector is not None if text_changed else None}
+    return {"uuid": uuid}
 
 
 async def delete_node(uuid: str) -> dict:
@@ -373,7 +398,7 @@ async def create_edge(
         fact=fact, group_id=ends[0]["group_id"], created_at=now,
         valid_at=valid_at, invalid_at=invalid_at, episode=episode, **vec_params,
     )
-    return {"uuid": edge_uuid, "embedded": vector is not None, "episode": episode}
+    return {"uuid": edge_uuid, "episode": episode}
 
 
 async def update_edge(
@@ -448,7 +473,7 @@ async def update_edge(
         )
         if not moved:
             raise WriteError("new source or target entity not found")
-    return {"uuid": uuid, "embedded": vector is not None if fact is not None else None}
+    return {"uuid": uuid}
 
 
 async def delete_edge(uuid: str) -> dict:

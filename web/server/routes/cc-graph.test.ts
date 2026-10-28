@@ -58,4 +58,20 @@ describe('cc-graph adapter: episode deletion', () => {
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ ok: false, error: 'the graph changed since this preview was read' });
   });
+
+  it('passes an embedder refusal through as a 503 naming the dependency', async () => {
+    fetchMock.mockResolvedValueOnce(respond({
+      error: 'embedder down', dependency: 'embedder',
+      detail: 'The embedder is down, so nothing was written.',
+    }, 503));
+    const app = await buildApp();
+    const res = await app.request('/api/graph/node', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Jane Doe', labels: [], summary: '', group_id: 'central_command' }),
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      ok: false, error: 'The embedder is down, so nothing was written.', dependency: 'embedder',
+    });
+  });
 });

@@ -14,11 +14,11 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from central_command import events
-from central_command.contract import is_transient
+from central_command.contract import EmbedderDown, is_transient
 from central_command.db import repo
 from central_command.gateway import gateway
 from central_command.ingest import bulk_dismiss, ledger
@@ -3548,6 +3548,12 @@ class GraphMergeIn(BaseModel):
     drop_uuid: str
 
 
+EMBEDDER_REFUSAL = (
+    "The embedder is down, so nothing was written. Your entry is kept — save "
+    "it again once the embedder is back."
+)
+
+
 async def _curate(coro, op: str, detail: dict):
     """One error contract for every curation write: a rejected edit is a 422
     the operator can act on ("unknown entity type Personn"), a broken bolt is
@@ -3559,6 +3565,18 @@ async def _curate(coro, op: str, detail: dict):
     `proposal.created` landing after its save."""
     try:
         result = await coro
+    except EmbedderDown as e:
+        # The embedder is DOWN (epic-outage-doctrine story 7): nothing was
+        # written — the writer embeds before it writes, and nothing lands
+        # without its vector. A refusal, not a park: the operator is right
+        # here, and the cockpit keeps the form filled so the write is one
+        # click once the embedder is back (the operator's ruling, 2026-10-27).
+        return JSONResponse(status_code=503, content={
+            "error": "embedder down",
+            "dependency": "embedder",
+            "detail": EMBEDDER_REFUSAL,
+            "cause": f"{type(e.original).__name__}: {e.original}"[:300],
+        })
     except neo4j_writer.WriteError as e:
         raise HTTPException(422, str(e)) from e
     except Exception as e:

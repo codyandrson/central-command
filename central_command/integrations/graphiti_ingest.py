@@ -238,6 +238,14 @@ async def _run_remove(job: dict) -> dict:
     )
 
 
+async def _dependencies_down() -> set[str]:
+    """Which of the worker's dependencies the retry sweep last recorded DOWN.
+    The persisted probe, not a probe of our own: one name, one probe (story 3)."""
+    states = await repo.dependency_probe_states()
+    return {n for n in ("graph", "embedder")
+            if (states.get(n) or {}).get("state") == "down"}
+
+
 def _failing_dependencies(exc: BaseException) -> tuple[str, ...]:
     """What the failing call needed, for the park record: `graph` for a bolt
     failure, `embedder` when the request that failed was an embedding, else the
@@ -580,6 +588,18 @@ class IngestWorker:
             )
             # The patches concern extraction; a deletion at the head of its
             # group still runs (it waits behind an extraction like any job).
+            kinds = (REMOVE,)
+        # The dependency gate (epic-outage-doctrine story 7). An extraction
+        # writes the graph AND embeds; while either is recorded DOWN by the
+        # retry sweep's probes (`dependency_probe` — a missing row is up), no
+        # extraction is taken, so a long outage spends no job's attempts. A
+        # deletion is bolt-only: it still runs while only the embedder is down.
+        down = await _dependencies_down()
+        if "graph" in down:
+            self._report(None, "waiting: the graph is down")
+            return []
+        if "embedder" in down:
+            self._report(None, "waiting: the embedder is down (deletions still run)")
             kinds = (REMOVE,)
         claimed = await repo.claim_ingest_jobs(exclude_groups=list(self._jobs), kinds=kinds)
         for job in claimed:

@@ -30,7 +30,13 @@ how to add one.
   everyone; a verification check that was itself off-by-one very nearly
   normalized exactly that mistake, so the write path now checks the size
   itself and refuses/drops anything that doesn't match.
-- **Enforced:** test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_dropped_not_stored` (a fake embedder, no live graph) and test: `tests/test_graph_embedding_width.py::test_every_text_changing_graph_write_re_embeds` (the walk over the write functions)
+- **Amended 2026-10-27 (epic-outage-doctrine story 7):** a mis-sized vector is
+  now REFUSED loudly (`neo4j_writer.EmbedWidthError`, a semantic write error)
+  rather than dropped into a "degraded write", and an embedder that is down
+  raises `contract.EmbedderDown`: nothing lands without its vector. The rule's
+  point — never a mis-sized or missing vector in the graph — is unchanged; the
+  text above is kept as it was decided.
+- **Enforced:** test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_refused_loudly` (a fake embedder, no live graph) and test: `tests/test_graph_embedding_width.py::test_every_text_changing_graph_write_re_embeds` (the walk over the write functions)
 - **Source:** .claude/rules/graph.md
 
 ### DL-053 — The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1

@@ -55,6 +55,20 @@ class DependencyDown(Exception):
         self.tool_name = tool_name
         self.original = original
 
+
+class EmbedderDown(DependencyDown):
+    """The embedder could not answer a graph write's embedding request
+    (epic-outage-doctrine story 7). Raised by `neo4j_writer.embed` in place of
+    the old "degraded write" (a node stored without its vector, invisible to
+    semantic search for good): nothing lands without its vector. Transient by
+    type (a `DependencyDown`), so the Executor parks the proposal RETRY_PENDING
+    on `('graph', 'embedder')` — the graph write waits on both — and the
+    operator's direct write answers 503 naming the embedder. Lives here so
+    every tier can catch it without importing the writer."""
+
+    def __init__(self, original: BaseException):
+        super().__init__(("graph", "embedder"), "embed", original)
+
 # HTTP status codes that mean "come back later", not "no".
 #
 # 408 request timeout, 429 too many requests (LiteLLM's cooldown/no-deployment

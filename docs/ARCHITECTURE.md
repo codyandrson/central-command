@@ -782,6 +782,29 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   (the operator declined), and `nerve_gateway._close_conversation_for_key`
   (the operator closed a failed execution). `tests/test_turn_parking.py`
   walks the source against both lists.
+- **An embedder outage parks graph writes (story 7 of the outage doctrine).**
+  Nothing lands without its vector. `neo4j_writer.embed` raises
+  `contract.EmbedderDown` (a `DependencyDown` on `('graph', 'embedder')`,
+  transient by type, carrying the original) before anything is written; it
+  returns `None` only for empty text, and a wrong-width vector is a loud
+  semantic `EmbedWidthError`. The old "degraded write" (a node stored with no
+  vector, `embedded: False`) is gone, and there is no fallback embedder. A
+  gated curation write parks `RETRY_PENDING` with
+  `retry_state.dependencies = ['graph', 'embedder']` through the Executor's
+  typed classification. The operator's direct write (`routes._curate`, behind
+  the cockpit Graph panel) is refused `503 {error: 'embedder down',
+  dependency: 'embedder'}`, writing nothing; the panel shows the refusal and
+  keeps the unsaved form filled, so the write is one click once the embedder
+  is back. The dispatcher's embedder calls (the semantic freeze, the item and
+  intent vectors behind the pending-proposals context) no longer fail open: an
+  outage releases the claimed item transient with `work_item.dependencies =
+  ['embedder']` and `not_before` on the curve, and it is not run unguarded.
+  The ingest worker reads `dependency_probe` before claiming: while `graph` is
+  down it takes nothing, while `embedder` is down it takes only the bolt-only
+  deletions, and a transient failure still defers the job stamped with its
+  dependencies. The retry sweep also probes what released ledger items and
+  deferred ingest jobs wait on (`repo.dependencies_waited_on_by_queues`), so
+  those gates and the banner learn of an outage only the queues have met.
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).

@@ -1,4 +1,4 @@
-"""A mis-sized vector is dropped, because nothing downstream would complain.
+"""A mis-sized vector is refused, because nothing downstream would complain.
 
 `neo4j_writer` is the operator's own hand on the graph — the write half of the
 cockpit Graph panel, with no approval gate because the operator IS the gate.
@@ -13,10 +13,13 @@ of hybrid search. What breaks is the semantic half — silently, for that node,
 forever. Swapping `CC_EMBED_ALIAS` to a 768- or 1536-dimension model is a
 one-line config change that would do exactly this to every subsequent write.
 
-So `embed()` drops the vector and degrades the write instead: the edit still
-lands (losing the operator's correction to a sleeping GPU is worse) and the
-response says `embedded: False`, which is a fact the caller can see. A
-`None` and a wrong width are the same answer on purpose.
+So `embed()` refuses it, loudly (`EmbedWidthError`, a semantic `WriteError`),
+and writes nothing. Since epic-outage-doctrine story 7 the same rule covers an
+embedder that is DOWN: it raises `contract.EmbedderDown` and nothing lands
+without its vector (the old "degraded write" — the node stored with no vector,
+`embedded: False` — is gone; the gated write parks, the operator's direct
+write is refused 503 and the cockpit keeps the form). Only EMPTY text returns
+None: no text is not an outage.
 
 No live graph and no network here: the embedder is a fake, per
 `tests/conftest.py::no_live_graph_writes` — the bolt writes it guards are
@@ -108,16 +111,22 @@ async def test_a_right_sized_vector_is_stored(fake_embedder):
 
 
 @pytest.mark.parametrize("width", [768, 1023, 1025, 1536, 0])
-async def test_a_mis_sized_vector_is_dropped_not_stored(width, fake_embedder):
+async def test_a_mis_sized_vector_is_refused_loudly(width, fake_embedder):
+    """Rewritten for story 7 (it pinned `None`, the degraded write): a wrong
+    width is a loud semantic error — Neo4j would store it and the vector index
+    would not complain; the node would silently stop answering semantic search."""
     fake_embedder([0.5] * width)
-    vector = await neo4j_writer.embed("the operator's grandfather was a machinist")
-    assert vector is None, (
-        f"embed() returned a {width}-dimension vector where "
-        f"{settings.embed_dim} was expected. Neo4j will store it and the vector "
-        "index will not complain — the node simply stops answering the semantic "
-        "half of hybrid search, with nothing anywhere to notice it by. No "
-        "embedding beats a mis-sized one: return None and let the write degrade"
-    )
+    with pytest.raises(neo4j_writer.EmbedWidthError) as refused:
+        await neo4j_writer.embed("the operator's grandfather was a machinist")
+    assert str(width) in str(refused.value)
+    assert isinstance(refused.value, neo4j_writer.WriteError), "semantic: never retried"
+
+
+async def test_empty_text_is_not_an_outage(fake_embedder):
+    calls = fake_embedder([0.5] * settings.embed_dim)
+    assert await neo4j_writer.embed("") is None
+    assert await neo4j_writer.embed("   \n ") is None
+    assert calls == [], "no text, no request"
 
 
 def test_a_vector_is_stored_the_bulk_way_and_a_missing_one_is_cleared():
@@ -136,18 +145,25 @@ def test_a_vector_is_stored_the_bulk_way_and_a_missing_one_is_cleared():
         " SET n.name_embedding = null", {})
 
 
-async def test_an_unreachable_embedder_degrades_the_write_rather_than_failing_it(monkeypatch):
-    """The other half of the same rule: losing the operator's correction to a
-    sleeping GPU is worse than storing it without a vector."""
+async def test_an_unreachable_embedder_raises_embedder_down(monkeypatch):
+    """Rewritten for story 7 (it pinned the degraded write): an embedder that
+    is DOWN raises the typed `EmbedderDown`, transient by type, carrying the
+    original — nothing lands without its vector."""
+    from central_command.contract import EmbedderDown, classify_failure
+
     class _Boom:
         async def __aenter__(self):
-            raise OSError("workstation is off")
+            raise ConnectionError("workstation is off")
 
         async def __aexit__(self, *exc):
             return False
 
     monkeypatch.setattr(neo4j_writer.httpx, "AsyncClient", lambda *a, **k: _Boom())
-    assert await neo4j_writer.embed("anything") is None
+    with pytest.raises(EmbedderDown) as down:
+        await neo4j_writer.embed("anything")
+    assert isinstance(down.value.original, ConnectionError)
+    assert down.value.dependencies == ("graph", "embedder")
+    assert classify_failure(down.value) == "transient"
 
 
 # --------------------------------------------------------------------------
@@ -176,7 +192,7 @@ def test_every_text_changing_graph_write_re_embeds():
     """`create_node`, `create_edge`, `update_node`, `update_edge` — the four
     that write a name or a fact. Each must pass its new text through `embed()`
     and store the result through `_vector()` (the bulk path's procedure, or a
-    clear when the embedder was down), or the node goes into the graph
+    clear when the new text is empty), or the node goes into the graph
     invisible to semantic search."""
     offenders = []
     for fn in _writer_functions():

@@ -352,7 +352,7 @@ export function useGraph() {
 
   const createNode = useCallback((body: {
     name: string; labels: string[]; summary: string; group_id: string;
-  }) => write<{ uuid: string; embedded: boolean }>('/api/graph/node', 'POST', body), [write]);
+  }) => write<{ uuid: string }>('/api/graph/node', 'POST', body), [write]);
 
   const updateNode = useCallback((body: {
     uuid: string; name?: string; summary?: string; labels?: string[];

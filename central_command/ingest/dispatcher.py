@@ -151,24 +151,23 @@ _intent_vectors: dict[str, list[float]] = {}
 
 async def _item_vector(item: dict) -> list[float] | None:
     """The item's embedding — the one the semantic freeze computed and stored
-    on the row, or a fresh one from the same text. None when the embedder is
-    unreachable or the item has no text yet."""
+    on the row, or a fresh one from the same text. None only when the item has
+    no text yet. An embedder that is DOWN raises `EmbedderDown` out of here and
+    the run's own handler releases the item transient (epic-outage-doctrine
+    story 7): an embedder outage is a graph-write outage, never a reason to
+    run the item without its duplicate guards."""
     vector = item.get("embedding")
     if vector:
         return vector
     if settings.demo_mode:
         return None
-    try:
-        from central_command.integrations.neo4j_writer import embed
+    from central_command.integrations.neo4j_writer import embed
 
-        text = (
-            f"{item.get('subject') or ''}\n"
-            f"{(((item.get('payload') or {}).get('text')) or '')[:1500]}"
-        )
-        vector = await embed(text)
-    except Exception:  # noqa: BLE001 — best-effort, fail open
-        log.exception("item embedding failed — proceeding without it")
-        return None
+    text = (
+        f"{item.get('subject') or ''}\n"
+        f"{(((item.get('payload') or {}).get('text')) or '')[:1500]}"
+    )
+    vector = await embed(text)
     if vector:
         item["embedding"] = vector
         try:
@@ -196,10 +195,11 @@ async def _with_pending_proposals_context(prompt: str, item: dict | None = None)
     AKVIS run of 2026-09-22 cited "the standing practice for the dozens of
     other opted-in marketing senders" as its reason). Now only intents whose
     embedding sits within `pending_context_threshold` of the item's are
-    shown, at most `pending_context_limit`, nearest first; an unreachable
-    embedder means NO block — the duplicate guard then rests on the claim
-    query's hard keys and the semantic freeze, both of which still stand.
-    Facts, not directives: the agent is told what is pending and decides.
+    shown, at most `pending_context_limit`, nearest first. An embedder that
+    is DOWN raises (`EmbedderDown`) and the item is released transient to wait
+    for it — running without the block would lose the duplicate guard it
+    exists for. Facts, not directives: the agent is told what is pending and
+    decides.
     """
     pending = await repo.list_proposals("AWAITING_HUMAN")
     if not pending:
@@ -238,15 +238,13 @@ async def _with_pending_proposals_context(prompt: str, item: dict | None = None)
 
 
 async def _embed_intent(text: str) -> list[float] | None:
+    """A pending proposal's intent vector. `EmbedderDown` propagates (the item
+    waits for the embedder, story 7); None only for an empty intent."""
     if settings.demo_mode or not text.strip():
         return None
-    try:
-        from central_command.integrations.neo4j_writer import embed
+    from central_command.integrations.neo4j_writer import embed
 
-        return await embed(text)
-    except Exception:  # noqa: BLE001 — best-effort, fail open
-        log.exception("intent embedding failed — proceeding without it")
-        return None
+    return await embed(text)
 
 
 # The first prompt may take this many tool-result ceilings (each one
@@ -419,46 +417,47 @@ async def _semantic_freeze_check(item: dict) -> dict | None:
     Runs AFTER the atomic claim on purpose: the SQL claim stays race-safe, the
     fuzzy judgement happens out here, and the worst race outcome is one extra
     release/retry — never a duplicate run. Returns a payload describing the
-    match (→ release with backoff), or None to proceed. FAIL-OPEN everywhere:
-    an unreachable embedder or a check bug must never block dispatch — the
-    hard keys and the pending-proposals prompt context still stand behind it.
+    match (→ release with backoff), or None to proceed.
+
+    An embedder that is DOWN raises `EmbedderDown` out of here (epic-outage-
+    doctrine story 7, which reversed the old run-unguarded rule): the claimed item is
+    released TRANSIENT by `process_claimed`'s own handler — attempt handed
+    back, `not_before` on the one backoff curve, `work_item.dependencies`
+    `['embedder']` — and is not processed until the embedder is back. Running
+    it unguarded is how a duplicate proposal is born.
     """
     if settings.demo_mode or not settings.semantic_freeze_enabled:
         return None
-    try:
-        from central_command.integrations.neo4j_writer import embed
+    from central_command.integrations.neo4j_writer import embed
 
-        vector = item.get("embedding")
-        if not vector:
-            text = (
-                f"{item.get('subject') or ''}\n"
-                f"{(((item.get('payload') or {}).get('text')) or '')[:1500]}"
-            )
-            vector = await embed(text)
-            if vector is None:
-                return None  # embedder unreachable / empty text — fail open
-            await repo.set_work_item_embedding(item["id"], vector)
-            item["embedding"] = vector
+    vector = item.get("embedding")
+    if not vector:
+        text = (
+            f"{item.get('subject') or ''}\n"
+            f"{(((item.get('payload') or {}).get('text')) or '')[:1500]}"
+        )
+        vector = await embed(text)
+        if vector is None:
+            return None  # no text yet: nothing to compare
+        await repo.set_work_item_embedding(item["id"], vector)
+        item["embedding"] = vector
 
-        best, best_row = 0.0, None
-        for row in await repo.in_flight_embeddings(exclude_id=item["id"]):
-            score = _cosine(vector, row["embedding"])
-            if score > best:
-                best, best_row = score, row
-        if best_row is not None and best >= settings.semantic_freeze_threshold:
-            return {
-                "reason": (
-                    f"semantically related to in-flight item {best_row['id']} "
-                    f"(similarity {best:.2f} >= {settings.semantic_freeze_threshold})"
-                ),
-                "related_item_id": best_row["id"],
-                "related_subject": best_row.get("subject"),
-                "score": round(best, 3),
-            }
-        return None
-    except Exception:  # noqa: BLE001 — fail open, the gate is best-effort
-        log.exception("semantic freeze check failed — proceeding without it")
-        return None
+    best, best_row = 0.0, None
+    for row in await repo.in_flight_embeddings(exclude_id=item["id"]):
+        score = _cosine(vector, row["embedding"])
+        if score > best:
+            best, best_row = score, row
+    if best_row is not None and best >= settings.semantic_freeze_threshold:
+        return {
+            "reason": (
+                f"semantically related to in-flight item {best_row['id']} "
+                f"(similarity {best:.2f} >= {settings.semantic_freeze_threshold})"
+            ),
+            "related_item_id": best_row["id"],
+            "related_subject": best_row.get("subject"),
+            "score": round(best, 3),
+        }
+    return None
 
 
 async def dispatch_once(model=None) -> dict | None:
@@ -638,12 +637,19 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             releases = int(item.get("transient_releases") or 0)
             backoff = retry_backoff_seconds(releases)
             not_before = datetime.now(timezone.utc) + timedelta(seconds=backoff)
-            from central_command.contract.dependencies import LLM, stamped_dependencies
+            from central_command.contract import EmbedderDown
+            from central_command.contract.dependencies import (
+                EMBEDDER, LLM, stamped_dependencies,
+            )
 
+            # What the item waits on. An embedder outage is the embedder's
+            # alone here: the dispatcher embeds to compare, it writes nothing
+            # to the graph (story 7).
+            waits_on = ((EMBEDDER,) if isinstance(e, EmbedderDown)
+                        else stamped_dependencies(e) or (LLM,))
             await repo.release_work_item(
                 item["id"], error=str(e), count_attempt=False,
-                not_before=not_before,
-                dependencies=stamped_dependencies(e) or (LLM,),
+                not_before=not_before, dependencies=waits_on,
             )
             await events.emit(
                 "work.released",
