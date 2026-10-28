@@ -118,3 +118,14 @@ when a matching file is read.
   rule be created without the gate, and never let an agent fold terminal on
   its own say-so. A reopened rule fold is `rule_exempt` for good — a rule
   that re-takes what the operator pulled back is a loop they cannot escape.
+- **An integration that detects a moved target raises the typed
+  `WorldMoved` subclass of its OWN error, and its provider error carries
+  `status_code`.** `confluence.ConfluenceStale` and `jira.TransitionMoved` are
+  the pattern: a `ConfluenceError`/`JiraError` that also mixes in
+  `contract.failures.WorldMoved(target, expected, actual, what_moved)`, so the
+  Executor and the classifier read the verdict from the type, never from the
+  message. Pair it with a fresh-read check registered in
+  `executor.WORLD_CHECKS` that goes through the same function the handler calls
+  first. Every error built from an HTTP response subclasses
+  `ProviderStatusError` and passes `status_code=`, so a 5xx inside a vague
+  message still classifies as DOWN.

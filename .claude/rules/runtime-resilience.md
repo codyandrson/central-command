@@ -159,3 +159,15 @@ when a matching file is read.
   `classify_failure` reads it ahead of the text sniff. A Confluence or Jira 503
   once text-classified SEMANTIC and landed a proposal FAILED mid-outage. The
   sniff is the last resort, for errors that arrive already stringified.
+- **The world moved is a NO: typed, never transient and never parked.** A
+  handler that finds its target changed since the draft raises a
+  `contract.failures.WorldMoved` subclass; `classify_failure` decides it by
+  TYPE, ahead of the status branch and the text sniff, so a 409 or a
+  `what_moved` that says "timeout" cannot turn it into an outage. A moved world
+  replayed as-is overwrites what nobody reviewed, so it lands FAILED, resumes
+  the drafter to read again and redraft, and the redraft parks. The chain is
+  bounded by `CC_WORLD_MOVED_REDRAFT_LIMIT` (default 3); no other failure
+  counts toward it. A parked or interrupted proposal re-checks the world
+  before its first remaining action (`executor.WORLD_CHECKS`), so waiting never
+  turns into a stale write. Guarded by `tests/test_world_moved.py` and
+  `tests/test_world_moved_limit.py`.

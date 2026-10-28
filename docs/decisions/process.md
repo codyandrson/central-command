@@ -799,19 +799,20 @@ hygiene, and how the test suite itself must be written. See
 - **Date:** 2026-10-19
 - **Rule:** (recorded here) A proposal is not bounced at propose time for a stale read-version.
   World-state checks happen at execution, and a world that changed between
-  propose and approve produces the world-changed redraft (PRD FR-9; not yet
-  built, PRD §6.1 item 5).
+  propose and approve produces the world-moved redraft (PRD FR-9; built,
+  DL-190).
 - **Why:** The design contract's rule 4 had a proposal carry the version of what it
   read, to be compared at propose time. In practice the field was written
   "unknown" and nothing read it, while the checks that matter (the ticket is
   still in the state the draft assumed) can only run at execution because
   the world can change between propose and approve. Review ruling GATE-006
-  retired the bounce; dropping the field from drafting guidance is owed
-  (the charter-update and reflection prompts in `runtime/` still name
-  `read_version`). The world-changed redraft (INGEST-045; PRD
-  §6.1 item 5, not yet built) is the mechanism that replaces it. This
-  is also why `contract.ARG_SPECS` checks SHAPE only (AGENTS.md).
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+  retired the bounce. Built: the field is gone from every drafting
+  instruction (the tool docstrings, the charter-update and reflection prompts;
+  commit 3a7d8150), stored rows keep it and still load, and the cockpit's
+  display fallback stays. The world-moved redraft (INGEST-045; DL-190) is the
+  mechanism that replaces it. This is also why `contract.ARG_SPECS` checks
+  SHAPE only (AGENTS.md).
+- **Enforced:** test: `tests/test_read_version_retired.py`
 - **Source:** docs/PRD.md FR-5, FR-9; PRD addendum §B (GATE-006, INGEST-045); docs/DESIGN.md §2 contract rule 4
 
 ### DL-143 — A policy registry as a governed table was never built
@@ -1796,3 +1797,12 @@ hygiene, and how the test suite itself must be written. See
 - **Why:** PRD FR-40 (the outage doctrine) and FR-34 (an embedder outage is a graph-write outage; embeddings never fall back to another model, and writes park rather than fail open). They retire the RUNTIME-047 reading that a live read degrades ("proceed without it", never wedge), the attempt-exhaustion promotion of DL-172, and the semantic-freeze fail-open. The operator's standard for every park (2026-10-27), in his words: "I expect these processes to resume once the service is available again, with no long term evidence of this outage (other than the immediate existence of the banner, and any logs). Once completed, the session/run should result in the same results as if the service was never offline." That is why a parked turn re-sends its unsent request rather than re-running (no duplicated operator turn, no re-spent tool batch), why a restart lands nothing FAILED (DL-188), and why the one concession, an interrupted execution held for the operator, is recorded as an INTERIM with reconciliation as the end state. The ruling record is kept privately (PRD §0); this entry stands on its own.
 - **Enforced:** test: `tests/test_outage_doctrine.py::test_a_down_graph_search_parks_the_task_run_mid_turn`, `tests/test_turn_parking.py::test_a_chat_turn_whose_model_is_down_parks_and_lands_the_reply`, `tests/test_outage_backoff.py::test_a_task_backs_off_and_never_exhausts`, `tests/test_embedder_outage.py::test_a_create_node_proposal_parks_retry_pending_and_writes_nothing`
 - **Source:** docs/PRD.md FR-34, FR-40; docs/ARCHITECTURE.md "The outage doctrine"; docs/superpowers/specs/2026-07-31-outage-equivalence-design.md (as-built note)
+
+### DL-190 — A moved world is a NO that redrafts: typed, re-checked on a fresh read, bounded, and every redraft parks
+
+- **Status:** active
+- **Date:** 2026-10-28
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "The world moved is a NO: typed, never transient and never parked."
+- **Why:** An approved proposal replayed against a target that changed since the draft overwrites what nobody reviewed (a Confluence page edited by someone else, a Jira issue already transitioned, an episode preview that no longer matches). So the Executor re-reads each stateful target before its first action (`executor.WORLD_CHECKS`, on every execution: the first, a sweep's retry and the operator's retry-now of an interrupted one), and a handler or check that finds the world moved raises the typed `WorldMoved`; `classify_failure` makes it SEMANTIC by type, ahead of the status branch, so it is never transient and never parked. It lands FAILED, `proposal.failed` carries `world_moved`, and the drafter resumes with what moved and redrafts; the redraft is linked on the row (`proposal.redraft {of, root, cause, world_moved_count}`) and always parks for the operator, never decided by an override. The chain is bounded by `CC_WORLD_MOVED_REDRAFT_LIMIT` (default 3, 0 allowed, no unlimited value): at the limit the drafter is not resumed, the proposal is FAILED with `chain_exhausted` and `proposal.redraft_limit_reached` is emitted, so a target that keeps moving surfaces to the operator instead of looping; other semantic failures never count. 5xx and 403 stay DOWN (the operator's ruling in story 11), so a provider outage is parked and never mistaken for a moved world.
+- **Enforced:** test: `tests/test_world_moved.py`, `tests/test_world_moved_limit.py`, `tests/test_world_moved_wire.py` (an end-to-end test, `tests/test_world_moved_e2e.py`, is owed from story 9 and not yet cited)
+- **Source:** docs/ARCHITECTURE.md "Proposal" and "The outage doctrine"; docs/PRD.md FR-9; CHANGELOG (release entry owed from story 10)

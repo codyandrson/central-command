@@ -269,7 +269,7 @@ stateDiagram-v2
     EXECUTING --> RETRY_PENDING: dependency DOWN → repo.park_proposal_retry
     RETRY_PENDING --> EXECUTING: retry sweep or the operator's retry-now → gateway.retry_execution (an interrupted one: only the operator's flag); the Executor re-checks the world before the first remaining action
     RETRY_PENDING --> WITHDRAWN: gateway.dismiss_proposal — one SQL-guarded transition; the execution is withdrawn, the task FAILED
-    EXECUTING --> FAILED: the dependency said NO (or the world moved: proposal.failed carries world_moved) — drafter RESUMES; a redraft parks with proposal.redraft linking it
+    EXECUTING --> FAILED: the dependency said NO, or the world moved (proposal.failed carries world_moved) — drafter RESUMES; every redraft parks, linked by proposal.redraft; at CC_WORLD_MOVED_REDRAFT_LIMIT the drafter is NOT resumed (proposal.redraft_limit_reached)
     AWAITING_HUMAN --> REJECTED: gateway.reject_with_feedback — drafter RESUMES and may redraft a new proposal
     AWAITING_HUMAN --> WITHDRAWN: gateway.dismiss_proposal — folds released, session closed, drafter NEVER resumed
     EXECUTED --> [*]
@@ -531,8 +531,8 @@ stateDiagram-v2
   never evaluated and are recorded at the park itself
   (`overrides.record_unevaluated_park`, `override_eval` reason `redraft` or
   `follow_on`, outcome `parked`): a **redraft** (`gateway._park_redraft`,
-  after a Reject or a failed execution, and a redraft of a redraft) never
-  auto-executes under an override; a **follow-on** parked on the approved leg
+  whatever its cause (`redraft.cause`: `world_moved`, `failed` or `rejected`),
+  and a redraft of a redraft) never auto-executes under an override; a **follow-on** parked on the approved leg
   (context `follow_on_of`) goes to the operator by default.
   **Where the hook runs.** Every `park_proposal` call site, mapped to the
   caller that runs the hook (`overrides.PARK_SITES`; a source walk in
@@ -590,6 +590,12 @@ What varies is the approver.
 | **Graduated class** — the independent auditor re-derives the judgment from the raw source; a **CONCUR** executes with `approver="auditor"`, a **CHALLENGE** or an auditor error parks for the operator | the auditor, per class, revocable | `dismissal.confirm` (email dismissals) and `work.bulk_dismiss`; `dismissal.confirm.document`; graph-verification rows that are aligned, mechanically clean and addition-only (invalidations always park) | `CC_AUDITOR_ENABLED` (false) + `CC_AUDITOR_MODE` (shadow); `CC_AUDITOR_DOCUMENT_MODE` (shadow); `CC_GRAPH_AUDITOR_ENABLED` (false) + `CC_GRAPH_AUDITOR_MODE` (shadow) |
 | **Gate override** — the operator's standing rule for one agent and one capability, scoped and narrowable by argument, target or schedule; the proposal is still decided at the seam, by the gateway, and run by the same Executor | `override:<id>` (`override:<a>+<b>`, sorted, when several cover it) | any capability whose default gate is `human` or `auditor`, for any agent but the auditor; none exists until the operator authors one in the cockpit. Three safeguards: (1) the gateway pre-checks and the Executor re-checks the scope before the first action; (2) the write carries `trust=override:<id>`; (3) a shadow period of the operator's own approvals first, and one-click revoke on the agent's and the capability's pages. An irreversible or LIVE class also needs an acknowledgement at authoring and a shadow of at least 1. Never operator agreement for graduation | `CC_GATE_OVERRIDE_SHADOW_RUNS` (5) |
 | **Ungated deterministic write** — exactly two, no proposal, because there is no agent judgment to review | code, or the operator's own click | the closed `EXEMPT_WRITES` tuple beside `REGISTRY` names them (they are not registry rows); task creation is a trigger, has no row and is not on the list. (1) operator graph curation: a closed write set in `integrations/neo4j_writer.py`, called from `api/routes.py` for the operator's own edits; (2) wiki stale-page annotation: a deterministic template over claim rows, no model in the path, whose Confluence write is made by `ingest/wiki_freshness.py` | — ; `CC_WIKI_ANNOTATION_MODE` (off) |
+
+**Every redraft parks.** A redraft after a Reject, after a failed execution or
+after the world moved (the `redraft` link above, whatever its `cause`) waits for
+the operator: no override decides one and none is evaluated, so a re-draft
+against a moved world is never waved through by the standing rule that covered
+the first draft.
 
 **The default gate** is a registry column, `Capability.default_gate`
 (`gateway/capabilities.py`), never a table (DL-143): `human` on 63 rows (every
@@ -737,7 +743,16 @@ DOWN set is DOWN whatever the body says, a 4xx outside it reads its text as
 before, no status falls through. The text sniff is the last resort. A third
 typed error is a NO by type: `WorldMoved` (the world changed between approval
 and execution) is SEMANTIC ahead of the status branch and the sniff, so neither
-a 409 nor a `what_moved` that says "timeout" can park it.
+a 409 nor a `what_moved` that says "timeout" can park it. **The world-moved NO
+is therefore never parked and never retried as-is**: replaying an approved
+proposal against a world that moved would overwrite what nobody reviewed, so it
+lands FAILED and the drafter reads the target again and redrafts (bounded by
+`CC_WORLD_MOVED_REDRAFT_LIMIT`; see "Proposal"). The DOWN side meets it from the
+other direction: a proposal parked `RETRY_PENDING` (or interrupted by a restart)
+waits an arbitrary time, so every execution of it, the sweep's retry and the
+operator's retry-now included, runs the Executor's world re-check first
+(`executor.WORLD_CHECKS`) and a mismatch there takes the same redraft path
+instead of finishing the remaining actions on a stale premise.
 
 **Names, probes and maps.** `DEPENDENCIES` in `contract/dependencies.py` is the
 one closed vocabulary a park, a probe or an outage row uses; the probe
@@ -986,7 +1001,10 @@ updater's schema phase at release, never at process start): the table
 `proposal.execution_interrupted`, `proposal.execution_dismissed`,
 `retry.failing_despite_probe`, `outage.retry_requested`, `session.turn_lost`.
 Settings: `CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600) and
-`CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3); the three limits are gone.
+`CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3); the three limits are gone. The
+world-moved redraft (a NO, not an outage) adds its own: the `proposal.redraft`
+column, the event `proposal.redraft_limit_reached` and the setting
+`CC_WORLD_MOVED_REDRAFT_LIMIT` (default 3), all described under "Proposal".
 
 ## 5. The cockpit (`web/`)
 
