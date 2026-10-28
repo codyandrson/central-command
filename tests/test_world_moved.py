@@ -37,7 +37,6 @@ from tests.test_jira_client import FakeResponse
 
 AGENT = "jira-expert"
 _ORIGINAL_CLIENT = httpx.AsyncClient
-_REAL_UPDATE_PAGE = confluence.update_page
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +65,21 @@ def _confluence_answers(monkeypatch, *, version: int, put: httpx.Response | None
             "id": "42", "title": "Roadmap", "spaceId": "9",
             "version": {"number": version + 1},
         })
+
+    def factory(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return _ORIGINAL_CLIENT(**kwargs)
+
+    monkeypatch.setattr(confluence.httpx, "AsyncClient", factory)
+
+
+def _confluence_down(monkeypatch, calls: list | None = None):
+    """A Confluence that cannot be reached: every request, the re-check's read
+    included, raises a transport error (DOWN)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if calls is not None:
+            calls.append((request.method, request.url.path))
+        raise httpx.ConnectError("connection refused")
 
     def factory(**kwargs):
         kwargs["transport"] = httpx.MockTransport(handler)
@@ -407,15 +421,11 @@ async def test_a_retried_execution_keeps_world_moved_through_the_splice(monkeypa
     drafter = _Drafter(_page_update(4), _page_update(6))
     row = await _draft(monkeypatch, drafter)
 
-    async def down(*a, **k):
-        raise httpx.ConnectError("connection refused")
-
-    monkeypatch.setattr(executor.confluence, "update_page", down)
+    _confluence_down(monkeypatch)
     out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
     assert out["execution"] == "parked"
 
     _confluence_answers(monkeypatch, version=6)
-    monkeypatch.setattr(executor.confluence, "update_page", _REAL_UPDATE_PAGE)
     out = await gateway.retry_execution(row["id"], model=drafter.model)
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     payload = (await _event("proposal.failed", row["id"]))["payload"]
@@ -676,3 +686,285 @@ async def test_a_deletion_with_no_preview_is_still_a_drafting_error(graph_world)
     with pytest.raises(executor.ExecutionFailed, match="no preview") as ei:
         await executor.execute([action], "human:doe", [])
     assert ei.value.world_moved is None
+
+
+# --- the re-check before the first action (story 4) --------------------------------
+
+
+def _counting_confluence(monkeypatch, *, version: int, down: bool = False,
+                         down_after_gets: int | None = None) -> dict:
+    """A stateful fake Confluence: the page sits at `version` and every PUT
+    moves it one on. `down` makes every request a transport error;
+    `down_after_gets` answers that many GETs and then goes down. Returns the
+    state, whose `calls` records every request."""
+    state = {"version": version, "calls": [], "down": down}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["calls"].append(request.method)
+        gets = state["calls"].count("GET")
+        if state["down"] or (down_after_gets is not None and gets > down_after_gets):
+            raise httpx.ConnectError("connection refused")
+        if request.method == "PUT":
+            state["version"] += 1
+        return httpx.Response(200, json={
+            "id": "42", "title": "Roadmap", "spaceId": "9",
+            "version": {"number": state["version"]},
+            "body": {"storage": {"value": "<p>current</p>"}},
+        })
+
+    def factory(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return _ORIGINAL_CLIENT(**kwargs)
+
+    monkeypatch.setattr(confluence.httpx, "AsyncClient", factory)
+    return state
+
+
+def _mixed_proposal(expected_version: int) -> dict:
+    """jira.add_comment, jira.set_due_date, then the page update."""
+    page = _page_update(expected_version)
+    return {**page, "intent": "Comment, date and update the page",
+            "actions": [
+                _jira_action("jira.add_comment", issue_key="DEMO-7", body="Noted."),
+                _jira_action("jira.set_due_date", issue_key="DEMO-7", due_date="2026-11-30"),
+                *page["actions"]]}
+
+
+def _jira_spy(monkeypatch) -> list[tuple[str, str]]:
+    """A fake Jira that records every call and answers every write."""
+    monkeypatch.setattr(settings, "jira_email", "bot@example.com")
+    monkeypatch.setattr(settings, "jira_api_token", "tok")
+    calls: list[tuple[str, str]] = []
+
+    async def fake(method, path, json_body=None):
+        calls.append((method, path))
+        return FakeResponse(201 if method == "POST" else 204, {"id": "9"})
+
+    monkeypatch.setattr(jira, "_call", fake)
+    return calls
+
+
+def _drafting_model(monkeypatch, drafter: _Drafter) -> None:
+    """The sweep resolves the drafter's model itself: hand it the fake."""
+    from central_command.runtime import models
+
+    async def fixed(model=None, **_kw):
+        return drafter.model
+
+    monkeypatch.setattr(models, "resolve_model", fixed)
+
+
+@pytest.mark.usefixtures("confluence_grant")
+async def test_a_moved_page_third_in_line_stops_the_first_two_from_running(monkeypatch):
+    drafter = _Drafter(_mixed_proposal(4), _mixed_proposal(6))
+    row = await _draft(monkeypatch, drafter)
+    jira_calls = _jira_spy(monkeypatch)
+    _counting_confluence(monkeypatch, version=6)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"],
+                                            model=drafter.model)
+
+    assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
+    payload = (await _event("proposal.failed", row["id"]))["payload"]
+    assert payload["completed_actions"] == []
+    assert payload["failed_capability"] == "confluence.update_page"
+    assert (payload["world_moved"]["expected"], payload["world_moved"]["actual"]) == (4, 6)
+    assert jira_calls == [], "the fake Jira saw no write"
+    redraft = await repo.load_proposal(out["redraft_proposal_id"])
+    assert redraft["redraft"]["cause"] == "world_moved"
+
+
+async def test_two_updates_to_one_page_are_pre_checked_on_the_first_only(monkeypatch):
+    first, second = _page_update(4)["actions"][0], _page_update(5)["actions"][0]
+    state = _counting_confluence(monkeypatch, version=4)
+    out = await executor.execute([Action(**first), Action(**second)], "human:doe", [])
+
+    assert "updated to version 6" in out.result_text
+    # The re-check's read, then each handler's own read and write. A re-check
+    # of the second action (v5 against a page at v4) would have refused.
+    assert state["calls"] == ["GET", "GET", "PUT", "GET", "PUT"]
+
+
+async def test_a_dry_run_reads_nothing(monkeypatch):
+    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    state = _counting_confluence(monkeypatch, version=9)
+    out = await executor.execute([Action(**_page_update(4)["actions"][0])], "human:doe", [])
+    assert "[dry-run]" in out.result_text
+    assert state["calls"] == []
+
+
+async def test_a_moved_transition_is_caught_before_an_earlier_untouched_write(monkeypatch):
+    """The Jira check through the re-check: a set_due_date on another issue
+    does not run when DEMO-7's transition vanished after the draft."""
+    drafter = _Drafter(_jira_proposal(), _jira_proposal(transition="Resolve"))
+    row = await _draft(monkeypatch, drafter)
+    calls = _jira_answers(monkeypatch, updated=_stamp(+1))
+    actions = [Action(**_jira_action("jira.set_due_date", issue_key="DEMO-8",
+                                     due_date="2026-11-30")),
+               *[Action(**a) for a in row["actions"]]]
+    with pytest.raises(executor.ExecutionFailed) as ei:
+        await executor.execute(actions, "human:doe", [], proposer=AGENT,
+                               proposal_id=row["id"])
+    assert ei.value.completed == []
+    assert ei.value.world_moved["target"] == "jira:issue:DEMO-7"
+    assert all(method == "GET" for method, _ in calls)
+
+
+async def test_a_graph_deletion_is_re_checked_before_an_earlier_action(graph_world, monkeypatch):
+    graph_world["preview"] = _preview("d2", facts=["F1"])
+    jira_calls = _jira_spy(monkeypatch)
+    comment = Action(**_jira_action("jira.add_comment", issue_key="DEMO-7", body="x"))
+    with pytest.raises(executor.ExecutionFailed) as ei:
+        await executor.execute([comment, _delete_action(_preview("d1"))], "human:doe", [])
+    assert ei.value.completed == [] and ei.value.world_moved["actual"] == "d2"
+    assert jira_calls == [] and graph_world["queued"] == []
+
+
+@pytest.mark.usefixtures("confluence_grant")
+async def test_a_parked_update_whose_page_moved_in_the_outage_fails_world_moved_on_the_sweep(
+    monkeypatch,
+):
+    """Confluence goes DOWN between the re-check and the page write, after the
+    comment landed: the proposal parks with that prefix. The page moves during
+    the outage; the sweep's re-check finds it, nothing new runs, and the
+    record keeps the prefix the first attempt landed."""
+    from central_command.api import orchestration
+    from tests.conftest import make_parks_due
+    from tests.test_execution_retry import _Up
+
+    proposal = {**_page_update(4), "actions": [
+        _jira_action("jira.add_comment", issue_key="DEMO-7", body="Updating the page."),
+        *_page_update(4)["actions"]]}
+    drafter = _Drafter(proposal, _page_update(6))
+    row = await _draft(monkeypatch, drafter)
+    jira_calls = _jira_spy(monkeypatch)
+    _counting_confluence(monkeypatch, version=4, down_after_gets=1)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"],
+                                            model=drafter.model)
+    assert out["execution"] == "parked"
+    parked = await repo.load_proposal(row["id"])
+    assert parked["status"] == "RETRY_PENDING"
+    assert parked["retry_state"]["next_action_index"] == 1
+    prefix = parked["retry_state"]["completed_results"]
+    assert len(prefix) == 1 and len(jira_calls) == 1
+
+    _counting_confluence(monkeypatch, version=6)  # back, and moved meanwhile
+    _drafting_model(monkeypatch, drafter)
+    await make_parks_due()
+    await orchestration.retry_sweep(cache=_Up(), only="confluence")
+    await orchestration.sweep_settle()
+
+    assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
+    payload = (await _event("proposal.failed", row["id"]))["payload"]
+    assert payload["world_moved"]["actual"] == 6
+    assert payload["completed_actions"] == prefix
+    assert len(jira_calls) == 1, "the comment is never replayed"
+    redrafts = [e for e in await repo.list_events(kind="proposal.created", newest_first=True)
+                if (e["payload"].get("redraft") or {}).get("of") == row["id"]]
+    assert redrafts and redrafts[0]["payload"]["redraft"]["cause"] == "world_moved"
+
+
+@pytest.mark.usefixtures("confluence_grant")
+@pytest.mark.parametrize("down", ["transport", "503"])
+async def test_a_down_confluence_on_the_re_check_parks_again_with_an_attempt_spent(
+    monkeypatch, down,
+):
+    from central_command.api import orchestration
+    from tests.conftest import make_parks_due
+    from tests.test_execution_retry import _Up
+
+    drafter = _Drafter(_page_update(4), _page_update(6))
+    row = await _draft(monkeypatch, drafter)
+    _confluence_down(monkeypatch)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"],
+                                            model=drafter.model)
+    assert out["execution"] == "parked"
+    attempts = (await repo.load_proposal(row["id"]))["retry_state"]["attempts"]
+
+    calls: list = []
+    if down == "transport":
+        _confluence_down(monkeypatch, calls)
+    else:
+        async def unavailable(method, path, **_kw):
+            calls.append((method, path))
+            return httpx.Response(503, text="<html>Service Unavailable</html>")
+
+        monkeypatch.setattr(confluence, "_call", unavailable)
+    _drafting_model(monkeypatch, drafter)
+    await make_parks_due()
+    await orchestration.retry_sweep(cache=_Up(), only="confluence")
+    await orchestration.sweep_settle()
+
+    again = await repo.load_proposal(row["id"])
+    assert again["status"] == "RETRY_PENDING"
+    assert again["retry_state"]["attempts"] == attempts + 1
+    assert again["retry_state"]["dependencies"] == ["confluence"]
+    assert calls and all(c[0] == "GET" for c in calls), "only the re-check's read"
+    assert "proposal.failed" not in {
+        e["kind"] for e in await repo.list_events(ref_id=row["id"])}
+
+
+@pytest.mark.usefixtures("confluence_grant")
+async def test_an_interrupted_proposal_retried_now_re_checks_first_and_names_the_in_flight_action(
+    monkeypatch,
+):
+    from central_command.api import orchestration
+    from tests.test_execution_retry import _Up
+
+    drafter = _Drafter(_mixed_proposal(4), _page_update(6))
+    row = await _draft(monkeypatch, drafter)
+    # A restart killed the execution while the due date (action 2) was in
+    # flight: the comment had landed, and the hold keeps the cursor at 1.
+    conn = await repo._conn()
+    try:
+        await conn.execute(
+            "update proposal set status = 'EXECUTING', retry_state = $2::jsonb "
+            "where id = $1", row["id"],
+            '{"next_action_index": 1, "completed_results": ["comment added to DEMO-7"], '
+            '"attempts": 1, "approver": "human:doe"}')
+    finally:
+        await conn.close()
+    await repo.park_interrupted_executions()
+    assert (await repo.load_proposal(row["id"]))["retry_state"]["interrupted"] is True
+
+    jira_calls = _jira_spy(monkeypatch)
+    _counting_confluence(monkeypatch, version=6)
+    _drafting_model(monkeypatch, drafter)
+    await orchestration.retry_sweep(cache=_Up(), only="jira", ignore_not_before=True,
+                                    include_interrupted=True)
+    await orchestration.sweep_settle()
+
+    assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
+    payload = (await _event("proposal.failed", row["id"]))["payload"]
+    assert payload["world_moved"]["actual"] == 6
+    assert payload["completed_actions"] == ["comment added to DEMO-7"]
+    assert jira_calls == [], "the re-check stopped the in-flight action's replay"
+    report = drafter.seen[-1]["returns"][-1]
+    assert "interrupted by a restart while jira.set_due_date" in report
+    assert "may itself have landed" in report
+
+
+@pytest.mark.usefixtures("confluence_grant")
+async def test_an_override_decided_world_moved_redraft_parks_for_the_operator(monkeypatch):
+    row = await repo.create_gate_override(AGENT, "confluence.update_page", shadow_runs=0,
+                                          acknowledged_irreversible=True)
+    try:
+        _counting_confluence(monkeypatch, version=6)
+        drafter = _Drafter(_page_update(4), _page_update(6))
+        failed = await _draft(monkeypatch, drafter)
+        from central_command.api import orchestration
+
+        await orchestration.sweep_settle()
+        failed = await repo.load_proposal(failed["id"])
+        assert failed["status"] == "FAILED"
+        decided = await _event("proposal.decided", failed["id"])
+        assert decided["actor"].startswith("override:")
+        payload = (await _event("proposal.failed", failed["id"]))["payload"]
+        assert payload["world_moved"]["actual"] == 6
+        redrafts = [e for e in await repo.list_events(kind="proposal.created", newest_first=True)
+                    if (e["payload"].get("redraft") or {}).get("of") == failed["id"]]
+        assert redrafts, "the drafter redrafted"
+        redraft = await repo.load_proposal(redrafts[0]["ref_id"])
+        assert redraft["status"] == "AWAITING_HUMAN"
+        assert redraft["override_eval"]["reason"] == "redraft"
+    finally:
+        await repo.revoke_gate_override(row["id"], reason="test teardown")

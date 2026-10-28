@@ -1089,10 +1089,12 @@ async def _status_and_updated(key: str) -> dict:
 
 
 @_requires_native
-async def transition_issue(issue_key: str, transition: str) -> dict:
-    """Move an issue by transition NAME, resolved against what is actually
-    available from its current status — unavailable names fail loudly with the
-    available set, never a guess."""
+async def resolve_transition(issue_key: str, transition: str) -> dict:
+    """The world check `transition_issue` makes before it writes, and nothing
+    else: the named transition resolved against the issue's CURRENT list,
+    `TransitionUnavailable` (with the issue's status and `updated`) when it is
+    not there. Returns the matching `{id, name, to_status}`. The Executor's
+    pre-execution re-check calls exactly this."""
     key = _key(issue_key)
     if not isinstance(transition, str) or not transition.strip():
         raise JiraError(f"transitionIssue for {key} — transition must be a non-empty name")
@@ -1112,6 +1114,16 @@ async def transition_issue(issue_key: str, transition: str) -> dict:
             available=[t["name"] for t in avail],
             status=issue.get("status"), updated=issue.get("updated"),
         )
+    return match
+
+
+@_requires_native
+async def transition_issue(issue_key: str, transition: str) -> dict:
+    """Move an issue by transition NAME, resolved against what is actually
+    available from its current status — unavailable names fail loudly with the
+    available set, never a guess."""
+    key = _key(issue_key)
+    match = await resolve_transition(key, transition)
     resp = await _call("POST", _api(f"/issue/{key}/transitions"),
                        {"transition": {"id": match["id"]}})
     _check(resp, "transitionIssue", key)

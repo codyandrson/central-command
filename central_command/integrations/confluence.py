@@ -565,6 +565,28 @@ async def create_page(
     return {"ok": True, "kind": "confluence", "operation": "createPage", "page": _page_row(resp.json())}
 
 
+async def check_version(page_id: str, expected_version: int) -> dict:
+    """The world check `update_page` makes before it writes, and nothing else:
+    a fresh read of the page, refused with `ConfluenceStale` when its version
+    is not `expected_version`. Returns the current page row. The Executor's
+    pre-execution re-check calls exactly this, so the re-check and the write
+    can never disagree about what "moved" means."""
+    _require_configured("updatePage")
+    pid = _id(page_id)
+    ev = _version_number(expected_version)
+    page = (await get_page(pid))["page"]
+    actual = page["version"]
+    if actual != ev:
+        raise ConfluenceStale(
+            f"updatePage — stale version for page {pid}: this proposal was "
+            f"approved against version {ev}, but the current version is "
+            f"{actual}. Read the page again and redraft — executing over a "
+            "newer version would silently overwrite an edit nobody reviewed.",
+            page_id=pid, expected=ev, actual=actual,
+        )
+    return page
+
+
 async def update_page(page_id: str, title: str, body_storage: str, expected_version: int) -> dict:
     """Refuses to write over a version newer than `expected_version` — the
     operator approved a diff against that version, and executing over a newer
@@ -575,17 +597,7 @@ async def update_page(page_id: str, title: str, body_storage: str, expected_vers
     t = _title(title)
     b = _body_text(body_storage)
     ev = _version_number(expected_version)
-    current = await get_page(pid)
-    page = current["page"]
-    actual = page["version"]
-    if actual != ev:
-        raise ConfluenceStale(
-            f"updatePage — stale version for page {pid}: this proposal was "
-            f"approved against version {ev}, but the current version is "
-            f"{actual}. Read the page again and redraft — executing over a "
-            "newer version would silently overwrite an edit nobody reviewed.",
-            page_id=pid, expected=ev, actual=actual,
-        )
+    page = await check_version(pid, ev)
     new_version = ev + 1
     if _flavor() == "server":
         payload = {

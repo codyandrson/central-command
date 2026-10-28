@@ -481,7 +481,25 @@ async def _graph_delete_episode(args: dict, approver: str, proposer: str | None)
     `remove_episode`), so it runs strictly in order with that group's
     extractions; the worker computes the set a THIRD time inside the deleting
     transaction and refuses there if it moved again. Nothing here deletes."""
-    from central_command.integrations import graphiti_ingest, neo4j_reader
+    from central_command.integrations import graphiti_ingest
+
+    current = await _check_graph_delete_episode(args)
+    job = await graphiti_ingest.enqueue_delete(
+        args["episode_uuid"], current["episode"]["group_id"], preview=current,
+        requested_by=approver, proposal_id=_current_proposal_id.get(),
+    )
+    return (
+        f"episode '{current['episode']['name']}' queued for deletion (ingest job {job['id']}): "
+        f"{len(current['facts'])} fact(s), {len(current['collateral_facts'])} collateral "
+        f"fact(s), {len(current['entities'])} entit(y/ies)"
+    )
+
+
+async def _check_graph_delete_episode(args: dict) -> dict:
+    """graph.delete_episode's world check (a `WORLD_CHECKS` row, and the first
+    thing its handler does): recompute the preview and refuse when it is not
+    the approved one. Returns the current preview."""
+    from central_command.integrations import neo4j_reader
 
     episode_uuid = args["episode_uuid"]
     approved = args.get("preview")
@@ -519,15 +537,7 @@ async def _graph_delete_episode(args: dict, approver: str, proposer: str | None)
             target=f"graph:episode:{episode_uuid}", expected=expected_digest,
             actual=current.get("digest"), what_moved="; ".join(changes),
         )
-    job = await graphiti_ingest.enqueue_delete(
-        episode_uuid, current["episode"]["group_id"], preview=current,
-        requested_by=approver, proposal_id=_current_proposal_id.get(),
-    )
-    return (
-        f"episode '{current['episode']['name']}' queued for deletion (ingest job {job['id']}): "
-        f"{len(current['facts'])} fact(s), {len(current['collateral_facts'])} collateral "
-        f"fact(s), {len(current['entities'])} entit(y/ies)"
-    )
+    return current
 
 
 UNBOUNDED = "unbounded"
@@ -1026,14 +1036,28 @@ async def _jira_transition_issue(args: dict, approver: str, proposer: str | None
     try:
         await jira.transition_issue(args["issue_key"], args["transition"])
     except jira.TransitionUnavailable as e:
-        # The integration reports the facts and knows no proposal; deciding
-        # whether the WORLD moved is this tier's job. A name that was never
-        # available is a drafting error and stays plain; one on an issue
-        # updated after the draft (by someone else) is the world moving.
-        if await _issue_moved_since_draft(e):
-            raise jira.TransitionMoved(e) from e
-        raise
+        await _judge_transition(e)
     return f"{args['issue_key']} transitioned via '{args['transition']}'"
+
+
+async def _check_jira_transition_issue(args: dict) -> None:
+    """jira.transition_issue's world check (a `WORLD_CHECKS` row): the same
+    `jira.resolve_transition` the write runs first, judged the same way."""
+    try:
+        await jira.resolve_transition(args["issue_key"], args["transition"])
+    except jira.TransitionUnavailable as e:
+        await _judge_transition(e)
+
+
+async def _judge_transition(e: "jira.TransitionUnavailable") -> None:
+    """Re-raise an unavailable transition with this tier's verdict. The
+    integration reports the facts and knows no proposal; deciding whether the
+    WORLD moved is this tier's job. A name that was never available is a
+    drafting error and stays plain; one on an issue updated after the draft
+    (by someone else) is the world moving."""
+    if await _issue_moved_since_draft(e):
+        raise jira.TransitionMoved(e) from e
+    raise e
 
 
 async def _issue_moved_since_draft(e: "jira.TransitionUnavailable") -> bool:
@@ -1095,6 +1119,12 @@ async def _confluence_update_page(args: dict, approver: str, proposer: str | Non
     )
     p = out["page"]
     return f"page {p['id']} '{p['title']}' updated to version {p['version']}"
+
+
+async def _check_confluence_update_page(args: dict) -> None:
+    """confluence.update_page's world check (a `WORLD_CHECKS` row): the same
+    `confluence.check_version` the write runs first."""
+    await confluence.check_version(args["page_id"], args["expected_version"])
 
 
 async def _confluence_move_page(args: dict, approver: str, proposer: str | None) -> str:
@@ -2393,6 +2423,82 @@ async def _execute_action(action: Action, approver: str, proposer: str | None) -
     return await handler(action.arguments, approver, proposer)
 
 
+# The world re-check before anything runs (epic-world-changed-redraft R6):
+# per capability, a READ-ONLY check that is the very function its handler runs
+# before writing, so the re-check and the write can never disagree. Only
+# capabilities whose target carries state to compare are here (a page version,
+# a transition list against the issue's `updated`, a deletion's preview);
+# creates, sends and the rest are not re-checked.
+WORLD_CHECKS = {
+    "confluence.update_page": _check_confluence_update_page,
+    "jira.transition_issue": _check_jira_transition_issue,
+    "graph.delete_episode": _check_graph_delete_episode,
+}
+
+
+def _targets_of(action: Action) -> set[tuple[str, str]]:
+    """The existing objects an action names, as `(system, id)`: Jira issues
+    (`_jira_keys_of`), a Confluence `page_id`, a graph `episode_uuid`."""
+    capability = action.capability.split("@", 1)[0]
+    args = action.arguments or {}
+    out = {("jira", k) for k in _jira_keys_of(action)}
+    for prefix, system, key in (("confluence.", "confluence", "page_id"),
+                                ("graph.", "graph", "episode_uuid")):
+        v = args.get(key)
+        if capability.startswith(prefix) and isinstance(v, str) and v.strip():
+            out.add((system, v.strip()))
+    return out
+
+
+async def _recheck_world(actions: list[Action]) -> None:
+    """Run each stateful target's world check once, before the first action.
+
+    Only a target's FIRST action among `actions` is checked, and only when its
+    capability has a `WORLD_CHECKS` row: an earlier action of the same
+    proposal may legitimately change what a later one targets (a comment moves
+    an issue's `updated`, a move bumps a page version), and that later action
+    is checked by its own handler at its turn. A check's error reaches
+    `execute()` inside `_PreCheckFailed`, which wraps it like a handler's,
+    with nothing completed."""
+    if settings.executor_mode == "dry_run":
+        return  # nothing is read on a dry run, exactly as `_execute_action`
+    seen: set[tuple[str, str]] = set()
+    for a in actions:
+        targets = _targets_of(a)
+        check = WORLD_CHECKS.get(a.capability.split("@", 1)[0])
+        if check is not None and targets and not targets & seen:
+            try:
+                await check(a.arguments)
+            except Exception as e:  # noqa: BLE001 — wrapped by the caller
+                raise _PreCheckFailed(a, e) from e
+        seen |= targets
+
+
+class _PreCheckFailed(Exception):
+    """Carries the action whose world check raised to `execute()`'s wrapper."""
+
+    def __init__(self, action: Action, error: Exception):
+        super().__init__(str(error))
+        self.action = action
+        self.error = error
+
+
+def _execution_failed(action: Action, e: Exception, completed: list[str]) -> ExecutionFailed:
+    """The honest record of `e` raised by `action`'s handler or world check."""
+    moved = is_world_moved(e)
+    return ExecutionFailed(
+        action.capability, str(e), completed,
+        transient=(not moved) and classify_failure(e) == TRANSIENT,
+        dependencies=(stamped_dependencies(e)
+                      or dependencies_for_capability(action.capability)),
+        world_moved=({
+            "capability": action.capability, "target": e.target,
+            "expected": e.expected, "actual": e.actual,
+            "what_moved": e.what_moved,
+        } if moved else None),
+    )
+
+
 async def execute(
     actions: list[Action], approver: str, source_refs: list[str],
     proposer: str | None = None, proposal_id: str | None = None,
@@ -2427,6 +2533,13 @@ async def execute(
     checked against its mapped override. A failure raises `OverrideRefused`
     (not `ExecutionFailed`): nothing ran, nothing was written. An operator's
     approver is never checked.
+
+    **Then the world re-check, before the first action** (`WORLD_CHECKS`,
+    epic-world-changed-redraft R6): each stateful target's first action among
+    `actions` gets a fresh read through the same check its handler makes. A
+    mismatch raises `ExecutionFailed` with `world_moved` and nothing
+    completed; any other check error is wrapped exactly as a handler's (so a
+    DOWN read parks the proposal, never fails it). Skipped on a dry run.
     """
     # The propose-time shape check, run again here: the Executor never assumes
     # the runtime validated anything (an API-submitted proposal skips the tool
@@ -2474,6 +2587,14 @@ async def execute(
     token = _current_proposal_id.set(proposal_id)
     touched_token = _touched_issues.set(touched)
     try:
+        # The world re-check, on EVERY execution (first, sweep retry,
+        # interrupted retry-now): `actions` is already the remaining slice on
+        # a retry, so it is never sliced again. A mismatch or a DOWN read
+        # fails with nothing new run; the gateway splices the prefix it holds.
+        try:
+            await _recheck_world(actions)
+        except _PreCheckFailed as pre:
+            raise _execution_failed(pre.action, pre.error, []) from pre.error
         results: list[str] = []
         for n, a in enumerate(actions):
             try:
@@ -2481,18 +2602,7 @@ async def execute(
                     a, covering.get(action_offset + n, approver), proposer))
                 touched |= _jira_keys_of(a)
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
-                moved = is_world_moved(e)
-                raise ExecutionFailed(
-                    a.capability, str(e), results,
-                    transient=(not moved) and classify_failure(e) == TRANSIENT,
-                    dependencies=(stamped_dependencies(e)
-                                  or dependencies_for_capability(a.capability)),
-                    world_moved=({
-                        "capability": a.capability, "target": e.target,
-                        "expected": e.expected, "actual": e.actual,
-                        "what_moved": e.what_moved,
-                    } if moved else None),
-                ) from e
+                raise _execution_failed(a, e, results) from e
     finally:
         _current_proposal_id.reset(token)
         _touched_issues.reset(touched_token)

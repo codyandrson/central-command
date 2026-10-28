@@ -806,7 +806,8 @@ async def _record_execution_failure(
     # many world-moved redrafts led to it (0 for a first draft). Only a
     # world-moved failure is measured; any other semantic failure keeps its
     # resume and never counts, whatever the chain's count is.
-    link = ((await repo.load_proposal(proposal_id)) or {}).get("redraft") or {}
+    failed_row = (await repo.load_proposal(proposal_id)) or {}
+    link = failed_row.get("redraft") or {}
     chain_count = int(link.get("world_moved_count") or 0)
     chain_root = link.get("root") or proposal_id
     from central_command.config import settings
@@ -861,6 +862,20 @@ async def _record_execution_failure(
             f"Nothing past the completed actions was written. Actions completed "
             f"before the failure: {done}. "
         )
+        state = failed_row.get("retry_state") or {}
+        if state.get("interrupted"):
+            # A restart killed this execution mid-action and the operator
+            # retried it: the re-check cannot tell that action's own write
+            # from someone else's, so the report says so.
+            actions = failed_row.get("actions") or []
+            index = int(state.get("next_action_index") or 0)
+            in_flight = (actions[index].get("capability")
+                         if 0 <= index < len(actions) else None) or "unknown"
+            head += (
+                f"This execution was interrupted by a restart while {in_flight} "
+                f"(action {index + 1}) was in flight: that action may itself "
+                f"have landed, and be the change. "
+            )
         if chain_exhausted:
             moves = chain_count + 1
             report = head + (

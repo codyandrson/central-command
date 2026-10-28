@@ -267,7 +267,7 @@ stateDiagram-v2
     AWAITING_HUMAN --> EXECUTING: gateway.approve_and_execute → repo.claim_proposal_for_execution
     EXECUTING --> EXECUTED: repo.set_proposal_executed (provenance stamped)
     EXECUTING --> RETRY_PENDING: dependency DOWN → repo.park_proposal_retry
-    RETRY_PENDING --> EXECUTING: retry sweep or the operator's retry-now → gateway.retry_execution (an interrupted one: only the operator's flag)
+    RETRY_PENDING --> EXECUTING: retry sweep or the operator's retry-now → gateway.retry_execution (an interrupted one: only the operator's flag); the Executor re-checks the world before the first remaining action
     RETRY_PENDING --> WITHDRAWN: gateway.dismiss_proposal — one SQL-guarded transition; the execution is withdrawn, the task FAILED
     EXECUTING --> FAILED: the dependency said NO (or the world moved: proposal.failed carries world_moved) — drafter RESUMES; a redraft parks with proposal.redraft linking it
     AWAITING_HUMAN --> REJECTED: gateway.reject_with_feedback — drafter RESUMES and may redraft a new proposal
@@ -285,8 +285,21 @@ stateDiagram-v2
 - **At the gate.** `proposal.decided` is emitted inside
   `approve_and_execute` *before* `executor.execute()` runs. The Executor
   re-runs the same shape validation over every action before the first one
-  runs, then world-state checks, then the handlers; `proposer` comes from the
-  gateway, never from the agent's arguments.
+  runs, then the override backstop, then **the world re-check**, then the
+  handlers; `proposer` comes from the gateway, never from the agent's
+  arguments. The re-check (`executor.WORLD_CHECKS`) is a fresh read of each
+  stateful target through the very function its handler calls first
+  (`confluence.update_page`: the page version; `jira.transition_issue`: the
+  transition list, judged against the issue's `updated` and the proposal's
+  `created_at`; `graph.delete_episode`: the recomputed preview), run for each
+  target's FIRST action among the actions being executed (a later action on a
+  target an earlier one changes is checked by its handler at its turn), on
+  every execution alike: the first, a sweep's retry and the operator's
+  retry-now of an interrupted one. A mismatch fails with `world_moved` before
+  anything new runs (for an interrupted proposal the report adds that the
+  action in flight at the restart may itself be the change); a DOWN read parks the proposal like any DOWN. Creates,
+  sends and the other capabilities are not re-checked; nothing is read on a
+  dry run.
 - **After the gate: a NO, and the world moved.** A semantic failure lands the
   proposal FAILED, releases its folds, emits `proposal.failed`
   (`failed_capability`, `error`, `transient`, `completed_actions`,

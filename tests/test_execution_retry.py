@@ -532,6 +532,12 @@ async def test_a_confluence_503_parks_the_proposal_and_the_sweep_re_drives_it(mo
         async def updated(page_id, title, body, expected_version):
             return {"page": {"id": page_id, "title": title, "version": 4, "url": "u"}}
 
+        async def unmoved(page_id, expected_version):
+            return {"id": page_id, "version": expected_version}
+
+        # The sweep's world re-check reads the page before the write runs:
+        # it answers at the approved version now that Confluence is back.
+        monkeypatch.setattr(confluence, "check_version", unmoved)
         monkeypatch.setattr(confluence, "update_page", updated)
         await make_parks_due()
         await orchestration.retry_sweep(cache=_Up())
