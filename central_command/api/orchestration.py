@@ -148,14 +148,13 @@ async def run_project(task: dict, model=None) -> dict:
     """Entry point: run the orchestration loop for a project task assigned to
     the orchestrator. Returns when the loop parks (children/operator pending)
     or finishes; the caller's detached wrapper records any exception FAILED."""
-    from central_command.runtime.run import RunWindowExhausted, _run_live
+    from central_command.runtime.run import RunParked, RunWindowExhausted, _run_live
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
     agent = await _build_agent(model)
-    # `park_reads` stays False until story 6 of epic-outage-doctrine wires the
-    # orchestrator round's parked-read landing (`_process`); a DOWN read
-    # re-raises into the project's own failure path.
-    deps = TriageDeps(session_id=session_id, agent_id=AGENT_ID)
+    # The round has a landing tail (`_process`, after "orchestrator"), so a DOWN
+    # read or a DOWN model mid-round parks the session in place (FR-40, story 6).
+    deps = TriageDeps(session_id=session_id, agent_id=AGENT_ID, park_reads=True)
     state = {
         "task_id": task["id"], "round": 0, "stalls": 0, "assigns": 0,
         "plan_approved": False, "retries": 0, "pending": {},
@@ -168,7 +167,18 @@ async def run_project(task: dict, model=None) -> dict:
         )
     except RunWindowExhausted as e:
         return _orch_window_parked(e, state)
+    except RunParked as e:
+        return _orch_parked(e, state)
     return await _process(task, session_id, result, state, deps, model)
+
+
+def _orch_parked(e, state: dict) -> dict:
+    """A ROUND parked on a DOWN dependency (`run.RunParked`): the session is
+    AWAITING_RESUME with a `turn` park carrying the loop state, and — like a
+    stall or window park — the project task row is NOT touched: it stays
+    IN_PROGRESS while the sweep waits for the dependency."""
+    return {"parked": True, "session_id": e.session_id, "task_id": state["task_id"],
+            "kind": "turn", "dependencies": list(e.stored.get("dependencies") or [])}
 
 
 def _orch_window_parked(e: RunWindowExhausted, state: dict) -> dict:
@@ -223,7 +233,7 @@ async def _reject_batch(
     a model that cannot produce a valid batch fails the task honestly."""
     from pydantic_ai import DeferredToolResults
 
-    from central_command.runtime.run import RunWindowExhausted, _run_live
+    from central_command.runtime.run import RunParked, RunWindowExhausted, _run_live
 
     state["retries"] += 1
     await events.emit(
@@ -244,7 +254,7 @@ async def _reject_batch(
     for c in calls:
         dtr.calls[c.tool_call_id] = msg
     agent = await _build_agent(model)
-    fresh = TriageDeps(session_id=session_id, agent_id=AGENT_ID)
+    fresh = TriageDeps(session_id=session_id, agent_id=AGENT_ID, park_reads=True)
     try:
         result2 = await _run_live(
             agent, None, model=None, deps=fresh, agent_id=AGENT_ID,
@@ -256,6 +266,8 @@ async def _reject_batch(
         # Caught HERE, not at the callers: `_reject_batch` is reached through
         # `_process`, which neither `run_project` nor `maybe_resume` wraps.
         return _orch_window_parked(e, state)
+    except RunParked as e:
+        return _orch_parked(e, state)
     return await _process(task, session_id, result2, state, fresh, model)
 
 
@@ -341,6 +353,22 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
         return await _finish(task["id"], session_id, str(output))
 
     calls = list(output.calls)
+    # A read whose dependency was DOWN paused the round (FR-40): park it in
+    # place, carrying the loop state, BEFORE any round accounting — the round
+    # has not happened yet; it resumes with the read's real result and is
+    # counted then. The task stays IN_PROGRESS.
+    metadata = output.metadata or {}
+    reads = [c for c in calls if (metadata.get(c.tool_call_id) or {}).get("kind") == "read"]
+    if reads:
+        from central_command.runtime.resume_park import park_read
+
+        stored = await park_read(
+            session_id=session_id, result=result, call=reads[0],
+            metadata=metadata[reads[0].tool_call_id], after="orchestrator",
+            task_id=task["id"], state=state,
+        )
+        return {"parked": True, "session_id": session_id, "task_id": task["id"],
+                "kind": "read", "dependencies": list(stored.get("dependencies") or [])}
     state["round"] += 1
 
     # Stall accounting from THIS round's ledger (deps are fresh per round).
@@ -534,7 +562,7 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
     from pydantic_ai import DeferredToolResults
 
     from central_command.runtime.durable import load_messages
-    from central_command.runtime.run import RunWindowExhausted, _run_live
+    from central_command.runtime.run import RunParked, RunWindowExhausted, _run_live
 
     if await repo.session_status(session_id) != "AWAITING_AGENTS":
         return None
@@ -573,7 +601,7 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
 
     try:
         agent = await _build_agent(model)
-        deps = TriageDeps(session_id=session_id, agent_id=AGENT_ID)
+        deps = TriageDeps(session_id=session_id, agent_id=AGENT_ID, park_reads=True)
         result = await _run_live(
             agent, None, model=None, deps=deps, agent_id=AGENT_ID,
             session_id=session_id, message_history=load_messages(claimed),
@@ -585,6 +613,9 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
         # BEFORE the catch-all below, which would turn a park the operator can
         # release into a FAILED project.
         return _orch_window_parked(e, state)
+    except RunParked as e:
+        # Same reason: a DOWN dependency mid-round is a wait, never a failure.
+        return _orch_parked(e, state)
     except Exception as e:  # noqa: BLE001 — a resume error must reach the record
         log.exception("orchestration resume failed for %s", session_id)
         return await _fail(state["task_id"], session_id,
@@ -688,12 +719,11 @@ async def land_orphans_at_startup() -> dict:
                          "error": row["reason"], "transient": True},
                 actor="system",
             )
-        elif outcome in ("task_rerun", "turn_stopped", "stopped"):
+        elif outcome in ("task_rerun", "stopped"):
             await events.emit(
                 "session.stopped", ref_id=sid,
                 payload={"agent_id": row["agent_id"], "task_id": row.get("task_id"),
-                         "after": {"task_rerun": "task",
-                                   "turn_stopped": "converse"}.get(outcome),
+                         "after": "task" if outcome == "task_rerun" else None,
                          "reason": "restart", "restart_reason": row["reason"]},
                 actor="system",
             )
@@ -1045,6 +1075,9 @@ async def retry_sweep(cache=None) -> dict:
         if pending.get("kind") == "read":
             units.append(("session", sid, names,
                           lambda sid=sid: resume_parked_read(sid), resumed, True))
+        elif pending.get("kind") == "turn":
+            units.append(("session", sid, names,
+                          lambda sid=sid: resume_parked_turn(sid), resumed, True))
         else:
             units.append(("session", sid, names,
                           lambda sid=sid: resume_parked_session(sid), resumed, True))
@@ -1132,6 +1165,9 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         # here so every AWAITING_RESUME driver — the startup sweep included —
         # reaches it without knowing the kinds apart.
         return await resume_parked_read(session_id, model=model)
+    if _parked_turn(await repo.get_session_run_state(session_id)):
+        # A parked TURN likewise re-enters through its continuation tail.
+        return await resume_parked_turn(session_id, model=model)
     claimed = await repo.claim_parked_resume(session_id)
     if claimed is None:
         return None  # a concurrent sweep won the claim
@@ -1300,13 +1336,6 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     peek = _parked_read(await repo.get_session_run_state(session_id))
     if peek is None:
         return None
-    if (peek.get("after") or "task") not in ("task", "converse"):
-        # Only the task tail parks reads today; story 6 wires the orchestrator
-        # round. Left parked and visible rather than driven down a tail that
-        # cannot land it.
-        log.warning("parked read on %s names tail %r, which has no read landing "
-                    "yet", session_id, peek.get("after"))
-        return None
     claimed = await repo.claim_parked_resume(session_id)
     if claimed is None:
         return None  # a concurrent sweep won the claim
@@ -1385,20 +1414,117 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         messages, pending["tool_call_id"], text,
         session_id=session_id, agent_id=agent_id,
     )
+    out = await _drive_tail(
+        session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
+        state=pending.get("state") or {}, messages=messages,
+        deferred_tool_results=results, attempts=attempts, model=model,
+    )
+    return {"resumed": True, "session_id": session_id, "after": after,
+            "attempts": attempts, **out}
+
+
+def _tail_parked(e, after: str, state: dict) -> dict:
+    """A continued run met a DOWN dependency and parked in place: the outcome
+    its tail returns (the task row stays IN_PROGRESS on the session)."""
+    from central_command.runtime import converse as converse_mod
+    from central_command.runtime import run as run_mod
+
+    if after == "orchestrator":
+        return _orch_parked(e, state)
+    if after == "converse":
+        return converse_mod.parked_turn_reply(e)
+    return run_mod.parked_turn_outcome(e)
+
+
+def _parked_turn(run_state: dict | None) -> dict | None:
+    """The pending TURN a session is parked on (a model DOWN mid-turn), or None
+    for any other park."""
+    pending = (run_state or {}).get("pending_resume") or {}
+    return pending if pending.get("kind") == "turn" else None
+
+
+async def resume_parked_turn(session_id: str, model=None) -> dict | None:
+    """Drive a session parked AWAITING_RESUME because its TURN met a DOWN
+    dependency (epic-outage-doctrine story 6).
+
+    The persisted record ends in the unsent request, so re-entry is
+    `agent.iter(None, message_history=…)` through the stored `after`'s tail —
+    the request is re-sent, nothing is copied (no duplicated operator turn, no
+    re-spent tool batch), and the run lands exactly where an uninterrupted one
+    would have. The claim is the SQL flip every resume park uses. A turn still
+    DOWN re-parks one attempt older (no limit). None: not a turn park, or
+    someone else won the claim."""
+    from central_command.runtime import resume_park
+    from central_command.runtime.durable import load_messages
+
+    session = await repo.get_session(session_id)
+    if session is None or session["status"] != "AWAITING_RESUME":
+        return None
+    if _parked_turn(await repo.get_session_run_state(session_id)) is None:
+        return None
+    claimed = await repo.claim_parked_resume(session_id)
+    if claimed is None:
+        return None
+    pending = _parked_turn(claimed)
+    if pending is None:
+        return None
+    agent_id = session["agent_id"]
+    after = pending.get("after") or "task"
+    task_id = pending.get("task_id")
+    attempts = int(pending.get("attempts", 0)) + 1
+    await resume_park.arm(session_id, {**pending, "attempts": attempts})
+    await events.emit(
+        "session.resume_retried", ref_id=session_id,
+        payload={"after": after, "attempt": attempts, "kind": "turn",
+                 "dependencies": pending.get("dependencies")},
+        actor="system",
+    )
+    out = await _drive_tail(
+        session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
+        state=pending.get("state") or {}, messages=load_messages(claimed),
+        attempts=attempts, window=int(pending.get("window") or 1), model=model,
+    )
+    return {"resumed": True, "session_id": session_id, "after": after,
+            "attempts": attempts, **out}
+
+
+async def _drive_tail(
+    *, session_id: str, agent_id: str, after: str, task_id: str | None,
+    state: dict, messages, attempts: int, model, deferred_tool_results=None,
+    window: int = 1,
+) -> dict:
+    """Re-enter a parked run through its landing tail and land it — shared by
+    the read and turn resumes. Each tail is the one an uninterrupted run takes
+    (`run._land`, `converse._land_turn`, `_process`); a stop, a spent window or
+    another outage lands as the same park any run would."""
+    from central_command.runtime import converse as converse_mod
+    from central_command.runtime import run as run_mod
+
     agent, run_model = await _continue_agent(after, agent_id, model)
-    deps = TriageDeps(agent_id=agent_id, session_id=session_id,
-                      park_reads=after == "task")
+    # Every tail has a landing, so a DOWN read or model parks in place again.
+    deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         result = await run_mod._run_live(
             agent, None, model=run_model, deps=deps,
             agent_id=agent_id, session_id=session_id,
-            message_history=messages, deferred_tool_results=results,
+            message_history=messages, deferred_tool_results=deferred_tool_results,
             task_id=None if after == "orchestrator" else task_id,
-            continuable=True, after=after,
+            continuable=True, window=window, after=after,
+            continue_state=state or None, park_attempts=attempts,
         )
     except run_mod.RunStopped:
-        return {"resumed": True, "stopped": True, "session_id": session_id}
+        return {"stopped": True, "session_id": session_id}
+    except run_mod.RunParked as e:
+        # Still down (or down again): parked in place by `_run_live`, one
+        # attempt older. The task row is untouched — IN_PROGRESS on this session.
+        if after == "orchestrator":
+            return _orch_parked(e, state)
+        if after == "converse":
+            return converse_mod.parked_turn_reply(e)
+        return run_mod.parked_turn_outcome(e)
     except run_mod.RunWindowExhausted as e:
+        if after == "orchestrator":
+            return _orch_window_parked(e, state)
         out = run_mod.window_outcome(e)
         if after == "task" and task_id:
             await repo.park_task_review(task_id, session_id)
@@ -1408,10 +1534,16 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         await _land_resumed_run_failure(task_id, e, after=after)
         raise
 
+    if after == "orchestrator":
+        task = await repo.get_task(state.get("task_id") or task_id)
+        if task is None:
+            return await _fail(state.get("task_id") or task_id, session_id,
+                               "the project task vanished while parked")
+        return await _process(task, session_id, result, state, deps, model)
     if after == "converse":
         out = await converse_mod._land_turn(session_id, agent_id, result)
         await decide_landed(out, model=model)
-        return {"resumed": True, "after": after, **out}
+        return out
     out = await run_mod._land(
         result, session_id=session_id, agent_id=agent_id, task_id=task_id,
         tokens=run_mod._total_tokens(result),
@@ -1424,8 +1556,7 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         task = await repo.get_task(task_id)
         if task and task.get("status") in ("DONE", "FAILED"):
             spawn_child_resolved(task)
-    return {"resumed": True, "session_id": session_id, "after": after,
-            "attempts": attempts, **out}
+    return out
 
 
 _TERMINAL_SESSION = ("DONE", "FAILED")
@@ -2147,11 +2278,9 @@ async def continue_session(item_id: str, model=None) -> dict | None:
     )
 
     agent, run_model = await _continue_agent(after, agent_id, model)
-    # The task tail lands a parked read (`run._land` → `parked_outcome`), so a
-    # DOWN read in a continued task run parks in place (FR-40); the other two
-    # tails wait for story 6.
-    deps = TriageDeps(agent_id=agent_id, session_id=session_id,
-                      park_reads=after == "task")
+    # Every tail lands a parked read or turn (`run._land`, `converse._land_turn`,
+    # `_process`), so a DOWN dependency in a continued run parks in place.
+    deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         result = await run_mod._run_live(
             agent, None, model=run_model, deps=deps,
@@ -2167,6 +2296,8 @@ async def continue_session(item_id: str, model=None) -> dict | None:
         # The operator stopped the continued run. Already parked STOPPED by
         # `_run_live`; nothing here should re-park or fail it.
         return {"window": window, "stopped": True, "session_id": session_id}
+    except run_mod.RunParked as e:
+        return {"window": window, **_tail_parked(e, after, state)}
     except run_mod.RunWindowExhausted as e:
         # It spent this window too. Same park, one window higher — repeatable
         # by design, because every window costs an explicit human click.
@@ -2272,11 +2403,9 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
     )
 
     agent, run_model = await _continue_agent(after, agent_id, model)
-    # The task tail lands a parked read (`run._land` → `parked_outcome`), so a
-    # DOWN read in a continued task run parks in place (FR-40); the other two
-    # tails wait for story 6.
-    deps = TriageDeps(agent_id=agent_id, session_id=session_id,
-                      park_reads=after == "task")
+    # Every tail lands a parked read or turn (`run._land`, `converse._land_turn`,
+    # `_process`), so a DOWN dependency in a continued run parks in place.
+    deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         result = await run_mod._run_live(
             agent, None, model=run_model, deps=deps,
@@ -2290,6 +2419,8 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
         # Stopped again at the first boundary — the accepted race documented on
         # `session.stop_requested`, or simply a second press. Parked already.
         return {"resumed": True, "stopped": True, "session_id": session_id}
+    except run_mod.RunParked as e:
+        return {"resumed": True, **_tail_parked(e, after, state)}
     except run_mod.RunWindowExhausted as e:
         if after == "orchestrator":
             return _orch_window_parked(e, state)

@@ -548,6 +548,31 @@ async def park_session_stopped(session_id: str, marker: dict) -> None:
         await conn.close()
 
 
+async def cancel_parked_resume(session_id: str, marker: dict, reason: str) -> bool:
+    """The operator cancels a lane PARKED on a dependency outage (story 6):
+    AWAITING_RESUME → STOPPED in one conditional UPDATE, so a racing sweep
+    claim and this cancel produce exactly one outcome. The park is cleared by
+    the flip (no worklist reads STOPPED); `pending_resume` stays as the record
+    that the outage happened, and `pending_stop` says who stopped it. False:
+    it was not parked (the sweep already re-drove it, or it never was)."""
+    conn = await _conn()
+    try:
+        r = await conn.execute(
+            """
+            update session set status = 'STOPPED', stop_requested = false,
+                   closed_reason = $3,
+                   run_state = coalesce(run_state, '{}'::jsonb)
+                               || jsonb_build_object('pending_stop', $2::jsonb),
+                   updated_at = now()
+             where id = $1 and status = 'AWAITING_RESUME'
+            """,
+            session_id, json.dumps(marker), reason,
+        )
+        return r.endswith(" 1")
+    finally:
+        await conn.close()
+
+
 async def claim_stopped_session(session_id: str) -> dict | None:
     """Atomically claim a stopped session for resume: STOPPED → RUNNING,
     returning the run state, or None if it is not stopped (someone else won).
@@ -1024,10 +1049,9 @@ async def park_orphaned_sessions() -> list[dict]:
         tool may already have fired;
     (c) a CHAT LANE killed mid-turn: a record ending in a finished response is
         a turn that landed (the lane goes back to AWAITING_OPERATOR); one
-        ending in an unsent request is the stop-boundary shape, so the lane
-        parks STOPPED with a resumable restart marker. STORY 6 SEAM: story 6
-        re-drives this one automatically (AWAITING_RESUME kind `turn`,
-        after `converse`) instead of waiting on the operator's Resume. One
+        ending in an unsent request is exactly a parked turn's shape, so the
+        lane parks AWAITING_RESUME with a `turn` record after `converse`, due
+        now, and the sweep re-sends the operator's message (story 6). One
         ending in unanswered calls cannot be re-entered (the next send would
         carry them), so that lane closes DONE with the turn marked lost;
     (d) anything else (coach, steward, wiki, reflection, an orchestrator round)
@@ -1099,10 +1123,25 @@ async def park_orphaned_sessions() -> list[dict]:
                         out.append({**entry, "outcome": "turn_landed",
                                     "reason": RESTART_REASON})
                     elif tail == "request":
-                        await _stop_for_restart(conn, sid, RESTART_REASON,
-                                                after="converse", resumable=True)
-                        out.append({**entry, "outcome": "turn_stopped",
-                                    "reason": RESTART_REASON})
+                        # The parked-turn shape (`resume_park.park_turn`), due
+                        # now: a restart is not an outage, nothing to wait out.
+                        pending = {"kind": "turn", "after": "converse",
+                                   "attempts": 0, "dependencies": ["llm"],
+                                   "window": 1, "last_error": RESTART_REASON,
+                                   "parked_at": now.isoformat(),
+                                   "not_before": now.isoformat()}
+                        await conn.execute(
+                            """
+                            update session set status = 'AWAITING_RESUME',
+                                   run_state = coalesce(run_state, '{}'::jsonb)
+                                       || jsonb_build_object('pending_resume', $2::jsonb),
+                                   updated_at = now()
+                             where id = $1
+                            """,
+                            sid, json.dumps(pending),
+                        )
+                        out.append({**entry, "outcome": "resume",
+                                    "reason": RESTART_REASON, "pending": pending})
                     else:
                         reason = "the last turn was lost to a restart; say it again"
                         await conn.execute(

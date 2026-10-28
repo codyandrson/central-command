@@ -274,6 +274,19 @@ def _model_that_raises(exc: BaseException) -> FunctionModel:
     return FunctionModel(respond)
 
 
+def _resolver_raising(exc: BaseException):
+    """The provider is DOWN before the run's first request exists — the one
+    case a task run is still retry-parked FRESH (`park_task_retry`). Since
+    outage doctrine story 6, a model that dies on a request the run already
+    persisted parks the TURN in place instead (`tests/test_turn_parking.py`),
+    so these tests, which pin the fresh retry park, fail at model resolution:
+    no session, no record to resume, nothing to re-send."""
+    async def _resolve(*a, **k):
+        raise exc
+
+    return _resolve
+
+
 @pytest.fixture()
 def sessions_created(monkeypatch) -> list[str]:
     """Every session id a run opens, so a test can look at the transcript the
@@ -323,7 +336,7 @@ async def _assigned_task(agent_id: str = "jira-expert", instructions: str = "x")
 async def test_a_transient_task_run_parks_the_task_and_keeps_the_dead_session(
     monkeypatch, sessions_created,
 ):
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task()
 
     await routes._run_assigned_task_detached(task, "operator")
@@ -345,10 +358,10 @@ async def test_a_transient_task_run_parks_the_task_and_keeps_the_dead_session(
     assert wire["status"] == "ASSIGNED"
     assert wire["outcome"].startswith(orchestration.RETRY_HINT)
 
-    # Sessions are never rewritten: the dead run keeps its FAILED status and
-    # whatever transcript it got to.
-    assert sessions_created, "the run really ran"
-    assert await repo.session_status(sessions_created[-1]) == "FAILED"
+    # Rewritten for outage doctrine story 6: the outage now hits before the
+    # run's first request exists, so there is no session to keep — which is
+    # exactly why the task is retry-parked FRESH rather than parked in place.
+    assert not sessions_created, "nothing ran, so there is nothing to resume"
 
     parked = await _event(task["id"], "task.run_parked")
     assert parked["payload"]["transient"] is True
@@ -379,7 +392,7 @@ async def test_a_semantic_task_run_failure_keeps_todays_behaviour(monkeypatch):
 async def test_retrying_a_parked_task_runs_it_again_and_lands_the_outcome(monkeypatch):
     """The dependency is back: a fresh run, through the same entry the original
     used, lands its outcome exactly as a no-outage first run would have."""
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task(instructions="Advise only, no change needed.")
     await routes._run_assigned_task_detached(task, "operator")
     assert (await repo.get_task(task["id"]))["status"] == "ASSIGNED"
@@ -401,7 +414,7 @@ async def test_retrying_a_parked_task_runs_it_again_and_lands_the_outcome(monkey
 # no promotion (the operator's ruling, 2026-10-27). The old 6b, "exhaustion
 # gives the operator an item", tested the promotion itself and went with it.
 async def test_task_retries_never_exhaust(monkeypatch):
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task()
 
     await routes._run_assigned_task_detached(task, "operator")     # attempt 1
@@ -419,7 +432,7 @@ async def test_task_retries_never_exhaust(monkeypatch):
 
 # 7
 async def test_two_concurrent_retries_run_the_task_exactly_once(monkeypatch):
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task(instructions="Advise only, no change needed.")
     await routes._run_assigned_task_detached(task, "operator")
 
@@ -447,7 +460,7 @@ async def test_the_sweep_drives_due_retry_parked_tasks_and_skips_the_rest(monkey
     """The "after a restart, or whenever in doubt" lever covers parked tasks
     too — respecting the backoff, so a sweep can't burn the attempt budget into
     a dependency that is still down. (Its cadence is slice 5.)"""
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     due = await _assigned_task(instructions="Advise only, no change needed.")
     later = await _assigned_task(instructions="Advise only, no change needed.")
     await routes._run_assigned_task_detached(due, "operator")
@@ -492,7 +505,7 @@ async def test_a_synchronous_run_lands_its_failure_too(monkeypatch):
     The exception still propagates (the heartbeat records `heartbeat.error`,
     an HTTP caller still gets its 500); only the record is new.
     """
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task()
 
     with pytest.raises(ModelHTTPError):
@@ -520,7 +533,7 @@ async def test_a_retry_is_not_parked_twice_by_the_fresh_run_guard(monkeypatch):
     """The guard must not fire underneath `retry_parked_task`, whose own handler
     is attempt-AWARE: two landings would re-park at attempts=1 every round and
     the backoff would never grow past its first step."""
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task()
     await routes._run_assigned_task_detached(task, "operator")          # attempt 1
 

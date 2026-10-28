@@ -34,7 +34,7 @@ from central_command.runtime.durable import (
 )
 from central_command.runtime.proposals import park_proposal
 from central_command.runtime.roster import conversational_agent_ids  # noqa: F401 — re-exported
-from central_command.runtime.run import RunStopped, RunWindowExhausted, _run_live
+from central_command.runtime.run import RunParked, RunStopped, RunWindowExhausted, _run_live
 
 
 def _conversational_packs(agent_id: str, packs: tuple[str, ...]) -> tuple[str, ...]:
@@ -166,6 +166,20 @@ async def _handle_non_proposal_deferral(
     it in its own idiom.)
     """
     tool = getattr(call, "tool_name", "") or ""
+    metadata = ((getattr(getattr(result, "output", None), "metadata", None) or {})
+                .get(getattr(call, "tool_call_id", None)) or {})
+    if metadata.get("kind") == "read" and result is not None:
+        # A read found its dependency DOWN mid-turn (FR-40): the lane parks
+        # AWAITING_RESUME on it and the sweep re-executes the read and lands
+        # the reply here, as though the dependency had never been down.
+        # Checked first: a consult that met an outage pauses as a read too.
+        from central_command.runtime.resume_park import park_read
+
+        stored = await park_read(
+            session_id=session_id, result=result, call=call, metadata=metadata,
+            after="converse",
+        )
+        return _parked_reply(session_id, stored)
     if tool == "consult_agent" and result is not None:
         # The agent consulted a specialist mid-chat and the specialist DRAFTED.
         # The conversation waits for that work to finish, exactly as a task
@@ -284,9 +298,10 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
     try:
         result = await _run_live(
             agent, prompt, model=model,
-            # `park_reads` stays False until story 6 of epic-outage-doctrine
-            # wires the chat turn's parked-read landing; a DOWN read re-raises.
-            deps=TriageDeps(agent_id=agent_id, session_id=session_id),
+            # The turn has a landing tail (`_land_turn`), so a DOWN read or a
+            # DOWN model mid-turn parks the lane in place (FR-40, story 6).
+            deps=TriageDeps(agent_id=agent_id, session_id=session_id,
+                            park_reads=True),
             agent_id=agent_id, session_id=session_id, message_history=history,
             continuable=True, after="converse",
         )
@@ -312,7 +327,30 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
             "session_id": session_id, "awaiting": "stopped", "stopped": True,
             "reply": "(stopped by you — resume the session to continue)",
         }
+    except RunParked as e:
+        # The model (or another dependency) was DOWN mid-turn: the lane is
+        # AWAITING_RESUME with the operator's message persisted as the unsent
+        # request, and the sweep re-sends it once the dependency is back.
+        # Returned, not raised — the same END-frame reason as the two above.
+        return parked_turn_reply(e)
     return await _land_turn(session_id, agent_id, result)
+
+
+def _parked_reply(session_id: str, stored: dict) -> dict:
+    deps = ", ".join(stored.get("dependencies") or []) or "a dependency"
+    return {
+        "session_id": session_id, "awaiting": "resume", "parked": True,
+        "dependencies": list(stored.get("dependencies") or []),
+        "reply": (f"(paused — {deps} is down; your message is kept and the "
+                  "reply will land here once it is back)"),
+    }
+
+
+def parked_turn_reply(e: RunParked) -> dict:
+    """What a parked chat turn returns to `_chat_send`: a reply-shaped outcome
+    (so the END frame is pushed and the spinner clears) that says the turn is
+    waiting, not failed. The lane is AWAITING_RESUME, kind `turn`."""
+    return _parked_reply(e.session_id, e.stored)
 
 
 async def _land_turn(session_id: str, agent_id: str, result) -> dict:
@@ -438,6 +476,17 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
             f"discussion {session_id} concluded and its task resumed — start a "
             "new conversation with the agent instead",
         )
+    if status == "AWAITING_RESUME":
+        # A dependency was DOWN mid-turn (a parked turn or read, story 6). The
+        # turn is OWED, not lost: the sweep re-sends it the moment the
+        # dependency is back and the reply lands in this lane. A new message
+        # would start a turn over a run still waiting to finish its last one.
+        parked_on = session.get("parked_on") or "a dependency"
+        return (
+            "awaiting_resume",
+            f"conversation {session_id} is paused — {parked_on} is down; your "
+            "last message is kept and the reply lands here once it is back",
+        )
     if status == "AWAITING_CONTINUE":
         # The turn spent its request window and asked for another. Not
         # `turn_in_progress` ("wait for the turn to finish" — nothing is
@@ -456,9 +505,10 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
         # act). The one lever is Resume, and the message says so.
         return (
             "stopped",
-            f"conversation {session_id} was stopped by you mid-turn — resume "
-            "the session to let the agent finish its turn, or cancel the work "
-            "for good; a new message would be lost against a paused run",
+            f"conversation {session_id} was stopped mid-turn (by you, or by a "
+            "process restart) — resume the session to let the agent finish its "
+            "turn, or cancel the work for good; a new message would be lost "
+            "against a paused run",
         )
     if status not in ("AWAITING_OPERATOR", "DONE"):
         # RUNNING: the turn owns the session until it lands. DONE is allowed so
@@ -658,6 +708,31 @@ async def end_conversation(session_id: str) -> dict:
             f"conversation {session_id} has a pending proposal — decide it "
             "in the Decisions Inbox before closing the session"
         )
+    if status == "AWAITING_RESUME":
+        # A lane PARKED on a dependency outage (story 6). Closing it is the
+        # operator's cancel-for-good on the wait: the park is cleared (no
+        # sweep re-drives it) and the lane lands STOPPED with the reason —
+        # never FAILED, and the transcript ends where the turn paused, so a
+        # later Resume can still land it.
+        from central_command import events
+        from datetime import datetime, timezone
+
+        reason = "parked turn cancelled by the operator"
+        marker = {"reason": "cancelled", "after": "converse", "resumable": True,
+                  "stopped_at": datetime.now(timezone.utc).isoformat()}
+        if not await repo.cancel_parked_resume(session_id, marker, reason):
+            raise ValueError(
+                f"conversation {session_id} is no longer parked — the reply "
+                "may already be landing; try again in a moment"
+            )
+        await events.emit(
+            "session.stopped", ref_id=session_id,
+            payload={"agent_id": session["agent_id"], "after": "converse",
+                     "task_id": None, "reason": "cancelled",
+                     "restart_reason": reason},
+            actor="operator",
+        )
+        return {"session_id": session_id, "status": "STOPPED"}
     if status == "STOPPED":
         # Nothing is running, so "wait for the turn to finish" would be a lie
         # the operator waits on forever. Closing a stopped lane would also

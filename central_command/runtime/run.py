@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 import uuid
 
-from central_command.contract import claim_supported
+from central_command.contract import TRANSIENT, claim_supported, classify_failure
 from central_command.db import repo
 from central_command.runtime.agent import build_agent, load_charter
 from central_command.runtime.deps import ThreadContext, TriageDeps
@@ -60,11 +60,33 @@ class RunStopped(Exception):
         self.after = after
 
 
+class RunParked(Exception):
+    """A dependency was DOWN mid-turn (a model call, or a read that could not
+    park on its own) and the run PARKED in place: the session is
+    AWAITING_RESUME with a `pending_resume` of kind `turn`, its persisted
+    record ending in the unsent request (epic-outage-doctrine story 6).
+
+    Not a failure: the retry sweep re-enters the run with
+    `agent.iter(None, message_history=…)` once every dependency in
+    `stored["dependencies"]` probes up, so the request is re-sent and nothing
+    is duplicated. Raised (like `RunStopped` / `RunWindowExhausted`) so each
+    landing tail RETURNS a parked outcome (`parked_turn_outcome`) — returned,
+    not raised further, so `_chat_send` still pushes its END frame. Only a run
+    whose entry has a landing tail (`TriageDeps.park_reads`) parks; every
+    other run keeps its own unit-level DOWN path."""
+
+    def __init__(self, session_id: str, stored: dict):
+        super().__init__(f"{session_id} parked on {stored.get('dependencies')}")
+        self.session_id = session_id
+        self.stored = stored
+
+
 async def _run_live(
     agent, prompt: str | None, *, model, deps, agent_id: str, session_id: str,
     message_history=None, deferred_tool_results=None, parent_session_id=None,
     task_id: str | None = None, continuable: bool = False, window: int = 1,
     after: str = "task", continue_state: dict | None = None,
+    park_attempts: int = 0,
 ):
     """Run an agent while persisting the growing transcript — the live half of
     M15. The session row exists from run START (status RUNNING); after every
@@ -105,6 +127,16 @@ async def _run_live(
     `orchestrator`) and `continue_state` carries whatever that tail cannot
     rebuild from the transcript — only the orchestrator has any (its round and
     stall counters).
+
+    A DOWN dependency mid-turn PARKS the run instead of failing it when its
+    entry has a landing tail (`deps.park_reads`, epic-outage-doctrine story 6):
+    AWAITING_RESUME, `pending_resume.kind = "turn"`, raising `RunParked`. Only
+    when the persisted record ends in the UNSENT request — the shape
+    `agent.iter(None, message_history=…)` re-sends — because a record ending in
+    a response whose calls were being executed cannot be re-entered without
+    re-running them; that rare case (a transient error out of a non-read tool)
+    keeps the FAILED landing. `park_attempts` is how many times this turn has
+    already been re-driven (the backoff curve's exponent).
     """
     from pydantic_ai import UsageLimits
     from pydantic_ai.exceptions import UsageLimitExceeded
@@ -121,12 +153,17 @@ async def _run_live(
         await repo.start_task(task_id, session_id)
     persisted = 0
     stop_requested = False
+    # Whether the record as PERSISTED ends in an unsent request — the one
+    # shape a parked turn can re-enter (see the docstring).
+    tail_is_request = bool(message_history) and isinstance(
+        list(message_history)[-1], ModelRequest)
 
     async def snapshot(messages) -> None:
-        nonlocal persisted, stop_requested
+        nonlocal persisted, stop_requested, tail_is_request
         if len(messages) <= persisted:
             return
         persisted = len(messages)
+        tail_is_request = isinstance(messages[-1], ModelRequest)
         dumped = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
         # The operator's stop flag rides back on the snapshot's own UPDATE, so
         # checking it at every node boundary costs no extra query.
@@ -248,6 +285,18 @@ async def _run_live(
             raise RunWindowExhausted(
                 session_id, parked["item_id"], parked["body"]
             ) from exc
+        if (getattr(deps, "park_reads", False) and tail_is_request
+                and classify_failure(exc) == TRANSIENT):
+            from central_command.contract.dependencies import LLM, stamped_dependencies
+            from central_command.runtime.resume_park import park_turn
+
+            stored = await park_turn(
+                session_id=session_id, after=after, error=exc,
+                task_id=task_id or (continue_state or {}).get("task_id"),
+                state=continue_state, window=window, attempts=park_attempts,
+                dependencies=list(stamped_dependencies(exc) or (LLM,)),
+            )
+            raise RunParked(session_id, stored) from exc
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, failed=True, agent_id=agent_id,
@@ -991,6 +1040,8 @@ async def run_task(
         return window_outcome(e)
     except RunStopped as e:
         return stopped_outcome(e)
+    except RunParked as e:
+        return parked_turn_outcome(e)
     return await _land(
         result, session_id=session_id, agent_id=agent_id, task_id=task_id,
         tokens=_total_tokens(result),
@@ -1030,9 +1081,19 @@ def parked_outcome(stored: dict, *, session_id: str, tokens: int = 0) -> dict:
     moves it to REVIEW. The task stays IN_PROGRESS on this session; the retry
     sweep resumes it when every dependency in `dependencies` probes up."""
     return {"deferred": False, "parked": True, "session_id": session_id,
+            "kind": stored.get("kind") or "read",
             "tool": stored.get("tool"),
             "dependencies": list(stored.get("dependencies") or []),
             "output": "waiting on a dependency outage", "tokens": tokens}
+
+
+def parked_turn_outcome(e: RunParked, tokens: int = 0) -> dict:
+    """What a PARKED TURN means to the caller — the SAME shape a parked read
+    returns (`parked_outcome`), because it means the same thing to every
+    landing tail: the run waits in place on its session, AWAITING_RESUME; the
+    task stays IN_PROGRESS on it; nothing is in the Inbox. One shape, so no
+    caller has to tell a read park from a turn park."""
+    return parked_outcome(e.stored, session_id=e.session_id, tokens=tokens)
 
 
 async def _land(

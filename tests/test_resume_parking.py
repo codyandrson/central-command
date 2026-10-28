@@ -382,7 +382,9 @@ async def test_the_cockpit_notice_tells_the_truth_about_a_parked_run(monkeypatch
     session = await repo.get_session(run["session_id"])
     notice = await nerve_gateway._run_session_context(session)
     assert "finished" not in notice["message"]
-    assert "outage" in notice["message"]
+    # Story 6's wait line names what it waits on (`llm`, the decision park's
+    # record); with no probe row recorded down it carries no time.
+    assert "paused — waiting on llm; retrying" in notice["message"]
 
 
 # --- 8: the sweep drives parked resumes ----------------------------------------

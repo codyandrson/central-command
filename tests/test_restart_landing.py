@@ -289,15 +289,18 @@ async def test_a_chat_lane_whose_turn_finished_is_landed_open():
     assert await repo.session_status(sid) == "AWAITING_OPERATOR"
 
 
-async def test_a_chat_lane_stopped_at_an_unsent_request_is_resumable():
-    """The stop-boundary shape: the operator's Resume re-enters it safely.
-    STORY 6 SEAM — story 6 re-drives this automatically."""
+async def test_a_chat_lane_killed_at_an_unsent_request_parks_its_turn_due_now():
+    """Rewritten for story 6 (it pinned story 5's interim STOPPED-and-resumable
+    seam): the record ends in exactly a parked turn's shape, so the lane parks
+    AWAITING_RESUME kind `turn` after `converse`, due now, and the sweep
+    re-sends the operator's message — no click."""
     sid = await _conversation([_ASK])
     await orchestration.land_orphans_at_startup()
-    assert await repo.session_status(sid) == "STOPPED"
-    stop = (await repo.get_session_run_state(sid))["pending_stop"]
-    assert stop["reason"] == "restart" and stop["resumable"] is True
-    assert stop["after"] == "converse"
+    assert await repo.session_status(sid) == "AWAITING_RESUME"
+    pending = (await repo.get_session_run_state(sid))["pending_resume"]
+    assert pending["kind"] == "turn" and pending["after"] == "converse"
+    assert datetime.fromisoformat(pending["not_before"]) <= datetime.now(timezone.utc)
+    assert sid in await repo.sessions_awaiting_resume(due_only=True)
 
 
 async def test_a_chat_lane_with_unanswered_calls_loses_the_turn_not_the_lane():

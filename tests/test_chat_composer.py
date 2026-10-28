@@ -59,14 +59,20 @@ def test_the_rule_names_every_state_the_operator_can_act_on():
     assert why_not_sendable(
         {"id": "sess_5", "mode": "conversation", "status": "RUNNING"}
     )[0] == "turn_in_progress"
-    # A conversation parked AWAITING_RESUME (outage equivalence, 2026-07-31) is
-    # a turn the control plane still owes the agent — a retry will drive it. The
-    # existing catch-all already tells that truth and no new refusal code (nor a
-    # `_COMPOSER_DISABLING` entry) is needed; this pins it so a later status
-    # rename cannot silently make a parked conversation look chattable.
-    assert why_not_sendable(
-        {"id": "sess_6", "mode": "conversation", "status": "AWAITING_RESUME"}
-    )[0] == "turn_in_progress"
+    # A conversation parked AWAITING_RESUME is a turn the control plane still
+    # owes — the sweep re-sends it once the dependency is back. Rewritten for
+    # outage doctrine story 6: the catch-all's "wait for the turn to finish"
+    # was true-ish while nothing could park a chat turn; now one does, so the
+    # code NAMES the park (`awaiting_resume`, and what it waits on) and the
+    # composer is disabled by it.
+    code, message = why_not_sendable(
+        {"id": "sess_6", "mode": "conversation", "status": "AWAITING_RESUME",
+         "parked_on": "llm"}
+    )
+    assert code == "awaiting_resume" and "llm is down" in message
+    from central_command.api.nerve_gateway import _COMPOSER_DISABLING
+
+    assert "awaiting_resume" in _COMPOSER_DISABLING
 
 
 async def test_conversation_turn_enforces_exactly_that_rule(monkeypatch):

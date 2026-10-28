@@ -478,7 +478,7 @@ async def _send_target(key: str) -> dict:
         session = await repo.get_session(lane)
         if session is None:
             return {"blocked": (404, "no_session", f"no session {lane}")}
-        blocked = why_not_sendable(session)
+        blocked = why_not_sendable(await _with_parked_on(session))
         if blocked:
             return {"blocked": (409, *blocked), "session": session}
         return {"session": session, "session_id": lane}
@@ -490,7 +490,7 @@ async def _send_target(key: str) -> dict:
         row = await _latest_conversation(agent_id, open_only=True)
         if row is None:
             return {"opener_agent": agent_id}
-        blocked = why_not_sendable(row)
+        blocked = why_not_sendable(await _with_parked_on(row))
         if blocked:
             return {"blocked": (409, *blocked), "session": row}
         return {"session": row, "session_id": row["id"]}
@@ -507,6 +507,33 @@ async def _send_target(key: str) -> dict:
 # spinner + abort, and taking the keyboard away mid-turn would discard what the
 # operator is typing — the one thing the client is authoritative about
 # (2026-07-25, "my inputs should never disappear").
+async def parked_wait_line(session_id: str) -> str:
+    """'paused — <dependency> is down since <t>; retrying' for a session parked
+    AWAITING_RESUME. The dependency is the first one the park recorded that the
+    probes have recorded DOWN (`dependency_probe`); with no such row the
+    dependency is up by the probes' rule (a missing row is up), so the line
+    carries no time — the sweep simply has not re-driven it yet."""
+    pending = ((await repo.get_session_run_state(session_id)) or {}).get("pending_resume") or {}
+    deps = [d for d in (pending.get("dependencies") or ["llm"]) if d != "local"] or ["llm"]
+    states = await repo.dependency_probe_states()
+    for d in deps:
+        row = states.get(d) or {}
+        if row.get("state") == "down" and row.get("down_since"):
+            since = row["down_since"].astimezone().strftime("%Y-%m-%d %H:%M")
+            return f"paused — {d} is down since {since}; retrying"
+    return f"paused — waiting on {', '.join(deps)}; retrying"
+
+
+async def _with_parked_on(session: dict) -> dict:
+    """The session dict `why_not_sendable` reads, with `parked_on` filled for a
+    parked lane so the composer names what it waits on."""
+    if session.get("status") != "AWAITING_RESUME":
+        return session
+    pending = ((await repo.get_session_run_state(session["id"])) or {}).get("pending_resume") or {}
+    deps = [d for d in (pending.get("dependencies") or ["llm"]) if d != "local"] or ["llm"]
+    return {**session, "parked_on": ", ".join(deps)}
+
+
 _COMPOSER_DISABLING = ("not_a_conversation", "pending_proposal", "failed",
                        "no_session", "no_lane", "discussion_concluded",
                        "update_hold",
@@ -522,7 +549,11 @@ _COMPOSER_DISABLING = ("not_a_conversation", "pending_proposal", "failed",
                        # the specialist's proposal in the Inbox; the lane
                        # resumes itself once it is decided. Sending here would
                        # start a turn on a run paused mid-deferral.
-                       "awaiting_agents")
+                       "awaiting_agents",
+                       # A lane parked on a DOWN dependency (story 6): the reply
+                       # is owed and the sweep lands it; a new message would
+                       # start a turn over the one still waiting to finish.
+                       "awaiting_resume")
 
 
 async def _run_session_context(session: dict) -> dict:
@@ -572,9 +603,9 @@ async def _run_session_context(session: dict) -> dict:
         # Outage equivalence (2026-07-31): a dependency was down when this run's
         # last turn was handed back, so the turn is OWED, not lost. Without this
         # branch the notice fell through to "finished" — the exact silent lie
-        # the read-only notice exists to prevent.
-        waiting = ("paused — a dependency outage interrupted its last turn; "
-                   "the control plane retries it")
+        # the read-only notice exists to prevent. Story 6 names the dependency
+        # and how long it has been down, from what the probes recorded.
+        waiting = await parked_wait_line(session_id)
     elif status == "STOPPED":
         # Without this it fell through to "finished" — the exact silent lie the
         # read-only notice exists to prevent, and about the one state where the

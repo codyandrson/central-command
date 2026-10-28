@@ -43,7 +43,9 @@ from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_spike_model
 from tests.conftest import aresolve, needs_pg
 from tests.test_execution_retry import OUTAGE_TEXT, _graph_spy, _jira_spy, _parked_run
-from tests.test_outage_requeue import OUTAGE, _boom_handler, _model_that_raises
+from tests.test_outage_requeue import (
+    OUTAGE, _boom_handler, _model_that_raises, _resolver_raising,
+)
 from tests.test_resume_parking import _boom_on_build, _pending
 
 pytestmark = needs_pg
@@ -177,8 +179,9 @@ async def test_an_approved_execution_backs_off_and_never_exhausts(monkeypatch):
 
 
 async def test_a_task_backs_off_and_never_exhausts(monkeypatch):
-    monkeypatch.setattr(routes, "resolve_model",
-                        aresolve(lambda *a, **k: _model_that_raises(OUTAGE)))
+    # The fresh retry park: the outage hits before the first request exists
+    # (a model that dies on a persisted request parks the TURN since story 6).
+    monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task_id = "task_" + uuid.uuid4().hex[:12]
     _TASKS.append(task_id)
     await repo.create_task(task_id, "backoff test", "x", "jira-expert")

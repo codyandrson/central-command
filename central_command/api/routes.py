@@ -624,11 +624,11 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         park_reads=True,
     )
     if result.get("parked"):
-        # A read found its dependency DOWN: the session is AWAITING_RESUME
-        # with the pending read, and the task stays IN_PROGRESS on it (linked
-        # at run start by `_run_live`) — not retry-parked fresh, not failed.
-        # The retry sweep re-executes the read and lands the task through the
-        # same tail an uninterrupted run takes. Checked BEFORE `deferred`, for
+        # A read, or the model itself, was DOWN mid-run: the session is
+        # AWAITING_RESUME with a `read` or `turn` park, and the task stays
+        # IN_PROGRESS on it (linked at run start by `_run_live`) — not
+        # retry-parked fresh, not failed. The retry sweep re-enters the run
+        # and lands the task through the same tail an uninterrupted run takes. Checked BEFORE `deferred`, for
         # the reason the stopped branch below gives.
         return {**result, "task_id": task_id}
     if result.get("asked"):

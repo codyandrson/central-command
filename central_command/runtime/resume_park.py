@@ -90,7 +90,7 @@ def read_pending(*, call, metadata: dict, after: str,
 
 async def park_read(
     *, session_id: str, result, call, metadata: dict, after: str = "task",
-    task_id: str | None = None,
+    task_id: str | None = None, state: dict | None = None,
 ) -> dict:
     """Park a run whose read found its dependencies DOWN: AWAITING_RESUME with
     the pending read, announced by the same `session.resume_parked` every
@@ -108,9 +108,43 @@ async def park_read(
         session_id, dump_run_state(result, call.tool_call_id)
     )
     pending = read_pending(call=call, metadata=metadata, after=after, task_id=task_id)
+    if state:
+        # The orchestrator round's loop counters, which its tail cannot
+        # rebuild from the record (the same `state` a turn park carries).
+        pending["state"] = state
     return await park_resume(
         session_id, pending, metadata.get("error") or "dependency down"
     )
+
+
+async def park_turn(
+    *, session_id: str, after: str, error: BaseException, task_id: str | None,
+    state: dict | None, window: int, attempts: int, dependencies: list[str],
+) -> dict:
+    """Park a run whose TURN met a DOWN dependency (epic-outage-doctrine story
+    6): AWAITING_RESUME with a `pending_resume` of kind `turn`. Called by
+    `run._run_live` only after its record is persisted ending in the unsent
+    request, so there is no call to answer and no text to keep — the resume
+    re-sends that request (`agent.iter(None, message_history=…)`). `after` is
+    the landing tail it re-enters (task | converse | orchestrator); `state`
+    is what that tail cannot rebuild from the record (the orchestrator's loop
+    counters); `window` keeps the continuation window it was on.
+
+    Goes through `park_resume`, so the record gets `not_before` on the one
+    backoff curve and the same `session.resume_parked` announcement every
+    other resume park writes."""
+    pending = {
+        "kind": "turn",
+        "after": after,
+        "attempts": attempts,
+        "dependencies": list(dependencies),
+        "window": window,
+    }
+    if task_id:
+        pending["task_id"] = task_id
+    if state:
+        pending["state"] = state
+    return await park_resume(session_id, pending, error)
 
 
 def framed_denial(feedback: str) -> str:

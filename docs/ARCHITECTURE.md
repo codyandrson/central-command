@@ -724,8 +724,8 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   `retry_state.kind = 'restart'` due now (re-run fresh whatever its age) and
   its transcript closed `STOPPED` with the reason `process restarted; re-run
   queued as a new session of task <id>`; a chat lane by its record's tail
-  (finished turn → `AWAITING_OPERATOR`, unsent request → `STOPPED` resumable,
-  unanswered calls → `DONE` with `session.turn_lost`); anything else
+  (finished turn → `AWAITING_OPERATOR`, unsent request → `AWAITING_RESUME`
+  kind `turn` due now, unanswered calls → `DONE` with `session.turn_lost`); anything else
   `STOPPED`. Every `EXECUTING` proposal parks `RETRY_PENDING` with
   `retry_state.interrupted` (merged: a retry's known-complete prefix is kept;
   a fresh execution is seeded at action 0) and `proposal.execution_interrupted`;
@@ -740,6 +740,48 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   reconciliation, where the Executor's record of the in-flight action is
   enough to ask the service whether it landed and resume past it or re-run it
   with no operator click (DL-188).
+- **A model DOWN mid-turn parks the turn (story 6 of the outage doctrine).** A
+  run whose entry has a landing tail (`TriageDeps.park_reads`: the task run,
+  the chat turn, the orchestrator round, and every continuation of them) does
+  not land FAILED when a dependency is DOWN mid-turn: `run._run_live` parks the
+  session `AWAITING_RESUME` with `pending_resume.kind = 'turn'` (the tail in
+  `after`, the orchestrator's loop counters in `state`, `dependencies`
+  `['llm']` or the typed error's own) and raises `RunParked`, which each tail
+  returns as the same parked outcome a parked read has (`run.parked_outcome`).
+  The persisted record ends in the unsent request, so
+  `orchestration.resume_parked_turn` re-enters with
+  `agent.iter(None, message_history=…)` through `_drive_tail`, the read and
+  turn resumes' one tail driver: the request is re-sent, nothing is copied (no
+  duplicated operator turn, no re-spent earlier turn), and a second outage on
+  the resumed run parks in place again. A transient error out of a non-read
+  TOOL leaves a record ending in a response whose calls were executing; that
+  cannot be re-entered, so it keeps the FAILED landing. A parked chat lane
+  disables the composer (`awaiting_resume`), the notice reads `paused —
+  <dependency> is down since <t>; retrying` (no time when `dependency_probe`
+  has no down row), and closing the lane cancels the wait: `STOPPED`, park
+  cleared, transcript kept. Runs with no landing tail keep their unit-level
+  DOWN path:
+
+  | Run (no landing tail) | Entry | Its DOWN path |
+  |---|---|---|
+  | Inbox triage | `run.ingest_and_propose` | the dispatcher's transient release of the work item (`work_item.not_before`) |
+  | Coach | `run.run_coach` | the heartbeat's next occurrence |
+  | Steward | `steward.run_document` | the heartbeat's next occurrence |
+  | Wiki repair | `wiki_agent.run_repair` | the heartbeat's next occurrence |
+  | Reflection | `reflection._reflect` | the next closed conversation reflects again |
+  | Reflection episode | `reflection._propose_episode` | the startup audit/reflection sweep |
+  | Routing recommendation | `orchestrator.recommend` | the operator asks again; nothing is lost |
+  | Consult sub-run | `tools.consult_agent` | not a `_run_live` run: the outage re-raises and the ASKER parks (story 2) |
+
+  Every other `land_session(failed=True)` site is a semantic landing, reached
+  only after the transient branch parked: `run._run_live` (a no-tail run, or a
+  record that cannot be re-entered), `orchestration._fail`,
+  `orchestration.resume_parked_session`, `orchestration.resume_parked_read`,
+  `orchestration.resume_consult_wait`, `orchestration.resume_task_wait`,
+  `orchestration._finish_answered_resume`, `orchestration._decline_continue`
+  (the operator declined), and `nerve_gateway._close_conversation_for_key`
+  (the operator closed a failed execution). `tests/test_turn_parking.py`
+  walks the source against both lists.
 - **Durability.** A paused run is the deferred-tool pattern plus the project's
   own persisted message history (`runtime/durable.py`); DBOS was never adopted.
   `system_prompt=` is persisted into that history on purpose (AGENTS.md).

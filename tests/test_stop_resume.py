@@ -568,18 +568,24 @@ async def _stopped_task(monkeypatch) -> tuple[str, str]:
 
 
 @needs_pg
-async def test_a_transient_death_on_resume_parks_the_task_for_retry(monkeypatch):
+async def test_a_transient_death_on_resume_parks_the_run_in_place(monkeypatch):
+    """Rewritten for outage doctrine story 6. A resumed run whose model is DOWN
+    used to land its session FAILED and retry-park the task FRESH (re-spending
+    every turn before the outage). Now the run parks IN PLACE: the session is
+    AWAITING_RESUME with a `turn` park, the task stays IN_PROGRESS on it, and
+    nothing is raised — the sweep re-sends the unsent request later."""
     task_id, session_id = await _stopped_task(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="Connection error"):
-        await orchestration.resume_stopped_session(
-            session_id, model=_dying_model("Connection error.")
-        )
+    out = await orchestration.resume_stopped_session(
+        session_id, model=_dying_model("Connection error.")
+    )
 
+    assert out["parked"] is True and out["kind"] == "turn"
     row = await repo.get_task(task_id)
-    assert row["status"] == "ASSIGNED", "a transient death is the retry sweep's, not the board's"
-    assert (row.get("retry_state") or {}).get("kind") == "run"
-    assert await repo.session_status(session_id) == "FAILED"
+    assert row["status"] == "IN_PROGRESS" and not row.get("retry_state")
+    assert await repo.session_status(session_id) == "AWAITING_RESUME"
+    pending = (await repo.get_session_run_state(session_id))["pending_resume"]
+    assert pending["kind"] == "turn" and pending["after"] == "task"
 
 
 @needs_pg
