@@ -350,9 +350,10 @@ async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
     finally:
         await conn.close()
     assert state not in ("UNPROCESSED", "FAILED", "CLAIMED"), state
-    assert await worker.tick() == [job_id]
+    # Foreign queued jobs left by earlier tests may be taken too: assert on ours.
+    assert job_id in await worker.tick()
     await worker.settle()
-    assert claimed_jobs == [job_id]
+    assert job_id in claimed_jobs and claimed_jobs.count(job_id) == 1
 
     # The banner goes quiet.
     after = _by_name(jsonable_encoder(await outages.list_outages()))["graph"]
