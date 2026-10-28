@@ -26,6 +26,7 @@ from urllib.parse import quote
 import httpx
 
 from central_command.config import settings
+from central_command.contract.failures import ProviderStatusError
 from central_command.integrations import http as http_client
 
 KINDS = ("github", "gitlab")
@@ -35,7 +36,7 @@ KINDS = ("github", "gitlab")
 MAX_FILE_CHARS = 20_000
 
 
-class ForgeError(Exception):
+class ForgeError(ProviderStatusError):
     pass
 
 
@@ -152,12 +153,12 @@ def _check(resp: httpx.Response, op: str, ref: str | None = None) -> None:
     detail = resp.text[:300]
     st = resp.status_code
     if st == 404:
-        raise ForgeError(f"{op} — not found{r}")
+        raise ForgeError(f"{op} — not found{r}", status_code=st)
     if st in (401, 403):
-        raise ForgeError(f"{op} — auth failed ({st}){r} — check the instance's CC_FORGE_TOKEN_<NAME>")
+        raise ForgeError(f"{op} — auth failed ({st}){r} — check the instance's CC_FORGE_TOKEN_<NAME>", status_code=st)
     if st == 429:
-        raise ForgeError(f"{op} — rate limited{r} — retry later")
-    raise ForgeError(f"{op} — provider rejected the request ({st}){r}: {detail}")
+        raise ForgeError(f"{op} — rate limited{r} — retry later", status_code=st)
+    raise ForgeError(f"{op} — provider rejected the request ({st}){r}: {detail}", status_code=st)
 
 
 def _project_id(repo: str) -> str:

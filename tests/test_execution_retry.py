@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import asyncio
 
+import httpx
+
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 
@@ -413,3 +415,134 @@ async def test_the_cockpit_notice_tells_the_truth_about_a_parked_execution(monke
     # for retry (provider outage)" — now it names WHAT the execution waits on
     # (the park recorded the graph write's own dependencies).
     assert "approved proposal is waiting on graph, embedder" in notice["message"]
+
+
+# --- story 7.11: a provider's HTTP 503 parks, typed, never FAILED -----------------
+
+
+class _Up:
+    """A ProbeCache double: every dependency answers."""
+
+    asked: list = []
+
+    async def warm(self, dependencies):
+        pass
+
+    async def healthy(self, dependency):
+        return True
+
+    @property
+    def results(self):
+        return {}
+
+
+def _http_503(monkeypatch, module, *, kwarg: str):
+    """The provider answers 503 through the REAL `_check`: the status reaches
+    the executor only as the error's typed `status_code`."""
+    async def fake(*a, **k):
+        return httpx.Response(503, text="<html>Service Unavailable</html>")
+
+    monkeypatch.setattr(module, "_call", fake)
+
+
+async def test_a_jira_503_parks_the_proposal_and_the_sweep_re_drives_it(monkeypatch):
+    from central_command.api import orchestration
+    from central_command.integrations import jira
+    from tests.conftest import make_parks_due
+
+    monkeypatch.setattr(settings, "jira_email", "bot@example.com")
+    monkeypatch.setattr(settings, "jira_api_token", "tok")
+    _graph_spy(monkeypatch)
+    _http_503(monkeypatch, jira, kwarg="json_body")
+    model = make_sc1_model()
+    run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
+    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
+
+    assert out["execution"] == "parked"
+    row = await repo.load_proposal(run["proposal_id"])
+    assert row["status"] == "RETRY_PENDING"
+    assert row["retry_state"]["dependencies"] == ["jira"]
+    assert "proposal.failed" not in await _kinds(run["proposal_id"])
+
+    async def ok(*a, **k):
+        return httpx.Response(204)
+
+    monkeypatch.setattr(jira, "_call", ok)
+    await make_parks_due()
+    await orchestration.retry_sweep(cache=_Up())
+    await orchestration.sweep_settle()
+    assert (await repo.load_proposal(run["proposal_id"]))["status"] == "EXECUTED"
+
+
+async def test_a_confluence_503_parks_the_proposal_and_the_sweep_re_drives_it(monkeypatch):
+    import uuid
+
+    from central_command.api import orchestration, routes
+    from central_command.integrations import confluence
+    from central_command.runtime import packs as packs_mod
+    from central_command.runtime.spike_model import make_deferred_tool_model
+    from tests.conftest import make_parks_due
+
+    monkeypatch.setattr(settings, "confluence_base_url", "https://example.atlassian.net")
+    monkeypatch.setattr(settings, "confluence_email", "bot@example.com")
+    monkeypatch.setattr(settings, "confluence_api_token", "tok")
+    monkeypatch.setattr(settings, "confluence_auth_mode", "basic")
+    monkeypatch.setattr(settings, "auditor_enabled", False)
+    _http_503(monkeypatch, confluence, kwarg="json")
+
+    agent = "jira-expert"
+    held = await packs_mod.granted_packs(agent)
+    granted_here = "confluence.update_page" not in packs_mod.granted_capability_names(held)
+    if granted_here:
+        await repo.grant_pack(agent, "confluence-propose")
+    try:
+        proposal = {
+            "intent": "Update the roadmap page",
+            "actions": [{
+                "capability": "confluence.update_page",
+                "arguments": {"page_id": "42", "title": "Roadmap",
+                              "body_storage": "<p>new</p>", "expected_version": 3},
+                "target_ref": {"system": "confluence", "id": "42", "read_version": "3"},
+                "reversibility": "reversible",
+            }],
+            "evidence": [{"kind": "operator", "source_ref": "operator:task",
+                          "locator": "test task", "claim": "Operator tasked an edit."}],
+            "expected_effect": "page 42 carries the new body",
+        }
+        model = make_deferred_tool_model("propose_action", {"proposal": proposal})
+
+        async def fixed_model(**_kw):
+            return model
+
+        monkeypatch.setattr(routes, "resolve_model", fixed_model)
+        task_id = f"task_c711_{uuid.uuid4().hex[:10]}"
+        await repo.create_task(task_id, "confluence 503", "edit the page", agent,
+                               created_by="operator")
+        run = await routes._run_assigned_task(await repo.get_task(task_id))
+        pid = run["proposal_id"]
+        row = await repo.load_proposal(pid)
+        out = await gateway.approve_and_execute(row["session_id"], pid, model=model)
+
+        assert out["execution"] == "parked"
+        row = await repo.load_proposal(pid)
+        assert row["status"] == "RETRY_PENDING"
+        assert row["retry_state"]["dependencies"] == ["confluence"]
+        assert "proposal.failed" not in await _kinds(pid)
+
+        async def updated(page_id, title, body, expected_version):
+            return {"page": {"id": page_id, "title": title, "version": 4, "url": "u"}}
+
+        monkeypatch.setattr(confluence, "update_page", updated)
+        await make_parks_due()
+        await orchestration.retry_sweep(cache=_Up())
+        await orchestration.sweep_settle()
+        assert (await repo.load_proposal(pid))["status"] == "EXECUTED"
+    finally:
+        if granted_here:
+            conn = await repo._conn()
+            try:
+                await conn.execute(
+                    "delete from agent_grant where agent_id = $1 and pack = $2",
+                    agent, "confluence-propose")
+            finally:
+                await conn.close()

@@ -23,9 +23,10 @@ from __future__ import annotations
 import httpx
 
 from central_command.config import settings
+from central_command.contract.failures import ProviderStatusError
 
 
-class EmailFacadeError(Exception):
+class EmailFacadeError(ProviderStatusError):
     pass
 
 
@@ -55,7 +56,8 @@ async def _call(payload: dict, timeout: float = 60.0) -> dict:
     if resp.status_code != 200:
         raise EmailFacadeError(
             f"email façade {payload.get('mode')} failed: HTTP {resp.status_code} "
-            f"{resp.text[:200]}"
+            f"{resp.text[:200]}",
+            status_code=resp.status_code,
         )
     return resp.json()
 

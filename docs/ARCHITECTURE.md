@@ -666,6 +666,12 @@ landing still lands FAILED at once with its reason, and `dispatch_max_attempts`
 still caps a ledger item's semantic attempts. Two typed errors carry their
 dependencies: `DependencyDown` (a read, raised once, where the read ran) and
 `EmbedderDown` (a subclass, on `graph` and `embedder`).
+An integration error built from an HTTP response carries the status TYPED:
+`contract.failures.ProviderStatusError` (`status_code`) is the base of
+`ConfluenceError`, `JiraError`, `ForgeError`, `LiteLLMError` and the two façade
+errors, and `classify_failure` reads it before it sniffs text — a status in the
+DOWN set is DOWN whatever the body says, a 4xx outside it reads its text as
+before, no status falls through. The text sniff is the last resort.
 
 **Names, probes and maps.** `DEPENDENCIES` in `contract/dependencies.py` is the
 one closed vocabulary a park, a probe or an outage row uses; the probe

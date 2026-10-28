@@ -38,6 +38,7 @@ from urllib.parse import urlencode
 import httpx
 
 from central_command.config import settings
+from central_command.contract.failures import ProviderStatusError
 from central_command.integrations import http as http_client
 
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}-[1-9][0-9]{0,9}$")
@@ -107,7 +108,7 @@ CUSTOM_WRITE_SHAPES = {
 MAX_CUSTOM_CHARS = 500
 
 
-class JiraError(Exception):
+class JiraError(ProviderStatusError):
     pass
 
 
@@ -317,12 +318,12 @@ def _check(resp: httpx.Response, op: str, key: str | None = None) -> None:
     detail = resp.text[:300]
     st = resp.status_code
     if st == 404:
-        raise JiraError(f"{op} — not found{ref}")
+        raise JiraError(f"{op} — not found{ref}", status_code=st)
     if st in (401, 403):
-        raise JiraError(f"{op} — auth failed ({st}){ref} — check CC_JIRA_EMAIL/CC_JIRA_API_TOKEN")
+        raise JiraError(f"{op} — auth failed ({st}){ref} — check CC_JIRA_EMAIL/CC_JIRA_API_TOKEN", status_code=st)
     if st == 429:
-        raise JiraError(f"{op} — rate limited{ref} — retry later")
-    raise JiraError(f"{op} — provider rejected the request ({st}){ref}: {detail}")
+        raise JiraError(f"{op} — rate limited{ref} — retry later", status_code=st)
+    raise JiraError(f"{op} — provider rejected the request ({st}){ref}: {detail}", status_code=st)
 
 
 def _adf_to_text(node) -> str:

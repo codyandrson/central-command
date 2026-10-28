@@ -22,6 +22,7 @@ import struct
 import httpx
 
 from central_command.config import settings
+from central_command.contract.failures import ProviderStatusError
 from central_command.contract.args import COST_FIELDS
 from central_command.integrations import http as http_client
 
@@ -47,7 +48,7 @@ def _mask_secret(value: str) -> str:
     return f"{value[:5]}…{value[-4:]}"
 
 
-class LiteLLMError(Exception):
+class LiteLLMError(ProviderStatusError):
     pass
 
 
@@ -108,10 +109,10 @@ def _check(resp: httpx.Response, op: str) -> None:
     st = resp.status_code
     detail = resp.text[:300]
     if st in (401, 403):
-        raise LiteLLMError(f"{op} — auth failed ({st}) — check CC_LLM_PROXY_ADMIN_KEY")
+        raise LiteLLMError(f"{op} — auth failed ({st}) — check CC_LLM_PROXY_ADMIN_KEY", status_code=st)
     if st == 404:
-        raise LiteLLMError(f"{op} — not found (404): {detail}")
-    raise LiteLLMError(f"{op} — proxy rejected the request ({st}): {detail}")
+        raise LiteLLMError(f"{op} — not found (404): {detail}", status_code=st)
+    raise LiteLLMError(f"{op} — proxy rejected the request ({st}): {detail}", status_code=st)
 
 
 async def exposed_model_ids() -> list[str]:
@@ -140,11 +141,13 @@ async def exposed_model_ids() -> list[str]:
         raise LiteLLMError(f"model catalog — {base} unreachable: {exc}") from exc
     if resp.status_code in (401, 403):
         raise LiteLLMError(
-            f"model catalog — auth failed ({resp.status_code}) — check CC_LLM_API_KEY"
+            f"model catalog — auth failed ({resp.status_code}) — check CC_LLM_API_KEY",
+            status_code=resp.status_code,
         )
     if not 200 <= resp.status_code < 300:
         raise LiteLLMError(
-            f"model catalog — proxy answered {resp.status_code}: {resp.text[:200]}"
+            f"model catalog — proxy answered {resp.status_code}: {resp.text[:200]}",
+            status_code=resp.status_code,
         )
     data = resp.json().get("data") or []
     return sorted({str(m["id"]) for m in data if isinstance(m, dict) and m.get("id")})
@@ -194,9 +197,15 @@ async def _fetch_model_info(op: str) -> list:
     except httpx.HTTPError as exc:
         raise LiteLLMError(f"{op} — {base} unreachable: {exc}") from exc
     if resp.status_code in (401, 403):
-        raise LiteLLMError(f"{op} — auth failed ({resp.status_code}) — check CC_LLM_API_KEY")
+        raise LiteLLMError(
+            f"{op} — auth failed ({resp.status_code}) — check CC_LLM_API_KEY",
+            status_code=resp.status_code,
+        )
     if not 200 <= resp.status_code < 300:
-        raise LiteLLMError(f"{op} — proxy answered {resp.status_code}: {resp.text[:200]}")
+        raise LiteLLMError(
+            f"{op} — proxy answered {resp.status_code}: {resp.text[:200]}",
+            status_code=resp.status_code,
+        )
     return resp.json().get("data") or []
 
 

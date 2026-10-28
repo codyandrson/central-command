@@ -715,3 +715,13 @@ async def test_unreadable_gadget_declaration_leaves_the_config_alone(monkeypatch
         {"module_key": "com.example:gadget", "config": {"filterId": "filter-7", "whatever": "1"}},
     ])
     assert calls[2][2] == {"whatever": "1", "filterId": "filter-7"}
+
+
+def test_check_types_the_response_status_on_every_branch():
+    import httpx
+
+    for status in (404, 401, 403, 429, 500, 503):
+        with pytest.raises(jira.JiraError) as ei:
+            jira._check(httpx.Response(status, text="boom"), "getIssue", "A-1")
+        assert ei.value.status_code == status
+    jira._check(httpx.Response(200), "getIssue")  # a 2xx raises nothing

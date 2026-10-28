@@ -321,3 +321,61 @@ async def test_audit_error_carries_the_label(monkeypatch):
     assert out is None  # a down auditor degrades to the human gate
 
     assert (await _payload("audit.error", item_id))["transient"] is True
+
+
+# --- story 7.11: a provider HTTP status is typed on the integration error ------
+
+from central_command.contract.failures import ProviderStatusError  # noqa: E402
+from central_command.integrations import (  # noqa: E402
+    calendar_facade,
+    confluence,
+    email_facade,
+    forge,
+    jira,
+)
+from central_command.integrations import litellm as litellm_client  # noqa: E402
+
+_PROVIDER_ERRORS = [
+    confluence.ConfluenceError,
+    jira.JiraError,
+    forge.ForgeError,
+    litellm_client.LiteLLMError,
+    email_facade.EmailFacadeError,
+    calendar_facade.CalendarFacadeError,
+]
+
+
+@pytest.mark.parametrize("cls", _PROVIDER_ERRORS, ids=lambda c: c.__name__)
+@pytest.mark.parametrize("status", [403, 429, 500, 502, 503, 504])
+def test_a_provider_down_status_is_transient_by_type(cls, status):
+    assert classify_failure(cls("x", status_code=status)) == "transient"
+
+
+@pytest.mark.parametrize("cls", _PROVIDER_ERRORS, ids=lambda c: c.__name__)
+@pytest.mark.parametrize("status", [400, 401, 404, 409])
+def test_a_provider_no_status_is_semantic(cls, status):
+    assert classify_failure(cls("x", status_code=status)) == "semantic"
+
+
+def test_a_4xx_body_naming_a_misconfigured_dependency_still_reads_transient():
+    exc = confluence.ConfluenceError("updatePage — rejected (400): no deployments available",
+                                     status_code=400)
+    assert classify_failure(exc) == "transient"
+
+
+def test_a_provider_error_with_no_status_falls_to_the_text_sniff():
+    assert confluence.ConfluenceError("x").status_code is None
+    assert classify_failure(jira.JiraError("connection refused")) == "transient"
+    assert classify_failure(jira.JiraError("issue does not exist")) == "semantic"
+
+
+def test_the_status_beats_misleading_text():
+    # A 503 whose text carries no marker used to land FAILED.
+    assert classify_failure(
+        jira.JiraError("setDueDate — provider rejected the request (503) for A-1: <html>",
+                       status_code=503)) == "transient"
+
+
+def test_every_integration_error_is_a_provider_status_error_subclass():
+    for cls in _PROVIDER_ERRORS:
+        assert issubclass(cls, ProviderStatusError)

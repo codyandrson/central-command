@@ -153,3 +153,9 @@ when a matching file is read.
   DISPATCHES both detached (`orchestration._spawn_detached`) and the tick
   returns; `sweep_settle()` is for tests and shutdown only. Guarded by
   `test_the_sweep_returns_while_an_agent_lane_is_busy`.
+- **An integration error built from an HTTP response carries the status
+  TYPED, never only in its message.** Subclass `contract.failures.ProviderStatusError`
+  and pass `status_code=` at every raise site that holds a response;
+  `classify_failure` reads it ahead of the text sniff. A Confluence or Jira 503
+  once text-classified SEMANTIC and landed a proposal FAILED mid-outage. The
+  sniff is the last resort, for errors that arrive already stringified.

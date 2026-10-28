@@ -44,6 +44,7 @@ from urllib.parse import urlencode
 import httpx
 
 from central_command.config import settings
+from central_command.contract.failures import ProviderStatusError
 from central_command.integrations import http as http_client
 
 ID_RE = re.compile(r"^\d+$")
@@ -56,7 +57,7 @@ DEFAULT_PAGE_LIMIT = 25
 _sleep = asyncio.sleep
 
 
-class ConfluenceError(Exception):
+class ConfluenceError(ProviderStatusError):
     pass
 
 
@@ -236,15 +237,16 @@ def _check(resp: httpx.Response, op: str, ref: str | None = None) -> None:
     detail = resp.text[:300]
     st = resp.status_code
     if st == 404:
-        raise ConfluenceError(f"{op} — not found{r}")
+        raise ConfluenceError(f"{op} — not found{r}", status_code=st)
     if st in (401, 403):
         raise ConfluenceError(
             f"{op} — auth failed ({st}){r} — check CC_CONFLUENCE_EMAIL/"
-            "CC_CONFLUENCE_API_TOKEN/CC_CONFLUENCE_AUTH_MODE"
+            "CC_CONFLUENCE_API_TOKEN/CC_CONFLUENCE_AUTH_MODE",
+            status_code=st,
         )
     if st == 429:
-        raise ConfluenceError(f"{op} — rate limited{r} — retry later")
-    raise ConfluenceError(f"{op} — provider rejected the request ({st}){r}: {detail}")
+        raise ConfluenceError(f"{op} — rate limited{r} — retry later", status_code=st)
+    raise ConfluenceError(f"{op} — provider rejected the request ({st}){r}: {detail}", status_code=st)
 
 
 # --- endpoint seam (flavor -> base path) ---------------------------------------

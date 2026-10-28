@@ -57,6 +57,22 @@ class DependencyDown(Exception):
         self.original = original
 
 
+class ProviderStatusError(Exception):
+    """An integration error built from an HTTP response, carrying the status TYPED.
+
+    The integrations (`confluence`, `jira`, `forge`, `litellm`, the façades)
+    raise their own error types from a response; the status used to live only
+    in the message, so a provider 503 text-classified SEMANTIC and landed a
+    proposal FAILED instead of parking it. `classify_failure` reads
+    `status_code` before it sniffs text. `None` means "not built from a
+    response" (a config error, a transport error) and falls through to the sniff.
+    """
+
+    def __init__(self, *args: object, status_code: int | None = None):
+        super().__init__(*args)
+        self.status_code = status_code
+
+
 class EmbedderDown(DependencyDown):
     """The embedder could not answer a graph write's embedding request
     (epic-outage-doctrine story 7). Raised by `neo4j_writer.embed` in place of
@@ -169,6 +185,13 @@ def classify_failure(exc: BaseException | None) -> str:
     # Already classified where it was raised — the type IS the verdict.
     if isinstance(exc, DependencyDown):
         return TRANSIENT
+    # An integration error built from an HTTP response: the status is typed
+    # evidence, the message a guess. A 4xx outside the set stays a judgement of
+    # the request, unless its text names a misconfigured dependency.
+    if isinstance(exc, ProviderStatusError) and exc.status_code is not None:
+        if exc.status_code in TRANSIENT_STATUS:
+            return TRANSIENT
+        return classify_failure_text(str(exc))
 
     # --- pydantic_ai: the model provider seam (the one that bit first) --------
     try:

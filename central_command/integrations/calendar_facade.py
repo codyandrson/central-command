@@ -31,9 +31,10 @@ from __future__ import annotations
 import httpx
 
 from central_command.config import settings
+from central_command.contract.failures import ProviderStatusError
 
 
-class CalendarFacadeError(Exception):
+class CalendarFacadeError(ProviderStatusError):
     pass
 
 
@@ -55,7 +56,8 @@ async def _call(payload: dict, timeout: float = 60.0) -> dict:
     if resp.status_code != 200:
         raise CalendarFacadeError(
             f"calendar façade {payload.get('mode')} failed: HTTP "
-            f"{resp.status_code} {resp.text[:200]}"
+            f"{resp.status_code} {resp.text[:200]}",
+            status_code=resp.status_code,
         )
     out = resp.json()
     if not out.get("ok"):

@@ -552,3 +552,11 @@ def test_confluence_propose_pack_capabilities_are_all_registered():
 def test_confluence_space_propose_pack_is_isolated():
     pack = packs.PACKS["confluence-space-propose"]
     assert [c.name for c in pack.capabilities] == ["confluence.create_space"]
+
+
+def test_check_types_the_response_status_on_every_branch():
+    for status in (404, 401, 403, 429, 500, 503):
+        with pytest.raises(confluence.ConfluenceError) as ei:
+            confluence._check(httpx.Response(status, text="boom"), "getPage", "42")
+        assert ei.value.status_code == status
+    confluence._check(httpx.Response(200), "getPage")  # a 2xx raises nothing
