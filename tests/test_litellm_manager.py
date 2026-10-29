@@ -30,12 +30,12 @@ from central_command.runtime.spike_model import (
     make_litellm_update_model,
 )
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 # --- the native client -------------------------------------------------------
@@ -279,7 +279,6 @@ async def test_add_and_delete_handlers_call_the_client(monkeypatch):
         return {"ok": True, "observed": {"chat": {"ok": True, "detail": "OK"}},
                 "suggested_model_info": {"supports_function_calling": True}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
     monkeypatch.setattr(executor.litellm_client, "delete_model", fake_delete)
     monkeypatch.setattr(executor.litellm_client, "probe_model", fake_probe)
@@ -342,7 +341,6 @@ async def test_executor_stamps_model_provenance_over_agent_claims(monkeypatch):
         return {"ok": False, "observed": {"chat": {"ok": False, "detail": "boom"}},
                 "suggested_model_info": {}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
     monkeypatch.setattr(executor.litellm_client, "probe_model", fake_probe)
@@ -387,7 +385,6 @@ async def test_update_handler_preserves_key_on_metadata_edit(monkeypatch):
         calls.append((model_id, model_info, litellm_params, model_name))
         return {"ok": True, "model": {"model_id": model_id, "updated": ["model_info"]}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
 
     out = await executor.execute(
@@ -421,7 +418,6 @@ async def test_update_handler_injects_key_when_repointing_to_anthropic(monkeypat
         calls.append((model_id, litellm_params))
         return {"ok": True, "model": {"model_id": model_id, "updated": ["litellm_params"]}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
 
     await executor.execute(
@@ -450,7 +446,6 @@ async def test_add_handler_does_not_inject_key_when_credential_named(monkeypatch
         return {"ok": True, "model": {"model_name": model_name,
                                       "provider_model": model, "model_id": "id-1"}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
 
     await executor.execute(
@@ -475,7 +470,6 @@ async def test_update_handler_does_not_inject_key_when_credential_named(monkeypa
         seen.append(litellm_params)
         return {"ok": True, "model": {"model_id": model_id, "updated": ["litellm_params"]}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
 
     await executor.execute(
@@ -565,7 +559,6 @@ async def test_create_key_handler_keeps_plaintext_out_of_result_text(monkeypatch
         return {"ok": True, "key": {"key_alias": key_alias, "token_id": "hash-9",
                                     "models": models or [], "key_preview": "sk-DO…9999"}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "create_key", fake_create)
 
     out = await executor.execute(
@@ -589,7 +582,6 @@ async def test_delete_key_handler_calls_client(monkeypatch):
         calls.append((key_alias, key))
         return {"ok": True, "deleted": key_alias}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "delete_key", fake_delete)
     out = await executor.execute(
         [Action(capability="litellm.delete_key",
@@ -696,7 +688,6 @@ async def test_fallback_handlers_call_the_client(monkeypatch):
         calls.append(("del", model, fallback_type))
         return {"model": model, "fallback_type": fallback_type}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "set_fallbacks", fake_set)
     monkeypatch.setattr(executor.litellm_client, "delete_fallbacks", fake_del)
 
@@ -896,7 +887,6 @@ async def test_key_and_team_handlers_dispatch(monkeypatch):
     assert gated_write_names() == set(executor.HANDLERS)  # parity holds with the new writes
 
     calls = []
-    monkeypatch.setattr(settings, "executor_mode", "live")
 
     async def fake_update_key(key, **kw):
         calls.append(("update_key", key)); return {"updated": ["models"]}
@@ -965,9 +955,10 @@ async def test_litellm_manager_is_taskable():
 
 
 @needs_pg
-async def test_direct_task_parks_a_proposal_behind_the_gate():
+async def test_direct_task_parks_a_proposal_behind_the_gate(monkeypatch):
     from central_command.gateway import gateway
 
+    log = fake_world(monkeypatch)
     model = make_litellm_model()
     out = await run_task(
         "litellm-manager", "Add a cc-triage alias on Haiku.", model=model
@@ -981,20 +972,22 @@ async def test_direct_task_parks_a_proposal_behind_the_gate():
 
     # Approval resumes under the litellm-manager definition (not inbox-triage)
     # and completes the session — the multi-agent resume path for the new agent.
-    # executor_mode is dry_run (pinned), so no real proxy call happens.
+    # fake_world answers the approval, so no real proxy call happens.
     result = await gateway.approve_and_execute(
         out["session_id"], out["proposal_id"], model=model
     )
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
+    assert [c for c, _a, _p in log] == ["litellm.add_model"]
 
 
 @needs_pg
-async def test_create_key_task_parks_and_resumes_behind_the_gate():
+async def test_create_key_task_parks_and_resumes_behind_the_gate(monkeypatch):
     """A create_key task rides the same durable gate and resumes under the
-    litellm-manager definition. dry_run pinned — no real key is issued."""
+    litellm-manager definition. fake_world answers the approval — no real key is issued."""
     from central_command.gateway import gateway
 
+    log = fake_world(monkeypatch)
     model = make_litellm_create_key()
     out = await run_task(
         "litellm-manager", "Issue a scoped virtual key for triage attribution.", model=model
@@ -1009,12 +1002,14 @@ async def test_create_key_task_parks_and_resumes_behind_the_gate():
     )
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
+    assert [c for c, _a, _p in log] == ["litellm.create_key"]
 
 
 @needs_pg
-async def test_fallbacks_task_parks_and_resumes_behind_the_gate():
+async def test_fallbacks_task_parks_and_resumes_behind_the_gate(monkeypatch):
     from central_command.gateway import gateway
 
+    log = fake_world(monkeypatch)
     model = make_litellm_fallbacks()
     out = await run_task(
         "litellm-manager", "Add a fallback from claude-sonnet-5 to claude-opus-4-8.", model=model
@@ -1027,15 +1022,17 @@ async def test_fallbacks_task_parks_and_resumes_behind_the_gate():
     )
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
+    assert [c for c, _a, _p in log] == ["litellm.set_fallbacks"]
 
 
 @needs_pg
-async def test_update_model_task_parks_and_resumes_behind_the_gate():
+async def test_update_model_task_parks_and_resumes_behind_the_gate(monkeypatch):
     """The in-place update rides the same durable gate: task → propose
     (litellm.update_model) → approve → resume under the litellm-manager
-    definition. dry_run is pinned, so no real proxy call happens."""
+    definition. fake_world answers the approval, so no real proxy call happens."""
     from central_command.gateway import gateway
 
+    log = fake_world(monkeypatch)
     model = make_litellm_update_model()
     out = await run_task(
         "litellm-manager",
@@ -1055,6 +1052,7 @@ async def test_update_model_task_parks_and_resumes_behind_the_gate():
     )
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
+    assert [c for c, _a, _p in log] == ["litellm.update_model"]
 
 
 # --- litellm_credstore: LiteLLM's OWN credential store, decrypted (2026-08-20) -

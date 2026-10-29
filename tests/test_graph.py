@@ -174,7 +174,6 @@ def _fake_enqueue(calls: list):
 async def test_executor_stamps_trust_and_approver_into_the_episode(monkeypatch):
     calls = []
     monkeypatch.setattr(graphiti_ingest, "enqueue", _fake_enqueue(calls))
-    monkeypatch.setattr(settings, "executor_mode", "live")
 
     outcome = await executor.execute([_GRAPH_ACTION], approver="human:lee", source_refs=["x"])
 
@@ -210,8 +209,7 @@ async def test_sc1_one_approval_commits_jira_and_graph(monkeypatch):
         jira_calls.append((issue_key, due_date))
 
     monkeypatch.setattr(executor.jira, "set_due_date", fake_due)
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
 
     model = make_sc1_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)

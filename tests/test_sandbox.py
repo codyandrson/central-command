@@ -518,11 +518,11 @@ def test_import_is_credential_free():
                     pytest.fail(f"runner.py imports banned module {alias.name!r}")
 
 
-# --- tools: demo mode is a pure stub, no network ------------------------------
+# --- tools: the test model is a pure stub, no network ------------------------------
 
 
-async def test_sandbox_tools_stub_in_demo_mode(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_sandbox_tools_stub_in_test_model(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     ctx = _Ctx()
     assert "test model" in (await tools_mod.sandbox_exec(ctx, "echo hi")).lower()
     assert "test model" in (await tools_mod.sandbox_write_file(ctx, "a.txt", "x")).lower()
@@ -555,7 +555,7 @@ def _patch_runner_http(monkeypatch, handler):
 
 
 async def test_sandbox_exec_round_trips_through_the_runner(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
 
     def handler(request):
         if request.url.path == "/sessions":
@@ -571,7 +571,7 @@ async def test_sandbox_exec_round_trips_through_the_runner(monkeypatch):
 
 
 async def test_sandbox_exec_degrades_when_the_runner_is_down(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
 
     def handler(request):
         raise httpx.ConnectError("connection refused")
@@ -586,7 +586,7 @@ async def test_sandbox_exec_degrades_when_the_runner_is_down(monkeypatch):
 
 
 async def test_sandbox_write_and_read_round_trip(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     store = {}
 
     def handler(request):
@@ -609,7 +609,7 @@ async def test_sandbox_write_and_read_round_trip(monkeypatch):
 
 
 async def test_sandbox_reset_calls_delete_without_creating_first(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     calls = []
 
     def handler(request):
@@ -627,7 +627,7 @@ async def test_sandbox_reset_calls_delete_without_creating_first(monkeypatch):
 
 @needs_pg
 async def test_sandbox_copy_in_allow_deny_revoked_and_prefix(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     agent_id = "sandboxtest-agent"
     await repo.upsert_agent(agent_id, "Sandbox Test", "sandboxtest", "test")
     try:

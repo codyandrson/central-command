@@ -31,8 +31,7 @@ def _sid() -> str:
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
     """Nothing here may reach a real model — `_handle_document` resolves one."""
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 @pytest.fixture()

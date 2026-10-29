@@ -132,7 +132,6 @@ def proxy(monkeypatch):
         seen["catalog_calls"].append((credential_name, provider_model))
         return MERCURY if credential_name == "Kilo.ai" else None
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
     monkeypatch.setattr(executor.litellm_client, "probe_model", fake_probe)

@@ -221,7 +221,7 @@ class _FakeMCPToolset:
 
 @needs_pg
 async def test_toolset_split_by_effective_gate(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr("pydantic_ai.mcp.MCPToolset", _FakeMCPToolset)
 
     server_id = "mg-svr-e"
@@ -245,8 +245,8 @@ async def test_toolset_split_by_effective_gate(monkeypatch):
         proposer_toolsets = [t for t in toolsets if not isinstance(t, _FakeFilteredToolset)]
         assert len(proposer_toolsets) == 1
 
-        # Demo mode: nothing attaches at all.
-        monkeypatch.setattr(settings, "demo_mode", True)
+        # Test model: nothing attaches at all.
+        monkeypatch.setattr(settings, "test_model", True)
         assert await packs.mcp_toolsets_for(agent_id, [f"mcp:{server_id}"]) == []
     finally:
         await _cleanup_mcp_server(server_id)
@@ -263,15 +263,15 @@ def test_propose_mcp_tool_call_is_non_advisory_and_a_propose_tool():
 # --- propose_mcp_tool_call: validation, incl. the ungated-tool refusal -----
 
 
-async def test_propose_mcp_tool_call_demo_mode_is_a_stub(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_propose_mcp_tool_call_test_model_is_a_stub(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     out = await tools_mod.propose_mcp_tool_call(_Ctx(), "s", "t", {}, "why")
     assert "test model" in out
 
 
 @needs_pg
 async def test_propose_mcp_tool_call_refuses_unknown_tool(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     server_id = "mg-svr-f"
     await _insert_mcp_server(server_id)
     try:
@@ -287,7 +287,7 @@ async def test_propose_mcp_tool_call_refuses_unknown_tool(monkeypatch):
 async def test_propose_mcp_tool_call_refuses_ungated_tool_and_tells_it_to_call_directly(
     monkeypatch,
 ):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     server_id = "mg-svr-g"
     agent_id = "mg-agent-tester"
     await _insert_mcp_server(server_id)
@@ -308,7 +308,7 @@ async def test_propose_mcp_tool_call_refuses_ungated_tool_and_tells_it_to_call_d
 
 @needs_pg
 async def test_propose_mcp_tool_call_captures_expected_proposal_shape(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     server_id = "mg-svr-h"
     agent_id = "mg-agent-tester2"
     await _insert_mcp_server(server_id)
@@ -374,7 +374,6 @@ async def test_tool_call_refuses_when_server_not_registered(monkeypatch):
     server_id = "mg-svr-i"
     await _insert_mcp_server(server_id, status="deployed", litellm_alias=None)
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         with pytest.raises(executor.ExecutionFailed, match="not registered"):
             await executor.execute(
                 [_tool_call_action(server_id)], approver="human:lee", source_refs=[],
@@ -388,7 +387,6 @@ async def test_tool_call_refuses_unknown_tool_at_execute_time(monkeypatch):
     server_id = "mg-svr-j"
     await _insert_mcp_server(server_id)
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         with pytest.raises(executor.ExecutionFailed, match="not a known tool"):
             await executor.execute(
                 [_tool_call_action(server_id, "no-such-tool")],
@@ -404,7 +402,6 @@ async def test_tool_call_happy_path_dispatches_and_caps_result(monkeypatch):
     await _insert_mcp_server(server_id)
     try:
         await repo.upsert_mcp_tools(server_id, [{"name": "gated_tool", "description": ""}])
-        monkeypatch.setattr(settings, "executor_mode", "live")
         seen = {}
 
         async def fake_call(server_name, tool_name, arguments):
@@ -437,7 +434,6 @@ async def test_registration_discovery_failure_is_non_fatal(monkeypatch):
     server_id = "mg-svr-l"
     await _insert_mcp_server(server_id, status="deployed", litellm_alias=None)
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
 
         async def fake_register(server_name, alias, url, transport="http", description=None):
             return {"ok": True, "server": {"litellm_server_id": "uuid-disc"}}
@@ -472,7 +468,6 @@ async def test_registration_discovery_success_upserts_tools(monkeypatch):
     server_id = "mg-svr-m"
     await _insert_mcp_server(server_id, status="deployed", litellm_alias=None)
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
 
         async def fake_register(server_name, alias, url, transport="http", description=None):
             return {"ok": True, "server": {"litellm_server_id": "uuid-disc2"}}

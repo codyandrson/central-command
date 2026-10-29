@@ -18,12 +18,12 @@ from central_command.runtime import jira_expert
 from central_command.runtime.run import run_task
 from central_command.runtime.spike_model import make_jira_task_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 def _tool_names(agent) -> set[str]:
@@ -45,7 +45,8 @@ async def test_the_tasked_expert_holds_its_propose_and_read_tools():
 
 
 @needs_pg
-async def test_direct_task_parks_a_proposal_behind_the_gate():
+async def test_direct_task_parks_a_proposal_behind_the_gate(monkeypatch):
+    log = fake_world(monkeypatch)
     model = make_jira_task_model()
     out = await run_task("jira-expert", "Add a dependency note to TASKS-12.", model=model)
     assert out["deferred"] is True
@@ -60,6 +61,7 @@ async def test_direct_task_parks_a_proposal_behind_the_gate():
     result = await gateway.approve_and_execute(out["session_id"], out["proposal_id"], model=model)
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
+    assert [c for c, _a, _p in log] == ["jira.add_comment"]
 
 
 @needs_pg
@@ -128,7 +130,6 @@ async def test_link_and_transition_handlers_call_the_facade(monkeypatch):
         calls.append(("transition", issue_key, transition))
         return {"ok": True}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.jira, "link_issues", fake_link)
     monkeypatch.setattr(executor.jira, "transition_issue", fake_transition)
 
@@ -190,7 +191,6 @@ async def test_the_2026_09_29_draft_executes_without_a_priority(monkeypatch):
         seen.append((issue_key, named))
         return {"ok": True}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.jira, "update_attributes", fake_update)
     out = await executor.execute(
         [Action(capability="jira.update_attributes",
@@ -212,7 +212,6 @@ async def test_delete_issue_needs_a_reason_and_records_what_was_deleted(monkeypa
         return {"issue": {"issue_key": issue_key, "summary": "Tri Peaks quote",
                           "status": "To Do", "labels": [], "due_date": None}}
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setattr(executor.jira, "delete_issue", fake_delete)
 
     def act(args):

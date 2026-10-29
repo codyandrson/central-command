@@ -207,7 +207,7 @@ async def test_create_and_sweep_folds_only_unprocessed_matches(seeded):
 
 @needs_pg
 async def test_dispatcher_folds_a_matching_claim_without_a_run(seeded, monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     crit, exc = mail_rules.validate(_CRIT, _EXC)
     await repo.create_mail_rule(crit, exc, mail_rules.describe(crit, exc), "test-mr: claim", "operator")
 
@@ -248,7 +248,6 @@ async def test_dispatcher_folds_a_matching_claim_without_a_run(seeded, monkeypat
 
 @needs_pg
 async def test_executor_revalidates_and_sweeps(seeded, monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")
     text = await executor._mail_create_rule(
         {"criteria": _CRIT, "exceptions": _EXC, "reason": "test-mr: executor",
          "description": "an agent-written description that must be re-derived",

@@ -179,30 +179,30 @@ async def test_client_fails_loud_when_unconfigured(monkeypatch):
         await litellm_client.deregister_mcp_server("id")
 
 
-# --- propose-side: demo stub, validation refusals, parked shape -------------
+# --- propose-side: test-model stub, validation refusals, parked shape -------------
 
 
-async def test_propose_register_demo_mode_is_a_stub(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_propose_register_test_model_is_a_stub(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     out = await tools_mod.propose_mcp_register(_Ctx(), "my-server", "ready to register")
     assert "test model" in out
 
 
 @pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
 async def test_propose_register_bad_server_ids_are_refused(monkeypatch, server_id):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_register(_Ctx(), server_id, "test")
     assert "refused" in out
 
 
 async def test_propose_register_bad_transport_is_refused(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_register(_Ctx(), "myserver", "test", transport="grpc")
     assert "refused" in out
 
 
 async def test_propose_register_captures_the_expected_proposal_shape(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     with pytest.raises(CallDeferred) as exc:
         await tools_mod.propose_mcp_register(_Ctx(), "myserver", "deploy is live")
     proposal = exc.value.metadata["proposal"]
@@ -239,7 +239,6 @@ async def test_register_refuses_when_not_yet_deployed(monkeypatch):
     server_id = "not-deployed-yet"
     await _insert_mcp_server(server_id, "built")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         with pytest.raises(executor.ExecutionFailed, match="not deployed yet"):
             await executor.execute(
                 [_action(server_id)], approver="human:lee", source_refs=[],
@@ -250,7 +249,6 @@ async def test_register_refuses_when_not_yet_deployed(monkeypatch):
 
 @needs_pg
 async def test_register_refuses_with_no_row_at_all(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")
     with pytest.raises(executor.ExecutionFailed, match="not deployed yet"):
         await executor.execute(
             [_action("no-such-server")], approver="human:lee", source_refs=[],
@@ -262,7 +260,6 @@ async def test_register_refuses_bad_transport_at_execute_time(monkeypatch):
     server_id = "bad-transport"
     await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         with pytest.raises(executor.ExecutionFailed, match="transport"):
             await executor.execute(
                 [_action(server_id, transport="grpc")], approver="human:lee", source_refs=[],
@@ -279,7 +276,6 @@ async def test_register_happy_path_url_construction_and_row_update(monkeypatch):
     server_id = "register-happy"
     await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         calls = []
 
         async def fake_register(server_name, alias, url, transport="http", description=None):
@@ -329,7 +325,6 @@ async def test_register_is_idempotent_when_already_registered(monkeypatch):
         server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-existing",
     )
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
 
         async def _boom(*a, **k):
             raise AssertionError("must not double-create a registration")
@@ -444,7 +439,6 @@ async def test_register_grants_the_shared_key_access_to_the_new_server(monkeypat
     server_id = "register-keygrant"
     await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "llm_api_key", "sk-shared")
 
         async def fake_register(server_name, alias, url, transport="http", description=None):
@@ -477,7 +471,6 @@ async def test_register_stands_when_key_grant_fails_but_says_so_loudly(monkeypat
     server_id = "register-keyfail"
     await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
 
         async def fake_register(server_name, alias, url, transport="http", description=None):
             return {"ok": True, "server": {"litellm_server_id": "uuid-kf"}}

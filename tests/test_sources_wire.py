@@ -38,7 +38,7 @@ async def _async(value):
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 @pytest.fixture()

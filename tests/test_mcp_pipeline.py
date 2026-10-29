@@ -87,37 +87,37 @@ def test_mcp_propose_pack_carries_all_three_tools_and_capabilities():
         assert "mcp-propose" not in names, f"{agent_id} should not default-hold it"
 
 
-# --- propose-side: demo stub, validation refusals ----------------------------
+# --- propose-side: test-model stub, validation refusals ----------------------------
 
 
-async def test_propose_build_demo_mode_is_a_stub(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_propose_build_test_model_is_a_stub(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     out = await tools_mod.propose_mcp_build(_Ctx(), "my-server", "ready to build")
     assert "test model" in out
 
 
-async def test_propose_deploy_demo_mode_is_a_stub(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_propose_deploy_test_model_is_a_stub(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     out = await tools_mod.propose_mcp_deploy(_Ctx(), "my-server", "ready to deploy")
     assert "test model" in out
 
 
 @pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
 async def test_propose_build_bad_server_ids_are_refused(monkeypatch, server_id):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_build(_Ctx(), server_id, "test")
     assert "refused" in out
 
 
 @pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
 async def test_propose_deploy_bad_server_ids_are_refused(monkeypatch, server_id):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_deploy(_Ctx(), server_id, "test")
     assert "refused" in out
 
 
 async def test_propose_build_captures_the_expected_proposal_shape(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     with pytest.raises(CallDeferred) as exc:
         await tools_mod.propose_mcp_build(_Ctx(), "myserver", "source review passed")
     proposal = exc.value.metadata["proposal"]
@@ -129,7 +129,7 @@ async def test_propose_build_captures_the_expected_proposal_shape(monkeypatch):
 
 
 async def test_propose_deploy_captures_the_expected_proposal_shape(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     with pytest.raises(CallDeferred) as exc:
         await tools_mod.propose_mcp_deploy(_Ctx(), "myserver", "image is built")
     proposal = exc.value.metadata["proposal"]
@@ -200,7 +200,6 @@ async def test_build_refuses_when_not_yet_synced(monkeypatch):
     server_id = "not-synced-yet"
     await _insert_mcp_server(server_id, "proposed")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         with pytest.raises(executor.ExecutionFailed, match="not passed sync review"):
             await executor.execute(
                 [_action("mcp.build_image@v1", server_id)],
@@ -212,7 +211,6 @@ async def test_build_refuses_when_not_yet_synced(monkeypatch):
 
 @needs_pg
 async def test_build_refuses_with_no_row_at_all(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")
     with pytest.raises(executor.ExecutionFailed, match="not passed sync review"):
         await executor.execute(
             [_action("mcp.build_image@v1", "no-such-server")],
@@ -225,7 +223,6 @@ async def test_build_refuses_missing_dockerfile(monkeypatch, tmp_path):
     server_id = "no-dockerfile"
     await _insert_mcp_server(server_id, "synced")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
         monkeypatch.setattr(settings, "mcp_build_host", "build-host.example")
         (tmp_path / "servers" / server_id).mkdir(parents=True)
@@ -243,7 +240,6 @@ async def test_build_refuses_with_no_build_host(monkeypatch, tmp_path):
     server_id = "no-build-host"
     await _insert_mcp_server(server_id, "synced")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
         monkeypatch.setattr(settings, "mcp_build_host", "")
         server_dir = tmp_path / "servers" / server_id
@@ -263,7 +259,6 @@ async def test_deploy_refuses_when_not_yet_built(monkeypatch):
     server_id = "not-built-yet"
     await _insert_mcp_server(server_id, "synced")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         with pytest.raises(executor.ExecutionFailed, match="not built yet"):
             await executor.execute(
                 [_action("mcp.server_deploy@v1", server_id)],
@@ -281,7 +276,6 @@ async def test_deploy_refuses_with_no_kubeconfig(monkeypatch):
         image_ref="docker.io/library/cc-mcp-no-kubeconfig:abc", digest="sha256:abc",
     )
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "")
         with pytest.raises(executor.ExecutionFailed, match="deploy kubeconfig not configured"):
             await executor.execute(
@@ -304,7 +298,6 @@ async def test_build_happy_path_exact_ssh_tar_podman_shapes_and_row_update(monke
     server_id = "build-happy"
     await _insert_mcp_server(server_id, "synced")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
         monkeypatch.setattr(settings, "mcp_build_host", "chromebox")
         server_dir = tmp_path / "servers" / server_id
@@ -361,7 +354,6 @@ async def test_build_refuses_when_import_verify_is_a_near_miss_not_an_exact_matc
     server_id = "build-near-miss"
     await _insert_mcp_server(server_id, "synced")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
         monkeypatch.setattr(settings, "mcp_build_host", "chromebox")
         server_dir = tmp_path / "servers" / server_id
@@ -402,7 +394,6 @@ async def test_deploy_happy_path_exact_kubectl_argv_and_stdin_and_row_update(mon
     image_ref = f"docker.io/library/cc-mcp-{server_id}:abc123"
     await _insert_mcp_server(server_id, "built", image_ref=image_ref, digest="sha256:abc")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/tmp/fake.kubeconfig")
 
         calls: list[dict] = []

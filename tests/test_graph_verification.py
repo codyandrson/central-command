@@ -57,7 +57,7 @@ def _delta(*, edges=True, embedded=True, invalidated=False, fact="Ada leads the 
 
 @pytest.fixture(autouse=True)
 async def base(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "graph_auditor_enabled", True)
     monkeypatch.setattr(settings, "graph_auditor_mode", "shadow")
 
@@ -335,7 +335,7 @@ async def test_invalidations_always_park_and_carry_their_own_class(monkeypatch):
 
 async def test_active_mode_flag_parks(monkeypatch):
     monkeypatch.setattr(settings, "graph_auditor_mode", "active")
-    # The demo graph auditor flags on "unrelated" in the rendered delta.
+    # The test-model graph auditor flags on "unrelated" in the rendered delta.
     _graph(monkeypatch, delta=_delta(fact="Zed painted an unrelated fence"))
     row = await _row()
     outcome = await graph_auditor.verify_one(row)

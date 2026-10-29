@@ -328,7 +328,6 @@ async def test_the_executor_refuses_a_malformed_catalog_tag_before_it_runs(monke
     from central_command.contract import Action, Reversibility
     from central_command.gateway import executor
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     bad = Action(capability="catalog.tag", arguments={"document_id": "doc_1"},
                  target_ref={"system": "catalog", "id": "doc_1"},
                  reversibility=Reversibility.reversible)

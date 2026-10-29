@@ -98,11 +98,11 @@ async def test_a_scan_is_refused_rather_than_delivered_as_an_empty_document(monk
     returns ''. Anything that checks only for an exception ships a confident
     answer about a document nobody read.
 
-    demo_mode pinned since the OCR fallback (2026-08-19): with a live .env the
+    test_model pinned since the OCR fallback (2026-08-19): with a live .env the
     session model now DECLARES vision, and an unpinned test would OCR this scan
-    against the real proxy. Demo mode is the no-fallback world this test is
+    against the real proxy. The test model is the no-fallback world this test is
     about."""
-    monkeypatch.setattr(attachments.settings, "demo_mode", True)
+    monkeypatch.setattr(attachments.settings, "test_model", True)
     with pytest.raises(attachments.AttachmentRefused) as e:
         await attachments.prepare(
             [_att("contract.pdf", "application/pdf", _scanned_pdf())],
@@ -133,7 +133,7 @@ async def test_markitdown_really_does_return_nothing_for_a_scan():
 
 
 def _vision_yes(monkeypatch):
-    monkeypatch.setattr(attachments.settings, "demo_mode", False)
+    monkeypatch.setattr(attachments.settings, "test_model", False)
     from central_command.integrations import litellm
 
     async def _yes(model_id):
@@ -213,7 +213,7 @@ async def test_a_transcription_error_refuses_rather_than_delivering_half(monkeyp
 
 
 async def test_a_scan_on_a_text_only_model_keeps_the_plain_refusal(monkeypatch):
-    monkeypatch.setattr(attachments.settings, "demo_mode", False)
+    monkeypatch.setattr(attachments.settings, "test_model", False)
     from central_command.integrations import litellm
 
     async def _no(model_id):
@@ -230,7 +230,7 @@ async def test_a_scan_on_a_text_only_model_keeps_the_plain_refusal(monkeypatch):
 
 
 async def test_an_image_is_refused_when_the_model_cannot_read_it(monkeypatch):
-    monkeypatch.setattr(attachments.settings, "demo_mode", False)
+    monkeypatch.setattr(attachments.settings, "test_model", False)
 
     async def _no_vision(model_id):
         return False
@@ -250,7 +250,7 @@ async def test_an_image_is_refused_when_the_model_cannot_read_it(monkeypatch):
 async def test_unknown_capability_refuses_rather_than_assuming_yes(monkeypatch):
     """'We cannot tell' is not 'yes'. An unreachable proxy must refuse, not
     fall through and let the image be dropped downstream."""
-    monkeypatch.setattr(attachments.settings, "demo_mode", False)
+    monkeypatch.setattr(attachments.settings, "test_model", False)
     from central_command.integrations import litellm
 
     async def _boom(model_id):
@@ -266,8 +266,8 @@ async def test_unknown_capability_refuses_rather_than_assuming_yes(monkeypatch):
     assert "could not check" in e.value.message
 
 
-async def test_demo_mode_refuses_images_without_asking_the_proxy(monkeypatch):
-    monkeypatch.setattr(attachments.settings, "demo_mode", True)
+async def test_test_model_refuses_images_without_asking_the_proxy(monkeypatch):
+    monkeypatch.setattr(attachments.settings, "test_model", True)
     with pytest.raises(attachments.AttachmentRefused) as e:
         await attachments.prepare(
             [_att("shot.png", "image/png", PNG_1PX)], model_id=None
@@ -278,7 +278,7 @@ async def test_demo_mode_refuses_images_without_asking_the_proxy(monkeypatch):
 async def test_one_bad_file_refuses_the_WHOLE_send(monkeypatch):
     """Partial delivery is the failure mode dressed as helpfulness: the operator
     is told nothing and the agent answers as though it had everything."""
-    monkeypatch.setattr(attachments.settings, "demo_mode", False)
+    monkeypatch.setattr(attachments.settings, "test_model", False)
     from central_command.integrations import litellm
 
     async def _no_vision(model_id):
@@ -440,7 +440,7 @@ async def _refusing_send(monkeypatch, attachment: dict):
     monkeypatch.setattr(nerve_gateway, "_send_target", _target)
     monkeypatch.setattr(nerve_gateway.events, "emit", _emit)
     monkeypatch.setattr(attachments, "session_model_id", _model_id)
-    monkeypatch.setattr(attachments.settings, "demo_mode", False)
+    monkeypatch.setattr(attachments.settings, "test_model", False)
 
     from fastapi import HTTPException
 
@@ -459,7 +459,7 @@ async def test_a_refused_attachment_starts_no_turn_and_mutates_nothing(monkeypat
     frame owed to the cockpit. A turn that starts and then dies owes the spinner
     an END frame — the 2026-07-23 "still thinking" incident — and the cheapest
     way to owe nothing is to fail before the turn exists."""
-    # Pin the capability answer (not demo_mode — `_refusing_send` re-pins that
+    # Pin the capability answer (not test_model — `_refusing_send` re-pins that
     # False): with a live .env the model declares vision and the OCR fallback
     # would reach the real proxy. A text-only answer keeps this the refusal
     # world the test is about.

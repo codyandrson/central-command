@@ -51,12 +51,11 @@ async def _explode(*a, **kw):
 
 @pytest.fixture(autouse=True)
 def configured(monkeypatch):
-    # Pinned demo mode everywhere a model is reachable (a real key in .env
+    # Pinned test model everywhere a model is reachable (a real key in .env
     # would otherwise make the "offline" suite spend money), and a token so the
     # not-configured short-circuit is opted into per-test rather than by
     # whatever the dev box has in .env.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "calendar_facade_token", "test-token")
     # Unlimited (0) contact budget by default — the throttle has its own tests
@@ -437,7 +436,6 @@ def write_facade(monkeypatch):
 
     fake = _WriteFacade()
     monkeypatch.setattr(calendar_facade, "_call", fake._call)
-    monkeypatch.setattr(settings, "executor_mode", "live")
     return fake, executor
 
 

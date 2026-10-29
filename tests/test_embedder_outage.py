@@ -94,7 +94,6 @@ async def test_the_executor_flags_an_embedder_outage_with_its_dependencies(
 ):
     from central_command.contract import Action, Reversibility
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     action = Action(capability="graph.create_node",
                     arguments={"name": "Jane Doe", "group_id": "central_command",
                                "summary": "Works at Example Co"},
@@ -111,8 +110,7 @@ async def test_the_executor_flags_an_embedder_outage_with_its_dependencies(
 async def test_a_create_node_proposal_parks_retry_pending_and_writes_nothing(
     embedder_down, writes, monkeypatch,
 ):
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     pid = "prop_emb_" + uuid.uuid4().hex[:10]
     sid = "sess_emb_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
@@ -172,7 +170,7 @@ async def test_a_ledger_item_whose_freeze_check_meets_the_outage_is_released(
 ):
     import json
 
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "semantic_freeze_enabled", True)
     ran: list[str] = []
 

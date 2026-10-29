@@ -56,14 +56,14 @@ def test_mcp_propose_pack_holds_the_whole_pipeline_ungranted_by_default():
         assert "mcp-propose" not in names, f"{agent_id} should not default-hold it"
 
 
-# --- propose-side: demo stub, validation refusals ----------------------------
+# --- propose-side: test-model stub, validation refusals ----------------------------
 
 
-async def test_demo_mode_is_a_stub(monkeypatch):
+async def test_test_model_is_a_stub(monkeypatch):
     async def _boom(*a, **k):
-        raise AssertionError("must not touch the sandbox in demo mode")
+        raise AssertionError("must not touch the sandbox in test model")
 
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(sandbox_client, "create_session", _boom)
     out = await tools_mod.propose_mcp_sync_source(_Ctx(), "my-server", ["a.py"], "test")
     assert "test model" in out
@@ -74,20 +74,20 @@ async def test_demo_mode_is_a_stub(monkeypatch):
     "has_underscore", "",
 ])
 async def test_bad_server_ids_are_refused(monkeypatch, server_id):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_sync_source(_Ctx(), server_id, ["a.py"], "test")
     assert "refused" in out
 
 
 @pytest.mark.parametrize("paths", [["../escape.py"], ["/abs/path.py"], []])
 async def test_bad_paths_are_refused(monkeypatch, paths):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_sync_source(_Ctx(), "myserver", paths, "test")
     assert "refused" in out
 
 
 async def test_truncated_read_refuses_rather_than_syncing_a_partial_file(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
 
     async def fake_create_session(agent_id, session_id):
@@ -106,7 +106,7 @@ async def test_truncated_read_refuses_rather_than_syncing_a_partial_file(monkeyp
 
 
 async def test_over_cap_bytes_are_refused(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
     monkeypatch.setattr(settings, "mcp_sync_max_bytes", 10)
 
@@ -132,7 +132,7 @@ async def test_propose_captures_exact_content_and_a_diff_into_the_proposal(monke
     code reading the sandbox — never authored by the model. This is what makes
     `mcp.sync_source` safe to review as a diff and safe for the Executor to
     trust without re-reading the sandbox."""
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     root = tmp_path / "servers"
     monkeypatch.setattr(settings, "mcp_servers_root", str(root))
     # An existing file in the repo tree, so the diff isn't just "all-new".
@@ -220,7 +220,6 @@ async def test_executor_writes_exactly_the_captured_bytes(monkeypatch, tmp_path)
     _init_scratch_repo(tmp_path)
     _scratch_git(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
-    monkeypatch.setattr(settings, "executor_mode", "live")
 
     files = [
         {"path": "main.py", "content": "print('hi')\n"},
@@ -250,7 +249,6 @@ async def test_dirty_tree_refuses_to_mix_with_operator_work(monkeypatch, tmp_pat
     _init_scratch_repo(tmp_path)
     _scratch_git(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
-    monkeypatch.setattr(settings, "executor_mode", "live")
 
     server_dir = tmp_path / "servers" / "exec-server"
     server_dir.mkdir(parents=True)
@@ -270,7 +268,6 @@ async def test_bad_server_id_and_path_refused_mechanically_at_execute_time(monke
     even though the runtime tool already validated the same shape."""
     _init_scratch_repo(tmp_path)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
-    monkeypatch.setattr(settings, "executor_mode", "live")
 
     with pytest.raises(executor.ExecutionFailed):
         await executor.execute(
@@ -290,7 +287,6 @@ async def test_mcp_server_row_lands_synced_after_execution(monkeypatch, tmp_path
     _init_scratch_repo(tmp_path)
     _scratch_git(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
-    monkeypatch.setattr(settings, "executor_mode", "live")
     server_id = "pgtest-server"
     try:
         await executor.execute(

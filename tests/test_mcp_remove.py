@@ -84,24 +84,24 @@ def test_propose_mcp_remove_is_a_durable_propose_tool_and_non_advisory():
     assert "propose_mcp_remove" in packs.NON_ADVISORY_TOOLS
 
 
-# --- propose-side: demo stub, validation refusals, parked shape -------------
+# --- propose-side: test-model stub, validation refusals, parked shape -------------
 
 
-async def test_propose_remove_demo_mode_is_a_stub(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_propose_remove_test_model_is_a_stub(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     out = await tools_mod.propose_mcp_remove(_Ctx(), "my-server", "no longer needed")
     assert "test model" in out
 
 
 @pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
 async def test_propose_remove_bad_server_ids_are_refused(monkeypatch, server_id):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_remove(_Ctx(), server_id, "test")
     assert "refused" in out
 
 
 async def test_propose_remove_captures_the_expected_proposal_shape(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     with pytest.raises(CallDeferred) as exc:
         await tools_mod.propose_mcp_remove(_Ctx(), "myserver", "decommissioning")
     proposal = exc.value.metadata["proposal"]
@@ -136,7 +136,6 @@ async def test_dry_run_remove_writes_nothing_and_touches_no_db_or_proxy(monkeypa
 
 @needs_pg
 async def test_remove_refuses_with_no_row_at_all(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")
     with pytest.raises(executor.ExecutionFailed, match="missing or already retired"):
         await executor.execute(
             [_action("no-such-server")], approver="human:lee", source_refs=[],
@@ -148,7 +147,6 @@ async def test_remove_refuses_when_already_retired(monkeypatch):
     server_id = "already-retired"
     await _insert_mcp_server(server_id, "retired", namespace="cc-mcp")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         with pytest.raises(executor.ExecutionFailed, match="missing or already retired"):
             await executor.execute(
                 [_action(server_id)], approver="human:lee", source_refs=[],
@@ -162,7 +160,6 @@ async def test_remove_refuses_with_no_kubeconfig(monkeypatch):
     server_id = "no-kubeconfig"
     await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "")
         with pytest.raises(executor.ExecutionFailed, match="kubeconfig not configured"):
             await executor.execute(
@@ -182,7 +179,6 @@ async def test_remove_happy_path_deletes_deregisters_and_retires(monkeypatch):
         server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-happy",
     )
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
 
         run_calls = []
@@ -237,7 +233,6 @@ async def test_remove_pod_already_gone_still_succeeds(monkeypatch):
     server_id = "pod-already-gone"
     await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
 
         async def fake_run(cmd=None, *, shell_cmd=None, stdin=None, cwd=None, timeout=600.0):
@@ -266,7 +261,6 @@ async def test_remove_never_registered_skips_deregistration_cleanly(monkeypatch)
     server_id = "never-registered"
     await _insert_mcp_server(server_id, "built")  # never even deployed
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
 
         async def fake_run(cmd=None, *, shell_cmd=None, stdin=None, cwd=None, timeout=600.0):
@@ -355,7 +349,6 @@ async def test_remove_happy_path_cleans_up_key_permission(monkeypatch):
         server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-kg",
     )
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
         monkeypatch.setattr(settings, "llm_api_key", "sk-shared")
 
@@ -395,7 +388,6 @@ async def test_remove_stands_when_key_cleanup_fails_but_says_so_loudly(monkeypat
         server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-kf",
     )
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
 
         async def fake_run(cmd=None, *, shell_cmd=None, stdin=None, cwd=None, timeout=600.0):
@@ -432,7 +424,6 @@ async def test_remove_never_registered_skips_key_cleanup_too(monkeypatch):
     server_id = "never-registered-nokey"
     await _insert_mcp_server(server_id, "built")  # never even deployed, no litellm_alias
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
 
         async def fake_run(cmd=None, *, shell_cmd=None, stdin=None, cwd=None, timeout=600.0):
@@ -465,7 +456,6 @@ async def test_remove_already_gone_from_proxy_skips_deregistration(monkeypatch):
         server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-stale",
     )
     try:
-        monkeypatch.setattr(settings, "executor_mode", "live")
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
 
         async def fake_run(cmd=None, *, shell_cmd=None, stdin=None, cwd=None, timeout=600.0):

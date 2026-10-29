@@ -70,7 +70,7 @@ class Harness:
 
 @pytest.fixture
 def h(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     (tmp_path / "deploy/shared/litellm").mkdir(parents=True)
     (tmp_path / CONFIG).write_text(OLD_CONFIG)
     (tmp_path / PREFS).write_text(OLD_PREFS)
