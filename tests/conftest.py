@@ -13,6 +13,7 @@ them afterwards.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 from pathlib import Path
 
@@ -406,6 +407,13 @@ def pytest_runtest_protocol(item, nextitem):
         installer_source.CURRENT = None
 
 
+# The test database is nobody's record and is recreated every run, so a commit
+# need not wait for its WAL flush (R21, 2026-10-24: the suite on the Pi). A
+# per-database default, so every pooled connection opened afterwards gets it;
+# only ever issued against TEST_DB, never the database the app runs on.
+_UNSYNCHRONISED = f'alter database "{TEST_DB}" set synchronous_commit = off'
+
+
 def _switch_to_test_database() -> None:
     """Point the whole suite at a dedicated database, creating it if needed.
 
@@ -415,10 +423,26 @@ def _switch_to_test_database() -> None:
     review. Tests must never write into the database someone is operating on.
     """
     base = settings.database_url
-    if base.rsplit("/", 1)[-1] == TEST_DB:
-        return
     admin_url = base.rsplit("/", 1)[0] + "/postgres"
     test_url = base.rsplit("/", 1)[0] + "/" + TEST_DB
+
+    if base.rsplit("/", 1)[-1] == TEST_DB:
+        # The URL already names this checkout's test database (it is not
+        # recreated here): it still gets the unsynchronised default, so both
+        # paths run the suite the same way. The name check above is what
+        # keeps this ALTER off any database but the throwaway one.
+        async def unsynchronise() -> None:
+            try:
+                conn = await asyncpg.connect(admin_url)
+            except Exception:  # noqa: BLE001 — no Postgres at all; DB tests will skip
+                return
+            try:
+                await conn.execute(_UNSYNCHRONISED)
+            finally:
+                await conn.close()
+
+        asyncio.run(unsynchronise())
+        return
 
     async def prepare() -> bool:
         try:
@@ -435,6 +459,7 @@ def _switch_to_test_database() -> None:
             # database is nobody's record; it restarts from zero.
             await conn.execute(f'drop database if exists "{TEST_DB}" with (force)')
             await conn.execute(f'create database "{TEST_DB}"')
+            await conn.execute(_UNSYNCHRONISED)
         finally:
             await conn.close()
 
@@ -504,12 +529,108 @@ def no_live_probes(monkeypatch):
     monkeypatch.setattr(probes, "PROBES", {name: _up for name in probes.PROBES})
 
 
+# The one pool door, captured before any test hooks it: every hook calls THIS,
+# so a hook a test's own monkeypatch.undo() puts back after teardown (it saw the
+# hook when it patched) passes straight through and never chains onto another.
+_REAL_GET_POOL = repo._get_pool
+
+# Set inside the settle's own task, so the settle's repo._conn() -> _get_pool
+# reaches the real door instead of waiting on the lock it holds.
+_settling: contextvars.ContextVar[bool] = contextvars.ContextVar("_settling", default=False)
+
+# A test that plants rows over its OWN connection (asyncpg.connect, which
+# bypasses the pool door) before its first pool request would have them
+# settled by the lazy hook; it opts back into the eager settle with this.
+eager_settle = pytest.mark.eager_settle
+
+
+async def _settle_queue(conn) -> None:
+    await conn.execute(
+        f"update work_item set state = '{PARKED}' where state = 'UNPROCESSED'"
+    )
+    # The retry sweep persists probe results (a global table, one row per
+    # dependency): a test that took a dependency down must not leave the
+    # next test re-probing it. The test database is throwaway.
+    await conn.execute("delete from dependency_probe")
+    # Parks left behind by EARLIER tests. The retry sweeps are GLOBAL
+    # worklists and `make_parks_due()` backdates every park in the
+    # database, so a proposal, session or task another file left parked
+    # would be driven by THIS test's sweep through its spies — invisible
+    # under `-n 4` (the files land on different workers), fatal in the
+    # release gate's sequential run. Settle them before the test parks its
+    # own; the test database is throwaway. Terminal states, never deletes
+    # (sessions and proposals are never destroyed), and a cancelled task
+    # so the startup relaunch sweep cannot mistake it for a never-started one.
+    await conn.execute("update proposal set status = 'FAILED', retry_state = null "
+                       "where status = 'RETRY_PENDING'")
+    await conn.execute("update session set status = 'DONE' "
+                       "where status = 'AWAITING_RESUME'")
+    # An orchestrator parked on its children (a test's planted row, often
+    # with no `task_id` in its payload) is picked up by the next test's
+    # `orchestration.resume_sweep()` the same way.
+    await conn.execute("update session set status = 'DONE' "
+                       "where status = 'AWAITING_AGENTS'")
+    await conn.execute("update task set status = 'CANCELLED', retry_state = null "
+                       "where status = 'ASSIGNED' and retry_state is not null")
+
+
+class _LazySettle:
+    """One test's settle, run on its FIRST request through `repo._get_pool`.
+
+    Lock-guarded and marked done only after it ran, so every concurrent first
+    caller (tests/test_db_pool.py gathers eight) waits for the one settle. A
+    lock per event loop: a test's `asyncio.run` gets a loop of its own, and an
+    asyncio.Lock may not be shared across loops. A request for any URL but the
+    test database's passes through unsettled (a test pointed elsewhere is not
+    using the queue this hides); the first one for the test database settles."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.settled = False
+        self.active = True
+        self._locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+
+    async def get_pool(self):
+        if not self.active or self.settled or _settling.get() \
+                or settings.database_url != self.url:
+            return await _REAL_GET_POOL()
+        lock = self._locks.setdefault(asyncio.get_running_loop(), asyncio.Lock())
+        async with lock:
+            if not self.settled:
+                await self.settle()
+        return await _REAL_GET_POOL()
+
+    async def settle(self) -> None:
+        token = _settling.set(True)
+        try:
+            conn = await repo._conn()
+            try:
+                await _settle_queue(conn)
+            finally:
+                await conn.close()
+        finally:
+            _settling.reset(token)
+        self.settled = True
+
+
 @pytest.fixture(autouse=True)
-async def isolated_queue():
+async def isolated_queue(request):
     """Hide any queued work that this test did not create, then give it back.
 
     Only UNPROCESSED rows are parked: CLAIMED/FOLD_PENDING rows are mid-flight
     and moving them would corrupt state a test may be asserting on.
+
+    LAZY (R21, 2026-10-24): setup only hooks `repo._get_pool`, the one pool
+    door, and the settle runs on the test's first pool request, before that
+    request's query — by whatever path it comes (a route, the app, a fixture,
+    the dispatcher). A test that never touches Postgres pays nothing; nothing
+    is skipped. A test marked `eager_settle` is settled here at setup, as every
+    test used to be.
+
+    Set and restored by hand, never through `monkeypatch` (see
+    `_no_live_tracker_read`): a test's own monkeypatch is undone after this
+    teardown, so teardown runs against the URL the settle used, not whatever
+    a test patched in.
 
     Availability is the CACHED answer, not a fresh probe: this fixture used to
     open a throwaway connection per test just to re-ask what `pg_available()`
@@ -519,53 +640,37 @@ async def isolated_queue():
         yield
         return
 
-    conn = await repo._conn()
+    lazy = _LazySettle(settings.database_url)
+    repo._get_pool = lazy.get_pool
     try:
-        await conn.execute(
-            f"update work_item set state = '{PARKED}' where state = 'UNPROCESSED'"
-        )
-        # The retry sweep persists probe results (a global table, one row per
-        # dependency): a test that took a dependency down must not leave the
-        # next test re-probing it. The test database is throwaway.
-        await conn.execute("delete from dependency_probe")
-        # Parks left behind by EARLIER tests. The retry sweeps are GLOBAL
-        # worklists and `make_parks_due()` backdates every park in the
-        # database, so a proposal, session or task another file left parked
-        # would be driven by THIS test's sweep through its spies — invisible
-        # under `-n 4` (the files land on different workers), fatal in the
-        # release gate's sequential run. Settle them before the test parks its
-        # own; the test database is throwaway. Terminal states, never deletes
-        # (sessions and proposals are never destroyed), and a cancelled task
-        # so the startup relaunch sweep cannot mistake it for a never-started one.
-        await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                           "where status = 'RETRY_PENDING'")
-        await conn.execute("update session set status = 'DONE' "
-                           "where status = 'AWAITING_RESUME'")
-        # An orchestrator parked on its children (a test's planted row, often
-        # with no `task_id` in its payload) is picked up by the next test's
-        # `orchestration.resume_sweep()` the same way.
-        await conn.execute("update session set status = 'DONE' "
-                           "where status = 'AWAITING_AGENTS'")
-        await conn.execute("update task set status = 'CANCELLED', retry_state = null "
-                           "where status = 'ASSIGNED' and retry_state is not null")
-    finally:
-        await conn.close()
-
-    try:
+        if request.node.get_closest_marker("eager_settle"):
+            await lazy.settle()
         yield
     finally:
-        conn = await repo._conn()
-        try:
-            await conn.execute(
-                f"update work_item set state = 'UNPROCESSED' where state = '{PARKED}'"
-            )
-            await conn.execute("delete from dependency_probe")
-        finally:
-            await conn.close()
-        # The pool is per event loop and pytest-asyncio closes this test's
-        # loop right after us — release the connections while it still runs,
-        # or every test leaves its members open until the GC gets to them.
-        await repo.close_pool()
+        lazy.active = False
+        repo._get_pool = _REAL_GET_POOL
+        if lazy.settled:
+            patched, settings.database_url = settings.database_url, lazy.url
+            try:
+                conn = await repo._conn()
+                try:
+                    await conn.execute(
+                        f"update work_item set state = 'UNPROCESSED' where state = '{PARKED}'"
+                    )
+                    await conn.execute("delete from dependency_probe")
+                finally:
+                    await conn.close()
+            finally:
+                settings.database_url = patched
+        if lazy.settled or repo._pool is not None:
+            if repo._pool_loop is not asyncio.get_running_loop():
+                # A pool an `asyncio.run` inside the test built on a loop now
+                # gone: swap it for this loop's, which close_pool can await.
+                await _REAL_GET_POOL()
+            # The pool is per event loop and pytest-asyncio closes this test's
+            # loop right after us — release the connections while it still runs,
+            # or every test leaves its members open until the GC gets to them.
+            await repo.close_pool()
 
 
 async def event_kinds(ref_id: str) -> list[str]:
@@ -593,22 +698,6 @@ async def make_parks_due() -> None:
             "where status = 'RETRY_PENDING' and retry_state is not null")
     finally:
         await conn.close()
-
-
-@pytest.fixture
-def no_detached_runs(monkeypatch):
-    """Create tasks, but never let a real agent run detach from the test.
-
-    The create path is what is under test; a background run would put an
-    uncontrolled agent session into the suite — the shape of the task-test
-    flakes already root-caused twice.
-    """
-    from central_command.api import routes
-
-    async def noop(task, actor, **_kw):
-        return None
-
-    monkeypatch.setattr(routes, "_run_assigned_task_detached", noop)
 
 
 @pytest.fixture
