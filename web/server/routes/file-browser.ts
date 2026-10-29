@@ -38,8 +38,10 @@ import {
 import { InvalidAgentIdError, resolveAgentWorkspace } from '../lib/agent-workspace.js';
 import { isWorkspaceLocal } from '../lib/workspace-detect.js';
 import { gatewayFilesList, gatewayFilesGet, gatewayFilesSet } from '../lib/gateway-rpc.js';
+import { fileBrowserGuard } from './cc-file-browser-guard.js';
 
 const app = new Hono();
+app.use('/api/files/*', fileBrowserGuard); // Central Command: read-only unless FILE_BROWSER_WRITABLE=1
 
 // ── Types ────────────────────────────────────────────────────────────
 

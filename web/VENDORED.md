@@ -110,11 +110,39 @@ surface; re-affirmed 2026-08-05 — leave off). Two facts recorded here so nobod
   root). Pointing the root at the repo to browse `servers/` would serve `.env`
   — and its secrets — over HTTP. If it is ever enabled, scope the root to a
   directory that contains no secrets (e.g. `servers/` itself) and add a
-  read-only guard first: the mutation endpoints have no off switch today.
+  read-only guard first (both now exist: see the guard section below).
 - **Agent sandbox workspaces are unreachable regardless**: they live in k8s
   pods, and the remote fallback this route would use (`agents.files.list/get/set`
   gateway RPC) has no handler in `nerve_gateway.py`. The default root
   (`~/.openclaw/workspace`) is an upstream leftover with nothing in it.
+
+### The read-only guard (R18 / COCKPIT-028, story 11.11)
+
+The "no off switch" and "exclusion list goes EMPTY" facts above are now closed
+by two Central Command pieces:
+
+- **`server/routes/cc-file-browser-guard.ts`** — OUR middleware. Every
+  non-read request under `/api/files/*` (write, rename, move, trash, restore
+  and the remote `gatewayFilesSet` fallback inside write, agent-scoped
+  workspaces included) answers `403 { ok: false, error: 'the file browser is
+  read-only' }` unless `FILE_BROWSER_WRITABLE=1` (read in `server/lib/config.ts`
+  as `config.fileBrowserWritable`). The GETs (tree, read, raw, resolve) stay
+  open. Test: `cc-file-browser-guard.test.ts`; the vendored
+  `file-browser.test.ts` sets the flag in its config mock.
+- **The one upstream edit, in `server/routes/file-browser.ts`:** an import of
+  the guard plus `app.use('/api/files/*', fileBrowserGuard);` immediately after
+  `const app = new Hono();`. It lives inside the vendored file (not in
+  `app.ts`) so the vendored suites, which build their app from
+  `file-browser.ts` alone, run under the guard.
+- **Custom `FILE_BROWSER_ROOT`: chosen = REFUSE AT CONFIG LOAD**, not "keep the
+  exclusions on". `validateConfig()` discards a root whose top level holds
+  `.env*`, `.git` or `certs` (error logged, default workspace used), reusing the
+  existing "inaccessible root falls back to default" path. Why: it leaves
+  upstream's `file-utils.ts` untouched (no second vendored edit), and a root
+  that holds secrets is an operator mistake worth surfacing loudly at boot
+  rather than silently serving a trimmed view. Limit: it checks the top level
+  at boot only, so a secret created later or nested deeper is not caught —
+  keep a custom root scoped to a directory that never holds secrets.
 
 ## `docs/`, `README.md`, `CHANGELOG.md`, `install.sh`, `.github/` — upstream
 

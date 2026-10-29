@@ -1,11 +1,21 @@
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { CapabilitiesView } from './CapabilitiesView';
 
-const rpc = vi.fn();
-vi.mock('@/contexts/GatewayContext', () => ({ useGateway: () => ({ rpc }) }));
+const { rpc, handlers, subscribe } = vi.hoisted(() => {
+  const handlers = new Set<(msg: { type: string; event?: string; payload?: unknown }) => void>();
+  return {
+    rpc: vi.fn(),
+    handlers,
+    subscribe: (h: (msg: { type: string; event?: string; payload?: unknown }) => void) => {
+      handlers.add(h);
+      return () => { handlers.delete(h); };
+    },
+  };
+});
+vi.mock('@/contexts/GatewayContext', () => ({ useGateway: () => ({ rpc, subscribe }) }));
 
 const cap = (o: object) => ({
   kind: 'write', risk: 'low', arguments: [], description: '', reversibility: 'reversible',
@@ -16,6 +26,41 @@ const ov = (o: object) => ({
   agent_id: 'drafter', scope: {}, scope_text: 'every use', shadow: { k: 0, n: 0 }, matches: 0,
   last_match: null, granted_by: 'operator', granted_at: '2026-10-19T10:00:00Z', revoked_at: null,
   reversibility: 'reversible', requires_acknowledgement: false, ...o,
+});
+
+async function push(event: string) {
+  await act(async () => {
+    for (const h of handlers) h({ type: 'event', event, payload: {} });
+    await new Promise((r) => setTimeout(r, 550));   // the 400ms debounce
+  });
+}
+
+describe('CapabilitiesView (R22: override panels refresh on cc.override.* events)', () => {
+  it('refreshes silently on a cc.override.shadowed frame and shows the new shadow badge', async () => {
+    rpc.mockReset();
+    let shadowK = 2;
+    rpc.mockImplementation(async (m: string, p: { capability?: string }) => {
+      if (m === 'capabilities.list') return { capabilities: [cap({ name: 'catalog.tag' })] };
+      if (m === 'overrides.list') {
+        return { overrides: p.capability === 'catalog.tag'
+          ? [ov({ id: 's', capability: 'catalog.tag', state: 'shadow', shadow: { k: shadowK, n: 5 } })] : [] };
+      }
+      return {};
+    });
+    render(<CapabilitiesView />);
+    expect(await screen.findByText('in shadow 2 of 5')).toBeInTheDocument();
+    const listCalls = () => rpc.mock.calls.filter(
+      ([m, p]) => m === 'overrides.list' && p?.capability === 'catalog.tag').length;
+    const before = listCalls();
+
+    shadowK = 3;
+    await push('cc.override.shadowed');
+    expect(listCalls()).toBe(before + 1);
+    expect(await screen.findByText('in shadow 3 of 5')).toBeInTheDocument();
+
+    await push('cc.feed.poll');   // not an override event
+    expect(listCalls()).toBe(before + 1);
+  });
 });
 
 describe('CapabilitiesView', () => {

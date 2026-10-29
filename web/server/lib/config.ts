@@ -83,6 +83,9 @@ export const config = {
   dist: path.join(PROJECT_ROOT, 'dist'),
   agentLogPath: path.join(PROJECT_ROOT, 'agent-log.json'),
   fileBrowserRoot: process.env.FILE_BROWSER_ROOT || '',
+  // The file browser's mutation routes answer 403 unless this is set
+  // (server/routes/cc-file-browser-guard.ts; R18 / COCKPIT-028).
+  fileBrowserWritable: process.env.FILE_BROWSER_WRITABLE === '1',
   memoryPath: process.env.MEMORY_PATH || path.join(HOME, '.openclaw', 'workspace', 'MEMORY.md'),
   memoryDir: process.env.MEMORY_DIR || path.join(HOME, '.openclaw', 'workspace', 'memory'),
   sessionsDir: process.env.SESSIONS_DIR || path.join(HOME, '.openclaw', 'agents', 'main', 'sessions'),
@@ -217,6 +220,15 @@ export async function probeGateway(): Promise<void> {
 }
 
 /** Log startup warnings and validate critical configuration. */
+/** Top-level entries of `root` that the default file-browser exclusions exist to hide: .env*, .git, certs. */
+export function secretEntriesIn(root: string): string[] {
+  try {
+    return fs.readdirSync(root).filter((n) => n === '.git' || n === 'certs' || /^\.env(\.|$)/.test(n));
+  } catch {
+    return [];
+  }
+}
+
 export function validateConfig(): void {
   // Critical: gateway token is the only required config
   if (!config.gatewayToken) {
@@ -308,6 +320,18 @@ export function validateConfig(): void {
       }
     } catch {
       console.warn('[config] ⚠ FILE_BROWSER_ROOT is not a directory or is inaccessible, falling back to default');
+      (config as typeof config & { fileBrowserRoot: string }).fileBrowserRoot = '';
+    }
+  }
+  // A custom root empties the secret exclusions (lib/file-utils.ts), so a root
+  // that holds secrets would serve them. Refuse it (R18 / COCKPIT-028).
+  if (config.fileBrowserRoot) {
+    const secrets = secretEntriesIn(config.fileBrowserRoot);
+    if (secrets.length > 0) {
+      console.error(
+        `[config] ✖ FILE_BROWSER_ROOT contains ${secrets.join(', ')} — a custom root disables the ` +
+        'secret exclusions, so the root is refused and the default workspace is used',
+      );
       (config as typeof config & { fileBrowserRoot: string }).fileBrowserRoot = '';
     }
   }

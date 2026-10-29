@@ -51,6 +51,8 @@ describe('file-browser routes', () => {
         memoryPath: path.join(configuredWorkspace, 'MEMORY.md'),
         memoryDir: path.join(configuredWorkspace, 'memory'),
         fileBrowserRoot: opts?.fileBrowserRoot ?? '',
+        // the mutation suites below test the routes, not the guard (cc-file-browser-guard.test.ts)
+        fileBrowserWritable: true,
         workspaceRemote: false,
       },
       SESSION_COOKIE_NAME: 'nerve_session_3000',

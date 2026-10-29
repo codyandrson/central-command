@@ -16,7 +16,7 @@ export function overrideStateLabel(o: GateOverride) {
  * Errors reach the caller as the RPC error message ("; "-joined problems).
  */
 export function useOverrides(scope: { agentId?: string; capability?: string }) {
-  const { rpc } = useGateway();
+  const { rpc, subscribe } = useGateway();
   const rpcRef = useRef(rpc);
   useEffect(() => { rpcRef.current = rpc; }, [rpc]);
   const [overrides, setOverrides] = useState<GateOverride[]>([]);
@@ -24,9 +24,9 @@ export function useOverrides(scope: { agentId?: string; capability?: string }) {
   const [error, setError] = useState('');
   const { agentId, capability } = scope;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!agentId && !capability) { setOverrides([]); return; }
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const res = await rpcRef.current(
         'overrides.list', capability ? { capability } : { agentId },
@@ -41,6 +41,21 @@ export function useOverrides(scope: { agentId?: string; capability?: string }) {
   }, [agentId, capability]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Live-follow, debounced: a shadow run, a go-live or a revoke emits an
+  // override event, and one silent refresh covers a burst (shadow progress and
+  // live/suspended state change without a reload).
+  useEffect(() => {
+    if (!agentId && !capability) return;
+    if (typeof subscribe !== 'function') return;
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const unsub = subscribe((msg) => {
+      if (!(msg.event || '').startsWith('cc.override')) return;
+      if (t) return;  // one refresh per burst, not one per event
+      t = setTimeout(() => { t = null; refresh({ silent: true }); }, 400);
+    });
+    return () => { unsub(); if (t) clearTimeout(t); };
+  }, [agentId, capability, refresh, subscribe]);
 
   const author = useCallback(async (
     forAgent: string, cap: string, overrideScope: OverrideScope, acknowledgeIrreversible: boolean,

@@ -1065,6 +1065,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `cc-mail-rules` | standing mail rules and their preview (`/api/cc/mail-rules`) |
 | `cc-update`, `cc-update-proxy` | update status / stage / apply / hold |
 | `cc-context` | context-window settings |
+| `cc-file-browser-guard` | not a proxy: middleware inside the vendored file browser; its mutations (write, rename, move, trash, restore) answer 403 unless `FILE_BROWSER_WRITABLE=1` |
 
 ## 6. Deploy surfaces
 
