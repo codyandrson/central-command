@@ -94,6 +94,17 @@ def test_credentialed_proxy_with_no_port_or_path_is_refused_too(scratch: Path):
     assert LOGIN not in r.stdout + r.stderr and not out.exists()
 
 
+@pytest.mark.parametrize("proxy", [
+    f"{LOGIN}:{SECRET}@proxy.example.com:8080",          # no scheme: curl accepts it
+    f"http://{LOGIN}:{SECRET}/x@proxy.example.com:8080",  # a '/' inside the password
+])
+def test_credentialed_proxy_the_userinfo_regex_would_miss_is_refused(scratch: Path, proxy: str):
+    r, out, log = _run(scratch, proxy)
+    assert r.returncode == 3 and "USERACTION proxy-credentials" in r.stdout, r.stdout + r.stderr
+    assert LOGIN not in r.stdout + r.stderr and SECRET not in r.stdout + r.stderr
+    assert not out.exists() and not log.exists()
+
+
 def test_credential_free_proxy_is_not_refused(scratch: Path):
     r, out, log = _run(scratch, "http://proxy.example.com:8080")
     assert "proxy-credentials" not in r.stdout + r.stderr

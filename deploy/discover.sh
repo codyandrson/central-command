@@ -240,12 +240,13 @@ load_conf() {
   fi
   DISCO_CA_BUNDLE="${CC_CA_BUNDLE:-}"
   DISCO_PROXY="${CC_PROXY:-}"
-  # A proxy URL carrying `user:pw@` (the shape redact() strips) would reach
+  # A proxy value carrying `user:pw@` — with a scheme or without (curl takes
+  # `user:pw@host:8080` too), and a password may hold a `/` — would reach
   # curl's argv, readable by every local user in `ps` — refuse it HERE, before
   # main creates $OUT or any probe runs. Incrementing ACTIONS alone would let
   # every probe run (the normal exit 3 is at the end of main), so this exits
   # itself. The line names the KEY, never the value (R8, PROCESS-006).
-  if [[ "$DISCO_PROXY" =~ ://[^/@[:space:]]*@ ]]; then
+  if [[ "$DISCO_PROXY" == *@* ]]; then
     DISCO_PROXY=""
     useraction "proxy-credentials" "CC_PROXY in $ENV_FILE carries credentials, and the prober will not hand them to curl on its command line. Set CC_PROXY to the credential-free proxy URL, and give curl the proxy login in its own config instead: a 'proxy-user = \"user:password\"' line in ~/.curlrc (mode 600). curl does not read proxy credentials from ~/.netrc, so CC_NETRC=1 does not help here — then re-run"
     exit 3
