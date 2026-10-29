@@ -177,7 +177,7 @@ move_for() { # move_for <class> <KEYVAR>
     tls-intercept) printf 'TLS is intercepted by %s — export the corporate root CA and set CC_CA_BUNDLE in .env. CC_TLS_INSECURE=1 is the other supported answer (one documented switch across the whole install) and it trades a verifiable supply chain for a working one' "${TLS_ISSUER_HINT:-the corporate proxy}" ;;
     # One text for both surfaces of the same fact: a 407 on a plain-HTTP
     # request, and a refused CONNECT tunnel (exit 56) on an HTTPS one.
-    proxy-auth) printf 'the proxy wants credentials or refused the CONNECT tunnel (auth required or policy block) — set CC_PROXY with credentials or use CC_NETRC=1 with a ~/.netrc entry, and re-run' ;;
+    proxy-auth) printf 'the proxy wants credentials or refused the CONNECT tunnel (auth required or policy block) — keep CC_PROXY credential-free and put the login in ~/.curlrc (mode 600) as: proxy-user = "user:password" — curl does not read proxy credentials from ~/.netrc, so CC_NETRC=1 does not help, and re-run' ;;
     throttled) printf 'reachable but rate-limited (anonymous quota) — expect this on Docker Hub; authenticated pulls or a pull-through mirror raise the limit' ;;
     auth) printf 'reachable but wants credentials — add a ~/.netrc entry and set CC_NETRC=1, and re-run' ;;
     denied) printf 'reachable but denied — likely proxy policy; ask what the sanctioned source for this resource is' ;;
@@ -240,6 +240,16 @@ load_conf() {
   fi
   DISCO_CA_BUNDLE="${CC_CA_BUNDLE:-}"
   DISCO_PROXY="${CC_PROXY:-}"
+  # A proxy URL carrying `user:pw@` (the shape redact() strips) would reach
+  # curl's argv, readable by every local user in `ps` — refuse it HERE, before
+  # main creates $OUT or any probe runs. Incrementing ACTIONS alone would let
+  # every probe run (the normal exit 3 is at the end of main), so this exits
+  # itself. The line names the KEY, never the value (R8, PROCESS-006).
+  if [[ "$DISCO_PROXY" =~ ://[^/@[:space:]]*@ ]]; then
+    DISCO_PROXY=""
+    useraction "proxy-credentials" "CC_PROXY in $ENV_FILE carries credentials, and the prober will not hand them to curl on its command line. Set CC_PROXY to the credential-free proxy URL, and give curl the proxy login in its own config instead: a 'proxy-user = \"user:password\"' line in ~/.curlrc (mode 600). curl does not read proxy credentials from ~/.netrc, so CC_NETRC=1 does not help here — then re-run"
+    exit 3
+  fi
   DISCO_NETRC="${CC_NETRC:-0}"
   DISCO_INSECURE="${CC_TLS_INSECURE:-0}"
   # A simple index is probed at ONE PROJECT'S page, never its root (see the

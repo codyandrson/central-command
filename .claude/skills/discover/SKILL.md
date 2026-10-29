@@ -131,10 +131,12 @@ value is a HOST PREFIX, never a URL; the prober expands it to that registry's
   `CC_TLS_INSECURE=1` is the other supported answer (see Boundaries) — the
   operator's call, always warned.
 - **`proxy-auth`** — the proxy wants credentials (a 407, or a refused
-  CONNECT tunnel surfacing as curl exit 56). Credentials → `~/.netrc` +
-  `CC_NETRC=1`; `CC_PROXY` carries only the credential-free proxy URL the
-  platform team supplies (the prober's own prescription still says "with
-  credentials"; the `.netrc` rule wins until that is fixed).
+  CONNECT tunnel surfacing as curl exit 56). `CC_PROXY` carries only the
+  credential-free proxy URL the platform team supplies; the login goes in
+  `~/.curlrc` as `proxy-user = "user:password"` (mode 600), because curl
+  does not read proxy credentials from `~/.netrc` (`CC_NETRC=1` is for the
+  `auth` class below). A `CC_PROXY` that carries credentials stops the run
+  at once with `USERACTION proxy-credentials` (exit 3): fix the key, re-run.
 - **`auth`** — the endpoint itself wants credentials (typical for a
   private mirror). `~/.netrc` + `CC_NETRC=1`.
 - **`denied`** — reachable but policy-blocked; the block page in
