@@ -200,6 +200,87 @@ def no_live_graph_writes():
         neo4j_writer._write_tx = real_write_tx
 
 
+# Every write-capable integration's address and credential, and what the suite
+# holds it at. The two n8n façades have no `configured()` check (they just
+# POST), and each value must make httpx refuse before any socket with an error
+# that classifies SEMANTIC, so an approval lands FAILED: a TRANSIENT one would
+# PARK the proposal for retry under the outage doctrine instead of failing it
+# (a resolvable `.invalid` host or a loopback port reads "connection"). The
+# email façade gets the EMPTY string: httpx's `UnsupportedProtocol` is a
+# transport error, but `email_facade._call` wraps it and its text classifies
+# SEMANTIC. `calendar_facade._call` does NOT wrap, and a raw transport error
+# classifies TRANSIENT, so the calendar façade gets a URL whose port does not
+# parse: httpx raises `InvalidURL` (not a transport error) before resolving
+# anything, and it classifies SEMANTIC. Blanking the admin key also
+# blanks the key `neo4j_writer.request_embedding` reads: a test that calls it
+# fakes `request_embedding`. `llm_base_url`/`llm_api_key` stay: the graph_live
+# reads embed through them on purpose.
+NO_LIVE_WORLD = {
+    "jira_base_url": "",
+    "jira_api_token": "",
+    "confluence_base_url": "",
+    "confluence_api_token": "",
+    "email_facade_url": "",
+    "email_facade_token": "",
+    "calendar_facade_url": "http://calendar-facade.invalid:not-configured",
+    "calendar_facade_token": "",
+    "exchange_url": "",
+    "exchange_password": "",
+    "llm_proxy_admin_key": "",
+    "sandbox_runner_url": "",
+    "sandbox_runner_token": "",
+    "mcp_build_host": "",
+    "litellm_kubeconfig": "",
+}
+
+REAL_SUBPROCESS_REFUSED = (
+    "a test reached a real subprocess — fake executor._run / executor._git"
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_live_world(tmp_path_factory):
+    """The world is not a test fixture either — nothing the suite approves can
+    reach a real service.
+
+    A worktree's `.env` is a copy of the live checkout's, credentials included,
+    and the dry_run executor pin used to be the only thing between an approved
+    test proposal and a real Jira, Confluence, mail, calendar, LiteLLM or MCP
+    write. This guard holds every write-capable integration at nothing
+    (`NO_LIVE_WORLD`), points the MCP servers root at a session temporary
+    directory, and makes BOTH subprocess seams refuse: `executor._run` (build,
+    deploy, kubectl) and `executor._git` (mcp.sync_source's commit and push,
+    the LiteLLM config change's commit in the real worktree).
+
+    A test that needs a service fakes its client or sets its own endpoint with
+    a function-scoped monkeypatch, which wins over these values and is undone
+    back to THEM, never to the `.env` value. An approval that should execute
+    without any service uses `tests/fake_world.fake_world`.
+
+    Set and restored by hand and SESSION-scoped, for the same reason as
+    `no_live_graph_writes` above: a function-scoped monkeypatch is already
+    restored by the time an async task outliving its test lands, and that
+    task would then write with the real credentials."""
+    from central_command.gateway import executor
+
+    async def refuse(*args, **kwargs):
+        raise AssertionError(REAL_SUBPROCESS_REFUSED)
+
+    held = dict(NO_LIVE_WORLD, mcp_servers_root=str(tmp_path_factory.mktemp("mcp-servers")))
+    real = {name: getattr(settings, name) for name in held}
+    real_run, real_git = executor._run, executor._git
+    for name, value in held.items():
+        setattr(settings, name, value)
+    executor._run = refuse
+    executor._git = refuse
+    try:
+        yield
+    finally:
+        executor._run, executor._git = real_run, real_git
+        for name, value in real.items():
+            setattr(settings, name, value)
+
+
 # ── the live-graph preflight (ledger F40) ───────────────────────────────────
 # The graph guard above deliberately lets live READS run: a fake proves nothing
 # about whether the library's search and our result shapes agree with the real

@@ -6,12 +6,12 @@ M9 folding works on real mail), **known mail is never re-fetched** (the poller
 checks the ledger before touching the provider), and **HTML-only mail still
 yields a body** (real inboxes are full of it — the first live fetch was one).
 
-The façade is faked here; a live smoke test skips when it isn't reachable.
+The façade is faked here; a live smoke test runs only on CC_LIVE_FACADE_TESTS=1.
 """
 
 from __future__ import annotations
 
-import asyncio
+import os
 
 import pytest
 
@@ -115,24 +115,21 @@ async def test_poll_skips_known_mail_without_refetching(monkeypatch):
     assert fetched == []
 
 
-def _facade_up() -> bool:
-    if not settings.email_facade_token:  # a worktree without .env would probe the live n8n untokened
-        return False
-
-    async def probe() -> bool:
-        try:
-            await email_facade.list_refs("newer_than:1d")
-            return True
-        except Exception:  # noqa: BLE001
-            return False
-
-    try:
-        return asyncio.run(probe())
-    except Exception:  # noqa: BLE001
-        return False
+# A live read of the real mailbox is opt-in, like the graph's live probes
+# (CC_LIVE_GRAPH_TESTS): the suite's no-live-world guard holds the façade at
+# nothing, so this test reads the real endpoint and token from a fresh
+# `Settings()` (the `.env`) and sets them function-scoped.
+LIVE_FACADE = os.getenv("CC_LIVE_FACADE_TESTS") == "1"
 
 
-@pytest.mark.skipif(not _facade_up(), reason="cc-email-facade not reachable")
-async def test_live_facade_lists_refs():
+@pytest.mark.skipif(not LIVE_FACADE, reason="live façade read is opt-in: CC_LIVE_FACADE_TESTS=1")
+async def test_live_facade_lists_refs(monkeypatch):
+    from central_command.config import Settings
+
+    live = Settings()
+    if not live.email_facade_token:  # a worktree without .env would probe the live n8n untokened
+        pytest.skip("no email façade token in .env")
+    monkeypatch.setattr(settings, "email_facade_url", live.email_facade_url)
+    monkeypatch.setattr(settings, "email_facade_token", live.email_facade_token)
     refs = await email_facade.list_refs("newer_than:2d")
     assert all(set(r) >= {"uuid", "conversation_id"} for r in refs)

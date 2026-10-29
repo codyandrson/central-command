@@ -180,6 +180,32 @@ def _init_scratch_repo(repo_root):
     _git(repo_root, "config", "user.name", "Test")
 
 
+def _scratch_git(monkeypatch, scratch_root):
+    """The suite's no-live-world guard makes `executor._git` refuse. These
+    tests need REAL git, so they get it back for their scratch repo only: any
+    other working directory still refuses, and `push` never runs (answered as
+    a failure, the outcome a scratch repo with no remote gave anyway)."""
+    import asyncio
+    from pathlib import Path
+
+    scratch = Path(scratch_root).resolve()
+
+    async def git(*args, cwd):
+        here = Path(cwd).resolve()
+        if here != scratch and scratch not in here.parents:
+            raise AssertionError(f"executor._git outside the scratch repo: {here}")
+        if args[:1] == ("push",):
+            return 1, "", "fatal: no remote (the test's scratch repo)"
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=str(here),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await proc.communicate()
+        return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+
+    monkeypatch.setattr(executor, "_git", git)
+
+
 def _action(server_id="exec-server", files=None):
     files = files or [{"path": "main.py", "content": "print('hi')\n"}]
     return Action(
@@ -192,6 +218,7 @@ def _action(server_id="exec-server", files=None):
 
 async def test_executor_writes_exactly_the_captured_bytes(monkeypatch, tmp_path):
     _init_scratch_repo(tmp_path)
+    _scratch_git(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
     monkeypatch.setattr(settings, "executor_mode", "live")
 
@@ -221,6 +248,7 @@ async def test_executor_writes_exactly_the_captured_bytes(monkeypatch, tmp_path)
 
 async def test_dirty_tree_refuses_to_mix_with_operator_work(monkeypatch, tmp_path):
     _init_scratch_repo(tmp_path)
+    _scratch_git(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
     monkeypatch.setattr(settings, "executor_mode", "live")
 
@@ -260,6 +288,7 @@ async def test_bad_server_id_and_path_refused_mechanically_at_execute_time(monke
 @needs_pg
 async def test_mcp_server_row_lands_synced_after_execution(monkeypatch, tmp_path):
     _init_scratch_repo(tmp_path)
+    _scratch_git(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
     monkeypatch.setattr(settings, "executor_mode", "live")
     server_id = "pgtest-server"
@@ -292,14 +321,20 @@ async def test_dry_run_writes_nothing(monkeypatch, tmp_path):
     assert not (tmp_path / "servers").exists()
 
 
-def test_servers_root_is_the_same_path_on_both_sides():
+def test_servers_root_is_the_same_path_on_both_sides(monkeypatch):
     """The runtime diffs against servers/ and the Executor writes to it — if
     those resolve differently the operator reviews a diff against a path the
     write never touches. Found live 2026-08-04: executor.py used parents[1]
     (=central_command/) while tools.py used parents[2] (=repo root), so an approved
-    sync landed in central_command/servers/ and every diff read as all-new."""
+    sync landed in central_command/servers/ and every diff read as all-new.
+
+    The suite's no-live-world guard points `mcp_servers_root` at a temporary
+    directory; this test reads the DEFAULT, so it unsets the override (only
+    path resolution runs here, nothing is written)."""
     from central_command.gateway import executor as _ex
     from central_command.runtime import tools as _tools
+
+    monkeypatch.setattr(settings, "mcp_servers_root", "")
 
     assert _ex._mcp_servers_root() == _tools._mcp_servers_root()
     assert _ex._mcp_servers_root().name == "servers"

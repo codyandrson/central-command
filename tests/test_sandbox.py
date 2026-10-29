@@ -543,7 +543,9 @@ _ORIGINAL_ASYNC_CLIENT = httpx.AsyncClient  # captured ONCE, before any patching
 def _patch_runner_http(monkeypatch, handler):
     """Same shape as test_webfetch's `_patch_client`: replace sandbox_client's
     httpx.AsyncClient with one wired to a MockTransport, so the suite never
-    touches the real network (or a real cluster)."""
+    touches the real network (or a real cluster). The suite's no-live-world
+    guard holds the runner URL at nothing, so the fake runner gets its own."""
+    monkeypatch.setattr(settings, "sandbox_runner_url", "http://sandbox-runner.example")
 
     def _factory(**kwargs):
         kwargs["transport"] = httpx.MockTransport(handler)
