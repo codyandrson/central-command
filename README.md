@@ -168,10 +168,6 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,runtime]"
 cp .env.example .env                 # fill CC_LLM_BASE_URL + CC_LLM_API_KEY for live mode
 
-# Demo mode — no API key, no live writes (safe):
-(cd web && npm install && npm run build)
-CC_DEMO_MODE=true CC_EXECUTOR_MODE=dry_run uvicorn central_command.api.app:app --port 8080
-
 pytest -q                            # the full suite; needs the dev Postgres below, makes no live model calls
 ```
 

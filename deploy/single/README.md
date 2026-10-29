@@ -440,9 +440,8 @@ runner, and PROVES the ports are free — under Git Bash `kill` reports success 
 Windows process it never signalled. **Deliberately still OFF after the demo, each one an
 explicit flip when you decide:** the mail feed and dispatch drain
 (`CC_FEED_ENABLED` / `CC_DISPATCH_ENABLED` + their schedules in the cockpit's
-Crons tab) and every recurring schedule (seeded disabled). The executor is NOT one of them — it runs `live` from the first
-approval (2026-09-18); the gate is the safety, and `dry_run` no-ops every
-capability including the internal ones. Onboarding waits for you in the
+Crons tab) and every recurring schedule (seeded disabled). There is no executor mode — every approval performs its write from the
+first one; the gate is the safety. Onboarding waits for you in the
 cockpit: a first-run prompt bar asks your name, and the EA's team tour (the
 seeded `team-tour` schedule — **Run now** in the Crons tab) asks the rest and
 records it in the knowledge graph through the normal gate. Two demo traps worth knowing: re-POSTing the same email is a silent

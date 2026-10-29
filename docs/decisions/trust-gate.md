@@ -129,14 +129,14 @@ for the entry format and how to add one.
 - **Source:** docs/superpowers/plans/2026-08-03-sandbox-slice1.md; code comment `deploy/k3s/sandbox.Dockerfile:3-10`
 - **Superseded-by:** DL-005
 
-### DL-008 — A proposal's arguments arrive flattened from real Claude, nested from the demo model
+### DL-008 — A proposal's arguments arrive flattened from real Claude, nested from the test model
 
 - **Status:** active
 - **Date:** undated
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**Proposal arg shape:** real Claude *flattens*"
 - **Why:** Not recorded beyond the stated mechanism: Pydantic AI hoists a
   single-model tool param for a real Claude call, while the deterministic
-  demo `FunctionModel` nests the fields under `proposal` instead — always
+  test-model `FunctionModel` nests the fields under `proposal` instead — always
   parse via the one tolerant seam.
 - **Enforced:** code structure only — `central_command/runtime/durable.py` (`proposal_from_call()`); exercised indirectly by `tests/test_durable_spike.py::test_pause_serialize_restart_resume` and others, but no test asserts the flatten/nested duality itself
 - **Source:** AGENTS.md bite marks

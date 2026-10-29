@@ -6,19 +6,20 @@ resilience, and the runtime's context/window handling. See
 
 ### DL-021 — Two run modes: CC_DEMO_MODE and CC_EXECUTOR_MODE
 
-- **Status:** active
+- **Status:** superseded
 - **Date:** 2026-07-19
-- **Rule:** [AGENTS.md](../../AGENTS.md) — "**Two run modes** (config): `CC_DEMO_MODE`"
+- **Rule:** (recorded here) Two run modes, `CC_DEMO_MODE` (deterministic model vs real Claude) and `CC_EXECUTOR_MODE` (`dry_run` vs `live`), as AGENTS.md's "Two run modes" bite mark stood at this date. Superseded by DL-141.
 - **Why:** Early testing had used a scripted stand-in model to validate the
   system's plumbing, but that stand-in could not prove an agent's decisions
   were actually sound — only real inference could. The two concerns (which
   model answers, versus whether a write is actually performed) were kept as
   separate switches so neither could be mistaken for the other.
   **Amended 2026-10-21 (review ruling, PRD FR-42; see DL-141):** the
-  deterministic model is now a test-only mode and the dry-run executor mode
-  is to be removed, so the second switch will not survive. The rule quoted
-  here is the position as of its date; it does not change until the code does.
-- **Enforced:** code structure only — `central_command/config.py`; exercised indirectly across most of `tests/` via `demo_mode=True` fixtures, no single dedicated test
+  deterministic model became test-only and the dry-run executor mode was
+  removed (built in epic run-modes; DL-141). The rule recorded here is the
+  position as of its date.
+- **Enforced:** superseded — see DL-141
+- **Superseded-by:** DL-141
 - **Source:** AGENTS.md bite marks
 
 ### DL-022 — A fresh run must load the charter; build_agent_for does not

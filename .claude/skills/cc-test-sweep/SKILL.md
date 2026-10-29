@@ -137,5 +137,5 @@ created), `findings/`, `baseline/`, `verify/`.
 - **The operator skills-import API is deliberately ungated** (operator
   decision 2026-08-20) — not a finding, don't re-file it.
 - Assert on rows your test created, never global counts; pin
-  `dispatch_approval_limit` and `demo_mode` where the existing test rules
+  `dispatch_approval_limit` and `test_model` where the existing test rules
   say so (see `.claude/rules/tests.md`).

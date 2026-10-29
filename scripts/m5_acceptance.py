@@ -4,7 +4,8 @@ Real Claude reads an email, proposes a due-date change to a throwaway Jira issue
 a human approves, and the Executor performs the ACTUAL Jira write. Verifies the
 issue's due date before and after.
 
-Run with: CC_DEMO_MODE=false CC_EXECUTOR_MODE=live CC_DATABASE_URL=... (key in .env)
+Run with: CC_DATABASE_URL=... (key in .env). It runs live, as every run does; there
+are no run-mode keys to set (the API refuses to start on one).
 """
 
 import asyncio

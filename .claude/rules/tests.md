@@ -9,10 +9,17 @@ Rules below exist because a real failure produced them. Trust the rule even
 where the story is gone. Moved verbatim from the root instructions; they load
 when a matching file is read.
 
-- **Tests must pin `demo_mode=True` if they hit code that calls
+- **Tests must pin `test_model=True` if they hit code that calls
   `resolve_model()` itself** (e.g. `routes.feed_email`) — with a real key in
   `.env` the "offline" suite will otherwise call the model for real and spend
   money.
+- **Any test whose approval executes uses `fake_world`**
+  (`tests/fake_world.py`); there is no executor mode to pin. The session-scoped
+  `no_live_world` guard in `tests/conftest.py` holds every write-capable
+  integration at nothing and makes both subprocess seams refuse, because a
+  worktree's `.env` is a copy of the live one and carries real credentials: an
+  approved test proposal must fail loudly as unconfigured, never reach a real
+  Jira, mail, calendar, LiteLLM or MCP write.
 - **Assert on rows your test created, never on global counts.** The dev DB
   may be shared; `tests/conftest.py` parks foreign `UNPROCESSED` rows so
   queue-order tests are deterministic, but count assertions still need

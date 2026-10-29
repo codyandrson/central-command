@@ -92,11 +92,11 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** code structure only — `tests/conftest.py` re-executes `central_command/db/schema.sql` every test run, and the updater applies it (`deploy/k3s/cc-update.sh`, `deploy/single/update.sh`); no guard checks that a new statement is idempotent
 - **Source:** AGENTS.md bite marks
 
-### DL-099 — Tests must pin demo_mode=True when they hit resolve_model()
+### DL-099 — Tests must pin test_model=True when they hit resolve_model()
 
 - **Status:** active
 - **Date:** undated
-- **Rule:** [.claude/rules/tests.md](../../.claude/rules/tests.md) — "**Tests must pin `demo_mode=True` if they hit code that calls `resolve_model()` itself**"
+- **Rule:** [.claude/rules/tests.md](../../.claude/rules/tests.md) — "**Tests must pin `test_model=True` if they hit code that calls `resolve_model()` itself**"
 - **Why:** With a real key in `.env` the "offline" suite would otherwise call
   the model for real and spend money.
 - **Enforced:** discipline only — convention enforced by review, no meta-test
@@ -778,19 +778,14 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-10-19
-- **Rule:** (recorded here) AGENTS.md's "Two run modes" bite mark records `CC_DEMO_MODE` and
-  `CC_EXECUTOR_MODE` (`dry_run` vs `live`) as it stood. The 2026-10 review
-  amends it (PRD FR-42): the deterministic model becomes a test-only mode,
-  renamed, with a guard that refuses it in any deployment env file; the
-  dry-run executor mode is removed and a fresh install starts live. Tests
-  use fakes. Not yet built; until it lands, DL-021 describes the code.
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**The test model is test-only, and there is no executor mode.** The deterministic model is `settings.test_model`, set only in-process by the test suite"
 - **Why:** A dry-run executor that logs a write instead of performing it is a
   silent-success trap: the proposal reads EXECUTED and nothing happened.
   The deterministic stand-in model was only ever meant for plumbing tests,
   and a deployment that boots on it answers without judgment (the reason
   DL-021 kept the two switches separate). Rejected alternative recorded in
   the PRD addendum §B (dry-run executor mode).
-- **Enforced:** discipline only — the guard and the meta-test are owed (PRD §6.1 item 8); until built, nothing enforces the amendment
+- **Enforced:** test: `tests/test_run_modes.py`, `tests/test_test_model.py`, `tests/test_no_live_world.py`, `tests/test_install_starts_live.py`, `tests/test_simulated_history.py` (the end-to-end file `tests/test_run_modes_e2e.py` is owed, story 13)
 - **Source:** docs/PRD.md FR-42; PRD addendum §B and §E (GATE-125..128); DL-021
 
 ### DL-142 — The read-version stale bounce at propose time is retired; world-state checks at execution replace it

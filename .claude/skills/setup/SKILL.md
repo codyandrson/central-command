@@ -456,7 +456,7 @@ its §10.
   runs — a restore under a different key leaves rows undecryptable.
 - Integration choices (Jira/Confluence/email/network-trust) — identical
   elicitation to the podman substrate's (see **Elicitation help**); the values go into the
-  root `.env` (the driver creates it at the shipped `CC_EXECUTOR_MODE=live`).
+  root `.env` (the driver creates it with no run-mode key).
 
 **Run the driver.**
 
@@ -492,9 +492,9 @@ does not carry them yet, then:
 ./deploy/k3s/setup.sh verify --clean-install   # zero failures is the gate
 ```
 
-`--clean-install` asserts the running API is LIVE — a stale `dry_run` systemd
-drop-in or `.env` would simulate every approval, and that drop-in is the trap
-now that the unit pins nothing.
+`--clean-install` runs the run-mode guard over the running API's process
+environment — a stale systemd drop-in or `.env` naming `CC_TEST_MODEL`,
+`CC_DEMO_MODE` or `CC_EXECUTOR_MODE` is refused whatever its value.
 
 Then read `deploy/k3s/README.md` §8 with the operator and decide each
 instance-data item deliberately — on a fully-clean deployment the answer is
@@ -502,10 +502,10 @@ instance-data item deliberately — on a fully-clean deployment the answer is
 Jira/Confluence first-read verification, macro harvest offer, team tour)
 and the GO-LIVE checklist are the shared sections above — **After the
 install** and **Demo shapes** (here the demo is hand-conducted, per its shapes). No executor flip on
-either substrate any more — if the operator ever wants `dry_run` here, note
-that a systemd `Environment=` in a drop-in BEATS pydantic's env_file, so
-editing `.env` alone does nothing; verify via the `status` RPC's
-`executorMode`, never the file.
+either substrate: there is no executor mode. A run-mode key in a systemd
+`Environment=` or drop-in is not a setting to flip; the API refuses to start
+on it, so check the guard (`verify.sh` on k3s; the setup driver's own run-mode check on podman), never
+a status field.
 
 **Uninstalling (k3s).** Per-manifest: `sudo k3s kubectl delete -f
 deploy/k3s/<file>.yaml` for each of `20-postgres`, `40-graph`, `50-n8n`,

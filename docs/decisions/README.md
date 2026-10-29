@@ -96,7 +96,7 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-005 | The agent sandbox is containment, not restriction | active | 2026-08-04 | discipline only | [trust-gate.md](trust-gate.md) |
 | DL-006 | The sandbox's only exit is mcp.sync_source, and content is captured at propose time | active | undated | test: `tests/test_mcp_sync.py::test_servers_root_is_the_same_path_on_both_sides` | [trust-gate.md](trust-gate.md) |
 | DL-007 | srt stays dormant in the sandbox image; bwrap-fs-only ships instead | superseded | 2026-08-03 | discipline only | [trust-gate.md](trust-gate.md) |
-| DL-008 | A proposal's arguments arrive flattened from real Claude, nested from the demo model | active | undated | code structure only | [trust-gate.md](trust-gate.md) |
+| DL-008 | A proposal's arguments arrive flattened from real Claude, nested from the test model | active | undated | code structure only | [trust-gate.md](trust-gate.md) |
 | DL-009 | A proposal's agent_id is the drafter, never the subject | active | 2026-07-29 | test: `tests/test_executor_provenance.py::test_the_handler_is_handed_the_gateways_proposer_not_the_agents` | [trust-gate.md](trust-gate.md) |
 | DL-010 | A proposal's argument shape is checked in both tiers from one list | active | 2026-08-29 | code structure only | [trust-gate.md](trust-gate.md) |
 | DL-011 | ARG_SPECS stays partial by design; added only after a live multi-round rejection | active | 2026-09-20 | discipline only | [trust-gate.md](trust-gate.md) |
@@ -109,7 +109,7 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-018 | Grant revocation is a timestamp, never a delete | active | undated | test: `tests/test_mcp_grants.py::test_effective_mcp_gates_override_wins_revoke_restores_regrant_reactivates` | [trust-gate.md](trust-gate.md) |
 | DL-019 | EA holds read-only mail-read, narrower than the drafting slice it was weighed against | active | 2026-09-02 | discipline only | [trust-gate.md](trust-gate.md) |
 | DL-020 | Build the spot-check before graph.verify_invalidation graduates | active | undated | discipline only | [trust-gate.md](trust-gate.md) |
-| DL-021 | Two run modes: CC_DEMO_MODE and CC_EXECUTOR_MODE | active | 2026-07-19 | code structure only | [runtime.md](runtime.md) |
+| DL-021 | Two run modes: CC_DEMO_MODE and CC_EXECUTOR_MODE | superseded | 2026-07-19 | superseded by DL-141 | [runtime.md](runtime.md) |
 | DL-022 | A fresh run must load the charter; build_agent_for does not | active | 2026-07-29 | test: `tests/test_agent_run_contract.py::test_every_fresh_run_path_loads_a_charter` | [runtime.md](runtime.md) |
 | DL-023 | system_prompt= is load-bearing; never modernise it to instructions= | active | undated | test: `tests/test_agent_construction_guards.py::test_no_agent_is_built_with_instructions` | [runtime.md](runtime.md) |
 | DL-024 | Agents take deps | active | 2026-07-19 | test: `tests/test_agent_run_contract.py::test_every_agent_run_passes_deps` | [runtime.md](runtime.md) |
@@ -187,7 +187,7 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-096 | Never edit docs/vendor/ or hand-create anything in servers/ | active | undated | script: `scripts/vendor_docs_fetch.sh` | [process.md](process.md) |
 | DL-097 | A fresh database must reproduce the roster | active | undated | sql: `central_command/db/schema.sql:77,81,85,89,93,97,101,104` | [process.md](process.md) |
 | DL-098 | schema.sql is applied on a fresh database and by the updater at release, never at process start | active | undated | code structure only | [process.md](process.md) |
-| DL-099 | Tests must pin demo_mode=True when they hit resolve_model() | active | undated | discipline only | [process.md](process.md) |
+| DL-099 | Tests must pin test_model=True when they hit resolve_model() | active | undated | discipline only | [process.md](process.md) |
 | DL-100 | Assert on rows your test created, never on global counts | active | undated | code structure only | [process.md](process.md) |
 | DL-101 | One name everywhere: the historical identifiers are gone | active | 2026-08-29 | discipline only | [process.md](process.md) |
 | DL-102 | The great scrub: a whole-repo audit is itself a periodic decision | active | 2026-08-31 | discipline only | [process.md](process.md) |
@@ -229,7 +229,7 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-138 | A date filter carries at most one parameter-bearing OR group per field | active | 2026-10-05 | test: `tests/test_graph_search_filters.py::test_a_date_field_never_has_two_parameter_carrying_or_groups` | [process.md](process.md) |
 | DL-139 | Graph search reranks through one optional alias, the best kind the environment has, and the installers probe which | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_the_chat_question_is_upstreams_verbatim` | [process.md](process.md) |
 | DL-140 | A reranker that fails raises; there is no fallback order and no time budget | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_an_http_failure_raises_and_is_classified_by_its_status` | [process.md](process.md) |
-| DL-141 | The deterministic model is test-only and the dry-run executor mode is removed | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-141 | The deterministic model is test-only and the dry-run executor mode is removed | active | 2026-10-19 | test: `tests/test_run_modes.py` (+4 more) | [process.md](process.md) |
 | DL-142 | The read-version stale bounce at propose time is retired; world-state checks at execution replace it | active | 2026-10-19 | test: `tests/test_read_version_retired.py` | [process.md](process.md) |
 | DL-143 | A policy registry as a governed table was never built | active | 2026-10-19 | discipline only | [process.md](process.md) |
 | DL-144 | Not every write produces a proposal: an ungated write stamps an override instead of auto-approving as system | active | 2026-10-19 | discipline only | [process.md](process.md) |

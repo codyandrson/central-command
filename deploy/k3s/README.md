@@ -646,12 +646,11 @@ answers):
   already backed up and removed by the teardown, but verify rather than
   assume.
 - **A leftover executor drop-in**: `/etc/systemd/system/cc-uvicorn.service.d/`
-  (e.g. `executor-live.conf`). The unit no longer pins `CC_EXECUTOR_MODE` at
-  all (2026-09-18 — a fresh install runs `live`), so the trap has inverted: a
-  drop-in that pins **`dry_run`** lives outside the repo AND the cluster,
-  survives every teardown, beats `.env`, and would silently simulate every
-  approval on the new install. `verify.sh --clean-install` asserts the running
-  process is LIVE.
+  (e.g. `executor-live.conf`). A drop-in may not name `CC_TEST_MODEL`,
+  `CC_DEMO_MODE` or `CC_EXECUTOR_MODE`: the API refuses to start on one that
+  does (whatever the value), and `verify.sh` fails it over the running
+  process's environment. Such a drop-in lives outside the repo AND the cluster
+  and survives every teardown, so check for it.
 
 ## 8a. Starting over on the same cluster — `setup.sh reset`
 

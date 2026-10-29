@@ -62,12 +62,16 @@ the credentialed Executor performs writes *after* approval. Keep it that way.
 Rules below exist because a real failure produced them. Trust the rule even
 where the story is gone.
 
-- **Two run modes** (config): `CC_DEMO_MODE` (deterministic FunctionModel vs
-  real Claude) and `CC_EXECUTOR_MODE` (`dry_run` logs writes vs `live`
-  performs them). The one model seam is `runtime/models.py:resolve_model()`.
+- **The test model is test-only, and there is no executor mode.** The
+  deterministic model is `settings.test_model`, set only in-process by the test
+  suite — no env key or env file can set it — and the API refuses to start when
+  `CC_TEST_MODEL`, `CC_DEMO_MODE` or `CC_EXECUTOR_MODE` is present in its
+  environment, whatever the value. Every approval performs its write; tests
+  that need an approval to execute use `tests/fake_world.py`. The one model
+  seam is `runtime/models.py:resolve_model()`.
 - **Proposal arg shape:** real Claude *flattens* the `Proposal` fields at the
   top level of tool-call args (Pydantic AI hoists a single-model tool param);
-  the demo model nests them under `proposal`. Always parse via
+  the test model nests them under `proposal`. Always parse via
   `durable.proposal_from_call()` — it tolerates both.
 - **A proposal's `agent_id` is the DRAFTER, never the subject.** The coach
   drafts charter edits for other agents, so the two differ: the proposal row

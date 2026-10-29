@@ -15,7 +15,8 @@ Source: `central_command/runtime/tools.py` (the 5 sandbox tools),
 | `sandbox_copy_in(source_path)` | copies a granted repo path into your workspace — see below |
 | `sandbox_reset()` | destroys your session's Job; your next tool call creates a fresh, empty one |
 
-All five no-op with a stub message in `CC_DEMO_MODE`. A session is
+All five no-op with a stub message under the test suite's `settings.test_model`
+(the stubs exist only there; a deployment never runs them). A session is
 identified by `(agent_id, session_id)`; `_sandbox_id_for` gets-or-creates it
 on every call (idempotent on the runner side), so there is no separate
 "start a session" step to remember.
