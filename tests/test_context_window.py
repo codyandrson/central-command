@@ -5,7 +5,7 @@ only, step by step, each step an operator toggle. What is under test:
 
 - each pure step does exactly its one thing and leaves the wire protocol valid
   (a tool return never loses the call it answers);
-- the processor is a no-op in demo mode and with every toggle off, and a
+- the processor is a no-op under the test model and with every toggle off, and a
   failure inside it sends the raw history rather than killing the run;
 - the summary step spends its model call once, caches in `run_state`, and
   keeps messages[0] plus a tail that starts with a response;
@@ -40,7 +40,7 @@ from tests.conftest import needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     context._windows.clear()
     context._sent.clear()
     yield
@@ -160,12 +160,12 @@ def _pin(monkeypatch, cfg: dict, window: int = 100_000):
     context._windows["cc-default"] = window
 
 
-async def test_demo_mode_and_all_off_send_the_raw_history(monkeypatch):
+async def test_the_test_model_and_all_off_send_the_raw_history(monkeypatch):
     msgs = _transcript()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     assert await context.prepare_window(_ctx(), msgs) is msgs
 
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     _pin(monkeypatch, {"drop_thinking": False, "clear_tool_results": False,
                        "pressure_warning": False, "output_headroom": False, "summarize": False})
     assert await context.prepare_window(_ctx(), msgs) is msgs

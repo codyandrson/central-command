@@ -3,7 +3,7 @@
 Everything reflection produces stays human-gated: lessons become ordinary
 `graph.add_episode` proposals through the ONE park path, and the coaching
 self-nomination is a signal, not a charter edit. These tests hold the shadow
-guarantees: demo mode produces nothing, the per-session bound notes its
+guarantees: the test model produces nothing, the per-session bound notes its
 overflow rather than dropping it, and a nomination's quote is CHECKED (True or
 False, never absent).
 """
@@ -34,11 +34,10 @@ TRANSCRIPT = {
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    # `demo_mode=True` is not optional: every path here can reach
+    # `test_model=True` is not optional: every path here can reach
     # `resolve_model`, and with a real key in .env an unpinned test calls
     # Claude for real and spends money.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "reflection_enabled", True)
     # The scope floor (2026-08-05) would skip the tiny fixture transcript and
@@ -134,8 +133,8 @@ ONE_LESSON = {
 
 
 @needs_pg
-async def test_demo_mode_and_the_flag_both_schedule_nothing(monkeypatch):
-    """Demo mode must produce nothing and never touch a model — the check is
+async def test_the_test_model_and_the_flag_both_schedule_nothing(monkeypatch):
+    """The test model must produce nothing and never touch a model — the check is
     synchronous in close_session, so no task is created at all. Same for the
     kill switch."""
     called: list[tuple] = []
@@ -151,8 +150,8 @@ async def test_demo_mode_and_the_flag_both_schedule_nothing(monkeypatch):
     await asyncio.sleep(0)
     assert called == []
 
-    # Live mode with the flag off: still nothing.
-    monkeypatch.setattr(settings, "demo_mode", False)
+    # Real model with the flag off: still nothing.
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "reflection_enabled", False)
     sid2 = await _closed_session(agent_id)
     await converse.close_session(sid2, agent_id=agent_id, reason="operator", actor="operator")
@@ -170,7 +169,7 @@ async def test_a_dismissed_session_is_never_reflected_on(monkeypatch):
     async def spy(session_id, *a, **k):
         called.append(session_id)
 
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "reflection_enabled", True)
     monkeypatch.setattr(reflection, "reflect_on_close", spy)
     agent_id = await _fixture_agent()

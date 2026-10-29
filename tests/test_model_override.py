@@ -34,9 +34,8 @@ CATALOG = ["cc-default", "openai/gpt-5.2"]
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    # demo_mode: anything that reaches resolve_model() must not call Claude.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    # The test model: anything that reaches resolve_model() must not call Claude.
+    monkeypatch.setattr(settings, "test_model", True)
 
     async def fake_catalog() -> list[str]:
         return list(CATALOG)
@@ -135,7 +134,7 @@ async def test_patching_a_model_persists_the_override_and_the_run_resolves_to_it
     # …and the run path uses it. Live mode, with the model BUILDER stubbed: the
     # claim is "the override names the model the turn runs on", which is exactly
     # what _live_model is handed.
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     async def fake_live(name, agent_id=None, thinking=None):
         return ("built", name)
 
@@ -169,9 +168,9 @@ async def test_a_model_litellm_does_not_serve_is_refused():
 
 
 @needs_pg
-async def test_demo_mode_ignores_the_override():
-    """The doubles are not addressable model ids — honouring an alias in the one
-    mode that promises no live call would be the lie demo mode exists to avoid."""
+async def test_the_test_model_ignores_the_override():
+    """The doubles are not addressable model ids — honouring an alias in the test
+    model, which promises no live call, would be the lie it exists to avoid."""
     session_id = await _session()
     await repo.set_session_model_override(session_id, "openai/gpt-5.2")
     resolved = await models_mod.resolve_session_model(session_id, "inbox-triage")
@@ -195,7 +194,7 @@ async def test_patching_an_effort_persists_and_the_run_delivers_it(monkeypatch):
 
     # …and the run path builds a model whose settings carry the kwargs. Live
     # mode against a fake endpoint — the model is BUILT, never called.
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "http://localhost:4000")
     monkeypatch.setattr(settings, "llm_api_key", "sk-test-not-a-real-key")
     m = await models_mod.resolve_session_model(session_id, "inbox-triage")
@@ -215,7 +214,7 @@ async def test_effort_off_spells_enable_thinking_false(monkeypatch):
     (the chat template raise_exceptions on it and every request 500s)."""
     session_id = await _session()
     await repo.set_session_thinking_override(session_id, "off")
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "http://localhost:4000")
     monkeypatch.setattr(settings, "llm_api_key", "sk-test-not-a-real-key")
     m = await models_mod.resolve_session_model(session_id, "inbox-triage")
@@ -268,7 +267,7 @@ def test_session_rows_carry_the_thinking_level_the_dropdown_reads():
 async def test_no_thinking_override_builds_no_extra_body(monkeypatch):
     """The default path must stay byte-identical to before the feature: no
     extra_body at all, so the deployment's own kwargs (and the cache) apply."""
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "http://localhost:4000")
     monkeypatch.setattr(settings, "llm_api_key", "sk-test-not-a-real-key")
     m = await models_mod.resolve_model(agent_id="inbox-triage")

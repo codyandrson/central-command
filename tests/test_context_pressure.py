@@ -25,9 +25,9 @@ from tests.conftest import needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    # Nothing here resolves a model, but `check_pressure` reads demo_mode and
+    # Nothing here resolves a model, but `check_pressure` reads the test-model switch and
     # the suite must never reach a provider.
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     context._last_fraction.clear()
     context._windows.clear()
     context._sent.clear()
@@ -177,8 +177,8 @@ async def test_pressure_fires_over_the_threshold_and_then_throttles(monkeypatch)
 
 
 @needs_pg
-async def test_demo_mode_measures_nothing(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_the_test_model_measures_nothing(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     _pin_window(10_000)
     session_id = await _a_session()
 

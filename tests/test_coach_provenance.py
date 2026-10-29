@@ -27,10 +27,8 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    # charter.update writes only the (test) DB — live mode exercises the real
-    # handler instead of dry-run's no-op.
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
+    # charter.update writes only the (test) DB, so its real handler runs here.
 
 
 async def _seed_charter_proposal(drafter: str, target: str, extra_args: dict | None = None) -> tuple[str, str]:

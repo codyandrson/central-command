@@ -43,7 +43,7 @@ async def restore_agent_row():
 @pytest.fixture
 def live(monkeypatch):
     """Live mode against a fake endpoint — models are BUILT, never called."""
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "http://localhost:4000")
     monkeypatch.setattr(settings, "llm_api_key", "sk-test-not-a-real-key")
     monkeypatch.delenv(f"CC_MODEL_{AGENT.upper().replace('-', '_')}", raising=False)
@@ -111,8 +111,8 @@ async def test_a_session_model_override_still_carries_the_rows_thinking(live):
     assert m.settings["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "low"
 
 
-async def test_demo_mode_ignores_the_agent_row(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_the_test_model_ignores_the_agent_row(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     await repo.set_agent_model(AGENT, "from-the-row", "xhigh")
     resolved = await models_mod.resolve_model(agent_id=AGENT)
     assert type(resolved).__name__ != "OpenAIChatModel"
@@ -283,7 +283,7 @@ def test_a_bad_thinking_level_cannot_be_scheduled_at_all():
 async def test_create_and_run_task_refuses_a_bad_level_before_the_task_row(monkeypatch):
     """A refusal must leave no task row — same invariant as the attachment
     guard, and it is what makes the heartbeat's error record actionable."""
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     before = len(await repo.list_tasks())
     with pytest.raises(Exception) as exc:
         await routes.create_and_run_task(

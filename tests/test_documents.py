@@ -93,8 +93,7 @@ async def _wipe():
 
 @pytest.fixture()
 async def clean_docs(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     # dispatch_once must never trip the approval throttle: it passes once and
     # then fails as AWAITING_HUMAN proposals accumulate past the default of 3.
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
@@ -435,8 +434,8 @@ async def test_enroll_only_document_route_does_not_run_the_agent(clean_docs):
 
 
 @pytestmark_db
-async def test_a_documents_demo_model_is_pinned(clean_docs):
-    """Guard the pin itself: with demo_mode on, the steward must resolve the
+async def test_a_documents_test_model_is_pinned(clean_docs):
+    """Guard the pin itself: with the test model on, the steward must resolve the
     steward stand-in — not a live Claude call, and not triage's model."""
     from central_command.runtime import steward
 

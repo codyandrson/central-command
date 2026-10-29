@@ -51,9 +51,8 @@ async def clean_skills():
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
     # `_agents_detail` composes REST handlers that import runtime modules; with
-    # a real key in `.env` an unpinned demo_mode would reach live Claude.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    # a real key in `.env` an unpinned test model would reach live Claude.
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 async def _held(skill_id: str) -> dict:

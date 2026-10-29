@@ -343,7 +343,7 @@ async def test_generated_team_section_names_teammates_not_self(monkeypatch):
     from the live roster, exactly like the granted-capabilities section — a
     new hire is self-announcing with zero recoaching. It names every OTHER
     active teammate and never the agent itself."""
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     from central_command.runtime.jira_expert import build_jira_expert
     from central_command.runtime.roster import team_section
 
@@ -366,7 +366,7 @@ async def test_a_consult_advisory_prompt_also_carries_the_team_section(monkeypat
     """Slice A must ride every fresh-run path that composes a charter,
     including the consult advisory build — a consulted specialist is
     introduced to its own teammates too."""
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     from central_command.runtime import consult as consult_mod
 
     agent = await consult_mod.build_advisory_agent(

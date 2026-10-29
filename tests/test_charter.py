@@ -27,8 +27,7 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 async def clean(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     await repo.upsert_agent(AGENT, "Inbox Triage", "inbox-triage", "test")
     await _wipe()
     yield

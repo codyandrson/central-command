@@ -212,7 +212,7 @@ async def test_unloaded_skill_costs_no_context(clean_skills, monkeypatch):
     """THE acceptance guard: a run that never loads a skill contains the
     catalog entry but NOT the guidance body anywhere in the request. Guidance
     stays deferred until the model chooses to load_capability it."""
-    monkeypatch.setattr(settings, "demo_mode", True, raising=False)
+    monkeypatch.setattr(settings, "test_model", True, raising=False)
 
     secret = "ZZZGUIDANCEBODYZZZ"
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
@@ -258,7 +258,7 @@ async def test_first_run_task_carries_granted_skills(clean_skills, monkeypatch):
     where every first-run call site built agents bare."""
     from central_command.runtime.run import run_task
 
-    monkeypatch.setattr(settings, "demo_mode", True, raising=False)
+    monkeypatch.setattr(settings, "test_model", True, raising=False)
 
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
     await repo.add_skill_doc(

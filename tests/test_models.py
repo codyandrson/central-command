@@ -3,7 +3,7 @@
 Locks the one-provider shape: CC_LLM_BASE_URL + CC_LLM_API_KEY configure the
 endpoint agents talk to, presence is enablement (no flag, no fallback chain),
 base_url is ALWAYS pinned so ambient env vars cannot redirect traffic, and
-missing config raises in live mode. Demo mode returns the deterministic model
+missing config raises in live mode. The test model returns the deterministic model
 without touching any of it.
 
 Builds models only — no provider is called. It needs Postgres since
@@ -29,7 +29,7 @@ def _api_key(model):
 
 
 def _configure(monkeypatch, base_url="http://localhost:4000", api_key="sk-cc-virtual"):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", base_url)
     monkeypatch.setattr(settings, "llm_api_key", api_key)
 
@@ -72,7 +72,7 @@ async def test_ambient_base_url_cannot_redirect_traffic(monkeypatch):
 
 
 async def test_missing_config_raises_naming_both_variables(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "")
     monkeypatch.setattr(settings, "llm_api_key", "")
 
@@ -149,9 +149,9 @@ async def test_explicit_model_param_beats_per_agent_override(monkeypatch):
     assert await resolve_model(sentinel, agent_id="inbox-triage") is sentinel
 
 
-async def test_demo_mode_returns_the_spike_model(monkeypatch):
-    """Demo mode returns before any provider config is read — even unconfigured."""
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_the_test_model_returns_the_spike_model(monkeypatch):
+    """The test model returns before any provider config is read — even unconfigured."""
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "llm_base_url", "")
     monkeypatch.setattr(settings, "llm_api_key", "")
 
@@ -159,10 +159,10 @@ async def test_demo_mode_returns_the_spike_model(monkeypatch):
     assert type(model).__name__ != "OpenAIChatModel"
 
 
-async def test_demo_mode_ignores_per_agent_key(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_the_test_model_ignores_per_agent_key(monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setenv("CC_LLM_PROXY_KEY_INBOX_TRIAGE", "sk-triage-key")
-    # Demo returns the deterministic model regardless of agent/key.
+    # The test model returns the deterministic model regardless of agent/key.
     assert type(await resolve_model(agent_id="inbox-triage")).__name__ != "OpenAIChatModel"
 
 
@@ -181,7 +181,7 @@ async def test_live_model_pins_max_tokens_above_the_client_default(monkeypatch):
     from central_command.config import settings as cfg
     from central_command.runtime.models import resolve_model
 
-    monkeypatch.setattr(cfg, "demo_mode", False)
+    monkeypatch.setattr(cfg, "test_model", False)
     monkeypatch.setattr(cfg, "llm_base_url", "http://localhost:4000")
     monkeypatch.setattr(cfg, "llm_api_key", "sk-test-not-a-real-key")
     _declare_output_cap(monkeypatch, None)
@@ -218,7 +218,7 @@ async def test_live_model_clamps_max_tokens_to_the_models_declared_cap(monkeypat
     from central_command.config import settings as cfg
     from central_command.runtime.models import resolve_model
 
-    monkeypatch.setattr(cfg, "demo_mode", False)
+    monkeypatch.setattr(cfg, "test_model", False)
     monkeypatch.setattr(cfg, "llm_base_url", "http://localhost:4000")
     monkeypatch.setattr(cfg, "llm_api_key", "sk-test-not-a-real-key")
 
@@ -238,7 +238,7 @@ async def test_a_failed_cap_discovery_is_not_cached(monkeypatch):
     from central_command.config import settings as cfg
     from central_command.runtime import context
 
-    monkeypatch.setattr(cfg, "demo_mode", False)
+    monkeypatch.setattr(cfg, "test_model", False)
     monkeypatch.setattr(context, "_output_caps", {})
     monkeypatch.setattr(context, "_windows", {})
     answers = iter([None, 10000, 10000])  # None = raise this time

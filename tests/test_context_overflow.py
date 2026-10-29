@@ -21,7 +21,7 @@ from tests.test_context_window import _ctx, _pairs_ok, _pin, _transcript, _windo
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     context._windows.clear()
     context._sent.clear()
     context._density.clear()
