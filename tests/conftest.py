@@ -404,6 +404,11 @@ async def isolated_queue():
                            "where status = 'RETRY_PENDING'")
         await conn.execute("update session set status = 'DONE' "
                            "where status = 'AWAITING_RESUME'")
+        # An orchestrator parked on its children (a test's planted row, often
+        # with no `task_id` in its payload) is picked up by the next test's
+        # `orchestration.resume_sweep()` the same way.
+        await conn.execute("update session set status = 'DONE' "
+                           "where status = 'AWAITING_AGENTS'")
         await conn.execute("update task set status = 'CANCELLED', retry_state = null "
                            "where status = 'ASSIGNED' and retry_state is not null")
     finally:
