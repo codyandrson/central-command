@@ -3024,8 +3024,8 @@ async def sandbox_exec(ctx: RunContext, command: str) -> str:
     silent — narrow your command rather than assuming a truncated result was
     complete.
     """
-    if _settings.demo_mode:
-        return "(demo mode: sandbox_exec is a stub — no sandbox runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: sandbox_exec is a stub — no sandbox runs under the test model)"
     from central_command.integrations import sandbox_client
 
     try:
@@ -3046,8 +3046,8 @@ async def sandbox_write_file(ctx: RunContext, path: str, content: str) -> str:
     home; a relative path lands there, an absolute path must already be under
     it). Directories are created as needed. Refused if `path` tries to escape
     the workspace (any `..`, or an absolute path outside `/workspace`)."""
-    if _settings.demo_mode:
-        return "(demo mode: sandbox_write_file is a stub — no sandbox runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: sandbox_write_file is a stub — no sandbox runs under the test model)"
     from central_command.integrations import sandbox_client
 
     try:
@@ -3063,8 +3063,8 @@ async def sandbox_read_file(ctx: RunContext, path: str) -> str:
     """Read a file back from your sandbox workspace. Capped at 200,000 bytes;
     a truncated read says so rather than silently handing back a partial
     file as if it were complete."""
-    if _settings.demo_mode:
-        return "(demo mode: sandbox_read_file is a stub — no sandbox runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: sandbox_read_file is a stub — no sandbox runs under the test model)"
     from central_command.integrations import sandbox_client
 
     try:
@@ -3091,8 +3091,8 @@ async def sandbox_copy_in(ctx: RunContext, source_path: str) -> str:
     If you need something that is not granted, `declare_gap` with
     `kind='missing_tool'` naming the path — do not guess at a nearby one.
     """
-    if _settings.demo_mode:
-        return "(demo mode: sandbox_copy_in is a stub — no sandbox runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: sandbox_copy_in is a stub — no sandbox runs under the test model)"
     from central_command.db import repo
     from central_command.integrations import sandbox_client
 
@@ -3136,8 +3136,8 @@ async def sandbox_reset(ctx: RunContext) -> str:
     its workspace). Your NEXT sandbox tool call creates a fresh, empty one —
     use this when you want to start over rather than build on a workspace
     that has drifted."""
-    if _settings.demo_mode:
-        return "(demo mode: sandbox_reset is a stub — no sandbox runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: sandbox_reset is a stub — no sandbox runs under the test model)"
     from central_command.integrations import sandbox_client
 
     agent_id, session_id = _sandbox_identity(ctx)
@@ -3210,8 +3210,8 @@ async def propose_mcp_sync_source(
     truncated read (yours or the runner's cap) REFUSES rather than syncing a
     partial file — ask a narrower path instead.
     """
-    if _settings.demo_mode:
-        return "(demo mode: propose_mcp_sync_source is a stub — no sandbox runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: propose_mcp_sync_source is a stub — no sandbox runs under the test model)"
 
     if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
         return (
@@ -3309,8 +3309,8 @@ async def propose_mcp_build(ctx: RunContext, server_id: str, rationale: str) -> 
     (synced -> built), never a shortcut past review. `rationale` is one
     sentence for the operator: why this server is ready to build.
     """
-    if _settings.demo_mode:
-        return "(demo mode: propose_mcp_build is a stub — no build runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: propose_mcp_build is a stub — no build runs under the test model)"
     if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
         return (
             f"refused: server_id {server_id!r} must match "
@@ -3352,8 +3352,8 @@ async def propose_mcp_deploy(ctx: RunContext, server_id: str, rationale: str) ->
     never a shortcut past mcp.build_image. `rationale` is one sentence for
     the operator: why this server is ready to run.
     """
-    if _settings.demo_mode:
-        return "(demo mode: propose_mcp_deploy is a stub — no deploy runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: propose_mcp_deploy is a stub — no deploy runs under the test model)"
     if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
         return (
             f"refused: server_id {server_id!r} must match "
@@ -3404,8 +3404,8 @@ async def propose_mcp_register(
     'http' (the default, for streamable-HTTP servers) or 'sse'. `rationale`
     is one sentence for the operator: why this server is ready to register.
     """
-    if _settings.demo_mode:
-        return "(demo mode: propose_mcp_register is a stub — no registration runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: propose_mcp_register is a stub — no registration runs under the test model)"
     if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
         return (
             f"refused: server_id {server_id!r} must match "
@@ -3454,8 +3454,8 @@ async def propose_mcp_remove(ctx: RunContext, server_id: str, rationale: str) ->
     approved again. `rationale` is one sentence for the operator: why this
     server should come down.
     """
-    if _settings.demo_mode:
-        return "(demo mode: propose_mcp_remove is a stub — no removal runs in demo mode)"
+    if _settings.test_model:
+        return "(test model: propose_mcp_remove is a stub — no removal runs under the test model)"
     if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
         return (
             f"refused: server_id {server_id!r} must match "
@@ -3511,8 +3511,8 @@ async def propose_mcp_tool_call(
     available to you as a DIRECT callable (named after the tool itself) —
     call it directly instead of proposing it here.
     """
-    if _settings.demo_mode:
-        return "(demo mode: propose_mcp_tool_call is a stub — no MCP calls run in demo mode)"
+    if _settings.test_model:
+        return "(test model: propose_mcp_tool_call is a stub — no MCP calls run under the test model)"
 
     from central_command.db import repo
 

@@ -3,7 +3,7 @@
 import os
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Pydantic's env_file populates Settings FIELDS only — it never exports to
@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     #   llm_api_key  -> the key for whatever that endpoint is: a LiteLLM VIRTUAL
     #                   key scoped to Central Command (never the master key), or an
     #                   Anthropic key when pointed at Anthropic directly.
-    # Demo mode is unaffected (never hits a provider).
+    # The test model is unaffected (never hits a provider).
     llm_base_url: str = ""
     llm_api_key: str = ""
     # Per-agent keys (Phase 5, attribution): OPTIONAL env vars named
@@ -414,9 +414,11 @@ class Settings(BaseSettings):
     api_port: int = 8080
 
     # Run modes.
-    #   demo_mode=True  -> drive agents with a deterministic model (no API key needed)
+    #   test_model      -> drive agents with a deterministic model (no API key
+    #                      needed). NOT a field: no environment variable or env
+    #                      file can set it (see the property at the foot of the
+    #                      class), only code in this process.
     #   executor_mode   -> "live" performs real writes; "dry_run" logs them instead
-    demo_mode: bool = False
     executor_mode: str = "live"
 
     # Backpressure dispatcher (Phase 2, M7). PULL not push — these are the valves.
@@ -441,7 +443,7 @@ class Settings(BaseSettings):
     # everything — by comparing the claimed item's embedding against every item
     # still in flight or owing an unexecuted proposal, and releasing it back
     # with a backoff on a match. Fail-open: an unreachable embedder never
-    # blocks dispatch. Skipped in demo mode (no proxy to embed with).
+    # blocks dispatch. Skipped under the test model (no proxy to embed with).
     #   semantic_freeze_enabled   -> the gate itself
     #   semantic_freeze_threshold -> cosine similarity at or above which the
     #                                item is frozen; lower = more aggressive
@@ -774,7 +776,7 @@ class Settings(BaseSettings):
     #   selfcheck_on_start            -> one run in the background at API
     #                                    start, so the Systems page has a
     #                                    result without anyone asking. Never
-    #                                    under the test suite or in demo mode
+    #                                    under the test suite or the test model
     #                                    (api/selfcheck.py:start_on_boot).
     #                                    Two checks spend one model request
     #                                    each, which is why it is a switch.
@@ -837,6 +839,36 @@ class Settings(BaseSettings):
         if not agent_id:
             return ""
         return os.environ.get(f"CC_MODEL_{agent_id.upper().replace('-', '_')}", "")
+
+    # The test model: a switch the environment cannot reach. A pydantic private
+    # attribute is never read from env or `.env`, so `CC_TEST_MODEL=true` (or
+    # the retired `CC_DEMO_MODE=true`) in either leaves it False; the property
+    # setter below is what `monkeypatch.setattr(settings, "test_model", True)`
+    # calls, because pydantic v2's BaseModel.__setattr__ routes a name that is a
+    # class-level property to that property. Epic run-modes, story 3.
+    _test_model: bool = PrivateAttr(default=False)
+
+    @property
+    def test_model(self) -> bool:
+        """True when agents run on the deterministic doubles of
+        `runtime/spike_model.py` (no provider, no key). Set in-process only —
+        by the test suite — and never by a deployment."""
+        return self._test_model
+
+    @test_model.setter
+    def test_model(self, value: bool) -> None:
+        self._test_model = bool(value)
+
+    # TRANSITIONAL alias for the field this replaced, so a test that still pins
+    # `monkeypatch.setattr(settings, "demo_mode", True)` keeps working while the
+    # area sweeps move it. Removed in story 10 of epic-run-modes.
+    @property
+    def demo_mode(self) -> bool:
+        return self.test_model
+
+    @demo_mode.setter
+    def demo_mode(self, value: bool) -> None:
+        self.test_model = value
 
 
 settings = Settings()

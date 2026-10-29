@@ -175,7 +175,7 @@ async def _run_live(
         # the check is one json.dumps + a division over data that is in hand, and
         # it is the only place that sees a run growing mid-flight — a run that
         # blows the window does it between turns, not at its edges. Never
-        # raises (see `context.check_pressure`), no-op in demo mode.
+        # raises (see `context.check_pressure`), no-op under the test model.
         await context.check_pressure(
             session_id, {"messages": dumped}, agent_id=agent_id,
             model=getattr(model, "model_name", None),

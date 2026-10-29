@@ -2150,17 +2150,17 @@ async def granted_packs(agent_id: str) -> tuple[str, ...]:
 # effective gate is 'ungated' attaches as a REAL, directly-callable MCP
 # toolset, filtered to exactly that agent's ungated tool names for that one
 # server (an agent's ungated access to server A says nothing about server B).
-# Demo mode attaches nothing at all — no MCP connections are made.
+# The test model attaches nothing at all — no MCP connections are made.
 
 
 async def mcp_toolsets_for(agent_id: str, pack_names) -> list:
     """The extra toolsets an agent's `mcp:` grants contribute, on top of
     `toolset_for`'s static packs. Returns `[]` when there are no `mcp:`
-    grants, or in demo mode (no live MCP connections then)."""
+    grants, or under the test model (no live MCP connections then)."""
     from central_command.config import settings
 
     server_ids = mcp_server_ids_from_grants(pack_names)
-    if not server_ids or settings.demo_mode:
+    if not server_ids or settings.test_model:
         return []
 
     from central_command.db import repo

@@ -225,7 +225,7 @@ def make_redraft_model(claim: str | None = None) -> FunctionModel:
 
 # --- the auditor's deterministic stand-in ------------------------------------
 # Verdict from the email text alone: an issue key or "action required" means
-# the dismissal was wrong (challenge); otherwise concur. Demo mode and the
+# the dismissal was wrong (challenge); otherwise concur. The test model and the
 # auditor tests control the input text, so the behaviour is fully scripted.
 
 
@@ -257,7 +257,7 @@ def make_auditor_model() -> FunctionModel:
 # --- the graph auditor's deterministic stand-in --------------------------------
 # Verdict from the prompt text alone: "misaligned" or "unrelated" anywhere in
 # the rendered delta means the extraction diverged (flag); otherwise aligned.
-# Demo mode and the verification tests control the input text, so the
+# The test model and the verification tests control the input text, so the
 # behaviour is fully scripted.
 
 
@@ -854,7 +854,7 @@ def make_orchestrator_model() -> FunctionModel:
 # --- D7 phase 2: deterministic project-orchestration models --------------------
 # Drive the full loop offline: plan → operator review → assign → child result →
 # final report. The driver's park/resume machinery is identical under real
-# Claude; these make it a repeatable, API-key-free test (and the demo mode).
+# Claude; these make it a repeatable, API-key-free test (and the test model).
 
 
 def _latest_returns(messages) -> dict[str, str]:
@@ -950,7 +950,7 @@ def make_bad_target_project_model() -> FunctionModel:
 # operator's turn -> conclude_discussion -> the RESUMED task parks the
 # graph.add_episode work-log proposal.
 #
-# The composite (`make_ea_model`) is what demo mode actually resolves for the
+# The composite (`make_ea_model`) is what the test model actually resolves for the
 # `ea` agent, because all three of those steps go through the ONE model seam
 # (`runtime/models.resolve_model`) and the agent has to know which of its own
 # moves is next. It decides from the transcript alone — no flags, no state — so
@@ -1073,7 +1073,7 @@ def _respond_ea(messages, info: AgentInfo) -> ModelResponse:
 
 
 def make_ea_model() -> FunctionModel:
-    """THE demo model for the `ea` agent — dispatches between the lane and the
+    """THE test model for the `ea` agent — dispatches between the lane and the
     task run from the transcript's shape."""
     return FunctionModel(_respond_ea)
 

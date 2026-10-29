@@ -63,7 +63,7 @@ _OUTCOME_CHARS = 3000  # child outcome truncation in the result contract
 async def _resolve_project_model(model=None):
     if model is not None:
         return model
-    if settings.demo_mode:
+    if settings.test_model:
         from central_command.runtime.spike_model import make_project_model
 
         return make_project_model()

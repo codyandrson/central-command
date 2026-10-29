@@ -524,11 +524,11 @@ def test_import_is_credential_free():
 async def test_sandbox_tools_stub_in_demo_mode(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     ctx = _Ctx()
-    assert "demo mode" in (await tools_mod.sandbox_exec(ctx, "echo hi")).lower()
-    assert "demo mode" in (await tools_mod.sandbox_write_file(ctx, "a.txt", "x")).lower()
-    assert "demo mode" in (await tools_mod.sandbox_read_file(ctx, "a.txt")).lower()
-    assert "demo mode" in (await tools_mod.sandbox_copy_in(ctx, "some/path")).lower()
-    assert "demo mode" in (await tools_mod.sandbox_reset(ctx)).lower()
+    assert "test model" in (await tools_mod.sandbox_exec(ctx, "echo hi")).lower()
+    assert "test model" in (await tools_mod.sandbox_write_file(ctx, "a.txt", "x")).lower()
+    assert "test model" in (await tools_mod.sandbox_read_file(ctx, "a.txt")).lower()
+    assert "test model" in (await tools_mod.sandbox_copy_in(ctx, "some/path")).lower()
+    assert "test model" in (await tools_mod.sandbox_reset(ctx)).lower()
 
 
 # --- tools: the runner faked at the httpx boundary ----------------------------

@@ -93,13 +93,13 @@ def test_mcp_propose_pack_carries_all_three_tools_and_capabilities():
 async def test_propose_build_demo_mode_is_a_stub(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     out = await tools_mod.propose_mcp_build(_Ctx(), "my-server", "ready to build")
-    assert "demo mode" in out
+    assert "test model" in out
 
 
 async def test_propose_deploy_demo_mode_is_a_stub(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     out = await tools_mod.propose_mcp_deploy(_Ctx(), "my-server", "ready to deploy")
-    assert "demo mode" in out
+    assert "test model" in out
 
 
 @pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])

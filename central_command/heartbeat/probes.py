@@ -40,7 +40,7 @@ Endpoints (the first three verified against the live Pi stack on 2026-07-31):
              is listening, as `api/systems.py` does)
 Each is derived from the SAME setting the real client uses, so a redeployment
 that moves a service moves its probe with it. A service that is NOT configured
-(no Jira URL, no forge instance, demo mode for the model chain) has nothing to
+(no Jira URL, no forge instance, the test model for the model chain) has nothing to
 wait for and probes UP.
 
 The names are `contract/dependencies.DEPENDENCIES` (without `local`, which is
@@ -167,9 +167,9 @@ async def probe_sandbox() -> bool:
 
 async def probe_embedder() -> bool:
     """One embedding of a one-word input on the configured alias, through the
-    same base URL and key the graph's embedder uses. Demo mode has no provider;
+    same base URL and key the graph's embedder uses. The test model has no provider;
     an unconfigured live one is DOWN. Only a transient status counts as down."""
-    if settings.demo_mode:
+    if settings.test_model:
         return True
     base_url, api_key = settings.llm_base_url, settings.llm_api_key
     if not base_url or not api_key:
@@ -216,7 +216,7 @@ async def probe_llm() -> bool:
     URL and default alias (`cc-default`), i.e. exactly the route a retried agent
     run would take — proxy, routing and provider together.
 
-    In demo mode there is no provider to ask and no run that could fail on one,
+    Under the test model there is no provider to ask and no run that could fail on one,
     so the answer is yes. An UNCONFIGURED live provider is reported DOWN: a
     retry would raise the moment it resolved a model, and burning an attempt on
     that helps nobody.
@@ -225,7 +225,7 @@ async def probe_llm() -> bool:
     is a refusal (a 4xx about the request). Only 429 and 5xx — the shapes the
     failure taxonomy calls transient — count as down.
     """
-    if settings.demo_mode:
+    if settings.test_model:
         return True
     base_url, api_key = settings.llm_base_url, settings.llm_api_key
     if not base_url or not api_key:

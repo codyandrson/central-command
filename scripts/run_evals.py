@@ -20,11 +20,6 @@ fixed throughout. `--out PATH` writes the comparison as JSON (see
 `build_results_json` for the exact, documented shape) — the record an
 operator or `litellm-manager` skill document is later built from.
 
-It also refuses to run in demo mode, on purpose. Demo mode's FunctionModel
-returns a canned proposal, so it would score ~100% and prove nothing: that
-"demo mode cannot validate judgment" is exactly the gap this dataset exists to
-close.
-
 What it exercises: the real charter (the CURRENT `guidance_version` row), the
 real granted packs and skills, the real model behind `cc-default`, and the same
 thread-bundle prompt the dispatcher builds. What it deliberately does NOT do is
@@ -333,20 +328,6 @@ def main() -> int:
     if not dataset.cases:
         print("no cases selected", file=sys.stderr)
         return 1
-
-    from central_command.config import settings
-
-    if settings.demo_mode:
-        print(
-            "REFUSING TO RUN IN DEMO MODE.\n\n"
-            "Demo mode answers with a canned FunctionModel proposal, so these cases\n"
-            "would score high and measure nothing — which is the exact gap this\n"
-            "dataset exists to close. Run it against the real model:\n\n"
-            "  CC_DEMO_MODE=false python scripts/run_evals.py\n\n"
-            "with CC_LLM_BASE_URL and CC_LLM_API_KEY set. This spends real inference.",
-            file=sys.stderr,
-        )
-        return 2
 
     aliases = args.model or [None]
     model_timings: dict[str, tuple] = {}

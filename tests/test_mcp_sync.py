@@ -66,7 +66,7 @@ async def test_demo_mode_is_a_stub(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     monkeypatch.setattr(sandbox_client, "create_session", _boom)
     out = await tools_mod.propose_mcp_sync_source(_Ctx(), "my-server", ["a.py"], "test")
-    assert "demo mode" in out
+    assert "test model" in out
 
 
 @pytest.mark.parametrize("server_id", [

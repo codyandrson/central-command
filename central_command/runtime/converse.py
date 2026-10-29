@@ -640,7 +640,7 @@ async def close_session(
     wake_consult_waiters(session_id)
     # Session-close reflection (shadow) rides here and NOWHERE else — the close
     # is done and announced before anything looks back at it. The guard is
-    # synchronous, so demo mode creates no task and touches no model at all.
+    # synchronous, so the test model creates no task and touches no model at all.
     #
     # A DISMISSED session is excluded, and that is the load-bearing one:
     # Dismiss means "no action needed, don't ask again", which is why the
@@ -657,7 +657,7 @@ async def close_session(
     # and a bulk cancel of 38 parked autodiscovery tasks fanned out into 38
     # reflection turns against a backend already buried — the run was cut
     # short by the operator, there is no completed work to reflect on.
-    if settings.demo_mode or not settings.reflection_enabled or reason in ("dismissed", "cancelled"):
+    if settings.test_model or not settings.reflection_enabled or reason in ("dismissed", "cancelled"):
         return
     from central_command.runtime.reflection import reflect_on_close
 

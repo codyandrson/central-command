@@ -93,7 +93,7 @@ async def _resolve_model(model=None):
         return model
     from central_command.config import settings
 
-    if settings.demo_mode:
+    if settings.test_model:
         from central_command.runtime.spike_model import make_orchestrator_model
 
         return make_orchestrator_model()

@@ -76,10 +76,10 @@ def _under_test_suite() -> bool:
 
 def start_on_boot() -> bool:
     """The lifespan's one run at API start. Never under the test suite, never
-    in demo mode (which promises no provider call), and off when
+    under the test model (which promises no provider call), and off when
     CC_SELFCHECK_ON_START is false. Background — startup never waits on a
     model round."""
-    if not settings.selfcheck_on_start or settings.demo_mode or _under_test_suite():
+    if not settings.selfcheck_on_start or settings.test_model or _under_test_suite():
         return False
     return start_run()
 

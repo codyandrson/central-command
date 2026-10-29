@@ -417,14 +417,14 @@ def _default_alias() -> str:
     return configured_model_name(None)
 
 
-def _demo_skip() -> Outcome:
-    return not_applicable("CC_DEMO_MODE is on — agents run on the deterministic "
+def _test_model_skip() -> Outcome:
+    return not_applicable("the test model is on — agents run on the deterministic "
                           "model and never call the provider")
 
 
 async def check_proxy_as_app(ctx: Context) -> Outcome:
-    if settings.demo_mode:
-        return _demo_skip()
+    if settings.test_model:
+        return _test_model_skip()
     if _llm_missing():
         return _llm_missing_fail("the agents have nothing to reach the model proxy with")
     alias = _default_alias()
@@ -460,8 +460,8 @@ async def check_proxy_as_app(ctx: Context) -> Outcome:
 
 
 async def check_completion_as_app(ctx: Context) -> Outcome:
-    if settings.demo_mode:
-        return _demo_skip()
+    if settings.test_model:
+        return _test_model_skip()
     if _llm_missing():
         return _llm_missing_fail("resolve_model cannot build the agents' client")
     from pydantic_ai.direct import model_request

@@ -158,7 +158,7 @@ async def _item_vector(item: dict) -> list[float] | None:
     vector = item.get("embedding")
     if vector:
         return vector
-    if settings.demo_mode:
+    if settings.test_model:
         return None
     from central_command.integrations.neo4j_writer import embed
 
@@ -239,7 +239,7 @@ async def _with_pending_proposals_context(prompt: str, item: dict | None = None)
 async def _embed_intent(text: str) -> list[float] | None:
     """A pending proposal's intent vector. `EmbedderDown` propagates (the item
     waits for the embedder, story 7); None only for an empty intent."""
-    if settings.demo_mode or not text.strip():
+    if settings.test_model or not text.strip():
         return None
     from central_command.integrations.neo4j_writer import embed
 
@@ -425,7 +425,7 @@ async def _semantic_freeze_check(item: dict) -> dict | None:
     `['embedder']` — and is not processed until the embedder is back. Running
     it unguarded is how a duplicate proposal is born.
     """
-    if settings.demo_mode or not settings.semantic_freeze_enabled:
+    if settings.test_model or not settings.semantic_freeze_enabled:
         return None
     from central_command.integrations.neo4j_writer import embed
 

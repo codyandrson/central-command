@@ -65,10 +65,10 @@ async def context_window() -> int:
 async def window_for(model: str | None) -> int:
     """Same discovery for an EXPLICIT model (a session's override), cached per
     name so a sessions.list of 50 rows costs one lookup per distinct model."""
-    # Demo mode addresses a FunctionModel with no window worth discovering, and
+    # The test model addresses a FunctionModel with no window worth discovering, and
     # asking the proxy would be a live call from the one mode that promises none.
     # Ahead of the cache so a mode flip can never read a value from the other one.
-    if settings.demo_mode:
+    if settings.test_model:
         return settings.context_window
     name = (model or settings.default_model or "").split(":", 1)[-1]
     if name not in _windows:
@@ -88,7 +88,7 @@ async def output_cap_for(model: str | None) -> int | None:
     (a Kilo.ai alias counting 262144 of requested output against a 256k
     context rejected every run, 2026-09-13). Declared, never guessed: an
     undeclared cap leaves the deployment default in force."""
-    if settings.demo_mode:
+    if settings.test_model:
         return None
     name = (model or settings.default_model or "").split(":", 1)[-1]
     if name not in _output_caps:
@@ -224,12 +224,12 @@ async def check_pressure(
     threshold, throttled by growth. Never raises: this is telemetry riding on a
     run, and a measurement must not be able to kill the thing it measures.
 
-    No-op in demo mode — the FunctionModel has no context window worth
+    No-op under the test model — the FunctionModel has no context window worth
     measuring and the deterministic transcripts would emit noise into every
     offline test run.
     """
     try:
-        if settings.demo_mode:
+        if settings.test_model:
             return
         estimate = estimate_tokens(run_state)
         if not estimate:
@@ -635,7 +635,7 @@ class WindowedModel(WrapperModel):
 
 
 async def _prepare_window(ctx, messages):
-    if settings.demo_mode or not messages:
+    if settings.test_model or not messages:
         return messages
     cfg = await load_settings()
     session_id = getattr(ctx.deps, "session_id", None)

@@ -1420,7 +1420,7 @@ async def feed_document(body: DocumentIn) -> dict:
 
     No `model=` is passed. `feed_email` passes the inbox-triage model because
     that is the agent it feeds; copying that here would run the steward on
-    triage's demo model, whose proposal is a Jira due-date change.
+    triage's test model, whose proposal is a Jira due-date change.
     """
     if not body.text.strip():
         raise HTTPException(422, "a document needs text")

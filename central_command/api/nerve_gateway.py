@@ -1185,7 +1185,7 @@ async def _operator_name_set(params: dict) -> dict:
 async def _dispatch(method: str, params: dict, notify) -> Any:
     # Route-handler imports are deferred: routes.py imports runtime modules
     # that must not load at interpreter start in every context (tests pin
-    # demo_mode before app import for the same reason).
+    # the test model before app import for the same reason).
     from central_command.api import routes as rest
 
     if method == "connect":
@@ -1199,7 +1199,7 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         return {
             "agent": {"model": _model_label()},
             "config": {"model": _model_label()},
-            "demoMode": settings.demo_mode,
+            "demoMode": settings.test_model,
             # dry_run | live. The cockpit banners dry_run: an operator approved
             # six proposals believing they executed, and NOTHING on screen said
             # they were simulated (2026-08-26). Pinned by a backend wire test.

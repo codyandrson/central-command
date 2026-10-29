@@ -70,7 +70,7 @@ def parse_email(raw: str) -> dict:
     # Hand-fed text like "Dana: the deadline slipped" parses as a single header
     # named "Dana" and an empty body — the whole message vanishes into pseudo-
     # headers. If parsing yielded nothing but the input wasn't empty, the input
-    # IS the body. (Real Claude 400s on an empty prompt; demo mode never noticed.)
+    # IS the body. (Real Claude 400s on an empty prompt; the test model never noticed.)
     if not body.strip() and raw.strip():
         body = raw
 

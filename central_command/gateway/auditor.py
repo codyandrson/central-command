@@ -93,7 +93,7 @@ def build_auditor(model, charter: str | None = None) -> Agent:
 async def _resolve_model(model=None):
     if model is not None:
         return model
-    if settings.demo_mode:
+    if settings.test_model:
         from central_command.runtime.spike_model import make_auditor_model
 
         return make_auditor_model()

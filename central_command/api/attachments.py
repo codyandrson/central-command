@@ -247,13 +247,13 @@ async def _ocr_scanned_pdf(
     produced nothing — None means the caller's `attachment_no_text` refusal
     stands unchanged, so this can only ADD a delivery, never soften a refusal.
 
-    FAILS CLOSED on every uncertainty: demo mode, no resolved model, a model
+    FAILS CLOSED on every uncertainty: the test model, no resolved model, a model
     that has not DECLARED vision (None is "nobody said", never "yes"), an
     unreachable proxy, bytes pypdfium2 cannot open, or a transcription error
     mid-document — a half-OCR'd document delivered as whole is the same silent
     failure this module exists to prevent.
     """
-    if settings.demo_mode or not model_id:
+    if settings.test_model or not model_id:
         return None
 
     from central_command.integrations.litellm import LiteLLMError, model_accepts_images
@@ -303,9 +303,9 @@ async def _images_deliverable(model_id: str | None) -> tuple[bool, str]:
     Two blockers, reported in the order the operator would hit them, because a
     refusal that names the wrong cause sends them to fix the wrong thing.
     """
-    if settings.demo_mode:
+    if settings.test_model:
         return False, (
-            "demo mode runs deterministic stand-in models that cannot read "
+            "the test model runs deterministic stand-in models that cannot read "
             "images. Attach a document, or describe the image in text."
         )
     if not model_id:
@@ -414,7 +414,7 @@ async def session_model_id(session_id: str | None, agent_id: str | None) -> str 
     from central_command.db import repo
     from central_command.runtime.models import configured_model_name
 
-    if settings.demo_mode:
+    if settings.test_model:
         return None
     if session_id:
         override = await repo.get_session_model_override(session_id)

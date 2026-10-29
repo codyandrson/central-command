@@ -1,6 +1,6 @@
 """Model resolution — the single seam where the agent's model is chosen.
 
-In demo mode we drive agents with the deterministic FunctionModel (no API key,
+Under the test model we drive agents with the deterministic FunctionModel (no API key,
 repeatable). Otherwise we build the configured model against ONE configured
 provider: CC_LLM_BASE_URL + CC_LLM_API_KEY. Presence is enablement — there is
 no on/off flag and no fallback chain. The client speaks OpenAI
@@ -39,13 +39,13 @@ async def resolve_model(model=None, agent_id=None, model_name=None, thinking=Non
     `resolve_session_model`.
 
     Async since 2026-08-19: the agent row is the operator's per-agent model/
-    thinking setting, and reading it is a DB round-trip. The demo short-circuit
+    thinking setting, and reading it is a DB round-trip. The test-model short-circuit
     stays ABOVE that read, so the offline suite never touches Postgres here.
     """
     if model is not None:
         return model
-    if settings.demo_mode:
-        # Per-agent demo stand-ins, at the seam rather than at call sites.
+    if settings.test_model:
+        # Per-agent test-model stand-ins, at the seam rather than at call sites.
         # `make_spike_model` is the INBOX-TRIAGE double — its only move is a
         # Jira due-date proposal — so an agent whose whole behaviour is
         # something else proves nothing running on it. The steward and the
@@ -213,14 +213,14 @@ async def resolve_session_model(session_id: str | None, agent_id: str | None):
     per-session model override (cockpit dropdown → `session.model_override`)
     wins, otherwise the normal precedence applies.
 
-    The override is ignored in demo mode on purpose — the deterministic doubles
+    The override is ignored under the test model on purpose — the deterministic doubles
     are not addressable model ids, so honouring a LiteLLM alias there would swap
     a stand-in for a live call in the one mode that promises it never does.
 
     The thinking override rides the same way: it applies with or without a
     model override, so a session can think harder on the default model.
     """
-    if session_id and not settings.demo_mode:
+    if session_id and not settings.test_model:
         from central_command.db import repo
 
         override = await repo.get_session_model_override(session_id)

@@ -90,7 +90,7 @@ def test_propose_mcp_remove_is_a_durable_propose_tool_and_non_advisory():
 async def test_propose_remove_demo_mode_is_a_stub(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     out = await tools_mod.propose_mcp_remove(_Ctx(), "my-server", "no longer needed")
-    assert "demo mode" in out
+    assert "test model" in out
 
 
 @pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])

@@ -19,7 +19,7 @@ The one-per-session nomination cap is structural (the schema field is
 `SelfNomination | None`), not charter prose: it is what keeps the operator's
 queue bounded by session count rather than by agent enthusiasm.
 
-Demo mode produces nothing at all — canned models cannot glean lessons, and
+The test model produces nothing at all — canned models cannot glean lessons, and
 the guard is in `converse.close_session` so no reflection task is ever created
 (the suite closes sessions constantly).
 

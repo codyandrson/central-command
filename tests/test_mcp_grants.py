@@ -266,7 +266,7 @@ def test_propose_mcp_tool_call_is_non_advisory_and_a_propose_tool():
 async def test_propose_mcp_tool_call_demo_mode_is_a_stub(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     out = await tools_mod.propose_mcp_tool_call(_Ctx(), "s", "t", {}, "why")
-    assert "demo mode" in out
+    assert "test model" in out
 
 
 @needs_pg

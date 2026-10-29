@@ -185,7 +185,7 @@ async def test_client_fails_loud_when_unconfigured(monkeypatch):
 async def test_propose_register_demo_mode_is_a_stub(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)
     out = await tools_mod.propose_mcp_register(_Ctx(), "my-server", "ready to register")
-    assert "demo mode" in out
+    assert "test model" in out
 
 
 @pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])

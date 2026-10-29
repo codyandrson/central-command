@@ -96,7 +96,7 @@ def build_graph_auditor(model, charter: str | None = None) -> Agent:
 async def _resolve_model(model=None):
     if model is not None:
         return model
-    if settings.demo_mode:
+    if settings.test_model:
         from central_command.runtime.spike_model import make_graph_auditor_model
 
         return make_graph_auditor_model()

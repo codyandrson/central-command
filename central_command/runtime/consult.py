@@ -476,8 +476,8 @@ async def _consult_model(agent_id: str, model=None):
         return model
     from central_command.config import settings
 
-    if settings.demo_mode:
-        # Demo mode has ONE deterministic advisor: a text answer, so the consult
+    if settings.test_model:
+        # The test model has ONE deterministic advisor: a text answer, so the consult
         # loop runs offline. The triage spike model must not be used here — it
         # emits propose calls, which an advisory run holds no tool for.
         from central_command.runtime.spike_model import make_jira_advice_model
