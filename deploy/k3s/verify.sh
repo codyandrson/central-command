@@ -7,14 +7,15 @@
 #   assertion it made is still made here; the access mechanism changed and two
 #   sections gained new obligations.
 #
-#   It checks four things:
+#   It checks five things:
 #     A. every service Central Command depends on is UP and answering;
 #     B. the migrated data is present and DECRYPTABLE;
 #     C. PLACEMENT matches the design — the float/pin split is the whole point
 #        of the migration, and "it works right now" does not prove it. A pod
 #        that happened to land on the right node is indistinguishable from one
 #        that was pinned there, until the day it moves;
-#     D. the host's own config still points at loopback.
+#     D. the host's own config still points at loopback;
+#     E. the running API carries no run-mode key (central_command/run_modes.py).
 #
 #   On (D) and the old "nothing points off-box" rule: the premise CHANGED on
 #   2026-07-31. The deployment is deliberately two nodes now, so the chromebox
@@ -135,12 +136,6 @@ if [[ "$CLEAN" == "1" ]]; then
   check "spine: schema loaded (event log queryable; fresh log may be near-empty)" \
     "test \"\$(${K[*]} exec deploy/cc-postgres -- psql -qtAX -U central_command -d central_command -c 'select count(*) from audit_event')\" -ge 0"
   skip "n8n: facade workflow + Gmail credential — instance data, restored in README.md phase 8"
-  # The RUNNING process's mode, not the unit file's: a go-live drop-in in
-  # cc-uvicorn.service.d/ outlives a teardown and beats Environment= in the
-  # unit (2026-08-29: a "clean" install executed its demo approval live).
-  # systemd's value is in the process env; absent that, .env decides.
-  check "executor: the running API is live (a stale dry_run drop-in or .env would simulate every approval)" \
-    "mode=\$(sudo tr '\\0' '\\n' </proc/\$(systemctl show -p MainPID --value cc-uvicorn)/environ | sed -n 's/^CC_EXECUTOR_MODE=//p'); [[ -z \$mode ]] && mode=\$(sed -n 's/^CC_EXECUTOR_MODE=//p' .env); [[ \${mode:-live} == live ]]"
   skip "n8n: (run without --clean-install after the phase-8 restore to assert both)"
 else
   check "spine: event log carried over" \
@@ -303,6 +298,40 @@ if [[ -n "$missing_llm" ]]; then
 else
   ok "LLM provider configured (CC_LLM_BASE_URL + CC_LLM_API_KEY)"
 fi
+
+echo
+echo "== E. the API runs on no run mode =="
+# The RUNNING process's environment, not the unit file's: a drop-in in
+# cc-uvicorn.service.d/ outlives a teardown and beats Environment= in the unit
+# (2026-08-29: a "clean" install executed its demo approval live). systemd's
+# values are in /proc/<pid>/environ; with no process running, the root .env
+# decides. The rule is central_command/run_modes.py's, never a copy: any
+# run-mode key PRESENT, whatever its value, FAILS, and the API itself refuses
+# to start on one. -I keeps the package directory off sys.path (stdlib only).
+run_modes_check() {
+  local pid out src rc
+  pid="$(systemctl show -p MainPID --value cc-uvicorn 2>/dev/null)"
+  if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    if ! sudo test -r "/proc/$pid/environ"; then
+      bad "run modes: cannot read the running cc-uvicorn's environment (pid $pid)"
+      return
+    fi
+    src="the running cc-uvicorn (pid $pid)"
+    out="$(sudo cat "/proc/$pid/environ" | python3 -I central_command/run_modes.py --environ /dev/stdin 2>&1)"
+    rc=$?
+  else
+    src=".env (no cc-uvicorn process)"
+    out="$(python3 -I central_command/run_modes.py --env-file .env 2>&1)"
+    rc=$?
+  fi
+  if [[ $rc -eq 0 ]]; then
+    ok "run modes: none in $src (the real model, every approved write performed)"
+  else
+    bad "run modes: $src carries a run-mode key — central_command/run_modes.py reports:"
+    sed -n 's/^/        /p' <<<"$out"
+  fi
+}
+run_modes_check
 
 echo
 if [[ "$SKIP" -gt 0 ]]; then

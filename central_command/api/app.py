@@ -67,7 +67,6 @@ def _release_followers_on_signal() -> list:
     return installed
 
 
-@asynccontextmanager
 def _warn_retired_settings() -> None:
     """One warning naming the retired keys this process was given. The values
     change nothing: the outage doctrine retries for as long as an outage lasts
@@ -84,7 +83,36 @@ def _warn_retired_settings() -> None:
         )
 
 
+def _refuse_run_modes() -> None:
+    """Refuse to serve when the process environment carries any run-mode key
+    (`run_modes.KEYS`), whatever its value. This environment is the one place
+    every source the API reads has already merged: config.py's load_dotenv
+    mirrored the root .env into it, and systemd the unit's Environment= lines
+    and every drop-in. One critical line per key, then the raise, so uvicorn
+    exits without serving."""
+    import os
+
+    from central_command import run_modes
+
+    findings = run_modes.check(os.environ)
+    if not findings:
+        return
+    log = logging.getLogger(__name__)
+    for finding in findings:
+        log.critical("refusing to start: %s", finding.message())
+    raise RuntimeError(
+        "refusing to start: run-mode key(s) "
+        + ", ".join(f"{f.key}={f.value!r}" for f in findings)
+        + " present in the API's environment; remove them from .env, the unit "
+        "or its drop-in"
+    )
+
+
+@asynccontextmanager
 async def lifespan(app: FastAPI):
+    # First, before anything opens: a deployment never runs on the test model
+    # or the dry-run executor (central_command/run_modes.py).
+    _refuse_run_modes()
     event_log.opened()
     # WARNING+ log records surface in Activity → Events (log.error/log.warning
     # events). Installed here because the handler needs the serving loop.
@@ -250,8 +278,8 @@ async def lifespan(app: FastAPI):
     # The application self-check (central_command/selfcheck.py): one READINESS
     # run in the background so the Systems page has a result. It spends one
     # completion and one embedding, so it is a switch — and start_on_boot
-    # also refuses under the test suite and in demo mode. Never re-run on a
-    # timer, and nothing acts on its result.
+    # also refuses under the test suite and under the test model. Never re-run
+    # on a timer, and nothing acts on its result.
     if settings.selfcheck_on_start:
         from central_command.api import selfcheck as selfcheck_api
 

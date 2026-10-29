@@ -152,6 +152,11 @@ Top-level modules of `central_command/`: `config.py` holds every `CC_*` setting
 application self-check — the install proved as the app, one implementation run
 from the command line (`python -m central_command.selfcheck`) and from
 `api/selfcheck.py`; it reads the spine directly and reports readiness only.
+`run_modes.py` is the run-mode guard (`central_command/run_modes.py`, stdlib
+only): any of `CC_TEST_MODEL`, `CC_DEMO_MODE`, `CC_EXECUTOR_MODE` present, whatever
+its value, refuses — the API's lifespan applies it to its own environment
+before anything opens, and `deploy/k3s/verify.sh` runs it over the running
+process's environ.
 
 ### The parts `DESIGN.md` does not describe
 

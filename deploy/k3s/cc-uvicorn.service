@@ -18,8 +18,9 @@
 #      old ExecStartPre was really buying.
 #
 # The app reads .env from WorkingDirectory (CC_ANTHROPIC_API_KEY, CC_DISPATCH_*,
-# CC_FEED_*, CC_AUDITOR_*, CC_LLM_PROXY_* all live there); only the run-mode
-# flags are pinned here, matching the documented recipe.
+# CC_FEED_*, CC_AUDITOR_*, CC_LLM_PROXY_* all live there). No run-mode key
+# (run_modes.KEYS) may be set here, in .env or in a drop-in: the API refuses
+# to start on any of them (central_command/run_modes.py).
 
 # Wants=, not Requires= (v2.58.3). Requires= makes this unit's start job
 # depend on k3s's start job SUCCEEDING: when k3s loses its first attempt at
@@ -42,7 +43,6 @@ Wants=network-online.target k3s.service
 User=codyslab
 Group=codyslab
 WorkingDirectory=/home/codyslab/central-command
-Environment=CC_DEMO_MODE=false
 # NOTE: CC_DISPATCH_APPROVAL_LIMIT=5 used to be pinned here. It is not a
 # run-mode flag, and a systemd Environment= beats pydantic-settings' env_file,
 # so it SILENTLY shadowed .env: raising the valve there changed nothing and the
