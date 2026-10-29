@@ -4,6 +4,79 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-28 — v2.73.0: the world moved is a NO that redrafts — typed, re-checked, bounded, and every redraft parks
+
+epic-world-changed-redraft. Eleven commits since v2.72.0 (`8a25d25c..9bf792d2`, ten
+stories and one test-isolation fix) make "the world moved between the draft and the
+write" one typed NO that redrafts, instead of a write replayed over what nobody
+reviewed. A target that changed
+since the draft is a `WorldMoved` failure: never transient, never parked for an outage,
+because replaying the draft as-is would overwrite a change the operator never saw
+(DL-190). It lands FAILED and loud, the drafter is resumed with what moved, and its
+redraft parks for the operator like any other proposal.
+
+- **A typed NO.** `contract.failures.WorldMoved` (target, expected, actual, what
+  moved) classifies semantic ahead of every other branch. Raised today by a stale
+  Confluence page version (`ConfluenceStale`), a Jira transition that vanished since
+  the draft (`TransitionMoved`; a transition that was never available stays a plain
+  drafting error) and a changed or vanished `graph.delete_episode` preview.
+- **The Executor re-checks before it writes.** `executor.WORLD_CHECKS` maps the three
+  stateful capabilities to read-only checks that are the very functions their handlers
+  run first. `execute()` runs them before the first action on each target, after the
+  shape pass and the override backstop, and skips them on a dry run. A proposal that
+  waited out an outage, was interrupted by a restart, or was approved late redrafts
+  instead of half-landing. A DOWN read during the check parks the proposal as before.
+- **What a world-moved failure does.** The proposal lands FAILED;
+  `proposal.failed` carries `world_moved` (capability, target, expected, actual, what
+  moved); the drafter resumes with a report of what moved. An interrupted-by-a-restart
+  proposal says so in the report and names the action that was in flight.
+- **Redrafts are linked and always park.** New additive column `proposal.redraft`
+  `{of, root, cause, world_moved_count}`, written only through `park_proposal`. Every
+  redraft parks for the operator: a redraft is never decided by a gate override, and
+  it counts as a redraft after the world moved, a failed execution or a Reject.
+- **A bound.** `CC_WORLD_MOVED_REDRAFT_LIMIT` (setting `world_moved_redraft_limit`,
+  default 3, 0 allowed = the first world-moved failure is terminal). At the limit the
+  drafter is not resumed: `proposal.failed` carries `chain_exhausted`, one
+  `proposal.redraft_limit_reached` event follows, the session rests open flagged
+  `exec_failed`, and the task and its work items land FAILED naming the limit. Other
+  semantic failures keep their resume and never count toward it.
+- **What the operator sees.** The Decisions inbox (pending and waiting) and the
+  history show a redraft's link, cause and count, the chain behind it (oldest first)
+  and a "redraft limit reached" mark on an exhausted chain. `GET /proposals/{id}`
+  returns the redraft link.
+- **A provider status is typed.** `ProviderStatusError.status_code` is carried by the
+  Confluence, Jira, forge, LiteLLM and the two facade errors, and the classifier reads
+  it before the text sniff: 5xx, 403, 408, 429 and 529 classify DOWN. This closes a
+  gap from the outage epic, where a 503 inside an untyped message read as semantic and
+  landed FAILED.
+- **The read-version field is retired.** The stale-bounce `read_version` is gone from
+  every drafting instruction (the tool docstrings, the pack notes, the coach and
+  reflection prompts, the graphiti skill reference, the demo fixtures);
+  `target_ref` is `{system, id}`. Stored rows keep it and still load and execute, and
+  the cockpit's display fallback stays.
+- **Documents and proof.** ARCHITECTURE gains the world-moved redraft at the gate and
+  in the RETRY_PENDING -> EXECUTING line (176 distinct event types, was 175); DL-190
+  is new, DL-142 is marked built, and the rules say what the moved-target types are.
+  `tests/test_world_moved.py`, `test_world_moved_limit.py`, `test_world_moved_wire.py`,
+  `test_read_version_retired.py` and `tests/test_world_moved_e2e.py` (the chain, an
+  outage-parked approval, an interrupted retry, an override-decided redraft, a Jira
+  400, a Dismiss and a death between FAILED and the resume, through the public seams)
+  pin it.
+- **Schema** (additive, applied by the updater's schema phase): column
+  `proposal.redraft jsonb`.
+- **Settings:** `world_moved_redraft_limit` (`CC_WORLD_MOVED_REDRAFT_LIMIT`, 3).
+- **Events:** `proposal.redraft_limit_reached`; `proposal.failed` now carries
+  `world_moved` and `chain_exhausted`; `proposal.created` carries `redraft`.
+- **What the apply does.** Nothing to do by hand. The schema phase adds the column
+  (existing proposals read as having no redraft link), and the cockpit is rebuilt.
+  No image, manifest or unit changes, and no capability is removed, so
+  `deploy/k3s/removed-capabilities.txt` gets no entry. `min_upgrade_from` stays 2.69.0:
+  the column is additive, nothing is removed, and nothing here needs a newer installed
+  updater than v2.69.0's.
+- **After the apply, the operator checks:** the cockpit shows v2.73.0;
+  `GET /api/heartbeat` is healthy; a proposal's detail carries no redraft chip until a
+  write meets a moved world. `CC_WORLD_MOVED_REDRAFT_LIMIT` is optional in `.env`.
+
 ## 2026-10-27 — v2.72.0: outage doctrine — nothing is terminal from DOWN; the operator sees a banner, not a failure
 
 epic-outage-doctrine. Fourteen commits since v2.71.0 (`2b03b63a..ba8ecddb`, thirteen
