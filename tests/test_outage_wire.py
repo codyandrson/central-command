@@ -1,5 +1,6 @@
 """Story 8 of epic-outage-doctrine: a waiting approved proposal is LISTED, says
-what it waits on, and can be dismissed without re-running anything.
+what it waits on, and can be dismissed without re-running anything. (The two
+nothing-ran asserts on the fake world's log are epic-small-fixes R32.)
 
 The cockpit hand-declares its interfaces over untyped payloads, so a field the
 gateway never sends is invisible to `tsc` and to every frontend test
@@ -42,9 +43,11 @@ WAITING_FIELDS = {
 
 
 @pytest.fixture(autouse=True)
-def pinned(monkeypatch):
+def world_log(monkeypatch):
+    """Pins the test model and fakes the world; yields the fake's log so a test
+    that asserts "nothing ran" can read it (epic-small-fixes R32)."""
     monkeypatch.setattr(settings, "test_model", True)
-    fake_world(monkeypatch)
+    yield fake_world(monkeypatch)
 
 
 async def _parked(*, state: dict | None = None, actions: int = 2,
@@ -174,7 +177,7 @@ async def test_the_session_wait_line_names_the_dependencies():
 # --- dismissing a waiting execution -------------------------------------------------------------
 
 
-async def test_dismissing_a_waiting_proposal_withdraws_the_execution(monkeypatch):
+async def test_dismissing_a_waiting_proposal_withdraws_the_execution(monkeypatch, world_log):
     parked = await _parked(with_task=True)
     pid, sid, task_id = parked["proposal_id"], parked["session_id"], parked["task_id"]
     before = (await repo.load_proposal(pid))["retry_state"]
@@ -196,6 +199,7 @@ async def test_dismissing_a_waiting_proposal_withdraws_the_execution(monkeypatch
 
     kinds = [e["kind"] for e in await repo.list_events(ref_id=pid, limit=500)]
     assert kinds.count("proposal.decided") == 1, "the decision stands; no second one"
+    assert world_log == [], "dismissing withdraws the execution: no handler ran"
     dismissed = [e for e in await repo.list_events(ref_id=pid, limit=500)
                  if e["kind"] == "proposal.execution_dismissed"]
     assert len(dismissed) == 1
@@ -475,7 +479,7 @@ def _stub_drivers(monkeypatch) -> list[tuple[str, str]]:
     return driven
 
 
-async def test_retry_with_the_probe_down_drives_nothing(monkeypatch):
+async def test_retry_with_the_probe_down_drives_nothing(monkeypatch, world_log):
     parked = await _park_on("graph")
     driven = _stub_drivers(monkeypatch)
 
@@ -487,6 +491,7 @@ async def test_retry_with_the_probe_down_drives_nothing(monkeypatch):
 
     assert out == {"probe": "down", "driven": {k: 0 for k in KIND_FIELDS}}
     assert driven == []
+    assert world_log == [], "a down probe drives nothing, so no handler ran either"
     kinds = [e["kind"] for e in await repo.list_events(ref_id="graph", limit=500)]
     assert "outage.retry_requested" in kinds and "dependency.down" in kinds
     assert _by_name(jsonable_encoder(await outages.list_outages()))["graph"]["total"] == 5

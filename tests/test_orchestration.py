@@ -13,6 +13,10 @@ What these tests lock in:
 - restart-proofness: resume works purely from persisted state (M2's
   two-process property, orchestration edition);
 - the capability-gap principle: a child's declared gap becomes event-log data.
+
+A test that settles on one write and then asserts a second is racy against the
+background resume (epic-small-fixes R31): `_settle` waits on every fact the
+test goes on to assert.
 """
 
 from __future__ import annotations
@@ -152,11 +156,18 @@ async def test_gated_child_parks_proposal_and_resumes_after_approval(monkeypatch
     item = await _open_item(sid, "plan_review")
     await orchestration.answer_item(item["id"], "", "approved")
 
-    # The child runs in the background and parks REVIEW with a proposal.
+    # The child runs in the background and parks REVIEW with a proposal, while
+    # the orchestrator's own resume parks it AWAITING_AGENTS again: settle on
+    # every fact asserted below, not just the first to land (R31).
     async def child_in_review():
         kids = [t for t in await repo.list_tasks()
                 if t.get("parent_session_id") == sid]
-        return bool(kids) and kids[0]["status"] == "REVIEW"
+        if not kids or kids[0]["status"] != "REVIEW":
+            return False
+        waiting = [p for p in await repo.list_proposals()
+                   if p["session_id"] == kids[0]["session_id"]
+                   and p["status"] == "AWAITING_HUMAN"]
+        return bool(waiting) and await repo.session_status(sid) == "AWAITING_AGENTS"
     await _settle(child_in_review)
 
     child = [t for t in await repo.list_tasks()
@@ -270,9 +281,13 @@ async def test_project_exceeding_orch_fanout_limit_parks_an_operator_question(
 
     await orchestration.answer_item(plan["id"], "", "approved")
 
+    # `_park_stalled` writes the stall item (orchestration.py:296) BEFORE it
+    # parks the session AWAITING_AGENTS (:308), and answer_item resumes in the
+    # background: settle on BOTH facts the test asserts (R31).
     async def parked():
-        return any(i["session_id"] == sid and i["kind"] == "stall"
-                   for i in await repo.list_operator_items("OPEN"))
+        return (any(i["session_id"] == sid and i["kind"] == "stall"
+                    for i in await repo.list_operator_items("OPEN"))
+                and await repo.session_status(sid) == "AWAITING_AGENTS")
     await _settle(parked)
 
     item = await _open_item(sid, "stall")
@@ -297,8 +312,9 @@ async def test_assign_work_children_count_against_the_project_task():
     await orchestration.answer_item(plan["id"], "", "approved")
 
     async def assigned():
-        return any(t.get("parent_session_id") == sid
-                   for t in await repo.list_tasks())
+        return (any(t.get("parent_session_id") == sid
+                    for t in await repo.list_tasks())
+                and await repo.count_child_tasks(parent_task_id=r["task_id"]) == 1)
     await _settle(assigned)
 
     (child,) = [t for t in await repo.list_tasks()

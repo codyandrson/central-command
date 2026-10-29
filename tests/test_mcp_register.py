@@ -5,6 +5,9 @@ Integration functions are tested with httpx faked at the `_call` boundary
 (same convention as tests/test_litellm_manager.py); executor preconditions and
 the happy path use a real test-DB row (skipped without Postgres, like
 test_mcp_pipeline.py); propose-side tests check validation + the parked shape.
+
+The proxy-name parity tests (executor and runtime derive the same LiteLLM
+server name) are epic-small-fixes R10 / GATE-077.
 """
 
 from __future__ import annotations
@@ -340,20 +343,48 @@ def test_litellm_server_name_translates_hyphens_to_underscores():
     assert _litellm_server_name("a-b-c") == "a_b_c"
 
 
-def test_runtime_mcp_url_uses_the_same_proxy_name_as_registration():
+@pytest.mark.parametrize("server_id", ["echo-demo", "a-b-c", "plain", "a--b", "x-1-y"])
+def test_runtime_mcp_url_uses_the_same_proxy_name_as_registration(monkeypatch, server_id):
     """The toolset URL must address the name the Executor actually registered,
-    or every ungated MCP tool call 404s. runtime/ cannot import gateway/, so
-    the translation is duplicated — this test is what keeps the two honest."""
-    import inspect
+    or every ungated MCP tool call 404s (GATE-077; epic-small-fixes R10).
+    runtime/ cannot import gateway/, so the translation is duplicated — this
+    test is what keeps the two honest, by BEHAVIOUR: the toolset
+    `packs._mcp_live_toolset` builds ends '/<registered name>/mcp' and its
+    filter admits the proxy's namespaced '<registered name>-<tool>' (and the
+    bare name), for every id including the ones with doubled and numeric
+    hyphens. Read from the installed MCPToolset: the filter wraps it
+    (`FilteredToolset.wrapped`), its fastmcp `client.transport.url` holds the
+    URL."""
+    from pydantic_ai.tools import ToolDefinition
 
-    from central_command.gateway.executor import _litellm_server_name
-    from central_command.runtime import packs
+    monkeypatch.setattr(settings, "llm_base_url", "http://proxy.example:4000/")
+    registered = executor._litellm_server_name(server_id)
 
-    src = inspect.getsource(packs.mcp_toolset_for_server) if hasattr(
-        packs, "mcp_toolset_for_server"
-    ) else inspect.getsource(packs)
-    assert "replace('-', '_')" in src or 'replace("-", "_")' in src
-    assert _litellm_server_name("echo-demo") == "echo-demo".replace("-", "_")
+    toolset = packs._mcp_live_toolset("mcp-tester", server_id, ["t"])
+
+    assert toolset.wrapped.client.transport.url == f"http://proxy.example:4000/{registered}/mcp"
+    admits = lambda name: toolset.filter_func(None, ToolDefinition(name=name))  # noqa: E731
+    assert admits(f"{registered}-t")
+    assert admits("t")
+    assert not admits(f"{registered}-other")
+
+
+def test_each_module_holds_exactly_one_hyphen_translation():
+    """The source walk: executor.py and packs.py each translate a server id's
+    '-' to '_' in exactly one place. A second one is a second opinion on the
+    proxy name that the behavioural test above does not know to exercise."""
+    import ast
+    from pathlib import Path
+
+    for module in (executor, packs):
+        tree = ast.parse(Path(module.__file__).read_text())
+        translations = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "replace"
+            and [getattr(a, "value", None) for a in node.args] == ["-", "_"]
+        ]
+        assert len(translations) == 1, (module.__name__, [n.lineno for n in translations])
 
 
 # --- key permission coupling (live finding 2026-08-05) ------------------------

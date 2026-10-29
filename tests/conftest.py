@@ -280,6 +280,63 @@ def no_live_world(tmp_path_factory):
             setattr(settings, name, value)
 
 
+REAL_MODEL_REFUSED = (
+    "a test reached a REAL model request — pin settings.test_model or fake the "
+    "model; CC_LIVE_MODEL_TESTS=1 opts in"
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_live_model():
+    """No unpinned test can spend the model key (R15, PROCESS-048).
+
+    A worktree's `.env` is a copy of the live one and carries a real model key,
+    so a test that reaches `resolve_model()` without `settings.test_model`
+    builds a live client and the next request is billed. This guard sits at the
+    SPEND POINT, not at the builder: `resolve_model()` and `models._live_model`
+    still build live model objects (tests/test_models.py and others assert on
+    them without calling them), and `WindowedModel` wraps the same
+    `OpenAIChatModel`, so replacing that class's network entry points covers
+    every live path. `request` and `request_stream` are the two public ones;
+    `_completions_create` is the single funnel under both that reaches the
+    client. (`count_tokens` and `compact_messages` are the base class's
+    NotImplementedError in this pydantic-ai version, so they open nothing.)
+    Graphiti's embedder and the curation writer use their own HTTP clients and
+    are not touched here.
+
+    CC_LIVE_MODEL_TESTS=1 opts in, read at CALL time like CC_LIVE_GRAPH_TESTS:
+    the guard stays installed and lets the real method through.
+
+    Set and restored by hand and SESSION-scoped, for the same reason as
+    `no_live_world`: a function-scoped monkeypatch is already restored by the
+    time a task outliving its test makes the request."""
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    names = ("request", "request_stream", "_completions_create")
+    real = {name: OpenAIChatModel.__dict__[name] for name in names}
+
+    def guarded(name):
+        original = real[name]
+
+        # `request` and `_completions_create` are coroutine functions and
+        # `request_stream` an async context manager: a plain function that
+        # raises on CALL is awaited, entered and iterated by none of them.
+        def refuse(self, *args, **kwargs):
+            if os.getenv("CC_LIVE_MODEL_TESTS") == "1":
+                return original(self, *args, **kwargs)
+            raise AssertionError(REAL_MODEL_REFUSED)
+
+        return refuse
+
+    for name in names:
+        setattr(OpenAIChatModel, name, guarded(name))
+    try:
+        yield
+    finally:
+        for name, original in real.items():
+            setattr(OpenAIChatModel, name, original)
+
+
 # ── the live-graph preflight (ledger F40) ───────────────────────────────────
 # The graph guard above deliberately lets live READS run: a fake proves nothing
 # about whether the library's search and our result shapes agree with the real

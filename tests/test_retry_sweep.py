@@ -19,6 +19,9 @@ The two properties these tests pin:
 
 Probes are ALWAYS monkeypatched here — the offline suite must never reach the
 Pi's n8n, Graphiti or LiteLLM.
+
+The autouse `world_log` fixture yields the fake world's log; the killed-resume
+test asserts the approval's write ran exactly once (epic-small-fixes R32).
 """
 
 from __future__ import annotations
@@ -44,12 +47,13 @@ OUTAGE = ModelHTTPError(429, "cc-default", body="No deployments available")
 
 
 @pytest.fixture(autouse=True)
-def pinned(monkeypatch):
+def world_log(monkeypatch):
     # test_model pinned everywhere `resolve_model` is reachable — the sweep's
-    # drivers all end in agent runs.
+    # drivers all end in agent runs. Yields the fake world's log (R32).
     monkeypatch.setattr(settings, "test_model", True)
-    fake_world(monkeypatch)
+    log = fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
+    yield log
 
 
 class _Recorder:
@@ -554,7 +558,7 @@ async def test_a_fresh_database_seeds_the_retry_sweep_enabled():
 
 
 @needs_pg
-async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch):
+async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch, world_log):
     """A resume killed with its process is recovered WITHOUT a restart.
 
     `resume_sweep` has owned the orphan worklist since 2026-08-15, but it runs
@@ -592,6 +596,10 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch):
     )
 
     monkeypatch.undo()
+    # `undo` took the fake world with it; put it back so a re-execution during
+    # the sweep would be recorded, on a log of its own (`world_log` keeps the
+    # approval's single write).
+    resweep_log = fake_world(monkeypatch)
     monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_stale_claim_seconds", 0)
     _no_probes(monkeypatch, llm=True)
@@ -605,6 +613,10 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch):
     )
     await orchestration.sweep_settle()
     assert await repo.session_status(session_id) == "DONE"
+    # The write ran once, at the approval; the resume re-drives the agent and
+    # never re-executes it.
+    assert [capability for capability, *_ in world_log] == ["jira.set_due_date"]
+    assert resweep_log == []
 
 
 # --- the tick never waits on an agent lane (2026-09-11) -------------------------
