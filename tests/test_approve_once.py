@@ -25,8 +25,7 @@ async def test_a_second_approve_during_execution_is_refused(monkeypatch):
     from central_command.runtime.run import ingest_and_propose
     from central_command.runtime.spike_model import make_spike_model
 
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "auditor_enabled", False)
 
     release = asyncio.Event()
@@ -66,8 +65,7 @@ async def test_a_crash_before_the_verdict_hands_the_claim_back(monkeypatch):
     from central_command.runtime.run import ingest_and_propose
     from central_command.runtime.spike_model import make_spike_model
 
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "auditor_enabled", False)
 
     async def boom(*a, **k):

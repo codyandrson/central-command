@@ -20,6 +20,7 @@ from central_command.runtime.spike_model import (
 )
 from central_command.runtime.steward_profile import AGENT_ID
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 DOC = (
     "Title: Platform decision\n\n"
@@ -77,10 +78,10 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 async def demo(monkeypatch):
-    # Anywhere a model is reachable, pin demo mode — with a real key in .env the
+    # Anywhere a model is reachable, pin the test model — with a real key in .env the
     # "offline" suite would otherwise call Claude for real and spend money.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     yield
@@ -191,7 +192,7 @@ async def test_one_document_yields_one_proposal_with_one_episode():
     assert row["agent_id"] == AGENT_ID
     assert len(row["actions"]) == 1
     assert row["actions"][0]["capability"] == "graph.add_episode"
-    # And the demo model's citation really is verbatim — so the check above is
+    # And the test model's citation really is verbatim — so the check above is
     # exercised against a live pairing, not a hand-written one.
     assert row["evidence"][0]["claim_matches_source"] is True
 

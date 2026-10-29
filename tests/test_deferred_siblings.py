@@ -36,12 +36,13 @@ from central_command.runtime.durable import (
     unanswered_calls,
 )
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
 

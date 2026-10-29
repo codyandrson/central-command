@@ -36,6 +36,7 @@ from central_command.runtime.spike_model import (
     make_spike_model,
 )
 from tests.conftest import event_kinds as _kinds, needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -44,8 +45,8 @@ OUTAGE = ModelHTTPError(429, "cc-default", body="No deployments available")
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     # A parked session is not AWAITING_HUMAN, but proposals accumulate across
     # the file all the same — pin the valve open so nothing drains-blocks.
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
@@ -94,6 +95,7 @@ async def _task_for(session_id: str, agent_id: str = "inbox-triage") -> str:
 
 
 async def test_a_transient_resume_failure_parks_the_session(monkeypatch):
+    log = fake_world(monkeypatch)
     """The world change stands; the agent's final turn is DEFERRED, not lost."""
     model = make_spike_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
@@ -117,7 +119,8 @@ async def test_a_transient_resume_failure_parks_the_session(monkeypatch):
     assert pending["after"] == "approved"
     assert pending["proposal_id"] == run["proposal_id"]
     assert pending["attempts"] == 0
-    assert "2026-08-03" in pending["text"]
+    assert "[fake] jira.set_due_date" in pending["text"]
+    assert [(c, a["due_date"]) for c, a, _ in log] == [("jira.set_due_date", "2026-08-03")]
     assert pending["tool_call_id"]
     assert pending["parked_at"] and pending["last_error"]
 
@@ -172,6 +175,7 @@ async def test_a_semantic_resume_failure_keeps_todays_behaviour(monkeypatch):
 
 
 async def test_the_driver_finishes_a_parked_approved_resume(monkeypatch):
+    log = fake_world(monkeypatch)
     model = make_spike_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
     task_id = await _task_for(run["session_id"])
@@ -185,7 +189,7 @@ async def test_the_driver_finishes_a_parked_approved_resume(monkeypatch):
 
     # The provider is back.
     monkeypatch.undo()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     out = await orchestration.resume_parked_session(run["session_id"], model=model)
 
     assert out["resumed"] is True and out["attempts"] == 1
@@ -198,7 +202,8 @@ async def test_the_driver_finishes_a_parked_approved_resume(monkeypatch):
     # The task resolved exactly as a no-outage run would have left it …
     task = await repo.get_task(task_id)
     assert task["status"] == "DONE"
-    assert "2026-08-03" in (task["outcome"] or "")
+    assert "[fake] jira.set_due_date" in (task["outcome"] or "")
+    assert [(c, a["due_date"]) for c, a, _ in log] == [("jira.set_due_date", "2026-08-03")]
     # … and the agent's final turn is in the transcript.
     assert out["final_output"]
 
@@ -229,7 +234,7 @@ async def test_a_retried_rejection_redraft_still_gets_the_evidence_check(monkeyp
     assert pending["decided_event_id"]
 
     monkeypatch.undo()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     driven = await orchestration.resume_parked_session(run["session_id"], model=model)
 
     redraft = await repo.load_proposal(driven["redraft_proposal_id"])
@@ -281,7 +286,7 @@ async def test_a_transient_answer_resume_parks_without_failing_the_task(monkeypa
     assert (await repo.get_task(task_id))["status"] == "IN_PROGRESS"
 
     monkeypatch.undo()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     driven = await orchestration.resume_parked_session(out["session_id"], model=model)
 
     assert driven["resumed"] is True
@@ -345,7 +350,7 @@ async def test_two_concurrent_drivers_produce_exactly_one_resume(monkeypatch):
     await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     monkeypatch.undo()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     a, b = await asyncio.gather(
         orchestration.resume_parked_session(run["session_id"], model=model),
         orchestration.resume_parked_session(run["session_id"], model=model),
@@ -400,7 +405,7 @@ async def test_resume_sweep_picks_up_a_parked_resume(monkeypatch):
     assert run["session_id"] in await repo.sessions_awaiting_resume()
 
     monkeypatch.undo()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     swept = await orchestration.resume_sweep()
 
     assert run["session_id"] in swept["resumed"]
@@ -440,7 +445,7 @@ async def test_a_killed_resume_is_recovered_by_the_sweep(monkeypatch):
     assert run["session_id"] not in await repo.sessions_awaiting_resume()
 
     monkeypatch.undo()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_stale_claim_seconds", 0)
     swept = await orchestration.resume_sweep()
 

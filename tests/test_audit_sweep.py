@@ -24,6 +24,7 @@ from central_command.ingest import dispatcher, ledger
 from central_command.runtime.spike_model import make_no_action_model
 from tests.conftest import needs_pg
 from tests.test_bulk_dismiss_audit import _propose  # noqa: F401 — reuses its facade patch
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -41,8 +42,8 @@ ACTIONABLE = (
 
 @pytest.fixture(autouse=True)
 async def clean(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_mode", "active")
     await _wipe()
@@ -132,7 +133,7 @@ async def test_sweep_audits_but_never_confirms_a_reopened_item(monkeypatch):
 
 
 async def test_sweep_audits_and_approves_an_orphaned_bulk_proposal(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")  # the fold commit IS the effect
+    fake_world(monkeypatch, real=("work.bulk_dismiss",))  # the fold commit IS the effect
     monkeypatch.setattr(settings, "dispatch_concurrency", 1)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     result, _ = await _propose(monkeypatch)

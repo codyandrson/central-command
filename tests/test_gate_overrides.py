@@ -31,6 +31,7 @@ from central_command.gateway.steward_agreement import pair_confidence
 from central_command.runtime import packs as packs_mod
 from central_command.runtime.spike_model import make_deferred_tool_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 DRAFTER = "jira-expert"
 OTHER = "litellm-manager"
@@ -209,8 +210,8 @@ def test_the_mark_and_the_flag_reach_the_wire():
 
 @pytest.fixture()
 async def demo(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     yield
@@ -931,8 +932,7 @@ async def ledger_rows(monkeypatch):
     the effect. Rows this fixture enrolls are removed afterwards."""
     from central_command.integrations import email_facade
 
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "dispatch_concurrency", 1)
     monkeypatch.setattr(settings, "auditor_enabled", False)
@@ -1023,7 +1023,7 @@ async def test_a_covered_proposal_with_no_folded_siblings_is_decided_too(
     comment, with nothing folded."""
     from central_command.ingest import dispatcher
 
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")  # no Jira call
+    log = fake_world(monkeypatch)  # no Jira call
     ovr = await granted(TRIAGE, "jira.add_comment")
     await ledger_rows.enroll(_BD_UUIDS[:1])
     model = make_deferred_tool_model(
@@ -1035,6 +1035,8 @@ async def test_a_covered_proposal_with_no_folded_siblings_is_decided_too(
     assert row["agent_id"] == TRIAGE
     assert row["status"] == "EXECUTED", row["override_eval"]
     assert row["provenance"]["approver"] == f"override:{ovr['id']}"
+    # The fake saw the comment, decided by the override; no real Jira client ran.
+    assert [(c, a) for c, _, a in log] == [("jira.add_comment", f"override:{ovr['id']}")]
 
 
 @needs_pg

@@ -19,6 +19,7 @@ from central_command.db import repo
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.spike_model import make_no_action_model, make_spike_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -31,13 +32,13 @@ RAW = (
 
 @pytest.fixture(autouse=True)
 async def clean(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     # These tests are about the HUMAN dismissal gate. With the live .env now
     # carrying CC_AUDITOR_MODE=active (D8 graduation), an unpinned auditor
     # auto-confirms the very items these tests park — pin it off, like
-    # demo_mode. The auditor has its own suites.
+    # test_model. The auditor has its own suites.
     monkeypatch.setattr(settings, "auditor_enabled", False)
     try:
         await _wipe()

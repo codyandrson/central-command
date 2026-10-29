@@ -39,6 +39,7 @@ from tests.world_moved_helpers import (  # noqa: F401 — pinned and confluence_
     confluence_grant,
     pinned,
 )
+from tests.fake_world import fake_world
 
 # --- the type --------------------------------------------------------------------
 
@@ -230,7 +231,7 @@ async def test_a_reject_redraft_carries_cause_rejected(monkeypatch):
     from central_command.runtime.run import ingest_and_propose
     from central_command.runtime.spike_model import make_redraft_model
 
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    fake_world(monkeypatch)
     model = make_redraft_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
     out = await gateway.reject_with_feedback(

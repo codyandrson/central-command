@@ -66,7 +66,6 @@ async def test_the_handler_is_handed_the_gateways_proposer_not_the_agents(monkey
         seen.update(args=args, approver=approver, proposer=proposer)
         return "ok"
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
     monkeypatch.setitem(executor.HANDLERS, "test.provenance_spy", spy)
 
     lying_args = {

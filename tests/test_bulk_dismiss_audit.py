@@ -11,7 +11,7 @@ pinned into its own args.
 
 Real Postgres for the same reason the sibling suite uses it (the reservation is
 SQL); the email façade is always monkeypatched, and the auditor's verdict comes
-from the deterministic demo model — "ACTION REQUIRED" in the hydrated body is
+from the deterministic test model — "ACTION REQUIRED" in the hydrated body is
 what makes it challenge.
 """
 
@@ -37,8 +37,7 @@ _QUERY = "from:news@shop.example"
 
 @pytest.fixture(autouse=True)
 async def clean(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "live")  # the fold commit IS the effect
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "dispatch_concurrency", 1)
     monkeypatch.setattr(settings, "auditor_enabled", True)

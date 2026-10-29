@@ -42,10 +42,8 @@ _QUERY = "from:news@shop.example"
 @pytest.fixture(autouse=True)
 async def clean(monkeypatch):
     # The handler makes no external call at all (the fold commit IS the
-    # effect), so `live` is safe here and is what actually exercises it —
-    # dry_run would short-circuit before the handler ever runs.
-    monkeypatch.setattr(settings, "executor_mode", "live")
-    monkeypatch.setattr(settings, "demo_mode", True)
+    # effect), so it runs for real here and no fake_world is installed.
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "dispatch_concurrency", 1)
     # This file is about the HUMAN gate. Since 2026-08-17 an active auditor

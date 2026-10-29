@@ -28,8 +28,7 @@ _ORIGINAL_CLIENT = httpx.AsyncClient
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     monkeypatch.setattr(settings, "confluence_base_url", "https://example.atlassian.net")
     monkeypatch.setattr(settings, "confluence_email", "bot@example.com")

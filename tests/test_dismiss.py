@@ -18,6 +18,7 @@ from central_command.gateway import gateway
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.spike_model import make_folding_model, make_spike_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -44,8 +45,8 @@ def _thread_msg(message_id: str, body: str, in_reply_to: str | None = None) -> s
 
 @pytest.fixture(autouse=True)
 async def clean(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)  # keep offline: no live Claude call
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)  # keep offline: no live Claude call
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "dispatch_concurrency", 1)
     monkeypatch.setattr(settings, "auditor_enabled", False)

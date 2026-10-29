@@ -19,6 +19,7 @@ from central_command.db import repo
 from central_command.gateway.steward_agreement import pair_confidence
 from central_command.runtime.durable import proposal_from_call
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 _CORE = {
     "intent": "Record the platform decision.",
@@ -58,7 +59,7 @@ def test_confidence_requires_a_rationale():
 
 
 def test_proposal_from_call_tolerates_confidence_nested():
-    """The demo model's shape: a single-model tool param, nested."""
+    """The test model's shape: a single-model tool param, nested."""
     call = ToolCallPart(
         tool_name="propose_action",
         args={"proposal": {**_CORE,
@@ -146,7 +147,7 @@ async def test_proposal_detail_carries_confidence_to_the_cockpit(monkeypatch):
     test on the real detail-payload builder."""
     from central_command.api import routes
 
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     row = {
         "id": "prop_x", "session_id": "sess_x", "agent_id": "knowledge-steward",
         "intent": "Record it.", "status": "AWAITING_HUMAN",
@@ -169,7 +170,7 @@ async def test_work_items_carry_kind_to_the_reviewer_pane(monkeypatch):
     backend actually sends `kind`."""
     from central_command.api import routes
 
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     item = {"id": "wi_1", "message_id": "<cc-doc-1@central_command.local>",
             "subject": "A doc", "payload": {"text": "body"}, "state": "PROCESSED",
             "kind": "document"}
@@ -204,8 +205,8 @@ async def test_confidence_survives_the_round_trip_through_the_park_path(monkeypa
     from central_command.runtime import steward
     from central_command.runtime.spike_model import make_steward_model
 
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
 
     text = "Title: cc-conftest\n\nThe cutover lands on 2026-09-01, owned by Dana."
     result = await steward.run_document(

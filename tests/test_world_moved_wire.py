@@ -25,6 +25,7 @@ from central_command.api import nerve_gateway, routes
 from central_command.config import settings
 from central_command.db import repo
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -35,8 +36,8 @@ REDRAFT_FIELDS = {"of", "root", "cause", "world_moved_count"}
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "world_moved_redraft_limit", 3)
 
 

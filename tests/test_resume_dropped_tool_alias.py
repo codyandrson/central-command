@@ -27,14 +27,15 @@ from central_command.gateway import gateway
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_spike_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")  # never touch real Jira
-    monkeypatch.setattr(settings, "demo_mode", True)
+    fake_world(monkeypatch)  # never touch real Jira
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 async def test_session_parked_under_the_dropped_alias_still_resumes():

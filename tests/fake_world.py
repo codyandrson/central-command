@@ -8,7 +8,8 @@ and every `executor.WORLD_CHECKS` entry not named in `real` becomes a no-op
 that reads nothing. Internal capabilities (charter, LOE, catalog, skill) are
 faked too, exactly as dry_run skipped them, so a test that pinned dry_run keeps
 its meaning; `real=("charter.update",)` runs the named handlers (and their
-world checks) for real.
+world checks) for real; calling it again in a test whose fixture already faked
+the world restores the named ones.
 
     log = fake_world(monkeypatch)
     ...approve...
@@ -40,23 +41,30 @@ def fake_world(monkeypatch, real=()) -> WorldLog:
         raise ValueError(f"fake_world(real=...) names no handler: {sorted(unknown)}")
     log = WorldLog()
 
-    def recorder(capability: str):
+    def recorder(capability: str, original):
         async def handler(args: dict, approver: str, proposer: str | None) -> str:
             log.append((capability, args, approver))
             return f"[fake] {capability}"
 
+        handler.fake_world_original = original
         return handler
 
-    def check_recorder(capability: str):
+    def check_recorder(capability: str, original):
         async def check(args: dict) -> None:
             log.checks.append((capability, args))
 
+        check.fake_world_original = original
         return check
 
-    for capability in executor.HANDLERS:
-        if capability not in real:
-            monkeypatch.setitem(executor.HANDLERS, capability, recorder(capability))
-    for capability in executor.WORLD_CHECKS:
-        if capability not in real:
-            monkeypatch.setitem(executor.WORLD_CHECKS, capability, check_recorder(capability))
+    # A second call in the same test (an autouse fixture faked everything, one
+    # test needs `charter.update` for real) sees through an earlier fake to the
+    # original, so `real=` always restores and never stacks.
+    for table, make in ((executor.HANDLERS, recorder), (executor.WORLD_CHECKS, check_recorder)):
+        for capability in table:
+            current = table[capability]
+            original = getattr(current, "fake_world_original", current)
+            if capability in real:
+                monkeypatch.setitem(table, capability, original)
+            else:
+                monkeypatch.setitem(table, capability, make(capability, original))
     return log

@@ -17,6 +17,7 @@ from central_command.gateway import gateway
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_redraft_model, make_spike_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 FEEDBACK = "Wrong — I spoke to Dana, make it 2026-08-10."
 
@@ -26,11 +27,12 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")  # never touch real Jira
-    monkeypatch.setattr(settings, "demo_mode", True)
+    fake_world(monkeypatch)  # never touch real Jira
+    monkeypatch.setattr(settings, "test_model", True)
 
 
-async def test_reject_with_instruction_persists_a_redraft():
+async def test_reject_with_instruction_persists_a_redraft(monkeypatch):
+    log = fake_world(monkeypatch)
     model = make_redraft_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
     assert run["deferred"]
@@ -74,7 +76,8 @@ async def test_reject_with_instruction_persists_a_redraft():
 
     # The loop closes: approving the redraft executes it and completes the session.
     result = await gateway.approve_and_execute(run["session_id"], redraft_id, model=model)
-    assert "2026-08-10" in result["result_text"]
+    assert result["result_text"] == "[fake] jira.set_due_date"
+    assert [(c, a["due_date"]) for c, a, _ in log] == [("jira.set_due_date", "2026-08-10")]
     assert (await repo.load_proposal(redraft_id))["status"] == "EXECUTED"
     assert await repo.session_status(run["session_id"]) == "DONE"
 

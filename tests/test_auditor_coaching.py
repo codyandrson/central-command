@@ -16,12 +16,13 @@ from central_command.gateway import auditor, gateway
 from central_command.runtime.agent import builtin_charter
 from central_command.runtime.spike_model import make_auditor_model, make_coach_model
 from tests.conftest import aresolve, needs_pg
+from tests.fake_world import fake_world
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "auditor_enabled", True)
     monkeypatch.setattr(settings, "auditor_mode", "shadow")
 
@@ -111,9 +112,9 @@ async def test_coach_loop_for_the_auditor_closes_end_to_end(monkeypatch):
     # `resolve_model` via the `agent` module's own imported reference, so
     # that is the seam to patch.
     monkeypatch.setattr(agent_mod, "resolve_model", aresolve(lambda *a, **k: make_coach_model()))
-    # live executor so charter.update actually commits — the only action this
+    # charter.update runs for real so it actually commits — the only action this
     # test executes is the DB-backed capability (same as test_coach_loop).
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    fake_world(monkeypatch, real=("charter.update",))
     # Pin the setting, not the ambient .env — CC_OPERATOR_NAME varies per
     # deployment (2026-08-21 Windows validation, W6).
     monkeypatch.setattr(settings, "operator_name", "lee")

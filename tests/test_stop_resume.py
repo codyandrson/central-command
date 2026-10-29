@@ -35,16 +35,17 @@ from central_command.db import repo
 from central_command.runtime import converse
 from central_command.runtime.run import RunStopped, run_task
 from tests.conftest import aresolve, needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    # demo_mode: these paths resolve models themselves; a real key in .env would
+    # test_model: these paths resolve models themselves; a real key in .env would
     # otherwise make the "offline" suite call Claude for real.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     monkeypatch.setattr(settings, "run_request_limit", 25)

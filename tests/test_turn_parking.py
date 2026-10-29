@@ -30,6 +30,7 @@ from central_command.db import repo
 from central_command.runtime import converse
 from central_command.runtime import models as models_mod
 from tests.conftest import event_kinds as _kinds, make_parks_due, needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -39,8 +40,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
 
 

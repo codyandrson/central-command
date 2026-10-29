@@ -18,6 +18,7 @@ from central_command.gateway import gateway, policy
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_spike_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 TODAY = date(2026, 7, 19)
 
@@ -89,8 +90,8 @@ def test_dateless_actions_are_ignored():
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
 
 
 @needs_pg
