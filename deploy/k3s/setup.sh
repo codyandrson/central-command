@@ -316,8 +316,8 @@ derive_systems_links() {
 # lives here and is called from the llm phase, not only from app.
 #
 # No run-mode key is written here, in .env.example or in the unit: a fresh
-# install starts live (the API refuses to start on CC_TEST_MODEL, CC_DEMO_MODE
-# or CC_EXECUTOR_MODE). The approval gate is the safety; nothing proposes on its
+# install starts live (the API refuses to start on any run-mode key:
+# central_command/run_modes.py). The approval gate is the safety; nothing proposes on its
 # own until the operator enables the feed, the drain or a schedule. An existing
 # file is never touched.
 ensure_app_env() {
@@ -1476,7 +1476,7 @@ phase_reset() {
   fi
 
   # Outside the repo AND the cluster, so nothing above reaches it, and it beats
-  # .env: a drop-in naming CC_TEST_MODEL, CC_DEMO_MODE or CC_EXECUTOR_MODE makes
+  # .env: a drop-in naming a run-mode key (central_command/run_modes.py) makes
   # the API refuse to start on the new instance.
   local dropins
   dropins="$(ls /etc/systemd/system/cc-uvicorn.service.d/ 2>/dev/null | tr '\n' ' ')"

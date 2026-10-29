@@ -355,7 +355,7 @@ step_host() {
   # Operator drop-ins (e.g. gv-uvicorn.service.d/executor-live.conf, the go-live
   # override) are not in the repo: carry them over, rewritten, or the new unit
   # silently runs on the tracked default (bit us live 2026-08-29). A drop-in
-  # naming CC_TEST_MODEL, CC_DEMO_MODE or CC_EXECUTOR_MODE is carried over too,
+  # naming a run-mode key (central_command/run_modes.py) is carried over too,
   # and makes the API refuse to start: remove the key first.
   local d; for d in /etc/systemd/system/gv-*.d; do
     [[ -d $d ]] || continue

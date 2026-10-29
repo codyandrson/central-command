@@ -1,4 +1,4 @@
-"""`fake_world`: the dry_run executor's stand-in in the test tree.
+"""`fake_world`: the one way a test lets an approval EXECUTE without a service.
 
 Under `tests/conftest.py`'s `no_live_world` guard an approval that reaches a
 real handler fails loudly as unconfigured. A test that needs the approval to
@@ -6,10 +6,15 @@ EXECUTE without any service installs this instead: every `executor.HANDLERS`
 entry not named in `real` becomes a recorder returning `"[fake] <capability>"`,
 and every `executor.WORLD_CHECKS` entry not named in `real` becomes a no-op
 that reads nothing. Internal capabilities (charter, LOE, catalog, skill) are
-faked too, exactly as dry_run skipped them, so a test that pinned dry_run keeps
-its meaning; `real=("charter.update",)` runs the named handlers (and their
-world checks) for real; calling it again in a test whose fixture already faked
-the world restores the named ones.
+faked too, so a test that never needs their effect does not run them;
+`real=("charter.update",)` runs the named handlers (and their world checks)
+for real.
+
+It is safe to call twice in one test: a second call sees through an earlier
+fake to the original handler, so an autouse fixture can fake everything and a
+test body can call `fake_world(monkeypatch, real=(...))` to restore the named
+ones, and `real=` always restores and never stacks. It returns a fresh log
+each time; the earlier call's log stops recording.
 
     log = fake_world(monkeypatch)
     ...approve...

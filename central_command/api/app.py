@@ -100,12 +100,7 @@ def _refuse_run_modes() -> None:
     log = logging.getLogger(__name__)
     for finding in findings:
         log.critical("refusing to start: %s", finding.message())
-    raise RuntimeError(
-        "refusing to start: run-mode key(s) "
-        + ", ".join(f"{f.key}={f.value!r}" for f in findings)
-        + " present in the API's environment; remove them from .env, the unit "
-        "or its drop-in"
-    )
+    raise RuntimeError("refusing to start: " + "; ".join(f.message() for f in findings))
 
 
 @asynccontextmanager

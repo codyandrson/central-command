@@ -244,9 +244,8 @@ def no_live_world(tmp_path_factory):
     reach a real service.
 
     A worktree's `.env` is a copy of the live checkout's, credentials included,
-    and the dry_run executor pin used to be the only thing between an approved
-    test proposal and a real Jira, Confluence, mail, calendar, LiteLLM or MCP
-    write. This guard holds every write-capable integration at nothing
+    and no executor setting stands between an approved test proposal and a real
+    Jira, Confluence, mail, calendar, LiteLLM or MCP write. This guard holds every write-capable integration at nothing
     (`NO_LIVE_WORLD`), points the MCP servers root at a session temporary
     directory, and makes BOTH subprocess seams refuse: `executor._run` (build,
     deploy, kubectl) and `executor._git` (mcp.sync_source's commit and push,

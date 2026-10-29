@@ -4,7 +4,7 @@
 integration at nothing and refuses both subprocess seams, so an approval that
 no test faked fails LOUDLY as unconfigured — FAILED, never parked for retry,
 and without opening a socket. `tests/fake_world.fake_world` is what replaced
-the retired dry-run executor: the same approval EXECUTES against a recorder.
+the executor's old simulation: the same approval EXECUTES against a recorder.
 """
 
 from __future__ import annotations

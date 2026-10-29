@@ -318,7 +318,7 @@ phase_app() {
   fi
 
   # No run-mode key is written: a fresh install starts live, and `check` FAILS
-  # a .env that carries CC_TEST_MODEL, CC_DEMO_MODE or CC_EXECUTOR_MODE at all.
+  # a .env that carries any run-mode key (central_command/run_modes.py) at all.
   # The approval gate is the safety; the feed, the drain and every schedule stay
   # off until the operator turns them on.
   # CC_OPERATOR_NAME is deliberately NOT set here: it is the interview's, and
