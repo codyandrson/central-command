@@ -6,7 +6,7 @@ Three things are worth pinning and nothing else is new machinery:
 1. `onboarding_tour` is a registered `ea.contact` kind — the same registry
    parity the other four kinds have, because an unregistered kind cannot be
    scheduled OR fired.
-2. ONE intro task, walked in demo mode: the lane opens and the episode
+2. ONE intro task, walked on the test model: the lane opens and the episode
    proposal parks through `park_proposal`. That is the whole per-agent shape
    the tour repeats.
 3. THE CAPABILITY AUDIT, as a guard. The spec's "guidance-needs-a-mechanism"
@@ -34,8 +34,7 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 async def demo(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     # 0 = unlimited, as tests/test_ea.py does: the throttle has its own tests.
     monkeypatch.setattr(settings, "ea_contact_budget_per_day", 0)
@@ -151,7 +150,7 @@ async def test_the_brief_routes_around_agents_a_task_would_fail_for():
 
 
 async def test_an_intro_task_opens_the_lane_and_parks_its_episode(monkeypatch):
-    """The per-agent shape the tour repeats, on demo models, end to end.
+    """The per-agent shape the tour repeats, on the test model, end to end.
 
     jira-expert is the arc member that is BOTH taskable and episode-capable,
     so it is the one whose intro runs the full promised path.

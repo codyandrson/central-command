@@ -19,6 +19,7 @@ from central_command.runtime.deps import ThreadContext, TriageDeps
 from central_command.runtime.spike_model import make_folding_model, make_spike_model
 from central_command.runtime.tools import record_thread_decision
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -40,11 +41,10 @@ def _msg(message_id: str, body: str, in_reply_to: str | None = None) -> str:
 
 @pytest.fixture(autouse=True)
 async def clean(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")  # never touch real Jira
     # `feed_email` resolves its own model, so without this the offline suite
     # would call the real Claude API (and spend money) whenever a key is present
     # in .env. Tests must stay offline no matter how the environment is set up.
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     # These tests drive dispatch_once, which consults the approval throttle. Left
     # to the default limit they would pass or fail depending on how many
     # proposals happen to be sitting in the inbox from earlier runs — so pin the
@@ -132,7 +132,7 @@ async def test_bundle_prompt_includes_sibling_bodies():
 # --- the fold lifecycle ------------------------------------------------------
 
 
-async def test_fold_is_pending_until_approved_then_committed():
+async def test_fold_is_pending_until_approved_then_committed(monkeypatch):
     await _enroll_thread()
     result = await dispatcher.dispatch_once(model=make_folding_model())
     assert result and result["ok"]
@@ -141,9 +141,11 @@ async def test_fold_is_pending_until_approved_then_committed():
     folded_id = result["folded_message_ids"][0]
     assert await _state(folded_id) == "FOLD_PENDING", "not terminal before approval"
 
+    log = fake_world(monkeypatch)
     await gateway.approve_and_execute(
         result["session_id"], result["proposal_id"], model=make_spike_model()
     )
+    assert [c for c, _, _ in log] == ["jira.set_due_date"]
     assert await _state(folded_id) == "FOLDED"
 
 

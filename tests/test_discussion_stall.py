@@ -302,8 +302,7 @@ async def test_a_sweep_that_finds_nothing_writes_no_event_at_all(discussion_lab)
 def pinned(monkeypatch):
     """Nothing in this file may reach a real model. `conclude_discussion`
     schedules a task resume, which would run an agent for real."""
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 @pytest.fixture()

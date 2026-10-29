@@ -25,14 +25,14 @@ from central_command.db import repo
 from central_command.gateway import executor, gateway
 from central_command.runtime.spike_model import make_jira_task_model
 from tests.conftest import aresolve, needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: make_jira_task_model()))
 
 
@@ -70,7 +70,7 @@ async def test_unassigned_task_parks_awaiting_orchestrator(monkeypatch):
     assert [e["ref_id"] for e in created] == [out["task_id"]]
 
 
-async def test_assigned_task_runs_to_review_and_approval_completes_it():
+async def test_assigned_task_runs_to_review_and_approval_completes_it(monkeypatch):
     since = await repo.latest_event_id()
     out = await create_task(
         TaskCreateIn(instructions="Add a dependency note to TASKS-12.",
@@ -88,9 +88,11 @@ async def test_assigned_task_runs_to_review_and_approval_completes_it():
     kinds = [e["kind"] for e in await repo.list_events(since_id=since, kind="task")]
     assert kinds == ["task.created", "task.started", "task.review"]
 
+    log = fake_world(monkeypatch)
     result = await gateway.approve_and_execute(
         out["session_id"], out["proposal_id"], model=make_jira_task_model()
     )
+    assert [c for c, _, _ in log] == ["jira.add_comment"]
     assert result["ok"] is True
     task = await repo.get_task(out["task_id"])
     assert task["status"] == "DONE"

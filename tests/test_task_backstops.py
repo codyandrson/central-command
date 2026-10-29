@@ -34,8 +34,7 @@ AGENTS = ["jira-expert", "litellm-manager", "confluence-expert", "wiki-agent",
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch, no_detached_runs):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 def _uid(prefix: str) -> str:

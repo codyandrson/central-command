@@ -61,8 +61,7 @@ async def _consult_expecting_a_draft(ctx, target: str, question: str) -> tuple[s
 def pinned(monkeypatch):
     # Anything here can reach resolve_model(); a real key in .env would make the
     # "offline" suite spend money.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 class _Ctx:

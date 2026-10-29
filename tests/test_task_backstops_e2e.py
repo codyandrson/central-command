@@ -47,8 +47,7 @@ _OPEN = ("NEW", "ASSIGNED", "IN_PROGRESS")
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 # --- scripted models --------------------------------------------------------
@@ -91,7 +90,7 @@ class Resolver:
         self.asked: list[str] = []
 
     async def __call__(self, model=None, agent_id=None, **_kw):
-        assert settings.demo_mode, "a real model would have been resolved"
+        assert settings.test_model, "a real model would have been resolved"
         self.asked.append(agent_id)
         return self.scripts.get(agent_id) or _text()
 

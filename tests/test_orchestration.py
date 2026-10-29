@@ -46,12 +46,11 @@ def _text_model(text: str):
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 async def _settle(cond, timeout: float = 5.0):
-    """Wait for background child runs / resume hooks (instant demo models,
+    """Wait for background child runs / resume hooks (instant test-model runs,
     but detached tasks need event-loop turns)."""
     for _ in range(int(timeout / 0.02)):
         if await cond():

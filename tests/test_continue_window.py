@@ -40,9 +40,8 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    # demo_mode: `run_task` resolves a model itself for the agents it builds.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    # test model: `run_task` resolves a model itself for the agents it builds.
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
 

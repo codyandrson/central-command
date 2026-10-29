@@ -28,6 +28,7 @@ from central_command.gateway import gateway
 from central_command.runtime import consult as consult_mod
 from central_command.runtime.run import run_task
 from tests.conftest import aresolve, needs_pg
+from tests.fake_world import fake_world
 
 A_ID, B_ID, C_ID = "chaintest-a", "chaintest-b", "chaintest-c"
 
@@ -53,8 +54,7 @@ _DRAFT = {
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
     # A real key in .env would otherwise make this "offline" suite spend money.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def woken(monkeypatch) -> list[str]:
     """Record the wake-up hook instead of firing it, and hand back the list.
 
     The hook is a fire-and-forget `asyncio.create_task` that resumes on
-    `resolve_model(None, ...)` — in demo mode the inbox-triage spike double,
+    `resolve_model(None, ...)` — under the test model the inbox-triage spike double,
     whose only move is a Jira due-date proposal. Letting it race here would
     resume the chain on a model chosen for another agent entirely and win the
     claim before the test's own driver call. So these tests drive the resume
@@ -266,10 +266,12 @@ async def test_the_whole_chain_parks_and_unwinds_on_the_decision(monkeypatch, wo
         assert b_state["consult_chain"] == [A_ID]
 
         # The operator approves the LEAF's proposal.
+        log = fake_world(monkeypatch)
         await gateway.approve_and_execute(
             chain.c, chain.proposal_id, approver="operator",
             model=_text_model("C: done, the link is in place."),
         )
+        assert [c for c, _, _ in log] == ["jira.link_issues"]
         assert (await repo.get_session(chain.c))["status"] == "DONE"
 
         # Wake B, the way the hook (or the sweep) does.
@@ -368,10 +370,12 @@ async def test_the_consult_chain_survives_into_the_resumed_deps(monkeypatch, wok
     await _hire_trio()
     try:
         chain = await _park_a_chain(monkeypatch)
+        log = fake_world(monkeypatch)
         await gateway.approve_and_execute(
             chain.c, chain.proposal_id, approver="operator",
             model=_text_model("C: done."),
         )
+        assert [c for c, _, _ in log] == ["jira.link_issues"]
         # On resume, B reaches back toward A.
         await orchestration.resume_consult_wait(chain.b, model=_cycling_model(A_ID))
         answer = (await repo.get_session_run_state(chain.b))["consult_answer"]

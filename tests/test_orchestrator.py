@@ -28,8 +28,7 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 async def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     created: list[str] = []
 
     def track(task_id: str) -> str:

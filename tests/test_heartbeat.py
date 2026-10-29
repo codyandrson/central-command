@@ -599,7 +599,7 @@ async def test_second_heartbeat_is_refused_while_the_lease_is_held(monkeypatch):
 # These drive `fire()` with `create_and_run_task` stubbed. The point is the
 # ACTION's own contract — what window it reads, what it hands the agent, and
 # that a deferral costs nothing — not the agent run behind it, which
-# tests/test_ea.py walks end to end on demo models.
+# tests/test_ea.py walks end to end on the test model.
 
 
 def _ea_schedule(schedule_id="ea-digest", kind="digest"):

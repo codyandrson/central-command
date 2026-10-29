@@ -30,7 +30,7 @@ from tests.conftest import aresolve, needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 def _ctx(agent_id: str | None, session_id: str | None) -> SimpleNamespace:

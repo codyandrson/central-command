@@ -41,7 +41,7 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
 
 
@@ -168,7 +168,7 @@ async def test_the_wake_hook_resumes_the_creator_when_the_child_goes_terminal():
     await repo.resolve_task(child["id"], "DONE", outcome="done")
     await orchestration.child_resolved(await repo.get_task(child["id"]))
 
-    # Resumed (the hook builds its own demo model, which proposes again):
+    # Resumed (the hook builds its own test model, which proposes again):
     # whatever it ended on, it is no longer parked on the task.
     assert await repo.session_status(sid) != "AWAITING_AGENTS"
     assert "agent.task_resumed" in [e["kind"] for e in await repo.list_events(ref_id=sid)]

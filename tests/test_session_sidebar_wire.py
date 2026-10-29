@@ -28,8 +28,8 @@ NOW = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    # `contextTokens` resolves a model window; demo mode keeps that off the proxy.
-    monkeypatch.setattr(settings, "demo_mode", True)
+    # `contextTokens` resolves a model window; the test model keeps that off the proxy.
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 def _row(sess_id: str, **over) -> dict:

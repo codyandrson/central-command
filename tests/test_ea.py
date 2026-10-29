@@ -36,10 +36,9 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 async def demo(monkeypatch):
-    # Pin demo mode anywhere a model is reachable — with a real key in .env the
+    # Pin the test model anywhere a model is reachable — with a real key in .env the
     # "offline" suite would otherwise call Claude for real and spend money.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     # Unlimited (0) by default, as tests/test_heartbeat.py's ea_stubs does: the
@@ -224,7 +223,7 @@ async def test_an_empty_window_says_so_rather_than_reaching_further_back():
 
 @pytest.mark.graph_live
 async def test_fire_to_lane_to_conclude_to_resume_to_gated_proposal(monkeypatch):
-    """The whole slice, on demo models, through the shared machinery only."""
+    """The whole slice, on the test model, through the shared machinery only."""
     from central_command.api import nerve_gateway
     from central_command.heartbeat.engine import fire
     from central_command.runtime import converse

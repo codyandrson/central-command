@@ -16,12 +16,12 @@ from central_command.gateway import gateway
 from central_command.runtime import converse
 from central_command.runtime.spike_model import make_converse_model
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
 
@@ -111,14 +111,16 @@ async def test_propose_mid_conversation_parks_and_gates():
 
 
 @needs_pg
-async def test_approve_continues_the_conversation():
+async def test_approve_continues_the_conversation(monkeypatch):
     out = await converse.start_conversation(
         "litellm-manager", "add a cc-scratch model", model=_model()
     )
     assert out.get("proposed") is True
     sid, pid = out["session_id"], out["proposal_id"]
 
+    log = fake_world(monkeypatch)
     result = await gateway.approve_and_execute(sid, pid, model=_model())
+    assert [c for c, _, _ in log] == ["litellm.add_model"]
     assert result["ok"] is True
     # Option C: the session did NOT go DONE — it is back to the resting state.
     assert await repo.session_status(sid) == "AWAITING_OPERATOR"
@@ -158,7 +160,9 @@ async def test_approve_survives_a_resume_failure_without_orphaning(monkeypatch):
 
     monkeypatch.setattr(gateway, "resume", boom)
     since = await repo.latest_event_id()
+    log = fake_world(monkeypatch)
     result = await gateway.approve_and_execute(sid, pid, model=_model())
+    assert [c for c, _, _ in log] == ["litellm.add_model"]
 
     assert result["ok"] is True  # the execution itself still succeeded
     assert (await repo.load_proposal(pid))["status"] == "EXECUTED"
@@ -419,7 +423,7 @@ def no_task_resume(monkeypatch):
 
 @needs_pg
 async def test_approving_a_proposal_made_in_a_lane_can_end_in_a_conclusion(
-    no_task_resume,
+    monkeypatch, no_task_resume,
 ):
     model = _propose_then_conclude()
     out = await converse.start_conversation(
@@ -429,7 +433,9 @@ async def test_approving_a_proposal_made_in_a_lane_can_end_in_a_conclusion(
     ids = await _link_as_discussion(sid, "litellm-manager")
 
     since = await repo.latest_event_id()
+    log = fake_world(monkeypatch)
     result = await gateway.approve_and_execute(sid, pid, model=model)
+    assert [c for c, _, _ in log] == ["litellm.add_model"]
 
     # The decision stands whatever the resume did.
     assert result["ok"] is True
@@ -495,7 +501,9 @@ async def test_a_failing_conclusion_falls_back_to_resting_the_session(
     await _link_as_discussion(sid, "litellm-manager")
 
     since = await repo.latest_event_id()
+    log = fake_world(monkeypatch)
     result = await gateway.approve_and_execute(sid, pid, model=model)
+    assert [c for c, _, _ in log] == ["litellm.add_model"]
 
     assert result["ok"] is True
     assert (await repo.load_proposal(pid))["status"] == "EXECUTED"

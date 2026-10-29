@@ -1,6 +1,6 @@
 """The world-moved redraft end to end (epic-world-changed-redraft, story 9).
 
-On the demo model and fake integrations, through the PUBLIC seams only: the
+On the test model and fake integrations, through the PUBLIC seams only: the
 cockpit's approve and dismiss RPCs (`proposals.approve` → the approve route,
 detached closing turn and all), the outage retry-now (`outages.retry` →
 probe, then the restricted retry sweep), the lifespan's startup sweeps, and

@@ -1,6 +1,6 @@
 """Gate overrides — the closing end-to-end suite (epic-gate-overrides story 14).
 
-The deterministic demo model drives real task runs, chat turns and ingest
+The deterministic test model drives real task runs, chat turns and ingest
 claims; the operator's side goes through the real cockpit RPC
 (`nerve_gateway._dispatch`) and the real gateway. Nothing here calls a model.
 Fixtures and builders are the ones tests/test_gate_overrides.py defines.
