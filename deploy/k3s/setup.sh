@@ -315,11 +315,11 @@ derive_systems_links() {
 # INTO it and FATALs if the file is absent (mint-keys.sh:42). That is why this
 # lives here and is called from the llm phase, not only from app.
 #
-# CC_EXECUTOR_MODE stays at .env.example's `live` (v2.37.0; a fresh install
-# used to be forced to dry_run, and the unit pinned it — see the unit file's
-# history). The approval gate is the safety; nothing proposes on its own until
-# the operator enables the feed, the drain or a schedule. An existing file is
-# never touched.
+# No run-mode key is written here, in .env.example or in the unit: a fresh
+# install starts live (the API refuses to start on CC_TEST_MODEL, CC_DEMO_MODE
+# or CC_EXECUTOR_MODE). The approval gate is the safety; nothing proposes on its
+# own until the operator enables the feed, the drain or a schedule. An existing
+# file is never touched.
 ensure_app_env() {
   if [[ -f "$APP_ENV" ]]; then
     pass "app-env" "the app's .env already exists — only empty values will be filled"
@@ -1476,7 +1476,8 @@ phase_reset() {
   fi
 
   # Outside the repo AND the cluster, so nothing above reaches it, and it beats
-  # .env: a dry_run pin here would simulate every approval on the new instance.
+  # .env: a drop-in naming CC_TEST_MODEL, CC_DEMO_MODE or CC_EXECUTOR_MODE makes
+  # the API refuse to start on the new instance.
   local dropins
   dropins="$(ls /etc/systemd/system/cc-uvicorn.service.d/ 2>/dev/null | tr '\n' ' ')"
   if [[ -n "${dropins// /}" ]]; then

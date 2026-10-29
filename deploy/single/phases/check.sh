@@ -133,6 +133,31 @@ phase_validate() {
   validate_compose_config
 }
 
+# A deployment carries no run-mode key at all (epic-run-modes, rulings 2 and 3):
+# CC_TEST_MODEL, CC_DEMO_MODE and CC_EXECUTOR_MODE PRESENT in the root .env,
+# whatever the value, is a FAIL — the API refuses to start on any of them, and a
+# fresh install starts live with none. The rule is central_command/run_modes.py's
+# (stdlib only, run with the interpreter this script already resolved), never a
+# copy here; it prints protocol lines, which are re-emitted through the driver's
+# own pass/fail so the ledger and the counters see them. The root .env only: the
+# API reads neither web/.env nor deploy/k3s/.env, and a process that has not
+# started has no environment to scan.
+validate_run_modes() {
+  local out rc=0 line said=0
+  out="$( cd "$REPO_ROOT" && $PY -I central_command/run_modes.py --env-file "$ENV_FILE" 2>&1 )" || rc=$?
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    case "$line" in
+      "FAIL run-modes: "*) fail "run-modes" "${line#FAIL run-modes: }"; said=1 ;;
+      "PASS run-modes: "*) pass "run-modes" "${line#PASS run-modes: }"; said=1 ;;
+    esac
+  done <<<"$out"
+  if (( ! said )); then
+    fail "run-modes" "central_command/run_modes.py gave no verdict (exit $rc): ${out:-no output}"
+  fi
+  return 0
+}
+
 validate_answers() {
   load_env || return 1
   pass "answer-file" "$ENV_FILE present (the one answer file — app and deployment)"
@@ -151,6 +176,8 @@ validate_answers() {
   else
     pass "provider-in-env" "no retired upstream-provider settings in .env"
   fi
+
+  validate_run_modes
 
   validate_ports
 
@@ -279,8 +306,8 @@ phase_preflight() {
 # later blamed on something else.
 #
 # So this row, plus the same test at the top of load_env for every mutating
-# phase and at the top of update.sh's apply. There is no flag past it; the
-# developer bypass CC_SETUP_UNLEDGERED does NOT cover it.
+# phase and at the top of update.sh's apply. There is no flag or variable past
+# it.
 check_tree_pristine() {
   local rc=0
   cc_tree_diff "$REPO_ROOT" || rc=$?

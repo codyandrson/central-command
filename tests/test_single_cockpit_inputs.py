@@ -101,8 +101,8 @@ class Rig:
         env = dict(os.environ)
         home = self.tmp / "home"
         env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
-        for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_SETUP_UNLEDGERED", "CC_RUN_LOCK_PID",
-                      "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY", "CC_EXECUTOR_MODE",
+        for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_RUN_LOCK_PID",
+                      "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
                       "CC_STAGED_FOR"):
             env.pop(stale, None)
         env["PATH"] = str(self.tmp / "bin") + os.pathsep + env.get("PATH", "")
@@ -133,7 +133,7 @@ def rig(tmp_path: Path) -> Rig:
     r.state.mkdir()
     _set(repo / ".env", {"CC_STATE_DIR": env_path(r.state),
                          "CC_LLM_API_KEY": "sk-already-minted-0000000000",
-                         "CC_LLM_PROXY_ADMIN_KEY": "", "CC_EXECUTOR_MODE": "dry_run"})
+                         "CC_LLM_PROXY_ADMIN_KEY": ""})
     setup = repo / "deploy" / "single" / "setup.sh"
     text = setup.read_text(encoding="utf-8")
     tail = 'main "$@"'

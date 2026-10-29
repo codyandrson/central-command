@@ -302,8 +302,8 @@ def _run(repo: Path, script: str, *args: str, env_extra: dict[str, str] | None =
     home = repo.parent / "home"
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
     for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
-                  "CC_SETUP_UNLEDGERED", "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
-                  "CC_EXECUTOR_MODE", "CC_RUN_LOCK_PID"):
+                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
+                  "CC_RUN_LOCK_PID"):
         env.pop(stale, None)
     env.update(env_extra or {})
     return run_driver([bash(), script, *args], cwd=repo / "deploy" / "single", env=env)

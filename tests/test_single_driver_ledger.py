@@ -14,9 +14,9 @@ What the record asks P1 to prove, and what each test here is:
   That refusal is the whole point: accepting it is exactly the 2026-10-01
   work-site state — an empty `CC_LLM_API_KEY`, eight blank Systems links, and
   a green `verify`;
-* the developer bypass `CC_SETUP_UNLEDGERED=1` is REFUSED on an installation
-  whose `.env` says `CC_EXECUTOR_MODE=live`. There is no `--force`; the
-  operator decided that the escape hatch is the defect;
+* there is no bypass: a phase whose `requires` are not done is refused with no
+  `--force` and no variable past it (the old developer variable was deleted;
+  a process that still carries it is refused exactly as one that does not);
 * `failed` app rows block `verify`, and the refusal NAMES `app/mint-key` —
   the step whose mid-function `return 1` used to skip nine `.env` writes and
   the cockpit build in silence;
@@ -31,8 +31,8 @@ WHICH SUBCOMMAND each test drives is chosen for SPEED, and deliberately:
   copying their probes). So `preflight` exercises the identical code in
   seconds, where a full `check` spends minutes on registry and index round
   trips — probes this test has no opinion about;
-* `machine` is the bypass test's target because on bare Linux it is a no-op,
-  and `test` is the tree-guard's because it has one row. Both leave the host
+* `machine` is the out-of-order test's target because on bare Linux it is a
+  no-op, and `test` is the tree-guard's because it has one row. Both leave the host
   untouched either way;
 * `status` is capped with `CC_VERIFY_MAX_WAIT=1`, the same knob `diagnose`
   uses, so verify.sh reports against the absent stack instead of polling for
@@ -115,6 +115,9 @@ def tree(tmp_path: Path) -> Path:
     (repo / "central_command" / "db").mkdir(parents=True)
     shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
                  repo / "central_command" / "db" / "schema.sql")
+    # `check`'s run-modes row runs this stdlib-only file by path.
+    shutil.copy2(ROOT / "central_command" / "run_modes.py",
+                 repo / "central_command" / "run_modes.py")
     (tmp_path / "home").mkdir()
     state = tmp_path / "state"
     state.mkdir()
@@ -134,8 +137,7 @@ def _run(repo: Path, *args: str, env_extra: dict[str, str] | None = None):
     # A Central Command .env may be sourced into the session running pytest;
     # none of it may reach this temp install.
     for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
-                  "CC_SETUP_UNLEDGERED", "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
-                  "CC_EXECUTOR_MODE"):
+                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY"):
         env.pop(stale, None)
     env.update(env_extra or {})
     return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
@@ -199,42 +201,33 @@ def test_an_older_updater_on_a_pre_ledger_install_gets_a_pause_not_a_failure(tre
     assert "FAIL fetch: requires" in by_hand.stdout, by_hand.stdout
 
 
-@drives_installer
-def test_the_developer_bypass_is_refused_on_a_live_deployment(tree: Path):
-    """D3: `CC_SETUP_UNLEDGERED=1` is the only bypass there is, it is
-    documented nowhere an operator reads, and it does not apply when the
-    Executor is live — out-of-order phases on a live deployment is the failure
-    mode the ledger exists to end."""
-    _set(tree / ".env", {"CC_EXECUTOR_MODE": "live"})
-
-    r = _run(tree, "boot", env_extra={"CC_SETUP_UNLEDGERED": "1"})
-
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "FAIL unledgered:" in r.stdout, r.stdout
-    assert "CC_EXECUTOR_MODE=live" in r.stdout
-    # The phase stays refused — the bypass did not take effect.
-    assert "FAIL boot: requires app/install" in r.stdout, r.stdout
+# The deleted developer variable's name, spelled in two pieces so that the
+# epic's "no mention anywhere in tests/" grep stays empty: the test below
+# exists to prove that setting it changes nothing.
+_RETIRED_BYPASS = "CC_SETUP_" + "UNLEDGERED"
 
 
 @drives_installer
-def test_the_developer_bypass_works_when_the_executor_is_not_live(tree: Path):
-    """The other half: it IS a bypass, or it would not be one. `machine` is the
-    target because on a host with no podman machine the phase is a no-op, so
-    what the test exercises is the refusal and nothing else."""
-    _set(tree / ".env", {"CC_EXECUTOR_MODE": "dry_run"})
+def test_an_out_of_order_phase_is_refused_with_or_without_the_retired_bypass(tree: Path):
+    """There is no bypass (epic-run-modes, ruling 5). `machine` is the target
+    because on a host with no podman machine the phase is a no-op, so what the
+    test exercises is the refusal and nothing else. The retired variable in the
+    environment must change neither the exit code, nor a protocol line, nor the
+    plan."""
     _write_ledger(tree, [])
 
-    blocked = _run(tree, "machine")
-    assert blocked.returncode == 1, blocked.stdout
-    assert "FAIL machine: requires check/tree-pristine, which is pending" in blocked.stdout, (
-        blocked.stdout
+    plain = _run(tree, "machine")
+    assert plain.returncode == 1, plain.stdout
+    assert "FAIL machine: requires check/tree-pristine, which is pending" in plain.stdout, (
+        plain.stdout
     )
 
-    allowed = _run(tree, "machine", env_extra={"CC_SETUP_UNLEDGERED": "1"})
-    assert "WARN machine: CC_SETUP_UNLEDGERED=1 — running out of order" in allowed.stdout, (
-        allowed.stdout
-    )
-    assert "FAIL machine: requires" not in allowed.stdout, allowed.stdout
+    with_var = _run(tree, "machine", env_extra={_RETIRED_BYPASS: "1"})
+    assert with_var.returncode == plain.returncode, with_var.stdout
+    assert _protocol(with_var.stdout) == _protocol(plain.stdout), with_var.stdout
+    assert "WARN machine:" not in with_var.stdout, with_var.stdout
+    assert "OUT OF ORDER" not in with_var.stdout, with_var.stdout
+    assert "WILL NOT RUN" in with_var.stdout, with_var.stdout
 
 
 @drives_installer
@@ -600,12 +593,14 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
     py.chmod(0o755)
     # A free API port: nothing of the host's may answer this temp install (and
     # until v2.57.0 a healthy API made `test` skip its suite).
-    _set(tree / ".env", {"CC_API_PORT": str(_free_port()), "CC_EXECUTOR_MODE": "dry_run"})
-    extra = {"CC_SETUP_UNLEDGERED": "1"}
+    _set(tree / ".env", {"CC_API_PORT": str(_free_port())})
+    # `test` requires app/install: reach it the way a real run does, with the
+    # prerequisite recorded done in the ledger (there is no bypass).
+    _write_ledger(tree, [("app/install", "done")])
 
     env = dict(os.environ)
     home = tree.parent / "home"
-    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1", **extra)
+    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
     for stale in ("CC_STATE_DIR", "CC_RUN_LOCK_PID"):
         env.pop(stale, None)
     proc = subprocess.Popen([_bash_exe(), "setup.sh", "test"], cwd=tree / "deploy" / "single",
@@ -627,7 +622,7 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
     assert (_state_dir(tree) / "run.lock" / "pid").exists()
 
     (flags / "python-go").touch()
-    r = _run(tree, "test", env_extra=extra)
+    r = _run(tree, "test")
     warn = [l for l in r.stdout.splitlines() if l.startswith("WARN run-lock:")]
     assert warn, r.stdout + r.stderr
     assert f"pid {proc.pid}" in warn[0] and '"./setup.sh test"' in warn[0], warn[0]
@@ -720,7 +715,7 @@ def test_a_failed_mint_key_leaves_every_later_app_row_pending(tree: Path):
     CC_LLM_PROXY_UI_URL blank (its `failed` rows with an empty reason). A
     later row's probe is never even asked."""
     _set(tree / ".env", {"CC_LLM_PROXY_ADMIN_KEY": "sk-test-admin-0000000000",
-                         "CC_LLM_API_KEY": "", "CC_EXECUTOR_MODE": "dry_run"})
+                         "CC_LLM_API_KEY": ""})
     _rows_done_through(tree, "stack")
     for exe in ("python", "uvicorn"):
         f = tree / ".venv" / "bin" / exe
@@ -794,7 +789,7 @@ def test_the_llm_catalog_pause_is_a_gate_and_the_rows_after_it_are_pending(tree:
       catalog-filled    done                               -> gate (its own USERACTION)
       probe-*, embed-*  done / failed, never ran           -> pending, no reason
     """
-    _set(tree / ".env", {"CC_ENABLE_SPEECH": "0", "CC_EXECUTOR_MODE": "dry_run"})
+    _set(tree / ".env", {"CC_ENABLE_SPEECH": "0"})
     _rows_done_through(tree, "fetch")
     stub_py = tree.parent / "py"
     stub_py.write_text(

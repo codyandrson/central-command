@@ -215,9 +215,9 @@ when a matching file is read.
   argument is the only resume command — it reads the ledger and continues
   from wherever the last run stopped. `./setup.sh <phase>` is a DEVELOPER
   form, never an operator one: it REFUSES (exit 1) when that phase's
-  `requires` are not recorded `done`, with no `--force`; the bypass,
-  `CC_SETUP_UNLEDGERED=1`, is documented ONLY here and is itself refused when
-  `.env` carries `CC_EXECUTOR_MODE=live`.
+  `requires` are not recorded `done`, with no `--force` and no variable past
+  it (the old developer bypass variable was deleted: every single-node
+  install is fresh).
 - **One exit-code rule, everywhere** (v2.55.0, D5). `cc_exit_code <fails>
   <warns> <actions>` in `deploy/env-lib.sh`, precedence `FAIL > USERACTION >
   WARN` — `run_phase`, the `machine` subcommand, `resolve-images.sh` and
@@ -231,7 +231,7 @@ when a matching file is read.
   every mutating phase and of `update.sh apply`: the tracked tree is clean
   and `HEAD` is an ancestor of `upstream` when that ref exists. A difference
   is a FAIL naming the files; no git is a USERACTION naming `./update.sh
-  init`; `CC_SETUP_UNLEDGERED=1` does NOT cover it. `update.sh apply` is
+  init`; no variable covers it. `update.sh apply` is
   fast-forward only now — the three-way merge of local commits and the
   advice to commit local tweaks to `local` are retired. `update.sh init`'s
   baseline `git add -A` on a freshly unzipped tree with no history STAYS —

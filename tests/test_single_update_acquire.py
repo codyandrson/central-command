@@ -943,8 +943,8 @@ def _setup(repo: Path, *args: str, path_prefix: str | None = None):
     env = dict(os.environ)
     home = repo.parent / "home"
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_SETUP_UNLEDGERED", "CC_RUN_LOCK_PID",
-                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY", "CC_EXECUTOR_MODE", "CC_STAGED_FOR"):
+    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_RUN_LOCK_PID",
+                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY", "CC_STAGED_FOR"):
         env.pop(stale, None)
     if path_prefix:
         env["PATH"] = path_prefix + os.pathsep + env.get("PATH", "")
@@ -989,8 +989,7 @@ def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
 @drives_installer
 def test_a_failing_npm_ci_fails_the_cockpit_step_even_when_the_build_would_succeed(tmp_path: Path):
     repo = _plain_tree(tmp_path)
-    _set(repo / ".env", {"CC_LLM_API_KEY": "sk-already-minted-0000000000", "CC_LLM_PROXY_ADMIN_KEY": "",
-                         "CC_EXECUTOR_MODE": "dry_run"})
+    _set(repo / ".env", {"CC_LLM_API_KEY": "sk-already-minted-0000000000", "CC_LLM_PROXY_ADMIN_KEY": ""})
     _ledger(tmp_path, ["check/tree-pristine", "fetch/venv", "fetch/cockpit", "llm/secrets",
                        "llm/litellm-live"])
     (repo / "web").mkdir()

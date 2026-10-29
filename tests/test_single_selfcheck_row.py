@@ -181,8 +181,8 @@ def _run(repo: Path, *args: str, env_extra: dict[str, str] | None = None):
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"),
                CC_VERIFY_MAX_WAIT="1")
     for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
-                  "CC_SETUP_UNLEDGERED", "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
-                  "CC_EXECUTOR_MODE", "CC_LITELLM_PORT", "CC_LLM_BASE_URL",
+                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
+                  "CC_LITELLM_PORT", "CC_LLM_BASE_URL",
                   "VIRTUAL_ENV"):
         env.pop(stale, None)
     env.update(env_extra or {})

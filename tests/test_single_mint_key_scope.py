@@ -187,8 +187,8 @@ def _run_app(repo: Path):
     home = repo.parent / "home"
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"))
     env = with_stub_path(env, _stub(repo))
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_SETUP_UNLEDGERED",
-                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY", "CC_EXECUTOR_MODE",
+    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH",
+                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
                   "VIRTUAL_ENV"):
         env.pop(stale, None)
     return run_driver([_bash_exe(), "setup.sh", "app"], cwd=repo / "deploy" / "single", env=env)

@@ -354,7 +354,9 @@ step_host() {
   install -m 644 "$REPO/deploy/k3s/cc-update-tmpfiles.conf" /etc/tmpfiles.d/cc-update.conf
   # Operator drop-ins (e.g. gv-uvicorn.service.d/executor-live.conf, the go-live
   # override) are not in the repo: carry them over, rewritten, or the new unit
-  # silently runs on the tracked default (bit us live 2026-08-29: dry_run).
+  # silently runs on the tracked default (bit us live 2026-08-29). A drop-in
+  # naming CC_TEST_MODEL, CC_DEMO_MODE or CC_EXECUTOR_MODE is carried over too,
+  # and makes the API refuse to start: remove the key first.
   local d; for d in /etc/systemd/system/gv-*.d; do
     [[ -d $d ]] || continue
     local nd="/etc/systemd/system/$(basename "$d" | sed 's/^gv-/cc-/')"

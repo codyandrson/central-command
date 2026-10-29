@@ -356,10 +356,7 @@ re-runs only the steps that read it; a release bump re-runs everything.
 The phases are still subcommands of the same code path, kept for
 development — but they are no longer operator moves: **`./setup.sh <phase>`
 REFUSES (exit 1) when that phase's prerequisites are not recorded `done` in
-the ledger**, with no `--force`. (The developer bypass,
-`CC_SETUP_UNLEDGERED=1`, is documented in `.claude/rules/deploy-single.md`,
-never here — and it is itself refused when `.env` carries
-`CC_EXECUTOR_MODE=live`.) The phases and their steps are declared in
+the ledger**, with no `--force` and no variable past it. The phases and their steps are declared in
 [`steps.tsv`](steps.tsv) and listed in [`CHECKLIST.md`](CHECKLIST.md). The
 commands an operator uses:
 

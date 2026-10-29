@@ -112,9 +112,9 @@ def test_a_failed_patch_is_a_warning_never_a_stop(repo: Path):
 
 def test_a_key_the_merged_release_declares_is_appended_once(repo: Path):
     (repo / ".env.example").write_text("# a comment\n#CC_GRAPH_RERANK_ALIAS=\n")
-    (repo / ".env").write_text("CC_DEMO_MODE=false")          # no trailing newline
+    (repo / ".env").write_text("CC_FEED_ENABLED=0")          # no trailing newline
     assert _run(repo, "ensure_app_env_defaults").returncode == 0
-    assert (repo / ".env").read_text() == "CC_DEMO_MODE=false\nCC_GRAPH_RERANK_ALIAS=cc-rerank\n"
+    assert (repo / ".env").read_text() == "CC_FEED_ENABLED=0\nCC_GRAPH_RERANK_ALIAS=cc-rerank\n"
     _run(repo, "ensure_app_env_defaults")
     assert (repo / ".env").read_text().count("CC_GRAPH_RERANK_ALIAS") == 1
 
@@ -128,11 +128,11 @@ def test_an_operators_value_even_an_empty_one_is_left_alone(repo: Path):
 
 
 def test_a_key_the_running_release_does_not_know_is_never_written(repo: Path):
-    (repo / ".env.example").write_text("CC_DEMO_MODE=false\n")
-    (repo / ".env").write_text("CC_DEMO_MODE=false\n")
+    (repo / ".env.example").write_text("CC_FEED_ENABLED=0\n")
+    (repo / ".env").write_text("CC_FEED_ENABLED=0\n")
     r = _run(repo, "ensure_app_env_defaults")
     assert "not declared" in r.stdout
-    assert (repo / ".env").read_text() == "CC_DEMO_MODE=false\n"
+    assert (repo / ".env").read_text() == "CC_FEED_ENABLED=0\n"
 
 
 def test_this_release_does_not_declare_the_rerank_key_unless_it_reads_it():

@@ -53,8 +53,8 @@ phase_demo() {
   if ! demo_awaiting; then
     # Knowledge-only email: triage proposes a graph episode, which the
     # Executor performs for REAL against the local graph — no Jira needed.
-    # (The invoice fixture named a Jira issue no fresh install has; dry_run
-    # used to make that free.)
+    # (The invoice fixture named a Jira issue no fresh install has, so it
+    # would fail here.)
     local eml="$REPO_ROOT/fixtures/emails/007-ownership-change.eml"
     [[ -f "$eml" ]] || { fail "demo-feed" "$eml missing"; return 1; }
     # pipefail INSIDE the body (D5): a `bash -c` child does not inherit this

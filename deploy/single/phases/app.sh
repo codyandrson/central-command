@@ -317,13 +317,10 @@ phase_app() {
     set_kv_if_unset "$ENV_FILE" CC_SANDBOX_DOCS_URL "${sbx:-http://127.0.0.1:8090}/docs" "app-link-sandbox"
   fi
 
-  # CC_EXECUTOR_MODE is left at .env.example's `live` (v2.37.0). A fresh
-  # install used to be forced to dry_run — a global no-op on EVERY capability,
-  # including the internal ones — and the operator forgot the flip more often
-  # than it protected anything: a day of approvals nobody knew were simulated,
-  # a tour whose episodes evaporated, a rename that ran production dry for 40
-  # minutes. The approval gate is the safety; the feed, the drain and every
-  # schedule stay off until the operator turns them on.
+  # No run-mode key is written: a fresh install starts live, and `check` FAILS
+  # a .env that carries CC_TEST_MODEL, CC_DEMO_MODE or CC_EXECUTOR_MODE at all.
+  # The approval gate is the safety; the feed, the drain and every schedule stay
+  # off until the operator turns them on.
   # CC_OPERATOR_NAME is deliberately NOT set here: it is the interview's, and
   # the default ("the operator") is correct until someone is asked.
 

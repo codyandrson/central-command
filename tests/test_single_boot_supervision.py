@@ -360,7 +360,6 @@ class Install:
             "CC_SANDBOX_RUNNER_URL": f"http://127.0.0.1:{self.runner}",
             "CC_SANDBOX_RUNNER_TOKEN": TOKEN,
             "CC_ENABLE_SANDBOX": "1",
-            "CC_EXECUTOR_MODE": "dry_run",
         })
         # Every cross-phase prerequisite of a boot row, recorded done.
         _write_ledger(repo, ["app/install", "app/mint-key", "verify/selfcheck", "app/cockpit"])
@@ -370,9 +369,9 @@ class Install:
         home = self.tmp / "home"
         env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"),
                    FAKE_DIR=str(self.fake), PATH=f"{self.stubs}:{env.get('PATH', '/usr/bin:/bin')}")
-        for stale in ("CC_STATE_DIR", "CC_SETUP_UNLEDGERED", "CC_RUN_LOCK_PID",
+        for stale in ("CC_STATE_DIR", "CC_RUN_LOCK_PID",
                       "CC_SANDBOX_RUNNER_TOKEN", "CC_ENABLE_SANDBOX", "CC_API_PORT",
-                      "CC_COCKPIT_PORT", "CC_SANDBOX_RUNNER_URL", "CC_EXECUTOR_MODE",
+                      "CC_COCKPIT_PORT", "CC_SANDBOX_RUNNER_URL",
                       "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
             env.pop(stale, None)
         return run_driver([_bash_exe(), "setup.sh", *args], cwd=self.repo / "deploy" / "single",

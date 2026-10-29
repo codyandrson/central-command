@@ -485,11 +485,10 @@ load_env() {
   # D10, before a mutating phase reads a single answer: this deployment
   # configures through .env and never rewrites any part of Central Command, so
   # a tree that differs from the release it claims to be does not get to
-  # mutate anything. There is no bypass variable for this one —
-  # CC_SETUP_UNLEDGERED (D3) does not cover it. A STAGED run is exempt, and
-  # not by accident: its tree is a sparse worktree of `upstream` that mutates no
-  # install, and the DEPLOYMENT's tree was put through this same test
-  # (cc_tree_diff) by update.sh's own gate before anything was staged.
+  # mutate anything. There is no bypass variable for this one. A STAGED run is
+  # exempt, and not by accident: its tree is a sparse worktree of `upstream`
+  # that mutates no install, and the DEPLOYMENT's tree was put through this same
+  # test (cc_tree_diff) by update.sh's own gate before anything was staged.
   if (( MUTATING && ! STAGED )) && ! p_tree_pristine; then
     fail "tree-pristine" "this deployment DIFFERS from the release it claims to be, so the $CURPHASE phase will not run: $TREE_DIFF_PATHS. An install configures through .env and never rewrites any part of Central Command (2026-10-01 design record, D10) — restore those paths (git restore -- <path>), and carry the change back to a development session as a finding: ./setup.sh report writes one"
     return 1
@@ -2376,28 +2375,6 @@ phase_is_done() { # phase_is_done <phase>
   [[ "$PHASE_VERDICT" == skip ]]
 }
 
-# The DEVELOPER bypass (D3), documented only in .claude/rules/deploy-single.md
-# and never in an operator document. There is no --force: the operator decided
-# on 2026-10-01 that the escape hatch is the defect. It is REFUSED outright on
-# an installation whose Executor is live, because running a phase ahead of its
-# prerequisites there means proposing against half a deployment.
-#
-# unledgered_permitted is the silent half, which the plan asks; the gate asks
-# unledgered_allowed, which also says why when it refuses.
-unledgered_permitted() {
-  [[ "${CC_SETUP_UNLEDGERED:-0}" == "1" ]] || return 1
-  [[ "$(get_kv "$ENV_FILE" CC_EXECUTOR_MODE)" != "live" ]]
-}
-
-unledgered_allowed() {
-  [[ "${CC_SETUP_UNLEDGERED:-0}" == "1" ]] || return 1
-  if ! unledgered_permitted; then
-    fail "unledgered" "CC_SETUP_UNLEDGERED=1 is REFUSED while .env carries CC_EXECUTOR_MODE=live — out-of-order phases on a live deployment is the failure mode the ledger exists to end. Run ./setup.sh (it resumes in order)"
-    return 1
-  fi
-  return 0
-}
-
 # What a `requires` row's status MEANS, in a refusal. `started` is the one that
 # needs saying: the ledger is not merely incomplete there, a run was killed or
 # lost inside that phase.
@@ -2448,7 +2425,7 @@ ledger_plan() { # ledger_plan all | ledger_plan <phase>
   p="$1"
   blocked=""
   cc__ledger_blocked_into "$LEDGER" "$p" && blocked="$LEDGER_BLOCKED"
-  if [[ -n "$blocked" ]] && ! unledgered_permitted; then
+  if [[ -n "$blocked" ]]; then
     plan_line "$p: WILL NOT RUN — it requires ${blocked%% *}, which is $(ledger_status_words "${blocked#* }"); the ledger refuses a phase whose prerequisites are not done"
     return 0
   fi
@@ -2463,7 +2440,6 @@ ledger_plan() { # ledger_plan all | ledger_plan <phase>
       text="$PLAN_TEXT"
     fi
   fi
-  [[ -n "$blocked" ]] && text="$text — OUT OF ORDER under CC_SETUP_UNLEDGERED=1 (${blocked%% *} is ${blocked#* })"
   plan_line "$text"
   return 0
 }
@@ -2512,10 +2488,6 @@ phase_ledger_gate() { # phase_ledger_gate <phase>
   local blocked
   if cc__ledger_blocked_into "$LEDGER" "$1"; then
     blocked="$LEDGER_BLOCKED"
-    if unledgered_allowed; then
-      warn "$1" "CC_SETUP_UNLEDGERED=1 — running out of order on purpose (${blocked%% *} is ${blocked#* })"
-      return 0
-    fi
     # THE PRE-LEDGER INSTALL, driven by an OLDER release's updater. A
     # deployment installed before v2.55.0 has no ledger rows at all, and the
     # update that brings the ledger in is run by the updater it already has —
