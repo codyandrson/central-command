@@ -4,6 +4,78 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-29 — v2.74.0: the deterministic model is test-only and the dry-run executor is gone — any run-mode key refuses the start
+
+epic-run-modes. Thirteen commits since v2.73.0 (`96d43816..741b692b`, thirteen
+stories) remove the two run modes. The deterministic model is a test double and
+nothing else: only the test suite sets it, in-process, and no `.env` line, drop-in or
+shell variable can turn it on. The dry-run executor is deleted, so every approval
+performs its write. A deployment that still carries a run-mode key is refused at
+start instead of silently running in a mode that no longer exists.
+
+**PRECONDITION: do this BEFORE applying.** The API REFUSES TO START when
+`CC_TEST_MODEL`, `CC_DEMO_MODE` or `CC_EXECUTOR_MODE` is present anywhere in its
+environment, whatever the value (`false` and `live` included). Remove each such line
+from `.env` and from any `cc-uvicorn.service.d/` drop-in before the apply. On k3s a
+missed key fails the update's health poll and `cc-update.sh` rolls back
+automatically. On a single node `update.sh` has NO automatic rollback: the API stays
+down until the line is removed; `./setup.sh check` names the offending key and
+`./update.sh rollback` returns to the previous release.
+
+- **The test model is test-only.** It is `settings.test_model`, a private attribute
+  with a setter that only in-process code reaches (the test suite). It is not a
+  settings field, so the environment, `.env` and constructor arguments cannot set it.
+  `resolve_model()` stays the one seam.
+- **The dry-run executor is gone.** `executor_mode` and `demo_mode` no longer exist;
+  `_execute_action` and the world re-check have no mode branch, so every approval
+  performs its write. The offline quickstart that depended on the modes went with
+  them; a fresh install starts live.
+- **One rule, three callers.** `central_command/run_modes.py` holds the rule: a key
+  PRESENT is a finding, whatever its value. The API applies it at startup over its
+  own process environment and raises; `deploy/k3s/verify.sh` applies it on every run
+  over the running process's environment (the root `.env` when that is not
+  readable); the single-node `check` applies it to the root `.env`. `web/.env` and
+  `deploy/k3s/.env` are not scanned.
+- **What the release removes itself.** The tracked unit's `Environment=CC_DEMO_MODE=false`
+  line and `.env.example`'s two keys. A fresh install's `.env` is seeded without
+  them. A drop-in or a hand-written `.env` line is the operator's to remove, hence
+  the precondition.
+- **What the operator sees.** The cockpit's DRY RUN banner is gone, and the `status`
+  RPC no longer carries `demoMode` or `executorMode`. Proposals that ran under the
+  retired mode keep their "simulated" badge: it is history, derived from each
+  proposal's own log, and was not rewritten.
+- **The developer bypass is deleted.** `CC_SETUP_UNLEDGERED` no longer exists on the
+  single-node installer: an out-of-order phase is refused, and no variable gets past
+  it.
+- **The test suite holds no live world.** A session guard points every write-capable
+  integration at nothing (Jira, Confluence, Exchange, the sandbox, the MCP build
+  host, the email and calendar façades, the git and subprocess seams), and a test
+  that executes an approval installs `tests/fake_world.py`, which fakes every
+  handler and world check and records what it saw. The guard found one real leak: a
+  feed test used to contact the live email façade at collection, on every suite run.
+  It is now opt-in (`CC_LIVE_FACADE_TESTS=1`).
+- **A string guard.** `tests/test_run_modes_e2e.py` fails the suite on any run-mode
+  token outside a named allowlist (the rule module, the history read, the lines that
+  state the guard, the run-mode tests). Its other cases boot the API against each
+  forbidden key and value, run the first proposal of a fresh database to a live
+  execution against a fake, and probe six write families with no fake installed: each
+  lands FAILED, none reaches a non-loopback address.
+- **Documents.** AGENTS has one bite mark, "The test model is test-only, and there
+  is no executor mode"; ARCHITECTURE, the tests rule, the setup skill and both
+  deploy READMEs say the modes as built. DL-021 is superseded by DL-141, and DL-141
+  is enforced by the tests above. `evals/triage_judgment.yaml`'s header says "test
+  model" where it said "demo mode".
+- **Schema:** none.
+- **Settings:** `demo_mode` and `executor_mode` are removed, with no replacement
+  key.
+- **Events:** unchanged (176 distinct event types).
+- **What the apply does.** Nothing to do by hand beyond the precondition. No image,
+  configmap or capability is removed, so there is no bridge and
+  `deploy/k3s/removed-capabilities.txt` gets no entry; `min_upgrade_from` stays 2.69.0.
+- **After the apply, the operator checks:** the cockpit shows v2.74.0; `/health` and
+  `GET /api/heartbeat` are healthy; `deploy/k3s/verify.sh` passes, its run-modes
+  check included; and the API log carries no run-modes refusal line.
+
 ## 2026-10-28 — v2.73.0: the world moved is a NO that redrafts — typed, re-checked, bounded, and every redraft parks
 
 epic-world-changed-redraft. Eleven commits since v2.72.0 (`8a25d25c..9bf792d2`, ten

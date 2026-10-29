@@ -1,6 +1,6 @@
-# Inbox-triage JUDGMENT dataset — the answer to "demo mode can't validate judgment".
+# Inbox-triage JUDGMENT dataset — the answer to "the test model can't validate judgment".
 #
-# Demo mode's FunctionModel returns a canned proposal, so it proves the plumbing
+# The test model's FunctionModel returns a canned proposal, so it proves the plumbing
 # and nothing about reasoning. These cases run the REAL model against the REAL
 # charter and ask whether it DECIDED correctly.
 #
