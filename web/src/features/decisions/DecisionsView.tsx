@@ -358,12 +358,13 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-/** An EXECUTED proposal that only ran in dry_run — the world never changed. */
+/** An EXECUTED proposal that ran under the retired dry-run mode — the world
+ *  never changed. History: nothing executes that way any more. */
 function SimulatedBadge() {
   return (
     <span
       data-testid="simulated-badge"
-      title="Executor was in dry_run: this action was simulated, nothing was written."
+      title="Executed under the retired dry-run mode: this action was simulated, nothing was written."
       className="inline-flex items-center rounded-full border border-orange/30 bg-orange/10 px-1.5 py-0.5 text-[0.6rem] font-semibold text-orange"
     >
       SIMULATED

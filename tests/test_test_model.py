@@ -4,9 +4,7 @@ doubles, and the one thing in Settings no environment can reach.
 Epic run-modes, story 3. It was the `demo_mode` field, settable from `.env` and
 the environment; it is now a private attribute behind a property, so only code
 in this process can turn it on (the suite does, with `monkeypatch.setattr`).
-`demo_mode` survives for one epic as an alias onto it, so tests that still pin
-the old name keep working until the area sweeps move them and story 10 deletes
-the alias.
+Story 10 deleted the old name outright: no alias is left to set it by.
 
 Needs no database: `resolve_model` returns for the test model before it reads
 the agent row.
@@ -36,7 +34,6 @@ def test_no_environment_key_turns_the_test_model_on(monkeypatch):
     fresh = _fresh()
 
     assert fresh.test_model is False
-    assert fresh.demo_mode is False
 
 
 def test_no_env_file_turns_the_test_model_on(tmp_path, monkeypatch):
@@ -50,7 +47,6 @@ def test_no_env_file_turns_the_test_model_on(tmp_path, monkeypatch):
     fresh = Settings(_env_file=env_file)
 
     assert fresh.test_model is False
-    assert fresh.demo_mode is False
 
 
 def test_a_constructor_argument_does_not_turn_it_on_either():
@@ -65,6 +61,7 @@ def test_the_switch_is_not_a_settings_field():
     check or schema walk can see it as configuration."""
     assert "test_model" not in Settings.model_fields
     assert "demo_mode" not in Settings.model_fields
+    assert not hasattr(Settings, "demo_mode"), "the transitional alias is gone"
     assert "test_model" not in _fresh().model_dump()
 
 
@@ -107,31 +104,6 @@ def test_monkeypatch_setattr_sets_the_switch_and_undo_restores_it():
     assert settings.test_model is before
 
 
-def test_demo_mode_is_an_alias_both_ways(monkeypatch):
-    """The transitional alias: either name sets and reads the one switch.
-    Removed in story 10 of epic-run-modes."""
-    monkeypatch.setattr(settings, "test_model", False)
-
-    monkeypatch.setattr(settings, "demo_mode", True)
-    assert settings.test_model is True
-    assert settings.demo_mode is True
-
-    monkeypatch.setattr(settings, "test_model", False)
-    assert settings.demo_mode is False
-
-    monkeypatch.setattr(settings, "test_model", True)
-    assert settings.demo_mode is True
-
-
-def test_the_alias_undoes_like_the_name(monkeypatch):
-    monkeypatch.setattr(settings, "test_model", False)
-    mp = pytest.MonkeyPatch()
-    mp.setattr(settings, "demo_mode", True)
-    assert settings.test_model is True
-    mp.undo()
-    assert settings.test_model is False
-
-
 # --- what the switch does at the one seam -------------------------------------
 
 
@@ -153,14 +125,3 @@ async def test_the_test_model_resolves_the_eas_own_double(monkeypatch):
 
     assert isinstance(model, FunctionModel)
     assert model.function is _respond_ea
-
-
-def test_the_status_rpc_still_reports_the_switch_under_its_old_key():
-    """`demoMode` stays on the wire until story 10 removes the key; it reads the
-    new name."""
-    import inspect
-
-    from central_command.api import nerve_gateway
-
-    source = inspect.getsource(nerve_gateway._dispatch)
-    assert '"demoMode": settings.test_model' in source

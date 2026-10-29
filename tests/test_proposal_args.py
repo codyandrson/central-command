@@ -15,7 +15,6 @@ import pytest
 from pydantic_ai import ModelRetry
 
 from central_command import events
-from central_command.config import settings
 from central_command.contract import ARG_SPECS, Action, Proposal, Reversibility, validate_action_args
 from central_command.db import repo
 from central_command.gateway import executor
@@ -153,7 +152,7 @@ async def test_executor_refuses_the_same_shape_before_any_action_runs(monkeypatc
     """The Executor half, from the same list: the trust boundary never assumes
     the runtime checked (an API-submitted proposal skips the tool path). Every
     action is checked before the FIRST runs, so the failure carries an empty
-    completed-cursor and no handler is ever called — in either executor mode."""
+    completed-cursor and no handler is ever called."""
     async def explode(*a, **k):
         raise AssertionError("handler ran on a malformed action")
 
@@ -163,14 +162,12 @@ async def test_executor_refuses_the_same_shape_before_any_action_runs(monkeypatc
                   target_ref={"system": "graphiti", "id": "central_command"},
                   reversibility=Reversibility.reversible)
     bad = _proposal(_BAD_ARGS).actions[0]
-    for mode in ("dry_run", "live"):
-        monkeypatch.setattr(settings, "executor_mode", mode)
-        with pytest.raises(executor.ExecutionFailed) as excinfo:
-            await executor.execute([good, bad], approver="human:lee", source_refs=[])
-        assert excinfo.value.completed == []
-        assert excinfo.value.failed_capability == "graph.add_episode"
-        assert "name, episode_body, scope, reference_time" in excinfo.value.error
-        assert excinfo.value.error != "'name'"  # the bare KeyError is gone
+    with pytest.raises(executor.ExecutionFailed) as excinfo:
+        await executor.execute([good, bad], approver="human:lee", source_refs=[])
+    assert excinfo.value.completed == []
+    assert excinfo.value.failed_capability == "graph.add_episode"
+    assert "name, episode_body, scope, reference_time" in excinfo.value.error
+    assert excinfo.value.error != "'name'"  # the bare KeyError is gone
 
 
 def test_executor_normalises_the_reference_time_and_refuses_words():

@@ -3,8 +3,8 @@
 `tests/conftest.py`'s session guard `no_live_world` holds every write-capable
 integration at nothing and refuses both subprocess seams, so an approval that
 no test faked fails LOUDLY as unconfigured — FAILED, never parked for retry,
-and without opening a socket. `tests/fake_world.fake_world` is the stand-in
-for the dry_run executor: the same approval EXECUTES against a recorder.
+and without opening a socket. `tests/fake_world.fake_world` is what replaced
+the retired dry-run executor: the same approval EXECUTES against a recorder.
 """
 
 from __future__ import annotations
@@ -30,8 +30,7 @@ EMAIL = "Dana: DEMO-1 slipped, due Aug 3."
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")  # no dry_run in the way
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 @pytest.fixture
@@ -160,7 +159,7 @@ async def test_an_unfaked_facade_approval_lands_failed_never_retry_pending(
     assert _not_postgres(connects) == []
 
 
-# --- fake_world stands in for dry_run -------------------------------------------
+# --- fake_world stands in for the world -----------------------------------------
 
 
 @needs_pg

@@ -176,22 +176,6 @@ def test_service_manifest_targets_8000_in_cc_mcp():
     assert s["spec"]["ports"] == [{"port": 8000, "targetPort": 8000}]
 
 
-# --- executor side: dry-run needs no DB at all -------------------------------
-
-
-async def test_dry_run_build_and_deploy_write_nothing_and_touch_no_db(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-
-    async def _boom(*a, **k):
-        raise AssertionError("dry-run must never reach the DB")
-
-    monkeypatch.setattr(repo, "get_mcp_server", _boom)
-
-    for action in (_action("mcp.build_image@v1", "x"), _action("mcp.server_deploy@v1", "x")):
-        outcome = await executor.execute([action], approver="human:lee", source_refs=[])
-        assert "dry-run" in outcome.result_text
-
-
 # --- executor side: state-machine preconditions (needs a real row) ----------
 
 

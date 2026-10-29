@@ -2415,8 +2415,6 @@ HANDLERS = {
 async def _execute_action(action: Action, approver: str, proposer: str | None) -> str:
     """Route one Action to its façade call. Returns a human-readable result."""
     capability = action.capability.split("@", 1)[0]  # strip @version
-    if settings.executor_mode == "dry_run":
-        return f"[dry-run] would execute {action.capability} with {action.arguments}"
     handler = HANDLERS.get(capability)
     if handler is None:
         raise ExecutorError(f"unknown capability: {action.capability}")
@@ -2460,8 +2458,6 @@ async def _recheck_world(actions: list[Action]) -> None:
     is checked by its own handler at its turn. A check's error reaches
     `execute()` inside `_PreCheckFailed`, which wraps it like a handler's,
     with nothing completed."""
-    if settings.executor_mode == "dry_run":
-        return  # nothing is read on a dry run, exactly as `_execute_action`
     seen: set[tuple[str, str]] = set()
     for a in actions:
         targets = _targets_of(a)
@@ -2539,7 +2535,7 @@ async def execute(
     `actions` gets a fresh read through the same check its handler makes. A
     mismatch raises `ExecutionFailed` with `world_moved` and nothing
     completed; any other check error is wrapped exactly as a handler's (so a
-    DOWN read parks the proposal, never fails it). Skipped on a dry run.
+    DOWN read parks the proposal, never fails it).
     """
     # The propose-time shape check, run again here: the Executor never assumes
     # the runtime validated anything (an API-submitted proposal skips the tool

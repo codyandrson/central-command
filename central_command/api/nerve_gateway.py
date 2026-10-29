@@ -1199,11 +1199,6 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         return {
             "agent": {"model": _model_label()},
             "config": {"model": _model_label()},
-            "demoMode": settings.test_model,
-            # dry_run | live. The cockpit banners dry_run: an operator approved
-            # six proposals believing they executed, and NOTHING on screen said
-            # they were simulated (2026-08-26). Pinned by a backend wire test.
-            "executorMode": settings.executor_mode,
             # The cockpit prompts for a name while this reads the unnamed
             # default — the in-product half of onboarding (v2.37.0).
             "operatorName": settings.operator_name,

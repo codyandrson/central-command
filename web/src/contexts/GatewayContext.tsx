@@ -15,9 +15,6 @@ interface GatewayContextValue {
   reconnectAttempt: number;
   model: string;
   thinking: string;
-  /** Executor mode from the `status` RPC: 'dry_run' means every approval is
-   *  SIMULATED. '' until the first poll answers — never assume 'live'. */
-  executorMode: string;
   /** The operator's name from the `status` RPC. '' until the first poll;
    *  'the operator' is the UNNAMED default the first-run prompt keys on. */
   operatorName: string;
@@ -49,7 +46,6 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const { connectionState, connect, disconnect, rpc, onEvent, connectError, reconnectAttempt } = useWebSocket();
   const [model, setModel] = useState('--');
   const [thinking, setThinking] = useState('--');
-  const [executorMode, setExecutorMode] = useState('');
   const [operatorName, setOperatorName] = useState('');
   const [sparkline, setSparkline] = useState('▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁');
   const activityBuckets = useRef<number[]>(new Array(30).fill(0));
@@ -91,7 +87,6 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
       const h = await currentRpc('status', {}) as Record<string, unknown>;
       const agent = h?.agent as Record<string, unknown> | undefined;
       const config = h?.config as Record<string, unknown> | undefined;
-      setExecutorMode(String(h?.executorMode || ''));
       setOperatorName(String(h?.operatorName || ''));
       let clean = normalizeModel(String(agent?.model || h?.model || config?.model || h?.defaultModel || '--'));
 
@@ -154,7 +149,6 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     reconnectAttempt,
     model,
     thinking,
-    executorMode,
     operatorName,
     nameOperator,
     sparkline,
@@ -162,7 +156,7 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     subscribe,
   }), [
     connectionState, connect, disconnect, rpc, connectError,
-    reconnectAttempt, model, thinking, executorMode, operatorName, nameOperator, sparkline, subscribe,
+    reconnectAttempt, model, thinking, operatorName, nameOperator, sparkline, subscribe,
     // isVisibleRef is a stable ref — no need to track
   ]);
 

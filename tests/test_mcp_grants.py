@@ -341,7 +341,7 @@ def test_mcp_tool_call_is_registered_gated_and_dispatched():
     assert "mcp.tool_call" in executor.HANDLERS
 
 
-# --- executor handler: preconditions + faked call_mcp_tool + dry-run --------
+# --- executor handler: preconditions + faked call_mcp_tool ------------------
 
 
 def _tool_call_action(server_id: str, tool_name: str = "gated_tool") -> Action:
@@ -352,21 +352,6 @@ def _tool_call_action(server_id: str, tool_name: str = "gated_tool") -> Action:
         target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
         reversibility=Reversibility.reversible,
     )
-
-
-async def test_dry_run_tool_call_writes_nothing_and_touches_no_db_or_proxy(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-
-    async def _boom(*a, **k):
-        raise AssertionError("dry-run must never reach the DB or the proxy")
-
-    monkeypatch.setattr(repo, "get_mcp_server", _boom)
-    monkeypatch.setattr(litellm_client, "call_mcp_tool", _boom)
-
-    outcome = await executor.execute(
-        [_tool_call_action("x")], approver="human:lee", source_refs=[],
-    )
-    assert "dry-run" in outcome.result_text
 
 
 @needs_pg

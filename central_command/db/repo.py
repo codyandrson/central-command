@@ -1394,12 +1394,12 @@ async def set_proposal_status(proposal_id: str, status: str) -> None:
         await conn.close()
 
 
-# Was this execution a SIMULATION? Derived from the append-only log, not from
-# the CURRENT executor mode — mode changes, and a decision's record must not.
-# `executor._execute_action` prefixes every dry-run result with "[dry-run]", and
-# `proposal.executed`'s payload carries that text verbatim (2026-08-26: the
-# operator approved six proposals believing they had executed). Reading the log
-# rather than adding a column also covers rows decided BEFORE this existed.
+# Was this execution a SIMULATION? This reads HISTORY: the retired dry-run
+# executor mode (gone since epic-run-modes) prefixed every result it logged with
+# "[dry-run]", and `proposal.executed`'s payload carries that text verbatim
+# (2026-08-26: the operator approved six proposals believing they had
+# executed). Nothing writes the prefix any more; the log keeps it, and a
+# decision's record is never rewritten.
 _SIMULATED_SQL = """
     exists (select 1 from audit_event e
              where e.ref_id = p.id and e.kind = 'proposal.executed'

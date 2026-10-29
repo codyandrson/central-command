@@ -1,6 +1,6 @@
 """LiteLLM-manager tests (Phase 2 of the LiteLLM integration): the native admin
 client validates model-controlled strings and fails loud when unconfigured, the
-executor handlers map add/delete to it (and dry_run never touches the proxy), and
+executor handlers map add/delete to it, and
 a direct task rides the SAME durable gate as every other agent, resuming under
 the litellm-manager definition.
 
@@ -906,26 +906,6 @@ async def test_key_and_team_handlers_dispatch(monkeypatch):
         approver="human:lee", source_refs=[],
     )
     assert calls == [("update_key", "hash-1"), ("create_team", "cc-team")]
-
-
-async def test_dry_run_never_touches_the_proxy(monkeypatch):
-    from central_command.contract import Action
-    from central_command.gateway import executor
-
-    async def explode(*a, **k):
-        raise AssertionError("dry_run must not call the proxy")
-
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-    monkeypatch.setattr(executor.litellm_client, "add_model", explode)
-
-    out = await executor.execute(
-        [Action(capability="litellm.add_model",
-                arguments={"model_name": "cc-x", "model": "openai/gpt-4o"},
-                target_ref={"system": "litellm", "id": "cc-x", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
-    )
-    assert "[dry-run]" in out.result_text
 
 
 # --- the agent ---------------------------------------------------------------

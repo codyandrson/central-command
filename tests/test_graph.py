@@ -185,16 +185,6 @@ async def test_executor_stamps_trust_and_approver_into_the_episode(monkeypatch):
     assert "email gmail:msg_1846d2" in source
 
 
-async def test_dry_run_never_touches_the_graph(monkeypatch):
-    async def explode(*a, **k):
-        raise AssertionError("dry_run must not call the graph")
-
-    monkeypatch.setattr(graphiti_ingest, "enqueue", explode)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-    outcome = await executor.execute([_GRAPH_ACTION], approver="human:lee", source_refs=[])
-    assert "[dry-run]" in outcome.result_text
-
-
 # --- the full SC-1 loop: one approval commits Jira AND the graph (needs PG) ----
 
 

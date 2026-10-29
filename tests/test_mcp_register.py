@@ -213,24 +213,6 @@ async def test_propose_register_captures_the_expected_proposal_shape(monkeypatch
     assert proposal["evidence"][0]["source_ref"] == "mcp_server:myserver"
 
 
-# --- executor side: dry-run needs no DB, no network --------------------------
-
-
-async def test_dry_run_register_writes_nothing_and_touches_no_db_or_proxy(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-
-    async def _boom(*a, **k):
-        raise AssertionError("dry-run must never reach the DB or the proxy")
-
-    monkeypatch.setattr(repo, "get_mcp_server", _boom)
-    monkeypatch.setattr(litellm_client, "register_mcp_server", _boom)
-
-    outcome = await executor.execute(
-        [_action("x")], approver="human:lee", source_refs=[],
-    )
-    assert "dry-run" in outcome.result_text
-
-
 # --- executor side: state-machine preconditions (needs a real row) ----------
 
 

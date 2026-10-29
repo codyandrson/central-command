@@ -157,27 +157,6 @@ async def test_link_and_transition_handlers_call_the_facade(monkeypatch):
     assert "Blocks" in out.result_text and "In Progress" in out.result_text
 
 
-async def test_dry_run_never_touches_link_or_transition(monkeypatch):
-    from central_command.contract import Action
-    from central_command.gateway import executor
-
-    async def explode(*a, **k):  # any façade call is a test failure
-        raise AssertionError("dry_run must not call the façade")
-
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-    monkeypatch.setattr(executor.jira, "link_issues", explode)
-    monkeypatch.setattr(executor.jira, "transition_issue", explode)
-
-    out = await executor.execute(
-        [Action(capability="jira.link_issues",
-                arguments={"from_key": "A-1", "to_key": "A-2", "link_type": "Relates"},
-                target_ref={"system": "jira", "id": "A-1", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
-    )
-    assert "[dry-run]" in out.result_text
-
-
 async def test_the_2026_09_29_draft_executes_without_a_priority(monkeypatch):
     """prop_16267d0321d7's update actions — due_date + labels, no priority —
     crashed the Executor with KeyError 'priority'. Now they execute, and

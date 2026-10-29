@@ -90,9 +90,9 @@ export interface ProposalSummary {
   created_at: string;
   decided_at?: string | null;
   origin?: ProposalOrigin | null;
-  /** This execution was a DRY RUN — nothing was written. Derived server-side
-   *  from the `proposal.executed` event's "[dry-run]" result, so it stays true
-   *  of the decision even after the deployment switches to live. */
+  /** This proposal executed under the retired dry-run mode — nothing was
+   *  written. Derived server-side from the `proposal.executed` event's
+   *  "[dry-run]" result: history, kept true of the decision forever. */
   simulated?: boolean;
   /** Null/absent while undecided. */
   decided_by?: DecidedBy | null;

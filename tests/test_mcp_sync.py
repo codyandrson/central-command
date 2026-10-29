@@ -306,17 +306,6 @@ async def test_mcp_server_row_lands_synced_after_execution(monkeypatch, tmp_path
             await conn.close()
 
 
-async def test_dry_run_writes_nothing(monkeypatch, tmp_path):
-    _init_scratch_repo(tmp_path)
-    monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-
-    await executor.execute(
-        [_action(server_id="exec-server")], approver="human:lee", source_refs=[],
-    )
-    assert not (tmp_path / "servers").exists()
-
-
 def test_servers_root_is_the_same_path_on_both_sides(monkeypatch):
     """The runtime diffs against servers/ and the Executor writes to it — if
     those resolve differently the operator reviews a diff against a path the

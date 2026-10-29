@@ -418,8 +418,7 @@ class Settings(BaseSettings):
     #                      needed). NOT a field: no environment variable or env
     #                      file can set it (see the property at the foot of the
     #                      class), only code in this process.
-    #   executor_mode   -> "live" performs real writes; "dry_run" logs them instead
-    executor_mode: str = "live"
+    # There is no executor mode: every approved action performs its write.
 
     # Backpressure dispatcher (Phase 2, M7). PULL not push — these are the valves.
     #   dispatch_enabled          -> autostart the drain loop with the API
@@ -842,7 +841,7 @@ class Settings(BaseSettings):
 
     # The test model: a switch the environment cannot reach. A pydantic private
     # attribute is never read from env or `.env`, so `CC_TEST_MODEL=true` (or
-    # the retired `CC_DEMO_MODE=true`) in either leaves it False; the property
+    # the retired demo-model key) in either leaves it False; the property
     # setter below is what `monkeypatch.setattr(settings, "test_model", True)`
     # calls, because pydantic v2's BaseModel.__setattr__ routes a name that is a
     # class-level property to that property. Epic run-modes, story 3.
@@ -858,17 +857,6 @@ class Settings(BaseSettings):
     @test_model.setter
     def test_model(self, value: bool) -> None:
         self._test_model = bool(value)
-
-    # TRANSITIONAL alias for the field this replaced, so a test that still pins
-    # `monkeypatch.setattr(settings, "demo_mode", True)` keeps working while the
-    # area sweeps move it. Removed in story 10 of epic-run-modes.
-    @property
-    def demo_mode(self) -> bool:
-        return self.test_model
-
-    @demo_mode.setter
-    def demo_mode(self, value: bool) -> None:
-        self.test_model = value
 
 
 settings = Settings()

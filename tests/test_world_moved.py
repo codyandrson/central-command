@@ -610,14 +610,6 @@ async def test_two_updates_to_one_page_are_pre_checked_on_the_first_only(monkeyp
     assert state["calls"] == ["GET", "GET", "PUT", "GET", "PUT"]
 
 
-async def test_a_dry_run_reads_nothing(monkeypatch):
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
-    state = _counting_confluence(monkeypatch, version=9)
-    out = await executor.execute([Action(**_page_update(4)["actions"][0])], "human:doe", [])
-    assert "[dry-run]" in out.result_text
-    assert state["calls"] == []
-
-
 async def test_a_moved_transition_is_caught_before_an_earlier_untouched_write(monkeypatch):
     """The Jira check through the re-check: a set_due_date on another issue
     does not run when DEMO-7's transition vanished after the draft."""

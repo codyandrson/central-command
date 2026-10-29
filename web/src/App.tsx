@@ -107,7 +107,7 @@ function getInitialViewMode(canShowKanban: boolean): ViewMode {
 export default function App({ onLogout }: AppProps) {
   // Gateway state
   const {
-    connectionState, connectError, reconnectAttempt, sparkline, executorMode,
+    connectionState, connectError, reconnectAttempt, sparkline,
     operatorName, nameOperator,
   } = useGateway();
   // First-run prompt: the in-product half of onboarding (v2.37.0). Shown
@@ -1010,9 +1010,6 @@ export default function App({ onLogout }: AppProps) {
         </div>
       )}
 
-      {/* Dry run is INVISIBLE otherwise: the operator approved six proposals
-          believing they had executed, and every one was simulated
-          (2026-08-26). Not dismissible — it is true for as long as the mode is. */}
       {operatorUnnamed && (
         <form
           role="status"
@@ -1033,17 +1030,6 @@ export default function App({ onLogout }: AppProps) {
             Save
           </button>
         </form>
-      )}
-
-      {executorMode === 'dry_run' && (
-        <div
-          role="status"
-          data-testid="dry-run-banner"
-          className="flex shrink-0 items-center justify-center gap-2 bg-orange/20 px-4 py-1.5 text-[0.733rem] font-semibold text-orange"
-        >
-          <AlertTriangle size={13} aria-hidden="true" />
-          DRY RUN — approvals are simulated, nothing is written for real
-        </div>
       )}
 
       {/* One banner per DOWN dependency (name, how long, how many wait, Retry
