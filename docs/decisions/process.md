@@ -785,7 +785,7 @@ hygiene, and how the test suite itself must be written. See
   and a deployment that boots on it answers without judgment (the reason
   DL-021 kept the two switches separate). Rejected alternative recorded in
   the PRD addendum §B (dry-run executor mode).
-- **Enforced:** test: `tests/test_run_modes.py`, `tests/test_test_model.py`, `tests/test_no_live_world.py`, `tests/test_install_starts_live.py`, `tests/test_simulated_history.py` (the end-to-end file `tests/test_run_modes_e2e.py` is owed, story 13)
+- **Enforced:** test: `tests/test_run_modes.py`, `tests/test_test_model.py`, `tests/test_no_live_world.py`, `tests/test_install_starts_live.py`, `tests/test_simulated_history.py`, `tests/test_run_modes_e2e.py`
 - **Source:** docs/PRD.md FR-42; PRD addendum §B and §E (GATE-125..128); DL-021
 
 ### DL-142 — The read-version stale bounce at propose time is retired; world-state checks at execution replace it

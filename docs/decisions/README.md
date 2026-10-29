@@ -229,7 +229,7 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-138 | A date filter carries at most one parameter-bearing OR group per field | active | 2026-10-05 | test: `tests/test_graph_search_filters.py::test_a_date_field_never_has_two_parameter_carrying_or_groups` | [process.md](process.md) |
 | DL-139 | Graph search reranks through one optional alias, the best kind the environment has, and the installers probe which | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_the_chat_question_is_upstreams_verbatim` | [process.md](process.md) |
 | DL-140 | A reranker that fails raises; there is no fallback order and no time budget | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_an_http_failure_raises_and_is_classified_by_its_status` | [process.md](process.md) |
-| DL-141 | The deterministic model is test-only and the dry-run executor mode is removed | active | 2026-10-19 | test: `tests/test_run_modes.py` (+4 more) | [process.md](process.md) |
+| DL-141 | The deterministic model is test-only and the dry-run executor mode is removed | active | 2026-10-19 | test: `tests/test_run_modes.py` (+5 more) | [process.md](process.md) |
 | DL-142 | The read-version stale bounce at propose time is retired; world-state checks at execution replace it | active | 2026-10-19 | test: `tests/test_read_version_retired.py` | [process.md](process.md) |
 | DL-143 | A policy registry as a governed table was never built | active | 2026-10-19 | discipline only | [process.md](process.md) |
 | DL-144 | Not every write produces a proposal: an ungated write stamps an override instead of auto-approving as system | active | 2026-10-19 | discipline only | [process.md](process.md) |
