@@ -56,8 +56,7 @@ EXPECTED = [60, 120, 240, 300, 300, 300, 300, 300]   # eight failures
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "retry_backoff_cap_seconds", CAP)
 

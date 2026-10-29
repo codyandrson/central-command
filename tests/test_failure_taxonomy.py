@@ -189,8 +189,7 @@ async def test_proposal_failed_and_resume_failed_carry_the_label(monkeypatch):
     from central_command.runtime.run import ingest_and_propose
     from central_command.runtime.spike_model import make_spike_model
 
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
 
     async def broken(issue_key, due_date):
         raise RuntimeError("404 issue does not exist")
@@ -224,8 +223,7 @@ async def test_a_provider_outage_parks_the_execution_labelled_transient(monkeypa
     from central_command.runtime.run import ingest_and_propose
     from central_command.runtime.spike_model import make_spike_model
 
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
 
     async def down(issue_key, due_date):
         raise RuntimeError("Connection refused talking to the Jira façade")
@@ -309,7 +307,7 @@ async def test_audit_error_carries_the_label(monkeypatch):
     from central_command.gateway import auditor
 
     monkeypatch.setattr(settings, "auditor_enabled", True)
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
 
     async def _boom():
         raise httpx.ConnectError("connection refused")

@@ -39,6 +39,7 @@ from central_command.db import repo
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.spike_model import make_jira_task_model
 from tests.conftest import aresolve, event_kinds as _kinds, needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -49,8 +50,8 @@ SEMANTIC = RuntimeError("field 'due_date' is not a valid date")
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     # Proposals accumulate across the file; pin the valve open or the drain
     # blocks once three are awaiting review.
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)

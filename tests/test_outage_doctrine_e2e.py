@@ -2,7 +2,7 @@
 
 A dependency goes down, every surface parks and backs off, the banner's counts
 match, retry-now drives them, a kill between park and resume loses nothing, and
-the embedder holds the graph. The deterministic demo model drives the task runs
+the embedder holds the graph. The deterministic test model drives the task runs
 and chat turns; the operator's side goes through the real REST handlers
 (`api/outages.py`), the `/ws` RPC (`nerve_gateway._dispatch`) and the real
 gateway; the clock is the `not_before` timestamp (`make_parks_due`), never a
@@ -72,8 +72,7 @@ OUTAGE = DependencyDown(("graph",), "e2e", RuntimeError("graph is down"))
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     monkeypatch.setattr(settings, "retry_backoff_cap_seconds", 3600)

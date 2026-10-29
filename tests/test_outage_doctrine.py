@@ -49,6 +49,7 @@ from central_command.db import repo
 from central_command.integrations import graphiti
 from central_command.runtime import durable, models, tools
 from tests.conftest import aresolve, needs_pg, make_parks_due
+from tests.fake_world import fake_world
 
 FACT = "Renewal of the example.com contract is due 2026-11-01"
 DEGRADED = "proceed without it"
@@ -56,10 +57,10 @@ DEGRADED = "proceed without it"
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    # demo_mode: these paths resolve models themselves; a real key in .env
+    # test_model: these paths resolve models themselves; a real key in .env
     # would otherwise make the "offline" suite call the model for real.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "auditor_enabled", False)
 
@@ -567,7 +568,7 @@ def _litellm(mp, exc):
 def _sandbox(mp, exc):
     from central_command.integrations import sandbox_client
 
-    mp.setattr(settings, "demo_mode", False)
+    mp.setattr(settings, "test_model", False)
 
     async def _id(ctx):
         return "sb-1"

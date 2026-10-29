@@ -170,7 +170,7 @@ class Fakes:
 def fakes(monkeypatch):
     f = Fakes()
     for name, value in {
-        "demo_mode": False,
+        "test_model": False,
         "default_model": f"openai:{ALIAS}",
         "llm_base_url": PROXY,
         "llm_api_key": MARK_LLM,
@@ -475,8 +475,8 @@ async def test_an_empty_agent_key_or_url_fails_proxy_and_completion_naming_it(fa
     assert fakes.completion_settings == [], "no request may be attempted without a key"
 
 
-async def test_demo_mode_spends_no_model_request(fakes, monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+async def test_test_model_spends_no_model_request(fakes, monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
     checks = by_name(await selfcheck.run(mode="api"))
     for name in ("proxy-as-app", "completion-as-app"):
         assert checks[name]["status"] == "skip"

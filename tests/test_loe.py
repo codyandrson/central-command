@@ -21,8 +21,8 @@ pytestmark = needs_pg
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
     # Nothing here should reach resolve_model, but the roster/hire paths run
-    # real code — pin demo mode so an accidental model call cannot spend money.
-    monkeypatch.setattr(settings, "demo_mode", True)
+    # real code — pin the test model so an accidental model call cannot spend money.
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 _SEMANTIC = {"questions": ["Did you run this week?"], "thresholds": "3+ = green"}
@@ -178,7 +178,6 @@ async def test_a_proposed_creation_is_written_only_by_the_executor(monkeypatch):
     """The full gated path: the drafter proposes, the operator approves, and
     the row appears with the goal's OWNING agent from the arguments — which is
     not the same field as the proposal's drafter."""
-    monkeypatch.setattr(settings, "executor_mode", "live")
     from central_command.contract import Action
 
     await executor.execute(
@@ -224,7 +223,6 @@ async def test_the_update_handler_recalibrates_and_retires():
 async def test_execution_stamps_the_proposal_id_from_the_control_plane(monkeypatch):
     """Provenance comes from the execution context, never from the arguments —
     an agent cannot write which proposal its own check-in belongs to."""
-    monkeypatch.setattr(settings, "executor_mode", "live")
     from central_command.contract import Action
 
     await _make("loe-prov")

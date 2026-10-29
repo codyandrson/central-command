@@ -30,10 +30,10 @@ from tests.conftest import needs_pg
 
 
 @pytest.fixture(autouse=True)
-def _demo_mode(monkeypatch):
-    # Opening a discussion lane reaches resolve_model(); pin demo_mode so
+def _test_model(monkeypatch):
+    # Opening a discussion lane reaches resolve_model(); pin test_model so
     # this doesn't depend on a live LLM key in the developer's .env.
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
 
 # --- the rule (no database) ----------------------------------------------------
 

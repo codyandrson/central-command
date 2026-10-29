@@ -31,6 +31,7 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.gateway import gateway
 from tests.conftest import needs_pg
+from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
@@ -42,8 +43,8 @@ WAITING_FIELDS = {
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
 
 
 async def _parked(*, state: dict | None = None, actions: int = 2,
@@ -529,7 +530,8 @@ async def test_an_interrupted_proposal_is_driven_only_when_asked_and_resumes_at_
 ):
     from tests.test_execution_retry import _graph_spy, _parked_run
 
-    monkeypatch.setattr(settings, "executor_mode", "live")
+    fake_world(monkeypatch, real=("jira.set_due_date", "graph.add_episode"))
+
     run = await _parked_run(monkeypatch)             # jira landed, the graph write parked
     pid = run["proposal_id"]
     conn = await repo._conn()

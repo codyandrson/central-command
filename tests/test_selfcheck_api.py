@@ -135,7 +135,7 @@ async def test_a_runner_bug_leaves_the_last_result_and_no_dangling_task(monkeypa
 
 async def test_the_startup_run_never_fires_under_the_test_suite(monkeypatch, gated_run):
     monkeypatch.setattr(settings, "selfcheck_on_start", True)
-    monkeypatch.setattr(settings, "demo_mode", False)
+    monkeypatch.setattr(settings, "test_model", False)
     assert selfcheck_api.start_on_boot() is False
     assert selfcheck_api._task is None and gated_run["calls"] == 0
 
@@ -143,12 +143,12 @@ async def test_the_startup_run_never_fires_under_the_test_suite(monkeypatch, gat
 @pytest.mark.parametrize("on_start,demo,expected", [
     (True, False, True), (False, False, False), (True, True, False),
 ])
-async def test_the_startup_run_is_gated_by_its_switch_and_demo_mode(
+async def test_the_startup_run_is_gated_by_its_switch_and_test_model(
         monkeypatch, gated_run, on_start, demo, expected):
     # Pretend we are NOT under the suite, to see the other two gates work.
     monkeypatch.setattr(selfcheck_api, "_under_test_suite", lambda: False)
     monkeypatch.setattr(settings, "selfcheck_on_start", on_start)
-    monkeypatch.setattr(settings, "demo_mode", demo)
+    monkeypatch.setattr(settings, "test_model", demo)
     assert selfcheck_api.start_on_boot() is expected
     await asyncio.sleep(0)
     assert gated_run["calls"] == (1 if expected else 0)

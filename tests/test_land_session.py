@@ -55,7 +55,7 @@ def test_only_the_land_seam_flips_a_session_terminal():
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
 
 
 @needs_pg

@@ -395,7 +395,7 @@ def test_cosine_similarity():
 @pytest.mark.asyncio
 async def test_semantic_freeze_matches_in_flight_item(clean_ledger, monkeypatch):
     """The fuzzy layer: a claimed item embedding-close to an in-flight one is
-    frozen; an orthogonal one proceeds; demo mode skips entirely."""
+    frozen; an orthogonal one proceeds; the test model skips entirely."""
     from central_command.ingest import dispatcher
     from central_command.integrations import neo4j_writer
 
@@ -407,7 +407,7 @@ async def test_semantic_freeze_matches_in_flight_item(clean_ledger, monkeypatch)
     second = await repo.claim_next_work_item("sess_b")
     assert second is not None, "no exact key overlaps — the hard lock stays out of the way"
 
-    monkeypatch.setattr(dispatcher.settings, "demo_mode", False)
+    monkeypatch.setattr(dispatcher.settings, "test_model", False)
     monkeypatch.setattr(dispatcher.settings, "semantic_freeze_enabled", True)
     monkeypatch.setattr(dispatcher.settings, "semantic_freeze_threshold", 0.70)
 
@@ -424,10 +424,10 @@ async def test_semantic_freeze_matches_in_flight_item(clean_ledger, monkeypatch)
     second["embedding"] = [0.0, 1.0, 0.0]
     assert await dispatcher._semantic_freeze_check(second) is None
 
-    monkeypatch.setattr(dispatcher.settings, "demo_mode", True)
+    monkeypatch.setattr(dispatcher.settings, "test_model", True)
     second["embedding"] = None
     assert await dispatcher._semantic_freeze_check(second) is None, (
-        "demo mode must skip the gate"
+        "the test model must skip the gate"
     )
 
 
@@ -446,7 +446,7 @@ async def test_semantic_freeze_raises_when_the_embedder_is_down(clean_ledger, mo
     await ledger.enroll_email(_raw(1))
     item = await repo.claim_next_work_item("sess_a")
 
-    monkeypatch.setattr(dispatcher.settings, "demo_mode", False)
+    monkeypatch.setattr(dispatcher.settings, "test_model", False)
     monkeypatch.setattr(dispatcher.settings, "semantic_freeze_enabled", True)
 
     async def no_text(text):

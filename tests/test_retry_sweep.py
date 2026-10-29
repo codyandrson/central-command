@@ -38,16 +38,17 @@ from central_command.heartbeat import actions as hb_actions
 from central_command.heartbeat import probes
 from central_command.heartbeat.engine import HeartbeatEngine, fire
 from tests.conftest import aresolve, needs_pg, make_parks_due
+from tests.fake_world import fake_world
 
 OUTAGE = ModelHTTPError(429, "cc-default", body="No deployments available")
 
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    # demo_mode pinned everywhere `resolve_model` is reachable — the sweep's
+    # test_model pinned everywhere `resolve_model` is reachable — the sweep's
     # drivers all end in agent runs.
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "dry_run")
+    monkeypatch.setattr(settings, "test_model", True)
+    fake_world(monkeypatch)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
 
 
@@ -408,8 +409,8 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
     from central_command.runtime.run import ingest_and_propose
     from central_command.runtime.spike_model import make_sc1_model, make_spike_model
 
-    monkeypatch.setattr(settings, "executor_mode", "live")  # real handlers, spied
     down = {"on": True}
+    fake_world(monkeypatch, real=("jira.set_due_date", "graph.add_episode"))
 
     # (a) a session parked AWAITING_RESUME: the world change landed, the
     # drafter's closing turn did not.
@@ -591,7 +592,7 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch):
     )
 
     monkeypatch.undo()
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_stale_claim_seconds", 0)
     _no_probes(monkeypatch, llm=True)
     _no_touch(monkeypatch)

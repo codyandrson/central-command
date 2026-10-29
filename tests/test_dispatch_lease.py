@@ -22,7 +22,7 @@ pytestmark = needs_pg
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "test_model", True)
     # Long poll so started loops just sleep instead of touching the queue.
     monkeypatch.setattr(settings, "dispatch_poll_seconds", 60.0)
 

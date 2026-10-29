@@ -44,8 +44,7 @@ RESUME_OUTAGE = ModelHTTPError(429, "cc-default", body="No deployments available
 
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "executor_mode", "live")  # retries need real handlers
+    monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
 
 
