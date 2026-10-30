@@ -1,18 +1,18 @@
 # ============================================================================
-# The log console (2026-08-15) — VictoriaLogs PINNED to the chromebox, one
+# The log console (2026-08-15) — VictoriaLogs PINNED to the compute node, one
 # Fluent Bit DaemonSet shipping BOTH log sources from BOTH nodes.
 #
 #   Why this exists: before it, errors lived in three places with three tools —
 #   the event log (cockpit), journald (`journalctl` by hand), and pod logs
 #   (`kubectl logs` by hand). This puts the last two behind one UI:
-#   http://127.0.0.1:9428/select/vmui/ (ServiceLB carries it to the Pi's
+#   http://127.0.0.1:9428/select/vmui/ (ServiceLB carries it to the anchor node's
 #   loopback; tailscale serve exposes it on the tailnet like the cockpit).
 #
 #   Placement follows the standing rule — split by STATE. VictoriaLogs is
 #   stateful (its index/partitions are a local-path PVC) so it is PINNED, and
-#   it goes on the CHROMEBOX to keep another memory-holding store off the Pi —
-#   the same call as cc-neo4j, with the same accepted consequence: chromebox
-#   down means the log console is down. The logs themselves are NOT lost in
+#   it goes on the COMPUTE NODE to keep another memory-holding store off the anchor node —
+#   the same call as cc-neo4j, with the same accepted consequence: the compute
+#   node down means the log console is down. The logs themselves are NOT lost in
 #   that window: Fluent Bit retries with buffering (Retry_Limit False), and
 #   journald/kubelet keep the originals on each node regardless.
 #
@@ -50,7 +50,7 @@ metadata:
   name: vlogs
   namespace: central-command
 spec:
-  # LoadBalancer so the UI answers on the Pi's loopback (ServiceLB), same
+  # LoadBalancer so the UI answers on the anchor node's loopback (ServiceLB), same
   # mechanism as litellm. In-cluster shippers use the DNS name.
   type: LoadBalancer
   selector:

@@ -1,7 +1,7 @@
 # Sandbox-runner (D-sandbox, slice 1) — SEPARATE from cc-uvicorn on purpose.
 #
 # This unit runs central_command/sandbox/runner.py, a standalone, credential-free
-# FastAPI service that drives ephemeral gVisor Jobs on the chromebox by
+# FastAPI service that drives ephemeral gVisor Jobs on the compute node by
 # shelling out to kubectl with a namespace-scoped (cc-sandbox) kubeconfig. It
 # holds no Postgres connection, no LiteLLM key, no Jira token — see the
 # module's own docstring for why that boundary matters.

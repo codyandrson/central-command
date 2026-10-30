@@ -100,7 +100,7 @@ spec:
             - name: NEO4J_AUTH
               value: "none"
             # Heap/pagecache kept at the compose values on purpose. The
-            # chromebox has room to raise them, but that is a behaviour change
+            # compute node has room to raise them, but that is a behaviour change
             # worth making deliberately and measuring, not a free side effect
             # of the move.
             - name: NEO4J_server_memory_heap_initial__size

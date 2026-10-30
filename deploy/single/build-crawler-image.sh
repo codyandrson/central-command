@@ -4,7 +4,7 @@
 #
 #   Same Dockerfile and context as the k3s profile (central_command/crawler/) —
 #   only the reference form and the delivery differ. deploy/k3s's version
-#   builds on the chromebox over ssh and imports into containerd as
+#   builds on the compute node over ssh and imports into containerd as
 #   docker.io/library/cc-crawler:1, because the kubelet normalises a bare name
 #   to docker.io/library and cannot see a localhost/ ref. Here the runtime is
 #   podman, which resolves `localhost/` out of local storage and would SEARCH

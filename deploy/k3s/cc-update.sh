@@ -793,7 +793,6 @@ PY
 stage_main() {
   mkdir -p "$STATEDIR"
   require_compute_ssh
-  require_compute_ssh
   if apply_in_flight; then
     note "an update is in flight — the stage yields (apply's prebuild covers it)"
     exit 0

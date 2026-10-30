@@ -38,7 +38,7 @@ general_settings:
   # Spend-log retention (2026-09-14). LiteLLM_SpendLogs had no retention at
   # all and reached 577 MB / 20k rows in 16 days with prompts stored; the
   # bundled Prisma query engine's high-water mark tracks its largest
-  # statements, and on the chromebox it grew to 5.3 GB over four days and
+  # statements, and on the compute node it grew to 5.3 GB over four days and
   # OOM-killed the pod (the 6Gi limit in deploy/k3s/30-litellm.yaml is the
   # backstop, not the fix). The cockpit's usage panel reads the DAILY
   # aggregate tables, so the 30-day chart is unaffected; what expires is the
@@ -51,7 +51,7 @@ general_settings:
   # Health-check-driven routing: a background loop pings every deployment and a
   # failing one is dropped from the routing pool BEFORE a request lands on it,
   # rather than after one has already failed. That is what would let the
-  # workstation models carry a timeout generous enough to cover a cold model
+  # model-host models carry a timeout generous enough to cover a cold model
   # load instead of doubling as a liveness probe.
   #
   # DELIBERATELY DISABLED (2026-07-26). The keys are correct — verified against
@@ -90,16 +90,16 @@ litellm_settings:
 # Failover policy. The model ENTRIES live in the DB (see the note above); only
 # the policy lives here, because it is a decision worth reviewing in a diff.
 #
-# qwen3.8-27b is a self-hosted model on the operator's WORKSTATION (llama.cpp on
-# the 3090), reached over Tailscale. The workstation is not always on — that is
-# expected and fine. What must NOT happen is the Pi erroring or hanging when it
+# qwen3.8-27b is a self-hosted model on the operator's MODEL HOST (llama.cpp on
+# the 3090), reached over Tailscale. The model host is not always on — that is
+# expected and fine. What must NOT happen is the anchor node erroring or hanging when it
 # is off: an off-box model is a degradable capability, not a dependency. Hence
 # liveness is now detected by the background health checks (general_settings
 # above), which drop a dead deployment from the routing pool before a request
-# lands on it — freeing the workstation models' per-model timeout (300s, set
+# lands on it — freeing the model-host models' per-model timeout (300s, set
 # on the DB entry) to cover a legitimate cold model load instead of doubling
 # as a liveness probe. This does not weaken the standalone guarantee in
-# the retired Compose stack's verify.sh (deploy/pi/, gone in v2.67.0) — the spine never depends on the workstation, it only
+# the retired Compose stack's verify.sh (deploy/pi/, gone in v2.67.0) — the spine never depends on the model host, it only
 # opportunistically uses it.
 #
 # Fallbacks are NOT declared here. With store_model_in_db: true the DB wins the
@@ -118,8 +118,8 @@ router_settings:
   allowed_fails: 1
   cooldown_time: 0
 
-# Local model groups point at the operator's WORKSTATION (100.73.68.9), one GPU.
-# The :8081 slot is llama-swap (container `cc-swap`, since 2026-08-19): ONE big
+# Local model groups point at the operator's MODEL HOST (<model-host-address>), one GPU.
+# The :8081 slot is llama-swap (the model swapper, since 2026-08-19): ONE big
 # model at a time, loaded on demand by the request's `model` field, requests
 # QUEUED through the ~10s swap. The embedder and reranker are NOT competitors —
 # they are separate resident containers:
@@ -135,7 +135,7 @@ router_settings:
 # RETIRED, deliberately and for good: `qwen3.6-35b` and `north-mini-code`
 # (2026-08-01 — never routed to, never given a role) and `qwen3-coder-next`
 # (replaced 2026-08-15 by the dense 27B). Deleted from the proxy, from this
-# repo, and from the workstation config. Do not re-register them — a new local
+# repo, and from the model host's config. Do not re-register them — a new local
 # LLM gets its role decided first (the two judges above are the pattern).
 #
 # The embedder must stay up no matter what the LLM slot does: Graphiti has NO
@@ -143,4 +143,4 @@ router_settings:
 # substitute, the dimensions differ), so an embedder outage is a graph WRITE
 # outage, not a degraded capability. The LLM being down is the degradable case.
 #
-# Setup, benchmark evidence and lessons: ~/QWEN/README.md on the workstation.
+# Setup, benchmark evidence and lessons: the model host's own notes.

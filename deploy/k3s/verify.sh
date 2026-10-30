@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Prove the k3s deployment is correct. Run this ON THE PI.
+# Prove the k3s deployment is correct. Run this ON THE ANCHOR NODE.
 #
 #   Ported from the retired Compose stack's verify.sh (deploy/pi/, deleted in
 #   v2.67.0), which checked the Docker stack. Every

@@ -4,7 +4,7 @@
 #
 #   Same Dockerfile as the k3s profile (deploy/k3s/sandbox.Dockerfile) — only
 #   the reference form and the delivery differ. deploy/k3s's version builds on
-#   the chromebox over ssh and imports into containerd as
+#   the compute node over ssh and imports into containerd as
 #   docker.io/library/cc-sandbox:1, because the kubelet normalises a bare name
 #   to docker.io/library and cannot see a localhost/ ref at all. Here the
 #   runtime is podman, which resolves `localhost/` out of local storage and

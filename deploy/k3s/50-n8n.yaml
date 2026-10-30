@@ -1,5 +1,5 @@
 # ============================================================================
-# n8n — the EMAIL facade, and nothing else. Pinned to the Pi, loopback only.
+# n8n — the EMAIL facade, and nothing else. Pinned to the anchor node, loopback only.
 #
 #   Gmail credentials live only inside n8n; Central Command never sees them.
 #   PINNED because it is stateful (its database plus /home/node/.n8n) and

@@ -1,17 +1,17 @@
 # ============================================================================
-# LiteLLM — the proxy FLOATS (prefers the chromebox), its stores stay on the Pi.
+# LiteLLM — the proxy FLOATS (prefers the compute node), its stores stay on the anchor node.
 #
 #   This split is the whole point of the migration. cc-litellm is the memory hog
 #   AND it is stateless: everything it remembers lives in cc-litellm-db and
-#   redis. So the hog floats to the x86_64 chromebox (off the architecture where
+#   redis. So the hog floats to the x86_64 compute node (off the architecture where
 #   the Prisma leak was measured) while its 182 MB database stays pinned to the
-#   Pi. If the chromebox goes away, LiteLLM reschedules onto the Pi and its
+#   anchor node. If the compute node goes away, LiteLLM reschedules onto the anchor node and its
 #   database is already there. That is real failover, and it only works because
 #   the volume did NOT move.
 #
 #   Exposure: type: LoadBalancer, served by k3s's built-in ServiceLB (Klipper),
 #   which binds :4000 on EVERY node and forwards to the pod wherever it runs.
-#   So CC_LLM_BASE_URL=http://localhost:4000 keeps working on the Pi unchanged.
+#   So CC_LLM_BASE_URL=http://localhost:4000 keeps working on the anchor node unchanged.
 #   The compose stack bound 0.0.0.0:4000, so tailnet reachability is unchanged.
 # ============================================================================
 apiVersion: v1
@@ -62,7 +62,7 @@ spec:
     - port: 6379
       targetPort: 6379
 ---
-# The one service the Pi host must reach at a fixed port while the pod roams.
+# The one service the anchor host must reach at a fixed port while the pod roams.
 apiVersion: v1
 kind: Service
 metadata:
@@ -94,7 +94,7 @@ spec:
       labels:
         app: cc-litellm-db
     spec:
-      # PINNED to the Pi on purpose — see the header. This is what lets the
+      # PINNED to the anchor node on purpose — see the header. This is what lets the
       # proxy fall back here without its data being stranded on a dead node.
       nodeSelector:
         cc-role/anchor: "true"
@@ -104,7 +104,7 @@ spec:
           # Loopback-only hostPort, same pattern as cc-postgres:5442 — the
           # spine's autodiscovery reads LiteLLM's stored credentials from
           # here (decrypted with the salt key). Safe to hostPort a pinned
-          # pod: the local-path PV means it can never move off the Pi.
+          # pod: the local-path PV means it can never move off the anchor node.
           ports:
             - containerPort: 5432
               hostPort: 5443
@@ -193,8 +193,8 @@ spec:
         app: cc-litellm
     spec:
       # ── THE FLOAT ────────────────────────────────────────────────────────
-      # "preferred", not "required": the chromebox is where this SHOULD run
-      # (x86_64, 8 cores, and off the arm64 Prisma leak), but the Pi is a
+      # "preferred", not "required": the compute node is where this SHOULD run
+      # (x86_64, 8 cores, and off the arm64 Prisma leak), but the anchor node is a
       # perfectly valid fallback and the pod must never go Pending waiting for
       # a node that is switched off.
       affinity:
@@ -209,7 +209,7 @@ spec:
       # "IgnoredDuringExecution" is literal — affinity is NOT re-evaluated for a
       # running pod. Eviction from a dead node is what actually moves it, and
       # that is driven by these tolerations. The k8s default is 300s; 30s turns
-      # a chromebox outage into a ~1 minute LiteLLM gap instead of ~6.
+      # a compute-node outage into a ~1 minute LiteLLM gap instead of ~6.
       tolerations:
         - key: node.kubernetes.io/unreachable
           operator: Exists
@@ -297,8 +297,8 @@ spec:
               cpu: 250m
             limits:
               # Blast-radius cap, kept from compose. The arm64 Prisma leak is the
-              # reason this exists; the cap still matters on the Pi-fallback path,
-              # and costs nothing on the chromebox.
+              # reason this exists; the cap still matters on the anchor-fallback path,
+              # and costs nothing on the compute node.
               memory: 6Gi
       volumes:
         - name: config

@@ -1,5 +1,5 @@
 # ============================================================================
-# cc-postgres — THE SPINE. Pinned to the Pi, loopback-only, port 5442.
+# cc-postgres — THE SPINE. Pinned to the anchor node, loopback-only, port 5442.
 #
 #   PINNED, and not negotiable: this is the durable state behind every proposal,
 #   the ledger and the append-only event log. cc-uvicorn and the Executor hit it

@@ -104,7 +104,7 @@ models:
   #   thinking_mechanism: anthropic
   #   thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
 
-  # ── Workstation, 100.73.68.9 over Tailscale (free; often off) ─────────────
+  # ── Model host, <model-host-address> over Tailscale (free; often off) ─────
   # timeout is generous ON PURPOSE: liveness is now detected by background
   # health checks (config.yaml general_settings), which frees the request
   # timeout to cover a COLD MODEL LOAD. A short timeout here would misread a
@@ -137,19 +137,19 @@ models:
   # fallback (config.py). 81920 since later on 2026-08-19: the embedder moved
   # to CPU (100ms/query measured — trivial at ~165 calls/day), freeing the
   # VRAM that had capped context at 49152, and the :8081 slot is now
-  # llama-swap (`cc-swap` container, ~/QWEN/llama-swap.yaml on the
-  # workstation): one big model at a time, requests QUEUE through a swap.
+  # llama-swap (the model swapper, configured by the model host's
+  # own notes): one big model at a time, requests QUEUE through a swap.
   qwen3.8-27b:
     registration:
       model: openai/PLACEHOLDER
-      api_base: PLACEHOLDER   # the llama-swap slot (cc-swap)
+      api_base: PLACEHOLDER   # the llama-swap slot (the model swapper)
     quality_tier: 2
     strengths: [factual_lookup, general, code_understanding]
     input_cost_per_token: 0
     # 6000, was 600, was 300 (2026-08-20, operator decision): under llama-swap
     # FIFO a request waits behind the whole queue, and the operator would "much rather
     # long running processes than crashing processes just because they were
-    # waiting". Outage detection is unharmed: a dead workstation refuses the
+    # waiting". Outage detection is unharmed: a dead model host refuses the
     # TCP connection instantly — the timeout only governs connected-but-queued.
     timeout: 6000
     supports_vision: true
@@ -415,7 +415,7 @@ aliases: []
 #
 # This block previously declared `[claude-haiku-4-5]` for qwen3-coder-next,
 # qwen3.6-35b and cc-default. Those fallbacks were removed from the proxy
-# because a workstation outage was silently reaching for Anthropic, and the
+# because a model-host outage was silently reaching for Anthropic, and the
 # attempt died anyway on `max_tokens: 262144 > 64000` — 366 such errors in four
 # days. Failing fast with the real `Connection error` is what makes an outage
 # diagnosable, and the operator is at the machine when it happens.
@@ -428,5 +428,5 @@ aliases: []
 # `policy.py --apply`. If you do, note the historical bite mark: the ALIAS needs
 # its own key, because when the alias's one deployment is in COOLDOWN the router
 # 429s on `cc-default` before any call happens and the lookup finds nothing
-# declared there (found 2026-07-29, the first real workstation outage).
+# declared there (found 2026-07-29, the first real model-host outage).
 fallbacks: {}

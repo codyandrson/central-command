@@ -10,8 +10,8 @@
 #
 #   Containment is TWO independent layers, neither load-bearing alone:
 #     1. gVisor (`runtimeClassName: gvisor`, handler `runsc`) — installed on
-#        the CHROMEBOX only (no k3s-agent restart on the Pi's control plane).
-#        Sandbox pods carry a REQUIRED nodeAffinity to chromebox for exactly
+#        the COMPUTE NODE only (no k3s-agent restart on the anchor node's control plane).
+#        Sandbox pods carry a REQUIRED nodeAffinity to the compute node for exactly
 #        this reason; there is no fallback node.
 #     2. A default-deny INGRESS NetworkPolicy. `kubectl exec` rides the
 #        kubelet's own control channel, not the pod network, so exec keeps
@@ -22,7 +22,7 @@
 #        no credentials.
 #
 #   The sandbox-runner (central_command/sandbox/runner.py, deployed OUTSIDE this
-#   cluster as a Pi systemd unit) is the only actor with any access to this
+#   cluster as an anchor-node systemd unit) is the only actor with any access to this
 #   namespace, and its SA is scoped to jobs/pods/exec/log — nothing else, and
 #   nothing cluster-scoped (Role, never ClusterRole).
 # ============================================================================
@@ -33,10 +33,10 @@ metadata:
   labels:
     app.kubernetes.io/part-of: central-command
 ---
-# Handler `runsc` — installed by the chromebox infra track
+# Handler `runsc` — installed by the compute node infra track
 # (containerd-shim-runsc-v1 + the runsc runtime entry in
 # /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl). This object
-# is cluster-scoped and costs nothing on the Pi; only pods that request it
+# is cluster-scoped and costs nothing on the anchor node; only pods that request it
 # (via the required nodeAffinity above) ever land on a node that has it.
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
@@ -98,7 +98,7 @@ spec:
   egress:
     # Everything — internet and internal services alike — EXCEPT link-local.
     # 169.254.0.0/16 is excluded not because anything here serves it (this is
-    # bare metal; there is no cloud metadata endpoint on a Pi or a chromebox)
+    # bare metal; there is no cloud metadata endpoint on an anchor or a compute node)
     # but because it costs nothing, conflicts with no stated need — every
     # internal service is on 10.43.x or the 100.x tailnet — and the work
     # deployment may not be bare metal. 169.254.169.254 is the single most

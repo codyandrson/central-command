@@ -4,19 +4,19 @@
 #   Supersedes deploy/pi/docker-compose.yml as THE deployment. The move exists
 #   for one measured reason: LiteLLM's bundled Prisma query engine leaks GBs
 #   per minute ON ARM64 (1.47 -> 4.82 GB in 24s, see the long note in the old
-#   compose file). Uncapped it reached 10.96 GiB of the Pi's 15.6 GiB and took
+#   compose file). Uncapped it reached 10.96 GiB of the anchor's 15.6 GiB and took
 #   the whole host down three times, k3s control plane included. The 6 GB
 #   mem_limit was a blast-radius guard, never a fix. Running LiteLLM on the
-#   x86_64 chromebox takes it off the architecture where the leak was measured.
+#   x86_64 compute node takes it off the architecture where the leak was measured.
 #
 #   THE PLACEMENT RULE — split by STATE, not by service. Since 2026-08-27 the
 #   manifests express it through ROLE LABELS, never hostnames (the
 #   setup-update contract): cc-role/anchor = small stateful stores + control
-#   plane (today the Pi), cc-role/compute = JVM/gVisor/Chromium muscle (today
-#   the chromebox). Swapping hardware = relabel the new node; the manifests
+#   plane (the arm64 node), cc-role/compute = JVM/gVisor/Chromium muscle (the
+#   x86_64 node). Swapping hardware = relabel the new node; the manifests
 #   never change. Label once:
-#     kubectl label node raspberrypi cc-role/anchor=true
-#     kubectl label node chromebox   cc-role/compute=true
+#     kubectl label node <anchor-node-name> cc-role/anchor=true
+#     kubectl label node <compute-node-name> cc-role/compute=true
 #     * Stateless compute FLOATS, preferring the compute node, falling back
 #       to the anchor automatically (preferred nodeAffinity + fast NoExecute
 #       tolerations).  -> cc-litellm
@@ -30,20 +30,20 @@
 #       -> cc-postgres, cc-litellm-db, cc-litellm-redis, cc-n8n, cc-n8n-db (anchor)
 #       -> cc-neo4j (compute, for the JVM headroom)
 #
-#   Why the databases stay on the Pi is the part that makes failover WORK:
+#   Why the databases stay on the anchor node is the part that makes failover WORK:
 #   LiteLLM the proxy is the memory hog AND it is stateless — its state lives
 #   in cc-litellm-db (182 MB) and redis. Float the hog, keep the small database
-#   on the Pi, and a chromebox outage reschedules LiteLLM onto the Pi where its
+#   on the anchor node, and a compute-node outage reschedules LiteLLM onto the anchor node where its
 #   database already is.
 #
 #   EXPOSURE — the host still reaches everything at today's addresses, so
 #   deploy/k3s/.env needs no edits:
-#     * Pi-pinned services use hostPort bound to 127.0.0.1 (loopback only,
+#     * Anchor-pinned services use hostPort bound to 127.0.0.1 (loopback only,
 #       exactly as the compose stack bound them).
 #     * FLOATING services use type: LoadBalancer. k3s's built-in ServiceLB
 #       (Klipper) runs a DaemonSet that binds the REAL port on every node and
 #       forwards to the service wherever its pods are — so localhost:4000
-#       works on the Pi whether LiteLLM is on the Pi or the chromebox. No
+#       works on the anchor node whether LiteLLM is on the anchor node or the compute node. No
 #       NodePort range hacks.
 #     * cc-neo4j is ClusterIP ONLY. The host reaches it through one loopback
 #       relay, cc-graph-bolt.service (127.0.0.1:7687/7474 -> svc/neo4j), which

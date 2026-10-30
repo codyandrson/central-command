@@ -2,7 +2,7 @@
 #
 # Layer 2 (defense-in-depth, dormant): @anthropic-ai/sandbox-runtime (srt) +
 # bubblewrap ship in the image, but srt's own netns-removal step does not
-# survive under gVisor's netstack (verified 2026-08-03 on the chromebox —
+# survive under gVisor's netstack (verified 2026-08-03 on the compute node —
 # `RTM_NEWADDR: No child processes`; see the plan's residual note). The two
 # layers actually load-bearing here are gVisor (the pod's runtimeClassName)
 # and the namespace's ingress-deny NetworkPolicy — both outside this image

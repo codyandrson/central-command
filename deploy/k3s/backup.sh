@@ -6,12 +6,12 @@
 #   v2.67.0), which drove the Docker stack. Same four
 #   stores, same validity checks, same retention rule, same exit contract. The
 #   only real change is HOW each store is reached, plus one new fact: the graph
-#   now lives on the CHROMEBOX, so its dump runs there.
+#   now lives on the COMPUTE NODE, so its dump runs there.
 #
 #     central_command  the spine: ledger, proposals, event log, charters, roster
 #     litellm      virtual keys + spend + DB-registered models
 #     n8n          workflows + the ENCRYPTED Gmail OAuth credential
-#     neo4j        the knowledge graph            (chromebox)
+#     neo4j        the knowledge graph            (compute node)
 #
 #   Two keys are captured ALONGSIDE the dumps, because without them the dumps
 #   are undecryptable ciphertext, not a backup:
@@ -299,7 +299,7 @@ say "done → ${OUT}/ (retain ${RETAIN_DAYS}d, $(du -sh "$OUT" | cut -f1) total)
 #                                        # assertions cover façade-active and
 #                                        # Gmail-credential-decrypts
 #
-#   Neo4j — offline load on the chromebox, overwriting the store. Same dumper
+#   Neo4j — offline load on the compute node, overwriting the store. Same dumper
 #   pod shape as above, with `database load --from-stdin`:
 #     k3s kubectl -n central-command scale deploy/cc-neo4j --replicas=0
 #     # create the neo4j-dumper pod (see the manifest inlined above), then:

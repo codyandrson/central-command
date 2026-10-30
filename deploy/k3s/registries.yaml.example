@@ -1,8 +1,8 @@
 # ============================================================================
 # containerd mirror config for k3s — air-gapped work site.
 #
-# Copy to /etc/rancher/k3s/registries.yaml on EVERY node (raspberrypi AND
-# chromebox), fill in MIRROR_HOST (+ auth/CA if the mirror needs them), then
+# Copy to /etc/rancher/k3s/registries.yaml on EVERY node (the anchor AND
+# the compute node), fill in MIRROR_HOST (+ auth/CA if the mirror needs them), then
 # restart:  sudo systemctl restart k3s        (control plane node)
 #           sudo systemctl restart k3s-agent  (agent node)
 #

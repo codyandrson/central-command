@@ -1,12 +1,12 @@
 # ============================================================================
 # cc-crawler — browser-rendering crawl service (rung-2 docs ingestion).
 #
-#   PINNED to the chromebox, REQUIRED nodeAffinity, no fallback. This is a
+#   PINNED to the compute node, REQUIRED nodeAffinity, no fallback. This is a
 #   deliberate exception to "stateless compute floats": the state is not the
 #   reason — Chromium is. A Playwright browser under a 3Gi limit is exactly the
-#   memory profile the placement rule exists to keep off the 15.6 GB Pi that
+#   memory profile the placement rule exists to keep off the 15.6 GB anchor node that
 #   also runs the k3s control plane and every database. Accepted consequence,
-#   same call as cc-sandbox and cc-neo4j: chromebox down = crawler down. It is
+#   same call as cc-sandbox and cc-neo4j: compute node down = crawler down. It is
 #   a DEGRADABLE capability (rung 1, plain HTTP fetch, still works), never a
 #   dependency of the spine.
 #
@@ -15,8 +15,8 @@
 #   `Always` would try to pull a tag that exists in no registry and CrashLoop.
 #
 #   Service is type LoadBalancer so k3s's ServiceLB (Klipper) binds :8091 on
-#   every node — the Pi host reaches the crawler at 127.0.0.1:8091 even though
-#   the pod runs on the chromebox, which is what keeps CC_CRAWLER_URL a
+#   every node — the anchor host reaches the crawler at 127.0.0.1:8091 even though
+#   the pod runs on the compute node, which is what keeps CC_CRAWLER_URL a
 #   LOOPBACK address like every other CC_* endpoint.
 #
 #   No PVC: stateless. No Secret: the service holds NO credentials and makes no
