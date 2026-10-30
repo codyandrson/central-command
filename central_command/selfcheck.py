@@ -287,7 +287,7 @@ def _flag(name: str, default: bool) -> bool:
     not a Settings field, because that is where it lives: the installer
     writes it, `.env` is mirrored into `os.environ` by config.py, and a
     profile that never sets it (k3s) gets the single-node installer's own
-    default. Same precedent as `exchange._tls_insecure`."""
+    default. The precedent for knobs no Settings field owns."""
     raw = (os.environ.get(name) or "").strip().lower()
     if not raw:
         return default
@@ -769,11 +769,13 @@ async def check_mail(ctx: Context) -> Outcome:
             "the mail feed is off (CC_FEED_ENABLED=0, and no enabled heartbeat mail-poll "
             "schedule) and Exchange is not configured, so nothing in the app reads mail; "
             "turn the feed on and the self-check will prove the provider"), None)
-    if not settings.email_facade_token:
-        return fail(f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_TOKEN "
-                    "is empty — the façade refuses an unauthenticated call",
-                    "CC_EMAIL_FACADE_TOKEN")
-    if not settings.email_facade_url:
+    if not email_facade.configured():
+        # The façade's own switch (url AND token); the two messages only say
+        # WHICH key is the empty one.
+        if not settings.email_facade_token:
+            return fail(f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_TOKEN "
+                        "is empty — the façade refuses an unauthenticated call",
+                        "CC_EMAIL_FACADE_TOKEN")
         return fail(f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_URL "
                     "is empty", "CC_EMAIL_FACADE_URL")
     try:

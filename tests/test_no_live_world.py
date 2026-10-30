@@ -5,6 +5,9 @@ integration at nothing and refuses both subprocess seams, so an approval that
 no test faked fails LOUDLY as unconfigured — FAILED, never parked for retry,
 and without opening a socket. `tests/fake_world.fake_world` is what replaced
 the executor's old simulation: the same approval EXECUTES against a recorder.
+
+Story 11.10 (epic small-fixes, R30): both n8n façades are held at the empty URL
+and token and raise "not configured" before any socket.
 """
 
 from __future__ import annotations
@@ -97,7 +100,7 @@ def test_every_write_capable_integration_is_held_at_nothing():
         assert getattr(settings, name) == value, name
     assert settings.litellm_kubeconfig == ""
     assert settings.email_facade_url == ""
-    assert settings.calendar_facade_url.endswith(":not-configured")
+    assert settings.calendar_facade_url == ""
 
 
 def test_the_mcp_servers_root_is_a_session_temporary_directory():

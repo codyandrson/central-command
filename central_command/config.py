@@ -305,7 +305,8 @@ class Settings(BaseSettings):
     # primary SMTP address and is only needed when the username is not a UPN.
     # NOTHING about TLS lives here on purpose (design decision 3): trust is the
     # global CC_CA_BUNDLE / CC_CLIENT_CERT / CC_CLIENT_KEY / CC_TLS_INSECURE
-    # surface every integration client already reads, never a per-tool knob.
+    # surface (`ca_bundle`..`tls_insecure` below, read through
+    # integrations/http.py:client_kwargs()), never a per-tool knob.
     exchange_url: str = ""        # the EWS endpoint, e.g. https://mail.corp.example/ews/exchange.asmx
     exchange_username: str = ""   # DOMAIN\\user or user@corp.example
     exchange_password: str = ""
@@ -338,6 +339,15 @@ class Settings(BaseSettings):
     ca_bundle: str = ""       # path to a custom trust bundle (httpx `verify=`)
     client_cert: str = ""     # path to a client cert, or a combined cert+key PEM
     client_key: str = ""      # path to the client key, if not combined with client_cert above
+    # CC_TLS_INSECURE=1 turns verification OFF for EVERY client built from
+    # integrations/http.py:client_kwargs() — Jira, Confluence, LiteLLM, the
+    # graph, forge, speech, attachments, the self-check and Systems probes,
+    # Exchange and the agents' web fetch — and WINS over CC_CA_BUNDLE (ruled
+    # 2026-10-29, epic small-fixes Decision 11). It is the same deployment
+    # knob curl/uv/npm/podman read, and this field is the ONE place the
+    # application reads it; no module reads it from os.environ. An EMPTY
+    # value (`CC_TLS_INSECURE=`) is false, so a blank `.env` line boots.
+    tls_insecure: bool = False
 
     # Jira API flavor (Jira Data Center flavor design, 2026-09-23, decision 1):
     # "cloud" (default — REST API v3, ADF rich text, cursor search) or
@@ -458,6 +468,15 @@ class Settings(BaseSettings):
     # its own env knob (NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB), Node cannot
     # read this one; only the defaults are pinned equal.
     attachment_max_bytes: int = 50 * 1024 * 1024
+
+    @field_validator("tls_insecure", mode="before")
+    @classmethod
+    def _empty_tls_flag_is_false(cls, value):
+        # `CC_TLS_INSECURE=` is how an installer leaves the key unanswered; a
+        # plain bool field rejects "" and would stop the boot.
+        if isinstance(value, str) and not value.strip():
+            return False
+        return value
 
     @field_validator("attachment_max_bytes")
     @classmethod

@@ -14,6 +14,9 @@ cockpit's approve RPC and the Decisions RPC:
 (d) no run-mode string survives outside the allowlist below;
 (e) with NO fake installed, one approved proposal per write-capable family
     lands FAILED loud, never RETRY_PENDING, and opens no outbound socket.
+
+Story 11.10 (epic small-fixes, R30): (e)'s calendar row now fails as "not
+configured" (the façade's `configured()`), not as an unparseable port.
 """
 
 from __future__ import annotations
@@ -394,14 +397,15 @@ FAMILIES = [
      "set CC_EXCHANGE_URL"),
     ("calendar.create_event", {"title": "Sync", "start": "2026-11-02T10:00:00Z",
                                "end": "2026-11-02T10:30:00Z"}, "calendar",
-     "Invalid port"),
+     "calendar façade create_event not configured"),
     ("litellm.add_model", {"model_name": "doe-small", "model": "openai/doe-small"},
      "litellm", "LiteLLM admin not configured"),
     ("mcp.build_image", {"server_id": "e2e-build"}, "mcp", "no build host configured"),
 ]
 # Why each lands FAILED: the guard holds Jira, Confluence, Exchange and the
-# LiteLLM admin at nothing (unconfigured), the calendar façade at an unparseable
-# port (SEMANTIC, story 2), and the MCP build host empty; the build's server row
+# LiteLLM admin at nothing (unconfigured), the calendar façade at the empty URL
+# and token (its `configured()` is false, SEMANTIC; story 11.10 / R30, which
+# replaced the unparseable-port workaround), and the MCP build host empty; the build's server row
 # is planted as sync-reviewed so the build gets past review to the empty host.
 
 

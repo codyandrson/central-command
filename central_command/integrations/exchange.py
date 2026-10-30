@@ -32,8 +32,10 @@ site's notes proposed `CC_EXCHANGE_CERT_PATH` / `CC_EXCHANGE_VERIFY_TLS`;
 the operator's recorded decision (2026-09-23) is ONE trust surface. This client
 reads `integrations/http.py:client_kwargs()` — `CC_CA_BUNDLE` for the internal
 CA, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` for the PKI identity — exactly as the
-Jira, Graphiti and LiteLLM clients do, and honours `CC_TLS_INSECURE=1` with the
-same single WARN every consumer prints. Mechanically that is an
+Jira, Graphiti and LiteLLM clients do, and honours `CC_TLS_INSECURE=1` the way
+every `client_kwargs()` consumer does: it turns verification OFF, it WINS over
+`CC_CA_BUNDLE` (ruled 2026-10-29, epic small-fixes Decision 11), and the one
+warning per process is `client_kwargs()`'s, not this module's. Mechanically that is an
 `requests.adapters.HTTPAdapter` subclass installed as
 `BaseProtocol.HTTP_ADAPTER_CLS` (exchangelib's own `NoVerifyHTTPAdapter` is the
 precedent); NTLM stays the `auth_type` and `autodiscover` is always False — the
@@ -50,7 +52,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 import shlex
 import threading
@@ -92,7 +93,6 @@ DISTINGUISHED_FOLDERS = {
 _lock = threading.Lock()
 _account = None
 _fingerprint: tuple | None = None
-_insecure_warned = False
 
 
 def configured() -> bool:
@@ -106,36 +106,15 @@ def configured() -> bool:
     )
 
 
-def _tls_insecure() -> bool:
-    """`CC_TLS_INSECURE=1` — read from the environment rather than a Settings
-    field because that is where it lives: it is a DEPLOYMENT knob every
-    consumer (curl, uv, npm, podman, LiteLLM) reads for itself, and `.env` is
-    mirrored into `os.environ` by `config.py`."""
-    return (os.environ.get("CC_TLS_INSECURE") or "").strip() in ("1", "true", "yes")
-
-
 def _trust() -> tuple[object, object]:
     """`(cert, verify)` for the EWS session, from the GLOBAL trust knobs.
 
-    Prefer the CA bundle over insecure; both are the operator's. The insecure
-    WARN is printed ONCE per process at first use — a per-request warning
-    becomes noise nobody reads, and this one has to be read.
+    `client_kwargs()` carries the whole ruling: `CC_TLS_INSECURE=1` gives
+    `verify=False` and wins over the CA bundle, with its one warning per
+    process. The default stays `verify=True`.
     """
-    global _insecure_warned
-
     kwargs = http_client.client_kwargs()
-    cert = kwargs.get("cert")
-    verify = kwargs.get("verify", True)
-    if _tls_insecure():
-        verify = False
-        if not _insecure_warned:
-            _insecure_warned = True
-            log.warning(
-                "WARN CC_TLS_INSECURE=1 — the Exchange EWS endpoint's server "
-                "certificate is NOT verified. Prefer CC_CA_BUNDLE with your "
-                "internal CA; this covers every EWS request this process makes."
-            )
-    return cert, verify
+    return kwargs.get("cert"), kwargs.get("verify", True)
 
 
 def _adapter_cls():
@@ -222,7 +201,7 @@ def _settings_fingerprint() -> tuple:
         settings.ca_bundle,
         settings.client_cert,
         settings.client_key,
-        _tls_insecure(),
+        settings.tls_insecure,
     )
 
 

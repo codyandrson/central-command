@@ -202,17 +202,11 @@ def no_live_graph_writes():
 
 
 # Every write-capable integration's address and credential, and what the suite
-# holds it at. The two n8n façades have no `configured()` check (they just
-# POST), and each value must make httpx refuse before any socket with an error
-# that classifies SEMANTIC, so an approval lands FAILED: a TRANSIENT one would
-# PARK the proposal for retry under the outage doctrine instead of failing it
-# (a resolvable `.invalid` host or a loopback port reads "connection"). The
-# email façade gets the EMPTY string: httpx's `UnsupportedProtocol` is a
-# transport error, but `email_facade._call` wraps it and its text classifies
-# SEMANTIC. `calendar_facade._call` does NOT wrap, and a raw transport error
-# classifies TRANSIENT, so the calendar façade gets a URL whose port does not
-# parse: httpx raises `InvalidURL` (not a transport error) before resolving
-# anything, and it classifies SEMANTIC. Blanking the admin key also
+# holds it at. Both n8n façades answer `configured()` (url AND token, story
+# 11.10 / R30) and raise "not configured" before any socket when it is false;
+# that text carries no transient marker word, so it classifies SEMANTIC and an
+# approval lands FAILED rather than PARKED for retry under the outage doctrine.
+# Both therefore get the EMPTY URL and token. Blanking the admin key also
 # blanks the key `neo4j_writer.request_embedding` reads: a test that calls it
 # fakes `request_embedding`. `llm_base_url`/`llm_api_key` stay: the graph_live
 # reads embed through them on purpose.
@@ -223,7 +217,7 @@ NO_LIVE_WORLD = {
     "confluence_api_token": "",
     "email_facade_url": "",
     "email_facade_token": "",
-    "calendar_facade_url": "http://calendar-facade.invalid:not-configured",
+    "calendar_facade_url": "",
     "calendar_facade_token": "",
     "exchange_url": "",
     "exchange_password": "",

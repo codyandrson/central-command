@@ -48,9 +48,12 @@ when a matching file is read.
 - **Trust for an integration client comes from the GLOBAL knobs, never a
   per-integration one.** `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and
   `CC_TLS_INSECURE` are one surface an operator configures once
-  (`integrations/http.py:client_kwargs()` carries the first two; the Exchange
-  client reads `CC_TLS_INSECURE` itself today, and moving that read into
-  `client_kwargs()` is owed); the Exchange client injects them
+  (`integrations/http.py:client_kwargs()` carries all of them: `CC_TLS_INSECURE`
+  is `settings.tls_insecure`, turns verification off for EVERY client that
+  splats `client_kwargs()` — the agents' web fetch and the Systems probes
+  included — and WINS over `CC_CA_BUNDLE`, ruled 2026-10-29, with one warning
+  per process; nothing reads it from `os.environ`, a source walk pins that);
+  the Exchange client injects them
   into exchangelib through an `HTTPAdapter` subclass rather than growing
   `CC_EXCHANGE_CERT_PATH`/`CC_EXCHANGE_VERIFY_TLS` of its own, which is what
   a deployment's own notes proposed. A second knob for the same fact is a second

@@ -46,13 +46,37 @@ def _exchange():
     return exchange if exchange.configured() else None
 
 
+def configured() -> bool:
+    """True when the n8n calendar façade has an address AND a token. The
+    default URL is never empty, so the token is the signal (as selfcheck and
+    `reports/ea_calendar.py` already treat it)."""
+    return bool(settings.calendar_facade_url and settings.calendar_facade_token)
+
+
 async def _call(payload: dict, timeout: float = 60.0) -> dict:
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            settings.calendar_facade_url,
-            headers={"x-cc-token": settings.calendar_facade_token},
-            json=payload,
+    if not configured():
+        # No transient marker word ('connection', 'timeout' — see
+        # contract/failures.py): this must classify SEMANTIC and land FAILED,
+        # never park for a retry that cannot succeed. Exchange has already
+        # routed away before any caller reaches this n8n path.
+        raise CalendarFacadeError(
+            f"calendar façade {payload.get('mode')} not configured — set "
+            "CC_CALENDAR_FACADE_URL and CC_CALENDAR_FACADE_TOKEN"
         )
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                settings.calendar_facade_url,
+                headers={"x-cc-token": settings.calendar_facade_token},
+                json=payload,
+            )
+    except httpx.HTTPError as e:
+        # Same wrap as email_facade: a down n8n is the façade's own error, and
+        # "unreachable at" is the text selfcheck matches.
+        raise CalendarFacadeError(
+            f"calendar façade {payload.get('mode')} unreachable at "
+            f"{settings.calendar_facade_url}: {e}"
+        ) from e
     if resp.status_code != 200:
         raise CalendarFacadeError(
             f"calendar façade {payload.get('mode')} failed: HTTP "

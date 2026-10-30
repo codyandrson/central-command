@@ -18,6 +18,9 @@ What is worth pinning here is the SWITCH, not the clients (those are
   gateway's granted-capability check agree about it;
 * the ledger prefers a supplied Message-ID and stamps the right `source`;
 * the two new capabilities have a spec, a handler and a registry row.
+
+Story 11.10 (epic small-fixes, R30): the `on_gmail` fixture sets both façades'
+url AND token, because an unconfigured n8n façade now fails instead of parking.
 """
 
 from __future__ import annotations
@@ -52,6 +55,14 @@ def on_gmail(monkeypatch):
     monkeypatch.setattr(settings, "exchange_url", "", raising=False)
     monkeypatch.setattr(settings, "exchange_username", "", raising=False)
     monkeypatch.setattr(settings, "exchange_password", "", raising=False)
+    # The n8n path is "configured" only with url AND token (story 11.10 / R30);
+    # the suite's guard holds both blank, so this fixture sets both.
+    monkeypatch.setattr(settings, "email_facade_url",
+                        "http://n8n.example.com:5678/webhook/cc-email-facade")
+    monkeypatch.setattr(settings, "email_facade_token", "test-token")
+    monkeypatch.setattr(settings, "calendar_facade_url",
+                        "http://n8n.example.com:5678/webhook/cc-calendar-facade")
+    monkeypatch.setattr(settings, "calendar_facade_token", "test-token")
     assert exchange.configured() is False
 
 

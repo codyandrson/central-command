@@ -38,7 +38,23 @@ def _exchange():
     return exchange if exchange.configured() else None
 
 
+def configured() -> bool:
+    """True when the n8n email façade has an address AND a token. The default
+    URL is never empty, so the token is the signal (as selfcheck and the EA
+    calendar already treat it)."""
+    return bool(settings.email_facade_url and settings.email_facade_token)
+
+
 async def _call(payload: dict, timeout: float = 60.0) -> dict:
+    if not configured():
+        # No transient marker word here ('connection', 'timeout' — see
+        # contract/failures.py): this must classify SEMANTIC and land FAILED,
+        # never park for a retry that cannot succeed. Exchange has already
+        # routed away before any caller reaches this n8n path.
+        raise EmailFacadeError(
+            f"email façade {payload.get('mode')} not configured — set "
+            "CC_EMAIL_FACADE_URL and CC_EMAIL_FACADE_TOKEN"
+        )
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(

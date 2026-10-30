@@ -20,6 +20,10 @@ What it pins, and why each one is worth a test:
 * the writes — a move resolves its folder generously, and a reply's
   In-Reply-To/References come from the REFERENCED MESSAGE'S own headers.
 * the adapter — the global trust knobs actually reach the TLS layer.
+
+Story 11.10 (epic small-fixes, R5, ruled 2026-10-29): the insecure flag is the
+`settings.tls_insecure` field read through `client_kwargs()`, never the
+environment, and it wins over the CA bundle.
 """
 
 from __future__ import annotations
@@ -543,7 +547,7 @@ def test_the_adapter_injects_the_ca_bundle_and_client_certificate(monkeypatch):
     monkeypatch.setattr(settings, "ca_bundle", "/etc/cc/corp-root.pem", raising=False)
     monkeypatch.setattr(settings, "client_cert", "/etc/cc/client.pem", raising=False)
     monkeypatch.setattr(settings, "client_key", "/etc/cc/client.key", raising=False)
-    monkeypatch.delenv("CC_TLS_INSECURE", raising=False)
+    monkeypatch.setattr(settings, "tls_insecure", False)
     seen = _capture_adapter(monkeypatch)
     assert seen["verify"] == "/etc/cc/corp-root.pem"
     assert seen["cert"] == ("/etc/cc/client.pem", "/etc/cc/client.key")
@@ -553,16 +557,19 @@ def test_the_adapter_defaults_to_the_system_trust_store(monkeypatch):
     monkeypatch.setattr(settings, "ca_bundle", "", raising=False)
     monkeypatch.setattr(settings, "client_cert", "", raising=False)
     monkeypatch.setattr(settings, "client_key", "", raising=False)
-    monkeypatch.delenv("CC_TLS_INSECURE", raising=False)
+    monkeypatch.setattr(settings, "tls_insecure", False)
     seen = _capture_adapter(monkeypatch)
     assert seen["verify"] is True and seen["cert"] is None
 
 
 def test_insecure_turns_verification_off_and_warns_exactly_once(monkeypatch, caplog):
+    """The setting, not the environment (story 11.10 / R5, ruled 2026-10-29)."""
+    from central_command.integrations import http as http_client
+
     monkeypatch.setattr(settings, "ca_bundle", "", raising=False)
     monkeypatch.setattr(settings, "client_cert", "", raising=False)
-    monkeypatch.setenv("CC_TLS_INSECURE", "1")
-    monkeypatch.setattr(exchange, "_insecure_warned", False)
+    monkeypatch.setattr(settings, "tls_insecure", True)
+    monkeypatch.setattr(http_client, "_insecure_warned", False)
     with caplog.at_level(logging.WARNING):
         exchange._trust()
         exchange._trust()

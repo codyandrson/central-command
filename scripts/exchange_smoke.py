@@ -91,13 +91,12 @@ def check_config() -> bool:
     # which one wins.
     kwargs = http_client.client_kwargs()
     parts = []
-    if kwargs.get("verify"):
+    if settings.tls_insecure:
+        parts.append("CC_TLS_INSECURE=1 — verification OFF (this wins over the CA)")
+    elif kwargs.get("verify"):
         parts.append(f"CA bundle {kwargs['verify']}")
     if kwargs.get("cert"):
         parts.append(f"client certificate {kwargs['cert']}")
-    insecure = exchange._tls_insecure()
-    if insecure:
-        parts.append("CC_TLS_INSECURE=1 — verification OFF (this wins over the CA)")
     report(True, "trust", "; ".join(parts) or "system trust store, no client certificate")
     return True
 
@@ -108,7 +107,7 @@ def check_tls() -> None:
     url = urlparse(settings.exchange_url)
     host, port = url.hostname or "", url.port or 443
     context = ssl.create_default_context(cafile=settings.ca_bundle or None)
-    if exchange._tls_insecure():
+    if settings.tls_insecure:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
     if settings.client_cert:
