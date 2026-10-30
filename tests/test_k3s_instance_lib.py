@@ -290,6 +290,20 @@ def test_env_path_does_not_carry_the_helper_and_the_helper_sets_nothing(tmp_path
     }
 
 
+def test_each_value_has_one_resolver_across_the_k3s_scripts():
+    code = {p.name: [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("#")]
+            for p in K3S.glob("*.sh")}
+    for name, lines in code.items():
+        if name == LIB.name:
+            continue
+        for line in lines:
+            assert not re.search(r"stat -c %[UG]|getent passwd|id -gn|SUDO_USER|\$\{?USER\b|/cc-backups", line), f"{name}: {line}"
+            if "BASH_SOURCE" in line:
+                assert line.startswith(("REPO_ROOT=", "HERE=", "cd ", 'SELF="${BASH_SOURCE[0]}"')), f"{name}: {line}"
+    for name in ("setup.sh", "cc-update.sh"):
+        assert sum("cc_k3s_render_unit " in line for line in code[name]) == 1, name
+
+
 # ── cc-update.sh's own head ─────────────────────────────────────────────────
 
 

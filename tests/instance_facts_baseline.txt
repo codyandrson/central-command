@@ -1,6 +1,0 @@
-# Instance-fact shapes that still stand in tracked files (R12, INSTANCE-001).
-# One `<path><TAB><shape letter>` per hit -- paths and letters only, never the
-# matched text. tests/test_no_instance_facts.py fails on a hit missing from here
-# AND on a line here with no hit, so a story that cleans a file deletes its lines
-# (keep the lines sorted). Epic story 12 deletes this file, and the code that
-# reads it, once it is empty.

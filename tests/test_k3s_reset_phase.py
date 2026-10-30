@@ -87,6 +87,7 @@ def tree(tmp_path: Path) -> Path:
     (t / "web").mkdir()
     shutil.copy(SETUP, k3s / "setup.sh")
     shutil.copy(SETUP.parent / "env-path.sh", k3s / "env-path.sh")
+    shutil.copy(SETUP.parent / "instance-lib.sh", k3s / "instance-lib.sh")
     (k3s / "backup.sh").write_text(BACKUP)
     (k3s / "backup.sh").chmod(0o755)
     (k3s / "make-secrets.sh").write_text('#!/usr/bin/env bash\necho make-secrets >> "$STUB_LOG"\n')

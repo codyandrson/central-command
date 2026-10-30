@@ -24,12 +24,6 @@ skills, attention), so upstream fixtures and docs are out by construction. NAMES
 `scripts/prepush-scan.sh --tree` checks them against the operator's private list
 (tests/test_prepush_scan.py), and this test never reads that list.
 
-While sweeps are open, tests/instance_facts_baseline.txt lists `<path>\\t<shape>`
-for every hit that still stands (paths and shape letters only, never the matched
-text). The test fails on a hit not in the baseline AND on a baseline line with no
-hit (stale), so each story deletes the lines of the files it cleans. The file and
-the code reading it are deleted when it is empty (epic story 12).
-
 Every planted value below is built at runtime from parts: a literal one would be
 a hit in this very file.
 """
@@ -46,7 +40,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = Path(__file__).with_name("instance_facts_baseline.txt")
 
 EXAMPLE_NETWORK = ipaddress.ip_network("100.64.0.0/24")
 TAILNET = ipaddress.ip_network("100.64.0.0/10")
@@ -142,23 +135,6 @@ def find_hits(root: Path) -> set[tuple[str, str]]:
     return hits
 
 
-def read_baseline(path: Path) -> set[tuple[str, str]]:
-    rows = set()
-    for n, line in enumerate(path.read_text().splitlines(), 1):
-        if not line.strip() or line.startswith("#"):
-            continue
-        p, _, shape = line.partition("\t")
-        assert shape in tuple(SHAPES), f"{path.name}:{n}: want '<path><TAB><shape a-e>'"
-        rows.add((p, shape))
-    return rows
-
-
-def compare(root: Path, baseline: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """(hits the baseline does not list, baseline lines with no hit), both sorted."""
-    hits, listed = find_hits(root), read_baseline(baseline)
-    return sorted(hits - listed), sorted(listed - hits)
-
-
 def _need_checkout() -> None:
     if not shutil.which("git") or not (ROOT / ".git").exists():
         pytest.skip("git and a checkout are needed (a source archive has neither)")
@@ -166,24 +142,14 @@ def _need_checkout() -> None:
 
 # -- the tree ----------------------------------------------------------------
 
-def test_tracked_tree_matches_the_baseline():
+def test_tracked_tree_holds_no_shape():
     _need_checkout()
-    new, stale = compare(ROOT, BASELINE)
-    assert not new, (
+    hits = sorted(find_hits(ROOT))
+    assert not hits, (
         "instance-fact shapes in tracked files (R12): "
-        + "; ".join(f"{p} [{s}]" for p, s in new)
+        + "; ".join(f"{p} [{s}]" for p, s in hits)
         + " -- name the role or an example value instead, never this deployment's"
     )
-    assert not stale, (
-        "baseline lines with no hit (delete them): " + "; ".join(f"{p} [{s}]" for p, s in stale)
-    )
-
-
-def test_baseline_is_sorted_and_free_of_matched_text():
-    lines = [ln for ln in BASELINE.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
-    assert lines == sorted(lines), "keep the baseline sorted by path (adjacent deletions merge cleanly)"
-    for ln in lines:
-        assert re.fullmatch(r"[^\t]+\t[a-e]", ln), f"baseline line is not '<path><TAB><letter>': {ln[:60]!r}"
 
 
 # -- the shapes, each planted in a temp tracked file -------------------------
@@ -198,13 +164,6 @@ def _repo(tmp_path: Path, files: dict[str, str]) -> Path:
         f.write_text(text)
     subprocess.run(["git", "-C", str(tmp_path), "add", "--", *files], check=True)
     return tmp_path
-
-
-@pytest.fixture
-def empty_baseline(tmp_path_factory):
-    f = tmp_path_factory.mktemp("baseline") / "baseline.txt"
-    f.write_text("# empty\n")
-    return f
 
 
 def _planted(shape: str) -> tuple[str, str]:
@@ -225,37 +184,20 @@ def _planted(shape: str) -> tuple[str, str]:
 
 
 @pytest.mark.parametrize("shape", list(SHAPES))
-def test_planted_shape_fails(tmp_path, empty_baseline, shape):
+def test_planted_shape_fails(tmp_path, shape):
     path, text = _planted(shape)
     root = _repo(tmp_path / "r", {path: text})
-    new, stale = compare(root, empty_baseline)
-    assert (path, shape) in new and not stale
+    assert (path, shape) in find_hits(root)
 
 
-@pytest.mark.parametrize("shape", list(SHAPES))
-def test_planted_shape_passes_when_baselined(tmp_path, shape):
-    path, text = _planted(shape)
-    root = _repo(tmp_path / "r", {path: text})
-    base = tmp_path / "baseline.txt"
-    base.write_text(f"{path}\t{shape}\n")
-    assert compare(root, base) == ([], [])
-
-
-def test_a_unit_template_home_path_is_shape_e(tmp_path, empty_baseline):
+def test_a_unit_template_home_path_is_shape_e(tmp_path):
     # Also shape b (a /home/<name>/ path); the point is that e fires on a path in a directive.
     path = "deploy/k3s/cc-x.service.in"
     root = _repo(tmp_path / "r", {path: "[Service]\nUser=@CC_OWNER@\nWorkingDirectory=/home/" + "zq7acct/repo\n"})
-    assert (path, "e") in compare(root, empty_baseline)[0]
+    assert (path, "e") in find_hits(root)
 
 
-def test_a_baseline_line_with_no_hit_is_stale(tmp_path):
-    root = _repo(tmp_path / "r", {"README.md": "clean\n"})
-    base = tmp_path / "baseline.txt"
-    base.write_text("README.md\ta\n")
-    assert compare(root, base) == ([], [("README.md", "a")])
-
-
-def test_examples_and_bare_mentions_pass(tmp_path, empty_baseline):
+def test_examples_and_bare_mentions_pass(tmp_path):
     key = "kubernetes.io/" + "hostname"
     ok = {
         "deploy/x.sh": "ssh 100.64.0.5 # example block\nping 8.8.8.8 and 100.200.1.1 and v1.2.100.64.3.4\n",
@@ -266,17 +208,17 @@ def test_examples_and_bare_mentions_pass(tmp_path, empty_baseline):
         "deploy/k3s/note.in": "Environment=HOME=${CC_HOME}\n",
     }
     root = _repo(tmp_path / "r", ok)
-    assert compare(root, empty_baseline) == ([], [])
+    assert find_hits(root) == set()
 
 
-def test_a_yaml_hostname_selector_with_a_literal_value_is_shape_d(tmp_path, empty_baseline):
+def test_a_yaml_hostname_selector_with_a_literal_value_is_shape_d(tmp_path):
     key = "kubernetes.io/" + "hostname"
     text = f"- key: {key}\n  operator: In\n  values:\n    - zq7node\n"
     root = _repo(tmp_path / "r", {"deploy/k3s/x.yaml": text})
-    assert compare(root, empty_baseline)[0] == [("deploy/k3s/x.yaml", "d")]
+    assert find_hits(root) == {("deploy/k3s/x.yaml", "d")}
 
 
-def test_scope_skips_vendor_and_upstream_web_and_keeps_our_web(tmp_path, empty_baseline):
+def test_scope_skips_vendor_and_upstream_web_and_keeps_our_web(tmp_path):
     path, text = _planted("b")
     files = {
         "docs/vendor/x.md": text,
@@ -288,26 +230,25 @@ def test_scope_skips_vendor_and_upstream_web_and_keeps_our_web(tmp_path, empty_b
         "web/server/routes/other.ts": text,
     }
     root = _repo(tmp_path / "r", files)
-    new, _ = compare(root, empty_baseline)
-    assert sorted(p for p, _s in new) == [
+    assert sorted(p for p, _s in find_hits(root)) == [
         "web/server/lib/ws-proxy.ts",
         "web/server/routes/cc-x.ts",
         "web/src/features/decisions/x.ts",
     ]
 
 
-def test_the_working_tree_is_not_scanned_only_tracked_files(tmp_path, empty_baseline):
+def test_the_working_tree_is_not_scanned_only_tracked_files(tmp_path):
     path, text = _planted("a")
     root = _repo(tmp_path / "r", {"README.md": "clean\n"})
     (root / path).parent.mkdir(parents=True, exist_ok=True)
     (root / path).write_text(text)                     # untracked
-    assert compare(root, empty_baseline) == ([], [])
+    assert find_hits(root) == set()
 
 
-def test_this_file_and_its_baseline_hold_no_shape():
+def test_this_file_holds_no_shape():
     _need_checkout()
-    for p in ("tests/test_no_instance_facts.py", "tests/instance_facts_baseline.txt"):
-        assert shapes_of(p, (ROOT / p).read_text()) == set(), p
+    p = "tests/test_no_instance_facts.py"
+    assert shapes_of(p, (ROOT / p).read_text()) == set(), p
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX paths")

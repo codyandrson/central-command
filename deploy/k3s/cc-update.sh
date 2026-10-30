@@ -124,11 +124,6 @@ set +a
 # After the env: CC_BACKUP_DIR in deploy/k3s/.env counts, same rule as backup.sh.
 BACKUPS="$(cc_k3s_backup_dir "$SELF")" || instance_fail "could not derive the backup directory — the journal says why"
 
-# An answer in deploy/k3s/.env, no default here and no check here: the check is
-# require_compute_ssh, the first thing main and stage_main do, so a stage-mode
-# failure lands in stage.json and never in the status.json the cockpit polls.
-COMPUTE_SSH="${CC_COMPUTE_SSH:-}"
-
 phase() { note "== $1"; write_status running "$1"; }
 
 start_services()  { systemctl start cc-uvicorn cc-sandbox-runner; systemctl restart cc-nerve; }
@@ -338,9 +333,13 @@ die() { # <phase> <message> — best-effort recovery: services back up, honest s
   exit 1
 }
 
+# An answer in deploy/k3s/.env, no default and no check at module level: this is
+# the first thing main and stage_main do, so a stage-mode failure lands in
+# stage.json and never in the status.json the cockpit polls.
 require_compute_ssh() {
-  local why
-  why="$(cc_k3s_compute_ssh "$SELF" 2>&1 >/dev/null)" || die precondition "$why"
+  local answer
+  answer="$(cc_k3s_compute_ssh "$SELF" 2>&1)" || die precondition "$answer"
+  COMPUTE_SSH="$answer"
 }
 
 # ── busy gate ────────────────────────────────────────────────────────────────

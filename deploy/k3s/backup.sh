@@ -52,7 +52,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Otherwise both are derived from the checkout, never from $USER or $HOME: this
 # runs as root from cc-backup.service.
 REPO="${REPO:-}"
-[[ -n "$REPO" ]] || REPO="$(cc_k3s_checkout "${BASH_SOURCE[0]}")" || exit 1
+[[ -n "$REPO" ]] || REPO="$(cc_k3s_checkout)" || exit 1
 OUT="${CC_BACKUP_DIR:-}"
 RETAIN_DAYS="${CC_BACKUP_RETAIN_DAYS:-14}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

@@ -22,7 +22,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=instance-lib.sh
 . "$HERE/instance-lib.sh"
-OWNER_HOME="$(cc_k3s_home "${BASH_SOURCE[0]}")"
+OWNER_HOME="$(cc_k3s_home)"
 
 NS=cc-sandbox
 SA=cc-sandbox-runner

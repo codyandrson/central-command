@@ -332,7 +332,7 @@ ensure_app_env() {
 # The compute node is an answer, never a default. load_env runs in EVERY phase,
 # reset and status included, so it asks for nothing: each phase that uses the key
 # asks here first, before the phase changes anything. Sourced here rather than at
-# the top: the reset phase's scratch tree has no instance-lib.sh, and never asks.
+# the top, like each other use: most phases never ask.
 require_compute_ssh() {
   local answer
   # shellcheck source=instance-lib.sh
@@ -415,8 +415,7 @@ phase_validate() {
 # PHASE: preflight — is this CLUSTER able to run the install? Read-only.
 # ─────────────────────────────────────────────────────────────────────────────
 # ── the systemd units: a .in template is rendered for this install, a plain one copied ──
-# Sourced here rather than at the top: most phases, and the reset phase's scratch
-# tree, never read a unit.
+# Sourced here rather than at the top: most phases never read a unit.
 load_unit_values() {
   # shellcheck source=instance-lib.sh
   if ! . "$HERE/instance-lib.sh" \
@@ -1405,7 +1404,12 @@ reset_assert_fresh() {
 }
 
 phase_reset() {
-  local bdir="${CC_BACKUP_DIR:-$HOME/cc-backups}" row dep pvc manifest
+  local bdir row dep pvc manifest
+  # shellcheck source=instance-lib.sh
+  if ! . "$HERE/instance-lib.sh" || ! bdir="$(cc_k3s_backup_dir "$HERE/setup.sh")"; then
+    fail "reset-backup-dir" "could not derive the backup directory — the line above names what failed"
+    return 1
+  fi
 
   if (( ! RESET_CONFIRM )); then
     note "reset would, in this order:"

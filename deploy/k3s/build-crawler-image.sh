@@ -27,10 +27,11 @@ set -euo pipefail
 # load_env, the updater), then this checkout's deploy/k3s/.env; else this exits
 # here, naming the key, before anything changes.
 # shellcheck source=instance-lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/instance-lib.sh"
-COMPUTE_SSH="$(cc_k3s_compute_ssh "${BASH_SOURCE[0]}")"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/instance-lib.sh"
+COMPUTE_SSH="$(cc_k3s_compute_ssh)"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 DOCKERFILE="$REPO_ROOT/central_command/crawler/Dockerfile"
 SERVICE="$REPO_ROOT/central_command/crawler/service.py"
 IMAGE=cc-crawler:1

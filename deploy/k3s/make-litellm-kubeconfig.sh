@@ -38,7 +38,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=instance-lib.sh
 . "$HERE/instance-lib.sh"
-OWNER_HOME="$(cc_k3s_home "${BASH_SOURCE[0]}")"
+OWNER="$(cc_k3s_owner)"
+OWNER_HOME="$(cc_k3s_home)"
 
 NS=central-command
 SERVER="https://127.0.0.1:6443"
@@ -76,7 +77,7 @@ mint() {
   # Run under sudo (kubectl needs root on k3s) this lands root-owned in the
   # operator's home, and cc-uvicorn runs as the operator — every read/write
   # through it was "permission denied" (gap declared 2026-09-04). Hand it back.
-  chown "${SUDO_USER:-$USER}:" "$out"
+  chown "$OWNER:" "$out"
   echo "wrote $out (namespace=$NS, server=$SERVER)"
 }
 

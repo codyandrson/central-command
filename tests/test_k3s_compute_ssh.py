@@ -279,8 +279,8 @@ def test_the_updaters_check_is_the_first_statement_after_mkdir(fn: str):
 
 
 def test_the_updaters_module_level_holds_no_default_and_no_check():
-    assert 'COMPUTE_SSH="${CC_COMPUTE_SSH:-}"\n' in UPDATER
-    assert UPDATER.index("\nrequire_compute_ssh() {") > UPDATER.index('\nCOMPUTE_SSH="')
+    assert "\nCOMPUTE_SSH=" not in UPDATER  # only require_compute_ssh sets it, from the resolver
+    assert 'answer="$(cc_k3s_compute_ssh "$SELF" 2>&1)" || die precondition "$answer"' in UPDATER
     assert UPDATER.count("\n  require_compute_ssh\n") == 2  # main and stage_main, nowhere at module level
 
 
