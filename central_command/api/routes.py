@@ -659,12 +659,17 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         # otherwise be resolved DONE with "stopped by the operator" as its
         # answer, which is the loudest possible lie about what happened.
         return {**result, "task_id": task_id}
-    if result.get("task_waiting"):
+    if result.get("task_waiting") or result.get("consult_waiting"):
         # The agent created a task and is waiting on its outcome
-        # (`create_task(await_result=True)`): the run is parked AWAITING_AGENTS
-        # and nothing awaits the operator, so the task holds in REVIEW with its
-        # session linked and no `task.review` frame (there is no proposal). The
-        # session's own landing resolves it when the awaited task finishes.
+        # (`create_task(await_result=True)`), or consulted a specialist whose
+        # draft it waits on (`runtime/consult.park_consult_wait`; its
+        # `proposal_id` is the SPECIALIST's, never this task's): the run is
+        # parked AWAITING_AGENTS and nothing awaits the operator, so the task
+        # holds in REVIEW with its session linked and no `task.review` frame
+        # (there is no proposal of its own) and no override decision. The
+        # session's own landing resolves it when the awaited work finishes.
+        # (R23: a consult wait fell through to the proposal branch below and
+        # KeyError'd on `intent`, landing the task FAILED.)
         await repo.park_task_review(task_id, result["session_id"])
         return {**result, "task_id": task_id}
     if result["deferred"]:
@@ -1340,6 +1345,13 @@ async def _run_coach_detached(task_id: str, agent_id: str, kwargs: dict) -> None
                      "question": str(result.get("question") or "")[:500]},
             actor=f"agent:{COACH_ID}",
         )
+        return
+    if result.get("consult_waiting") or result.get("task_waiting"):
+        # A wait, not a draft (R23): the session is parked AWAITING_AGENTS and
+        # its own landing resolves the task. Without this the proposal branch
+        # below KeyErrors on `intent`, OUTSIDE the try above, and kills the
+        # detached task after the park.
+        await repo.park_task_review(task_id, session_id)
         return
     if result.get("deferred"):
         # A drafted edit is a PROPOSAL. The task holds in REVIEW; deciding the

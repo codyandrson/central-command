@@ -271,13 +271,24 @@ async def _reject_batch(
     return await _process(task, session_id, result2, state, fresh, model)
 
 
+_REPLAN_NOTE = ("this is guidance, not plan approval: submit_plan again before "
+                "assign_work")
+
+
 async def _park_stalled(
     task: dict, session_id: str, result, state: dict, calls, reason: str,
-    ledger: list[dict],
+    ledger: list[dict], *, no_progress: bool = False,
 ) -> dict:
     """The stall escalation (The operator: pause when stuck, never silently retry):
     the requested calls are NOT executed; ONE operator item carries the reason
-    and the ledger, and every pending call resumes with the operator's answer."""
+    and the ledger, and every pending call resumes with the operator's answer.
+
+    `no_progress` is the stall's REASON, recorded on each pending entry so the
+    resume can tell (R13, ruled 2026-10-29): only an answered NO-PROGRESS stall
+    withdraws plan approval (`maybe_resume`). The round and fan-out backstops
+    never do — their counters (`round`, `assigns`) are not reset by an answer,
+    so a lone `submit_plan` after one would trip the same backstop again and no
+    plan review could ever park."""
     from central_command.runtime.durable import dump_run_state
 
     await events.emit(
@@ -292,6 +303,9 @@ async def _park_stalled(
         f"Round {state['round']}; recent progress ledger: {json.dumps(ledger[-3:])}\n"
         "The orchestrator's requested actions were NOT executed. Your answer "
         "resumes the loop as trusted guidance."
+        + (" Because the loop made no progress, answering also withdraws plan "
+           "approval: the orchestrator must submit a new plan for your review "
+           "before it assigns more work." if no_progress else "")
     )
     await repo.create_operator_item(
         item_id, "stall", session_id, AGENT_ID, body, task_id=task["id"],
@@ -303,7 +317,8 @@ async def _park_stalled(
         actor="system",
     )
     state["pending"] = {
-        c.tool_call_id: {"kind": "stall", "item_id": item_id} for c in calls
+        c.tool_call_id: {"kind": "stall", "item_id": item_id,
+                         "no_progress": no_progress} for c in calls
     }
     await repo.park_session_awaiting_agents(
         session_id,
@@ -385,7 +400,9 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
 
     # Safety escalations — never another silent round.
     reason = None
+    no_progress = False
     if state["stalls"] >= settings.orch_stall_limit:
+        no_progress = True
         reason = (f"{state['stalls']} consecutive rounds without progress "
                   "(the progress ledger)")
     elif state["round"] > settings.orch_max_rounds:
@@ -394,7 +411,7 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
         reason = f"fan-out backstop hit ({settings.orch_fanout_limit} assignments)"
     if reason is not None:
         return await _park_stalled(task, session_id, result, state, calls,
-                                   reason, ledger)
+                                   reason, ledger, no_progress=no_progress)
 
     # Batch validation — all-or-nothing, so a bad target never half-executes.
     problems: list[str] = []
@@ -512,7 +529,7 @@ async def _collect(pending: dict) -> tuple[bool, dict, dict]:
     (task rows / operator items). Returns (all_ready, results_by_call_id,
     flags) — read-only, safe to call repeatedly."""
     results: dict[str, str] = {}
-    flags: dict = {"plan_approved": None, "gaps": []}
+    flags: dict = {"plan_approved": None, "gaps": [], "replan": False}
     for call_id, p in pending.items():
         if p["kind"] == "assign":
             t = await repo.get_task(p["task_id"])
@@ -551,6 +568,11 @@ async def _collect(pending: dict) -> tuple[bool, dict, dict]:
                     f"OPERATOR ANSWER (trusted): {answer}"
                     + await lane_exchange(item)
                 )
+                if p["kind"] == "stall" and p.get("no_progress"):
+                    # An answered NO-PROGRESS stall withdraws plan approval (R13):
+                    # tell the orchestrator, and let `maybe_resume` do the reset.
+                    flags["replan"] = True
+                    results[call_id] += f"\n({_REPLAN_NOTE})"
     return True, results, flags
 
 
@@ -570,6 +592,18 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
     if not rs or "orch" not in rs:
         return None
     state = rs["orch"]
+    if not state.get("task_id"):
+        # A parked orchestration that cannot name its task can never resume:
+        # the claim below would flip it RUNNING and the lookup after it would
+        # KeyError, leaving it RUNNING for good (R28, ruled 2026-10-29). Land it
+        # FAILED with the reason BEFORE claiming, then raise so the sweep's
+        # per-unit guard records it (`session.resume_failed`, `errors`).
+        from central_command.runtime.converse import land_session
+
+        reason = "orchestration state names no task_id — cannot resume"
+        await land_session(session_id, failed=True, agent_id=AGENT_ID,
+                           reason=reason)
+        raise ValueError(reason)
     ready, results, flags = await _collect(state.get("pending") or {})
     if not ready:
         return None
@@ -583,6 +617,12 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
 
     if flags["plan_approved"] is not None:
         state["plan_approved"] = flags["plan_approved"]
+    if flags["replan"]:
+        # The loop stalled with no progress and the operator answered: that is
+        # guidance, not approval of whatever comes next. The counter resets so
+        # the stall check does not fire again before a plan can be submitted.
+        state["plan_approved"] = False
+        state["stalls"] = 0
     for gap in flags["gaps"]:
         await events.emit(
             "orchestration.capability_gap", ref_id=session_id,
@@ -801,13 +841,40 @@ async def resume_sweep() -> dict:
     it only WRITES the park record the dead process never reached; the
     AWAITING_RESUME loop below is what drives it, so one sweep both discovers
     and finishes the recovery rather than converging over two.
+    Every unit of every worklist is driven under its own guard (R28, ruled
+    2026-10-29): a unit that raises is logged, listed in the result's `errors`
+    (`{unit, id, error}`) and, for a session, recorded as
+    `session.resume_failed` with `after: "sweep"`; the sweep goes on, so one bad
+    row cannot strand the rows behind it.
     """
     resumed, still_parked = [], []
-    # FIRST worklist, so an orphan converges in ONE pass: this writes the park
-    # record the dead process never reached, and the AWAITING_RESUME loop below
-    # is what actually drives it.
-    orphaned = await park_orphaned_resumes()
-    for sid in await repo.sessions_awaiting_agents():
+    errors: list[dict] = []
+
+    async def guarded(unit: str, unit_id: str, driver):
+        """Drive ONE unit under its own guard (R28; the `retry_sweep._drive`
+        pattern): one bad row must not end the sweep and strand every unit
+        behind it. A failure is logged, reported in the result's `errors` and —
+        for a session — recorded as `session.resume_failed` (`after: "sweep"`);
+        the sweep goes on. `CancelledError` is a BaseException and sails past
+        this, as it must. Returns `(ran, result)`."""
+        try:
+            return True, await driver()
+        except Exception as e:  # noqa: BLE001 — one bad unit must not end the sweep
+            log.exception("resume sweep: %s %s failed", unit, unit_id)
+            errors.append({"unit": unit, "id": unit_id, "error": str(e)[:300]})
+            if unit == "session":
+                try:
+                    await events.emit(
+                        "session.resume_failed", ref_id=unit_id,
+                        payload={"error": str(e)[:500], "after": "sweep",
+                                 "transient": classify_failure(e) == TRANSIENT},
+                        actor="system",
+                    )
+                except Exception:  # noqa: BLE001 — the record failing is not the sweep's end
+                    log.exception("resume sweep: recording %s %s failed", unit, unit_id)
+            return False, None
+
+    async def resume_awaiting_agents(sid: str):
         # AWAITING_AGENTS carries three shapes — an orchestration waiting on its
         # children, an asker waiting on a specialist it consulted, and (Decision
         # 5, 2026-08-22) a `create_task(await_result=True)` creator waiting on
@@ -816,15 +883,25 @@ async def resume_sweep() -> dict:
         # in this worklist forever, reported as "still parked" on every sweep.
         rs = await repo.get_session_run_state(sid)
         if rs and "consult_wait" in rs:
-            r = await resume_consult_wait(sid)
-        elif rs and "task_wait" in rs:
-            r = await resume_task_wait(sid)
-        else:
-            r = await maybe_resume(sid)
-        (resumed if r is not None else still_parked).append(sid)
+            return await resume_consult_wait(sid)
+        if rs and "task_wait" in rs:
+            return await resume_task_wait(sid)
+        return await maybe_resume(sid)
+
+    # FIRST worklist, so an orphan converges in ONE pass: this writes the park
+    # record the dead process never reached, and the AWAITING_RESUME loop below
+    # is what actually drives it.
+    orphaned = await park_orphaned_resumes()
+    for sid in await repo.sessions_awaiting_agents():
+        ran, r = await guarded("session", sid,
+                               lambda sid=sid: resume_awaiting_agents(sid))
+        if ran:
+            (resumed if r is not None else still_parked).append(sid)
     for sid in await repo.sessions_awaiting_resume():
-        r = await resume_parked_session(sid)
-        (resumed if r is not None else still_parked).append(sid)
+        ran, r = await guarded("session", sid,
+                               lambda sid=sid: resume_parked_session(sid))
+        if ran:
+            (resumed if r is not None else still_parked).append(sid)
 
     from central_command.gateway import gateway
 
@@ -839,25 +916,34 @@ async def resume_sweep() -> dict:
 
     waiting = []
     for prop in reversed(await repo.list_proposals("RETRY_PENDING")):
-        row = await repo.load_proposal(prop["id"])
-        if _interrupted(row):
-            continue  # held for the operator — never replayed by a sweep
-        waiting.append((prop["id"], gate_names(_proposal_dependencies(
-            (row or {}).get("retry_state") or {}))))
+        async def _wait_entry(pid=prop["id"]):
+            row = await repo.load_proposal(pid)
+            if _interrupted(row):
+                return None  # held for the operator — never replayed by a sweep
+            return (pid, gate_names(_proposal_dependencies(
+                (row or {}).get("retry_state") or {})))
+        ran, entry = await guarded("proposal", prop["id"], _wait_entry)
+        if entry is not None:
+            waiting.append(entry)
     cache = probes.ProbeCache()
     await cache.warm([n for _pid, names in waiting for n in names])
     for pid, names in waiting:
         if any([not await cache.healthy(n) for n in names]):
             still_pending.append(pid)
             continue
-        r = await gateway.retry_execution(pid)
-        (retried if r is not None else still_pending).append(pid)
+        ran, r = await guarded("proposal", pid,
+                               lambda pid=pid: gateway.retry_execution(pid))
+        if ran:
+            (retried if r is not None else still_pending).append(pid)
 
     tasks_retried, tasks_still_parked = [], []
     for task in await repo.tasks_awaiting_retry(due_only=True):
-        r = await retry_parked_task(task["id"])
-        (tasks_retried if r is not None else tasks_still_parked).append(task["id"])
+        ran, r = await guarded("task", task["id"],
+                               lambda tid=task["id"]: retry_parked_task(tid))
+        if ran:
+            (tasks_retried if r is not None else tasks_still_parked).append(task["id"])
     return {"resumed": resumed, "still_parked": still_parked,
+            "errors": errors,
             "orphaned": orphaned,
             "retried": retried, "still_pending": still_pending,
             "tasks_retried": tasks_retried,
@@ -2737,7 +2823,7 @@ async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
     through the decide hook, after the task row is booked (or at once when
     the run has no task)."""
     if not task_id:
-        if out.get("deferred"):
+        if out.get("deferred") and not out.get("consult_waiting"):
             await decide_landed(out)
         return
     if out.get("parked"):
@@ -2751,6 +2837,13 @@ async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
                      "question": out["question"][:500]},
             actor="system",
         )
+        return
+    if out.get("consult_waiting"):
+        # The run is waiting on a consulted specialist's draft (R23): its
+        # `proposal_id` is the SPECIALIST's, not this task's own proposal, so
+        # it takes no `task.review` frame and no override decision. The task
+        # holds in REVIEW; the session's own landing resolves it.
+        await repo.park_task_review(task_id, out["session_id"])
         return
     if out.get("deferred"):
         await repo.park_task_review(task_id, out["session_id"])

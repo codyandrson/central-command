@@ -17,6 +17,11 @@ What these tests lock in:
 A test that settles on one write and then asserts a second is racy against the
 background resume (epic-small-fixes R31): `_settle` waits on every fact the
 test goes on to assert.
+
+epic-small-fixes R13 (story 11.6, ruled 2026-10-29, Decision 3): a revise
+answer parks a second plan review, an answered NO-PROGRESS stall withdraws
+plan approval (the orchestrator must submit_plan again before assign_work),
+an answered fan-out stall does not, and a continue window never does.
 """
 
 from __future__ import annotations
@@ -301,6 +306,228 @@ async def test_project_exceeding_orch_fanout_limit_parks_an_operator_question(
     assert [t for t in await repo.list_tasks()
             if t.get("parent_session_id") == sid] == []
     assert await repo.session_status(sid) == "AWAITING_AGENTS"
+
+
+# --- the revised plan and the answered stall (epic-small-fixes R13, 2026-10-29) --
+
+
+def _replan_model(*, stall_with: str = "no_progress"):
+    """plan -> (approved) -> a round the control plane PAUSES -> (stall answered)
+    -> assign_work -> (rejected, plan not approved) -> submit_plan again ->
+    (approved) -> assign_work -> text. `stall_with` picks the round the pause
+    happens on: a round that reports no progress, or an ordinary one (the
+    fan-out backstop is what pauses it)."""
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+    )
+    from pydantic_ai.models.function import FunctionModel
+
+    def progress(made: bool, step: str):
+        return ToolCallPart(tool_name="record_progress", args={
+            "made_progress": made, "in_a_loop": not made, "next_step": step})
+
+    def assign():
+        return ToolCallPart(tool_name="assign_work", args={
+            "agent_id": "jira-expert", "title": "job",
+            "instructions": "Demo: job."})
+
+    def respond(messages, info):
+        latest = {p.tool_name: str(p.content)
+                  for p in getattr(messages[-1], "parts", [])
+                  if isinstance(p, ToolReturnPart)}
+        approvals = sum(
+            1 for m in messages if isinstance(m, ModelRequest)
+            for p in m.parts if isinstance(p, ToolReturnPart)
+            and p.tool_name == "submit_plan"
+            and str(p.content).startswith("PLAN APPROVED"))
+        if "assign_work" in latest:
+            text = latest["assign_work"]
+            if text.startswith("BATCH REJECTED"):
+                return ModelResponse(parts=[
+                    progress(True, "replan"),
+                    ToolCallPart(tool_name="submit_plan",
+                                 args={"plan": "PLAN 2: replanned."})])
+            if text.startswith("OPERATOR ANSWER"):
+                return ModelResponse(parts=[progress(True, "assign"), assign()])
+            return ModelResponse(parts=[TextPart(content="Done.")])
+        if "submit_plan" in latest:
+            if latest["submit_plan"].startswith("PLAN NOT APPROVED"):
+                return ModelResponse(parts=[
+                    progress(True, "revise"),
+                    ToolCallPart(tool_name="submit_plan",
+                                 args={"plan": "PLAN 2: revised."})])
+            first = approvals <= 1
+            made = not (first and stall_with == "no_progress")
+            return ModelResponse(parts=[progress(made, "go"), assign()])
+        return ModelResponse(parts=[
+            progress(True, "plan"),
+            ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: go."})])
+
+    return FunctionModel(respond)
+
+
+async def _answer_and_resume(item: dict, answer: str, verdict, sid: str, model):
+    await repo.answer_operator_item(item["id"], answer, verdict)
+    return await orchestration.maybe_resume(sid, model=model)
+
+
+async def _rejections(sid: str) -> list[dict]:
+    return [e for e in await repo.list_events_of_kinds(["orchestration.batch_rejected"])
+            if e["ref_id"] == sid]
+
+
+async def test_a_revise_answer_parks_a_second_plan_review(monkeypatch):
+    """A revise note withdraws approval and the orchestrator's revised plan
+    parks as a SECOND plan review (R13: the revise round trip, as built)."""
+    model = _replan_model()
+    r = await _start_project()
+    sid = r["session_id"]
+    first = await _open_item(sid, "plan_review")
+
+    await _answer_and_resume(first, "Split it in two.", "revise", sid, model)
+
+    second = await _open_item(sid, "plan_review")
+    assert second["id"] != first["id"]
+    assert "PLAN 2: revised." in second["body"]
+    rs = await repo.get_session_run_state(sid)
+    assert rs["orch"]["plan_approved"] is False
+    assert [t for t in await repo.list_tasks()
+            if t.get("parent_session_id") == sid] == []
+
+
+async def test_an_answered_no_progress_stall_withdraws_plan_approval(monkeypatch):
+    """The ruling (2026-10-29, Decision 3): the operator's answer to a
+    NO-PROGRESS pause is guidance, not approval of what comes next. The next
+    assign_work is rejected until a NEW plan review is answered."""
+    monkeypatch.setattr(settings, "orch_stall_limit", 1)
+    monkeypatch.setattr(
+        routes, "resolve_model",
+        aresolve(lambda *a, **k: _text_model("Done.")))
+    model = _replan_model(stall_with="no_progress")
+    r = await _start_project()
+    sid = r["session_id"]
+    plan = await _open_item(sid, "plan_review")
+
+    # Approved, then a round with no progress: the control plane pauses it.
+    await _answer_and_resume(plan, "", "approved", sid, model)
+    stall = await _open_item(sid, "stall")
+    assert "withdraws plan approval" in stall["body"]
+    rs = await repo.get_session_run_state(sid)
+    assert rs["orch"]["plan_approved"] is True
+    # The reason travels on the pending entries, so the resume can tell.
+    assert {p["no_progress"] for p in rs["orch"]["pending"].values()} == {True}
+    assert await _rejections(sid) == []
+
+    # The operator answers. The orchestrator is told it is guidance only, its
+    # next assign_work is REJECTED, and it re-plans: a second plan review parks.
+    await _answer_and_resume(stall, "Try the other approach.", None, sid, model)
+    (rej,) = await _rejections(sid)
+    assert any("APPROVED plan" in p for p in rej["payload"]["problems"])
+    assert [t for t in await repo.list_tasks()
+            if t.get("parent_session_id") == sid] == []
+    second = await _open_item(sid, "plan_review")
+    assert "PLAN 2: replanned." in second["body"]
+    rs = await repo.get_session_run_state(sid)
+    assert rs["orch"]["plan_approved"] is False and rs["orch"]["stalls"] == 0
+    answers = [str(p.get("content")) for m in rs["messages"]
+               for p in m.get("parts", [])
+               if p.get("part_kind") == "tool-return"
+               and str(p.get("content")).startswith("OPERATOR ANSWER")]
+    assert answers and all("submit_plan again before assign_work" in a
+                           for a in answers)
+
+    # Only a newly answered plan review lets assign_work through.
+    await _answer_and_resume(second, "", "approved", sid, model)
+    assert len(await _rejections(sid)) == 1
+    (child,) = [t for t in await repo.list_tasks()
+                if t.get("parent_session_id") == sid]
+    assert child["parent_task_id"] == r["task_id"]
+
+
+async def test_an_answered_fan_out_stall_leaves_plan_approval_alone(monkeypatch):
+    """The round and fan-out backstops keep today's meaning (Decision 3): their
+    counters are never reset by an answer, so withdrawing approval would send a
+    lone submit_plan into the same backstop and no plan review could ever
+    park. An answered fan-out stall leaves approval as it was."""
+    monkeypatch.setattr(settings, "orch_fanout_limit", 0)
+    model = _replan_model(stall_with="fan_out")
+    r = await _start_project()
+    sid = r["session_id"]
+    plan = await _open_item(sid, "plan_review")
+
+    await _answer_and_resume(plan, "", "approved", sid, model)
+    stall = await _open_item(sid, "stall")
+    assert "fan-out backstop" in stall["body"]
+    assert "withdraws plan approval" not in stall["body"]
+    rs = await repo.get_session_run_state(sid)
+    assert {p["no_progress"] for p in rs["orch"]["pending"].values()} == {False}
+
+    await _answer_and_resume(stall, "Carry on.", None, sid, model)
+
+    # The orchestrator's next assign_work was NOT rejected for a missing plan:
+    # it ran into the same backstop and parked a second stall.
+    assert await _rejections(sid) == []
+    again = await _open_item(sid, "stall")
+    assert again["id"] != stall["id"]
+    rs = await repo.get_session_run_state(sid)
+    assert rs["orch"]["plan_approved"] is True
+    assert [i for i in await repo.list_operator_items("OPEN")
+            if i["session_id"] == sid and i["kind"] == "plan_review"] == []
+
+
+async def test_a_continue_window_never_withdraws_plan_approval(monkeypatch):
+    """A window grant is the operator saying 'keep going', not an answered
+    stall: the approved plan stays approved across it (R13, Decision 3), so the
+    next assign_work runs instead of being rejected for a missing plan."""
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    monkeypatch.setattr(settings, "run_request_limit", 3)
+    monkeypatch.setattr(
+        routes, "resolve_model",
+        aresolve(lambda *a, **k: _text_model("Done.")))
+    phase = {"now": "plan"}
+
+    def progress():
+        return ToolCallPart(tool_name="record_progress", args={
+            "made_progress": True, "in_a_loop": False, "next_step": "go"})
+
+    def respond(messages, info):
+        if phase["now"] == "plan":
+            return ModelResponse(parts=[progress(), ToolCallPart(
+                tool_name="submit_plan", args={"plan": "PLAN: go."})])
+        if phase["now"] == "loop":
+            return ModelResponse(parts=[progress()])  # never ends the round
+        return ModelResponse(parts=[progress(), ToolCallPart(
+            tool_name="assign_work", args={
+                "agent_id": "jira-expert", "title": "job",
+                "instructions": "Demo: job."})])
+
+    model = FunctionModel(respond)
+    r = await _start_project()
+    sid = r["session_id"]
+    plan = await _open_item(sid, "plan_review")
+
+    phase["now"] = "loop"
+    await repo.answer_operator_item(plan["id"], "", "approved")
+    parked = await orchestration.maybe_resume(sid, model=model)
+    assert parked["window_exhausted"] is True
+    assert await repo.session_status(sid) == "AWAITING_CONTINUE"
+    marker = (await repo.get_session_run_state(sid))["pending_continue"]
+    assert marker["state"]["plan_approved"] is True
+
+    phase["now"] = "assign"
+    monkeypatch.setattr(settings, "run_request_limit", 25)
+    await orchestration.continue_session(parked["item_id"], model=model)
+
+    assert await _rejections(sid) == []
+    (child,) = [t for t in await repo.list_tasks()
+                if t.get("parent_session_id") == sid]
+    assert child["parent_task_id"] == r["task_id"]
 
 
 async def test_assign_work_children_count_against_the_project_task():

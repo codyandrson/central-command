@@ -11,6 +11,9 @@ looks exactly like an agent thinking, so the tests that matter most are the
 ones about who wakes the asker and when — especially DISMISS, which closes the
 specialist's session through a seam that never lands, and the redraft loop,
 where the proposal id the wait started with is no longer the live one.
+
+The last two tests pin epic-small-fixes R23 (story 11.6, 2026-10-29): a task run
+that ends waiting on a consult holds in REVIEW, never FAILED "run failed: 'intent'".
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import pytest
 from central_command.api import orchestration
 from central_command.runtime import consult as consult_mod
 from central_command.runtime.durable import classify_deferred
+from tests.conftest import aresolve, needs_pg
 
 
 class _Call:
@@ -264,5 +268,112 @@ async def test_a_conversation_asker_rests_with_its_answer_instead_of_closing(mon
             await conn.execute("delete from audit_event where ref_id = $1", sid)
             await conn.execute("delete from session where id = $1", sid)
             await conn.execute("delete from agent where id = 'cw-ea'")
+        finally:
+            await conn.close()
+
+
+# --- a task run that ends waiting on a consult (epic-small-fixes R23) -----------
+#
+# Origin: epic-gate-overrides close, 2026-10-26, story 11.6. The consult-wait
+# result (`deferred`, `consult_waiting`, no `intent`) fell into the PROPOSAL
+# branch of `routes._run_one_assigned_task`, KeyError'd on `intent`, and
+# `_land_run_failure` marked the task FAILED "run failed: 'intent'" while its
+# session waited correctly. The task holds in REVIEW like a task wait.
+
+
+def _task_events(kinds: list[str], task_id: str):
+    from central_command.db import repo
+
+    async def _go():
+        return [e for e in await repo.list_events_of_kinds(kinds)
+                if e["ref_id"] == task_id]
+    return _go()
+
+
+@needs_pg
+async def test_a_consult_waiting_task_run_holds_in_review_not_failed(monkeypatch) -> None:
+    """Through the ENTRY (`routes._run_assigned_task`), not `_run_one_assigned_task`:
+    the failure landing lives in the wrapper (runtime-resilience, 'test the entry')."""
+    import uuid as _uuid
+
+    from central_command.api import routes
+    from central_command.config import settings
+    from central_command.db import repo
+    from central_command.gateway import overrides
+    from tests.test_consult_chain import (
+        A_ID, C_ID, _consulting_model, _drafting_model, _fire_trio, _hire_trio,
+    )
+
+    monkeypatch.setattr(settings, "test_model", True)
+    decided: list[dict] = []
+
+    async def _decide(result, **kw):
+        decided.append(result)
+        return None
+
+    monkeypatch.setattr(overrides, "decide_landed", _decide)
+    monkeypatch.setattr(
+        consult_mod, "_consult_model",
+        aresolve(lambda agent_id, model=None: _drafting_model()))
+    monkeypatch.setattr(
+        routes, "resolve_model",
+        aresolve(lambda *a, **k: _consulting_model(C_ID, "A acted on")))
+    await _hire_trio()
+    task_id = "task_" + _uuid.uuid4().hex[:12]
+    try:
+        await repo.create_task(task_id, "Consult task",
+                               "Should TASKS-12 block TASKS-13?", A_ID)
+        out = await routes._run_assigned_task(await repo.get_task(task_id))
+
+        assert out["consult_waiting"] is True and out["task_id"] == task_id
+        task = await repo.get_task(task_id)
+        assert task["status"] == "REVIEW"
+        assert task["session_id"] == out["session_id"]
+        assert await repo.session_status(out["session_id"]) == "AWAITING_AGENTS"
+        assert await _task_events(["task.run_failed", "task.review"], task_id) == []
+        assert decided == [], "a consult wait is not the task's own proposal"
+    finally:
+        conn = await repo._conn()
+        try:
+            await conn.execute("delete from task where id = $1", task_id)
+        finally:
+            await conn.close()
+        await _fire_trio()
+
+
+@needs_pg
+async def test_a_resumed_runs_consult_wait_is_not_the_tasks_own_proposal(monkeypatch) -> None:
+    """`orchestration._land_task_question_outcome` is reached from the parked-read
+    resume with the consult-wait result. Its `proposal_id` is the SPECIALIST's:
+    no `task.review` frame and no override decision, with or without a task."""
+    import uuid as _uuid
+
+    from central_command.db import repo
+
+    decided: list[dict] = []
+
+    async def _decide(out):
+        decided.append(out)
+
+    monkeypatch.setattr(orchestration, "decide_landed", _decide)
+    sid = f"sess_cw_{_uuid.uuid4().hex[:8]}"
+    task_id = "task_" + _uuid.uuid4().hex[:12]
+    await repo.upsert_agent("cw-asker", "cw-asker", "cc-default", "test charter")
+    await repo.create_running_session(sid, "cw-asker")
+    await repo.create_task(task_id, "Consult task", "ask B", "cw-asker")
+    await repo.start_task(task_id, sid)
+    out = {"deferred": True, "consult_waiting": True, "session_id": sid,
+           "proposal_id": "prop_specialist", "target": "cw-spec"}
+    try:
+        await orchestration._land_task_question_outcome(task_id, out)
+        assert (await repo.get_task(task_id))["status"] == "REVIEW"
+        assert await _task_events(["task.review"], task_id) == []
+        await orchestration._land_task_question_outcome(None, out)
+        assert decided == []
+    finally:
+        conn = await repo._conn()
+        try:
+            await conn.execute("delete from task where id = $1", task_id)
+            await conn.execute("delete from session where id = $1", sid)
         finally:
             await conn.close()

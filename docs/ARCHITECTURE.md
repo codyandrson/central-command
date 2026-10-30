@@ -858,7 +858,8 @@ record that cannot be re-entered), `orchestration._fail`,
 `orchestration.resume_parked_session`, `orchestration.resume_parked_read`,
 `orchestration.resume_consult_wait`, `orchestration.resume_task_wait`,
 `orchestration._finish_answered_resume`, `orchestration._decline_continue`
-(the operator declined), and `nerve_gateway._close_conversation_for_key` (the
+(the operator declined), `orchestration.maybe_resume` (a parked orchestration
+whose state names no task, landed before it is claimed), and `nerve_gateway._close_conversation_for_key` (the
 operator closed a failed execution). `tests/test_turn_parking.py` walks the
 source against both lists.
 
