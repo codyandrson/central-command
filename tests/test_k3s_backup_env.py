@@ -47,6 +47,7 @@ def tree(tmp_path: Path) -> Path:
     (t / "web").mkdir()
     shutil.copy(K3S_DIR / "backup.sh", t / "deploy" / "k3s" / "backup.sh")
     shutil.copy(K3S_DIR / "env-path.sh", t / "deploy" / "k3s" / "env-path.sh")
+    shutil.copy(K3S_DIR / "instance-lib.sh", t / "deploy" / "k3s" / "instance-lib.sh")
     for label, rel in SOURCE.items():
         (t / rel).write_bytes(CONTENT[label])
     stubs = tmp_path / "stubs"

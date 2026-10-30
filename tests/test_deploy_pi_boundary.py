@@ -123,9 +123,6 @@ def test_the_other_k3s_scripts_name_the_shared_litellm_files_and_the_moved_unit(
     assert '"$HERE/cc-nerve.service"' in setup and "deploy/pi/cc-nerve.service" not in setup
     assert "deploy/shared/litellm/config.yaml" in _code(K3S / "make-secrets.sh")
     assert "deploy/shared/litellm/policy.py --check" in _code(K3S / "verify.sh")
-    assert "deploy/pi/cc-nerve.service" not in _code(K3S / "migrate-to-cc.sh")
-    migrate = _code(K3S / "migrate-to-cc.sh")
-    assert '"$REPO/deploy/k3s/.env"' in migrate and '"$REPO/deploy/pi/.env"' not in migrate
 
 
 def test_the_app_and_the_single_profile_name_the_shared_files():
@@ -253,7 +250,6 @@ ALLOWED = {
     "deploy/k3s/cc-update.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/init-env.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/setup.sh": ("operator-facing fallback message", _message),
-    "deploy/k3s/migrate-to-cc.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/README.md": ("sections 0a/0b are the dated history of the two boundary updates; "
                              "section 10 reaches the retired stack through git and says which "
                              "env to copy to the old path before the Compose fallback can start",

@@ -21,7 +21,7 @@
 #     litellm, n8n + the two decryption keys — see below) -> stop cc-uvicorn +
 #     cc-sandbox-runner (cc-nerve stays up serving progress; restarted last)
 #     -> merge the tag -> schema (additive-only, idempotent) -> pip + cockpit
-#     rebuild AS codyslab (root-owned files in the checkout break every later
+#     rebuild AS the checkout's owner (root-owned files in the checkout break every later
 #     build) -> apply changed k8s manifests + install changed unit files ->
 #     start services -> health poll -> on failure: git reset --hard to the
 #     checkpoint, rebuild, restore the images/manifests the forward pass
@@ -42,15 +42,16 @@
 # ============================================================================
 set -uo pipefail
 
-REPO=/home/codyslab/central-command
-RUNAS=(runuser -u codyslab --)
 RUNDIR=/run/cc-update
 STATEDIR=/var/lib/cc-update
 STATUS="$STATEDIR/status.json"
 REQUEST="$RUNDIR/request.json"
 STAGE_REQUEST="$RUNDIR/stage-request.json"
 STAGE_MODE=0   # 1 = `cc-update.sh stage`: prebuild caches only, never mutate
-BACKUPS=/home/codyslab/cc-backups
+if [[ "${1:-}" == stage ]]; then
+  STAGE_MODE=1
+  STATUS="$STATEDIR/stage.json"   # write_status + the TERM trap follow this
+fi
 K=(k3s kubectl -n central-command)
 STARTED_AT="$(date -u +%FT%TZ)"
 
@@ -67,17 +68,6 @@ IMAGE_DEPLOYS=()     # deployments whose image bytes changed under the same tag
 TOUCHED_DEPLOYS=()   # deployments whose manifest changed
 APPLIED_MANIFESTS=0
 WT=""                # build worktree, "" when none exists
-
-set -a
-# shellcheck disable=SC1091
-# shellcheck source=env-path.sh
-. "$REPO/deploy/k3s/env-path.sh"
-ENV_FILE="$(cc_k3s_env_file "$REPO")"
-[[ -f "$ENV_FILE" ]] && . "$ENV_FILE"
-set +a
-
-# Same resolution as the build scripts and verify.sh: override in deploy/k3s/.env.
-COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
 
 note() { printf '%s\n' "$*"; }   # journald captures stdout — that IS the log
 
@@ -99,6 +89,43 @@ PY
   chmod 644 "$tmp" && mv -f "$tmp" "$STATUS"
 }
 
+# ── where this install lives ─────────────────────────────────────────────────
+# Derived from the script the unit ran, ONCE, here: nothing below re-resolves,
+# so neither the merge nor a rollback's reset --hard can move these, and no
+# build worktree can become REPO (its scripts resolve their own REPO_ROOT).
+# Before anything is touched, and loud in the cockpit as well as the journal:
+# this runs with no -e, and an empty RUNAS would run every later step as root.
+instance_fail() { # <message>
+  note "FAILED at resolve: $1"
+  mkdir -p "$STATEDIR" 2>/dev/null
+  write_status failed resolve "$1"
+  exit 1
+}
+
+SELF="${BASH_SOURCE[0]}"
+# shellcheck source=instance-lib.sh
+. "$(dirname "$SELF")/instance-lib.sh" || instance_fail "deploy/k3s/instance-lib.sh could not be read"
+REPO="$(cc_k3s_checkout "$SELF")" \
+  && OWNER="$(cc_k3s_owner "$SELF")" \
+  && OWNER_GROUP="$(cc_k3s_group "$SELF")" \
+  && OWNER_HOME="$(cc_k3s_home "$SELF")" \
+  || instance_fail "could not derive this install's checkout, owner, group or home — the journal names which"
+RUNAS=(runuser -u "$OWNER" --)
+
+set -a
+# shellcheck disable=SC1091
+# shellcheck source=env-path.sh
+. "$REPO/deploy/k3s/env-path.sh"
+ENV_FILE="$(cc_k3s_env_file "$REPO")"
+[[ -f "$ENV_FILE" ]] && . "$ENV_FILE"
+set +a
+
+# After the env: CC_BACKUP_DIR in deploy/k3s/.env counts, same rule as backup.sh.
+BACKUPS="$(cc_k3s_backup_dir "$SELF")" || instance_fail "could not derive the backup directory — the journal says why"
+
+# Same resolution as the build scripts and verify.sh: override in deploy/k3s/.env.
+COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
+
 phase() { note "== $1"; write_status running "$1"; }
 
 start_services()  { systemctl start cc-uvicorn cc-sandbox-runner; systemctl restart cc-nerve; }
@@ -112,8 +139,8 @@ healthy() { # poll the API up to 2 minutes; it is the load-bearing process
   return 1
 }
 
-rebuild() { # as codyslab, never root
-  "${RUNAS[@]}" env VIRTUAL_ENV="$REPO/.venv" PATH="/home/codyslab/.local/bin:$PATH" \
+rebuild() { # as the checkout's owner, never root
+  "${RUNAS[@]}" env VIRTUAL_ENV="$REPO/.venv" PATH="$OWNER_HOME/.local/bin:$PATH" \
     bash -c "cd '$REPO' && uv pip install -e '.[dev,runtime]'" || return 1
   patch_graphiti
   # `npm ci`, never `npm install`: install REWRITES package-lock.json when its
@@ -416,7 +443,7 @@ main() {
   else
     # Build from a detached worktree of the target tag: no merge is needed, so
     # the running checkout stays exactly as the live services expect it.
-    WT="/home/codyslab/.cc-update-build-$CKPT"
+    WT="$OWNER_HOME/.cc-update-build-$CKPT"
     "${RUNAS[@]}" git -C "$REPO" worktree add --detach "$WT" "v$TARGET_VERSION" \
       || die prebuild "could not create the build worktree $WT — nothing was stopped or merged"
 
@@ -434,7 +461,7 @@ main() {
         fi
       done
       # The target tag's OWN build script, resolving its REPO_ROOT from
-      # BASH_SOURCE inside the worktree; as codyslab, because git, ssh keys and
+      # BASH_SOURCE inside the worktree; as the checkout's owner, because git, ssh keys and
       # the docker group are the operator's, not root's.
       log="$(mktemp "/tmp/cc-update-build-$name.XXXXXX.log")"
       "${RUNAS[@]}" env CC_COMPUTE_SSH="$COMPUTE_SSH" bash "$WT/deploy/k3s/$script" >"$log" 2>&1 &
@@ -485,7 +512,7 @@ main() {
     if ! gunzip -c "$file" | tail -5 | grep -q 'PostgreSQL database dump complete'; then
       rm -f "$file"; return 1
     fi
-    chown codyslab:codyslab "$file" 2>/dev/null; chmod 600 "$file"
+    chown "$OWNER:$OWNER_GROUP" "$file" 2>/dev/null; chmod 600 "$file"
   }
 
   dump_pg central_command cc-postgres   central_command central_command \
@@ -502,7 +529,7 @@ main() {
     echo "N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}"
     echo "LITELLM_SALT_KEY=${LITELLM_SALT_KEY:-}"
   } >"$keyfile"
-  chown codyslab:codyslab "$keyfile" 2>/dev/null; chmod 600 "$keyfile"
+  chown "$OWNER:$OWNER_GROUP" "$keyfile" 2>/dev/null; chmod 600 "$keyfile"
   [[ -n "${N8N_ENCRYPTION_KEY:-}" && -n "${LITELLM_SALT_KEY:-}" ]] \
     || note "WARNING: a decryption key is missing from deploy/k3s/.env — the litellm/n8n dumps above would not be restorable"
 
@@ -771,7 +798,7 @@ stage_main() {
   if [[ ${#changed_rows[@]} -eq 0 ]]; then
     note "no image inputs change in v$TARGET_VERSION — nothing to build"
   else
-    WT="/home/codyslab/.cc-stage-build-$(date -u +%Y%m%dT%H%M%SZ)"
+    WT="$OWNER_HOME/.cc-stage-build-$(date -u +%Y%m%dT%H%M%SZ)"
     "${RUNAS[@]}" git -C "$REPO" worktree add --detach "$WT" "v$TARGET_VERSION" \
       || die stage-build "could not create the build worktree $WT"
     for row in "${changed_rows[@]}"; do
@@ -795,8 +822,6 @@ stage_main() {
 }
 
 if [[ "${1:-}" == stage ]]; then
-  STAGE_MODE=1
-  STATUS="$STATEDIR/stage.json"   # write_status + the TERM trap follow this
   stage_main
 else
   main "$@"

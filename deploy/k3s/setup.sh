@@ -1002,10 +1002,17 @@ phase_app() {
   set_kv_if_unset "$APP_ENV" CC_LITELLM_DB_URL \
     "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD:-}@127.0.0.1:5443/litellm" "app-litellm-db-url"
   # The three minted kubeconfig paths. The sandbox one is deliberately absent:
-  # it is pinned in cc-sandbox-runner.service, not in the app's env.
-  set_kv_if_unset "$APP_ENV" CC_MCP_DEPLOY_KUBECONFIG  "/home/codyslab/.cc-mcp-deployer.kubeconfig"       "app-mcp-kubeconfig"
-  set_kv_if_unset "$APP_ENV" CC_LITELLM_KUBECONFIG     "/home/codyslab/.cc-litellm-operator.kubeconfig"   "app-litellm-kubeconfig"
-  set_kv_if_unset "$APP_ENV" CC_LITELLM_LOG_KUBECONFIG "/home/codyslab/.cc-litellm-logreader.kubeconfig"  "app-litellm-log-kubeconfig"
+  # it is pinned in cc-sandbox-runner.service, not in the app's env. They live in
+  # the checkout owner's home (the make-*-kubeconfig.sh scripts write them there).
+  local owner_home
+  # shellcheck source=instance-lib.sh
+  if ! . "$HERE/instance-lib.sh" || ! owner_home="$(cc_k3s_home "$HERE/setup.sh")"; then
+    fail "app-owner-home" "could not derive the checkout owner's home — the line above names what failed"
+    return 1
+  fi
+  set_kv_if_unset "$APP_ENV" CC_MCP_DEPLOY_KUBECONFIG  "$owner_home/.cc-mcp-deployer.kubeconfig"       "app-mcp-kubeconfig"
+  set_kv_if_unset "$APP_ENV" CC_LITELLM_KUBECONFIG     "$owner_home/.cc-litellm-operator.kubeconfig"   "app-litellm-kubeconfig"
+  set_kv_if_unset "$APP_ENV" CC_LITELLM_LOG_KUBECONFIG "$owner_home/.cc-litellm-logreader.kubeconfig"  "app-litellm-log-kubeconfig"
 
   # Settings with a value THIS profile needs, added only when the key is
   # ABSENT: an operator's own value — an empty one included, which is an

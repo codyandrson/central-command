@@ -9,7 +9,7 @@
 #   token (Role: jobs/pods/exec/log in cc-sandbox only, no ClusterRole) — this
 #   kubeconfig can make/exec/delete sandbox pods and nothing else, anywhere.
 #
-#   Written to /home/codyslab/.cc-sandbox-runner.kubeconfig, mode 0600 (same
+#   Written to <checkout owner's home>/.cc-sandbox-runner.kubeconfig, mode 0600 (same
 #   posture as any other credential on this box — never under the repo, never
 #   world-readable). Idempotent: re-running just rewrites the file with
 #   whatever the Secret currently holds (a token rotation is picked up by
@@ -19,10 +19,15 @@
 # ============================================================================
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=instance-lib.sh
+. "$HERE/instance-lib.sh"
+OWNER_HOME="$(cc_k3s_home "${BASH_SOURCE[0]}")"
+
 NS=cc-sandbox
 SA=cc-sandbox-runner
 SECRET=cc-sandbox-runner-token
-OUT="/home/codyslab/.cc-sandbox-runner.kubeconfig"
+OUT="$OWNER_HOME/.cc-sandbox-runner.kubeconfig"
 SERVER="https://127.0.0.1:6443"
 KUBECTL=(sudo k3s kubectl)
 

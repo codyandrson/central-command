@@ -10,7 +10,6 @@ deploy/desktop-superseded/cc-uvicorn.service	b
 deploy/desktop-superseded/homelab-portcheck.service	b
 deploy/desktop-superseded/homelab-portcheck.sh	b
 deploy/k3s/.env.example	a
-deploy/k3s/backup.sh	b
 deploy/k3s/build-crawler-image.sh	a
 deploy/k3s/build-crawler-image.sh	c
 deploy/k3s/build-sandbox-image.sh	a
@@ -21,19 +20,11 @@ deploy/k3s/cc-sandbox-runner.service	b
 deploy/k3s/cc-update-stage.service	b
 deploy/k3s/cc-update.service	b
 deploy/k3s/cc-update.sh	a
-deploy/k3s/cc-update.sh	b
 deploy/k3s/cc-update.sh	c
 deploy/k3s/cc-uvicorn.service	b
 deploy/k3s/install-gvisor.sh	a
 deploy/k3s/install-gvisor.sh	c
-deploy/k3s/make-litellm-kubeconfig.sh	b
-deploy/k3s/make-mcp-kubeconfig.sh	b
-deploy/k3s/make-sandbox-kubeconfig.sh	b
-deploy/k3s/migrate-to-cc.sh	a
-deploy/k3s/migrate-to-cc.sh	b
-deploy/k3s/migrate-to-cc.sh	c
 deploy/k3s/setup.sh	a
-deploy/k3s/setup.sh	b
 deploy/k3s/setup.sh	c
 deploy/k3s/verify.sh	a
 deploy/k3s/verify.sh	c

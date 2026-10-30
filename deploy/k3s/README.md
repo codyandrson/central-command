@@ -25,12 +25,10 @@ v2.0.0 renamed every identifier (package, `CC_*` prefix, `cc-*` pods/units/
 images, the namespaces, the databases and role, the Graphiti group ids, the
 LiteLLM alias, the n8n webhook paths). Kubernetes cannot rename a namespace
 and the cockpit updater cannot rename its own units mid-run, so **this one
-release is applied by hand**, with downtime, by `deploy/k3s/migrate-to-cc.sh`
-— its header is the runbook (rehearse with `DUMP_ONLY=1`, then run, then
-`verify.sh`, then `cleanup` to delete the old namespace once everything is
-green; `rollback` reverses from the journal). Do NOT press "Check for
-updates" in the cockpit for this release. Fresh installs follow §1 onward as
-before.
+release was applied by hand**, with downtime, by a one-shot script, kept in
+git history at v2.75.0, where its header is the runbook. The cockpit updater
+refuses a v1.x install (`min_upgrade_from` in `VERSION`). Fresh installs follow
+§1 onward as before.
 
 ## 0a. The update that removes the Graphiti server
 
@@ -584,9 +582,9 @@ code bug.
 Everything in §§1–7 rebuilds the **system**. None of it restores **this
 instance's** accumulated data. Decide each of these deliberately.
 
-Backups live in the backup directory (`CC_BACKUP_DIR` in the backup
-script's environment; its default is the operator's, see your private docs; 0600 in a 0700 dir, outside the
-repo). Full commands are in the **RESTORE section at the bottom of
+Backups live in the backup directory (`CC_BACKUP_DIR` in `deploy/k3s/.env`,
+by default `cc-backups` in the home of the account that owns the checkout;
+0600 in a 0700 dir, outside the repo). Full commands are in the **RESTORE section at the bottom of
 `deploy/k3s/backup.sh`** — read it there, it is the authority.
 
 1. **n8n workflows + the encrypted Gmail OAuth credential — REQUIRED for the

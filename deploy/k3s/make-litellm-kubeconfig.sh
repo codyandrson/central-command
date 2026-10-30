@@ -15,7 +15,7 @@
 #   form does not resolve the dotted key and is a live-found bug (do not
 #   "simplify" back to it).
 #
-#   Written to /home/codyslab/.cc-litellm-operator.kubeconfig, mode 0600.
+#   Written to <checkout owner's home>/.cc-litellm-operator.kubeconfig, mode 0600.
 #   Idempotent: re-running rewrites the file with whatever the Secret
 #   currently holds (a token rotation is picked up by re-running this, not by
 #   editing the file).
@@ -25,15 +25,20 @@
 #   pods/log get ONLY, no configmaps/deployments/secrets). Kept distinct from
 #   the write identity above because runtime/ tools may hold READ credentials
 #   only; the Executor's write kubeconfig must never reach a runtime tool.
-#   Written to /home/codyslab/.cc-litellm-logreader.kubeconfig, mode 0600.
+#   Written to <checkout owner's home>/.cc-litellm-logreader.kubeconfig, mode 0600.
 #
 #   Usage:  ./deploy/k3s/make-litellm-kubeconfig.sh
 #           then put the path in the REPO-ROOT .env as
-#           CC_LITELLM_KUBECONFIG=/home/codyslab/.cc-litellm-operator.kubeconfig
+#           CC_LITELLM_KUBECONFIG=<checkout owner's home>/.cc-litellm-operator.kubeconfig
 #           and restart cc-uvicorn (a merged change is not live until its
 #           process restarts).
 # ============================================================================
 set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=instance-lib.sh
+. "$HERE/instance-lib.sh"
+OWNER_HOME="$(cc_k3s_home "${BASH_SOURCE[0]}")"
 
 NS=central-command
 SERVER="https://127.0.0.1:6443"
@@ -78,9 +83,9 @@ mint() {
 # Write identity — the Executor's, WRITE verbs (configmaps, deployments).
 # Put the path in the REPO-ROOT .env as CC_LITELLM_KUBECONFIG.
 mint cc-litellm-operator cc-litellm-operator-token \
-  "/home/codyslab/.cc-litellm-operator.kubeconfig"
+  "$OWNER_HOME/.cc-litellm-operator.kubeconfig"
 
 # Read-only identity — the runtime's, pods get/list + pods/log get ONLY.
 # Put the path in the REPO-ROOT .env as CC_LITELLM_LOG_KUBECONFIG.
 mint cc-litellm-logreader cc-litellm-logreader-token \
-  "/home/codyslab/.cc-litellm-logreader.kubeconfig"
+  "$OWNER_HOME/.cc-litellm-logreader.kubeconfig"

@@ -13,18 +13,23 @@
 #   `.data."ca.crt"` form does not resolve the dotted key and is a live-found
 #   bug (do not "simplify" back to it).
 #
-#   Written to /home/codyslab/.cc-mcp-deployer.kubeconfig, mode 0600. Idempotent:
-#   re-running rewrites the file with whatever the Secret currently holds (a
+#   Written to <checkout owner's home>/.cc-mcp-deployer.kubeconfig, mode 0600.
+#   Idempotent: re-running rewrites the file with whatever the Secret currently holds (a
 #   token rotation is picked up by re-running this, not by editing the file).
 #
 #   Usage:  ./deploy/k3s/make-mcp-kubeconfig.sh
 # ============================================================================
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=instance-lib.sh
+. "$HERE/instance-lib.sh"
+OWNER_HOME="$(cc_k3s_home "${BASH_SOURCE[0]}")"
+
 NS=cc-mcp
 SA=cc-mcp-deployer
 SECRET=cc-mcp-deployer-token
-OUT="/home/codyslab/.cc-mcp-deployer.kubeconfig"
+OUT="$OWNER_HOME/.cc-mcp-deployer.kubeconfig"
 SERVER="https://127.0.0.1:6443"
 KUBECTL=(sudo k3s kubectl)
 

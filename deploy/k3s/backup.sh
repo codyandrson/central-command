@@ -44,8 +44,16 @@
 # ============================================================================
 set -uo pipefail
 
-REPO="${REPO:-/home/codyslab/central-command}"
-OUT="${CC_BACKUP_DIR:-/home/codyslab/cc-backups}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=instance-lib.sh
+. "$HERE/instance-lib.sh" || { echo "[backup] ERROR: deploy/k3s/instance-lib.sh could not be read" >&2; exit 1; }
+
+# REPO and CC_BACKUP_DIR in the environment win (the reset phase, a hand run).
+# Otherwise both are derived from the checkout, never from $USER or $HOME: this
+# runs as root from cc-backup.service.
+REPO="${REPO:-}"
+[[ -n "$REPO" ]] || REPO="$(cc_k3s_checkout "${BASH_SOURCE[0]}")" || exit 1
+OUT="${CC_BACKUP_DIR:-}"
 RETAIN_DAYS="${CC_BACKUP_RETAIN_DAYS:-14}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 NS=central-command
@@ -55,7 +63,6 @@ K=(k3s kubectl -n "$NS")   # runs as root from the systemd timer
 # file. The n8n dump carries the encrypted Gmail credential and the spine dump
 # carries real mail content.
 umask 077
-mkdir -p "$OUT"; chmod 700 "$OUT"
 
 set -a
 # shellcheck disable=SC1091
@@ -64,6 +71,10 @@ set -a
 ENV_FILE="$(cc_k3s_env_file "$REPO")"
 [[ -f "$ENV_FILE" ]] && . "$ENV_FILE"
 set +a
+
+# After the env, so the key in deploy/k3s/.env counts.
+[[ -n "$OUT" ]] || OUT="$(cc_k3s_backup_dir "$REPO/deploy/k3s/backup.sh")" || exit 1
+mkdir -p "$OUT"; chmod 700 "$OUT"
 
 # One backup at a time — an overlapping run would fight over the neo4j scale-down.
 exec 9>"${OUT}/.backup.lock"
