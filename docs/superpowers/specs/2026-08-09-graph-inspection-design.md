@@ -1,5 +1,7 @@
 # Graph inspection & curation — the rung ladder (2026-08-09)
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** diverged — rungs 1-3 built with the spec; curation writes built later but not through the Executor/proposal gate as the spec's "next increment" proposed — this record's own inline correction (below) already reflects that
 > **As-built:** `central_command/integrations/neo4j_writer.py`
 > **As-built note (2026-09-20):** Rungs 1-3 built with the spec (browse recipe, `graph_inspect.py`, cockpit Graph panel); curation writes built 2026-08-15, but not as the spec's 'next increment' originally proposed — not a proposal through the Executor, but a closed write set in `integrations/neo4j_writer.py` the API tier calls directly. Graphistry integration remains the one deferred increment.
@@ -124,7 +126,7 @@ struck/dimmed, never hidden.
 ### The Graphistry seam (built now) vs. Graphistry itself (deferred)
 
 Graphistry's GPU requirement is **server-side** (RAPIDS on NVIDIA/x86); the
-homelab Pi/chromebox can never host it, the operator's workstation and the work
+homelab Pi/<compute-node-name> can never host it, the operator's workstation and the work
 deployment can. Decision (The operator, 2026-08-09): ship the **seam** now, defer the
 integration until scale or the work deployment demands it.
 

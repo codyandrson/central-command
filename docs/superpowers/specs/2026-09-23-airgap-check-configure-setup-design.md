@@ -1,5 +1,7 @@
 # Air-gapped install: one answer file, a check that executes nothing, a setup that cannot surprise
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** implemented — every phase shipped (v2.42.0–v2.45.0)
 > **As-built:** P1 — `deploy/env-lib.sh`, `.env.example`, `deploy/single/setup.sh`, `deploy/single/update.sh`, `deploy/single/resolve-images.sh`, `deploy/single/make-secrets.sh`, `deploy/discover.sh`, `central_command/config.py`, `central_command/api/update.py`, `tests/test_single_no_tree_writes.py`. P2 (v2.43.0, D2 + D4) — the same five scripts plus `deploy/single/machine-lib.sh` (new), `deploy/single/build-sandbox-image.sh`, `deploy/single/build-crawler-image.sh`, `deploy/single/verify.sh`, `deploy/single/discover-llm.sh`, `deploy/single/compose.yaml`, `deploy/single/images.txt`, `deploy/k3s/sandbox.Dockerfile`, `central_command/crawler/Dockerfile`, `central_command/sandbox/runner.py`, `deploy/AIRGAP.md`, `deploy/single/README.md`, `.claude/rules/deploy-single.md`, `.claude/skills/setup/SKILL.md`, `tests/test_single_airgap_seams.py`, `tests/test_single_machine_lib.py` (new).
 > P3 (v2.44.0, D5 + D3) — `deploy/single/setup.sh` (the `check` command, the
@@ -329,7 +331,7 @@ containers/buildah#3284). Every script that builds these with podman therefore
 puts a `cc-ca.crt` in the context even when there is no CA — an EMPTY one, which
 the `-s` test reads exactly as the old `[ -s /run/secrets/cc_ca ]` did and which
 the layer removes again. That includes the three k3s build scripts, whose
-chromebox builds are podman; the Pi's `docker build` from the repo context is the
+<compute-node-name> builds are podman; the Pi's `docker build` from the repo context is the
 one genuine zero-match case and BuildKit tolerates it.
 
 **AMENDMENT, 2026-09-24 (F32): `CC_CA_BUNDLE` REPLACES the trust store, so the

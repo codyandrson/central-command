@@ -5,10 +5,6 @@
 # (keep the lines sorted). Epic story 12 deletes this file, and the code that
 # reads it, once it is empty.
 central_command/gateway/executor.py	d
-deploy/desktop-superseded/cc-nerve.service	b
-deploy/desktop-superseded/cc-uvicorn.service	b
-deploy/desktop-superseded/homelab-portcheck.service	b
-deploy/desktop-superseded/homelab-portcheck.sh	b
 deploy/k3s/.env.example	a
 deploy/k3s/build-crawler-image.sh	a
 deploy/k3s/build-crawler-image.sh	c
@@ -24,8 +20,4 @@ deploy/k3s/verify.sh	a
 deploy/k3s/verify.sh	c
 deploy/shared/litellm/config.yaml	a
 deploy/shared/litellm/model-preferences.yaml	a
-docs/superpowers/plans/2026-07-26-adaptive-routing-units-1-2.md	a
-docs/superpowers/plans/2026-07-26-skills-library.md	b
-docs/superpowers/plans/2026-07-27-discussion-stall-escalation.md	b
-docs/superpowers/specs/2026-07-27-default-alias-seam-design.md	a
 tests/test_mail_actions.py	a

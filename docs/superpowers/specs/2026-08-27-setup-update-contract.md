@@ -1,5 +1,7 @@
 # The setup & update contract (2026-08-27)
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** partial — Phase A+B built; Phase C (connected update check) built but diverged from the spec — an in-process 1-hour cache rather than ETag-conditional-GET cached in the spine DB — secondary record, see `../specs/2026-08-21-setup-onboarding-design.md`
 > **As-built:** `central_command/api/update.py`
 
@@ -131,7 +133,7 @@ a prose runbook with helper scripts and no orchestrator. Phase B:
 
 - **Role labels replace hostname literals.** Nodes are labeled
   `cc-role/anchor` (small stateful stores, control plane — today the Pi) and
-  `cc-role/compute` (JVM/gVisor/Chromium muscle — today the chromebox).
+  `cc-role/compute` (JVM/gVisor/Chromium muscle — today the <compute-node-name>).
   Every `kubernetes.io/hostname` selector/affinity in the manifests becomes a
   role selector; verify.sh asserts placement by role. The role→node mapping
   is elicited setup data (the driver applies the labels). Design RULES

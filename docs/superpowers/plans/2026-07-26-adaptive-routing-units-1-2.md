@@ -1,5 +1,7 @@
 # Adaptive Routing (Units 1–2) Implementation Plan
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** partial — Units 1-2 (tiers/costs/declarations) landed; fallback declared but never turned on by operator decision; Unit 3 out of scope — secondary record, see `../specs/2026-07-26-adaptive-routing-that-learns-design.md`
 > **As-built:** `deploy/shared/litellm/model-preferences.yaml`
 
@@ -231,7 +233,7 @@ models:
     input_cost_per_token: 0.000001
     timeout: null
 
-  # ── Workstation, 100.73.68.9 over Tailscale (free; often off) ─────────────
+  # ── Workstation, <model-host-address> over Tailscale (free; often off) ─────────────
   # timeout is generous ON PURPOSE: liveness is now detected by background
   # health checks (config.yaml general_settings), which frees the request
   # timeout to cover a COLD MODEL LOAD. A short timeout here would misread a

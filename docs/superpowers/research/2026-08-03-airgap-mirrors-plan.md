@@ -1,5 +1,7 @@
 # Air-gapped mirrors plan — 2026-08-03
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** implemented — registry mirror env vars and a k3s registries.yaml example exist
 > **As-built:** `deploy/AIRGAP.md`, `deploy/k3s/registries.yaml.example`
 > **As-built note (2026-09-20):** The mechanism this checklist called for exists today — `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` mirror variables are documented and wired in `deploy/AIRGAP.md`, and `deploy/k3s/registries.yaml.example` ships as the k3s-side example.
@@ -28,7 +30,7 @@ Grepped from `deploy/k3s/*.yaml`:
 
 `build-graphiti-image.sh` already proves the tarball-import path works (it
 builds locally per-arch and imports into containerd — arm64 via docker on
-the Pi, amd64 natively via podman on the chromebox, no QEMU). That mechanism
+the Pi, amd64 natively via podman on the <compute-node-name>, no QEMU). That mechanism
 generalizes to every image above: pull once outside the air gap, `docker
 save` / `ctr images export` to a tarball, `ctr images import` on each node.
 
@@ -144,7 +146,7 @@ lines:
   toolchain) or shipped as pre-built tarballs from the connected side.
   Recommend tarballs — matches the existing two-node
   build-locally-then-import flow (`build-graphiti-image.sh`) and avoids
-  needing docker (Pi) and podman (chromebox) build tooling on the air-gapped
+  needing docker (Pi) and podman (<compute-node-name>) build tooling on the air-gapped
   site at all.
 - k3s version parity between whatever version is developed/tested here and
   whatever air-gap tarball ships to the work site — a mismatch is an

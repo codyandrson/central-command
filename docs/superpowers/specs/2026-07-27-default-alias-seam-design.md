@@ -1,5 +1,7 @@
 # The `cc-default` alias seam — design
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** implemented — routing logic deferred to LiteLLM; `cc-smart` deleted (never routed)
 > **As-built:** `deploy/shared/litellm/model-preferences.yaml`
 > **As-built note (2026-09-20):** Shipped — routing logic is deferred to LiteLLM; the spine addresses one alias, `cc-default`. `cc-smart` was deleted (it never routed).
@@ -65,7 +67,7 @@ code change.
   point of control.
 - Embeddings are already self-hosted (`aembedding → openai/qwen3-embedding`).
   Consistent with constraint 2; out of scope here.
-- The workstation (`100.73.68.9`) is up and serving `qwen3-coder-next` on `:8081`.
+- The workstation (`<model-host-address>`) is up and serving `qwen3-coder-next` on `:8081`.
   `qwen3.6-35b` on `:8080` is down — one GPU, one model at a time.
 
 ## Mechanism — a deployment row, not `model_group_alias`
@@ -95,7 +97,7 @@ The path Central Command uses already works this way: `anthropic_messages` →
 ```
 model_name:     cc-default
 litellm_params: model:                openai/qwen3-coder-next
-                api_base:             http://100.73.68.9:8081/v1
+                api_base:             http://<model-host-address>:8081/v1
                 timeout:              300
                 input_cost_per_token: 0
 ```
@@ -220,7 +222,7 @@ default. No prohibition on different models in the future, nothing else."*
 **What shipped:**
 
 1. `cc-default` created via `POST /model/new` → `openai/qwen3-coder-next` @
-   `100.73.68.9:8081`, timeout 300, cost 0. Model id
+   `<model-host-address>:8081`, timeout 300, cost 0. Model id
    `11765ab3-a240-4319-985a-9eda678def66`.
 2. Fallback `cc-default → claude-haiku-4-5` via `POST /fallback`; survived the
    proxy restart.

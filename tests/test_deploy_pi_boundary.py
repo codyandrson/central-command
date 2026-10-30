@@ -244,7 +244,6 @@ ALLOWED = {
     "CHANGELOG.md": ("release history names the paths each release changed", None),
     "docs/superpowers/": ("design records are dated history; their As-built headers point at live files", None),
     "docs/decisions/process.md": ("the decision log recounts the v2.61.0 Graphiti deletion", None),
-    "deploy/desktop-superseded/": ("the pre-move desktop units, kept as history", None),
     "deploy/k3s/env-path.sh": ("the resolver's fallback and the one-time move (kept through B by decision)", None),
     "deploy/shared/litellm/policy.py": ("the resolver's Python mirror", _block("def _env_path(")),
     "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),

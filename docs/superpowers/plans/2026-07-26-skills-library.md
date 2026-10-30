@@ -1,5 +1,7 @@
 # Skills Library Implementation Plan
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** implemented — all 12 tasks done, skills are DB rows delivered on demand — secondary record, see `../specs/2026-07-26-skills-library-design.md`
 > **As-built:** `central_command/runtime/packs.py`
 
@@ -2499,7 +2501,7 @@ git push origin master
 - [ ] **Step 1: Read the pattern before writing anything**
 
 ```bash
-cd /home/codyslab/central-command
+cd <checkout>
 sed -n '1,80p' web/src/features/agents/useAgents.ts
 sed -n '1,60p' web/src/features/agents/types.ts
 grep -rn "AgentsView" web/src --include=*.tsx --include=*.ts

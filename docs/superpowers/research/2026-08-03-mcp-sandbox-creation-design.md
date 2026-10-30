@@ -1,5 +1,7 @@
 # MCP server creation via sandbox — design (reconstructed v3)
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** implemented — the sandbox mechanism this record designed is built
 > **As-built:** `central_command/sandbox/runner.py`
 > **As-built note (2026-09-20):** Shipped, now at podman-backend parity — `sandbox/runner.py` (credential-free, `CC_SANDBOX_BACKEND=kubectl`|`podman`), slice 1's ungated exec/read/write/copy_in with nothing produced inside reaching anywhere durable, and slice 2's one gated exit (`mcp.sync_source` — content captured at propose time, never re-read from the sandbox). See `../plans/2026-08-03-sandbox-slice1.md` for the slice 1 implementation record.
@@ -89,7 +91,7 @@ policy, nothing else.
 
 **Isolation mechanism.** gVisor (`runtimeClass: gvisor`) as a one-line
 `RuntimeClass` on the Job's pod spec — verified to run on both arm64 (the Pi)
-and amd64 (the chromebox) via the `systrap` platform, which needs no KVM
+and amd64 (the <compute-node-name>) via the `systrap` platform, which needs no KVM
 (neither node has nested virtualization). `anthropic-experimental/sandbox-runtime`
 (`srt`, bubblewrap + an egress-controlling proxy) runs *inside* the container
 as defense-in-depth under gVisor, not instead of it — two independent layers,
@@ -343,7 +345,7 @@ on slice 1 and can land any time after it, independent of slices 2–5.
 
 Each slice is independently useful and independently reviewable — slice 1 in
 particular is a good place to stop and validate the isolation mechanism on
-real hardware (Pi + chromebox) before building anything that depends on it.
+real hardware (Pi + <compute-node-name>) before building anything that depends on it.
 
 ## 11. Open questions — **DECIDED by the operator 2026-08-03** (Q5 in research)
 

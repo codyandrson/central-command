@@ -291,7 +291,7 @@ async def test_a_fresh_databases_first_proposal_executes_live_against_a_fake(
 WALK_ROOTS = ("central_command", "web/src", "web/server/routes", "deploy", "scripts",
               "skills", ".claude/rules", ".claude/skills", "tests", "AGENTS.md",
               "README.md", "docs/ARCHITECTURE.md", ".env.example")
-WALK_EXCLUDED = ("deploy/desktop-superseded", "scripts/oneoff")
+WALK_EXCLUDED = ("scripts/oneoff",)
 SKIP_DIRS = {"node_modules", "__pycache__", ".pytest_cache", "dist"}
 
 # The run-mode tokens. The BARE identifier dry_run and every `--dry-run` flag are

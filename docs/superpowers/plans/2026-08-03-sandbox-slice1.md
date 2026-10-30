@@ -1,5 +1,7 @@
 # Sandbox slice 1 — the mechanism alone, no exit
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** implemented — in-sandbox exec/read/write/copy_in, ungated, nothing durable reachable — secondary record, see `../research/2026-08-03-mcp-sandbox-creation-design.md`
 > **As-built:** `central_command/sandbox/runner.py`
 
@@ -16,19 +18,19 @@ inside can reach anywhere durable** — `mcp.sync_source` is a later slice.
    workspace at `/workspace`; the runner `kubectl exec`s each command into
    it; close/TTL deletes the Job and everything in it. Same trust posture —
    ephemeral, no exit, exec out of the runtime process.
-2. **Chromebox-only**: sandbox pods carry a *required* nodeAffinity to the
-   chromebox. gVisor is installed on the chromebox only (no k3s restart on
+2. **<compute-node-name>-only**: sandbox pods carry a *required* nodeAffinity to the
+   <compute-node-name>. gVisor is installed on the <compute-node-name> only (no k3s restart on
    the Pi's control plane), and the sandbox image is built single-arch with
    podman there (`build-graphiti-image.sh` precedent — fully-qualified ref,
-   `IfNotPresent`). Chromebox down ⇒ sandbox unavailable: accepted default,
+   `IfNotPresent`). <compute-node-name> down ⇒ sandbox unavailable: accepted default,
    same philosophy as the design's §9.3 single-arch call.
 
 ## Components
 
 | # | What | Where |
 |---|---|---|
-| 1 | gVisor: `runsc` + `containerd-shim-runsc-v1` (x86_64) + containerd `config-v3.toml.tmpl` (base template + runsc runtime), restart `k3s-agent` | chromebox |
-| 2 | Sandbox image `cc-sandbox:1`: debian-slim + python3 + node + `@anthropic-ai/sandbox-runtime` (srt) + bubblewrap + git; built with podman, imported fully-qualified | chromebox |
+| 1 | gVisor: `runsc` + `containerd-shim-runsc-v1` (x86_64) + containerd `config-v3.toml.tmpl` (base template + runsc runtime), restart `k3s-agent` | <compute-node-name> |
+| 2 | Sandbox image `cc-sandbox:1`: debian-slim + python3 + node + `@anthropic-ai/sandbox-runtime` (srt) + bubblewrap + git; built with podman, imported fully-qualified | <compute-node-name> |
 | 3 | `deploy/k3s/60-sandbox.yaml`: namespace `cc-sandbox`, RuntimeClass `gvisor` (handler `runsc`), **default-deny-all NetworkPolicy** (egress AND ingress — exec rides the kubelet, not the pod network), SA `cc-sandbox-runner` + namespace Role (jobs/pods/exec) + RoleBinding, LimitRange (default 1Gi mem / 1 cpu) | repo + cluster |
 | 4 | Runner service `central_command/sandbox/runner.py` (FastAPI, own uvicorn): sessions API; drives the cluster by **shelling out to kubectl** with a scoped kubeconfig (SA token) — no new Python k8s dep (ponytail: subprocess-to-kubectl; swap to the python client if it ever limits us). Binds 127.0.0.1:8090. Runs as systemd unit `cc-sandbox-runner.service` on the Pi (venv reuse, no image build). Holds NO Central Command credentials — no DB, no LiteLLM, no Jira; only the scoped kubeconfig. | repo + Pi systemd |
 | 5 | Runtime pack `sandbox` (`runtime/packs.py`) + tools (`runtime/tools.py`): `sandbox_exec`, `sandbox_write_file`, `sandbox_read_file`, `sandbox_copy_in`, `sandbox_reset` — ungated, call the runner over HTTP. `sandbox_copy_in` validates the path against `agent_sandbox_source` (runtime reads the DB; the runner never does). Session key = (agent_id, session_id) from deps; runner creates lazily, TTL-reaps. Demo mode: tools return a stub, no runner calls. Granted to nobody until the operator grants it (web-read precedent). | repo |

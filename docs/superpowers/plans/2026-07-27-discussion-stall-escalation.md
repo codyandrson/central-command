@@ -1,5 +1,7 @@
 # Tier-3 Discussion Stall Escalation — Implementation Plan
 
+Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record is otherwise unchanged.
+
 > **Status:** implemented — S1 sweep flag + S2 nudge + close-seam shipped; `discussion-sweep` schedule seeded disabled (dormant, not unbuilt) — secondary record, see `../specs/2026-07-27-discussion-stall-escalation-design.md`
 > **As-built:** `central_command/db/schema.sql`
 
@@ -13,7 +15,7 @@
 
 ## Global Constraints
 
-- Work in `/home/codyslab/central-command` on the Pi, on `master`. Run tests with `source .venv/bin/activate`.
+- Work in `<checkout>` on the Pi, on `master`. Run tests with `source .venv/bin/activate`.
 - **Assert on rows your test created, never global counts** — the dev DB is shared.
 - **Pin `demo_mode=True`** in any test that reaches code calling `resolve_model()`, or the offline suite calls Claude for real.
 - `runtime/` may never import `gateway/`. (`runtime/questions.py` already reaches `api.orchestration` late — that is allowed and not the banned edge.)

@@ -5,10 +5,9 @@ dry-run executor are test-only; a deployment carries none of `CC_TEST_MODEL`,
 `CC_DEMO_MODE` and `CC_EXECUTOR_MODE`, and the API refuses to start on any of
 them (`central_command/run_modes.py`). Two things pin that on the install side:
 
-* a static walk: no file under `deploy/` (outside `deploy/desktop-superseded/`,
-  the pre-move history) WRITES or SETS one of the three keys — through a
-  `set_kv*` writer, a unit's `Environment=` line, an `export` or a `KEY=value`
-  line. A comment that states the guard is not a write;
+* a static walk: no file under `deploy/` WRITES or SETS one of the three keys
+  — through a `set_kv*` writer, a unit's `Environment=` line, an `export` or a
+  `KEY=value` line. A comment that states the guard is not a write;
 * the single-node `check` FAILS a root `.env` that carries one, whatever its
   value, and passes the `run-modes` row for one that carries none.
 """
@@ -43,7 +42,7 @@ _WRITES = [
 def _deploy_files() -> list[Path]:
     out = []
     for path in sorted((ROOT / "deploy").rglob("*")):
-        if not path.is_file() or "desktop-superseded" in path.parts:
+        if not path.is_file():
             continue
         if "__pycache__" in path.parts or path.suffix in {".pyc", ".png", ".ico", ".zip"}:
             continue
