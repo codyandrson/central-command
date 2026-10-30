@@ -17,6 +17,11 @@ bullet — the one mechanism every later read reuses, on one tool:
 - a run with no landing tail (ingest) re-raises the transient failure into its
   unit's own DOWN path: the ledger item is released, as before.
 
+Later stories append here, among them epic-small-fixes R35 (the operator's
+ruling of 2026-10-29, Decision 10): `propose_delete_episode`, whose deletion
+preview is a live graph read, parks on a graph outage like any read and its
+resume parks the proposal through each tail's own landing.
+
 The operator's acceptance standard for every DOWN park: "I expect these
 processes to resume once the service is available again, with no long term
 evidence of this outage (other than the immediate existence of the banner, and
@@ -27,6 +32,7 @@ as if the service was never offline."
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -36,13 +42,15 @@ from neo4j.exceptions import ServiceUnavailable
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
 )
 from pydantic_ai.models.function import FunctionModel
 
-from central_command.api import orchestration, routes
+from central_command.api import nerve_gateway, orchestration, routes
+from central_command.api import outages as outages_mod
 from central_command.config import settings
 from central_command.contract import TRANSIENT, DependencyDown, classify_failure
 from central_command.db import repo
@@ -815,3 +823,280 @@ async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(
     assert row["status"] == "DONE"
     assert FACT in row["outcome"]
     assert await repo.session_status(session_id) == "DONE"
+
+
+# ── a propose tool that parks on its own read (epic-small-fixes R35) ─────────
+#
+# `propose_delete_episode` embeds a live graph read (the deletion preview). The
+# operator's ruling (2026-10-29, Decision 10): with the graph down the run parks
+# on the outages banner, AWAITING_RESUME on ['graph'], and the graph back, the
+# resume re-executes the tool and parks the deletion proposal through
+# `park_proposal` — never "nothing proposed". What each tail does on resume:
+#
+# - task: `run._land` parks it (`tasked`), the task holds in REVIEW;
+# - converse: `converse._land_turn` parks it (`conversational`);
+# - orchestrator: the round has no proposal landing, so `_process` rejects the
+#   call as a stranger, as it would with no outage — no proposal;
+# - anything else: refused loudly, the session FAILED with the reason.
+
+PREVIEW = {
+    "episode": {"uuid": "ep-1", "name": "wrong renewal date", "group_id": "central_command"},
+    "facts": [{"uuid": "f-1"}], "entities": [], "collateral_facts": [],
+    "provenance_facts": [], "digest": "d1g3st",
+}
+
+
+class _Preview:
+    """`graphiti.episode_delete_preview` double: DOWN (a typed Neo4j outage)
+    until told otherwise; `gone` makes the episode not found."""
+
+    def __init__(self):
+        self.down = True
+        self.gone = False
+        self.calls = 0
+
+    async def __call__(self, uuid):
+        self.calls += 1
+        if self.down:
+            raise ServiceUnavailable("Couldn't connect to graph:7687")
+        return None if self.gone else {**PREVIEW, "episode": {**PREVIEW["episode"], "uuid": uuid}}
+
+
+@pytest.fixture
+def curator(monkeypatch):
+    """jira-expert holds graph-curate for this test only (in process: no grant
+    row is written), and the deletion preview is faked."""
+    from central_command.runtime import packs as packs_mod
+
+    real = packs_mod.granted_packs
+
+    async def with_curate(agent_id):
+        packs = await real(agent_id)
+        if agent_id == "jira-expert" and "graph-curate" not in packs:
+            packs = (*packs, "graph-curate")
+        return packs
+
+    monkeypatch.setattr(packs_mod, "granted_packs", with_curate)
+    preview = _Preview()
+    monkeypatch.setattr(graphiti, "episode_delete_preview", preview)
+    return preview
+
+
+def _retry_or_return(messages, call_id: str):
+    for m in messages:
+        if isinstance(m, ModelRequest):
+            for p in m.parts:
+                if getattr(p, "tool_call_id", None) == call_id and isinstance(
+                    p, (ToolReturnPart, RetryPromptPart)
+                ):
+                    return p
+    return None
+
+
+def _deleting_model() -> FunctionModel:
+    """Turn 1: propose the deletion. Then answer with what the call returned
+    (a retry prompt, on a resume whose episode is gone)."""
+
+    def _respond(messages, info) -> ModelResponse:
+        got = _retry_or_return(messages, "call_del")
+        if got is not None:
+            return ModelResponse(parts=[TextPart(content=f"Answer: {got.content}")])
+        return ModelResponse(parts=[ToolCallPart(
+            tool_name="propose_delete_episode",
+            args={"episode_uuid": "ep-1", "rationale": "the renewal date is wrong"},
+            tool_call_id="call_del",
+        )])
+
+    return FunctionModel(_respond)
+
+
+async def _session_proposals(session_id: str) -> list[dict]:
+    return [p for p in await repo.list_proposals_for("jira-expert")
+            if p["session_id"] == session_id]
+
+
+async def _parked_deletion_task(monkeypatch) -> tuple[dict, str]:
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _deleting_model()))
+    task = await _task("Delete the wrong renewal episode")
+    out = await routes._run_assigned_task(task)
+    assert out["parked"] is True
+    return task, out["session_id"]
+
+
+async def _assert_parked_on_the_graph(session_id: str, after: str) -> None:
+    assert await repo.session_status(session_id) == "AWAITING_RESUME"
+    pending = (await repo.get_session_run_state(session_id))["pending_resume"]
+    assert pending["kind"] == "read" and pending["tool"] == "propose_delete_episode"
+    assert pending["dependencies"] == ["graph"]
+    assert pending["after"] == after
+    assert pending["args"] == {"episode_uuid": "ep-1",
+                               "rationale": "the renewal date is wrong"}
+    assert session_id in await repo.sessions_awaiting_resume()
+    graph_row = next(d for d in (await outages_mod.list_outages())["dependencies"]
+                     if d["name"] == "graph")
+    assert graph_row["waiting"]["sessions"] >= 1, "on the outages banner"
+    assert not await _session_proposals(session_id), "nothing proposed while down"
+
+
+async def _assert_one_deletion_proposal(session_id: str, context_key: str) -> dict:
+    (prop,) = await _session_proposals(session_id)
+    full = await repo.load_proposal(prop["id"])
+    (action,) = full["actions"]
+    assert action["capability"] == "graph.delete_episode@v1"
+    assert action["arguments"]["episode_uuid"] == "ep-1"
+    assert action["arguments"]["preview"]["digest"] == "d1g3st", "the preview is embedded"
+    created = await _events(prop["id"], "proposal.created")
+    assert len(created) == 1, "parked through park_proposal, once"
+    assert created[0]["payload"]["session_id"] == session_id
+    assert created[0]["payload"].get(context_key) is True
+    assert await repo.session_status(session_id) == "AWAITING_HUMAN"
+    return prop
+
+
+@needs_pg
+async def test_a_down_graph_parks_a_deletion_task_and_the_resume_parks_the_proposal(
+    monkeypatch, curator
+):
+    task, session_id = await _parked_deletion_task(monkeypatch)
+    await _assert_parked_on_the_graph(session_id, "task")
+    assert curator.calls == 2, "the bounded retry still runs before the park"
+    assert (await repo.get_task(task["id"]))["status"] == "IN_PROGRESS"
+    messages = json.dumps((await repo.get_session_run_state(session_id))["messages"])
+    assert "nothing proposed" not in messages
+
+    # Still down: the sweep skips it and spends nothing.
+    await make_parks_due()
+    result = await orchestration.retry_sweep(cache=_Probes(graph=False))
+    await orchestration.sweep_settle()
+    assert session_id not in result["resumed"]
+    assert curator.calls == 2
+
+    curator.down = False
+    await make_parks_due()
+    result = await orchestration.retry_sweep(cache=_Probes())
+    await orchestration.sweep_settle()
+    assert session_id in result["resumed"]
+
+    prop = await _assert_one_deletion_proposal(session_id, "tasked")
+    row = await repo.get_task(task["id"])
+    assert row["status"] == "REVIEW" and row["session_id"] == session_id
+    review = await _events(task["id"], "task.review")
+    assert [e["payload"]["proposal_id"] for e in review] == [prop["id"]]
+    assert not await _events(session_id, "session.failed")
+
+
+@needs_pg
+async def test_a_deletion_whose_episode_is_gone_on_resume_hands_back_the_retry(
+    monkeypatch, curator
+):
+    """A NO after the outage is the same NO as without one: the model gets the
+    ModelRetry naming list_graph_group_episodes, and the task lands DONE."""
+    task, session_id = await _parked_deletion_task(monkeypatch)
+    curator.down, curator.gone = False, True
+    monkeypatch.setattr(models, "resolve_model", aresolve(lambda *a, **k: _deleting_model()))
+    await make_parks_due()
+    result = await orchestration.retry_sweep(cache=_Probes())
+    await orchestration.sweep_settle()
+    assert session_id in result["resumed"]
+
+    assert not await _session_proposals(session_id)
+    rs = await repo.get_session_run_state(session_id)
+    retry = _retry_or_return(durable.load_messages(rs), "call_del")
+    assert isinstance(retry, RetryPromptPart)
+    assert "list_graph_group_episodes" in str(retry.content)
+    row = await repo.get_task(task["id"])
+    assert row["status"] == "DONE" and "list_graph_group_episodes" in row["outcome"]
+
+
+async def _chat(session_id: str, message: str) -> list[dict]:
+    frames: list[dict] = []
+
+    async def notify(frame):
+        frames.append(frame)
+
+    await nerve_gateway._chat_send(
+        {"sessionKey": f"agent:jira-expert:{session_id}", "message": message}, notify)
+    for _ in range(200):
+        if any(f.get("event") == "agent"
+               and f["payload"]["data"]["phase"] in ("end", "error") for f in frames):
+            break
+        await asyncio.sleep(0.05)
+    return frames
+
+
+@needs_pg
+async def test_a_down_graph_parks_a_chat_deletion_and_the_resume_parks_it_conversationally(
+    monkeypatch, curator
+):
+    async def _resolve(*a, **k):
+        return _deleting_model()
+
+    monkeypatch.setattr(routes, "resolve_model", _resolve)
+    monkeypatch.setattr(models, "resolve_model", _resolve)
+    monkeypatch.setattr(models, "resolve_session_model", _resolve)
+    session_id = "sess_" + uuid.uuid4().hex[:12]
+    await repo.create_conversation_session(session_id, "jira-expert")
+    await repo.mark_session_awaiting_operator(session_id)
+
+    frames = await _chat(session_id, "Delete the wrong renewal episode ep-1.")
+    phases = [f["payload"]["data"]["phase"] for f in frames if f.get("event") == "agent"]
+    assert phases[-1] == "end", "the spinner clears on a parked turn"
+    await _assert_parked_on_the_graph(session_id, "converse")
+
+    curator.down = False
+    await make_parks_due()
+    result = await orchestration.retry_sweep(cache=_Probes())
+    await orchestration.sweep_settle()
+    assert session_id in result["resumed"]
+    await _assert_one_deletion_proposal(session_id, "conversational")
+    assert not await _events(session_id, "session.failed")
+
+
+async def _repark(session_id: str, **changes) -> None:
+    """Rewrite the parked read's tail — the shape an orchestrator round (or a
+    tail no read parks under) would have left."""
+    rs = await repo.get_session_run_state(session_id)
+    await repo.update_session_run_state(
+        session_id, {"pending_resume": {**rs["pending_resume"], **changes}})
+    await make_parks_due()
+
+
+@needs_pg
+async def test_an_orchestrator_round_rejects_the_resumed_deletion_as_it_would_live(
+    monkeypatch, curator
+):
+    """The orchestrator round holds no proposal landing: a stranger deferred
+    call is a batch rejection with no outage, and so it is after one."""
+    task, session_id = await _parked_deletion_task(monkeypatch)
+    state = {"task_id": task["id"], "round": 0, "stalls": 0, "assigns": 0,
+             "retries": 0, "plan_approved": False}
+    await _repark(session_id, after="orchestrator", state=state)
+    rejected: list[list[str]] = []
+
+    async def capture(task, session_id, result, state, deps, model, calls, problems):
+        rejected.append(problems)
+        return {"rejected": True, "session_id": session_id}
+
+    monkeypatch.setattr(orchestration, "_reject_batch", capture)
+    curator.down = False
+    out = await orchestration.resume_parked_read(session_id)
+
+    assert out["rejected"] is True and out["after"] == "orchestrator"
+    assert rejected == [["unexpected deferred call(s): ['propose_delete_episode']"]]
+    assert not await _session_proposals(session_id)
+
+
+@needs_pg
+async def test_a_tail_with_no_proposal_landing_fails_loudly(monkeypatch, curator):
+    task, session_id = await _parked_deletion_task(monkeypatch)
+    await _repark(session_id, after="consulted")
+    curator.down = False
+
+    with pytest.raises(RuntimeError, match="'consulted' has no proposal landing"):
+        await orchestration.resume_parked_read(session_id)
+
+    assert await repo.session_status(session_id) == "FAILED"
+    failed = await _events(session_id, "session.failed")
+    assert failed and "no proposal landing" in failed[-1]["payload"]["reason"]
+    assert not await _session_proposals(session_id)
+    assert (await repo.get_task(task["id"]))["status"] == "FAILED"

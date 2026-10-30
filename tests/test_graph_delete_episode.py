@@ -21,6 +21,12 @@ What is pinned here:
   a typed world-moved one, whose `graph.ingest.failed` carries `world_moved`
   (epic-small-fixes R26).
 * The propose tool embeds the preview; the cockpit routes confirm a digest.
+* A graph OUTAGE at the preview parks the run as a read on ['graph'] instead of
+  answering "nothing proposed" (epic-small-fixes R35, the operator's ruling of
+  2026-10-29, Decision 10); a missing episode is still a NO (ModelRetry naming
+  list_graph_group_episodes), and a decided deletion proposal's siblings get
+  the ordinary sibling text. The resume through each tail is pinned in
+  `tests/test_outage_doctrine.py`.
 
 Nothing here touches a real graph: every Neo4j call goes through a fake
 `run`, and the ingest worker's deletion seam (`graphiti_ingest._deleter`) is
@@ -422,6 +428,163 @@ async def test_the_propose_tool_hands_back_an_unknown_uuid(monkeypatch):
     monkeypatch.setattr(graphiti, "episode_delete_preview", none)
     with pytest.raises(ModelRetry, match="list_graph_group_episodes"):
         await tools.propose_delete_episode(None, "nope", "why")
+
+
+# --- a graph outage parks the propose tool (epic-small-fixes R35) -----------------------
+
+
+def _down_preview(monkeypatch, exc=None):
+    """`episode_delete_preview` raising a typed Neo4j outage (or `exc`), with
+    the bounded retry's sleep removed. Counts every attempt."""
+    from neo4j.exceptions import ServiceUnavailable
+
+    calls = []
+
+    async def down(uuid):
+        calls.append(uuid)
+        raise exc or ServiceUnavailable("Couldn't connect to graph:7687")
+
+    monkeypatch.setattr(graphiti, "episode_delete_preview", down)
+
+    async def _no_wait(delay):
+        return None
+
+    monkeypatch.setattr(tools, "_sleep", _no_wait)
+    return calls
+
+
+def _tail_ctx():
+    from types import SimpleNamespace
+
+    from central_command.runtime.deps import TriageDeps
+
+    return SimpleNamespace(deps=TriageDeps(agent_id="jira-expert", park_reads=True))
+
+
+async def test_a_down_graph_parks_the_propose_tool_as_a_read(monkeypatch):
+    """The ruling (2026-10-29, Decision 10): a graph outage is a DOWN, not a
+    "nothing proposed" — under a landing tail the call pauses as a read on
+    ['graph'], with the arguments the resume re-executes it from."""
+    calls = _down_preview(monkeypatch)
+    with pytest.raises(CallDeferred) as raised:
+        await tools.propose_delete_episode(_tail_ctx(), "X", "the claim was wrong")
+    meta = raised.value.metadata
+    assert meta["kind"] == "read" and meta["tool"] == "propose_delete_episode"
+    assert meta["dependencies"] == ["graph"]
+    assert meta["args"] == {"episode_uuid": "X", "rationale": "the claim was wrong"}
+    assert "proposal" not in meta, "nothing is proposed while the graph is down"
+    assert "ServiceUnavailable" in meta["error"]
+    assert len(calls) == 2, "the bounded retry still runs before the park"
+
+
+async def test_with_no_landing_tail_the_outage_re_raises(monkeypatch):
+    from neo4j.exceptions import ServiceUnavailable
+
+    _down_preview(monkeypatch)
+    with pytest.raises(ServiceUnavailable):
+        await tools.propose_delete_episode(None, "X", "why")
+
+
+async def test_a_graph_that_answers_with_an_error_proposes_nothing_and_says_why(monkeypatch):
+    """A failure that is not an outage keeps honest text — a NO, not a DOWN."""
+    calls = _down_preview(monkeypatch, ValueError("bad uuid shape"))
+    out = await tools.propose_delete_episode(_tail_ctx(), "X", "why")
+    assert out.startswith("knowledge graph read failed (ValueError)")
+    assert "bad uuid shape" in out and out.endswith("nothing proposed")
+    assert len(calls) == 1, "a NO is not retried"
+
+
+async def test_the_propose_tool_is_a_parkable_read_on_purpose():
+    from central_command.contract.dependencies import TOOL_DEPENDENCY
+    from central_command.runtime import durable
+
+    assert TOOL_DEPENDENCY["propose_delete_episode"] == ("graph",)
+    assert "propose_delete_episode" in durable.READ_TOOLS
+    assert "propose_delete_episode" in tools._parkable_reads()
+    # …but by name it is a proposal: only a pause's metadata makes it a read.
+    from pydantic_ai.messages import ToolCallPart
+
+    call = ToolCallPart(tool_name="propose_delete_episode", args={})
+    assert durable.classify_deferred(call) == "proposal"
+    assert durable.classify_deferred(call, {"kind": "read"}) == "read"
+
+
+async def test_run_read_by_name_re_executes_the_propose_tool(monkeypatch):
+    """The resume's re-execution: graph up, it drafts (the CallDeferred carries
+    the proposal for the driver to park); graph still down, the driver gets
+    the typed failure it re-parks on."""
+    from central_command.contract import DependencyDown
+    from central_command.runtime.deps import TriageDeps
+
+    approved = await neo4j_reader.compute_delete_preview(_fixture().run, "X")
+
+    async def up(uuid):
+        return approved
+
+    async def no_events(*a, **k):
+        return None
+
+    monkeypatch.setattr(events, "emit", no_events)
+    deps = TriageDeps(agent_id="jira-expert", park_reads=True)
+    _down_preview(monkeypatch)
+    with pytest.raises(DependencyDown) as down:
+        await tools.run_read_by_name(
+            "propose_delete_episode", {"episode_uuid": "X", "rationale": "why"}, deps)
+    assert down.value.dependencies == ("graph",)
+
+    monkeypatch.setattr(graphiti, "episode_delete_preview", up)
+    with pytest.raises(CallDeferred) as raised:
+        await tools.run_read_by_name(
+            "propose_delete_episode", {"episode_uuid": "X", "rationale": "why"}, deps)
+    (action,) = raised.value.metadata["proposal"]["actions"]
+    assert action["capability"] == "graph.delete_episode@v1"
+    assert action["arguments"]["preview"]["digest"] == approved["digest"]
+
+
+def _two_calls():
+    from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, UserPromptPart
+
+    return [
+        ModelRequest(parts=[UserPromptPart(content="tidy the graph")]),
+        ModelResponse(parts=[
+            ToolCallPart(tool_name="propose_delete_episode",
+                         args={"episode_uuid": "X", "rationale": "why"},
+                         tool_call_id="call_del"),
+            ToolCallPart(tool_name="search_graph_group",
+                         args={"group_id": "g", "query": "q"},
+                         tool_call_id="call_read"),
+        ]),
+    ]
+
+
+async def test_a_decided_deletion_proposals_siblings_get_the_ordinary_text():
+    """The two name-only checks (durable.tool_call_id_is_read and the sibling
+    reword) once read the tool NAME: with the propose tool now a key of
+    TOOL_DEPENDENCY, a DECIDED deletion proposal would have told its siblings
+    "this turn paused on another read". The name says proposal; only the
+    resume's `kind: 'read'` says read."""
+    from central_command.runtime import durable
+
+    messages = _two_calls()
+    assert not durable.tool_call_id_is_read(messages, "call_del")
+    results = await durable.deferred_results(messages, "call_del", "deleted")
+    bounce = results.calls["call_read"]
+    assert bounce.message == durable.SIBLING_NOT_PARKED.format(tool="search_graph_group")
+
+    # The same call resumed as the PARKED READ it was (its re-execution
+    # returned text): the sibling read is told to call again.
+    assert durable.tool_call_id_is_read(messages, "call_del", {"kind": "read"})
+    results = await durable.deferred_results(
+        messages, "call_del", "knowledge graph read failed", decided_metadata={"kind": "read"})
+    bounce = results.calls["call_read"]
+    assert bounce.message == durable.SIBLING_READ_NOT_RUN.format(tool="search_graph_group")
+
+    # A deletion proposal as the SIBLING of a parked read keeps the ordinary
+    # text: by name it is a proposal, and a sibling's pause is not persisted.
+    results = await durable.deferred_results(
+        messages, "call_read", "facts", decided_metadata={"kind": "read"})
+    bounce = results.calls["call_del"]
+    assert bounce.message == durable.SIBLING_NOT_PARKED.format(tool="propose_delete_episode")
 
 
 # --- the queue (needs Postgres) --------------------------------------------------------

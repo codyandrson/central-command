@@ -65,6 +65,11 @@ TOOL_DEPENDENCY: dict[str, tuple[str, ...]] = {
     "search_graph_group": _GRAPH_AND_EMBEDDER,
     "list_graph_groups": _GRAPH,
     "list_graph_group_episodes": _GRAPH,
+    # A PROPOSE tool on purpose (epic-small-fixes R35): it reads the deletion
+    # preview it embeds by episode id, so a graph outage parks the run like
+    # any read, and the resume re-executes it and parks the proposal it then
+    # drafts (`orchestration.resume_parked_read`). The only propose tool here.
+    "propose_delete_episode": _GRAPH,
     # --- Jira (native client; n8n only for the Cloud-only reads) --------------
     "jira_get_issue": ("jira",),
     "jira_search_issues": ("jira",),

@@ -81,6 +81,12 @@ TASK_WAIT_TOOLS = frozenset({"create_task"})
 # One list with `tools._parkable_reads()`: both derive from
 # `contract.dependencies.TOOL_DEPENDENCY` (parity-tested).
 READ_TOOLS = _dependencies.parkable_reads()
+# The reads a call's NAME alone may be taken for. `propose_delete_episode` is in
+# READ_TOOLS on purpose (it reads the preview it embeds, so a graph outage parks
+# it as a read: epic-small-fixes R35), but by name it is a proposal: only a
+# pause's `kind: 'read'` metadata makes it a read. Without this a DECIDED
+# deletion proposal would hand its siblings the parked-read text.
+_NAMED_READS = READ_TOOLS - PROPOSE_TOOLS
 
 
 def classify_deferred(call, metadata: dict | None = None) -> str:
@@ -240,12 +246,19 @@ def unanswered_calls(messages) -> list[ToolCallPart]:
     ]
 
 
-def tool_call_id_is_read(messages, tool_call_id: str) -> bool:
-    """Is the call this resume decides one of the READ tools? (The sibling's
-    reword depends on what the DECIDED call was, not only on the sibling.)"""
+def tool_call_id_is_read(messages, tool_call_id: str, metadata: dict | None = None) -> bool:
+    """Is the call this resume decides a parked READ? (The sibling's reword
+    depends on what the DECIDED call was, not only on the sibling.)
+
+    `metadata` is what the resume knows about the decided pause; `kind: 'read'`
+    there beats the name, as in `classify_deferred` — the read resume passes it,
+    and it is the only way a propose tool that parked as a read counts as one.
+    By name alone a propose tool is never a read."""
     for call in unanswered_calls(messages):
         if call.tool_call_id == tool_call_id:
-            return call.tool_name in READ_TOOLS
+            if isinstance(metadata, dict) and metadata.get("kind") == "read":
+                return True
+            return call.tool_name in _NAMED_READS
     return False
 
 
@@ -279,7 +292,7 @@ def answer_pending_calls(messages, tool_call_id: str, report: str) -> list | Non
 
 async def deferred_results(
     messages, tool_call_id: str, result, *, session_id: str | None = None,
-    agent_id: str | None = None,
+    agent_id: str | None = None, decided_metadata: dict | None = None,
 ) -> DeferredToolResults:
     """THE way a paused run gets its results: `result` for the decided call,
     and a `ToolFailed` for every SIBLING deferred in the same response.
@@ -301,6 +314,9 @@ async def deferred_results(
     says so, so the model re-raises it on the turn it now gets. A bounce is
     recorded (`session.deferred_siblings_bounced`): the operator is spared the
     re-approval, never the knowledge.
+
+    `decided_metadata` is what the caller knows about the decided pause: the
+    parked-read resume passes `{'kind': 'read'}` (see `tool_call_id_is_read`).
     """
     results = DeferredToolResults()
     results.calls[tool_call_id] = result
@@ -312,8 +328,11 @@ async def deferred_results(
         # also paused was never about an operator's decision: tell it to call
         # the read again, not that "the decision you just received" is about
         # another call.
+        # By name only (a sibling's pause metadata is not persisted), so a
+        # propose-tool sibling keeps the ordinary text.
         text = SIBLING_READ_NOT_RUN if (
-            call.tool_name in READ_TOOLS and tool_call_id_is_read(messages, tool_call_id)
+            call.tool_name in _NAMED_READS
+            and tool_call_id_is_read(messages, tool_call_id, decided_metadata)
         ) else SIBLING_NOT_PARKED
         results.calls[call.tool_call_id] = ToolFailed(text.format(tool=call.tool_name))
         bounced.append(call.tool_name)

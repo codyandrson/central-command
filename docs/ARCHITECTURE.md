@@ -552,9 +552,9 @@ stateDiagram-v2
   | `runtime/run.py` `ingest_and_propose` | `ingest/dispatcher.py::process_claimed`, at function scope after the fold reservation and the auditor's bulk hook, before `work.processed` |
   | `runtime/steward.py` `run_document` | the dispatcher, same place |
   | `runtime/wiki_agent.py` `run_repair` | the dispatcher, same place |
-  | `runtime/run.py` `_land` | `api/routes.py::_run_one_assigned_task` (after `task.review`); `orchestration._land_task_question_outcome` for `continue_session` / `resume_stopped_session` |
+  | `runtime/run.py` `_land` | `api/routes.py::_run_one_assigned_task` (after `task.review`); `orchestration._land_task_question_outcome` for `continue_session` / `resume_stopped_session` / `resume_parked_read` (a parked propose read that drafts on re-execution, through `_land_tail`) |
   | `runtime/run.py` `run_coach` | `routes.coach_agent` (synchronous) and `routes._run_coach_detached` (after `task.review`) |
-  | `runtime/converse.py` `_land_turn` | the chat lane `api/nerve_gateway.py::_chat_send` (after the turn's end frame); the heartbeat nudge `heartbeat/actions.py::_nudge_discussion` (detached, via `orchestration.decide_landed_detached`); the converse branches of `continue_session` / `resume_stopped_session` |
+  | `runtime/converse.py` `_land_turn` | the chat lane `api/nerve_gateway.py::_chat_send` (after the turn's end frame); the heartbeat nudge `heartbeat/actions.py::_nudge_discussion` (detached, via `orchestration.decide_landed_detached`); the converse branches of `continue_session` / `resume_stopped_session` and of `orchestration._land_tail` (a resumed read or turn) |
   | `runtime/questions.py` `_settle` | `orchestration._land_task_question_outcome` (every answered-question resume) |
   | `runtime/consult.py` `consult` | the asker's own landing: the consult-wait result carries the specialist's `proposal_id`, decided once the asker is parked |
   | `api/orchestration.py` `_settle_consult_resume` | `orchestration.resume_consult_wait` and `resume_parked_session` (`after=consulted`) |
@@ -820,7 +820,14 @@ continuation of them. The session parks with a `pending_resume` of kind `read`
 `attempts`, `not_before`, `last_error`, `parked_at`); the sweep re-executes the
 read in the runtime (`tools.run_read_by_name`) and resumes the run through that
 tail with the real result. A consult whose specialist is DOWN parks the ASKER
-(the whole consult re-runs on resume). A Postgres-only read (`local`) never
+(the whole consult re-runs on resume). `propose_delete_episode` is the one
+propose tool in `TOOL_DEPENDENCY` (`graph`): the deletion preview it embeds is a
+live read, so a graph outage parks it as a read instead of answering "nothing
+proposed", and on resume the proposal it drafts parks through the run's own
+tail (`orchestration._land_tail`: `run._land` for a task, `converse._land_turn`
+for a chat lane; an orchestrator round rejects it as a call it cannot drive, as
+it would with no outage); any other tail is refused loudly. By name alone a
+propose tool is never a read (`durable._NAMED_READS`). A Postgres-only read (`local`) never
 parks and a web page is not a dependency; a read the dependency *answered* with
 a no still returns honest text; a run with no tail re-raises into its unit's
 own DOWN path.

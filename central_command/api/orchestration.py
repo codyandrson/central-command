@@ -1515,7 +1515,7 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     from central_command.runtime import resume_park
     from central_command.runtime import tools as tools_mod
     from central_command.runtime import converse as converse_mod
-    from pydantic_ai import CallDeferred
+    from pydantic_ai import CallDeferred, ModelRetry
 
     from central_command.runtime.durable import (
         deferred_results, load_messages, unanswered_calls,
@@ -1552,38 +1552,81 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     from central_command.contract import DependencyDown
 
     messages = load_messages(claimed)
+    deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         text = await tools_mod.run_read_by_name(
-            pending["tool"], pending.get("args") or {},
-            TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True),
+            pending["tool"], pending.get("args") or {}, deps,
         )
     except CallDeferred as paused:
-        # The only read that can pause for another reason: a consult re-run
-        # whose specialist now DRAFTED (the outage is over and it did its
-        # work). The asker waits on that proposal exactly as it would have
-        # with no outage — parked through the same consult-wait seam, from the
-        # history it was paused with.
+        # A re-executed read that pauses for another reason: the outage is
+        # over and the tool did its work, which was to defer. The run waits on
+        # that exactly as it would have with no outage, from the history it
+        # was paused with (a shim of the run's CallDeferred).
         from pydantic_ai import DeferredToolRequests
         from types import SimpleNamespace
 
         from central_command.runtime import consult as consult_mod
+        from central_command.runtime.durable import PROPOSE_TOOLS
 
         meta = paused.metadata or {}
         call = next((c for c in unanswered_calls(messages)
                      if c.tool_call_id == pending["tool_call_id"]), None)
-        if "consult_wait" not in meta or call is None:
+        if call is None:
             raise
         shim = SimpleNamespace(
             output=DeferredToolRequests(calls=[call], metadata={call.tool_call_id: meta}),
             all_messages=lambda: messages,
         )
-        waited = await consult_mod.park_consult_wait(
-            session_id=session_id, agent_id=agent_id, result=shim, call=call,
-            task_id=task_id,
+        if "consult_wait" in meta:
+            # A consult whose specialist now DRAFTED: the asker waits on that
+            # proposal through the consult-wait seam.
+            waited = await consult_mod.park_consult_wait(
+                session_id=session_id, agent_id=agent_id, result=shim, call=call,
+                task_id=task_id,
+            )
+            await _land_task_question_outcome(task_id, waited)
+            return {"resumed": True, "session_id": session_id, "after": after,
+                    "attempts": attempts, **waited}
+        if "proposal" not in meta or call.tool_name not in PROPOSE_TOOLS:
+            raise
+        # A propose tool that parked on its own read (`propose_delete_episode`,
+        # epic-small-fixes R35) now drafted. The proposal parks through the
+        # run's own landing tail — `run._land` (context `tasked`, then the task
+        # row and the decide hook), `converse._land_turn` (context
+        # `conversational`, then the hook) or the orchestrator round, which
+        # holds no proposal landing and rejects the call as it would with no
+        # outage — so `park_proposal` is reached from the seam a no-outage run
+        # reaches it from. Any other tail cannot have parked a read and is
+        # refused loudly, never landed as a task.
+        if after not in _READ_TAILS:
+            reason = (f"a parked {pending['tool']} drafted a proposal on resume, "
+                      f"but its tail {after!r} has no proposal landing")
+            await converse_mod.land_session(
+                session_id, failed=True, agent_id=agent_id, reason=reason,
+            )
+            if task_id:
+                # `_land_resumed_run_failure` lands only a `task` tail's row;
+                # nothing owns this one, so it lands here rather than sitting
+                # IN_PROGRESS against a FAILED session.
+                await repo.resolve_task(task_id, "FAILED",
+                                        outcome=f"resumed run failed: {reason}")
+                await events.emit(
+                    "task.run_failed", ref_id=task_id,
+                    payload={"error": reason[:300], "transient": False, "after": after},
+                    actor="system",
+                )
+            raise RuntimeError(reason)
+        out = await _land_tail(
+            session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
+            state=pending.get("state") or {}, result=shim, deps=deps, model=model,
         )
-        await _land_task_question_outcome(task_id, waited)
         return {"resumed": True, "session_id": session_id, "after": after,
-                "attempts": attempts, **waited}
+                "attempts": attempts, **out}
+    except ModelRetry as retry:
+        # The dependency is back and ANSWERED with a no the model can act on
+        # (a propose read's episode is gone): the model gets the retry prompt
+        # a no-outage call would have given it, never a FAILED session.
+        text = retry
     except DependencyDown as down:
         stored = await resume_park.park_resume(
             session_id, {**pending, "attempts": attempts}, down.original,
@@ -1603,7 +1646,7 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
 
     results = await deferred_results(
         messages, pending["tool_call_id"], text,
-        session_id=session_id, agent_id=agent_id,
+        session_id=session_id, agent_id=agent_id, decided_metadata={"kind": "read"},
     )
     out = await _drive_tail(
         session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
@@ -1724,6 +1767,32 @@ async def _drive_tail(
     except Exception as e:  # the task must not outlive its run ownerless
         await _land_resumed_run_failure(task_id, e, after=after)
         raise
+    return await _land_tail(
+        session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
+        state=state, result=result, deps=deps, model=model,
+    )
+
+
+# The tails a parked read can carry (`resume_park.park_read`'s three callers:
+# `run._land`, `converse._turn`, the orchestrator round) — what `_land_tail`
+# lands. A parked propose read re-executed into a proposal is refused for any
+# other `after` rather than landed as a task (`resume_parked_read`).
+_READ_TAILS = ("task", "converse", "orchestrator")
+
+
+async def _land_tail(
+    *, session_id: str, agent_id: str, after: str, task_id: str | None,
+    state: dict, result, deps, model,
+) -> dict:
+    """Land a run that re-entered through its tail exactly as an uninterrupted
+    one lands: the orchestrator round (`_process`), the chat turn
+    (`converse._land_turn`, then the decide hook) or the task run (`run._land`,
+    then the task row). `result` is the continued run's — or, for a parked
+    propose read that drafted on re-execution, a shim of its CallDeferred
+    (`resume_parked_read`), so the proposal parks at the same seam with the
+    same context (`tasked`, `conversational`) a no-outage run gives it."""
+    from central_command.runtime import converse as converse_mod
+    from central_command.runtime import run as run_mod
 
     if after == "orchestrator":
         task = await repo.get_task(state.get("task_id") or task_id)

@@ -974,7 +974,11 @@ async def run_read_by_name(name: str, args: dict, deps: TriageDeps) -> str:
     fits the tool fails loudly here rather than calling it with garbage. The
     stub context carries `deps`; a parked read's tools read nothing from the
     context but `deps`. Returns the tool's text; a read that is STILL down
-    raises `DependencyDown` (the driver re-parks), anything else propagates.
+    raises `DependencyDown` (the driver re-parks), anything else propagates —
+    including the `CallDeferred` of a tool whose work, once the read answers,
+    is to defer: a consult whose specialist drafted, and `propose_delete_episode`
+    (the one propose tool in `TOOL_DEPENDENCY`, R35), whose proposal the
+    driver parks through the run's own tail.
     """
     from types import SimpleNamespace
 
@@ -1716,6 +1720,13 @@ async def propose_action(ctx: RunContext, proposal: ProposalArg) -> str:
     raise CallDeferred(metadata={"kind": "proposal"})
 
 
+# A propose tool that is ALSO a parkable read (epic-small-fixes R35): the
+# preview it embeds is a live graph read, and an outage there parks the run
+# like any other read (the operator's ruling of 2026-10-29, Decision 10) instead
+# of answering "nothing proposed". On resume `run_read_by_name` re-executes it,
+# and the CallDeferred proposal it then raises is parked through the run's own
+# tail by `orchestration.resume_parked_read`.
+@parkable_read
 async def propose_delete_episode(ctx: RunContext, episode_uuid: str, rationale: str) -> str:
     """Propose DELETING one knowledge-graph episode, and what only it
     produced. IRREVERSIBLE: the episode's text is gone, with the facts it was
@@ -1740,9 +1751,14 @@ async def propose_delete_episode(ctx: RunContext, episode_uuid: str, rationale: 
     if not uuid:
         raise ModelRetry("name the episode: pass its uuid as list_graph_group_episodes shows it")
     try:
-        preview = await graphiti.episode_delete_preview(uuid)
-    except Exception as e:  # noqa: BLE001 — a down graph proposes nothing
-        return f"knowledge graph unavailable ({type(e).__name__}); nothing proposed"
+        preview = await _read_with_retry(lambda: graphiti.episode_delete_preview(uuid))
+    except Exception as e:  # noqa: BLE001
+        # A DOWN graph parks the run (DependencyDown → `@parkable_read`); only
+        # a failure that is not an outage proposes nothing, and says why.
+        _raise_if_down(e)
+        reason = str(e).strip() or type(e).__name__
+        return (f"knowledge graph read failed ({type(e).__name__}): "
+                f'"{reason[:300]}"; nothing proposed')
     if preview is None:
         raise ModelRetry(
             f"no episode with uuid {uuid!r} — read list_graph_group_episodes for the "

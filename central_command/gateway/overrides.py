@@ -1024,15 +1024,17 @@ PARK_SITES: dict[str, tuple[str, str]] = {
         "ingest/dispatcher.process_claimed (the wiki-repair handler), same place"),
     "runtime/run.py:_land": (HOOK,
         "api/routes._run_one_assigned_task (run_task, after task.review); "
-        "api/orchestration._land_task_question_outcome for continue_session "
-        "and resume_stopped_session"),
+        "api/orchestration._land_task_question_outcome for continue_session, "
+        "resume_stopped_session and resume_parked_read (a parked propose read "
+        "that drafted on re-execution, through _land_tail)"),
     "runtime/run.py:run_coach": (HOOK,
         "api/routes.coach_agent (synchronous) and routes._run_coach_detached "
         "(after task.review)"),
     "runtime/converse.py:_land_turn": (HOOK,
         "the chat lane api/nerve_gateway._chat_send; the heartbeat discussion "
         "nudge heartbeat/actions._nudge_discussion; the converse branches of "
-        "api/orchestration.continue_session and resume_stopped_session"),
+        "api/orchestration.continue_session and resume_stopped_session; "
+        "api/orchestration._land_tail for a resumed read or turn"),
     "runtime/questions.py:_settle": (HOOK,
         "api/orchestration._land_task_question_outcome (every answered-question "
         "resume: _resume_task_question, _retry_answered_question, "
