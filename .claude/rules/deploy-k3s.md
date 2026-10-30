@@ -176,3 +176,36 @@ when a matching file is read.
   resolver, and that no tracked file names the old directory outside dated
   history, the resolver seam, operator-facing fallback messages and comment
   lines (its `ALLOWED` table is the list, one reason per entry).
+- **A unit that names the checkout, the account or its home is edited in its
+  `.in` template and installed by rendering, never by hand** (epic
+  instance-facts-relocation, DL-197). The seven `deploy/k3s/<name>.in`
+  templates hold four tokens, `@CC_CHECKOUT@`, `@CC_OWNER@`,
+  `@CC_OWNER_GROUP@`, `@CC_OWNER_HOME@`, and the installers (`setup.sh`'s
+  `install_unit`, `cc-update.sh`'s `install_changed_unit`) fill them through
+  `cc_k3s_render_unit` in `deploy/k3s/instance-lib.sh`, which refuses an unknown
+  or leftover token and installs nothing. A `cp` of a `.in` file puts tokens in
+  `/etc/systemd/system`; a `cp` of a rendered file back into the tree puts this
+  host's account in the public repo (`tests/test_no_instance_facts.py` fails
+  a home path or an account literal in a template). The group token is the owner's PRIMARY group, never the checkout's (it
+  also owns the updater's trigger directory). A NEW token, or any change to the
+  helper that an update needs, ships in the updater ONE RELEASE AHEAD, as the
+  "What a release needs an EXISTING install to gain" bullet says: the update
+  into a release runs the previous release's `cc-update.sh`, whose helper copy
+  would refuse the unknown token.
+  Likewise the templates keep the `.in` name — an installed updater installs
+  anything it finds named `*.service`, `*.path`, `*.timer` or `*-tmpfiles.conf`
+  verbatim and skips a plain unit a release deleted, which is how the release
+  that introduced them installed no unit at its own apply.
+- **`CC_COMPUTE_SSH` has no default; scripts find nodes by `cc-role` labels,
+  never by name** (epic instance-facts-relocation, DL-197). The compute node's
+  ssh target is an ANSWER in `deploy/k3s/.env` (`<user>@<compute-address>`),
+  read through `cc_k3s_compute_ssh` (environment first, else that checkout's env
+  file), and an unset key stops the run naming the key before anything changes:
+  no script, test or example carries a fallback address, because a default is a
+  fact about one deployment in a public file and the install it was wrong for
+  would build on someone else's node. A fact is an answer only when it cannot
+  be derived: the checkout, its owner and primary group, the owner's home and
+  the backup directory (`CC_BACKUP_DIR`, else `<owner home>/cc-backups`) come
+  from the machine through `instance-lib.sh` and are never asked or written
+  into a script. A node is chosen by `cc-role/anchor` or `cc-role/compute`
+  (the executor's MCP Deployment affinity included), not by hostname.

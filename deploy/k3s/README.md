@@ -119,8 +119,13 @@ Assumed already true before phase 2:
   script shells over that). Set the target as `CC_COMPUTE_SSH` in
   `deploy/k3s/.env`: it is required, with no default, and every script that
   needs it stops naming the key while it is unset; the real value belongs to your private instance docs.
+  It is the one answer this runbook asks of you about the machines: the
+  checkout, its owner and the owner's primary group and home, and the backup
+  directory are derived from where the scripts live (`deploy/k3s/instance-lib.sh`)
+  and are never asked or written into a script, and nodes are found by their
+  `cc-role` label (§3a), never by name.
 - Repo cloned at **`<checkout>`** (any path; the units and scripts below are
-  run from it).
+  run from it, and the unit templates are rendered for it — §6).
 - **`deploy/k3s/.env`** populated — run **`./deploy/k3s/init-env.sh`**: it copies
   the template, generates every **GENERATED** variable that is empty, and
   prints the **ELICITED** ones you must supply yourself. It
@@ -421,20 +426,49 @@ would pass its websocket ceiling (`config.WS_MAX_SIZE_BYTES`, 96 MiB, so a cap
 of at most 72 MiB), and `cc-uvicorn.service` carries the same number as
 `--ws-max-size`. An operator who changes the cap sets the cockpit's limit too.
 
-```bash
-sudo cp deploy/k3s/cc-uvicorn.service       /etc/systemd/system/
-sudo cp deploy/k3s/cc-sandbox-runner.service /etc/systemd/system/
-sudo cp deploy/k3s/cc-graph-bolt.service     /etc/systemd/system/
-sudo cp deploy/k3s/cc-backup.service         /etc/systemd/system/
-sudo cp deploy/k3s/cc-backup.timer           /etc/systemd/system/
-sudo cp deploy/k3s/cc-update.service         /etc/systemd/system/
-sudo cp deploy/k3s/cc-update.path            /etc/systemd/system/
-sudo cp deploy/k3s/cc-update-stage.service   /etc/systemd/system/
-sudo cp deploy/k3s/cc-update-stage.path      /etc/systemd/system/
-sudo cp deploy/k3s/cc-nerve.service           /etc/systemd/system/
-sudo cp deploy/k3s/cc-update-tmpfiles.conf   /etc/tmpfiles.d/cc-update.conf
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
+Seven of the units are templates (`deploy/k3s/<name>.in`: the `cc-uvicorn`,
+`cc-sandbox-runner`, `cc-backup`, `cc-update`, `cc-update-stage` and `cc-nerve`
+services, and the update tmpfiles config that becomes
+`/etc/tmpfiles.d/cc-update.conf`), holding `@CC_CHECKOUT@`, `@CC_OWNER@`,
+`@CC_OWNER_GROUP@` and `@CC_OWNER_HOME@` where this install's checkout, owner,
+the owner's primary group and home go; the rest (`cc-graph-bolt.service`,
+`cc-backup.timer`, `cc-update.path`, `cc-update-stage.path`) hold no instance
+value and are copied as they are. **Never `cp` a template** — systemd would be
+handed the tokens. `./deploy/k3s/setup.sh app` does this step for every unit
+here except the two `cc-update-stage` units; to install by hand (the stage pair
+included), render through the helper and install the output:
 
+```bash
+. deploy/k3s/instance-lib.sh
+setup=deploy/k3s/setup.sh
+checkout="$(cc_k3s_checkout "$setup")" owner="$(cc_k3s_owner "$setup")"
+group="$(cc_k3s_owner_primary_group "$setup")" home="$(cc_k3s_home "$setup")"
+for unit in cc-uvicorn.service cc-sandbox-runner.service cc-graph-bolt.service \
+            cc-backup.service cc-backup.timer cc-update.service cc-update.path \
+            cc-update-stage.service cc-update-stage.path cc-nerve.service \
+            cc-update-tmpfiles.conf; do
+  case "$unit" in
+    cc-update-tmpfiles.conf) dest=/etc/tmpfiles.d/cc-update.conf ;;
+    *)                       dest="/etc/systemd/system/$unit" ;;
+  esac
+  src="deploy/k3s/$unit"; rendered="$(mktemp)"
+  if [[ -f "$src.in" ]]; then
+    cc_k3s_render_unit "$src.in" "$checkout" "$owner" "$group" "$home" >"$rendered" \
+      || { echo "not installed: $unit" >&2; rm -f "$rendered"; continue; }
+  else
+    cat -- "$src" >"$rendered"
+  fi
+  sudo install -m 644 "$rendered" "$dest"
+  rm -f "$rendered"
+done
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
+```
+
+The helper refuses an unknown or leftover `@CC_` token and prints nothing, so a
+refused render installs nothing (the loop above says which unit it skipped).
+Then:
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now cc-uvicorn cc-nerve cc-sandbox-runner cc-graph-bolt
 sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
@@ -451,8 +485,9 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   tag, applies schema, rebuilds AS the checkout's owner (venv, cockpit — and, when the
   release ships `scripts/apply_graphiti_patches.py`, graphiti-core's carried
   fixes right after the install), **applies changed `deploy/k3s/`
-  manifests and installs changed unit files (`daemon-reload`; a changed
-  `cc-update.service` takes effect next run)**, then — before the restart —
+  manifests and installs changed unit files — rendering a changed `.in`
+  template for this install, copying a changed plain unit (`daemon-reload`; a
+  changed `cc-update.service` takes effect next run)**, then — before the restart —
   reconciles the app's configuration with the release (v2.59.1): appends each
   `APP_ENV_DEFAULTS` setting the release's `.env.example` declares and `.env`
   lacks (never one already present, an empty "off" included), and widens the
@@ -554,6 +589,26 @@ never re-imported, even when the release changed the bundled copy. Re-running
 the phase on an existing install adds only the bundled skills the library
 lacks. The updater does not run this step; after an update that adds a
 bundled skill, run `./deploy/k3s/setup.sh app`.
+
+**The instance overlay** — a bundled skill that would name a fact only one
+deployment has (a host, a model fleet, a Jira instance's field names) carries a
+`<!-- overlay: <field> -->` marker instead, and the import writes the
+deployment's own text there. Set `CC_SKILL_OVERLAY_DIR` in the root `.env` to a
+directory holding one `<field>.md` per field (default `<state dir>/skill-overlay`);
+keep it outside the checkout. The installer and the updater neither create nor
+copy it. A field with no file is not an error: the marker is removed, the
+generic text stands, and the import result lists the field as unresolved. The
+overlay is applied at import only, so after editing it re-import the skill from
+the cockpit (or with `skill_id` on `POST /api/skills/import`); to see what
+resolves before importing, run, from the checkout:
+
+```bash
+.venv/bin/python -m central_command.skills.overlay check
+```
+
+It prints each field as RESOLVED or UNRESOLVED and no text, and exits non-zero
+while any field is unresolved. A malformed marker, or one in a skill's
+frontmatter, refuses the import naming the file and line.
 
 Each skill's `default_agents` front-matter names the agents that hold it; the
 import grants those CREATE-ONLY (a revoked grant is never restored; unknown

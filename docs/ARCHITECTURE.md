@@ -254,6 +254,37 @@ process's environ.
   mark informs and forbids nothing; it is never read from the proposing
   agent's own `Action.reversibility`. Agent charters' capability sections are
   *generated* from pack grants over this registry at run start.
+- **A bundled skill names a fact only one deployment has through an overlay
+  marker, resolved at import in the API tier** (`skills/overlay.py`;
+  `docs/decisions/process.md` DL-197). The marker is `<!-- overlay: <field> -->`,
+  short form only, with `<field>` in `[a-z0-9_]+` and named in `FIELDS`, the one
+  public index of the 19 fields (a line on what each holds, never a value; the
+  field list is that dict, and `tests/test_skill_overlay.py` pins it to the
+  markers under `skills/` in both directions). A marker never carries a value:
+  the public tree holds field names, and the operator's overlay holds the text.
+  The overlay is a directory of one `<field>.md` file per field, **outside the
+  checkout** at `CC_SKILL_OVERLAY_DIR` (default `<state dir>/skill-overlay`,
+  `settings.resolved_skill_overlay_dir()`), so it cannot be committed and the
+  updater's `reset --hard` never touches it; the personal deployment points the
+  key at a directory in its private repo, one copy. The importer renders each
+  body when it imports (`importer.py`, in the decode-first phase), so the library
+  holds the text agents read and the agent tier stays file-free; an overlay
+  edit reaches the library only through a re-import of that skill. A field with
+  no file, or no overlay directory at all, is not an error: the marker is
+  removed (an agent never reads one), the generic text stands and the field is
+  reported unresolved. Failures raise: `POST /api/skills/import` answers 422,
+  naming file and line, for a malformed marker (anything opening
+  `<!-- overlay` that is not the grammar) and for any marker in the
+  frontmatter (which becomes the skill's id, title and summary, shown
+  everywhere), and a non-UTF-8 or unreadable field file raises naming it. The
+  import result and the `skill.imported` event carry the resolved and the
+  unresolved field NAMES, never their values.
+  `python -m central_command.skills.overlay check [--dir DIR] [--skills skills/]`
+  is the read-only check: it lists each field resolved or not (and files that
+  name no field, and markers outside `FIELDS`), prints no value, opens no
+  database, and exits non-zero when any field is unresolved. Neither installer
+  nor the updater seeds or copies the overlay. `runtime/` never imports the
+  module (a test walks the source).
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
   façade idempotency keys are the owed fix (PRD §6.2).
@@ -1126,6 +1157,52 @@ config → start services → health → roll back on failure. It reads `VERSION
 the installed version, not git. `kubectl apply` never deletes, so a removed
 manifest must be tombstoned in `deploy/k3s/removed.txt`; a changed updater unit
 takes effect on the *next* run.
+
+**What a unit may hold, and what the install is asked.** A k3s unit that names
+the checkout or the account is a template, `deploy/k3s/<name>.in` (seven today:
+the uvicorn, nerve, sandbox-runner, backup, update and update-stage services and
+the update tmpfiles config; a unit with no instance value stays a plain file).
+A template holds four tokens and no other, `@CC_CHECKOUT@`, `@CC_OWNER@`,
+`@CC_OWNER_GROUP@` and `@CC_OWNER_HOME@`; `cc_k3s_render_unit`
+(`deploy/k3s/instance-lib.sh`) fills them literally, refuses an unknown or a
+leftover `@CC_` token and prints nothing, and both installers go through it:
+`setup.sh` (`install_unit`, in the `app` phase) and `cc-update.sh`
+(`install_changed_unit`, through a temp file, so a refused render leaves the
+installed unit alone). The group handed in is the owner's *primary* group, not
+the checkout's, because the same value gives the updater's trigger directory
+its group (`/run/cc-update`, mode 0770) and a shared checkout group must not be
+able to start the root updater. Nothing is asked for these values: the
+checkout is where the script lives (no git; the updater runs as root on a
+checkout another account owns), the owner and group come from `stat`, the home
+from the account database, and the backup directory is `CC_BACKUP_DIR` when
+set, else `<owner home>/cc-backups`, all through `instance-lib.sh`. What
+cannot be derived is an *answer*: `CC_COMPUTE_SSH`, the compute node's ssh
+target in the k3s env file, has no default in any script. `cc_k3s_compute_ssh`
+takes it from the environment, else from that checkout's env file, and an unset
+key stops the run naming the key before anything changes (`setup.sh` in the
+phases that use it, `cc-update.sh` as the first statement of `main` and
+`stage_main`). Nodes are found by their `cc-role` label, never by name. The
+rule is DL-197, and `tests/test_no_instance_facts.py` is the guard that refuses
+the shapes of instance facts in the public tree (a tailnet address, a
+`/home/<name>` path, an ssh-target default, a literal node name, an account or
+home path in a unit template); `scripts/prepush-scan.sh --tree` checks names
+against the operator's private list.
+
+**Why the templates are `.in` files, and why a new token waits a release.** The
+update INTO release N is run by release N-1's `cc-update.sh` (systemd runs the
+copy on disk; the merge replaces it only for the next run), and that script
+installs any changed `deploy/k3s/*.service|*.path|*.timer|*-tmpfiles.conf`
+verbatim and skips a plain unit the release deleted. Naming a template
+`*.service` would have been installed raw, tokens and all, and broken the API at
+the restart. So the release that introduced the templates renamed them to
+`.in` and deleted the plain files: its own apply matched no unit and installed
+none, `/etc/systemd/system` kept the files it had (which the render reproduces
+byte for byte on the layout they were written for), and the update after it
+installed rendered units. The same reasoning is why a release that needs a
+FIFTH token ships it in the updater one release ahead: the update into it runs
+the previous `cc-update.sh`, whose copy of `cc_k3s_render_unit` would refuse the
+unknown token. The runbook's manual install (README §6) renders through the
+same helper and never copies a template.
 A capability a release removes is named in `deploy/k3s/removed-capabilities.txt`
 (read from the *target* tag); the busy-check phase, repeated just before the
 stop, refuses the apply while a proposal of that capability is undecided
