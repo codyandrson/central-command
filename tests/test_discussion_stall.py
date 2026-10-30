@@ -4,6 +4,10 @@ The sweep that uses it is not: its whole job is reading real `operator_item` /
 `session` rows and stamping them, so those tests need a real Postgres and skip
 without one (same rule as `tests/test_ledger.py` — mocking the rows would test
 nothing).
+
+RUNTIME-060 / R12 (epic small-fixes, story 11.16): the sweep reads
+`settings.discussion_stall_hours`, it does not hard-code 24. The
+setting-varied cases below move the setting and leave the quiet time alone.
 """
 import asyncio
 import uuid
@@ -207,6 +211,34 @@ async def test_a_fresh_discussion_is_not_swept(discussion_lab):
     assert await _events("discussion.stalled", ids["item_id"]) == []
     item = await repo.get_operator_item(ids["item_id"])
     assert item["stalled_at"] is None and item["nudged_at"] is None
+
+
+def test_the_stall_window_defaults_to_24_hours():
+    """RUNTIME-060 / R12: the shipped default the other cases assume."""
+    from central_command.config import Settings
+
+    assert Settings(_env_file=None).discussion_stall_hours == 24
+
+
+@needs_pg
+async def test_the_sweep_flags_by_the_setting_not_a_constant(
+    discussion_lab, monkeypatch
+):
+    """RUNTIME-060 / R12: one discussion, quiet 2 hours, the agent spoke last.
+    Under `discussion_stall_hours=1` the sweep flags it; under 48 it does not,
+    and the lane is left unstamped so a later, shorter setting still can."""
+    ids = await _make_discussion(quiet_hours=2, last_turn="agent")
+
+    monkeypatch.setattr(settings, "discussion_stall_hours", 48)
+    result = await _sweep()
+    assert result["stalled"] == [] and result["nudged"] == []
+    assert await _events("discussion.stalled", ids["item_id"]) == []
+    assert (await repo.get_operator_item(ids["item_id"]))["stalled_at"] is None
+
+    monkeypatch.setattr(settings, "discussion_stall_hours", 1)
+    result = await _sweep()
+    assert ids["item_id"] in result["stalled"]
+    assert len(await _events("discussion.stalled", ids["item_id"])) == 1
 
 
 @needs_pg

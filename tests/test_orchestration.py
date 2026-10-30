@@ -18,7 +18,7 @@ A test that settles on one write and then asserts a second is racy against the
 background resume (epic-small-fixes R31): `_settle` waits on every fact the
 test goes on to assert.
 
-epic-small-fixes R13 (story 11.6, ruled 2026-10-29, Decision 3): a revise
+epic-small-fixes R13 / D7-P (story 11.6, ruled 2026-10-29, Decision 3): a revise
 answer parks a second plan review, an answered NO-PROGRESS stall withdraws
 plan approval (the orchestrator must submit_plan again before assign_work),
 an answered fan-out stall does not, and a continue window never does.

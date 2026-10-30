@@ -2,7 +2,7 @@
 compatibility design decision 3. Empty settings (the homelab default) must
 map to {} — zero behavior change from today's bare httpx.AsyncClient(...).
 
-Story 11.10 (epic small-fixes, R5; ruled 2026-10-29, Decision 11):
+Story 11.10 (epic small-fixes, R5, INGEST-005; ruled 2026-10-29, Decision 11):
 `CC_TLS_INSECURE` is `settings.tls_insecure`, turns verification off for every
 `client_kwargs()` client, wins over `CC_CA_BUNDLE`, tolerates an empty env
 value, warns once per process, and is read from nowhere but the setting.

@@ -25,6 +25,10 @@ No live graph and no network here: the embedder is a fake, per
 `tests/conftest.py::no_live_graph_writes` — the bolt writes it guards are
 opt-in behind `CC_LIVE_GRAPH_TESTS=1`, and nothing in this file reaches Neo4j
 at all.
+
+Story 11.14 (epic small-fixes, R20, stale words): the words that said a vector
+index exists were corrected to say none does; this docstring is one of them.
+It asserts nothing new, since that story changed no behaviour.
 """
 
 from __future__ import annotations
