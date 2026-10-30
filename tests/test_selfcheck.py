@@ -261,7 +261,7 @@ async def test_the_completion_is_one_request_with_a_one_token_ceiling(fakes):
     assert fakes.completion_settings[0]["max_tokens"] == 1
 
 
-async def test_proxy_check_asks_with_the_agents_key_and_embedding_with_the_writers(fakes):
+async def test_proxy_check_asks_with_the_agents_key_and_embedding_with_the_scoped_key(fakes):
     await selfcheck.run(mode="api")
     models_call = [h for u, h in fakes.calls if u.endswith("/v1/models")]
     assert models_call and models_call[0]["Authorization"] == f"Bearer {MARK_LLM}"
@@ -333,7 +333,7 @@ def _break_embedding_key(f, mp):
     request = httpx.Request("POST", f"{PROXY}/v1/embeddings")
     f.embed_error = httpx.HTTPStatusError("401", request=request,
                                           response=httpx.Response(401, request=request))
-    return "CC_LLM_PROXY_ADMIN_KEY"
+    return "CC_LLM_API_KEY"
 
 
 def _break_graph(f, mp):
@@ -580,7 +580,7 @@ def _all_broken(f, monkeypatch):
     credentials out — the worst case for a leak."""
     f.responses.clear()
     f.pg_error = OSError(f"password authentication failed: {MARK_DB} postgresql://cc:{MARK_DB}@h/cc")
-    f.embed_error = RuntimeError(f"Bearer {MARK_ADMIN} rejected")
+    f.embed_error = RuntimeError(f"Bearer {MARK_LLM} rejected")
     f.status = RuntimeError(f"neo4j auth {MARK_NEO}")
     f.refs = email_facade.EmailFacadeError(f"HTTP 500 {MARK_MAIL} op@example.com")
     f.atlassian = {"checks": 2, "failures": 2, "fail_lines": [f"FAIL jira GET /x — 401 {MARK_JIRA}"]}

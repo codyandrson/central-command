@@ -134,16 +134,36 @@ async def _write_tx(work):
         return await session.execute_write(tx_fn)
 
 
+def _embeddings_url() -> str:
+    """`<CC_LLM_BASE_URL>/v1/embeddings`, normalised the way Graphiti's own
+    client is (`graphiti_client._proxy_v1`): the setting is the proxy ROOT, and
+    a value already ending in /v1 never doubles it. Not imported from there —
+    graphiti_client is the lazy-import seam and the writer stays clear of it."""
+    base = settings.llm_base_url.rstrip("/")
+    return (base if base.endswith("/v1") else base + "/v1") + "/embeddings"
+
+
+def _embedding_client(timeout: float):
+    """The embedder's HTTP client — a seam, so the test suite can refuse the
+    real one (tests/conftest.py `no_live_graph_writes`) while a test that
+    fakes `httpx.AsyncClient` still replaces it."""
+    return httpx.AsyncClient(timeout=timeout, **http_client.client_kwargs())
+
+
 async def request_embedding(text: str, timeout: float = 60.0) -> list[float]:
     """The embedder round trip itself — URL, key, alias — RAISING on any
     failure and checking no width. `embed()` below types the failure and checks
     the width; the application self-check (`central_command/selfcheck.py`,
     `embedding-as-app`) calls it bare, so the check proves the writer's own
-    request rather than a copy of it."""
-    async with httpx.AsyncClient(timeout=timeout, **http_client.client_kwargs()) as client:
+    request rather than a copy of it.
+
+    The data-plane address and the SCOPED key (`CC_LLM_BASE_URL`,
+    `CC_LLM_API_KEY`) — the ones the extractor and Graphiti's embedder use —
+    not the proxy admin key (epic-small-fixes R14, GRAPH-064)."""
+    async with _embedding_client(timeout) as client:
         res = await client.post(
-            f"{settings.llm_proxy_base_url}/v1/embeddings",
-            headers={"Authorization": f"Bearer {settings.llm_proxy_admin_key}"},
+            _embeddings_url(),
+            headers={"Authorization": f"Bearer {settings.llm_api_key}"},
             json={"model": _EMBED_MODEL, "input": text},
         )
         res.raise_for_status()

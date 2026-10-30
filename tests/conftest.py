@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 
 import asyncpg
+import httpx
 import pytest
 
 from central_command.config import settings
@@ -190,16 +191,38 @@ def no_live_graph_writes():
             )
         return await real_write_tx(work)
 
+    # The embedder is the writer's third door, and a worktree's `.env` carries
+    # the live scoped key (epic-small-fixes R14, story 11.18). Guard the SEND,
+    # not the function: `neo4j_writer._embedding_client` is the seam that builds
+    # the real HTTP client. A test that fakes `httpx.AsyncClient` (test_graph_
+    # embedding_width, test_embedder_outage) replaced the class this guard
+    # captured, and gets its fake; a test that fakes `request_embedding` never
+    # gets here. Only an untouched, real client is refused.
+    real_embedding_client = neo4j_writer._embedding_client
+    real_client_class = httpx.AsyncClient
+
+    def guarded_embedding_client(timeout):
+        if httpx.AsyncClient is real_client_class and os.getenv("CC_LIVE_GRAPH_TESTS") != "1":
+            raise AssertionError(REAL_EMBEDDING_REFUSED)
+        return real_embedding_client(timeout)
+
     graphiti_client.get_graphiti = guarded_get_graphiti
     neo4j_writer._write = guarded_write
     neo4j_writer._write_tx = guarded_write_tx
+    neo4j_writer._embedding_client = guarded_embedding_client
     try:
         yield
     finally:
         graphiti_client.get_graphiti = real_get_graphiti
         neo4j_writer._write = real_write
         neo4j_writer._write_tx = real_write_tx
+        neo4j_writer._embedding_client = real_embedding_client
 
+
+REAL_EMBEDDING_REFUSED = (
+    "a test reached a real embedding — fake neo4j_writer.request_embedding or its "
+    "httpx client, or CC_LIVE_GRAPH_TESTS=1"
+)
 
 # Every write-capable integration's address and credential, and what the suite
 # holds it at. Both n8n façades answer `configured()` (url AND token, story

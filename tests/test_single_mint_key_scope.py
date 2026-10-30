@@ -5,9 +5,10 @@ and P2's spine-key scope fix. The app phase used to mint the spine's LiteLLM
 virtual key with a hard-coded `["cc-default", "cc-tts", "cc-stt"]`: a second,
 hand-kept alias list beside `deploy/env-lib.sh`'s `cc_required_aliases`, and
 one that had already drifted (graphiti-llm, cc-embedding and gpt-4.1-nano were
-never in it). Measured before the fix: the graph writer embeds with the ADMIN
-key, so this is not what broke embedding — but a scope is a list, and a list
-has one definition.
+never in it). Measured before the fix: the graph writer then embedded with
+the ADMIN key (since epic-small-fixes R14 it embeds with the scoped
+CC_LLM_API_KEY, which this scope must therefore cover), so this is not what
+broke embedding — but a scope is a list, and a list has one definition.
 
 What these prove, against the REAL `./setup.sh app` in a temp copy of the tree
 with a stub `curl` on PATH that records what it was asked:

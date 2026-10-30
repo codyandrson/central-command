@@ -515,10 +515,10 @@ async def check_completion_as_app(ctx: Context) -> Outcome:
 async def check_embedding_as_app(ctx: Context) -> Outcome:
     from central_command.integrations import neo4j_writer
 
-    # The graph writer's key is the proxy ADMIN key (neo4j_writer.
-    # request_embedding) — not CC_LLM_API_KEY. Checked as what it is.
-    for key, value in (("CC_LLM_PROXY_BASE_URL", settings.llm_proxy_base_url),
-                       ("CC_LLM_PROXY_ADMIN_KEY", settings.llm_proxy_admin_key),
+    # The graph writer embeds with the scoped key at the data-plane base
+    # (neo4j_writer.request_embedding; R14) — what Graphiti's own embedder uses.
+    for key, value in (("CC_LLM_BASE_URL", settings.llm_base_url),
+                       ("CC_LLM_API_KEY", settings.llm_api_key),
                        ("CC_EMBED_ALIAS", settings.embed_alias)):
         if not value:
             return fail(f"{key} is empty — the graph writer cannot embed; run ./setup.sh "
@@ -530,21 +530,23 @@ async def check_embedding_as_app(ctx: Context) -> Outcome:
         status = exc.response.status_code
         if status in (401, 403):
             return fail(f"the proxy refused the graph writer's key (HTTP {status}) — "
-                        "check CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_PROXY_ADMIN_KEY")
+                        "check CC_LLM_API_KEY (its scope must include CC_EMBED_ALIAS)",
+                        "CC_LLM_API_KEY")
         return fail(f"embedding via {alias!r} failed (HTTP {status}) — check "
                     "CC_EMBED_ALIAS and the alias's backend in the proxy", "CC_EMBED_ALIAS")
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         return fail(f"embedding via {alias!r} answered without a vector ({_describe(exc)}) — "
                     "check CC_EMBED_ALIAS", "CC_EMBED_ALIAS")
     except Exception as exc:  # noqa: BLE001
-        return fail(f"no answer from the proxy at CC_LLM_PROXY_BASE_URL ({_describe(exc)})",
-                    "CC_LLM_PROXY_BASE_URL")
+        return fail(f"no answer from the proxy at CC_LLM_BASE_URL ({_describe(exc)})",
+                    "CC_LLM_BASE_URL")
     width = len(vector) if isinstance(vector, list) else 0
     if width != settings.embed_dim:
         return fail(f"{alias!r} returned {width} dimensions but CC_EMBED_DIM is "
                     f"{settings.embed_dim} — the graph writer drops every mis-sized vector; "
                     "fix CC_EMBED_DIM (or CC_EMBED_ALIAS)", "CC_EMBED_DIM")
-    return ok(f"{alias!r} embeds with the graph writer's key: {width} dimensions = CC_EMBED_DIM")
+    return ok(f"{alias!r} embeds with the graph writer's key (CC_LLM_API_KEY at CC_LLM_BASE_URL, "
+              f"alias CC_EMBED_ALIAS): {width} dimensions = CC_EMBED_DIM")
 
 
 async def check_graph(ctx: Context) -> Outcome:
