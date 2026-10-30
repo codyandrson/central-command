@@ -4,6 +4,128 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-30 — v2.76.0: instance facts leave the public tree — a skill overlay, unit templates, a required compute key, and a guard that keeps them out
+
+epic-instance-facts-relocation. Fifteen commits since v2.75.0 (`v2.75.0..c77c0319`,
+eleven stories) move everything only one deployment knows out of the public tree: into
+an operator-kept skill overlay, into values the scripts derive from the machine, and
+into one required answer. Behaviour changes come first, then the test suite, then what
+the operator does. No value, host, address or account appears here or in the tree; the
+text names roles and placeholders.
+
+**Before applying, the operator** does three things, each an edit of their own:
+(1) adds `CC_COMPUTE_SSH=<user>@<compute-address>` to `deploy/k3s/.env`. This apply is
+safe without it, because the installed v2.75.0 updater still carries its old default;
+the update after this one stops at its precondition without the key (below).
+(2) Adds `CC_SKILL_OVERLAY_DIR=<the overlay directory, outside the checkout>` to the
+root `.env`. (3) Extends the private identifier list the pre-push guard reads (kept
+outside every repo) with the values this release relocates.
+
+- **A skill overlay carries what only one deployment knows.** A bundled skill marks such
+  a place with `<!-- overlay: <field> -->`. The overlay is a directory, outside the
+  checkout, named by `CC_SKILL_OVERLAY_DIR` (default `<CC_STATE_DIR>/skill-overlay`),
+  holding one `<field>.md` per field. At import, in the API tier, each marker in a
+  skill's body is replaced by that file's text. An absent overlay or field removes the
+  marker, leaves the generic text, and the import succeeds, reporting the field
+  unresolved. A malformed marker, or a marker in a skill's frontmatter, refuses the
+  import (422), naming the file and line. The `skill.imported` event and the import
+  result carry the resolved and unresolved field NAMES, never a value. Every marker names
+  one of the 19 fields of the public `FIELDS` index in `central_command/skills/overlay.py`
+  (one grammar; the long form is now malformed). `python -m central_command.skills.overlay
+  check [--dir <overlay>]` lists each field RESOLVED or UNRESOLVED (and unused files)
+  without printing a value; it exits 1 on an unresolved or unknown field. The runtime tier
+  never imports the overlay. The overlay reaches the library only when a skill is imported
+  again; the apply does not re-import anything.
+- **The seven k3s units that name the checkout or the account are templates.**
+  `cc-backup.service`, `cc-nerve.service`, `cc-sandbox-runner.service`,
+  `cc-update-stage.service`, `cc-update.service`, `cc-uvicorn.service` and
+  `cc-update-tmpfiles.conf` are now `<name>.in`; the four units with no instance value
+  stay plain. Four tokens (`@CC_CHECKOUT@`, `@CC_OWNER@`, `@CC_OWNER_GROUP@`,
+  `@CC_OWNER_HOME@`) are rendered by `setup.sh` and `cc-update.sh` through the new
+  `deploy/k3s/instance-lib.sh`, which refuses an unknown or leftover token. The group is
+  the owner's PRIMARY group, not the checkout's, so a member of a shared group cannot
+  write the root updater's trigger directory. **This apply installs no unit:** the
+  installed v2.75.0 updater's unit pathspec matches no `.in` file and skips deleted ones.
+  The update AFTER this one is the first run of the derived updater: it installs the
+  rendered units (on the reference layout six render byte-identical to what is installed
+  and one, `cc-sandbox-runner`, differs by a single comment line). Watch that update.
+- **The checkout, its owner, the owner's primary group, the owner's home and the backup
+  directory are derived, never asked.** `cc-update.sh`, `backup.sh`, the three
+  `make-*-kubeconfig.sh` scripts and `setup.sh` each resolve them once from the script's
+  own location through `instance-lib.sh` (no git, no `$USER`/`$HOME`); a value the
+  machine cannot answer stops the script before anything is touched. `CC_BACKUP_DIR` set
+  in `deploy/k3s/.env` now counts (it used to be read before the file was sourced).
+  Unusual layouts: `setup.sh reset` derives the backup directory and stops on a
+  root-owned checkout; with `CC_BACKUP_DIR` unset, reset uses the checkout owner's home;
+  the LiteLLM kubeconfigs are always chowned to the checkout owner.
+- **`CC_COMPUTE_SSH` is required, with no default anywhere.** Unset, `setup.sh`,
+  `verify.sh`, the two image build scripts, `install-gvisor.sh` and the updater stop by
+  naming the key before anything changes; the updater does so as a phase precondition and
+  reports it on both status channels. Nodes are found by their `cc-role` label, never by
+  name, and `install-gvisor.sh` refuses anything but exactly one compute node.
+  `.env.example` now ships `CC_MCP_BUILD_HOST` empty, with the placeholder in a comment.
+- **An agent's MCP server Deployment lands on the compute node by label.** Its required
+  node affinity is `cc-role/compute`, like the sandbox Job, not a hostname. It takes
+  effect at the next `mcp.server_deploy`; a server already deployed keeps its old pin
+  until redeployed.
+- **Words.** Comments, docstrings, messages and tests in `central_command/`, `tests/`,
+  `scripts/`, `deploy/`, both example env files and the LiteLLM config name roles
+  ("the compute node", "the anchor node", "the model host") and example values, never a
+  host, address, account or home path of any deployment. The crawler's unavailable
+  message reads "the compute node". The v2.0.0 one-shot `deploy/k3s/migrate-to-cc.sh` is deleted (it stays in git
+  history at v2.75.0), and so is `deploy/desktop-superseded/` (six files of pre-move
+  desktop units). Ten dated records under `docs/superpowers/` carry placeholders instead
+  of fact tokens, each with one dated redaction line under its title.
+- **A guard keeps the facts out.** `tests/test_no_instance_facts.py` walks the tracked tree
+  (minus `docs/vendor/` and the vendored upstream `web/`) for five shapes: a tailnet-range
+  address outside the example block, a `/home/<name>` path outside the example names, an
+  ssh-target default with a literal (`${CC_..._SSH:-literal}`), a `kubernetes.io/hostname`
+  selector with a literal node, and, in a unit template, a `User=`, `Group=`,
+  `WorkingDirectory=`, `ExecStart=`, `EnvironmentFile=` or `Environment=` value that holds
+  an absolute `/home` path (or a `User=`/`Group=` that is not a token). The shrinking baseline the guard started with reached empty and is deleted, so the guard is the plain shape test. `scripts/prepush-scan.sh --tree [rev]` scans
+  a whole commit's tree against the operator's private identifier list and prints
+  `path:line` and a pattern NUMBER, never the text; the guard's added-lines scan on push is
+  unchanged. No history is rewritten: values already published stay in earlier commits.
+- **The refactor sweep.** One resolver per value across the k3s scripts (the idioms live
+  only in `instance-lib.sh`); a duplicate `require_compute_ssh` call is gone.
+- **Documents.** DL-197 (a fact is an answer only when it cannot be derived; what one
+  deployment knows lives in the operator's overlay), `docs/ARCHITECTURE.md` (the overlay
+  and the unit templates), `deploy/k3s/README.md` (answer file, install loop, required
+  key), the `deploy-k3s` rule and `AGENTS.md` say what the stories built.
+
+**The test suite.**
+
+- New: `test_no_instance_facts`, `test_skill_overlay` (480 lines: render, refusal, the
+  field count against the tree, the runtime tier never importing the overlay),
+  `test_k3s_instance_lib`, `test_k3s_unit_templates` (including that this release
+  installs no unit), `test_k3s_compute_ssh`, and the shared `tests/k3s_units.py`, through
+  which every test reads a unit as shipped (rendered).
+- 5651 passed, 11 skipped, sequential `pytest -q`, 596 s at 175ff6dc's tree.
+
+- **Schema:** none. `schema.sql` carries comment edits only; the updater's schema phase
+  runs as it always does and changes nothing.
+- **Settings:** added `CC_SKILL_OVERLAY_DIR`; `CC_COMPUTE_SSH` (deploy/k3s/.env) is now
+  required; `CC_MCP_BUILD_HOST` ships empty in `.env.example`.
+- **Events:** no new type; `skill.imported` gains the resolved and unresolved field names.
+- **What the apply does.** The comment edits are real input changes to the updater, so it
+  does more than a code-only release: (1) it rebuilds BOTH locally-built images (sandbox
+  and crawler) over ssh on the compute node, which must be reachable during the apply,
+  and restarts `cc-crawler`; (2) it re-applies the manifests `00-namespace`, `20-postgres`,
+  `30-litellm`, `40-graph`, `50-n8n`, `60-sandbox`, `70-crawler` and `80-vlogs` and so
+  restarts their Deployments; (3) it refreshes the `cc-litellm-config` configmap and
+  restarts `cc-litellm`; (4) it refreshes `cc-schema-sql` with no schema change. Every
+  step is inside the updater's normal path, with its rollback. No capability, image or
+  configmap is removed, so there is no bridge and `deploy/k3s/removed-capabilities.txt`
+  gets no entry; `min_upgrade_from` stays 2.69.0.
+- **After the apply, the operator checks (read-only):** the cockpit shows v2.76.0; `/health`
+  and `GET /api/heartbeat` are healthy; `deploy/k3s/verify.sh` passes; the overlay check
+  (`python -m central_command.skills.overlay check --dir "$CC_SKILL_OVERLAY_DIR"`) shows
+  every field RESOLVED; and no tracked file matches the private list
+  (`scripts/prepush-scan.sh --tree HEAD`). Separately, from the cockpit, re-import the
+  bundled skills that carry markers so the library holds the overlay text; the apply does
+  not do this, and a re-import supersedes any version the operator edited by hand, so
+  re-import only the set with no operator-posted version.
+
 ## 2026-10-29 — v2.75.0: the small fixes — gates that refuse a thin draft, one TLS switch, a retired token budget, and a suite that cannot spend money
 
 epic-small-fixes. Twenty commits since v2.74.0 (`5e6ee0bc..aaf09748`, eighteen
