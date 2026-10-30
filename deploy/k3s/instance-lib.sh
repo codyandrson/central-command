@@ -19,6 +19,11 @@
 #     cc_k3s_home [path]        the owner's home, from the account database
 #     cc_k3s_backup_dir [path]  CC_BACKUP_DIR when set, else <owner home>/cc-backups
 #
+#   The one function that takes values instead of a path, so a read-only check
+#   can render for the live install from a worktree:
+#
+#     cc_k3s_render_unit <template> <checkout> <owner> <group> <home>
+#
 #   No git here: cc-update.sh and backup.sh run as root on a checkout another
 #   user owns, and git's safe.directory check refuses that. No $USER or $HOME
 #   either, for the same reason. From a worktree's script the checkout IS that
@@ -78,4 +83,40 @@ cc_k3s_backup_dir() { # [path]
   fi
   home="$(cc_k3s_home "${1:-${BASH_SOURCE[1]:-}}")" || return 1
   printf '%s/cc-backups\n' "$home"
+}
+
+# The tokens a deploy/k3s/*.in template may hold are these four and no other. A
+# release that adds one ships it in the updater a release AHEAD: the update INTO
+# release N runs N-1's cc-update.sh, whose bash holds N-1's copy of this function.
+# No sed: a value holding `&`, `/` or `\` is literal. Prints nothing on a refusal.
+cc_k3s_render_unit() { # <template> <checkout> <owner> <group> <home>
+  if (( $# != 5 )) || [[ -z "$2" || -z "$3" || -z "$4" || -z "$5" ]]; then
+    echo "instance-lib: render wants a template, a checkout, an owner, a group and a home, none empty" >&2
+    return 1
+  fi
+  local text rest token
+  # The sentinel keeps the trailing newlines $(...) would strip.
+  text="$(cat -- "$1" 2>/dev/null && printf x)" || {
+    echo "instance-lib: cannot read the unit template $1" >&2
+    return 1
+  }
+  text="${text%x}"
+  rest="$text"
+  while [[ "$rest" =~ @CC_[A-Za-z0-9_]*@ ]]; do
+    token="${BASH_REMATCH[0]}"
+    case "$token" in
+      @CC_CHECKOUT@|@CC_OWNER@|@CC_OWNER_GROUP@|@CC_OWNER_HOME@) ;;
+      *) echo "instance-lib: $1 holds the unknown token $token" >&2; return 1 ;;
+    esac
+    rest="${rest#*"$token"}"
+  done
+  text="${text//@CC_CHECKOUT@/"$2"}"
+  text="${text//@CC_OWNER_GROUP@/"$4"}"
+  text="${text//@CC_OWNER_HOME@/"$5"}"
+  text="${text//@CC_OWNER@/"$3"}"
+  if [[ "$text" == *@CC_* ]]; then
+    echo "instance-lib: $1 still holds a token after rendering (a malformed @CC_ token, or a value holding one)" >&2
+    return 1
+  fi
+  printf '%s' "$text"
 }

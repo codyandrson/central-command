@@ -396,6 +396,80 @@ phase_validate() {
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE: preflight — is this CLUSTER able to run the install? Read-only.
 # ─────────────────────────────────────────────────────────────────────────────
+# ── the systemd units: a .in template is rendered for this install, a plain one copied ──
+# Sourced here rather than at the top: most phases, and the reset phase's scratch
+# tree, never read a unit.
+load_unit_values() {
+  # shellcheck source=instance-lib.sh
+  if ! . "$HERE/instance-lib.sh" \
+     || ! UNIT_CHECKOUT="$(cc_k3s_checkout "$HERE/setup.sh")" \
+     || ! UNIT_OWNER="$(cc_k3s_owner "$HERE/setup.sh")" \
+     || ! UNIT_GROUP="$(cc_k3s_group "$HERE/setup.sh")" \
+     || ! UNIT_HOME="$(cc_k3s_home "$HERE/setup.sh")"; then
+    fail "unit-values" "could not derive this install's checkout, owner, group or home — the line above names what failed"
+    return 1
+  fi
+}
+
+unit_text() { # unit_text <file> — what systemd would be given
+  case "$1" in
+    *.in) cc_k3s_render_unit "$1" "$UNIT_CHECKOUT" "$UNIT_OWNER" "$UNIT_GROUP" "$UNIT_HOME" ;;
+    *)    cat -- "$1" ;;
+  esac
+}
+
+install_unit() { # install_unit <source file> <destination> — a refused render installs nothing
+  local rendered rc
+  case "$1" in
+    *.in)
+      rendered="$(mktemp)" || return 1
+      if unit_text "$1" >"$rendered"; then
+        sudo install -m 644 "$rendered" "$2"; rc=$?
+      else
+        rc=1
+      fi
+      rm -f "$rendered"
+      return "$rc" ;;
+    *) sudo cp "$1" "$2" ;;
+  esac
+}
+
+install_update_tmpfiles() {
+  install_unit "$HERE/cc-update-tmpfiles.conf.in" /etc/tmpfiles.d/cc-update.conf \
+    && sudo systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf
+}
+
+# A template renders to this checkout by construction, so what is left to catch
+# is a path hardcoded into a template or a plain unit — and that is the failure
+# this exists for: a driver run from a DIFFERENT checkout building the venv and
+# writing the .env here while systemd starts uvicorn THERE (2026-08-29: a stale
+# sibling checkout's .env had the feed enabled and a PENDING key; the API polled
+# real Gmail and 401'd for twenty minutes). Every absolute path in every unit we
+# install must live under the checkout (Environment= is exempt: the minted
+# kubeconfigs live in the owner's home by design). Checked on the RENDERED text,
+# against the physical path the tokens were given.
+unit_paths_check() {
+  load_unit_values || return 1
+  local unit text paths p stray=""
+  for unit in "$HERE"/cc-*.service "$HERE"/cc-*.path "$HERE"/cc-*.timer "$HERE"/cc-*.in; do
+    [[ -f "$unit" ]] || continue   # a glob that matched nothing stays literal
+    if ! text="$(unit_text "$unit")"; then
+      fail "unit-paths" "$(basename "$unit") does not render — the line above says why"
+      return 1
+    fi
+    paths="$(grep -E '^(WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=' <<<"$text" \
+             | grep -oE '/home/[^ :"]+')" || continue
+    while read -r p; do
+      [[ "$p" == "$UNIT_CHECKOUT" || "$p" == "$UNIT_CHECKOUT"/* ]] || { stray="$stray $(basename "$unit")"; break; }
+    done <<<"$paths"
+  done
+  if [[ -n "$stray" ]]; then
+    fail "unit-paths" "unit files point outside this checkout ($UNIT_CHECKOUT):$stray — fix the hardcoded paths before installing them"
+    return 1
+  fi
+  pass "unit-paths" "every unit file's paths live under $UNIT_CHECKOUT"
+}
+
 phase_preflight() {
   load_env || return 1
 
@@ -405,26 +479,7 @@ phase_preflight() {
   fi
   pass "k3s" "$(k3s --version 2>/dev/null | head -1)"
 
-  # The unit files hardcode the checkout path, and the app phase installs
-  # them verbatim — so a driver run from a DIFFERENT checkout builds the venv
-  # and writes the .env here while systemd starts uvicorn THERE (2026-08-29:
-  # a stale sibling checkout's .env had the feed enabled and a PENDING key;
-  # the API polled real Gmail and 401'd for twenty minutes). Every absolute
-  # path in every unit we install must live under REPO_ROOT (Environment= is
-  # exempt: the minted kubeconfigs live in $HOME by design).
-  local unit stray
-  stray=""
-  for unit in "$HERE"/cc-*.service "$HERE"/cc-*.path "$HERE"/cc-*.timer "$HERE/cc-nerve.service"; do
-    if grep -E '^(WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=' "$unit" 2>/dev/null \
-       | grep -oE '/home/[^ :"]+' | grep -vq "^$REPO_ROOT"; then
-      stray="$stray $(basename "$unit")"
-    fi
-  done
-  if [[ -n "$stray" ]]; then
-    fail "unit-paths" "unit files point outside this checkout ($REPO_ROOT):$stray — fix the hardcoded paths before installing them"
-    return 1
-  fi
-  pass "unit-paths" "every unit file's paths live under $REPO_ROOT"
+  unit_paths_check || return 1
 
   # Both nodes Ready. Capture then inspect — a `get nodes | grep` pipeline
   # inverts under pipefail when kubectl takes SIGPIPE.
@@ -1117,18 +1172,21 @@ phase_app() {
   # systemd units from deploy/k3s/ only. The retired Compose stack's
   # cc-uvicorn.service (deploy/pi/, deleted in v2.67.0) had `ExecStartPre=docker
   # compose up -d`, which resurrects the Docker stack and fights k3s for 5442.
-  local u
+  load_unit_values || return 1
+  local u src
   for u in cc-uvicorn.service cc-sandbox-runner.service cc-graph-bolt.service \
            cc-backup.service cc-backup.timer cc-update.service cc-update.path; do
-    step "unit-${u}" "$u installed" sudo cp "$HERE/$u" /etc/systemd/system/ || return 1
+    src="$HERE/$u"
+    [[ -f "$src.in" ]] && src="$src.in"
+    step "unit-${u}" "$u installed" install_unit "$src" "/etc/systemd/system/$u" || return 1
   done
   # The one-click updater's channel dirs (trigger tmpfs + durable status) —
   # cc-nerve's "apply update" button writes the trigger; cc-update.path fires
   # the root one-shot. See cc-update.sh's header for the design.
   step "update-tmpfiles" "cc-update trigger/status directories declared and created" \
-    sudo bash -c "cp '$HERE/cc-update-tmpfiles.conf' /etc/tmpfiles.d/cc-update.conf && systemd-tmpfiles --create /etc/tmpfiles.d/cc-update.conf" || return 1
+    install_update_tmpfiles || return 1
   step "unit-cc-nerve.service" "cc-nerve.service installed" \
-    sudo cp "$HERE/cc-nerve.service" /etc/systemd/system/ || return 1
+    install_unit "$HERE/cc-nerve.service.in" /etc/systemd/system/cc-nerve.service || return 1
   step "daemon-reload" "systemd reloaded" sudo systemctl daemon-reload || return 1
 
   # First boot is no longer held for an interview (v2.37.0): the operator's

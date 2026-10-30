@@ -29,9 +29,9 @@ Wants=network-online.target
 # pulls it in regardless. Setup-time ordering must not be decided here.
 
 [Service]
-User=codyslab
-Group=codyslab
-WorkingDirectory=/home/codyslab/central-command/web
+User=@CC_OWNER@
+Group=@CC_OWNER_GROUP@
+WorkingDirectory=@CC_CHECKOUT@/web
 ExecStart=/usr/bin/node server-dist/index.js
 Restart=always
 RestartSec=5

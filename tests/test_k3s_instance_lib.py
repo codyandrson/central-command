@@ -17,6 +17,8 @@ the real functions and the real scripts against a temp checkout:
 
 Anything that would write under a home gets a `getent` stub pointing at a temp one
 first: these tests never touch the real home of the account running them.
+
+The helper also holds the unit render (R6), tested in tests/test_k3s_unit_templates.py.
 """
 
 from __future__ import annotations
@@ -233,6 +235,7 @@ def test_env_path_does_not_carry_the_helper_and_the_helper_sets_nothing(tmp_path
     new = set((tmp_path / "fb").read_text().splitlines()) - set((tmp_path / "fa").read_text().splitlines())
     assert {line.split()[-1] for line in new} == {
         "cc_k3s_checkout", "cc_k3s_owner", "cc_k3s_group", "cc_k3s_home", "cc_k3s_backup_dir", "_cc_k3s_stat",
+        "cc_k3s_render_unit",  # R6, pinned in tests/test_k3s_unit_templates.py
     }
 
 

@@ -14,6 +14,8 @@ interpreter at `.venv/bin/python` in a scratch tree, printing canned
     sourced from deploy/k3s/.env (Settings load the ROOT .env);
   * nothing restarts on its result: the section sits outside cc-update.sh's
     health poll and out of every unit and timer.
+
+The units named below are read rendered from their templates (R6, tests/k3s_units.py).
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests.k3s_units import shipped_text
 
 ROOT = Path(__file__).resolve().parents[1]
 VERIFY = ROOT / "deploy" / "k3s" / "verify.sh"
@@ -147,4 +151,4 @@ def test_verify_calls_the_section_on_every_run_after_the_run_modes_check():
 @pytest.mark.parametrize("rel", ["deploy/k3s/cc-update.sh", "deploy/k3s/cc-backup.timer",
                                  "deploy/k3s/cc-update.service", "deploy/k3s/cc-uvicorn.service"])
 def test_the_self_check_is_never_in_the_updater_or_on_a_timer(rel):
-    assert "selfcheck" not in (ROOT / rel).read_text()
+    assert "selfcheck" not in shipped_text(rel)

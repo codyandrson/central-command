@@ -40,9 +40,9 @@ After=network-online.target k3s.service
 Wants=network-online.target k3s.service
 
 [Service]
-User=codyslab
-Group=codyslab
-WorkingDirectory=/home/codyslab/central-command
+User=@CC_OWNER@
+Group=@CC_OWNER_GROUP@
+WorkingDirectory=@CC_CHECKOUT@
 # NOTE: CC_DISPATCH_APPROVAL_LIMIT=5 used to be pinned here. It is not a
 # run-mode flag, and a systemd Environment= beats pydantic-settings' env_file,
 # so it SILENTLY shadowed .env: raising the valve there changed nothing and the
@@ -65,7 +65,7 @@ ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do (exec 3<>/dev/tcp/127.0.0.1/
 # after base64 inflation (~4/3×), or the socket closes 1009 before the
 # application's clean attachment_too_large refusal can fire (uvicorn's default
 # is 16 MB). Settings refuses a cap that would not fit under this number.
-ExecStart=/home/codyslab/central-command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080 --timeout-graceful-shutdown 30 --ws-max-size 100663296
+ExecStart=@CC_CHECKOUT@/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080 --timeout-graceful-shutdown 30 --ws-max-size 100663296
 # The app exits if Postgres isn't ready yet — keep retrying until the stack is
 # up. The dispatch advisory lease makes a double-start refuse loudly rather than
 # run two drain loops.

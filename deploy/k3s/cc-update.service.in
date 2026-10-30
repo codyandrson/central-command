@@ -29,6 +29,6 @@ TimeoutStartSec=5400
 CacheDirectory=cc-kube
 Environment=KUBECACHEDIR=/var/cache/cc-kube
 ExecStartPre=-/usr/bin/mv -f /run/cc-update/trigger /run/cc-update/request.json
-ExecStart=/home/codyslab/central-command/deploy/k3s/cc-update.sh
+ExecStart=@CC_CHECKOUT@/deploy/k3s/cc-update.sh
 
 # No [Install]: cc-update.path is what gets enabled, per the .path convention.

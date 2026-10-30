@@ -33,15 +33,15 @@ After=network-online.target k3s.service
 Wants=network-online.target k3s.service
 
 [Service]
-User=codyslab
-Group=codyslab
-WorkingDirectory=/home/codyslab/central-command
+User=@CC_OWNER@
+Group=@CC_OWNER_GROUP@
+WorkingDirectory=@CC_CHECKOUT@
 # .env carries CC_SANDBOX_RUNNER_TOKEN (and any CC_SANDBOX_* overrides) so the
 # runner and the app enforce/send the SAME token from the same file.
-EnvironmentFile=-/home/codyslab/central-command/.env
-Environment=CC_SANDBOX_KUBECONFIG=/home/codyslab/.cc-sandbox-runner.kubeconfig
-Environment=CC_SANDBOX_COPY_ROOT=/home/codyslab/central-command
-ExecStart=/home/codyslab/central-command/.venv/bin/uvicorn central_command.sandbox.runner:app --host 127.0.0.1 --port 8090
+EnvironmentFile=-@CC_CHECKOUT@/.env
+Environment=CC_SANDBOX_KUBECONFIG=@CC_OWNER_HOME@/.cc-sandbox-runner.kubeconfig
+Environment=CC_SANDBOX_COPY_ROOT=@CC_CHECKOUT@
+ExecStart=@CC_CHECKOUT@/.venv/bin/uvicorn central_command.sandbox.runner:app --host 127.0.0.1 --port 8090
 Restart=always
 RestartSec=5
 TimeoutStopSec=15

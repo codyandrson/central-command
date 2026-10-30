@@ -23,6 +23,6 @@ RemainAfterExit=no
 # Same budget as the updater: the Chromium image build is the long pole.
 TimeoutStartSec=5400
 ExecStartPre=-/usr/bin/mv -f /run/cc-update/stage-trigger /run/cc-update/stage-request.json
-ExecStart=/home/codyslab/central-command/deploy/k3s/cc-update.sh stage
+ExecStart=@CC_CHECKOUT@/deploy/k3s/cc-update.sh stage
 
 # No [Install]: cc-update-stage.path is what gets enabled, per the .path convention.

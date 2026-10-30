@@ -7,7 +7,7 @@
 #
 # Runs as ROOT, and that is not a preference. Every store is dumped through
 # `k3s kubectl`, which reads /etc/rancher/k3s/k3s.yaml — mode 0600, owned by
-# root. Under the old `User=codyslab` (carried over from the compose stack,
+# root. Under the old `User=@CC_OWNER@` (carried over from the compose stack,
 # where the docker group was enough) EVERY kubectl call died with "permission
 # denied" and all four dumps failed. It failed SILENTLY in the sense that
 # matters: the timer stayed `active (waiting)`, the last neo4j dump on disk was
@@ -28,13 +28,13 @@ Requires=k3s.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/codyslab/central-command
+WorkingDirectory=@CC_CHECKOUT@
 # Root, no HOME, WorkingDirectory=the checkout: kubectl's discovery cache
 # would otherwise resolve the relative default `.kube/cache` and land
 # root-owned inside the repo. Point it somewhere that isn't the checkout.
 CacheDirectory=cc-kube
 Environment=KUBECACHEDIR=/var/cache/cc-kube
-ExecStart=/home/codyslab/central-command/deploy/k3s/backup.sh
+ExecStart=@CC_CHECKOUT@/deploy/k3s/backup.sh
 # The neo4j stop/dump/start window dominates the runtime; 30min is generous
 # headroom. On timeout systemd sends SIGTERM, which the script traps to bring
 # the graph stack back up rather than leaving neo4j stopped.

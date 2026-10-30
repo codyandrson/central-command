@@ -13,12 +13,17 @@ starts the unit whether or not k3s's attempt succeeded; `Restart=always` is
 what then carries it until the cluster answers. `cc-backup.service` is a
 timer-fired one-shot and is deliberately not in this list: it should fail
 when k3s is down.
+
+R6: three of the four are templates now, so each is read rendered, through
+tests/k3s_units.py, and every directive pinned here is the same as before.
 """
 
 import re
 from pathlib import Path
 
 import pytest
+
+from tests.k3s_units import shipped_text
 
 K3S = Path(__file__).resolve().parents[1] / "deploy/k3s"
 LONG_RUNNING = ["cc-uvicorn.service", "cc-sandbox-runner.service", "cc-graph-bolt.service"]
@@ -27,7 +32,7 @@ LONG_RUNNING = ["cc-uvicorn.service", "cc-sandbox-runner.service", "cc-graph-bol
 def directives(unit: str) -> dict[str, list[str]]:
     """Uncommented `Key=value` lines of a unit file, values split on spaces."""
     out: dict[str, list[str]] = {}
-    for key, value in re.findall(r"^([A-Za-z]+)=(.*)$", (K3S / unit).read_text(), flags=re.M):
+    for key, value in re.findall(r"^([A-Za-z]+)=(.*)$", shipped_text(f"deploy/k3s/{unit}"), flags=re.M):
         out.setdefault(key, []).extend(value.split() if key != "ExecStart" else [value])
     return out
 
@@ -35,9 +40,9 @@ def directives(unit: str) -> dict[str, list[str]]:
 def test_every_restarting_k3s_unit_is_covered():
     """A new always-on unit that orders itself after k3s joins LONG_RUNNING."""
     found = sorted(
-        p.name for p in K3S.glob("*.service")
-        if "always" in directives(p.name).get("Restart", [])
-        and "k3s.service" in directives(p.name).get("After", [])
+        name for name in {p.name.removesuffix(".in") for g in ("*.service", "*.service.in") for p in K3S.glob(g)}
+        if "always" in directives(name).get("Restart", [])
+        and "k3s.service" in directives(name).get("After", [])
     )
     assert found == sorted(LONG_RUNNING)
 

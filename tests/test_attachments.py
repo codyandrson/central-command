@@ -12,6 +12,8 @@ image-only PDF without raising and returns zero characters.
 The size cap is a setting (story 11.5, R4, GATE-084; ruled 2026-10-29,
 Decision 2: default 50 MiB, today's value): the tests near the end pin the
 default, the env key, the refusal message and the transport-ceiling validator.
+
+The k3s unit's websocket limit is read rendered from its template (R6).
 """
 
 import base64
@@ -391,10 +393,11 @@ def test_the_three_places_that_start_the_api_carry_the_one_ws_limit():
     from pathlib import Path
 
     from central_command.config import WS_MAX_SIZE_BYTES, Settings
+    from tests.k3s_units import shipped_text
 
     root = Path(__file__).resolve().parent.parent
     for rel in ("deploy/k3s/cc-uvicorn.service", "deploy/single/phases/boot.sh"):
-        found = re.findall(r"--ws-max-size\s+(\d{6,})", (root / rel).read_text())
+        found = re.findall(r"--ws-max-size\s+(\d{6,})", shipped_text(rel))
         assert found and {int(n) for n in found} == {WS_MAX_SIZE_BYTES}, rel
     ts = (root / "web/server/lib/upload-config.ts").read_text()
     m = re.search(r"inlineAttachmentMaxMb:\s*(\d+)", ts)

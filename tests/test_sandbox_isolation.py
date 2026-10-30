@@ -22,6 +22,11 @@ tailnet-published URL (`tailscale serve` proxies /api to the loopback API
 without authentication) — is a LIVE DRILL written into deploy/k3s/README.md
 and referenced from the cc-test-sweep skill. pytest never runs it; the
 release story runs it once after apply with the operator's OK.
+
+R6: the units that name the checkout or the account are `.in` templates. The
+pins read them rendered (tests/k3s_units.py), and the tree walks select on the
+name's ending, because `Path.suffix` of a `.service.in` is `.in` and the template
+would drop out of every walk without a failure.
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from tests.k3s_units import shipped_text
 
 ROOT = Path(__file__).resolve().parents[1]
 K3S = ROOT / "deploy" / "k3s"
@@ -54,9 +61,20 @@ def _shipped_files(*suffixes: str) -> list[Path]:
     files: list[Path] = []
     for base in (ROOT / "deploy" / "k3s", ROOT / "deploy" / "single"):
         for p in base.rglob("*"):
-            if p.is_file() and p.suffix in suffixes and "node_modules" not in p.parts:
+            if p.is_file() and p.name.endswith(suffixes) and "node_modules" not in p.parts:
                 files.append(p)
     return files
+
+
+_UNITS_AND_DRIVERS = (".service", ".service.in", ".conf.in", ".sh", ".yaml", ".yml", ".conf")
+
+
+def test_the_walks_see_the_seven_unit_templates():
+    """R6. Matched on the suffix alone, a template would silently leave the walks."""
+    seen = {p.name for p in _shipped_files(*_UNITS_AND_DRIVERS)}
+    assert {"cc-uvicorn.service.in", "cc-nerve.service.in", "cc-sandbox-runner.service.in",
+            "cc-backup.service.in", "cc-update.service.in", "cc-update-stage.service.in",
+            "cc-update-tmpfiles.conf.in"} <= seen
 
 
 # ── the API, the sandbox runner and the cockpit bind loopback ───────────────
@@ -66,7 +84,7 @@ def _shipped_files(*suffixes: str) -> list[Path]:
     ("deploy/k3s/cc-sandbox-runner.service", "central_command.sandbox.runner:app"),
 ])
 def test_the_k3s_units_bind_loopback(path, module):
-    exec_lines = [ln for ln in (ROOT / path).read_text().splitlines() if ln.startswith("ExecStart=")]
+    exec_lines = [ln for ln in shipped_text(path).splitlines() if ln.startswith("ExecStart=")]
     assert len(exec_lines) == 1 and module in exec_lines[0], path
     assert _bind_hosts(exec_lines[0]) == ["127.0.0.1"], path
 
@@ -83,13 +101,13 @@ def test_the_single_node_boot_phase_binds_loopback_for_the_api_and_the_runner():
 
 
 def test_no_shipped_uvicorn_command_binds_anything_but_loopback():
-    for p in _shipped_files(".service", ".sh", ".yaml", ".yml"):
+    for p in _shipped_files(".service", ".service.in", ".sh", ".yaml", ".yml"):
         for host in _bind_hosts(p.read_text(errors="replace")):
             assert host == "127.0.0.1", f"{p.relative_to(ROOT)} binds {host}"
 
 
 def test_the_bind_check_catches_a_unit_edited_to_listen_on_every_interface():
-    text = (K3S / "cc-uvicorn.service").read_text()
+    text = shipped_text("deploy/k3s/cc-uvicorn.service")
     edited = text.replace("--host 127.0.0.1", "--host 0.0.0.0")
     assert edited != text
     assert _bind_hosts(edited) == ["0.0.0.0"]
@@ -102,7 +120,7 @@ def test_nothing_binds_from_settings_api_host():
     for p in (ROOT / "central_command").rglob("*.py"):
         if p not in allowed:
             assert "api_host" not in p.read_text(), f"{p.relative_to(ROOT)} reads api_host"
-    for p in _shipped_files(".service", ".sh", ".yaml", ".yml", ".conf"):
+    for p in _shipped_files(*_UNITS_AND_DRIVERS):
         # CC_API_HOST is the env spelling of the setting (resolve-images.sh has an
         # unrelated registry helper that happens to be called api_host).
         assert not re.search(r"CC_API_HOST|settings\.api_host", p.read_text(errors="replace")), p.relative_to(ROOT)
@@ -120,14 +138,14 @@ def test_the_cockpit_defaults_to_loopback_and_refuses_every_interface_without_au
 
 
 def test_no_unit_or_driver_sets_the_cockpits_host_to_every_interface():
-    for p in _shipped_files(".service", ".sh", ".yaml", ".yml", ".conf"):
+    for p in _shipped_files(*_UNITS_AND_DRIVERS):
         for line in p.read_text(errors="replace").splitlines():
             if line.lstrip().startswith("#"):
                 continue
             assert not re.search(r"\bHOST\s*=\s*['\"]?0\.0\.0\.0", line), p.relative_to(ROOT)
-    for p in (K3S / "cc-nerve.service", ROOT / "deploy/single/phases/boot.sh"):
-        assert not re.search(r"(?m)^[^#\n]*\bHOST=", p.read_text()), (
-            f"{p.name} sets HOST: the cockpit's loopback default must stand")
+    for rel in ("deploy/k3s/cc-nerve.service", "deploy/single/phases/boot.sh"):
+        assert not re.search(r"(?m)^[^#\n]*\bHOST=", shipped_text(rel)), (
+            f"{rel} sets HOST: the cockpit's loopback default must stand")
 
 
 # ── a sandbox pod holds nothing and shares nothing with the host ────────────

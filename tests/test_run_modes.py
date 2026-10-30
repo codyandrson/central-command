@@ -7,6 +7,8 @@ running process's /proc environ.
 config.py's load_dotenv mirrors a worktree's `.env` (a copy of the live one,
 which may still carry the old keys) into os.environ, so every case that
 expects NO finding deletes all three keys first.
+
+The k3s unit is read rendered from its template (R6, tests/k3s_units.py).
 """
 
 import importlib.util
@@ -19,6 +21,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from tests.k3s_units import shipped_text
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "central_command" / "run_modes.py"
@@ -200,7 +204,7 @@ def test_lifespan_is_an_asynccontextmanager_and_the_retired_warning_is_plain():
 
 @pytest.mark.parametrize("rel", [".env.example", "deploy/k3s/cc-uvicorn.service"])
 def test_the_templates_carry_no_run_mode_key(rel):
-    text = (ROOT / rel).read_text()
+    text = shipped_text(rel)
     assert not re.search(r"CC_(DEMO|EXECUTOR|TEST)_MODE", text)
 
 

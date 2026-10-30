@@ -290,6 +290,29 @@ changed_between() { # changed_between <pathspec...> — output non-empty = relea
   "${RUNAS[@]}" git -C "$REPO" diff --name-only "$CKPT" "v$TARGET_VERSION" -- "$@"
 }
 
+# Installed paths mirror the runbook (README §6), not the source names. Through a
+# temp file: a refused render must leave the unit that is installed alone.
+install_changed_unit() { # install_changed_unit <repo-relative unit>
+  local f="$1" name dest rendered rc
+  name="$(basename "${f%.in}")"
+  case "$name" in
+    *-tmpfiles.conf) dest=/etc/tmpfiles.d/cc-update.conf ;;
+    *)               dest="/etc/systemd/system/$name" ;;
+  esac
+  case "$f" in
+    *.in)
+      rendered="$(mktemp)" || return 1
+      if cc_k3s_render_unit "$REPO/$f" "$REPO" "$OWNER" "$OWNER_GROUP" "$OWNER_HOME" >"$rendered"; then
+        install -m 644 "$rendered" "$dest"; rc=$?
+      else
+        rc=1
+      fi
+      rm -f "$rendered"
+      return "$rc" ;;
+    *) install -m 644 "$REPO/$f" "$dest" ;;
+  esac
+}
+
 deployments_in() { # deployments_in <manifest> — every Deployment it declares
   [[ -f "$1" ]] || return 0
   awk '/^kind: Deployment/{d=1} d&&/^  name:/{print $2; d=0}' "$1"
@@ -620,16 +643,22 @@ CM
     "${K[@]}" rollout status "deploy/$d" --timeout=300s || die manifests "deploy/$d did not become ready"
   done
 
+  # A unit that names the checkout or the account is a template (deploy/k3s/<name>.in),
+  # rendered here to its installed name; a unit with no instance value is a plain file.
+  #
+  # The release that INTRODUCED the templates installed no unit at its own apply,
+  # and that is what made it safe: the update INTO a release runs the previous
+  # release's copy of this script, whose pathspec had no '*.in', so it matched no
+  # template, and it skipped the plain files the release deleted (the -f below).
+  # /etc/systemd/system kept the files it had, which the render reproduces byte
+  # for byte on the layout they were written for. Naming the templates *.service
+  # would have installed them raw, tokens and all, and broken the API at restart.
   changed_units="$(changed_between 'deploy/k3s/*.service' 'deploy/k3s/*.path' 'deploy/k3s/*.timer' \
-                                   'deploy/k3s/*-tmpfiles.conf')"
+                                   'deploy/k3s/*-tmpfiles.conf' 'deploy/k3s/*.in')"
   if [[ -n "$changed_units" ]]; then
     while read -r f; do
       [[ -f "$REPO/$f" ]] || continue   # a unit DELETED by the release is not ours to install
-      case "$f" in
-        # Installed paths mirror the runbook (README §6), not the source names.
-        *-tmpfiles.conf) install -m 644 "$REPO/$f" /etc/tmpfiles.d/cc-update.conf ;;
-        *)               install -m 644 "$REPO/$f" /etc/systemd/system/ ;;
-      esac || die manifests "could not install $f"
+      install_changed_unit "$f" || die manifests "could not install $f"
     done <<<"$changed_units"
     systemctl daemon-reload || die manifests "systemctl daemon-reload failed"
     # A changed cc-update.service takes effect on the NEXT run: restarting the

@@ -14,7 +14,7 @@ be written down here:
   e  in a deploy/k3s/*.in unit template, a User=, Group=, WorkingDirectory=,
      ExecStart=, EnvironmentFile= or Environment= value that holds an absolute
      /home path, or (User=/Group=) is not a token (@NAME@, ${NAME}, {{NAME}} or
-     <name>) -- no template exists yet; the rule is armed for the unit templates
+     <name>); the templates and their render are R6, tests/test_k3s_unit_templates.py
 
 Scope: `git ls-files` (the tracked tree, not the working tree), minus docs/vendor/;
 under web/ only the paths web/VENDORED.md names as ours (server/routes/cc-*.ts,

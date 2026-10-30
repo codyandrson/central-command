@@ -11,6 +11,8 @@ Compose stack and the README whole; `git show v2.65.3:deploy/pi/<file>` is the
 way to reach them now.
 
 These pin that state, and that every reader still names the new paths.
+
+R6: cc-nerve's unit has since become a template, so setup.sh installs `cc-nerve.service.in`.
 """
 
 from __future__ import annotations
@@ -120,7 +122,7 @@ def test_the_updater_names_the_new_paths_and_carries_the_move():
 def test_the_other_k3s_scripts_name_the_shared_litellm_files_and_the_moved_unit():
     setup = _code(K3S / "setup.sh")
     assert "deploy/shared/litellm/register-models.py" in setup and "deploy/shared/litellm/policy.py" in setup
-    assert '"$HERE/cc-nerve.service"' in setup and "deploy/pi/cc-nerve.service" not in setup
+    assert '"$HERE/cc-nerve.service.in"' in setup and "deploy/pi/cc-nerve.service" not in setup
     assert "deploy/shared/litellm/config.yaml" in _code(K3S / "make-secrets.sh")
     assert "deploy/shared/litellm/policy.py --check" in _code(K3S / "verify.sh")
 
