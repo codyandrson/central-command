@@ -43,13 +43,20 @@ set -uo pipefail
 TARGET="${1:?usage: update-run.sh <target-version> <deploy-single-dir>}"
 SINGLE="${2:?usage: update-run.sh <target-version> <deploy-single-dir>}"
 REPO_ROOT="$(cd "$SINGLE/../.." && pwd)"
+# env-lib.sh is sourced UNCONDITIONALLY and FIRST (R6): this script runs from a
+# COPY in the state dir, but env-lib.sh is read from the checkout, and the merge
+# rewrites the checkout mid-run — so the helper (cc_exit_code, below) is read
+# into this shell before anything can move it. It used to load only when
+# CC_UPDATE_DIR was unset, and the API always sets it. A failed source is
+# fatal here (bash only aborts on one in POSIX mode): without the helper there
+# is no exit rule to apply, and nothing has been stopped yet.
+# shellcheck source=../env-lib.sh
+. "$REPO_ROOT/deploy/env-lib.sh" || exit $?
 # CC_UPDATE_DIR is what the API passes (api/update.py `_update_dir`); without
 # it — a run started by hand — derive the same default from the state dir.
 if [[ -n "${CC_UPDATE_DIR:-}" ]]; then
   UPD="$CC_UPDATE_DIR"
 else
-  # shellcheck source=../env-lib.sh
-  . "$REPO_ROOT/deploy/env-lib.sh"
   STATE_DIR="$(cc_state_dir "$REPO_ROOT/.env" "$REPO_ROOT")" \
     || STATE_DIR="${TMPDIR:-/tmp}/central-command-state"
   UPD="$STATE_DIR/update"
@@ -103,6 +110,14 @@ restart_api() { # best-effort boot + health wait; true iff healthy
   return 1
 }
 
+# Every exit goes through finish(): cc_exit_code decides the code from the
+# counters (FAIL > USERACTION > WARN, the one rule — env-lib.sh), so this
+# runner never spells a literal exit status. FAILS/ACTIONS are set where the
+# outcome is decided; WARNS stays 0 (update.sh's rc 2 is a WARN, which this
+# runner has always treated as a success).
+FAILS=0; ACTIONS=0; WARNS=0
+finish() { exit "$(cc_exit_code "$FAILS" "$WARNS" "$ACTIONS")"; }
+
 write_status running "starting"
 # Let the API flush the 202 that spawned us before we take it down.
 sleep 2
@@ -112,7 +127,7 @@ write_status running "stop-api"
 for i in $(seq 1 30); do api_up || break; sleep 1; done
 if api_up; then
   write_status failed "stop-api" "the API is still answering after ./setup.sh stop — stop it yourself, then run: ./update.sh apply"
-  exit 1
+  FAILS=1; finish
 fi
 
 write_status running "apply"
@@ -131,10 +146,10 @@ if (( UNMOVED )) && (( rc == 1 || rc == 3 )); then
   restart_api || true
   if (( rc == 3 )); then
     write_status failed "operator-action" "${why:-the update paused for your action before anything was changed} — NOTHING was changed (still v$(current_version)): fix what it names, then apply the update again (here, or: cd deploy/single && ./update.sh apply)"
-    exit 3
+    ACTIONS=1; finish
   fi
   write_status failed "apply" "${why:-the update stopped before anything was changed} — NOTHING was changed and nothing was rolled back (still v$(current_version)): fix what it names, then apply the update again. Details: $LOG"
-  exit 1
+  FAILS=1; finish
 fi
 
 if (( rc == 1 )); then
@@ -145,7 +160,7 @@ if (( rc == 1 )); then
   else
     write_status failed "rollback" "apply failed AND rollback did not come back healthy — read $LOG, then: ./update.sh rollback, then ./setup.sh (it resumes in order and starts the API)"
   fi
-  exit 1
+  FAILS=1; finish
 fi
 
 if (( rc == 3 )); then
@@ -161,12 +176,12 @@ if (( rc == 3 )); then
     # refused until the ledger is built, which is the sentence's whole point.
     # ./setup.sh's own boot phase brings the API back.
     write_status failed "operator-action" "${pause_line#USERACTION ledger-adopt: } — the API stays stopped until then; in a terminal: cd deploy/single && ./setup.sh (its boot phase starts the API again)"
-    exit 3
+    ACTIONS=1; finish
   fi
   # Bring the API back up so the cockpit showing this status is reachable.
   restart_api || true
   write_status failed "operator-action" "${pause_line:-the update paused for your action} — finish in a terminal: cd deploy/single && ./update.sh apply, then ./setup.sh (it resumes at boot, which starts the API)"
-  exit 3
+  ACTIONS=1; finish
 fi
 
 write_status running "restart"
@@ -175,5 +190,6 @@ if restart_api; then
   echo "== update-run finished: healthy on v$(current_version) =="
 else
   write_status failed "restart" "the updated API never answered /health — read the uvicorn.log beside $LOG's directory (./setup.sh report prints the state dir); roll back with: ./update.sh rollback, then ./setup.sh (it resumes in order and starts the API)"
-  exit 1
+  FAILS=1
 fi
+finish

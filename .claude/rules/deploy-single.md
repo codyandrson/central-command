@@ -220,10 +220,10 @@ when a matching file is read.
   install is fresh).
 - **One exit-code rule, everywhere** (v2.55.0, D5). `cc_exit_code <fails>
   <warns> <actions>` in `deploy/env-lib.sh`, precedence `FAIL > USERACTION >
-  WARN` — `run_phase`, the `machine` subcommand, `resolve-images.sh` and
-  `update.sh` call it, so a FAIL is never reported as "stopped for your action."
-  (`update-run.sh` still relays `update.sh`'s code by hand; adopting
-  `cc_exit_code` there is owed.)
+  WARN` — `run_phase`, the `machine` subcommand, `resolve-images.sh`,
+  `update.sh` and `update-run.sh` call it (the runner sources `env-lib.sh`
+  unconditionally, before the merge rewrites the tree, and spells no literal
+  exit status), so a FAIL is never reported as "stopped for your action."
   `phase_fetch` returns 1 on a FAIL now; `USERACTION` is reserved for a seam
   only the operator can fill.
 - **The tree is pristine, or the driver refuses — there is no flag past it**

@@ -11,11 +11,17 @@ The working directory is the STATE dir's `update/` since v2.42.0 (design
 record 2026-09-23, D7 — nothing is written inside the checkout). CC_UPDATE_DIR
 is how api/update.py hands the spawned runner the directory it is polling, and
 it is how this rig pins it too.
+
+Story 11.12 (epic small-fixes, R6, DEPLOY-SINGLE-009): the runner sources
+deploy/env-lib.sh unconditionally and exits only through cc_exit_code. The rig
+therefore carries the REAL env-lib.sh — no tolerance for its absence — and a
+source walk pins that no literal `exit <digit>` survives outside a comment.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import os
 import subprocess
@@ -32,6 +38,7 @@ from tests.installer_source import (
 )
 
 RUNNER_SRC = Path(__file__).resolve().parents[1] / "deploy" / "single" / "update-run.sh"
+ENV_LIB_SRC = Path(__file__).resolve().parents[1] / "deploy" / "env-lib.sh"
 
 # The harness shadows curl with a stub script on PATH. Git Bash PREPENDS
 # /mingw64/bin:/usr/bin to whatever PATH it is handed, so on Windows the real
@@ -85,6 +92,9 @@ exit 0
 
     runner = upd / "run.sh"
     shutil.copyfile(RUNNER_SRC, runner)
+    # The runner sources <repo>/deploy/env-lib.sh unconditionally (R6): the REAL
+    # file, copied in, so a rig that lacks it fails loudly instead of passing.
+    shutil.copyfile(ENV_LIB_SRC, repo / "deploy" / "env-lib.sh")
 
     def run(target="2.22.0"):
         # The bash the product itself would use (Git's on Windows, where PATH's
@@ -154,6 +164,34 @@ def test_unhealthy_restart_is_a_loud_failure(rig, tmp_path):
     assert status["phase"] == "restart"
 
 
+def test_the_rig_runs_the_real_env_lib_and_the_runner_requires_it(rig):
+    """No tolerance for env-lib.sh's absence: with the file gone the runner stops
+    at the source line, before any status is written — a missing helper is a
+    broken install, never a quiet fallback to hand-written exit codes."""
+    single, run, calls, _hf, _script, _upd, _flag = rig
+    env_lib = single.parent / "env-lib.sh"
+    assert env_lib.read_bytes() == ENV_LIB_SRC.read_bytes()
+    env_lib.unlink()
+    with pytest.raises(FileNotFoundError):   # no status.json was ever written
+        run()
+    assert _lines(calls) == [], "the API must not be stopped before the helper is loaded"
+
+
+def test_the_runner_spells_no_literal_exit_and_uses_the_one_helper():
+    """R6: every exit goes through cc_exit_code (FAIL > USERACTION > WARN). A
+    literal `exit 1`/`exit 3` is the hand-relayed code the rule replaces, and a
+    new branch copying the old shape would quietly bring it back."""
+    code = [ln for ln in RUNNER_SRC.read_text(encoding="utf-8").splitlines()
+            if not ln.lstrip().startswith("#")]
+    literal = [ln for ln in code if re.search(r"\bexit\s+[0-9]", ln)]
+    assert not literal, f"a literal exit status outside a comment: {literal}"
+    body = "\n".join(code)
+    assert "cc_exit_code" in body
+    assert re.search(r'^\s*\.\s+"\$REPO_ROOT/deploy/env-lib\.sh"', body, flags=re.M), (
+        "env-lib.sh must be sourced at the top level, not inside a conditional"
+    )
+
+
 # ── `update.sh import`: the docs/vendor skip (F19), a failed unpack is a FAIL
 # (F20), and no unzip at all (P5, F6) ──────────────────────────────────────
 #
@@ -172,7 +210,6 @@ def test_unhealthy_restart_is_a_loud_failure(rig, tmp_path):
 # pins the extractor's own rules.
 
 UPDATE_SRC = Path(__file__).resolve().parents[1] / "deploy" / "single" / "update.sh"
-ENV_LIB_SRC = Path(__file__).resolve().parents[1] / "deploy" / "env-lib.sh"
 RELEASE_ZIP_SRC = Path(__file__).resolve().parents[1] / "deploy" / "single" / "release-zip.py"
 
 

@@ -21,6 +21,12 @@ out of step are exactly what this walk checks:
   or an alias nobody is ever asked about.
 
 To see it fail: add a row for `CC_NOPE` and re-run.
+
+Story 11.12 (epic small-fixes, R7, DEPLOY-SINGLE-001) extends it two ways: the
+four typed keys that were answered by hand (CC_NETRC, CC_CLIENT_CERT,
+CC_CLIENT_KEY, WHISPER_MODELS_BASE_URL) are rows now, and the FORWARD walk
+below reads deploy/AIRGAP.md's seam table, so a seam documented there with no
+row fails the suite instead of waiting for review.
 """
 
 from __future__ import annotations
@@ -254,6 +260,83 @@ def test_the_secret_rows_are_exactly_the_credentials():
         "a secret answer is read with no echo and printed as "
         f"`(secret, not printed)` in the diff — that set is: {sorted(secrets)}"
     )
+
+
+def test_the_four_typed_keys_are_rows_with_the_right_shape():
+    """R7: these were answered by hand until story 11.12. The two client-cert
+    rows take a PATH that may not be mounted at configure time (questions-lib's
+    v_path judges the shape; v_path_readable would refuse an answer for a file
+    that arrives later), and are not secrets — the key FILE is, its path is not."""
+    rows = {r["key"]: r for r in ROWS}
+    assert (rows["CC_NETRC"]["group"], rows["CC_NETRC"]["default"],
+            rows["CC_NETRC"]["validator"]) == ("network", "0", "v_bool01")
+    for key in ("CC_CLIENT_CERT", "CC_CLIENT_KEY"):
+        r = rows[key]
+        assert (r["group"], r["default"], r["validator"], r["secret"]) == (
+            "network", "-", "v_path", "n"), r
+    w = rows["WHISPER_MODELS_BASE_URL"]
+    assert (w["group"], w["validator"], w["when"]) == ("mirrors", "v_url", "-")
+    assert "local speech engine" in w["prompt"].lower()
+    keys = [r["key"] for r in ROWS]
+    assert keys.index("CC_NETRC") > keys.index("CC_TLS_INSECURE")
+    assert keys.index("WHISPER_MODELS_BASE_URL") > keys.index("CC_HF_ENDPOINT")
+
+
+# ── the FORWARD walk: AIRGAP.md's seam table -> a row, or a named exception ──
+# Seam-column tokens that are NOT rows, each with the reason and the place that
+# reason must still hold. A new exception is a decision, so it is written here.
+AIRGAP = ROOT / "deploy" / "AIRGAP.md"
+_SEAM_EXCEPTIONS = {
+    "CC_JIRA_AUTH_MODE": ("derives from its flavor; an .env.example line", ENV_EXAMPLE),
+    "CC_CONFLUENCE_AUTH_MODE": ("derives from its flavor; an .env.example line", ENV_EXAMPLE),
+    "CC_CONFLUENCE_PROFILE": ("informational; an .env.example line", ENV_EXAMPLE),
+    "CC_IMG_<NAME>": ("written by the image resolver", SINGLE / "resolve-images.sh"),
+    "WHISPER_MODEL_DIR": ("a local directory, not an answer", ROOT / "web" / "server" / "lib" / "config.ts"),
+    "CC_LLM_UPSTREAM_MODEL_<ALIAS>": ("a prefix the per-alias rows expand", None),
+}
+
+
+def _seam_tokens() -> list[str]:
+    lines = AIRGAP.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines)
+                 if ln.replace(" ", "") == "|Source|Usedby|Seam|Notes|")
+    tokens: list[str] = []
+    for ln in lines[start + 2:]:           # skip the |---| rule
+        if not ln.startswith("|"):
+            break
+        cells = [c.strip() for c in ln.strip().strip("|").split(" | ")]
+        for tok in re.findall(r"`([^`]+)`", cells[2]):
+            tok = tok.split("=", 1)[0]     # `CC_TLS_INSECURE=1` -> the key
+            if re.fullmatch(r"[A-Z][A-Z0-9_]*(<[A-Z]+>)?", tok):
+                tokens.append(tok)
+    return tokens
+
+
+def test_every_airgap_seam_is_a_row_or_a_named_exception():
+    """Story 11.12 (R7): the table promises an operator a seam; `configure` asks
+    only for rows. Without this walk a seam documented in AIRGAP.md and given no
+    row passes the suite (CC_NETRC, CC_CLIENT_CERT/KEY and
+    WHISPER_MODELS_BASE_URL did, for months)."""
+    keys = {r["key"] for r in ROWS}
+    tokens = _seam_tokens()
+    assert len(tokens) > 25 and "CC_REGISTRY_DOCKERIO" in tokens, (
+        f"the walk found too little of the table — did its header move? {tokens}"
+    )
+    missing = [t for t in tokens if t not in keys and t not in _SEAM_EXCEPTIONS]
+    assert not missing, (
+        f"deploy/AIRGAP.md's Seam column names {missing}: each needs a row in "
+        "questions.tsv (and its .env.example line), or a named exception with its "
+        "reason in _SEAM_EXCEPTIONS"
+    )
+    for tok, (reason, where) in _SEAM_EXCEPTIONS.items():
+        assert tok in tokens, f"{tok} is excepted but the table no longer names it — drop the exception"
+        if tok == "CC_LLM_UPSTREAM_MODEL_<ALIAS>":
+            assert any(k.startswith("CC_LLM_UPSTREAM_MODEL_") for k in keys), reason
+        elif where is not None:
+            needle = tok.split("<")[0]
+            assert needle in where.read_text(encoding="utf-8"), (
+                f"{tok} is excepted because it is {reason}, but {where.relative_to(ROOT)} no longer carries it"
+            )
 
 
 def test_check_and_configure_both_read_the_schema():

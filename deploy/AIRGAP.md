@@ -115,25 +115,30 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 | huggingface.co | the speech engine's models (Kokoro TTS + faster-whisper STT), fetched by `cc-speech` when the `llm` phase installs them | `CC_HF_ENDPOINT`, or pre-place the hub snapshots in the `speech-models` volume | `HF_HUB_CACHE` is the volume; a present snapshot is not re-fetched. `CC_ENABLE_SPEECH=0` removes the source entirely (point `cc-tts`/`cc-stt` at your own engines) |
 | huggingface.co | Whisper STT for the cockpit's *local* engine (k3s Node server only) | `WHISPER_MODELS_BASE_URL`, or pre-place `ggml-*.bin` in `WHISPER_MODEL_DIR` (default `~/.nerve/models`) | `whisper-local.ts` checks the local file first; unused once `cc-stt` is registered |
 | the upstream LLM endpoint | LiteLLM — and `check`, directly from the host | `CC_LLM_UPSTREAM_BASE_URL`, `CC_LLM_UPSTREAM_API_KEY`, `CC_LLM_UPSTREAM_MODEL_<ALIAS>` | v2.44.0. One base, one key, one upstream model id per alias (the alias upper-cased, every non-alphanumeric `_`). `cc_required_aliases` in `deploy/env-lib.sh` decides which aliases this deployment needs — the three core ones (`cc-default`, `graphiti-llm`, `cc-embedding`) always, `cc-tts`/`cc-stt` only with `CC_ENABLE_SPEECH=1`. **All three families are OPTIONAL** (v2.45.1): blank is the normal case and means the catalog is entered in the LiteLLM UI at the `llm` phase's deliberate pause; see below |
-| an on-premises Exchange server (EWS) | the mail feed, the ledger's hydration, the mail tools and the Executor's mail/calendar writes, via `central_command/integrations/exchange.py` | `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`, `CC_EXCHANGE_PASSWORD`, `CC_EXCHANGE_EMAIL` | INTERNAL — there is no mirror seam and nothing to stage: it is a service on the site's own network, reached at install time and at run time alike. Trust rides the rows below: the internal CA in `CC_CA_BUNDLE`, the PKI client certificate in `CC_CLIENT_CERT`/`CC_CLIENT_KEY`, `CC_TLS_INSECURE=1` as the other answer. Blank everywhere = no Exchange, and the n8n Gmail façade is the mail path. Prove it with `python scripts/exchange_smoke.py` |
+| an on-premises Exchange server (EWS) | the mail feed, the ledger's hydration, the mail tools and the Executor's mail/calendar writes, via `central_command/integrations/exchange.py` | `CC_EXCHANGE_URL`, `CC_EXCHANGE_USERNAME`, `CC_EXCHANGE_PASSWORD`, `CC_EXCHANGE_EMAIL`, `CC_CLIENT_CERT`, `CC_CLIENT_KEY` | INTERNAL — there is no mirror seam and nothing to stage: it is a service on the site's own network, reached at install time and at run time alike. Trust rides the rows below: the internal CA in `CC_CA_BUNDLE`, the PKI client certificate in `CC_CLIENT_CERT`/`CC_CLIENT_KEY`, `CC_TLS_INSECURE=1` as the other answer. Blank everywhere = no Exchange, and the n8n Gmail façade is the mail path. Prove it with `python scripts/exchange_smoke.py` |
 | a Jira / Confluence site (Cloud or Data Center) | every Jira and Confluence read and the Executor's Jira writes, via `central_command/integrations/jira.py` and `central_command/integrations/confluence.py` | `CC_JIRA_BASE_URL`, `CC_JIRA_EMAIL`, `CC_JIRA_API_TOKEN`, `CC_JIRA_API_FLAVOR`, `CC_JIRA_AUTH_MODE`, `CC_CONFLUENCE_BASE_URL`, `CC_CONFLUENCE_EMAIL`, `CC_CONFLUENCE_API_TOKEN`, `CC_CONFLUENCE_API_FLAVOR`, `CC_CONFLUENCE_AUTH_MODE`, `CC_CONFLUENCE_PROFILE` | v2.53.0 — ASKED at `configure` and PROBED by `check`'s `integrations` section and by both profiles' `verify.sh` (`python scripts/atlassian_probe.py --quiet`), so a stale token is found before the UI rather than mid-tour. No mirror seam and nothing to stage: on an internal Data Center it is a service on the site's own network, and trust rides the CA/insecure rows below. Blank `CC_JIRA_BASE_URL` = NO Jira, and an agent holding a `jira`/`confluence` capability then fails at execution with "Jira is not configured"; blank `CC_CONFLUENCE_BASE_URL` = no Confluence, never "the same site as Jira". A CLOUD API token is ACCOUNT-scoped, so one token serves both products on one site |
 | a private/corporate CA (TLS interception, a self-signed mirror) | everything: host acquisition, the local image builds, podman pulls, LiteLLM, the speech engine | `CC_CA_BUNDLE` | one key, fanned out — the table above |
 | a mandatory egress proxy | every host-side acquisition, and (inside a podman machine) pulls and builds | `CC_PROXY` | fanned out to `http(s)_proxy` in both cases, `no_proxy` pinned to loopback; `./setup.sh machine` writes the machine's `containers.conf` `[engine] env` drop-in |
 | — (verification off) | everything the CA row covers, except the speech engine | `CC_TLS_INSECURE=1` | the other supported answer to interception. In the app it turns verification off for every client built from `integrations/http.py:client_kwargs()` (Exchange, Jira, Confluence, LiteLLM, the graph, web fetch, the self-check and Systems probes) and wins over `CC_CA_BUNDLE` when both are set |
-| — (credentials) | `deploy/discover.sh`'s probes | `CC_NETRC=1` | `--netrc`, so credentials stay in `~/.netrc` and never in `.env` |
+| — (credentials) | `deploy/discover.sh`'s probes | `CC_NETRC=1` | `--netrc`, so credentials stay in `~/.netrc` and never in `.env`; netrc does not carry PROXY credentials (those go in `~/.curlrc` as `proxy-user`, see `CC_PROXY`) |
 
 Every key above that an operator answers is a ROW in
 `deploy/single/questions.tsv`, which is what lets `configure` ask for it and
-`check` validate it. Three kinds are not asked, on purpose, and stay
-`.env.example` lines: `CC_JIRA_AUTH_MODE` and `CC_CONFLUENCE_AUTH_MODE` DERIVE
-from their flavor, `CC_CONFLUENCE_PROFILE` is informational, and `CC_IMG_<NAME>`
-is written by the resolver. `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and `CC_NETRC` are
-the real gaps: they are answered by hand today and their rows are owed. Adding
-a seam means adding that row, its `.env.example` line and its consumer
-(`.claude/rules/deploy-single.md`).
-`tests/test_single_questions_schema.py` enforces only the reverse — every row's
-key must be declared in `.env.example` — so a seam with no row passes the suite
-and is caught by review.
+`check` validate it. That includes `CC_NETRC`, `CC_CLIENT_CERT`, `CC_CLIENT_KEY`
+and `WHISPER_MODELS_BASE_URL` (story 11.12, R7); the two client-certificate rows
+validate the path's SHAPE only (`v_path`, not `v_path_readable`), because the
+file may not be mounted yet when `configure` runs. Five kinds of token in the
+Seam column are not rows, on purpose, and each is a named exception in
+`tests/test_single_questions_schema.py`: `CC_JIRA_AUTH_MODE` and
+`CC_CONFLUENCE_AUTH_MODE` DERIVE from their flavor and `CC_CONFLUENCE_PROFILE`
+is informational (all three stay `.env.example` lines), `CC_IMG_<NAME>` is
+written by the resolver, `WHISPER_MODEL_DIR` is a local directory rather than
+an answer, and `CC_LLM_UPSTREAM_MODEL_<ALIAS>` is a prefix the per-alias rows
+expand. Adding a seam means adding that row, its `.env.example` line and its
+consumer (`.claude/rules/deploy-single.md`). The test walks this table's Seam
+column in BOTH directions now: every row's key is declared in `.env.example`,
+and every key-shaped token here is a row or a named exception, so a seam with
+no row fails the suite instead of waiting for review.
 
 ## Two host prerequisites the air gap cannot download for you
 
