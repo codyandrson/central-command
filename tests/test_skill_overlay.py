@@ -250,6 +250,31 @@ async def test_a_malformed_marker_is_422_naming_file_and_line_and_writes_nothing
 
 @pytestmark_db
 @pytest.mark.asyncio
+async def test_a_marker_in_the_frontmatter_is_refused_and_a_body_line_is_the_file_line(
+    clean_skills, tmp_path, monkeypatch
+):
+    """Frontmatter becomes the skill's id, title and summary: a value must not
+    be rendered into them, so a marker there refuses; and a malformed marker
+    after the frontmatter is named by its line in the FILE, not in the body."""
+    _overlay(tmp_path, monkeypatch, layout=VALUE)
+    bad_front = _folder(
+        tmp_path, "---\nname: ovl\ndescription: runs on <!-- overlay: layout -->\n---\n# G\n", "# R\n"
+    )
+    with pytest.raises(HTTPException) as exc:
+        await _import(bad_front)
+    assert exc.value.status_code == 422 and "SKILL.md:3" in exc.value.detail
+    assert await repo.get_skill("cc-test-ovl") is None
+
+    (bad_front / "SKILL.md").write_text(
+        "---\nname: ovl\ndescription: d\n---\n\n# G\n<!-- overlay: Bad -->\n"
+    )
+    with pytest.raises(HTTPException) as exc:
+        await _import(bad_front)
+    assert "SKILL.md:7" in exc.value.detail
+
+
+@pytestmark_db
+@pytest.mark.asyncio
 async def test_the_agent_reads_the_rendered_text(clean_skills, tmp_path, monkeypatch):
     """capabilities_for (the guidance) and the skill's search tool (the
     references) return the text with the value in it and no marker."""

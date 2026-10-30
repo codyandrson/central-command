@@ -115,15 +115,23 @@ async def import_skill_folder(
     resolved: set[str] = set()
     unresolved: set[str] = set()
 
-    def _render(text: str, f: Path) -> str:
-        rendered, got, missed = skill_overlay.render(text, fields, source=str(f))
+    def _split_render(f: Path) -> tuple[dict, str]:
+        """Frontmatter parsed as written; only the BODY is rendered. A marker
+        in the frontmatter is refused (it would reach the skill's id, title
+        and summary), and reported lines are lines of the file on disk."""
+        raw = _read_text(f)
+        meta, _ = parse_frontmatter(raw)
+        m = _FRONTMATTER.match(raw)
+        head, rest = (raw[: m.end()], raw[m.end():]) if m else ("", raw)
+        skill_overlay.refuse_in(head, source=str(f))
+        rendered, got, missed = skill_overlay.render(
+            rest, fields, source=str(f), first_line=head.count("\n") + 1
+        )
         resolved.update(got)
         unresolved.update(missed)
-        return rendered
+        return meta, rendered.lstrip("\n")
 
-    # Render the RAW file, before the frontmatter is split off, so a reported
-    # `file:line` is the line in the file the operator opens.
-    meta, body = parse_frontmatter(_render(_read_text(skill_md), skill_md))
+    meta, body = _split_render(skill_md)
     derived = skill_id is None
     sid = validate_skill_id(skill_id or _doc_key(meta.get("name") or folder.name))
     title = meta.get("name") or folder.name
@@ -162,7 +170,7 @@ async def import_skill_folder(
     references_to_write: list[tuple[str, Path, str]] = []
     for f in ref_files:
         key = _doc_key(f.name)
-        _, ref_body = parse_frontmatter(_render(_read_text(f), f))
+        _, ref_body = _split_render(f)
         references_to_write.append((key, f, ref_body))
 
     # --- everything decoded and slug-checked; now write -------------------

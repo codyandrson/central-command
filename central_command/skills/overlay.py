@@ -66,8 +66,25 @@ def load(directory: str | Path) -> dict[str, str]:
     return out
 
 
+def refuse_in(text: str, *, source: str, first_line: int = 1) -> None:
+    """Raise `ValueError` naming `source:line` if `text` holds any marker.
+
+    For frontmatter: its fields become the skill's id, title and summary, which
+    the catalog and the cockpit show everywhere, so a deployment value must
+    never be rendered into them — and a marker left in them would reach an
+    agent unrendered. Loud beats either.
+    """
+    for lineno, line in enumerate(text.splitlines(), start=first_line):
+        if _OPENER.search(line):
+            raise ValueError(
+                f"{source}:{lineno}: an overlay marker is not allowed in the "
+                "frontmatter (it becomes the skill's id, title and summary); "
+                "put it in the body"
+            )
+
+
 def render(
-    text: str, overlay: dict[str, str], *, source: str
+    text: str, overlay: dict[str, str], *, source: str, first_line: int = 1
 ) -> tuple[str, list[str], list[str]]:
     """Replace each marker in `text` with its field's text.
 
@@ -82,13 +99,14 @@ def render(
     - a marker mid-sentence is replaced in place, and removed in place when
       unresolved.
 
-    A malformed marker raises `ValueError` naming `source:line`.
+    A malformed marker raises `ValueError` naming `source:line`; `first_line`
+    is the file line `text` starts at, when it is a slice of the file.
     """
     resolved: set[str] = set()
     unresolved: set[str] = set()
     out_lines: list[str] = []
 
-    for lineno, line in enumerate(text.splitlines(keepends=True), start=1):
+    for lineno, line in enumerate(text.splitlines(keepends=True), start=first_line):
         ending = line[len(line.rstrip("\r\n")):]
         body = line[: len(line) - len(ending)]
 
