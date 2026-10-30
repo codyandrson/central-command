@@ -8,6 +8,9 @@ that check, so a row cannot be dropped silently: LEDGER below maps every row to
 its proving test file(s), and the tests assert that each file exists and that
 its module docstring (a web test: its describe text) names the row's id.
 
+R20 (stale words) is proven by `test_the_stale_words_are_gone` below, which runs
+story 11.14's ten verify greps over the files on disk and fails on any hit.
+
 R37 is a recorded verification, not a test: the legacy-cohort count is read on
 the deployment at release time (story 11.17) and recorded in the memlog. Its row
 therefore points at this file, which is where the ledger names it.
@@ -50,7 +53,7 @@ LEDGER: dict[str, tuple[str, tuple[str, ...]]] = {
     "COCKPIT-028": ("COCKPIT-028", ("web/server/routes/cc-file-browser-guard.test.ts",)),
     # The operator's three additions.
     "FR-51 env backup": ("FR-51", ("tests/test_k3s_backup_env.py",)),
-    "stale words": ("R20", ("tests/test_graph_embedding_width.py",)),
+    "stale words": ("R20", ("tests/test_small_fixes_ledger.py",)),
     "harness speed": ("R21", ("tests/test_conftest_database.py",)),
     # The orchestrator-found rows.
     "R22": ("R22", ("web/src/features/gates/useOverrides.test.tsx",)),
@@ -128,6 +131,63 @@ def test_the_proving_file_exists_and_names_its_row(row, rel):
         f"{row}: {rel} does not name {token} in its "
         f"{'module docstring' if path.suffix == '.py' else 'describe text'}"
     )
+
+
+# R20, stale words: story 11.14's ten verify greps. Each phrase was false when
+# it was written or after a later story; none may come back. (phrase,
+# ignore case, paths, a line prefix that is allowed to stay.)
+STALE_WORDS = [
+    ("no network egress", True, ("central_command", "deploy"), None),
+    ("default-deny", False, ("central_command", "deploy/k3s/sandbox.Dockerfile"), None),
+    ("nothing applies it at runtime", False, ("deploy/k3s",), None),
+    ("seeded enabled for the same class", False, ("central_command/db/schema.sql",), None),
+    ("no propose_*/Executor writes exist yet", False, ("central_command",), None),
+    ("façade fallback until", False, ("central_command",), None),
+    ("falls through to the n8n façade", False, ("central_command/integrations/jira.py",), None),
+    ("deny-all", True, ("deploy/k3s/60-sandbox.yaml",), "# INGRESS stays deny-all"),
+    ("vector index", True, ("deploy/single/verify.sh",
+                            "central_command/integrations/neo4j_writer.py",
+                            "tests/test_graph_embedding_width.py"), None),
+    ("DL-007", False, ("skills/mcp/references/sandbox-mechanics.md",), None),
+]
+_SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv"}
+
+
+def _files_under(rel: str, root: Path = ROOT):
+    path = root / rel
+    if path.is_file():
+        yield path
+        return
+    for p in sorted(path.rglob("*")):
+        if p.is_file() and not _SKIP_DIRS & set(p.relative_to(root).parts):
+            yield p
+
+
+def stale_hits(phrase, ignore_case, paths, allowed_prefix, root: Path = ROOT):
+    hits = []
+    needle = phrase.lower() if ignore_case else phrase
+    for rel in paths:
+        for f in _files_under(rel, root):
+            try:
+                lines = f.read_text().splitlines()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for n, line in enumerate(lines, 1):
+                hay = line.lower() if ignore_case else line
+                if needle in hay and not (
+                    allowed_prefix and line.lstrip().startswith(allowed_prefix)
+                ):
+                    hits.append(f"{f.relative_to(root)}:{n}: {line.strip()}")
+    return hits
+
+
+@pytest.mark.parametrize(
+    "phrase,ignore_case,paths,allowed", STALE_WORDS, ids=[w[0] for w in STALE_WORDS]
+)
+def test_the_stale_words_are_gone(phrase, ignore_case, paths, allowed):
+    """R20 (story 11.14): the phrase returns nothing over its paths."""
+    hits = stale_hits(phrase, ignore_case, paths, allowed)
+    assert not hits, f"stale words {phrase!r} are back:\n" + "\n".join(hits)
 
 
 def test_the_proving_files_are_listed(capsys):
