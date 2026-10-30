@@ -74,6 +74,7 @@ from central_command.contract.failures import (
     TRANSIENT,
     TRANSIENT_STATUS,
     EmbedderDown,
+    WorldMoved,
     classify_failure,
 )
 from central_command.integrations import http as http_client
@@ -732,8 +733,24 @@ async def _copy_entity(uuid: str, labels: list[str], group_id: str) -> str:
     return new_uuid
 
 
-class PreviewChanged(WriteError):
-    """The graph no longer deletes what the operator approved — refused."""
+class PreviewChanged(WriteError, WorldMoved):
+    """The graph no longer deletes what the operator approved — refused.
+
+    The deletion worker's in-transaction comparison (the third, after the
+    Executor's re-check and its handler's): a typed world-moved verdict too
+    (epic-small-fixes R26), so `graph.ingest.failed` carries what moved —
+    `target` the episode, `expected` the approved preview's digest, `actual`
+    the digest read inside the transaction. Still a `WriteError`, so every
+    caller that catches that keeps catching it. Nothing redrafts from it: the
+    proposal is already EXECUTED when the job runs."""
+
+    def __init__(self, message: str, *, episode_uuid: str = "", expected: object = None,
+                 actual: object = None, what_moved: str = ""):
+        WriteError.__init__(self, message)
+        self.target = f"graph:episode:{episode_uuid}" if episode_uuid else ""
+        self.expected = expected
+        self.actual = actual
+        self.what_moved = what_moved
 
 
 DELETE_FACTS = "MATCH ()-[r:RELATES_TO]->() WHERE r.uuid IN $facts DELETE r"
@@ -796,7 +813,9 @@ async def delete_episode(
             if changes:
                 raise PreviewChanged(
                     "the graph changed since this deletion was approved — nothing was "
-                    "deleted: " + "; ".join(changes)
+                    "deleted: " + "; ".join(changes),
+                    episode_uuid=episode_uuid, expected=expected.get("digest"),
+                    actual=preview.get("digest"), what_moved="; ".join(changes),
                 )
         sets = neo4j_reader.preview_sets(preview)
         dead = sorted(set(sets["facts"]) | set(sets["collateral_facts"]))

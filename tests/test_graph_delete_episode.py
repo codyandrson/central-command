@@ -17,7 +17,9 @@ What is pinned here:
 * The deletion is a `remove_episode` job on the group's ingest queue: it
   waits behind earlier work in its group, is not held by the patch gate,
   is re-run (never marker-checked) by crash recovery, records
-  `graph.episode.deleted` on completion and FAILS loudly on a refusal.
+  `graph.episode.deleted` on completion and FAILS loudly on a refusal —
+  a typed world-moved one, whose `graph.ingest.failed` carries `world_moved`
+  (epic-small-fixes R26).
 * The propose tool embeds the preview; the cockpit routes confirm a digest.
 
 Nothing here touches a real graph: every Neo4j call goes through a fake
@@ -285,9 +287,18 @@ async def test_a_changed_set_is_refused_and_nothing_is_deleted(fake_tx):
     g = fake_tx["graph"] = _fixture()
     approved = await neo4j_reader.compute_delete_preview(g.run, "X")
     g.mentions.append(("Y", "A"))
-    with pytest.raises(neo4j_writer.PreviewChanged, match="nothing was deleted"):
+    with pytest.raises(neo4j_writer.PreviewChanged, match="nothing was deleted") as ei:
         await neo4j_writer.delete_episode("X", expected=approved)
     assert g.writes == [] and "X" in g.episodes
+    # R26: the refusal is a typed world-moved verdict naming what it compared.
+    from central_command.contract.failures import is_world_moved
+
+    moved = ei.value
+    assert is_world_moved(moved) and isinstance(moved, neo4j_writer.WriteError)
+    assert moved.target == "graph:episode:X"
+    assert moved.expected == approved["digest"]
+    assert moved.actual is not None and moved.actual != approved["digest"]
+    assert moved.what_moved
 
 
 async def test_a_rerun_after_the_episode_is_gone_is_done_and_still_cleans_up(fake_tx):
@@ -492,6 +503,7 @@ async def test_a_deletion_job_runs_and_records_what_it_removed(isolated_jobs, de
     ((uuid, expected, dead),) = deleter["calls"]
     assert uuid == "EP1" and dead == ["f1"]
     assert [f["uuid"] for f in expected["facts"]] == ["f1"]
+    assert expected["digest"] == "d"   # carried for a typed refusal's `expected` (R26)
     (kind, kw), = [e for e in seen if e[0] == "graph.episode.deleted"]
     assert kw["ref_id"] == "EP1" and kw["payload"]["requested_by"] == "operator"
     assert (await repo.episode_deletion_job("EP1"))["id"] == job["id"]
@@ -506,7 +518,9 @@ async def test_a_refused_deletion_fails_loudly(isolated_jobs, deleter, monkeypat
         seen.append((kind, kw))
 
     monkeypatch.setattr(graphiti_ingest.events, "emit", emit)
-    deleter["behaviour"]["raise"] = neo4j_writer.PreviewChanged("the graph changed")
+    deleter["behaviour"]["raise"] = neo4j_writer.PreviewChanged(
+        "the graph changed", episode_uuid="EP2", expected="d-approved", actual="d-now",
+        what_moved="fact f9 joined the set")
     group = _group()
     job = await graphiti_ingest.enqueue_delete("EP2", group, preview=_preview("EP2", group),
                                                requested_by="human:doe")
@@ -515,6 +529,12 @@ async def test_a_refused_deletion_fails_loudly(isolated_jobs, deleter, monkeypat
     assert (await repo.get_ingest_job(job["id"]))["status"] == "FAILED"
     (kind, kw), = [e for e in seen if e[0] == "graph.ingest.failed"]
     assert kw["payload"]["kind"] == "remove_episode" and kw["payload"]["episode_uuid"] == "EP2"
+    # R26: the typed payload, as `proposal.failed` carries it; no redraft (the
+    # proposal was EXECUTED when the job was queued).
+    assert kw["payload"]["world_moved"] == {
+        "target": "graph:episode:EP2", "expected": "d-approved", "actual": "d-now",
+        "what_moved": "fact f9 joined the set"}
+    assert kw["payload"]["error_type"] == "PreviewChanged"
 
 
 @needs_pg

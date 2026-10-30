@@ -58,6 +58,10 @@ async def park_proposal(
     row and mirrored into `proposal.created`'s payload here, so the two can
     never disagree. None on a first draft.
 
+    `charter.update` is also STAMPED here (`_stamp_charter_base`): the charter
+    version the drafting session was last shown goes into the action's
+    `base_version`, which the Executor re-checks (epic-small-fixes R24).
+
     `charter.update` gets its evidence checked here REGARDLESS of which door
     the agent came through. The coach's charter and the charter-propose pack
     both promise the quote-and-event-id check "re-checked mechanically against
@@ -78,6 +82,7 @@ async def park_proposal(
         metadata = result.output.metadata.get(call.tool_call_id)
     proposal = proposal_from_call(call, metadata=metadata)
     proposal_id = "prop_" + uuid.uuid4().hex[:12]
+    await _stamp_charter_base(session_id, proposal)
 
     if evidence is None and any(
         a.capability.split("@", 1)[0] == "charter.update" for a in proposal.actions
@@ -127,3 +132,26 @@ async def park_proposal(
         actor=actor or f"agent:{agent_id}",
     )
     return {"proposal_id": proposal_id, "proposal": proposal}
+
+
+async def _stamp_charter_base(session_id: str, proposal) -> None:
+    """Stamp every `charter.update` action with `base_version`: the version of
+    its target's charter this session was last SHOWN (`repo.charter_base_version`
+    reads the session's run state; 0 is the built-in). The Executor compares it
+    with the CURRENT version and refuses a mismatch as world-moved, so a coached
+    edit approved after the operator changed that charter never overwrites the
+    operator's edit (the operator's ruling of 2026-10-29, Decision 6).
+
+    The stamp is the system's, never the agent's: an agent-supplied
+    `base_version` is discarded first, because a drafter that could name its own
+    base could approve its way past the check. Stamped from what the session was
+    SHOWN rather than from what is current at park, because a redraft stamped
+    current would overwrite the operator's edit while claiming it had not."""
+    for action in proposal.actions:
+        if action.capability.split("@", 1)[0] != "charter.update":
+            continue
+        args = {k: v for k, v in (action.arguments or {}).items() if k != "base_version"}
+        target = args.get("agent_id")
+        if isinstance(target, str) and target.strip():
+            args["base_version"] = await repo.charter_base_version(session_id, target.strip())
+        action.arguments = args

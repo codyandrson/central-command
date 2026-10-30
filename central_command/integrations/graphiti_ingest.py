@@ -71,7 +71,7 @@ from datetime import datetime, timezone
 
 from central_command import events
 from central_command.contract import TRANSIENT, classify_failure
-from central_command.contract.failures import SEMANTIC, retry_backoff_seconds
+from central_command.contract.failures import SEMANTIC, is_world_moved, retry_backoff_seconds
 from central_command.db import repo
 from central_command.integrations import graph_ontology, neo4j_reader
 from central_command.integrations.graphiti import GROUP_ID
@@ -231,6 +231,9 @@ async def _run_remove(job: dict) -> dict:
         "facts": [{"uuid": u} for u in expected.get("facts") or []],
         "collateral_facts": [{"uuid": u} for u in expected.get("collateral_facts") or []],
         "entities": [{"uuid": u} for u in expected.get("entities") or []],
+        # Carried for the typed refusal's `expected` (R26); the comparison
+        # itself is by the sets, never by the digest.
+        "digest": payload.get("digest"),
     } if expected else None
     return await _deleter()(
         payload["episode_uuid"], expected=approved,
@@ -343,6 +346,12 @@ async def run_job(job: dict) -> str:
 
 async def _fail(job: dict, exc: BaseException) -> None:
     error = _error_text(exc)
+    # The deletion worker's typed refusal (`neo4j_writer.PreviewChanged`, R26):
+    # the record of what moved, as `proposal.failed` carries it. No redraft —
+    # the proposal was EXECUTED when it queued this job.
+    world_moved = ({"target": exc.target, "expected": exc.expected,
+                    "actual": exc.actual, "what_moved": exc.what_moved}
+                   if is_world_moved(exc) else None)
     log.warning("graph ingest job %s FAILED (permanent): %s", job["id"], error)
     await repo.fail_ingest_job(job["id"], error=error)
     verification_id = job.get("verification_id")
@@ -355,7 +364,7 @@ async def _fail(job: dict, exc: BaseException) -> None:
                  "episode_uuid": payload.get("episode_uuid"),
                  "group_id": job["group_id"], "episode_name": episode_name,
                  "error": error, "error_type": type(exc).__name__,
-                 "attempts": job.get("attempts")},
+                 "attempts": job.get("attempts"), "world_moved": world_moved},
         actor=ACTOR,
     )
     if not verification_id:

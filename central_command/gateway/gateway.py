@@ -32,7 +32,6 @@ from central_command.runtime.durable import (
     call_args,
     classify_deferred,
     deferred_results,
-    dump_run_state,
     extract_deferred,
     load_messages,
     proposal_from_call,
@@ -796,15 +795,39 @@ def _times(n: int) -> str:
     return f"{n} time{'s' if n != 1 else ''}"
 
 
+async def _current_charter_shown(failure: executor.ExecutionFailed) -> dict | None:
+    """For a world-moved `charter:` target, the charter as it is NOW —
+    `{agent_id, version, content}` (version 0 is the built-in) — which the
+    report shows the drafter. The coach holds no charter-read tool, so without
+    it a redraft could only guess at the operator's edit. None for any other
+    failure."""
+    target = str((failure.world_moved or {}).get("target") or "")
+    if not target.startswith("charter:"):
+        return None
+    agent_id = target.split(":", 1)[1]
+    current = await repo.current_charter(agent_id)
+    if current is None:
+        from central_command.runtime.agent import builtin_charter
+
+        return {"agent_id": agent_id, "version": 0, "content": builtin_charter(agent_id)}
+    return {"agent_id": agent_id, "version": current["version"],
+            "content": current["content"]}
+
+
 def _execution_failure_report(
     failure: executor.ExecutionFailed, failed_row: dict, *,
     chain_count: int, limit: int, chain_exhausted: bool,
+    charter: dict | None = None,
 ) -> str:
     """The honest partial report a failed execution hands its drafter (and, at
     the chain's limit, the terminal text that answers its pending call). The one
     place the world-moved wording is built: the first-failure report, the
     interrupted-by-a-restart line and the at-the-limit ending all live here, so
-    the three can never drift apart."""
+    the three can never drift apart.
+
+    `charter` (`_current_charter_shown`) is the moved charter as it is now; the
+    report carries its text and version, and the caller records that version
+    as SHOWN to the session, so a redraft is stamped with what it read (R24)."""
     done = "; ".join(failure.completed) if failure.completed else "none"
     wm = failure.world_moved
     if not wm:
@@ -834,6 +857,14 @@ def _execution_failure_report(
             f"This execution was interrupted by a restart while {in_flight} "
             f"(action {index + 1}) was in flight: that action may itself "
             f"have landed, and be the change. "
+        )
+    if charter is not None:
+        report += (
+            f"{charter['agent_id']}'s charter is now v{charter['version']}; "
+            f"its current text follows. Draft any edit against this text.\n"
+            f"--- {charter['agent_id']} charter v{charter['version']} ---\n"
+            f"{charter['content']}\n"
+            f"--- end of charter ---\n"
         )
     if chain_exhausted:
         return report + (
@@ -905,10 +936,16 @@ async def _record_execution_failure(
 
     # Resume the agent with the honest partial report. The failure is already
     # durably recorded above — a resume error must never mask it.
+    charter = await _current_charter_shown(failure)
     report = _execution_failure_report(
         failure, failed_row, chain_count=chain_count, limit=limit,
-        chain_exhausted=chain_exhausted,
+        chain_exhausted=chain_exhausted, charter=charter,
     )
+    if charter is not None:
+        # The report puts this version in front of the drafter: record it as
+        # shown before anything can resume the session, so the redraft it
+        # parks is stamped with it (runtime/proposals._stamp_charter_base).
+        await repo.record_charter_shown(session_id, charter["agent_id"], charter["version"])
     cause = "world_moved" if failure.world_moved else None
     out: dict = {
         "ok": False,

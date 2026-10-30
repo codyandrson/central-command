@@ -1,5 +1,9 @@
 """The world moved between approval and execution (epic-world-changed-redraft,
-story 1): a stale Confluence version is a typed NO.
+story 1): a stale Confluence version is a typed NO. Widened by epic-small-fixes
+story 11.7: a coached charter edit re-checks the version its drafter was shown
+(R24, the operator's Decision 6), a Confluence page deleted since the draft is
+world-moved while a Jira 404 stays plain (R25, Decision 7), and the shared
+fakes live in tests/world_moved_helpers.py (R29).
 
 The properties: the verdict is decided by exception TYPE (`WorldMoved`), never
 by text; the approved proposal lands FAILED (never RETRY_PENDING) with
@@ -23,20 +27,24 @@ from central_command.contract.failures import WorldMoved, is_world_moved
 from central_command.db import repo
 from central_command.gateway import executor, gateway
 from central_command.contract.models import Action
-from central_command.integrations import confluence, graphiti_ingest, jira, neo4j_reader
-from tests.conftest import needs_pg
+from central_command.integrations import confluence, jira
 from tests.test_jira_client import FakeResponse
-from tests.world_moved_helpers import (  # noqa: F401 — pinned and confluence_grant are fixtures
+from tests.world_moved_helpers import (  # noqa: F401 — pinned, confluence_grant and graph_world are fixtures
     AGENT,
     _confluence_answers,
+    _Coach,
+    _coached_target,
     _confluence_down,
     _counting_confluence,
+    _delete_action,
     _Drafter,
     _draft,
     _drafting_model,
     _event,
     _page_update,
+    _preview,
     confluence_grant,
+    graph_world,
     pinned,
 )
 from tests.fake_world import fake_world
@@ -495,35 +503,6 @@ async def test_another_caller_of_transition_issue_never_sees_a_world_moved(monke
 # --- the graph deletion (story 2) --------------------------------------------------
 
 
-def _preview(digest: str, facts=()) -> dict:
-    return {"episode": {"uuid": "X", "name": "e", "group_id": "g"}, "digest": digest,
-            "facts": [{"uuid": f} for f in facts], "collateral_facts": [],
-            "entities": []}
-
-
-@pytest.fixture
-def graph_world(monkeypatch):
-    state = {"preview": None, "queued": []}
-
-    async def fake_preview(uuid):
-        return state["preview"]
-
-    async def fake_enqueue(*a, **k):
-        state["queued"].append((a, k))
-        return {"id": 1}
-
-    monkeypatch.setattr(neo4j_reader, "episode_delete_preview", fake_preview)
-    monkeypatch.setattr(graphiti_ingest, "enqueue_delete", fake_enqueue)
-    return state
-
-
-def _delete_action(approved: dict) -> Action:
-    return Action(capability="graph.delete_episode",
-                  arguments={"episode_uuid": "X", "preview": approved},
-                  target_ref={"system": "graph", "id": "X", "read_version": approved["digest"]},
-                  reversibility="irreversible")
-
-
 async def test_a_changed_deletion_preview_lands_world_moved_and_deletes_nothing(graph_world):
     graph_world["preview"] = _preview("d2", facts=["F1"])
     with pytest.raises(executor.ExecutionFailed) as ei:
@@ -787,3 +766,182 @@ async def test_an_override_decided_world_moved_redraft_parks_for_the_operator(mo
         assert redraft["override_eval"]["reason"] == "redraft"
     finally:
         await repo.revoke_gate_override(row["id"], reason="test teardown")
+
+
+# --- a coached charter edit (epic-small-fixes story 11.7, R24) ----------------------
+# The operator's ruling of 2026-10-29 (Decision 6): a coached edit approved after
+# the operator changed that charter lands FAILED world-moved and the coach
+# redrafts; the version compared is the one the coach was SHOWN, stamped
+# server-side at park, never an agent argument.
+
+
+async def _coach_draft(coach: _Coach) -> dict:
+    from central_command.runtime.run import run_coach
+
+    out = await run_coach(coach.target, model=coach.model, note="Answer briefly.",
+                          note_event_id=0)
+    assert out["deferred"] is True, out
+    return await repo.load_proposal(out["proposal_id"])
+
+
+async def test_a_coached_edit_is_stamped_with_the_version_it_was_shown_never_the_agents():
+    target = await _coached_target("wm-stamp")
+    row = await _coach_draft(_Coach(target, supplied_base=999))
+    assert row["actions"][0]["arguments"]["base_version"] == 1
+    run_state = await repo.get_session_run_state(row["session_id"])
+    assert run_state["charter_shown"] == {target: 1}
+
+
+async def test_a_charter_moved_since_the_draft_lands_failed_world_moved_and_the_coach_redrafts(
+    monkeypatch,
+):
+    fake_world(monkeypatch, real=("charter.update",))
+    target = await _coached_target("wm-moved")
+    coach = _Coach(target)
+    row = await _coach_draft(coach)
+    marker = "OPERATOR-EDIT-" + uuid.uuid4().hex[:8]
+    await repo.save_charter_version(target, f"CHARTER v2. {marker}", "operator edit")
+
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=coach.model)
+    assert out["ok"] is False
+    assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
+    moved = (await _event("proposal.failed", row["id"]))["payload"]["world_moved"]
+    assert moved == {"capability": "charter.update", "target": f"charter:{target}",
+                     "expected": 1, "actual": 2,
+                     "what_moved": f"{target}'s charter moved v1 -> v2"}
+    current = await repo.current_charter(target)
+    assert current["version"] == 2 and marker in current["content"], "the operator's edit stands"
+
+    # The report showed the coach the charter as it is now …
+    report = coach.reports[-1]
+    assert "world moved" in report and "charter is now v2" in report and marker in report
+    # … so the redraft is stamped with v2 and drafted against the operator's text.
+    redraft = await repo.load_proposal(out["redraft_proposal_id"])
+    assert redraft["status"] == "AWAITING_HUMAN"
+    assert redraft["redraft"]["cause"] == "world_moved"
+    assert redraft["actions"][0]["arguments"]["base_version"] == 2
+    assert marker in redraft["actions"][0]["arguments"]["content"]
+    assert (await repo.get_session_run_state(row["session_id"]))["charter_shown"][target] == 2
+
+    done = await gateway.approve_and_execute(row["session_id"], redraft["id"], model=coach.model)
+    assert done["ok"] is True
+    assert (await repo.current_charter(target))["version"] == 3
+
+
+async def test_an_unchanged_charter_executes(monkeypatch):
+    fake_world(monkeypatch, real=("charter.update",))
+    target = await _coached_target("wm-same")
+    coach = _Coach(target)
+    row = await _coach_draft(coach)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=coach.model)
+    assert out["ok"] is True
+    current = await repo.current_charter(target)
+    assert current["version"] == 2 and "COACHED RULE 0" in current["content"]
+    # The coach wrote that text: its next edit of this charter is stamped v2.
+    assert (await repo.get_session_run_state(row["session_id"]))["charter_shown"][target] == 2
+
+
+def _charter_action(target: str, **extra) -> Action:
+    return Action(capability="charter.update",
+                  arguments={"agent_id": target, "content": "NEW", "rationale": "r", **extra},
+                  target_ref={"system": "central_command", "id": target},
+                  reversibility="reversible")
+
+
+async def test_an_unstamped_charter_update_is_not_checked(monkeypatch):
+    fake_world(monkeypatch, real=("charter.update",))
+    target = await _coached_target("wm-unstamped")
+    await repo.save_charter_version(target, "CHARTER v2", "operator edit")
+    await executor.execute([_charter_action(target)], "human:doe", [])
+    assert (await repo.current_charter(target))["version"] == 3
+
+
+async def test_the_write_compares_the_version_again_inside_its_transaction(monkeypatch):
+    """The operator saves between the Executor's re-check and the write: the
+    write itself refuses, typed the same way, and the operator's edit stands."""
+    fake_world(monkeypatch, real=("charter.update",))
+    target = await _coached_target("wm-race")
+    original = executor._check_charter_update
+
+    async def check_then_operator_saves(args):
+        await original(args)
+        await repo.save_charter_version(target, "OPERATOR v2", "operator edit")
+
+    monkeypatch.setattr(executor, "_check_charter_update", check_then_operator_saves)
+    with pytest.raises(executor.ExecutionFailed) as ei:
+        await executor.execute([_charter_action(target, base_version=1)], "human:doe", [])
+    assert ei.value.world_moved["expected"] == 1 and ei.value.world_moved["actual"] == 2
+    assert ei.value.transient is False
+    current = await repo.current_charter(target)
+    assert current["version"] == 2 and current["content"] == "OPERATOR v2"
+
+
+async def test_a_session_never_shown_the_charter_is_stamped_with_the_version_at_its_start():
+    """A coach session that never had the charter in front of it (a task or a
+    chat) is stamped with the version CURRENT when it started — never the one
+    current at park, which would let it overwrite an edit made meanwhile."""
+    from central_command.contract.models import Proposal
+    from central_command.runtime.proposals import _stamp_charter_base
+
+    target = await _coached_target("wm-start")
+    sid = "sess_wm_" + uuid.uuid4().hex[:10]
+    await repo.create_running_session(sid, "coach")
+    await repo.save_charter_version(target, "CHARTER v2", "operator edit")
+
+    proposal = Proposal.model_validate(_Coach(target, supplied_base=7)._proposal("x", 0))
+    await _stamp_charter_base(sid, proposal)
+    assert proposal.actions[0].arguments["base_version"] == 1
+
+    await repo.record_charter_shown(sid, target, 2)
+    await _stamp_charter_base(sid, proposal)
+    assert proposal.actions[0].arguments["base_version"] == 2
+    # A built-in charter is version 0.
+    assert await repo.charter_base_version(sid, "wm-builtin-" + uuid.uuid4().hex[:6]) == 0
+
+
+# --- a page deleted since the draft; a Jira 404 (story 11.7, R25) -------------------
+# The operator's ruling of 2026-10-29 (Decision 7): only a Confluence page gone at
+# the update's pre-check is world-moved; a Jira 404 stays a plain FAILED.
+
+
+async def test_a_page_deleted_before_execution_is_world_moved_with_actual_none(monkeypatch):
+    calls = _confluence_answers(monkeypatch, version=4,
+                                get=httpx.Response(404, text="not found"))
+    action = Action(**_page_update(4)["actions"][0])
+    with pytest.raises(executor.ExecutionFailed) as ei:
+        await executor.execute([action], "human:doe", [])
+    moved = ei.value.world_moved
+    assert moved["target"] == "confluence:page:42"
+    assert (moved["expected"], moved["actual"]) == (4, None)
+    assert moved["what_moved"] == "page 42 no longer exists"
+    assert ei.value.transient is False
+    assert [m for m, _ in calls] == ["GET"], "nothing was written"
+
+
+@pytest.mark.usefixtures("confluence_grant")
+async def test_a_deleted_page_redrafts_and_counts_toward_the_limit(monkeypatch):
+    drafter = _Drafter(_page_update(4), _page_update(4))
+    row = await _draft(monkeypatch, drafter)
+    _confluence_answers(monkeypatch, version=4, get=httpx.Response(404, text="not found"))
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
+    payload = (await _event("proposal.failed", row["id"]))["payload"]
+    assert payload["world_moved"]["actual"] is None and payload["transient"] is False
+    assert "page 42 no longer exists" in drafter.seen[-1]["returns"][-1]
+    redraft = await repo.load_proposal(out["redraft_proposal_id"])
+    assert redraft["redraft"]["cause"] == "world_moved"
+    assert redraft["redraft"]["world_moved_count"] == 1
+
+
+async def test_a_jira_404_stays_a_plain_failure(monkeypatch):
+    monkeypatch.setattr(settings, "jira_email", "bot@example.com")
+    monkeypatch.setattr(settings, "jira_api_token", "tok")
+
+    async def gone(method, path, json_body=None):
+        return FakeResponse(404, {"errorMessages": ["Issue does not exist"]})
+
+    monkeypatch.setattr(jira, "_call", gone)
+    action = Action(**_jira_action("jira.transition_issue", issue_key="DEMO-7",
+                                   transition="Done"))
+    with pytest.raises(executor.ExecutionFailed) as ei:
+        await executor.execute([action], "human:doe", [], proposal_id="prop_wm_jira404")
+    assert ei.value.world_moved is None and ei.value.transient is False

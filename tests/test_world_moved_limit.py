@@ -11,23 +11,18 @@ limit. A conversation lane stays sendable over the repaired history, and its
 exec-failed mark clears when it answers a later turn with a text reply (epic-small-fixes
 story 11.4, R27, the operator's ruling 2026-10-29) but stays through a turn that parks.
 Any other semantic failure keeps its resume and never counts; a Reject keeps the count.
+The scripted drafter and the chain helpers live in tests/world_moved_helpers.py
+(epic-small-fixes story 11.7, R29), shared without importing another suite.
 """
 
 from __future__ import annotations
 
-import uuid
-
-import httpx
 import pytest
 from pydantic_ai.messages import (
-    ModelRequest,
     ModelResponse,
-    RetryPromptPart,
-    TextPart,
     ToolCallPart,
     ToolReturnPart,
 )
-from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from central_command.config import Settings, settings
 from central_command.db import repo
@@ -37,8 +32,12 @@ from central_command.runtime.durable import load_messages, unanswered_calls
 from tests.world_moved_helpers import (  # noqa: F401 — pinned and confluence_grant are fixtures
     AGENT,
     _confluence_answers,
+    _count,
     _event,
     _page_update,
+    _Persistent,
+    _redrafts_of,
+    _task_session,
     confluence_grant,
     pinned,
 )
@@ -46,51 +45,8 @@ from tests.world_moved_helpers import (  # noqa: F401 — pinned and confluence_
 LIVE_VERSION = 99
 
 
-class _Persistent:
-    """Proposes on its first turn and again on every propose return that is not
-    the terminal report; a return naming the redraft limit gets a text reply.
-    Records each call's propose returns, so a test reads exactly what a resumed
-    run — or an operator's next turn — was handed."""
-
-    def __init__(self, make, cap: int = 12):
-        self.make, self.cap = make, cap
-        self.calls: list[list[str]] = []
-        self.model = FunctionModel(self._respond)
-
-    def _respond(self, messages, info: AgentInfo) -> ModelResponse:
-        parts = [p for m in messages for p in getattr(m, "parts", [])]
-        made = sum(isinstance(p, ToolCallPart) and p.tool_name == "propose_action"
-                   for p in parts)
-        last = messages[-1]
-        fresh = [str(p.content) for p in (last.parts if isinstance(last, ModelRequest) else [])
-                 if isinstance(p, ToolReturnPart | RetryPromptPart)
-                 and p.tool_name == "propose_action"]
-        self.calls.append(fresh)
-        if any("redraft limit" in r for r in fresh):
-            return ModelResponse(parts=[TextPart(content="Understood — it is yours.")])
-        if made == 0 or (fresh and made < self.cap):
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="propose_action",
-                args={"proposal": self.make(made)})])
-        return ModelResponse(parts=[TextPart(content="Closing out.")])
-
-
 def _stale_page(made: int) -> dict:
     return _page_update(made + 4)
-
-
-async def _task_session(monkeypatch, drafter: _Persistent) -> tuple[dict, str]:
-    from central_command.api import routes
-
-    async def fixed_model(**_kw):
-        return drafter.model
-
-    monkeypatch.setattr(routes, "resolve_model", fixed_model)
-    task_id = f"task_wl_{uuid.uuid4().hex[:10]}"
-    await repo.create_task(task_id, "edit the roadmap", "edit the page", AGENT,
-                           created_by="operator")
-    run = await routes._run_assigned_task(await repo.get_task(task_id))
-    return await repo.load_proposal(run["proposal_id"]), task_id
 
 
 async def _chain(session_id: str, first_id: str, model, failures: int) -> list[dict]:
@@ -104,20 +60,6 @@ async def _chain(session_id: str, first_id: str, model, failures: int) -> list[d
         if pid is None:
             break
     return outs
-
-
-async def _redrafts_of(proposal_id: str) -> list[dict]:
-    conn = await repo._conn()
-    try:
-        rows = await conn.fetch(
-            "select id from proposal where redraft->>'of' = $1", proposal_id)
-    finally:
-        await conn.close()
-    return [await repo.load_proposal(r["id"]) for r in rows]
-
-
-async def _count(kind: str, ref_id: str) -> int:
-    return sum(e["kind"] == kind for e in await repo.list_events(ref_id=ref_id))
 
 
 def _history_ends_answered(run_state: dict) -> list:

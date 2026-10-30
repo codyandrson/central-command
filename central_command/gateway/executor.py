@@ -519,8 +519,10 @@ async def _check_graph_delete_episode(args: dict) -> dict:
     # `WorldMoved`, so the drafter is resumed with what moved): `expected` is
     # the approved preview's digest, `actual` the recomputed one (None when
     # the episode is gone). The worker's third comparison, inside the deleting
-    # transaction (DL-136), runs after this returned and stays an untyped job
-    # failure.
+    # transaction (DL-136), runs after this returned: its refusal is typed too
+    # (`neo4j_writer.PreviewChanged`, R26) and `graph.ingest.failed` carries
+    # its `world_moved`, but nothing redrafts from it — the proposal is
+    # already EXECUTED by then.
     expected_digest = approved.get("digest")
     if current is None:
         raise WorldMoved(
@@ -865,10 +867,25 @@ async def _charter_update(args: dict, approver: str, proposer: str | None) -> st
         f"agent:{drafter} (approved {approver})" if drafter == target
         else f"agent:{drafter} for {target} (approved {approver})"
     )
-    row = await repo.save_charter_version(
-        target, args["content"], args.get("rationale"), created_by=pedigree,
-        proposal_id=_current_proposal_id.get(),
-    )
+    # The world re-check (R24): the version the drafter was shown, stamped at
+    # park, compared before the write and again inside its transaction. An
+    # unstamped action (built by hand, or parked before the stamp existed) is
+    # not checked, as `_check_charter_update` says.
+    base = args.get("base_version")
+    await _check_charter_update(args)
+    proposal_id = _current_proposal_id.get()
+    shown_session = None
+    if proposal_id:
+        shown_session = ((await repo.load_proposal(proposal_id)) or {}).get("session_id")
+    try:
+        row = await repo.save_charter_version(
+            target, args["content"], args.get("rationale"), created_by=pedigree,
+            proposal_id=proposal_id,
+            expected_version=int(base) if base is not None else None,
+            shown_session_id=shown_session,
+        )
+    except repo.StaleCharter as e:
+        raise _charter_moved(target, e.expected, e.actual) from e
     await events.emit(
         "charter.updated",
         ref_id=target,
@@ -877,6 +894,36 @@ async def _charter_update(args: dict, approver: str, proposer: str | None) -> st
         actor=approver,
     )
     return f"charter for {target} updated to v{row['version']}"
+
+
+def _charter_moved(target: str, expected: int, actual: int) -> WorldMoved:
+    """The typed verdict for a coached charter edit whose charter moved past
+    the version its drafter was shown — one wording for the re-check and the
+    in-transaction refusal."""
+    return WorldMoved(
+        f"charter.update: {target}'s charter moved from v{expected} (the version "
+        f"this edit was drafted against) to v{actual} — nothing was written",
+        target=f"charter:{target}", expected=expected, actual=actual,
+        what_moved=f"{target}'s charter moved v{expected} -> v{actual}",
+    )
+
+
+async def _check_charter_update(args: dict) -> None:
+    """charter.update's world check (a `WORLD_CHECKS` row; epic-small-fixes
+    R24): the CURRENT version of the target's charter (0 = the built-in) must
+    still be `base_version`, the version the drafting session was SHOWN,
+    stamped server-side by `park_proposal`. No stamp, no check: the operator's
+    own PUT and revert never come through here, and a hand-built Action
+    carries none."""
+    from central_command.db import repo
+
+    base = args.get("base_version")
+    if base is None:
+        return
+    current = await repo.current_charter(args["agent_id"])
+    actual = current["version"] if current else 0
+    if actual != int(base):
+        raise _charter_moved(args["agent_id"], int(base), actual)
 
 
 def _skill_slug(title: str) -> str:
@@ -1123,7 +1170,9 @@ async def _confluence_update_page(args: dict, approver: str, proposer: str | Non
 
 async def _check_confluence_update_page(args: dict) -> None:
     """confluence.update_page's world check (a `WORLD_CHECKS` row): the same
-    `confluence.check_version` the write runs first."""
+    `confluence.check_version` the write runs first — a moved version
+    (`ConfluenceStale`) and a page that no longer exists (`ConfluencePageGone`,
+    a 404 for this draft's page: R25) are both world-moved there."""
     await confluence.check_version(args["page_id"], args["expected_version"])
 
 
@@ -2425,21 +2474,29 @@ async def _execute_action(action: Action, approver: str, proposer: str | None) -
 # per capability, a READ-ONLY check that is the very function its handler runs
 # before writing, so the re-check and the write can never disagree. Only
 # capabilities whose target carries state to compare are here (a page version,
-# a transition list against the issue's `updated`, a deletion's preview);
+# a transition list against the issue's `updated`, a deletion's preview, a
+# charter's version against the one its drafter was shown);
 # creates, sends and the rest are not re-checked.
 WORLD_CHECKS = {
     "confluence.update_page": _check_confluence_update_page,
     "jira.transition_issue": _check_jira_transition_issue,
     "graph.delete_episode": _check_graph_delete_episode,
+    "charter.update": _check_charter_update,
 }
 
 
 def _targets_of(action: Action) -> set[tuple[str, str]]:
     """The existing objects an action names, as `(system, id)`: Jira issues
-    (`_jira_keys_of`), a Confluence `page_id`, a graph `episode_uuid`."""
+    (`_jira_keys_of`), a Confluence `page_id`, a graph `episode_uuid`, the
+    target agent of a `charter.update`. A `WORLD_CHECKS` row whose action
+    names no target here is silently never run."""
     capability = action.capability.split("@", 1)[0]
     args = action.arguments or {}
     out = {("jira", k) for k in _jira_keys_of(action)}
+    if capability == "charter.update":
+        v = args.get("agent_id")
+        if isinstance(v, str) and v.strip():
+            out.add(("charter", v.strip()))
     for prefix, system, key in (("confluence.", "confluence", "page_id"),
                                 ("graph.", "graph", "episode_uuid")):
         v = args.get(key)

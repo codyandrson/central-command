@@ -296,7 +296,11 @@ stateDiagram-v2
   stateful target through the very function its handler calls first
   (`confluence.update_page`: the page version; `jira.transition_issue`: the
   transition list, judged against the issue's `updated` and the proposal's
-  `created_at`; `graph.delete_episode`: the recomputed preview), run for each
+  `created_at`; `graph.delete_episode`: the recomputed preview;
+  `charter.update`: the target's CURRENT charter version against the
+  `base_version` `park_proposal` stamped from the version the drafting session
+  was SHOWN, recorded in its `run_state.charter_shown` — an unstamped action
+  is not checked, and the write compares again inside its transaction), run for each
   target's FIRST action among the actions being executed (a later action on a
   target an earlier one changes is checked by its handler at its turn), on
   every execution alike: the first, a sweep's retry and the operator's

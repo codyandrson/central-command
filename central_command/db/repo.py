@@ -2974,18 +2974,46 @@ async def list_charter_versions(agent_id: str) -> list[dict]:
         await conn.close()
 
 
+class StaleCharter(Exception):
+    """`save_charter_version` refused: the CURRENT version is not the one the
+    caller drafted against. The Executor turns it into its typed world-moved
+    verdict (`executor._charter_moved`)."""
+
+    def __init__(self, agent_id: str, expected: int, actual: int):
+        super().__init__(f"{agent_id}'s charter is at v{actual}, not v{expected}")
+        self.agent_id, self.expected, self.actual = agent_id, expected, actual
+
+
 async def save_charter_version(
     agent_id: str, content: str, rationale: str | None, created_by: str = "operator",
-    proposal_id: str | None = None,
+    proposal_id: str | None = None, expected_version: int | None = None,
+    shown_session_id: str | None = None,
 ) -> dict:
     """Append a new CURRENT version, superseding the previous one — atomically,
     so the one-CURRENT-per-agent index can never be tripped by a race.
 
     `proposal_id` links back to the coaching proposal that produced this
-    version (None for operator-typed saves — never backfilled)."""
+    version (None for operator-typed saves — never backfilled).
+
+    `expected_version` (a coached edit's `base_version`; 0 = the built-in)
+    makes the write refuse with `StaleCharter` when the CURRENT version is
+    another one — compared INSIDE the transaction, under a row lock, so an
+    operator save landing between the Executor's re-check and this write still
+    cannot be overwritten. None (the operator's own PUT and revert) never
+    compares. `shown_session_id` records the new version as SHOWN to the
+    drafting session in the same transaction (it wrote that text), so its next
+    edit of this charter is stamped with it (`charter_base_version`)."""
     conn = await _conn()
     try:
         async with conn.transaction():
+            if expected_version is not None:
+                current = await conn.fetchval(
+                    "select version from guidance_version"
+                    " where agent_id = $1 and status = 'CURRENT' for update",
+                    agent_id,
+                ) or 0
+                if current != expected_version:
+                    raise StaleCharter(agent_id, expected_version, current)
             await conn.execute(
                 "update guidance_version set status = 'SUPERSEDED'"
                 " where agent_id = $1 and status = 'CURRENT'",
@@ -3004,7 +3032,78 @@ async def save_charter_version(
                 """,
                 agent_id, content, rationale, created_by, proposal_id,
             )
+            if shown_session_id is not None:
+                await _record_charter_shown(conn, shown_session_id, agent_id, row["version"])
         return dict(row)
+    finally:
+        await conn.close()
+
+
+# --- the charter version a session was SHOWN (epic-small-fixes R24) -------------
+# A coached `charter.update` is stamped at park time with the version of the
+# target's charter its drafting session was last shown (`runtime/proposals.
+# park_proposal`), and the Executor refuses it as world-moved when the charter
+# has moved since. The record is `run_state.charter_shown = {agent_id: version}`
+# on the drafting session, written by whoever put the charter in front of the
+# model: `run_coach`'s prompt (runtime), the world-moved report for a
+# `charter:` target (gateway) and the coached write itself (the drafter wrote
+# that text). A key inside the merge-written jsonb bag, so no writer of
+# `messages` can drop it.
+
+
+async def _record_charter_shown(conn, session_id: str, agent_id: str, version: int) -> None:
+    await conn.execute(
+        """
+        update session set
+            run_state = coalesce(run_state, '{}'::jsonb) || jsonb_build_object(
+                'charter_shown',
+                coalesce(run_state -> 'charter_shown', '{}'::jsonb)
+                    || jsonb_build_object($2::text, $3::int)),
+            updated_at = now()
+        where id = $1
+        """,
+        session_id, agent_id, int(version),
+    )
+
+
+async def record_charter_shown(session_id: str, agent_id: str, version: int) -> None:
+    """Record that `session_id` was shown `agent_id`'s charter at `version`
+    (0 = the built-in). Merges into `charter_shown`; the session row must
+    exist (a missing row records nothing, and the stamp then falls back to the
+    version current at the session's start)."""
+    conn = await _conn()
+    try:
+        await _record_charter_shown(conn, session_id, agent_id, version)
+    finally:
+        await conn.close()
+
+
+async def charter_base_version(session_id: str, agent_id: str) -> int:
+    """The version of `agent_id`'s charter a coached edit drafted in
+    `session_id` is stamped with: the version the session was last SHOWN
+    (`charter_shown`), else the version CURRENT when the session started (the
+    newest version created at or before its `created_at`; versions only ever
+    append, a revert included, so that is the one that was CURRENT), else 0,
+    the built-in. A session with no row yet starts now: the CURRENT version."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            select (s.run_state -> 'charter_shown' ->> $2)::int as shown,
+                   (select max(g.version) from guidance_version g
+                     where g.agent_id = $2 and g.created_at <= s.created_at) as at_start
+            from session s where s.id = $1
+            """,
+            session_id, agent_id,
+        )
+        if row is None:
+            return await conn.fetchval(
+                "select version from guidance_version"
+                " where agent_id = $1 and status = 'CURRENT'", agent_id,
+            ) or 0
+        if row["shown"] is not None:
+            return int(row["shown"])
+        return int(row["at_start"] or 0)
     finally:
         await conn.close()
 

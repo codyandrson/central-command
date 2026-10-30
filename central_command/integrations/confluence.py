@@ -80,6 +80,21 @@ class ConfluenceStale(ConfluenceError, WorldMoved):
         )
 
 
+class ConfluencePageGone(ConfluenceError, WorldMoved):
+    """The page an approved update targets no longer exists (a 404 at the
+    update's version check): world-moved, `actual` None (epic-small-fixes R25,
+    the operator's ruling of 2026-10-29, Decision 7). Only here — the check of a
+    proposal that carries `expected_version`, i.e. a draft made against a page
+    that existed — never a reclassification of 404 in `classify_failure`."""
+
+    def __init__(self, message: str, *, page_id: str, expected: int):
+        ConfluenceError.__init__(self, message, status_code=404)
+        self.target = f"confluence:page:{page_id}"
+        self.expected = expected
+        self.actual = None
+        self.what_moved = f"page {page_id} no longer exists"
+
+
 # A 409 is world-moved ONLY when the body names a version conflict ("Version
 # must be incremented on update. Current version is: 7"); a 409 for any other
 # reason (a duplicate title) stays `_check`'s generic refusal.
@@ -568,13 +583,24 @@ async def create_page(
 async def check_version(page_id: str, expected_version: int) -> dict:
     """The world check `update_page` makes before it writes, and nothing else:
     a fresh read of the page, refused with `ConfluenceStale` when its version
-    is not `expected_version`. Returns the current page row. The Executor's
+    is not `expected_version` and with `ConfluencePageGone` when the read
+    answers 404. Returns the current page row. The Executor's
     pre-execution re-check calls exactly this, so the re-check and the write
     can never disagree about what "moved" means."""
     _require_configured("updatePage")
     pid = _id(page_id)
     ev = _version_number(expected_version)
-    page = (await get_page(pid))["page"]
+    try:
+        page = (await get_page(pid))["page"]
+    except ConfluenceError as e:
+        if e.status_code != 404:
+            raise
+        # The draft was made against a page at version `ev`; it is gone now.
+        raise ConfluencePageGone(
+            f"updatePage — page {pid} no longer exists: this proposal was "
+            f"approved against version {ev}. Nothing was written.",
+            page_id=pid, expected=ev,
+        ) from e
     actual = page["version"]
     if actual != ev:
         raise ConfluenceStale(

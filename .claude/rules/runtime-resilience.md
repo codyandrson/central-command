@@ -169,5 +169,9 @@ when a matching file is read.
   bounded by `CC_WORLD_MOVED_REDRAFT_LIMIT` (default 3); no other failure
   counts toward it. A parked or interrupted proposal re-checks the world
   before its first remaining action (`executor.WORLD_CHECKS`), so waiting never
-  turns into a stale write. Guarded by `tests/test_world_moved.py` and
+  turns into a stale write. A `WORLD_CHECKS` row runs only when `_targets_of`
+  names the action's target. A coached `charter.update` is compared against
+  the version its drafter was SHOWN, stamped by `park_proposal` from
+  `run_state.charter_shown`, never an agent argument; a Confluence page gone
+  at the update's version check is world-moved, a Jira 404 is not. Guarded by `tests/test_world_moved.py` and
   `tests/test_world_moved_limit.py`.

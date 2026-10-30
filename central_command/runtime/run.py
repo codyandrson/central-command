@@ -862,6 +862,12 @@ async def run_coach(
 
     coach = await build_coach_agent(await coach_loadout(), model=model)
     session_id = "sess_" + uuid.uuid4().hex[:12]
+    # The prompt below SHOWS the coach this version of the target's charter:
+    # record it on the session before the model sees it, so the edit it parks
+    # is stamped with what it actually read (`park_proposal`, R24). The row is
+    # created here for the record; `_run_live`'s own create is a no-op on it.
+    await repo.create_running_session(session_id, COACH_ID)
+    await repo.record_charter_shown(session_id, agent_id, version)
     result = await _run_live(
         coach,
         _coach_prompt(agent_id, content, version, signals),

@@ -19,7 +19,10 @@ the Decisions RPC (`decisions.history`). No test calls a gateway internal.
 (g) a death between the FAILED status and the drafter's resume: the startup
     sweeps resume it exactly once from the armed record, linked and counted;
 and a `graph.delete_episode` whose preview changed lands world-moved through
-the approve route (owed from story 4).
+the approve route (owed from story 4); and (epic-small-fixes story 11.7, R24,
+the operator's Decision 6) a coached charter edit the operator overtook through
+the charter route lands world-moved on Approve, the coach redrafts against the
+charter the report showed it, and the chain stops at the limit.
 """
 
 from __future__ import annotations
@@ -27,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-import httpx
 import pytest
 from fastapi.encoders import jsonable_encoder
 
@@ -39,21 +41,24 @@ from central_command.gateway import executor, gateway
 from central_command.heartbeat import probes
 from central_command.runtime import agent as agent_mod
 from tests.conftest import needs_pg
-from tests.test_world_moved import (  # noqa: F401 — graph_world is a fixture
-    _delete_action,
-    _preview,
-    graph_world,
-)
-from tests.test_world_moved_limit import _count, _Persistent, _redrafts_of, _task_session
-from tests.world_moved_helpers import (  # noqa: F401 — pinned and confluence_grant are fixtures
+from tests.world_moved_helpers import (  # noqa: F401 — pinned, confluence_grant and graph_world are fixtures
     AGENT,
+    _Coach,
+    _coached_target,
+    _count,
     _counting_confluence,
+    _delete_action,
     _draft,
     _Drafter,
     _drafting_model,
     _event,
     _page_update,
+    _Persistent,
+    _preview,
+    _redrafts_of,
+    _task_session,
     confluence_grant,
+    graph_world,
     pinned,
 )
 
@@ -467,3 +472,50 @@ async def test_a_changed_deletion_preview_lands_world_moved_through_the_approve_
     kinds = await _kinds(pid)
     assert kinds.index("proposal.decided") < kinds.index("proposal.failed")
     assert graph_world["queued"] == [], "nothing was deleted"
+
+
+# --- a coached charter edit the operator overtook (epic-small-fixes story 11.7, R24) --
+
+
+async def test_an_operator_charter_edit_before_approval_fails_world_moved_and_the_coach_redrafts(
+    monkeypatch,
+):
+    """The operator's ruling of 2026-10-29 (Decision 6), through the public
+    seams: a coach run drafts an edit of v1, the operator saves the charter
+    through its route before approving, and the cockpit's Approve lands FAILED
+    world-moved; the coach redrafts against the text the report showed it, and
+    an operator who keeps editing meets the redraft limit, loud."""
+    from central_command.runtime.run import run_coach
+    from tests.fake_world import fake_world
+
+    fake_world(monkeypatch, real=("charter.update",))
+    target = await _coached_target("wme-charter")
+    coach = _Coach(target)
+    _session_model(monkeypatch, coach.model)
+    out = await run_coach(target, model=coach.model, note="Answer briefly.", note_event_id=0)
+    first = await repo.load_proposal(out["proposal_id"])
+
+    ids = [first["id"]]
+    for n in (1, 2, 3):
+        await routes.save_charter(target, routes.CharterIn(
+            content=f"OPERATOR EDIT {n}", rationale="the operator's own edit"))
+        approved = await _approve(ids[-1])
+        assert approved["ok"] is False
+        assert (await _event("proposal.failed", ids[-1]))["payload"]["world_moved"][
+            "what_moved"] == f"{target}'s charter moved v{n} -> v{n + 1}"
+        assert (await repo.current_charter(target))["content"] == f"OPERATOR EDIT {n}"
+        redraft = await _only_redraft(ids[-1])
+        assert redraft["status"] == "AWAITING_HUMAN"
+        assert redraft["redraft"] == {"of": ids[-1], "root": first["id"],
+                                      "cause": "world_moved", "world_moved_count": n}
+        args = redraft["actions"][0]["arguments"]
+        assert args["base_version"] == n + 1, "stamped with the version the report showed"
+        assert f"OPERATOR EDIT {n}" in args["content"]
+        ids.append(redraft["id"])
+
+    await routes.save_charter(target, routes.CharterIn(content="OPERATOR EDIT 4"))
+    end = await _approve(ids[-1])
+    assert end["chain_exhausted"] is True
+    assert await _redrafts_of(ids[-1]) == []
+    assert (await repo.current_charter(target))["content"] == "OPERATOR EDIT 4"
+    assert await _count("proposal.redraft_limit_reached", ids[-1]) == 1
