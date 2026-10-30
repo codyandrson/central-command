@@ -166,8 +166,9 @@ if [[ "${CC_VERIFY_LIVE:-0}" == "1" ]]; then
     -H 'Content-Type: application/json' \
     -d '{"model":"cc-embedding","input":"dimension probe"}' \
     "${LL}/v1/embeddings" 2>/dev/null)"
-  # CC_EMBED_DIM is written into the Neo4j vector index. A mismatch does not
-  # error at write time — it corrupts retrieval silently — so prove it here.
+  # CC_EMBED_DIM is the width of every vector the graph stores (there is no
+  # index in Neo4j enforces it). A mismatch does not error at write
+  # time — it corrupts retrieval silently — so prove it here.
   # Parse with python, not text-mangling: the first element is glued to
   # `"embedding":[` so a line-count regex reads 1023 for a true 1024 — and the
   # "fix" a user would infer (set CC_EMBED_DIM=1023) corrupts the index this

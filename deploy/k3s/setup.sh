@@ -1406,8 +1406,9 @@ phase_reset() {
   rm -f "$marker"
   pass "reset-keep" "this dump set is kept in $keep (outside the nightly retention)"
 
-  # schema.sql reaches the spine through the cc-schema-sql ConfigMap, ONCE, on
-  # the empty volume, and nothing applies it at runtime — so the ConfigMap is
+  # schema.sql reaches a FRESH spine through the cc-schema-sql ConfigMap, once,
+  # on the empty volume (a running one gets it from the updater's schema
+  # phase, never at process start) — so the ConfigMap is
   # rebuilt from THIS checkout before the volume goes, or the new spine is
   # born with whatever schema the cluster last held. Still before anything
   # stops: a failure here leaves the deployment running.

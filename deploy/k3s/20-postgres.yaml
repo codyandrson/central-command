@@ -12,8 +12,9 @@
 #   exactly, so CC_DATABASE_URL is unchanged.
 #
 #   schema.sql is mounted the same way compose mounted it, into
-#   /docker-entrypoint-initdb.d. Remember it runs on a FRESH database only —
-#   nothing applies it at runtime — and its founding-roster UPDATEs are guarded
+#   /docker-entrypoint-initdb.d. Remember initdb runs it on a FRESH database
+#   only; a running one gets it from the updater's schema phase
+#   (cc-update.sh), never at process start — and its founding-roster UPDATEs are guarded
 #   by `where ... and role = ''`, so a fresh database still reproduces the
 #   roster. The migration restore (migrate-from-docker.sh) drops and recreates
 #   on top of whatever initdb built.

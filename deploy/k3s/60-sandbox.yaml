@@ -8,17 +8,18 @@
 #   plane's own workloads, and a compromised sandbox pod must not be able to
 #   even LIST anything in `central_command`.
 #
-#   Isolation is TWO independent layers, neither load-bearing alone:
+#   Containment is TWO independent layers, neither load-bearing alone:
 #     1. gVisor (`runtimeClassName: gvisor`, handler `runsc`) — installed on
 #        the CHROMEBOX only (no k3s-agent restart on the Pi's control plane).
 #        Sandbox pods carry a REQUIRED nodeAffinity to chromebox for exactly
 #        this reason; there is no fallback node.
-#     2. A default-deny-ALL NetworkPolicy, BOTH directions. `kubectl exec`
-#        rides the kubelet's own control channel, not the pod network, so
-#        exec keeps working even though every packet the sandbox tries to
-#        send or receive over the CNI is dropped — this is what makes
-#        egress=deny-all consistent with the runner still being able to
-#        drive the sandbox at all.
+#     2. A default-deny INGRESS NetworkPolicy. `kubectl exec` rides the
+#        kubelet's own control channel, not the pod network, so exec keeps
+#        working even though every packet sent TO the sandbox over the CNI is
+#        dropped — this is what lets the runner drive the sandbox at all.
+#        EGRESS is open (see the allow-all-egress policy below): the sandbox
+#        is containment, not restriction, and its constraint is that it holds
+#        no credentials.
 #
 #   The sandbox-runner (central_command/sandbox/runner.py, deployed OUTSIDE this
 #   cluster as a Pi systemd unit) is the only actor with any access to this
@@ -44,7 +45,7 @@ metadata:
 handler: runsc
 ---
 # THE SANDBOX IS CONTAINMENT, NOT RESTRICTION (The operator, 2026-08-04 — this
-# reverses the deny-all egress this file shipped with on 2026-08-03).
+# reverses the closed egress this file shipped with on 2026-08-03).
 #
 # The sandbox exists so an agent can work FREELY and unsupervised without any
 # risk of damaging the operator's system — not to limit what the agent can reach. An

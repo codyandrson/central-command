@@ -66,10 +66,12 @@ set_kv_if_unset() { # set_kv_if_unset <file> <key> <value> <check-name>
 # "cc-stt"] — a SECOND hand-kept alias list beside cc_required_aliases (the ONE
 # list, deploy/env-lib.sh), and it had already drifted: graphiti-llm,
 # cc-embedding and the then-reranker alias were never in it. MEASURED before this fix:
-# that is NOT what breaks graph embedding — the graph writer embeds with the
-# ADMIN key, not this one — but the record's fix stands on its own: a scope is
-# a list, a list has one definition, so the key is scoped to exactly the
-# aliases this deployment requires and nothing else.
+# that was NOT what broke graph embedding — the graph writer then embedded with
+# the ADMIN key, not this one (since story 11.18 it embeds with this scoped
+# key: CC_LLM_API_KEY at CC_LLM_BASE_URL, so the scope covers it) — but the
+# record's fix stands on its own: a scope is a list, a list has one
+# definition, so the key is scoped to exactly the aliases this deployment
+# requires and nothing else.
 #
 # LiteLLM endpoint shapes, from the vendored docs (never a live write to check
 # them): docs/vendor/litellm/docs/proxy/virtual_keys.md — POST /key/generate

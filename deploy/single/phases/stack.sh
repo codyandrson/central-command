@@ -68,7 +68,7 @@ phase_stack() {
     pass "image-crawler" "skipped (CC_ENABLE_CRAWLER=0)"
   fi
 
-  # The dimension is written into the Neo4j vector index and is effectively
+  # The dimension is the width of every vector the graph stores and is effectively
   # permanent, so the graph may not be created before it has been MEASURED.
   [[ -n "${CC_EMBED_DIM:-}" ]] || {
     fail "embed-dimension" "CC_EMBED_DIM is empty in .env — run: ./setup.sh (it resumes at llm, which measures it through the cc-embedding alias)"

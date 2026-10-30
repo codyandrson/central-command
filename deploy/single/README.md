@@ -89,8 +89,8 @@ validates each alias with a real request, and continues. Nothing you enter
 or later change in the UI is ever overwritten by setup.
 
 `CC_EMBED_DIM` is measured, not declared, and the `stack` phase refuses to run
-without it: it is written into the Neo4j vector index and is effectively
-permanent.
+without it: it is the width of every vector the graph stores and is
+effectively permanent.
 
 ## Prerequisites
 

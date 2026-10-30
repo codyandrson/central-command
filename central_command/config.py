@@ -170,7 +170,7 @@ class Settings(BaseSettings):
 
     # The embedder the curation writer (integrations/neo4j_writer) uses — the
     # LiteLLM ALIAS, not the upstream model name, and the vector dimension the
-    # Neo4j indexes were created with. The embedder `graphiti_client` builds
+    # graph's stored vectors carry. The embedder `graphiti_client` builds
     # for extraction uses the same two settings, so the curation writer and
     # graphiti-core index the same vectors; a mismatched dimension is
     # silently-broken similarity, not an error (verified 2026-08-30: there
@@ -384,7 +384,7 @@ class Settings(BaseSettings):
     # UNAUTHENTICATED (works for public GitHub, subject to rate limits) rather
     # than refusing.
 
-    # Native Confluence client, Phase 1 read-only (D-confluence). Same giftable
+    # Native Confluence client (D-confluence). Same giftable
     # convention as jira_base_url above: no instance-specific default, so a
     # gift install never points at the operator's Confluence — unset + a confluence
     # pack granted means reads fail loudly with a URL-shaped error. The operator's

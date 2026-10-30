@@ -325,8 +325,8 @@ when a matching file is read.
   Both keys travel in a curl config on STDIN (`curl -K -`), never an argv.
   Since graphiti-core runs in the API (design record 2026-10-04, D2) the
   scope is load-bearing for the graph: extraction (`graphiti-llm`) and its
-  embedder (`cc-embedding`) are called with THIS key — the curation writer
-  still embeds with the admin key — and so is the reranker, which joins the
+  embedder (`cc-embedding`) are called with THIS key — and, since story 11.18,
+  so does the curation writer (`CC_LLM_API_KEY` at `CC_LLM_BASE_URL`) — and so is the reranker, which joins the
   scope through `cc_scope_aliases` only once `CC_GRAPH_RERANK_ALIAS` names it
   (v2.62.0; `cc-rerank` is OPTIONAL, `cc_optional_aliases`, and never pauses
   the run). The k3s profile's equivalent is `mint-keys.sh` (`--scope-only`

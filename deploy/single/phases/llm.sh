@@ -315,7 +315,7 @@ phase_llm() {
 
   local cur; cur="$(get_kv "$ENV_FILE" CC_EMBED_DIM)"
   if [[ -n "$cur" && "$cur" != "$dim" ]]; then
-    fail "embed-dimension" "CC_EMBED_DIM is already ${cur} but the endpoint returns ${dim} — REFUSING to change it. It is written into the Neo4j vector index; changing it means dropping the index and re-embedding the graph. Fix the model, or clear CC_EMBED_DIM deliberately on a graph you are willing to lose."
+    fail "embed-dimension" "CC_EMBED_DIM is already ${cur} but the endpoint returns ${dim} — REFUSING to change it. It is the width of every vector the graph stores; changing it means re-embedding the whole graph. Fix the model, or clear CC_EMBED_DIM deliberately on a graph you are willing to lose."
     return 1
   fi
   set_kv "$ENV_FILE" CC_EMBED_DIM "$dim"

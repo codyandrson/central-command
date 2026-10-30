@@ -5,7 +5,8 @@
 # survive under gVisor's netstack (verified 2026-08-03 on the chromebox —
 # `RTM_NEWADDR: No child processes`; see the plan's residual note). The two
 # layers actually load-bearing here are gVisor (the pod's runtimeClassName)
-# and the namespace's default-deny NetworkPolicy — both outside this image.
+# and the namespace's ingress-deny NetworkPolicy — both outside this image
+# (egress is open: the sandbox is containment, not restriction).
 # srt stays installed in case a later slice finds a way to use it (bwrap
 # --share-net, fs-only isolation, is confirmed to work under gVisor).
 #

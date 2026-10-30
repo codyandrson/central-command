@@ -266,8 +266,8 @@ answer in conversation (then you write the answer into `.env`).
   operator owns the values; a row they fill in the UI always wins over `.env`.
 - **The embedding-permanence warning** — say it in one sentence: the
   embedding choice is effectively permanent, because `CC_EMBED_DIM` gets
-  written into the Neo4j vector index; changing the embedder later means
-  dropping the index and re-embedding the whole graph. **Leave `CC_EMBED_DIM`
+  used as the width of every vector the graph stores; changing the embedder later means
+  re-embedding the whole graph. **Leave `CC_EMBED_DIM`
   blank** — the run measures it, and refuses to overwrite a different value
   that is already there.
 - **Enable flags** — `CC_ENABLE_N8N` (default 0; only needed by an

@@ -1620,9 +1620,9 @@ PACKS: dict[str, Pack] = {
         ),
         guidance=(
             "SANDBOX: you have your own ephemeral Linux container "
-            "(gVisor-isolated, no network egress) with a persistent "
-            "`/workspace` for the life of your session — write a file, run "
-            "it, read the result back. `sandbox_exec` runs a shell command; "
+            "(gVisor-isolated, no credentials, open network egress) with a "
+            "persistent `/workspace` for the life of your session — write a "
+            "file, run it, read the result back. `sandbox_exec` runs a shell command; "
             "`sandbox_write_file`/`sandbox_read_file` touch files under "
             "/workspace directly; `sandbox_copy_in` pulls in ONLY paths the "
             "operator has explicitly granted (name what you need if it "

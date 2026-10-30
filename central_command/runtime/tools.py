@@ -1318,8 +1318,9 @@ async def forge_list_commits(
 
 
 # --- Confluence reads (`confluence-read` pack) ---------------------------------
-# Phase 1 read-only — no propose_*/Executor writes exist yet (Phase 2: gated
-# create/update/move/trash page, upload attachment, labels, create space).
+# These are the reads; the gated writes (create/update/move/trash page, upload
+# attachment, labels, create space) are capabilities in
+# gateway/capabilities.py that the Executor performs after approval.
 # Page bodies are always storage-format HTML (Confluence's macro-carrying
 # representation, not rendered view HTML).
 
@@ -3040,9 +3041,10 @@ async def _sandbox_id_for(ctx: RunContext) -> str:
 @parkable_read
 async def sandbox_exec(ctx: RunContext, command: str) -> str:
     """Run a shell command inside YOUR OWN ephemeral sandbox (a real Linux
-    container, gVisor-isolated, no network egress) and get back its exit
-    code, stdout and stderr. The workspace at `/workspace` persists across
-    calls within your session — write a file, then run it, then read it back.
+    container, gVisor-isolated, no credentials, open network egress) and get
+    back its exit code, stdout and stderr. The workspace at `/workspace`
+    persists across calls within your session — write a file, then run it,
+    then read it back.
 
     Nothing this produces is trusted or durable: it never leaves the sandbox
     on its own. There is no way from here to affect anything outside your own

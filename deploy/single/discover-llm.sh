@@ -65,8 +65,8 @@
 #   falls back to the chat pair.
 #
 #   The embed probe IS the dimension discovery: never trust a model card for
-#   this — a mis-sized vector corrupts the Neo4j index instead of erroring,
-#   and the dimension is effectively permanent once the index exists.
+#   this — a mis-sized vector corrupts retrieval instead of erroring,
+#   and the dimension is effectively permanent once vectors are stored.
 # ============================================================================
 set -euo pipefail
 

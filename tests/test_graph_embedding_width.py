@@ -7,7 +7,7 @@ at the same width Graphiti is configured with (`CC_EMBED_DIM`, 1024).
 
 The reason the width is checked rather than trusted is written in the module:
 "A wrong-width vector would corrupt the index rather than fail a query". Neo4j
-stores whatever list it is handed; the vector index does not validate width, no
+stores whatever list it is handed; no index exists to validate width, no
 exception is raised, and the node stays perfectly visible to the keyword half
 of hybrid search. What breaks is the semantic half — silently, for that node,
 forever. Swapping `CC_EMBED_ALIAS` to a 768- or 1536-dimension model is a
@@ -113,8 +113,9 @@ async def test_a_right_sized_vector_is_stored(fake_embedder):
 @pytest.mark.parametrize("width", [768, 1023, 1025, 1536, 0])
 async def test_a_mis_sized_vector_is_refused_loudly(width, fake_embedder):
     """Rewritten for story 7 (it pinned `None`, the degraded write): a wrong
-    width is a loud semantic error — Neo4j would store it and the vector index
-    would not complain; the node would silently stop answering semantic search."""
+    width is a loud semantic error — Neo4j would store it and nothing
+    schema-side would complain (no index enforces width); the node would
+    silently stop answering semantic search."""
     fake_embedder([0.5] * width)
     with pytest.raises(neo4j_writer.EmbedWidthError) as refused:
         await neo4j_writer.embed("the operator's grandfather was a machinist")

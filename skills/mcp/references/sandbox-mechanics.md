@@ -73,7 +73,7 @@ and `deploy/k3s/60-sandbox.yaml`):
   its netns removal trips gVisor's netstack, no off switch — so it ships
   dormant in the sandbox image. The layers actually live are gVisor itself
   and the namespace NetworkPolicy, which denies INGRESS only (egress is open,
-  above); decision-log DL-007 records this.
+  above); decision-log DL-005 records this (containment, not restriction).
 
 ## Gate resolution happens outside the sandbox pack entirely
 

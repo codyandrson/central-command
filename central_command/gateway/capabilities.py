@@ -95,7 +95,7 @@ REGISTRY: list[Capability] = [
         reversibility="reversible",
         risk="external, reversible — a wrong date can be set back",
         holder="Executor",
-        route="integrations/jira.py → Jira REST setDueDate (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST setDueDate (native, D23; native only, no n8n façade fallback)",
         arguments=["issue_key", "due_date"],
         description="Set a Jira issue's due date.",
     ),
@@ -108,7 +108,7 @@ REGISTRY: list[Capability] = [
         reversibility="reversible",
         risk="external, reversible — a wrongly created issue can be closed or deleted in the Jira UI",
         holder="Executor",
-        route="integrations/jira.py → Jira REST createIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST createIssue (native, D23; native only, no n8n façade fallback)",
         arguments=["project_key", "summary", "description?", "issue_type? (Task|Bug|Story|Epic|Subtask)", "parent?", "due_date?", "labels?", "custom_fields?", "assignee? (user_id from jira.find_users)"],
         description=(
             "Create a new Jira issue for not-yet-tracked work. Built after the "
@@ -126,7 +126,7 @@ REGISTRY: list[Capability] = [
         reversibility="reversible",
         risk="external, append-only — visible to others; lib-jira has no delete op",
         holder="Executor",
-        route="integrations/jira.py → Jira REST addComment (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST addComment (native, D23; native only, no n8n façade fallback)",
         arguments=["issue_key", "body"],
         description="Add a comment to a Jira issue.",
     ),
@@ -139,7 +139,7 @@ REGISTRY: list[Capability] = [
         reversibility="reversible",
         risk="external, reversible — priority/labels/due date can be restored",
         holder="Executor",
-        route="integrations/jira.py → Jira REST updateAttributes (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST updateAttributes (native, D23; native only, no n8n façade fallback)",
         arguments=["issue_key", "priority?", "due_date? (null clears)", "labels? ([] clears)"],
         description=(
             "Change a Jira issue's priority, due date and/or labels — a PARTIAL "
@@ -454,7 +454,7 @@ REGISTRY: list[Capability] = [
         reversibility="reversible",
         risk="external, usually reversible — workflows can gate reverse transitions",
         holder="Executor",
-        route="integrations/jira.py → Jira REST transitionIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST transitionIssue (native, D23; native only, no n8n façade fallback)",
         arguments=["issue_key", "transition (name)"],
         description=(
             "Move an issue through its workflow by transition NAME — resolved "
@@ -1387,7 +1387,7 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world",
         holder="agents (jira_get_issue tool) + control plane (verification reads)",
-        route="integrations/jira.py → Jira REST getIssue (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST getIssue (native, D23; native only, no n8n façade fallback)",
         arguments=["issue_key"],
         description=(
             "Read one Jira issue — agents check reality before advising or "
@@ -1405,7 +1405,7 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world",
         holder="agents (jira_search_issues tool) + control plane",
-        route="integrations/jira.py → Jira REST searchIssues (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST searchIssues (native, D23; native only, no n8n façade fallback)",
         arguments=["jql", "limit?"],
         description=(
             "Search Jira with a bounded JQL query. Rows carry assignee, "
@@ -1436,7 +1436,7 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world",
         holder="agents (jira_get_transitions tool)",
-        route="integrations/jira.py → Jira REST getTransitions (native, D23; n8n façade fallback until CC_JIRA_API_TOKEN is set)",
+        route="integrations/jira.py → Jira REST getTransitions (native, D23; native only, no n8n façade fallback)",
         arguments=["issue_key"],
         description=(
             "The legal next statuses for an issue — read before proposing a "
@@ -1750,8 +1750,8 @@ REGISTRY: list[Capability] = [
         reversibility="reversible",
         risk=(
             "none outside the agent's own ephemeral pod — gVisor-isolated, "
-            "no network egress (default-deny NetworkPolicy), no Central Command "
-            "credentials reachable (the sandbox-runner holds none), deleted "
+            "open egress but no credentials (ingress-deny NetworkPolicy; the "
+            "sandbox-runner holds no Central Command credentials), deleted "
             "on session close or TTL"
         ),
         holder="agent (sandbox_exec tool), granted only via the sandbox pack",
@@ -2396,7 +2396,7 @@ POLICIES: list[Policy] = [
         enforced_at=(
             "central_command/sandbox/runner.py is a SEPARATE, credential-free "
             "service (no DB/LiteLLM/Jira access, only a namespace-scoped "
-            "kubeconfig) driving a gVisor-isolated, default-deny-network Job "
+            "kubeconfig) driving a gVisor-isolated, ingress-deny Job "
             "per sandbox session; the five sandbox.* capabilities carry "
             "gate='ungated'/'ungated read', never 'human approval', and have "
             "no Executor handler at all — the sandbox pack's tools are the "

@@ -976,8 +976,8 @@ print("\n".join(str(m.get("id","")) for m in (d.get("data") or [])))' "$out" 2>/
     else
       pass "llm-embed" "$cid returned a ${dim}-dimension vector"
       # MEASURED, never declared, and never overwritten: the dimension is
-      # written into the Neo4j vector index and is permanent once that index
-      # exists. Writing it here is inside check's "may update .env" allowance —
+      # the width of every stored graph vector and is permanent once any are
+      # stored. Writing it here is inside check's "may update .env" allowance —
       # the llm phase re-measures it through the proxy alias and FAILS on a
       # mismatch, which is what catches a changed embedder.
       local cur; cur="$(get_kv "$ENV_FILE" CC_EMBED_DIM)"
@@ -987,7 +987,7 @@ print("\n".join(str(m.get("id","")) for m in (d.get("data") or [])))' "$out" 2>/
       elif [[ "$cur" == "$dim" ]]; then
         pass "llm-embed-dim" "CC_EMBED_DIM=${cur} in .env matches what the endpoint returns"
       else
-        fail "llm-embed-dim" "CC_EMBED_DIM is already ${cur} in .env but ${cid} returns ${dim} — REFUSING to change it: it is written into the Neo4j vector index, and changing it means dropping the index and re-embedding the graph. Fix the model, or clear CC_EMBED_DIM deliberately on a graph you are willing to lose"
+        fail "llm-embed-dim" "CC_EMBED_DIM is already ${cur} in .env but ${cid} returns ${dim} — REFUSING to change it: it is the width of every vector the graph stores, and changing it means re-embedding the whole graph. Fix the model, or clear CC_EMBED_DIM deliberately on a graph you are willing to lose"
       fi
     fi
   fi

@@ -3239,7 +3239,7 @@ async def import_skill_doc_route(body: SkillDocImportIn) -> dict:
     return doc
 
 
-# ponytail: 25 MB is a guess-free round number for an operator's one-off
+# ponytail: 50 MB is a guess-free round number for an operator's one-off
 # reference doc, not a measured limit — raise it if a real upload needs more.
 MAX_IMPORT_FILE_BYTES = 50 * 1024 * 1024
 

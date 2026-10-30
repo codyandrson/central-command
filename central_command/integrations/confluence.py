@@ -1,4 +1,4 @@
-"""Native Confluence client, Phase 1 read-only (D-confluence).
+"""Native Confluence client — reads, plus the Executor-called writes (D-confluence).
 
 Same posture as `jira.py`: a plain token-REST API is better served by a
 native client that lives in git and is tested by the suite, no

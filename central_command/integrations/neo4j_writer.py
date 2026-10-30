@@ -172,8 +172,9 @@ async def request_embedding(text: str, timeout: float = 60.0) -> list[float]:
 
 class EmbedWidthError(WriteError):
     """The embedder answered with a vector of the wrong width. A semantic
-    error, loud: Neo4j would store it and the vector index would not complain —
-    the node would silently stop answering the semantic half of hybrid search.
+    error, loud: Neo4j would store it and nothing schema-side would complain (no
+    index enforces the width) — the node would silently stop answering the
+    semantic half of hybrid search.
     A misconfigured alias (`CC_EMBED_ALIAS` on a 768-dim model) is exactly this."""
 
 

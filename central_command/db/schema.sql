@@ -544,8 +544,10 @@ on conflict (id) do nothing;
 --     had occurred, BY ITSELF"). Disabled by default would mean every outage
 --     recovery waits for an operator click, which contradicts the property the
 --     action exists to deliver;
---   * precedent: `mail-poll` is seeded enabled for the same class of reason
---     (the system's own housekeeping, not new work aimed at the operator);
+--   * it is the one INTERNAL sweep, not new work aimed at the operator or the
+--     world: `mail-poll` and the other seeds above contact the operator or
+--     the world, so they are born disabled and this is the only one seeded
+--     enabled (AGENTS.md lists it);
 --   * it is a strict no-op when nothing is parked — no probes fire, nothing is
 --     written, the tick is one indexed query per worklist. The cost of it
 --     running unnoticed is nil; the cost of it NOT running is a parked unit

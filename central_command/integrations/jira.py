@@ -10,9 +10,9 @@ façade returned: `{ok, kind: "jira", operation, issue|issues|transitions|link,
 ...}`. Input validation of model-controlled strings (issue keys, dates, link
 types) happens here — the last stop before the provider.
 
-**Cutover:** while the credentials CC_JIRA_AUTH_MODE calls for are unset,
-every call falls through to the n8n façade, so shipping this module changes
-nothing until the operator adds credentials; rollback is deleting them again.
+**Unconfigured:** while the credentials CC_JIRA_AUTH_MODE calls for are unset,
+every call fails loudly (`_requires_native`). There is no n8n façade fallback
+since v2.50.0; Jira is native only.
 
 **Two products, one switch (`CC_JIRA_API_FLAVOR`, 2026-09-23).** Jira Cloud
 exposes REST v3; Jira Data Center (and the retired Server line) only ever
