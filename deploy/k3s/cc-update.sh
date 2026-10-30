@@ -124,8 +124,10 @@ set +a
 # After the env: CC_BACKUP_DIR in deploy/k3s/.env counts, same rule as backup.sh.
 BACKUPS="$(cc_k3s_backup_dir "$SELF")" || instance_fail "could not derive the backup directory — the journal says why"
 
-# Same resolution as the build scripts and verify.sh: override in deploy/k3s/.env.
-COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
+# An answer in deploy/k3s/.env, no default here and no check here: the check is
+# require_compute_ssh, the first thing main and stage_main do, so a stage-mode
+# failure lands in stage.json and never in the status.json the cockpit polls.
+COMPUTE_SSH="${CC_COMPUTE_SSH:-}"
 
 phase() { note "== $1"; write_status running "$1"; }
 
@@ -336,6 +338,11 @@ die() { # <phase> <message> — best-effort recovery: services back up, honest s
   exit 1
 }
 
+require_compute_ssh() {
+  local why
+  why="$(cc_k3s_compute_ssh "$SELF" 2>&1 >/dev/null)" || die precondition "$why"
+}
+
 # ── busy gate ────────────────────────────────────────────────────────────────
 # The cockpit's "Apply update" no longer writes the trigger directly: it
 # engages the API's update hold (central_command/api/hold.py), which pauses the
@@ -400,6 +407,7 @@ trap 'remove_worktree' EXIT
 
 main() {
   mkdir -p "$STATEDIR"
+  require_compute_ssh
 
   PHASE_NOW=resolve; phase "resolving target version"
   local requested=""
@@ -784,6 +792,8 @@ PY
 
 stage_main() {
   mkdir -p "$STATEDIR"
+  require_compute_ssh
+  require_compute_ssh
   if apply_in_flight; then
     note "an update is in flight — the stage yields (apply's prebuild covers it)"
     exit 0

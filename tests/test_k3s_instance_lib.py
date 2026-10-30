@@ -19,12 +19,15 @@ Anything that would write under a home gets a `getent` stub pointing at a temp o
 first: these tests never touch the real home of the account running them.
 
 The helper also holds the unit render and the owner's primary group it is handed
-(R6), the render tested in tests/test_k3s_unit_templates.py.
+(R6), the render tested in tests/test_k3s_unit_templates.py, and the compute node's
+ssh target (R7, INSTANCE-001), tested in tests/test_k3s_compute_ssh.py. An owner of
+root is refused here: the updater rebuilds as the owner and never as root.
 """
 
 from __future__ import annotations
 
 import grp
+import json
 import os
 import pwd
 import re
@@ -228,6 +231,25 @@ def test_an_unreadable_owner_or_group_fails_loud(tree: Path, stubs: Path, fn: st
     assert f"the {named} of" in r.stderr, r.stderr
 
 
+@pytest.mark.parametrize("fn", ["cc_k3s_owner", "cc_k3s_owner_primary_group", "cc_k3s_home", "cc_k3s_backup_dir"])
+def test_a_root_owned_checkout_is_refused(tree: Path, stubs: Path, fn: str):
+    # The updater's RUNAS is this owner: a root-owned checkout would make it root.
+    _exe(stubs / "stat", "echo root\n")
+    r = _call(fn, _script(tree), _clean_env(stubs))
+    assert r.returncode != 0 and r.stdout == ""
+    assert "owned by root" in r.stderr, r.stderr
+
+
+def test_the_updater_stops_at_resolve_on_a_root_owned_checkout(tree: Path, stubs: Path, tmp_path: Path):
+    script = _updater_head(tree, tmp_path / "state")
+    _exe(stubs / "stat", "echo root\n")
+    r = subprocess.run([str(script)], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    assert r.returncode == 1, r.stdout
+    assert "runuser" not in r.stdout
+    status = json.loads((tmp_path / "state" / "status.json").read_text())
+    assert (status["state"], status["phase"]) == ("failed", "resolve")
+
+
 @pytest.mark.parametrize("answer", ["exit 2\n", 'printf "jane:x:1:1::::\\n"\n', 'printf "\\n"\n'])
 def test_an_account_with_no_home_fails_loud(tree: Path, stubs: Path, answer: str):
     _exe(stubs / "getent", answer)
@@ -264,6 +286,7 @@ def test_env_path_does_not_carry_the_helper_and_the_helper_sets_nothing(tmp_path
     assert {line.split()[-1] for line in new} == {
         "cc_k3s_checkout", "cc_k3s_owner", "cc_k3s_group", "cc_k3s_home", "cc_k3s_backup_dir", "_cc_k3s_stat",
         "cc_k3s_owner_primary_group", "cc_k3s_render_unit",  # R6, tests/test_k3s_unit_templates.py
+        "cc_k3s_compute_ssh",  # R7, tests/test_k3s_compute_ssh.py
     }
 
 

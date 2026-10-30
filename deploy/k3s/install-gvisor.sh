@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Install gVisor (runsc) on the chromebox — the HOST half of the sandbox
-# runtime. Run this ON THE PI, like the build-*.sh siblings.
+# Install gVisor (runsc) on the compute node — the HOST half of the sandbox
+# runtime. Run this ON THE ANCHOR NODE, like the build-*.sh siblings.
 #
 #   The sandbox has two halves and only one lives in the manifests:
 #     - 60-sandbox.yaml declares `RuntimeClass gvisor` — a named POINTER saying
 #       "a containerd handler called runsc exists". kubectl apply accepts it
 #       unconditionally; nothing checks that anything backs it.
 #     - THIS script is the other half: the runsc binary + containerd shim on
-#       the chromebox, plus the containerd config stanza that registers the
+#       the compute node, plus the containerd config stanza that registers the
 #       handler. Without it, every install step goes green and the first
 #       sandbox Job just sits there with a "failed to create shim" event —
 #       weeks later, reading like random infra breakage.
 #   (Scripted 2026-08-23; until then this half had been done by hand on
 #   2026-08-04 and recorded nowhere.)
 #
-#   Facts this encodes, captured from the live chromebox:
+#   Facts this encodes, captured from a live compute node:
 #     - binaries in /usr/local/bin, installed from gVisor's official release
 #       bucket (no deb/apt — upstream's documented install method).
 #     - k3s reads /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl
@@ -35,26 +35,49 @@
 # ============================================================================
 set -euo pipefail
 
-CB="${CC_COMPUTE_SSH:-${CC_CHROMEBOX_SSH:-chromebox_admin@100.113.118.28}}"
+# The compute node is an answer, never a default: the environment (setup.sh's
+# load_env, the updater), then this checkout's deploy/k3s/.env; else this exits
+# here, naming the key, before anything changes.
+# shellcheck source=instance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/instance-lib.sh"
+COMPUTE_SSH="$(cc_k3s_compute_ssh "${BASH_SOURCE[0]}")"
 REL="${GVISOR_RELEASE:-latest}"
 TMPL=/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl
 
 say() { printf '[gvisor] %s\n' "$*"; }
 
+# The node carrying the role label, exactly one, never a hostname: the same rule
+# as setup.sh's preflight. Asked BEFORE the install, so a wrong label stops before
+# the k3s-agent bounce rather than after it.
+compute_node() {
+  local nodes count
+  nodes="$(sudo k3s kubectl get nodes -l cc-role/compute=true -o jsonpath='{.items[*].metadata.name}')" || {
+    say "FAIL: could not list the node labelled cc-role/compute=true" >&2
+    return 1
+  }
+  count="$(wc -w <<<"$nodes")"
+  if (( count != 1 )); then
+    say "FAIL: cc-role/compute=true matches ${count} nodes — label exactly one: sudo k3s kubectl label node <name> cc-role/compute=true" >&2
+    return 1
+  fi
+  printf '%s\n' "$nodes"
+}
+
 installed() {
-  ssh -o ConnectTimeout=10 "$CB" \
+  ssh -o ConnectTimeout=10 "$COMPUTE_SSH" \
     "test -x /usr/local/bin/runsc && test -x /usr/local/bin/containerd-shim-runsc-v1 \
      && sudo grep -q 'runtimes\.runsc' $TMPL 2>/dev/null"
 }
 
 if [[ "${FORCE:-0}" != "1" ]] && installed; then
-  say "already installed: $(ssh "$CB" '/usr/local/bin/runsc --version | head -1') + stanza in $TMPL"
+  say "already installed: $(ssh "$COMPUTE_SSH" '/usr/local/bin/runsc --version | head -1') + stanza in $TMPL"
   say "nothing to do (FORCE=1 to reinstall/upgrade)"
 else
-  say "installing runsc ($REL) on $CB…"
-  # Download + sha512-verify + install, all on the chromebox. x86_64 is not a
-  # parameter: the chromebox is the only sandbox node by design (60-sandbox).
-  ssh "$CB" "REL='$REL' bash -s" <<'REMOTE'
+  node="$(compute_node)"
+  say "installing runsc ($REL) on $COMPUTE_SSH…"
+  # Download + sha512-verify + install, all on the compute node. x86_64 is not a
+  # parameter: the compute node is the only sandbox node by design (60-sandbox).
+  ssh "$COMPUTE_SSH" "REL='$REL' bash -s" <<'REMOTE'
 set -euo pipefail
 d=$(mktemp -d); cd "$d"
 URL="https://storage.googleapis.com/gvisor/releases/release/${REL}/x86_64"
@@ -69,7 +92,7 @@ cd /; rm -rf "$d"
 REMOTE
 
   say "registering the runsc handler in $TMPL…"
-  ssh "$CB" "sudo bash -s" <<REMOTE
+  ssh "$COMPUTE_SSH" "sudo bash -s" <<REMOTE
 set -euo pipefail
 if [[ ! -f $TMPL ]]; then
   printf '{{ template "base" . }}\n\n[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runsc]\n  runtime_type = "io.containerd.runsc.v1"\n' > $TMPL
@@ -79,15 +102,15 @@ fi
 REMOTE
 
   say "restarting k3s-agent (running pods survive; kubelet reconnects)…"
-  ssh "$CB" 'sudo systemctl restart k3s-agent'
-  sudo k3s kubectl wait --for=condition=Ready node/chromebox --timeout=180s >/dev/null
+  ssh "$COMPUTE_SSH" 'sudo systemctl restart k3s-agent'
+  sudo k3s kubectl wait --for=condition=Ready "node/$node" --timeout=180s >/dev/null
   say "node Ready again"
 fi
 
 # --- verification ------------------------------------------------------------
 # Rung 1: containerd actually registered the handler (this is what a wrong
 # tmpl filename fails — the binaries can be perfect and this still red).
-info="$(ssh "$CB" 'sudo k3s crictl info' 2>/dev/null)"
+info="$(ssh "$COMPUTE_SSH" 'sudo k3s crictl info' 2>/dev/null)"
 if grep -q '"runsc"' <<<"$info"; then
   say "ok: containerd reports the runsc runtime handler"
 else

@@ -21,6 +21,9 @@
 #                               database; the group the unit templates render
 #     cc_k3s_home [path]        the owner's home, from the account database
 #     cc_k3s_backup_dir [path]  CC_BACKUP_DIR when set, else <owner home>/cc-backups
+#     cc_k3s_compute_ssh [path] the compute node's ssh target, an ANSWER and never
+#                               derived: CC_COMPUTE_SSH from the environment, else
+#                               from that checkout's deploy/k3s/.env
 #
 #   The one function that takes values instead of a path, so a read-only check
 #   can render for the live install from a worktree:
@@ -58,8 +61,16 @@ _cc_k3s_stat() { # <format> <role> <path>
   printf '%s\n' "$value"
 }
 
+# Never root: the updater rebuilds as the owner and never as root, so a root-owned
+# checkout would make its RUNAS root. The checkout belongs to the operator account.
 cc_k3s_owner() { # [path]
-  _cc_k3s_stat %U owner "${1:-${BASH_SOURCE[1]:-}}"
+  local owner
+  owner="$(_cc_k3s_stat %U owner "${1:-${BASH_SOURCE[1]:-}}")" || return 1
+  if [[ "$owner" == root ]]; then
+    echo "instance-lib: the checkout is owned by root — it must belong to the operator account (chown it to that account)" >&2
+    return 1
+  fi
+  printf '%s\n' "$owner"
 }
 
 cc_k3s_group() { # [path]
@@ -71,7 +82,7 @@ cc_k3s_group() { # [path]
 # A checkout in a shared group (`users`) must not hand every member of it that.
 cc_k3s_owner_primary_group() { # [path]
   local owner group
-  owner="$(_cc_k3s_stat %U owner "${1:-${BASH_SOURCE[1]:-}}")" || return 1
+  owner="$(cc_k3s_owner "${1:-${BASH_SOURCE[1]:-}}")" || return 1
   group="$(id -gn -- "$owner" 2>/dev/null)" || group=""
   if [[ -z "$group" ]]; then
     echo "instance-lib: cannot resolve the primary group of account $owner" >&2
@@ -82,7 +93,7 @@ cc_k3s_owner_primary_group() { # [path]
 
 cc_k3s_home() { # [path]
   local owner entry home
-  owner="$(_cc_k3s_stat %U owner "${1:-${BASH_SOURCE[1]:-}}")" || return 1
+  owner="$(cc_k3s_owner "${1:-${BASH_SOURCE[1]:-}}")" || return 1
   entry="$(getent passwd "$owner" 2>/dev/null)" || entry=""
   home="$(printf '%s\n' "$entry" | cut -d: -f6)"
   if [[ -z "$home" ]]; then
@@ -100,6 +111,31 @@ cc_k3s_backup_dir() { # [path]
   fi
   home="$(cc_k3s_home "${1:-${BASH_SOURCE[1]:-}}")" || return 1
   printf '%s/cc-backups\n' "$home"
+}
+
+# The environment first: setup.sh's load_env exports the key, and the updater hands
+# it to the build scripts it runs from a detached worktree, where no untracked
+# deploy/k3s/.env exists. The file is read in a subshell, as the other scripts
+# source it, so nothing from it reaches the caller. Names the key, never a value.
+cc_k3s_compute_ssh() { # [path]
+  local checkout answer
+  if [[ -n "${CC_COMPUTE_SSH:-}" ]]; then
+    printf '%s\n' "$CC_COMPUTE_SSH"
+    return 0
+  fi
+  checkout="$(cc_k3s_checkout "${1:-${BASH_SOURCE[1]:-}}")" || return 1
+  answer="$(
+    set +eu
+    . "$checkout/deploy/k3s/env-path.sh" >/dev/null 2>&1 || exit 0
+    file="$(cc_k3s_env_file "$checkout")"
+    [[ -f "$file" ]] && . "$file" >/dev/null 2>&1
+    printf '%s' "${CC_COMPUTE_SSH:-}"
+  )"
+  if [[ -z "$answer" ]]; then
+    echo "CC_COMPUTE_SSH is not set in deploy/k3s/.env — set it to <user>@<compute-address> (the compute node's ssh target)" >&2
+    return 1
+  fi
+  printf '%s\n' "$answer"
 }
 
 # The tokens a deploy/k3s/*.in template may hold are these four and no other. A

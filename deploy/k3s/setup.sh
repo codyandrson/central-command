@@ -129,7 +129,6 @@ load_env() {
   # shellcheck disable=SC1090
   . "$ENV_FILE"
   set +a
-  : "${CC_COMPUTE_SSH:=chromebox_admin@100.113.118.28}"
   : "${CC_AIRGAP:=0}"
 }
 
@@ -330,8 +329,27 @@ ensure_app_env() {
   pass "app-env" "created the app's .env from .env.example (0600)"
 }
 
+# The compute node is an answer, never a default. load_env runs in EVERY phase,
+# reset and status included, so it asks for nothing: each phase that uses the key
+# asks here first, before the phase changes anything. Sourced here rather than at
+# the top: the reset phase's scratch tree has no instance-lib.sh, and never asks.
+require_compute_ssh() {
+  local answer
+  # shellcheck source=instance-lib.sh
+  if ! . "$HERE/instance-lib.sh"; then
+    fail "answer-file" "$HERE/instance-lib.sh could not be read, so CC_COMPUTE_SSH cannot be resolved"
+    return 1
+  fi
+  if ! answer="$(cc_k3s_compute_ssh "$HERE/setup.sh" 2>&1)"; then
+    fail "answer-file" "$answer"
+    return 1
+  fi
+  export CC_COMPUTE_SSH="$answer"
+}
+
 # ssh to the compute node, non-interactively. Used read-only everywhere in
-# preflight; the build scripts do their own ssh.
+# preflight; the build scripts do their own ssh. A phase calls
+# require_compute_ssh first: under -u an unset key would end the whole run here.
 compute_ssh() { ssh "${SSH_OPTS[@]}" "$CC_COMPUTE_SSH" "$@"; }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -509,6 +527,8 @@ phase_preflight() {
       fail "role-${role}" "cc-role/${role} resolves to ${count} nodes ('${n}') — label exactly one: sudo k3s kubectl label node <name> cc-role/${role}=true"
     fi
   done
+
+  require_compute_ssh || return 1
 
   # Passwordless ssh to the compute node: every build script, install-gvisor.sh
   # and verify.sh shell over it. BatchMode turns "would prompt" into a failure
@@ -872,6 +892,7 @@ images_compute() { compute_ssh 'sudo k3s ctr -n k8s.io images ls -q' 2>/dev/null
 
 phase_stack() {
   load_env || return 1
+  require_compute_ssh || return 1
 
   local compute_imgs
   compute_imgs="$(images_compute)"
@@ -1615,14 +1636,21 @@ env_key_names() { # env_key_names <file>
 phase_diagnose() {
   local out="$HERE/setup-diagnostics.txt"
   load_env || true
+  # On stdout with the other check lines, not in the bundle; the bundle still gets written.
+  local compute_answered=0
+  require_compute_ssh && compute_answered=1
   {
     echo "Central Command k3s setup diagnostics — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     echo "Paste this whole file to Claude. It contains key NAMES only, never values."
     echo
     echo "== host"
     uname -a 2>&1
-    echo "compute node ssh target: ${CC_COMPUTE_SSH:-<unset>}"
-    ssh "${SSH_OPTS[@]}" "${CC_COMPUTE_SSH:-nowhere}" 'uname -a' 2>&1
+    if (( compute_answered )); then
+      echo "compute node ssh target: $CC_COMPUTE_SSH"
+      ssh "${SSH_OPTS[@]}" "$CC_COMPUTE_SSH" 'uname -a' 2>&1
+    else
+      echo "compute node ssh target: not answered (CC_COMPUTE_SSH in deploy/k3s/.env)"
+    fi
     echo
     echo "== tool versions"
     local t

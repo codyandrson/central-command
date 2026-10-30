@@ -117,7 +117,8 @@ Assumed already true before phase 2:
 - **A private network** (a tailnet, for instance) between the two; the anchor
   can `ssh <user>@<compute-address>` without a password prompt (every build
   script shells over that). Set the target as `CC_COMPUTE_SSH` in
-  `deploy/k3s/.env`; the real value belongs to your private instance docs.
+  `deploy/k3s/.env`: it is required, with no default, and every script that
+  needs it stops naming the key while it is unset; the real value belongs to your private instance docs.
 - Repo cloned at **`<checkout>`** (any path; the units and scripts below are
   run from it).
 - **`deploy/k3s/.env`** populated — run **`./deploy/k3s/init-env.sh`**: it copies

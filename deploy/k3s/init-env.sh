@@ -78,6 +78,11 @@ ensure N8N_DB_PASSWORD
 
 
 echo
+echo "REQUIRED — written commented in the template; setup stops and names it until you answer it:"
+[[ -n "$(current CC_COMPUTE_SSH)" ]] && echo "  set       CC_COMPUTE_SSH" \
+  || echo "  empty     CC_COMPUTE_SSH  (<user>@<compute-address>, the compute node's ssh target)"
+
+echo
 echo "ELICITED — supply these yourself if you need them (empty is fine and is"
 echo "today's state for all of them):"
 for v in OPENAI_API_KEY GEMINI_API_KEY; do

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Build cc-sandbox:1 for the CHROMEBOX ONLY and import it into the
-# chromebox's containerd — single-arch, pinned (design §9.3: a newly built
+# Build cc-sandbox:1 for the COMPUTE NODE ONLY and import it into that
+# node's containerd — single-arch, pinned (design §9.3: a newly built
 # image defaults to one node's architecture, not the multi-arch floating
 # pattern, until an operator deliberately escalates it).
 #
-#   Sandbox pods carry a REQUIRED nodeAffinity to chromebox (gVisor is only
-#   installed there), so this image never needs to exist on the Pi.
+#   Sandbox pods carry a REQUIRED nodeAffinity to the compute node (gVisor is
+#   only installed there), so this image never needs to exist on the anchor.
 #
 #   Built with podman, NATIVELY (no QEMU) — same reasoning as
 #   build-graphiti-image.sh. podman tags local builds `localhost/<name>`
@@ -24,21 +24,27 @@
 # ============================================================================
 set -euo pipefail
 
+# The compute node is an answer, never a default: the environment (setup.sh's
+# load_env, the updater), then this checkout's deploy/k3s/.env; else this exits
+# here, naming the key, before anything changes.
+# shellcheck source=instance-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/instance-lib.sh"
+COMPUTE_SSH="$(cc_k3s_compute_ssh "${BASH_SOURCE[0]}")"
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKERFILE="$REPO_ROOT/deploy/k3s/sandbox.Dockerfile"
 IMAGE=cc-sandbox:1
 IMAGE_REF="docker.io/library/${IMAGE}"
-CHROMEBOX="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"   # compute-node ssh target; override in deploy/k3s/.env
 CTR_NS=k8s.io  # k3s's containerd keeps kubernetes images in this namespace
 
 [[ -f "$DOCKERFILE" ]] || { echo "FATAL: $DOCKERFILE not found" >&2; exit 1; }
 
-echo "==> building amd64 on the chromebox (podman, native)"
-ssh "$CHROMEBOX" 'rm -rf ~/cc-sandbox-build && mkdir -p ~/cc-sandbox-build'
-scp -q "$DOCKERFILE" "$CHROMEBOX:~/cc-sandbox-build/Dockerfile"
+echo "==> building amd64 on the compute node (podman, native)"
+ssh "$COMPUTE_SSH" 'rm -rf ~/cc-sandbox-build && mkdir -p ~/cc-sandbox-build'
+scp -q "$DOCKERFILE" "$COMPUTE_SSH:~/cc-sandbox-build/Dockerfile"
 # Unquoted heredoc on purpose: the flag and refs expand locally, so the
 # remote side runs with this invocation's values baked in.
-ssh "$CHROMEBOX" bash -se <<REMOTE
+ssh "$COMPUTE_SSH" bash -se <<REMOTE
 set -euo pipefail
 cd ~/cc-sandbox-build
 # An EMPTY cc-ca.crt, because the Dockerfile's optional-CA step is a GLOB COPY
@@ -57,18 +63,18 @@ if [[ "${CC_BUILD_ONLY:-0}" != 1 ]]; then
 fi
 REMOTE
 if [[ "${CC_BUILD_ONLY:-0}" == 1 ]]; then
-  echo "==> CC_BUILD_ONLY=1 — build cached on the chromebox, nothing imported"
+  echo "==> CC_BUILD_ONLY=1 — build cached on the compute node, nothing imported"
   exit 0
 fi
-echo "    imported into the chromebox's containerd"
+echo "    imported into the compute node's containerd"
 
 echo
-echo "==> verifying the chromebox holds the exact reference the kubelet will look up"
-found=$(ssh "$CHROMEBOX" "sudo k3s ctr -n $CTR_NS images ls -q")
+echo "==> verifying the compute node holds the exact reference the kubelet will look up"
+found=$(ssh "$COMPUTE_SSH" "sudo k3s ctr -n $CTR_NS images ls -q")
 if echo "$found" | grep -qx "$IMAGE_REF"; then
   echo "  OK  $IMAGE_REF"
 else
   echo "  MISSING $IMAGE_REF" >&2
-  echo "FATAL: cc-sandbox would ImagePullBackOff on the chromebox." >&2
+  echo "FATAL: cc-sandbox would ImagePullBackOff on the compute node." >&2
   exit 1
 fi

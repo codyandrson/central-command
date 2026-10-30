@@ -19,8 +19,8 @@
 #     F. the application self-check passes AS THE APP (central_command/selfcheck.py).
 #
 #   On (D) and the old "nothing points off-box" rule: the premise CHANGED on
-#   2026-07-31. The deployment is deliberately two nodes now, so the chromebox
-#   is a legitimate dependency and the Pi no longer stands alone. What must
+#   2026-07-31. The deployment is deliberately two nodes now, so the compute
+#   node is a legitimate dependency and the anchor no longer stands alone. What must
 #   still hold is narrower and still worth guarding: every CC_* endpoint in .env
 #   resolves to LOOPBACK, because ServiceLB binds the real port on this node
 #   whichever node the pod runs on. If that check ever goes red it means someone
@@ -49,15 +49,19 @@ ENV_FILE="$(cc_k3s_env_file "$PWD")"
 [[ -f "$ENV_FILE" ]] && . "$ENV_FILE"
 set +a
 
+# The compute node is an answer, never a default. Asked first: a verify that cannot
+# reach the node would otherwise report a gVisor failure the answer file caused.
+# shellcheck source=instance-lib.sh
+. deploy/k3s/instance-lib.sh
+COMPUTE_SSH="$(cc_k3s_compute_ssh "$PWD/deploy/k3s/verify.sh")" || exit 1
+
 # Topology is ROLE LABELS, not hostnames (2026-08-27 contract): manifests pin
 # by cc-role/anchor (small stateful stores, control plane) and cc-role/compute
 # (JVM/gVisor/Chromium muscle). Resolve each role to its node once; every
 # placement assertion below compares against these, so a node swap is a
-# relabel, not a verify.sh edit. SSH target for the compute node comes from
-# deploy/k3s/.env (CC_COMPUTE_SSH), defaulting to today's chromebox.
+# relabel, not a verify.sh edit.
 ANCHOR_NODE="$(sudo k3s kubectl get nodes -l cc-role/anchor=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 COMPUTE_NODE="$(sudo k3s kubectl get nodes -l cc-role/compute=true -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-COMPUTE_SSH="${CC_COMPUTE_SSH:-chromebox_admin@100.113.118.28}"
 
 PASS=0; FAIL=0; SKIP=0
 ok()   { printf '  \033[32mok\033[0m    %s\n' "$1"; PASS=$((PASS+1)); }
@@ -228,7 +232,7 @@ done
 # will never start.
 unbound="$("${K[@]}" get pvc -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase} {end}' 2>/dev/null | tr ' ' '\n' | grep -v '=Bound$' | grep -v '^$' || true)"
 if [[ -z "$unbound" ]]; then ok "every PVC is Bound"; else bad "unbound PVCs: $unbound"; fi
-# The RuntimeClass object applies unconditionally, so a chromebox missing the
+# The RuntimeClass object applies unconditionally, so a compute node missing the
 # runsc HOST half stays green everywhere until the first sandbox Job hangs at
 # a "failed to create shim" event, weeks later. Assert the host half here.
 gvisor_ok="$(ssh -o ConnectTimeout=10 "$COMPUTE_SSH" \
