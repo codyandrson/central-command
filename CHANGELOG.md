@@ -4,6 +4,121 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-29 — v2.75.0: the small fixes — gates that refuse a thin draft, one TLS switch, a retired token budget, and a suite that cannot spend money
+
+epic-small-fixes. Twenty commits since v2.74.0 (`5e6ee0bc..aaf09748`, eighteen
+stories) close the register's small items. Behaviour changes come first, then the
+test suite, then what the operator does.
+
+**Before applying, the operator:** (1) deletes the `CC_DISPATCH_TOKEN_BUDGET` line
+from `.env`; the key is retired, and until the line is gone the API logs one warning
+at start (it does not refuse the start). (2) Checks that the scoped LiteLLM key in
+`CC_LLM_API_KEY` includes the embedding alias; the curation writer now embeds with
+that key (below), and the application self-check's embedding row names the base URL,
+key and alias when it cannot.
+
+- **A thin draft is handed back.** A proposal whose action carries no rationale is
+  refused in both tiers: `charter.update` now has `rationale` in
+  `contract.ARG_SPECS`, so the runtime and the Executor reject it from the same
+  list. An agent's proposal that carries no confidence is handed back to the model
+  in the runtime only, and only for the four agent-authored propose tools; the
+  three server-built ones (`delete_episode`, `mail_send`, `mail_move`) are exempt.
+  The generated charter guidance states the rule.
+- **The attachment cap is `CC_ATTACHMENT_MAX_BYTES`.** Default 50 MiB. A value whose
+  base64 form would not fit the API's websocket frame limit is refused at start
+  rather than closing the socket mid-upload; the single-node API now starts with
+  `--ws-max-size`, as the k3s unit already did.
+- **`CC_DISPATCH_TOKEN_BUDGET` is retired.** The dispatcher's token-budget valve
+  (setting, counter, status keys, cockpit types) is deleted; LiteLLM's per-key
+  budgets own spend limits. Per-run token totals stay as telemetry.
+- **`CC_TLS_INSECURE` is one setting.** It turns certificate verification off for
+  every integration client built through `http.client_kwargs()` (Exchange, Jira,
+  Confluence, LiteLLM, web fetch, the Systems probes and the rest), warns once per
+  process, and wins over `CC_CA_BUNDLE` when both are set. The Exchange client's
+  private copy of the switch is gone.
+- **The curation writer embeds with the scoped key.** It posts to
+  `CC_LLM_BASE_URL` with `CC_LLM_API_KEY` instead of a separate credential, so that
+  key must include the embedding alias. The self-check's embedding row names the
+  three settings that decide it.
+- **An unconfigured mail or calendar façade fails.** With the n8n façade's URL or
+  token missing, mail and calendar actions land FAILED with a "not configured"
+  reason instead of parking as if a dependency were down. A transport error to a
+  configured calendar façade still parks.
+- **An answered no-progress stall makes the orchestrator's plan park again.** The
+  operator's answer to a no-progress stall withdraws the plan's approval, so the
+  next round starts from a plan the operator reviews. Backstop stalls and continue
+  windows are unchanged.
+- **World-moved covers two more cases.** A coached charter edit is checked against
+  the charter version its drafter was shown (stamped server-side, never by the
+  agent); if the charter changed since, the edit fails as world-moved and the
+  drafter redrafts. An update to a Confluence page that has been deleted fails as
+  world-moved and redrafts; a Jira 404 stays an ordinary failure.
+- **The red exec-failed chip clears.** A later successful conversation turn on the
+  lane clears its exec-failed mark; no event is emitted.
+- **A failed context step sends the clip.** When the window-preparation step fails,
+  the model gets the clipped history, never the raw one.
+- **The startup resume sweep survives a bad row.** One unreadable row is skipped
+  loudly and the sweep goes on; a parked orchestration row with no task lands
+  FAILED. A consult wait no longer fails its task.
+- **A graph outage parks a deletion request.** `propose_delete_episode` is a
+  parkable read like any live graph read: an outage parks the run and its resume
+  lands the deletion proposal through the run's own tail. A "no" from the graph
+  still goes back to the model as a retry.
+- **A freeze is not a failure.** Releasing a frozen item clears its failure streak;
+  a retried resume names the dependencies it waited on; the failing-despite-probe
+  report fires once per failure episode, not once per sweep.
+- **`discover` refuses a credentialed `CC_PROXY`.** Any `@` in the value stops the
+  prober before it probes, naming the key. Keep `CC_PROXY` credential-free and put
+  `proxy-user` in `~/.curlrc` (0600); a `~/.netrc` does not authenticate to a proxy.
+- **The pre-push guard scans new tags and branches.** Every commit a push publishes
+  is scanned, including a new ref's whole history, and an annotated tag's message is
+  scanned too. The old net diff is kept, so nothing refused before passes now. This
+  release's own tag is the first push through it.
+- **Installers ask four more optional questions:** `CC_NETRC`, `CC_CLIENT_CERT`,
+  `CC_CLIENT_KEY` and `WHISPER_MODELS_BASE_URL`. A test walks `deploy/AIRGAP.md`'s
+  seam table so a documented seam without a question fails the suite. The update
+  runner now sources `env-lib.sh` unconditionally and exits through one function.
+- **`deploy/k3s/verify.sh` runs the application self-check every run** (section F),
+  as two small model requests; it is skipped, with a line, under `--clean-install`.
+- **The nightly k3s backup also keeps the root `.env` and `web/.env`**, byte-identical
+  and mode 0600, alongside `deploy/k3s/.env`, for the retention period; a missing or
+  empty file is a loud failure by name and a value is never printed.
+  `setup.sh reset` labels the three as kept.
+- **The cockpit file browser's write routes are read-only** (403) until
+  `FILE_BROWSER_WRITABLE=1`, and a `FILE_BROWSER_ROOT` that holds `.env*`, `.git` or
+  certificates is refused at load. The override panels refresh on override events.
+- **A sandbox-isolation test and a runbook drill.** `tests/test_sandbox_isolation.py`
+  pins the API's loopback binds, the Job manifest and the sandbox ingress policy;
+  `deploy/k3s/README.md` carries the live reach drill the operator runs once.
+- **Words.** Stale comments, docstrings and fail messages now say what is true;
+  no behaviour change. The documents, rules and decision log (DL-191..196) say what
+  the stories built.
+
+**The test suite.**
+
+- The test model cannot spend money: an unpinned live model request refuses unless
+  `CC_LIVE_MODEL_TESTS=1`, and a real embedding send is refused unless the test
+  fakes it (`CC_LIVE_GRAPH_TESTS=1` opts a live graph run in).
+- The sequential suite is about 24% faster on the reference hardware with nothing
+  skipped (measured 735 s before, 559 s after, in the story that changed it).
+- A small-fixes ledger test maps every ruling and follow-up row to its proving test
+  and fails if a row is dropped.
+
+- **Schema:** two additive columns on `work_item`, `transient_failures` and
+  `failing_since`, with an idempotent backfill, through the updater's schema phase.
+  The per-episode stamp (`episode_at`) lives inside existing JSON state and needs no
+  column.
+- **Settings:** added `CC_ATTACHMENT_MAX_BYTES` and `CC_TLS_INSECURE`; retired
+  `CC_DISPATCH_TOKEN_BUDGET`.
+- **Events:** unchanged (176 distinct event types).
+- **What the apply does.** Nothing to do by hand beyond the two items above. No
+  image, configmap or capability is removed, so there is no bridge and
+  `deploy/k3s/removed-capabilities.txt` gets no entry; `min_upgrade_from` stays 2.69.0.
+- **After the apply, the operator checks:** the cockpit shows v2.75.0; `/health` and
+  `GET /api/heartbeat` are healthy; `deploy/k3s/verify.sh` passes, section F (the
+  self-check) included; and the next nightly backup directory holds the 0600 `.env`
+  copies (`ls -l`, values never shown).
+
 ## 2026-10-29 — v2.74.0: the deterministic model is test-only and the dry-run executor is gone — any run-mode key refuses the start
 
 epic-run-modes. Thirteen commits since v2.73.0 (`96d43816..741b692b`, thirteen
