@@ -38,6 +38,51 @@ added_lines() {
   '
 }
 
+# Whole-tree mode (R12, INSTANCE-001): `prepush-scan.sh --tree [<rev>]`. Selected
+# ONLY when $1 is exactly "--tree"; any other argument vector (git runs a pre-push
+# hook with the remote's name and URL as $1 and $2) falls through, untouched, to
+# the hook loop below. Scans every tracked file of <rev> (default HEAD), outside
+# docs/vendor, for SECRET_SHAPES and for each pattern of $LIST, and prints only
+# "path:line" and the pattern's line number in $LIST — never the matched text, and
+# never git's own error text, which would quote a pattern. A hit, or a git failure,
+# exits 1; a clean tree exits 0.
+if [[ "${1:-}" == "--tree" ]]; then
+  rev="${2:-HEAD}"
+  if (( $# > 2 )); then echo "tree: usage: prepush-scan.sh --tree [<rev>]" >&2; exit 1; fi
+  if ! git rev-parse --verify -q "${rev}^{commit}" </dev/null >/dev/null 2>&1; then
+    echo "tree: REFUSING — git could not resolve a commit from the revision given to --tree" >&2; exit 1
+  fi
+  # Prints "  <path>:<line>" per hit of pattern $1; returns 0 (hits or none), 1 (git failed).
+  tree_scan() {
+    local out st p l _t
+    out="$(git grep -I -n -E -z --no-color -e "$1" "$rev" -- . ':!docs/vendor' </dev/null 2>/dev/null | tr '\0' '\001')"
+    st=$?                                  # pipefail: git grep's status (1 = no match)
+    (( st <= 1 )) || return 1
+    [[ -z "$out" ]] && return 0
+    while IFS=$'\001' read -r p l _t; do
+      printf '  %s:%s\n' "${p#"$rev":}" "$l"
+    done <<<"$out"
+  }
+  tree_rc=0
+  hits="$(tree_scan "$SECRET_SHAPES")" || { echo "tree: REFUSING — git could not search $rev for secret shapes" >&2; exit 1; }
+  if [[ -n "$hits" ]]; then echo "tree: SECRET SHAPE in $rev:" >&2; echo "$hits" >&2; tree_rc=1; fi
+  if [[ -f "$LIST" ]]; then
+    n=0
+    while IFS= read -r pat; do
+      n=$((n + 1))
+      [[ -z "$pat" || "$pat" == \#* ]] && continue
+      if ! hits="$(tree_scan "$pat")"; then
+        echo "tree: REFUSING — git could not search $rev for pattern #$n of $LIST" >&2; tree_rc=1; continue
+      fi
+      if [[ -n "$hits" ]]; then echo "tree: PRIVATE IDENTIFIER (pattern #$n) in $rev:" >&2; echo "$hits" >&2; tree_rc=1; fi
+    done <"$LIST"
+  else
+    echo "pre-push: WARNING $LIST missing — only secret shapes were checked" >&2
+  fi
+  [[ $tree_rc -ne 0 ]] && echo "tree: REFUSED (scripts/prepush-scan.sh --tree)" >&2
+  exit $tree_rc
+fi
+
 while read -r _lref lsha rref rsha; do
   [[ -z "${lsha:-}" || "$lsha" == "$ZERO" ]] && continue   # branch delete
   added=""

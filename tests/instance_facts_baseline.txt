@@ -1,0 +1,46 @@
+# Instance-fact shapes that still stand in tracked files (R12, INSTANCE-001).
+# One `<path><TAB><shape letter>` per hit -- paths and letters only, never the
+# matched text. tests/test_no_instance_facts.py fails on a hit missing from here
+# AND on a line here with no hit, so a story that cleans a file deletes its lines
+# (keep the lines sorted). Epic story 12 deletes this file, and the code that
+# reads it, once it is empty.
+central_command/gateway/executor.py	d
+deploy/desktop-superseded/cc-nerve.service	b
+deploy/desktop-superseded/cc-uvicorn.service	b
+deploy/desktop-superseded/homelab-portcheck.service	b
+deploy/desktop-superseded/homelab-portcheck.sh	b
+deploy/k3s/.env.example	a
+deploy/k3s/backup.sh	b
+deploy/k3s/build-crawler-image.sh	a
+deploy/k3s/build-crawler-image.sh	c
+deploy/k3s/build-sandbox-image.sh	a
+deploy/k3s/build-sandbox-image.sh	c
+deploy/k3s/cc-backup.service	b
+deploy/k3s/cc-nerve.service	b
+deploy/k3s/cc-sandbox-runner.service	b
+deploy/k3s/cc-update-stage.service	b
+deploy/k3s/cc-update.service	b
+deploy/k3s/cc-update.sh	a
+deploy/k3s/cc-update.sh	b
+deploy/k3s/cc-update.sh	c
+deploy/k3s/cc-uvicorn.service	b
+deploy/k3s/install-gvisor.sh	a
+deploy/k3s/install-gvisor.sh	c
+deploy/k3s/make-litellm-kubeconfig.sh	b
+deploy/k3s/make-mcp-kubeconfig.sh	b
+deploy/k3s/make-sandbox-kubeconfig.sh	b
+deploy/k3s/migrate-to-cc.sh	a
+deploy/k3s/migrate-to-cc.sh	b
+deploy/k3s/migrate-to-cc.sh	c
+deploy/k3s/setup.sh	a
+deploy/k3s/setup.sh	b
+deploy/k3s/setup.sh	c
+deploy/k3s/verify.sh	a
+deploy/k3s/verify.sh	c
+deploy/shared/litellm/config.yaml	a
+deploy/shared/litellm/model-preferences.yaml	a
+docs/superpowers/plans/2026-07-26-adaptive-routing-units-1-2.md	a
+docs/superpowers/plans/2026-07-26-skills-library.md	b
+docs/superpowers/plans/2026-07-27-discussion-stall-escalation.md	b
+docs/superpowers/specs/2026-07-27-default-alias-seam-design.md	a
+tests/test_mail_actions.py	a

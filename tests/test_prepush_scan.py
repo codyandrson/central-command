@@ -13,6 +13,12 @@ Every case runs the real script with git's stdin protocol
 CC_PRIVATE_IDENTIFIERS pointed at a temp list. Secret shapes are BUILT AT
 RUNTIME: a literal one here would make the guard refuse the push that adds this
 file. A couple of cases also drive a real `git push` with the hook installed.
+
+Whole-tree mode (R12, INSTANCE-001): `prepush-scan.sh --tree [<rev>]` scans every
+tracked file of a revision against SECRET_SHAPES and the operator's list, and is
+selected only when $1 is exactly `--tree`. Its cases run the same script in a temp
+repo with the same synthetic list (CC_PRIVATE_IDENTIFIERS); the output names
+`path:line` and the pattern NUMBER, never the matched text.
 """
 
 from __future__ import annotations
@@ -73,6 +79,11 @@ class Repo:
         return subprocess.run(["bash", str(SCAN)], input=stdin, capture_output=True, text=True,
                               cwd=self.work, timeout=60,
                               env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(self.ident)})
+
+    def tree(self, *args: str, ident: Path | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(SCAN), "--tree", *args], capture_output=True, text=True,
+                              cwd=self.work, timeout=60,
+                              env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(ident or self.ident)})
 
     @property
     def tip(self) -> str:
@@ -265,3 +276,115 @@ def test_real_push_of_a_clean_new_tag_goes_through(repo: Repo):
     _install(repo)
     repo.git("tag", "-a", "v1", "-m", "release 1")
     assert _push(repo, "origin", "v1").returncode == 0
+
+
+# ── whole-tree mode (--tree) ────────────────────────────────────────────────
+
+def _out(r: subprocess.CompletedProcess) -> str:
+    return r.stdout + r.stderr
+
+
+def test_tree_refuses_a_listed_value_in_a_tracked_file_naming_file_line_and_pattern(repo: Repo):
+    repo.commit("src/a.txt", f"one\nhost {IDENT}\n", "add")
+    r = repo.tree()
+    assert r.returncode == 1
+    assert "src/a.txt:2" in r.stderr and "pattern #2" in r.stderr
+    assert IDENT not in _out(r)
+
+
+def test_tree_scans_the_revision_given_not_the_working_tree(repo: Repo):
+    clean = repo.tip
+    repo.commit("src/a.txt", f"host {IDENT}\n", "add")
+    assert repo.tree(clean).returncode == 0
+    assert repo.tree("HEAD").returncode == 1
+    assert repo.tree("master").returncode == 1
+
+
+def test_tree_defaults_to_head(repo: Repo):
+    repo.commit("a.txt", f"host {IDENT}\n", "add")
+    assert repo.tree().returncode == repo.tree("HEAD").returncode == 1
+
+
+def test_tree_ignores_an_untracked_file_with_the_value(repo: Repo):
+    (repo.work / "u.txt").write_text(f"host {IDENT}\n")
+    assert repo.tree().returncode == 0
+
+
+def test_tree_skips_docs_vendor(repo: Repo):
+    repo.commit("docs/vendor/x.md", f"host {IDENT}\n{SHAPE}\n", "vendor")
+    assert repo.tree().returncode == 0
+
+
+def test_tree_passes_a_clean_tree(repo: Repo):
+    r = repo.tree()
+    assert r.returncode == 0 and _out(r) == ""
+
+
+def test_tree_refuses_a_secret_shape_without_printing_it(repo: Repo):
+    repo.commit("a.txt", f"token = {SHAPE}\n", "add")
+    r = repo.tree()
+    assert r.returncode == 1 and "SECRET SHAPE" in r.stderr and "a.txt:1" in r.stderr
+    assert SHAPE not in _out(r)
+
+
+def test_tree_reports_every_matching_pattern_by_its_number(repo: Repo):
+    repo.ident.write_text(f"# list\n\nnever-present-zq\n{IDENT}\n")
+    repo.commit("a.txt", f"x {IDENT}\n", "add")
+    r = repo.tree()
+    assert r.returncode == 1 and "pattern #4" in r.stderr and "pattern #3" not in r.stderr
+
+
+def test_tree_warns_when_the_list_is_missing_and_still_checks_shapes(repo: Repo):
+    gone = repo.ident.with_name("no-such-list")
+    assert repo.tree(ident=gone).returncode == 0
+    assert "WARNING" in repo.tree(ident=gone).stderr
+    repo.commit("a.txt", f"token = {SHAPE}\n", "add")
+    assert repo.tree(ident=gone).returncode == 1
+
+
+def test_tree_refuses_an_unresolvable_revision(repo: Repo):
+    r = repo.tree("no-such-rev")
+    assert r.returncode == 1 and "REFUSING" in r.stderr
+
+
+def test_tree_refuses_outside_a_repository(tmp_path: Path):
+    if not shutil.which("bash") or not shutil.which("git"):
+        pytest.skip("POSIX bash and git needed")
+    lst = tmp_path / "list"
+    lst.write_text(f"{IDENT}\n")
+    r = subprocess.run(["bash", str(SCAN), "--tree"], capture_output=True, text=True, cwd=tmp_path, timeout=60,
+                       env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(lst), "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)})
+    assert r.returncode == 1
+
+
+def test_tree_refuses_an_invalid_pattern_without_echoing_it(repo: Repo):
+    bad = "zq7-(unclosed"
+    repo.ident.write_text(f"{bad}\n{IDENT}\n")
+    repo.commit("a.txt", f"x {IDENT}\n", "add")
+    r = repo.tree()
+    assert r.returncode == 1 and "pattern #1" in r.stderr and "pattern #2" in r.stderr
+    assert bad not in _out(r) and IDENT not in _out(r)
+
+
+def test_tree_mode_needs_the_exact_argument_other_vectors_are_hook_mode(repo: Repo):
+    # git runs a pre-push hook with the remote's name and URL as $1 and $2.
+    repo.git("checkout", "-q", "-b", "feat")
+    sha = repo.commit("a.txt", f"host {IDENT}\n", "add")
+    for argv in (["origin", "git@example.com:o/r.git"], ["--trees"], ["tree"], ["origin", "--tree"]):
+        r = subprocess.run(["bash", str(SCAN), *argv], input=" ".join(_new("refs/heads/feat", sha)) + "\n",
+                           capture_output=True, text=True, cwd=repo.work, timeout=60,
+                           env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(repo.ident)})
+        assert r.returncode == 1 and "PRIVATE IDENTIFIER" in r.stderr and "tree:" not in r.stderr, argv
+
+
+def test_real_push_still_refuses_a_listed_value_and_passes_a_clean_one(repo: Repo):
+    _install(repo)
+    assert _push(repo, "origin", "master").returncode == 0
+    repo.commit("a.txt", "clean\n", "clean")
+    assert _push(repo, "origin", "master").returncode == 0
+    repo.commit("b.txt", f"host {IDENT}\n", "dirty")
+    r = _push(repo, "origin", "master")
+    assert r.returncode != 0 and "PRIVATE IDENTIFIER" in r.stderr
+    assert repo.git("rev-parse", "HEAD") != subprocess.run(
+        ["git", "-C", str(repo.work), "ls-remote", "origin", "refs/heads/master"],
+        capture_output=True, text=True).stdout.split()[0]
