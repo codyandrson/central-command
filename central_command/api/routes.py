@@ -3369,7 +3369,12 @@ async def import_skill_route(body: SkillImportIn) -> dict:
         raise HTTPException(422, str(e)) from e
     await events.emit(
         "skill.imported", ref_id=result["skill_id"],
-        payload={"path": body.path, "references": len(result["references"])},
+        payload={
+            "path": body.path, "references": len(result["references"]),
+            # Field NAMES only: the overlay's text is the deployment's own and
+            # never enters an event.
+            "overlay": result["overlay"],
+        },
         actor="operator",
     )
     for agent_id in result["default_grants"]["applied"]:

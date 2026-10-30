@@ -878,6 +878,20 @@ class Settings(BaseSettings):
         base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
         return str(Path(base).as_posix() + f"/central-command/{install_id}")
 
+    # The instance overlay for the bundled skills (epic-instance-facts-
+    # relocation, R1/R2, INSTANCE-008): a directory of `<field>.md` files, each
+    # the deployment's own text for one `<!-- overlay: <field> -->` marker in a
+    # skill. It lives OUTSIDE the checkout on purpose — it cannot be committed
+    # and the updater's `git reset --hard` never touches it. Blank = the
+    # default under the state directory.
+    skill_overlay_dir: str = ""
+
+    def resolved_skill_overlay_dir(self) -> str:
+        """`CC_SKILL_OVERLAY_DIR`, or `<resolved_state_dir()>/skill-overlay`."""
+        if self.skill_overlay_dir:
+            return self.skill_overlay_dir
+        return self.resolved_state_dir().rstrip("/") + "/skill-overlay"
+
     def agent_proxy_key(self, agent_id: str | None) -> str:
         """The per-agent LiteLLM virtual key for `agent_id`, from
         CC_LLM_PROXY_KEY_<AGENT_ID> (upper-cased, '-'→'_'), or "" if unset.

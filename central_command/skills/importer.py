@@ -16,7 +16,9 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from central_command.config import settings
 from central_command.db import repo
+from central_command.skills import overlay as skill_overlay
 from central_command.skills.ids import validate_skill_id
 
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
@@ -91,6 +93,12 @@ async def import_skill_folder(
     "yes, this folder updates THAT skill", which is the only way the two cases
     can be told apart from here.
 
+    The instance overlay (`skills/overlay.py`) is rendered in the same decode-
+    first phase: every `<!-- overlay: <field> -->` marker in SKILL.md and every
+    reference becomes this deployment's text (or is removed), so the library
+    holds what agents read and a malformed marker refuses before any write.
+    The result's `overlay` lists field NAMES only, never a value.
+
     Read-everything-then-write-everything on purpose: every file is opened,
     decoded, and slugged into a doc_key BEFORE the first database write. That
     way a decode failure or a doc_key collision raises before anything is
@@ -103,7 +111,19 @@ async def import_skill_folder(
         raise FileNotFoundError(f"no SKILL.md in {folder}")
 
     # --- discover + decode everything first; write nothing yet -------------
-    meta, body = parse_frontmatter(_read_text(skill_md))
+    fields = skill_overlay.load(settings.resolved_skill_overlay_dir())
+    resolved: set[str] = set()
+    unresolved: set[str] = set()
+
+    def _render(text: str, f: Path) -> str:
+        rendered, got, missed = skill_overlay.render(text, fields, source=str(f))
+        resolved.update(got)
+        unresolved.update(missed)
+        return rendered
+
+    # Render the RAW file, before the frontmatter is split off, so a reported
+    # `file:line` is the line in the file the operator opens.
+    meta, body = parse_frontmatter(_render(_read_text(skill_md), skill_md))
     derived = skill_id is None
     sid = validate_skill_id(skill_id or _doc_key(meta.get("name") or folder.name))
     title = meta.get("name") or folder.name
@@ -142,7 +162,7 @@ async def import_skill_folder(
     references_to_write: list[tuple[str, Path, str]] = []
     for f in ref_files:
         key = _doc_key(f.name)
-        _, ref_body = parse_frontmatter(_read_text(f))
+        _, ref_body = parse_frontmatter(_render(_read_text(f), f))
         references_to_write.append((key, f, ref_body))
 
     # --- everything decoded and slug-checked; now write -------------------
@@ -177,4 +197,5 @@ async def import_skill_folder(
     return {
         "skill_id": sid, "guidance": "guidance", "references": references,
         "default_grants": default_grants,
+        "overlay": {"resolved": sorted(resolved), "unresolved": sorted(unresolved)},
     }
