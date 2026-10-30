@@ -35,3 +35,17 @@ when a matching file is read.
   only on `agent/lifecycle` end frames and the panel updates on
   `cc.conversation.ended` / `cc.session.*` events. If you add a new
   turn/close path, push the frames, or the UI lies.
+- **The file browser's mutations answer 403 until `FILE_BROWSER_WRITABLE=1`,
+  and the override panels refresh on override events** (epic small-fixes,
+  COCKPIT-028). `routes/file-browser.ts` is mounted whatever the UI flag says
+  and upstream gave its write, rename, move, trash and restore routes no off
+  switch, so `routes/cc-file-browser-guard.ts` is middleware on `/api/files/*`
+  (the one upstream edit, recorded in `web/VENDORED.md`) that refuses every
+  non-read request unless the flag is `1`. A `FILE_BROWSER_ROOT` holding `.env*`,
+  `.git` or certificates is refused at config load (the default workspace
+  is used instead), so the browser cannot be aimed at a secret. A new route in that file is guarded by the prefix, not by
+  remembering. The gate-override hooks (`useOverrides`) subscribe to the
+  `cc.override*` push events (400 ms debounce) and refresh silently, so an
+  override changed in another tab or by a decision shows without a reload.
+  Guarded by `web/server/routes/cc-file-browser-guard.test.ts` and
+  `web/src/features/gates/useOverrides.test.tsx`.

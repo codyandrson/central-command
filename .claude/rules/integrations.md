@@ -59,6 +59,16 @@ when a matching file is read.
   a deployment's own notes proposed. A second knob for the same fact is a second
   place to be wrong about it, and the operator decided (2026-09-23) there is
   exactly one.
+- **A façade is `configured()` only when its URL AND its token are set, and
+  an unconfigured one FAILS — it never parks** (epic small-fixes, ruled
+  2026-10-29). The default URLs are never empty, so the token is the signal (the
+  self-check and the EA calendar report read it the same way). `email_facade`
+  and `calendar_facade` check `configured()` on the n8n path before any socket
+  and raise "…not configured — set CC_…_URL and CC_…_TOKEN", which classifies
+  SEMANTIC (the wording carries no transient marker word on purpose) and lands
+  FAILED at once: a retry cannot succeed, so parking it would wait for nothing.
+  A configured façade whose host is down stays transient and parks. Guarded by
+  `tests/test_facade_configured.py`.
 - **A Jira gadget's config keys are declared BY THE GADGET — read its XML,
   never a table.** A gadget silently ignores any pref it does not declare, so
   a wrong key is a 200 with no binding and no error.

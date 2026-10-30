@@ -14,7 +14,7 @@ hygiene, and how the test suite itself must be written. See
   mail/issue content, no deployment facts. The rule covers every gitignored
   env file, not only the root one (`deploy/k3s/.env` and `web/.env` are
   ignored too; PRD FR-47, review ruling PROCESS-004).
-- **Enforced:** script: `scripts/prepush-scan.sh` (pre-push hook, confirmed present); it scans the added lines of the pushed commit range, and scanning a NEW tag or branch is owed (PRD §6.1 item 9, review ruling PROCESS-030)
+- **Enforced:** script: `scripts/prepush-scan.sh` (pre-push hook, confirmed present); it scans the added lines of every commit a push publishes, per commit, for a new branch or tag as well as an existing one (an annotated tag is scanned by its message only; epic small-fixes story 11.19, review ruling PROCESS-030). test: `tests/test_prepush_scan.py::test_new_branch_carrying_a_shape_is_refused`
 - **Source:** AGENTS.md Policy
 
 ### DL-093 — master is the only branch
@@ -98,8 +98,11 @@ hygiene, and how the test suite itself must be written. See
 - **Date:** undated
 - **Rule:** [.claude/rules/tests.md](../../.claude/rules/tests.md) — "**Tests must pin `test_model=True` if they hit code that calls `resolve_model()` itself**"
 - **Why:** With a real key in `.env` the "offline" suite would otherwise call
-  the model for real and spend money.
-- **Enforced:** discipline only — convention enforced by review, no meta-test
+  the model for real and spend money. Since epic small-fixes story 11.1
+  (2026-10-29, review ruling PROCESS-048) the convention is also a guard: the
+  session-scoped `no_live_model` fixture refuses an unpinned test's request at
+  the spend point, and `CC_LIVE_MODEL_TESTS=1` is the opt-in.
+- **Enforced:** test: `tests/test_no_live_model.py::test_a_built_live_models_request_is_refused_and_opens_no_socket`
 - **Source:** .claude/rules/tests.md
 
 ### DL-100 — Assert on rows your test created, never on global counts
@@ -902,14 +905,14 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-10-19
-- **Rule:** (recorded here) Dispatch carries no token-budget valve (REMOVED: epic small-fixes
-  story 11.5, 2026-10-29; `CC_DISPATCH_TOKEN_BUDGET` is a retired key that warns at start),
+- **Rule:** (recorded here) Dispatch carries no token-budget valve (removed in v2.75.0;
+  `CC_DISPATCH_TOKEN_BUDGET` is a retired key that warns once at start),
   and no enterprise-licensed LiteLLM feature is used.
-- **Why:** The valve was judged unnecessary (review ruling MODELS-018, removal owed
-  in PRD §6.1). The enterprise features are unlicensed here and, checked
+- **Why:** The valve was judged unnecessary (review ruling MODELS-018) and was
+  removed with epic small-fixes story 11.5, in v2.75.0. The enterprise features are unlicensed here and, checked
   against LiteLLM's current documentation, give one operator nothing the
   open features do not (MODELS-024).
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+- **Enforced:** test: `tests/test_token_budget_retired.py::test_no_token_budget_setting_remains_under_central_command` (the valve half; the enterprise-features half is a design position with nothing to enforce)
 - **Source:** PRD addendum §B and §E (MODELS-018, MODELS-024)
 
 ### DL-149 — Embedding changes: per-vector stamps, a keyword-only freeze, a Postgres embedder record, a heartbeat re-embed, in-place rewrite and a second graph are rejected
@@ -1802,3 +1805,57 @@ hygiene, and how the test suite itself must be written. See
 - **Why:** An approved proposal replayed against a target that changed since the draft overwrites what nobody reviewed (a Confluence page edited by someone else, a Jira issue already transitioned, an episode preview that no longer matches). So the Executor re-reads each stateful target before its first action (`executor.WORLD_CHECKS`, on every execution: the first, a sweep's retry and the operator's retry-now of an interrupted one), and a handler or check that finds the world moved raises the typed `WorldMoved`; `classify_failure` makes it SEMANTIC by type, ahead of the status branch, so it is never transient and never parked. It lands FAILED, `proposal.failed` carries `world_moved`, and the drafter resumes with what moved and redrafts; the redraft is linked on the row (`proposal.redraft {of, root, cause, world_moved_count}`) and always parks for the operator, never decided by an override. The chain is bounded by `CC_WORLD_MOVED_REDRAFT_LIMIT` (default 3, 0 allowed, no unlimited value): at the limit the drafter is not resumed, the proposal is FAILED with `chain_exhausted` and `proposal.redraft_limit_reached` is emitted, so a target that keeps moving surfaces to the operator instead of looping; other semantic failures never count. 5xx and 403 stay DOWN (the operator's ruling in story 11), so a provider outage is parked and never mistaken for a moved world.
 - **Enforced:** test: `tests/test_world_moved.py`, `tests/test_world_moved_limit.py`, `tests/test_world_moved_wire.py`, `tests/test_world_moved_e2e.py`
 - **Source:** docs/ARCHITECTURE.md "Proposal" and "The outage doctrine"; docs/PRD.md FR-9; CHANGELOG (release entry owed from story 10)
+
+### DL-191 — A proposal the agent writes must state its confidence; the check lives in the runtime tier only
+
+- **Status:** active
+- **Date:** 2026-10-29
+- **Rule:** (recorded here) A draft from one of the four propose tools whose `proposal` argument the model writes (`packs.AGENT_AUTHORED_PROPOSE_TOOLS`) is handed back to the model as a `ModelRetry` when it states no `confidence` (a level and one sentence of why); `charter.update`'s `rationale` is in `contract.ARG_SPECS`, so both tiers check it. A proposal a tool builds from plain arguments carries no confidence and is exempt.
+- **Why:** PRD FR-5 and review ruling GATE-067 asked for both values to be rejected when missing, not merely discouraged. Confidence is a field of the `Proposal` the agent writes, and the Executor receives the actions, never the proposal around them, so a check in both tiers is impossible as worded; the operator ruled (2026-10-29, epic small-fixes, kept privately) that it is enforced in the runtime only. An invented confidence on a server-built proposal would be a false record of what the agent assessed, which is why those stay exempt. Every propose guidance is generated with a line saying to state it, because an agent that was never told loops on the retry and lands FAILED.
+- **Enforced:** test: `tests/test_confidence.py::test_an_agent_authored_draft_without_confidence_is_handed_back`, `tests/test_confidence.py::test_every_test_double_proposal_states_a_confidence`
+- **Source:** code comment `central_command/contract/args.py` (`validate_proposal_shape`); `central_command/runtime/packs.py` (`AGENT_AUTHORED_PROPOSE_TOOLS`, `CONFIDENCE_GUIDANCE`); docs/ARCHITECTURE.md "Proposal"; docs/PRD.md FR-5
+
+### DL-192 — A coached charter edit is checked against the version its drafter was shown, and a gone Confluence page is world-moved
+
+- **Status:** active
+- **Date:** 2026-10-29
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "The world moved is a NO: typed, never transient and never parked."
+- **Why:** An approved coached `charter.update` replayed over a charter the operator edited meanwhile overwrites that edit unreviewed (DL-190 covered only Confluence, Jira and the deletion preview). So `park_proposal` stamps the action with the charter version the drafting session was SHOWN, server-side from `run_state.charter_shown` and never as an agent argument (an agent-written base would be an agent-authored claim about provenance), the Executor re-checks it before the first action (`WORLD_CHECKS`), and the write compares again inside its transaction; a mismatch is the typed world-moved NO and the coach redrafts. Of the 404s, only a Confluence page gone at the update's version check (`ConfluencePageGone`, from a draft made against a page that existed) joins the set and counts toward the redraft limit; a Jira 404 stays a plain FAILED, as does every other 404 (the operator's rulings 6 and 7 of 2026-10-29, epic small-fixes, kept privately). The deletion worker's refusal (`PreviewChanged`) is typed world-moved too.
+- **Enforced:** test: `tests/test_world_moved.py::test_a_charter_moved_since_the_draft_lands_failed_world_moved_and_the_coach_redrafts`, `tests/test_world_moved.py::test_a_page_deleted_before_execution_is_world_moved_with_actual_none`, `tests/test_world_moved.py::test_a_jira_404_stays_a_plain_failure`
+- **Source:** code comment `central_command/gateway/executor.py` (`_check_charter_update`), `central_command/integrations/confluence.py` (`check_version`); docs/ARCHITECTURE.md "Proposal"; supplements DL-190
+
+### DL-193 — Only an answered no-progress stall withdraws plan approval
+
+- **Status:** active
+- **Date:** 2026-10-29
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "An answered no-progress stall makes the plan park again:"
+- **Why:** An orchestrator whose rounds stopped making progress kept its plan approval after the operator answered the stall, so it assigned more work without a new plan review (review ruling D7-P, FR-21b). The stall that fired on consecutive rounds without progress records `no_progress` on its pending entry; once answered, `maybe_resume` withdraws plan approval and zeroes the count so the orchestrator submits a plan and parks again. The round and fan-out backstops and a `continue` window are different escalations whose counters never reset, so a new plan review could not help them and they never withdraw it (the operator's ruling 3 of 2026-10-29, epic small-fixes, kept privately).
+- **Enforced:** test: `tests/test_orchestration.py::test_an_answered_no_progress_stall_withdraws_plan_approval`, `tests/test_orchestration.py::test_an_answered_fan_out_stall_leaves_plan_approval_alone`
+- **Source:** code comment `central_command/api/orchestration.py` (`_park_stalled`, `maybe_resume`); docs/ARCHITECTURE.md "The parts `DESIGN.md` does not describe"
+
+### DL-194 — The resume sweep drives every row under its own guard
+
+- **Status:** active
+- **Date:** 2026-10-29
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "The resume sweep drives every row under its own guard"
+- **Why:** The sweep runs at every startup and is the guarantee behind the wake-up hooks, so one row that raised ended the sweep and stranded every row behind it, again at every restart (an orchestrated session whose state named no task claimed itself RUNNING and then raised a `KeyError`). Each unit of each worklist is driven under `guarded()`: a failure is logged, listed in the result's `errors`, and for a session recorded as `session.resume_failed` with `after: "sweep"`; the sweep continues, and a cancellation is never swallowed. A parked orchestration with no `task_id` lands FAILED with that reason before it is claimed (the operator's ruling 9 of 2026-10-29, epic small-fixes, kept privately).
+- **Enforced:** test: `tests/test_resume_sweep_isolation.py::test_a_raising_unit_in_any_worklist_is_recorded_and_the_rest_run`, `tests/test_resume_sweep_isolation.py::test_a_task_less_row_is_failed_loudly_and_the_good_row_still_resumes`
+- **Source:** code comment `central_command/api/orchestration.py` (`resume_sweep`, `maybe_resume`); docs/ARCHITECTURE.md "The parts `DESIGN.md` does not describe"
+
+### DL-195 — propose_delete_episode parks on a graph outage like any live read
+
+- **Status:** active
+- **Date:** 2026-10-29
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "`propose_delete_episode` is the one propose tool that parks"
+- **Why:** The deletion preview a `propose_delete_episode` draft embeds is a live graph read, and DL-189 says a read on a DOWN dependency parks and never degrades; the tool instead answered "nothing proposed", which an agent reasons about as an absence. So it is a `@parkable_read` with `TOOL_DEPENDENCY` `graph`, and on resume the proposal it drafts parks through the run's own tail (`orchestration._land_tail`, shared with the drive tail: a task lands through `run._land`, a chat lane through `converse._land_turn`; an orchestrator round rejects it as a call it cannot drive; any other tail is refused loudly). A NO, an episode that is not found, keeps its `ModelRetry`; by name alone a propose tool is never a read, so a decided deletion proposal is not re-executed (the operator's ruling 10 of 2026-10-29, epic small-fixes, kept privately).
+- **Enforced:** test: `tests/test_graph_delete_episode.py::test_a_down_graph_parks_the_propose_tool_as_a_read`, `tests/test_outage_doctrine.py::test_a_down_graph_parks_a_deletion_task_and_the_resume_parks_the_proposal`
+- **Source:** code comment `central_command/runtime/tools.py` (`propose_delete_episode`); docs/ARCHITECTURE.md "The outage doctrine"; supplements DL-189
+
+### DL-196 — The nightly k3s backup also keeps the root and cockpit environment files
+
+- **Status:** active
+- **Date:** 2026-10-29
+- **Rule:** [.claude/rules/deploy-k3s.md](../../.claude/rules/deploy-k3s.md) — "`verify.sh` ends with the application self-check, and the nightly backup keeps the three environment files"
+- **Why:** The backup captured the databases and the two never-rotate keys, but the files that say how the application and the cockpit are configured (the root `.env`, `web/.env`) and the containers' own file lived nowhere else, so a rebuilt host had dumps but not the configuration that made them a running system; `web/.env` had already once been missing from the minimum install. The operator ruled (2026-10-29, epic small-fixes ruling 5, kept privately) that `backup.sh` also copies the root `.env` and `web/.env`, superseding the earlier decision that scoped it to `deploy/k3s/.env`. The copies are byte for byte, 0600, under their own prefixes (`env_`, `env-app_`, `env-web_`, never `keys_*`, because the reset phase's keep loop globs by label), pruned keep-the-last-good, and a missing or empty source fails the run by name and never prints a value. The same bullet records the self-check (ruling 4): `verify.sh` runs it on every run and skips it under `--clean-install`.
+- **Enforced:** test: `tests/test_k3s_backup_env.py::test_each_env_file_is_copied_byte_for_byte_at_0600_in_a_0700_directory`, `tests/test_k3s_backup_env.py::test_a_missing_or_empty_env_file_fails_the_run_naming_it_and_no_value`
+- **Source:** code comment `deploy/k3s/backup.sh` (header, RESTORE section); deploy/k3s/README.md §8; PRD FR-51

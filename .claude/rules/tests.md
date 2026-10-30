@@ -12,7 +12,14 @@ when a matching file is read.
 - **Tests must pin `test_model=True` if they hit code that calls
   `resolve_model()` itself** (e.g. `routes.feed_email`) — with a real key in
   `.env` the "offline" suite will otherwise call the model for real and spend
-  money.
+  money. Pin it, or fake the model: a test that builds a live model and makes a
+  request is stopped at the spend point. The session-scoped `no_live_model`
+  guard in `tests/conftest.py` replaces `OpenAIChatModel.request`,
+  `request_stream` and `_completions_create` with a refusal that says how to opt
+  in, so a worktree's copy of the live key cannot be billed by an unpinned test
+  (building a live model stays allowed; only the request is refused).
+  `CC_LIVE_MODEL_TESTS=1` is the opt-in, read at call time, for a run that means
+  to spend. Guarded by `tests/test_no_live_model.py`.
 - **Any test whose approval executes uses `fake_world`**
   (`tests/fake_world.py`); there is no executor mode to pin. The session-scoped
   `no_live_world` guard in `tests/conftest.py` holds every write-capable
@@ -20,6 +27,23 @@ when a matching file is read.
   worktree's `.env` is a copy of the live one and carries real credentials: an
   approved test proposal must fail loudly as unconfigured, never reach a real
   Jira, mail, calendar, LiteLLM or MCP write.
+- **The queue is settled lazily; a test that plants rows over its own
+  connection opts in to the eager settle.** The autouse `isolated_queue`
+  fixture used to park foreign `UNPROCESSED` rows at the start of every test;
+  it now does so on the first pool request to the test database (a one-shot
+  hook on `repo._get_pool`), which is why the suite is faster. A test that opens
+  its own `asyncpg.connect` and plants rows BEFORE its first pool request must
+  carry `@eager_settle` (`pytest.mark.eager_settle`), or the late settle parks
+  its rows too. The test database also runs with `synchronous_commit = off`.
+  The failures of this change show only in the sequential `pytest -q` run, which
+  stays the gate. Guarded by `tests/test_conftest_database.py`.
+- **A real embedding is refused unless it is faked.** `no_live_graph_writes`
+  replaces `neo4j_writer._embedding_client` with a refusal, so a test that
+  reaches `request_embedding` must fake `request_embedding` (or a class standing
+  in for `httpx.AsyncClient`); `CC_LIVE_GRAPH_TESTS=1` opts in. The curation
+  writer posts to `<llm_base_url>/v1/embeddings` with the scoped key, and the
+  worktree's `.env` carries a real one. Guarded by
+  `tests/test_curation_embed_key.py`.
 - **Assert on rows your test created, never on global counts.** The dev DB
   may be shared; `tests/conftest.py` parks foreign `UNPROCESSED` rows so
   queue-order tests are deterministic, but count assertions still need

@@ -87,7 +87,7 @@ can reach changes anything.**
 |---|---|---|
 | ① cockpit (`web/`) | The API's address (`GATEWAY_URL`); no external credential | Anything for Jira, Confluence, mail, the graph or the model proxy |
 | ② `gateway/` (Executor) | Every **write** credential: Jira, Confluence, the git forge, the n8n façades (mail, calendar), Exchange, the LiteLLM administration database and its salt key, the scoped kubeconfigs for model and MCP changes | — (this is the only tier that writes after a decision) |
-| ② `api/` | The Postgres DSN; the **Neo4j bolt password** (operator graph curation through `integrations/neo4j_writer.py`, and the Graph panel's reads through `integrations/neo4j_reader.py`); the **LiteLLM proxy key** for speech (`api/speech.py`) | A credential an agent can reach: agents never call the API tier's code |
+| ② `api/` | The Postgres DSN; the **Neo4j bolt password** (operator graph curation through `integrations/neo4j_writer.py`, and the Graph panel's reads through `integrations/neo4j_reader.py`); the **LiteLLM proxy key** for speech (`api/speech.py`) and the same scoped key for the curation writer's embedding request (`integrations/neo4j_writer.py`; never the admin key) | A credential an agent can reach: agents never call the API tier's code |
 | ② `ingest/`, `heartbeat/`, `events/`, `reports/` | The Postgres DSN; `ingest/` reads mail and files through the façades; `ingest/wiki_freshness.py` holds the Confluence write used by the config-gated stale-page annotation (default off) | Any agent-directed write |
 | ③ `runtime/` | **Read credentials only**: Jira, Confluence, forge, graph reads over bolt (`integrations/graphiti.py`, `neo4j_reader.py`), mail façade reads, Exchange reads, the LiteLLM proxy key for model calls and `/model/info`, the credential-store listing; the sandbox client (a mutating client against a credential-free sandbox) | A write path: no module under `runtime/` may reach a write method of a credentialed client, nor the graph write modules. Guards: `tests/test_runtime_integration_reads.py` (frozen per-client allowlist, DL-103) and `tests/test_governance.py` |
 | ④ `db/`, `integrations/` | `db/`: the DSN. `integrations/`: the client for each external system, each holding its own credential | — |
@@ -127,7 +127,7 @@ Rows for the same package are grouped by what the modules are for.
 
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
-| `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py`, `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
+| `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py` (the cap is `settings.attachment_max_bytes`, `CC_ATTACHMENT_MAX_BYTES`, default 50 MiB, read at call time; a validator refuses a cap whose base64 size would pass the transport ceiling `config.WS_MAX_SIZE_BYTES`, the `--ws-max-size` both API launchers, the k3s unit and the single-node `boot.sh`, pass uvicorn), `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (96 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
@@ -141,7 +141,7 @@ Rows for the same package are grouped by what the modules are for.
 | `heartbeat/` | ② | none | The scheduler for recurring team work: tick loop, action registry, dependency-health probes | `engine.py` (`fire`, one firing path for tick and run-now), `actions.py` (`ActionSpec`, 12 action kinds), `probes.py` | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `integrations/` | ④ | each client holds its own | **Native clients**: Jira, Confluence, the git forge, LiteLLM (proxy) and its credential store, the Exchange (EWS) mail client, Neo4j (reads and the closed curation write set) | `jira.py`, `confluence.py`, `forge.py`, `litellm.py`, `litellm_credstore.py`, `exchange.py`, `neo4j_reader.py`, `neo4j_writer.py` | [integrations](../.claude/rules/integrations.md) |
 | `integrations/` | ④ | as above | **graphiti-core, in-process** (no server): `graphiti.py` reads (the one graph module `runtime/` may import; it imports graphiti-core search modules function-locally, after the client has prepared the environment), `graphiti_client.py` is the one place the library is built and configured, `graphiti_ingest.py` is the durable ingest queue's worker, `graph_ontology.py` holds the ten entity types, `graphiti_patches.py` applies the two carried graphiti-core fixes | `graphiti.py`, `graphiti_client.py`, `graphiti_ingest.py`, `graph_ontology.py`, `graphiti_patches.py` | [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
-| `integrations/` | ④ | n8n holds the OAuth | **n8n façades** for mail and calendar (n8n holds the OAuth; the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: web fetch, the crawler client, the sandbox client. `http.py` is the pluggable-trust httpx factory (CA bundle / mTLS) | `email_facade.py`, `calendar_facade.py`, `webfetch.py`, `crawler.py`, `sandbox_client.py`, `http.py` | [integrations](../.claude/rules/integrations.md) |
+| `integrations/` | ④ | n8n holds the OAuth | **n8n façades** for mail and calendar (n8n holds the OAuth; the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: web fetch, the crawler client, the sandbox client. `http.py` is the pluggable-trust httpx factory and the ONE TLS surface: every client built from `client_kwargs()` (the native clients, the agents' web fetch, the Systems probes, the self-check) honours `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and `CC_TLS_INSECURE`, which turns verification off for all of them and wins over the bundle. A façade is `configured()` when its URL and its token are both set; an unconfigured one fails "not configured" as a NO, it never parks | `email_facade.py`, `calendar_facade.py`, `webfetch.py`, `crawler.py`, `sandbox_client.py`, `http.py` | [integrations](../.claude/rules/integrations.md) |
 | `reports/` | ② | none | Deterministic, judgment-free reads composed from the spine: the EA's snapshot, the operator's calendar day, the EA's open follow-ups; called only from `runtime/tools.py` and `heartbeat/actions.py` | `ea_report.py`, `ea_calendar.py`, `ea_followups.py` | — |
 | `sandbox/` | out-of-process | **none, by design** | A standalone FastAPI service giving agents a disposable workspace. Two backends behind one API: `kubectl` (a gVisor Job+Pod per session) or `podman` (a container per session). Never imported; reached only through `integrations/sandbox_client.py`. Its single exit is the gated `mcp.sync_source`, content captured at propose time | `runner.py` | [AGENTS.md](../AGENTS.md) |
 | `crawler/` | out-of-process | none | A standalone browser-rendering crawl service for whole-site documentation import. Never imported; reached through `integrations/crawler.py`, whose only caller is `skills/site_import.py` | `service.py` | — |
@@ -151,7 +151,7 @@ Top-level modules of `central_command/`: `config.py` holds every `CC_*` setting
 (`settings`), with its comment as documentation; `selfcheck.py` is the
 application self-check — the install proved as the app, one implementation run
 from the command line (`python -m central_command.selfcheck`) and from
-`api/selfcheck.py`; it reads the spine directly and reports readiness only.
+`api/selfcheck.py`; it reads the spine directly and reports readiness only. The k3s `deploy/k3s/verify.sh` runs it as its last section on every run (two small model requests, the venv's interpreter under a minimal environment, skipped with a stated reason under `--clean-install`), and never from the updater's health poll or a timer.
 `run_modes.py` is the run-mode guard (`central_command/run_modes.py`, stdlib
 only): any of `CC_TEST_MODEL`, `CC_DEMO_MODE`, `CC_EXECUTOR_MODE` present, whatever
 its value, refuses — the API's lifespan applies it to its own environment
@@ -222,7 +222,18 @@ process's environ.
   `resume_sweep`, `resume_parked_session`, `resume_consult_wait`,
   `resume_task_wait`, `retry_parked_task`, `continue_session`). It is also where
   the retry sweep lives (`retry_sweep`), because that sweep must reach
-  `gateway.retry_execution`.
+  `gateway.retry_execution`. **A stall of NO PROGRESS re-plans.** A stall that
+  fires on `orch_stall_limit` consecutive rounds without progress records
+  `no_progress` on its pending entry (`_park_stalled`); when the operator answers
+  it, `maybe_resume` withdraws plan approval and zeroes the stall count, so the
+  orchestrator submits a plan and parks for review again before its next
+  `assign_work`. The round and fan-out backstop stalls and a `continue` window
+  never withdraw it. **The restart sweep isolates its rows.** `resume_sweep`
+  drives every unit of every worklist under its own guard: a row that raises is
+  logged, listed in the result's `errors` list and, for a session, recorded as
+  `session.resume_failed` (`after: "sweep"`); the sweep goes on. A parked
+  orchestration whose state names no task lands FAILED with that reason (before
+  it is claimed) and counts as such a row.
 - **`api/nerve_gateway.py`** answers the cockpit's gateway wire protocol
   (request/response/event frames over WebSocket at `/ws`). It is a
   read-and-plumbing surface; writes go through the same gateway functions the
@@ -286,7 +297,16 @@ stateDiagram-v2
 - **Before the gate.** A `propose_*` tool validates argument shape against
   `contract.ARG_SPECS` (a malformed draft goes back to the model as a
   `ModelRetry`, up to `max_retries=10`), then the run pauses at a deferred call
-  and `park_proposal` is the one path into the queue.
+  and `park_proposal` is the one path into the queue. **A draft states its
+  confidence** — in the runtime tier only. For the four tools whose `proposal`
+  argument the model writes (`packs.AGENT_AUTHORED_PROPOSE_TOOLS`),
+  `runtime/tools._validate_proposal(agent_authored=True)` hands back a draft with
+  no `confidence` or an empty `confidence.rationale` through
+  `contract.validate_proposal_shape`; the other propose tools build their
+  proposal from plain arguments, carry no confidence and are exempt, and the
+  Executor never sees the proposal around its actions, so the check cannot live
+  there. `charter.update`'s `rationale` is in `contract.ARG_SPECS`, so both tiers
+  check it. The generated propose guidance says to state a confidence.
 - **At the gate.** `proposal.decided` is emitted inside
   `approve_and_execute` *before* `executor.execute()` runs. The Executor
   re-runs the same shape validation over every action before the first one
@@ -294,7 +314,7 @@ stateDiagram-v2
   handlers; `proposer` comes from the gateway, never from the agent's
   arguments. The re-check (`executor.WORLD_CHECKS`) is a fresh read of each
   stateful target through the very function its handler calls first
-  (`confluence.update_page`: the page version; `jira.transition_issue`: the
+  (`confluence.update_page`: the page version, and a page gone at the check (a 404 on a draft made against a page that existed) is world-moved too; `jira.transition_issue`: the
   transition list, judged against the issue's `updated` and the proposal's
   `created_at`; `graph.delete_episode`: the recomputed preview;
   `charter.update`: the target's CURRENT charter version against the
@@ -315,7 +335,11 @@ stateDiagram-v2
   `world_moved` is set when the handler raised the typed verdict
   `contract.failures.WorldMoved` (decided by type, never by text; today
   `confluence.ConfluenceStale`, a stale page version or a 409 whose body names
-  a version conflict): `{capability, target, expected, actual, what_moved}`,
+  a version conflict; `confluence.ConfluencePageGone`, a 404 at the update's
+  version check; `jira.TransitionMoved`; a coached `charter.update` whose base
+  version moved; and, in the deletion worker, `neo4j_writer.PreviewChanged`, which
+  is `(WriteError, WorldMoved)`; only a gone Confluence page counts, a Jira 404
+  stays a plain FAILED): `{capability, target, expected, actual, what_moved}`,
   carried on `ExecutionFailed.world_moved` and never on `transient` — it is a
   NO, never parked. Its resume report says what moved, that nothing past the
   completed actions was written, and to read the target again and redraft or
@@ -700,7 +724,7 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
   dispatcher claim → `dispatcher.process_claimed()` → agent run → terminal
   state; standing mail rules (`ingest/mail_rules.py`) run before any model
   call. Valves: concurrency, the approval-coupled throttle (don't outrun
-  review), token budget (retired by decision, PRD FR-24; the knob stays until its removal ships), max attempts. Dispatch is opt-in. Operations and
+  review), max attempts (the token-budget valve was removed in v2.75.0, PRD FR-24, DL-148; `CC_DISPATCH_TOKEN_BUDGET` is a retired key that warns once at start). Dispatch is opt-in. Operations and
   defaults: [`QUEUE.md`](QUEUE.md).
 - **Outage equivalence.** A dependency that is DOWN costs latency, never work
   (PRD FR-34 and FR-40): the sweep, the parks, the backoff, the banner and
@@ -762,7 +786,7 @@ other direction: a proposal parked `RETRY_PENDING` (or interrupted by a restart)
 waits an arbitrary time, so every execution of it, the sweep's retry and the
 operator's retry-now included, runs the Executor's world re-check first
 (`executor.WORLD_CHECKS`) and a mismatch there takes the same redraft path
-instead of finishing the remaining actions on a stale premise.
+instead of finishing the remaining actions on a stale premise. The set of world checks is `confluence.update_page` (version, or page gone), `jira.transition_issue`, `graph.delete_episode` (the recomputed preview, and again in the deletion worker as the typed `PreviewChanged`) and a coached `charter.update` (its drafter's shown version).
 
 **Names, probes and maps.** `DEPENDENCIES` in `contract/dependencies.py` is the
 one closed vocabulary a park, a probe or an outage row uses; the probe
@@ -930,7 +954,7 @@ record of the in-flight action is enough to ask the service whether it landed
 click. Not built; it is in the epic's deferred work (DL-188).
 
 **An embedder outage parks graph writes.** Nothing lands without its vector.
-`neo4j_writer.embed` raises `contract.EmbedderDown` before anything is written;
+`neo4j_writer.embed` embeds through `request_embedding`, which posts to `<CC_LLM_BASE_URL>/v1/embeddings` with the SCOPED key `CC_LLM_API_KEY` (the key graphiti-core's embedder uses; never the admin key) through the `neo4j_writer._embedding_client` seam, and raises `contract.EmbedderDown` before anything is written;
 it returns `None` only for empty text, a wrong-width vector is a loud semantic
 `EmbedWidthError`, and there is no second embedder to fall back on. A gated
 curation write parks `RETRY_PENDING` on `['graph', 'embedder']` through the
@@ -1087,7 +1111,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | Surface | What it is | Entry points | Read first |
 |---|---|---|---|
 | `deploy/single/` | Single-node profile on Compose (`compose.yaml`). Unconditional services: postgres, litellm with its db and redis, neo4j; behind profiles: n8n (with its db), the crawler and speech. Deterministic driver: its phases and steps are declared once, in `steps.tsv` (run order), and recorded in a ledger as each completes; the operator's procedure is the generated [`CHECKLIST.md`](../deploy/single/CHECKLIST.md); exit codes 0/1/2/3 (3 = stopped for the operator) | `setup.sh`, `update.sh` (`init` · `import` · `stage` · `plan` · `apply` · `rollback`), `resolve-images.sh` + `images.txt` (constraint / locked tag / locked digest) | [`deploy/single/README.md`](../deploy/single/README.md), [deploy-single rules](../.claude/rules/deploy-single.md) |
-| `deploy/k3s/` | Multi-node profile: numbered manifests `00-namespace`, `20-postgres`, `30-litellm`, `31-litellm-rbac`, `40-graph`, `50-n8n`, `60-sandbox`, `61-mcp`, `70-crawler`, `80-vlogs`, `85-pgweb`, `90-speech`; placement split by state (stateful pinned, stateless floats), services exposed on loopback, the API / cockpit / sandbox-runner as systemd units outside the cluster. Same driver contract, six phases: validate · preflight · llm · stack · app · verify | `setup.sh`, `verify.sh`, `cc-update.sh`, `backup.sh`, `make-secrets.sh`, `mint-keys.sh`, `build-*-image.sh` | [`deploy/k3s/README.md`](../deploy/k3s/README.md), [deploy-k3s rules](../.claude/rules/deploy-k3s.md) |
+| `deploy/k3s/` | Multi-node profile: numbered manifests `00-namespace`, `20-postgres`, `30-litellm`, `31-litellm-rbac`, `40-graph`, `50-n8n`, `60-sandbox`, `61-mcp`, `70-crawler`, `80-vlogs`, `85-pgweb`, `90-speech`; placement split by state (stateful pinned, stateless floats), services exposed on loopback, the API / cockpit / sandbox-runner as systemd units outside the cluster. Same driver contract, six phases: validate · preflight · llm · stack · app · verify | `setup.sh`, `verify.sh` (sections A-E under the admin key, then F, the application self-check, on every run), `cc-update.sh`, `backup.sh` (besides the databases and the keys file it copies the containers' env file, the application's root env file and the cockpit's env file byte for byte, 0600, as `env_`, `env-app_` and `env-web_` copies; one that is missing or empty fails loudly by store name), `make-secrets.sh`, `mint-keys.sh`, `build-*-image.sh` | [`deploy/k3s/README.md`](../deploy/k3s/README.md), [deploy-k3s rules](../.claude/rules/deploy-k3s.md) |
 | `deploy/shared/` | Assets both deployment substrates read: `litellm/` — `register-models.py` (run by both installers), `policy.py`/`checks.sh` and the k3s profile's declared LiteLLM policy (`config.yaml`, `model-preferences.yaml`; the single profile's equivalents are `deploy/single/litellm-config.yaml` and `deploy/single/models.json`). `gateway/executor.py` and `runtime/tools.py` name these files by path | — | [`deploy/shared/README.md`](../deploy/shared/README.md) |
 | `deploy/n8n/` | The mail and calendar façade workflows as code; applied by both updaters | `apply-workflows.sh` | [`deploy/n8n/README.md`](../deploy/n8n/README.md) |
 | `deploy/discover.sh`, `deploy/AIRGAP.md` | Environment discovery and the mirror / CA / proxy seams for restricted networks (`deploy/env-lib.sh` maps the answers to settings). Registry mirrors are per-upstream: `CC_REGISTRY_DOCKERIO`, `CC_REGISTRY_GHCR`, `CC_REGISTRY_MCR` | `discover.sh` | [`deploy/AIRGAP.md`](../deploy/AIRGAP.md) — **first**, for any mirrored or no-egress install |
@@ -1155,7 +1179,7 @@ Code comments cite these; this is where they resolve.
 | D11 → D11-r1 | No ungoverned private agent memory; revised 2026-08-01 to allow a *gated* per-agent graph partition | revised |
 | D12 | Auditor rollout: shadow first, graduate per action class | standing, built |
 | D13 | Mail bodies referenced and re-fetched, never stored | **reversed** — converted once and persisted ([decision log](decisions/ingest-integrations.md)) |
-| D15–D16 | Dispatcher valves | D15 standing, built; D16's guaranteed backlog trickle was never built (DL-152) and the token-budget valve is retired (PRD FR-24; DL-148) |
+| D15–D16 | Dispatcher valves | D15 standing, built; D16's guaranteed backlog trickle was never built (DL-152) and the token-budget valve was removed in v2.75.0 (PRD FR-24; DL-148) |
 | D17 | Thread-aware batching and folds | standing, built |
 | D18 | Agent-version lifecycle and replay | deferred, not built |
 | D19–D21 | Sandboxing / egress allowlists / vault / anomaly detection cut from the MVP | cut — though an agent sandbox was later built as *containment* |

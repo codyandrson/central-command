@@ -57,6 +57,21 @@ when a matching file is read.
   `run_state` is a key-level MERGE, so a resumed-then-re-parked session still
   carries the old marker, and driving it would hand the redraft the PREVIOUS
   decision's outcome.
+- **The resume sweep drives every row under its own guard** (ruled
+  2026-10-29). `resume_sweep` wraps each unit of each worklist in `guarded()`:
+  a row that raises is logged, listed in the result's `errors`
+  (`{unit, id, error}`) and, for a session, recorded as `session.resume_failed`
+  with `after: "sweep"`; the sweep goes on, so one bad row cannot strand the
+  rows behind it at every restart. A `CancelledError` is not swallowed. A parked
+  orchestration whose state names no `task_id` is landed FAILED with that reason
+  BEFORE the claim (the claim would flip it RUNNING and a lookup would
+  `KeyError`), then raised into the guard. Guarded by
+  `tests/test_resume_sweep_isolation.py`. **An answered no-progress stall makes
+  the plan park again:** only the stall that fired on `orch_stall_limit`
+  rounds without progress, once answered, withdraws plan approval
+  (`maybe_resume`), so the orchestrator submits a plan and the operator reviews
+  it before the next `assign_work`; the round and fan-out backstops and a
+  `continue` window never do. Guarded by `tests/test_orchestration.py`.
 - **A restart lands nothing FAILED: the startup landing re-parks what each
   orphan owes, and it lands the TASK, not just the session.** Only a sweep
   CAN land what a dead process left — the park that would have recorded the
@@ -93,7 +108,18 @@ when a matching file is read.
   was only an outage; PRD FR-40 retired that reading (the old RUNTIME-047
   "degrade, never wedge" position). A read
   the dependency ANSWERED with a no still returns honest text — that is a NO,
-  not a DOWN — and `local` and `()` entries never park.
+  not a DOWN — and `local` and `()` entries never park. **`propose_delete_episode`
+  is the one propose tool that parks** (ruled 2026-10-29): it is a
+  `@parkable_read` with `TOOL_DEPENDENCY` `graph`, because the deletion preview
+  it embeds is a live read, so a graph outage parks the run instead of answering
+  "nothing proposed", and on resume the proposal it drafts parks through the
+  run's own tail (`orchestration._land_tail`: `run._land` for a task,
+  `converse._land_turn` for a chat lane; an orchestrator round rejects it as a
+  call it cannot drive; any other tail is refused loudly). A NO (the episode is
+  not found) keeps its `ModelRetry`. By name alone a propose tool is never a
+  read: the durable name-only checks use `READ_TOOLS - PROPOSE_TOOLS`, so a
+  decided deletion proposal is not misread as a read to re-execute. Guarded by
+  `tests/test_graph_delete_episode.py` and `tests/test_outage_doctrine.py`.
 - **A tool pauses a run only through `CallDeferred`.** pydantic-ai lets any
   other exception cancel the sibling tools and fail the run, so a DOWN read that
   raised something else would turn an outage into a FAILED session. Anything

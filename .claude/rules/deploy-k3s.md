@@ -120,6 +120,32 @@ when a matching file is read.
   rerank since graphiti-core moved in-process, and the three Graphiti-only
   keys are retired. `APP_ENV_DEFAULTS` and `setup.sh app`'s defaults loop are
   one table in two places — keep them in step.
+- **`verify.sh` ends with the application self-check, and the nightly backup
+  keeps the three environment files** (epic small-fixes, rulings 4 and 5 of
+  2026-10-29). Section F runs `python -m central_command.selfcheck` from the
+  checkout's `.venv` under `env -i` (the minimal environment systemd gives the
+  API: `verify.sh` has sourced `deploy/k3s/.env` into its own shell, and a
+  variable already set beats `.env`), from the repo root because Settings load
+  the ROOT `.env`, without `--pre-boot`. It spends two small model requests and
+  runs on every run; `--clean-install` skips it with a line saying why, through
+  a function (the `run_modes_check` pattern), never a `CLEAN == 1` branch beside
+  it. A WARN passes with its text, a FAIL fails, exit 2 is not a failure, a
+  module that printed no check line fails. It is NOT in `cc-update.sh`'s health
+  poll and on no timer. `backup.sh` also copies `deploy/k3s/.env`, the root
+  `.env` and `web/.env` byte for byte, 0600, as `env_`, `env-app_` and
+  `env-web_` copies in the backup directory (none is ever named `keys_*`: the
+  reset phase's keep loop globs by label), pruned keep-the-last-good, failing
+  loud BY NAME when a source is missing or empty and never printing a value;
+  `setup.sh reset` keeps all three labels, and the RESTORE section at the bottom
+  of `backup.sh` says where each goes (`install -m 600 … <checkout>/…`) before
+  `make-secrets.sh`. After a reset moves `.env` aside the backup fails the two
+  app copies until the installer recreates them: that is the loud failure
+  asked for. The sandbox's reach to the API is a drill, not a test:
+  `tests/test_sandbox_isolation.py` pins what the suite can prove (loopback
+  binds, the Job manifest, ingress deny, no 8080 Service) and never asserts an
+  egress deny; README §9 "Sandbox reach drill" is the live run. Guarded by
+  `tests/test_k3s_verify_selfcheck.py`, `tests/test_k3s_backup_env.py` and
+  `tests/test_k3s_reset_phase.py`.
 - **A long-running host unit `Wants=k3s.service`, never `Requires=` it.**
   `Requires=` ties the unit's start job to k3s's FIRST start attempt: when
   that fails at boot, systemd cancels the dependent once ("Dependency
@@ -143,7 +169,8 @@ when a matching file is read.
   and REFUSES when both paths are regular files. `init-env.sh` calls it
   first; `cc-update.sh` calls it right after the merge (WARN-only, keyed on
   the merged tree having the script). Never regenerate, print or copy the
-  two keys inside. `tests/test_k3s_env_path.py` runs the real functions in
+  two keys inside (the nightly backup does copy the file whole — next
+  bullet). `tests/test_k3s_env_path.py` runs the real functions in
   every layout; `tests/test_deploy_pi_boundary.py` pins that nothing under
   `deploy/pi/` is tracked since v2.67.0, that every reader is on the
   resolver, and that no tracked file names the old directory outside dated

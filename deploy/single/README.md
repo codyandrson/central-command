@@ -673,6 +673,15 @@ the rows present but undecryptable. `make-secrets.sh` generates them once and
 never overwrites a value that is already set. **Back `.env` up somewhere
 outside the install tree.**
 
+**The attachment limit is `CC_ATTACHMENT_MAX_BYTES`** (default 50 MiB; the
+cockpit's own inline limit, `NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB` in `web/.env`,
+defaults to the same). The API refuses a value whose base64 size would pass its
+websocket ceiling (`config.WS_MAX_SIZE_BYTES`, 96 MiB, so a cap of at most
+72 MiB), and the `boot` phase starts the API with the same number as
+`--ws-max-size`, as the k3s unit does. The operator's `.env` may still carry
+`CC_DISPATCH_TOKEN_BUDGET`; the key is retired and warns once at start, so
+delete the line.
+
 **`CC_EMBED_DIM` is a discover-once decision, not a tunable.** The app's
 graph client embeds at that width, so it is the width of every vector stored
 in Neo4j. A mis-sized

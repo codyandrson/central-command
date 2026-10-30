@@ -139,8 +139,14 @@ when a matching file is read.
   expression language cannot parse, or a `CC_LLM_UPSTREAM_MODEL_*` row that
   does not match `models.json`'s aliases. Two families are written by a
   resolver, not asked, and so have no row: `CC_IMG_<NAME>` (`resolve-images.sh`)
-  and `CC_GRAPH_RERANK_ALIAS`/`_KIND` (the `llm` probe). A test that a consumer
-  never reads a key without a row is owed. The validators live in
+  and `CC_GRAPH_RERANK_ALIAS`/`_KIND` (the `llm` probe). The FORWARD direction
+  is guarded (epic small-fixes story 11.12):
+  `tests/test_single_questions_schema.py::test_every_airgap_seam_is_a_row_or_a_named_exception`
+  walks the Seam column of `deploy/AIRGAP.md` and fails on a documented seam
+  with neither a row nor one of its six named exceptions — it found
+  `CC_NETRC`, `CC_CLIENT_CERT`, `CC_CLIENT_KEY` and `WHISPER_MODELS_BASE_URL`
+  askable by nobody, and they now have rows. A test that a consumer never
+  reads a key without a row is owed. The validators live in
   `deploy/single/questions-lib.sh`, print ONE line of reason, and may never
   write — `check` reaches them. `when` is `KEY=value` / `KEY!=value`,
   comma-separated ANDs, evaluated against the answers so far: a tiny expression

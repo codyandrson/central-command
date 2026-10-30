@@ -415,6 +415,13 @@ loads the page fine and then fails the WebSocket with a 403 you only see in
 the server log (web/.env was once missing from the backup set; the line is
 part of the minimum now, so it is three lines, not two).
 
+The attachment limit is `CC_ATTACHMENT_MAX_BYTES` in the root `.env` (default
+50 MiB, the cockpit's inline limit `NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB` in
+`web/.env` defaults to the same). The API refuses a value whose base64 size
+would pass its websocket ceiling (`config.WS_MAX_SIZE_BYTES`, 96 MiB, so a cap
+of at most 72 MiB), and `cc-uvicorn.service` carries the same number as
+`--ws-max-size`. An operator who changes the cap sets the cockpit's limit too.
+
 ```bash
 sudo cp deploy/k3s/cc-uvicorn.service       /etc/systemd/system/
 sudo cp deploy/k3s/cc-sandbox-runner.service /etc/systemd/system/
@@ -724,8 +731,16 @@ this section is verification only:
 ./deploy/k3s/verify.sh --clean-install   # the clean-install gate: 0 failures
 ```
 
-Four sections: services answering, stores initialized, placement matching the
-design, and every `CC_*` endpoint in the root `.env` resolving to loopback.
+Sections: services answering, stores initialized, placement matching the
+design, every `CC_*` endpoint in the root `.env` resolving to loopback, the
+run-mode guard over the running API's environment, and, last (section F), the
+**application self-check** — `python -m central_command.selfcheck` run from the
+checkout's `.venv` under the minimal environment systemd gives the API, so it
+proves the install as the application sees it. It spends two small model
+requests and runs on EVERY `verify.sh` run; under `--clean-install` it is
+skipped with a line saying why (the model catalog is not set up yet). A WARN
+line passes with its text, a FAIL line fails the run. It is readiness, never
+liveness: the updater's health poll and no timer run it.
 **0 failures is the gate — in `--clean-install` mode there is no expected red.**
 
 Section A also probes **Jira and Confluence** (v2.53.0) — the one off-box
