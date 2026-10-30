@@ -453,7 +453,7 @@ async def search_graph_group(
 
 
 # THE DEPLOYMENT CEILING ITSELF — not a fraction of it. The runtime serves
-# the workstation's llama.cpp slot (qwen3.8-27b since 2026-08-18) with no
+# the model host's llama.cpp slot (qwen3.8-27b since 2026-08-18) with no
 # output cap, and the operator's standing decision is "no incentive to impose any more
 # conservative constraints at any point ever" (2026-07-28). So this is
 # settings.max_output_tokens expressed in characters (~4 chars/token), which is

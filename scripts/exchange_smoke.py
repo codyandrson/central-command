@@ -4,7 +4,7 @@ native client design, 2026-09-25, decision 8).
     python scripts/exchange_smoke.py
 
 No Exchange server exists outside the second deployment's network, so nothing
-in `integrations/exchange.py` can be proven from the reference homelab: the
+in `integrations/exchange.py` can be proven from the reference deployment: the
 fixtures in `tests/test_exchange.py` pin the SHAPES, and this script is what
 proves them against a real mailbox. Its output is the acceptance record, and
 its findings become the next fixtures.

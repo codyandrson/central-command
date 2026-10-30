@@ -7,8 +7,8 @@ world but the far server's access log. `settings.crawler_url` is ONE address
 for the whole process, never a per-call agent argument (the webfetch/sandbox
 precedent).
 
-HONEST DEGRADATION, not an exception: the crawler is a chromebox-pinned pod, so
-"not reachable" is a NORMAL state (chromebox down, or the service simply never
+HONEST DEGRADATION, not an exception: the crawler is a compute-node-pinned pod, so
+"not reachable" is a NORMAL state (compute node down, or the service simply never
 deployed). Both entry points return a result carrying `degraded` instead of
 raising, so a caller gets a sentence it can put in front of the operator rather
 than a traceback.
@@ -25,7 +25,7 @@ from central_command.config import settings
 # asking for 5000 pages deserves the honest number back either way.
 MAX_PAGES_CEILING = 200
 
-_UNAVAILABLE = "crawler unavailable — the chromebox may be down or cc-crawler not deployed"
+_UNAVAILABLE = "crawler unavailable — the compute node may be down or cc-crawler not deployed"
 
 
 def _degraded(exc: Exception) -> str:

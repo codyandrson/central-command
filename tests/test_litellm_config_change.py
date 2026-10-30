@@ -112,7 +112,8 @@ def test_the_capability_is_a_gated_write_with_a_handler():
     [
         ({CONFIG: "router_settings:\n  bad: [unclosed\n"}, "not valid YAML"),
         ({CONFIG: "general_settings:\n  master_key: sk-ant-abc123\n"}, "secret shape"),
-        ({CONFIG: "keys:\n  - ATATT-jira-token\n"}, "secret shape"),
+        # built at runtime: a literal here is itself a hit for the tree scan
+        ({CONFIG: "keys:\n  - " + "ATATT" + "-jira-token\n"}, "secret shape"),
         ({"deploy/k3s/.env": "X=1\n"}, "is not one of"),
         ({}, "non-empty"),
         (

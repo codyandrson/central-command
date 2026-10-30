@@ -1659,7 +1659,7 @@ async def nerve_gateway(ws: WebSocket) -> None:
     # loop must never stop reading: with serial dispatch, one slow RPC starved
     # `receive_text`, uvicorn's flow control paused the transport, the client's
     # keepalive PONGS sat unread, and the server killed the socket 1011 at ~60s
-    # — every reconnect burst re-triggered it (2026-08-12, chromebox outage).
+    # — every reconnect burst re-triggered it (2026-08-12, a compute-node outage).
     # The semaphore bounds the damage of a burst; a task that never finishes is
     # still a bug (its "rpc start" line without a "done" names it), but it now
     # costs one slot, not the whole socket.

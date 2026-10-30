@@ -208,7 +208,7 @@ def _entries() -> list[dict]:
             "url": settings.vlogs_ui_url or None,
             # Not settings-driven: no internal CC_* URL exists for it (only
             # the browser URL is configured). ServiceLB carries the real port
-            # to loopback on the Pi, where cc-uvicorn runs, same as every
+            # to loopback on the anchor node, where cc-uvicorn runs, same as every
             # other CC_* endpoint (deploy/k3s/80-vlogs.yaml).
             "health": _http_check(
                 "http://127.0.0.1:9428/health" if settings.vlogs_ui_url else None

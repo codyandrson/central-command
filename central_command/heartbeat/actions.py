@@ -1167,7 +1167,7 @@ async def _litellm_discovery(schedule_id: str, params: dict) -> dict:
     # Health is probed ONLY for managed deployments, one scoped call per
     # alias (each is a REAL provider call). Whole-fleet /health is the wrong
     # tool here: it walks the hand-tuned local fleet too — swapping GPU
-    # models on the workstation and blowing the 30s client timeout (measured
+    # models on the model host and blowing the 30s client timeout (measured
     # 2026-08-20) — and no managed deployments means no health call at all.
     # A health call that RAISES is not a finding about the model — the proxy
     # answers 200 with the failing endpoint listed when a model is down. An

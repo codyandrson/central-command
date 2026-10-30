@@ -240,7 +240,7 @@ async def test_sc1_one_approval_commits_jira_and_graph(monkeypatch):
 # disposable during the build and gets wiped before real use, so a corpus
 # assertion fails for a reason that has nothing to do with the client. (That is
 # exactly how the old `test_live_reads_return_facts_from_the_preserved_graph`
-# broke — it asserted on desktop-era homelab facts that no longer exist.)
+# broke — it asserted on facts from an earlier deployment that no longer exist.)
 
 
 def _graphiti_up() -> bool:

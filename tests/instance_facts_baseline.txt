@@ -19,4 +19,3 @@ deploy/k3s/verify.sh	a
 deploy/k3s/verify.sh	c
 deploy/shared/litellm/config.yaml	a
 deploy/shared/litellm/model-preferences.yaml	a
-tests/test_mail_actions.py	a

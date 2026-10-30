@@ -78,7 +78,7 @@ async def _get_raw(url: str, max_bytes: int) -> tuple[bool, str]:
         parsed = httpx.URL(url)
         async with httpx.AsyncClient(**webfetch._client_kwargs(parsed.host)) as client:
             # Streamed so the cap bounds what is DOWNLOADED, not just what is
-            # kept — a typo'd URL to a huge file must not balloon the Pi's
+            # kept — a typo'd URL to a huge file must not balloon the anchor node's
             # memory before a post-hoc slice.
             async with client.stream("GET", url) as resp:
                 if resp.status_code != 200:

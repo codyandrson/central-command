@@ -3409,7 +3409,7 @@ class GraphSettingsIn(BaseModel):
 async def _graphistry_state(settings_row: dict) -> str:
     """Three states, not two (design spec): the toggle records INTENT only,
     the cockpit believes this probe, never the flag. enabled-but-unreachable
-    is an expected state (workstation off / GPU busy), not an error."""
+    is an expected state (model host off / GPU busy), not an error."""
     if not settings_row["graphistry_enabled"]:
         return "disabled"
     url = settings_row["graphistry_url"]

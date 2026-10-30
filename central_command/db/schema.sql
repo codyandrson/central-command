@@ -53,7 +53,7 @@ alter table agent add column if not exists steward_group text not null default '
 -- taskable = consultable = false — jira-expert and litellm-manager were not
 -- taskable and no agent was consultable. The desktop never showed it: its rows
 -- predate the change, so the updates had already run there. It surfaced on the
--- Raspberry Pi migration, where the test database was built from scratch.
+-- migration to the anchor node, where the test database was built from scratch.
 insert into agent (id, name, model, charter) values
     ('inbox-triage',    'Inbox Triage',    '', 'triage email into gated Jira + knowledge-graph proposals'),
     ('jira-expert',     'Jira Expert',     '', 'Jira hygiene: advisory consultation + operator-tasked changes'),
@@ -850,7 +850,7 @@ alter table session add column if not exists stop_requested boolean not null def
 -- (2026-08-12). The list query used to detoast every run_state to render this
 -- number; at 668 sessions that was ~1.5s per call — and the cockpit's
 -- reconnect burst runs several concurrently, which measured 22-26s EACH on
--- the Pi and presented as "websocket disconnected"/client timeouts. A STORED
+-- the anchor node and presented as "websocket disconnected"/client timeouts. A STORED
 -- generated column moves the cost to the write, which already carries the
 -- full jsonb through its merge; the read becomes a plain column. Same
 -- chars/4 heuristic as runtime/context.estimate_tokens (± jsonb whitespace).

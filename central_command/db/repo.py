@@ -3,7 +3,7 @@
 Connections come from ONE pool per event loop. Every caller keeps the shape it
 always had — `conn = await _conn()` … `await conn.close()` — and `close()`
 returns the connection to the pool instead of hanging up. Measured 2026-09-13:
-a fresh connection cost ~38 ms on the Pi (backend fork + scram; the raw TCP
+a fresh connection cost ~38 ms on the anchor node, a small ARM board (backend fork + scram; the raw TCP
 connect is 0.3 ms) against 0.2 ms for a query on an open one, and with ~19
 connects per test that handshake was ~80% of the suite's 16.5 minutes.
 """
@@ -1276,13 +1276,13 @@ async def list_sessions(
                    -- The predicted ceiling arrived (2026-08-12): the detoast
                    -- that used to live here hit ~1.5s at 668 sessions, and the
                    -- cockpit's reconnect burst ran several concurrently — 22-26s
-                   -- EACH on the Pi, presenting as socket deaths. The estimate
+                   -- EACH on the anchor node, presenting as socket deaths. The estimate
                    -- is a STORED GENERATED column now (schema.sql): computed by
                    -- the row write, which already carries the full jsonb; this
                    -- read is a plain column.
                    coalesce(s.token_estimate, 0) as token_estimate,
                    -- The other half of "what is this run FOR". 423 of the 601
-                   -- sessions on the Pi are ledger drains with no task, so
+                   -- sessions on the anchor node are ledger drains with no task, so
                    -- without this the Activity browser prints a uuid for 70%
                    -- of its rows. `work_item.session_id` is the existing link.
                    (select w.subject from work_item w where w.session_id = s.id

@@ -29,7 +29,7 @@ REQUEST_TYPES = {
     "general",
 }
 
-# Reached over Tailscale; down whenever the workstation is off. A fallback that
+# Reached over Tailscale; down whenever the model host is off. A fallback that
 # points at one of these is not a safety net.
 #
 # `qwen3.6-35b` and `north-mini-code` were RETIRED 2026-08-01 — never routed to,

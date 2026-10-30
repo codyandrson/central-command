@@ -1,6 +1,6 @@
 # cc-crawler:1 — Crawl4AI + Playwright/Chromium behind a small FastAPI.
 #
-# Built NATIVELY with podman (no QEMU) — on the chromebox for k3s (the pod
+# Built NATIVELY with podman (no QEMU) — on the compute node for k3s (the pod
 # carries a REQUIRED nodeAffinity there), on the one machine for the
 # single-node profile.
 #

@@ -187,7 +187,7 @@ class _Loop:
         return [(None, None, None, "", (a, port)) for a in self.addrs]
 
 
-@pytest.mark.parametrize("addr", ["127.0.0.1", "10.0.0.5", "100.113.118.28", "169.254.1.1", "::1", "fd00::1"])
+@pytest.mark.parametrize("addr", ["127.0.0.1", "10.0.0.5", "100.64.0.42", "169.254.1.1", "::1", "fd00::1"])
 @pytest.mark.asyncio
 async def test_executor_refuses_a_host_that_resolves_inward(monkeypatch, addr):
     class A:

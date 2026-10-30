@@ -45,7 +45,7 @@ RETIRED_ENV_KEYS = {
 }
 
 # The websocket frame limit the API is started with (uvicorn --ws-max-size):
-# deploy/k3s/cc-uvicorn.service and deploy/single/phases/boot.sh carry this
+# deploy/k3s/cc-uvicorn.service.in and deploy/single/phases/boot.sh carry this
 # number on the command line (tests/test_attachments.py pins all three
 # together). An attachment travels base64-inflated (~4/3) inside one frame, so
 # `attachment_max_bytes` must fit under it or the socket closes with a raw 1009
@@ -85,10 +85,10 @@ class Settings(BaseSettings):
     # died after four identical retries (2026-07-28, the first live coach test).
     #
     # Sized to THE DEPLOYMENT, not to the job (The operator, 2026-07-28): the serving
-    # model is qwen3.6-27b on the workstation, where llama.cpp reports
+    # model is qwen3.6-27b on the model host, where llama.cpp reports
     # n_ctx = 262144 per slot and sets no output cap of its own (n_predict
     # defaults to unlimited, bounded only by remaining context). So this is the
-    # workstation's own ceiling — Central Command imposes nothing tighter, and a
+    # model host's own ceiling — Central Command imposes nothing tighter, and a
     # bigger document later needs no code change. llama.cpp clamps generation
     # to whatever context the prompt leaves free.
     #
@@ -103,9 +103,9 @@ class Settings(BaseSettings):
     # model's sake.
     #
     # THE FALLBACK IS PART OF THE DEPLOYMENT (found 2026-07-29, the first real
-    # workstation outage): cc-default falls back to claude-haiku-4-5, and a
+    # model-host outage): cc-default falls back to claude-haiku-4-5, and a
     # 262144 max_tokens request is REJECTED by haiku (64000 cap) — so with the
-    # workstation off, every agent run failed even though the fallback route
+    # model host off, every agent run failed even though the fallback route
     # itself was healthy. "Sized to the deployment" therefore means sized to
     # the MINIMUM across primary + fallback — and since the per-model clamp
     # above, the way to say that is to declare the fallback's cap on the
@@ -179,7 +179,7 @@ class Settings(BaseSettings):
     # The dimension is discovered at setup and is effectively permanent —
     # changing the embedder later is a re-embed-the-whole-graph migration
     # (skills/graphiti/references/operations.md, "Changing the embedding
-    # model"). Defaults = the homelab instance.
+    # model"). Defaults = the reference deployment.
     embed_alias: str = "cc-embedding"
     embed_dim: int = 1024
     # The voice cc-tts speaks in when the cockpit names none. REQUIRED on the
@@ -322,7 +322,7 @@ class Settings(BaseSettings):
     fetch_ca_bundle: str = ""
     # Comma-separated host suffixes the client cert may be PRESENTED to
     # (e.g. "corp.example.com,tools.internal"). Empty = present it to every
-    # host — fine on the homelab, but a corporate PKI identity should be
+    # host — fine on a home network, but a corporate PKI identity should be
     # scoped so an agent-named external URL can't be handed the cert.
     fetch_cert_hosts: str = ""
     fetch_timeout: float = 30.0
@@ -334,7 +334,7 @@ class Settings(BaseSettings):
     # integrations/http.py). Distinct from the fetch_* settings above, which
     # scope an agent-named URL's client identity by host; these apply
     # uniformly because the target of each of those calls is one fixed,
-    # operator-configured endpoint. Empty (default) = unchanged homelab
+    # operator-configured endpoint. Empty (default) = unchanged home-network
     # behavior — public CA verification, no client cert.
     ca_bundle: str = ""       # path to a custom trust bundle (httpx `verify=`)
     client_cert: str = ""     # path to a client cert, or a combined cert+key PEM
@@ -707,7 +707,7 @@ class Settings(BaseSettings):
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor
-    # Jobs on the chromebox by shelling out to kubectl — this process talks
+    # Jobs on the compute node by shelling out to kubectl — this process talks
     # to it over plain HTTP, localhost-only, same trust as api_port today.
     #   sandbox_runner_url            -> ONE address for the whole process
     #   sandbox_session_ttl_seconds   -> mirrors CC_SANDBOX_SESSION_TTL_SECONDS
@@ -747,7 +747,7 @@ class Settings(BaseSettings):
     # silently, when unconfigured — an unset build host or kubeconfig must
     # never look like a build/deploy that quietly did nothing.
     #   mcp_build_host        -> ssh target the image is built ON (single-arch
-    #                            per design §9.3 — the chromebox only, since
+    #                            per design §9.3 — the compute node only, since
     #                            that's where gVisor/the image will run).
     #                            Empty = refuse to build.
     #   mcp_deploy_kubeconfig -> path to the SCOPED kubeconfig
@@ -773,9 +773,9 @@ class Settings(BaseSettings):
     litellm_log_kubeconfig: str = ""
 
     # cc-crawler (2026-08-07): the browser-rendering crawl service, a
-    # chromebox-pinned pod exposed by ServiceLB, so this stays LOOPBACK like
+    # compute-node-pinned pod exposed by ServiceLB, so this stays LOOPBACK like
     # every other CC_* endpoint. Rung 2 for docs ingestion — rung 1 is
-    # webfetch. Not reachable is a normal state (chromebox down / not
+    # webfetch. Not reachable is a normal state (compute node down / not
     # deployed); integrations/crawler.py degrades instead of raising.
     crawler_url: str = "http://127.0.0.1:8091"
 

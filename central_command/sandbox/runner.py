@@ -14,7 +14,7 @@ docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md §4.
 One Job per sandbox SESSION (not per exec — a fresh emptyDir per exec would
 lose the workspace between tool calls, defeating write->test->read). The pod
 sleeps for the session TTL under `runtimeClassName: gvisor`, required
-nodeAffinity to the chromebox (gVisor is only installed there), and an
+nodeAffinity to the compute node (gVisor is only installed there), and an
 `emptyDir` workspace at `/workspace`. The runner `kubectl exec`s each command
 into it; deleting the Job (on close or TTL) deletes the pod and everything in
 it — nothing about a sandbox outlives its Job.

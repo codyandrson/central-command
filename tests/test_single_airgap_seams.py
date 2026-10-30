@@ -757,7 +757,7 @@ def test_every_podman_build_of_these_dockerfiles_has_a_cc_ca_crt_to_match():
     containers/buildah#3284). So every script that builds one of these
     Dockerfiles WITH PODMAN has to put a cc-ca.crt in the context even when there
     is no CA. The single-node scripts stage one (empty when CC_CA_BUNDLE is
-    unset); the k3s scripts build on the chromebox with podman out of a remote
+    unset); the k3s scripts build on the compute node with podman out of a remote
     staging directory, so they touch an empty one there.
     """
     for script in BUILD_SCRIPTS:
@@ -771,7 +771,7 @@ def test_every_podman_build_of_these_dockerfiles_has_a_cc_ca_crt_to_match():
     for script in ("build-sandbox-image.sh", "build-crawler-image.sh"):
         text = (ROOT / "deploy" / "k3s" / script).read_text(encoding="utf-8")
         assert ": >cc-ca.crt" in text, (
-            f"deploy/k3s/{script}: its chromebox build is `podman build`, so the "
+            f"deploy/k3s/{script}: its compute-node build is `podman build`, so the "
             "context needs a cc-ca.crt for the glob to match"
         )
 

@@ -6,10 +6,10 @@ not in the app venv. It holds no credentials and reaches nothing but the target
 site — Crawl4AI's optional LLM features are NOT used, so there is no provider
 call anywhere in this process.
 
-WHY A CONTAINER ON THE CHROMEBOX: Crawl4AI drives a real Playwright/Chromium.
+WHY A CONTAINER ON THE COMPUTE NODE: Crawl4AI drives a real Playwright/Chromium.
 That is a ~1 GB browser and a memory-hungry process, i.e. exactly what the
-placement rule keeps off the Pi. Required nodeAffinity to the chromebox,
-accepted consequence: chromebox down = crawler down (same call as the sandbox).
+placement rule keeps off the anchor node. Required nodeAffinity to the compute node,
+accepted consequence: compute node down = crawler down (same call as the sandbox).
 
 WHEN TO USE IT: rung 1 is a plain HTTP fetch (`integrations/webfetch.py`).
 Reach for this only when the site is a JS-rendered SPA that plain fetching

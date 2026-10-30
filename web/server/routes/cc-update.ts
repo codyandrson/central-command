@@ -93,8 +93,8 @@ function stagePending(): boolean {
 
 function writeTrigger(path: string, target: string, force = false): void {
   // Atomic write (tmp + rename) so the path unit never sees a half-written
-  // trigger. The dir is tmpfs (cleared on boot) and codyslab-writable —
-  // see deploy/k3s/cc-update-tmpfiles.conf.
+  // trigger. The dir is tmpfs (cleared on boot) and writable by the checkout owner —
+  // see deploy/k3s/cc-update-tmpfiles.conf.in (rendered to /etc/tmpfiles.d/cc-update.conf).
   const tmp = `${path}.tmp`;
   // `force` is the operator's "update anyway": the updater refuses to stop the
   // API while agent runs are in flight (it would kill them) unless this is set.
@@ -143,7 +143,7 @@ app.post('/api/update/stage', rateLimitGeneral, async (c) => {
   if (result === 'error') {
     return c.json({
       error: `could not write ${STAGE_TRIGGER} — is cc-update-stage installed? `
-        + '(deploy/k3s/cc-update-tmpfiles.conf + cc-update-stage.path; see deploy/k3s/README.md §6)',
+        + '(deploy/k3s/cc-update-tmpfiles.conf.in + cc-update-stage.path; see deploy/k3s/README.md §6)',
     }, 503);
   }
   return c.json({ staging: true, alreadyStaged: result === 'already' }, result === 'requested' ? 202 : 200);
@@ -192,7 +192,7 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   } catch (err) {
     return c.json({
       error: `could not write ${TRIGGER} — is cc-update installed? `
-        + '(deploy/k3s/cc-update-tmpfiles.conf + cc-update.path; see deploy/k3s/README.md §6) '
+        + '(deploy/k3s/cc-update-tmpfiles.conf.in + cc-update.path; see deploy/k3s/README.md §6) '
         + `[${err instanceof Error ? err.message : String(err)}]`,
     }, 503);
   }

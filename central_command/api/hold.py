@@ -64,7 +64,8 @@ _trigger_error: str | None = None
 
 def _trigger_path() -> str:
     # Same path (and env override) as the cockpit server's writer; the dir is
-    # tmpfs and codyslab-writable (deploy/k3s/cc-update-tmpfiles.conf).
+    # tmpfs and writable by the checkout owner (rendered from
+    # deploy/k3s/cc-update-tmpfiles.conf.in to /etc/tmpfiles.d/cc-update.conf).
     return os.environ.get("CC_UPDATE_TRIGGER", "/run/cc-update/trigger")
 
 

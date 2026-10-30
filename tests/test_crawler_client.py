@@ -1,9 +1,12 @@
 """The cc-crawler CLIENT SEAM only (central_command/integrations/crawler.py).
 
 The service itself cannot run here: it needs Playwright/Chromium, which is why
-it lives in a container on the chromebox. What is testable offline — and what
+it lives in a container on the compute node. What is testable offline — and what
 actually bites — is the seam: does an unreachable crawler degrade instead of
 raising, and does the request carry the caps the server expects.
+
+R9 (epic-instance-facts-relocation, INSTANCE-001): the degraded message names
+the compute node by role, never by hostname.
 """
 
 from __future__ import annotations
@@ -102,7 +105,7 @@ async def test_connect_failure_degrades_and_never_raises(captured):
     out = await crawler.crawl_site("https://x")
     assert out["pages"] == []
     assert "crawler unavailable" in out["degraded"]
-    assert "chromebox" in out["degraded"]
+    assert "compute node" in out["degraded"]
 
     page = await crawler.fetch_rendered("https://x")
     assert page["markdown"] == ""
