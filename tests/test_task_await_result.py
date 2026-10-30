@@ -67,6 +67,7 @@ def _proposal() -> dict:
             "claim": "Sender asks whether TASKS-9 has a due date.",
         }],
         "expected_effect": "TASKS-9 carries the answer",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
 
@@ -352,7 +353,7 @@ async def test_a_task_create_draft_is_refused_in_run_as_no_capability():
         "agent_id": "jira-expert", "instructions": "Check TASKS-9."})
     ctx = SimpleNamespace(deps=TriageDeps(agent_id="inbox-triage", session_id=None))
     with pytest.raises(ModelRetry, match="not a real capability"):
-        await _validate_proposal(ctx, Proposal.model_validate(draft))
+        await _validate_proposal(ctx, Proposal.model_validate(draft), agent_authored=True)
 
 
 # --- restart resilience: the sweep -----------------------------------------

@@ -112,6 +112,7 @@ def _reflecting_model(reflection_args: dict):
                     "claim": episode["episode_body"][:20],
                 }],
                 "expected_effect": "the graph holds the distilled lesson",
+                "confidence": {"level": "high", "rationale": "The test states it."},
             }},
         )])
 

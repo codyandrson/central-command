@@ -19,7 +19,7 @@ from pydantic_ai import CallDeferred, ModelRetry, RunContext
 from central_command.config import settings as _settings
 from central_command.contract import (
     Action, DependencyDown, Evidence, Proposal, Reversibility, TRANSIENT,
-    classify_failure, validate_action_args,
+    classify_failure, validate_action_args, validate_proposal_shape,
 )
 from central_command.contract import dependencies as _dependencies
 from central_command.contract.dependencies import TOOL_DEPENDENCY, is_parkable, parkable_reads
@@ -1633,7 +1633,8 @@ def _loads_if_str(value):
 ProposalArg = Annotated[Proposal, BeforeValidator(_loads_if_str)]
 
 
-async def _validate_proposal(ctx: RunContext, proposal: Proposal) -> None:
+async def _validate_proposal(ctx: RunContext, proposal: Proposal, *,
+                             agent_authored: bool) -> None:
     """Reject an invented capability or a malformed action IN-RUN, before the
     proposal parks — the model gets every problem at once as a tool error
     (ModelRetry) and redrafts in the same run; only a well-formed proposal
@@ -1652,7 +1653,14 @@ async def _validate_proposal(ctx: RunContext, proposal: Proposal) -> None:
     the record must — a cluster of them is the coaching signal (charter, pack
     doc, or model) and hiding it would be the silent third state.
     Ungranted-but-REAL capabilities pass — grants stay an advisory amber flag
-    at review, never a ceiling."""
+    at review, never a ceiling.
+
+    `agent_authored` is True only for the four tools whose `proposal` the
+    model writes (`packs.AGENT_AUTHORED_PROPOSE_TOOLS`): those drafts must also
+    pass `contract.validate_proposal_shape` (a stated confidence, GATE-067).
+    A proposal a tool builds from plain arguments passes False and is never
+    given an invented confidence. Keyword-only and without a default, so a new
+    propose tool has to choose."""
     from central_command import events
     from central_command.runtime.packs import known_capability_names
 
@@ -1671,6 +1679,8 @@ async def _validate_proposal(ctx: RunContext, proposal: Proposal) -> None:
             )
             continue
         problems.extend(validate_action_args(a.capability, a.arguments))
+    if agent_authored:
+        problems.extend(validate_proposal_shape(proposal))
     if not problems:
         return
     deps = getattr(ctx, "deps", None)
@@ -1702,7 +1712,7 @@ async def propose_action(ctx: RunContext, proposal: ProposalArg) -> str:
     # Raising CallDeferred ends the run with a DeferredToolRequests carrying this
     # call. The control plane persists the proposal, routes it for approval, and
     # on approval resumes the run with the Executor's result.
-    await _validate_proposal(ctx, proposal)
+    await _validate_proposal(ctx, proposal, agent_authored=True)
     raise CallDeferred(metadata={"kind": "proposal"})
 
 
@@ -1757,7 +1767,7 @@ async def propose_delete_episode(ctx: RunContext, episode_uuid: str, rationale: 
         expected_effect=(f"episode '{ep['name']}' ({ep['group_id']}) is deleted with {counts}; "
                          f"{len(preview['provenance_facts'])} surviving fact(s) stop citing it"),
     )
-    await _validate_proposal(ctx, proposal)
+    await _validate_proposal(ctx, proposal, agent_authored=False)
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
@@ -2159,7 +2169,7 @@ async def propose_litellm_change(ctx: RunContext, proposal: ProposalArg) -> str:
     new file content). Reviewed and, once approved, applied by the
     control-plane Executor — this tool does not perform the change.
     """
-    await _validate_proposal(ctx, proposal)
+    await _validate_proposal(ctx, proposal, agent_authored=True)
     raise CallDeferred(metadata={"kind": "litellm_change"})
 
 
@@ -2169,7 +2179,7 @@ async def propose_calendar_change(ctx: RunContext, proposal: ProposalArg) -> str
     this tool does not change the calendar, and nothing happens until a human
     approves it.
     """
-    await _validate_proposal(ctx, proposal)
+    await _validate_proposal(ctx, proposal, agent_authored=True)
     raise CallDeferred(metadata={"kind": "calendar_change"})
 
 
@@ -2180,7 +2190,7 @@ async def propose_loe(ctx: RunContext, proposal: ProposalArg) -> str:
     and, once approved, written by the control-plane Executor — this tool
     records nothing itself.
     """
-    await _validate_proposal(ctx, proposal)
+    await _validate_proposal(ctx, proposal, agent_authored=True)
     raise CallDeferred(metadata={"kind": "loe"})
 
 
@@ -2738,7 +2748,7 @@ async def propose_mail_send(ctx: RunContext, to: list[str], subject: str, body: 
                          + (f" (cc {', '.join(copies)})" if copies else "")
                          + f" with the subject {subject!r}"),
     )
-    await _validate_proposal(ctx, proposal)
+    await _validate_proposal(ctx, proposal, agent_authored=False)
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
@@ -2778,7 +2788,7 @@ async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str,
         expected_effect=(f"the message from {sender} ({subject!r}) moves to the "
                          f"{folder.strip()} folder"),
     )
-    await _validate_proposal(ctx, proposal)
+    await _validate_proposal(ctx, proposal, agent_authored=False)
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 

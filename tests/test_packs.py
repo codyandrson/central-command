@@ -147,6 +147,7 @@ async def test_invented_capability_is_rejected_in_run():
     def prop(capability):
         return Proposal(
             intent="x", expected_effect="y", evidence=[],
+            confidence={"level": "high", "rationale": "The test states it."},
             actions=[Action(capability=capability, arguments={},
                             target_ref={"system": "jira", "id": "T-1"},
                             reversibility=Reversibility.reversible)],
@@ -160,14 +161,14 @@ async def test_invented_capability_is_rejected_in_run():
     events.emit = no_db
     try:
         with pytest.raises(ModelRetry, match="jira.dismiss"):
-            await tools_mod._validate_proposal(ctx, prop("jira.dismiss"))
+            await tools_mod._validate_proposal(ctx, prop("jira.dismiss"), agent_authored=True)
     finally:
         events.emit = real
     # A real name passes the NAME check; the arguments are the shape check's
     # business, so give it a well-formed draft.
     ok = prop("jira.add_comment@v2")
     ok.actions[0].arguments.update({"issue_key": "T-1", "body": "b"})
-    await tools_mod._validate_proposal(ctx, ok)
+    await tools_mod._validate_proposal(ctx, ok, agent_authored=True)
 
 
 def test_granted_capability_names_union():

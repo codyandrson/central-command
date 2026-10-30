@@ -35,6 +35,7 @@ _PROPOSAL = {
         }
     ],
     "expected_effect": "DEMO-1.duedate == 2026-08-03",
+    "confidence": {"level": "high", "rationale": "The email states the new deadline outright."},
 }
 
 
@@ -128,6 +129,9 @@ _SC1_PROPOSAL = {
     ],
     "evidence": _PROPOSAL["evidence"],
     "expected_effect": "DEMO-1.duedate == 2026-08-03; graph records the slip",
+    "confidence": {"level": "high",
+                   "rationale": ("The email states the new deadline outright; "
+                                 "the episode records only what it says.")},
 }
 
 
@@ -182,6 +186,8 @@ _REDRAFT_PROPOSAL = {
         }
     ],
     "expected_effect": "DEMO-1.duedate == 2026-08-10",
+    "confidence": {"level": "high",
+                   "rationale": "The operator named the date in their rejection feedback."},
 }
 
 
@@ -329,6 +335,8 @@ def _respond_task(messages, info: AgentInfo) -> ModelResponse:
             "claim": "Operator tasked a dependency note.",
         }],
         "expected_effect": f"{key} has a new comment",
+        "confidence": {"level": "high",
+                       "rationale": "The task names the issue and the comment to add."},
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
@@ -365,6 +373,8 @@ def _respond_litellm(messages, info: AgentInfo) -> ModelResponse:
             "claim": "Operator tasked adding a cc-triage alias on Haiku.",
         }],
         "expected_effect": "proxy serves alias cc-triage → anthropic/claude-haiku-4-5",
+        "confidence": {"level": "high",
+                       "rationale": "The request names the alias and the model it serves."},
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -401,6 +411,8 @@ def _respond_litellm_update(messages, info: AgentInfo) -> ModelResponse:
             "claim": "Operator tasked correcting the Claude model metadata using native fields.",
         }],
         "expected_effect": "claude-sonnet-5 gains native created_at metadata; provider key preserved",
+        "confidence": {"level": "high",
+                       "rationale": "The catalog lists created_at; only metadata changes."},
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -433,6 +445,8 @@ def _respond_litellm_create_key(messages, info: AgentInfo) -> ModelResponse:
             "claim": "Operator tasked issuing a scoped virtual key for triage attribution.",
         }],
         "expected_effect": "proxy issues virtual key cc-triage-key scoped to claude-haiku-4-5",
+        "confidence": {"level": "high",
+                       "rationale": "The request names the key alias and its one model."},
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -466,6 +480,8 @@ def _respond_litellm_fallbacks(messages, info: AgentInfo) -> ModelResponse:
             "claim": "Operator tasked adding a fallback from claude-sonnet-5 to claude-opus-4-8.",
         }],
         "expected_effect": "claude-sonnet-5 falls back to claude-opus-4-8 on failure",
+        "confidence": {"level": "high",
+                       "rationale": "The request names the model and its fallback."},
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -498,6 +514,8 @@ _CONVERSE_PROPOSAL = {
         "claim": "Operator asked to add a cc-scratch alias.",
     }],
     "expected_effect": "proxy serves alias cc-scratch → anthropic/claude-haiku-4-5",
+    "confidence": {"level": "high",
+                   "rationale": "The operator asked for this alias in the conversation."},
 }
 
 
@@ -619,6 +637,8 @@ def _respond_coach(
             "claim": claim,
         }],
         "expected_effect": f"{agent_id} charter gains a rule derived from feedback",
+        "confidence": {"level": "medium",
+                       "rationale": "The rule quotes the operator's own feedback."},
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]

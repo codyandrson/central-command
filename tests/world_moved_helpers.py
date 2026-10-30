@@ -89,6 +89,7 @@ def _page_update(expected_version: int) -> dict:
         "evidence": [{"kind": "operator", "source_ref": "operator:task",
                       "locator": "test task", "claim": "Operator tasked an edit."}],
         "expected_effect": "page 42 carries the new body",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
 

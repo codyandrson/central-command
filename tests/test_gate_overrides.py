@@ -324,6 +324,7 @@ def _tag_proposal(intent: str) -> dict:
             "locator": "test task", "claim": "Operator tasked a tag.",
         }],
         "expected_effect": f"{doc_id} is tagged draft",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
 
@@ -341,6 +342,7 @@ def _comment_proposal(intent: str) -> dict:
             "locator": "test task", "claim": "Operator tasked a comment.",
         }],
         "expected_effect": "TASKS-12 has a comment",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
 

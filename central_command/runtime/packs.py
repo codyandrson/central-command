@@ -1363,7 +1363,9 @@ PACKS: dict[str, Pack] = {
             "source_ref='event:<id>', locator='event log', claim=<the "
             "feedback, QUOTED VERBATIM>. Both the quote and the event id are "
             "re-checked mechanically against the record, so never paraphrase "
-            "and never cite an event you have not read."
+            "and never cite an event you have not read. `rationale` is "
+            "required: 1-2 sentences on what changed and why — a draft "
+            "without it is handed back, and the Executor refuses it."
         ),
         capabilities=(
             GatedCapability(
@@ -2004,6 +2006,28 @@ ADVISORY_DEFERRAL_TOOLS = frozenset({
     "propose_loe",
 })
 
+# The propose tools whose `proposal` the MODEL writes (a `ProposalArg`
+# parameter), as opposed to the ones that build the proposal server-side from
+# plain arguments. Only these are held to `contract.validate_proposal_shape`
+# (a confidence on every draft, GATE-067), and an agent offered one is told so
+# in its generated charter section. A parity test pins this set against the
+# tool signatures in `runtime/tools.py`.
+AGENT_AUTHORED_PROPOSE_TOOLS = frozenset({
+    "propose_action",
+    "propose_litellm_change",
+    "propose_calendar_change",
+    "propose_loe",
+})
+
+CONFIDENCE_GUIDANCE = (
+    "CONFIDENCE: every proposal you write with "
+    + ", ".join(sorted(AGENT_AUTHORED_PROPOSE_TOOLS))
+    + " states a `confidence` — level 'high', 'medium' or 'low' plus "
+    "`rationale`, one sentence saying WHY that level. A draft without one is "
+    "handed back to you. Be honest: the operator reads it beside your proposal, "
+    "and the record of your confidence against their decisions is kept."
+)
+
 # `consult_agent` is a THIRD category, distinct from both sets above (depth 2,
 # 2026-08-22): it is ALLOWED in an advisory sub-run (dropped from
 # NON_ADVISORY_TOOLS), but its own deferral — the wait for an agent IT consults
@@ -2076,6 +2100,9 @@ def charter_section(pack_names) -> str:
         "charter. If a task calls for a capability not listed here, say so in "
         "plain text instead of proposing it.",
     ]
+    if any(t in AGENT_AUTHORED_PROPOSE_TOOLS for pack in packs for t in _offered(pack)[0]):
+        lines.append("")
+        lines.append(CONFIDENCE_GUIDANCE)
     caps_seen: set[str] = set()
     for pack in packs:
         if pack.guidance:

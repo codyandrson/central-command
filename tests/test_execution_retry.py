@@ -507,6 +507,7 @@ async def test_a_confluence_503_parks_the_proposal_and_the_sweep_re_drives_it(mo
             "evidence": [{"kind": "operator", "source_ref": "operator:task",
                           "locator": "test task", "claim": "Operator tasked an edit."}],
             "expected_effect": "page 42 carries the new body",
+            "confidence": {"level": "high", "rationale": "The test states it."},
         }
         model = make_deferred_tool_model("propose_action", {"proposal": proposal})
 

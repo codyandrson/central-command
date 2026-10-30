@@ -1,7 +1,9 @@
 """Confidence: the contract field, the wire shape, and the agreement record.
 
 Uncertainty triage ships in EVIDENCE mode — confidence is recorded on every
-proposal and nothing is auto-approved. These tests hold the two things that
+proposal and nothing is auto-approved. Since story 11.3 (GATE-067, ruled by the
+operator 2026-10-29) a draft the agent writes must state one or it is handed
+back in-run; a proposal a tool builds server-side still carries none. These tests hold the two things that
 make it more than decoration: that it survives the round trip to the cockpit
 (a field the gateway never sends is invisible to `tsc` AND to every frontend
 test), and that it can be measured against the operator's verdicts.
@@ -14,7 +16,7 @@ from pydantic import ValidationError
 from pydantic_ai.messages import ToolCallPart
 
 from central_command.config import settings
-from central_command.contract import Confidence, Proposal
+from central_command.contract import Confidence, Proposal, validate_proposal_shape
 from central_command.db import repo
 from central_command.gateway.steward_agreement import pair_confidence
 from central_command.runtime.durable import proposal_from_call
@@ -38,11 +40,31 @@ _CORE = {
 # --- the contract --------------------------------------------------------------
 
 
-def test_a_proposal_without_confidence_still_validates():
-    """Optional by construction: every existing path — email triage, coaching,
-    tasks — parks proposals that state none, and must keep doing so."""
+def test_an_agent_authored_draft_without_confidence_is_handed_back():
+    """Inverted by GATE-067: the MODEL still validates without one (server-built
+    proposals and older rows carry none), but the propose-time shape check —
+    run for the four tools whose `proposal` the agent writes — names it."""
     p = Proposal.model_validate(_CORE)
     assert p.confidence is None
+    (problem,) = validate_proposal_shape(p)
+    assert problem.startswith("confidence:")
+    stated = Proposal.model_validate(
+        {**_CORE, "confidence": {"level": "medium", "rationale": "partly stated"}})
+    assert validate_proposal_shape(stated) == []
+
+
+def test_every_test_double_proposal_states_a_confidence():
+    """Every proposal dict the deterministic doubles draft carries one — they
+    stand in for agent-authored drafts, which are handed back without it."""
+    import inspect
+    import re
+
+    from central_command.runtime import spike_model
+
+    src = inspect.getsource(spike_model)
+    drafts = len(re.findall(r'"actions": \[', src))
+    stated = len(re.findall(r'"confidence": \{', src))
+    assert drafts == stated == 15, (drafts, stated)
 
 
 def test_a_bad_confidence_level_is_rejected():
@@ -123,7 +145,9 @@ def test_an_undecided_proposal_is_awaiting_never_an_agreement():
 
 def test_a_proposal_with_no_stated_confidence_is_counted_apart():
     """Absent is not low: counting it as low would invent evidence against the
-    agent, and counting it as high would invent evidence for it."""
+    agent, and counting it as high would invent evidence for it. Still reached
+    after GATE-067: server-built proposals and rows recorded before it carry
+    none."""
     report = pair_confidence([_p("a", None)], [_d("a", "approved", 1)])
     assert report["no_confidence_stated"] == 1
     assert report["total_paired"] == 0

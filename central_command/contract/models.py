@@ -65,10 +65,16 @@ class Action(BaseModel):
 class Confidence(BaseModel):
     """The agent's own confidence in its proposal, with the reason for it.
 
-    Recorded, never enforced: every proposal still passes the human gate. It
-    exists so the confidence-vs-verdict record can be measured (the steward
-    agreement report), which is what a later bulk-approval threshold would have
-    to graduate on."""
+    Its PRESENCE is enforced at propose time for agent-authored proposals
+    (`contract.validate_proposal_shape`, called by the runtime for the four
+    tools whose `proposal` the model writes): a draft without one is handed
+    back in-run. Server-built proposals carry none and are never given one. The
+    Executor cannot check it — `execute()` receives the actions, not the
+    proposal — and that is recorded, not worked around (GATE-067). Its VALUE
+    gates nothing: every proposal still passes the human gate. It exists so the
+    confidence-vs-verdict record can be measured (the steward agreement
+    report), which is what a later bulk-approval threshold would have to
+    graduate on."""
 
     level: ConfidenceLevel = Field(
         ..., description="high | medium | low — your own assessment of this proposal"
@@ -85,9 +91,11 @@ class Proposal(BaseModel):
     actions: list[Action] = Field(..., min_length=1)
     evidence: list[Evidence]
     expected_effect: str = Field(..., description="the post-state to verify against")
-    # Optional so every existing path keeps validating unchanged: an ABSENT
-    # confidence means the agent did not state one, which is not the same as a
-    # low one and must never render as one.
+    # Optional in the MODEL because server-built proposals carry none (and
+    # proposals recorded before GATE-067 have none): an ABSENT confidence means
+    # nobody stated one, which is not the same as a low one and must never
+    # render as one. For agent-authored proposals the runtime enforces its
+    # presence at propose time (`contract.validate_proposal_shape`).
     confidence: Confidence | None = None
 
 

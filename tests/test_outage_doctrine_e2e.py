@@ -180,6 +180,7 @@ async def _graph_proposal(spy: list[str], landed: list[str], monkeypatch,
         "evidence": [{"kind": "operator", "source_ref": "operator:task",
                       "locator": "test task", "claim": "Jane Doe works at Example Co"}],
         "expected_effect": "the graph knows Jane Doe",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
     run = await _run(monkeypatch, "jira-expert", proposal)
     model = make_deferred_tool_model("propose_action", {"proposal": proposal})

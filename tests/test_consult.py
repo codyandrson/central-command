@@ -460,6 +460,7 @@ _DRAFT = {
         "claim": "TASKS-12 has no outward link to TASKS-13.",
     }],
     "expected_effect": "TASKS-12 blocks TASKS-13",
+    "confidence": {"level": "high", "rationale": "The test states it."},
 }
 
 

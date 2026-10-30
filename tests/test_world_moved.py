@@ -362,6 +362,7 @@ def _jira_proposal(*, comment_first: bool = False, transition: str = "Done") -> 
         "evidence": [{"kind": "operator", "source_ref": "operator:task",
                       "locator": "test task", "claim": "Operator tasked a close."}],
         "expected_effect": "DEMO-7 is Done",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
 

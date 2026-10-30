@@ -61,6 +61,7 @@ def _episode(name: str) -> dict:
         "evidence": [{"kind": "record", "source_ref": "chat", "locator": "chat",
                       "claim": f"{name} happened."}],
         "expected_effect": f"episode {name} exists",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
 

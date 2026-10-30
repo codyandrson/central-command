@@ -71,6 +71,7 @@ def _one_action_model(capability: str, arguments: dict) -> FunctionModel:
         "evidence": [{"kind": "email", "source_ref": "email:test",
                       "locator": "body", "claim": "Dana"}],
         "expected_effect": f"{capability} performed",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
     def respond(messages, info: AgentInfo) -> ModelResponse:

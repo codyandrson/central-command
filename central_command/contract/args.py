@@ -21,6 +21,10 @@ nothing looked at arguments before approval.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .models import Proposal
 
 
 @dataclass(frozen=True)
@@ -170,7 +174,9 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "calendar.create_event": ArgSpec(required=("title", "start", "end")),
     "calendar.update_event": ArgSpec(required=("event_id",)),
     "calendar.delete_event": ArgSpec(required=("event_id", "reason")),
-    "charter.update": ArgSpec(required=("agent_id", "content")),
+    # The rationale is what the operator weighs a charter edit by, and the
+    # record of why an agent's standing rules changed (GATE-009).
+    "charter.update": ArgSpec(required=("agent_id", "content", "rationale")),
     "skill.doc_add": ArgSpec(required=("skill_id",)),
     # Not a gated write since story 4.7: task creation is a trigger, and the
     # direct `create_task` tool checks its shape here — the one list.
@@ -253,4 +259,34 @@ def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
                 f"{capability}: {path}={value!r} is negative — an unknown price is an "
                 f"absence, not a sentinel. Leave the field out."
             )
+    return problems
+
+
+def validate_proposal_shape(proposal: Proposal) -> list[str]:
+    """Every shape problem with a proposal's own fields — the ones no single
+    action carries, so `validate_action_args` (which sees one action) cannot
+    check them. Today that is the confidence: a level and the one sentence
+    saying why (GATE-067).
+
+    The runtime calls it for AGENT-AUTHORED proposals only — the four tools
+    whose `proposal` argument the model writes. A proposal a tool builds from
+    plain arguments (mail send, MCP, bulk dismiss, skills) carries no
+    confidence and must never be given one: an invented confidence would be a
+    false record of what the agent assessed. The Executor tier cannot run it:
+    `execute()` receives the actions, never the proposal around them."""
+    confidence = getattr(proposal, "confidence", None)
+    if confidence is None:
+        return [
+            "confidence: missing — state how sure you are of this proposal, as "
+            "confidence.level (high | medium | low) plus confidence.rationale, one "
+            "sentence on WHY that level"
+        ]
+    problems: list[str] = []
+    if not getattr(confidence, "level", None):
+        problems.append("confidence.level: missing — one of high | medium | low")
+    if not (getattr(confidence, "rationale", None) or "").strip():
+        problems.append(
+            "confidence.rationale: empty — one sentence on WHY that level "
+            "(what makes the proposal certain or not)"
+        )
     return problems

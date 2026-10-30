@@ -5,6 +5,13 @@ Found live 2026-08-29: one `graph.add_episode` intent took the operator FOUR
 approvals — `summary` instead of `episode_body`, no `name`, no `scope` —
 because the Executor was the first thing to look at the arguments, and it
 found one problem per round (two of them as bare KeyErrors: `'name'`).
+
+Story 11.3 (epic small-fixes R1/R2, GATE-009 and GATE-067, ruled by the
+operator 2026-10-29): a `charter.update` without its `rationale` is handed back
+in-run and refused by the Executor from this same list; a draft the model
+writes (the four `ProposalArg` tools) without a `confidence` is handed back
+in-run by `contract.validate_proposal_shape`, while a proposal a tool builds
+server-side carries none and still parks.
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ from pydantic_ai import ModelRetry
 
 from central_command import events
 from central_command.contract import ARG_SPECS, Action, Proposal, Reversibility, validate_action_args
+from central_command.contract import validate_proposal_shape
 from central_command.db import repo
 from central_command.gateway import executor
 from central_command.gateway.capabilities import gated_write_names
@@ -29,10 +37,14 @@ from tests.conftest import needs_pg
 _BAD_ARGS = {"summary": "EA scope — operator contact doctrine …"}
 
 
-def _proposal(arguments: dict, capability: str = "graph.add_episode") -> Proposal:
+_CONFIDENCE = {"level": "high", "rationale": "The operator stated the doctrine outright."}
+
+
+def _proposal(arguments: dict, capability: str = "graph.add_episode",
+              confidence: dict | None = _CONFIDENCE) -> Proposal:
     return Proposal(
         intent="record the contact doctrine", expected_effect="graph episode",
-        evidence=[],
+        evidence=[], confidence=confidence,
         actions=[Action(capability=capability, arguments=arguments,
                         target_ref={"system": "graphiti", "id": "central_command"},
                         reversibility=Reversibility.reversible)],
@@ -138,7 +150,7 @@ async def test_bad_draft_is_handed_back_in_run_and_recorded():
     since = await repo.latest_event_id()
     ctx = SimpleNamespace(deps=TriageDeps(agent_id="ea", session_id="sess_test_args"))
     with pytest.raises(ModelRetry) as excinfo:
-        await tools_mod._validate_proposal(ctx, _proposal(_BAD_ARGS))
+        await tools_mod._validate_proposal(ctx, _proposal(_BAD_ARGS), agent_authored=True)
     assert "name, episode_body, scope, reference_time" in str(excinfo.value)
     rows = await repo.list_events(since_id=since, kind="proposal.rejected_in_run")
     assert len(rows) == 1
@@ -196,3 +208,137 @@ def test_every_propose_tool_has_a_redraft_budget():
     propose = {name: t for name, t in toolset.tools.items() if name.startswith("propose_")}
     assert propose, "no propose tools in the granted toolset?"
     assert {t.max_retries for t in propose.values()} == {10}
+
+
+# --- story 11.3: rationale (GATE-009) and confidence (GATE-067) ---------------
+
+_CHARTER_NO_RATIONALE = {"agent_id": "a", "content": "c"}
+
+
+def test_a_charter_update_without_rationale_is_named_by_the_one_list():
+    (problem,) = validate_action_args("charter.update", _CHARTER_NO_RATIONALE)
+    assert "rationale" in problem and "present: agent_id, content" in problem
+    assert validate_action_args("charter.update", {**_CHARTER_NO_RATIONALE,
+                                                   "rationale": "why"}) == []
+
+
+@needs_pg
+async def test_a_coach_run_drafting_without_rationale_is_handed_back_and_redrafts(monkeypatch):
+    """The coach's first draft drops `rationale`: the run gets a ModelRetry
+    naming it (recorded as `proposal.rejected_in_run`), redrafts in the same
+    run, and only the redraft reaches the Inbox."""
+    from pydantic_ai.messages import RetryPromptPart, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from central_command.config import settings
+    from central_command.runtime import spike_model
+    from central_command.runtime.run import run_coach
+    from tests.test_coach_loop import _seeded_agent
+
+    monkeypatch.setattr(settings, "test_model", True)
+    retries: list[str] = []
+
+    def respond(messages, info):
+        sent_back = [p for m in messages for p in getattr(m, "parts", [])
+                     if isinstance(p, RetryPromptPart)]
+        retries[:] = [str(p.content) for p in sent_back]
+        response = spike_model._respond_coach(messages, info)
+        if not sent_back:
+            for part in response.parts:
+                if isinstance(part, ToolCallPart) and part.tool_name == "propose_action":
+                    part.args["proposal"]["actions"][0]["arguments"].pop("rationale")
+        return response
+
+    agent = await _seeded_agent("rationale")
+    since = await repo.latest_event_id()
+    out = await run_coach(agent, model=FunctionModel(respond))
+
+    assert retries and "rationale" in retries[0], retries
+    assert out["deferred"] is True
+    row = await repo.load_proposal(out["proposal_id"])
+    assert row["actions"][0]["arguments"]["rationale"]
+    rejected = await repo.list_events(since_id=since, kind="proposal.rejected_in_run")
+    mine = [r for r in rejected if r["ref_id"] == out["session_id"]]
+    assert len(mine) == 1 and "rationale" in mine[0]["payload"]["problems"][0]
+
+
+async def test_the_executor_refuses_a_charter_update_without_rationale_before_it_runs(
+        monkeypatch):
+    """The Executor half: an API-submitted charter edit skips the runtime, so
+    the same list refuses it before the handler writes a version."""
+    async def explode(*a, **k):
+        raise AssertionError("the charter handler ran on a rationale-less edit")
+
+    monkeypatch.setitem(executor.HANDLERS, "charter.update", explode)
+    action = Action(capability="charter.update", arguments=dict(_CHARTER_NO_RATIONALE),
+                    target_ref={"system": "central_command", "id": "a"},
+                    reversibility=Reversibility.reversible)
+    with pytest.raises(executor.ExecutionFailed) as excinfo:
+        await executor.execute([action], approver="human:lee", source_refs=[])
+    assert excinfo.value.completed == []
+    assert "rationale" in excinfo.value.error
+
+
+def test_validate_proposal_shape_names_a_missing_or_empty_confidence():
+    assert validate_proposal_shape(_proposal({}, confidence=None))[0].startswith("confidence:")
+    (problem,) = validate_proposal_shape(
+        _proposal({}, confidence={"level": "low", "rationale": "  "}))
+    assert problem.startswith("confidence.rationale")
+    assert validate_proposal_shape(_proposal({})) == []
+
+
+_GOOD_EPISODE = {"name": "n", "episode_body": "b", "scope": "shared",
+                 "reference_time": "2026-01-01T00:00:00Z"}
+
+
+@needs_pg
+async def test_propose_action_without_confidence_is_handed_back_and_with_one_parks():
+    from pydantic_ai import CallDeferred
+
+    ctx = SimpleNamespace(deps=TriageDeps(agent_id="ea", session_id="sess_test_conf"))
+    with pytest.raises(ModelRetry) as excinfo:
+        await tools_mod.propose_action(ctx, _proposal(_GOOD_EPISODE, confidence=None))
+    assert "confidence" in str(excinfo.value)
+    with pytest.raises(CallDeferred):
+        await tools_mod.propose_action(ctx, _proposal(_GOOD_EPISODE))
+
+
+async def test_a_server_built_mail_send_without_confidence_still_parks():
+    """`propose_mail_send` builds its proposal from plain arguments, so it
+    carries no confidence, and inventing one would falsify the record."""
+    from pydantic_ai import CallDeferred
+
+    ctx = SimpleNamespace(deps=TriageDeps(agent_id="ea", session_id="sess_test_mail"))
+    with pytest.raises(CallDeferred) as excinfo:
+        await tools_mod.propose_mail_send(
+            ctx, to=["jane.doe@example.com"], subject="Thursday",
+            body="Thursday works.", rationale="She asked for a time.")
+    assert excinfo.value.metadata["proposal"]["confidence"] is None
+
+
+def test_the_agent_authored_set_is_exactly_the_proposal_arg_tools():
+    """Pins `packs.AGENT_AUTHORED_PROPOSE_TOOLS` to the tool signatures, and
+    each propose tool's call to `_validate_proposal` to its membership — a new
+    `ProposalArg` tool that forgot the confidence check fails here."""
+    import inspect
+    import re
+
+    authored = {
+        name for name, fn in inspect.getmembers(tools_mod, inspect.iscoroutinefunction)
+        if name.startswith("propose_")
+        and any(p.annotation in (tools_mod.ProposalArg, "ProposalArg")
+                for p in inspect.signature(fn).parameters.values())
+    }
+    assert authored == packs.AGENT_AUTHORED_PROPOSE_TOOLS
+    for name, fn in inspect.getmembers(tools_mod, inspect.iscoroutinefunction):
+        flags = re.findall(r"_validate_proposal\(ctx, proposal, agent_authored=(\w+)\)",
+                           inspect.getsource(fn))
+        if name.startswith("propose_") and flags:
+            assert flags == [str(name in authored)], (name, flags)
+
+
+def test_every_agent_offered_an_authored_tool_is_told_to_state_confidence():
+    for name, pack in packs.PACKS.items():
+        section = packs.charter_section([name])
+        offers = set(pack.tool_names) & packs.AGENT_AUTHORED_PROPOSE_TOOLS
+        assert (packs.CONFIDENCE_GUIDANCE in section) == bool(offers), name

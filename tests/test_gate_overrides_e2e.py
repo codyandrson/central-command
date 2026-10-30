@@ -194,6 +194,7 @@ async def test_a_flagged_proposal_parks_with_the_reviewers_reason(demo, authored
             "reversibility": "reversible"}],
         "evidence": _tag_proposal("x")["evidence"],
         "expected_effect": "DOE-1 is due in 2020",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
     out = await _run(monkeypatch, DRAFTER, proposal)
     row = await _assert_parked(out)

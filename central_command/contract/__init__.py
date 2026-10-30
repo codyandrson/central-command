@@ -5,7 +5,7 @@ It defines what an agent may *propose* and how that proposal moves through its
 lifecycle. See the design docs (contracts artifact) for the full rationale.
 """
 
-from .args import ARG_SPECS, ArgSpec, validate_action_args
+from .args import ARG_SPECS, ArgSpec, validate_action_args, validate_proposal_shape
 from .failures import (
     RETRY_BACKOFF_BASE_SECONDS,
     SEMANTIC,
@@ -40,6 +40,7 @@ __all__ = [
     "ARG_SPECS",
     "ArgSpec",
     "validate_action_args",
+    "validate_proposal_shape",
     "Reversibility",
     "ConfidenceLevel",
     "Confidence",

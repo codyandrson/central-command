@@ -177,6 +177,7 @@ def _proposal(capability: str, arguments: dict, claim: str, system: str) -> dict
         "evidence": [{"kind": "email", "source_ref": "email:body",
                       "locator": "body", "claim": claim}],
         "expected_effect": f"{capability} performed",
+        "confidence": {"level": "high", "rationale": "The test states it."},
     }
 
 
