@@ -196,6 +196,25 @@ async def arm(session_id: str, pending: dict | None) -> None:
     await repo.update_session_run_state(session_id, {"pending_resume": pending})
 
 
+async def _episode_of(session_id: str, pending: dict, now: datetime) -> str:
+    """When the failure streak this park belongs to began (R36): the identity
+    `retry.failing_despite_probe` is reported once per. A re-park of the SAME
+    park (`attempts` > 0, a re-drive that failed again) keeps it — from the
+    record it was handed, else from the record still on the session (a turn
+    re-park builds a fresh record); a first park opens a new one. Never read
+    the stored record for a first park: `pending_resume` outlives a successful
+    resume, so it would hand an old streak to a new outage."""
+    if pending.get("episode_at"):
+        return pending["episode_at"]
+    if int(pending.get("attempts") or 0) > 0:
+        prior = (await repo.get_session_run_state(session_id) or {}).get(
+            "pending_resume") or {}
+        carried = prior.get("episode_at") or prior.get("parked_at")
+        if carried:
+            return carried
+    return now.isoformat()
+
+
 async def park_resume(
     session_id: str, pending: dict, error: BaseException | str, *,
     due_now: bool = False,
@@ -218,6 +237,7 @@ async def park_resume(
         or failed_dependencies(error if isinstance(error, BaseException) else None)
     )
     now = datetime.now(timezone.utc)
+    episode_at = await _episode_of(session_id, pending, now)
     if due_now:
         backoff, not_before = 0, now
     else:
@@ -227,6 +247,7 @@ async def park_resume(
         "dependencies": dependencies,
         "last_error": str(error)[:500],
         "parked_at": now.isoformat(),
+        "episode_at": episode_at,
         "not_before": not_before.isoformat(),
     }
     await repo.park_session_awaiting_resume(session_id, stored)

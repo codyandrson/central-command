@@ -371,6 +371,8 @@ async def test_with_the_probes_up_the_read_resumes_in_place_and_the_task_lands(
 
     retried = await _events(session_id, "session.resume_retried")
     assert len(retried) == 1 and retried[0]["payload"]["kind"] == "read"
+    # R34 (story 11.8): the retried event names what the park waited on.
+    assert retried[0]["payload"]["dependencies"] == ["graph", "embedder"]
     assert len(await _events(task["id"], "task.completed")) == 1
     assert not await _events(task["id"], "task.run_failed")
 

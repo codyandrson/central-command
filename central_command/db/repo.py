@@ -2372,12 +2372,21 @@ async def release_work_item(
     count_attempt: bool = True,
     not_before: datetime | None = None,
     dependencies: tuple[str, ...] | list[str] | None = None,
+    freeze: bool = False,
 ) -> None:
     """Hand a claimed item back to the queue (crash/transient failure).
 
     `dependencies` is what a TRANSIENT release waited on (`work_item.
     dependencies`, jsonb); None leaves the column as it was, and a reader takes
-    a row with none to mean `llm`.
+    a row with none to mean `llm`. A release that names dependencies is the
+    only one that is a FAILURE: it bumps `transient_failures` and opens the
+    streak (`failing_since`) if none is open.
+
+    `freeze=True` is the semantic freeze (R33): the item was held back, not
+    failed. It clears the dependency record, the failure count and the streak,
+    so a frozen item never reads as failing despite a healthy probe because an
+    OLD transient record outlived the freeze. The backoff exponent
+    (`transient_releases`) still grows.
 
     `count_attempt=False` is the outage-equivalence release: the CLAIM already
     incremented `attempts`, so a run that died because the PROVIDER was down
@@ -2402,11 +2411,21 @@ async def release_work_item(
                    transient_releases = case when $3 then transient_releases
                                              else transient_releases + 1 end,
                    not_before = coalesce($4, not_before),
-                   dependencies = coalesce($5::jsonb, dependencies)
+                   dependencies = case when $6 then null
+                                       else coalesce($5::jsonb, dependencies) end,
+                   transient_failures = case when $6 then 0
+                                             when $5::jsonb is not null
+                                               then transient_failures + 1
+                                             else transient_failures end,
+                   failing_since = case when $6 then null
+                                        when $5::jsonb is not null
+                                          then coalesce(failing_since, now())
+                                        else failing_since end
              where id = $1 and state = 'CLAIMED'
             """,
             item_id, error, count_attempt, not_before,
             None if dependencies is None else json.dumps(list(dependencies)),
+            freeze,
         )
     finally:
         await conn.close()
@@ -7177,7 +7196,19 @@ async def units_failing_despite_probe(n: int) -> list[dict]:
     first park is 0), so its failures are attempts + 1; a proposal's and a
     task's first park is attempt 1; a ledger item counts `transient_releases`;
     an ingest job counts its claims. Returns `{unit, id, failures, dependencies,
-    last_error}`, oldest kind first.
+    last_error, episode}`, oldest kind first.
+
+    `episode` is when the unit's CURRENT failure streak began, the identity the
+    sweep reports once per (R36); never a count, which the sweep cannot see
+    drop (it lists only units at or over the threshold). Per kind: a session,
+    proposal or task carries `episode_at` in its park record, set at the first
+    park and carried through every re-park (`parked_at`, rewritten on each
+    re-park, is the fallback for a park written before the stamp); a ledger
+    item's is `failing_since`, opened by its first release that recorded a
+    dependency and cleared by a freeze; an ingest job is one streak for life
+    (a success makes it terminal), so its `created_at`. A freeze is not a
+    failure (R33): the ledger arm counts `transient_failures`, which a freeze
+    never bumps, and lists only an item still carrying a dependency record.
     """
     conn = await _conn()
     try:
@@ -7188,32 +7219,40 @@ async def units_failing_despite_probe(n: int) -> list[dict]:
                        coalesce((run_state -> 'pending_resume' ->> 'attempts')::int, 0) + 1
                          as failures,
                        {_deps_sql("run_state -> 'pending_resume' -> 'dependencies'")} as deps,
-                       run_state -> 'pending_resume' ->> 'last_error' as last_error
+                       run_state -> 'pending_resume' ->> 'last_error' as last_error,
+                       coalesce((run_state -> 'pending_resume' ->> 'episode_at')::timestamptz,
+                                (run_state -> 'pending_resume' ->> 'parked_at')::timestamptz)
+                         as episode
                   from session where status = 'AWAITING_RESUME'
                 union all
                 select 'proposal', id,
                        coalesce((retry_state ->> 'attempts')::int, 1),
                        {_deps_sql("retry_state -> 'dependencies'")},
-                       retry_state ->> 'last_error'
+                       retry_state ->> 'last_error',
+                       coalesce((retry_state ->> 'episode_at')::timestamptz,
+                                (retry_state ->> 'parked_at')::timestamptz)
                   from proposal where status = 'RETRY_PENDING'
                 union all
                 select 'task', id,
                        coalesce((retry_state ->> 'attempts')::int, 1),
                        {_deps_sql("retry_state -> 'dependencies'")},
-                       retry_state ->> 'last_error'
+                       retry_state ->> 'last_error',
+                       coalesce((retry_state ->> 'episode_at')::timestamptz,
+                                (retry_state ->> 'parked_at')::timestamptz)
                   from task where status = 'ASSIGNED' and retry_state is not null
                 union all
-                select 'work_item', id, transient_releases, {_deps_sql("dependencies")}, last_error
+                select 'work_item', id, transient_failures, {_deps_sql("dependencies")}, last_error,
+                       failing_since
                   from work_item
                  where state = 'UNPROCESSED' and dependencies is not null
                 union all
                 select 'ingest_job', 'ingest-job-' || id::text, attempts,
-                       {_deps_sql("dependencies")}, last_error
+                       {_deps_sql("dependencies")}, last_error, created_at
                   from graph_ingest_job
                  where status = 'QUEUED' and last_error is not null
                    and not_before is not null
             )
-            select unit, id, failures, deps, last_error
+            select unit, id, failures, deps, last_error, episode
               from parked
              where failures >= $1
                and not exists (
@@ -7229,7 +7268,9 @@ async def units_failing_despite_probe(n: int) -> list[dict]:
             d = r["deps"]
             out.append({"unit": r["unit"], "id": r["id"], "failures": r["failures"],
                         "dependencies": json.loads(d) if isinstance(d, str) else d,
-                        "last_error": r["last_error"]})
+                        "last_error": r["last_error"],
+                        "episode": (r["episode"].isoformat()
+                                    if r["episode"] is not None else None)})
         return out
     finally:
         await conn.close()

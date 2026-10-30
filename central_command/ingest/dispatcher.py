@@ -576,7 +576,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             backoff, not_before = retry_not_before(releases)
             await repo.release_work_item(
                 item["id"], error=freeze["reason"], count_attempt=False,
-                not_before=not_before,
+                not_before=not_before, freeze=True,
             )
             await events.emit(
                 "work.frozen",

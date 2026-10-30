@@ -1016,27 +1016,70 @@ async def _record_probe_changes(cache, states: dict[str, dict]) -> list[dict]:
     return changes
 
 
+def _as_utc(value) -> datetime | None:
+    """A timestamp as an aware UTC datetime, from an ISO string or a datetime;
+    None when there is none or it does not parse."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+async def _already_reported(unit: dict) -> bool:
+    """Has this unit's CURRENT failure episode been reported (R36)?
+
+    The newest `retry.failing_despite_probe` event for the id carries the
+    `episode` it reported; the unit is reported again when its current episode
+    differs. Never a count comparison: the sweep sees only units at or over the
+    threshold, so it never sees a dip, and two episodes first seen at the same
+    count compare equal. A report written before the episode identity existed
+    has none: it covers the unit's current episode when that began no later
+    than the report (an upgrade must not re-announce every unit already
+    reported), and a unit whose episode began AFTER it is a later outage. A
+    unit with no recorded episode keeps the old once-per-id reading."""
+    last = await repo.list_events(kind="retry.failing_despite_probe",
+                                  ref_id=unit["id"], limit=1, newest_first=True)
+    if not last:
+        return False
+    current = _as_utc(unit.get("episode"))
+    if current is None:
+        return True
+    reported = last[0]["payload"].get("episode")
+    if reported is not None:
+        return _as_utc(reported) == current
+    at = _as_utc(last[0].get("created_at"))
+    return at is None or current <= at
+
+
 async def _report_failing_despite_probe() -> list[dict]:
     """The loud rule (outage doctrine story 4). With no attempt limit, a unit
     whose failures classify transient while every dependency it recorded probes
     UP — a revoked key answering 403, a firewall deny — would retry once per
     backoff cap in silence. Once it has failed `retry_loud_after_attempts`
-    times, say so ONCE: `retry.failing_despite_probe`, keyed by the unit's id.
+    times, say so ONCE per failure episode: `retry.failing_despite_probe`,
+    keyed by the unit's id and the `episode` its payload carries (when the
+    current streak began, `repo.units_failing_despite_probe`).
 
     Bookkeeping, not authorisation: it opens no gate and changes no unit (the
     unit keeps retrying on its curve), so it is written after the fact. "Once"
-    is per unit id, read back off the append-only log."""
+    is read back off the append-only log, per unit id and episode (R36): a unit
+    that leaves the failing list and fails again later is a new episode and is
+    reported again; no event is ever deleted."""
     reported: list[dict] = []
     units = await repo.units_failing_despite_probe(settings.retry_loud_after_attempts)
     for unit in units:
-        if await repo.list_events(kind="retry.failing_despite_probe",
-                                  ref_id=unit["id"], limit=1):
+        if await _already_reported(unit):
             continue
         await events.emit(
             "retry.failing_despite_probe", ref_id=unit["id"],
             payload={"unit": unit["unit"], "failures": unit["failures"],
                      "dependencies": unit["dependencies"],
-                     "last_error": (unit["last_error"] or "")[:500]},
+                     "last_error": (unit["last_error"] or "")[:500],
+                     "episode": unit.get("episode")},
             actor="system",
         )
         reported.append({"unit": unit["unit"], "id": unit["id"]})
@@ -1332,7 +1375,11 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         "session.resume_retried", ref_id=session_id,
         payload={"after": after, "attempt": attempts,
                  "proposal_id": pending.get("proposal_id"),
-                 "item_id": pending.get("item_id")},
+                 "item_id": pending.get("item_id"),
+                 # What the park waited on (R34): the recorded list, never a
+                 # guess from the error text — an untyped transient error was
+                 # recorded as ['llm'] when it parked.
+                 "dependencies": pending.get("dependencies")},
         actor="system",
     )
 
@@ -2173,6 +2220,7 @@ async def park_task_retry(
     kind: str = "run",
     attempts: int = 1,
     item_id: str | None = None,
+    episode_at: str | None = None,
 ) -> dict | None:
     """Park `task_id` for a re-run if `exc` is TRANSIENT; None means it was not
     parked (a semantic failure, or an already-terminal task) and the caller
@@ -2182,6 +2230,10 @@ async def park_task_retry(
     through that one: `"run"` for a plain assigned run, `"answer"` for the
     resume of a question the operator already answered — re-running the latter
     as a fresh task would throw away the operator's answer.
+
+    `episode_at` is when the failure streak this park belongs to began (R36):
+    a re-park passes the claimed record's, so every attempt of one streak
+    carries the same identity; a first park omits it and opens a new one.
     """
     if classify_failure(exc) != TRANSIENT:
         return None
@@ -2197,6 +2249,7 @@ async def park_task_retry(
         "dependencies": list(failed_dependencies(exc)),
         "last_error": str(exc)[:500],
         "parked_at": now.isoformat(),
+        "episode_at": episode_at or now.isoformat(),
         "not_before": not_before.isoformat(),
     }
     if item_id:
@@ -2283,6 +2336,7 @@ async def retry_parked_task(task_id: str, model=None) -> dict | None:
         parked = await park_task_retry(
             task_id, e, kind=kind, attempts=attempts + 1,
             item_id=state.get("item_id"),
+            episode_at=state.get("episode_at") or state.get("parked_at"),
         )
         if parked is not None:
             return {"parked": True, "task_id": task_id,

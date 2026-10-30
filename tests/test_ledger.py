@@ -3,6 +3,10 @@
 Parsing tests are pure and always run. The ledger-invariant tests need a real
 Postgres (the invariants live in SQL — `on conflict do nothing`, `for update
 skip locked` — so mocking them would test nothing), and skip without one.
+
+Story 11.8 (R33, outage follow-up J1) added the freeze test: a semantic freeze is
+not a failure, so a frozen item is never listed as failing despite a healthy
+probe because of an old transient record.
 """
 
 from __future__ import annotations
@@ -470,3 +474,96 @@ async def test_backlog_enrollment_is_resumable(clean_ledger):
     second = await ledger.enroll_fixture_dir(FIXTURES)
     assert first["enrolled"] + first["duplicates"] == second["duplicates"]
     assert second["enrolled"] == 0, "re-running a sweep must add nothing"
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
+    clean_ledger, monkeypatch
+):
+    """R33: an item with an old transient record that is then frozen (twice)
+    with its dependency probing up is absent from `units_failing_despite_probe`
+    and from the outages 'failing' list, while `transient_releases` and
+    `not_before` keep growing. A later real failure opens a NEW streak counted
+    from zero, never from the freezes."""
+    from datetime import datetime, timedelta, timezone
+
+    from central_command.api import outages
+    from central_command.config import settings
+    from central_command.ingest import dispatcher
+
+    monkeypatch.setattr(settings, "retry_backoff_cap_seconds", 3600)
+    await ledger.enroll_email(_raw(801))
+
+    async def claim():
+        conn = await repo._conn()
+        try:
+            await conn.execute("update work_item set not_before = null "
+                               "where message_id like '<cc-test-801@%'")
+        finally:
+            await conn.close()
+        return await repo.claim_next_work_item("sess_freeze")
+
+    async def row(item_id):
+        conn = await repo._conn()
+        try:
+            return dict(await conn.fetchrow(
+                "select transient_releases, transient_failures, failing_since, "
+                "dependencies, not_before from work_item where id = $1", item_id))
+        finally:
+            await conn.close()
+
+    async def failing(item_id):
+        return [u for u in await repo.units_failing_despite_probe(3)
+                if u["id"] == item_id]
+
+    async def transient_failure(item_id):
+        # What the dispatcher's except-branch does for a transient failure.
+        await repo.release_work_item(
+            item_id, error="embedder timeout", count_attempt=False,
+            not_before=datetime.now(timezone.utc) + timedelta(seconds=60),
+            dependencies=("embedder",))
+
+    item = await claim()
+    for n in range(3):
+        await transient_failure(item["id"])
+        if n < 2:
+            item = await claim()
+    (listed,) = await failing(item["id"])
+    assert listed["failures"] == 3 and listed["dependencies"] == ["embedder"]
+    first_episode = listed["episode"]
+    assert first_episode is not None
+
+    # Frozen twice through the real dispatcher path, the dependency probing up.
+    async def busy(_id):
+        return True
+
+    monkeypatch.setattr(repo, "work_item_related_busy", busy)
+    before = await row(item["id"])
+    for _ in range(2):
+        item = await claim()
+        out = await dispatcher.process_claimed(item)
+        assert out["frozen"] is True
+    after = await row(item["id"])
+
+    assert await failing(item["id"]) == []
+    listed_by_dep = [e["id"] for d in (await outages.list_outages())["dependencies"]
+                     for e in d["failing"]]
+    assert item["id"] not in listed_by_dep
+    assert after["transient_releases"] == before["transient_releases"] + 2
+    assert after["not_before"] > datetime.now(timezone.utc)
+    assert after["dependencies"] is None and after["failing_since"] is None
+
+    # A new real failure is a new streak: counted from one, a later episode.
+    monkeypatch.undo()
+    item = await claim()
+    await transient_failure(item["id"])
+    again = await row(item["id"])
+    assert again["transient_failures"] == 1
+    assert again["failing_since"] > first_episode_dt(first_episode)
+
+
+def first_episode_dt(iso: str):
+    from datetime import datetime
+
+    return datetime.fromisoformat(iso)

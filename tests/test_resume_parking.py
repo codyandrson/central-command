@@ -15,6 +15,9 @@ would have — including the operator-evidence re-check on a redraft, which is
 the one thing a second copy of the post-resume tail would silently lose.
 
 A SEMANTIC failure keeps today's behaviour byte-for-byte: loud and terminal.
+
+Story 11.8 (R34, outage follow-up J2): the decision resume's `session.resume_retried`
+carries the dependencies the park recorded.
 """
 
 from __future__ import annotations
@@ -198,6 +201,10 @@ async def test_the_driver_finishes_a_parked_approved_resume(monkeypatch):
     kinds = await _kinds(run["session_id"])
     assert "session.completed" in kinds
     assert "session.resume_retried" in kinds
+    retried = [e for e in await repo.list_events(ref_id=run["session_id"])
+               if e["kind"] == "session.resume_retried"]
+    assert retried[0]["payload"]["dependencies"] == ["llm"], (
+        "an untyped transient error is recorded, and named, as the model")
 
     # The task resolved exactly as a no-outage run would have left it …
     task = await repo.get_task(task_id)

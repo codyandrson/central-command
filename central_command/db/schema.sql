@@ -1559,3 +1559,18 @@ create table if not exists dependency_probe (
 -- reads as ['llm'], the dependency every park waited on before this column.
 alter table work_item add column if not exists dependencies jsonb;
 alter table graph_ingest_job add column if not exists dependencies jsonb;
+
+-- Outage follow-ups (epic-small-fixes story 11.8, R33/R36). A ledger item's
+-- FAILURE STREAK, kept apart from `transient_releases`, which is the backoff
+-- exponent and also grows on a freeze or a shutdown cancel (neither is a
+-- failure). `transient_failures` counts the releases that RECORDED a dependency
+-- (a genuine transient failure); `failing_since` is when the current streak
+-- began, the identity `retry.failing_despite_probe` reports once per. A freeze
+-- clears both with the dependency record. The backfill adopts what an item
+-- already waiting carried before these columns existed; it matches only rows
+-- with a dependency record and no streak stamp, so a re-run is a no-op.
+alter table work_item add column if not exists transient_failures int not null default 0;
+alter table work_item add column if not exists failing_since timestamptz;
+update work_item
+   set failing_since = now(), transient_failures = transient_releases
+ where dependencies is not null and failing_since is null;

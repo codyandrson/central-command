@@ -1068,6 +1068,7 @@ async def _park_execution_retry(
     failure: executor.ExecutionFailed,
     approver: str,
     attempts: int = 1,
+    episode_at: str | None = None,
 ) -> dict:
     """Park an APPROVED proposal whose execution hit a transient dependency
     failure: RETRY_PENDING plus the replay cursor, never terminal FAILED.
@@ -1096,6 +1097,9 @@ async def _park_execution_retry(
         "dependencies": _execution_dependencies(failure),
         "last_error": failure.error[:500],
         "parked_at": now.isoformat(),
+        # When this failure streak began (R36): a re-park passes the claimed
+        # record's, a first park opens a new one.
+        "episode_at": episode_at or now.isoformat(),
         # The one backoff curve over the attempts already spent: the recurring
         # sweep does not offer the proposal again before this.
         "not_before": not_before.isoformat(),
@@ -1229,7 +1233,8 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
             # backoff curve, for as long as the outage lasts — no limit and no
             # promotion (epic-outage-doctrine story 4). The decision stands.
             return await _park_execution_retry(
-                session_id, row, spliced, approver, attempts=attempts + 1
+                session_id, row, spliced, approver, attempts=attempts + 1,
+                episode_at=state.get("episode_at") or state.get("parked_at"),
             )
         out = await _record_execution_failure(
             session_id, proposal_id, agent_id, spliced, model

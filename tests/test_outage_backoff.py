@@ -3,6 +3,11 @@ one cap setting and retries for as long as the outage lasts; the retry limits
 and the exhaustion promotions are gone; a unit failing against a healthy probe
 is reported.
 
+Story 11.8 (R36, outage follow-up J4) extended the loud rule: it is reported once
+per failure EPISODE (a unit that clears and fails again is reported again), the
+episode identity is the park's own `episode_at` and never a count, and the
+log stays append-only.
+
 Story 11.5 (R11, MODELS-018) extended the retired-key test: hermetic against every
 retired key in the environment, and each key is asserted to carry its own reason.
 
@@ -16,7 +21,7 @@ What these pin:
 - a probe-gated skip leaves `attempts` and `not_before` exactly as they were;
 - a unit failing three times with its probes up is listed by
   `repo.units_failing_despite_probe` with its last error, and reported exactly
-  once (`retry.failing_despite_probe`);
+  once per failure episode (`retry.failing_despite_probe`);
 - a SEMANTIC failure on each surface still lands FAILED on the first attempt;
 - the retired names are gone from the tree.
 
@@ -36,6 +41,7 @@ from pathlib import Path
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 
+from central_command import events
 from central_command.api import orchestration, routes
 from central_command.config import settings
 from central_command.contract import retry_backoff_seconds
@@ -279,8 +285,10 @@ async def test_a_unit_failing_despite_a_healthy_probe_is_reported_once(monkeypat
 
     failing = await repo.units_failing_despite_probe(settings.retry_loud_after_attempts)
     mine = [u for u in failing if u["id"] == task_id]
-    assert mine == [{"unit": "task", "id": task_id, "failures": 3,
-                     "dependencies": ["llm"], "last_error": str(deny)[:500]}]
+    assert [{k: v for k, v in u.items() if k != "episode"} for u in mine] == [
+        {"unit": "task", "id": task_id, "failures": 3,
+         "dependencies": ["llm"], "last_error": str(deny)[:500]}]
+    assert mine[0]["episode"] is not None
 
     first = await orchestration.retry_sweep()
     await orchestration.retry_sweep()
@@ -288,8 +296,71 @@ async def test_a_unit_failing_despite_a_healthy_probe_is_reported_once(monkeypat
     reported = await _payloads(task_id, "retry.failing_despite_probe")
     assert len(reported) == 1
     assert reported[0]["last_error"] == str(deny)[:500]
+    assert reported[0]["episode"] == mine[0]["episode"]
     # It keeps retrying: reporting changes nothing about the unit.
     assert (await repo.get_task(task_id))["status"] == "ASSIGNED"
+
+
+async def test_a_unit_that_clears_and_fails_again_is_reported_twice():
+    """R36: fail, report, clear, re-fail -> two events. The episode is when the
+    streak began, carried through every re-park of it, so the second outage is a
+    different episode even though it reaches the same count."""
+    task_id = "task_" + uuid.uuid4().hex[:12]
+    await repo.create_task(task_id, "loud twice", "x", "jira-expert")
+    deny = ModelHTTPError(403, "cc-default", body="denied by the edge firewall")
+
+    async def streak() -> str:
+        episode = None
+        for attempt in (1, 2, 3):
+            assert await orchestration.park_task_retry(
+                task_id, deny, attempts=attempt, episode_at=episode)
+            if episode is None:
+                episode = (await repo.get_task(task_id))["retry_state"]["episode_at"]
+        return episode
+
+    first = await streak()
+    mine = [u for u in await repo.units_failing_despite_probe(3) if u["id"] == task_id]
+    assert [u["episode"] for u in mine] == [first], "three parks, one episode"
+    assert {"unit": "task", "id": task_id} in await orchestration._report_failing_despite_probe()
+    assert len(await _payloads(task_id, "retry.failing_despite_probe")) == 1
+
+    # Cleared: the retry claimed the park (the unit leaves the list) and the
+    # run succeeded. Then a later outage parks it afresh.
+    assert await repo.claim_task_retry(task_id) is not None
+    assert task_id not in [u["id"] for u in await repo.units_failing_despite_probe(3)]
+    second = await streak()
+    assert second != first
+
+    assert {"unit": "task", "id": task_id} in await orchestration._report_failing_despite_probe()
+    await orchestration._report_failing_despite_probe()
+    reported = await _payloads(task_id, "retry.failing_despite_probe")
+    assert [p["episode"] for p in reported] == [first, second]
+
+
+async def test_an_event_reported_before_episodes_existed_covers_its_streak():
+    """An upgrade must not re-announce every unit already reported: a report with
+    no `episode` covers a streak that began no later than the report, and only a
+    streak that began after it is a later outage."""
+    task_id = "task_" + uuid.uuid4().hex[:12]
+    await repo.create_task(task_id, "loud legacy", "x", "jira-expert")
+    deny = ModelHTTPError(403, "cc-default", body="denied by the edge firewall")
+    episode = None
+    for attempt in (1, 2, 3):
+        await orchestration.park_task_retry(task_id, deny, attempts=attempt,
+                                            episode_at=episode)
+        episode = episode or (await repo.get_task(task_id))["retry_state"]["episode_at"]
+    await events.emit("retry.failing_despite_probe", ref_id=task_id,
+                      payload={"unit": "task", "failures": 3, "dependencies": ["llm"],
+                               "last_error": "legacy"}, actor="system")
+    await orchestration._report_failing_despite_probe()
+    assert len(await _payloads(task_id, "retry.failing_despite_probe")) == 1
+
+    # A streak that began after that report is a new outage.
+    assert await repo.claim_task_retry(task_id) is not None
+    for attempt in (1, 2, 3):
+        await orchestration.park_task_retry(task_id, deny, attempts=attempt)
+    await orchestration._report_failing_despite_probe()
+    assert len(await _payloads(task_id, "retry.failing_despite_probe")) == 2
 
 
 async def test_a_unit_whose_dependency_is_down_is_not_failing_despite_the_probe():

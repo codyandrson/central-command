@@ -114,8 +114,11 @@ when a matching file is read.
   recorded dependency (plus `llm`, for a model turn) probes down BEFORE calling
   its driver, so there is no path on which an outage can advance `attempts` or
   `not_before`. Attempts are spent only when the probe said healthy and the call
-  still failed, and a unit that keeps doing that is reported once
-  (`retry.failing_despite_probe`) rather than failed: there is no attempt limit.
+  still failed, and a unit that keeps doing that is reported once per
+  failure EPISODE (`retry.failing_despite_probe`, keyed on the `episode` its
+  park recorded, never a count: the sweep only sees units at or over the
+  threshold) rather than failed: there is no attempt limit. A ledger freeze is
+  not a failure and clears the item's streak.
   Why: with limits, a two-hour outage at a five-minute cadence exhausted every
   parked unit in 25 minutes and promoted a storm of operator items. One curve
   (`contract.retry_backoff_seconds`) and one cap setting now set the patience.

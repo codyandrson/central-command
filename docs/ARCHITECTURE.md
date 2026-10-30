@@ -888,8 +888,11 @@ skip changes neither `attempts` nor `not_before`. The loudness the limits used
 to give comes from `CC_RETRY_LOUD_AFTER_ATTEMPTS` (default 3): a unit that has
 failed that many times while every dependency it recorded probes up (a revoked
 key answering 403, a firewall deny) is listed by
-`repo.units_failing_despite_probe` and reported once per unit id by the sweep
-as `retry.failing_despite_probe`; it keeps retrying. Agent work is dispatched
+`repo.units_failing_despite_probe` and reported once per failure episode by the
+sweep as `retry.failing_despite_probe` (the payload's `episode` is when the
+unit's current streak began, recorded by its park; a unit that clears and fails
+again is reported again, and a ledger item's freeze is not a failure); it keeps
+retrying. Agent work is dispatched
 detached and never awaited, so a tick returns at once.
 
 **A restart lands nothing FAILED.** The lifespan in `api/app.py` runs, before
