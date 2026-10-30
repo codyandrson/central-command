@@ -314,6 +314,7 @@ SEGMENT_ALLOWED = {
     "tests/test_k3s_env_path.py": ("builds every env layout under tmp_path", None),
     "tests/test_k3s_mint_key_scope.py": ("builds the pre-move layout under tmp_path", None),
     "tests/test_k3s_reset_phase.py": ("builds the pre-move layout under tmp_path", None),
+    "tests/test_k3s_compute_ssh.py": ("builds the pre-move layout under tmp_path, to prove the resolver reads the file through env-path.sh", None),
     "tests/test_deploy_pi_boundary.py": ("this guard: it names the shape it greps for and asserts the path is gone", None),
     "tests/test_graphiti_server_boundary.py": ("asserts deploy/pi/graphiti is gone", None),
 }
