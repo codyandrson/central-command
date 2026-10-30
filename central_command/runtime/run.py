@@ -305,13 +305,14 @@ async def _run_live(
 
 
 def _total_tokens(result) -> int:
-    """Token spend for one run, for the dispatcher's budget valve. Best-effort:
-    the demo FunctionModel reports nothing meaningful.
+    """Token spend for one run, reported as telemetry (the landing's `tokens`,
+    the `work.processed` event). Best-effort: the demo FunctionModel reports
+    nothing meaningful.
 
     `usage` became a PROPERTY in pydantic-ai v2 (`result.usage()` → `.usage`) —
     the old call raised TypeError into this catch-all and every run reported
-    ZERO tokens, silently blinding the budget valve. Found 2026-07-20 during
-    the multi-agent-patterns research pass; handle both shapes."""
+    ZERO tokens. Found 2026-07-20 during the multi-agent-patterns research
+    pass; handle both shapes."""
     try:
         usage = result.usage
         if callable(usage):  # v1 shape

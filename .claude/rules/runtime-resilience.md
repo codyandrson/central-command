@@ -24,7 +24,7 @@ when a matching file is read.
   empty check guards the OCR result. Validate BEFORE the turn exists: a
   refusal must leave no transcript row and no lifecycle frame owed to the
   spinner. Capability is DECLARED, not guessed — `None` means "nobody said",
-  never "yes". `MAX_ATTACHMENT_BYTES` only refuses cleanly because uvicorn's
+  never "yes". `settings.attachment_max_bytes` only refuses cleanly because uvicorn's
   `--ws-max-size` sits above its base64-inflated frame.
 - **A `failed=True` session must record WHY** (`land_session(...,
   reason=…)`). Guarded by a source walk

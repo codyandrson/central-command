@@ -60,9 +60,11 @@ ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do (exec 3<>/dev/tcp/127.0.0.1/
 # finish that phase. The app now releases those followers from its SIGTERM handler
 # (see api/app.py: the lifespan shutdown runs AFTER this wait, far too late), so
 # this should never be reached. 30s of headroom if one ever is.
-# --ws-max-size 96 MB: must exceed MAX_ATTACHMENT_BYTES (50 MB) after base64
-# inflation (~4/3×), or the socket closes 1009 before the application's clean
-# attachment_too_large refusal can fire (uvicorn's default is 16 MB).
+# --ws-max-size 96 MB (config.WS_MAX_SIZE_BYTES): must exceed
+# settings.attachment_max_bytes (CC_ATTACHMENT_MAX_BYTES, 50 MB by default)
+# after base64 inflation (~4/3×), or the socket closes 1009 before the
+# application's clean attachment_too_large refusal can fire (uvicorn's default
+# is 16 MB). Settings refuses a cap that would not fit under this number.
 ExecStart=/home/codyslab/central-command/.venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 --port 8080 --timeout-graceful-shutdown 30 --ws-max-size 100663296
 # The app exits if Postgres isn't ready yet — keep retrying until the stack is
 # up. The dispatch advisory lease makes a double-start refuse loudly rather than

@@ -3,7 +3,7 @@
 import os
 
 from dotenv import load_dotenv
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Pydantic's env_file populates Settings FIELDS only — it never exports to
@@ -30,11 +30,27 @@ load_dotenv()
 # Settings that no longer exist. A deployment `.env` may still carry them (the
 # updater never edits it), and `extra="ignore"` would drop them silently, so the
 # app says once at startup that they are ignored (`warn_retired_settings`).
-RETIRED_ENV_KEYS = (
-    "CC_RESUME_RETRY_LIMIT",
-    "CC_EXECUTION_RETRY_LIMIT",
-    "CC_TASK_RETRY_LIMIT",
+_OUTAGE_DOCTRINE_REASON = (
+    "parked work now retries until the dependency is back, at most once per "
+    "CC_RETRY_BACKOFF_CAP_SECONDS"
 )
+RETIRED_ENV_KEYS = {
+    "CC_RESUME_RETRY_LIMIT": _OUTAGE_DOCTRINE_REASON,
+    "CC_EXECUTION_RETRY_LIMIT": _OUTAGE_DOCTRINE_REASON,
+    "CC_TASK_RETRY_LIMIT": _OUTAGE_DOCTRINE_REASON,
+    "CC_DISPATCH_TOKEN_BUDGET": (
+        "the per-process token budget valve is gone; LiteLLM owns spend "
+        "limits (per-key budgets), so a ceiling set here is not honoured"
+    ),
+}
+
+# The websocket frame limit the API is started with (uvicorn --ws-max-size):
+# deploy/k3s/cc-uvicorn.service and deploy/single/phases/boot.sh carry this
+# number on the command line (tests/test_attachments.py pins all three
+# together). An attachment travels base64-inflated (~4/3) inside one frame, so
+# `attachment_max_bytes` must fit under it or the socket closes with a raw 1009
+# before the application's clean refusal can fire.
+WS_MAX_SIZE_BYTES = 100663296
 
 
 def retired_settings_present() -> list[str]:
@@ -425,16 +441,38 @@ class Settings(BaseSettings):
     #   dispatch_concurrency      -> max work items in flight at once (D15: start 1)
     #   dispatch_approval_limit   -> pause dispatch while this many proposals are
     #                                AWAITING_HUMAN, so agents can't outrun review
-    #   dispatch_token_budget     -> per-process token ceiling (0 = unlimited)
     #   dispatch_max_attempts     -> attempts before an item is parked FAILED
     #   dispatch_stale_claim_seconds -> recover items a crashed process left CLAIMED
     dispatch_enabled: bool = False
     dispatch_concurrency: int = 1
     dispatch_approval_limit: int = 3
-    dispatch_token_budget: int = 0
     dispatch_poll_seconds: float = 2.0
     dispatch_max_attempts: int = 3
     dispatch_stale_claim_seconds: int = 900
+
+    # The largest attachment the cockpit send path accepts, in bytes (R4,
+    # GATE-084). 50 MiB is the ruled default (the operator, 2026-10-29,
+    # Decision 2: today's value, so nothing that works starts failing). The
+    # validator refuses a cap whose base64 frame cannot fit under the API's
+    # websocket limit (`WS_MAX_SIZE_BYTES`). The cockpit's own inline limit is
+    # its own env knob (NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB), Node cannot
+    # read this one; only the defaults are pinned equal.
+    attachment_max_bytes: int = 50 * 1024 * 1024
+
+    @field_validator("attachment_max_bytes")
+    @classmethod
+    def _attachment_cap_fits_the_transport(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("CC_ATTACHMENT_MAX_BYTES must be a positive number of bytes")
+        inflated = 4 * ((value + 2) // 3)  # base64 length of `value` bytes
+        if inflated > WS_MAX_SIZE_BYTES:
+            raise ValueError(
+                f"CC_ATTACHMENT_MAX_BYTES={value:,} is {inflated:,} bytes after "
+                f"base64, over the API's websocket limit of {WS_MAX_SIZE_BYTES:,} "
+                "(--ws-max-size); the socket would close before the clean "
+                "refusal could fire. Lower the cap."
+            )
+        return value
 
     # Semantic relatedness freeze (2026-08-19) — the fuzzy layer of the
     # relatedness lock. The claim query hard-locks exact keys (thread, subject,

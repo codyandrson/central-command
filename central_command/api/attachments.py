@@ -51,15 +51,12 @@ import io
 from central_command.config import settings
 from central_command.integrations import http as http_client
 
-# Same round number as the skills-library file import
-# (`routes.MAX_IMPORT_FILE_BYTES`) — an operator's one-off reference document,
-# not a measured limit. Kept in step with it on purpose: two different caps for
-# "a file the operator hands over" would be a difference with no reason behind it.
-# The transport must stay wider than this cap or the refusal never fires:
-# uvicorn's --ws-max-size (cc-uvicorn.service, 96 MB) has to exceed this
-# limit's base64-inflated frame (~4/3×), else the socket closes with a raw
-# 1009 before this check sees the bytes (found 2026-08-20).
-MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
+# The cap is `settings.attachment_max_bytes` (CC_ATTACHMENT_MAX_BYTES), read at
+# call time; the ruled default (50 MiB, 2026-10-29) lives in config.py. The
+# transport must stay wider than the cap's base64-inflated frame (~4/3x) or the
+# refusal never fires and the socket closes with a raw 1009 (found 2026-08-20):
+# `config.WS_MAX_SIZE_BYTES` is that limit, the Settings validator enforces it,
+# and the k3s unit and the single-node boot both start uvicorn with it.
 
 # ponytail: ~200k chars is roughly 50k tokens against a 262144-token local
 # context — room for a large document without crowding out the conversation.
@@ -126,11 +123,12 @@ def _decode(att: dict) -> tuple[str, str, bytes]:
         raise AttachmentRefused(
             "attachment_empty", f"{name!r} is empty (0 bytes).", name
         )
-    if len(data) > MAX_ATTACHMENT_BYTES:
+    cap = settings.attachment_max_bytes
+    if len(data) > cap:
         raise AttachmentRefused(
             "attachment_too_large",
             f"{name!r} is {len(data):,} bytes, over the "
-            f"{MAX_ATTACHMENT_BYTES:,}-byte attachment limit.",
+            f"{cap:,}-byte attachment limit.",
             name,
         )
     return name, media_type, data

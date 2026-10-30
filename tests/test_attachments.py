@@ -8,6 +8,10 @@ The measured behaviour these guard (2026-08-11, real proxy, `cc-default` ->
 the then-current qwen3-coder-next): an Anthropic `document` block is silently dropped and the
 model answers "I don't see any file attached", and markitdown converts an
 image-only PDF without raising and returns zero characters.
+
+The size cap is a setting (story 11.5, R4, GATE-084; ruled 2026-10-29,
+Decision 2: default 50 MiB, today's value): the tests near the end pin the
+default, the env key, the refusal message and the transport-ceiling validator.
 """
 
 import base64
@@ -326,13 +330,76 @@ async def test_empty_and_oversized_files_are_refused(monkeypatch):
         )
     assert e.value.code == "attachment_empty"
 
-    monkeypatch.setattr(attachments, "MAX_ATTACHMENT_BYTES", 10)
+    monkeypatch.setattr(attachments.settings, "attachment_max_bytes", 10)
     with pytest.raises(attachments.AttachmentRefused) as e:
         await attachments.prepare(
             [_att("big.txt", "text/plain", b"more than ten bytes")],
             model_id="cc-default",
         )
     assert e.value.code == "attachment_too_large"
+    assert "over the 10-byte attachment limit" in str(e.value)
+
+    # The cap is read at call time: raising it lets the same file through.
+    monkeypatch.setattr(attachments.settings, "attachment_max_bytes", 1000)
+    prepared = await attachments.prepare(
+        [_att("big.txt", "text/plain", b"more than ten bytes")],
+        model_id="cc-default",
+    )
+    assert prepared
+
+
+# --- the cap is a setting the transport cannot undercut (R4, GATE-084) -------
+
+
+def _fresh_settings(monkeypatch, **env):
+    from central_command.config import Settings
+
+    monkeypatch.delenv("CC_ATTACHMENT_MAX_BYTES", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    return Settings(_env_file=None)
+
+
+def test_the_default_cap_is_the_ruled_fifty_mebibytes(monkeypatch):
+    assert _fresh_settings(monkeypatch).attachment_max_bytes == 50 * 1024 * 1024
+
+
+def test_a_fresh_settings_honours_the_env_key(monkeypatch):
+    s = _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES="1048576")
+    assert s.attachment_max_bytes == 1048576
+
+
+def test_a_cap_whose_base64_frame_exceeds_the_websocket_limit_is_refused(monkeypatch):
+    from pydantic import ValidationError
+
+    from central_command.config import WS_MAX_SIZE_BYTES
+
+    over = WS_MAX_SIZE_BYTES  # base64 inflates it ~4/3, past the limit
+    with pytest.raises(ValidationError, match="websocket limit"):
+        _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES=str(over))
+    # The largest cap that fits is accepted: 3/4 of the limit.
+    fits = WS_MAX_SIZE_BYTES * 3 // 4
+    assert _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES=str(fits)).attachment_max_bytes == fits
+    with pytest.raises(ValidationError):
+        _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES="0")
+
+
+def test_the_three_places_that_start_the_api_carry_the_one_ws_limit():
+    """The named constant, the k3s unit and the single-node boot agree, and the
+    web cockpit's inline default is the same number of megabytes."""
+    import re
+    from pathlib import Path
+
+    from central_command.config import WS_MAX_SIZE_BYTES, Settings
+
+    root = Path(__file__).resolve().parent.parent
+    for rel in ("deploy/k3s/cc-uvicorn.service", "deploy/single/phases/boot.sh"):
+        found = re.findall(r"--ws-max-size\s+(\d{6,})", (root / rel).read_text())
+        assert found and {int(n) for n in found} == {WS_MAX_SIZE_BYTES}, rel
+    ts = (root / "web/server/lib/upload-config.ts").read_text()
+    m = re.search(r"inlineAttachmentMaxMb:\s*(\d+)", ts)
+    default_mb = Settings.model_fields["attachment_max_bytes"].default // (1024 * 1024)
+    assert m and int(m.group(1)) == default_mb
 
 
 DOCX_MIME = (

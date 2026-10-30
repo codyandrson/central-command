@@ -34,8 +34,7 @@ export interface DispatchStatus {
   reason: string | null;
   in_flight: number;
   awaiting_human: number;
-  tokens_spent: number;
-  valves: { concurrency: number; approval_limit: number; token_budget: number };
+  valves: { concurrency: number; approval_limit: number };
   ledger: Record<string, number>;
 }
 

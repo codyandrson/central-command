@@ -12,6 +12,10 @@ export interface UploadFeatureConfig {
   exposeInlineBase64ToAgent: boolean;
 }
 
+// inlineAttachmentMaxMb's default (50) is pinned equal to the API's ruled
+// default for CC_ATTACHMENT_MAX_BYTES (50 MiB, central_command/config.py;
+// ruling 2026-10-29, Decision 2). Node cannot read the Python setting, so an
+// operator who changes one sets the other: NERVE_UPLOAD_INLINE_ATTACHMENT_MAX_MB.
 const DEFAULT_UPLOAD_FEATURE_CONFIG: UploadFeatureConfig = {
   twoModeEnabled: false,
   inlineEnabled: true,

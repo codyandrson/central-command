@@ -1,5 +1,8 @@
 """`boot` starts, and `stop` stops, exactly three host processes — supervised.
 
+(Story 11.5, R4, GATE-084: the API's command also carries `--ws-max-size`, the
+k3s unit's number, so a large attachment's refusal can fire.)
+
 The 2026-10-01 design record's D6 ("everything the install starts, it
 supervises") and D7 ("importing the bundled skills is a step"), P3's half of
 v2.57.0. The acceptance the operator set for P3 — "on Linux, `stop` then `boot`
@@ -448,7 +451,7 @@ def test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_b
     assert f"EnvironmentFile={inst.repo}/.env" in api_text
     assert f"WorkingDirectory={inst.repo}\n" in api_text
     assert (f"ExecStart={inst.repo}/.venv/bin/uvicorn central_command.api.app:app "
-            f"--host 127.0.0.1 --port {inst.api}") in api_text
+            f"--host 127.0.0.1 --port {inst.api} --ws-max-size 100663296") in api_text
     assert "KillMode=process" in api_text, "the updater the API spawns must outlive the API's stop"
     assert "Restart=on-failure" in api_text and "WantedBy=default.target" in api_text
     assert f"StandardOutput=append:{inst.state}/uvicorn.log" in api_text

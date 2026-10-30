@@ -245,8 +245,8 @@ async def test_activity_overview_carries_every_top_level_field(monkeypatch):
     number from one instant beside a ledger number from another."""
     dispatch_status = {
         "running": True, "may_dispatch": True, "reason": "ok", "in_flight": 1,
-        "awaiting_human": 0, "tokens_spent": 100,
-        "valves": {"concurrency": 4, "approval_limit": 3, "token_budget": 1000},
+        "awaiting_human": 0,
+        "valves": {"concurrency": 4, "approval_limit": 3},
         "ledger": {"UNPROCESSED": 2},
     }
     from central_command.ingest import dispatcher as dispatcher_mod
@@ -294,8 +294,8 @@ async def test_activity_overview_failure_rows_carry_the_failures_strip_fields(mo
         dispatcher_mod.dispatcher, "status",
         lambda: _async({
             "running": False, "may_dispatch": False, "reason": "stopped",
-            "in_flight": 0, "awaiting_human": 0, "tokens_spent": 0,
-            "valves": {"concurrency": 0, "approval_limit": 0, "token_budget": 0},
+            "in_flight": 0, "awaiting_human": 0,
+            "valves": {"concurrency": 0, "approval_limit": 0},
             "ledger": {},
         }),
     )

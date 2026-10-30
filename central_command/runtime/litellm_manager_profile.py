@@ -246,7 +246,7 @@ BUDGETS & RATE LIMITS (settable at key / team / user / model scope):
   per-model cap on one key. Exceeding a budget → HTTP 400 "ExceededBudget…";
   exceeding a rate limit → HTTP 429. (This is the substrate for Phase 5:
   per-agent virtual keys carrying LiteLLM-side budgets + rpm/tpm, so LiteLLM
-  enforces the spend ceiling and Central Command's internal token valve can retire.)
+  enforces the spend ceiling; Central Command's own token valve is retired.)
 
 VIRTUAL KEYS (actionable — see create_key/delete_key/list_keys above):
   A key carries key_alias (human name), models[] (scope), metadata (TAGS live at

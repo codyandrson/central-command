@@ -8,7 +8,6 @@ one more?" and only then claims a row. Every valve is a reason to answer no:
 - **approval-coupled throttle** — in the MVP the human *is* the bottleneck. If
   the Decisions Inbox already holds `dispatch_approval_limit` proposals, stop
   producing more. Draining slowly is a correctness requirement (DESIGN.md §4).
-- **token budget** — a per-process ceiling, so a bad night can't burn the month.
 
 Pick order (D16) is live-feed-first, then newest-first, and an item related to
 one in flight or owing an unexecuted proposal (same thread, normalized subject,
@@ -42,13 +41,6 @@ from central_command.runtime.run import ingest_and_propose
 
 log = logging.getLogger(__name__)
 
-# Tokens spent by this process since start — the budget valve's counter.
-_tokens_spent = 0
-
-
-def tokens_spent() -> int:
-    return _tokens_spent
-
 
 async def check_valves() -> tuple[bool, str]:
     """May the dispatcher take one more item? Returns (ok, reason)."""
@@ -64,10 +56,6 @@ async def check_valves() -> tuple[bool, str]:
             f"approval throttle: {awaiting} items awaiting review "
             f"(limit {settings.dispatch_approval_limit})"
         )
-
-    budget = settings.dispatch_token_budget
-    if budget and _tokens_spent >= budget:
-        return False, f"token budget: {_tokens_spent}/{budget} spent"
 
     return True, "ok"
 
@@ -511,8 +499,6 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
       and `heartbeat.error` / `feed.error` shout independently), so nothing is
       hidden by waiting.
     """
-    global _tokens_spent
-
     log.info("dispatch: claimed %s (%s)", item["id"], item.get("subject") or "no subject")
     kind = item.get("kind") or "email"
     await events.emit(
@@ -679,8 +665,6 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             )
         return {"item_id": item["id"], "ok": False, "error": str(e),
                 "transient": transient}
-
-    _tokens_spent += int(result.get("tokens") or 0)
 
     if not result.get("deferred"):
         # "No action needed" is a CLAIM, not an outcome (M14) — the same rule
@@ -975,11 +959,9 @@ class Dispatcher:
             "reason": reason if not ok else self.last_reason,
             "in_flight": await repo.count_in_flight(),
             "awaiting_human": await repo.count_awaiting_human(),
-            "tokens_spent": _tokens_spent,
             "valves": {
                 "concurrency": settings.dispatch_concurrency,
                 "approval_limit": settings.dispatch_approval_limit,
-                "token_budget": settings.dispatch_token_budget,
             },
             "ledger": await repo.ledger_counts(),
         }

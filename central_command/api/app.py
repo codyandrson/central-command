@@ -68,18 +68,18 @@ def _release_followers_on_signal() -> list:
 
 
 def _warn_retired_settings() -> None:
-    """One warning naming the retired keys this process was given. The values
-    change nothing: the outage doctrine retries for as long as an outage lasts
-    (`retry_backoff_cap_seconds` sets how often), so a limit set there is not
-    honoured. Removing the lines from .env silences it."""
-    from central_command.config import retired_settings_present
+    """One warning naming the retired keys this process was given, each with
+    its own reason (`config.RETIRED_ENV_KEYS` maps key -> reason). The values
+    change nothing: a retired key is ignored. Removing the lines from .env
+    silences it."""
+    from central_command.config import RETIRED_ENV_KEYS, retired_settings_present
 
     present = retired_settings_present()
     if present:
         logging.getLogger(__name__).warning(
-            "ignored retired setting(s) %s: parked work now retries until the "
-            "dependency is back, at most once per CC_RETRY_BACKOFF_CAP_SECONDS; "
-            "remove them from .env to silence this warning", ", ".join(present),
+            "ignored retired setting(s) %s; %s; remove them from .env to "
+            "silence this warning", ", ".join(present),
+            "; ".join(f"{k}: {RETIRED_ENV_KEYS[k]}" for k in present),
         )
 
 

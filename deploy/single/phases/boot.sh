@@ -129,7 +129,10 @@ proc_spec() { # proc_spec <api|cockpit|sandbox>
       # taken before the runner was even started. Ordering only — no Wants=.
       [[ "$(p_flag CC_ENABLE_SANDBOX 1)" == 1 ]] && PROC_AFTER="$(sup_unit sandbox)"
       uv="$(venv_uvicorn)" || { PROC_WHY="uvicorn not in .venv — run: ./setup.sh (it resumes at app, which installs it)"; return 1; }
-      PROC_CMD=("$uv" central_command.api.app:app --host 127.0.0.1 --port "$PROC_PORT")
+      # --ws-max-size is config.WS_MAX_SIZE_BYTES (the k3s unit carries the same
+      # number): uvicorn's 16 MB default closes a large attachment's socket with
+      # a raw 1009 before the app's clean attachment_too_large refusal can fire.
+      PROC_CMD=("$uv" central_command.api.app:app --host 127.0.0.1 --port "$PROC_PORT" --ws-max-size 100663296)
       ;;
     sandbox)
       PROC_CHECK=boot-sandbox; PROC_WHAT="the sandbox runner"; PROC_TITLE="sandbox runner"

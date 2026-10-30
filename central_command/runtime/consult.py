@@ -37,8 +37,8 @@ Three bounds are mechanical rather than charter-suggested:
   the operator explicitly accepts the latency: a collapsed chain is worse than a slow
   one. Degrading is now only what happens if PERSISTENCE fails.
 - **Budget propagation.** The caller's usage accumulator rides along
-  (pydantic-ai's agent-delegation pattern) so the dispatcher's budget valve
-  sees the whole tree, plus a per-consult `request_limit`.
+  (pydantic-ai's agent-delegation pattern) so the run's reported token total
+  covers the whole tree, plus a per-consult `request_limit`.
 - **Distillation.** The answer is size-capped at the deployment's text ceiling
   (`ANSWER_CEILING`) and cut HONESTLY — a silent cut reads to a model as a
   complete answer.

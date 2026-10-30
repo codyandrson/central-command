@@ -902,8 +902,9 @@ hygiene, and how the test suite itself must be written. See
 
 - **Status:** active
 - **Date:** 2026-10-19
-- **Rule:** (recorded here) Dispatch carries no token-budget valve (the existing one is to be
-  removed), and no enterprise-licensed LiteLLM feature is used.
+- **Rule:** (recorded here) Dispatch carries no token-budget valve (REMOVED: epic small-fixes
+  story 11.5, 2026-10-29; `CC_DISPATCH_TOKEN_BUDGET` is a retired key that warns at start),
+  and no enterprise-licensed LiteLLM feature is used.
 - **Why:** The valve was judged unnecessary (review ruling MODELS-018, removal owed
   in PRD §6.1). The enterprise features are unlicensed here and, checked
   against LiteLLM's current documentation, give one operator nothing the

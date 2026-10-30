@@ -3,6 +3,9 @@ one cap setting and retries for as long as the outage lasts; the retry limits
 and the exhaustion promotions are gone; a unit failing against a healthy probe
 is reported.
 
+Story 11.5 (R11, MODELS-018) extended the retired-key test: hermetic against every
+retired key in the environment, and each key is asserted to carry its own reason.
+
 What these pin:
 
 - the curve: 60, 120, 240 ... seconds, capped at `retry_backoff_cap_seconds`
@@ -383,16 +386,27 @@ def test_the_retired_limits_are_gone_from_the_tree():
 def test_a_retired_key_in_the_environment_is_warned_about_once(monkeypatch, caplog):
     from central_command.api import app as app_module
 
+    from central_command.config import RETIRED_ENV_KEYS
+
+    # Hermetic (story 11.5): the live .env and every worktree copy carry retired
+    # keys (config.py's load_dotenv puts them in the environment), so clear
+    # EVERY retired key in both halves, not only the one under test.
+    for key in RETIRED_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
     monkeypatch.setenv("CC_TASK" + "_RETRY_LIMIT", "5")
     with caplog.at_level(logging.WARNING):
         app_module._warn_retired_settings()
     warnings = [r for r in caplog.records if "ignored retired setting" in r.getMessage()]
     assert len(warnings) == 1
     assert "CC_TASK" + "_RETRY_LIMIT" in warnings[0].getMessage()
+    assert RETIRED_ENV_KEYS["CC_TASK" + "_RETRY_LIMIT"] in warnings[0].getMessage()
+    # Each key gets its OWN reason: the outage-doctrine text is not the token
+    # budget's.
+    assert RETIRED_ENV_KEYS["CC_DISPATCH" + "_TOKEN_BUDGET"] not in warnings[0].getMessage()
 
     caplog.clear()
-    monkeypatch.delenv("CC_TASK" + "_RETRY_LIMIT")
-    for key in ("CC_RESUME" + "_RETRY_LIMIT", "CC_EXECUTION" + "_RETRY_LIMIT"):
+    for key in RETIRED_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     app_module._warn_retired_settings()
     assert not [r for r in caplog.records if "ignored retired setting" in r.getMessage()]

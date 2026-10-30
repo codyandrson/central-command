@@ -33,6 +33,8 @@ afterEach(() => {
   }
 });
 
+// Story 11.5 / R4 (GATE-084): the inline attachment default equals the API's
+// ruled attachment_max_bytes default (50 MiB).
 describe('GET /api/upload-config', () => {
   it('returns upload capability defaults when env overrides are absent', async () => {
     for (const key of ENV_KEYS) delete process.env[key];
@@ -46,8 +48,8 @@ describe('GET /api/upload-config', () => {
       inlineEnabled: true,
       fileReferenceEnabled: false,
       modeChooserEnabled: false,
-      // 50 since the 2026-08-20 attachment-cap change (MAX_ATTACHMENT_BYTES);
-      // this test pins the DEFAULT, which moved with it.
+      // 50 = the API's ruled attachment_max_bytes default (50 MiB, 2026-10-29
+      // Decision 2; config.py); this test pins the DEFAULT equal to it.
       inlineAttachmentMaxMb: 50,
       inlineImageContextMaxBytes: 32768,
       inlineImageAutoDowngradeToFileReference: true,

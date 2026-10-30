@@ -110,7 +110,6 @@ attempt and parks `FAILED` at `CC_DISPATCH_MAX_ATTEMPTS`.
 | `CC_DISPATCH_ENABLED` | false | autostart the drain loop with the API |
 | `CC_DISPATCH_CONCURRENCY` | 1 | max work items in flight at once |
 | `CC_DISPATCH_APPROVAL_LIMIT` | 3 | pause dispatch while this many proposals + unconfirmed dismissals await review — the "agents can't outrun the human" valve |
-| `CC_DISPATCH_TOKEN_BUDGET` | 0 (unlimited) | per-process token ceiling — retired by decision (PRD FR-24); leave it at 0, the knob goes when its removal ships |
 | `CC_DISPATCH_MAX_ATTEMPTS` | 3 | semantic failures before a row parks FAILED |
 | `CC_DISPATCH_POLL_SECONDS` | 2.0 | drain-loop poll interval |
 
