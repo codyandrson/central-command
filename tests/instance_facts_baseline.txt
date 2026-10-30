@@ -4,7 +4,6 @@
 # AND on a line here with no hit, so a story that cleans a file deletes its lines
 # (keep the lines sorted). Epic story 12 deletes this file, and the code that
 # reads it, once it is empty.
-central_command/gateway/executor.py	d
 deploy/k3s/.env.example	a
 deploy/k3s/build-crawler-image.sh	a
 deploy/k3s/build-crawler-image.sh	c

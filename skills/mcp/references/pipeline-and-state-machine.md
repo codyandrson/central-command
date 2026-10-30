@@ -88,10 +88,10 @@ Tool: `propose_mcp_deploy(server_id, rationale)` — same simple shape.
 - Applies a `Deployment` + `Service` (as one `kind: List`) to namespace
   **`cc-mcp`**: 1 replica, `runtimeClassName: gvisor`,
   `automountServiceAccountToken: false`, **required** (not preferred) node
-  affinity pinning to one node name hard-coded in `_mcp_deployment_manifest`
-  (the image was built single-arch on the build host and no fallback node has
-  it — but the pin is NOT derived from `settings.mcp_build_host`, so the two
-  must be kept aligned by hand), `imagePullPolicy: IfNotPresent`, container port
+  affinity by the `cc-role/compute` label (the image was built single-arch on
+  the build host and no fallback node has it; the build host is a separate
+  setting, `settings.mcp_build_host`, and the affinity does not name it),
+  `imagePullPolicy: IfNotPresent`, container port
   **8000**, `ClusterIP` Service on 8000.
 - **Mandatory resource limits, refused even against its own generated
   manifest**: `_mcp_deployment_manifest` raises `ExecutorError` before apply

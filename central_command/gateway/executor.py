@@ -1769,13 +1769,13 @@ def _mcp_deployment_manifest(server_id: str, image_ref: str) -> dict:
                     "runtimeClassName": "gvisor",
                     "automountServiceAccountToken": False,
                     # REQUIRED, not preferred — the image (built single-arch,
-                    # §9.3) exists on the chromebox only, so there is no
-                    # fallback node to prefer instead (mirrors runner.py's
-                    # sandbox Job affinity, the one other required-affinity
-                    # spec in this deployment).
+                    # §9.3) exists on the compute node only, so there is no
+                    # fallback node to prefer instead. Role label, not hostname
+                    # (mirrors runner.py's sandbox Job affinity): gVisor and the
+                    # image live on whichever node carries cc-role/compute.
                     "affinity": {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": {
                         "nodeSelectorTerms": [{"matchExpressions": [
-                            {"key": "kubernetes.io/hostname", "operator": "In", "values": ["chromebox"]}
+                            {"key": "cc-role/compute", "operator": "In", "values": ["true"]}
                         ]}],
                     }}},
                     "containers": [{

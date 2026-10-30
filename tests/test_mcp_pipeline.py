@@ -6,6 +6,10 @@ one real trust boundary at mcp.sync_source — so these tests check the state
 machine (synced -> built -> deployed cannot be skipped from either end) and
 the exact subprocess/manifest shapes, monkeypatching `executor._run` (the one
 subprocess seam) rather than touching a real ssh/podman/kubectl anywhere.
+
+R8 (epic-instance-facts-relocation, INSTANCE-001): the MCP Deployment's node
+affinity is the `cc-role/compute` label, never a node name, and the build host
+is the example host `build-host.example.com`.
 """
 
 from __future__ import annotations
@@ -151,7 +155,7 @@ def test_proposal_suffix_takes_the_last_12_hex_chars():
     assert len(executor._mcp_proposal_suffix("prop_")) == 12
 
 
-def test_deployment_manifest_carries_the_8000_convention_and_chromebox_affinity():
+def test_deployment_manifest_carries_the_8000_convention_and_the_compute_role_affinity():
     m = executor._mcp_deployment_manifest("myserver", "docker.io/library/cc-mcp-myserver:abc")
     assert m["metadata"]["namespace"] == "cc-mcp"
     container = m["spec"]["template"]["spec"]["containers"][0]
@@ -160,7 +164,11 @@ def test_deployment_manifest_carries_the_8000_convention_and_chromebox_affinity(
     terms = m["spec"]["template"]["spec"]["affinity"]["nodeAffinity"][
         "requiredDuringSchedulingIgnoredDuringExecution"
     ]["nodeSelectorTerms"]
-    assert terms[0]["matchExpressions"][0]["values"] == ["chromebox"]
+    # R8 (INSTANCE-001): the pin is the role label, never a node name.
+    assert terms[0]["matchExpressions"] == [
+        {"key": "cc-role/compute", "operator": "In", "values": ["true"]}
+    ]
+    assert "kubernetes.io/hostname" not in json.dumps(m)
     assert container["resources"]["limits"] and container["resources"]["requests"]
 
 
@@ -283,7 +291,7 @@ async def test_build_happy_path_exact_ssh_tar_podman_shapes_and_row_update(monke
     await _insert_mcp_server(server_id, "synced")
     try:
         monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
-        monkeypatch.setattr(settings, "mcp_build_host", "chromebox")
+        monkeypatch.setattr(settings, "mcp_build_host", "build-host.example.com")
         server_dir = tmp_path / "servers" / server_id
         server_dir.mkdir(parents=True)
         (server_dir / "Dockerfile").write_text("FROM scratch\n")
@@ -297,12 +305,12 @@ async def test_build_happy_path_exact_ssh_tar_podman_shapes_and_row_update(monke
         async def fake_run(cmd=None, *, shell_cmd=None, stdin=None, cwd=None, timeout=600.0):
             calls.append({"cmd": cmd, "shell_cmd": shell_cmd, "stdin": stdin})
             if shell_cmd and "podman build" in shell_cmd:
-                assert shell_cmd.startswith(f"tar -C {server_dir} -cf - . | ssh chromebox ")
+                assert shell_cmd.startswith(f"tar -C {server_dir} -cf - . | ssh build-host.example.com ")
                 assert f"podman build -t {ref} -f Dockerfile -" in shell_cmd
                 return 0, "Successfully built\n", ""
             if shell_cmd and "podman image inspect" in shell_cmd:
                 assert ref in shell_cmd
-                assert "ssh chromebox" in shell_cmd
+                assert "ssh build-host.example.com" in shell_cmd
                 return 0, "sha256:abc123\n", ""
             if shell_cmd and "podman save" in shell_cmd:
                 assert ref in shell_cmd
@@ -339,7 +347,7 @@ async def test_build_refuses_when_import_verify_is_a_near_miss_not_an_exact_matc
     await _insert_mcp_server(server_id, "synced")
     try:
         monkeypatch.setattr(settings, "mcp_servers_root", str(tmp_path / "servers"))
-        monkeypatch.setattr(settings, "mcp_build_host", "chromebox")
+        monkeypatch.setattr(settings, "mcp_build_host", "build-host.example.com")
         server_dir = tmp_path / "servers" / server_id
         server_dir.mkdir(parents=True)
         (server_dir / "Dockerfile").write_text("FROM scratch\n")

@@ -64,8 +64,9 @@ actually does.
 - **Single-arch build is pinned to one build host.** There is no cross-arch
   step here — `mcp.build_image` builds and imports on exactly
   `settings.mcp_build_host`, and `mcp.server_deploy`'s manifest carries a
-  **required** (not preferred) node affinity to that same node, because
-  there is no fallback node with the image. Escalating a server to run on
+  **required** (not preferred) node affinity by the `cc-role/compute`
+  label (the build host is a separate setting), because there is no
+  fallback node with the image. Escalating a server to run on
   both nodes is real, separate work (a second build, a second
   `imagePullPolicy`/presence verification) that nothing in the pipeline
   does automatically — say so plainly if a task seems to assume failover
