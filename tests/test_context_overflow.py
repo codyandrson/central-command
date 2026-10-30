@@ -6,7 +6,10 @@ ContextWindowExceeded: one turn opened four full marketing emails through
 working window's estimate at 4 chars/token called a 111k-token request
 half-full. Three seams changed: the estimate's density, a per-result
 ceiling derived from the INPUT window, and a last-resort clip before a
-request that would not fit."""
+request that would not fit.
+
+Epic-small-fixes story 11.4 (R3, RUNTIME-006) adds the outer catch: a failure
+anywhere in `_prepare_window` sends the clip, never the raw record."""
 
 from __future__ import annotations
 
@@ -109,6 +112,34 @@ async def test_a_dead_summarizer_still_ends_in_the_clip_not_raw_history(monkeypa
     assert "session.context_overflow_clipped" in emitted
     assert context.estimate_messages(out) < 30_000 * context.OVERFLOW_FRACTION
     assert _pairs_ok(out)
+
+
+@pytest.mark.parametrize("breaks", ["estimate_messages", "load_settings"])
+async def test_a_step_that_raises_still_sends_a_clipped_window(monkeypatch, caplog, breaks):
+    """R3: the estimate (or the settings read) raising used to send the RAW record
+    from the outer catch. The fallback clips with inputs that need no I/O."""
+    msgs = _transcript(turns=6, payload=20_000)
+    _pin(monkeypatch, {"summarize": False}, window=30_000)
+
+    def boom(*a, **k):
+        raise RuntimeError("estimate died")
+
+    async def aboom(*a, **k):
+        raise RuntimeError("settings died")
+    monkeypatch.setattr(context, breaks, aboom if breaks == "load_settings" else boom)
+    monkeypatch.setattr(settings, "context_window", 30_000)
+
+    out = await _window(_ctx(session_id="sess_brokenstep"), msgs)
+    size = int(30_000 * context.OVERFLOW_CLIP_SHARE * context.density_for("cc-default"))
+    returns = [p for m in out if isinstance(m, ModelRequest)
+               for p in m.parts if isinstance(p, ToolReturnPart)]
+    assert returns and all(len(r.content) <= size + len(context.CLIPPED.format(n=size))
+                           for r in returns)
+    assert all("[CLIPPED at" in r.content for r in returns)
+    assert out is not msgs and _pairs_ok(out)
+    assert "sending the clipped history" in caplog.text
+    assert max(len(p.content) for m in msgs if isinstance(m, ModelRequest)
+               for p in m.parts if isinstance(p, ToolReturnPart)) == 20_000, "the record is untouched"
 
 
 async def test_a_request_that_fits_is_not_clipped(monkeypatch):

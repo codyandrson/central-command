@@ -535,14 +535,32 @@ async def prepare_window(ctx: RunContext[Any], messages: list):
     """The `ProcessHistory` seam. Measures the working window for this request
     and hands it to `WindowedModel` via `_pending`; RETURNS THE INPUT UNCHANGED
     so the record pydantic-ai persists stays raw (see the slice-2 note). A step
-    that breaks means the raw history is sent, never a dead run."""
+    that breaks means the CLIPPED history is sent (R3), never the raw one and
+    never a dead run."""
     try:
         working = await _prepare_window(ctx, messages)
     except Exception:
         import logging
 
-        logging.getLogger(__name__).exception("context.prepare_window failed; sending raw history")
-        working = messages
+        log = logging.getLogger(__name__)
+        # The raw record is the one request guaranteed not to fit once it is
+        # bigger than the window (2026-09-18: 607k tokens against 262k), so a
+        # failed step falls back to the clip, computed from inputs that need no
+        # I/O: the static window setting and the density table. Not
+        # `window_for` — it is a discovery call and may be what failed. The clip
+        # is unconditional: it cuts only results over ~4% of the window, so a
+        # small record comes back unchanged in content, and there is no estimate
+        # to gate on (the estimate may be what raised).
+        try:
+            density = density_for(getattr(ctx.model, "model_name", None))
+            working = clip_tool_results(
+                messages, int(settings.context_window * OVERFLOW_CLIP_SHARE * density))
+            log.exception(
+                "context.prepare_window failed; sending the clipped history, not the raw one")
+        except Exception:
+            log.exception(
+                "context.prepare_window failed AND the fallback clip failed; sending raw history")
+            working = messages
     if messages:
         _pending.set((messages[-1], working))
     return messages

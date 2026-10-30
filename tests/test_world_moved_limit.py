@@ -7,8 +7,10 @@ next failure is terminal and loud — FAILED with `chain_exhausted`, one
 `proposal.redraft_limit_reached`, the drafter NOT resumed, the stored history
 repaired (the pending propose call answered with the terminal report, no model
 run), the session resting open flagged `exec_failed`, the task FAILED naming the
-limit. A conversation lane stays sendable over the repaired history. Any other
-semantic failure keeps its resume and never counts; a Reject keeps the count.
+limit. A conversation lane stays sendable over the repaired history, and its
+exec-failed mark clears when it answers a later turn with a text reply (epic-small-fixes
+story 11.4, R27, the operator's ruling 2026-10-29) but stays through a turn that parks.
+Any other semantic failure keeps its resume and never counts; a Reject keeps the count.
 """
 
 from __future__ import annotations
@@ -306,7 +308,26 @@ async def test_a_conversation_lane_at_the_limit_stays_sendable_over_a_repaired_h
     reply = await converse.conversation_turn(sid, "what happened?", model=drafter.model)
     assert reply["reply"] == "Understood — it is yours."
     assert any("redraft limit 3 reached" in r for r in drafter.calls[-1])
-    assert (await repo.get_session(sid))["status"] == "AWAITING_OPERATOR"
+    after = await repo.get_session(sid)
+    assert after["status"] == "AWAITING_OPERATOR"
+    assert after["exec_failure"] is None, "a successful text reply clears the chip (R27)"
+
+
+@pytest.mark.usefixtures("confluence_grant")
+async def test_a_turn_that_parks_keeps_the_conversation_lanes_exec_failure(monkeypatch):
+    """R27: only a SUCCESSFUL text reply clears the mark. A later turn that ends
+    in a parked proposal leaves the lane flagged."""
+    drafter = _Persistent(_stale_page)
+    out = await converse.start_conversation(AGENT)  # opens, awaits the operator
+    sid = out["session_id"]
+    await repo.mark_session_exec_failed_open(sid, "Confluence page changed (redraft limit 3)")
+
+    turn = await converse.conversation_turn(sid, "update the roadmap page", model=drafter.model)
+    assert turn["awaiting"] == "approval"
+
+    session = await repo.get_session(sid)
+    assert session["status"] == "AWAITING_HUMAN"
+    assert session["exec_failure"] == "Confluence page changed (redraft limit 3)"
 
 
 async def test_a_sibling_deferred_in_the_same_response_is_answered_too():

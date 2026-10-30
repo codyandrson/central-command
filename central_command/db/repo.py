@@ -846,6 +846,25 @@ async def mark_session_running(session_id: str) -> None:
         await conn.close()
 
 
+async def clear_session_exec_failure(session_id: str) -> None:
+    """A conversation lane answered a later turn with a plain text reply: its
+    red exec-failed mark has served (operator's ruling, 2026-10-29). Mode
+    `conversation` only — a task-run session keeps the mark for the hand-close
+    lever — and a no-op when none is set, so an ordinary reply touches nothing.
+    Called from `converse._land_turn`'s text-reply branch and nowhere else:
+    never at `mark_session_running` (a turn that dies keeps the mark) and never
+    in `mark_session_awaiting_operator` (the gateway's post-decision rest)."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            "update session set exec_failure = null, updated_at = now() "
+            "where id = $1 and mode = 'conversation' and exec_failure is not null",
+            session_id,
+        )
+    finally:
+        await conn.close()
+
+
 async def mark_session_awaiting_operator(session_id: str, run_state: dict | None = None) -> None:
     """The conversation's resting state: the agent has replied and awaits the
     operator's next message. Optionally re-persist the transcript (the gateway

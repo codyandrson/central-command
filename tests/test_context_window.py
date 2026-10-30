@@ -6,7 +6,8 @@ only, step by step, each step an operator toggle. What is under test:
 - each pure step does exactly its one thing and leaves the wire protocol valid
   (a tool return never loses the call it answers);
 - the processor is a no-op under the test model and with every toggle off, and a
-  failure inside it sends the raw history rather than killing the run;
+  failure inside it sends the CLIPPED history (epic-small-fixes story 11.4, R3,
+  RUNTIME-006) — never the raw record, never a dead run;
 - the summary step spends its model call once, caches in `run_state`, and
   keeps messages[0] plus a tail that starts with a response;
 - the settings round-trip through the routes with partial PUT semantics.
@@ -255,7 +256,9 @@ def test_load_messages_repairs_a_typed_return_damaged_by_the_leak():
     assert "tool_kind" not in damaged["messages"][0]["parts"][0]
 
 
-async def test_a_broken_step_sends_the_raw_history(monkeypatch):
+async def test_a_broken_step_sends_the_clipped_history_not_the_raw_one(monkeypatch, caplog):
+    """R3: the outer catch clips from inputs that need no I/O. `clip_tool_results`
+    always returns a new list, so the window is a clip of the record, never it."""
     msgs = _transcript()
     _pin(monkeypatch, {})
 
@@ -263,7 +266,22 @@ async def test_a_broken_step_sends_the_raw_history(monkeypatch):
         raise RuntimeError("no")
     monkeypatch.setattr(context, "drop_thinking", boom)
     assert await context.prepare_window(_ctx(), msgs) is msgs
+    sent = context.working_window(msgs)
+    assert sent is not msgs and sent == msgs, "nothing was over the clip size, so content is equal"
+    assert "sending the clipped history" in caplog.text
+
+
+async def test_a_clip_that_itself_fails_sends_the_raw_history(monkeypatch, caplog):
+    msgs = _transcript()
+    _pin(monkeypatch, {})
+
+    def boom(*a, **k):
+        raise RuntimeError("no")
+    monkeypatch.setattr(context, "drop_thinking", boom)
+    monkeypatch.setattr(context, "clip_tool_results", boom)
+    assert await context.prepare_window(_ctx(), msgs) is msgs
     assert context.working_window(msgs) is msgs
+    assert "fallback clip failed" in caplog.text
 
 
 @needs_pg

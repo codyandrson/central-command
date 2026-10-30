@@ -7,6 +7,10 @@ sidebar showed a normal completion for a run whose write blew up. Now the
 session rests AWAITING_OPERATOR with `exec_failure` set (the sidebar's red
 chip), and closing it is the operator's explicit act: the ✕ on the row routes
 to `_close_conversation_for_key`, which lands it FAILED with the WHY.
+
+Epic-small-fixes story 11.4 (R27, the operator's ruling 2026-10-29): a CONVERSATION lane's
+mark clears on its next successful text reply (`repo.clear_session_exec_failure`);
+a task-run session keeps it for the hand-close lever.
 """
 
 from __future__ import annotations
@@ -93,3 +97,14 @@ async def test_a_plain_run_without_an_exec_failure_still_refuses_manual_close():
         "the carve-out is for exec-failed rests ONLY — ordinary runs still "
         "resolve through their proposals, never by hand"
     )
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_exec_failure_is_for_conversation_lanes_only():
+    lane = await _insert_session(mode="conversation", status="AWAITING_OPERATOR")
+    task_run = await _insert_session(mode="oneshot", status="AWAITING_OPERATOR")
+    for sid in (lane, task_run):
+        await repo.mark_session_exec_failed_open(sid, "Jira 400: no project SUPP")
+        await repo.clear_session_exec_failure(sid)
+    assert (await repo.get_session(lane))["exec_failure"] is None
+    assert (await repo.get_session(task_run))["exec_failure"] == "Jira 400: no project SUPP"

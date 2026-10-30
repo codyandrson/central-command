@@ -365,6 +365,11 @@ async def _land_turn(session_id: str, agent_id: str, result) -> dict:
         # A text reply — rest until the operator's next message. _run_live has
         # already persisted the full transcript as the session's run_state.
         await repo.mark_session_awaiting_operator(session_id)
+        # A lane that was resting on an exec-failed mark and has now answered a
+        # turn successfully is no longer failed (ruling 2026-10-29, R27). Only
+        # this branch: a turn that parks, asks or dies never reaches it. The
+        # cockpit row refreshes on the turn's own lifecycle end frame.
+        await repo.clear_session_exec_failure(session_id)
         return {"session_id": session_id, "reply": str(result.output), "awaiting": "operator"}
 
     # NOT every deferral is a proposal. `extract_deferred` returns the FIRST
