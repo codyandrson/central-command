@@ -35,7 +35,7 @@ A private or gated variant behind your gateway can differ from its public
 namesake in every dimension these files describe: a smaller context window
 served (KV-cache-limited, not model-limited: a model card's native context can
 be far above what the server's KV cache actually serves — the served figure is
-an instance fact, <!-- overlay: served_context_example — moved to the instance overlay by epic-instance-facts-relocation -->), a
+an instance fact, <!-- overlay: served_context_example -->), a
 disabled tool-calling path, a reasoning control that's silently dropped, or a
 distillation/fine-tune with materially different benchmark scores than the
 base model it's named after. **Never write a `model_info` field from one of

@@ -20,7 +20,7 @@ job on the ingest queue; extraction runs afterwards, one episode at a time
 within a group. Approval is **not the finished graph state**. An episode you
 just committed will not be searchable as facts immediately — with a local
 extraction model it takes on the order of a minute per episode
-<!-- overlay: graph_extraction_latency — moved to the instance overlay by epic-instance-facts-relocation -->,
+<!-- overlay: graph_extraction_latency -->,
 and a burst in one group waits its turn. Do not conclude the write failed because a search a
 moment later found nothing: a job that fails is retried (transient causes) or
 parked for the operator with its error (permanent ones), never silently
@@ -73,7 +73,7 @@ form an isolated graph that can be queried independently.
 | **write group** | `central_command` (`CC_GRAPH_WRITE_GROUP`) |
 
 `main` is the **preserved inherited graph** from before this system
-existed <!-- overlay: graph_main_group_origin — moved to the instance overlay by epic-instance-facts-relocation -->. Reads span both so agents get the full picture; writes land only in
+existed <!-- overlay: graph_main_group_origin -->. Reads span both so agents get the full picture; writes land only in
 `central_command`, so the inherited graph is never polluted by Central Command's
 proposals. Do not propose writing to `main`, and do not treat a `main` fact as
 something this system produced.

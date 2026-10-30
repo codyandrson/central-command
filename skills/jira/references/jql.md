@@ -38,10 +38,10 @@ redraft got it right:
 
 - **`issueFunction`** — a ScriptRunner (marketplace app) function. Not
   installed. Any JQL using it is rejected with "Field 'issueFunction' does
-  not exist". <!-- overlay: jira_installed_apps — moved to the instance overlay by epic-instance-facts-relocation -->
+  not exist". <!-- overlay: jira_installed_apps -->
 - **`"Epic Link"`** — the classic-Jira epic field. This instance expresses
   hierarchy as `parent`; write `parent = TASKS-20`, exactly as the epic row
-  in the table above. <!-- overlay: jira_hierarchy_field — moved to the instance overlay by epic-instance-facts-relocation -->
+  in the table above. <!-- overlay: jira_hierarchy_field -->
 
 The general rule: use only fields you have SEEN — in the clauses table above
 or in real issues you read. If you are unsure a field exists, that is what

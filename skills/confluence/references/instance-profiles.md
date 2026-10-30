@@ -19,8 +19,8 @@ are instance facts: they belong in the gitignored instance overlay, not in
 this file (the overlay loader is not built yet, so until it is the operator
 supplies the allowlist).
 
-<!-- overlay: confluence_profile_cloud — moved to the instance overlay by epic-instance-facts-relocation -->
-<!-- overlay: confluence_profile_server — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: confluence_profile_cloud -->
+<!-- overlay: confluence_profile_server -->
 
 What does hold for every instance of a flavor, and stays here as generic
 guidance:

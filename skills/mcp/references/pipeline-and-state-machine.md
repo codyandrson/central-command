@@ -60,7 +60,7 @@ Tool: `propose_mcp_build(server_id, rationale)` — a "simple shape" proposal
   once. Also requires `settings.mcp_build_host` configured and
   `servers/<server_id>/Dockerfile` to exist.
 - Build is **single-arch, pinned to one build host** (`settings.mcp_build_host`
-  — the compute node today <!-- overlay: compute_node_name — moved to the instance overlay by epic-instance-facts-relocation -->): `tar -C <server_dir> -cf - . | ssh <host> podman
+  — the compute node today <!-- overlay: compute_node_name -->): `tar -C <server_dir> -cf - . | ssh <host> podman
   build -t <ref> -f Dockerfile -`. No cross-arch build, no multi-arch
   manifest — per the design doc's §9.3 ratified decision, a newly agent-built
   server defaults to no-failover until an operator deliberately escalates it.

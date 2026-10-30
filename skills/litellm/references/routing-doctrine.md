@@ -24,7 +24,7 @@ true now, and the two paths (agent traffic vs. the CLI) are unrelated.
   alias's deployment — no Central Command edit, no restart, no deploy.
 - There is **no router in Central Command and none is wanted**. Measured agent
   traffic cost less than a router's own upkeep.
-  <!-- overlay: agent_traffic_cost — moved to the instance overlay by epic-instance-facts-relocation -->
+  <!-- overlay: agent_traffic_cost -->
 - Provider config is **presence-is-enablement**: `CC_LLM_BASE_URL` +
   `CC_LLM_API_KEY`. `base_url` is always passed explicitly so no ambient env
   var can redirect agent traffic. Missing either in live mode raises
@@ -75,7 +75,7 @@ haiku rejects a `max_tokens` above its cap. No separate fix was needed.
 `max_output_tokens`; a model that declares one is clamped to it per request
 (`runtime/context.py::output_cap_for`), so never lower the ceiling for one
 model's sake — declare that model's cap on its entry.
-<!-- overlay: model_server_max_output_tokens — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: model_server_max_output_tokens -->
 
 **To reverse it:** add the keys back to
 `deploy/shared/litellm/model-preferences.yaml` and run `policy.py --apply`, or
@@ -121,7 +121,7 @@ itself, not only on the underlying deployment alias.
 
 ## The local model server: one slot, two aliases, a swapper
 
-<!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: model_server_layout -->
 (Its host, port, swapper container, swapper config path and the model-to-slot
 layout with each model's served context are instance facts; read them from the
 instance overlay, not from this file.)
@@ -141,12 +141,12 @@ instance overlay, not from this file.)
   timeouts are sized for waiting, not for compute. Do not propose shortening
   them as a fix for slowness; a dead server still refuses the TCP connection
   instantly, so outage detection is unaffected.
-  <!-- overlay: model_server_timeouts — moved to the instance overlay by epic-instance-facts-relocation -->
+  <!-- overlay: model_server_timeouts -->
   (The declared figures, their decision date and the operator's rationale are
   instance facts.)
 - **The swapper's per-model concurrency limit may need raising** (its default
   bites with 429s during a drain burst).
-  <!-- overlay: model_server_concurrency — moved to the instance overlay by epic-instance-facts-relocation -->
+  <!-- overlay: model_server_concurrency -->
   (The deployed value is an instance fact.)
 - **Two traps specific to a swapper slot:** (1) it answers only `/v1/*`
   paths — a LiteLLM entry pointed at it needs `api_base` ending `/v1`, or
@@ -155,7 +155,7 @@ instance overlay, not from this file.)
   blind.
 - **Embedder and reranker, where the deployment runs them locally, are
   separate resident servers**, not competing for the swap slot.
-  <!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
+  <!-- overlay: model_server_layout -->
   (Their upstream names, ports and hardware are instance facts.) Consumers
   address them through the ROLE aliases `cc-embedding` and `cc-rerank`
   (separate proxy rows onto the same upstreams, mirroring cc-default); the
@@ -176,7 +176,7 @@ instance overlay, not from this file.)
   client.
 - **Models retired from the fleet stay retired.** Never route to one or give
   it a role; if a second local LLM role is wanted, decide its role first.
-  <!-- overlay: retired_local_models — moved to the instance overlay by epic-instance-facts-relocation -->
+  <!-- overlay: retired_local_models -->
   (Which models were retired, and when, are instance facts.)
 
 If the server's default-serving model changes, **re-point `cc-default`**

@@ -25,7 +25,7 @@ before interpreting a status code.
 ## Rate limiting (Cloud only)
 
 Cloud enforces an API-points-per-hour quota that depends on the plan tier
-<!-- overlay: confluence_plan_limits — moved to the instance overlay by epic-instance-facts-relocation -->,
+<!-- overlay: confluence_plan_limits -->,
 tracked per-request-cost rather than per-request-count (some endpoints cost
 more points than others). A 429 carries `Retry-After` — back off for that many
 seconds; don't retry immediately. Cost control:
@@ -34,7 +34,7 @@ seconds; don't retry immediately. Cost control:
   `confluence_get_page` calls to find something.
 - Then use `confluence_get_page` for the specific pages you actually need
   the body or version of.
-- A free plan also caps total users and storage <!-- overlay: confluence_plan_limits — moved to the instance overlay by epic-instance-facts-relocation --> — an upload
+- A free plan also caps total users and storage <!-- overlay: confluence_plan_limits --> — an upload
   that fails on Cloud with a space/quota-flavored error may be the plan cap,
   not a bug; check remaining space before assuming the request was malformed.
 

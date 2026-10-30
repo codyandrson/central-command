@@ -47,7 +47,7 @@ approves, the Executor applies.
    swapper (llama-swap style).** `cc-default`/`graphiti-llm` and any judge
    models all share it — a role decision or a model change there affects the
    others. See `routing-doctrine`.
-   <!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
+   <!-- overlay: model_server_layout -->
 
 ## References
 

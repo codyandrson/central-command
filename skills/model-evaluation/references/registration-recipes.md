@@ -52,8 +52,7 @@ reaches the gateway must be the catalog id. A doubled `openai/openai/` looks
 wrong and is right. Stripping the vendor because it "repeats" sends the
 gateway a bare `gpt-5.6-sol`, which it may 404 — or may silently resolve to
 whatever it aliases that name to (an observed bulk registration: a slice of
-the rows 404ed and the rest routed on a guess
-<!-- overlay: gateway_registration_incident — moved to the instance overlay by epic-instance-facts-relocation -->). And `anthropic/<id>` is LiteLLM's
+the rows 404ed and the rest routed on a guess). And `anthropic/<id>` is LiteLLM's
 NATIVE Anthropic provider, not a gateway path — it authenticates against
 api.anthropic.com with the gateway's key and is rejected on the spot.
 

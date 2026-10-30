@@ -74,7 +74,7 @@ substitute for the verification itself.
 - **Story / Task** = one deliverable a person finishes; it names its Epic via
   `parent` when it belongs to one. Story for user-visible value, Task for
   work-about-work — where both types exist, don't agonise; be consistent
-  within a project. <!-- overlay: jira_issue_types_present — moved to the instance overlay by epic-instance-facts-relocation -->
+  within a project. <!-- overlay: jira_issue_types_present -->
 - **Subtask** = a checklist step of ONE parent issue, never freestanding
   (`parent` is mechanically required). If a "subtask" would make sense
   assigned to a different week or person than its parent, it is a Task under

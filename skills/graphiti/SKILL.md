@@ -41,7 +41,7 @@ before the Executor commits it.
    distilled claims, never source bodies (PRD FR-30).
 3. **Reads span `main` + `central_command`; writes land only in `central_command`.**
    The inherited `main` graph is never polluted by this system's proposals.
-   <!-- overlay: graph_main_group_origin — moved to the instance overlay by epic-instance-facts-relocation -->
+   <!-- overlay: graph_main_group_origin -->
 4. **Be stricter about relationships than about things.** Naming an entity the
    document names is usually safe. Asserting that A blocks B, C owns D, or X
    caused Y is where extraction breaks — a relationship you inferred rather

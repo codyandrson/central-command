@@ -316,8 +316,8 @@ answer in conversation (then you write the answer into `.env`).
     `CC_CONFLUENCE_API_FLAVOR` / `CC_CONFLUENCE_AUTH_MODE`. Ask which macro
     profile matches their instance
     (`skills/confluence/references/instance-profiles.md` lists the profiles
-    the deployment ships)
-    <!-- overlay: confluence_profile_names — moved to the instance overlay by epic-instance-facts-relocation -->
+    the deployment ships; which of them this deployment has is in the
+    operator's private session guidance, the gitignored `CLAUDE.local.md`)
     — if none matches, record `CC_CONFLUENCE_PROFILE` empty rather than
     guessing a macro that might not exist on their instance.
   - **Email** — Gmail (needs `CC_ENABLE_N8N=1`, wired in the n8n UI on
@@ -446,9 +446,9 @@ its §10.
   generates every GENERATED value and prints the ELICITED ones to collect.
   Topology: placement is the role labels `cc-role/anchor` /
   `cc-role/compute` (preflight names the label commands if missing), and
-  `CC_COMPUTE_SSH` is the compute node's ssh target (defaults to the
-  compute node's address in `deploy/k3s/setup.sh`)
-  <!-- overlay: compute_ssh_default — moved to the instance overlay by epic-instance-facts-relocation -->.
+  `CC_COMPUTE_SSH` is the compute node's ssh target, a required key
+  with no default (this deployment's value is in the operator's private
+  session guidance, the gitignored `CLAUDE.local.md`).
   `CC_COCKPIT_ORIGIN` is the cockpit's tailnet URL —
   without it, tailnet browsers 403 on the WS upgrade (README §6).
   On a RESTORE, the two never-rotate keys (`LITELLM_SALT_KEY`,

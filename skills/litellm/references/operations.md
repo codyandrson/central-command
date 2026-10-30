@@ -14,7 +14,7 @@ Two different reads, do not conflate them:
   whole-fleet sweep would hit each model that lives on the same swapper
   slot in sequence — probing several forces live GPU model swaps (seconds
   each) and can time the sweep out entirely.
-  <!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation --> Probe **one model alias at a time**, and prefer probing only the
+  <!-- overlay: model_server_layout --> Probe **one model alias at a time**, and prefer probing only the
   one you actually suspect is unhealthy.
 - **`litellm_probe_model`** — a different kind of expensive: not a liveness
   check but a **capability measurement**, ~10 short real requests (chat,
@@ -47,7 +47,7 @@ timing out, check its declared timeout and the actual upstream latency before
 proposing a change. On the local-model-server models, a long declared timeout
 is deliberate FIFO-queue policy, not slack to trim — see
 `routing-doctrine`'s local-model-server section.
-<!-- overlay: model_server_timeouts — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: model_server_timeouts -->
 (The declared figures are instance facts.) A request can legitimately wait
 behind an entire swap-queue drain before it even starts.
 

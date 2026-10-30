@@ -1,12 +1,16 @@
 """The skill overlay's thinnest path: overlay file -> loader -> render at
 import -> library -> agent read.
 
-Covers R1 and R2 of epic-instance-facts-relocation (INSTANCE-008): a bundled
+Covers R1, R2 and R3 of epic-instance-facts-relocation (INSTANCE-008): a bundled
 skill carries `<!-- overlay: <field> -->` where a deployment-only fact would
 go, and the API tier writes this deployment's text there at IMPORT, so the
 library holds what agents read and the agent tier stays file-free. An absent
 overlay or field removes the marker (the import lists it unresolved); a
 MALFORMED marker refuses the import, naming file and line, before any write.
+R3 is the index: every marker under skills/ is the one short grammar and names
+a field in `overlay.FIELDS`, every field has a marker, nothing under .claude/
+is marked, and `overlay check` says which fields an overlay resolves without
+ever printing a value.
 
 Values here are example text only. The route is called directly, the pattern
 every skills import test in this suite uses (there is no TestClient).
@@ -15,7 +19,10 @@ every skills import test in this suite uses (there is no TestClient).
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,7 +37,8 @@ from tests.conftest import needs_pg
 
 pytestmark_db = needs_pg
 
-LONG = "<!-- overlay: layout — moved to the instance overlay by epic-instance-facts-relocation -->"
+ROOT = Path(__file__).resolve().parents[1]
+SHORT = re.compile(r"<!-- overlay: ([a-z0-9_]+) -->")
 VALUE = "node-a runs the model, 4 slots"  # example text, not a real layout
 
 
@@ -46,9 +54,11 @@ def test_render_inserts_the_value_and_removes_the_marker():
     assert "overlay" not in out
 
 
-def test_the_long_form_is_the_same_marker():
-    out, resolved, _ = overlay.render(f"x {LONG}.\n", {"layout": VALUE}, source="a.md")
-    assert out == f"x {VALUE}.\n" and resolved == ["layout"]
+def test_the_retired_long_form_is_malformed():
+    long = "<!-- overlay: layout — moved to the instance overlay by epic-instance-facts-relocation -->"
+    with pytest.raises(ValueError) as exc:
+        overlay.render(f"x {long}.\n", {"layout": VALUE}, source="a.md")
+    assert "a.md:1" in str(exc.value)
 
 
 def test_trailing_newline_of_the_value_is_trimmed_by_load(tmp_path):
@@ -95,6 +105,7 @@ def test_an_inline_marker_mid_sentence_inside_an_indented_item():
     "<!-- overlay: layout",
     "<!-- overlay: layout - moved -->",
     "<!--overlay: layout -->",
+    "<!-- overlay: layout — moved to the instance overlay by epic-instance-facts-relocation -->",
 ])
 def test_a_malformed_marker_raises_naming_file_and_line(marker):
     with pytest.raises(ValueError) as exc:
@@ -135,6 +146,158 @@ def test_nothing_in_the_runtime_tier_imports_the_overlay():
         str(p) for p in root.rglob("*.py") if pattern.search(p.read_text(encoding="utf-8"))
     ]
     assert offenders == []
+
+
+# --- the index: FIELDS against the tree (R3) -----------------------------------
+
+
+def _markers_in_tree() -> dict[str, list[str]]:
+    """Every `<!-- overlay` occurrence under skills/ (any file type), by field;
+    a non-short occurrence is returned under the key '?'."""
+    found: dict[str, list[str]] = {}
+    for f in sorted((ROOT / "skills").rglob("*")):
+        if not f.is_file():
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        rel = str(f.relative_to(ROOT))
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            opened = len(re.findall(r"<!--\s*overlay", line))
+            short = SHORT.findall(line)
+            for field in short:
+                found.setdefault(field, []).append(f"{rel}:{lineno}")
+            if opened != len(short):
+                found.setdefault("?", []).append(f"{rel}:{lineno}")
+    return found
+
+
+def test_every_marker_under_skills_is_the_short_grammar_and_names_a_field():
+    found = _markers_in_tree()
+    assert found.pop("?", []) == []
+    assert sorted(set(found) - set(overlay.FIELDS)) == []
+
+
+def test_every_field_has_a_marker_and_the_count_matches_the_tree():
+    found = _markers_in_tree()
+    assert sorted(set(overlay.FIELDS) - set(found)) == []
+    assert list(overlay.FIELDS) == sorted(overlay.FIELDS)
+    assert all(re.fullmatch(r"[a-z0-9_]+", k) for k in overlay.FIELDS)
+    assert all(d.strip() and "\n" not in d for d in overlay.FIELDS.values())
+    # the same count `git grep -h -o '<!-- overlay:' -- skills | wc -l` gives
+    total = sum(len(v) for v in found.values())
+    grep = subprocess.run(
+        ["git", "grep", "-h", "-o", "<!-- overlay:", "--", "skills"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if grep.returncode in (0, 1):  # outside a git checkout there is nothing to compare
+        assert len(grep.stdout.splitlines()) == total
+
+
+def test_no_marker_under_the_claude_directory():
+    offenders = [
+        str(f.relative_to(ROOT))
+        for f in (ROOT / ".claude").rglob("*")
+        if f.is_file() and re.search(r"<!--\s*overlay", f.read_text(encoding="utf-8", errors="ignore"))
+    ]
+    assert offenders == []
+
+
+def test_no_planning_tail_survives_in_the_skills_or_claude_trees():
+    offenders = [
+        str(f.relative_to(ROOT))
+        for top in ("skills", ".claude")
+        for f in (ROOT / top).rglob("*")
+        if f.is_file() and "moved to the instance overlay" in f.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert offenders == []
+
+
+# --- check: which fields an overlay resolves ---------------------------------
+
+
+def _run_check(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "central_command.skills.overlay", "check", *args],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+
+
+def test_check_against_an_empty_dir_lists_every_field_unresolved_and_exits_1(tmp_path):
+    r = _run_check("--dir", str(tmp_path))
+    assert r.returncode == 1
+    for field in overlay.FIELDS:
+        assert any(
+            line.startswith("UNRESOLVED") and f" {field} " in line for line in r.stdout.splitlines()
+        ), field
+    assert "RESOLVED  " not in r.stdout.replace("UNRESOLVED", "")
+    assert "skills/litellm/SKILL.md" in r.stdout  # the marking files are named
+
+
+def test_check_with_a_missing_dir_is_the_same_empty_overlay(tmp_path):
+    r = _run_check("--dir", str(tmp_path / "nope"))
+    assert r.returncode == 1 and "(absent)" in r.stdout
+
+
+def test_check_against_a_dir_with_every_field_exits_0(tmp_path):
+    planted = "SECRET-PLANTED-VALUE-7731"
+    for field in overlay.FIELDS:
+        (tmp_path / f"{field}.md").write_text(f"{planted} for {field}\n")
+    r = _run_check("--dir", str(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "UNRESOLVED" not in r.stdout and "UNUSED" not in r.stdout
+    assert len([l for l in r.stdout.splitlines() if l.startswith("RESOLVED")]) == len(overlay.FIELDS)
+    assert planted not in r.stdout and planted not in r.stderr
+
+
+def test_check_names_an_extra_file_unused_and_never_prints_a_value(tmp_path):
+    planted = "SECRET-PLANTED-VALUE-9152"
+    for field in overlay.FIELDS:
+        (tmp_path / f"{field}.md").write_text(planted + "\n")
+    (tmp_path / "not_a_field.md").write_text(planted + "\n")
+    (tmp_path / "README.txt").write_text(planted)
+    r = _run_check("--dir", str(tmp_path))
+    assert r.returncode == 0  # an unused file is reported, not a failure
+    assert any(l.startswith("UNUSED") and "not_a_field.md" in l for l in r.stdout.splitlines())
+    assert "README" not in r.stdout
+    assert planted not in r.stdout and planted not in r.stderr
+
+
+def test_check_one_field_missing_exits_1_and_an_empty_file_is_unresolved(tmp_path):
+    names = list(overlay.FIELDS)
+    for field in names[1:]:
+        (tmp_path / f"{field}.md").write_text("text\n")
+    (tmp_path / f"{names[0]}.md").write_text("\n")
+    r = _run_check("--dir", str(tmp_path))
+    assert r.returncode == 1
+    unresolved = [l for l in r.stdout.splitlines() if l.startswith("UNRESOLVED")]
+    assert len(unresolved) == 1 and names[0] in unresolved[0] and "(empty file)" in unresolved[0]
+
+
+def test_check_flags_a_marker_naming_no_field_and_a_malformed_one(tmp_path):
+    skills = tmp_path / "skills"
+    (skills / "demo").mkdir(parents=True)
+    (skills / "demo" / "SKILL.md").write_text("text <!-- overlay: stray_field -->\n")
+    r = _run_check("--dir", str(tmp_path / "ovl"), "--skills", str(skills))
+    assert r.returncode == 1 and "UNKNOWN     stray_field" in r.stdout
+    (skills / "demo" / "SKILL.md").write_text("a\nb <!-- overlay: Bad -->\n")
+    r = _run_check("--dir", str(tmp_path / "ovl"), "--skills", str(skills))
+    assert r.returncode == 1 and "SKILL.md:2" in r.stderr and r.stdout == ""
+
+
+def test_check_defaults_to_the_resolved_overlay_dir(tmp_path):
+    state = tmp_path / "state"
+    (state / "skill-overlay").mkdir(parents=True)
+    (state / "skill-overlay" / "model_server_layout.md").write_text("x\n")
+    env = {**os.environ, "CC_STATE_DIR": str(state), "CC_SKILL_OVERLAY_DIR": ""}
+    r = subprocess.run(
+        [sys.executable, "-m", "central_command.skills.overlay", "check"],
+        cwd=ROOT, capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 1
+    assert str(state / "skill-overlay") in r.stdout
+    assert any(l.startswith("RESOLVED") and "model_server_layout" in l for l in r.stdout.splitlines())
 
 
 # --- through the import route (needs Postgres) -------------------------------
@@ -190,7 +353,7 @@ async def test_import_writes_the_value_and_reports_names_never_the_value(
     folder = _folder(
         tmp_path,
         "---\nname: ovl\ndescription: d\n---\n# G\nHost: <!-- overlay: layout -->\n",
-        f"# R\n- item\n  {LONG}\n- other <!-- overlay: missing_field -->.\n",
+        "# R\n- item\n  <!-- overlay: layout -->\n- other <!-- overlay: missing_field -->.\n",
     )
     before = (await repo.list_events_of_kinds(["skill.imported"]))
     since = before[-1]["id"] if before else 0

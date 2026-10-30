@@ -128,7 +128,7 @@ the graph, to learn whether it ran.
   local model (background work); a hosted model takes a few seconds. This is
   acceptable for queue processing and worth knowing before you assert a write
   "did not land".
-  <!-- overlay: graph_extraction_latency — moved to the instance overlay by epic-instance-facts-relocation -->
+  <!-- overlay: graph_extraction_latency -->
   (The measured figure for this deployment is an instance fact.)
 
 ## The one configuration that must not be "simplified"
@@ -163,7 +163,7 @@ ingestion-dated facts and is never relied on.
 Graphiti has **no embedding fallback** — another provider cannot substitute
 because the dimensions differ (PRD FR-34). So an outage of the embedder (role
 alias `cc-embedding`, over whatever upstream the deployment runs
-<!-- overlay: embedder_upstream — moved to the instance overlay by epic-instance-facts-relocation -->)
+<!-- overlay: embedder_upstream -->)
 is a graph **write outage**, not a degraded capability: ingest jobs cannot
 complete until it is back. The LLM being down is the degradable case; the
 embedder being down is not. Report them differently.

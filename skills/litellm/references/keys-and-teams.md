@@ -109,4 +109,4 @@ don't touch keys.
 Measured context: agent traffic cost is small (the figure is an instance
 fact). Cost is not the constraint here; loops and context are. Don't propose
 spend controls as if it were.
-<!-- overlay: agent_traffic_cost — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: agent_traffic_cost -->

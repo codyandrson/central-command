@@ -123,7 +123,7 @@ model server (the figure is an instance fact). A model that declares
 `max_output_tokens` in `model_info` is clamped to the lower of the two per
 request (`runtime/context.py::output_cap_for`), so declare a hosted model's
 cap on its own entry rather than lowering the ceiling.
-<!-- overlay: model_server_max_output_tokens — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: model_server_max_output_tokens -->
 
 ### `supports_vision` — capability is declared, never guessed
 
@@ -136,7 +136,7 @@ local model server loads a vision projector for its default model; a model
 with no vision encoder (a judge model, where the deployment has any) omits the
 field rather than asserting a false capability that happens to read the same
 either way.
-<!-- overlay: model_server_layout — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: model_server_layout -->
 
 ## The declared policy file and `policy.py`
 
@@ -170,7 +170,7 @@ needs its own copy in addition to the underlying model's.
 Timeouts on the local-model-server entries are large **on purpose** — see
 `routing-doctrine`'s local-model-server section for why (FIFO queueing, not
 slow compute).
-<!-- overlay: model_server_timeouts — moved to the instance overlay by epic-instance-facts-relocation -->
+<!-- overlay: model_server_timeouts -->
 (Which entries those are is an instance fact.)
 
 ## Model autodiscovery (`litellm.discovery` heartbeat action, 2026-08-20/21)

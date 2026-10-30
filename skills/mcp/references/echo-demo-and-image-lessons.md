@@ -34,8 +34,7 @@ day with one particular pip-installed version. A new server build should
 repeat the introspection step, not trust that `echo-demo`'s imports are
 still current.
 
-## Why it was left deployed
-<!-- overlay: mcp_echo_demo_live_state — moved to the instance overlay by epic-instance-facts-relocation -->
+## Why echo-demo is kept as a fixture
 
 It was left up as a live fixture for two things that needed a real registered
 server to test against: an **ungated** MCP tool as a direct callable (proved

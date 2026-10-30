@@ -61,7 +61,7 @@ and `deploy/k3s/60-sandbox.yaml`):
 - **The sandbox carries no credentials.** That is the actual constraint —
   provisioning a credential into a sandbox turns "can reach" into "can
   write", which is why that is an explicit, never-default operator decision.
-- **Isolation**: gVisor (`runtimeClassName: gvisor`) on the compute node only <!-- overlay: compute_node_name — moved to the instance overlay by epic-instance-facts-relocation --> —
+- **Isolation**: gVisor (`runtimeClassName: gvisor`) on the compute node only <!-- overlay: compute_node_name --> —
   one k8s Job **per sandbox session** (not per-exec, or the workspace would
   be lost between tool calls), `emptyDir` workspace, `1Gi`/`1cpu` limits,
   `automountServiceAccountToken: false`. Nothing that happens inside is

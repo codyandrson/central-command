@@ -17,7 +17,7 @@ Two real instance flavors exist and they are **not interchangeable**:
   v2 equivalent and stays on v1 CQL (`/wiki/rest/api/search`), permanently.
   Cursor pagination. Basic auth (email + API token). ~65k API points/hour,
   plan caps vary by tier.
-  <!-- overlay: confluence_instances — moved to the instance overlay by epic-instance-facts-relocation -->
+  <!-- overlay: confluence_instances -->
 - **server** — Confluence Server/DC 9.x (which site that is, is an instance fact). **v1
   `/rest/api` only** — v2 does not exist on Server/DC, ever. start/limit
   pagination. PAT-as-Bearer auth.
