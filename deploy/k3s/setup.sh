@@ -1384,7 +1384,7 @@ phase_reset() {
   keep="$bdir/keep-pre-reset-$stamp"
   marker="$(mktemp)" || { fail "reset-backup" "mktemp failed"; return 1; }
   touch -d '2 seconds ago' "$marker"
-  if ! step "reset-backup" "backup.sh dumped all four stores and the keys" \
+  if ! step "reset-backup" "backup.sh dumped all four stores, the keys and the three env files" \
        sudo env REPO="$REPO_ROOT" CC_BACKUP_DIR="$bdir" "$HERE/backup.sh"; then
     rm -f "$marker"
     note "nothing was stopped or wiped: reset does not proceed without a complete backup."
@@ -1392,7 +1392,7 @@ phase_reset() {
   fi
   sudo install -d -m 700 "$keep" && sudo chown --reference="$bdir" "$keep" \
     || { rm -f "$marker"; fail "reset-keep" "could not create $keep — nothing was wiped"; return 1; }
-  for label in central_command litellm n8n neo4j keys; do
+  for label in central_command litellm n8n neo4j keys env env-app env-web; do
     f="$(sudo find "$bdir" -maxdepth 1 -type f -name "${label}_*" -newer "$marker" | sort | tail -1)"
     if [[ -z "$f" ]]; then
       rm -f "$marker"

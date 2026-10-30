@@ -20,6 +20,15 @@
 #   Written 0600 into a backup directory OUTSIDE the git repo, on purpose —
 #   dumps and key material must never sit in a tree that gets pushed.
 #
+#   The three environment files are copied byte for byte beside them (R19,
+#   FR-51; ruled 2026-10-29), each under its own prefix so the reset phase's
+#   `${label}_*` keep loop picks each one up by label and none is ever named
+#   keys_*:
+#     env_<stamp>.env      deploy/k3s/.env  (the containers' env, both keys)
+#     env-app_<stamp>.env  the root .env    (the application's settings)
+#     env-web_<stamp>.env  web/.env         (the cockpit's settings)
+#   A missing or empty source fails the run, naming the copy and never a value.
+#
 #   Neo4j Community has no online backup, so the graph is a scale-to-0 -> dump
 #   -> scale-to-1 cycle. Nothing else is scaled down with it any more: the
 #   retired Graphiti server had to be (it acknowledged episodes it then lost
@@ -124,6 +133,30 @@ else
   say "  ok → $(basename "$keyfile") (0600)"
 fi
 
+# --- The environment files: what a restore onto a new host needs back -------
+# Copied, never rewritten: `cp -L` follows a symlinked source (deploy/k3s/.env
+# may be one after the deploy/pi move), and the umask above plus the chmod make
+# the copy 0600. A missing or empty source is a failure of THAT copy; the say
+# names the copy and the source's basename only — journald keeps this output,
+# so a value must never reach it.
+copy_env() { # <label> <source-path>
+  local label="$1" src="$2"
+  local dst="${OUT}/${label}_${STAMP}.env"
+  if [[ ! -s "$src" ]] || ! cp -L -- "$src" "$dst" 2>/dev/null; then
+    say "ERROR: ${label}: $(basename "$src") is missing or empty — it is NOT backed up tonight"
+    rm -f "$dst"; failed+=("$label"); return 1
+  fi
+  chmod 600 "$dst"
+  if [[ ! -s "$dst" ]] || ! cmp -s -- "$src" "$dst"; then
+    say "ERROR: ${label}: the copy of $(basename "$src") is empty or differs from its source"
+    rm -f "$dst"; failed+=("$label"); return 1
+  fi
+  say "  ok → $(basename "$dst") (0600)"
+}
+copy_env env     "$ENV_FILE"
+copy_env env-app "${REPO}/.env"
+copy_env env-web "${REPO}/web/.env"
+
 # --- Neo4j: offline dump on the compute node ------------------------------------
 # The PVC is ReadWriteOnce and node-pinned, so the dumper pod must land on the
 # same node and cc-neo4j must be down first.
@@ -194,6 +227,9 @@ in_failed central_command || prune 'central_command_*.sql.gz'
 in_failed litellm     || prune 'litellm_*.sql.gz'
 in_failed n8n         || prune 'n8n_*.sql.gz'
 in_failed keys        || prune 'keys_*.env'
+in_failed env         || prune 'env_*.env'
+in_failed env-app     || prune 'env-app_*.env'
+in_failed env-web     || prune 'env-web_*.env'
 [[ "$neo4j_ok" == "1" ]] && prune 'neo4j_*.dump.gz'
 
 # --- Verdict -----------------------------------------------------------------
@@ -268,4 +304,14 @@ say "done → ${OUT}/ (retain ${RETAIN_DAYS}d, $(du -sh "$OUT" | cut -f1) total)
 #   Keys — if restoring onto a NEW host, put keys_<stamp>.env's values into
 #   deploy/k3s/.env BEFORE running make-secrets.sh. Same-host restores already
 #   have them.
+#
+#   Environment files — a new host also needs the files themselves. Pick the
+#   SAME stamp as the dumps and copy each back, keeping mode 0600, BEFORE
+#   make-secrets.sh and before anything starts:
+#     install -m 600 env_<stamp>.env      <checkout>/deploy/k3s/.env
+#     install -m 600 env-app_<stamp>.env  <checkout>/.env
+#     install -m 600 env-web_<stamp>.env  <checkout>/web/.env
+#   (If the checkout still has the pre-v2.66 layout, deploy/pi/.env is where
+#   env_<stamp>.env goes.) The three files are byte copies: they hold the same
+#   secrets as the live files, so treat them like keys_<stamp>.env.
 # ============================================================================

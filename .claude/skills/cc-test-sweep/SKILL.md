@@ -91,6 +91,13 @@ created), `findings/`, `baseline/`, `verify/`.
    folds→valves; agent hire→grants→charter→coach→retire; skills import;
    chat+attachments; heartbeat schedules; MCP governance + sync_source
    (source-verify, don't provision); orchestrator+auditor.
+3b. **Sandbox reach (operator-run, once per release apply)** — the live half
+   of the sandbox-isolation guarantee: a throwaway curl pod in `cc-sandbox`
+   must NOT connect to the API's port, the cockpit's port or the cockpit's
+   tailnet-published URL. The commands are the "Sandbox reach drill" in
+   `deploy/k3s/README.md` (§9, placeholders only); run them with the
+   operator's OK, never from pytest, and delete the pod afterwards. Egress in
+   general is open on purpose — this checks these three listeners only.
 4. **Resilience (operator-run)** — the session never restarts the unit: it
    pre-captures state, attaches an SSE client and (ideally) starts a RUNNING
    session, then asks the operator to restart the backend through their usual

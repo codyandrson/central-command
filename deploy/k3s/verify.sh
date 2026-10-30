@@ -15,7 +15,8 @@
 #        that happened to land on the right node is indistinguishable from one
 #        that was pinned there, until the day it moves;
 #     D. the host's own config still points at loopback;
-#     E. the running API carries no run-mode key (central_command/run_modes.py).
+#     E. the running API carries no run-mode key (central_command/run_modes.py);
+#     F. the application self-check passes AS THE APP (central_command/selfcheck.py).
 #
 #   On (D) and the old "nothing points off-box" rule: the premise CHANGED on
 #   2026-07-31. The deployment is deliberately two nodes now, so the chromebox
@@ -332,6 +333,61 @@ run_modes_check() {
   fi
 }
 run_modes_check
+
+echo
+echo "== F. the application self-check =="
+# `python -m central_command.selfcheck` proves the deployment AS THE APP: the
+# app's own settings and the credential the app actually holds (sections A-E
+# run under the admin key). It spends two small model requests, so it runs on
+# EVERY verify.sh run — Decision 4, ruled 2026-10-29 — and is skipped, with a
+# line saying why, under --clean-install, where the model catalog is not set up
+# yet. READINESS, never liveness: nothing restarts or reconfigures anything on
+# its result, and it is deliberately NOT in cc-update.sh's health poll and on
+# no timer (the module's docstring says why).
+#
+# Two environment rules. The interpreter is the venv cc-uvicorn.service's
+# ExecStart runs; the cwd is the repo root, because Settings load the ROOT .env
+# (never deploy/k3s/.env). This script SOURCED deploy/k3s/.env into its own
+# shell above, and a variable already in the environment beats .env
+# (load_dotenv never overrides), so the module runs under `env -i`: the same
+# minimal environment systemd gives the API. PASS lines pass, a WARN line
+# passes with its text (exit 2 is not a failure, as in the single-node
+# installer), a FAIL line fails. --pre-boot is not passed: the API is up.
+selfcheck_check() {
+  local py out rc line verb name msg nfail=0 nseen=0
+  local re='^(PASS|WARN|FAIL) (selfcheck-[A-Za-z0-9_-]+): ?(.*)$'
+  if (( CLEAN )); then
+    skip "application self-check: not run under --clean-install (the model catalog is not set up yet)"
+    return 0
+  fi
+  py="$PWD/.venv/bin/python"
+  if [[ ! -x "$py" ]]; then
+    bad "application self-check: $py is missing — the venv cc-uvicorn runs from; run ./deploy/k3s/setup.sh app"
+    return 0
+  fi
+  out="$(env -i PATH="$PATH" HOME="${HOME:-/}" LANG="${LANG:-C.UTF-8}" "$py" -m central_command.selfcheck)"
+  rc=$?
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    if [[ "$line" =~ $re ]]; then
+      verb="${BASH_REMATCH[1]}"; name="${BASH_REMATCH[2]}"; msg="${BASH_REMATCH[3]}"
+      nseen=$((nseen+1))
+      case "$verb" in
+        PASS) ok "$name: $msg" ;;
+        WARN) ok "WARN $name: $msg" ;;
+        FAIL) bad "$name: $msg"; nfail=$((nfail+1)) ;;
+      esac
+    elif [[ -n "${line//[[:space:]]/}" ]]; then
+      printf '        %s\n' "$line"
+    fi
+  done <<<"$out"
+  if (( nseen == 0 )); then
+    bad "application self-check: python -m central_command.selfcheck printed no check line (exit $rc)"
+  elif (( nfail == 0 && rc != 0 && rc != 2 )); then
+    bad "application self-check: the module exited $rc without a FAIL line — it stopped part-way"
+  fi
+}
+selfcheck_check
 
 echo
 if [[ "$SKIP" -gt 0 ]]; then

@@ -674,7 +674,7 @@ operator's command: an agent conducting a setup does not run it.
 | **Kept** | the cluster, node labels, images, gVisor; the LiteLLM database (models, virtual keys, spend); the n8n database (the Gmail and Calendar OAuth); `deploy/k3s/.env` (`LITELLM_SALT_KEY`, `N8N_ENCRYPTION_KEY`); the logs; the systemd units. |
 
 The order is the safety: `backup.sh` runs first, and nothing is stopped or
-deleted unless it exits 0 and leaves all four dumps and the key file. That set
+deleted unless it exits 0 and leaves all four dumps, the key file and the three env-file copies (`env_`, `env-app_`, `env-web_`). That set
 is hard-linked into `keep-pre-reset-<stamp>/` under the backup directory —
 the nightly retention prunes top-level files only, so it never ages out — and
 the moved env files land in its `env/` folder. Rolling back is §10 against
@@ -763,13 +763,58 @@ Cockpit: `https://<cockpit-host>` (the `tailscale serve` front for port 3080) ·
 logs: `http://<tailnet-name>:9428/select/vmui/` (plain http — a ServiceLB port,
 §6). The real hosts are in your private instance docs.
 
+### Sandbox reach drill
+
+The sandbox is containment, not restriction: its egress is open on purpose
+(`60-sandbox.yaml`), so what keeps an agent's code off the control plane is
+that the API and the cockpit listen on loopback only and nothing publishes
+them. `tests/test_sandbox_isolation.py` pins the shipped text that makes that
+true (every bind is `127.0.0.1`, the Job manifest holds no credential and no
+host network, no manifest exposes port 8080). It cannot prove the live
+network, so this drill does. It is **never run by pytest**: the release story
+runs it once after an apply, with the operator's OK, and the cc-test-sweep
+skill points here. It changes nothing and leaves nothing behind.
+
+Run it from the anchor node. Take `<anchor-address>` from the node's address
+as the cluster reports it, and `<cockpit-tailnet-url>` from
+`tailscale serve status` (the https front of port 3080 — it proxies `/api` to
+the loopback API without authentication, so it is a target in its own right).
+`<curl-image>` is any image a node already holds that carries `curl`.
+
+```bash
+sudo k3s kubectl -n cc-sandbox run reach-drill --image=<curl-image> \
+  --overrides='{"spec":{"runtimeClassName":"gvisor","automountServiceAccountToken":false}}' \
+  --command -- sleep 1800
+sudo k3s kubectl -n cc-sandbox wait --for=condition=Ready pod/reach-drill --timeout=180s
+```
+
+Then try each of the three targets from inside the pod, one command each:
+
+```bash
+sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 10 -o /dev/null -w '%{http_code}\n' http://<anchor-address>:8080/health
+sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 10 -o /dev/null -w '%{http_code}\n' http://<anchor-address>:3080/health
+sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 10 -o /dev/null -w '%{http_code}\n' <cockpit-tailnet-url>/api/heartbeat
+```
+
+**Expected: all three fail to connect** — `Connection refused`, a timeout, or
+`Could not resolve host` (curl exits non-zero and prints no status). An HTTP
+status from any of them is a finding: stop, leave the pod for inspection, and
+report which target answered. Whatever the outcome, delete the pod:
+
+```bash
+sudo k3s kubectl -n cc-sandbox delete pod reach-drill
+```
+
 ## 10. Rollback
 
 - **Data:** the RESTORE section at the bottom of `deploy/k3s/backup.sh`, against
   the **pre-clean-install** dump set in `$CC_BACKUP_DIR` (take one
   before wiping: `sudo <checkout>/deploy/k3s/backup.sh`, and
   confirm the `keys_<stamp>.env` beside it — without those two keys the dumps
-  are ciphertext).
+  are ciphertext). The same run leaves byte copies of the three env files
+  beside the dumps (`env_`, `env-app_` and `env-web_<stamp>.env`, 0600, for
+  `deploy/k3s/.env`, the root `.env` and `web/.env`); backup.sh's RESTORE
+  section says where each goes back.
 - **Whole stack:** the pre-k3s Docker Compose stack was deleted from the tree
   in v2.67.0. Reach it at v2.65.3 (the retired stack's bytes are identical at
   every tag from v2.65.3 through v2.66.2; a fallback should point at neither a

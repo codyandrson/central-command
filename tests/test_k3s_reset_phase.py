@@ -9,7 +9,10 @@ writes (or refuses to write) a dump set. No cluster, no root.
   * nothing is stopped or deleted unless the backup exited 0 AND left the whole
     dump set, which is then kept outside the nightly retention's reach;
   * only the spine and graph volumes are deleted — never LiteLLM's or n8n's,
-    never deploy/k3s/.env.
+    never deploy/k3s/.env;
+  * the kept dump set includes the three env-file copies backup.sh now writes
+    (env_, env-app_, env-web_ — R19, ruled 2026-10-29, story 11.13), each
+    picked by its own label.
 """
 
 from __future__ import annotations
@@ -60,7 +63,7 @@ BACKUP = '''#!/usr/bin/env bash
 printf 'backup REPO=%s OUT=%s\\n' "$REPO" "$CC_BACKUP_DIR" >> "$STUB_LOG"
 [[ "${STUB_BACKUP:-ok}" == fail ]] && exit 1
 mkdir -p "$CC_BACKUP_DIR"
-for f in central_command_S.sql.gz litellm_S.sql.gz n8n_S.sql.gz keys_S.env neo4j_S.dump.gz; do
+for f in central_command_S.sql.gz litellm_S.sql.gz n8n_S.sql.gz keys_S.env env_S.env env-app_S.env env-web_S.env neo4j_S.dump.gz; do
   [[ "${STUB_BACKUP:-ok}" == short && "$f" == neo4j_* ]] && continue
   echo dump > "$CC_BACKUP_DIR/$f"
 done
@@ -170,8 +173,8 @@ def test_a_confirmed_reset_backs_up_then_wipes_exactly_the_spine_and_the_graph(t
 
     keep = _keep_dir(tree)
     assert sorted(p.name for p in keep.iterdir() if p.is_file()) == [
-        "central_command_S.sql.gz", "keys_S.env", "litellm_S.sql.gz", "n8n_S.sql.gz",
-        "neo4j_S.dump.gz"]
+        "central_command_S.sql.gz", "env-app_S.env", "env-web_S.env", "env_S.env", "keys_S.env",
+        "litellm_S.sql.gz", "n8n_S.sql.gz", "neo4j_S.dump.gz"]
     # The app's answers moved beside the dumps; the containers' env stayed.
     assert not (tree / ".env").exists() and not (tree / "web" / ".env").exists()
     assert "jira.example.com" in (keep / "env" / "root.env").read_text()
