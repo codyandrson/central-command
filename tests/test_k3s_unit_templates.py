@@ -10,7 +10,9 @@ copied, against temp trees with temp destinations:
   changes nothing but the tokens, so a personal layout's render is its unit;
 * every path a unit runs from lies under the checkout, on a layout where the
   checkout sits in the owner's home and on one where it does not;
-* the group is its own value: never assumed to be the owner's name;
+* the group the templates render is the owner's PRIMARY group, never the
+  checkout's: /run/cc-update takes it at 0770 and a trigger written there starts
+  the root updater, so a shared checkout group must not be able to write one;
 * the render refuses what it cannot render, and a refusal installs nothing;
 * setup's path check reads the RENDERED text and still refuses a stray path;
 * the installed updater, which runs the release that introduces the templates,
@@ -113,7 +115,7 @@ def test_the_sandbox_runners_environment_is_under_the_checkout_and_the_owners_ho
 
 
 def test_the_group_is_its_own_value():
-    """A checkout's group is never assumed to be its owner's name (cc_k3s_group)."""
+    """Its own argument: a primary group need not carry its owner's name."""
     text = render_unit(K3S / "cc-uvicorn.service.in", group="staff")
     assert "\nUser=doe\nGroup=staff\n" in text
     tmpfiles = render_unit(K3S / "cc-update-tmpfiles.conf.in", group="staff")
@@ -276,6 +278,33 @@ def test_setup_install_of_a_refused_template_installs_nothing(tree, tmp_path):
     assert r.returncode == 1 and not dest.exists()
 
 
+def test_setup_renders_the_owners_primary_group_never_the_checkouts(tree, tmp_path):
+    """A checkout owned by doe, group `users`: a member of `users` must not be able
+    to write the trigger that starts the root updater."""
+    stubs = _stub_bin(tmp_path)
+    for name, body in (("stat", 'case "$2" in %U) echo doe ;; %G) echo users ;; esac\n'),
+                       ("id", 'echo doeprimary\n'),
+                       ("getent", 'printf "doe:x:1000:1000::/home/doe:/bin/bash\\n"\n')):
+        (stubs / name).write_text("#!/usr/bin/env bash\n" + body)
+        (stubs / name).chmod(0o755)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    r = _run_setup(tree, tmp_path, f"""load_unit_values || exit 9
+install_unit "$HERE/cc-uvicorn.service.in" "{dest}/cc-uvicorn.service" || exit 1
+install_unit "$HERE/cc-update-tmpfiles.conf.in" "{dest}/cc-update.conf" || exit 2
+""")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "\nUser=doe\nGroup=doeprimary\n" in (dest / "cc-uvicorn.service").read_text()
+    tmpfiles = (dest / "cc-update.conf").read_text()
+    assert "d /run/cc-update      0770 doe doeprimary -\n" in tmpfiles and "users" not in tmpfiles
+
+
+def test_cc_k3s_group_is_for_the_chown_and_never_reaches_a_render():
+    assert "cc_k3s_group" not in SETUP_SH
+    assert '"$OWNER" "$OWNER_PRIMARY_GROUP" "$OWNER_HOME"' in _fn(UPDATER_SH, "install_changed_unit")
+    assert 'UNIT_GROUP="$(cc_k3s_owner_primary_group "$HERE/setup.sh")"' in _fn(SETUP_SH, "load_unit_values")
+
+
 def test_setup_installs_the_fixed_list_and_not_the_stage_pair():
     app = _fn(SETUP_SH, "phase_app")
     loop = re.search(r"for u in (.*?); do", app, re.S)
@@ -298,7 +327,7 @@ def _run_updater(tree: Path, tmp_path: Path, rel: str) -> tuple[subprocess.Compl
     script = "\n".join([
         "set -uo pipefail",
         f'. "{K3S / "instance-lib.sh"}"',
-        f'REPO="{tree}" OWNER=doe OWNER_GROUP=staff OWNER_HOME=/home/doe',
+        f'REPO="{tree}" OWNER=doe OWNER_GROUP=users OWNER_PRIMARY_GROUP=staff OWNER_HOME=/home/doe',
         _fn(UPDATER_SH, "install_changed_unit").replace("/etc/", f"{etc}/"),
         f'install_changed_unit "{rel}"',
     ])
@@ -316,7 +345,8 @@ def test_the_updater_renders_a_changed_template_to_its_installed_name(tree, tmp_
 def test_the_updater_renders_the_tmpfiles_template_to_the_runbooks_name(tree, tmp_path):
     r, etc = _run_updater(tree, tmp_path, "deploy/k3s/cc-update-tmpfiles.conf.in")
     assert r.returncode == 0, r.stderr
-    assert "0770 doe staff -" in (etc / "tmpfiles.d" / "cc-update.conf").read_text()
+    text = (etc / "tmpfiles.d" / "cc-update.conf").read_text()
+    assert "0770 doe staff -" in text and "users" not in text
 
 
 def test_the_updater_installs_a_plain_unit_verbatim(tree, tmp_path):

@@ -108,8 +108,9 @@ SELF="${BASH_SOURCE[0]}"
 REPO="$(cc_k3s_checkout "$SELF")" \
   && OWNER="$(cc_k3s_owner "$SELF")" \
   && OWNER_GROUP="$(cc_k3s_group "$SELF")" \
+  && OWNER_PRIMARY_GROUP="$(cc_k3s_owner_primary_group "$SELF")" \
   && OWNER_HOME="$(cc_k3s_home "$SELF")" \
-  || instance_fail "could not derive this install's checkout, owner, group or home — the journal names which"
+  || instance_fail "could not derive this install's checkout, owner, group, owner's primary group or home — the journal names which"
 RUNAS=(runuser -u "$OWNER" --)
 
 set -a
@@ -302,7 +303,7 @@ install_changed_unit() { # install_changed_unit <repo-relative unit>
   case "$f" in
     *.in)
       rendered="$(mktemp)" || return 1
-      if cc_k3s_render_unit "$REPO/$f" "$REPO" "$OWNER" "$OWNER_GROUP" "$OWNER_HOME" >"$rendered"; then
+      if cc_k3s_render_unit "$REPO/$f" "$REPO" "$OWNER" "$OWNER_PRIMARY_GROUP" "$OWNER_HOME" >"$rendered"; then
         install -m 644 "$rendered" "$dest"; rc=$?
       else
         rc=1

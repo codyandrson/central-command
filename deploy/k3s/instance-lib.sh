@@ -15,14 +15,17 @@
 #
 #     cc_k3s_checkout [path]    the checkout holding that script (physical path)
 #     cc_k3s_owner [path]       the account that owns the checkout
-#     cc_k3s_group [path]       the checkout's group, never assumed to be the owner's name
+#     cc_k3s_group [path]       the checkout's group, never assumed to be the owner's name;
+#                               for the chown of backup files and nothing else
+#     cc_k3s_owner_primary_group [path]  the owner's primary group, from the account
+#                               database; the group the unit templates render
 #     cc_k3s_home [path]        the owner's home, from the account database
 #     cc_k3s_backup_dir [path]  CC_BACKUP_DIR when set, else <owner home>/cc-backups
 #
 #   The one function that takes values instead of a path, so a read-only check
 #   can render for the live install from a worktree:
 #
-#     cc_k3s_render_unit <template> <checkout> <owner> <group> <home>
+#     cc_k3s_render_unit <template> <checkout> <owner> <owner primary group> <home>
 #
 #   No git here: cc-update.sh and backup.sh run as root on a checkout another
 #   user owns, and git's safe.directory check refuses that. No $USER or $HOME
@@ -63,6 +66,20 @@ cc_k3s_group() { # [path]
   _cc_k3s_stat %G group "${1:-${BASH_SOURCE[1]:-}}"
 }
 
+# Never the checkout's group: /run/cc-update takes this group at 0770, and the
+# trigger written there starts the root updater with a target and a force flag.
+# A checkout in a shared group (`users`) must not hand every member of it that.
+cc_k3s_owner_primary_group() { # [path]
+  local owner group
+  owner="$(_cc_k3s_stat %U owner "${1:-${BASH_SOURCE[1]:-}}")" || return 1
+  group="$(id -gn -- "$owner" 2>/dev/null)" || group=""
+  if [[ -z "$group" ]]; then
+    echo "instance-lib: cannot resolve the primary group of account $owner" >&2
+    return 1
+  fi
+  printf '%s\n' "$group"
+}
+
 cc_k3s_home() { # [path]
   local owner entry home
   owner="$(_cc_k3s_stat %U owner "${1:-${BASH_SOURCE[1]:-}}")" || return 1
@@ -89,7 +106,10 @@ cc_k3s_backup_dir() { # [path]
 # release that adds one ships it in the updater a release AHEAD: the update INTO
 # release N runs N-1's cc-update.sh, whose bash holds N-1's copy of this function.
 # No sed: a value holding `&`, `/` or `\` is literal. Prints nothing on a refusal.
-cc_k3s_render_unit() { # <template> <checkout> <owner> <group> <home>
+# The group handed in is the owner's PRIMARY group, cc_k3s_owner_primary_group's
+# answer, never the checkout's: a shared checkout group must not be able to write
+# the updater's trigger, and the same value fills every unit's Group=.
+cc_k3s_render_unit() { # <template> <checkout> <owner> <owner primary group> <home>
   if (( $# != 5 )) || [[ -z "$2" || -z "$3" || -z "$4" || -z "$5" ]]; then
     echo "instance-lib: render wants a template, a checkout, an owner, a group and a home, none empty" >&2
     return 1

@@ -404,9 +404,9 @@ load_unit_values() {
   if ! . "$HERE/instance-lib.sh" \
      || ! UNIT_CHECKOUT="$(cc_k3s_checkout "$HERE/setup.sh")" \
      || ! UNIT_OWNER="$(cc_k3s_owner "$HERE/setup.sh")" \
-     || ! UNIT_GROUP="$(cc_k3s_group "$HERE/setup.sh")" \
+     || ! UNIT_GROUP="$(cc_k3s_owner_primary_group "$HERE/setup.sh")" \
      || ! UNIT_HOME="$(cc_k3s_home "$HERE/setup.sh")"; then
-    fail "unit-values" "could not derive this install's checkout, owner, group or home — the line above names what failed"
+    fail "unit-values" "could not derive this install's checkout, owner, owner's primary group or home — the line above names what failed"
     return 1
   fi
 }

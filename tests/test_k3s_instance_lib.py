@@ -18,7 +18,8 @@ the real functions and the real scripts against a temp checkout:
 Anything that would write under a home gets a `getent` stub pointing at a temp one
 first: these tests never touch the real home of the account running them.
 
-The helper also holds the unit render (R6), tested in tests/test_k3s_unit_templates.py.
+The helper also holds the unit render and the owner's primary group it is handed
+(R6), the render tested in tests/test_k3s_unit_templates.py.
 """
 
 from __future__ import annotations
@@ -169,6 +170,33 @@ def test_the_group_is_read_never_assumed_equal_to_the_owner(tree: Path, stubs: P
     assert _call("cc_k3s_group", _script(tree), env).stdout.strip() == "rivers"
 
 
+def test_the_primary_group_is_the_owners_not_the_checkouts(tree: Path, stubs: Path):
+    _exe(stubs / "stat", 'case "$2" in %U) echo doe ;; %G) echo users ;; esac\n')
+    _exe(stubs / "id", '[[ "$*" == "-gn -- doe" ]] && echo doeprimary\n')
+    r = _call("cc_k3s_owner_primary_group", _script(tree), _clean_env(stubs))
+    assert (r.returncode, r.stdout.strip()) == (0, "doeprimary"), r.stderr
+
+
+def test_the_primary_group_of_the_real_owner_is_read_with_no_stub(tree: Path):
+    r = _call("cc_k3s_owner_primary_group", _script(tree))
+    assert (r.returncode, r.stdout.strip()) == (0, grp.getgrgid(pwd.getpwuid(tree.stat().st_uid).pw_gid).gr_name)
+
+
+@pytest.mark.parametrize("answer", ["exit 1\n", "exit 0\n"])
+def test_an_account_with_no_primary_group_fails_loud(tree: Path, stubs: Path, answer: str):
+    _exe(stubs / "id", answer)
+    r = _call("cc_k3s_owner_primary_group", _script(tree), _clean_env(stubs))
+    assert r.returncode != 0 and r.stdout == ""
+    assert "the primary group of account" in r.stderr, r.stderr
+
+
+def test_an_unreadable_owner_fails_the_primary_group_naming_the_owner(tree: Path, stubs: Path):
+    _exe(stubs / "stat", "echo UNKNOWN\n")
+    r = _call("cc_k3s_owner_primary_group", _script(tree), _clean_env(stubs))
+    assert r.returncode != 0 and r.stdout == ""
+    assert "the owner of" in r.stderr, r.stderr
+
+
 def test_the_backup_dir_is_the_key_when_set_else_under_the_owners_home(tree: Path, fake_home: Path, stubs: Path):
     assert _call("cc_k3s_backup_dir", _script(tree), _clean_env(stubs)).stdout.strip() == f"{fake_home}/cc-backups"
     r = _call("cc_k3s_backup_dir", _script(tree), _clean_env(stubs, CC_BACKUP_DIR="/srv/backups"))
@@ -235,7 +263,7 @@ def test_env_path_does_not_carry_the_helper_and_the_helper_sets_nothing(tmp_path
     new = set((tmp_path / "fb").read_text().splitlines()) - set((tmp_path / "fa").read_text().splitlines())
     assert {line.split()[-1] for line in new} == {
         "cc_k3s_checkout", "cc_k3s_owner", "cc_k3s_group", "cc_k3s_home", "cc_k3s_backup_dir", "_cc_k3s_stat",
-        "cc_k3s_render_unit",  # R6, pinned in tests/test_k3s_unit_templates.py
+        "cc_k3s_owner_primary_group", "cc_k3s_render_unit",  # R6, tests/test_k3s_unit_templates.py
     }
 
 
