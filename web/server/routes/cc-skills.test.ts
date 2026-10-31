@@ -82,4 +82,55 @@ describe('cc-skills proxy', () => {
     expect((init.headers as Record<string, string>)['content-type']).toBe(contentType);
     expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe('raw-multipart-bytes');
   });
+
+  it('forwards the update-review compute POST body untouched', async () => {
+    const app = await buildApp();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ target: '2.68.0' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+
+    const body = JSON.stringify({ target: '2.68.0', ref: 'v2.68.0' });
+    const res = await app.request('/api/skills/update-review', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    });
+
+    expect(res.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://cc.test/api/skills/update-review');
+    expect(init.method).toBe('POST');
+    expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body);
+  });
+
+  it('forwards the update-review GET with no body and keeps a 404 intact', async () => {
+    const app = await buildApp();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail: "no bundled-skill review is stored for '2.68.0'" }), {
+      status: 404, headers: { 'content-type': 'application/json' },
+    }));
+
+    const res = await app.request('/api/skills/update-review/2.68.0');
+
+    expect(res.status).toBe(404);
+    expect((await res.json() as { detail: string }).detail).toContain('no bundled-skill review');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://cc.test/api/skills/update-review/2.68.0');
+    expect(init.method).toBe('GET');
+    expect(init.body).toBeUndefined();
+  });
+
+  it('forwards a verdict to the item path and passes a 409 through', async () => {
+    const app = await buildApp();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail: 'the doc changed' }), {
+      status: 409, headers: { 'content-type': 'application/json' },
+    }));
+
+    const body = JSON.stringify({ verdict: 'keep_mine', ours_hash: 'a', theirs_hash: null });
+    const res = await app.request('/api/skills/update-review/2.68.0/items/jira/api/resolve', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    });
+
+    expect(res.status).toBe(409);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://cc.test/api/skills/update-review/2.68.0/items/jira/api/resolve');
+    expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body);
+  });
 });

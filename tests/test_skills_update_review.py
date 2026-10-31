@@ -17,6 +17,9 @@ from pathlib import Path
 
 import pytest
 
+from fastapi import HTTPException
+
+from central_command.api import nerve_gateway, routes
 from central_command.config import settings
 from central_command.db import repo
 from central_command.skills import importer, refresh
@@ -101,7 +104,9 @@ async def _sweep() -> None:
             "delete from skill_bundled_text where hash not in "
             "(select bundled_hash from skill_doc where bundled_hash is not null)"
         )
-        await conn.execute("delete from audit_event where kind = 'skill.review_computed'")
+        await conn.execute(
+            "delete from audit_event where kind in ('skill.review_computed', 'skill.review_resolved')"
+        )
     finally:
         await conn.close()
 
@@ -880,3 +885,336 @@ def test_settings_come_from_the_checkouts_env_whatever_the_directory(tmp_path):
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "True"
+
+
+# --- the review over the API (story 2.3; review-contract.md §Routes) ----------
+
+COUNT_KEYS = {
+    "unmodified", "new", "modified", "unresolved",
+    "retired_upstream", "retired_locally", "skill_retired",
+}
+ITEM_KEYS = {
+    "skill_id", "doc_key", "status", "bundled_path", "base_origin", "base", "ours",
+    "theirs", "merged", "conflicts", "ours_hash", "theirs_hash", "needs_verdict",
+    "verdict", "resolved_content", "resolved_at", "applied_at", "apply_error",
+}
+
+
+async def _post_review(target: str = "1", ref: str = "v1") -> dict:
+    return await routes.compute_skill_review_route(routes.SkillReviewIn(target=target, ref=ref))
+
+
+def _items(shape: dict) -> dict:
+    return {(i["skill_id"], i["doc_key"]): i for i in shape["items"]}
+
+
+async def _verdict(
+    item: dict, verdict: str = "keep_mine", content: str | None = None, *,
+    target: str = "1", **hashes,
+) -> dict:
+    body = routes.SkillReviewResolveIn(
+        verdict=verdict, content=content,
+        ours_hash=hashes.get("ours_hash", item["ours_hash"]),
+        theirs_hash=hashes.get("theirs_hash", item["theirs_hash"]),
+    )
+    return await routes.resolve_skill_review_item_route(
+        target, item["skill_id"], item["doc_key"], body
+    )
+
+
+async def _status_of(coro) -> int:
+    with pytest.raises(HTTPException) as e:
+        await coro
+    return e.value.status_code
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_get_is_404_until_a_post_computes_and_then_serves_the_same_shape(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    assert await _status_of(routes.get_skill_review_route("1")) == 404
+
+    posted = await _post_review()
+    fetched = await routes.get_skill_review_route("1")
+
+    assert posted == fetched
+    assert set(fetched) == {"target", "ref", "computed_at", "counts", "items"}
+    assert (fetched["target"], fetched["ref"]) == ("1", "v1")
+    assert set(fetched["counts"]) == COUNT_KEYS
+    assert all(set(i) == ITEM_KEYS for i in fetched["items"])
+    assert fetched["counts"]["new"] == 3 and fetched["counts"]["unmodified"] == 1
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_each_item_carries_the_texts_its_hashes_name(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    hand = ONE_V0.replace("line 10\n", "line ten, by hand\n")
+    await _hand_post("one", hand)
+    items = _items(await _post_review())
+
+    one = items[(ALPHA, "one")]
+    assert (one["base"], one["ours"], one["theirs"]) == (ONE_V0, hand, ONE_V1)
+    assert one["base_origin"] == "library" and one["status"] == "modified"
+    assert one["conflicts"] == 1 and "<<<<<<< mine (library)" in one["merged"]
+    assert one["needs_verdict"] and one["verdict"] is None and one["resolved_at"] is None
+    for text, key in ((one["base"], "base_hash"), (one["ours"], "ours_hash"), (one["theirs"], "theirs_hash")):
+        if key != "base_hash":
+            assert bundled_text_hash(text) == one[key]
+
+    born = items[(ALPHA, "born")]
+    assert (born["status"], born["ours"], born["base"]) == ("new", None, None)
+    assert born["theirs"] == "# Born\nadded by v1\n"
+    gone = items[(ALPHA, "gone")]
+    assert (gone["status"], gone["theirs"]) == ("retired-upstream", None)
+    assert gone["ours"] == gone["base"] == "# Gone\ndeleted by v1\n"
+    assert not gone["needs_verdict"]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_doc_with_no_provenance_is_based_on_the_installed_tree(
+    clean_skills, fixture_repo
+):
+    await repo.create_skill(ALPHA, "alpha", "a test skill")
+    await repo.add_skill_doc(ALPHA, "one", "reference", "one", ONE_V0)
+    one = _items(await _post_review())[(ALPHA, "one")]
+    assert one["base_origin"] == "installed-tree"
+    assert (one["base"], one["ours"], one["theirs"]) == (ONE_V0, ONE_V0, ONE_V1)
+    assert one["status"] == "unmodified"
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_review_that_cannot_be_computed_stores_nothing_and_says_why(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    status = await _status_of(_post_review("9", "no-such-ref"))
+    assert status == 422
+    with pytest.raises(HTTPException) as e:
+        await _post_review("9", "no-such-ref")
+    assert "no-such-ref" in e.value.detail
+    assert await _status_of(routes.get_skill_review_route("9")) == 404
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_library_that_moved_since_the_compute_is_a_409_not_a_stale_diff(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    await _post_review()
+    await _hand_post("one", "someone edited it again\n")
+    with pytest.raises(HTTPException) as e:
+        await routes.get_skill_review_route("1")
+    assert e.value.status_code == 409 and "recompute" in e.value.detail
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_verdict_is_stored_counted_and_announced(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    shape = await _post_review()
+    assert shape["counts"]["unresolved"] == 1
+    one = _items(shape)[(ALPHA, "one")]
+
+    answer = await _verdict(one, "keep_mine")
+
+    assert (answer["target"], answer["skill_id"], answer["doc_key"], answer["verdict"]) == (
+        "1", ALPHA, "one", "keep_mine",
+    )
+    assert answer["resolved_at"] is not None and answer["counts"]["unresolved"] == 0
+    again = _items(await routes.get_skill_review_route("1"))[(ALPHA, "one")]
+    assert again["verdict"] == "keep_mine" and again["resolved_at"] == answer["resolved_at"]
+    assert again["resolved_content"] is None
+    (event,) = [
+        e for e in await repo.list_events_of_kinds(["skill.review_resolved"]) if e["ref_id"] == ALPHA
+    ]
+    assert event["payload"] == {
+        "target": "1", "skill_id": ALPHA, "doc_key": "one", "verdict": "keep_mine",
+    }
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_verdict_replaces_a_verdict_and_there_is_no_way_back_to_none(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    one = _items(await _post_review())[(ALPHA, "one")]
+
+    await _verdict(one, "edit", "my own text\n")
+    stored = _items(await routes.get_skill_review_route("1"))[(ALPHA, "one")]
+    assert (stored["verdict"], stored["resolved_content"]) == ("edit", "my own text\n")
+
+    await _verdict(one, "take_release")
+    stored = _items(await routes.get_skill_review_route("1"))[(ALPHA, "one")]
+    assert (stored["verdict"], stored["resolved_content"]) == ("take_release", None)
+    assert await _status_of(_verdict(one, "none")) == 422
+    assert (await routes.get_skill_review_route("1"))["counts"]["unresolved"] == 0
+    assert len(await repo.list_events_of_kinds(["skill.review_resolved"])) == 2
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_verdict_over_stale_hashes_is_a_409_and_stores_nothing(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    one = _items(await _post_review())[(ALPHA, "one")]
+
+    assert await _status_of(_verdict(one, ours_hash="0" * 64)) == 409
+    assert await _status_of(_verdict(one, theirs_hash="0" * 64)) == 409
+    assert await _status_of(_verdict(one, theirs_hash=None)) == 409
+    assert _items(await routes.get_skill_review_route("1"))[(ALPHA, "one")]["verdict"] is None
+    assert await repo.list_events_of_kinds(["skill.review_resolved"]) == []
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_an_applied_row_takes_no_new_verdict(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    one = _items(await _post_review())[(ALPHA, "one")]
+    conn = await repo._conn()
+    try:
+        await conn.execute("update skill_doc_review set applied_at = now() where doc_key = 'one'")
+    finally:
+        await conn.close()
+    assert await _status_of(_verdict(one, "keep_mine")) == 409
+
+
+MARKER_LINES = [
+    "<<<<<<< mine (library)",
+    "||||||| base (v0)",
+    ">>>>>>> release (v1)",
+    "=======",
+    "<<<<<<< x",
+]
+
+
+@needs_pg
+@pytest.mark.asyncio
+@pytest.mark.parametrize("marker", MARKER_LINES)
+async def test_an_edit_holding_a_conflict_marker_line_is_refused(
+    clean_skills, fixture_repo, marker
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    one = _items(await _post_review())[(ALPHA, "one")]
+    assert await _status_of(_verdict(one, "edit", f"fine\n{marker}\nmore\n")) == 422
+    # CRLF from a browser textarea does not hide it.
+    assert await _status_of(_verdict(one, "edit", f"fine\r\n{marker}\r\nmore\r\n")) == 422
+    assert _items(await routes.get_skill_review_route("1"))[(ALPHA, "one")]["verdict"] is None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_setext_underline_or_prose_that_looks_like_a_marker_is_not_one(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    one = _items(await _post_review())[(ALPHA, "one")]
+    text = (
+        "Title\n=====\n\nSub\n==========\n\n<<<<<<<\n>>>>>>>>\n<<<<<<<< x\n"
+        "a ======= b\n ======= \n||||||| \n"
+    )
+    answer = await _verdict(one, "edit", text)
+    assert answer["verdict"] == "edit"
+    stored = _items(await routes.get_skill_review_route("1"))[(ALPHA, "one")]
+    assert stored["resolved_content"] == text
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_the_verdict_shapes_the_contract_refuses(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    await _hand_post("gone", "# Gone\nedited by hand\n")
+    items = _items(await _post_review())
+    one, gone = items[(ALPHA, "one")], items[(ALPHA, "gone")]
+    assert gone["status"] == "retired-upstream" and gone["needs_verdict"]
+
+    assert await _status_of(_verdict(one, "edit", None)) == 422       # no text
+    assert await _status_of(_verdict(one, "keep_mine", "text")) == 422  # content is for edit
+    assert await _status_of(_verdict(one, "merge")) == 422            # unknown verdict
+    assert await _status_of(_verdict(gone, "edit", "text\n")) == 422   # edit on a retired-* row
+    assert (await _verdict(gone, "take_release"))["verdict"] == "take_release"
+    # Nothing to decide on a doc that follows the release or is new.
+    assert await _status_of(_verdict(items[(ALPHA, "born")], "keep_mine")) == 422
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_skill_retired_row_and_an_unknown_item_are_not_resolvable(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await repo.retire_skill(ALPHA, "no longer used")
+    shape = await _post_review()
+    whole = _items(shape)[(ALPHA, refresh.WHOLE_SKILL_KEY)]
+    assert whole["status"] == "skill-retired" and not whole["needs_verdict"]
+    assert whole["ours"] is None and whole["theirs"] is None
+    # The row exists but has nothing to decide: 422. A row that does not exist: 404.
+    assert await _status_of(_verdict(whole, "keep_mine")) == 422
+    ghost = dict(whole, doc_key="no-such-doc")
+    assert await _status_of(_verdict(ghost, "keep_mine")) == 404
+    assert await _status_of(_verdict(whole, "keep_mine", target="nope")) == 404
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_recompute_keeps_a_verdict_over_unchanged_hashes(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    one = _items(await _post_review())[(ALPHA, "one")]
+    await _verdict(one, "keep_mine")
+    again = _items(await _post_review())[(ALPHA, "one")]
+    assert again["verdict"] == "keep_mine"
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_the_rpc_methods_answer_like_the_routes(clean_skills, fixture_repo):
+    noop = lambda *a, **k: None  # noqa: E731
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+
+    with pytest.raises(HTTPException) as e:
+        await nerve_gateway._dispatch("skills.update_review_get", {"target": "1"}, notify=noop)
+    assert e.value.status_code == 404
+
+    posted = await nerve_gateway._dispatch(
+        "skills.update_review", {"target": "1", "ref": "v1"}, notify=noop
+    )
+    got = await nerve_gateway._dispatch("skills.update_review_get", {"target": "1"}, notify=noop)
+    assert posted == got == await routes.get_skill_review_route("1")
+
+    one = _items(got)[(ALPHA, "one")]
+    answer = await nerve_gateway._dispatch(
+        "skills.update_review_resolve",
+        {
+            "target": "1", "skill_id": ALPHA, "doc_key": "one", "verdict": "edit",
+            "content": "rpc text\n", "ours_hash": one["ours_hash"], "theirs_hash": one["theirs_hash"],
+        },
+        notify=noop,
+    )
+    assert answer["verdict"] == "edit" and answer["counts"]["unresolved"] == 0
+    with pytest.raises(HTTPException) as e:
+        await nerve_gateway._dispatch(
+            "skills.update_review_resolve",
+            {
+                "target": "1", "skill_id": ALPHA, "doc_key": "one", "verdict": "keep_mine",
+                "ours_hash": "0" * 64, "theirs_hash": one["theirs_hash"],
+            },
+            notify=noop,
+        )
+    assert e.value.status_code == 409

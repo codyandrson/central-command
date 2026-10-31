@@ -4831,6 +4831,70 @@ async def list_skill_doc_review(target: str) -> list[dict]:
         await conn.close()
 
 
+async def get_skill_bundled_texts(hashes: list[str]) -> list[dict]:
+    """The stored bundled texts for these hashes (`hash`, `content`); a hash
+    the library never received is simply absent."""
+    if not hashes:
+        return []
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select hash, content from skill_bundled_text where hash = any($1::text[])",
+            hashes,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def get_skill_doc_review_row(target: str, skill_id: str, doc_key: str) -> dict | None:
+    """One stored review row, or None when `target` has no such row."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            "select * from skill_doc_review where target = $1 and skill_id = $2 and doc_key = $3",
+            target, skill_id, doc_key,
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def resolve_skill_doc_review(
+    target: str, skill_id: str, doc_key: str, verdict: str,
+    resolved_content: str | None, ours_hash: str | None, theirs_hash: str | None,
+) -> dict | None:
+    """Store a verdict on one review row, and only on the row the caller saw.
+
+    One conditional UPDATE: it matches only while the stored `ours_hash` and
+    `theirs_hash` still equal the ones the caller was shown (null-safe: a
+    retired-* row has a null on one side) and nothing has been applied, so a
+    recompute or an apply that lands between the route's read and this write
+    cannot take a verdict meant for a different text. Returns the updated row,
+    or None when nothing matched. A new verdict replaces the old one outright
+    (its content too, and a failed apply's error), and there is no way back to
+    no verdict.
+    """
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            update skill_doc_review
+               set verdict = $4, resolved_content = $5, resolved_at = now(),
+                   apply_error = null
+             where target = $1 and skill_id = $2 and doc_key = $3
+               and ours_hash is not distinct from $6
+               and theirs_hash is not distinct from $7
+               and applied_at is null
+            returning *
+            """,
+            target, skill_id, doc_key, verdict, resolved_content, ours_hash, theirs_hash,
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
 async def retire_skill_doc(skill_id: str, doc_key: str, reason: str) -> dict | None:
     """End a doc_key: stamp the current version retired and drop its search
     chunks, so new sessions can neither load nor find it. Every version row
