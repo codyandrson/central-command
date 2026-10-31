@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
 import { checkVersion, useVersionCheck, type VersionCheck } from '@/lib/version-check';
+import { BundledSkillReview } from '@/components/BundledSkillReview';
+import { useSkillReview } from '@/features/skills/useSkillReview';
 import {
   Dialog,
   DialogContent,
@@ -101,6 +103,8 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
   const [hold, setHold] = useState<HoldStatus | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  // Set below, once the hook has run: applyNow is declared before it.
+  const skillReviewReload = useRef<() => Promise<void>>(async () => {});
 
   // Poll the durable status records the whole time the modal is open — the
   // stage record decides whether "Apply update now" is offered at all. Fetch
@@ -158,6 +162,12 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
         return;
       }
       const body = await res.json().catch(() => ({})) as { error?: string };
+      if (res.status === 409 && (body.error ?? '').includes('skills-unresolved')) {
+        // A doc changed after the last poll: show the review as it is now.
+        void skillReviewReload.current();
+        setApplyError('Not applied — bundled skill docs need a decision; the review above has been reloaded.');
+        return;
+      }
       setApplyError(body.error ?? `HTTP ${res.status}`);
     } catch (err) {
       setApplyError(err instanceof Error ? err.message : String(err));
@@ -222,6 +232,26 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
     && stage.status.target === versionInfo.latest;
   const stageUnknown = !staged && !staging && !stageFailed;
 
+  // The bundled-skill review of the staged release (R4): read on the poll's
+  // cadence while the dialog is open and the stage is done, and computed on a
+  // 404 or 409. `upstream` is the single-node profile's ref, `v<target>` k3s's.
+  const skillReview = useSkillReview({
+    enabled: open && staged && !done && !applying && progress?.status?.state !== 'running',
+    target: versionInfo.latest,
+    ref: local ? 'upstream' : `v${versionInfo.latest}`,
+  });
+  skillReviewReload.current = skillReview.reload;
+  // Why Apply is disabled, when it is: only for a staged release (an unstaged
+  // one has no review to wait for and keeps its old behaviour).
+  const unresolved = skillReview.review?.counts.unresolved ?? 0;
+  const applyBlockedBy: string | null = !staged ? null
+    : skillReview.error ? skillReview.error
+    : skillReview.review === null ? 'Reviewing bundled skill docs…'
+    : unresolved > 0
+      ? `${unresolved} bundled skill ${unresolved === 1 ? 'doc needs' : 'docs need'} a decision above`
+      : null;
+  const showReview = staged && !done && !applying && !hold?.active && skillReview.review !== null;
+
   // Central Command's update pipeline (2026-08-27 contract): the running app
   // NEVER applies its own update — update.sh is the external updater. It
   // version-gates, backs up the spine DB, refuses to run under a live API,
@@ -235,7 +265,7 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
 
   return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={showReview ? 'sm:max-w-3xl' : 'sm:max-w-md'}>
           <DialogHeader>
             <DialogTitle>{done ? 'Update Complete' : 'Update Available'}</DialogTitle>
             <DialogDescription>
@@ -290,6 +320,9 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
               <div className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-500">
                 {applyError}
               </div>
+            )}
+            {showReview && skillReview.review && (
+              <BundledSkillReview review={skillReview.review} resolve={skillReview.resolve} />
             )}
             {hold?.active && !applying && progress?.status?.state !== 'running' ? (
               <div className="space-y-3">
@@ -382,14 +415,30 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
                 <>
                   <button
                     onClick={() => applyNow()}
-                    className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors"
+                    disabled={applyBlockedBy !== null}
+                    className="w-full rounded-md bg-primary text-primary-foreground py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Apply update now
                   </button>
+                  {applyBlockedBy !== null && (
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <p className={skillReview.error ? 'text-red-500' : 'animate-pulse'}>{applyBlockedBy}</p>
+                      {skillReview.error && (
+                        <button
+                          type="button"
+                          onClick={() => void skillReview.recompute()}
+                          className="rounded border border-border px-2 py-0.5 hover:bg-muted shrink-0"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {progress?.status?.state === 'failed' && progress.status.phase === 'busy' && (
                     <button
                       onClick={() => applyNow(true)}
-                      className="w-full rounded-md border border-amber-500/60 text-amber-500 py-2 text-sm font-semibold hover:bg-amber-500/10 transition-colors"
+                      disabled={applyBlockedBy !== null}
+                      className="w-full rounded-md border border-amber-500/60 text-amber-500 py-2 text-sm font-semibold hover:bg-amber-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Update anyway (kills in-flight runs)
                     </button>
