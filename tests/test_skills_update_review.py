@@ -1921,6 +1921,22 @@ async def test_apply_second_run_posts_nothing(clean_skills, fixture_repo, tmp_pa
 
 @needs_pg
 @pytest.mark.asyncio
+async def test_the_store_itself_skips_a_row_already_applied(clean_skills, fixture_repo):
+    """apply_review leaves applied rows out before it posts anything, but two
+    applies can run at once (the cockpit's and the updater's): the row lock and
+    the applied_at check inside apply_skill_doc_review_row are what hold then,
+    so they are proven on their own, on a row the first apply closed."""
+    await _library_for_cli(fixture_repo)
+    assert (await _apply())["failed"] == 0
+    row = await repo.get_skill_doc_review_row("1", ALPHA, "one")
+    assert row["applied_at"] is not None
+    assert await repo.apply_skill_doc_review_row(row) is None
+    again = await repo.get_skill_doc_review_row("1", ALPHA, "one")
+    assert again["applied_at"] == row["applied_at"]
+
+
+@needs_pg
+@pytest.mark.asyncio
 async def test_history_shows_actor_and_provenance(clean_skills, fixture_repo, tmp_path):
     await _library_for_cli(fixture_repo)
     assert _cli(fixture_repo, *APPLY, cwd=tmp_path).returncode == 0
