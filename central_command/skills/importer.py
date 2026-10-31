@@ -12,7 +12,9 @@ filesystem access and must not gain any. Only the API tier calls this.
 
 from __future__ import annotations
 
+import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -54,6 +56,92 @@ def _doc_key(filename: str) -> str:
     duplicates. Derived from the filename, which is what stays constant upstream."""
     stem = Path(filename).stem.lower()
     return re.sub(r"[^a-z0-9]+", "-", stem).strip("-") or "reference"
+
+
+@dataclass(frozen=True)
+class NormalisedDoc:
+    """One document as the library stores it, with what its render touched."""
+
+    meta: dict          # frontmatter fields, parsed as written (never rendered)
+    text: str           # the stored content: frontmatter stripped, overlay rendered
+    resolved: list[str]    # overlay field NAMES filled in
+    unresolved: list[str]  # overlay field NAMES with no text (marker removed)
+
+
+def normalise_doc_text(
+    kind: str,
+    raw_text: str,
+    source: str,
+    *,
+    overlay: dict[str, str] | None = None,
+) -> NormalisedDoc:
+    """Raw bundled-file text -> the text the library stores. ONE path.
+
+    The frontmatter strip, then the overlay render of the BODY only. Every
+    caller that turns a bundled file into a library document goes through
+    here, so the stored text, the hash taken over it (`bundled_text_hash`) and
+    the text a refresh compares against can never differ in how they were made
+    (epic-skills-refresh-on-update A5: the base is the RENDERED text the
+    library received, so an overlay edit alone never reads as a release change).
+
+    Frontmatter is parsed as written; a marker in it is refused (it would reach
+    the skill's id, title and summary), and reported lines are lines of the
+    source. `kind` is 'guidance' (SKILL.md) or 'reference'; both take the same
+    steps today, and an unknown kind raises rather than being guessed at.
+    `source` names the text in errors (a path on disk, or `<ref>:<path>` for
+    a file read from git). `overlay` is the loaded field map; None loads it
+    from the configured directory, which a caller normalising many files
+    loads once and passes.
+    """
+    if kind not in ("guidance", "reference"):
+        raise ValueError(f"{source}: unknown document kind {kind!r}")
+    if overlay is None:
+        overlay = skill_overlay.load(settings.resolved_skill_overlay_dir())
+    meta, _ = parse_frontmatter(raw_text)
+    m = _FRONTMATTER.match(raw_text)
+    head, rest = (raw_text[: m.end()], raw_text[m.end():]) if m else ("", raw_text)
+    skill_overlay.refuse_in(head, source=source)
+    rendered, got, missed = skill_overlay.render(
+        rest, overlay, source=source, first_line=head.count("\n") + 1
+    )
+    return NormalisedDoc(meta, rendered.lstrip("\n"), got, missed)
+
+
+def bundled_text_hash(text: str) -> str:
+    """sha256 (hex) of the STORED text, as UTF-8 — the key of
+    `skill_bundled_text` and the `bundled_hash` of a version posted from it."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def checkout_root() -> Path:
+    """The checkout this code runs from: `central_command/skills/` is two
+    levels below it. A seam on purpose: a test points it at a tmp checkout."""
+    return Path(__file__).resolve().parents[2]
+
+
+def checkout_release(root: Path) -> str:
+    """The checkout's release: the `version=` line of its `VERSION` file, the
+    one the updaters call current. Unreadable or missing raises, because a
+    stamp of a guessed release would put a wrong base into every later review."""
+    version_file = root / "VERSION"
+    try:
+        text = version_file.read_text(encoding="utf-8")
+    except OSError as e:
+        raise ValueError(f"{version_file} is unreadable: {e.strerror or e}") from e
+    m = re.search(r"^version=(\S+)\s*$", text, re.M)
+    if not m:
+        raise ValueError(f"{version_file} has no version= line")
+    return m.group(1)
+
+
+def _bundled_stamp(folder: Path) -> tuple[Path, str] | None:
+    """`(checkout root, release)` when `folder` is a skill folder under the
+    checkout's `skills/` tree, else None: provenance is a claim that a file
+    came from this release, so a folder from anywhere else makes none."""
+    root = checkout_root().resolve()
+    if (root / "skills") not in folder.parents:
+        return None
+    return root, checkout_release(root)
 
 
 def _read_text(f: Path) -> str:
@@ -99,6 +187,12 @@ async def import_skill_folder(
     holds what agents read and a malformed marker refuses before any write.
     The result's `overlay` lists field NAMES only, never a value.
 
+    A folder under the checkout's `skills/` tree is stamped: each version it
+    posts records the checkout's release, the file's path relative to the
+    checkout and the sha256 of the text as stored (`bundled_text_hash`), and the
+    library keeps that text content-addressed. A folder from anywhere else
+    stamps nothing, and the result's `bundled_release` is None.
+
     Read-everything-then-write-everything on purpose: every file is opened,
     decoded, and slugged into a doc_key BEFORE the first database write. That
     way a decode failure or a doc_key collision raises before anything is
@@ -111,27 +205,32 @@ async def import_skill_folder(
         raise FileNotFoundError(f"no SKILL.md in {folder}")
 
     # --- discover + decode everything first; write nothing yet -------------
+    # Provenance (epic-skills-refresh-on-update R1): read the checkout's release
+    # here, before any write, so an unreadable VERSION refuses the import whole.
+    stamp = _bundled_stamp(folder)
+    release = stamp[1] if stamp else None
+
+    def _provenance(f: Path, text: str) -> dict:
+        if stamp is None:
+            return {}
+        rel = folder.relative_to(stamp[0]) / f.relative_to(folder)
+        return {
+            "bundled_release": release,
+            "bundled_path": rel.as_posix(),
+            "bundled_hash": bundled_text_hash(text),
+        }
+
     fields = skill_overlay.load(settings.resolved_skill_overlay_dir())
     resolved: set[str] = set()
     unresolved: set[str] = set()
 
-    def _split_render(f: Path) -> tuple[dict, str]:
-        """Frontmatter parsed as written; only the BODY is rendered. A marker
-        in the frontmatter is refused (it would reach the skill's id, title
-        and summary), and reported lines are lines of the file on disk."""
-        raw = _read_text(f)
-        meta, _ = parse_frontmatter(raw)
-        m = _FRONTMATTER.match(raw)
-        head, rest = (raw[: m.end()], raw[m.end():]) if m else ("", raw)
-        skill_overlay.refuse_in(head, source=str(f))
-        rendered, got, missed = skill_overlay.render(
-            rest, fields, source=str(f), first_line=head.count("\n") + 1
-        )
-        resolved.update(got)
-        unresolved.update(missed)
-        return meta, rendered.lstrip("\n")
+    def _split_render(kind: str, f: Path) -> tuple[dict, str]:
+        doc = normalise_doc_text(kind, _read_text(f), str(f), overlay=fields)
+        resolved.update(doc.resolved)
+        unresolved.update(doc.unresolved)
+        return doc.meta, doc.text
 
-    meta, body = _split_render(skill_md)
+    meta, body = _split_render("guidance", skill_md)
     derived = skill_id is None
     sid = validate_skill_id(skill_id or _doc_key(meta.get("name") or folder.name))
     title = meta.get("name") or folder.name
@@ -170,7 +269,7 @@ async def import_skill_folder(
     references_to_write: list[tuple[str, Path, str]] = []
     for f in ref_files:
         key = _doc_key(f.name)
-        _, ref_body = _split_render(f)
+        _, ref_body = _split_render("reference", f)
         references_to_write.append((key, f, ref_body))
 
     # --- everything decoded and slug-checked; now write -------------------
@@ -187,6 +286,7 @@ async def import_skill_folder(
     await repo.add_skill_doc(
         sid, "guidance", "guidance", title, body,
         source_url=source_url, describes=describes, captured_at=captured_at,
+        **_provenance(skill_md, body),
     )
 
     references: list[str] = []
@@ -194,6 +294,7 @@ async def import_skill_folder(
         await repo.add_skill_doc(
             sid, key, "reference", f.stem, ref_body,
             source_url=source_url, describes=describes, captured_at=captured_at,
+            **_provenance(f, ref_body),
         )
         references.append(key)
 
@@ -206,4 +307,7 @@ async def import_skill_folder(
         "skill_id": sid, "guidance": "guidance", "references": references,
         "default_grants": default_grants,
         "overlay": {"resolved": sorted(resolved), "unresolved": sorted(unresolved)},
+        # The release the docs were stamped with; None when the folder is not
+        # under the checkout's skills/ tree and nothing was stamped.
+        "bundled_release": release,
     }

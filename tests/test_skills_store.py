@@ -7,6 +7,8 @@ that would test nothing, so these need a real Postgres and skip without one.
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from central_command.db import repo
@@ -443,3 +445,135 @@ async def test_the_catalog_route_can_show_retired_skills(clean_skills):
         s["id"] for s in (await routes.list_skills_route(include_retired=False))["skills"]
     ]
     assert "cc-test-back" not in active_only
+
+
+# --- bundled provenance (epic-skills-refresh-on-update R1) -------------------
+
+
+async def _make_skill(skill_id: str = "cc-test-prov") -> None:
+    await repo.create_skill(skill_id, "Prov", "provenance tests")
+
+
+async def _bundled_text_row(hash_: str) -> dict | None:
+    conn = await repo._conn()
+    try:
+        row = await conn.fetchrow("select * from skill_bundled_text where hash = $1", hash_)
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_the_provenance_columns_and_the_text_table_exist_and_are_nullable():
+    """Additive schema: three nullable text columns on skill_doc and a
+    content-addressed table. Every version imported before this release has
+    none of the three, so nullability is what lets the existing rows stand."""
+    conn = await repo._conn()
+    try:
+        cols = {
+            (r["table_name"], r["column_name"]): (r["data_type"], r["is_nullable"])
+            for r in await conn.fetch(
+                """select table_name, column_name, data_type, is_nullable
+                     from information_schema.columns
+                    where table_name in ('skill_doc', 'skill_bundled_text')"""
+            )
+        }
+        pk = await conn.fetchval(
+            """select a.attname from pg_index i
+                 join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
+                where i.indrelid = 'skill_bundled_text'::regclass and i.indisprimary"""
+        )
+    finally:
+        await conn.close()
+    for name in ("bundled_release", "bundled_path", "bundled_hash"):
+        assert cols[("skill_doc", name)] == ("text", "YES")
+    assert pk == "hash"
+    assert cols[("skill_bundled_text", "content")] == ("text", "NO")
+    assert cols[("skill_bundled_text", "first_seen_release")] == ("text", "NO")
+    assert cols[("skill_bundled_text", "first_seen_at")][1] == "NO"
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_a_version_posted_with_provenance_stores_it_and_its_text(clean_skills):
+    await _make_skill()
+    hash_ = hashlib.sha256("# Body\ntext".encode()).hexdigest()
+    doc = await repo.add_skill_doc(
+        "cc-test-prov", "guidance", "guidance", "G", "# Body\ntext",
+        added_by="installer", bundled_release="2.77.0",
+        bundled_path="skills/prov/SKILL.md", bundled_hash=hash_,
+    )
+    assert (doc["bundled_release"], doc["bundled_path"], doc["bundled_hash"]) == (
+        "2.77.0", "skills/prov/SKILL.md", hash_,
+    )
+    row = await _bundled_text_row(hash_)
+    assert row["content"] == "# Body\ntext"
+    assert row["first_seen_release"] == "2.77.0"
+    assert row["first_seen_at"] is not None
+
+    (hist,) = await repo.skill_doc_history("cc-test-prov", "guidance")
+    (cur,) = await repo.list_skill_docs("cc-test-prov")
+    for r in (hist, cur):
+        assert (r["bundled_release"], r["bundled_path"], r["bundled_hash"]) == (
+            "2.77.0", "skills/prov/SKILL.md", hash_,
+        )
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_the_same_text_arriving_again_is_the_same_row(clean_skills):
+    """Content-addressed: a second version with the same hash adds no text row
+    and leaves the first release that carried it untouched."""
+    await _make_skill()
+    hash_ = hashlib.sha256(b"same").hexdigest()
+    for release in ("2.77.0", "2.78.0"):
+        await repo.add_skill_doc(
+            "cc-test-prov", "guidance", "guidance", "G", "same",
+            bundled_release=release, bundled_path="skills/prov/SKILL.md",
+            bundled_hash=hash_,
+        )
+    conn = await repo._conn()
+    try:
+        n = await conn.fetchval("select count(*) from skill_bundled_text where hash = $1", hash_)
+    finally:
+        await conn.close()
+    assert n == 1
+    assert (await _bundled_text_row(hash_))["first_seen_release"] == "2.77.0"
+    assert [d["version"] for d in await repo.skill_doc_history("cc-test-prov", "guidance")] == [2, 1]
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_a_hand_post_carries_no_provenance_and_adds_no_text(clean_skills):
+    await _make_skill()
+    before = await _bundled_count()
+    doc = await repo.add_skill_doc("cc-test-prov", "guidance", "guidance", "G", "by hand")
+    assert (doc["bundled_release"], doc["bundled_path"], doc["bundled_hash"]) == (None, None, None)
+    assert await _bundled_count() == before
+
+
+async def _bundled_count() -> int:
+    conn = await repo._conn()
+    try:
+        return await conn.fetchval("select count(*) from skill_bundled_text")
+    finally:
+        await conn.close()
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "given",
+    [
+        {"bundled_hash": "abc"},
+        {"bundled_release": "2.77.0"},
+        {"bundled_release": "2.77.0", "bundled_path": "skills/x/SKILL.md"},
+        {"bundled_path": "skills/x/SKILL.md", "bundled_hash": "abc"},
+    ],
+)
+async def test_partial_provenance_is_refused_and_nothing_is_written(clean_skills, given):
+    await _make_skill()
+    with pytest.raises(ValueError):
+        await repo.add_skill_doc("cc-test-prov", "guidance", "guidance", "G", "x", **given)
+    assert await repo.skill_doc_history("cc-test-prov", "guidance") == []

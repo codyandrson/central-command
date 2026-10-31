@@ -285,6 +285,16 @@ process's environ.
   database, and exits non-zero when any field is unresolved. Neither installer
   nor the updater seeds or copies the overlay. `runtime/` never imports the
   module (a test walks the source).
+- **A version posted from a bundled file records where it came from.** When
+  `import_skill_folder` reads a folder under the checkout's `skills/` tree, each
+  version it posts carries `skill_doc.bundled_release` (the checkout's `VERSION`
+  `version=` line), `bundled_path` (relative to the checkout) and `bundled_hash`
+  (sha256 of the text as STORED, i.e. after the frontmatter strip and the
+  overlay render, both done by `importer.normalise_doc_text`), and the library
+  keeps that text in `skill_bundled_text`, keyed by the hash. A folder from
+  anywhere else, and every hand post (`POST /api/skills/{id}/docs`), stamps
+  nothing. An unreadable `VERSION` refuses the import (422) before any write.
+  The `skill.imported` payload and the import result carry `bundled_release`.
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
   façade idempotency keys are the owed fix (PRD §6.2).

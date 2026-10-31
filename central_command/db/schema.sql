@@ -783,6 +783,28 @@ create table if not exists skill_doc (
 alter table skill_doc add column if not exists retired_at timestamptz;
 alter table skill_doc add column if not exists retired_reason text;
 
+-- Provenance of a version posted from a bundled file (epic-skills-refresh-on-
+-- update R1): the release that shipped it, its path relative to the checkout,
+-- and the sha256 of the text AS THE LIBRARY STORES IT (after the frontmatter
+-- strip and the overlay render). All three are null for a version nobody
+-- posted from a bundled file (an operator's or an agent's hand post, and every
+-- version imported before this column existed). "Modified" later means "the
+-- current content differs from the last bundled text this library received".
+alter table skill_doc add column if not exists bundled_release text;
+alter table skill_doc add column if not exists bundled_path    text;
+alter table skill_doc add column if not exists bundled_hash    text;
+
+-- The bundled texts the library has received, content-addressed by the hash
+-- above, so the three-way base never depends on a git ref still existing. A
+-- row is written with the version that first carried its hash and never
+-- changed: the same text arriving again is the same row.
+create table if not exists skill_bundled_text (
+    hash               text primary key,
+    content            text not null,
+    first_seen_release text not null,
+    first_seen_at      timestamptz not null default now()
+);
+
 -- Exactly one CURRENT version per document. The invariant is the index, not a
 -- convention someone has to remember in application code.
 create unique index if not exists skill_doc_current_uq

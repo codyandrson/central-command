@@ -7,6 +7,7 @@ imports as-is.
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from datetime import datetime, timezone
 
@@ -257,3 +258,246 @@ async def test_an_explicit_skill_id_must_still_be_a_legal_id(clean_skills, tmp_p
     (folder / "SKILL.md").write_text("# A\nbody")
     with pytest.raises(ValueError):
         await import_skill_folder(folder, skill_id="cc test thing")
+
+
+# --- bundled provenance (epic-skills-refresh-on-update R1) -------------------
+
+
+def _checkout(tmp_path, monkeypatch, release: str | None = "9.9.9"):
+    """A tmp checkout the importer treats as the one it runs from, with a copy
+    of a real MARKED bundled skill under its skills/ tree."""
+    import shutil
+    from pathlib import Path
+
+    from central_command.skills import importer
+
+    root = tmp_path / "checkout"
+    (root / "skills").mkdir(parents=True)
+    if release is not None:
+        (root / "VERSION").write_text(f"version={release}\nmin_upgrade_from=2.0.0\n")
+    real = Path(__file__).resolve().parents[1] / "skills" / "litellm"
+    shutil.copytree(real, root / "skills" / "litellm")
+    monkeypatch.setattr(importer, "checkout_root", lambda: root)
+    return root
+
+
+def _overlay_dir(tmp_path, monkeypatch, **fields: str) -> None:
+    from central_command.config import settings
+
+    d = tmp_path / "overlay"
+    d.mkdir()
+    for name, text in fields.items():
+        (d / f"{name}.md").write_text(text + "\n")
+    monkeypatch.setattr(settings, "skill_overlay_dir", str(d))
+
+
+async def _text_rows(hashes: list[str]) -> dict[str, dict]:
+    conn = await repo._conn()
+    try:
+        rows = await conn.fetch(
+            "select * from skill_bundled_text where hash = any($1::text[])", hashes
+        )
+    finally:
+        await conn.close()
+    return {r["hash"]: dict(r) for r in rows}
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_an_import_from_under_the_checkout_stamps_every_doc(
+    clean_skills, tmp_path, monkeypatch
+):
+    root = _checkout(tmp_path, monkeypatch)
+    _overlay_dir(tmp_path, monkeypatch, model_server_layout="DEMO")
+
+    result = await import_skill_folder(root / "skills" / "litellm", skill_id="cc-test-litellm")
+
+    assert result["bundled_release"] == "9.9.9"
+    docs = await repo.list_skill_docs("cc-test-litellm")
+    assert len(docs) == 5
+    paths = {
+        d["doc_key"]: d["bundled_path"] for d in docs
+    }
+    assert paths["guidance"] == "skills/litellm/SKILL.md"
+    assert paths["routing-doctrine"] == "skills/litellm/references/routing-doctrine.md"
+    assert all(d["bundled_release"] == "9.9.9" for d in docs)
+    # The hash is over the STORED text — the rendered text, not the file.
+    assert all(
+        d["bundled_hash"] == hashlib.sha256(d["content"].encode()).hexdigest() for d in docs
+    )
+    marked = next(d for d in docs if d["doc_key"] == "models-and-model-info")
+    assert "DEMO" in marked["content"]
+    assert marked["bundled_hash"] != hashlib.sha256(
+        (root / "skills/litellm/references/models-and-model-info.md").read_bytes()
+    ).hexdigest()
+    # One text row per distinct text, holding exactly the stored content.
+    hashes = sorted({d["bundled_hash"] for d in docs})
+    rows = await _text_rows(hashes)
+    assert sorted(rows) == hashes
+    assert all(r["first_seen_release"] == "9.9.9" for r in rows.values())
+    by_hash = {d["bundled_hash"]: d["content"] for d in docs}
+    assert all(rows[h]["content"] == by_hash[h] for h in hashes)
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_two_docs_with_the_same_text_share_one_text_row(
+    clean_skills, tmp_path, monkeypatch
+):
+    root = _checkout(tmp_path, monkeypatch)
+    folder = root / "skills" / "twins"
+    (folder / "references").mkdir(parents=True)
+    (folder / "SKILL.md").write_text("---\nname: twins\n---\n\n# Twins\nguidance")
+    (folder / "references" / "a.md").write_text("# Same\nbody")
+    (folder / "references" / "b.md").write_text("---\nx: y\n---\n# Same\nbody")
+
+    await import_skill_folder(folder, skill_id="cc-test-twins")
+
+    docs = await repo.list_skill_docs("cc-test-twins")
+    assert len(docs) == 3
+    hashes = {d["bundled_hash"] for d in docs}
+    assert len(hashes) == 2          # frontmatter is stripped before hashing
+    assert len(await _text_rows(sorted(hashes))) == 2
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_an_import_from_elsewhere_stamps_nothing(clean_skills, tmp_path, monkeypatch):
+    _checkout(tmp_path, monkeypatch)
+    folder = tmp_path / "elsewhere"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text("# One\nguidance")
+    conn = await repo._conn()
+    try:
+        before = await conn.fetchval("select count(*) from skill_bundled_text")
+    finally:
+        await conn.close()
+
+    result = await import_skill_folder(folder, skill_id="cc-test-elsewhere")
+
+    assert result["bundled_release"] is None
+    (doc,) = await repo.list_skill_docs("cc-test-elsewhere")
+    assert (doc["bundled_release"], doc["bundled_path"], doc["bundled_hash"]) == (None, None, None)
+    conn = await repo._conn()
+    try:
+        assert await conn.fetchval("select count(*) from skill_bundled_text") == before
+    finally:
+        await conn.close()
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_a_folder_beside_skills_in_the_checkout_stamps_nothing(
+    clean_skills, tmp_path, monkeypatch
+):
+    """Under the checkout is not enough: only its skills/ tree is bundled."""
+    root = _checkout(tmp_path, monkeypatch)
+    folder = root / "docs" / "notes"
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_text("# Notes\nx")
+
+    result = await import_skill_folder(folder, skill_id="cc-test-notes")
+
+    assert result["bundled_release"] is None
+    (doc,) = await repo.list_skill_docs("cc-test-notes")
+    assert doc["bundled_hash"] is None
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_a_hand_post_after_an_import_carries_no_provenance(
+    clean_skills, tmp_path, monkeypatch
+):
+    from central_command.api import routes
+
+    root = _checkout(tmp_path, monkeypatch)
+    await import_skill_folder(root / "skills" / "litellm", skill_id="cc-test-litellm")
+
+    await routes.add_skill_doc_route(
+        "cc-test-litellm",
+        routes.SkillDocIn(doc_key="guidance", kind="guidance", title="G", content="edited"),
+    )
+
+    v2, v1 = await repo.skill_doc_history("cc-test-litellm", "guidance")
+    assert (v2["version"], v2["bundled_release"], v2["bundled_path"], v2["bundled_hash"]) == (
+        2, None, None, None,
+    )
+    assert v1["bundled_release"] == "9.9.9" and v1["bundled_hash"] is not None
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_an_unreadable_version_refuses_the_import_before_any_write(
+    clean_skills, tmp_path, monkeypatch
+):
+    root = _checkout(tmp_path, monkeypatch, release=None)
+    with pytest.raises(ValueError, match="VERSION"):
+        await import_skill_folder(root / "skills" / "litellm", skill_id="cc-test-litellm")
+    assert await repo.get_skill("cc-test-litellm") is None
+
+    (root / "VERSION").write_text("min_upgrade_from=2.0.0\n")
+    with pytest.raises(ValueError, match="no version= line"):
+        await import_skill_folder(root / "skills" / "litellm", skill_id="cc-test-litellm")
+    assert await repo.get_skill("cc-test-litellm") is None
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_the_import_route_stamps_its_event_and_the_hand_route_does_not(
+    clean_skills, tmp_path, monkeypatch
+):
+    from central_command.api import routes
+
+    root = _checkout(tmp_path, monkeypatch)
+    folder = tmp_path / "elsewhere"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text("# One\nx")
+
+    await routes.import_skill_route(
+        routes.SkillImportIn(path=str(root / "skills" / "litellm"), skill_id="cc-test-litellm")
+    )
+    await routes.import_skill_route(
+        routes.SkillImportIn(path=str(folder), skill_id="cc-test-elsewhere")
+    )
+
+    events = {
+        e["ref_id"]: e["payload"]
+        for e in await repo.list_events_of_kinds(["skill.imported"])
+        if e["ref_id"] in ("cc-test-litellm", "cc-test-elsewhere")
+    }
+    assert events["cc-test-litellm"]["bundled_release"] == "9.9.9"
+    assert events["cc-test-elsewhere"]["bundled_release"] is None
+
+
+# --- normalise_doc_text (pure) -----------------------------------------------
+
+
+def test_normalise_strips_frontmatter_then_renders_the_body_only():
+    from central_command.skills.importer import normalise_doc_text
+
+    raw = "---\nname: s\n---\n\n# T\nwhere: <!-- overlay: model_server_layout -->\n"
+    doc = normalise_doc_text("guidance", raw, "mem", overlay={"model_server_layout": "HERE"})
+    assert doc.meta == {"name": "s"}
+    assert doc.text == "# T\nwhere: HERE\n"
+    assert doc.resolved == ["model_server_layout"] and doc.unresolved == []
+
+    bare = normalise_doc_text("reference", raw, "mem", overlay={})
+    assert bare.unresolved == ["model_server_layout"]
+    assert "overlay" not in bare.text
+
+
+def test_normalise_refuses_a_marker_in_frontmatter_and_an_unknown_kind():
+    from central_command.skills.importer import normalise_doc_text
+
+    with pytest.raises(ValueError, match="mem:2"):
+        normalise_doc_text(
+            "guidance", "---\nname: <!-- overlay: model_server_layout -->\n---\nx", "mem", overlay={}
+        )
+    with pytest.raises(ValueError, match="unknown document kind"):
+        normalise_doc_text("tome", "x", "mem", overlay={})
+
+
+def test_the_hash_is_sha256_of_the_utf8_text():
+    from central_command.skills.importer import bundled_text_hash
+
+    assert bundled_text_hash("é") == hashlib.sha256("é".encode()).hexdigest()

@@ -4603,6 +4603,9 @@ async def add_skill_doc(
     describes: str | None = None,
     captured_at=None,
     added_by: str = "operator",
+    bundled_release: str | None = None,
+    bundled_path: str | None = None,
+    bundled_hash: str | None = None,
 ) -> dict:
     """Add a NEW version of one document, superseding the prior current one.
 
@@ -4610,8 +4613,22 @@ async def add_skill_doc(
     half-applied version impossible rather than merely unlikely. Chunks are
     rebuilt here too, so `skill_chunk` can never describe a version that is no
     longer current.
+
+    The three `bundled_*` values are provenance for a version posted from a
+    bundled file: they come together or not at all (a hash without its release
+    and path, or the reverse, is a caller's bug and raises). Given a hash, the
+    `skill_bundled_text` row for it is inserted if absent in the SAME
+    transaction as the version, so no version ever names a hash the library
+    cannot resolve. The row holds `content`, which is why the hash must be of
+    the stored content (`importer.bundled_text_hash`); a hand post passes none.
     """
     from central_command.skills.chunking import split_markdown
+
+    given = (bundled_release, bundled_path, bundled_hash)
+    if any(v is not None for v in given) and not all(v is not None for v in given):
+        raise ValueError(
+            "bundled_release, bundled_path and bundled_hash are given together or not at all"
+        )
 
     conn = await _conn()
     try:
@@ -4636,13 +4653,24 @@ async def add_skill_doc(
                 """
                 insert into skill_doc
                     (id, skill_id, doc_key, kind, title, content, version,
-                     source_url, describes, captured_at, added_by)
-                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                     source_url, describes, captured_at, added_by,
+                     bundled_release, bundled_path, bundled_hash)
+                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 returning *
                 """,
                 doc_id, skill_id, doc_key, kind, title, content, version,
                 source_url, describes, captured_at, added_by,
+                bundled_release, bundled_path, bundled_hash,
             )
+            if bundled_hash is not None:
+                await conn.execute(
+                    """
+                    insert into skill_bundled_text (hash, content, first_seen_release)
+                    values ($1, $2, $3)
+                    on conflict (hash) do nothing
+                    """,
+                    bundled_hash, content, bundled_release,
+                )
             # Only reference docs are searchable — guidance arrives in context
             # whole when the capability loads, so indexing it would return the
             # agent text it is already reading.

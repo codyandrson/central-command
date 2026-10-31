@@ -3374,6 +3374,9 @@ async def import_skill_route(body: SkillImportIn) -> dict:
             # Field NAMES only: the overlay's text is the deployment's own and
             # never enters an event.
             "overlay": result["overlay"],
+            # The release the docs were stamped with; None for a folder
+            # outside the checkout's skills/ tree (no provenance claimed).
+            "bundled_release": result["bundled_release"],
         },
         actor="operator",
     )
