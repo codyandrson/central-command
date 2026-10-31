@@ -4606,6 +4606,7 @@ async def add_skill_doc(
     bundled_release: str | None = None,
     bundled_path: str | None = None,
     bundled_hash: str | None = None,
+    bundled_text: str | None = None,
 ) -> dict:
     """Add a NEW version of one document, superseding the prior current one.
 
@@ -4621,68 +4622,100 @@ async def add_skill_doc(
     transaction as the version, so no version ever names a hash the library
     cannot resolve. The row holds `content`, which is why the hash must be of
     the stored content (`importer.bundled_text_hash`); a hand post passes none.
-    """
-    from central_command.skills.chunking import split_markdown
 
+    `bundled_text` is for the one version whose content is not the bundled text:
+    a keep-mine posts the library's content with the target's provenance, so the
+    base moves to the target's text while the content stays. It takes a hash, and
+    a hash that is not this text's raises before any write.
+    """
     given = (bundled_release, bundled_path, bundled_hash)
     if any(v is not None for v in given) and not all(v is not None for v in given):
         raise ValueError(
             "bundled_release, bundled_path and bundled_hash are given together or not at all"
         )
+    _require_bundled_text_hash(bundled_hash, bundled_text)
 
     conn = await _conn()
     try:
         async with conn.transaction():
-            prior = await conn.fetchval(
-                """
-                select max(version) from skill_doc
-                 where skill_id = $1 and doc_key = $2
-                """,
-                skill_id, doc_key,
+            row = await _insert_skill_doc(
+                conn, skill_id, doc_key, kind, title, content,
+                source_url=source_url, describes=describes, captured_at=captured_at,
+                added_by=added_by, bundled_release=bundled_release,
+                bundled_path=bundled_path, bundled_hash=bundled_hash,
+                bundled_text=bundled_text,
             )
-            version = (prior or 0) + 1
-            await conn.execute(
-                """
-                update skill_doc set is_current = false
-                 where skill_id = $1 and doc_key = $2 and is_current
-                """,
-                skill_id, doc_key,
-            )
-            doc_id = f"doc_{uuid.uuid4().hex[:12]}"
-            row = await conn.fetchrow(
-                """
-                insert into skill_doc
-                    (id, skill_id, doc_key, kind, title, content, version,
-                     source_url, describes, captured_at, added_by,
-                     bundled_release, bundled_path, bundled_hash)
-                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                returning *
-                """,
-                doc_id, skill_id, doc_key, kind, title, content, version,
-                source_url, describes, captured_at, added_by,
-                bundled_release, bundled_path, bundled_hash,
-            )
-            if bundled_hash is not None:
-                await conn.execute(
-                    """
-                    insert into skill_bundled_text (hash, content, first_seen_release)
-                    values ($1, $2, $3)
-                    on conflict (hash) do nothing
-                    """,
-                    bundled_hash, content, bundled_release,
-                )
-            # Only reference docs are searchable — guidance arrives in context
-            # whole when the capability loads, so indexing it would return the
-            # agent text it is already reading.
-            if kind == "reference":
-                for ord_, chunk in enumerate(split_markdown(content)):
-                    await conn.execute(
-                        "insert into skill_chunk (doc_id, ord, content) values ($1, $2, $3)",
-                        doc_id, ord_, chunk,
-                    )
         return dict(row)
     finally:
         await conn.close()
+
+
+def _require_bundled_text_hash(bundled_hash: str | None, bundled_text: str | None) -> None:
+    if bundled_text is None:
+        return
+    from central_command.skills.importer import bundled_text_hash
+
+    if bundled_hash != bundled_text_hash(bundled_text):
+        raise ValueError(f"bundled_hash {bundled_hash!r} is not the hash of the bundled text given")
+
+
+async def _insert_skill_doc(
+    conn, skill_id: str, doc_key: str, kind: str, title: str, content: str, *,
+    source_url, describes, captured_at, added_by, bundled_release, bundled_path,
+    bundled_hash, bundled_text,
+):
+    """The version, its supersede, its bundled text and its chunks, on the
+    caller's connection and inside the caller's transaction."""
+    from central_command.skills.chunking import split_markdown
+
+    prior = await conn.fetchval(
+        """
+        select max(version) from skill_doc
+         where skill_id = $1 and doc_key = $2
+        """,
+        skill_id, doc_key,
+    )
+    version = (prior or 0) + 1
+    await conn.execute(
+        """
+        update skill_doc set is_current = false
+         where skill_id = $1 and doc_key = $2 and is_current
+        """,
+        skill_id, doc_key,
+    )
+    doc_id = f"doc_{uuid.uuid4().hex[:12]}"
+    row = await conn.fetchrow(
+        """
+        insert into skill_doc
+            (id, skill_id, doc_key, kind, title, content, version,
+             source_url, describes, captured_at, added_by,
+             bundled_release, bundled_path, bundled_hash)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        returning *
+        """,
+        doc_id, skill_id, doc_key, kind, title, content, version,
+        source_url, describes, captured_at, added_by,
+        bundled_release, bundled_path, bundled_hash,
+    )
+    if bundled_hash is not None:
+        await conn.execute(
+            """
+            insert into skill_bundled_text (hash, content, first_seen_release)
+            values ($1, $2, $3)
+            on conflict (hash) do nothing
+            """,
+            bundled_hash, content if bundled_text is None else bundled_text, bundled_release,
+        )
+    # Only reference docs are searchable — guidance arrives in context
+    # whole when the capability loads, so indexing it would return the
+    # agent text it is already reading.
+    if kind == "reference":
+        for ord_, chunk in enumerate(split_markdown(content)):
+            await conn.execute(
+                "insert into skill_chunk (doc_id, ord, content) values ($1, $2, $3)",
+                doc_id, ord_, chunk,
+            )
+    return row
 
 
 async def list_skill_docs(
@@ -4895,6 +4928,143 @@ async def resolve_skill_doc_review(
         await conn.close()
 
 
+async def apply_skill_doc_review_row(
+    row: dict, *, post: dict | None = None, retire_reason: str | None = None,
+    skill: dict | None = None,
+) -> dict | None:
+    """Apply one stored review row, in ONE transaction: the act and its
+    `applied_at` land together or not at all, so a crash between them cannot
+    leave a posted doc that a re-run would post again.
+
+    `row` is the review row the caller planned from. `post` is the version's
+    fields (a `content` of None keeps the current version's content, which is
+    keep-mine; a `title` of None keeps the doc's title) and `retire_reason`
+    retires the doc; with neither, the row only closes. `skill` {title, summary,
+    follow, default_agents} creates a skill the library lacks, and retitles an
+    existing one only when `follow` is set.
+
+    Anything that moved since the review raises `ValueError`, naming what, and
+    changes nothing: the row itself (a recompute or a new verdict), the library's
+    current text against `ours_hash` (checked under a row lock, so a hand post
+    cannot slip between the check and the write), a skill the operator retired.
+    Returns None when the row is already applied, else what happened:
+    {doc, retired, created_skill, grants}.
+    """
+    if post is not None:
+        _require_bundled_text_hash(post["bundled_hash"], post["bundled_text"])
+    from central_command.skills.importer import bundled_text_hash
+
+    target, skill_id, doc_key = row["target"], row["skill_id"], row["doc_key"]
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            locked = await conn.fetchrow(
+                """
+                select * from skill_doc_review
+                 where target = $1 and skill_id = $2 and doc_key = $3 for update
+                """,
+                target, skill_id, doc_key,
+            )
+            if locked is None:
+                raise ValueError("the review row is gone; recompute the review")
+            if locked["applied_at"] is not None:
+                return None
+            if any(
+                locked[c] != row[c]
+                for c in ("ours_hash", "theirs_hash", "verdict", "resolved_content")
+            ):
+                raise ValueError("the review row changed while the apply ran")
+
+            out = {"doc": None, "retired": None, "created_skill": False, "grants": None}
+            if post is not None or retire_reason is not None:
+                status = await conn.fetchval("select status from skill where id = $1", skill_id)
+                if status == "RETIRED":
+                    raise ValueError("the skill was retired after the review")
+                current = await conn.fetchval(
+                    """
+                    select content from skill_doc
+                     where skill_id = $1 and doc_key = $2 and is_current for update
+                    """,
+                    skill_id, doc_key,
+                )
+                ours = bundled_text_hash(current) if current is not None else None
+                if ours != row["ours_hash"]:
+                    raise ValueError("the library text changed since the review (ours_hash)")
+
+            if skill is not None:
+                created = await conn.fetchval(
+                    """
+                    insert into skill (id, title, summary) values ($1, $2, $3)
+                    on conflict (id) do nothing returning id
+                    """,
+                    skill_id, skill["title"], skill["summary"],
+                )
+                if created is not None:
+                    out["created_skill"] = True
+                    out["grants"] = await _seed_skill_grants(
+                        conn, skill_id, skill["default_agents"], "seed:skill",
+                    )
+                elif skill["follow"]:
+                    await conn.execute(
+                        "update skill set title = $2, summary = $3 where id = $1",
+                        skill_id, skill["title"], skill["summary"],
+                    )
+
+            if post is not None:
+                newest = await conn.fetchrow(
+                    """
+                    select title, source_url, describes from skill_doc
+                     where skill_id = $1 and doc_key = $2
+                     order by is_current desc, version desc limit 1
+                    """,
+                    skill_id, doc_key,
+                )
+                title = post["title"] or (newest["title"] if newest else doc_key)
+                doc = await _insert_skill_doc(
+                    conn, skill_id, doc_key, post["kind"], title,
+                    post["content"] if post["content"] is not None else current,
+                    source_url=newest["source_url"] if newest else None,
+                    describes=newest["describes"] if newest else None,
+                    captured_at=post["captured_at"], added_by=post["added_by"],
+                    bundled_release=post["bundled_release"],
+                    bundled_path=post["bundled_path"], bundled_hash=post["bundled_hash"],
+                    bundled_text=post["bundled_text"],
+                )
+                out["doc"] = dict(doc)
+            if retire_reason is not None:
+                retired = await _retire_skill_doc(conn, skill_id, doc_key, retire_reason)
+                out["retired"] = dict(retired)
+
+            await conn.execute(
+                """
+                update skill_doc_review set applied_at = now(), apply_error = null
+                 where target = $1 and skill_id = $2 and doc_key = $3
+                """,
+                target, skill_id, doc_key,
+            )
+        return out
+    finally:
+        await conn.close()
+
+
+async def record_skill_doc_review_error(
+    target: str, skill_id: str, doc_key: str, error: str,
+) -> None:
+    """Why this row did not apply. A row already applied keeps its `applied_at`
+    and takes no error."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            """
+            update skill_doc_review set apply_error = $4
+             where target = $1 and skill_id = $2 and doc_key = $3 and applied_at is null
+            """,
+            target, skill_id, doc_key, error,
+        )
+    finally:
+        await conn.close()
+
+
 async def retire_skill_doc(skill_id: str, doc_key: str, reason: str) -> dict | None:
     """End a doc_key: stamp the current version retired and drop its search
     chunks, so new sessions can neither load nor find it. Every version row
@@ -4908,21 +5078,25 @@ async def retire_skill_doc(skill_id: str, doc_key: str, reason: str) -> dict | N
     conn = await _conn()
     try:
         async with conn.transaction():
-            row = await conn.fetchrow(
-                """
-                update skill_doc
-                   set is_current = false, retired_at = now(), retired_reason = $3
-                 where skill_id = $1 and doc_key = $2 and is_current
-                returning *
-                """,
-                skill_id, doc_key, reason,
-            )
-            if row is None:
-                return None
-            await conn.execute("delete from skill_chunk where doc_id = $1", row["id"])
-        return dict(row)
+            row = await _retire_skill_doc(conn, skill_id, doc_key, reason)
+        return dict(row) if row else None
     finally:
         await conn.close()
+
+
+async def _retire_skill_doc(conn, skill_id: str, doc_key: str, reason: str):
+    row = await conn.fetchrow(
+        """
+        update skill_doc
+           set is_current = false, retired_at = now(), retired_reason = $3
+         where skill_id = $1 and doc_key = $2 and is_current
+        returning *
+        """,
+        skill_id, doc_key, reason,
+    )
+    if row is not None:
+        await conn.execute("delete from skill_chunk where doc_id = $1", row["id"])
+    return row
 
 
 async def get_skill_doc(doc_id: str) -> dict | None:
@@ -5024,29 +5198,33 @@ async def seed_skill_grants(
     given instance may not have hired.
     Returns {"applied": [...], "skipped": [...], "unknown": [...]}.
     """
-    out: dict[str, list[str]] = {"applied": [], "skipped": [], "unknown": []}
     conn = await _conn()
     try:
-        for agent_id in dict.fromkeys(agent_ids):
-            on_roster = await conn.fetchval(
-                "select 1 from agent where id = $1 and role <> '' and status = 'ACTIVE'",
-                agent_id,
-            )
-            if not on_roster:
-                out["unknown"].append(agent_id)
-                continue
-            result = await conn.execute(
-                """
-                insert into agent_skill_grant (agent_id, skill_id, granted_by)
-                values ($1, $2, $3)
-                on conflict (agent_id, skill_id) do nothing
-                """,
-                agent_id, skill_id, granted_by,
-            )
-            out["applied" if result.endswith(" 1") else "skipped"].append(agent_id)
-        return out
+        return await _seed_skill_grants(conn, skill_id, agent_ids, granted_by)
     finally:
         await conn.close()
+
+
+async def _seed_skill_grants(conn, skill_id: str, agent_ids: list[str], granted_by: str) -> dict:
+    out: dict[str, list[str]] = {"applied": [], "skipped": [], "unknown": []}
+    for agent_id in dict.fromkeys(agent_ids):
+        on_roster = await conn.fetchval(
+            "select 1 from agent where id = $1 and role <> '' and status = 'ACTIVE'",
+            agent_id,
+        )
+        if not on_roster:
+            out["unknown"].append(agent_id)
+            continue
+        result = await conn.execute(
+            """
+            insert into agent_skill_grant (agent_id, skill_id, granted_by)
+            values ($1, $2, $3)
+            on conflict (agent_id, skill_id) do nothing
+            """,
+            agent_id, skill_id, granted_by,
+        )
+        out["applied" if result.endswith(" 1") else "skipped"].append(agent_id)
+    return out
 
 
 async def revoke_skill(agent_id: str, skill_id: str, reason: str) -> bool:

@@ -1405,6 +1405,10 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
                 ours_hash=params.get("ours_hash"), theirs_hash=params.get("theirs_hash"),
             ),
         )
+    if method == "skills.update_review_apply":
+        return await rest.apply_skill_review_route(
+            params["target"], rest.SkillReviewApplyIn(actor=params.get("actor", "updater")),
+        )
     if method == "gaps.list":
         return await rest.list_gaps_route(params.get("limit", 100))
     if method == "sessions.patch":

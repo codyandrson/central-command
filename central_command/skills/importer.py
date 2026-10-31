@@ -148,6 +148,12 @@ def _bundled_stamp(folder: Path) -> tuple[Path, str] | None:
     return root, checkout_release(root)
 
 
+def skill_title_summary(meta: dict, folder_name: str) -> tuple[str, str]:
+    """A skill's title and summary from its guidance frontmatter."""
+    title = meta.get("name") or folder_name
+    return title, meta.get("description") or f"Knowledge about {title}"
+
+
 def _read_text(f: Path) -> str:
     """Decode one file, raising a message that names the offending file.
 
@@ -237,8 +243,7 @@ async def import_skill_folder(
     meta, body = _split_render("guidance", skill_md)
     derived = skill_id is None
     sid = validate_skill_id(skill_id or _doc_key(meta.get("name") or folder.name))
-    title = meta.get("name") or folder.name
-    summary = meta.get("description") or f"Knowledge about {title}"
+    title, summary = skill_title_summary(meta, folder.name)
 
     ref_dir = folder / "references"
     ref_files = sorted(ref_dir.glob("*.md")) if ref_dir.is_dir() else []

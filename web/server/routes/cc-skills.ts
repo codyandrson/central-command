@@ -3,8 +3,8 @@
  * over HTTP rather than the WebSocket RPC dispatch table (`nerve_gateway.py`):
  * the three Skills-page ingest routes — import-doc and import-site (JSON),
  * import-file (multipart, the reason these are REST at all; a File doesn't
- * ride the RPC channel) — and the three bundled-skill update-review routes the
- * update dialog polls and posts to (compute, read, resolve one item).
+ * ride the RPC channel) — and the four bundled-skill update-review routes the
+ * update dialog polls and posts to (compute, read, resolve one item, apply).
  *
  * Every other Skills operation goes over RPC. These three shipped 2026-08-07
  * as direct `fetch('/api/skills/…')` calls with no Hono route behind them, so
@@ -56,5 +56,6 @@ app.post(
   rateLimitGeneral,
   (c) => forward(c, reviewPath(c)),
 );
+app.post('/api/skills/update-review/:target/apply', rateLimitGeneral, (c) => forward(c, reviewPath(c)));
 
 export default app;

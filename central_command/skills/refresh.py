@@ -20,6 +20,18 @@ from the checkout's `.env` as the API does:
         exit 0 nothing unresolved; exit 3 docs unresolved, each named on stdout;
         exit 2 could not be computed, which leaves the gate closed.
 
+    python -m central_command.skills.refresh apply --target <version> --ref <ref> [--actor updater]
+        post the STORED review, never a recomputed one: the updater runs this
+        after the merge, when HEAD is already the target. Each row is its own
+        transaction, a row that fails records `apply_error` and the run goes on,
+        and a row already applied is skipped, so a re-run posts only what is
+        missing. `--actor` is who posts what nobody decided; a verdict's version
+        is always the operator's.
+        exit 0 every row applied or nothing was due; exit 1 a row failed, each
+        named on stderr with its reason and no doc text; exit 2 could not run
+        (no review stored, the ref unreadable, the database down), nothing
+        posted; exit 3 docs unresolved, each named on stdout, nothing posted.
+
 `<ref>` is what the stage names: `v<target>` on k3s, `upstream` on single-node.
 
 Everything read from git passes `importer.normalise_doc_text` with the live
@@ -41,6 +53,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from central_command import events
@@ -54,6 +67,10 @@ from central_command.skills.ids import validate_skill_id
 # `importer._doc_key` can never be this.
 WHOLE_SKILL_KEY = "*"
 
+# Who may post what nobody decided. An apply never posts as the operator on its
+# own account: a verdict is what makes a version the operator's.
+APPLY_ACTORS = ("updater",)
+
 # A checkout's git variables would point a read at the wrong repository when
 # this runs under a git hook.
 _GIT_ENV_DROPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
@@ -66,6 +83,7 @@ class BundledDoc:
     path: str   # relative to the checkout: 'skills/jira/references/api.md'
     kind: str   # 'guidance' | 'reference'
     text: str
+    meta: dict  # frontmatter fields, as written
 
 
 def _git(root: Path, *args: str) -> bytes:
@@ -117,8 +135,8 @@ def read_tree(root: Path, ref: str, overlay: dict[str, str]) -> dict[tuple[str, 
                 f"{source} and {docs[(skill_id, key)].path} collide on doc_key {key!r}"
             )
         raw = _git(root, "show", f"{commit}:{p}")
-        text = importer.normalise_doc_text(kind, _decode(raw, source), source, overlay=overlay).text
-        docs[(skill_id, key)] = BundledDoc(str(p), kind, text)
+        doc = importer.normalise_doc_text(kind, _decode(raw, source), source, overlay=overlay)
+        docs[(skill_id, key)] = BundledDoc(str(p), kind, doc.text, doc.meta)
     return docs
 
 
@@ -288,10 +306,196 @@ async def compute_review(target: str, ref: str) -> dict:
     return {"target": target, "ref": ref, "counts": counts, "items": items}
 
 
+# --- apply -------------------------------------------------------------------
+
+
+class ReviewNotStored(ValueError):
+    """Nothing to apply: no review is stored for the target."""
+
+
+class ReviewUnresolved(Exception):
+    """Docs still need a verdict, so nothing was applied."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        super().__init__(f"{len(rows)} docs still need a verdict")
+        self.rows = rows
+
+
+def _apply_act(row: dict, actor: str) -> tuple[str, str | None]:
+    """The contract's apply table: (act, who posts it). `actor` posts what nobody
+    decided; a verdict is the operator's."""
+    status, verdict = row["status"], row["verdict"]
+    if status in ("unmodified", "new"):
+        return "post_theirs", actor
+    if status == "retired-upstream" and verdict is None and not needs_verdict(row):
+        return "retire", actor
+    act = {
+        ("modified", "take_release"): "post_theirs",
+        ("modified", "keep_mine"): "post_ours",
+        ("modified", "edit"): "post_edit",
+        ("retired-upstream", "take_release"): "retire",
+        ("retired-locally", "take_release"): "post_theirs",
+    }.get((status, verdict))
+    if act is not None:
+        return act, "operator"
+    if needs_verdict(row) and verdict != "keep_mine":
+        raise ValueError(f"no apply rule for a {status} doc with verdict {verdict!r}")
+    return "nothing", None
+
+
+async def _apply_row(row: dict, tree: dict, target: str, actor: str) -> dict | None:
+    key = (row["skill_id"], row["doc_key"])
+    act, added_by = _apply_act(row, actor)
+    if act == "nothing":
+        return await repo.apply_skill_doc_review_row(row)
+
+    theirs = tree.get(key)
+    if (importer.bundled_text_hash(theirs.text) if theirs else None) != row["theirs_hash"]:
+        raise ValueError(f"the release text changed since the review (theirs_hash, {key[1]})")
+    if act == "retire":
+        reason = f"removed in v{target}"
+        out = await repo.apply_skill_doc_review_row(row, retire_reason=reason)
+        if out is not None:
+            await events.emit(
+                "skill.doc_retired", ref_id=key[0],
+                payload={"doc_key": key[1], "version": out["retired"]["version"], "reason": reason},
+                actor=added_by,
+            )
+        return out
+
+    # A2: the skill's title and summary follow the guidance doc's text, so they
+    # move with the release's text and stay with a kept or edited one. A new row
+    # may be the first of a whole new skill, in any order, so it carries them.
+    takes_release = act == "post_theirs"
+    is_guidance = key[1] == "guidance"
+    skill = None
+    if row["status"] == "new" or (is_guidance and takes_release):
+        meta = tree[(key[0], "guidance")].meta
+        title, summary = importer.skill_title_summary(meta, key[0])
+        skill = {
+            "title": title, "summary": summary, "follow": is_guidance,
+            "default_agents": importer.parse_id_list(meta.get("default_agents", "")),
+        }
+    doc_title = None
+    if takes_release:
+        doc_title = skill["title"] if is_guidance else PurePosixPath(theirs.path).stem
+    content = {"post_theirs": theirs.text, "post_ours": None, "post_edit": row["resolved_content"]}[act]
+    if act == "post_edit" and content is None:
+        raise ValueError("an edit verdict with no text to post")
+    out = await repo.apply_skill_doc_review_row(
+        row, skill=skill,
+        post={
+            "kind": theirs.kind, "title": doc_title, "content": content,
+            "added_by": added_by, "captured_at": datetime.now(timezone.utc),
+            "bundled_release": target, "bundled_path": theirs.path,
+            "bundled_hash": row["theirs_hash"], "bundled_text": theirs.text,
+        },
+    )
+    if out is None:
+        return None
+    if out["created_skill"]:
+        await events.emit(
+            "skill.created", ref_id=key[0],
+            payload={"title": skill["title"], "summary": skill["summary"]}, actor=added_by,
+        )
+        for agent_id in out["grants"]["applied"]:
+            await events.emit(
+                "skill.granted", ref_id=agent_id,
+                payload={"skill_id": key[0], "default": True}, actor="seed:skill",
+            )
+    await events.emit(
+        "skill.doc_added", ref_id=key[0],
+        payload={
+            "doc_key": key[1], "kind": theirs.kind, "version": out["doc"]["version"],
+            "describes": out["doc"]["describes"], "bundled_release": target,
+        },
+        actor=added_by,
+    )
+    return out
+
+
+async def apply_review(target: str, ref: str | None = None, actor: str = "updater") -> dict:
+    """Run the stored review of `target` through the apply table, row by row.
+
+    Returns `{target, ref, applied, failed, skipped, counts, items}`: `applied`
+    rows closed by this run, `failed` rows that recorded an `apply_error`,
+    `skipped` rows an earlier run already closed; each item says what became of
+    its row, and never holds doc text. Raises `ReviewNotStored`, or
+    `ReviewUnresolved` before anything is posted. A failure to read the target
+    tree raises too: nothing has been posted by then. `ref` defaults to the one
+    the review was computed from.
+    """
+    rows = await repo.list_skill_doc_review(target)
+    if not rows:
+        raise ReviewNotStored(f"no bundled-skill review is stored for {target!r}")
+    unresolved = unresolved_rows(rows)
+    if unresolved:
+        raise ReviewUnresolved(unresolved)
+
+    ref = ref or rows[0]["ref"]
+    due = [r for r in rows if r["applied_at"] is None]
+    tree: dict = {}
+    if due:
+        root = importer.checkout_root()
+        overlay = skill_overlay.load(settings.resolved_skill_overlay_dir())
+        tree = await asyncio.to_thread(read_tree, root, ref, overlay)
+
+    applied = failed = 0
+    skipped = len(rows) - len(due)
+    for row in due:
+        try:
+            done = await _apply_row(row, tree, target, actor)
+        except Exception as e:
+            failed += 1
+            await repo.record_skill_doc_review_error(
+                target, row["skill_id"], row["doc_key"], str(e) or type(e).__name__,
+            )
+            continue
+        if done is None:
+            skipped += 1
+        else:
+            applied += 1
+
+    stored = await repo.list_skill_doc_review(target)
+    return {
+        "target": target, "ref": ref,
+        "applied": applied, "failed": failed, "skipped": skipped,
+        "counts": review_counts(stored),
+        "items": [
+            {k: r[k] for k in (
+                "skill_id", "doc_key", "status", "verdict", "applied_at", "apply_error",
+            )}
+            for r in stored
+        ],
+    }
+
+
 # --- command line -------------------------------------------------------------
 
 
+async def _run_apply(args: argparse.Namespace) -> int:
+    try:
+        result = await apply_review(args.target, args.ref, args.actor)
+    except ReviewUnresolved as e:
+        for r in e.rows:
+            print(f"unresolved: {r['skill_id']}/{r['doc_key']} ({r['status']})")
+        print(f"error: {e}; decide them in the cockpit", file=sys.stderr)
+        return 3
+    finally:
+        await repo.close_pool()
+    print(
+        f"skill refresh for {args.target} ({args.ref}): applied={result['applied']} "
+        f"failed={result['failed']} skipped={result['skipped']}"
+    )
+    errors = [i for i in result["items"] if i["apply_error"]]
+    for i in errors:
+        print(f"failed: {i['skill_id']}/{i['doc_key']}: {i['apply_error']}", file=sys.stderr)
+    return 1 if errors else 0
+
+
 async def _run(args: argparse.Namespace) -> int:
+    if args.command == "apply":
+        return await _run_apply(args)
     try:
         review = await compute_review(args.target, args.ref)
     finally:
@@ -315,10 +519,16 @@ def main(argv: list[str] | None = None) -> int:
     for name, text in (
         ("review", "compute and store the review; exit 0, or 2 if it cannot be computed"),
         ("check", "the gate; exit 0 nothing unresolved, 3 docs unresolved, 2 cannot be computed"),
+        ("apply", "post the stored review; exit 0 done, 1 a row failed, 2 could not run, 3 unresolved"),
     ):
         p = sub.add_parser(name, help=text)
         p.add_argument("--target", required=True, help="the release under review, e.g. 2.68.0")
         p.add_argument("--ref", required=True, help="the git ref holding it, e.g. v2.68.0 or upstream")
+        if name == "apply":
+            p.add_argument(
+                "--actor", choices=APPLY_ACTORS, default="updater",
+                help="who posts what nobody decided",
+            )
     args = parser.parse_args(argv)
     try:
         return asyncio.run(_run(args))

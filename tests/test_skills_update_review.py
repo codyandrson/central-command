@@ -105,7 +105,9 @@ async def _sweep() -> None:
             "(select bundled_hash from skill_doc where bundled_hash is not null)"
         )
         await conn.execute(
-            "delete from audit_event where kind in ('skill.review_computed', 'skill.review_resolved')"
+            "delete from audit_event where kind in ('skill.review_computed', 'skill.review_resolved') "
+            "or (kind like 'skill.%' and ref_id like 'cc-test-%') "
+            "or (kind = 'skill.granted' and payload->>'skill_id' like 'cc-test-%')"
         )
     finally:
         await conn.close()
@@ -1240,3 +1242,788 @@ async def test_the_rpc_methods_answer_like_the_routes(clean_skills, fixture_repo
             notify=noop,
         )
     assert e.value.status_code == 409
+
+
+# --- apply: the contract's table, row by row (story 2.4) ------------------------
+
+
+MINE = ONE_V0.replace("line 10\n", "mine\n")
+
+
+async def _apply(target: str = "1") -> dict:
+    return await routes.apply_skill_review_route(target, routes.SkillReviewApplyIn(actor="updater"))
+
+
+async def _current(doc_key: str, skill_id: str = ALPHA) -> dict | None:
+    docs = await repo.list_skill_docs(skill_id)
+    return next((d for d in docs if d["doc_key"] == doc_key), None)
+
+
+async def _bundled_text(text: str) -> dict | None:
+    rows = await repo.get_skill_bundled_texts([bundled_text_hash(text)])
+    return rows[0] if rows else None
+
+
+async def _events(kind: str, skill_id: str = ALPHA) -> list[dict]:
+    import json
+
+    conn = await repo._conn()
+    try:
+        rows = await conn.fetch(
+            "select actor, payload from audit_event where kind = $1 and ref_id = $2 order by id",
+            kind, skill_id,
+        )
+    finally:
+        await conn.close()
+    return [{"actor": r["actor"], **json.loads(r["payload"])} for r in rows]
+
+
+def _assert_provenance(doc: dict, *, added_by: str, content: str, theirs: str, path: str) -> None:
+    assert doc["is_current"]
+    assert doc["content"] == content
+    assert doc["added_by"] == added_by
+    assert doc["bundled_release"] == "1"
+    assert doc["bundled_path"] == path
+    assert doc["bundled_hash"] == bundled_text_hash(theirs)
+
+
+ONE_PATH = f"skills/{ALPHA}/references/one.md"
+GONE_PATH = f"skills/{ALPHA}/references/gone.md"
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_unmodified_posts_theirs_as_the_updater(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    before = await _current("one")
+    await _post_review()
+    result = await _apply()
+
+    doc = await _current("one")
+    assert doc["version"] == before["version"] + 1
+    _assert_provenance(doc, added_by="updater", content=ONE_V1, theirs=ONE_V1, path=ONE_PATH)
+    assert (await _bundled_text(ONE_V1))["content"] == ONE_V1
+    item = next(i for i in result["items"] if i["doc_key"] == "one")
+    assert item["applied_at"] is not None and item["apply_error"] is None
+    assert result["failed"] == 0
+    # Nothing is edited in place: the version it superseded still reads as it did.
+    history = await repo.skill_doc_history(ALPHA, "one")
+    assert {d["content"] for d in history} == {ONE_V0, ONE_V1}
+    # The new version is what search finds.
+    conn = await repo._conn()
+    try:
+        chunks = await conn.fetch("select content from skill_chunk where doc_id = $1", doc["id"])
+    finally:
+        await conn.close()
+    assert chunks and "line ten, as the release says" in "".join(c["content"] for c in chunks)
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_new_posts_as_the_updater_and_creates_a_whole_new_skill(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _post_review()
+    assert await repo.get_skill(BETA) is None
+    await _apply()
+
+    _assert_provenance(
+        await _current("born"), added_by="updater", content="# Born\nadded by v1\n",
+        theirs="# Born\nadded by v1\n", path=f"skills/{ALPHA}/references/born.md",
+    )
+    skill = await repo.get_skill(BETA)
+    assert (skill["title"], skill["summary"]) == ("beta", "Knowledge about beta")
+    guidance = await _current("guidance", BETA)
+    assert guidance["title"] == "beta" and guidance["added_by"] == "updater"
+    assert guidance["content"] == "# Beta\n" and guidance["bundled_release"] == "1"
+    b = await _current("b", BETA)
+    assert (b["kind"], b["title"], b["content"]) == ("reference", "b", "# B\n")
+    assert [e["title"] for e in await _events("skill.created", BETA)] == ["beta"]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_a_new_doc_leaves_its_existing_skill_alone(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await repo.create_skill(ALPHA, "the operator's title", "the operator's summary")
+    await _post_review()
+    await _apply()
+    skill = await repo.get_skill(ALPHA)
+    assert skill["title"] == "the operator's title"
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_whole_new_skills_default_grants_apply_once_and_create_only(
+    clean_skills, fixture_repo
+):
+    """What the installers' import does for a new folder: an update that imports
+    the skill first must not leave it with no holders."""
+    conn = await repo._conn()
+    try:
+        holder = await conn.fetchval(
+            "select id from agent where role <> '' and status = 'ACTIVE' order by id limit 1"
+        )
+    finally:
+        await conn.close()
+    _git(fixture_repo, "checkout", "-q", "--detach", "v1")
+    _write(
+        fixture_repo, f"skills/{BETA}/SKILL.md",
+        f"---\nname: beta\ndefault_agents: {holder}, cc-test-nobody\n---\n\n# Beta\n",
+    )
+    _write(fixture_repo, f"skills/{ALPHA}/SKILL.md", f"---\nname: alpha\ndefault_agents: {holder}\n---\n\n# Alpha\nsteps\n")
+    _commit(fixture_repo, "v1g")
+    _git(fixture_repo, "checkout", "-q", "--detach", "v0")
+    await _seed(fixture_repo)
+
+    await _post_review("1", "v1g")
+    await _apply()
+
+    assert {r["skill_id"] for r in await repo.list_agent_skills(holder)} >= {BETA}
+    assert ALPHA not in {r["skill_id"] for r in await repo.list_agent_skills(holder)}
+    assert await _events("skill.granted", holder) == [
+        {"actor": "seed:skill", "skill_id": BETA, "default": True}
+    ]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_take_release_posts_theirs_as_the_operator(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "take_release")
+    await _apply()
+    _assert_provenance(
+        await _current("one"), added_by="operator", content=ONE_V1, theirs=ONE_V1, path=ONE_PATH,
+    )
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_keep_mine_posts_a_new_version_of_ours_and_the_base_moves(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    before = await _current("one")
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "keep_mine")
+    await _apply()
+
+    doc = await _current("one")
+    assert doc["version"] == before["version"] + 1
+    assert doc["content"] == before["content"] == MINE
+    _assert_provenance(doc, added_by="operator", content=MINE, theirs=ONE_V1, path=ONE_PATH)
+    # The text row is the release's, not the posted content: it is the next base.
+    assert (await _bundled_text(ONE_V1))["content"] == ONE_V1
+    assert await _bundled_text(MINE) is None
+    row = (await _review())[(ALPHA, "one")]
+    assert row["status"] == "unchanged-upstream"
+    assert row["base_hash"] == bundled_text_hash(ONE_V1)
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_edit_posts_the_resolved_content_as_the_operator(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "edit", "the two together\n")
+    await _apply()
+    _assert_provenance(
+        await _current("one"), added_by="operator", content="the two together\n",
+        theirs=ONE_V1, path=ONE_PATH,
+    )
+    assert (await _bundled_text(ONE_V1))["content"] == ONE_V1
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_retired_upstream_untouched_is_retired_by_the_updater(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    before = await repo.skill_doc_history(ALPHA, "gone")
+    await _post_review()
+    await _apply()
+
+    assert await _current("gone") is None
+    history = await repo.skill_doc_history(ALPHA, "gone")
+    assert len(history) == len(before)
+    assert max(history, key=lambda d: d["version"])["retired_reason"] == "removed in v1"
+    assert await _events("skill.doc_retired") == [
+        {"actor": "updater", "doc_key": "gone", "version": 1, "reason": "removed in v1"}
+    ]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_retired_upstream_take_release_is_retired_by_the_operator(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("gone", "# Gone\nmine\n")
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "gone")], "take_release")
+    await _apply()
+    assert await _current("gone") is None
+    assert [e["actor"] for e in await _events("skill.doc_retired")] == ["operator"]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_retired_upstream_keep_mine_does_nothing_and_closes_the_row(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("gone", "# Gone\nmine\n")
+    before = await _versions(ALPHA)
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "gone")], "keep_mine")
+    result = await _apply()
+
+    assert (await _current("gone"))["content"] == "# Gone\nmine\n"
+    assert await _events("skill.doc_retired") == []
+    assert next(i for i in result["items"] if i["doc_key"] == "gone")["applied_at"] is not None
+    # one + born are the only posts under alpha.
+    assert await _versions(ALPHA) == before + 2
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_retired_locally_take_release_reactivates_with_theirs(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await repo.retire_skill_doc(ALPHA, "one", "not wanted")
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "take_release")
+    await _apply()
+    doc = await _current("one")
+    _assert_provenance(doc, added_by="operator", content=ONE_V1, theirs=ONE_V1, path=ONE_PATH)
+    assert doc["version"] == 2
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_retired_locally_keep_mine_stays_retired(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await repo.retire_skill_doc(ALPHA, "one", "not wanted")
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "keep_mine")
+    await _apply()
+    assert await _current("one") is None
+    assert len(await repo.skill_doc_history(ALPHA, "one")) == 1
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_posts_nothing_for_a_row_with_nothing_due(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("two", "# Two\nmine\n")
+    await _hand_post("notes", "# My notes\n")
+    two, notes = await _current("two"), await _current("notes")
+    await _post_review()
+    result = await _apply()
+    assert (await _current("two"))["id"] == two["id"]
+    assert (await _current("notes"))["id"] == notes["id"]
+    closed = {i["doc_key"]: i for i in result["items"] if i["skill_id"] == ALPHA}
+    assert closed["two"]["applied_at"] and closed["notes"]["applied_at"]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_leaves_a_retired_skill_alone(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await repo.retire_skill(ALPHA, "not wanted")
+    before = await _versions(ALPHA)
+    await _post_review()
+    result = await _apply()
+    assert await _versions(ALPHA) == before
+    assert result["failed"] == 0
+    assert (await repo.get_skill(ALPHA))["status"] == "RETIRED"
+
+
+# --- apply: title and summary follow the guidance doc's verdict (A2) ------------
+
+
+def _release_with_new_frontmatter(root: Path, *, body: str = "# Alpha\nsteps\n") -> None:
+    _git(root, "checkout", "-q", "--detach", "v1")
+    _write(
+        root, f"skills/{ALPHA}/SKILL.md",
+        f"---\nname: alpha renamed\ndescription: a renamed skill\n---\n\n{body}",
+    )
+    _commit(root, "v1g")
+    _git(root, "checkout", "-q", "--detach", "v0")
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_an_unmodified_guidance_doc_brings_the_title_and_summary(clean_skills, fixture_repo):
+    _release_with_new_frontmatter(fixture_repo, body="# Alpha\nnew steps\n")
+    await _seed(fixture_repo)
+    await _post_review("1", "v1g")
+    await _apply()
+    skill = await repo.get_skill(ALPHA)
+    assert (skill["title"], skill["summary"]) == ("alpha renamed", "a renamed skill")
+    guidance = await _current("guidance")
+    assert guidance["title"] == "alpha renamed" and guidance["added_by"] == "updater"
+
+
+@needs_pg
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verdict,content,follows",
+    [("take_release", None, True), ("keep_mine", None, False), ("edit", "# Merged\n", False)],
+)
+async def test_a_modified_guidance_doc_moves_the_title_only_on_take_release(
+    clean_skills, fixture_repo, verdict, content, follows
+):
+    _release_with_new_frontmatter(fixture_repo, body="# Alpha\nnew steps\n")
+    await _seed(fixture_repo)
+    await repo.add_skill_doc(ALPHA, "guidance", "guidance", "alpha", "# Alpha\nmy steps\n")
+    items = _items(await _post_review("1", "v1g"))
+    await _verdict(items[(ALPHA, "guidance")], verdict, content)
+    await _apply()
+
+    skill = await repo.get_skill(ALPHA)
+    want = ("alpha renamed", "a renamed skill") if follows else ("alpha", "a test skill")
+    assert (skill["title"], skill["summary"]) == want
+    guidance = await _current("guidance")
+    assert guidance["title"] == want[0]
+    assert guidance["added_by"] == "operator"
+    assert guidance["bundled_release"] == "1"
+
+
+# --- apply: re-verify, record, continue, re-run ----------------------------------
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_hand_post_after_the_review_leaves_the_doc_alone_and_the_rest_go_on(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _post_review()
+    await _hand_post("one", MINE)
+    posted = await _current("one")
+
+    result = await _apply()
+
+    assert (await _current("one"))["id"] == posted["id"]
+    assert result["failed"] == 1
+    items = {i["doc_key"]: i for i in result["items"] if i["skill_id"] == ALPHA}
+    assert "ours_hash" in items["one"]["apply_error"] and items["one"]["applied_at"] is None
+    assert MINE not in items["one"]["apply_error"]
+    assert items["born"]["applied_at"] is not None
+    assert await _current("born") is not None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_failed_row_retries_and_a_success_clears_its_error(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _post_review()
+    await _hand_post("one", MINE)
+    await _apply()
+    await _hand_post("one", ONE_V0)  # the operator puts it back
+
+    result = await _apply()
+
+    assert result["failed"] == 0 and result["applied"] == 1
+    item = next(i for i in result["items"] if i["doc_key"] == "one")
+    assert item["apply_error"] is None and item["applied_at"] is not None
+    _assert_provenance(
+        await _current("one"), added_by="updater", content=ONE_V1, theirs=ONE_V1, path=ONE_PATH,
+    )
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_release_text_that_moved_leaves_the_doc_alone(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _post_review()
+    _git(fixture_repo, "checkout", "-q", "--detach", "v1")
+    _write(fixture_repo, f"skills/{ALPHA}/references/one.md", ONE_V1 + "and more\n")
+    _commit(fixture_repo, "v1-again")
+
+    result = await refresh.apply_review("1", "v1-again")
+
+    assert (await _current("one"))["content"] == ONE_V0
+    item = next(i for i in result["items"] if i["doc_key"] == "one")
+    assert "theirs_hash" in item["apply_error"] and item["applied_at"] is None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_skill_retired_after_the_review_is_not_touched(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _post_review()
+    before = await _versions(ALPHA)
+    await repo.retire_skill(ALPHA, "not wanted")
+    result = await _apply()
+    assert await _versions(ALPHA) == before
+    item = next(i for i in result["items"] if i["doc_key"] == "one")
+    assert "retired" in item["apply_error"]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_failure_inside_a_row_rolls_that_whole_row_back(
+    clean_skills, fixture_repo, monkeypatch
+):
+    """The skill a `new` row would have created goes with the version it failed
+    to post, and the row stays open for the re-run."""
+    await _seed(fixture_repo)
+    await _post_review()
+    real = repo._insert_skill_doc
+
+    async def refuse_beta(conn, skill_id, *a, **k):
+        if skill_id == BETA:
+            raise RuntimeError("the insert failed")
+        return await real(conn, skill_id, *a, **k)
+
+    monkeypatch.setattr(repo, "_insert_skill_doc", refuse_beta)
+    result = await _apply()
+    assert result["failed"] == 2
+    assert await repo.get_skill(BETA) is None
+    assert await _current("born") is not None
+    errors = {i["doc_key"]: i["apply_error"] for i in result["items"] if i["skill_id"] == BETA}
+    assert errors == {"b": "the insert failed", "guidance": "the insert failed"}
+
+    monkeypatch.setattr(repo, "_insert_skill_doc", real)
+    result = await _apply()
+    assert result["failed"] == 0 and result["applied"] == 2
+    assert await _current("b", BETA) is not None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_second_apply_posts_nothing(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "keep_mine")
+    first = await _apply()
+    versions = await _versions(ALPHA)
+    events_before = len(await _events("skill.doc_added"))
+
+    second = await _apply()
+
+    assert second["applied"] == 0 and second["failed"] == 0
+    assert second["skipped"] == first["applied"]
+    assert await _versions(ALPHA) == versions
+    assert len(await _events("skill.doc_added")) == events_before
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_row_applied_while_the_run_was_going_is_skipped_not_posted_twice(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _post_review()
+    stale = await repo.get_skill_doc_review_row("1", ALPHA, "one")
+    await _apply()
+    versions = await _versions(ALPHA)
+    assert await repo.apply_skill_doc_review_row(stale) is None
+    assert await _versions(ALPHA) == versions
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_verdict_changed_while_the_run_was_going_refuses_the_plan(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "take_release")
+    stale = await repo.get_skill_doc_review_row("1", ALPHA, "one")
+    await _verdict(items[(ALPHA, "one")], "keep_mine")
+    with pytest.raises(ValueError, match="changed while the apply ran"):
+        await repo.apply_skill_doc_review_row(stale)
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_after_the_apply_a_recompute_on_the_merged_tree_finds_nothing_to_decide(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "keep_mine")
+    await _apply()
+    _git(fixture_repo, "checkout", "-q", "--detach", "v1")
+
+    review = await refresh.compute_review("1", "v1")
+
+    assert review["counts"]["unresolved"] == 0
+    assert review["counts"]["modified"] == 0
+    assert review["counts"]["unmodified"] == 0 and review["counts"]["new"] == 0
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_with_unresolved_docs_is_409_and_posts_nothing(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    await _post_review()
+    before = await _versions(ALPHA)
+    assert await _status_of(_apply()) == 409
+    assert await _versions(ALPHA) == before
+    assert await repo.get_skill(BETA) is None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_with_no_review_is_404_and_a_bad_actor_is_422(clean_skills, fixture_repo):
+    assert await _status_of(_apply("nothing-stored")) == 404
+    await _seed(fixture_repo)
+    await _post_review()
+    assert await _status_of(
+        routes.apply_skill_review_route("1", routes.SkillReviewApplyIn(actor="operator"))
+    ) == 422
+    assert (await _current("born")) is None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_the_doc_events_carry_the_actor_and_never_the_text(clean_skills, fixture_repo):
+    await _seed(fixture_repo)
+    await _hand_post("two", "# Two\nmine\n")
+    await _hand_post("one", MINE)
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "take_release")
+    await _apply()
+    added = {e["doc_key"]: e for e in await _events("skill.doc_added")}
+    assert set(added) == {"one", "born"}
+    assert added["one"]["actor"] == "operator" and added["born"]["actor"] == "updater"
+    assert added["one"]["bundled_release"] == "1" and added["one"]["kind"] == "reference"
+    assert all("content" not in e for e in added.values())
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_refreshed_version_keeps_what_the_doc_said_about_its_source(
+    clean_skills, fixture_repo
+):
+    await _seed(fixture_repo)
+    await repo.add_skill_doc(
+        ALPHA, "one", "reference", "one", ONE_V0,
+        source_url="https://example.com/one", describes="the one thing",
+    )
+    await _post_review()
+    await _apply()
+    doc = await _current("one")
+    assert (doc["source_url"], doc["describes"]) == ("https://example.com/one", "the one thing")
+    assert doc["captured_at"] is not None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_the_rpc_apply_answers_like_the_route(clean_skills, fixture_repo):
+    noop = lambda *a, **k: None  # noqa: E731
+    await _seed(fixture_repo)
+    await _post_review()
+    answer = await nerve_gateway._dispatch(
+        "skills.update_review_apply", {"target": "1", "actor": "updater"}, notify=noop,
+    )
+    assert answer["applied"] > 0 and answer["failed"] == 0
+    again = await nerve_gateway._dispatch("skills.update_review_apply", {"target": "1"}, notify=noop)
+    assert again["items"] == (await _apply())["items"]
+    assert again["applied"] == 0
+    with pytest.raises(HTTPException) as e:
+        await nerve_gateway._dispatch(
+            "skills.update_review_apply", {"target": "nothing-stored"}, notify=noop,
+        )
+    assert e.value.status_code == 404
+
+
+# --- add_skill_doc's separate bundled text ---------------------------------------
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_version_may_name_a_bundled_text_that_is_not_its_content(clean_skills):
+    await repo.create_skill(ALPHA, "alpha", "a test skill")
+    theirs = "the release's text\n"
+    doc = await repo.add_skill_doc(
+        ALPHA, "one", "reference", "one", "my text\n",
+        bundled_release="1", bundled_path="skills/x.md",
+        bundled_hash=bundled_text_hash(theirs), bundled_text=theirs,
+    )
+    assert doc["content"] == "my text\n"
+    stored = await _bundled_text(theirs)
+    assert stored["content"] == theirs
+    assert await _bundled_text("my text\n") is None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_bundled_text_that_does_not_hash_to_the_hash_raises_before_any_write(clean_skills):
+    await repo.create_skill(ALPHA, "alpha", "a test skill")
+    with pytest.raises(ValueError, match="is not the hash"):
+        await repo.add_skill_doc(
+            ALPHA, "one", "reference", "one", "my text\n",
+            bundled_release="1", bundled_path="skills/x.md",
+            bundled_hash="0" * 64, bundled_text="the release's text\n",
+        )
+    assert await _versions(ALPHA) == 0
+    assert await _bundled_text("the release's text\n") is None
+
+
+# --- apply: the command line, as the updaters call it, after the merge -----------
+
+
+async def _library_for_cli(root: Path) -> None:
+    """One doc of every verdict, the verdicts in, and HEAD on the target: where
+    the updater's refresh step finds it."""
+    await _seed(root)
+    await _hand_post("one", MINE)
+    await _hand_post("gone", "# Gone\nmine\n")
+    await _hand_post("two", "# Two\nmine\n")
+    items = _items(await _post_review())
+    await _verdict(items[(ALPHA, "one")], "keep_mine")
+    await _verdict(items[(ALPHA, "gone")], "take_release")
+    _git(root, "checkout", "-q", "--detach", "v1")
+
+
+APPLY = ("apply", "--target", "1", "--ref", "v1", "--actor", "updater")
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_cli_posts_per_table(clean_skills, fixture_repo, tmp_path):
+    await _library_for_cli(fixture_repo)
+    done = _cli(fixture_repo, *APPLY, cwd=tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "failed=0" in done.stdout
+
+    _assert_provenance(
+        await _current("one"), added_by="operator", content=MINE, theirs=ONE_V1, path=ONE_PATH,
+    )
+    assert await _current("gone") is None
+    assert (await _current("two"))["content"] == "# Two\nmine\n"
+    assert (await _current("born"))["added_by"] == "updater"
+    assert (await _current("guidance", BETA))["added_by"] == "updater"
+    assert await repo.get_skill(BETA) is not None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_second_run_posts_nothing(clean_skills, fixture_repo, tmp_path):
+    await _library_for_cli(fixture_repo)
+    assert _cli(fixture_repo, *APPLY, cwd=tmp_path).returncode == 0
+    versions = await _versions(ALPHA) + await _versions(BETA)
+    done = _cli(fixture_repo, *APPLY, cwd=tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "applied=0" in done.stdout and "failed=0" in done.stdout
+    assert await _versions(ALPHA) + await _versions(BETA) == versions
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_history_shows_actor_and_provenance(clean_skills, fixture_repo, tmp_path):
+    await _library_for_cli(fixture_repo)
+    assert _cli(fixture_repo, *APPLY, cwd=tmp_path).returncode == 0
+    versions = (await routes.skill_doc_history_route(ALPHA, "one"))["versions"]
+    shown = sorted(
+        (v["version"], v["added_by"], v["bundled_release"], v["content"]) for v in versions
+    )
+    assert shown == [
+        (1, "operator", "0", ONE_V0),
+        (2, "operator", None, MINE),
+        (3, "operator", "1", MINE),
+    ]
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_cli_exits_1_naming_the_failed_row_and_no_doc_text(
+    clean_skills, fixture_repo, tmp_path
+):
+    await _seed(fixture_repo)
+    await _post_review()
+    await _hand_post("one", "MY PRIVATE TEXT\n")
+    done = _cli(fixture_repo, *APPLY, cwd=tmp_path)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert f"failed: {ALPHA}/one: " in done.stderr and "ours_hash" in done.stderr
+    assert "MY PRIVATE TEXT" not in done.stdout + done.stderr
+    assert (await _current("one"))["content"] == "MY PRIVATE TEXT\n"
+    # The rest went on, and the error is on the record for the cockpit.
+    assert await _current("born") is not None
+    row = await repo.get_skill_doc_review_row("1", ALPHA, "one")
+    assert row["apply_error"] and row["applied_at"] is None
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_cli_exits_3_naming_unresolved_docs_and_posts_nothing(
+    clean_skills, fixture_repo, tmp_path
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    await _post_review()
+    before = await _versions(ALPHA)
+    done = _cli(fixture_repo, *APPLY, cwd=tmp_path)
+    assert done.returncode == 3, done.stdout + done.stderr
+    assert f"unresolved: {ALPHA}/one (modified)" in done.stdout
+    assert await _versions(ALPHA) == before
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_apply_cli_exits_2_with_no_review_or_a_missing_ref(clean_skills, fixture_repo, tmp_path):
+    await _seed(fixture_repo)
+    done = _cli(fixture_repo, *APPLY, cwd=tmp_path)
+    assert done.returncode == 2 and "no bundled-skill review" in done.stderr
+
+    await _post_review()
+    before = await _versions(ALPHA)
+    done = _cli(fixture_repo, "apply", "--target", "1", "--ref", "no-such-ref", cwd=tmp_path)
+    assert done.returncode == 2 and "no-such-ref" in done.stderr
+    assert await _versions(ALPHA) == before
+    assert await repo.get_skill(BETA) is None
+
+
+def test_apply_cli_refuses_an_actor_it_does_not_know(fixture_repo, tmp_path):
+    done = _cli(fixture_repo, "apply", "--target", "1", "--ref", "v1", "--actor", "operator", cwd=tmp_path)
+    assert done.returncode == 2
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_a_skill_the_release_removed_has_every_doc_retired_and_stays_active(
+    clean_skills, fixture_repo
+):
+    """The contract's retired-upstream row, guidance included: the skill row is
+    the operator's to retire, and delivery drops a skill with no guidance."""
+    await _seed(fixture_repo)
+    _git(fixture_repo, "checkout", "-q", "--detach", "v1")
+    _git(fixture_repo, "rm", "-rq", f"skills/{ALPHA}")
+    _commit(fixture_repo, "v2")
+    _git(fixture_repo, "checkout", "-q", "--detach", "v0")
+    await _post_review("2", "v2")
+    result = await _apply("2")
+    assert result["failed"] == 0
+    assert await repo.list_skill_docs(ALPHA) == []
+    assert (await repo.get_skill(ALPHA))["status"] == "ACTIVE"
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_the_review_stays_readable_after_an_apply_with_its_failures_on_it(
+    clean_skills, fixture_repo
+):
+    """The cockpit's retry banner reads the failed rows from the GET, though the
+    apply's own posts and the hand post that failed have moved the library."""
+    await _seed(fixture_repo)
+    await _post_review()
+    await _hand_post("one", MINE)
+    await _apply()
+
+    items = _items(await routes.get_skill_review_route("1"))
+
+    one = items[(ALPHA, "one")]
+    assert "ours_hash" in one["apply_error"] and one["applied_at"] is None
+    assert one["ours"] is None and one["theirs"] == ONE_V1
+    born = items[(ALPHA, "born")]
+    assert born["applied_at"] is not None and born["apply_error"] is None

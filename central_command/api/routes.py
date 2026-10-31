@@ -3390,8 +3390,8 @@ async def import_skill_route(body: SkillImportIn) -> dict:
 
 # --- Bundled-skill update review (epic-skills-refresh-on-update R2/R3) -----
 # The review itself is computed and stored by `skills/refresh.py`; these routes
-# serve it and take the operator's verdicts. No apply route here: the updater's
-# apply step is a later story's.
+# serve it, take the operator's verdicts and run the apply the updater also runs
+# from the command line.
 
 _REVIEW_VERDICTS = ("take_release", "keep_mine", "edit")
 # What `git merge-file` writes, exactly: a marker run of seven, a space and a
@@ -3432,6 +3432,10 @@ async def _review_shape(target: str) -> dict:
     each is checked against the hash the review stored: a text that no longer
     hashes to it (the library doc, the installed tree or the target ref moved
     since the compute) is a 409, never a stale diff shown as current.
+
+    The exception is a row an apply has already touched: its own post moved the
+    library, and the failed rows are what the cockpit has to show. A text that
+    no longer matches on such a row is null, so the review stays readable.
     """
     import asyncio
 
@@ -3467,10 +3471,12 @@ async def _review_shape(target: str) -> dict:
     except ValueError as e:
         raise HTTPException(500, f"could not read the trees for this review: {e}") from e
 
-    def _text(value: str | None, want: str | None, what: str) -> str | None:
+    def _text(value: str | None, want: str | None, what: str, row: dict) -> str | None:
         if want is None:
             return None
         if value is None or importer.bundled_text_hash(value) != want:
+            if row["applied_at"] is not None or row["apply_error"] is not None:
+                return None
             raise HTTPException(409, _REVIEW_STALE.format(what=what))
         return value
 
@@ -3485,13 +3491,13 @@ async def _review_shape(target: str) -> dict:
         items.append({
             "skill_id": r["skill_id"], "doc_key": r["doc_key"], "status": r["status"],
             "bundled_path": r["bundled_path"], "base_origin": r["base_origin"],
-            "base": _text(base, r["base_hash"], "installed copy"),
+            "base": _text(base, r["base_hash"], "installed copy", r),
             "ours": _text(
                 lib["content"] if lib and lib["is_current"] else None,
-                r["ours_hash"], "library text",
+                r["ours_hash"], "library text", r,
             ),
             "theirs": _text(
-                theirs_doc.text if theirs_doc else None, r["theirs_hash"], "release text"
+                theirs_doc.text if theirs_doc else None, r["theirs_hash"], "release text", r,
             ),
             "merged": r["merged"], "conflicts": r["conflicts"],
             "ours_hash": r["ours_hash"], "theirs_hash": r["theirs_hash"],
@@ -3582,6 +3588,29 @@ async def resolve_skill_review_item_route(
         "verdict": saved["verdict"], "resolved_at": saved["resolved_at"],
         "counts": refresh.review_counts(await repo.list_skill_doc_review(target)),
     }
+
+
+class SkillReviewApplyIn(BaseModel):
+    actor: str = "updater"         # who posts what nobody decided
+
+
+@router.post("/skills/update-review/{target}/apply")
+async def apply_skill_review_route(target: str, body: SkillReviewApplyIn) -> dict:
+    """Run the stored review through the apply table. A row that fails records
+    its `apply_error` and the rest go on, so a partial failure is still a 200;
+    a re-run posts only what is missing."""
+    from central_command.skills import refresh
+
+    if body.actor not in refresh.APPLY_ACTORS:
+        raise HTTPException(422, f"actor must be one of {', '.join(refresh.APPLY_ACTORS)}")
+    try:
+        return await refresh.apply_review(target, actor=body.actor)
+    except refresh.ReviewUnresolved as e:
+        raise HTTPException(409, f"{e}; decide them first") from e
+    except refresh.ReviewNotStored as e:
+        raise HTTPException(404, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, f"could not apply the review: {e}") from e
 
 
 @router.get("/gaps")

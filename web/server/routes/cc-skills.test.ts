@@ -117,6 +117,23 @@ describe('cc-skills proxy', () => {
     expect(init.body).toBeUndefined();
   });
 
+  it('forwards the apply to its path and passes a 409 through', async () => {
+    const app = await buildApp();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail: '1 docs still need a verdict' }), {
+      status: 409, headers: { 'content-type': 'application/json' },
+    }));
+
+    const body = JSON.stringify({ actor: 'updater' });
+    const res = await app.request('/api/skills/update-review/2.68.0/apply', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    });
+
+    expect(res.status).toBe(409);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://cc.test/api/skills/update-review/2.68.0/apply');
+    expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body);
+  });
+
   it('forwards a verdict to the item path and passes a 409 through', async () => {
     const app = await buildApp();
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail: 'the doc changed' }), {
