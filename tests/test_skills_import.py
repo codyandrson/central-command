@@ -47,12 +47,28 @@ async def clean_skills():
     conn = await repo._conn()
     try:
         await conn.execute("delete from skill where id like 'cc-test-%'")
+        # A bundled text nobody references any more is a leftover of a test's
+        # import: sweep it so first_seen_release is this test's own (the row
+        # is written once and never changed; a shared text would otherwise
+        # carry whichever test imported it first).
+        await conn.execute(
+            "delete from skill_bundled_text where hash not in "
+            "(select bundled_hash from skill_doc where bundled_hash is not null)"
+        )
     finally:
         await conn.close()
     yield
     conn = await repo._conn()
     try:
         await conn.execute("delete from skill where id like 'cc-test-%'")
+        # A bundled text nobody references any more is a leftover of a test's
+        # import: sweep it so first_seen_release is this test's own (the row
+        # is written once and never changed; a shared text would otherwise
+        # carry whichever test imported it first).
+        await conn.execute(
+            "delete from skill_bundled_text where hash not in "
+            "(select bundled_hash from skill_doc where bundled_hash is not null)"
+        )
     finally:
         await conn.close()
 
