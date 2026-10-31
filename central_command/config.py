@@ -886,6 +886,11 @@ class Settings(BaseSettings):
     # default under the state directory.
     skill_overlay_dir: str = ""
 
+    # The checkout whose `skills/` tree and git history the bundled-skill review
+    # reads (`importer.checkout_root()` is the one reader). Blank = the checkout
+    # this code runs from, which is what every deployment wants.
+    repo_root: str = ""
+
     def resolved_skill_overlay_dir(self) -> str:
         """`CC_SKILL_OVERLAY_DIR`, or `<resolved_state_dir()>/skill-overlay`."""
         if self.skill_overlay_dir:

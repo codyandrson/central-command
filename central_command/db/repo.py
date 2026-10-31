@@ -4720,6 +4720,117 @@ async def list_skill_docs(
         await conn.close()
 
 
+async def skill_review_library(skill_ids: list[str]) -> dict:
+    """What the bundled-skill review reads about the named skills, from one
+    snapshot: `skills` {id: status}; `docs` {(skill, doc_key): the current row,
+    or the newest one when the key is retired}; `provenance` {(skill, doc_key):
+    the newest row carrying a bundled_hash, with `bundled_text` from
+    `skill_bundled_text`, None if that row is missing}."""
+    conn = await _conn()
+    try:
+        async with conn.transaction(isolation="repeatable_read", readonly=True):
+            skills = await conn.fetch(
+                "select id, status from skill where id = any($1::text[])", skill_ids,
+            )
+            docs = await conn.fetch(
+                """
+                select distinct on (skill_id, doc_key)
+                       skill_id, doc_key, is_current, content
+                  from skill_doc
+                 where skill_id = any($1::text[])
+                 order by skill_id, doc_key, is_current desc, version desc
+                """,
+                skill_ids,
+            )
+            provenance = await conn.fetch(
+                """
+                select distinct on (d.skill_id, d.doc_key)
+                       d.skill_id, d.doc_key, d.bundled_hash, d.bundled_path,
+                       t.content as bundled_text
+                  from skill_doc d
+                  left join skill_bundled_text t on t.hash = d.bundled_hash
+                 where d.skill_id = any($1::text[]) and d.bundled_hash is not null
+                 order by d.skill_id, d.doc_key, d.version desc
+                """,
+                skill_ids,
+            )
+        return {
+            "skills": {r["id"]: r["status"] for r in skills},
+            "docs": {(r["skill_id"], r["doc_key"]): dict(r) for r in docs},
+            "provenance": {(r["skill_id"], r["doc_key"]): dict(r) for r in provenance},
+        }
+    finally:
+        await conn.close()
+
+
+_SKILL_REVIEW_COMPUTED = (
+    "skill_id", "doc_key", "status", "bundled_path", "base_hash", "base_origin",
+    "ours_hash", "theirs_hash", "merged", "conflicts",
+)
+# What a recompute carries over from a row whose hashes did not move: the
+# decision and what became of it. Everything else is recomputed.
+_SKILL_REVIEW_DECISION = (
+    "verdict", "resolved_content", "resolved_at", "applied_at", "apply_error",
+)
+
+
+async def replace_skill_doc_review(target: str, ref: str, rows: list[dict]) -> list[dict]:
+    """Store a computed review as `target`'s whole review, in one transaction.
+
+    Every other target's rows go, resolutions included. A row of this target
+    keeps its decision only where `ours_hash` and `theirs_hash` are both
+    unchanged, which is what returns a doc re-posted between verdict and apply
+    to unresolved. The table lock serialises two reviews (the cockpit's and the
+    stage's), so neither reads decisions the other is about to replace; readers
+    are not blocked. Any failure rolls back to the review that was stored.
+    """
+    columns = ("target", "ref", *_SKILL_REVIEW_COMPUTED, *_SKILL_REVIEW_DECISION)
+    placeholders = ", ".join(f"${i}" for i in range(1, len(columns) + 1))
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            await conn.execute("lock table skill_doc_review in exclusive mode")
+            prior = {
+                (r["skill_id"], r["doc_key"]): r
+                for r in await conn.fetch(
+                    "select * from skill_doc_review where target = $1", target,
+                )
+            }
+            await conn.execute("delete from skill_doc_review")
+
+            def _values(row: dict) -> tuple:
+                old = prior.get((row["skill_id"], row["doc_key"]))
+                keep = old is not None and (old["ours_hash"], old["theirs_hash"]) == (
+                    row["ours_hash"], row["theirs_hash"],
+                )
+                return (
+                    target, ref,
+                    *(row[c] for c in _SKILL_REVIEW_COMPUTED),
+                    *(old[c] if keep else None for c in _SKILL_REVIEW_DECISION),
+                )
+
+            await conn.executemany(
+                f"insert into skill_doc_review ({', '.join(columns)}) values ({placeholders})",
+                [_values(r) for r in rows],
+            )
+        return await list_skill_doc_review(target)
+    finally:
+        await conn.close()
+
+
+async def list_skill_doc_review(target: str) -> list[dict]:
+    """The stored review of `target`, empty when none is stored."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from skill_doc_review where target = $1 order by skill_id, doc_key",
+            target,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
 async def retire_skill_doc(skill_id: str, doc_key: str, reason: str) -> dict | None:
     """End a doc_key: stamp the current version retired and drop its search
     chunks, so new sessions can neither load nor find it. Every version row

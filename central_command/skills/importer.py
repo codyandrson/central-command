@@ -114,8 +114,12 @@ def bundled_text_hash(text: str) -> str:
 
 
 def checkout_root() -> Path:
-    """The checkout this code runs from: `central_command/skills/` is two
-    levels below it. A seam on purpose: a test points it at a tmp checkout."""
+    """The checkout the bundled skills are read from: `CC_REPO_ROOT` when set,
+    else the one this code runs from (`central_command/skills/` is two levels
+    below it). The ONE root seam: the import's stamp and the review's git reads
+    both come through here, and a test points it at a tmp checkout."""
+    if settings.repo_root:
+        return Path(settings.repo_root).expanduser()
     return Path(__file__).resolve().parents[2]
 
 

@@ -805,6 +805,34 @@ create table if not exists skill_bundled_text (
     first_seen_at      timestamptz not null default now()
 );
 
+-- The review of one target release against the library, computed by
+-- `skills/refresh.py` (epic-skills-refresh-on-update R2). Keyed to the target: a
+-- review for another target replaces every row, and a verdict is bound to the
+-- (ours_hash, theirs_hash) it was decided over, so a recompute voids it when
+-- either moved. No foreign key to `skill`: a `new` row names a skill the
+-- library does not hold yet. A whole-skill row carries doc_key '*'.
+create table if not exists skill_doc_review (
+    target           text not null,          -- '2.68.0'
+    ref              text not null,          -- 'v2.68.0' | 'upstream'
+    skill_id         text not null,
+    doc_key          text not null,
+    status           text not null,          -- unchanged-upstream | unmodified | modified | retired-upstream | retired-locally | new | local-only | skill-retired
+    bundled_path     text not null,          -- '' when no bundled file ever named this doc
+    base_hash        text,                   -- null when no provenance and no installed copy
+    base_origin      text not null,          -- 'library' | 'installed-tree'
+    ours_hash        text,                   -- null when the library has no current version
+    theirs_hash      text,                   -- null when the target has no such file
+    merged           text,                   -- git merge-file --diff3 output, markers kept
+    conflicts        int  not null default 0,
+    verdict          text,                   -- null | 'take_release' | 'keep_mine' | 'edit'
+    resolved_content text,                   -- the bytes to post for 'edit'
+    resolved_at      timestamptz,
+    computed_at      timestamptz not null default now(),
+    applied_at       timestamptz,
+    apply_error      text,
+    primary key (target, skill_id, doc_key)
+);
+
 -- Exactly one CURRENT version per document. The invariant is the index, not a
 -- convention someone has to remember in application code.
 create unique index if not exists skill_doc_current_uq
