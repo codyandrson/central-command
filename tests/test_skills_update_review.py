@@ -1091,6 +1091,28 @@ async def test_an_applied_row_takes_no_new_verdict(clean_skills, fixture_repo):
     assert await _status_of(_verdict(one, "keep_mine")) == 409
 
 
+@needs_pg
+@pytest.mark.asyncio
+async def test_the_store_itself_refuses_a_verdict_on_an_applied_row(clean_skills, fixture_repo):
+    """The route refuses an applied row before it writes, but an apply can land
+    between the route's read and its write: the one conditional UPDATE is the
+    guard that holds then, so it is proven on its own, with matching hashes."""
+    await _seed(fixture_repo)
+    await _hand_post("one", ONE_V0.replace("line 10\n", "mine\n"))
+    one = _items(await _post_review())[(ALPHA, "one")]
+    conn = await repo._conn()
+    try:
+        await conn.execute("update skill_doc_review set applied_at = now() where doc_key = 'one'")
+    finally:
+        await conn.close()
+    saved = await repo.resolve_skill_doc_review(
+        "1", ALPHA, "one", "keep_mine", None, one["ours_hash"], one["theirs_hash"]
+    )
+    assert saved is None
+    row = await repo.get_skill_doc_review_row("1", ALPHA, "one")
+    assert row["verdict"] is None
+
+
 MARKER_LINES = [
     "<<<<<<< mine (library)",
     "||||||| base (v0)",
