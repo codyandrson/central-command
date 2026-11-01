@@ -21,11 +21,11 @@ memory (PRD §3). It carries:
   reject without opening anything else.
 - `actions[]` — each `{capability, arguments, target_ref, reversibility}`.
   Actions are **atomic**: one action does one thing. `reversibility` is set
-  **per action**, honestly. It is recorded with the proposal and shown to the
-  reader; today nothing in the gate reads it to triage, and closing that gap
-  (reversibility visible in the inbox, irreversible classes barred from auditor
-  graduation) is PRD FR-15. Until then it is a statement to the operator, not
-  a lever.
+  **per action**, honestly. It is your statement on the record: it is stored with
+  the proposal, and no surface shows it and no check reads it. What the operator
+  sees in the inbox is the capability's own server-held mark, and that mark is
+  what bars an irreversible class from auditor graduation. Your word is never a
+  lever.
 - `evidence[]` — see `evidence-and-claims`.
 - `expected_effect` — what the operator should see afterwards if this worked.
 - `confidence` — `{level: high|medium|low, rationale}`. State it on every

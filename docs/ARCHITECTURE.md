@@ -251,8 +251,9 @@ process's environ.
   (`reversible | irreversible`), `target_args` (the arguments naming the write's
   world target, empty when it has none) and `acknowledge` (an override on it needs the
   operator's recorded acknowledgement and a shadow period of at least 1). The
-  mark informs and forbids nothing; it is never read from the proposing
-  agent's own `Action.reversibility`. Agent charters' capability sections are
+  mark informs an override and forbids none, the Decisions Inbox shows it per
+  action, and it bars auditor graduation (see "Who may approve what"); it is
+  never read from the proposing agent's own `Action.reversibility`. Agent charters' capability sections are
   *generated* from pack grants over this registry at run start.
 - **A bundled skill names a fact only one deployment has through an overlay
   marker, resolved at import in the API tier** (`skills/overlay.py`;
@@ -719,7 +720,7 @@ What varies is the approver.
 | Category | Approver | Classes today | Switch (default) |
 |---|---|---|---|
 | **Human gate** — the baseline for everything | the operator | every capability whose `gate` is human approval: Jira, Confluence, calendar, mail, graph episodes and curation proposals, charter edits, MCP sync, model configuration, … | — |
-| **Graduated class** — the independent auditor re-derives the judgment from the raw source; a **CONCUR** executes with `approver="auditor"`, a **CHALLENGE** or an auditor error parks for the operator | the auditor, per class, revocable | `dismissal.confirm` (email dismissals) and `work.bulk_dismiss`; `dismissal.confirm.document`; graph-verification rows that are aligned, mechanically clean and addition-only (invalidations always park) | `CC_AUDITOR_ENABLED` (false) + `CC_AUDITOR_MODE` (shadow); `CC_AUDITOR_DOCUMENT_MODE` (shadow); `CC_GRAPH_AUDITOR_ENABLED` (false) + `CC_GRAPH_AUDITOR_MODE` (shadow) |
+| **Graduated class** — the independent auditor re-derives the judgment from the raw source; a **CONCUR** executes with `approver="auditor"`, a **CHALLENGE** or an auditor error parks for the operator | the auditor, per class, revocable | `dismissal.confirm` (email dismissals) and `work.bulk_dismiss`; `dismissal.confirm.document`; graph-verification rows that are aligned, mechanically clean and addition-only (invalidations always park). An irreversible capability is never one of them (below) | `CC_AUDITOR_ENABLED` (false) + `CC_AUDITOR_MODE` (shadow); `CC_AUDITOR_DOCUMENT_MODE` (shadow); `CC_GRAPH_AUDITOR_ENABLED` (false) + `CC_GRAPH_AUDITOR_MODE` (shadow) |
 | **Gate override** — the operator's standing rule for one agent and one capability, scoped and narrowable by argument, target or schedule; the proposal is still decided at the seam, by the gateway, and run by the same Executor | `override:<id>` (`override:<a>+<b>`, sorted, when several cover it) | any capability whose default gate is `human` or `auditor`, for any agent but the auditor; none exists until the operator authors one in the cockpit. Three safeguards: (1) the gateway pre-checks and the Executor re-checks the scope before the first action; (2) the write carries `trust=override:<id>`; (3) a shadow period of the operator's own approvals first, and one-click revoke on the agent's and the capability's pages. An irreversible or LIVE class also needs an acknowledgement at authoring and a shadow of at least 1. Never operator agreement for graduation | `CC_GATE_OVERRIDE_SHADOW_RUNS` (5) |
 | **Ungated deterministic write** — exactly two, no proposal, because there is no agent judgment to review | code, or the operator's own click | the closed `EXEMPT_WRITES` tuple beside `REGISTRY` names them (they are not registry rows); task creation is a trigger, has no row and is not on the list. (1) operator graph curation: a closed write set in `integrations/neo4j_writer.py`, called from `api/routes.py` for the operator's own edits; (2) wiki stale-page annotation: a deterministic template over claim rows, no model in the path, whose Confluence write is made by `ingest/wiki_freshness.py` | — ; `CC_WIKI_ANNOTATION_MODE` (off) |
 
@@ -743,6 +744,28 @@ no row and no override. The MCP tool gate (`agent_mcp_gate_override`) is a
 separate, older form that governs a DIRECT tool call; it is unchanged, and
 `mcp.tool_call`, the proposal capability, is overridable like any other under
 its acknowledgement tick and shadow floor.
+
+**The inbox mark.** The Decisions Inbox shows, per action of a proposal, the
+capability registry's server-held `reversibility` mark and whether the capability
+requires an acknowledgement, joined at read time on `proposals.get`
+(`capabilities.action_marks`); an irreversible action has its own badge. The
+agent-written `Action.reversibility` stays in the stored record and is never shown
+or read. The pending list cards and history rows carry no actions and are unchanged.
+
+**The graduation bar.** An irreversible capability is never graduated to the
+auditor. The bar reads exactly the registry's server-held
+`reversibility == "irreversible"` mark, never the proposing agent's own claim; the
+six LIVE litellm rows are reversible with an acknowledgement and stay graduatable
+in principle. It is enforced twice: the registry refuses `default_gate="auditor"`
+on an irreversible row when it loads, and `gateway.approve_and_execute(approver="auditor")`
+over an action whose capability is irreversible decides nothing: no
+`proposal.decided`, no write, the proposal stays AWAITING_HUMAN for the operator,
+and a `proposal.graduation_barred` event carries a `policy_flags` entry naming the
+bar. `GET /audit` lists the barred classes as `barred_classes`. The one
+auditor-gated class, `work.bulk_dismiss`, is reversible and is unaffected. The
+dismissal and graph classes are not capabilities and are outside the check. This
+adds to the rule that the auditor never graduates outward-facing writes and
+replaces nothing.
 
 Graduation is **configuration, never code**, one class at a time,
 on recorded agreement evidence (`gateway/auditor.py`,
@@ -773,6 +796,7 @@ stateDiagram-v2
     RUNNING --> STOPPED: operator stop — never auto-driven
     AWAITING_CONTINUE --> RUNNING: operator continues
     STOPPED --> RUNNING: operator resumes
+    STOPPED --> DONE: a re-run closes it, from any state but RUNNING
     RUNNING --> DONE
     RUNNING --> FAILED: always with a recorded reason
     DONE --> [*]
@@ -782,6 +806,53 @@ stateDiagram-v2
 `contract/enums.py::SessionStatus` is a narrower, older list (it still names
 `AWAITING_INPUT` and `ABORTED`, which nothing sets); the schema comment is the
 authority. Sessions are never deleted, and one agent may hold several at once.
+
+Every session row carries `charter_version`, the version of its agent's charter
+current when the session started, stamped by the insert itself in
+`repo.create_running_session`, `create_conversation_session` and
+`save_paused_session` (0 is the built-in code charter; a lane opened empty is
+stamped at its first turn, when its charter enters the record). A row from before
+the stamp stays null and the cockpit says "charter unknown": nothing derives it.
+`charterCurrent` on the wire is the agent's version at read time, and the session
+header says when a newer charter exists. It is not `run_state.charter_shown`, the
+coach's record of its target's charter.
+
+A re-run is a fresh session linked to the closed one
+(`gateway/rerun.py`; the RPC `sessions.rerun`, which returns the new key at once and
+never awaits the run). Which sessions qualify is one table, `KINDS`, a row per kind
+saying where its inputs live and which fresh-run entry starts it:
+
+| Kind | Inputs | Starts through | Also refused when |
+|---|---|---|---|
+| Task run | `task.instructions` | `routes._run_assigned_task_detached` | its agent is off the roster |
+| Orchestrator project | `task.instructions` | the same starter, then `run_project` | a child task is not terminal |
+| Conversation | the operator's opening message, the first user-prompt part of the whole transcript | `converse.start_conversation`, with the model overrides copied | it has no opening message; its agent is off the roster |
+| Email triage run | `work_item.payload` | `dispatcher.dispatch_item`, skipping the valves as naming one item does | its item is CLAIMED or UNPROCESSED |
+| Discussion lane, document, wiki repair, and any other run with no task and no item (coach, heartbeat, steward, consult) | none | none | always: "no stored inputs" |
+
+A kind the table does not list refuses too. An update hold, a RUNNING session, an
+existing `rerun_by` and an APPROVED, EXECUTING or RETRY_PENDING proposal refuse for
+every kind. A refusal changes nothing and gives its reason, and the composer's
+`rerun: {eligible, reason}` is the same check, so the cockpit offers only what the
+action would accept.
+
+`repo.claim_rerun` is one transaction, with the session's proposals locked first:
+the old row flips DONE with `closed_reason='rerun'` and `rerun_by` naming a pre-minted
+new id, its undecided proposals and open operator items are WITHDRAWN, and a task
+returns to ASSIGNED with no `retry_state`, or a work item to UNPROCESSED, rule-exempt
+and keeping `session_id`. So no decision or resume can land between the claim and the
+close. Then the folds are released, the close is announced through
+`converse.close_session` (no reflection for this reason), and `session.rerun` goes on
+the log, ref the old id and ids only, before the start it authorises. The new row is
+created under the pre-minted id with `rerun_of` set; the starter reads that id from the
+record (`repo.pending_rerun`), so a queued re-run keeps it across a restart. The fresh
+entry loads the charter that is current then, never a continuation tail. The old
+session stays readable and locked: `why_not_sendable` refuses with code `rerun`, and it
+keeps its task and its email through the rerun chain (`repo.task_for_session`,
+`repo.work_items_for_session`, old -> `rerun_by` -> the newest run), so no second link
+column can drift. `gateway._resolve_task_after` ignores a session with `rerun_by`, so a
+late landing of a replaced run has no say over the live task. `task_for_session` reads
+through the chain, so any new caller that writes must make the same check.
 
 ### State sets
 
@@ -808,7 +879,7 @@ index in `schema.sql`); history is kept as `SUPERSEDED`.
 - **Event log.** `events.emit()` writes the row to Postgres, then fans out to
   in-process subscribers; the SSE stream (`GET` stream route in
   `api/routes.py`) and the cockpit's `/ws` push frames are projections of the
-  table, never a parallel channel. 176 distinct event types are emitted today
+  table, never a parallel channel. 180 distinct event types are emitted today
   (recounted from `emit(...)` call sites by the guard; dynamic kinds such as
   bridged log records are not counted). Ordering rule: an event that
   *authorises* something is written before the thing it authorises.

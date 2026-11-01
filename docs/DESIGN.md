@@ -276,7 +276,10 @@ sole guard for irreversible actions.
 > **Superseded 2026-10-22 (reversibility triage).** Reversibility is recorded
 > per Action but nothing reads it: the inbox does not triage on it and it bars
 > no class from auditor graduation. Surfacing it in the inbox and barring
-> irreversible classes from graduation is PRD FR-15 (not yet built).
+> irreversible classes from graduation is PRD FR-15 (not yet built). **Closed
+> 2026-11-01:** built; the inbox shows the registry's server-held mark per action and
+> an irreversible class never graduates to the auditor (DL-199). The agent-written
+> field stays read by nothing.
 
 **Governed asset registries:** Agents; Skills (shared/versioned, each with a
 gateway-enforced risk+approval flag); Policies (scope human/agent/both; **enforced**
