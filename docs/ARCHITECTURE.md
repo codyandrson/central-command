@@ -845,7 +845,7 @@ close. Then the folds are released, the close is announced through
 `converse.close_session` (no reflection for this reason), and `session.rerun` goes on
 the log, ref the old id and ids only, before the start it authorises. The new row is
 created under the pre-minted id with `rerun_of` set; the starter reads that id from the
-record (`repo.pending_rerun`), so a queued re-run keeps it across a restart. The fresh
+record (`repo.claim_owed_rerun`), so a queued re-run keeps it across a restart. The fresh
 entry loads the charter that is current then, never a continuation tail. The old
 session stays readable and locked: `why_not_sendable` refuses with code `rerun`, and it
 keeps its task and its email through the rerun chain (`repo.task_for_session`,

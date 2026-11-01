@@ -5,7 +5,7 @@ import {
   Compass, CornerDownRight, RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { RerunButton } from '@/features/chat/components/RerunButton';
 import { Input } from '@/components/ui/input';
 import { COLUMN_LABELS, type KanbanTask } from './types';
 import { SourceEmailBlock } from './SourceEmailBlock';
@@ -71,8 +71,6 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
      task moves. A failed read offers nothing. */
   const [rerunEligible, setRerunEligible] = useState(false);
   const [rerunRefusal, setRerunRefusal] = useState<string | null>(null);
-  const [rerunning, setRerunning] = useState(false);
-  const [confirmRerun, setConfirmRerun] = useState(false);
   const taskId = task?.id;
   const taskStatus = task?.status;
   useEffect(() => {
@@ -94,9 +92,9 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
     return () => { stale = true; };
   }, [taskId, taskStatus]);
 
+  /* The POST only: RerunButton carries the confirmation and the busy state. */
   const handleRerun = useCallback(async () => {
-    if (!taskId || rerunning) return;
-    setRerunning(true);
+    if (!taskId) return;
     setError(null);
     try {
       const res = await fetch(`/api/kanban/tasks/${encodeURIComponent(taskId)}/rerun`, { method: 'POST' });
@@ -106,10 +104,8 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
       onOpenSession?.(`agent:${body.agentId}:${body.sessionId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Re-run failed');
-    } finally {
-      setRerunning(false);
     }
-  }, [taskId, rerunning, onOpenSession]);
+  }, [taskId, onOpenSession]);
 
   /* Reset transient state when task changes */
   useEffect(() => {
@@ -547,11 +543,13 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
                 </>
               )}
 
-              {rerunEligible && (
-                <Button size="xs" variant="outline" onClick={() => setConfirmRerun(true)} disabled={rerunning || workflowLoading !== null}>
-                  {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-                  Re-run
-                </Button>
+              {rerunEligible && taskId && (
+                <RerunButton
+                  sessionId={task?.sessionId ?? taskId}
+                  onRerun={handleRerun}
+                  disabled={workflowLoading !== null}
+                  message="This task's session closes and its transcript is kept. Its open proposals and questions are withdrawn, and the task runs again in a new session under the charter that is current now."
+                />
               )}
 
               {!rerunEligible && rerunRefusal && task.sessionId && (
@@ -560,16 +558,6 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
                   Re-run
                 </Button>
               )}
-
-              <ConfirmDialog
-                open={confirmRerun}
-                title="Re-run under the current charter?"
-                message="This task's session closes and its transcript is kept. Its open proposals and questions are withdrawn, and the task runs again in a new session under the charter that is current now."
-                confirmLabel="Re-run"
-                cancelLabel="Keep it"
-                onConfirm={() => { setConfirmRerun(false); void handleRerun(); }}
-                onCancel={() => setConfirmRerun(false)}
-              />
 
               <div className="flex-1" />
 

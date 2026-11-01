@@ -2650,24 +2650,34 @@ def gated_write_names() -> set[str]:
     return {c.name for c in REGISTRY if c.kind == "write" and c.gate == "human approval"}
 
 
+def _row_of(capability: str) -> Capability | None:
+    """The registry row a proposal action's capability names (a `@version`
+    suffix stripped), or None for a name the registry does not hold."""
+    return _BY_NAME.get(capability.split("@", 1)[0])
+
+
+def _is_irreversible_write(c: Capability) -> bool:
+    return c.kind == "write" and c.reversibility == "irreversible"
+
+
 def barred_classes() -> list[str]:
     """The capabilities no auditor may ever decide: every write row whose
     server-held mark is exactly `irreversible` (the graduation bar, A8)."""
-    return sorted(c.name for c in REGISTRY if c.kind == "write" and c.reversibility == "irreversible")
+    return sorted(c.name for c in REGISTRY if _is_irreversible_write(c))
 
 
 def is_barred_from_graduation(capability: str) -> bool:
     """Is this capability's registry mark `irreversible`? Reads the row, never
     the proposing agent's `Action.reversibility`; an unknown name (not a
     capability) is outside the bar."""
-    row = _BY_NAME.get(capability.split("@", 1)[0])
-    return bool(row and row.kind == "write" and row.reversibility == "irreversible")
+    row = _row_of(capability)
+    return bool(row and _is_irreversible_write(row))
 
 
 def target_args_of(capability: str) -> tuple[str, ...]:
     """The registry's declared target arguments of a capability, () when it has
     none or is unknown. Reads the row, never an agent's claim."""
-    row = _BY_NAME.get(capability.split("@", 1)[0])
+    row = _row_of(capability)
     return row.target_args if row else ()
 
 
@@ -2675,7 +2685,7 @@ def requires_acknowledgement(capability: str) -> bool:
     """Does an override on this capability need the operator's acknowledgement
     and the shadow floor? Reads the registry row, never an agent's claim; an
     unknown name (an MCP tool's own gate, a typo) requires nothing here."""
-    row = _BY_NAME.get(capability.split("@", 1)[0])
+    row = _row_of(capability)
     return bool(row and row.acknowledge)
 
 
@@ -2684,7 +2694,7 @@ def action_marks(capability: str) -> dict:
     `{"reversibility", "requires_acknowledgement"}`, both None for a name the
     registry does not hold as a write (never a guess). Reads the row, never the
     agent-written `Action.reversibility`."""
-    row = _BY_NAME.get(capability.split("@", 1)[0])
+    row = _row_of(capability)
     if row is None or row.kind != "write":
         return {"reversibility": None, "requires_acknowledgement": None}
     return {"reversibility": row.reversibility, "requires_acknowledgement": row.acknowledge}

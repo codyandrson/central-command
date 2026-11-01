@@ -78,7 +78,7 @@ async def _start_task(run: _Run, new_session_id: str, actor: str) -> None:
     from central_command.api import routes
     from central_command.gateway.gateway import _detach
 
-    # The starter reads the owed id from the record (`repo.pending_rerun`), so a
+    # The starter reads the owed id from the record (`repo.claim_owed_rerun`), so a
     # restart while this waits on the agent's lane keeps it.
     _detach(routes._run_assigned_task_detached(await repo.get_task(run.task["id"]), actor))
 
@@ -120,25 +120,55 @@ async def _start_email(run: _Run, new_session_id: str, actor: str) -> None:
 
 @dataclass(frozen=True)
 class RerunKind:
-    """One row: where this kind's inputs live and what starts it, or why not."""
+    """One row: where this kind's inputs live, what starts it or why not, and the
+    kind's own checks against the record. `check` returns the reason this run may
+    not go again, or None; `waits_for_children` refuses while a task the session
+    assigned is not terminal (and makes the claim re-check it in SQL)."""
 
     name: str
     inputs: str
     start: Callable[[_Run, str, str], Awaitable[None]] | None = None
     refusal: str | None = None
+    check: Callable[[_Run], Awaitable[str | None]] | None = None
+    waits_for_children: bool = False
+
+
+async def _check_task(run: _Run) -> str | None:
+    from central_command.runtime.roster import taskable_agent_ids
+
+    if run.task.get("agent_id") not in await taskable_agent_ids():
+        return f"{run.task.get('agent_id')} is not on the active roster"
+    return None
+
+
+async def _check_conversation(run: _Run) -> str | None:
+    from central_command.runtime.roster import conversational_agent_ids
+
+    if run.opening is None:
+        return NO_STORED_INPUTS
+    if run.session["agent_id"] not in await conversational_agent_ids():
+        return f"{run.session['agent_id']} is not on the active roster"
+    return None
+
+
+async def _check_email(run: _Run) -> str | None:
+    if run.item.get("state") in ("CLAIMED", "UNPROCESSED"):
+        return "its email is already queued or being processed"
+    return None
 
 
 KINDS: dict[str, RerunKind] = {row.name: row for row in (
-    RerunKind("task", "task.instructions", _start_task),
+    RerunKind("task", "task.instructions", _start_task, check=_check_task),
     # Refused too while a child is not terminal, or the fresh run assigns the work
     # twice. The roster cards are re-read live by design.
-    RerunKind("orchestrator", "task.instructions, through run_project", _start_task),
+    RerunKind("orchestrator", "task.instructions, through run_project", _start_task,
+              waits_for_children=True),
     # The opening message only (A2): the agent's answers shaped the later turns,
     # so replaying them would not be the same conversation.
     RerunKind("conversation", "the first user-prompt part of the transcript",
-              _start_conversation),
+              _start_conversation, check=_check_conversation),
     # Recurrence and pending-proposal context are recomputed per run by design.
-    RerunKind("email", "work_item.payload", _start_email),
+    RerunKind("email", "work_item.payload", _start_email, check=_check_email),
     # A lane an agent opened to unblock its task: the agent wrote its first words.
     RerunKind("discussion", "none", refusal=NO_STORED_INPUTS),
     RerunKind("document", "none", refusal=NO_STORED_INPUTS),
@@ -171,26 +201,15 @@ async def classify(session: dict) -> tuple[RerunKind, _Run]:
 
 
 async def _refusal(kind: RerunKind, run: _Run) -> str | None:
-    """The record's reason this run may not go again, row by row."""
-    from central_command.runtime.roster import conversational_agent_ids, taskable_agent_ids
-
+    """The record's reason this run may not go again, from the kind's own row."""
     if kind.refusal:
         return kind.refusal
     session_id = run.session["id"]
     if await repo.session_has_landing_proposal(session_id):
         return "decided work is still landing; wait for it"
-    if kind.name == "orchestrator" and await repo.session_has_live_children(session_id):
+    if kind.waits_for_children and await repo.session_has_live_children(session_id):
         return "children still running; wait for them or cancel them"
-    if kind.name == "task" and run.task.get("agent_id") not in await taskable_agent_ids():
-        return f"{run.task.get('agent_id')} is not on the active roster"
-    if kind.name == "conversation":
-        if run.opening is None:
-            return NO_STORED_INPUTS
-        if run.session["agent_id"] not in await conversational_agent_ids():
-            return f"{run.session['agent_id']} is not on the active roster"
-    if kind.name == "email" and run.item.get("state") in ("CLAIMED", "UNPROCESSED"):
-        return "its email is already queued or being processed"
-    return None
+    return await kind.check(run) if kind.check else None
 
 
 async def eligibility(session: dict) -> dict:
@@ -228,7 +247,7 @@ async def rerun_session(session_id: str, actor: str = "operator") -> dict:
 
     claimed = await repo.claim_rerun(
         session_id, new_session_id, task_id, work_item_id=item_id,
-        refuse_live_children=kind.name == "orchestrator",
+        refuse_live_children=kind.waits_for_children,
     )
     if claimed is None:
         raise RerunRefused(

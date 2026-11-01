@@ -270,7 +270,7 @@ async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
     prompt = await _with_pending_proposals_context(prompt, item)
     # A re-run comes back to the record, not an argument: the queue may have held
     # the item across a restart, and the old session still names the id it owes.
-    rerun = await repo.pending_rerun_for_work_item(item["id"])
+    rerun = await repo.claim_owed_rerun(work_item_id=item["id"])
     return await ingest_and_propose(
         _with_operator_note(prompt, note),
         model=model or await resolve_model(agent_id="inbox-triage"),

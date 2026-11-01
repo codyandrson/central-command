@@ -1249,6 +1249,20 @@ async def _stop_for_restart(conn, session_id: str, reason: str, *, after: str | 
     )
 
 
+def _rerun_chain(first: str, *, origin: bool = False) -> str:
+    """The recursive CTE `chain` that walks a re-run chain FORWARD (old session ->
+    `rerun_by` -> ...): `first` is the select that seeds it, one `id` column (or
+    `asked, asked` with `origin=True`, so each seed keeps the session it started
+    from and `chain` carries `origin, id`). The ONE copy of the walk the readers
+    share: a re-run session keeps its task and its item through the chain because
+    the row names only the newest run. `claim_owed_rerun`'s tail walk keeps its own
+    SQL: it also needs the previous id and a depth cap."""
+    cols, step = ("origin, id", "c.origin, n.rerun_by") if origin else ("id", "n.rerun_by")
+    return (f"with recursive chain({cols}) as ({first} union "
+            f"select {step} from session n join chain c on n.id = c.id "
+            "where n.rerun_by is not null)")
+
+
 async def list_sessions(
     limit: int = 50,
     status: str | None = None,
@@ -1326,11 +1340,7 @@ async def list_sessions(
                      (select t.title from task t where t.session_id = s.id
                        order by t.created_at desc limit 1),
                      case when s.rerun_by is not null then
-                       (with recursive chain(id) as (
-                          select s.rerun_by
-                          union
-                          select n.rerun_by from session n join chain c on n.id = c.id
-                           where n.rerun_by is not null)
+                       ({_rerun_chain("select s.rerun_by")}
                         select t.title from task t
                          where t.session_id in (select id from chain) limit 1)
                      end) as task_title,
@@ -1352,11 +1362,7 @@ async def list_sessions(
                      (select w.subject from work_item w where w.session_id = s.id
                        order by w.enrolled_at limit 1),
                      case when s.rerun_by is not null then
-                       (with recursive chain(id) as (
-                          select s.rerun_by
-                          union
-                          select n.rerun_by from session n join chain c on n.id = c.id
-                           where n.rerun_by is not null)
+                       ({_rerun_chain("select s.rerun_by")}
                         select w.subject from work_item w
                          where w.session_id in (select id from chain)
                          order by w.enrolled_at limit 1)
@@ -2631,12 +2637,7 @@ async def work_items_for_session(session_id: str) -> list[dict]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            """with recursive chain(id) as (
-                   select $1::text
-                   union
-                   select s.rerun_by from session s join chain c on s.id = c.id
-                    where s.rerun_by is not null
-               )
+            _rerun_chain("select $1::text") + """
                select id, message_id, subject, payload, received_at, state, kind
                from work_item where session_id in (select id from chain)
                order by enrolled_at""",
@@ -2725,12 +2726,8 @@ async def work_items_for_sessions(session_ids: list[str]) -> dict[str, dict]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            """with recursive chain(origin, id) as (
-                   select asked, asked from unnest($1::text[]) as asked
-                   union
-                   select c.origin, s.rerun_by from session s join chain c on s.id = c.id
-                    where s.rerun_by is not null
-               )
+            _rerun_chain("select asked, asked from unnest($1::text[]) as asked",
+                         origin=True) + """
                select w.id, w.message_id, w.thread_id, w.feed, w.source, w.kind, w.subject,
                       w.state, w.session_id, w.enrolled_at, w.payload, c.origin
                from work_item w join chain c on w.session_id = c.id""",
@@ -4176,7 +4173,7 @@ async def claim_rerun(
     This is the only way a terminal task returns. `park_task_retry` and
     `resolve_task` keep their guards, because a late failure on a DONE task must
     never resurrect it. `task.session_id` stays on the old session until the new
-    run links itself, which is what `pending_rerun` reads, so a queued re-run
+    run links itself, which is what `claim_owed_rerun` reads, so a queued re-run
     survives a restart under the id it was promised."""
     conn = await _conn()
     try:
@@ -4250,14 +4247,25 @@ class _RerunLost(Exception):
     """Rolls back `claim_rerun`'s link when its task has moved on."""
 
 
-async def pending_rerun(session_id: str | None) -> dict | None:
-    """What this start owes the rerun chain from the session its task or item names:
-    `{"rerun_of", "session_id"}`, or None when that session is in no chain.
+async def claim_owed_rerun(
+    session_id: str | None = None, *, work_item_id: str | None = None,
+) -> dict | None:
+    """What this start owes the rerun chain from the session its task or item names
+    (`work_item_id` names the item whose run is owed, and its current session is
+    read here): `{"rerun_of", "session_id"}`, or None when that session is in no chain.
 
     At the chain's tail is either an id no row has yet, which is the owed id the old
-    session promised, or a row that already ran: an attempt that died on a DOWN
+    session promised (a read), or a row that already ran: an attempt that died on a DOWN
     dependency or a restart, whose work is being started again. Then the chain grows by
-    one, or the old session would lose its task and its email at the next mark."""
+    one, which WRITES `rerun_by` on that tail: the old session would otherwise lose
+    its task and its email at the next mark."""
+    if work_item_id is not None:
+        conn = await _conn()
+        try:
+            session_id = await conn.fetchval(
+                "select session_id from work_item where id = $1", work_item_id)
+        finally:
+            await conn.close()
     if not session_id:
         return None
     conn = await _conn()
@@ -4303,17 +4311,6 @@ async def rerun_waiting_on(session_id: str) -> str | None:
         )
     finally:
         await conn.close()
-
-
-async def pending_rerun_for_work_item(item_id: str) -> dict | None:
-    """`pending_rerun`, from the work item whose run is owed."""
-    conn = await _conn()
-    try:
-        session_id = await conn.fetchval(
-            "select session_id from work_item where id = $1", item_id)
-    finally:
-        await conn.close()
-    return await pending_rerun(session_id)
 
 
 async def session_has_live_children(session_id: str) -> bool:
@@ -4487,15 +4484,8 @@ async def task_for_session(session_id: str) -> dict | None:
     conn = await _conn()
     try:
         row = await conn.fetchrow(
-            """
-            with recursive chain(id) as (
-                select $1::text
-                union
-                select s.rerun_by from session s join chain c on s.id = c.id
-                 where s.rerun_by is not null
-            )
-            select * from task where session_id in (select id from chain) limit 1
-            """,
+            _rerun_chain("select $1::text")
+            + " select * from task where session_id in (select id from chain) limit 1",
             session_id,
         )
         return _task_row(row) if row else None

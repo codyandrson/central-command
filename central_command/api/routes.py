@@ -607,7 +607,7 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
     )
     # A re-run comes back to the record, not an argument, so every starter,
     # the startup relaunch included, keeps the id the old session already names.
-    rerun = await repo.pending_rerun(task.get("session_id"))
+    rerun = await repo.claim_owed_rerun(task.get("session_id"))
     # IN_PROGRESS while the agent works. A re-run keeps its old session linked
     # until the new one exists, or a restart here would lose the chain.
     await repo.start_task(task_id, rerun["rerun_of"] if rerun else None)

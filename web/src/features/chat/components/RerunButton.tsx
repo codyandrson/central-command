@@ -8,11 +8,18 @@ interface RerunButtonProps {
   onRerun: (sessionId: string) => Promise<void>;
   /** Which charter this would change, when it would. */
   hint?: string | null;
+  /** The confirmation's body, where the default (a session's) is not the right
+   *  words, as for a task. The hint is prefixed to either. */
+  message?: string;
+  /** Held off by the caller's own busy state; the button's own run disables it too. */
+  disabled?: boolean;
 }
+
+const DEFAULT_MESSAGE = 'This session closes and its transcript is kept. Its open proposals and questions are withdrawn, and the same work runs again in a new session under the charter that is current now.';
 
 /** Re-run, asked first: the session closes and the work runs again in a new one.
  *  Rendered only where the server's `composer.rerun` says it is on offer. */
-export function RerunButton({ sessionId, onRerun, hint }: RerunButtonProps) {
+export function RerunButton({ sessionId, onRerun, hint, message, disabled }: RerunButtonProps) {
   const [confirming, setConfirming] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +39,7 @@ export function RerunButton({ sessionId, onRerun, hint }: RerunButtonProps) {
 
   return (
     <>
-      <Button variant="outline" size="xs" title={hint ?? undefined} onClick={() => setConfirming(true)} disabled={running}>
+      <Button variant="outline" size="xs" title={hint ?? undefined} onClick={() => setConfirming(true)} disabled={running || disabled}>
         {running ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
         Re-run
       </Button>
@@ -40,7 +47,7 @@ export function RerunButton({ sessionId, onRerun, hint }: RerunButtonProps) {
       <ConfirmDialog
         open={confirming}
         title="Re-run under the current charter?"
-        message={`${hint ? `${hint} ` : ''}This session closes and its transcript is kept. Its open proposals and questions are withdrawn, and the same work runs again in a new session under the charter that is current now.`}
+        message={`${hint ? `${hint} ` : ''}${message ?? DEFAULT_MESSAGE}`}
         confirmLabel="Re-run"
         cancelLabel="Keep it"
         onConfirm={() => { setConfirming(false); void run(); }}

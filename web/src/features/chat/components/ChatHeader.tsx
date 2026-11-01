@@ -45,7 +45,6 @@ function SourceEmailChip({ email }: { email: SourceEmail }) {
         type="button"
         onClick={() => setOpen(!open)}
         className="cockpit-badge flex items-center gap-1 whitespace-nowrap"
-        data-tone="muted"
         title="Source email"
         aria-expanded={open}
       >
@@ -162,7 +161,6 @@ export function ChatHeader({
           onClick={() => onOpenSession?.(link.sessionKey)}
           disabled={!onOpenSession}
           className="cockpit-badge shrink-0 whitespace-nowrap"
-          data-tone="muted"
           title="Open the linked session"
         >
           {link.label}
@@ -170,7 +168,7 @@ export function ChatHeader({
       ))}
 
       {charter && (
-        <span className="cockpit-badge shrink-0 whitespace-nowrap" data-tone={charter.newer ? 'warning' : 'muted'}>
+        <span className="cockpit-badge shrink-0 whitespace-nowrap" data-tone={charter.newer ? 'warning' : undefined}>
           {charter.label}
           {charter.newer && ` · ${charter.newer}`}
         </span>
@@ -180,7 +178,7 @@ export function ChatHeader({
         <RerunButton sessionId={rerunSessionId} onRerun={onRerun} hint={charter?.rerunHint} />
       )}
       {rerunRefusal && (
-        <button type="button" disabled className="cockpit-badge shrink-0 whitespace-nowrap" data-tone="muted"
+        <button type="button" disabled className="cockpit-badge shrink-0 whitespace-nowrap"
           title={`Cannot be re-run: ${rerunRefusal}`}>
           Re-run
         </button>

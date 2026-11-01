@@ -433,7 +433,7 @@ async def test_a_restart_before_the_new_row_exists_keeps_the_chain():
     task = await repo.get_task(task_id)
     assert task["status"] == "ASSIGNED"
     assert task["session_id"] == old
-    assert (await repo.pending_rerun(old)) == {"rerun_of": old, "session_id": new}
+    assert (await repo.claim_owed_rerun(old)) == {"rerun_of": old, "session_id": new}
 
 
 async def test_a_cancel_while_queued_voids_the_start():
@@ -518,9 +518,9 @@ async def test_a_claim_refused_by_a_landing_proposal_changes_nothing():
 
 
 async def test_an_ordinary_task_start_owes_no_rerun():
-    assert await repo.pending_rerun(None) is None
+    assert await repo.claim_owed_rerun(None) is None
     _, old = await _finished_task()
-    assert await repo.pending_rerun(old) is None
+    assert await repo.claim_owed_rerun(old) is None
 
 
 # ── the action and the offer agree, and the schema ──────────────────────────
@@ -796,7 +796,7 @@ async def test_row_email_requeue_is_rule_exempt_and_keeps_the_link():
     new = "sess_" + uuid.uuid4().hex[:12]
     assert await repo.claim_rerun(old, new, work_item_id=item_id)
     assert await _item_session(item_id) == (old, "UNPROCESSED")
-    assert (await repo.pending_rerun_for_work_item(item_id)) == {"rerun_of": old, "session_id": new}
+    assert (await repo.claim_owed_rerun(work_item_id=item_id)) == {"rerun_of": old, "session_id": new}
     conn = await repo._conn()
     try:
         payload = await conn.fetchval("select payload from work_item where id = $1", item_id)
@@ -972,7 +972,7 @@ async def test_a_task_rerun_started_again_keeps_the_chain():
 
 async def test_a_session_in_no_chain_starts_with_no_link():
     _, plain = await _finished_task()
-    assert await repo.pending_rerun(plain) is None
+    assert await repo.claim_owed_rerun(plain) is None
     assert (await repo.get_session(plain))["rerun_by"] is None
 
 
