@@ -5,6 +5,7 @@ import { MessageBubble } from './MessageBubble';
 import { InputBar, type InputBarHandle } from './InputBar';
 import { SearchBar } from './SearchBar';
 import { useMessageSearch } from './useMessageSearch';
+import { composerRerunLinks } from './rerunLink';
 import { ActivityLog, ChatHeader, ProcessingIndicator, ReadOnlySessionNotice, ScrollToBottomButton, StreamingMessage, ToolGroupBlock } from './components';
 import { isMessageCollapsible } from './types';
 import type { ChatMsg, ImageAttachment, OutgoingUploadPayload } from './types';
@@ -68,6 +69,10 @@ interface ChatPanelProps {
   onOpenTask?: (taskId: string) => void;
   /** Resume a session the operator stopped (composer.session.id). */
   onResume?: (sessionId: string) => Promise<void>;
+  /** Re-run a finished session under the current charter (composer.session.id). */
+  onRerun?: (sessionId: string) => Promise<void>;
+  /** Jump to another session, by its key. */
+  onOpenSession?: (sessionKey: string) => void;
   /** Stop a task's live run / cancel a parked task (composer.task.id). */
   onStopTask?: (taskId: string) => Promise<void>;
   onCancelTask?: (taskId: string) => Promise<void>;
@@ -98,6 +103,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   onOpenDecisions,
   onOpenTask,
   onResume,
+  onRerun,
+  onOpenSession,
   onStopTask,
   onCancelTask,
 }, ref) {
@@ -293,6 +300,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         onToggleMobileTopBar={onToggleMobileTopBar}
         isMobileTopBarHidden={isMobileTopBarHidden}
         sourceEmail={sourceEmail}
+        rerunLinks={composerRerunLinks(composer)}
+        onOpenSession={onOpenSession}
       />
 
       {/* Search Bar */}
@@ -443,6 +452,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
           onOpenDecisions={onOpenDecisions}
           onOpenTask={onOpenTask}
           onResume={onResume}
+          onRerun={onRerun}
+          onOpenSession={onOpenSession}
           onStopTask={onStopTask}
           onCancelTask={onCancelTask}
         />

@@ -136,7 +136,7 @@ export default function App({ onLogout }: AppProps) {
   const {
     messages, isGenerating, stream, processingStage,
     lastEventTimestamp, activityLog, currentToolDescription,
-    handleSend, handleAbort, handleResume, handleReset,
+    handleSend, handleAbort, handleResume, handleRerun, handleReset,
     handleStopTask, handleCancelTask,
     loadMore, hasMore, composer, sourceEmail,
     showResetConfirm, confirmReset, cancelReset,
@@ -873,6 +873,8 @@ export default function App({ onLogout }: AppProps) {
             // button that silently does nothing is worse than no button.
             onOpenTask={kanbanVisible ? openTaskInBoard : undefined}
             onResume={handleResume}
+            onRerun={handleRerun}
+            onOpenSession={handleSessionChange}
             onStopTask={handleStopTask}
             onCancelTask={handleCancelTask}
           />

@@ -131,6 +131,42 @@ describe('cc-kanban adapter — operator stop/resume', () => {
     expect(res.status).toBe(409);
   });
 
+  it('GET /tasks/:id/rerun asks the server about the task\'s session', async () => {
+    const app = await buildApp();
+    routeFetch({
+      '/api/tasks': () => respond({ tasks: [RUNNING_TASK] }),
+      '/api/sessions/sess_1/rerun': () => respond({ eligible: true, reason: null }),
+    });
+
+    const res = await app.request('/api/kanban/tasks/t1/rerun');
+    expect(await res.json()).toEqual({ eligible: true, reason: null });
+  });
+
+  it('GET /tasks/:id/rerun offers nothing for a task that has not run', async () => {
+    const app = await buildApp();
+    routeFetch({ '/api/tasks': () => respond({ tasks: [{ ...RUNNING_TASK, session_id: null }] }) });
+
+    const res = await app.request('/api/kanban/tasks/t1/rerun');
+    expect((await res.json()).eligible).toBe(false);
+  });
+
+  it('POST /tasks/:id/rerun proxies the re-run of the task\'s session', async () => {
+    const app = await buildApp();
+    let posted = false;
+    routeFetch({
+      '/api/tasks': () => respond({ tasks: [RUNNING_TASK] }),
+      '/api/sessions/sess_1/rerun POST': () => {
+        posted = true;
+        return respond({ sessionId: 'sess_2', agentId: 'jira-expert' });
+      },
+    });
+
+    const res = await app.request('/api/kanban/tasks/t1/rerun', { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(posted).toBe(true);
+    expect((await res.json()).sessionId).toBe('sess_2');
+  });
+
   it('CANCELLED tasks are not filtered out of the list (fold into Done is a frontend concern)', async () => {
     const app = await buildApp();
     const cancelled = { ...RUNNING_TASK, status: 'CANCELLED', session_status: null, stopped: false };

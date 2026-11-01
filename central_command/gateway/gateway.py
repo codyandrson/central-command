@@ -187,6 +187,10 @@ async def _resolve_task_after(session_id: str, status: str, outcome: str | None)
     task = await repo.task_for_session(session_id)
     if task is None or task["status"] in repo.TASK_TERMINAL:
         return
+    # The task reads through the rerun chain, and the run that resolves it is the
+    # newest one: a late landing of a replaced session has no say over it.
+    if (await repo.get_session(session_id) or {}).get("rerun_by"):
+        return
     await repo.resolve_task(task["id"], status, outcome)
     await events.emit(
         "task.completed" if status == "DONE" else "task.failed",
@@ -1329,6 +1333,19 @@ async def release_folds_for(proposal_id: str, reason: str) -> int:
             actor="system",
         )
     return released
+
+
+async def withdraw_session_work(session_id: str) -> tuple[list[str], list[str]]:
+    """The moot half of closing a session early: every OPEN operator item and
+    every undecided proposal is WITHDRAWN, and each proposal's folds are released.
+    Decided proposals are not touched. Returns (item ids, proposal ids).
+
+    One copy, shared by cancel-for-good and the re-run."""
+    items = await repo.withdraw_operator_items_for_session(session_id)
+    proposals = await repo.withdraw_proposals_for_session(session_id)
+    for proposal_id in proposals:
+        await release_folds_for(proposal_id, "covering proposal withdrawn")
+    return items, proposals
 
 
 _detached_resumes: set = set()

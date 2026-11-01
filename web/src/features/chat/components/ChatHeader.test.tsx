@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ChatHeader } from './ChatHeader';
+import { rerunLinks } from '../rerunLink';
 import { useModelEffort } from './useModelEffort';
 
 // Mock the useModelEffort hook
@@ -52,6 +53,26 @@ describe('ChatHeader', () => {
     expect(screen.getByText('Comms')).toBeInTheDocument();
     expect(screen.getByText('GPT-4')).toBeInTheDocument();
     expect(screen.getByText('Balanced')).toBeInTheDocument();
+  });
+
+  it('shows the re-run links from the server\'s row and jumps on a click', async () => {
+    vi.mocked(useModelEffort).mockReturnValue(defaultMockHook);
+    const onOpenSession = vi.fn();
+
+    render(
+      <ChatHeader
+        onReset={mockOnReset}
+        onAbort={mockOnAbort}
+        isGenerating={false}
+        rerunLinks={rerunLinks({ agentId: 'jira-expert', rerunOf: 'sess_old', rerunBy: 'sess_new' })}
+        onOpenSession={onOpenSession}
+      />
+    );
+
+    screen.getByRole('button', { name: 're-run as sess_new' }).click();
+    expect(onOpenSession).toHaveBeenCalledWith('agent:jira-expert:sess_new');
+    screen.getByRole('button', { name: 're-runs sess_old' }).click();
+    expect(onOpenSession).toHaveBeenCalledWith('agent:jira-expert:sess_old');
   });
 
   it('shows the file browser expand button when provided', () => {

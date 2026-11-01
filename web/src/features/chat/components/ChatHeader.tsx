@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Cpu, Gauge, Mail, PanelLeftClose, PanelLeftOpen
 import { InlineSelect } from '@/components/ui/InlineSelect';
 import { useModelEffort } from './useModelEffort';
 import type { SourceEmail } from '@/types';
+import type { RerunLink } from '../rerunLink';
 
 interface ChatHeaderProps {
   onReset?: () => void;
@@ -18,6 +19,10 @@ interface ChatHeaderProps {
   isMobileTopBarHidden?: boolean;
   /** Central Command: the email this lane was spawned to handle, when there is one. */
   sourceEmail?: SourceEmail | null;
+  /** Central Command: this session's re-run links, from the server's row. */
+  rerunLinks?: RerunLink[];
+  /** Jump to another session, by its key. */
+  onOpenSession?: (sessionKey: string) => void;
 }
 
 /** The email that spawned this lane — a chip in the header, collapsed by
@@ -72,6 +77,8 @@ export function ChatHeader({
   onToggleMobileTopBar,
   isMobileTopBarHidden = false,
   sourceEmail,
+  rerunLinks = [],
+  onOpenSession,
 }: ChatHeaderProps) {
   const {
     modelOptions,
@@ -134,6 +141,20 @@ export function ChatHeader({
       </div>
 
       {sourceEmail && <SourceEmailChip email={sourceEmail} />}
+
+      {rerunLinks.map(link => (
+        <button
+          key={link.sessionKey}
+          type="button"
+          onClick={() => onOpenSession?.(link.sessionKey)}
+          disabled={!onOpenSession}
+          className="cockpit-badge shrink-0 whitespace-nowrap"
+          data-tone="muted"
+          title="Open the linked session"
+        >
+          {link.label}
+        </button>
+      ))}
 
       {/* Model + Effort selectors on the right */}
       <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1 whitespace-nowrap sm:gap-2">

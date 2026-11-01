@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ReadOnlySessionNotice } from './ReadOnlySessionNotice';
@@ -26,6 +26,72 @@ const pausedRun: ChatComposerState = {
 };
 
 describe('ReadOnlySessionNotice', () => {
+  describe('re-run', () => {
+    const finishedRun: ChatComposerState = {
+      enabled: false,
+      code: 'not_a_conversation',
+      message: 'This is a task run, finished.',
+      session: { id: 'sess_old', mode: 'oneshot', status: 'DONE', agentId: 'jira-expert' },
+      kind: 'task run',
+      task: { id: 'task_1', title: 'Epic restructure', status: 'DONE' },
+      rerun: { eligible: true, reason: null },
+    };
+
+    it('asks first, then re-runs this session', async () => {
+      const onRerun = vi.fn(async () => {});
+      const user = userEvent.setup({ delay: null });
+      render(<ReadOnlySessionNotice composer={finishedRun} onRerun={onRerun} />);
+
+      await user.click(screen.getByRole('button', { name: 'Re-run' }));
+      expect(onRerun).not.toHaveBeenCalled();
+      const dialog = screen.getByRole('alertdialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Re-run' }));
+      expect(onRerun).toHaveBeenCalledWith('sess_old');
+    });
+
+    it('offers nothing the server did not offer, whatever the status says', () => {
+      render(
+        <ReadOnlySessionNotice
+          composer={{ ...finishedRun, rerun: { eligible: false, reason: 'not yet' } }}
+          onRerun={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole('button', { name: 'Re-run' })).not.toBeInTheDocument();
+    });
+
+    it('shows the server\'s refusal when the re-run fails', async () => {
+      const onRerun = vi.fn(async () => { throw new Error('decided work is still landing'); });
+      const user = userEvent.setup({ delay: null });
+      render(<ReadOnlySessionNotice composer={finishedRun} onRerun={onRerun} />);
+
+      await user.click(screen.getByRole('button', { name: 'Re-run' }));
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Re-run' }));
+      expect(await screen.findByText('decided work is still landing')).toBeInTheDocument();
+    });
+
+    it('a re-run lane says where the work went and jumps there', async () => {
+      const onOpenSession = vi.fn();
+      const user = userEvent.setup({ delay: null });
+      render(
+        <ReadOnlySessionNotice
+          composer={{
+            ...finishedRun,
+            code: 'rerun',
+            message: 'This is a task run, closed and re-run as sess_new.',
+            session: { ...finishedRun.session!, closedReason: 'rerun', rerunBy: 'sess_new' },
+            rerun: { eligible: false, reason: 'already re-run as sess_new' },
+          }}
+          onOpenSession={onOpenSession}
+        />,
+      );
+
+      expect(screen.getByText(/closed and re-run as sess_new/)).toBeInTheDocument();
+      expect(screen.getByText(/Runs are the record of work/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /re-run as sess_new/ }));
+      expect(onOpenSession).toHaveBeenCalledWith('agent:jira-expert:sess_new');
+    });
+  });
+
   it('says what the run is, shows the question, and offers no input', () => {
     render(<ReadOnlySessionNotice composer={pausedRun} />);
 

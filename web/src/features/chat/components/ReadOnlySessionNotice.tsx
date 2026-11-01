@@ -11,10 +11,11 @@
  * state, never re-deriving the rule client-side.
  */
 import { useState, useCallback } from 'react';
-import { Lock, ArrowRight, Loader2, Play, Square, XCircle } from 'lucide-react';
+import { Lock, ArrowRight, Loader2, Play, RotateCcw, Square, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import type { ChatComposerState } from '@/types';
+import { composerRerunLinks } from '../rerunLink';
 
 const TERMINAL_TASK = new Set(['DONE', 'FAILED', 'CANCELLED']);
 const TERMINAL_SESSION = new Set(['DONE', 'FAILED']);
@@ -27,6 +28,10 @@ interface ReadOnlySessionNoticeProps {
   onOpenTask?: (taskId: string) => void;
   /** Resume a session the operator stopped (composer.session.id). */
   onResume?: (sessionId: string) => Promise<void>;
+  /** Re-run this session under the current charter (composer.session.id). */
+  onRerun?: (sessionId: string) => Promise<void>;
+  /** Jump to another session, by its key. */
+  onOpenSession?: (sessionKey: string) => void;
   /** Stop the task's LIVE run at its next node boundary (composer.task.id). */
   onStopTask?: (taskId: string) => Promise<void>;
   /** Cancel the task for good — closes its parked session (composer.task.id). */
@@ -34,7 +39,7 @@ interface ReadOnlySessionNoticeProps {
 }
 
 export function ReadOnlySessionNotice({
-  composer, onOpenDecisions, onOpenTask, onResume, onStopTask, onCancelTask,
+  composer, onOpenDecisions, onOpenTask, onResume, onRerun, onOpenSession, onStopTask, onCancelTask,
 }: ReadOnlySessionNoticeProps) {
   const { session, task, blocking } = composer;
   const [resuming, setResuming] = useState(false);
@@ -42,6 +47,12 @@ export function ReadOnlySessionNotice({
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmRerun, setConfirmRerun] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
+  const [rerunError, setRerunError] = useState<string | null>(null);
+  // Whether it is on offer is the server's call, never derived from the status.
+  const canRerun = !!session && !!composer.rerun?.eligible && !!onRerun;
+  const links = composerRerunLinks(composer);
   const isStopped = composer.code === 'stopped';
   // Central Command (2026-09-13): the two levers a task run has, offered where
   // the operator is looking at it. A LIVE run can be stopped (cooperative,
@@ -80,7 +91,21 @@ export function ReadOnlySessionNotice({
       setResuming(false);
     }
   }, [onResume, session, resuming]);
-  const isRun = composer.code === 'not_a_conversation';
+
+  const handleRerun = useCallback(async () => {
+    if (!session || !onRerun || rerunning) return;
+    setRerunning(true);
+    setRerunError(null);
+    try {
+      await onRerun(session.id);
+    } catch (err) {
+      setRerunError(err instanceof Error ? err.message : 'Re-run failed');
+    } finally {
+      setRerunning(false);
+    }
+  }, [onRerun, session, rerunning]);
+
+  const isRun = composer.code === 'not_a_conversation' || composer.code === 'rerun';
   // The server's sentence for anything that is not a run (a pending proposal, a
   // failed conversation, a key with no lane) — it knows the rule; we don't.
   const headline = isRun
@@ -193,6 +218,45 @@ export function ReadOnlySessionNotice({
               </Button>
             </div>
           )}
+
+          {(canRerun || (links.length > 0 && onOpenSession)) && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {canRerun && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setConfirmRerun(true)}
+                  disabled={rerunning}
+                >
+                  {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                  Re-run
+                </Button>
+              )}
+              {onOpenSession && links.map(link => (
+                <Button
+                  key={link.sessionKey}
+                  variant="outline"
+                  size="xs"
+                  onClick={() => onOpenSession(link.sessionKey)}
+                >
+                  {link.label}
+                  <ArrowRight size={12} />
+                </Button>
+              ))}
+            </div>
+          )}
+          {rerunError && (
+            <p className="mt-1.5 text-[0.733rem] text-destructive">{rerunError}</p>
+          )}
+          <ConfirmDialog
+            open={confirmRerun}
+            title="Re-run under the current charter?"
+            message="This session closes and its transcript is kept. Its open proposals and questions are withdrawn, and the same work runs again in a new session under the charter that is current now."
+            confirmLabel="Re-run"
+            cancelLabel="Keep it"
+            onConfirm={() => { setConfirmRerun(false); void handleRerun(); }}
+            onCancel={() => setConfirmRerun(false)}
+          />
 
           {isStopped && onResume && (
             <div className="mt-2.5">

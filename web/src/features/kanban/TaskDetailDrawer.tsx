@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
   X, Play, CheckCircle2, XCircle, Trash2, Loader2,
   Clock, User, Tag, AlertTriangle, MessageSquare, StopCircle,
-  Compass, CornerDownRight,
+  Compass, CornerDownRight, RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +65,45 @@ interface TaskDetailDrawerProps {
 export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove, onReject, onAbort, onResume, onOpenSession }: TaskDetailDrawerProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /* Whether Re-run is on offer is the server's call, asked again whenever the
+     task moves. A failed read offers nothing. */
+  const [rerunEligible, setRerunEligible] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
+  const taskId = task?.id;
+  const taskStatus = task?.status;
+  useEffect(() => {
+    setRerunEligible(false);
+    if (!taskId) return;
+    let stale = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/kanban/tasks/${encodeURIComponent(taskId)}/rerun`);
+        const body = res.ok ? await res.json() : null;
+        if (!stale) setRerunEligible(!!body?.eligible);
+      } catch {
+        if (!stale) setRerunEligible(false);
+      }
+    })();
+    return () => { stale = true; };
+  }, [taskId, taskStatus]);
+
+  const handleRerun = useCallback(async () => {
+    if (!taskId || rerunning) return;
+    setRerunning(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/kanban/tasks/${encodeURIComponent(taskId)}/rerun`, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      setRerunEligible(false);
+      onOpenSession?.(`agent:${body.agentId}:${body.sessionId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Re-run failed');
+    } finally {
+      setRerunning(false);
+    }
+  }, [taskId, rerunning, onOpenSession]);
 
   /* Reset transient state when task changes */
   useEffect(() => {
@@ -500,6 +539,13 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
                     </Button>
                   )}
                 </>
+              )}
+
+              {rerunEligible && (
+                <Button size="xs" variant="outline" onClick={handleRerun} disabled={rerunning || workflowLoading !== null}>
+                  {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                  Re-run
+                </Button>
               )}
 
               <div className="flex-1" />

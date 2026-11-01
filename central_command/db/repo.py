@@ -216,23 +216,25 @@ async def mark_session_closed(session_id: str, reason: str) -> None:
 
 
 async def create_running_session(
-    session_id: str, agent_id: str, parent_session_id: str | None = None
+    session_id: str, agent_id: str, parent_session_id: str | None = None,
+    rerun_of: str | None = None,
 ) -> None:
     """A session row exists from the moment the run STARTS (live transcript):
     the Workspace can watch the transcript grow instead of only reading it
     after the pause. `save_paused_session`'s upsert flips it to AWAITING_HUMAN
     at deferral; `mark_session_done`/`mark_session_failed` close it out.
     `parent_session_id` (D7 phase 2) links a child run to the orchestrator
-    session that assigned it — the cockpit's spawnedBy tree."""
+    session that assigned it — the cockpit's spawnedBy tree. `rerun_of` names
+    the session this run re-runs (`gateway/rerun.py`)."""
     conn = await _conn()
     try:
         await conn.execute(
             """
-            insert into session (id, agent_id, status, parent_session_id)
-            values ($1, $2, 'RUNNING', $3)
+            insert into session (id, agent_id, status, parent_session_id, rerun_of)
+            values ($1, $2, 'RUNNING', $3, $4)
             on conflict (id) do nothing
             """,
-            session_id, agent_id, parent_session_id,
+            session_id, agent_id, parent_session_id, rerun_of,
         )
     finally:
         await conn.close()
@@ -1262,7 +1264,7 @@ async def list_sessions(
             f"""
             select s.id, s.agent_id, s.status, s.mode, s.created_at, s.updated_at,
                    s.parent_session_id, s.closed_reason, s.model_override,
-                   s.thinking_override, s.exec_failure,
+                   s.thinking_override, s.exec_failure, s.rerun_of, s.rerun_by,
                    (select par.agent_id from session par
                      where par.id = s.parent_session_id) as parent_agent_id,
                    (select p.intent from proposal p where p.session_id = s.id
@@ -1271,8 +1273,20 @@ async def list_sessions(
                      as proposal_count,
                    -- What the run is FOR, so the cockpit sidebar can name a lane
                    -- instead of printing its uuid. A task links its run here.
-                   (select t.title from task t where t.session_id = s.id
-                     order by t.created_at desc limit 1) as task_title,
+                   -- A re-run session's task has moved on to the newest run, so
+                   -- its title is found along the chain, and only for such a row.
+                   coalesce(
+                     (select t.title from task t where t.session_id = s.id
+                       order by t.created_at desc limit 1),
+                     case when s.rerun_by is not null then
+                       (with recursive chain(id) as (
+                          select s.rerun_by
+                          union
+                          select n.rerun_by from session n join chain c on n.id = c.id
+                           where n.rerun_by is not null)
+                        select t.title from task t
+                         where t.session_id in (select id from chain) limit 1)
+                     end) as task_title,
                    -- The predicted ceiling arrived (2026-08-12): the detoast
                    -- that used to live here hit ~1.5s at 668 sessions, and the
                    -- cockpit's reconnect burst ran several concurrently — 22-26s
@@ -1827,7 +1841,7 @@ async def get_session(session_id: str) -> dict | None:
         row = await conn.fetchrow(
             "select id, agent_id, status, mode, parent_session_id, closed_reason, "
             "model_override, thinking_override, stop_requested, exec_failure, "
-            "created_at, updated_at "
+            "rerun_of, rerun_by, created_at, updated_at "
             "from session where id = $1",
             session_id,
         )
@@ -4060,6 +4074,90 @@ async def resolve_task(
         await conn.close()
 
 
+async def claim_rerun(session_id: str, new_session_id: str, task_id: str) -> bool:
+    """THE re-run claim, in one transaction: the old session names the new one,
+    and its task returns to ASSIGNED with no `retry_state`, so the sweep never
+    sees it and the re-run's own start is the only one. The write is the lock:
+    two presses claim once, and a run or a decided proposal that arrived since
+    the eligibility check refuses it, with nothing changed.
+
+    This is the only way a terminal task returns. `park_task_retry` and
+    `resolve_task` keep their guards, because a late failure on a DONE task must
+    never resurrect it. `task.session_id` stays on the old session until the new
+    run links itself, which is what `pending_rerun` reads, so a queued re-run
+    survives a restart under the id it was promised."""
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            claimed = await conn.fetchval(
+                """
+                update session set rerun_by = $2, updated_at = now()
+                 where id = $1 and rerun_by is null and status != 'RUNNING'
+                   and not exists (
+                       select 1 from proposal p where p.session_id = $1
+                          and p.status in ('APPROVED', 'EXECUTING', 'RETRY_PENDING'))
+                returning id
+                """,
+                session_id, new_session_id,
+            )
+            if claimed is None:
+                return False
+            moved = await conn.fetchval(
+                """
+                update task
+                   set status = 'ASSIGNED', retry_state = null, outcome = null,
+                       terminal_at = null
+                 where id = $1 and session_id = $2
+                returning id
+                """,
+                task_id, session_id,
+            )
+            if moved is None:
+                raise _RerunLost
+        return True
+    except _RerunLost:
+        return False
+    finally:
+        await conn.close()
+
+
+class _RerunLost(Exception):
+    """Rolls back `claim_rerun`'s link when its task has moved on."""
+
+
+async def pending_rerun(session_id: str | None) -> dict | None:
+    """The re-run a task's linked session is still owed: `{"rerun_of", "session_id"}`
+    while the session it names has no row yet, else None."""
+    if not session_id:
+        return None
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            select s.id as rerun_of, s.rerun_by as session_id from session s
+             where s.id = $1 and s.rerun_by is not null
+               and not exists (select 1 from session n where n.id = s.rerun_by)
+            """,
+            session_id,
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def session_has_landing_proposal(session_id: str) -> bool:
+    """Whether a decided proposal of this session is still on its way to the world."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            "select exists (select 1 from proposal where session_id = $1 "
+            "and status in ('APPROVED', 'EXECUTING', 'RETRY_PENDING'))",
+            session_id,
+        )
+    finally:
+        await conn.close()
+
+
 # --- retryable task runs (outage equivalence, slice 4) ------------------------
 #
 # A task whose run died on a TRANSIENT dependency failure is never terminal
@@ -4199,9 +4297,23 @@ def _task_row(row) -> dict:
 
 
 async def task_for_session(session_id: str) -> dict | None:
+    """The task this session ran. A re-run session keeps its task through the
+    rerun chain (old -> `rerun_by` -> `task.session_id`): the row names only the
+    newest run, and there is no second link column to drift from it."""
     conn = await _conn()
     try:
-        row = await conn.fetchrow("select * from task where session_id = $1", session_id)
+        row = await conn.fetchrow(
+            """
+            with recursive chain(id) as (
+                select $1::text
+                union
+                select s.rerun_by from session s join chain c on s.id = c.id
+                 where s.rerun_by is not null
+            )
+            select * from task where session_id in (select id from chain) limit 1
+            """,
+            session_id,
+        )
         return _task_row(row) if row else None
     finally:
         await conn.close()
@@ -4294,7 +4406,9 @@ async def park_sessionless_in_progress_tasks() -> list[dict]:
     session-orphan sweep matches on session_id (null never matches), the
     ASSIGNED sweep excludes IN_PROGRESS, and `_land_run_failure` only fires on
     an in-process exception a hard kill never raises. Found live 2026-08-25 —
-    a restart in that window left a task stuck on the board forever.
+    a restart in that window left a task stuck on the board forever. A re-run
+    that dies in the same window still names its old session, whose `rerun_by`
+    gives it away, and keeps that link so its restart keeps the promised id.
 
     Re-run, never FAILED (epic-outage-doctrine story 5): the same `restart`
     retry park a killed task run gets (`park_orphaned_sessions` (b)), due now."""
@@ -4306,7 +4420,10 @@ async def park_sessionless_in_progress_tasks() -> list[dict]:
             update task
                set status = 'ASSIGNED', retry_state = $1::jsonb,
                    outcome = 'queued for re-run (process restarted before its session existed)'
-             where status = 'IN_PROGRESS' and session_id is null
+             where status = 'IN_PROGRESS'
+               and (session_id is null or exists (
+                     select 1 from session s
+                      where s.id = task.session_id and s.rerun_by is not null))
             returning *
             """,
             json.dumps(state),

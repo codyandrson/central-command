@@ -363,6 +363,36 @@ app.post('/api/kanban/tasks/:id/resume', rateLimitGeneral, async (c) => {
   }
 });
 
+// Re-run is a SESSION operation too, so it takes the same lookup. The read says
+// whether the drawer offers it; the server decides, never the card's status.
+app.get('/api/kanban/tasks/:id/rerun', rateLimitGeneral, async (c) => {
+  const id = c.req.param('id');
+  try {
+    const task = (await fetchGvTasks()).find(t => t.id === id);
+    if (!task) return c.json({ error: 'task not found' }, 404);
+    if (!task.session_id) return c.json({ eligible: false, reason: 'it has not run yet' });
+    const res = await cc(`/sessions/${encodeURIComponent(task.session_id)}/rerun`);
+    if (!res.ok) return c.json({ eligible: false, reason: await gvError(res) });
+    return c.json(await res.json());
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
+});
+
+app.post('/api/kanban/tasks/:id/rerun', rateLimitGeneral, async (c) => {
+  const id = c.req.param('id');
+  try {
+    const task = (await fetchGvTasks()).find(t => t.id === id);
+    if (!task) return c.json({ error: 'task not found' }, 404);
+    if (!task.session_id) return c.json({ error: `task ${id} has no session to re-run` }, 409);
+    const res = await cc(`/sessions/${encodeURIComponent(task.session_id)}/rerun`, { method: 'POST' });
+    if (!res.ok) return c.json({ error: await gvError(res) }, 409);
+    return c.json(await res.json());
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
+});
+
 app.post('/api/kanban/tasks/:id/approve', rateLimitGeneral, (c) =>
   c.json({ error: 'Approvals happen in the Decisions Inbox — the board never bypasses the gate.' }, 409));
 

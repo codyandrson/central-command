@@ -596,7 +596,12 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         payload={"agent_id": agent_id, "title": task["title"]},
         actor=actor,
     )
-    await repo.start_task(task_id, None)  # IN_PROGRESS while the agent works
+    # A re-run comes back to the record, not an argument, so every starter,
+    # the startup relaunch included, keeps the id the old session already names.
+    rerun = await repo.pending_rerun(task.get("session_id"))
+    # IN_PROGRESS while the agent works. A re-run keeps its old session linked
+    # until the new one exists, or a restart here would lose the chain.
+    await repo.start_task(task_id, rerun["rerun_of"] if rerun else None)
     if agent_id == "orchestrator":
         # D7 phase 2: a task assigned to the orchestrator is a PROJECT — it
         # runs the orchestration loop (plan review → assign → receive →
@@ -626,6 +631,8 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         # The task run has a landing tail to re-enter through (`run._land`),
         # so a DOWN read parks it in place instead of failing it (FR-40).
         park_reads=True,
+        **({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]}
+           if rerun else {}),
     )
     if result.get("parked"):
         # A read, or the model itself, was DOWN mid-run: the session is
@@ -1049,6 +1056,31 @@ async def stop_task(task_id: str) -> dict:
             "stop_requested": True}
 
 
+@router.get("/sessions/{session_id}/rerun")
+async def session_rerun_state(session_id: str) -> dict:
+    """Whether this session may be re-run, and if not, why."""
+    from central_command.gateway import rerun
+
+    session = await repo.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, f"no session {session_id}")
+    return await rerun.eligibility(session)
+
+
+@router.post("/sessions/{session_id}/rerun")
+async def rerun_session(session_id: str) -> dict:
+    """Re-run a finished session under the current charter. Returns at once with
+    the new session's id: the run starts detached."""
+    from central_command.gateway import rerun
+
+    try:
+        return await rerun.rerun_session(session_id)
+    except rerun.RerunUnknown as e:
+        raise HTTPException(404, str(e)) from e
+    except rerun.RerunRefused as e:
+        raise HTTPException(409, str(e)) from e
+
+
 @router.post("/sessions/{session_id}/resume")
 async def resume_session(session_id: str) -> dict:
     """Resume a session the operator stopped — it re-enters on its persisted
@@ -1103,7 +1135,7 @@ async def cancel_task(task_id: str) -> dict:
     park path a second terminal outcome — and stop-then-cancel is two clicks on
     a lever the operator is already holding.
     """
-    from central_command.gateway.gateway import release_folds_for
+    from central_command.gateway.gateway import withdraw_session_work
     from central_command.runtime.converse import close_session
 
     task = await repo.get_task(task_id)
@@ -1125,10 +1157,7 @@ async def cancel_task(task_id: str) -> dict:
     withdrawn_items: list[str] = []
     withdrawn_proposals: list[str] = []
     if session_id:
-        withdrawn_items = await repo.withdraw_operator_items_for_session(session_id)
-        withdrawn_proposals = await repo.withdraw_proposals_for_session(session_id)
-        for proposal_id in withdrawn_proposals:
-            await release_folds_for(proposal_id, "covering proposal withdrawn")
+        withdrawn_items, withdrawn_proposals = await withdraw_session_work(session_id)
         if await repo.session_status(session_id) not in ("DONE", "FAILED"):
             await close_session(
                 session_id, agent_id=task["agent_id"] or "operator",

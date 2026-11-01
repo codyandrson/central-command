@@ -840,6 +840,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // The session rests OPEN with an exec failure attached — the badge
         // needs the row's execFailure field, not just the status flip.
         || evt === 'cc.session.exec_failed'
+        // A re-run writes the link on the old row and starts a new one.
+        || evt === 'cc.session.rerun'
       ) {
         refreshSessions();
       }

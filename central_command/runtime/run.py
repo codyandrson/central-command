@@ -86,7 +86,7 @@ async def _run_live(
     message_history=None, deferred_tool_results=None, parent_session_id=None,
     task_id: str | None = None, continuable: bool = False, window: int = 1,
     after: str = "task", continue_state: dict | None = None,
-    park_attempts: int = 0,
+    park_attempts: int = 0, rerun_of: str | None = None,
 ):
     """Run an agent while persisting the growing transcript — the live half of
     M15. The session row exists from run START (status RUNNING); after every
@@ -147,7 +147,7 @@ async def _run_live(
     from central_command.runtime import context
 
     await repo.create_running_session(
-        session_id, agent_id, parent_session_id=parent_session_id
+        session_id, agent_id, parent_session_id=parent_session_id, rerun_of=rerun_of,
     )
     if task_id:
         await repo.start_task(task_id, session_id)
@@ -945,6 +945,7 @@ async def run_coach(
 async def run_task(
     agent_id: str, instruction: str, model=None, parent_session_id: str | None = None,
     task_id: str | None = None, park_reads: bool = False,
+    session_id: str | None = None, rerun_of: str | None = None,
 ) -> dict:
     """An operator-tasked run (Phase 4): the operator's instruction is trusted
     input, and any proposal the agent makes goes through the SAME gate as
@@ -959,6 +960,9 @@ async def run_task(
     `park_reads` lets a DOWN read pause this run in place (`TriageDeps.
     park_reads`); the task-run entry (`routes._run_one_assigned_task`) sets it,
     because it lands a parked outcome and the resume re-enters through `_land`.
+
+    `session_id` and `rerun_of` come together from a re-run, whose old session
+    already names the new id. It is still a fresh run: the charter loads here.
     """
     if agent_id not in await taskable_agent_ids():
         raise ValueError(f"agent {agent_id!r} is not directly taskable")
@@ -1037,7 +1041,7 @@ async def run_task(
             "OPERATOR TASK (from your team lead — trusted, needs no corroboration): "
             f"{instruction}"
         )
-    session_id = "sess_" + uuid.uuid4().hex[:12]
+    session_id = session_id or "sess_" + uuid.uuid4().hex[:12]
     try:
         result = await _run_live(
             agent, prompt, model=model,
@@ -1045,7 +1049,7 @@ async def run_task(
                             park_reads=park_reads),
             agent_id=agent_id, session_id=session_id,
             parent_session_id=parent_session_id, task_id=task_id,
-            continuable=True,
+            continuable=True, rerun_of=rerun_of,
         )
     except RunWindowExhausted as e:
         return window_outcome(e)

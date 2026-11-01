@@ -92,6 +92,16 @@ async def test_a_session_row_carries_label_tokens_and_a_running_state(monkeypatc
     )
 
 
+async def test_a_session_row_carries_the_rerun_link_both_ways(monkeypatch):
+    _wire(monkeypatch, [{**_row("sess_old"), "rerun_by": "sess_new"},
+                        {**_row("sess_new"), "rerun_of": "sess_old"}])
+
+    old, new = (await nerve_gateway._sessions_list({}))["sessions"][:2]
+
+    assert (old["rerunBy"], old["rerunOf"]) == ("sess_new", None)
+    assert (new["rerunOf"], new["rerunBy"]) == ("sess_old", None)
+
+
 async def test_a_waiting_session_is_not_running_and_still_gets_a_label(monkeypatch):
     _wire(monkeypatch, [_row("sess_wait", status="AWAITING_HUMAN", task_title=None)])
 

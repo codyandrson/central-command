@@ -428,7 +428,7 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
 
     Codes: not_a_conversation | pending_proposal | turn_in_progress |
     awaiting_agents | failed | discussion_concluded | awaiting_continue |
-    stopped | update_hold.
+    stopped | update_hold | rerun.
 
     Adding a code means adding it to `nerve_gateway._COMPOSER_DISABLING` too if
     the operator should not type — that tuple is an ALLOWLIST, not a check, so a
@@ -443,6 +443,14 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
             "the restart (or cancel the update from the update dialog)",
         )
     session_id = session.get("id")
+    if session.get("closed_reason") == "rerun":
+        # Ahead of the mode check, so whatever kind the lane was, the refusal
+        # names the re-run and where the work went.
+        return (
+            "rerun",
+            f"session {session_id} was re-run as {session.get('rerun_by')} — "
+            "its record stays readable here, and the work carries on there",
+        )
     if session.get("mode") != "conversation":
         return (
             "not_a_conversation",
@@ -662,7 +670,9 @@ async def close_session(
     # and a bulk cancel of 38 parked autodiscovery tasks fanned out into 38
     # reflection turns against a backend already buried — the run was cut
     # short by the operator, there is no completed work to reflect on.
-    if settings.test_model or not settings.reflection_enabled or reason in ("dismissed", "cancelled"):
+    # "rerun" is the same case: the operator replaced this run, and a new one is
+    # starting on the same inputs.
+    if settings.test_model or not settings.reflection_enabled or reason in ("dismissed", "cancelled", "rerun"):
         return
     from central_command.runtime.reflection import reflect_on_close
 

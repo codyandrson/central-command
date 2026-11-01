@@ -9,6 +9,7 @@ import { getStatusBadgeText, getStatusBadgeClasses } from './statusUtils';
 import { TERMINAL_SESSION_STATUSES } from './sessionKeys';
 import { ChevronRight, ChevronDown, EllipsisVertical, PenLine, Timer, CornerDownRight } from 'lucide-react';
 import { SessionInfoPanel } from './SessionInfoPanel';
+import { rerunLinks } from '@/features/chat/rerunLink';
 
 // Pre-defined color configs to avoid object creation during render
 const COLORS_CRITICAL = {
@@ -414,6 +415,20 @@ export const SessionNode = memo(function SessionNode({
           {badgeText}
         </span>
       </button>
+
+      {/* The re-run pair, from the server's row. A sibling of the main <button>,
+          like the close control below, because nested buttons are invalid HTML. */}
+      {!compact && rerunLinks(session).map(link => (
+        <button
+          key={link.sessionKey}
+          type="button"
+          onClick={() => onSelect(link.sessionKey)}
+          title="Open the linked session"
+          className="shrink-0 mr-1 max-w-[10rem] truncate bg-transparent border-0 text-muted-foreground hover:text-foreground cursor-pointer text-[0.6rem] underline decoration-dotted underline-offset-2"
+        >
+          {link.label}
+        </button>
+      ))}
 
       {/* Persistent close ✕ at the row's far right, where the status badge
           sits — sibling of the main <button> (nested buttons are invalid

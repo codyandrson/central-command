@@ -93,6 +93,12 @@ def _codes_from_send_target() -> set[str]:
 ALL_CODES = sorted(_codes_from_why_not_sendable() | _codes_from_send_target())
 
 
+def test_the_rerun_lock_disables_the_composer():
+    """The old lane of a re-run takes no message: the work carries on elsewhere."""
+    assert "rerun" in _codes_from_why_not_sendable()
+    assert "rerun" in _COMPOSER_DISABLING
+
+
 def test_the_walks_see_the_codes_they_are_guarding():
     """Both readers must actually find codes: a parser that returned an empty
     set would make every assertion below vacuously true forever."""

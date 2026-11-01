@@ -879,6 +879,11 @@ alter table operator_item add column if not exists nudged_at  timestamptz;
 -- 'concluded' (the agent ended its own clarification lane). Drives the lock
 -- rule in why_not_sendable, the terminal divider text, and the event payload.
 alter table session add column if not exists closed_reason text;
+-- The re-run pair (epic-cockpit-rerun R1, R2). `rerun_by` on the old row names the
+-- new one and is written first, as the claim; `rerun_of` is set when the new row
+-- is created. Plain text: the new row does not exist yet when the old one names it.
+alter table session add column if not exists rerun_of text;
+alter table session add column if not exists rerun_by text;
 
 -- A FINAL execution failure (approved proposal, write blew up, no redraft)
 -- rests its session OPEN and flagged instead of closing it — operator's rule

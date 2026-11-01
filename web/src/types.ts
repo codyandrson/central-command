@@ -58,6 +58,9 @@ export interface Session {
   /** Central Command: non-null means this run's approved proposal FAILED execution
    *  and the session is resting OPEN (AWAITING_OPERATOR) until closed by hand. */
   execFailure?: string | null;
+  /** Central Command: the session this one re-runs, and the one that re-ran it. */
+  rerunOf?: string | null;
+  rerunBy?: string | null;
 }
 
 /** Central Command: a dispatcher-claimed email — the work_item a session was
@@ -310,7 +313,7 @@ export interface SessionsListResponse {
 export interface ChatComposerState {
   enabled: boolean;
   /** not_a_conversation | pending_proposal | failed | no_session | no_lane |
-   *  discussion_concluded | awaiting_continue | stopped */
+   *  discussion_concluded | awaiting_continue | stopped | rerun */
   code?: string;
   /** What the operator reads — for a run, a sentence about THIS run. */
   message?: string;
@@ -323,7 +326,12 @@ export interface ChatComposerState {
     agentId?: string | null;
     /** 'concluded' (agent ended its own clarification lane) | 'operator'. */
     closedReason?: string | null;
+    /** The session this one re-runs, and the session that re-ran this one. */
+    rerunOf?: string | null;
+    rerunBy?: string | null;
   } | null;
+  /** Whether Re-run is on offer for this session, and if not, why. */
+  rerun?: { eligible: boolean; reason?: string | null };
   /** What kind of run this transcript is: "task run" | "triage run" | "agent run". */
   kind?: string;
   /** The task this run belongs to, when it has one. */

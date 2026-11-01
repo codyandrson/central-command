@@ -136,6 +136,9 @@ def _session_row_dict(
         # the reason, or null. Drives the sidebar's red chip and makes the row
         # hand-closable. Pinned by a BACKEND wire-shape test, like every field.
         "execFailure": row.get("exec_failure"),
+        # The re-run pair (ids; the row they come from is the server's own).
+        "rerunOf": row.get("rerun_of"),
+        "rerunBy": row.get("rerun_by"),
         "model": _row_model(row, agent_models),
         # Per-session thinking override — the effort dropdown's saved value
         # (`useModelEffort` reads `thinkingLevel` off the session row); absent/
@@ -576,7 +579,10 @@ _COMPOSER_DISABLING = ("not_a_conversation", "pending_proposal", "failed",
                        # A lane parked on a DOWN dependency (story 6): the reply
                        # is owed and the sweep lands it; a new message would
                        # start a turn over the one still waiting to finish.
-                       "awaiting_resume")
+                       "awaiting_resume",
+                       # Replaced by a re-run: the work carries on in the new
+                       # session, and nothing is listening in this one.
+                       "rerun")
 
 
 async def _run_session_context(session: dict) -> dict:
@@ -604,7 +610,9 @@ async def _run_session_context(session: dict) -> dict:
             break
 
     status = session.get("status")
-    if blocking:
+    if session.get("closed_reason") == "rerun":
+        waiting = f"closed and re-run as {session.get('rerun_by')}"
+    elif blocking:
         waiting = f"paused — {session['agent_id']} is waiting on your answer"
     elif status == "AWAITING_HUMAN":
         # Outage equivalence slice 3 keeps the drafter paused (session status
@@ -661,6 +669,8 @@ async def _run_session_context(session: dict) -> dict:
 async def _composer_state(key: str) -> dict:
     """Whether the operator may type into this session, and if not, why —
     with the record they should be looking at instead."""
+    from central_command.gateway import rerun
+
     target = await _send_target(key)
     session = target.get("session")
     session_block = {
@@ -674,10 +684,16 @@ async def _composer_state(key: str) -> dict:
         # end-of-transcript divider needs the distinction, and taking it from
         # here keeps it on the server's account rather than re-deriving it.
         "closedReason": session.get("closed_reason"),
+        "rerunOf": session.get("rerun_of"),
+        "rerunBy": session.get("rerun_by"),
     } if session else None
+    # Whether Re-run is offered, on the server's account: the cockpit draws the
+    # button from this and never from the status it can see.
+    rerun_state = (await rerun.eligibility(session) if session
+                   else {"eligible": False, "reason": "no session to re-run"})
 
     if "blocked" not in target:
-        return {"enabled": True, "session": session_block}
+        return {"enabled": True, "session": session_block, "rerun": rerun_state}
 
     _, code, message = target["blocked"]
     state: dict = {
@@ -690,8 +706,9 @@ async def _composer_state(key: str) -> dict:
         "message": message,
         "refusal": message,
         "session": session_block,
+        "rerun": rerun_state,
     }
-    if code == "not_a_conversation" and session is not None:
+    if code in ("not_a_conversation", "rerun") and session is not None:
         state.update(await _run_session_context(session))
     return state
 
@@ -878,6 +895,25 @@ async def _chat_abort(params: dict, notify) -> dict:
                     "data": {"phase": "end"}},
     })
     return {"sessionId": session_id, "stopRequested": True}
+
+
+async def _session_rerun(params: dict) -> dict:
+    """Re-run a session from the cockpit. Returns the new key at once and never
+    awaits the run: the session panel follows it on `cc.session.rerun` and the
+    new row's own frames."""
+    from central_command.gateway import rerun
+
+    key = str(params.get("sessionKey") or "")
+    session_id = str(params.get("sessionId") or "") or await _resolve_history_session(key)
+    if not session_id:
+        raise HTTPException(404, f"no Central Command session behind {key!r}")
+    try:
+        out = await rerun.rerun_session(session_id)
+    except rerun.RerunUnknown as e:
+        raise HTTPException(404, str(e)) from e
+    except rerun.RerunRefused as e:
+        raise HTTPException(409, str(e)) from e
+    return {**out, "sessionKey": f"agent:{out['agentId']}:{out['sessionId']}"}
 
 
 async def _session_resume(params: dict, notify) -> dict:
@@ -1215,6 +1251,8 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         return await _chat_abort(params, notify)
     if method == "sessions.resume":
         return await _session_resume(params, notify)
+    if method == "sessions.rerun":
+        return await _session_rerun(params)
     if method == "agents.create":
         # Nerve's stock spawn flow registers an ad-hoc agent before chatting.
         # Central Command agents are governed roster members — accept the name only

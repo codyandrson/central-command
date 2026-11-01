@@ -87,6 +87,9 @@ interface ChatContextValue {
   handleAbort: () => Promise<void>;
   /** Resume a session the operator stopped (composer.session.id). */
   handleResume: (sessionId: string) => Promise<void>;
+  /** Re-run a finished session under the current charter, then reload the
+   *  history so the link and the lock come from the server's account. */
+  handleRerun: (sessionId: string) => Promise<void>;
   /** Stop a task's live run / cancel a parked task, then reload the history
    *  so the notice reflects the server's account (2026-09-13). */
   handleStopTask: (taskId: string) => Promise<void>;
@@ -707,6 +710,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     await loadHistory(currentSessionRef.current);
   }, [rpc, loadHistory, currentSessionRef]);
 
+  const handleRerun = useCallback(async (sessionId: string) => {
+    await rpc('sessions.rerun', { sessionId });
+    await loadHistory(currentSessionRef.current);
+  }, [rpc, loadHistory, currentSessionRef]);
+
   // Same shape as handleResume: the kanban server routes already proxy
   // /tasks/{id}/stop and /tasks/{id}/cancel; after either, the history reload
   // is what clears or changes the notice — never a client-side status flip.
@@ -792,6 +800,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleSend,
     handleAbort,
     handleResume,
+    handleRerun,
     handleStopTask,
     handleCancelTask,
     handleReset,
@@ -814,6 +823,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleSend,
     handleAbort,
     handleResume,
+    handleRerun,
     handleStopTask,
     handleCancelTask,
     handleReset,

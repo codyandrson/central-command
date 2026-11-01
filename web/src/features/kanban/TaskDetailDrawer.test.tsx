@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
 import type { KanbanTask } from './types';
 
@@ -43,6 +43,48 @@ function renderDrawer(task: KanbanTask | null) {
 }
 
 describe('TaskDetailDrawer', () => {
+  describe('re-run', () => {
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    function stubRerun(eligible: boolean) {
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(
+        JSON.stringify(init?.method === 'POST'
+          ? { sessionId: 'sess_new', agentId: 'jira-expert' }
+          : { eligible, reason: eligible ? null : 'not yet' }),
+        { status: 200 },
+      ));
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    it('offers Re-run where the server says so, and opens the new session', async () => {
+      const fetchMock = stubRerun(true);
+      const onOpenSession = vi.fn();
+      const user = userEvent.setup({ delay: null });
+      render(
+        <TaskDetailDrawer
+          task={makeTask({ status: 'done' })}
+          onClose={vi.fn()}
+          onDelete={vi.fn(async () => {})}
+          onOpenSession={onOpenSession}
+        />,
+      );
+
+      await user.click(await screen.findByRole('button', { name: 'Re-run' }));
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/kanban/tasks/task-1/rerun', { method: 'POST' });
+      expect(onOpenSession).toHaveBeenCalledWith('agent:jira-expert:sess_new');
+    });
+
+    it('offers nothing when the server refuses', async () => {
+      const fetchMock = stubRerun(false);
+      render(<TaskDetailDrawer task={makeTask({ status: 'done' })} onClose={vi.fn()} onDelete={vi.fn(async () => {})} />);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      await act(async () => {});
+      expect(screen.queryByRole('button', { name: 'Re-run' })).not.toBeInTheDocument();
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
