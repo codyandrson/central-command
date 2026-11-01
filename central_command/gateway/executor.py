@@ -187,9 +187,12 @@ async def _calendar_delete_event(args: dict, approver: str, proposer: str | None
     calendar_id = args.get("calendar_id", "primary")
     ev = await calendar_facade.get_event(args["event_id"], calendar_id=calendar_id)
     deleted = await calendar_facade.delete_event(args["event_id"], calendar_id=calendar_id)
+    # A title and an organiser are written by whoever sent the invitation, and this
+    # line goes back to the drafter: quoted and capped, so they stay visibly data.
+    title, organiser = (repr(str(ev.get(k) or "")[:200]) for k in ("summary", "organizer"))
     return (f"calendar event {deleted} deleted — reason: {reason} — restore record: "
-            f"title {ev.get('summary')!r}, {ev.get('start')} → {ev.get('end')}, "
-            f"{ev.get('attendee_count')} attendee(s), organiser {ev.get('organizer') or 'unknown'}")
+            f"title {title}, {ev.get('start')} → {ev.get('end')}, "
+            f"{ev.get('attendee_count')} attendee(s), organiser {organiser}")
 
 
 async def _mail_report_spam(args: dict, approver: str, proposer: str | None) -> str:
