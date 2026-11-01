@@ -485,7 +485,11 @@ async def _send_target(key: str) -> dict:
     if lane.startswith("sess_"):
         session = await repo.get_session(lane)
         if session is None:
-            return {"blocked": (404, "no_session", f"no session {lane}")}
+            waiting_on = await repo.rerun_waiting_on(lane)
+            return {"blocked": (404, "no_session", (
+                f"this re-run of {waiting_on} has not started yet: it is queued, and "
+                "starts when its agent's current work lands"
+                if waiting_on else f"no session {lane}"))}
         blocked = why_not_sendable(await _with_parked_on(session))
         if blocked:
             return {"blocked": (409, *blocked), "session": session}
@@ -698,7 +702,7 @@ async def _composer_state(key: str) -> dict:
     # Whether Re-run is offered, on the server's account: the cockpit draws the
     # button from this and never from the status it can see.
     rerun_state = (await rerun.eligibility(session) if session
-                   else {"eligible": False, "reason": "no session to re-run"})
+                   else {"eligible": False, "reason": None})
 
     if "blocked" not in target:
         return {"enabled": True, "session": session_block, "rerun": rerun_state}

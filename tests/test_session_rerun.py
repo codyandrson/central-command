@@ -974,3 +974,30 @@ async def test_a_session_in_no_chain_starts_with_no_link():
     _, plain = await _finished_task()
     assert await repo.pending_rerun(plain) is None
     assert (await repo.get_session(plain))["rerun_by"] is None
+
+
+# ── a queued re-run says so (found by rehearsal R9) ─────────────────────────
+
+
+async def test_a_queued_reruns_lane_says_it_is_queued_not_that_nothing_is_there():
+    _, old = await _finished_task()
+    lock = routes._agent_task_lock(AGENT)
+    await lock.acquire()
+    try:
+        new = (await _rpc_rerun(old))["sessionId"]
+        composer = (await nerve_gateway._dispatch(
+            "chat.history", {"sessionKey": f"agent:{AGENT}:{new}"}, _noop))["composer"]
+    finally:
+        lock.release()
+    assert composer["code"] == "no_session"
+    assert old in composer["message"] and "queued" in composer["message"]
+    assert composer["rerun"] == {"eligible": False, "reason": None}, (
+        "a lane with no row yet has nothing to refuse"
+    )
+    await _settled(new)
+
+
+async def test_a_key_nothing_names_still_says_there_is_no_session():
+    composer = (await nerve_gateway._dispatch(
+        "chat.history", {"sessionKey": f"agent:{AGENT}:sess_nothing_here"}, _noop))["composer"]
+    assert composer["message"] == "no session sess_nothing_here"

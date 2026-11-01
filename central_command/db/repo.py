@@ -4292,6 +4292,19 @@ async def pending_rerun(session_id: str | None) -> dict | None:
         await conn.close()
 
 
+async def rerun_waiting_on(session_id: str) -> str | None:
+    """The session that names this id as its re-run, while this id has no row yet."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            "select s.id from session s where s.rerun_by = $1 "
+            "and not exists (select 1 from session n where n.id = $1)",
+            session_id,
+        )
+    finally:
+        await conn.close()
+
+
 async def pending_rerun_for_work_item(item_id: str) -> dict | None:
     """`pending_rerun`, from the work item whose run is owed."""
     conn = await _conn()
