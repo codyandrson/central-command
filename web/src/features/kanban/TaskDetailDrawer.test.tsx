@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
@@ -71,6 +71,8 @@ describe('TaskDetailDrawer', () => {
       );
 
       await user.click(await screen.findByRole('button', { name: 'Re-run' }));
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/kanban/tasks/task-1/rerun', { method: 'POST' });
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Re-run' }));
 
       expect(fetchMock).toHaveBeenCalledWith('/api/kanban/tasks/task-1/rerun', { method: 'POST' });
       expect(onOpenSession).toHaveBeenCalledWith('agent:jira-expert:sess_new');
@@ -82,6 +84,14 @@ describe('TaskDetailDrawer', () => {
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
       await act(async () => {});
       expect(screen.queryByRole('button', { name: 'Re-run' })).not.toBeInTheDocument();
+    });
+
+    it('says why not on a finished task that has a session', async () => {
+      stubRerun(false);
+      render(<TaskDetailDrawer task={makeTask({ status: 'done', sessionId: 'sess_1' })} onClose={vi.fn()} onDelete={vi.fn(async () => {})} />);
+      const refused = await screen.findByRole('button', { name: 'Re-run' });
+      expect(refused).toBeDisabled();
+      expect(refused).toHaveAttribute('title', 'Cannot be re-run: not yet');
     });
   });
 

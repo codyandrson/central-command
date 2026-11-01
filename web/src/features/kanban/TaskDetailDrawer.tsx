@@ -5,6 +5,7 @@ import {
   Compass, CornerDownRight, RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Input } from '@/components/ui/input';
 import { COLUMN_LABELS, type KanbanTask } from './types';
 import { SourceEmailBlock } from './SourceEmailBlock';
@@ -71,6 +72,7 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
   const [rerunEligible, setRerunEligible] = useState(false);
   const [rerunRefusal, setRerunRefusal] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
+  const [confirmRerun, setConfirmRerun] = useState(false);
   const taskId = task?.id;
   const taskStatus = task?.status;
   useEffect(() => {
@@ -546,18 +548,28 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
               )}
 
               {rerunEligible && (
-                <Button size="xs" variant="outline" onClick={handleRerun} disabled={rerunning || workflowLoading !== null}>
+                <Button size="xs" variant="outline" onClick={() => setConfirmRerun(true)} disabled={rerunning || workflowLoading !== null}>
                   {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
                   Re-run
                 </Button>
               )}
 
-              {!rerunEligible && rerunRefusal && task.run && (
+              {!rerunEligible && rerunRefusal && task.sessionId && (
                 <Button size="xs" variant="outline" disabled title={`Cannot be re-run: ${rerunRefusal}`}>
                   <RotateCcw size={12} />
                   Re-run
                 </Button>
               )}
+
+              <ConfirmDialog
+                open={confirmRerun}
+                title="Re-run under the current charter?"
+                message="This task's session closes and its transcript is kept. Its open proposals and questions are withdrawn, and the task runs again in a new session under the charter that is current now."
+                confirmLabel="Re-run"
+                cancelLabel="Keep it"
+                onConfirm={() => { setConfirmRerun(false); void handleRerun(); }}
+                onCancel={() => setConfirmRerun(false)}
+              />
 
               <div className="flex-1" />
 

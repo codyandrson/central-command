@@ -304,8 +304,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         rerunLinks={composerRerunLinks(composer)}
         onOpenSession={onOpenSession}
         rerunSessionId={composer?.enabled !== false && composer?.rerun?.eligible ? composer.session?.id : null}
-        rerunRefusal={composer?.enabled !== false && composer?.session?.status !== 'RUNNING' && !composer?.rerun?.eligible
-          ? composer?.rerun?.reason : null}
+        rerunRefusal={composer?.session && composer.enabled !== false && composer.session.status !== 'RUNNING' && !composer.rerun?.eligible
+          ? composer.rerun?.reason : null}
         onRerun={onRerun}
         charter={charterStamp(composer?.session)}
       />
