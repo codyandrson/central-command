@@ -4,6 +4,105 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-01 — v2.78.0: re-run a session under the current charter, see what cannot be undone, and inventory the Confluence macros
+
+epic-cockpit-rerun-reversibility-macros. Twenty-two commits since v2.77.0
+(`v2.77.0..a56e8e2f`): eight stories in fourteen commits, seven from the release rehearsal
+(six fixes and one test) and the refactor sweep, plus the floor's test pin moved at the
+release gate. No value, host or account appears here.
+
+**This is the first reviewed update, and it sets `min_upgrade_from=2.77.0`.** It is the
+first release after the v2.77.0 steps to change a bundled doc, so an install older than
+v2.77.0 is refused at resolve: its updater would merge these docs with no review and no
+refresh. This closes epic-skills-refresh-on-update story 12.
+
+### Re-run under the current charter
+
+- **A cockpit action closes a finished run and runs its inputs again.** A task run, an
+  orchestrator project run, a conversation or an email triage run closes with its record
+  kept (`closed_reason='rerun'`), the same inputs run in a fresh session under the charter
+  current now, and both sessions show the link, on the sidebar row and in the header, with
+  a jump. Sessions are never destroyed and a re-run is never a resume (DL-200).
+- **The record decides which sessions qualify.** `gateway/rerun.py` holds one table, a row
+  per kind saying where its inputs live and which fresh-run entry starts it. A conversation
+  re-runs from the operator's opening message only, with its model settings copied. An email
+  keeps its link to the old session until the new run's terminal mark. Coach, heartbeat,
+  steward, consult, document, wiki-repair and discussion sessions refuse with "no stored
+  inputs"; a kind the table does not list refuses. A RUNNING session, an existing re-run,
+  an update hold and a decided proposal still landing refuse for every kind, and a project
+  with a child not terminal refuses too. A refusal changes nothing and shows its reason.
+- **One transaction.** The close, the withdrawal of undecided proposals and open items, and
+  the return of the task or work item are one claim, so no approval or parked resume can land
+  between them. `session.rerun` goes on the log before the start it authorises.
+- **Every session records its charter.** `session.rerun_of`, `session.rerun_by` and
+  `session.charter_version` are new columns. The stamp is taken at creation (a lane opened
+  empty, at its first turn); 0 is the built-in charter. The header says "charter v3", says "a
+  newer charter (v5) exists" when stale, and reloads on a charter edit. Re-run names the two
+  versions. Sessions from before this release read "charter unknown": nothing derives it.
+- **A start the task moved past is void, for every task.** A task start that waited on its
+  agent's lane now stands down if the task moved meanwhile, so a cancelled queued task stays
+  cancelled. It used to run anyway and return to IN_PROGRESS.
+- **A re-run attempt that died keeps the chain.** A retry after a DOWN dependency or a process
+  restart links to the attempt before it, so the old session keeps its task, its email and its
+  subject. A re-run queued behind a busy agent says it is queued, and fills in when it starts.
+
+### A finished run stays on screen
+
+An older bug the rehearsal found: a finished run opened from Tasks or Activity disappeared at
+the next refresh, because the cockpit fell back to the default agent when the current session
+was not in the sidebar's list. It now stays. A finished re-run pair is also on the list, under
+the closed-sessions toggle.
+
+### The inbox mark and the graduation bar
+
+- **The inbox shows each action's server-held reversibility mark** and whether the capability
+  needs an acknowledgement, joined from the registry when a proposal is opened; an irreversible
+  action has its own badge. The agent-written field stays in the record and is shown and read
+  by nothing.
+- **An irreversible class never graduates to the auditor** (DL-199). The registry refuses
+  `default_gate="auditor"` on an irreversible row at load, and an auditor approval of an
+  irreversible capability decides nothing: the proposal stays with the operator, and
+  `proposal.graduation_barred` carries the reason. `GET /audit` lists `barred_classes`.
+
+### The macro inventory
+
+- **`scripts/confluence_macro_inventory.py`** inventories the Confluence instance's macros from
+  an operator-built sampler page and CQL usage, and writes a dated, version-stamped inventory
+  in the profile field's shape to the skill overlay, never inside the checkout. Verbatim macro
+  blocks come only from the sampler page; other pages contribute a count and a reduced pointer.
+- **`docs/CONFLUENCE_MACROS.md`** is the operator runbook: the three moments, the sampler page,
+  the command and its exit codes, the re-import. `scripts/atlassian_probe.py` prints the
+  Confluence version to compare with the inventory's stamp.
+
+### The documents
+
+`docs/ARCHITECTURE.md`, `docs/DESIGN.md`, `docs/PRD.md`, `AGENTS.md` and the decision log say
+what is built. Six bundled docs change, deliberately: `skills/confluence/SKILL.md`, its
+references `cql.md`, `instance-profiles.md`, `macro-discovery.md` and `storage-format.md`, and
+`skills/central-command-conventions/references/proposal-and-gate.md`. Internally, the re-run
+chain's reads share one SQL helper.
+
+### Operator notes
+
+- **What the Update dialog should show:** a review of the six bundled docs, none needing a
+  verdict, with Apply enabled. The library was re-imported on 2026-10-31, so the base is the
+  current text. A doc listed as needing a verdict means the library changed since then: decide
+  it in the dialog. The update's log shows the `skills` phase for the first time, and each
+  changed doc's history gains a version added by the updater.
+- **The upgrade floor:** `min_upgrade_from=2.77.0`. Apply v2.77.0 first.
+- **After the Apply, read:**
+  1. `verify.sh` and the schema phase: `session` has `rerun_of`, `rerun_by`, `charter_version`.
+  2. Existing sessions read "charter unknown"; a new one reads "charter vN".
+  3. Open any finished run from Tasks or Activity and leave it for a minute: it stays on screen.
+  4. Re-run one finished task from the notice: both versions named in the confirmation, the old
+     lane locked with the link, the pair under the closed-sessions toggle, the new session's
+     chip current.
+  5. A proposal on an irreversible capability, if one is parked: the red badge. No need to
+     create one on purpose.
+  6. `GET /audit` lists `barred_classes`.
+  7. Build the sampler page, then run the inventory. Until the page exists it exits 1 with "no
+     sampler page", which is the expected result.
+
 ## 2026-10-31 — v2.77.0: the bridge — bundled skill docs follow the release, and the operator decides the ones they changed
 
 epic-skills-refresh-on-update. Fourteen commits since v2.76.0 (`v2.76.0..3266cdbd`, ten
