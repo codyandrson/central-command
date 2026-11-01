@@ -109,11 +109,13 @@ def skill_table_macros(path: pathlib.Path = SKILL_TABLE) -> list[str]:
 
 
 def _plain(value, limit: int) -> str:
-    """Page-derived text reduced to one short plain line: control characters,
-    backticks and runs of whitespace gone, so it cannot open a fence, a
-    heading or a second line of the document."""
-    text = re.sub(r"[`\x00-\x1f\x7f]+", " ", str(value or ""))
-    return re.sub(r"\s+", " ", text).strip()[:limit]
+    """Page-derived text reduced to a short line of `[A-Za-z0-9 ._-]`: every
+    other character (markup, quotes, newlines, non-ASCII, invisible format and
+    tag characters) becomes a space and runs of spaces collapse. A title in a
+    document agents read is the shortest path for a page's author to talk to
+    them, so little survives; non-ASCII titles lose their letters."""
+    text = re.sub(r"[^A-Za-z0-9 ._-]+", " ", str(value or ""))
+    return re.sub(r" +", " ", text).strip()[:limit]
 
 
 def cql_quote(value: str) -> str:
@@ -199,10 +201,11 @@ async def gather(client, *, sampler_title: str, extra: list[str], table: list[st
             hits = await client.search(f"macro = {cql_quote(name)}", USAGE_LIMIT)
             count, truncated = hits.get("count", 0), bool(hits.get("truncated"))
             first = (hits.get("results") or [None])[0]
-            if first and first.get("id"):
-                first_hit = {"id": _plain(first.get("id"), 20),
-                             "space_key": _plain(first.get("space_key"), 40),
-                             "title": _plain(first.get("title"), 120)}
+            if first and ID_RE.match(str(first.get("id") or "")):
+                space = str(first.get("space_key") or "")
+                first_hit = {"id": str(first["id"]),
+                             "space_key": space if SPACE_RE.match(space) else "",
+                             "title": _plain(first.get("title"), 80)}
         except confluence.ConfluenceError as e:
             if _auth_failed(e):
                 raise Refused(str(e), 2) from e
@@ -258,7 +261,7 @@ def render(data: dict, *, harvested: str, flavor: str) -> str:
         hit = m["first_hit"]
         if hit:
             out += [f"- first page found: id {hit['id']}, space {hit['space_key'] or 'unknown'}, "
-                    f"title: {hit['title'] or 'untitled'}"]
+                    f'title (quoted data): "{hit["title"] or "untitled"}"']
         if m["example"] is not None:
             ex = m["example"]
             # A fence longer than any backtick run in the block (the sampler is

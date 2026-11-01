@@ -250,7 +250,7 @@ async def test_the_inventory_carries_the_stamp_the_sampler_blocks_and_usage(tmp_
     grid = text.split("## acme-grid")[1].split("\n## ")[0]
     assert "- pages using it: 2" in grid and "- on the sampler page: yes" in grid
     assert "schema version: 3" in grid, "the sampler's own block gives the schema version"
-    assert "- first page found: id 901, space OPS, title: Quarterly numbers" in grid
+    assert '- first page found: id 901, space OPS, title (quoted data): "Quarterly numbers"' in grid
     assert 'ac:schema-version="4"' not in text, "a usage hit's block is never copied"
     assert "from the sampler page" in grid and 'ac:name="acme-grid"' in grid
     status = text.split("## status")[1].split("\n## ")[0]
@@ -279,17 +279,53 @@ async def test_no_usage_hit_body_is_read_or_reaches_the_output(tmp_path):
     assert read_pages == {"900"}, "only the sampler page's body is ever fetched"
 
 
-async def test_a_hit_title_cannot_become_markdown(tmp_path):
+async def test_a_hit_title_is_reduced_to_a_short_quoted_allowlisted_string(tmp_path):
     mod = _script()
-    title = "Notes\n## injected heading\n```\n- fake: line " + "z" * 300
+    tag_chars = "".join(chr(0xE0000 + ord(c)) for c in "obey")    # invisible Unicode tag characters
+    title = ("Notes\n## injected heading\n```\n- fake: line" + "\u200b\u202e" + tag_chars
+             + " \"quoted\" <b>x</b> " + "z" * 300)
     client = FakeClient(usage={"acme-grid": ["901"]}, bodies={"901": ""}, titles={"901": title})
     out = tmp_path / "p.md"
     await mod.main(["--out", str(out)], client)
     text = out.read_text()
     assert "\n## injected heading" not in text
     line = next(l for l in text.splitlines() if l.startswith("- first page found: id 901"))
-    assert "`" not in line and len(line) < 260
-    assert "Notes ## injected heading" in line, "flattened to one inert line, not dropped"
+    quoted = line.split('title (quoted data): "', 1)[1]
+    assert quoted.endswith('"')
+    body = quoted[:-1]
+    assert len(body) <= 80
+    assert set(body) <= set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-")
+    assert body.startswith("Notes injected heading - fake line")
+    assert not any(ord(c) >= 0xE0000 or c in "\u200b\u202e" for c in text), "no invisible characters"
+
+
+@pytest.mark.parametrize("bad_id,bad_space", [("901; DROP", "OPS"), ("90 1", "OPS"), ("", "OPS")])
+async def test_a_hit_with_a_malformed_id_is_not_recorded_and_a_bad_space_key_is_dropped(
+    tmp_path, bad_id, bad_space,
+):
+    mod = _script()
+
+    class Odd(FakeClient):
+        async def search(self, cql, limit=None):
+            if cql.startswith("macro ="):
+                return {"results": [{"id": bad_id, "title": "T", "space_key": bad_space}], "count": 1,
+                        "truncated": False}
+            return await super().search(cql, limit)
+
+    out = tmp_path / "p.md"
+    await mod.main(["--out", str(out)], Odd())
+    assert "\n- first page found:" not in out.read_text()
+
+    class BadSpace(FakeClient):
+        async def search(self, cql, limit=None):
+            if cql.startswith("macro ="):
+                return {"results": [{"id": "901", "title": "T", "space_key": 'OPS" <x>'}], "count": 1,
+                        "truncated": False}
+            return await super().search(cql, limit)
+
+    await mod.main(["--out", str(out)], BadSpace())
+    text = out.read_text()
+    assert "id 901, space unknown" in text and "<x>" not in text
 
 
 async def test_a_macro_nobody_uses_still_shows_the_sampler_block(tmp_path):
