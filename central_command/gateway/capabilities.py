@@ -997,16 +997,20 @@ REGISTRY: list[Capability] = [
         reversibility="irreversible",
         acknowledge=True,
         risk=(
-            "external, IRREVERSIBLE in effect — cancelling notifies every "
-            "attendee and a recreated event does not restore their acceptances "
-            "or the original invitation thread; the biggest blast radius on the "
-            "calendar surface"
+            "external, IRREVERSIBLE in effect — the event's copy is recoverable "
+            "from Deleted Items (Exchange) or as a cancelled event (Google), but "
+            "the notifications are not: cancelling notifies the attendees and a "
+            "recreated event does not restore their acceptances or the original "
+            "invitation thread; the biggest blast radius on the calendar surface"
         ),
         holder="Executor",
         route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode delete_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
         arguments=["event_id", "reason", "calendar_id?"],
         description=(
-            "Cancel an event, addressed by the event_id from a read. `reason` is "
+            "Cancel an event, addressed by the event_id from a read; never a "
+            "hard delete. The Executor reads the event first and its result line "
+            "is the restore record (title, start, end, attendee count, organiser, "
+            "reason). `reason` is "
             "required and rides the proposal for review: cancelling someone's "
             "meeting is the one calendar action whose WHY the operator must see "
             "before approving, and it is recorded with the decision afterwards. "

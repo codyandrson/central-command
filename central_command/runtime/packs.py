@@ -998,8 +998,10 @@ PACKS: dict[str, Pack] = {
                 arguments=("{'event_id': '<id from a read>', 'reason': '<why this "
                            "meeting should be cancelled>', 'calendar_id'?: "
                            "'primary'}"),
-                notes=("IRREVERSIBLE in effect: every attendee is notified and "
-                       "recreating the event does not restore their acceptances. "
+                notes=("IRREVERSIBLE in effect: the event's copy is recoverable "
+                       "from Deleted Items or as a cancelled event, but the "
+                       "notifications are not: attendees are told and recreating "
+                       "the event does not restore their acceptances. "
                        "The reason is required and is what the operator reviews."),
             ),
         ),

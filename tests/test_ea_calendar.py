@@ -564,6 +564,11 @@ class _WriteFacade:
         self.calls.append(payload)
         if payload["mode"] == "delete_event":
             return {"ok": True, "deleted": payload["event_id"]}
+        if payload["mode"] == "get_event":
+            return {"ok": True, "event": {
+                "event_id": payload["event_id"], "summary": "Budget review",
+                "start": "2026-08-07T09:00:00-06:00", "end": "2026-08-07T09:30:00-06:00",
+                "attendee_count": 3, "organizer": "jane.doe@example.com"}}
         return {"ok": True, "event": {"event_id": "evt_123"}}
 
 
@@ -621,8 +626,80 @@ async def test_a_delete_requires_a_reason_and_records_it(write_facade):
 
     out = await executor._calendar_delete_event(
         {"event_id": "evt_123", "reason": "moved to Thursday"}, "lee", "ea")
-    assert fake.calls[0]["mode"] == "delete_event"
+    assert [c["mode"] for c in fake.calls] == ["get_event", "delete_event"]
     assert "moved to Thursday" in out
+
+
+async def test_the_delete_result_line_is_the_restore_record(write_facade):
+    fake, executor = write_facade
+    out = await executor._calendar_delete_event(
+        {"event_id": "evt_123", "reason": "moved to Thursday", "calendar_id": "team"},
+        "lee", "ea")
+    assert {c["calendar_id"] for c in fake.calls} == {"team"}
+    for field in ("evt_123", "moved to Thursday", "Budget review",
+                  "2026-08-07T09:00:00-06:00", "2026-08-07T09:30:00-06:00",
+                  "3 attendee(s)", "jane.doe@example.com"):
+        assert field in out
+
+
+@pytest.mark.parametrize("answer", [{"ok": True}, {"ok": True, "event": {}},
+                                    {"ok": False, "message": "get - event not found (404)"}])
+async def test_an_event_that_cannot_be_read_is_never_deleted(monkeypatch, answer):
+    from central_command.contract import failures
+    from central_command.gateway import executor
+
+    sent: list[str] = []
+
+    async def call(payload, timeout=60.0):
+        sent.append(payload["mode"])
+        if answer.get("ok") is False:
+            raise calendar_facade.CalendarFacadeError(f"calendar façade get_event refused: {answer}")
+        return answer
+
+    monkeypatch.setattr(calendar_facade, "_call", call)
+    with pytest.raises(calendar_facade.CalendarFacadeError) as caught:
+        await executor._calendar_delete_event(
+            {"event_id": "evt_123", "reason": "moved to Thursday"}, "lee", "ea")
+    assert sent == ["get_event"], "a delete must not follow a failed read"
+    assert failures.classify_failure(caught.value) == failures.SEMANTIC
+
+
+async def test_the_read_before_a_delete_goes_to_exchange_there(monkeypatch):
+    from central_command.gateway import executor
+    from central_command.integrations import exchange
+
+    monkeypatch.setattr(settings, "calendar_facade_token", "")
+    monkeypatch.setattr(settings, "exchange_url", "https://mail.example.com/ews/exchange.asmx",
+                        raising=False)
+    monkeypatch.setattr(settings, "exchange_username", "operator@example.com", raising=False)
+    monkeypatch.setattr(settings, "exchange_password", "secret", raising=False)
+    order: list[str] = []
+
+    async def read(event_id, calendar_id="primary"):
+        order.append("get")
+        return {"summary": "Budget review", "organizer": "operator@example.com"}
+
+    async def trash(event_id, calendar_id="primary"):
+        order.append("delete")
+        return event_id
+
+    monkeypatch.setattr(exchange, "get_event", read)
+    monkeypatch.setattr(exchange, "delete_event", trash)
+    out = await executor._calendar_delete_event(
+        {"event_id": "EV1=", "reason": "moved"}, "lee", "ea")
+    assert order == ["get", "delete"] and "Budget review" in out
+
+
+def test_the_words_say_the_copy_is_recoverable_and_the_notifications_are_not():
+    from central_command.gateway import capabilities
+    from central_command.runtime import packs
+
+    row = next(c for c in capabilities.REGISTRY if c.name == "calendar.delete_event")
+    assert row.reversibility == "irreversible" and row.acknowledge is True
+    assert "Deleted Items" in row.risk and "cancelled event" in row.risk
+    assert "the notifications are not" in row.risk
+    section = packs.charter_section(("calendar-read", "calendar-propose"))
+    assert "Deleted Items" in section and "the notifications are not" in section
 
 
 async def test_the_propose_tool_defers_instead_of_writing():

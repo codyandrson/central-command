@@ -130,6 +130,27 @@ async def list_events(
     return {"events": events, "truncated": bool(out.get("truncated"))}
 
 
+async def get_event(event_id: str, calendar_id: str = "primary") -> dict:
+    """One event by id: the normalised event plus its `organizer` address. The
+    Executor reads it before a delete, for the restore record. The list cannot
+    answer this: Google's events.list has no id filter."""
+    provider = _exchange()
+    if provider is not None:
+        try:
+            return await provider.get_event(event_id, calendar_id)
+        except provider.ExchangeError as e:
+            raise CalendarFacadeError(str(e)) from e
+    out = await _call({
+        "mode": "get_event",
+        "event_id": event_id,
+        "calendar_id": calendar_id,
+    })
+    event = out.get("event")
+    if not isinstance(event, dict) or not event:
+        raise CalendarFacadeError("provider answered without an event")
+    return event
+
+
 # --- writes: EXECUTOR-ONLY (see the module docstring) --------------------------
 # The façade returns the created/updated event so the Executor can state a real
 # event_id in the result the agent and the record see — "it worked" without an
@@ -195,9 +216,10 @@ async def update_event(
 
 
 async def delete_event(event_id: str, calendar_id: str = "primary") -> str:
-    """Cancel/delete an event. Google notifies the attendees; there is no undo
-    that restores their acceptances, which is why the registry calls this
-    irreversible and the proposal must carry a reason."""
+    """Cancel/delete an event, recoverably: on Exchange it moves to Deleted Items,
+    on Google it becomes `cancelled`. The attendees' notifications and acceptances
+    are what no undo restores, which is why the registry calls this irreversible
+    and the proposal must carry a reason."""
     provider = _exchange()
     if provider is not None:
         try:

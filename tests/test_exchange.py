@@ -29,7 +29,9 @@ environment, and it wins over the CA bundle.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -150,6 +152,7 @@ class FakeAccount:
             children=[self.inbox, self.junk, self.sent, *extra],
         )
         self.fetched = []
+        self.primary_smtp_address = "Operator@corp.example"
 
     def fetch(self, ids=None, **kwargs):
         wanted = {getattr(i, "id", i) for i in (ids or [])}
@@ -485,6 +488,80 @@ class FakeEvent:
         self.optional_attendees = []
         self.body = body
         self.my_response_type = "Decline" if declined else "Accept"
+        self.trashed: list[str] = []
+        self.trash_error: Exception | None = None
+
+    def move_to_trash(self, send_meeting_cancellations):
+        self.trashed.append(send_meeting_cancellations)
+        if self.trash_error:
+            raise self.trash_error
+
+    def delete(self, **kwargs):
+        raise AssertionError("a hard delete leaves no copy anywhere")
+
+    def cancel(self, **kwargs):
+        raise AssertionError("what cancel does to the organiser's copy is undocumented")
+
+
+@pytest.mark.asyncio
+async def test_an_organisers_delete_goes_to_the_trash_with_cancellations_to_all(mailbox):
+    from exchangelib.items import SEND_TO_ALL_AND_SAVE_COPY
+
+    event = FakeEvent(organizer="operator@corp.example")
+    mailbox.calendar.items = [event]
+    assert await exchange.delete_event("EV1=") == "EV1="
+    assert event.trashed == [SEND_TO_ALL_AND_SAVE_COPY]
+
+
+@pytest.mark.asyncio
+async def test_a_non_organisers_delete_goes_to_the_trash_notifying_nobody(mailbox):
+    from exchangelib.items import SEND_TO_NONE
+
+    event = FakeEvent(organizer="jane.doe@example.com")
+    mailbox.calendar.items = [event]
+    assert await exchange.delete_event("EV1=") == "EV1="
+    assert event.trashed == [SEND_TO_NONE]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_error_on_delete_raises_and_nothing_else_is_called(mailbox):
+    event = FakeEvent()
+    event.trash_error = RuntimeError("ErrorAccessDenied")
+    mailbox.calendar.items = [event]
+    with pytest.raises(exchange.ExchangeError, match="ErrorAccessDenied"):
+        await exchange.delete_event("EV1=")
+    assert len(event.trashed) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("organizer", ["", "/O=CORP/OU=EXCHANGE/CN=RECIPIENTS/CN=OPERATOR"])
+async def test_an_organiser_that_cannot_be_compared_raises_and_nothing_moves(mailbox, organizer):
+    """Guessing "not the organiser" would drop the attendees' cancellations silently."""
+    event = FakeEvent(organizer=organizer)
+    mailbox.calendar.items = [event]
+    with pytest.raises(exchange.ExchangeError, match="cannot tell who organises"):
+        await exchange.delete_event("EV1=")
+    assert event.trashed == []
+
+
+@pytest.mark.asyncio
+async def test_a_delete_of_an_event_that_is_gone_raises(mailbox):
+    with pytest.raises(exchange.ExchangeError, match="not found"):
+        await exchange.delete_event("GONE=")
+
+
+def test_no_path_in_the_client_reaches_a_hard_delete_or_a_cancel():
+    source = Path(exchange.__file__).read_text(encoding="utf-8")
+    assert not re.search(r"item\.delete\(|\.cancel\(", source)
+
+
+@pytest.mark.asyncio
+async def test_get_event_reads_the_item_by_id_with_its_organiser(mailbox):
+    mailbox.calendar.items = [FakeEvent(attendees=["a@x.example"], organizer="jane.doe@example.com")]
+    event = await exchange.get_event("EV1=")
+    assert event["event_id"] == "EV1=" and event["summary"] == "Standup"
+    assert event["organizer"] == "jane.doe@example.com" and event["attendee_count"] == 1
+    assert event["organizer_is_self"] is False
 
 
 @pytest.mark.asyncio

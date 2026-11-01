@@ -671,9 +671,13 @@ async def send(to: list[str], subject: str, body: str, cc: list[str] | None = No
 MAX_EVENTS = 250
 
 
-def _event(item, self_address: str) -> dict:
+def _organizer_address(item) -> str:
     organizer = getattr(item, "organizer", None)
-    organizer_address = (getattr(organizer, "email_address", "") or "") if organizer else ""
+    return (getattr(organizer, "email_address", "") or "") if organizer else ""
+
+
+def _event(item, self_address: str) -> dict:
+    organizer_address = _organizer_address(item)
     attendees = list(getattr(item, "required_attendees", None) or []) + \
         list(getattr(item, "optional_attendees", None) or [])
     body = getattr(item, "body", None)
@@ -800,29 +804,45 @@ async def update_event(event_id: str, title: str | None = None, start: str | Non
     return await _thread(run)
 
 
-async def delete_event(event_id: str, calendar_id: str = "primary") -> str:
-    """Cancel an event, returning the id that was cancelled. Executor-only.
-    Exchange notifies the attendees; nothing restores their acceptances, which
-    is why the registry calls this irreversible and the proposal must carry a
-    reason."""
+async def get_event(event_id: str, calendar_id: str = "primary") -> dict:
+    """One event by id: the normalised shape plus its `organizer` address. The
+    id says where the item is, so `calendar_id` is accepted and not needed."""
     def run():
-        from exchangelib.items import SEND_TO_ALL_AND_SAVE_COPY
+        item = _fetch(account(), event_id)
+        return {**_event(item, _email_address()), "organizer": _organizer_address(item)}
+
+    return await _thread(run)
+
+
+def _is_organizer(item, acct) -> bool:
+    """Is this account the organiser? `CalendarItem.organizer` is the server's
+    read-only `calendar:Organizer`, compared with the account's primary address.
+    An organiser that is not an SMTP address (an internal `EX` routing address)
+    cannot be compared, and guessing would silently skip the attendees'
+    cancellations, so it raises."""
+    address = _organizer_address(item)
+    if "@" not in address:
+        raise ExchangeError(
+            f"cannot tell who organises this event: its organiser reads {address!r}, "
+            "not an SMTP address, so nothing was deleted"
+        )
+    return address.lower() == (acct.primary_smtp_address or "").lower()
+
+
+async def delete_event(event_id: str, calendar_id: str = "primary") -> str:
+    """Move an event to Deleted Items, returning the id that was removed.
+    Executor-only. Never a hard delete: the copy stays recoverable there. The
+    organiser's attendees get a cancellation, which nothing can recall, so the
+    registry still calls this irreversible and the proposal must carry a reason;
+    a meeting someone else organises only leaves this calendar, and its
+    attendees hear nothing. A provider error raises through `_thread`."""
+    def run():
+        from exchangelib.items import SEND_TO_ALL_AND_SAVE_COPY, SEND_TO_NONE
 
         acct = account()
         item = _fetch(acct, event_id)
-        # `CalendarItem.cancel()` (calendar_item.py line 212) sends a
-        # CancelCalendarItem, which is what NOTIFIES the attendees; it is the
-        # organizer's verb. A meeting someone else owns cannot be cancelled,
-        # only removed from this calendar — `delete` with cancellations on is
-        # the honest fallback, and it is the same irreversibility either way.
-        cancel = getattr(item, "cancel", None)
-        if callable(cancel):
-            try:
-                cancel()
-                return event_id
-            except Exception:  # noqa: BLE001 — not the organizer; fall through
-                pass
-        item.delete(send_meeting_cancellations=SEND_TO_ALL_AND_SAVE_COPY)
+        item.move_to_trash(send_meeting_cancellations=(
+            SEND_TO_ALL_AND_SAVE_COPY if _is_organizer(item, acct) else SEND_TO_NONE))
         return event_id
 
     return await _thread(run)

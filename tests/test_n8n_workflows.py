@@ -95,13 +95,13 @@ def test_calendar_facade_token_is_a_placeholder_and_only_x_cc_token_is_read():
     assert "const TOKEN = '__CC_CALENDAR_FACADE_TOKEN__';" in code
     assert "x-cc-token" in code and "Gv" not in code
     # the mode allowlist IS the write boundary — pinned so widening it is a diff
-    assert "const MODES = ['list', 'create_event', 'update_event', 'delete_event'];" in code
+    assert "const MODES = ['list', 'create_event', 'update_event', 'delete_event', 'get_event'];" in code
 
 
 def test_calendar_credential_is_resolved_by_name_never_by_an_instance_id():
     provider = _load("lib-google-calendar.json")
     creds = [n["credentials"] for n in provider["nodes"] if n.get("credentials")]
-    assert len(creds) == 4, "the four REST nodes each carry the credential"
+    assert len(creds) == 5, "the five REST nodes each carry the credential"
     for c in creds:
         assert c == {"googleCalendarOAuth2Api": {"id": None, "name": "Google Calendar account"}}
 
@@ -112,23 +112,26 @@ def test_every_calendar_mode_is_validated_and_routed_and_the_writes_are_the_thre
     m = re.search(r"const MODES = \[([^\]]+)\]", validate)
     validated = set(re.findall(r"'([a-z_]+)'", m.group(1)))
     routed = {r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]}
-    assert validated == routed == {"list", "create_event", "update_event", "delete_event"}
+    assert validated == routed == {"list", "get_event", "create_event", "update_event", "delete_event"}
     # what central_command/integrations/calendar_facade.py sends
     methods = {n["name"]: n["parameters"].get("method", "GET")
                for n in provider["nodes"] if n["type"].endswith("httpRequest")}
-    assert sorted(v for v in methods.values()) == ["DELETE", "GET", "PATCH", "POST"]
+    assert sorted(v for v in methods.values()) == ["DELETE", "GET", "GET", "PATCH", "POST"]
+    assert methods["Get event (GCal REST)"] == "GET"
+    assert "sendUpdates=all" in _node(provider, "Delete event (GCal REST)")["parameters"]["url"]
 
 
-def _run_list_node(tmp_path, response):
-    """The shipped 'Return: list' code, run by node with n8n's two accessors stubbed."""
+def _run_node(tmp_path, name, response):
+    """A shipped Code node, run by node with n8n's two accessors stubbed."""
     node = shutil.which("node")
     if not node:
         pytest.skip("node needed")
-    code = _node(_load("lib-google-calendar.json"), "Return: list")["parameters"]["jsCode"]
-    script = tmp_path / "return_list.js"
+    code = _node(_load("lib-google-calendar.json"), name)["parameters"]["jsCode"]
+    script = tmp_path / "code_node.js"
+    item = f"{{ json: {json.dumps(response)} }}"
     script.write_text(
         "const $ = () => ({ first: () => ({ json: { calendar_id: 'primary', max_results: 250 } }) });\n"
-        f"const $input = {{ first: () => ({{ json: {json.dumps(response)} }}) }};\n"
+        f"const $input = {{ first: () => ({item}), all: () => [{item}] }};\n"
         f"const out = (function () {{\n{code}\n}})();\n"
         "process.stderr.write(JSON.stringify(out));\n",
         encoding="utf-8",
@@ -136,6 +139,41 @@ def _run_list_node(tmp_path, response):
     done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stderr)[0]["json"]
+
+
+def _run_list_node(tmp_path, response):
+    return _run_node(tmp_path, "Return: list", response)
+
+
+def test_a_get_event_request_stays_a_read(tmp_path):
+    """The validator's last line is the delete: a read that fell through to it
+    would route to the DELETE node."""
+    out = _run_node(tmp_path, "Validate request", {"mode": "get_event", "event_id": "ev1"})
+    assert out == {"mode": "get_event", "calendar_id": "primary", "event_id": "ev1"}
+
+
+def test_get_event_returns_the_fields_of_the_restore_record(tmp_path):
+    out = _run_node(tmp_path, "Return: get_event", {"statusCode": 200, "body": {
+        "id": "ev1", "status": "confirmed", "summary": "Budget review",
+        "start": {"dateTime": "2026-11-02T10:00:00Z"}, "end": {"dateTime": "2026-11-02T10:30:00Z"},
+        "organizer": {"email": "jane.doe@example.com"},
+        "attendees": [{"email": "a@example.com"}, {"email": "b@example.com"}],
+    }})
+    assert out["ok"] is True
+    event = out["event"]
+    assert event["event_id"] == "ev1" and event["summary"] == "Budget review"
+    assert event["start"] == "2026-11-02T10:00:00Z" and event["end"] == "2026-11-02T10:30:00Z"
+    assert event["attendee_count"] == 2 and event["organizer"] == "jane.doe@example.com"
+
+
+@pytest.mark.parametrize("response", [
+    {"statusCode": 404, "body": {"error": {"message": "Not Found"}}},
+    {"statusCode": 410, "body": {}},
+    {"statusCode": 200, "body": {}},
+])
+def test_get_event_without_an_event_is_a_no(tmp_path, response):
+    out = _run_node(tmp_path, "Return: get_event", response)
+    assert out["ok"] is False and "event" not in out and out["message"]
 
 
 @pytest.mark.parametrize("body", [

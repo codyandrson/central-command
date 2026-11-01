@@ -196,6 +196,12 @@ async def test_the_calendar_facade_routes_every_mode_to_exchange(on_exchange, no
     monkeypatch.setattr(exchange, "update_event", fake_update)
     monkeypatch.setattr(exchange, "delete_event", fake_delete)
 
+    async def fake_get(event_id, calendar_id="primary"):
+        calls.append(("get_event", event_id))
+        return {"event_id": event_id}
+
+    monkeypatch.setattr(exchange, "get_event", fake_get)
+
     assert await calendar_facade.list_events("2026-09-25T00:00:00Z",
                                              "2026-09-26T00:00:00Z") == {
         "events": [], "truncated": False}
@@ -203,8 +209,9 @@ async def test_the_calendar_facade_routes_every_mode_to_exchange(on_exchange, no
                                               "2026-09-25T09:15:00Z") == {"event_id": "EV1="}
     assert await calendar_facade.update_event("EV1=", title="Standup!") == {"event_id": "EV1="}
     assert await calendar_facade.delete_event("EV1=") == "EV1="
+    assert await calendar_facade.get_event("EV1=") == {"event_id": "EV1="}
     assert [c[0] for c in calls] == ["list_events", "create_event", "update_event",
-                                     "delete_event"]
+                                     "delete_event", "get_event"]
 
 
 @pytest.mark.asyncio

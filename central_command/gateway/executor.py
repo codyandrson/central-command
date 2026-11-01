@@ -182,9 +182,14 @@ async def _calendar_delete_event(args: dict, approver: str, proposer: str | None
     reason = (args.get("reason") or "").strip()
     if not reason:
         raise ExecutorError("calendar.delete_event: a reason is required")
-    deleted = await calendar_facade.delete_event(
-        args["event_id"], calendar_id=args.get("calendar_id", "primary"))
-    return f"calendar event {deleted} deleted — reason: {reason}"
+    # Read first: the result line is the restore record, so an event that cannot
+    # be read fails here, loudly, and is never deleted unrecorded.
+    calendar_id = args.get("calendar_id", "primary")
+    ev = await calendar_facade.get_event(args["event_id"], calendar_id=calendar_id)
+    deleted = await calendar_facade.delete_event(args["event_id"], calendar_id=calendar_id)
+    return (f"calendar event {deleted} deleted — reason: {reason} — restore record: "
+            f"title {ev.get('summary')!r}, {ev.get('start')} → {ev.get('end')}, "
+            f"{ev.get('attendee_count')} attendee(s), organiser {ev.get('organizer') or 'unknown'}")
 
 
 async def _mail_report_spam(args: dict, approver: str, proposer: str | None) -> str:
