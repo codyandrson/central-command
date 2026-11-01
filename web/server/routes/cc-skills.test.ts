@@ -101,6 +101,21 @@ describe('cc-skills proxy', () => {
     expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body);
   });
 
+  it('forwards the latest-review GET (no target) and keeps a 404 intact', async () => {
+    const app = await buildApp();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail: 'no bundled-skill review is stored' }), {
+      status: 404, headers: { 'content-type': 'application/json' },
+    }));
+
+    const res = await app.request('/api/skills/update-review');
+
+    expect(res.status).toBe(404);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://cc.test/api/skills/update-review');
+    expect(init.method).toBe('GET');
+    expect(init.body).toBeUndefined();
+  });
+
   it('forwards the update-review GET with no body and keeps a 404 intact', async () => {
     const app = await buildApp();
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail: "no bundled-skill review is stored for '2.68.0'" }), {

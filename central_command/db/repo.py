@@ -4864,6 +4864,18 @@ async def list_skill_doc_review(target: str) -> list[dict]:
         await conn.close()
 
 
+async def latest_skill_review_target() -> str | None:
+    """The target of the stored review (there is only ever one: a compute for
+    another target drops the old rows), or None when none is stored."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            "select target from skill_doc_review order by computed_at desc, target limit 1"
+        )
+    finally:
+        await conn.close()
+
+
 async def get_skill_bundled_texts(hashes: list[str]) -> list[dict]:
     """The stored bundled texts for these hashes (`hash`, `content`); a hash
     the library never received is simply absent."""

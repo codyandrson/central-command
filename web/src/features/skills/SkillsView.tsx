@@ -4,6 +4,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useSkills } from './useSkills';
+import { useBundledRefresh } from './useBundledRefresh';
+import { BundledRefreshBanner } from './BundledRefreshBanner';
 import {
   ImportDialog, CreateSkillDialog, AddDocDialog, ImportDocDialog, ImportSiteDialog,
   GrantSkillDialog, RevokeSkillDialog, RetireSkillDialog, RetireDocDialog,
@@ -296,6 +298,7 @@ export function SkillsView() {
     createSkill, addDoc, retireDoc, retireSkill, reactivateSkill, grant, revoke,
     importFolder, importDoc, importFile, importSite, history,
   } = useSkills();
+  const refreshState = useBundledRefresh();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const closeDialog = useCallback(() => setDialog(null), []);
@@ -372,6 +375,15 @@ export function SkillsView() {
             New skill
           </Button>
         </div>
+        {refreshState.review && refreshState.pending.length > 0 && (
+          <BundledRefreshBanner
+            target={refreshState.review.target}
+            items={refreshState.pending}
+            retrying={refreshState.retrying}
+            error={refreshState.retryError}
+            onRetry={refreshState.retry}
+          />
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {error && <p className="px-4 py-2 text-[0.733rem] text-destructive">{error}</p>}
           {skills.length === 0 && !loading && (

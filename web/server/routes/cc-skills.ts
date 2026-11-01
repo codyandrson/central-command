@@ -50,6 +50,7 @@ app.post('/api/skills/import-site', rateLimitGeneral, (c) => forward(c, '/skills
 // reaches the backend as the dialog wrote it.
 const reviewPath = (c: Context) => new URL(c.req.url).pathname.slice('/api'.length);
 app.post('/api/skills/update-review', rateLimitGeneral, (c) => forward(c, '/skills/update-review'));
+app.get('/api/skills/update-review', rateLimitGeneral, (c) => forward(c, '/skills/update-review', 'GET'));
 app.get('/api/skills/update-review/:target', rateLimitGeneral, (c) => forward(c, reviewPath(c), 'GET'));
 app.post(
   '/api/skills/update-review/:target/items/:skill_id/:doc_key/resolve',

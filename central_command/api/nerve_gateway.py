@@ -1395,6 +1395,8 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         return await rest.compute_skill_review_route(
             rest.SkillReviewIn(target=params["target"], ref=params["ref"])
         )
+    if method == "skills.update_review_latest":
+        return await rest.get_latest_skill_review_route()
     if method == "skills.update_review_get":
         return await rest.get_skill_review_route(params["target"])
     if method == "skills.update_review_resolve":

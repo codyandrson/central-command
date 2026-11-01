@@ -2043,3 +2043,99 @@ async def test_the_review_stays_readable_after_an_apply_with_its_failures_on_it(
     assert one["ours"] is None and one["theirs"] == ONE_V1
     born = items[(ALPHA, "born")]
     assert born["applied_at"] is not None and born["apply_error"] is None
+
+
+# --- the latest read the Skills page's retry banner polls (story 2.8) -----------
+
+_LATEST_ITEM_KEYS = {
+    "skill_id", "doc_key", "status", "verdict", "resolved_at", "applied_at",
+    "apply_error", "pending_apply", "moved",
+}
+
+
+def _installed(monkeypatch, version: str) -> None:
+    from central_command.api import update
+
+    monkeypatch.setattr(update, "read_product_version", lambda: version)
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_latest_is_404_with_no_review_stored_over_the_route_and_the_rpc(clean_skills):
+    noop = lambda *a, **k: None  # noqa: E731
+    assert await _status_of(routes.get_latest_skill_review_route()) == 404
+    with pytest.raises(HTTPException) as e:
+        await nerve_gateway._dispatch("skills.update_review_latest", {}, notify=noop)
+    assert e.value.status_code == 404
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_latest_names_the_stored_target_without_texts_and_the_rpc_answers_alike(
+    clean_skills, fixture_repo, monkeypatch
+):
+    noop = lambda *a, **k: None  # noqa: E731
+    _installed(monkeypatch, "0.9.0")
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    full = await _post_review()
+
+    latest = await routes.get_latest_skill_review_route()
+
+    assert latest["target"] == "1" and latest["ref"] == "v1"
+    assert latest["computed_at"] == full["computed_at"]
+    assert latest["installed"] == "0.9.0" and latest["finished"] is False
+    assert latest["counts"] == {**full["counts"], "not_refreshed": 0}
+    assert len(latest["items"]) == len(full["items"])
+    for item in latest["items"]:
+        assert set(item) == _LATEST_ITEM_KEYS     # hashes and texts stay on the by-target read
+        assert item["pending_apply"] is False and item["moved"] is False
+    assert latest == await nerve_gateway._dispatch("skills.update_review_latest", {}, notify=noop)
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_latest_marks_a_failed_row_pending_and_a_moved_text_as_not_retryable(
+    clean_skills, fixture_repo, monkeypatch
+):
+    _installed(monkeypatch, "1.0.0")
+    await _seed(fixture_repo)
+    await _post_review()
+    await _hand_post("one", MINE)          # the library moved after the review
+    await _apply()
+
+    latest = await routes.get_latest_skill_review_route()
+    items = {i["doc_key"]: i for i in latest["items"] if i["skill_id"] == ALPHA}
+
+    assert items["one"]["pending_apply"] is True and items["one"]["moved"] is True
+    assert "ours_hash" in items["one"]["apply_error"] and MINE not in items["one"]["apply_error"]
+    assert items["born"]["pending_apply"] is False and items["born"]["applied_at"] is not None
+    assert latest["counts"]["not_refreshed"] == 1
+
+    await _hand_post("one", ONE_V0)        # put back: a plain retry now succeeds
+    await _apply()
+    cleared = await routes.get_latest_skill_review_route()
+    assert cleared["counts"]["not_refreshed"] == 0
+    assert all(not i["pending_apply"] for i in cleared["items"])
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_latest_counts_a_decided_row_the_updater_never_applied_only_once_the_update_is_finished(
+    clean_skills, fixture_repo, monkeypatch
+):
+    await _seed(fixture_repo)
+    await _hand_post("one", MINE)
+    one = _items(await _post_review())[(ALPHA, "one")]
+    await _verdict(one, "keep_mine")
+
+    _installed(monkeypatch, "0.9.0")        # the release is still only staged
+    staged = await routes.get_latest_skill_review_route()
+    assert staged["finished"] is False and staged["counts"]["not_refreshed"] == 0
+
+    _installed(monkeypatch, "1.0.0")        # installed, and the refresh never ran
+    done = await routes.get_latest_skill_review_route()
+    flagged = {i["doc_key"]: i for i in done["items"] if i["pending_apply"]}
+    assert set(flagged) == {"one"} and flagged["one"]["apply_error"] is None
+    assert flagged["one"]["moved"] is False and done["counts"]["not_refreshed"] == 1
+
