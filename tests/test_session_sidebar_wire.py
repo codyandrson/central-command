@@ -320,8 +320,8 @@ async def test_a_session_spawned_from_an_email_carries_its_source(monkeypatch):
 async def test_the_sidebar_list_keeps_a_finished_rerun_pair_on_the_wire():
     """Found by rehearsal: both rows of a pair were filtered out of `sessions.list`,
     so the sidebar could never show the link R2 promises."""
-    agent_id = "sidebar-filter-agent"
-    await repo.upsert_agent(agent_id, "Sidebar Filter", "sidebar", "")
+    agent_id = "sidebar-pair-agent"
+    await repo.upsert_agent(agent_id, "Sidebar Pair", "sidebar", "")
     old, new, plain = ("sess_" + uuid.uuid4().hex[:12] for _ in range(3))
     conn = await repo._conn()
     try:
