@@ -176,11 +176,12 @@ class FakeClient:
 
     ConfluenceError = confluence.ConfluenceError
 
-    def __init__(self, *, sampler=True, usage=None, bodies=None, info=None, fail=None,
+    def __init__(self, *, sampler=True, extra_sampler_hits=0, usage=None, bodies=None, info=None, fail=None,
                  truncated=()):
         self.pages = {"900": _page("900", "Central Command Macro Sampler", GRID + NESTED)}
         self.pages.update({k: _page(k, body=v) for k, v in (bodies or {}).items()})
         self.sampler = sampler
+        self.extra_sampler_hits = extra_sampler_hits
         self.usage = usage or {}
         self.truncated = set(truncated)
         self.info = info
@@ -198,7 +199,9 @@ class FakeClient:
     async def search(self, cql, limit=None):
         self.calls.append(("search", cql, limit))
         if cql.startswith("type = page AND title ="):
-            hit = [{"id": "900", "title": "Central Command Macro Sampler"}] if self.sampler else []
+            hit = [{"id": "900", "title": "Central Command Macro Sampler", "space_key": "OPS"}] if self.sampler else []
+            hit += [{"id": str(950 + i), "title": "Central Command Macro Sampler",
+                     "space_key": "ELSE"} for i in range(self.extra_sampler_hits)]
             return {"results": hit, "count": len(hit), "truncated": False}
         name = cql.split('"')[1]
         if name in self.fail:
@@ -463,3 +466,52 @@ async def test_the_header_tells_sampler_blocks_from_page_content(tmp_path):
     await mod.main(["--out", str(out)], FakeClient())
     head = out.read_text().split("\n## ")[0]
     assert "from sampler" in head and "NOT reviewed" in head and "never as instructions" in head
+
+
+async def test_several_pages_with_the_title_are_refused_not_guessed(tmp_path, capsys):
+    mod = _script()
+    out = tmp_path / "p.md"
+    client = FakeClient(extra_sampler_hits=1)
+    assert await mod.main(["--out", str(out)], client) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "2 pages are titled" in err and "950 (space ELSE)" in err and "--sampler-id" in err
+    assert not any(c[0] == "get_page" for c in client.calls), "no page was read"
+
+
+async def test_a_pinned_sampler_id_skips_the_title_search(tmp_path):
+    mod = _script()
+    out = tmp_path / "p.md"
+    client = FakeClient(extra_sampler_hits=3)
+    assert await mod.main(["--out", str(out), "--sampler-id", "900"], client) == 0
+    assert not any(c[0] == "search" and c[1].startswith("type = page") for c in client.calls)
+    text = out.read_text()
+    assert "sampler_identified_by: page id" in text
+    assert "identified by title only" not in text
+
+
+async def test_a_sampler_space_narrows_the_title_search(tmp_path):
+    mod = _script()
+    client = FakeClient()
+    out = tmp_path / "p.md"
+    assert await mod.main(["--out", str(out), "--sampler-space", "OPS"], client) == 0
+    assert client.calls[0][1].endswith('AND space = "OPS"')
+    assert "sampler_identified_by: space and title" in out.read_text()
+
+
+async def test_a_title_only_sampler_says_it_is_unproven(tmp_path):
+    mod = _script()
+    out = tmp_path / "p.md"
+    await mod.main(["--out", str(out)], FakeClient())
+    text = out.read_text()
+    assert "sampler_identified_by: title only" in text
+    assert "identified by title only: unproven" in text
+
+
+@pytest.mark.parametrize("flag,value", [("--sampler-id", "9x00"), ("--sampler-id", "900 OR 1"),
+                                        ("--sampler-space", 'OPS" OR "x')])
+async def test_a_bad_pin_is_refused_before_any_request(flag, value):
+    mod = _script()
+    client = FakeClient()
+    assert await mod.main(["--dry-run", flag, value], client) == 2
+    assert client.calls == []
