@@ -227,6 +227,10 @@ export function pickDefaultSessionKey(sessions: Session[], preferredKey?: string
   if (preferredKey && sessions.some((session) => getSessionKey(session) === preferredKey)) {
     return preferredKey;
   }
+  // A Central Command lane the list does not carry is one the sidebar leaves out (a
+  // finished run), never one that is gone: sessions are not destroyed. Falling back
+  // here took the transcript away from whoever was reading it at the next refresh.
+  if (preferredKey && /^agent:[^:]+:sess_/.test(preferredKey)) return preferredKey;
 
   const topLevelAgents = getTopLevelAgentSessions(sessions);
   if (topLevelAgents.length > 0) {

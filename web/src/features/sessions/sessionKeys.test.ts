@@ -95,6 +95,13 @@ describe('sessionKeys', () => {
     expect(pickDefaultSessionKey(sessions)).toBe('agent:main:main');
   });
 
+  it('keeps a finished run the list leaves out, and still falls back from a key that is gone', () => {
+    const sessions = [session('agent:main:main')];
+    expect(pickDefaultSessionKey(sessions, 'agent:jira-expert:sess_0ca6e8aa665e'))
+      .toBe('agent:jira-expert:sess_0ca6e8aa665e');
+    expect(pickDefaultSessionKey(sessions, 'agent:retired:main')).toBe('agent:main:main');
+  });
+
   it('prefers explicit labels for root sessions, then falls back to identity name and root id', () => {
     expect(getSessionDisplayLabel(session('agent:reviewer:main', { label: 'Reviewer', displayName: 'webchat:reviewer' }), 'Nerve')).toBe('Reviewer');
     expect(getSessionDisplayLabel(session('agent:reviewer:main', { label: 'Release QA', identityName: 'Reviewer Prime' }), 'Nerve')).toBe('Release QA');

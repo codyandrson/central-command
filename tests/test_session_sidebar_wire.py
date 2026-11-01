@@ -317,6 +317,33 @@ async def test_a_session_spawned_from_an_email_carries_its_source(monkeypatch):
 
 
 @needs_pg
+async def test_the_sidebar_list_keeps_a_finished_rerun_pair_on_the_wire():
+    """Found by rehearsal: both rows of a pair were filtered out of `sessions.list`,
+    so the sidebar could never show the link R2 promises."""
+    agent_id = "sidebar-filter-agent"
+    await repo.upsert_agent(agent_id, "Sidebar Filter", "sidebar", "")
+    old, new, plain = ("sess_" + uuid.uuid4().hex[:12] for _ in range(3))
+    conn = await repo._conn()
+    try:
+        await conn.execute(
+            "insert into session (id, agent_id, status, mode, rerun_by, rerun_of) values "
+            "($1, $4, 'DONE', 'oneshot', $2, null), "
+            "($2, $4, 'DONE', 'oneshot', null, $1), "
+            "($3, $4, 'DONE', 'oneshot', null, null)",
+            old, new, plain, agent_id,
+        )
+    finally:
+        await conn.close()
+
+    rows = {r["id"]: r for r in await repo.list_sessions(
+        200, agent_id=agent_id, exclude_terminal_oneshot=True)}
+
+    assert {old, new} <= set(rows) and plain not in rows
+    wire = nerve_gateway._session_row_dict(rows[old])
+    assert wire["rerunBy"] == new
+
+
+@needs_pg
 async def test_exclude_terminal_oneshot_drops_done_but_keeps_running_and_conversations():
     agent_id = "sidebar-filter-agent"
     await repo.upsert_agent(agent_id, "Sidebar Filter", "sidebar", "")

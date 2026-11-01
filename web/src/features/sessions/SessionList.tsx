@@ -202,7 +202,8 @@ export function SessionList({ sessions, currentSession, isViewingChat = true, bu
     const isHistory = (s: Session) =>
       TERMINAL_SESSION_STATUSES.has((s.status || '').toUpperCase())
       && !(isViewingChat && getSessionKey(s) === currentSession);
-    const isMachineRun = (s: Session) => s.mode === 'oneshot';
+    // A re-run pair is the exception: the operator acted on it, and each row links the other.
+    const isMachineRun = (s: Session) => s.mode === 'oneshot' && !s.rerunOf && !s.rerunBy;
     return {
       visibleSessions: sessions.filter(s =>
         !isHistory(s) || (showHistory && !isMachineRun(s))),

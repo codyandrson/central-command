@@ -1296,7 +1296,10 @@ async def list_sessions(
             f"(s.created_at, s.id) < ({_arg(before)}, {_arg(before_id or '')})"
         )
     if exclude_terminal_oneshot:
-        where.append("not (s.mode = 'oneshot' and s.status in ('DONE','FAILED','CANCELLED'))")
+        # A re-run pair stays: both rows show the link, and the cockpit keeps them
+        # under its closed-sessions toggle.
+        where.append("not (s.mode = 'oneshot' and s.status in ('DONE','FAILED','CANCELLED') "
+                     "and s.rerun_of is null and s.rerun_by is null)")
     limit_ph = _arg(limit)
     where_sql = " and ".join(where)
 
