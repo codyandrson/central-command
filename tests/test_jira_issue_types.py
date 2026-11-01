@@ -153,3 +153,48 @@ async def test_a_read_that_jira_refuses_is_told_in_words(monkeypatch):
     monkeypatch.setattr(tools.jira, "list_issue_types", no)
     out = await tools.jira_list_issue_types(None, "NOPE")
     assert "not found for NOPE" in out
+
+
+# --- the cache expires -------------------------------------------------------
+
+
+class _Resp:
+    status_code = 200
+    text = ""
+
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+async def test_the_issue_type_cache_serves_within_the_ttl_and_refetches_after_it(monkeypatch):
+    """A cache that never expires is the bug CUSTOM_FIELDS_TTL's comment warns
+    about: a type an administrator adds would stay invisible until a restart.
+    A read, a read inside the TTL (one HTTP call), and a read past it (two)."""
+    monkeypatch.setattr(jira, "_issue_types_cache", {})
+    monkeypatch.setattr(jira.settings, "jira_email", "test@example.com")
+    monkeypatch.setattr(jira.settings, "jira_api_token", "tok")
+    clock = [5000.0]
+    monkeypatch.setattr(jira.time, "monotonic", lambda: clock[0])
+    pages = [{"issueTypes": [{"id": "1", "name": "Feature", "subtask": False}], "total": 1},
+             {"issueTypes": [{"id": "1", "name": "Feature", "subtask": False},
+                             {"id": "2", "name": "Risk", "subtask": False}], "total": 2}]
+    calls = []
+
+    async def fake(method, path, json_body=None):
+        calls.append(path)
+        return _Resp(pages[len(calls) - 1])
+
+    monkeypatch.setattr(jira, "_call", fake)
+
+    first = await jira.list_issue_types("TASKS")
+    clock[0] += jira.CUSTOM_FIELDS_TTL - 1
+    inside = await jira.list_issue_types("TASKS")
+    assert len(calls) == 1 and inside == first and first["count"] == 1
+
+    clock[0] += 2                                       # now TTL + 1 s past the first read
+    after = await jira.list_issue_types("TASKS")
+    assert len(calls) == 2 and after["count"] == 2
+    assert [t["name"] for t in after["issue_types"]] == ["Feature", "Risk"]
