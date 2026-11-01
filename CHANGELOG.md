@@ -4,6 +4,60 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-01 — v2.79.0: Work-site safety: Jira issue types come from the instance, the availability read fails closed, and a calendar delete is never a hard delete
+
+epic-work-site-safety. Seven commits since v2.78.0 (`v2.78.0..7196aba1`), from four stories.
+No value, host or account appears here.
+
+An agent now reads a project's issue types instead of guessing them. The EA never calls a day
+free unless it saw the whole day. An Exchange calendar delete goes to Deleted Items, and nothing
+is hard-deleted.
+
+**`min_upgrade_from` stays `2.77.0`, and this is a reviewed update** because the bundled Jira
+skill docs change. No verdict is due: the library is current. The updater's `n8n` phase
+re-imports `lib-google-calendar.json` and `cc-calendar-facade.json`, which carry the new
+`get_event` mode and the list node's empty-day rule.
+
+### Work-site safety
+
+- **Jira issue types come from the instance.** A new read, `jira_list_issue_types(project_key)`
+  (both flavours; each type's id, name and whether it is a sub-task; cached per project for five
+  minutes), is what an agent reads before `jira.create_issue`. `issue_type` is now required and the
+  constant list, the `Task` default and the type-name check are gone; Jira's own 400 is the only
+  validator and a bad type lands FAILED for a redraft.
+- **The availability read fails closed.** The EA's day is free only on a complete, successful list.
+  A truncated window, a missing event list, a provider answer that is not a calendar list, a failed
+  read or an unconfigured provider reads "availability unknown" in data and in words, never an empty
+  day; an outage still parks the read. An Exchange-only site now counts as configured. A complete
+  empty day is still free: the Google calendar workflow's list node treats `kind: calendar#events`
+  without `items` as an empty list, and answers `ok:false` on a 2xx with neither.
+- **A calendar delete is recoverable.** On Exchange it moves the event to Deleted Items
+  (cancellations go to the attendees only when the account is the organiser; an organiser that
+  cannot be compared raises); the hard-delete fallback and the swallowed error are gone. On Google
+  the event becomes `cancelled`. The Executor reads the event first and its result line is the
+  restore record, with the title and organiser quoted and capped at 200 characters. A new
+  `get_event` mode joins both calendar workflows.
+
+### The record
+
+- **FR-27 now says what holds, and DL-201 records the operator's rulings.** Mail and meetings keep
+  the approval gate as their explicit second step: `mail.send` and `mail.move` stay dormant and
+  ungranted, with no draft step, invitation step or mail trash.
+- **Skills.** The Jira skill's references point the agent at `jira_list_issue_types`.
+- **Internal.** The registry gains one read row, `jira.list_issue_types` (97 capabilities).
+
+### Operator notes
+
+- **Known gap, by the operator's decision.** Google's list mode emits no `event_id`, so on Google
+  an agent cannot take an event id from a read. `docs/ARCHITECTURE.md` records it, and this release
+  does not fix it.
+- **Until the `n8n` phase has run,** a Google delete fails loudly, because the old workflow refuses
+  `get_event`. Code and workflows land together only through the updater.
+- **Not yet met live.** The Exchange delete is proven by tests that construct the call and has not
+  met a real server. An organiser address that is an alias of the primary address reads as a
+  non-organiser and sends no cancellations. Which shape Google sends for an empty day is also
+  unobserved; the list node accepts both.
+
 ## 2026-11-01 — v2.78.0: re-run a session under the current charter, see what cannot be undone, and inventory the Confluence macros
 
 epic-cockpit-rerun-reversibility-macros. Twenty-two commits since v2.77.0
