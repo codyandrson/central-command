@@ -187,10 +187,13 @@ def test_the_floor_is_release_a():
     floor is 2.69.0: an install below it takes v2.69.0 first. (The earlier
     floor, 2.66.0, had the same reason for the deploy/pi paths.) Only the floor
     is pinned here: the version line belongs to tests/test_version_file.py
-    (VERSION against the newest CHANGELOG heading). The floor stays 2.69.0
-    until a release deliberately raises it."""
+    (VERSION against the newest CHANGELOG heading). The floor stays until a
+    release deliberately raises it, and v2.78.0 did: it changes bundled docs, so
+    the update INTO it must be run by v2.77.0's updater or later, whose steps
+    review and refresh them. A lower one would merge them with neither, and they
+    would read as `modified` at the next update."""
     text = (ROOT / "VERSION").read_text(encoding="utf-8")
-    assert re.search(r"^min_upgrade_from=2\.69\.0$", text, re.M), text
+    assert re.search(r"^min_upgrade_from=2\.77\.0$", text, re.M), text
 
 
 # ── nothing in the tree names deploy/pi outside history and the kept seam ───
