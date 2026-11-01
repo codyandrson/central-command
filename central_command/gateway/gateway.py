@@ -1340,7 +1340,8 @@ async def withdraw_session_work(session_id: str) -> tuple[list[str], list[str]]:
     every undecided proposal is WITHDRAWN, and each proposal's folds are released.
     Decided proposals are not touched. Returns (item ids, proposal ids).
 
-    One copy, shared by cancel-for-good and the re-run."""
+    The re-run does the same two writes inside `repo.claim_rerun`, from the same
+    SQL, and releases the folds itself."""
     items = await repo.withdraw_operator_items_for_session(session_id)
     proposals = await repo.withdraw_proposals_for_session(session_id)
     for proposal_id in proposals:

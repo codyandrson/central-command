@@ -590,6 +590,15 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         raise hold.RunHeld(
             f"task {task_id} not started: an update is waiting for the agents "
             "to finish — it starts after the restart")
+    # The row this starter was handed is as old as its wait on the lane. If the
+    # task has moved since (cancelled, re-run, or started by the other starter),
+    # the decision that moved it stands and this start is void. A cancelled task
+    # once ran anyway here and flipped back to IN_PROGRESS.
+    current = await repo.get_task(task_id)
+    if current and task.get("status") and current["status"] != task["status"]:
+        log.info("task %s: start void, it moved to %s while queued",
+                 task_id, current["status"])
+        return {"task_id": task_id, "deferred": False, "superseded": current["status"]}
     await events.emit(
         "task.started",
         ref_id=task_id,

@@ -298,8 +298,12 @@ async def test_an_unknown_session_is_a_404():
 
 async def test_a_claim_lost_to_a_moved_task_rolls_the_link_back():
     _, old = await _finished_task()
+    proposal = await _proposal(old)
     assert not await repo.claim_rerun(old, "sess_new", "task_not_this_one")
-    assert (await repo.get_session(old))["rerun_by"] is None
+    row = await repo.get_session(old)
+    assert row["rerun_by"] is None
+    assert row["closed_reason"] is None
+    assert (await repo.load_proposal(proposal))["status"] == "AWAITING_HUMAN"
 
 
 # ── the old session stays readable ──────────────────────────────────────────
@@ -423,6 +427,87 @@ async def test_a_restart_before_the_new_row_exists_keeps_the_chain():
     assert task["status"] == "ASSIGNED"
     assert task["session_id"] == old
     assert (await repo.pending_rerun(old)) == {"rerun_of": old, "session_id": new}
+
+
+async def test_a_cancel_while_queued_voids_the_start():
+    """The starter waited on the lane holding the row as it was. A cancelled task
+    must stay cancelled, a re-run or an ordinary one."""
+    for rerun_it in (True, False):
+        if rerun_it:
+            task_id, old = await _finished_task()
+            await _proposal(old)
+        else:
+            task_id = "task_" + uuid.uuid4().hex[:12]
+            await repo.create_task(task_id, "Queued", "Work.", AGENT)
+        lock = routes._agent_task_lock(AGENT)
+        await lock.acquire()
+        try:
+            if rerun_it:
+                await _rpc_rerun(old)
+            else:
+                queued = asyncio.create_task(
+                    routes._run_assigned_task(await repo.get_task(task_id)))
+            await asyncio.sleep(0.02)
+            await routes.cancel_task(task_id)
+        finally:
+            lock.release()
+        if not rerun_it:
+            out = await queued
+            assert out["superseded"] == "CANCELLED"
+        await asyncio.sleep(0.1)
+        await lock.acquire()
+        lock.release()
+        task = await repo.get_task(task_id)
+        assert task["status"] == "CANCELLED"
+
+
+async def test_a_retry_start_waiting_on_the_lane_yields_to_a_rerun():
+    """The sweep claimed the task and waits on the lane holding an IN_PROGRESS row;
+    a re-run takes the task meanwhile. One run, the re-run's."""
+    task_id, old = await _finished_task()
+    claimed_row = {**(await repo.get_task(task_id)), "status": "IN_PROGRESS"}
+    lock = routes._agent_task_lock(AGENT)
+    await lock.acquire()
+    try:
+        stale = asyncio.create_task(routes._run_assigned_task_inner(claimed_row, actor="system"))
+        await asyncio.sleep(0.02)
+        new = (await _rpc_rerun(old))["sessionId"]
+    finally:
+        lock.release()
+    assert (await stale)["superseded"] == "ASSIGNED"
+    await _settled(new)
+    assert (await repo.get_task(task_id))["session_id"] == new
+
+
+async def test_nothing_can_land_on_the_old_session_once_claimed():
+    """The claim closes and withdraws in its own transaction, so an approval or a
+    parked resume arriving right after it finds nothing to claim."""
+    task_id, old = await _finished_task()
+    proposal = await _proposal(old)
+    conn = await repo._conn()
+    try:
+        await conn.execute("update session set status = 'AWAITING_RESUME' where id = $1", old)
+    finally:
+        await conn.close()
+
+    claimed = await repo.claim_rerun(old, "sess_" + uuid.uuid4().hex[:12], task_id)
+
+    assert claimed["proposals"] == [proposal]
+    assert await repo.claim_proposal_for_execution(proposal) is None
+    assert await repo.claim_parked_resume(old) is None
+    row = await repo.get_session(old)
+    assert (row["status"], row["closed_reason"]) == ("DONE", "rerun")
+
+
+async def test_a_claim_refused_by_a_landing_proposal_changes_nothing():
+    task_id, old = await _finished_task()
+    undecided = await _proposal(old)
+    await _proposal(old, "EXECUTING")
+
+    assert await repo.claim_rerun(old, "sess_new", task_id) is None
+
+    assert (await repo.load_proposal(undecided))["status"] == "AWAITING_HUMAN"
+    assert (await repo.get_session(old))["rerun_by"] is None
 
 
 async def test_an_ordinary_task_start_owes_no_rerun():

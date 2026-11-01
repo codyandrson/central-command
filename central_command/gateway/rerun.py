@@ -6,10 +6,11 @@ other kinds refuse with "not yet".
 
 The order is the whole job, and each step is on the record before the next:
 
-  1. `repo.claim_rerun`: the old row names a pre-minted new id and the task goes
-     back to ASSIGNED, in one transaction. Two presses claim once.
-  2. The old session's undecided work is withdrawn and it closes through the one
-     close seam, with reason `rerun`.
+  1. `repo.claim_rerun`, one transaction: the old row closes naming a pre-minted
+     new id, its undecided work is withdrawn, and the task goes back to ASSIGNED.
+     Two presses claim once, and no decision or resume can land in between.
+  2. The withdrawn proposals' folds are released, and the close is announced
+     through the one close seam, with reason `rerun`.
   3. `session.rerun` goes on the log (ref the OLD id; ids only), before the run
      it authorises.
   4. The normal detached starter runs the task. It is a fresh run, so it loads
@@ -64,7 +65,7 @@ async def rerun_session(session_id: str, actor: str = "operator") -> dict:
     """Close this session and run its task again in a fresh one. Returns the new
     session's id at once; raises `RerunUnknown` or `RerunRefused`."""
     from central_command.api import routes
-    from central_command.gateway.gateway import _detach, withdraw_session_work
+    from central_command.gateway.gateway import _detach, release_folds_for
     from central_command.runtime.converse import close_session
 
     session = await repo.get_session(session_id)
@@ -77,11 +78,13 @@ async def rerun_session(session_id: str, actor: str = "operator") -> dict:
     agent_id = session["agent_id"]
     new_session_id = "sess_" + uuid.uuid4().hex[:12]
 
-    if not await repo.claim_rerun(session_id, new_session_id, task["id"]):
+    claimed = await repo.claim_rerun(session_id, new_session_id, task["id"])
+    if claimed is None:
         raise RerunRefused(
             f"session {session_id} cannot be re-run: it changed while the re-run "
             "was being claimed")
-    await withdraw_session_work(session_id)
+    for proposal_id in claimed["proposals"]:
+        await release_folds_for(proposal_id, "covering proposal withdrawn")
     await close_session(session_id, agent_id=agent_id, reason="rerun", actor=actor)
 
     charter = await repo.current_charter(agent_id)

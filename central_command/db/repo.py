@@ -601,18 +601,26 @@ async def claim_stopped_session(session_id: str) -> dict | None:
         await conn.close()
 
 
+# A decided proposal on its way to the world: it holds a session back from a re-run.
+LANDING_PROPOSAL_STATUSES = ("APPROVED", "EXECUTING", "RETRY_PENDING")
+
+
+async def _withdraw_operator_items(conn, session_id: str) -> list[str]:
+    rows = await conn.fetch(
+        "update operator_item set status = 'WITHDRAWN', answered_at = now() "
+        "where session_id = $1 and status = 'OPEN' returning id",
+        session_id,
+    )
+    return [r["id"] for r in rows]
+
+
 async def withdraw_operator_items_for_session(session_id: str) -> list[str]:
     """Withdraw every OPEN ask hanging off this session — the work it blocks is
     being cancelled for good, so the question is moot. WITHDRAWN, never deleted
     and never ANSWERED: nobody answered it."""
     conn = await _conn()
     try:
-        rows = await conn.fetch(
-            "update operator_item set status = 'WITHDRAWN', answered_at = now() "
-            "where session_id = $1 and status = 'OPEN' returning id",
-            session_id,
-        )
-        return [r["id"] for r in rows]
+        return await _withdraw_operator_items(conn, session_id)
     finally:
         await conn.close()
 
@@ -652,6 +660,18 @@ async def latest_proposal_for_session(session_id: str) -> dict | None:
         await conn.close()
 
 
+async def _withdraw_proposals(conn, session_id: str) -> list[str]:
+    rows = await conn.fetch(
+        """
+        update proposal set status = 'WITHDRAWN', decided_at = now()
+         where session_id = $1 and status in ('AWAITING_HUMAN', 'PROPOSED')
+        returning id
+        """,
+        session_id,
+    )
+    return [r["id"] for r in rows]
+
+
 async def withdraw_proposals_for_session(session_id: str) -> list[str]:
     """Withdraw this session's undecided proposals. AWAITING_HUMAN/PROPOSED
     only: an APPROVED / EXECUTING / RETRY_PENDING proposal is an approval the
@@ -659,15 +679,7 @@ async def withdraw_proposals_for_session(session_id: str) -> list[str]:
     terminal task and no-ops."""
     conn = await _conn()
     try:
-        rows = await conn.fetch(
-            """
-            update proposal set status = 'WITHDRAWN', decided_at = now()
-             where session_id = $1 and status in ('AWAITING_HUMAN', 'PROPOSED')
-            returning id
-            """,
-            session_id,
-        )
-        return [r["id"] for r in rows]
+        return await _withdraw_proposals(conn, session_id)
     finally:
         await conn.close()
 
@@ -4074,12 +4086,20 @@ async def resolve_task(
         await conn.close()
 
 
-async def claim_rerun(session_id: str, new_session_id: str, task_id: str) -> bool:
-    """THE re-run claim, in one transaction: the old session names the new one,
-    and its task returns to ASSIGNED with no `retry_state`, so the sweep never
-    sees it and the re-run's own start is the only one. The write is the lock:
-    two presses claim once, and a run or a decided proposal that arrived since
-    the eligibility check refuses it, with nothing changed.
+async def claim_rerun(
+    session_id: str, new_session_id: str, task_id: str,
+) -> dict | None:
+    """THE re-run claim, in one transaction: the old session closes naming the
+    new one, its undecided work is withdrawn, and its task returns to ASSIGNED
+    with no `retry_state`, so the sweep never sees it and the re-run's own start
+    is the only one. Returns the withdrawn `{"items", "proposals"}` ids, or None
+    with nothing changed.
+
+    One transaction because each of these is a race otherwise: an approval or a
+    parked resume landing between the claim and the close would run against a
+    task already handed to the new run. The session's proposals are locked first,
+    so a decision in flight either commits before this reads it, and refuses the
+    claim, or finds the proposal WITHDRAWN and does nothing.
 
     This is the only way a terminal task returns. `park_task_retry` and
     `resolve_task` keep their guards, because a late failure on a DONE task must
@@ -4089,19 +4109,26 @@ async def claim_rerun(session_id: str, new_session_id: str, task_id: str) -> boo
     conn = await _conn()
     try:
         async with conn.transaction():
+            statuses = await conn.fetch(
+                "select status from proposal where session_id = $1 for update",
+                session_id,
+            )
+            if any(r["status"] in LANDING_PROPOSAL_STATUSES for r in statuses):
+                return None
             claimed = await conn.fetchval(
                 """
-                update session set rerun_by = $2, updated_at = now()
+                update session
+                   set rerun_by = $2, status = 'DONE', closed_reason = 'rerun',
+                       updated_at = now()
                  where id = $1 and rerun_by is null and status != 'RUNNING'
-                   and not exists (
-                       select 1 from proposal p where p.session_id = $1
-                          and p.status in ('APPROVED', 'EXECUTING', 'RETRY_PENDING'))
                 returning id
                 """,
                 session_id, new_session_id,
             )
             if claimed is None:
-                return False
+                return None
+            items = await _withdraw_operator_items(conn, session_id)
+            proposals = await _withdraw_proposals(conn, session_id)
             moved = await conn.fetchval(
                 """
                 update task
@@ -4114,9 +4141,9 @@ async def claim_rerun(session_id: str, new_session_id: str, task_id: str) -> boo
             )
             if moved is None:
                 raise _RerunLost
-        return True
+        return {"items": items, "proposals": proposals}
     except _RerunLost:
-        return False
+        return None
     finally:
         await conn.close()
 
@@ -4151,8 +4178,8 @@ async def session_has_landing_proposal(session_id: str) -> bool:
     try:
         return await conn.fetchval(
             "select exists (select 1 from proposal where session_id = $1 "
-            "and status in ('APPROVED', 'EXECUTING', 'RETRY_PENDING'))",
-            session_id,
+            "and status = any($2::text[]))",
+            session_id, list(LANDING_PROPOSAL_STATUSES),
         )
     finally:
         await conn.close()
