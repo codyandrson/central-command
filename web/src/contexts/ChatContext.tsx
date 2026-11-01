@@ -18,6 +18,7 @@ import { createContext, useContext, useCallback, useRef, useEffect, useState, us
 import { useGateway } from './GatewayContext';
 import { useSessionContext } from './SessionContext';
 import { useSettings } from './SettingsContext';
+import { charterFrameTouches } from '@/features/chat/charterStamp';
 import { getSessionKey, type GatewayEvent, type ChatComposerState, type SourceEmail } from '@/types';
 import {
   getRootAgentSessionKey,
@@ -307,6 +308,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         recoveryTriggeredThisEvent = true;
         triggerRecovery(reason);
       };
+
+      // The header's charter chip comes with the history, so a charter edit reloads
+      // it: otherwise it reads current until the operator leaves and comes back.
+      if (charterFrameTouches(msg, currentSessionRef.current)) {
+        void loadHistory(currentSessionRef.current);
+        return;
+      }
 
       // Central Command turn failures — render them; a failed turn that only
       // logs to console reads as "still thinking" forever.
@@ -621,6 +629,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleFinalTTS,
     subscribe,
     rpc,
+    loadHistory,
   ]);
 
   // ─── Send message ─────────────────────────────────────────────────────────

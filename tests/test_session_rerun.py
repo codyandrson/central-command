@@ -1001,3 +1001,11 @@ async def test_a_key_nothing_names_still_says_there_is_no_session():
     composer = (await nerve_gateway._dispatch(
         "chat.history", {"sessionKey": f"agent:{AGENT}:sess_nothing_here"}, _noop))["composer"]
     assert composer["message"] == "no session sess_nothing_here"
+
+
+async def test_a_charter_frame_names_its_agent_in_ref_id():
+    """The cockpit reloads the header on this frame, reading the agent from `ref_id`."""
+    mark = await _last_event_id()
+    await routes.save_charter(AGENT, routes.CharterIn(content="A pushed charter.", rationale="test"))
+    events = await _events_since(mark, AGENT)
+    assert [e["kind"] for e in events] == ["charter.updated"]

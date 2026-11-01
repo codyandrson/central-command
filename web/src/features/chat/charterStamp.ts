@@ -8,6 +8,17 @@ export interface CharterStamp {
   rerunHint: string | null;
 }
 
+/** Whether this pushed frame changes the charter of the agent behind this session key.
+ *  The frame is the event itself, and a charter event's ref is the agent. */
+export function charterFrameTouches(
+  frame: { event?: string; payload?: unknown },
+  sessionKey: string | null | undefined,
+): boolean {
+  if (frame.event !== 'cc.charter.updated' && frame.event !== 'cc.charter.reverted') return false;
+  const agentId = (frame.payload as { ref_id?: string } | undefined)?.ref_id;
+  return !!agentId && !!sessionKey && sessionKey.startsWith(`agent:${agentId}:`);
+}
+
 export function charterStamp(
   row: { charterVersion?: number | null; charterCurrent?: number | null } | null | undefined,
 ): CharterStamp | null {
