@@ -24,6 +24,7 @@ from central_command.contract import (
 )
 from central_command.db import repo
 from central_command.gateway import executor, overrides, policy
+from central_command.gateway.capabilities import is_barred_from_graduation
 from central_command.runtime import resume_park
 from central_command.runtime.agent import build_agent_for
 from central_command.runtime.deps import TriageDeps
@@ -44,6 +45,11 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 class GatewayError(Exception):
     pass
+
+
+class GraduationBarred(GatewayError):
+    """An auditor approval of an irreversible capability: parked for the
+    operator, nothing decided, nothing written."""
 
 
 REDRAFT_CAUSES = ("world_moved", "failed", "rejected")
@@ -559,6 +565,43 @@ def _operator_actor() -> str:
     return f"human:{slug or 'operator'}"
 
 
+async def _refuse_auditor_on_irreversible(
+    proposal_id: str, session_id: str, prop_row: dict,
+) -> None:
+    """Raise `GraduationBarred` (after writing `proposal.graduation_barred`)
+    when any action's CAPABILITY MARK in the registry is irreversible. The mark
+    is the operator's code, never the agent-written `Action.reversibility`.
+    Dismissal and graph-invalidation classes are not capabilities and are not
+    seen here."""
+    flags = [
+        {
+            "policy": "irreversible-never-graduates",
+            "action_index": i,
+            "capability": a["capability"].split("@", 1)[0],
+            "problem": (
+                f"capability {a['capability'].split('@', 1)[0]!r} is irreversible; "
+                "an irreversible class is never decided by the auditor — "
+                "it waits for the operator"
+            ),
+        }
+        for i, a in enumerate(prop_row["actions"])
+        if is_barred_from_graduation(a["capability"])
+    ]
+    if not flags:
+        return
+    await events.emit(
+        "proposal.graduation_barred",
+        ref_id=proposal_id,
+        payload={"session_id": session_id, "status": prop_row["status"],
+                 "policy_flags": flags},
+        actor="auditor",
+    )
+    raise GraduationBarred(
+        f"proposal {proposal_id} stays with the operator: "
+        + "; ".join(f["problem"] for f in flags)
+    )
+
+
 async def approve_and_execute(
     session_id: str, proposal_id: str, approver: str | None = None, model=None,
     *, detach: bool = False,
@@ -582,6 +625,13 @@ async def approve_and_execute(
     # and a second click inside that window used to pass the same check and
     # execute again (2026-09-17: 8 proposals ran 2–4×). EXECUTING is a status
     # the cockpit already knows and the inbox already hides.
+    # The graduation bar (epic-cockpit-rerun-reversibility-macros R6, A8): an
+    # auditor never decides an irreversible class. Checked BEFORE the claim and
+    # the decision event, so nothing says "approved", nothing executes, and the
+    # proposal stays exactly where the operator will find it.
+    if approver == "auditor" and prop_row["status"] in ("AWAITING_HUMAN", "PROPOSED"):
+        await _refuse_auditor_on_irreversible(proposal_id, session_id, prop_row)
+
     if await repo.claim_proposal_for_execution(proposal_id) is None:
         raise GatewayError(
             f"proposal {proposal_id} is not awaiting approval (status {prop_row['status']})"

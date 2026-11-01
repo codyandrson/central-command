@@ -1526,12 +1526,15 @@ async def audit_status() -> dict:
     Operator-diagnostic endpoint — no code consumer; curl it (see STATUS.md)."""
     from central_command.config import settings
     from central_command.gateway.auditor import AUDIT_ACTION_CLASS, BULK_AUDIT_ACTION_CLASS
+    from central_command.gateway.capabilities import barred_classes
 
     return {
         "enabled": settings.auditor_enabled,
         "mode": settings.auditor_mode if settings.auditor_enabled else None,
         "graduated_action_class": AUDIT_ACTION_CLASS,
         "graduated_action_classes": [AUDIT_ACTION_CLASS, BULK_AUDIT_ACTION_CLASS],
+        # The irreversible capabilities no auditor may ever decide (A8).
+        "barred_classes": barred_classes(),
     }
 
 

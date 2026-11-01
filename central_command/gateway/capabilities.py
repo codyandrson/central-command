@@ -80,6 +80,13 @@ class Capability:
                 raise ValueError(f"{self.name}: reversibility {self.reversibility!r} not in {REVERSIBILITIES}")
             if self.reversibility == "irreversible" and not self.acknowledge:
                 raise ValueError(f"{self.name}: an irreversible capability must require acknowledgement")
+            # The graduation bar, layer 1 (epic-cockpit-rerun-reversibility-macros
+            # R6, A8): an irreversible class never graduates to the auditor. The
+            # bar reads exactly this server-held mark, never an agent's claim.
+            if self.default_gate == "auditor" and self.reversibility == "irreversible":
+                raise ValueError(
+                    f"{self.name}: an irreversible capability cannot have default_gate 'auditor'"
+                )
         elif self.reversibility or self.acknowledge:
             raise ValueError(f"{self.name}: only a write carries a reversibility mark or acknowledgement")
 
@@ -2264,6 +2271,28 @@ POLICIES: list[Policy] = [
         ),
     ),
     Policy(
+        name="An irreversible class never graduates",
+        status="enforced",
+        enforced_at=(
+            "gateway/capabilities.py Capability.__post_init__ refuses "
+            "default_gate='auditor' on a reversibility='irreversible' row at "
+            "import; gateway.approve_and_execute parks an approver='auditor' "
+            "decision over any action whose registry mark is irreversible, "
+            "before proposal.decided, with a policy_flags entry and a "
+            "proposal.graduation_barred event"
+        ),
+        guard="tests/test_graduation_bar.py::test_auditor_approval_of_an_irreversible_capability_parks_for_the_operator",
+        description=(
+            "An irreversible class (a send, a delete: the registry's server-held "
+            "mark, never the agent's claim) cannot be graduated to the auditor. "
+            "The registry refuses such a row when it loads, and the gateway "
+            "refuses an auditor approval of one at run time: the proposal stays "
+            "with the operator, nothing is written, and the reason is on the "
+            "record. The LIVE rows are reversible and stay graduatable in "
+            "principle; GET /audit lists the barred classes."
+        ),
+    ),
+    Policy(
         name="No past due dates",
         status="enforced",
         enforced_at="gateway/policy.check_actions — flagged amber on the proposal, recorded on proposal.decided",
@@ -2619,6 +2648,20 @@ def registry_as_dict() -> dict:
 def gated_write_names() -> set[str]:
     """The exact set the Executor must (and may only) dispatch."""
     return {c.name for c in REGISTRY if c.kind == "write" and c.gate == "human approval"}
+
+
+def barred_classes() -> list[str]:
+    """The capabilities no auditor may ever decide: every write row whose
+    server-held mark is exactly `irreversible` (the graduation bar, A8)."""
+    return sorted(c.name for c in REGISTRY if c.kind == "write" and c.reversibility == "irreversible")
+
+
+def is_barred_from_graduation(capability: str) -> bool:
+    """Is this capability's registry mark `irreversible`? Reads the row, never
+    the proposing agent's `Action.reversibility`; an unknown name (not a
+    capability) is outside the bar."""
+    row = _BY_NAME.get(capability.split("@", 1)[0])
+    return bool(row and row.kind == "write" and row.reversibility == "irreversible")
 
 
 def target_args_of(capability: str) -> tuple[str, ...]:
